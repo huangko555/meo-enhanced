@@ -6,13 +6,13 @@ import { collectInlineFootnoteMarkerRanges } from './inlineFootnotes';
 const sourceLinkMarkerDeco = Decoration.mark({
   class: 'meo-md-link-marker',
   attributes: {
-    style: 'color: var(--meo-color-base02) !important; -webkit-text-fill-color: var(--meo-color-base02) !important;'
+    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
   }
 });
 const sourceFootnoteMarkerDeco = Decoration.mark({
   class: 'meo-md-footnote-marker',
   attributes: {
-    style: 'color: var(--meo-color-base02) !important; -webkit-text-fill-color: var(--meo-color-base02) !important;'
+    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
   }
 });
 

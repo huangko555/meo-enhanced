@@ -1,0 +1,189 @@
+{
+  // 主题基本信息。
+  "id": "meo-complete",
+  "name": "MEO Complete",
+  // 编辑器正文背景。
+  "backgroundColor": "var(--vscode-editor-background)",
+  // 基础调色板：主要用于语法 token。Markdown/UI 颜色优先改 semanticColors。
+  "colors": {
+    "base01": "var(--vscode-editor-foreground)",
+    "base02": "#676f7d",
+    "base03": "#3e444d",
+    "base04": "#e06c75",
+    "base05": "#61afef",
+    "base06": "#66d9ef",
+    "base07": "#e5c07b",
+    "base08": "#c678dd",
+    "base09": "#98c379"
+  },
+  // 独立语义色：每个 Markdown/UI 部件都可以单独调，不需要借用 base 色。
+  "semanticColors": {
+    // 主文字颜色。
+    "foreground": "var(--vscode-editor-foreground)",
+    // 弱化文字颜色，例如标记、辅助说明。
+    "mutedForeground": "#676f7d",
+    // 编辑器正文背景。
+    "background": "var(--vscode-editor-background)",
+    // 工具栏、侧边区域等表面背景。
+    "surfaceBackground": "color-mix(in srgb, var(--meo-background) 86%, var(--meo-color-base03) 14%)",
+    // 内嵌块背景，例如表头、kbd。
+    "insetBackground": "color-mix(in srgb, var(--meo-background) 80%, var(--meo-color-base03) 20%)",
+    // 普通文本选区背景。
+    "selectionBackground": "color-mix(in srgb, var(--meo-color-base05) 28%, transparent 72%)",
+    // 光标所在行的高亮背景。
+    "activeLineBackground": "color-mix(in srgb, var(--meo-color-base03) 35%, transparent 65%)",
+    // 输入光标颜色。
+    "caret": "var(--vscode-editor-foreground)",
+    // 代码块和 Mermaid 块背景。
+    "codeBlockBackground": "#202223",
+    // 代码块内光标所在行背景。
+    "codeBlockActiveLineBackground": "color-mix(in srgb, var(--meo-background) 88%, var(--meo-color-base03) 12%)",
+    // 代码块左上角语言名字文字颜色。
+    "codeLanguageLabelForeground": "#79b8ff",
+    // 代码块左上角语言名字背景。
+    "codeLanguageLabelBackground": "transparent",
+    // 代码块右上角 copy 文字颜色。
+    "codeCopyForeground": "#79b8ff",
+    // 代码块右上角 copy 背景。
+    "codeCopyBackground": "transparent",
+    // copy 按钮悬浮文字颜色。
+    "codeCopyHoverForeground": "#79b8ff",
+    // copy 按钮悬浮背景。
+    "codeCopyHoverBackground": "var(--vscode-toolbar-hoverBackground)",
+    // 行内代码背景。
+    "inlineCodeBackground": "#2a3a52",
+    // Markdown 语法符号颜色，例如 #、**、~~、`、```。
+    "markdownSyntax": "#8e999e",
+    // 标签文字颜色，例如 #tag。
+    "tagForeground": "#61afef",
+    // 标签背景。
+    "tagBackground": "color-mix(in srgb, var(--meo-color-base05) 14%, transparent 86%)",
+    // 标签边框。
+    "tagBorder": "color-mix(in srgb, var(--meo-color-base05) 38%, transparent 62%)",
+    // 标题正文颜色。#、**、~~、` 这些 Markdown 标记仍保持原来的标记颜色。
+    "headingForeground": "#79b8ff",
+    // 有序列表序号颜色。
+    "orderedListMarker": "#79b8ff",
+    // 无序列表圆点颜色。
+    "unorderedListMarker": "#79b8ff",
+    // 源码里的列表前缀颜色。
+    "listPrefix": "#676f7d",
+    // 嵌套列表引导线颜色。
+    "listGuide": "#3e444d",
+    // 任务勾选框背景。
+    "taskCheckboxBackground": "var(--meo-surface-background)",
+    // 任务勾选框描边。
+    "taskCheckboxBorder": "#b4bbc0",
+    // 任务勾选框悬浮描边。
+    "taskCheckboxBorderHover": "#b4bbc0",
+    // 任务勾选框里的对勾、进度点或删除线。
+    "taskCheckboxCheck": "var(--vscode-editor-foreground)",
+    // 已完成任务勾选框填充。
+    "taskCheckboxDoneBackground": "#505862",
+    // 已完成任务勾选框描边。
+    "taskCheckboxDoneBorder": "#505862",
+    // 已完成任务勾选框里的对勾。
+    "taskCheckboxDoneCheck": "var(--meo-background)",
+    // 已完成任务文字颜色。
+    "taskCompleteForeground": "#676f7d",
+    // 已放弃任务文字颜色。
+    "taskDroppedForeground": "#676f7d",
+    // 引用左侧竖线颜色。
+    "blockquoteBorder": "#b4bbc0",
+    // 引用文字颜色。
+    "blockquoteForeground": "#b4bbc0",
+    // 分割线颜色。
+    "horizontalRule": "#3e4246",
+    // 表格单元格边框。
+    "tableBorder": "#3e4246",
+    // 表格表头背景。
+    "tableHeaderBackground": "var(--meo-inset-background)",
+    // 表格选中单元格描边。
+    "tableSelectionBorder": "#61afef",
+    // 源码表格分隔行颜色。
+    "tableDelimiterForeground": "#3e4246",
+    // 图片加载失败/占位背景。
+    "imageBackground": "var(--meo-code-background)",
+    // 图片加载失败/占位边框。
+    "imageBorder": "#3e444d",
+    // 图片加载/失败提示文字。
+    "imageFallbackForeground": "#676f7d",
+    // 普通链接颜色。
+    "linkForeground": "#61afef",
+    // Wiki 链接颜色。
+    "wikiLinkForeground": "#61afef",
+    // 脚注引用文字颜色。
+    "footnoteForeground": "#61afef",
+    // 脚注引用背景。
+    "footnoteBackground": "color-mix(in srgb, var(--meo-color-base05) 12%, transparent 88%)",
+    // kbd 键帽背景。
+    "kbdBackground": "var(--meo-inset-background)",
+    // kbd 键帽边框。
+    "kbdBorder": "#3e444d",
+    // Frontmatter key 颜色。
+    "frontmatterKey": "#e5c07b",
+    // Frontmatter value 颜色。
+    "frontmatterValue": "var(--vscode-editor-foreground)",
+    // Frontmatter 数组 pill 背景。
+    "frontmatterPillBackground": "#3e444d",
+    // 搜索命中的文字颜色。
+    "searchMatchForeground": "#1f1f1f",
+    // 搜索命中的背景颜色。
+    "searchMatchBackground": "#fff59d",
+    // 搜索命中的描边颜色。
+    "searchMatchBorder": "#d6b400",
+    // 当前选中搜索命中文字颜色。
+    "searchMatchActiveForeground": "#1f1f1f",
+    // 当前选中搜索命中背景颜色。
+    "searchMatchActiveBackground": "#ffff00",
+    // 当前选中搜索命中描边颜色。
+    "searchMatchActiveBorder": "#f0c000",
+    // 滚动条滑块颜色。
+    "scrollbarThumb": "color-mix(in srgb, var(--meo-foreground) 22%, transparent)",
+    // 滚动条滑块悬浮颜色。
+    "scrollbarThumbHover": "color-mix(in srgb, var(--meo-foreground) 32%, transparent)",
+    // 滚动条滑块按下颜色。
+    "scrollbarThumbActive": "color-mix(in srgb, var(--meo-foreground) 42%, transparent)",
+    // NOTE/TIP/IMPORTANT/WARNING/CAUTION 提示色。
+    "alertNoteForeground": "#61afef",
+    "alertNoteBackground": "color-mix(in srgb, var(--meo-semantic-alertNoteForeground) 8%, transparent)",
+    "alertNoteBorder": "#61afef",
+    "alertTipForeground": "#98c379",
+    "alertTipBackground": "color-mix(in srgb, var(--meo-semantic-alertTipForeground) 8%, transparent)",
+    "alertTipBorder": "#98c379",
+    "alertImportantForeground": "#c678dd",
+    "alertImportantBackground": "color-mix(in srgb, var(--meo-semantic-alertImportantForeground) 8%, transparent)",
+    "alertImportantBorder": "#c678dd",
+    "alertWarningForeground": "#e5c07b",
+    "alertWarningBackground": "color-mix(in srgb, var(--meo-semantic-alertWarningForeground) 8%, transparent)",
+    "alertWarningBorder": "#e5c07b",
+    "alertCautionForeground": "#e06c75",
+    "alertCautionBackground": "color-mix(in srgb, var(--meo-semantic-alertCautionForeground) 8%, transparent)",
+    "alertCautionBorder": "#e06c75"
+  },
+  // 语法 token 颜色。留空表示使用基础调色板默认值。
+  "syntaxTokens": {},
+  // 字体和字号设置。
+  "fonts": {
+    "liveFont": "",
+    "sourceFont": "",
+    "liveFontWeight": "",
+    "sourceFontWeight": "",
+    "liveFontSize": null,
+    "sourceFontSize": null,
+    "h1FontSize": 1.6,
+    "h2FontSize": 1.5,
+    "h3FontSize": 1.3,
+    "h4FontSize": 1.2,
+    "h5FontSize": 1.1,
+    "h6FontSize": 1,
+    "h1FontWeight": "600",
+    "h2FontWeight": "600",
+    "h3FontWeight": "600",
+    "h4FontWeight": "600",
+    "h5FontWeight": "600",
+    "h6FontWeight": "600",
+    "liveLineHeight": 1.5,
+    "sourceLineHeight": 1.5
+  }
+}

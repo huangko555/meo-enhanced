@@ -64,6 +64,7 @@ import {
 } from './shared/extensionConfig';
 import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
+import { parseThemeJsonc, serializeAnnotatedThemeJsonc } from './shared/themeJsonc';
 import {
   runWithTimedUiTimeout,
   showTimedErrorMessage,
@@ -279,6 +280,21 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('markdownEditorOptimized.toggleEditor', async (uriLike?: unknown) => {
+      const targetUri = getPreferredCommandUri(uriLike);
+      if (!targetUri || !isMarkdownDocumentPath((targetUri.path || targetUri.fsPath || '').toLowerCase())) {
+        return;
+      }
+
+      const activeTabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const targetViewType = activeTabInput instanceof vscode.TabInputCustom && activeTabInput.viewType === VIEW_TYPE
+        ? 'default'
+        : VIEW_TYPE;
+      await vscode.commands.executeCommand('vscode.openWith', targetUri, targetViewType);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('markdownEditorOptimized.setDefaultEditor', async () => {
       await syncEditorAssociations(true);
       void showTimedInformationMessage('Markdown Editor Optimized is now set as the default editor for Markdown files.');
@@ -323,8 +339,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('markdownEditorOptimized.importTheme', async () => {
       const openFiles = await vscode.window.showOpenDialog({
-        title: 'Import Theme JSON',
-        filters: { 'Theme JSON': ['json'] },
+        title: 'Import Theme JSON / JSONC',
+        filters: { 'Theme JSON': ['json', 'jsonc'] },
         canSelectMany: false
       });
 
@@ -335,7 +351,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const fileUri = openFiles[0];
       try {
         const fileContent = await vscode.workspace.fs.readFile(fileUri);
-        const payload = JSON.parse(new TextDecoder().decode(fileContent));
+        const payload = parseThemeJsonc(new TextDecoder().decode(fileContent));
         const validated = validateThemePayload(payload);
         if (!validated.success) {
           void showTimedErrorMessage(
@@ -358,9 +374,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('markdownEditorOptimized.exportTheme', async () => {
       const uri = await vscode.window.showSaveDialog({
-        title: 'Export Theme JSON',
-        filters: { 'Theme JSON': ['json'] },
-        defaultUri: vscode.Uri.file('meo-theme.json'),
+        title: 'Export Theme JSONC',
+        filters: { 'Theme JSONC': ['jsonc'], 'Theme JSON': ['json'] },
+        defaultUri: vscode.Uri.file('meo-theme.jsonc'),
         saveLabel: 'Export Theme'
       });
 
@@ -368,11 +384,11 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      const theme = serializeThemeSettings(getThemeSettings());
+      const theme = getThemeSettings();
       try {
         await vscode.workspace.fs.writeFile(
           uri,
-          new TextEncoder().encode(`${JSON.stringify(theme, null, 2)}\n`)
+          new TextEncoder().encode(serializeAnnotatedThemeJsonc(theme))
         );
         void showTimedInformationMessage(`Theme exported to ${uri.fsPath}`);
       } catch (error) {
@@ -955,7 +971,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       : '';
     const csp = [
       "default-src 'none'",
-      `img-src ${webview.cspSource} https:`,
+      `img-src ${webview.cspSource} https: http: data: blob:`,
       `font-src ${webview.cspSource}`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `script-src ${webview.cspSource} 'nonce-${nonce}' 'wasm-unsafe-eval'`
@@ -1078,6 +1094,12 @@ function collectLocalResourceRoots(distRoot: vscode.Uri, documentUri: vscode.Uri
 
   const documentDir = vscode.Uri.file(path.dirname(documentUri.fsPath));
   roots.set(documentDir.toString(), documentDir);
+
+  const documentDriveRoot = path.parse(documentUri.fsPath).root;
+  if (documentDriveRoot) {
+    const driveRootUri = vscode.Uri.file(documentDriveRoot);
+    roots.set(driveRootUri.toString(), driveRootUri);
+  }
 
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     roots.set(folder.uri.toString(), folder.uri);

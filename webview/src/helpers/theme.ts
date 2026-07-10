@@ -1,5 +1,6 @@
 import {
   resolveTheme,
+  semanticColorKeys,
   SYNTAX_TAG_SPECS,
   type ThemeSettings,
   themeColorKeys
@@ -105,31 +106,23 @@ export const applyThemeSettings = (theme?: ThemeSettings): void => {
   const rootStyle = document.documentElement.style;
   const insetBackground = getInsetBackground(resolvedTheme.backgroundColor, resolvedTheme.colors.base03);
   rootStyle.setProperty('--meo-background', resolvedTheme.backgroundColor);
-  rootStyle.setProperty('--meo-inset-background', insetBackground);
-  rootStyle.setProperty(
-    '--meo-code-background',
-    insetBackground
-  );
-  rootStyle.setProperty(
-    '--meo-code-block-active-line-bg-live',
-    `color-mix(in srgb, ${resolvedTheme.backgroundColor} 88%, ${resolvedTheme.colors.base03} 12%)`
-  );
-  rootStyle.setProperty(
-    '--meo-surface-background',
-    `color-mix(in srgb, ${resolvedTheme.backgroundColor} 86%, ${resolvedTheme.colors.base03} 14%)`
-  );
-  rootStyle.setProperty(
-    '--meo-selection-bg',
-    `color-mix(in srgb, ${resolvedTheme.colors.base05} 28%, transparent 72%)`
-  );
-  rootStyle.setProperty('--meo-caret-color', resolvedTheme.colors.base01);
-  rootStyle.setProperty(
-    '--meo-active-line-bg',
-    `color-mix(in srgb, ${resolvedTheme.colors.base03} 35%, transparent 65%)`
-  );
+  rootStyle.setProperty('--meo-inset-background', resolvedTheme.semanticColors.insetBackground || insetBackground);
+  rootStyle.setProperty('--meo-foreground', resolvedTheme.semanticColors.foreground);
+  rootStyle.setProperty('--meo-muted-foreground', resolvedTheme.semanticColors.mutedForeground);
+  rootStyle.setProperty('--meo-code-background', resolvedTheme.semanticColors.codeBlockBackground);
+  rootStyle.setProperty('--meo-code-block-active-line-bg-live', resolvedTheme.semanticColors.codeBlockActiveLineBackground);
+  rootStyle.setProperty('--meo-surface-background', resolvedTheme.semanticColors.surfaceBackground);
+  rootStyle.setProperty('--meo-selection-bg', resolvedTheme.semanticColors.selectionBackground);
+  rootStyle.setProperty('--meo-caret-color', resolvedTheme.semanticColors.caret);
+  rootStyle.setProperty('--meo-active-line-bg', resolvedTheme.semanticColors.activeLineBackground);
+  rootStyle.setProperty('--meo-inline-code-background', resolvedTheme.semanticColors.inlineCodeBackground);
 
   for (const key of themeColorKeys) {
     rootStyle.setProperty(`--meo-color-${key}`, resolvedTheme.colors[key]);
+  }
+
+  for (const key of semanticColorKeys) {
+    rootStyle.setProperty(`--meo-semantic-${key}`, resolvedTheme.semanticColors[key]);
   }
 
   for (const spec of SYNTAX_TAG_SPECS) {

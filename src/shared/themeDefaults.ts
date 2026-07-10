@@ -15,6 +15,90 @@ export const themeColorKeys = [
 export type ThemeColorKey = (typeof themeColorKeys)[number];
 export type ThemeColors = Record<ThemeColorKey, string>;
 
+export const semanticColorKeys = [
+  'foreground',
+  'mutedForeground',
+  'background',
+  'surfaceBackground',
+  'insetBackground',
+  'selectionBackground',
+  'activeLineBackground',
+  'caret',
+  'codeBlockBackground',
+  'codeBlockActiveLineBackground',
+  'codeLanguageLabelForeground',
+  'codeLanguageLabelBackground',
+  'codeCopyForeground',
+  'codeCopyBackground',
+  'codeCopyHoverForeground',
+  'codeCopyHoverBackground',
+  'inlineCodeBackground',
+  'markdownSyntax',
+  'tagForeground',
+  'tagBackground',
+  'tagBorder',
+  'headingForeground',
+  'orderedListMarker',
+  'unorderedListMarker',
+  'listPrefix',
+  'listGuide',
+  'taskCheckboxBackground',
+  'taskCheckboxBorder',
+  'taskCheckboxBorderHover',
+  'taskCheckboxCheck',
+  'taskCheckboxDoneBackground',
+  'taskCheckboxDoneBorder',
+  'taskCheckboxDoneCheck',
+  'taskCompleteForeground',
+  'taskDroppedForeground',
+  'blockquoteBorder',
+  'blockquoteForeground',
+  'horizontalRule',
+  'tableBorder',
+  'tableHeaderBackground',
+  'tableSelectionBorder',
+  'tableDelimiterForeground',
+  'imageBackground',
+  'imageBorder',
+  'imageFallbackForeground',
+  'linkForeground',
+  'wikiLinkForeground',
+  'footnoteForeground',
+  'footnoteBackground',
+  'kbdBackground',
+  'kbdBorder',
+  'frontmatterKey',
+  'frontmatterValue',
+  'frontmatterPillBackground',
+  'searchMatchForeground',
+  'searchMatchBackground',
+  'searchMatchBorder',
+  'searchMatchActiveForeground',
+  'searchMatchActiveBackground',
+  'searchMatchActiveBorder',
+  'scrollbarThumb',
+  'scrollbarThumbHover',
+  'scrollbarThumbActive',
+  'alertNoteForeground',
+  'alertNoteBackground',
+  'alertNoteBorder',
+  'alertTipForeground',
+  'alertTipBackground',
+  'alertTipBorder',
+  'alertImportantForeground',
+  'alertImportantBackground',
+  'alertImportantBorder',
+  'alertWarningForeground',
+  'alertWarningBackground',
+  'alertWarningBorder',
+  'alertCautionForeground',
+  'alertCautionBackground',
+  'alertCautionBorder'
+] as const;
+
+export type SemanticColorKey = (typeof semanticColorKeys)[number];
+export type SemanticColors = Record<SemanticColorKey, string>;
+
 export const minThemeLineHeight = 1;
 export const maxThemeLineHeight = 3;
 export const defaultThemeLineHeight = 1.5;
@@ -336,12 +420,14 @@ export type ThemeSettings = {
   name: string;
   backgroundColor: string;
   colors: ThemeColors;
+  semanticColors: SemanticColors;
   syntaxTokens: ThemeSyntaxTokens;
   fonts: ThemeFonts;
 };
 
-export type ThemeSettingsPayload = Omit<ThemeSettings, 'syntaxTokens'> & {
-  syntaxTokens: ThemeSyntaxTokens;
+export type ThemeSettingsPayload = Omit<ThemeSettings, 'semanticColors' | 'syntaxTokens'> & {
+  semanticColors?: Partial<SemanticColors>;
+  syntaxTokens: Partial<ThemeSyntaxTokens>;
 };
 
 export const defaultThemeColors: ThemeColors = {
@@ -357,7 +443,88 @@ export const defaultThemeColors: ThemeColors = {
 };
 
 export const defaultThemeBackgroundColor = 'var(--vscode-editor-background)';
-export const defaultCodeBlockBackgroundColor = '#1e1e1e';
+export const defaultCodeBlockBackgroundColor = '#202223';
+
+export const defaultSemanticColors: SemanticColors = {
+  foreground: defaultThemeColors.base01,
+  mutedForeground: defaultThemeColors.base02,
+  background: defaultThemeBackgroundColor,
+  surfaceBackground: 'color-mix(in srgb, var(--meo-background) 86%, var(--meo-color-base03) 14%)',
+  insetBackground: 'color-mix(in srgb, var(--meo-background) 80%, var(--meo-color-base03) 20%)',
+  selectionBackground: 'color-mix(in srgb, var(--meo-color-base05) 28%, transparent 72%)',
+  activeLineBackground: 'color-mix(in srgb, var(--meo-color-base03) 35%, transparent 65%)',
+  caret: defaultThemeColors.base01,
+  codeBlockBackground: defaultCodeBlockBackgroundColor,
+  codeBlockActiveLineBackground: 'color-mix(in srgb, var(--meo-background) 88%, var(--meo-color-base03) 12%)',
+  codeLanguageLabelForeground: '#79b8ff',
+  codeLanguageLabelBackground: 'transparent',
+  codeCopyForeground: '#79b8ff',
+  codeCopyBackground: 'transparent',
+  codeCopyHoverForeground: '#79b8ff',
+  codeCopyHoverBackground: 'var(--vscode-toolbar-hoverBackground)',
+  inlineCodeBackground: '#2a3a52',
+  markdownSyntax: '#8e999e',
+  tagForeground: defaultThemeColors.base05,
+  tagBackground: 'color-mix(in srgb, var(--meo-color-base05) 14%, transparent 86%)',
+  tagBorder: 'color-mix(in srgb, var(--meo-color-base05) 38%, transparent 62%)',
+  headingForeground: '#79b8ff',
+  orderedListMarker: '#79b8ff',
+  unorderedListMarker: '#79b8ff',
+  listPrefix: defaultThemeColors.base02,
+  listGuide: defaultThemeColors.base03,
+  taskCheckboxBackground: 'var(--meo-surface-background)',
+  taskCheckboxBorder: '#b4bbc0',
+  taskCheckboxBorderHover: '#b4bbc0',
+  taskCheckboxCheck: defaultThemeColors.base01,
+  taskCheckboxDoneBackground: '#505862',
+  taskCheckboxDoneBorder: '#505862',
+  taskCheckboxDoneCheck: 'var(--meo-background)',
+  taskCompleteForeground: defaultThemeColors.base02,
+  taskDroppedForeground: defaultThemeColors.base02,
+  blockquoteBorder: '#b4bbc0',
+  blockquoteForeground: '#b4bbc0',
+  horizontalRule: '#3e4246',
+  tableBorder: '#3e4246',
+  tableHeaderBackground: 'var(--meo-inset-background)',
+  tableSelectionBorder: defaultThemeColors.base05,
+  tableDelimiterForeground: '#3e4246',
+  imageBackground: 'var(--meo-code-background)',
+  imageBorder: defaultThemeColors.base03,
+  imageFallbackForeground: defaultThemeColors.base02,
+  linkForeground: defaultThemeColors.base05,
+  wikiLinkForeground: defaultThemeColors.base05,
+  footnoteForeground: defaultThemeColors.base05,
+  footnoteBackground: 'color-mix(in srgb, var(--meo-color-base05) 12%, transparent 88%)',
+  kbdBackground: 'var(--meo-inset-background)',
+  kbdBorder: defaultThemeColors.base03,
+  frontmatterKey: defaultThemeColors.base07,
+  frontmatterValue: defaultThemeColors.base01,
+  frontmatterPillBackground: defaultThemeColors.base03,
+  searchMatchForeground: '#1f1f1f',
+  searchMatchBackground: '#fff59d',
+  searchMatchBorder: '#d6b400',
+  searchMatchActiveForeground: '#1f1f1f',
+  searchMatchActiveBackground: '#ffff00',
+  searchMatchActiveBorder: '#f0c000',
+  scrollbarThumb: 'color-mix(in srgb, var(--meo-foreground) 22%, transparent)',
+  scrollbarThumbHover: 'color-mix(in srgb, var(--meo-foreground) 32%, transparent)',
+  scrollbarThumbActive: 'color-mix(in srgb, var(--meo-foreground) 42%, transparent)',
+  alertNoteForeground: defaultThemeColors.base05,
+  alertNoteBackground: 'color-mix(in srgb, var(--meo-semantic-alertNoteForeground) 8%, transparent)',
+  alertNoteBorder: defaultThemeColors.base05,
+  alertTipForeground: defaultThemeColors.base09,
+  alertTipBackground: 'color-mix(in srgb, var(--meo-semantic-alertTipForeground) 8%, transparent)',
+  alertTipBorder: defaultThemeColors.base09,
+  alertImportantForeground: defaultThemeColors.base08,
+  alertImportantBackground: 'color-mix(in srgb, var(--meo-semantic-alertImportantForeground) 8%, transparent)',
+  alertImportantBorder: defaultThemeColors.base08,
+  alertWarningForeground: defaultThemeColors.base07,
+  alertWarningBackground: 'color-mix(in srgb, var(--meo-semantic-alertWarningForeground) 8%, transparent)',
+  alertWarningBorder: defaultThemeColors.base07,
+  alertCautionForeground: defaultThemeColors.base04,
+  alertCautionBackground: 'color-mix(in srgb, var(--meo-semantic-alertCautionForeground) 8%, transparent)',
+  alertCautionBorder: defaultThemeColors.base04
+};
 
 export const defaultThemeFonts: ThemeFonts = {
   liveFont: '',
@@ -408,6 +575,7 @@ const createThemeFromColors = (params: {
   colors?: Partial<ThemeColors>;
   syntaxTokenPaletteOverrides?: Partial<ThemeSyntaxTokenPalette>;
   syntaxTokenOverrides?: Partial<ThemeSyntaxTokens>;
+  semanticColorOverrides?: Partial<SemanticColors>;
   fonts?: Partial<ThemeFonts>;
 }): ThemeSettings => {
   const colors = { ...defaultThemeColors, ...params.colors };
@@ -417,6 +585,59 @@ const createThemeFromColors = (params: {
     name: params.name,
     backgroundColor: params.backgroundColor ?? defaultThemeBackgroundColor,
     colors,
+    semanticColors: {
+      ...defaultSemanticColors,
+      foreground: colors.base01,
+      mutedForeground: colors.base02,
+      background: params.backgroundColor ?? defaultThemeBackgroundColor,
+      caret: colors.base01,
+      tagForeground: colors.base05,
+      markdownSyntax: '#8e999e',
+      headingForeground: '#79b8ff',
+      codeLanguageLabelForeground: '#79b8ff',
+      codeCopyForeground: '#79b8ff',
+      codeCopyHoverForeground: '#79b8ff',
+      codeBlockBackground: defaultCodeBlockBackgroundColor,
+      inlineCodeBackground: '#2a3a52',
+      orderedListMarker: '#79b8ff',
+      unorderedListMarker: '#79b8ff',
+      listPrefix: colors.base02,
+      listGuide: colors.base03,
+      taskCheckboxBorder: '#b4bbc0',
+      taskCheckboxBorderHover: '#b4bbc0',
+      taskCheckboxCheck: colors.base01,
+      taskCheckboxDoneBackground: '#505862',
+      taskCheckboxDoneBorder: '#505862',
+      taskCheckboxDoneCheck: 'var(--meo-background)',
+      taskCompleteForeground: colors.base02,
+      taskDroppedForeground: colors.base02,
+      blockquoteBorder: '#b4bbc0',
+      blockquoteForeground: '#b4bbc0',
+      horizontalRule: '#3e4246',
+      tableBorder: '#3e4246',
+      tableDelimiterForeground: '#3e4246',
+      tableSelectionBorder: colors.base05,
+      imageBorder: colors.base03,
+      imageFallbackForeground: colors.base02,
+      linkForeground: colors.base05,
+      wikiLinkForeground: colors.base05,
+      footnoteForeground: colors.base05,
+      kbdBorder: colors.base03,
+      frontmatterKey: colors.base07,
+      frontmatterValue: colors.base01,
+      frontmatterPillBackground: colors.base03,
+      alertNoteForeground: colors.base05,
+      alertNoteBorder: colors.base05,
+      alertTipForeground: colors.base09,
+      alertTipBorder: colors.base09,
+      alertImportantForeground: colors.base08,
+      alertImportantBorder: colors.base08,
+      alertWarningForeground: colors.base07,
+      alertWarningBorder: colors.base07,
+      alertCautionForeground: colors.base04,
+      alertCautionBorder: colors.base04,
+      ...(params.semanticColorOverrides ?? {})
+    },
     syntaxTokens: {
       ...buildSyntaxTokenColors(colors, params.syntaxTokenPaletteOverrides),
       ...(params.syntaxTokenOverrides ?? {})
@@ -427,8 +648,8 @@ const createThemeFromColors = (params: {
 
 export const themePresets: readonly ThemeSettings[] = [
   createThemeFromColors({
-    id: 'one-monokai',
-    name: 'One Monokai (default)',
+    id: 'meo-complete',
+    name: 'MEO Complete (default)',
   }),
   createThemeFromColors({
     id: 'one-dark-pro',
@@ -578,6 +799,8 @@ const hexColorRegex = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-f
 const rgbColorRegex = /^rgba?\(\s*(?:\d{1,3}\s*,\s*){2}\d{1,3}(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?|\d*\.?\d+))?\s*\)$/;
 const hslColorRegex = /^hsla?\(\s*(?:[+\-]?\d+(?:\.\d+)?(?:deg|rad|grad|turn)?\s*,\s*){2}\d{1,3}%?(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?|\d*\.?\d+))?\s*\)$/;
 const cssVarColorRegex = /^var\(\s*--[A-Za-z0-9_-]+\s*(?:,\s*[^)]+)?\)$/;
+const cssColorFunctionRegex = /^(?:color-mix|color|lab|lch|oklab|oklch)\(.+\)$/i;
+const cssColorKeywordRegex = /^(?:currentColor|transparent)$/i;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -596,7 +819,12 @@ const isValidThemeColor = (value: string): boolean => {
     return false;
   }
   const candidate = value.trim();
-  return hexColorRegex.test(candidate) || rgbColorRegex.test(candidate) || hslColorRegex.test(candidate) || cssVarColorRegex.test(candidate);
+  return hexColorRegex.test(candidate)
+    || rgbColorRegex.test(candidate)
+    || hslColorRegex.test(candidate)
+    || cssVarColorRegex.test(candidate)
+    || cssColorFunctionRegex.test(candidate)
+    || cssColorKeywordRegex.test(candidate);
 };
 
 const sanitizeThemeColor = (value: unknown, fallback: string): string => {
@@ -734,12 +962,83 @@ const resolveThemeSyntaxTokens = (raw: unknown, colors: ThemeColors): ThemeSynta
   return tokens;
 };
 
+const resolveThemeSemanticColors = (raw: unknown, colors: ThemeColors, backgroundColor: string): SemanticColors => {
+  const value = isRecord(raw) ? raw : {};
+  const defaults: SemanticColors = {
+    ...defaultSemanticColors,
+    foreground: colors.base01,
+    mutedForeground: colors.base02,
+    background: backgroundColor,
+    caret: colors.base01,
+    tagForeground: colors.base05,
+    markdownSyntax: '#8e999e',
+    headingForeground: '#79b8ff',
+    codeLanguageLabelForeground: '#79b8ff',
+    codeCopyForeground: '#79b8ff',
+    codeCopyHoverForeground: '#79b8ff',
+    codeBlockBackground: defaultCodeBlockBackgroundColor,
+    inlineCodeBackground: '#2a3a52',
+    orderedListMarker: '#79b8ff',
+    unorderedListMarker: '#79b8ff',
+    listPrefix: colors.base02,
+    listGuide: colors.base03,
+    taskCheckboxBorder: '#b4bbc0',
+    taskCheckboxBorderHover: '#b4bbc0',
+    taskCheckboxCheck: colors.base01,
+    taskCheckboxDoneBackground: '#505862',
+    taskCheckboxDoneBorder: '#505862',
+    taskCheckboxDoneCheck: 'var(--meo-background)',
+    taskCompleteForeground: colors.base02,
+    taskDroppedForeground: colors.base02,
+    blockquoteBorder: '#b4bbc0',
+    blockquoteForeground: '#b4bbc0',
+    horizontalRule: '#3e4246',
+    tableBorder: '#3e4246',
+    tableDelimiterForeground: '#3e4246',
+    tableSelectionBorder: colors.base05,
+    imageBorder: colors.base03,
+    imageFallbackForeground: colors.base02,
+    linkForeground: colors.base05,
+    wikiLinkForeground: colors.base05,
+    footnoteForeground: colors.base05,
+    kbdBorder: colors.base03,
+    frontmatterKey: colors.base07,
+    frontmatterValue: colors.base01,
+    frontmatterPillBackground: colors.base03,
+    alertNoteForeground: colors.base05,
+    alertNoteBorder: colors.base05,
+    alertTipForeground: colors.base09,
+    alertTipBorder: colors.base09,
+    alertImportantForeground: colors.base08,
+    alertImportantBorder: colors.base08,
+    alertWarningForeground: colors.base07,
+    alertWarningBorder: colors.base07,
+    alertCautionForeground: colors.base04,
+    alertCautionBorder: colors.base04
+  };
+  const semanticColors = {} as SemanticColors;
+
+  for (const key of semanticColorKeys) {
+    semanticColors[key] = sanitizeThemeColor(value[key], defaults[key]);
+  }
+
+  return semanticColors;
+};
+
 export const serializeThemeSettings = (theme: ThemeSettings): ThemeSettingsPayload => {
   const defaults = buildSyntaxTokenColors(theme.colors);
   const syntaxTokens = {} as ThemeSyntaxTokens;
+  const semanticColors: Partial<SemanticColors> = {};
 
   for (const key of Object.keys(defaults) as ThemeSyntaxTokenKey[]) {
     syntaxTokens[key] = theme.syntaxTokens[key] === defaults[key] ? '' : theme.syntaxTokens[key];
+  }
+
+  const resolvedDefaults = resolveThemeSemanticColors(undefined, theme.colors, theme.backgroundColor);
+  for (const key of semanticColorKeys) {
+    if (theme.semanticColors[key] !== resolvedDefaults[key]) {
+      semanticColors[key] = theme.semanticColors[key];
+    }
   }
 
   return {
@@ -747,6 +1046,7 @@ export const serializeThemeSettings = (theme: ThemeSettings): ThemeSettingsPaylo
     name: theme.name,
     backgroundColor: theme.backgroundColor,
     colors: { ...theme.colors },
+    semanticColors,
     syntaxTokens,
     fonts: { ...theme.fonts }
   };
@@ -754,11 +1054,13 @@ export const serializeThemeSettings = (theme: ThemeSettings): ThemeSettingsPaylo
 
 export const resolveTheme = (themeOverride?: Partial<ThemeSettings>): ThemeSettings => {
   const colors = resolveThemeColors(themeOverride?.colors);
+  const backgroundColor = sanitizeThemeColor(themeOverride?.backgroundColor, defaultThemeBackgroundColor);
   return {
     id: normalizeString(themeOverride?.id, defaultThemeSettings.id),
     name: normalizeString(themeOverride?.name, defaultThemeSettings.name),
-    backgroundColor: sanitizeThemeColor(themeOverride?.backgroundColor, defaultThemeBackgroundColor),
+    backgroundColor,
     colors,
+    semanticColors: resolveThemeSemanticColors(themeOverride?.semanticColors, colors, backgroundColor),
     syntaxTokens: resolveThemeSyntaxTokens(themeOverride?.syntaxTokens, colors),
     fonts: resolveThemeFonts(themeOverride?.fonts)
   };
@@ -831,6 +1133,33 @@ export const validateThemePayload = (value: unknown): ThemeValidationResult => {
     const unknownTokens = Object.keys(rawSyntaxTokens).filter((tokenId) => sanitizeSyntaxTokenId(tokenId) === null);
     if (unknownTokens.length) {
       errors.push(`Theme syntaxTokens contains unknown keys: ${unknownTokens.join(', ')}.`);
+    }
+  }
+
+  const rawSemanticColors = value.semanticColors;
+  if (rawSemanticColors !== undefined) {
+    if (!isRecord(rawSemanticColors)) {
+      errors.push('Theme "semanticColors" must be an object.');
+    } else {
+      for (const [colorId, colorValue] of Object.entries(rawSemanticColors)) {
+        if (!(semanticColorKeys as readonly string[]).includes(colorId)) {
+          continue;
+        }
+        if (typeof colorValue !== 'string') {
+          errors.push(`Theme semantic color "${colorId}" must be a string.`);
+          continue;
+        }
+        if (!colorValue.trim()) {
+          continue;
+        }
+        if (!isValidThemeColor(colorValue)) {
+          errors.push(`Theme semantic color "${colorId}" must be a valid CSS color string.`);
+        }
+      }
+      const unknownSemanticColors = Object.keys(rawSemanticColors).filter((colorId) => !(semanticColorKeys as readonly string[]).includes(colorId));
+      if (unknownSemanticColors.length) {
+        errors.push(`Theme semanticColors contains unknown keys: ${unknownSemanticColors.join(', ')}.`);
+      }
     }
   }
 

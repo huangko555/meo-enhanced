@@ -1,4 +1,4 @@
-import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
+import { RangeSetBuilder, StateEffect, StateField, EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass } from '@codemirror/view';
@@ -65,6 +65,7 @@ import {
   type LatexMathMode
 } from './helpers/math';
 import { diagnosticDataField } from './helpers/diagnostics';
+import { markdownTagField } from './helpers/tags';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
@@ -74,19 +75,19 @@ const activeLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-
 const linkLabelBracketDeco = Decoration.mark({
   class: 'meo-md-link-label-bracket',
   attributes: {
-    style: 'color: var(--meo-color-base02) !important; -webkit-text-fill-color: var(--meo-color-base02) !important;'
+    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
   }
 });
 const activeLinkLabelBracketDeco = Decoration.mark({
   class: 'meo-md-link-label-bracket-active',
   attributes: {
-    style: 'color: var(--meo-color-base02) !important; -webkit-text-fill-color: var(--meo-color-base02) !important;'
+    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
   }
 });
 const footnoteMarkerDeco = Decoration.mark({
   class: 'meo-md-footnote-marker',
   attributes: {
-    style: 'color: var(--meo-color-base02) !important; -webkit-text-fill-color: var(--meo-color-base02) !important;'
+    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
   }
 });
 const footnoteLiteralDeco = Decoration.mark({ class: 'meo-md-footnote-literal' });
@@ -98,6 +99,19 @@ const activeStrikeMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active me
 const codeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker' });
 const activeCodeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker-active' });
 const fenceMarkerDeco = Decoration.mark({ class: 'meo-md-fence-marker' });
+const headingContentDeco = Decoration.mark({ class: 'meo-md-heading-content' });
+const strongMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker meo-md-strong-marker',
+  attributes: {
+    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
+  }
+});
+const activeStrongMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker-active meo-md-strong-marker-active',
+  attributes: {
+    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
+  }
+});
 const hrMarkerDeco = Decoration.mark({ class: 'meo-md-hr-marker' });
 const hiddenLinkUrlDeco = Decoration.mark({ class: 'meo-md-link-url-hidden' });
 const linkBoundaryDeco = Decoration.mark({ class: 'meo-md-url-boundary' });
@@ -110,6 +124,22 @@ const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
   elementClass = 'meo-md-hide-line-number';
 })();
 const isTableContentLine = (lineText: string): boolean => lineText.includes('|');
+
+export const setLivePointerSelectionActiveEffect = StateEffect.define<boolean>();
+
+const livePointerSelectionActiveField = StateField.define<boolean>({
+  create() {
+    return false;
+  },
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setLivePointerSelectionActiveEffect)) {
+        return effect.value;
+      }
+    }
+    return value;
+  }
+});
 
 const lineStyleDecos = {
   h1: Decoration.line({ class: 'meo-md-h1' }),
@@ -247,13 +277,14 @@ function listLineDeco(
   guideStepColumns = 2,
   selected = false,
   isTask = false,
-  taskHiddenPrefixColumns = 0
+  taskHiddenPrefixColumns = 0,
+  isOrdered = false
 ) {
   const offset = Math.max(0, contentOffsetColumns);
   const indent = Math.max(0, indentColumns);
   const guideStep = Math.max(2, guideStepColumns);
   const hiddenTaskPrefix = Math.max(0, taskHiddenPrefixColumns);
-  const key = `${offset}:${indent}:${guideStep}:${selected ? 1 : 0}:${isTask ? 1 : 0}:${hiddenTaskPrefix}`;
+  const key = `${offset}:${indent}:${guideStep}:${selected ? 1 : 0}:${isTask ? 1 : 0}:${hiddenTaskPrefix}:${isOrdered ? 1 : 0}`;
   let deco = listLineDecoCache.get(key);
   if (deco) {
     return deco;
@@ -265,6 +296,9 @@ function listLineDeco(
   }
   if (isTask) {
     classes.push('meo-md-list-line-task');
+  }
+  if (isOrdered) {
+    classes.push('meo-md-list-line-ordered');
   }
 
   deco = Decoration.line({
@@ -283,6 +317,25 @@ const inlineStyleDecos = {
   strike: Decoration.mark({ class: 'meo-md-strike' }),
   inlineCode: Decoration.mark({ class: 'meo-md-inline-code' })
 };
+
+function addStrongEmphasisDecorations(builder, state, node, activeLines) {
+  const text = state.doc.sliceString(node.from, node.to);
+  const markerLength = (
+    (text.startsWith('**') && text.endsWith('**')) ||
+    (text.startsWith('__') && text.endsWith('__'))
+  ) ? 2 : 0;
+  if (!markerLength || node.to - node.from < markerLength * 2) {
+    addRange(builder, node.from, node.to, inlineStyleDecos.strong);
+    return;
+  }
+
+  addRange(builder, node.from + markerLength, node.to - markerLength, inlineStyleDecos.strong);
+
+  const line = state.doc.lineAt(node.from);
+  const markerDecoration = activeLines.has(line.number) ? activeStrongMarkerDeco : strongMarkerDeco;
+  addRange(builder, node.from, node.from + markerLength, markerDecoration);
+  addRange(builder, node.to - markerLength, node.to, markerDecoration);
+}
 
 function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLines) {
   if (frontmatter.contentTo > frontmatter.contentFrom) {
@@ -886,6 +939,10 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
 }
 
 function collectActiveLines(state: EditorState): Set<number> {
+  if (state.field(livePointerSelectionActiveField)) {
+    return new Set();
+  }
+
   const lines = new Set<number>();
   for (const range of state.selection.ranges) {
     // In live mode, only reveal markdown markers on the focused line.
@@ -1047,6 +1104,57 @@ function addAtxHeadingPrefixMarkers(builder, state, from, activeLines) {
   addRange(builder, line.from, prefixTo, markerDeco);
 }
 
+function collectInlineMarkdownSyntaxRanges(text) {
+  const ranges = [];
+  const patterns = [
+    /\*\*|__|~~|`+/g,
+    /(?<!\\)[*_]/g
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      ranges.push({ from: match.index, to: match.index + match[0].length });
+    }
+  }
+
+  ranges.sort((a, b) => a.from - b.from || b.to - a.to);
+  const merged = [];
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.from <= previous.to) {
+      previous.to = Math.max(previous.to, range.to);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  return merged;
+}
+
+function addAtxHeadingContentColor(builder, state, from, to) {
+  const line = state.doc.lineAt(from);
+  const text = state.doc.sliceString(line.from, line.to);
+  const match = /^(#{1,6}[ \t]+)/.exec(text);
+  const contentFrom = match ? line.from + match[1].length : from;
+  if (contentFrom >= to) {
+    return;
+  }
+
+  const syntaxRanges = collectInlineMarkdownSyntaxRanges(state.doc.sliceString(contentFrom, to));
+  let segmentFrom = contentFrom;
+  for (const syntaxRange of syntaxRanges) {
+    const syntaxFrom = contentFrom + syntaxRange.from;
+    const syntaxTo = contentFrom + syntaxRange.to;
+    if (segmentFrom < syntaxFrom) {
+      addRange(builder, segmentFrom, syntaxFrom, headingContentDeco);
+    }
+    segmentFrom = Math.max(segmentFrom, syntaxTo);
+  }
+  if (segmentFrom < to) {
+    addRange(builder, segmentFrom, to, headingContentDeco);
+  }
+}
+
 function addListLineDecorations(builder, state, indentSelectedLines, frontmatter = null, codeBlockLines = null) {
   const stylesByLine = detectListIndentStylesByLine(state);
   const orderedCountsByLevel: Array<number | null> = [];
@@ -1098,7 +1206,8 @@ function addListLineDecorations(builder, state, indentSelectedLines, frontmatter
         style?.columns ?? 2,
         indentSelectedLines.has(lineNo),
         Boolean(marker.isTask),
-        marker.taskHiddenPrefixColumns ?? 0
+        marker.taskHiddenPrefixColumns ?? 0,
+        Boolean(marker.orderedNumber)
       ).range(line.from)
     );
     addListMarkerDecoration(builder, state, line.from, orderedDisplayIndex, style);
@@ -1165,6 +1274,7 @@ function buildDecorations(state) {
       if (headingLevel !== null) {
         if (tableDepth === 0 && !isInsideFrontmatter(frontmatter, node.from)) {
           addAtxHeadingPrefixMarkers(ranges, state, node.from, activeLines);
+          addAtxHeadingContentColor(ranges, state, node.from, node.to);
           addLineClass(ranges, state, node.from, node.to, lineStyleDecos[`h${headingLevel}`]);
         }
       }
@@ -1213,7 +1323,7 @@ function buildDecorations(state) {
       if (node.name === 'Emphasis') {
         addRange(ranges, node.from, node.to, inlineStyleDecos.em);
       } else if (node.name === 'StrongEmphasis') {
-        addRange(ranges, node.from, node.to, inlineStyleDecos.strong);
+        addStrongEmphasisDecorations(ranges, state, node, activeLines);
       } else if (node.name === 'Strikethrough') {
         addRange(ranges, node.from, node.to, inlineStyleDecos.strike);
       } else if (node.name === 'InlineCode' || node.name === 'CodeText') {
@@ -2173,6 +2283,10 @@ function rangesOverlap(fromA, toA, fromB, toB) {
 }
 
 function overlapsSelection(state, from, to) {
+  if (state.field(livePointerSelectionActiveField)) {
+    return false;
+  }
+
   return state.selection.ranges.some((range) => rangesOverlap(from, to, range.from, range.to));
 }
 
@@ -2211,6 +2325,8 @@ export function liveModeExtensions() {
       extensions: [{ remove: ['SetextHeading'] }]
     }),
     syntaxHighlighting(highlightStyle),
+    markdownTagField,
+    livePointerSelectionActiveField,
     liveDecorationField,
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

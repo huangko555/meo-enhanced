@@ -14,18 +14,18 @@
   --meo-outline-background: var(--meo-code-background);
   --meo-outline-hover-background: color-mix(in srgb, var(--meo-foreground) 8%, transparent);
   --meo-outline-active-background: color-mix(in srgb, var(--meo-foreground) 14%, transparent);
-  --meo-scrollbar-thumb: color-mix(in srgb, var(--meo-foreground) 22%, transparent);
-  --meo-scrollbar-thumb-hover: color-mix(in srgb, var(--meo-foreground) 32%, transparent);
-  --meo-scrollbar-thumb-active: color-mix(in srgb, var(--meo-foreground) 42%, transparent);
+  --meo-scrollbar-thumb: var(--meo-semantic-scrollbarThumb, color-mix(in srgb, var(--meo-foreground) 22%, transparent));
+  --meo-scrollbar-thumb-hover: var(--meo-semantic-scrollbarThumbHover, color-mix(in srgb, var(--meo-foreground) 32%, transparent));
+  --meo-scrollbar-thumb-active: var(--meo-semantic-scrollbarThumbActive, color-mix(in srgb, var(--meo-foreground) 42%, transparent));
   --meo-surface-background: var(--vscode-sideBar-background);
   --meo-active-line-bg: color-mix(in srgb, var(--vscode-editor-selectionBackground) 20%, transparent 80%);
   --meo-selection-bg: color-mix(in srgb, var(--vscode-editor-selectionBackground) 55%, transparent 45%);
   --meo-inline-code-background: var(--meo-code-background);
-  --meo-code-block-active-line-bg: color-mix(
+  --meo-code-block-active-line-bg: var(--meo-semantic-codeBlockActiveLineBackground, color-mix(
     in srgb,
     var(--meo-code-background, var(--vscode-textCodeBlock-background)) 82%,
     var(--vscode-editor-selectionBackground) 18%
-  );
+  ));
   --meo-code-block-active-line-bg-live: color-mix(in srgb, var(--vscode-sideBar-background) 50%, transparent 50%);
   --meo-font-live: var(--vscode-editor-font-family);
   --meo-font-source: var(--vscode-editor-font-family);
@@ -49,7 +49,8 @@
   --meo-active-editor-font: var(--vscode-editor-font-family);
   --meo-active-editor-font-weight: var(--vscode-editor-font-weight);
   --meo-active-editor-font-size: var(--vscode-editor-font-size, 13px);
-  --meo-foreground: var(--meo-color-base01, var(--vscode-editor-foreground));
+  --meo-foreground: var(--meo-semantic-foreground, var(--meo-color-base01, var(--vscode-editor-foreground)));
+  --meo-muted-foreground: var(--meo-semantic-mutedForeground, var(--meo-color-base02, var(--vscode-descriptionForeground)));
   --meo-caret-color: var(--meo-foreground);
   --meo-line-height-live: 1.5;
   --meo-line-height-source: 1.5;
@@ -574,8 +575,7 @@ body {
 
 .format-button:hover,
 .heading-dropdown-option:hover,
-.mode-button.is-active,
-.meo-copy-code-btn:hover {
+.mode-button.is-active {
   background-color: var(--vscode-toolbar-hoverBackground);
 }
 
@@ -636,12 +636,13 @@ body {
   z-index: 10;
   cursor: pointer;
   padding: 2px 8px;
-  color: var(--meo-color-base02);
-  background-color: transparent;
+  color: var(--meo-semantic-codeCopyForeground);
+  background-color: var(--meo-semantic-codeCopyBackground);
 }
 
 .meo-copy-code-btn:hover {
-  color: var(--meo-color-base02);
+  color: var(--meo-semantic-codeCopyHoverForeground);
+  background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
 
 .meo-code-language-label {
@@ -650,8 +651,8 @@ body {
   left: calc(2ch);
   z-index: 10;
   padding: 2px 5px;
-  color: var(--meo-color-base02);
-  background-color: transparent;
+  color: var(--meo-semantic-codeLanguageLabelForeground);
+  background-color: var(--meo-semantic-codeLanguageLabelBackground);
   pointer-events: none;
   cursor: default;
 }
@@ -780,7 +781,7 @@ body {
 .cm-lineNumbers {
   width: 100%;
   box-sizing: border-box;
-  color: var(--vscode-editorLineNumber-foreground);
+  color: var(--meo-semantic-mutedForeground, var(--vscode-editorLineNumber-foreground));
 }
 
 .cm-editor .cm-lineNumbers .cm-gutterElement {
@@ -877,7 +878,7 @@ body {
 
 .cm-editor .cm-gutterElement.cm-activeLineGutter {
   background: transparent !important;
-  color: var(--vscode-editor-foreground);
+  color: var(--meo-foreground);
 }
 
 .cm-editor.meo-line-numbers-hidden .cm-lineNumbers .cm-gutterElement,
@@ -932,6 +933,7 @@ body {
   padding-top: 0;
   padding-right: var(--meo-editor-inline-end-padding);
   caret-color: var(--meo-caret-color);
+  cursor: text;
   width: 100%;
   max-width: var(--meo-content-max-width);
   margin-left: auto;
@@ -958,16 +960,21 @@ body {
 }
 
 .cm-editor .meo-search-match {
-  color: #1f1f1f;
-  background: #fff59d;
-  outline: 1px solid #d6b400;
+  color: var(--meo-semantic-searchMatchForeground);
+  background: var(--meo-semantic-searchMatchBackground);
+  outline: 1px solid var(--meo-semantic-searchMatchBorder);
   border-radius: 2px;
 }
 
+.cm-editor.meo-live-pointer-selecting,
+.cm-editor.meo-live-pointer-selecting * {
+  cursor: text !important;
+}
+
 .cm-editor .meo-search-match-active {
-  color: #1f1f1f;
-  background: #ffff00;
-  outline: 1px solid #f0c000;
+  color: var(--meo-semantic-searchMatchActiveForeground);
+  background: var(--meo-semantic-searchMatchActiveBackground);
+  outline: 1px solid var(--meo-semantic-searchMatchActiveBorder);
 }
 
 .cm-editor .meo-search-match-active::selection,
@@ -1007,7 +1014,7 @@ body {
 }
 
 .cm-editor .cm-activeLine.meo-md-code-block {
-  background-color: var(--meo-active-line-bg);
+  background-color: var(--meo-code-block-active-line-bg);
 }
 
 .cm-editor.meo-mode-source .meo-md-colon-fence-marker,
@@ -1021,7 +1028,7 @@ body {
 }
 
 .cm-editor.meo-mode-live .cm-activeLine.meo-md-code-block {
-  background-color: var(--meo-active-line-bg);
+  background-color: var(--meo-code-block-active-line-bg);
 }
 
 .cm-editor.meo-mode-live .cm-content {
@@ -1035,6 +1042,8 @@ body {
 .cm-editor.meo-mode-live .meo-md-marker-active {
   display: inline !important;
   line-height: inherit;
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
 .cm-editor.meo-mode-live.meo-table-interaction-active .meo-md-marker-active {
@@ -1076,6 +1085,29 @@ body {
   --meo-heading-token-weight: var(--meo-heading-6-weight);
 }
 
+.cm-editor.meo-mode-live .meo-md-heading-content,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-em,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-strong,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-strike,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-inline-code {
+  color: var(--meo-semantic-headingForeground, #79b8ff) !important;
+  -webkit-text-fill-color: var(--meo-semantic-headingForeground, #79b8ff) !important;
+}
+
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-marker,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-marker-active {
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
+}
+
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-strike-marker,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-strike-marker-active,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-code-marker,
+.cm-editor.meo-mode-live .meo-md-heading-content .meo-md-code-marker-active {
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
+}
+
 .cm-editor.meo-mode-live .cm-line.meo-md-heading-collapsed {
   opacity: 0.95;
 }
@@ -1085,8 +1117,30 @@ body {
 }
 
 .cm-editor .meo-md-strong {
-  color: var(--meo-color-base07);
+  color: var(--meo-foreground) !important;
+  -webkit-text-fill-color: var(--meo-foreground) !important;
   font-weight: 600;
+}
+
+.cm-editor .meo-md-strong * {
+  color: var(--meo-foreground) !important;
+  -webkit-text-fill-color: var(--meo-foreground) !important;
+}
+
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strong,
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strong * {
+  color: var(--meo-semantic-headingForeground, #79b8ff) !important;
+  -webkit-text-fill-color: var(--meo-semantic-headingForeground, #79b8ff) !important;
+}
+
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-marker,
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-marker-active,
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike-marker,
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike-marker-active,
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-code-marker,
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-code-marker-active {
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
 .cm-editor .meo-md-strike {
@@ -1095,7 +1149,8 @@ body {
 
 .cm-editor .meo-md-strike-marker,
 .cm-editor .meo-md-strike-marker-active {
-  color: var(--meo-color-base02) !important;
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
 .cm-editor .meo-md-link {
@@ -1113,7 +1168,7 @@ body {
 }
 
 .cm-editor.meo-mode-source .meo-md-source-file-link {
-  color: var(--meo-token-link-color, var(--meo-color-base05));
+  color: var(--meo-semantic-linkForeground, var(--meo-token-link-color, var(--meo-color-base05)));
 }
 
 .cm-editor.meo-mode-live .meo-md-link[data-meo-link-href] {
@@ -1126,7 +1181,8 @@ body {
 
 .cm-editor .meo-md-link-marker,
 .cm-editor .meo-md-link-marker-active {
-  color: var(--meo-color-base02) !important;
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
 .cm-editor .meo-md-link-label-bracket,
@@ -1135,8 +1191,8 @@ body {
 .cm-editor .meo-md-link-label-bracket-active *,
 .cm-editor .meo-md-footnote-marker,
 .cm-editor .meo-md-footnote-marker * {
-  color: var(--meo-color-base02) !important;
-  -webkit-text-fill-color: var(--meo-color-base02) !important;
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
 .cm-editor .meo-md-footnote-ref,
@@ -1147,8 +1203,8 @@ body {
   padding: 0;
   border: 0;
   border-radius: 3px;
-  color: var(--meo-color-base05);
-  background: transparent;
+  color: var(--meo-semantic-footnoteForeground);
+  background: var(--meo-semantic-footnoteBackground);
   font: inherit;
   line-height: inherit;
   cursor: pointer;
@@ -1169,14 +1225,14 @@ body {
   vertical-align: super;
   font-size: 0.72em;
   line-height: 1;
-  color: var(--meo-color-base05);
+  color: var(--meo-semantic-footnoteForeground);
   pointer-events: none;
 }
 
 .cm-editor.meo-mode-live .meo-md-footnote-literal,
 .cm-editor.meo-mode-live .meo-md-footnote-literal * {
-  color: var(--meo-token-link-color, var(--meo-color-base05)) !important;
-  -webkit-text-fill-color: var(--meo-token-link-color, var(--meo-color-base05)) !important;
+  color: var(--meo-semantic-footnoteForeground, var(--meo-token-link-color, var(--meo-color-base05))) !important;
+  -webkit-text-fill-color: var(--meo-semantic-footnoteForeground, var(--meo-token-link-color, var(--meo-color-base05))) !important;
   text-decoration: none !important;
   vertical-align: baseline !important;
   font-size: inherit !important;
@@ -1190,7 +1246,7 @@ body {
 
 .cm-editor .meo-md-footnote-backref {
   margin-right: 0.45em;
-  color: var(--meo-color-base05);
+  color: var(--meo-semantic-footnoteForeground);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1217,7 +1273,7 @@ body {
 
 .cm-editor .meo-md-wiki-marker,
 .cm-editor .meo-md-wiki-marker * {
-  color: var(--meo-color-base02) !important;
+  color: var(--meo-muted-foreground) !important;
 }
 
 .cm-editor.meo-mode-live .meo-md-wiki-empty-marker {
@@ -1235,7 +1291,7 @@ body {
   padding: 0;
   border: 0;
   line-height: 0;
-  color: var(--meo-color-base02);
+  color: var(--meo-muted-foreground);
   background: transparent;
   cursor: pointer;
   vertical-align: top;
@@ -1289,10 +1345,29 @@ body {
 }
 
 .cm-editor .meo-md-quote {
-  border-left: 3px solid var(--meo-color-base07);
+  border-left: 3px solid var(--meo-semantic-blockquoteBorder);
+  color: var(--meo-semantic-blockquoteForeground);
   min-height: calc(var(--meo-active-editor-line-height) * 1em);
   padding-left: 3ch;
   text-indent: -1ch;
+}
+
+.cm-editor .cm-line.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block) *,
+.cm-editor .cm-line.meo-md-quote:not(.meo-md-code-block):not(.meo-mermaid-block) {
+  color: var(--meo-semantic-blockquoteForeground) !important;
+  -webkit-text-fill-color: var(--meo-semantic-blockquoteForeground) !important;
+}
+
+.cm-editor .cm-line.meo-md-quote .meo-md-marker,
+.cm-editor .cm-line.meo-md-quote .meo-md-marker-active,
+.cm-editor .cm-line.meo-md-quote .meo-md-link-marker,
+.cm-editor .cm-line.meo-md-quote .meo-md-link-marker-active,
+.cm-editor .cm-line.meo-md-quote .meo-md-strike-marker,
+.cm-editor .cm-line.meo-md-quote .meo-md-strike-marker-active,
+.cm-editor .cm-line.meo-md-quote .meo-md-code-marker,
+.cm-editor .cm-line.meo-md-quote .meo-md-code-marker-active {
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
 .cm-editor.meo-mode-live .cm-activeLine.meo-md-quote {
@@ -1327,7 +1402,7 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--meo-color-base03);
+  background: var(--meo-semantic-horizontalRule);
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -1356,7 +1431,19 @@ body {
 
 .cm-editor .meo-md-inline-code {
   background: var(--meo-inline-code-background);
+  color: var(--meo-foreground) !important;
+  -webkit-text-fill-color: var(--meo-foreground) !important;
   border-radius: 0.35em;
+}
+
+.cm-editor .meo-md-tag {
+  color: var(--meo-semantic-tagForeground) !important;
+  background: var(--meo-semantic-tagBackground);
+  box-shadow: inset 0 0 0 1px var(--meo-semantic-tagBorder);
+  border-radius: 999px;
+  padding: 0 0.28em;
+  text-decoration: none !important;
+  -webkit-text-fill-color: var(--meo-semantic-tagForeground) !important;
 }
 
 .cm-editor.meo-mode-live .meo-md-inline-code,
@@ -1384,9 +1471,9 @@ body {
   margin: 0 0.08em;
   padding: 0.04em 0.42em 0.1em;
   min-width: 1.3em;
-  border: 1px solid var(--meo-color-base03);
+  border: 1px solid var(--meo-semantic-kbdBorder);
   border-radius: 0.35em;
-  background: var(--meo-inset-background);
+  background: var(--meo-semantic-kbdBackground);
   /* Keep fill out of the border area so the bottom edge stays crisp. */
   background-clip: padding-box;
   color: var(--meo-foreground);
@@ -1397,7 +1484,7 @@ body {
   white-space: nowrap;
   text-indent: 0;
   /* Extra 1px inside stroke -> visual 2px bottom edge without changing line height. */
-  box-shadow: inset 0 -1px 0 var(--meo-color-base03);
+  box-shadow: inset 0 -1px 0 var(--meo-semantic-kbdBorder);
 }
 
 .cm-editor .meo-md-math {
@@ -1449,11 +1536,15 @@ body {
 .cm-editor.meo-mode-live .meo-md-code-marker,
 .cm-editor.meo-mode-live .meo-md-code-marker * {
   color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  opacity: 0 !important;
 }
 
 .cm-editor.meo-mode-live .meo-md-code-marker-active,
 .cm-editor.meo-mode-live .meo-md-code-marker-active * {
-  color: var(--meo-color-base02) !important;
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
+  opacity: 1 !important;
 }
 
 .cm-editor .meo-md-code-block,
@@ -1478,25 +1569,30 @@ body {
   --meo-task-hidden-prefix-columns: 0ch;
   --meo-list-indent-columns: 0ch;
   --meo-list-guide-step: 2ch;
+  --meo-list-guide-offset: 0.95ch;
   padding-left: var(--meo-effective-list-hanging-indent);
   text-indent: calc(var(--meo-effective-list-hanging-indent) * -1);
   background-image: repeating-linear-gradient(
     to right,
-    var(--meo-color-base03) 0,
-    var(--meo-color-base03) 1px,
+    var(--meo-semantic-listGuide) 0,
+    var(--meo-semantic-listGuide) 1px,
     transparent 1px,
     transparent var(--meo-list-guide-step)
   );
   background-size: var(--meo-list-indent-columns) 100%;
-  background-position: left top;
+  background-position: var(--meo-list-guide-offset) top;
   background-repeat: no-repeat;
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-list-line.meo-md-list-line-ordered {
+  --meo-list-guide-offset: 0.5ch;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-list-line.meo-md-list-line-selected {
   background-image: repeating-linear-gradient(
       to right,
-      var(--meo-color-base03) 0,
-      var(--meo-color-base03) 1px,
+      var(--meo-semantic-listGuide) 0,
+      var(--meo-semantic-listGuide) 1px,
       transparent 1px,
       transparent var(--meo-list-guide-step)
     ),
@@ -1506,7 +1602,7 @@ body {
       var(--meo-selection-bg)
     );
   background-size: var(--meo-list-indent-columns) 100%, var(--meo-effective-list-hanging-indent) 100%;
-  background-position: left top, left top;
+  background-position: var(--meo-list-guide-offset) top, left top;
   background-repeat: no-repeat, no-repeat;
 }
 
@@ -1526,16 +1622,45 @@ body {
 }
 
 .cm-editor .meo-md-list-prefix {
-  color: var(--meo-color-base02) !important;
+  color: var(--meo-semantic-listPrefix) !important;
+}
+
+.cm-editor .meo-md-list-marker-bullet {
+  display: inline-block;
+  position: relative;
+  width: 1em;
+  height: 1em;
+  line-height: inherit;
+  overflow: visible;
+  vertical-align: baseline;
+}
+
+.cm-editor .meo-md-list-marker-bullet-dot {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  width: 0.45em;
+  height: 0.45em;
+  fill: var(--meo-semantic-unorderedListMarker, var(--meo-semantic-headingForeground, #79b8ff));
+  transform: translate(-50%, -50%);
+  overflow: visible;
+}
+
+.cm-editor .meo-md-list-marker-ordered {
+  color: var(--meo-semantic-orderedListMarker) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-editor .meo-md-list-marker-task {
+  color: var(--meo-semantic-unorderedListMarker) !important;
 }
 
 .cm-editor.meo-mode-source .meo-md-task-bracket,
 .cm-editor.meo-mode-source .meo-md-task-bracket * {
-  color: var(--meo-token-link-color, var(--meo-color-base05)) !important;
-  -webkit-text-fill-color: var(--meo-token-link-color, var(--meo-color-base05)) !important;
+  color: var(--meo-semantic-taskCheckboxBorder, var(--meo-token-link-color, var(--meo-color-base05))) !important;
+  -webkit-text-fill-color: var(--meo-semantic-taskCheckboxBorder, var(--meo-token-link-color, var(--meo-color-base05))) !important;
 }
 
-.cm-editor .meo-md-list-marker-ordered,
 .cm-editor .meo-md-list-marker-task {
   min-width: 3ch;
 }
@@ -1552,9 +1677,9 @@ body {
   height: var(--meo-task-checkbox-size);
   margin: 0;
   padding: 0;
-  border: 1px solid var(--meo-color-base03);
-  border-radius: 4px;
-  background: var(--meo-surface-background);
+  border: 1.5px solid var(--meo-semantic-taskCheckboxBorder);
+  border-radius: 5px;
+  background: var(--meo-semantic-taskCheckboxBackground);
   cursor: pointer;
   vertical-align: middle;
   position: relative;
@@ -1563,18 +1688,24 @@ body {
 }
 
 .cm-editor .meo-task-checkbox:hover {
-  border: 1px solid var(--meo-foreground);
+  border: 1.5px solid var(--meo-semantic-taskCheckboxBorderHover);
+}
+
+.cm-editor .meo-task-checkbox.is-done,
+.cm-editor .meo-task-checkbox.is-done:hover {
+  border-color: var(--meo-semantic-taskCheckboxDoneBorder);
+  background: var(--meo-semantic-taskCheckboxDoneBackground);
 }
 
 .cm-editor .meo-task-checkbox.is-done::after {
   content: '';
   position: absolute;
-  left: 4px;
-  top: 2px;
-  width: 4px;
-  height: 7px;
-  border: solid var(--meo-foreground);
-  border-width: 0 2px 2px 0;
+  left: 4.5px;
+  top: 1px;
+  width: 4.5px;
+  height: 8.5px;
+  border: solid var(--meo-semantic-taskCheckboxDoneCheck);
+  border-width: 0 2.5px 2.5px 0;
   transform: rotate(45deg);
 }
 
@@ -1584,7 +1715,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--meo-foreground);
+  color: var(--meo-semantic-taskCheckboxCheck);
   font-size: 12px;
   line-height: 1;
   content: '◐';
@@ -1597,7 +1728,7 @@ body {
   left: 3px;
   right: 3px;
   top: 50%;
-  border-top: 2px solid var(--meo-foreground);
+  border-top: 2px solid var(--meo-semantic-taskCheckboxCheck);
   transform: translateY(-50%);
 }
 
@@ -1606,14 +1737,50 @@ body {
 }
 
 .cm-editor .meo-task-complete,
-.cm-editor .meo-task-complete * {
-  color: var(--meo-color-base02) !important;
+.cm-editor .meo-task-complete *,
+.cm-editor .meo-task-complete.meo-md-strong,
+.cm-editor .meo-task-complete.meo-md-em,
+.cm-editor .meo-task-complete.meo-md-strike,
+.cm-editor .meo-task-complete.meo-md-inline-code,
+.cm-editor .meo-task-complete.meo-md-tag,
+.cm-editor .meo-md-strong.meo-task-complete,
+.cm-editor .meo-md-em.meo-task-complete,
+.cm-editor .meo-md-strike.meo-task-complete,
+.cm-editor .meo-md-inline-code.meo-task-complete,
+.cm-editor .meo-md-inline-code.meo-task-complete *,
+.cm-editor .meo-md-tag.meo-task-complete,
+.cm-editor .meo-task-complete .meo-md-strong,
+.cm-editor .meo-task-complete .meo-md-em,
+.cm-editor .meo-task-complete .meo-md-strike,
+.cm-editor .meo-task-complete .meo-md-inline-code,
+.cm-editor .meo-task-complete .meo-md-inline-code *,
+.cm-editor .meo-task-complete .meo-md-tag {
+  color: var(--meo-semantic-taskCompleteForeground) !important;
+  -webkit-text-fill-color: var(--meo-semantic-taskCompleteForeground) !important;
   text-decoration-color: currentColor !important;
 }
 
 .cm-editor .meo-task-dropped,
-.cm-editor .meo-task-dropped * {
-  color: var(--meo-color-base02) !important;
+.cm-editor .meo-task-dropped *,
+.cm-editor .meo-task-dropped.meo-md-strong,
+.cm-editor .meo-task-dropped.meo-md-em,
+.cm-editor .meo-task-dropped.meo-md-strike,
+.cm-editor .meo-task-dropped.meo-md-inline-code,
+.cm-editor .meo-task-dropped.meo-md-tag,
+.cm-editor .meo-md-strong.meo-task-dropped,
+.cm-editor .meo-md-em.meo-task-dropped,
+.cm-editor .meo-md-strike.meo-task-dropped,
+.cm-editor .meo-md-inline-code.meo-task-dropped,
+.cm-editor .meo-md-inline-code.meo-task-dropped *,
+.cm-editor .meo-md-tag.meo-task-dropped,
+.cm-editor .meo-task-dropped .meo-md-strong,
+.cm-editor .meo-task-dropped .meo-md-em,
+.cm-editor .meo-task-dropped .meo-md-strike,
+.cm-editor .meo-task-dropped .meo-md-inline-code,
+.cm-editor .meo-task-dropped .meo-md-inline-code *,
+.cm-editor .meo-task-dropped .meo-md-tag {
+  color: var(--meo-semantic-taskDroppedForeground) !important;
+  -webkit-text-fill-color: var(--meo-semantic-taskDroppedForeground) !important;
   text-decoration: line-through !important;
   text-decoration-color: currentColor !important;
 }
@@ -1625,7 +1792,7 @@ body {
   width: var(--meo-list-border-width);
   min-width: var(--meo-list-border-width);
   height: 100%;
-  border-left: 1px solid var(--meo-color-base03);
+  border-left: 1px solid var(--meo-semantic-listGuide);
 }
 
 .cm-editor .meo-mermaid-block {
@@ -1858,21 +2025,22 @@ body {
 }
 
 .cm-editor .meo-md-image-loading {
-  color: var(--vscode-descriptionForeground);
+  color: var(--meo-semantic-imageFallbackForeground);
   font-style: italic;
   font-size: 12px;
 }
 
 .cm-editor .meo-md-image-fallback {
   display: inline;
-  background: var(--meo-code-background);
+  background: var(--meo-semantic-imageBackground);
+  box-shadow: inset 0 0 0 1px var(--meo-semantic-imageBorder);
   border-radius: 2px;
 }
 
 .cm-editor .meo-md-image-fallback-text {
   font-family: var(--meo-active-editor-font);
   font-size: var(--meo-active-editor-font-size);
-  color: var(--vscode-descriptionForeground);
+  color: var(--meo-semantic-imageFallbackForeground);
 }
 
 .cm-editor .meo-md-image-linked {
@@ -2386,10 +2554,7 @@ body {
   min-width: 0;
   overflow-x: auto;
   overflow-y: visible;
-  scrollbar-color: var(
-    --vscode-scrollbarSlider-background,
-    color-mix(in srgb, var(--meo-color-base03) 70%, transparent)
-  ) transparent;
+  scrollbar-color: var(--meo-scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -2408,10 +2573,7 @@ body {
 
 .cm-editor .meo-md-html-table-wrap::-webkit-scrollbar-thumb {
   -webkit-appearance: none;
-  background: var(
-    --vscode-scrollbarSlider-background,
-    color-mix(in srgb, var(--meo-color-base03) 70%, transparent)
-  ) !important;
+  background: var(--meo-scrollbar-thumb) !important;
   background-clip: border-box !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -2420,20 +2582,14 @@ body {
 
 .cm-editor .meo-md-html-table-wrap::-webkit-scrollbar-thumb:hover {
   -webkit-appearance: none;
-  background: var(
-    --vscode-scrollbarSlider-hoverBackground,
-    var(--vscode-scrollbarSlider-background, var(--meo-color-base03))
-  ) !important;
+  background: var(--meo-scrollbar-thumb-hover) !important;
   border-radius: 0 !important;
   box-shadow: none !important;
 }
 
 .cm-editor .meo-md-html-table-wrap::-webkit-scrollbar-thumb:active {
   -webkit-appearance: none;
-  background: var(
-    --vscode-scrollbarSlider-activeBackground,
-    var(--vscode-scrollbarSlider-hoverBackground, var(--meo-color-base03))
-  ) !important;
+  background: var(--meo-scrollbar-thumb-active) !important;
   border-radius: 0 !important;
   box-shadow: none !important;
 }
@@ -2451,12 +2607,12 @@ body {
 .cm-editor .meo-md-html-table td {
   position: relative;
   padding: 0;
-  border: 1px solid var(--meo-color-base03);
+  border: 1px solid var(--meo-semantic-tableBorder);
 }
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected,
 .cm-editor .meo-md-html-table td.meo-md-html-table-cell-selected {
-  background: color-mix(in srgb, var(--meo-color-base05) 14%, transparent);
+  background: color-mix(in srgb, var(--meo-semantic-tableSelectionBorder) 14%, transparent);
   --meo-table-sel-top: transparent;
   --meo-table-sel-right: transparent;
   --meo-table-sel-bottom: transparent;
@@ -2470,22 +2626,22 @@ body {
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected-top,
 .cm-editor .meo-md-html-table td.meo-md-html-table-cell-selected-top {
-  --meo-table-sel-top: var(--meo-color-base05);
+  --meo-table-sel-top: var(--meo-semantic-tableSelectionBorder);
 }
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected-right,
 .cm-editor .meo-md-html-table td.meo-md-html-table-cell-selected-right {
-  --meo-table-sel-right: var(--meo-color-base05);
+  --meo-table-sel-right: var(--meo-semantic-tableSelectionBorder);
 }
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected-bottom,
 .cm-editor .meo-md-html-table td.meo-md-html-table-cell-selected-bottom {
-  --meo-table-sel-bottom: var(--meo-color-base05);
+  --meo-table-sel-bottom: var(--meo-semantic-tableSelectionBorder);
 }
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected-left,
 .cm-editor .meo-md-html-table td.meo-md-html-table-cell-selected-left {
-  --meo-table-sel-left: var(--meo-color-base05);
+  --meo-table-sel-left: var(--meo-semantic-tableSelectionBorder);
 }
 
 .cm-editor .meo-md-html-table th {
@@ -2707,7 +2863,7 @@ body {
 }
 
 .cm-editor .cm-line.meo-md-table-delim-line {
-  color: var(--vscode-panel-border);
+  color: var(--meo-semantic-tableDelimiterForeground);
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-table-delim-line {
@@ -2720,20 +2876,20 @@ body {
   overflow-wrap: anywhere;
   word-break: break-word;
   box-sizing: border-box;
-  border-left: 1px solid var(--vscode-panel-border);
-  border-bottom: 1px solid var(--vscode-panel-border);
+  border-left: 1px solid var(--meo-semantic-tableBorder);
+  border-bottom: 1px solid var(--meo-semantic-tableBorder);
   min-height: 1lh;
   line-height: inherit;
   padding: 0.25em 1ch;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-table-line:not(.meo-md-table-delim-line) .meo-md-table-cell.meo-md-table-cell-last {
-  border-right: 1px solid var(--vscode-panel-border);
+  border-right: 1px solid var(--meo-semantic-tableBorder);
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-table-header-line .meo-md-table-cell {
-  border-top: 1px solid var(--vscode-panel-border);
-  background-color: var(--meo-inset-background);
+  border-top: 1px solid var(--meo-semantic-tableBorder);
+  background-color: var(--meo-semantic-tableHeaderBackground);
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-table-line:not(.meo-md-table-delim-line) {
@@ -2793,7 +2949,7 @@ body {
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content,
 .cm-editor.meo-mode-source .cm-line.meo-md-frontmatter-content {
-  color: var(--meo-color-base07) !important;
+  color: var(--meo-semantic-frontmatterKey) !important;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content *,
@@ -2805,7 +2961,7 @@ body {
 .cm-editor.meo-mode-source .cm-line.meo-md-frontmatter-content .meo-md-list-marker,
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-list-prefix,
 .cm-editor.meo-mode-source .cm-line.meo-md-frontmatter-content .meo-md-list-prefix {
-  color: var(--meo-color-base02) !important;
+  color: var(--meo-semantic-listPrefix) !important;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-boundary .meo-code-language-label {
@@ -2815,12 +2971,12 @@ body {
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-key,
 .cm-editor.meo-mode-source .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-key {
-  color: var(--meo-color-base07) !important;
+  color: var(--meo-semantic-frontmatterKey) !important;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-value,
 .cm-editor.meo-mode-source .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-value {
-  color: var(--meo-foreground) !important;
+  color: var(--meo-semantic-frontmatterValue) !important;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-array-pills {
@@ -2837,7 +2993,7 @@ body {
   min-height: 1.35em;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--meo-color-base03);
+  background: var(--meo-semantic-frontmatterPillBackground);
   color: var(--meo-foreground) !important;
   font-size: 0.92em;
   line-height: 1.1;
@@ -2897,33 +3053,33 @@ body {
 }
 
 .cm-editor .meo-md-alert-note {
-  --meo-alert-color: var(--meo-color-base05);
-  border-left-color: var(--meo-color-base05);
-  background-color: color-mix(in srgb, var(--meo-color-base05) 8%, transparent);
+  --meo-alert-color: var(--meo-semantic-alertNoteForeground);
+  border-left-color: var(--meo-semantic-alertNoteBorder);
+  background-color: var(--meo-semantic-alertNoteBackground);
 }
 
 .cm-editor .meo-md-alert-tip {
-  --meo-alert-color: var(--meo-color-base09);
-  border-left-color: var(--meo-color-base09);
-  background-color: color-mix(in srgb, var(--meo-color-base09) 8%, transparent);
+  --meo-alert-color: var(--meo-semantic-alertTipForeground);
+  border-left-color: var(--meo-semantic-alertTipBorder);
+  background-color: var(--meo-semantic-alertTipBackground);
 }
 
 .cm-editor .meo-md-alert-important {
-  --meo-alert-color: var(--meo-color-base08);
-  border-left-color: var(--meo-color-base08);
-  background-color: color-mix(in srgb, var(--meo-color-base08) 8%, transparent);
+  --meo-alert-color: var(--meo-semantic-alertImportantForeground);
+  border-left-color: var(--meo-semantic-alertImportantBorder);
+  background-color: var(--meo-semantic-alertImportantBackground);
 }
 
 .cm-editor .meo-md-alert-warning {
-  --meo-alert-color: var(--meo-color-base07);
-  border-left-color: var(--meo-color-base07);
-  background-color: color-mix(in srgb, var(--meo-color-base07) 8%, transparent);
+  --meo-alert-color: var(--meo-semantic-alertWarningForeground);
+  border-left-color: var(--meo-semantic-alertWarningBorder);
+  background-color: var(--meo-semantic-alertWarningBackground);
 }
 
 .cm-editor .meo-md-alert-caution {
-  --meo-alert-color: var(--meo-color-base04);
-  border-left-color: var(--meo-color-base04);
-  background-color: color-mix(in srgb, var(--meo-color-base04) 8%, transparent);
+  --meo-alert-color: var(--meo-semantic-alertCautionForeground);
+  border-left-color: var(--meo-semantic-alertCautionBorder);
+  background-color: var(--meo-semantic-alertCautionBackground);
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-alert:not(.meo-md-code-block):not(.meo-mermaid-block),
@@ -2975,5 +3131,5 @@ body {
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-alert .meo-md-alert-label-active {
-  color: var(--meo-color-base05) !important;
+  color: var(--meo-alert-color) !important;
 }

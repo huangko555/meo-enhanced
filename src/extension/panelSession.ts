@@ -449,8 +449,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     console.error(`[MEO panelSession] ${contextLabel}`, error);
   };
 
-  const runBackground = (promise: Promise<unknown>, contextLabel: string): void => {
-    void promise.catch((error) => {
+  const runBackground = (promise: PromiseLike<unknown>, contextLabel: string): void => {
+    void Promise.resolve(promise).catch((error) => {
       reportBackgroundError(contextLabel, error);
     });
   };

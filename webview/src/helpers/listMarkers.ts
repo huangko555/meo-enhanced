@@ -445,7 +445,20 @@ class ListMarkerWidget extends WidgetType {
   toDOM(): HTMLElement {
     const marker = document.createElement('span');
     marker.className = `meo-md-list-marker ${this.classes}`;
-    marker.style.color = 'var(--meo-color-base02)';
+    if (this.classes.includes('meo-md-list-marker-bullet')) {
+      marker.setAttribute('aria-hidden', 'true');
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      dot.setAttribute('viewBox', '0 0 16 16');
+      dot.setAttribute('class', 'meo-md-list-marker-bullet-dot');
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', '8');
+      circle.setAttribute('cy', '8');
+      circle.setAttribute('r', '5');
+      dot.appendChild(circle);
+      marker.appendChild(dot);
+      return marker;
+    }
+
     marker.textContent = this.text;
     return marker;
   }

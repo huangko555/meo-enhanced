@@ -33,7 +33,7 @@ export function initializeImageHandling(vscode: any): void {
   vscodeApi = vscode;
 }
 
-const isImmediateImageSrc = (url: string): boolean => /^(?:https?:|data:|blob:|vscode-webview-resource:|vscode-resource:)/i.test(url);
+const isImmediateImageSrc = (url: string): boolean => /^(?:https?:|data:|blob:|vscode-webview:|vscode-webview-resource:|vscode-resource:)/i.test(url);
 
 const requestImageSrcResolution = (url: string): Promise<string> => new Promise((resolve) => {
   const waiting = pendingImageResolvers.get(url);

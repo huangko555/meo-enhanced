@@ -4,9 +4,10 @@ import { safeDecodeURIComponent } from '../agents/resourceMatching';
 import { withMarkdownExtensions } from './extensionConfig';
 
 const WIKI_LINK_SCHEME = 'meo-wiki:';
-const ALLOWED_IMAGE_SRC_RE = /^(?:https?:|data:|blob:|vscode-webview-resource:|vscode-resource:)/i;
+const ALLOWED_IMAGE_SRC_RE = /^(?:https?:|data:|blob:|vscode-webview:|vscode-webview-resource:|vscode-resource:)/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const HOSTNAME_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+const WINDOWS_ABSOLUTE_PATH_RE = /^[a-z]:[\\/]/i;
 
 export async function openExternalLink(rawHref: string): Promise<void> {
   try {
@@ -217,7 +218,7 @@ export function resolveWebviewImageSrc(rawUrl: string, documentUri: vscode.Uri, 
     return trimmed;
   }
 
-  if (SCHEME_RE.test(trimmed) && !/^file:/i.test(trimmed)) {
+  if (SCHEME_RE.test(trimmed) && !/^file:/i.test(trimmed) && !WINDOWS_ABSOLUTE_PATH_RE.test(trimmed)) {
     return trimmed;
   }
 

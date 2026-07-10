@@ -6,7 +6,7 @@ import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codem
 import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
-import { liveModeExtensions } from './liveMode';
+import { liveModeExtensions, setLivePointerSelectionActiveEffect } from './liveMode';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -14,6 +14,7 @@ import { sourceWikiMarkerField } from './helpers/wikiLinks';
 import { sourceFileLinkField } from './helpers/sourceRawLinks';
 import { sourceUrlBoundaryField } from './helpers/sourceUrlBoundaries';
 import { sourceFootnoteMarkerField } from './helpers/sourceFootnotes';
+import { markdownTagField } from './helpers/tags';
 import { getLinkHrefAtPointer, isPrimaryModifierPointerClick } from './helpers/linkNavigation';
 import {
   gitDiffGutterBaselineExtensions,
@@ -240,6 +241,7 @@ export function createEditor({
   }
   let applyingExternal = false;
   let capturedPointerId = null;
+  let liveSelectionPointerId = null;
   let inlineCodeClick = null;
   let checkboxClick = null;
   let frontmatterBoundaryClick = null;
@@ -255,6 +257,8 @@ export function createEditor({
   let onTableOpenLink = null;
   let onTableSelectionChange = null;
   let onScroll = null;
+  let onWindowPointerUp = null;
+  let onWindowPointerCancel = null;
   let pendingLiveSearchRevealFrame: number | null = null;
   let pendingLiveSearchRevealToken = 0;
   let gitBlameHover = null;
@@ -524,6 +528,18 @@ export function createEditor({
     }
     if (view.dom.releasePointerCapture && view.dom.hasPointerCapture(pointerId)) {
       view.dom.releasePointerCapture(pointerId);
+    }
+  };
+
+  const finishLivePointerSelection = (pointerId) => {
+    if (liveSelectionPointerId !== pointerId) {
+      return;
+    }
+    liveSelectionPointerId = null;
+    if (view && currentMode === 'live') {
+      view.dom.classList.remove('meo-live-pointer-selecting');
+      view.dom.style.cursor = '';
+      view.dispatch({ effects: setLivePointerSelectionActiveEffect.of(false) });
     }
   };
 
@@ -1531,6 +1547,13 @@ export function createEditor({
               targetElement.closest('.meo-md-inline-code') !== null
           };
 
+          if (currentMode === 'live') {
+            liveSelectionPointerId = event.pointerId;
+            view.dom.classList.add('meo-live-pointer-selecting');
+            view.dom.style.cursor = 'text';
+            view.dispatch({ effects: setLivePointerSelectionActiveEffect.of(true) });
+          }
+
           if (view.dom.setPointerCapture) {
             view.dom.setPointerCapture(event.pointerId);
             capturedPointerId = event.pointerId;
@@ -1544,6 +1567,8 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
+          finishLivePointerSelection(event.pointerId);
+
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;
             checkboxClick = null;
@@ -1612,6 +1637,8 @@ export function createEditor({
           return false;
         },
         pointercancel(event, _view) {
+          finishLivePointerSelection(event.pointerId);
+
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
               frontmatterBoundaryClick = null;
@@ -1723,6 +1750,14 @@ export function createEditor({
     emitSelectionChange();
   };
   view.dom.addEventListener('meo-table-selection-change', onTableSelectionChange);
+  onWindowPointerUp = (event) => {
+    finishLivePointerSelection(event.pointerId);
+  };
+  onWindowPointerCancel = (event) => {
+    finishLivePointerSelection(event.pointerId);
+  };
+  window.addEventListener('pointerup', onWindowPointerUp, true);
+  window.addEventListener('pointercancel', onWindowPointerCancel, true);
   onScroll = () => {
     emitSelectionChange();
     gitBlameHover?.hide();
@@ -1857,6 +1892,7 @@ export function createEditor({
       view.focus();
     },
     destroy() {
+      view.dom.classList.remove('meo-live-pointer-selecting');
       gitBlameHover?.destroy();
       gitBlameHover = null;
       gitDiffOverviewRuler?.destroy();
@@ -1876,6 +1912,14 @@ export function createEditor({
       if (onTableSelectionChange) {
         view.dom.removeEventListener('meo-table-selection-change', onTableSelectionChange);
         onTableSelectionChange = null;
+      }
+      if (onWindowPointerUp) {
+        window.removeEventListener('pointerup', onWindowPointerUp, true);
+        onWindowPointerUp = null;
+      }
+      if (onWindowPointerCancel) {
+        window.removeEventListener('pointercancel', onWindowPointerCancel, true);
+        onWindowPointerCancel = null;
       }
       if (capturedPointerId !== null) {
         releasePointerCaptureIfHeld(capturedPointerId);
@@ -2719,6 +2763,7 @@ function sourceMode() {
     sourceFileLinkField,
     sourceUrlBoundaryField,
     sourceFootnoteMarkerField,
+    markdownTagField,
     sourceTableHeaderLineField,
     sourceFrontmatterField,
     gitDiffLineHighlightsField,

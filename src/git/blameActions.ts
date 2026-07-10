@@ -19,7 +19,9 @@ type ResolvedGitBlameRequest = {
   result: GitBlameLineResult;
 };
 
-function resolveBlameUnavailableReason(reason: GitBaselinePayload['reason']): GitBlameLineResult['reason'] {
+function resolveBlameUnavailableReason(
+  reason: GitBaselinePayload['reason']
+): Extract<GitBlameLineResult, { kind: 'unavailable' }>['reason'] {
   if (reason === 'git-unavailable') {
     return 'git-unavailable';
   }
