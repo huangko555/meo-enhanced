@@ -443,7 +443,7 @@ export const defaultThemeColors: ThemeColors = {
 };
 
 export const defaultThemeBackgroundColor = 'var(--vscode-editor-background)';
-export const defaultCodeBlockBackgroundColor = '#202223';
+export const defaultCodeBlockBackgroundColor = '#1f2428';
 
 export const defaultSemanticColors: SemanticColors = {
   foreground: defaultThemeColors.base01,
@@ -648,8 +648,8 @@ const createThemeFromColors = (params: {
 
 export const themePresets: readonly ThemeSettings[] = [
   createThemeFromColors({
-    id: 'meo-complete',
-    name: 'MEO Complete (default)',
+    id: 'hkk',
+    name: 'HKK (default)',
   }),
   createThemeFromColors({
     id: 'one-dark-pro',

@@ -1,7 +1,7 @@
 {
   // 主题基本信息。
-  "id": "meo-complete",
-  "name": "MEO Complete",
+  "id": "hkk",
+  "name": "HKK",
   // 编辑器正文背景。
   "backgroundColor": "var(--vscode-editor-background)",
   // 基础调色板：主要用于语法 token。Markdown/UI 颜色优先改 semanticColors。
@@ -35,7 +35,7 @@
     // 输入光标颜色。
     "caret": "var(--vscode-editor-foreground)",
     // 代码块和 Mermaid 块背景。
-    "codeBlockBackground": "#202223",
+    "codeBlockBackground": "#1f2428",
     // 代码块内光标所在行背景。
     "codeBlockActiveLineBackground": "color-mix(in srgb, var(--meo-background) 88%, var(--meo-color-base03) 12%)",
     // 代码块左上角语言名字文字颜色。
