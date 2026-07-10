@@ -46,11 +46,9 @@ interface DomRefs {
   container: HTMLElement;
   shell: HTMLElement;
   wrap: HTMLElement;
-  toolbar: HTMLElement;
   lineNumberLayer: HTMLElement;
   cellGrid: HTMLTableCellElement[][];
   rowEntries: RowEntry[];
-  colEls: HTMLElement[];
   sourceBodyRows: HTMLTableRowElement[];
   sourceBodyRowInputs: HTMLTextAreaElement[][];
   sourceBodyCellGrid: HTMLTableCellElement[][];
@@ -1574,7 +1572,7 @@ class HtmlTableWidget extends WidgetType {
 
   applyCurrentSort(container) {
     if (!this.sortState) return;
-    this.commitMatrix(this.readCellMatrix(), container);
+    this.commitMatrix(this.readCellMatrix(), container, null, { preserveScrollPosition: true });
     this.sortState = null;
     this.updateSortControls();
   }
@@ -1721,6 +1719,7 @@ class HtmlTableWidget extends WidgetType {
     if (shell instanceof HTMLElement) {
       shell.classList.toggle('is-interacting', active);
     }
+    this.updateStickyControls();
     const view = this.getEditorView(container);
     if (!view) return;
     view.dom.dispatchEvent(new CustomEvent('meo-table-interaction', { detail: { active, owner: shell } }));
@@ -1987,7 +1986,19 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  commitMatrix(matrix, dom, focusTarget: PendingCellFocus | null = null) {
+  restoreScrollPositionAfterCommit(view: EditorView, scrollTop: number, scrollLeft: number) {
+    const restore = () => {
+      view.scrollDOM.scrollTop = scrollTop;
+      view.scrollDOM.scrollLeft = scrollLeft;
+    };
+
+    requestAnimationFrame(() => {
+      restore();
+      requestAnimationFrame(restore);
+    });
+  }
+
+  commitMatrix(matrix, dom, focusTarget: PendingCellFocus | null = null, { preserveScrollPosition = false } = {}) {
     const view = this.getEditorView(dom);
     if (!view) return;
 
@@ -2006,7 +2017,11 @@ class HtmlTableWidget extends WidgetType {
       return;
     }
 
+    const { scrollTop, scrollLeft } = view.scrollDOM;
     view.dispatch({ changes: { from: range.from, to: range.to, insert: markdown } });
+    if (preserveScrollPosition) {
+      this.restoreScrollPositionAfterCommit(view, scrollTop, scrollLeft);
+    }
     this.hasPendingCellEdits = false;
     if (focusTarget) {
       this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
@@ -2238,41 +2253,39 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
-  syncNativeTableLayout() {
-    if (!this.domRefs) return false;
-    const { shell, wrap, table, colEls } = this.domRefs;
-    let changed = false;
-    for (const colEl of colEls) {
-      if (colEl.style.width || colEl.style.minWidth || colEl.style.maxWidth) {
-        changed = true;
-      }
-      colEl.style.removeProperty('width');
-      colEl.style.removeProperty('min-width');
-      colEl.style.removeProperty('max-width');
+  updateStickyControls() {
+    if (!this.domRefs || !this.view) return;
+    const { shell, table } = this.domRefs;
+    const scroller = this.view.scrollDOM;
+    const controlsVisible = shell.classList.contains('is-interacting') || shell.classList.contains('has-active-sort');
+    if (!controlsVisible) {
+      shell.classList.remove('is-controls-sticky');
+      shell.style.removeProperty('--meo-html-table-sticky-top');
+      shell.style.removeProperty('--meo-html-table-sticky-left');
+      return;
     }
-    if (table.style.width || table.style.minWidth || table.style.maxWidth) {
-      changed = true;
-    }
-    table.style.removeProperty('width');
-    table.style.removeProperty('min-width');
-    table.style.removeProperty('max-width');
-    this.updateApplySortAnchor(shell, wrap, Math.min(wrap.clientWidth, table.getBoundingClientRect().width));
-    return changed;
-  }
 
-  updateApplySortAnchor(shell: HTMLElement, wrap: HTMLElement, tableWidth: number) {
-    const visibleWidth = Math.max(0, Math.floor(wrap.clientWidth));
-    const visibleTableRightEdge = Math.max(0, tableWidth - wrap.scrollLeft);
-    const anchor = Math.min(visibleWidth, visibleTableRightEdge);
-    shell.style.setProperty('--meo-html-table-right-edge', `${anchor}px`);
+    const scrollerRect = scroller.getBoundingClientRect();
+    const tableRect = table.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    const controlsHeight = 21;
+    const shouldStick = tableRect.top <= scrollerRect.top + controlsHeight && tableRect.bottom > scrollerRect.top + controlsHeight;
+    shell.classList.toggle('is-controls-sticky', shouldStick);
+    if (shouldStick) {
+      shell.style.setProperty('--meo-html-table-sticky-top', `${Math.round(scrollerRect.top)}px`);
+      shell.style.setProperty('--meo-html-table-sticky-left', `${Math.round(shellRect.left)}px`);
+    } else {
+      shell.style.removeProperty('--meo-html-table-sticky-top');
+      shell.style.removeProperty('--meo-html-table-sticky-left');
+    }
   }
 
   recalcLayout() {
-    const layoutChanged = this.syncNativeTableLayout();
-    if (this.pendingResizeRows || layoutChanged) {
+    if (this.pendingResizeRows) {
       this.resizeAllRows();
     }
     this.syncTableLineNumbers();
+    this.updateStickyControls();
   }
 
   scheduleLayout({ resizeRows = false } = {}) {
@@ -2535,14 +2548,6 @@ class HtmlTableWidget extends WidgetType {
 
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
-    const colgroup = document.createElement('colgroup');
-    const colEls = [];
-    for (let col = 0; col < this.tableData.colCount; col++) {
-      const colEl = document.createElement('col');
-      colEls.push(colEl);
-      colgroup.appendChild(colEl);
-    }
-    table.appendChild(colgroup);
     const rowEntries = [];
     const headerInputs = [];
     const cellGrid = [];
@@ -2638,9 +2643,7 @@ class HtmlTableWidget extends WidgetType {
       table,
       tbody,
       container: shell,
-      toolbar,
       lineNumberLayer,
-      colEls,
       rowEntries,
       headerInputs,
       rowInputs: bodyRowInputs,
@@ -2669,17 +2672,15 @@ class HtmlTableWidget extends WidgetType {
       }
       wrap._meoTableResizeObserver = observer;
     }
-    const onTableScroll = () => {
-      this.updateApplySortAnchor(shell, wrap, Math.min(wrap.clientWidth, table.getBoundingClientRect().width));
-    };
+    const onEditorScroll = () => this.scheduleLayout();
     const onSearchStateChange = (event) => {
       const detail = event instanceof CustomEvent ? event.detail : null;
       this.setSearchState(detail && typeof detail === 'object' ? detail : null);
     };
-    wrap.addEventListener('scroll', onTableScroll);
+    view.scrollDOM.addEventListener('scroll', onEditorScroll);
     view.dom.addEventListener(tableSearchStateEventName, onSearchStateChange);
     this.cleanupFns.push(() => {
-      wrap.removeEventListener('scroll', onTableScroll);
+      view.scrollDOM.removeEventListener('scroll', onEditorScroll);
       view.dom.removeEventListener(tableSearchStateEventName, onSearchStateChange);
     });
     return shell;

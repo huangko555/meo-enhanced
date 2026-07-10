@@ -2790,6 +2790,12 @@ body {
   -webkit-user-select: none;
 }
 
+.cm-editor .meo-md-html-table-shell.is-controls-sticky .meo-md-html-apply-sort-btn {
+  position: fixed;
+  top: var(--meo-html-table-sticky-top);
+  left: calc(var(--meo-html-table-sticky-left) + 274px);
+}
+
 .cm-editor .meo-md-html-apply-sort-btn[hidden] {
   display: none;
 }
@@ -2826,6 +2832,12 @@ body {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
+}
+
+.cm-editor .meo-md-html-table-shell.is-controls-sticky .meo-md-html-table-toolbar {
+  position: fixed;
+  top: var(--meo-html-table-sticky-top);
+  left: var(--meo-html-table-sticky-left);
 }
 
 .cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-toolbar,
