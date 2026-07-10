@@ -365,7 +365,7 @@
               "blockquoteBorder": "#b4bbc0",
               "blockquoteForeground": "#b4bbc0",
               "horizontalRule": "#3e4246",
-              "tableBorder": "#3e4246",
+              "tableBorder": "#474b50",
               "tableHeaderBackground": "var(--meo-inset-background)",
               "tableSelectionBorder": "#61afef",
               "tableDelimiterForeground": "#3e4246",
@@ -1019,7 +1019,7 @@
                 "horizontalRule": {
                   "type": "string",
                   "format": "color",
-                  "default": "#3e4246",
+                  "default": "#474b50",
                   "description": "Horizontal rule line."
                 },
                 "tableBorder": {

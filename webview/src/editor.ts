@@ -6,7 +6,7 @@ import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codem
 import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
-import { liveModeExtensions, setLivePointerSelectionActiveEffect } from './liveMode';
+import { liveModeExtensions, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -253,6 +253,8 @@ export function createEditor({
   // Preserve the user's current cursor once on the next undo of such a change.
   let pendingExternalUndoSelectionPreserve = false;
   let tableInteractionActive = false;
+  let tableInteractionOwner: HTMLElement | null = null;
+  let tableInteractionClassFrame = 0;
   let onTableInteraction = null;
   let onTableOpenLink = null;
   let onTableSelectionChange = null;
@@ -393,12 +395,43 @@ export function createEditor({
     };
   };
 
-  const setTableInteractionActive = (active) => {
-    if (!view || tableInteractionActive === active) {
+  const setTableInteractionActive = (active, owner: HTMLElement | null = null) => {
+    if (!view) return;
+
+    if (active) {
+      const changed = !tableInteractionActive || tableInteractionOwner !== owner;
+      tableInteractionActive = true;
+      tableInteractionOwner = owner;
+      if (changed && currentMode === 'live') {
+        view.dispatch({ effects: setLiveDocumentIdleEffect.of(true) });
+      }
+      view.dom.classList.add('meo-table-interaction-active');
+      if (tableInteractionClassFrame) {
+        cancelAnimationFrame(tableInteractionClassFrame);
+      }
+      tableInteractionClassFrame = requestAnimationFrame(() => {
+        tableInteractionClassFrame = 0;
+        if (view && tableInteractionActive && tableInteractionOwner === owner) {
+          view.dom.classList.add('meo-table-interaction-active');
+        }
+      });
       return;
     }
-    tableInteractionActive = active;
-    view.dom.classList.toggle('meo-table-interaction-active', active);
+
+    if (!tableInteractionActive || (owner && tableInteractionOwner && owner !== tableInteractionOwner)) {
+      return;
+    }
+
+    tableInteractionActive = false;
+    tableInteractionOwner = null;
+    if (tableInteractionClassFrame) {
+      cancelAnimationFrame(tableInteractionClassFrame);
+      tableInteractionClassFrame = 0;
+    }
+    if (currentMode === 'live') {
+      view.dispatch({ effects: setLiveDocumentIdleEffect.of(false) });
+    }
+    view.dom.classList.remove('meo-table-interaction-active');
   };
   const tableEntryCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
   const tableEntryProbeOffsetsY = [1, 4, 8, 12, 18];
@@ -1735,7 +1768,8 @@ export function createEditor({
   }
   onTableInteraction = (event) => {
     const active = Boolean(event?.detail?.active);
-    setTableInteractionActive(active);
+    const owner = event?.detail?.owner instanceof HTMLElement ? event.detail.owner : null;
+    setTableInteractionActive(active, owner);
   };
   view.dom.addEventListener('meo-table-interaction', onTableInteraction);
   onTableOpenLink = (event) => {

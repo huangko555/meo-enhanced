@@ -55,8 +55,8 @@ function createRenderedBlock(
       startLine,
       endLine,
       delimiterLine,
-      lineNumberHiddenFrom: startLine,
-      lineNumberHiddenTo: endLine
+      lineNumberHiddenFrom: 1,
+      lineNumberHiddenTo: 0
     };
   }
 

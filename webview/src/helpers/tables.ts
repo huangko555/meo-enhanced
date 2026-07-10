@@ -47,13 +47,14 @@ interface DomRefs {
   shell: HTMLElement;
   wrap: HTMLElement;
   toolbar: HTMLElement;
+  lineNumberLayer: HTMLElement;
   cellGrid: HTMLTableCellElement[][];
   rowEntries: RowEntry[];
   colEls: HTMLElement[];
   sourceBodyRows: HTMLTableRowElement[];
   sourceBodyRowInputs: HTMLTextAreaElement[][];
   sourceBodyCellGrid: HTMLTableCellElement[][];
-  sortButtons: HTMLButtonElement[];
+  sortButton: HTMLButtonElement;
   applySortButton: HTMLButtonElement;
   toolbarButtons: {
     insertRowAbove: HTMLButtonElement;
@@ -62,6 +63,10 @@ interface DomRefs {
     insertColumnLeft: HTMLButtonElement;
     insertColumnRight: HTMLButtonElement;
     deleteColumn: HTMLButtonElement;
+    sortColumn: HTMLButtonElement;
+    alignColumnLeft: HTMLButtonElement;
+    alignColumnCenter: HTMLButtonElement;
+    alignColumnRight: HTMLButtonElement;
   };
 }
 
@@ -138,16 +143,15 @@ interface TableSearchMatchRange {
   end: number;
 }
 
+interface TableHeaderAlignmentOverrides {
+  [tableStartLine: string]: Set<number>;
+}
+
 const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-header-line' });
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
 const tableDelimiterRegex = /^\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
-const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-sort-btn, .meo-md-html-apply-sort-btn';
-const minColumnWidthCh = 10;
-const maxColumnWidthCh = 40;
-const cellHorizontalPaddingCh = 1;
-const headerSortButtonPaddingCh = 2.5;
-const cellBorderPx = 2;
+const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn';
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 // Icons are inline SVG path data from Tabler Icons (MIT), vendored to avoid a
 // broad icon dependency for this table-only toolbar.
@@ -220,6 +224,30 @@ const tableToolbarIcons: Record<string, TableToolbarIcon> = {
     paths: [
       'M12 5v14',
       'M19 12l-7 7l-7 -7'
+    ]
+  },
+  alignLeft: {
+    className: 'icon-tabler-align-left',
+    paths: [
+      'M4 6l16 0',
+      'M4 12l10 0',
+      'M4 18l14 0'
+    ]
+  },
+  alignRight: {
+    className: 'icon-tabler-align-right',
+    paths: [
+      'M4 6l16 0',
+      'M10 12l10 0',
+      'M6 18l14 0'
+    ]
+  },
+  alignCenter: {
+    className: 'icon-tabler-align-center',
+    paths: [
+      'M4 6l16 0',
+      'M6 12l12 0',
+      'M5 18l14 0'
     ]
   }
 };
@@ -1110,43 +1138,6 @@ function serializeTableMarkdown(indent, headerCells, alignments, rows) {
   return [header, delimiter, ...dataRows].map((line) => `${indent}${line}`).join('\n');
 }
 
-function longestUnbreakableSegmentLength(value) {
-  return Math.max(0, ...String(value ?? '').split(/\s+/).map((part) => part.length));
-}
-
-function preferredCellWidthCh(value, extraCh = 0) {
-  return Math.max(
-    minColumnWidthCh,
-    Math.min(
-      maxColumnWidthCh,
-      Math.max(String(value ?? '').length, longestUnbreakableSegmentLength(value) + extraCh) + 2
-    )
-  );
-}
-
-function computePreferredColumnCharWidths(headerCells, rows, colCount) {
-  const widths = new Array(colCount).fill(minColumnWidthCh);
-  const update = (value, col, extraCh = 0) => {
-    widths[col] = Math.max(widths[col], preferredCellWidthCh(value, extraCh));
-  };
-
-  for (let col = 0; col < colCount; col++) {
-    update(headerCells[col] ?? '', col, headerSortButtonPaddingCh);
-  }
-  for (const row of rows) {
-    for (let col = 0; col < colCount; col++) {
-      update(row[col] ?? '', col);
-    }
-  }
-  return widths;
-}
-
-function computePreferredColumnCharWidthsFromInputs(headerInputs, rowInputs, colCount) {
-  const headerCells = normalizeRow(headerInputs.map((input) => input.value.trim()), colCount);
-  const rows = rowInputs.map((inputs) => normalizeRow(inputs.map((input) => input.value.trim()), colCount));
-  return computePreferredColumnCharWidths(headerCells, rows, colCount);
-}
-
 function parseTableSortNumber(value) {
   const normalized = value.replace(/,/g, '').replace(/%$/, '').trim();
   if (!/^[+-]?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
@@ -1260,9 +1251,7 @@ class HtmlTableWidget extends WidgetType {
   view: EditorView | null;
   layoutFrame: number;
   pendingResizeRows: boolean;
-  lastAppliedWidths: number[];
   domRefs: DomRefs | null;
-  chPx: number;
   cleanupFns: (() => void)[];
   selectionAnchor: CellCoords | null;
   selectionRange: SelectionRange | null;
@@ -1279,9 +1268,7 @@ class HtmlTableWidget extends WidgetType {
     this.view = null;
     this.layoutFrame = 0;
     this.pendingResizeRows = false;
-    this.lastAppliedWidths = [];
     this.domRefs = null;
-    this.chPx = 0;
     this.cleanupFns = [];
     this.selectionAnchor = null;
     this.selectionRange = null;
@@ -1410,20 +1397,19 @@ class HtmlTableWidget extends WidgetType {
 
   updateSortControls() {
     if (!this.domRefs) return;
-    const { sortButtons, applySortButton } = this.domRefs;
-    for (let col = 0; col < sortButtons.length; col += 1) {
-      const button = sortButtons[col];
-      const active = this.sortState?.column === col;
-      button.classList.toggle('is-active', active);
-      button.dataset.sortDirection = active ? this.sortState.direction : '';
-      this.setSortButtonIcon(button, active ? this.sortState.direction : null);
-      button.title = active
-        ? `Sorted ${this.sortState.direction === 'desc' ? 'descending' : 'ascending'}; click to toggle`
-        : 'Sort column descending';
-      button.setAttribute('aria-label', button.title);
-      button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    }
+    const { shell, sortButton, applySortButton } = this.domRefs;
+    const activeColumn = this.activeColumnIndex();
+    const active = activeColumn !== null && this.sortState?.column === activeColumn;
+    sortButton.classList.toggle('is-active', active);
+    sortButton.dataset.sortDirection = active ? this.sortState.direction : '';
+    this.setSortButtonIcon(sortButton, active ? this.sortState.direction : null);
+    sortButton.title = active
+      ? `Sorted ${this.sortState.direction === 'desc' ? 'descending' : 'ascending'}; click to toggle`
+      : 'Sort selected column descending';
+    sortButton.setAttribute('aria-label', sortButton.title);
+    sortButton.setAttribute('aria-pressed', active ? 'true' : 'false');
     applySortButton.hidden = !this.sortState;
+    shell.classList.toggle('has-active-sort', Boolean(this.sortState));
   }
 
   setSortButtonIcon(button: HTMLButtonElement, direction: TableSortDirection | null) {
@@ -1477,10 +1463,15 @@ class HtmlTableWidget extends WidgetType {
     toolbarButtons.insertColumnLeft.disabled = !hasColumnTarget;
     toolbarButtons.insertColumnRight.disabled = !hasColumnTarget;
     toolbarButtons.deleteColumn.disabled = !hasColumnTarget || this.tableData.colCount <= 1;
+    toolbarButtons.sortColumn.disabled = !hasColumnTarget || this.tableData.rows.length <= 1;
+    toolbarButtons.alignColumnLeft.disabled = !hasColumnTarget;
+    toolbarButtons.alignColumnCenter.disabled = !hasColumnTarget;
+    toolbarButtons.alignColumnRight.disabled = !hasColumnTarget;
   }
 
   updateActionTargetStyles() {
     this.updateToolbarState();
+    this.updateSortControls();
   }
 
   setActionTarget(target) {
@@ -1488,6 +1479,7 @@ class HtmlTableWidget extends WidgetType {
     const col = Math.min(Math.max(target.col ?? 0, 0), Math.max(0, this.tableData.colCount - 1));
     this.activeTarget = { row, col };
     this.updateActionTargetStyles();
+    this.syncTableLineNumbers();
   }
 
   insertRowAboveTarget(container) {
@@ -1542,6 +1534,42 @@ class HtmlTableWidget extends WidgetType {
     this.setVisualRowOrder(order);
     this.updateSortControls();
     this.setTableInteractionActive(container, true);
+  }
+
+  setColumnAlignment(container, alignment) {
+    const column = this.activeColumnIndex();
+    if (column === null) return;
+    this.markHeaderAlignmentOverride(container, column, alignment);
+    this.clearVisualSort();
+    const matrix = this.readCellMatrix();
+    if (!matrix.headerCells.length) return;
+    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length).map((value) => value ?? null);
+    alignments[column] = alignment;
+    matrix.alignments = alignments;
+    this.commitMatrix(matrix, container, { row: this.activeTarget.row, col: column });
+  }
+
+  headerAlignmentOverrideColumns(view: EditorView) {
+    const overrides = (view.dom as any).__meoTableHeaderAlignmentOverrides as TableHeaderAlignmentOverrides | undefined;
+    return overrides?.[String(this.tableData.startLine)] ?? null;
+  }
+
+  markHeaderAlignmentOverride(container, column, alignment) {
+    const view = this.getEditorView(container);
+    if (!view) return;
+    const dom = view.dom as any;
+    const overrides = (dom.__meoTableHeaderAlignmentOverrides ??= {}) as TableHeaderAlignmentOverrides;
+    const tableKey = String(this.tableData.startLine);
+    const columns = overrides[tableKey] ?? new Set<number>();
+    columns.add(column);
+    overrides[tableKey] = columns;
+
+    const headerCell = this.domRefs?.cellGrid[0]?.[column];
+    if (!headerCell) return;
+    headerCell.style.textAlign = alignment;
+    for (const element of Array.from(headerCell.querySelectorAll('.meo-md-html-table-cell-content, .meo-md-html-table-cell-preview, textarea')) as HTMLElement[]) {
+      element.style.textAlign = alignment;
+    }
   }
 
   applyCurrentSort(container) {
@@ -1676,17 +1704,26 @@ class HtmlTableWidget extends WidgetType {
   clearSelection() {
     this.selectionAnchor = null;
     this.applySelection(null);
+    this.syncTableLineNumbers();
   }
 
   exitTableInteraction(container) {
+    const shell = container?.closest?.('.meo-md-html-table-shell');
+    if (shell instanceof HTMLElement) {
+      shell.classList.remove('has-active-sort');
+    }
     this.setTableInteractionActive(container, false);
     this.clearSelection();
   }
 
   setTableInteractionActive(container, active) {
+    const shell = container?.closest?.('.meo-md-html-table-shell');
+    if (shell instanceof HTMLElement) {
+      shell.classList.toggle('is-interacting', active);
+    }
     const view = this.getEditorView(container);
     if (!view) return;
-    view.dom.dispatchEvent(new CustomEvent('meo-table-interaction', { detail: { active } }));
+    view.dom.dispatchEvent(new CustomEvent('meo-table-interaction', { detail: { active, owner: shell } }));
   }
 
   emitTableSelectionChange(container) {
@@ -1859,7 +1896,7 @@ class HtmlTableWidget extends WidgetType {
       }
       if (container.contains(event.target) && isModifierLinkActivationEvent(event)) return;
       if (!container.contains(event.target)) {
-        this.setTableInteractionActive(wrap, false);
+        this.exitTableInteraction(wrap);
       }
       if (isTableControlTarget(event.target)) {
         return;
@@ -2149,16 +2186,21 @@ class HtmlTableWidget extends WidgetType {
   resizeRow(row, rowInputs = null) {
     if (!row) return;
     const textareas = rowInputs ?? Array.from(row.querySelectorAll('textarea'));
-    if (textareas.length === 0) return;
+    const contents = Array.from(row.querySelectorAll('.meo-md-html-table-cell-content')) as HTMLElement[];
+    if (textareas.length === 0 || contents.length === 0) return;
 
     let maxHeight = 0;
-    for (const textarea of textareas) {
+    for (let index = 0; index < textareas.length; index += 1) {
+      const textarea = textareas[index];
+      const content = contents[index];
+      const preview = content?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
       textarea.style.height = 'auto';
-      maxHeight = Math.max(maxHeight, textarea.scrollHeight);
+      if (content) content.style.minHeight = '';
+      maxHeight = Math.max(maxHeight, textarea.scrollHeight, preview?.scrollHeight ?? 0);
     }
 
-    for (const textarea of textareas) {
-      textarea.style.height = `${maxHeight}px`;
+    for (const content of contents) {
+      content.style.minHeight = `${maxHeight}px`;
     }
   }
 
@@ -2169,46 +2211,52 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
-  measureChPx(container) {
-    if (this.chPx > 0) return this.chPx;
-    const probe = document.createElement('span');
-    probe.textContent = '0';
-    probe.style.position = 'absolute';
-    probe.style.visibility = 'hidden';
-    probe.style.width = '1ch';
-    container.appendChild(probe);
-    this.chPx = probe.getBoundingClientRect().width || 8;
-    probe.remove();
-    return this.chPx;
+  syncTableLineNumbers() {
+    if (!this.domRefs) return;
+    const { table, lineNumberLayer } = this.domRefs;
+    const gutter = this.view?.dom.querySelector('.cm-lineNumbers');
+    if (!(gutter instanceof HTMLElement)) return;
+    if (lineNumberLayer.parentElement !== gutter) {
+      gutter.appendChild(lineNumberLayer);
+    }
+
+    const gutterRect = gutter.getBoundingClientRect();
+    lineNumberLayer.style.left = '0';
+    lineNumberLayer.style.width = `${gutterRect.width}px`;
+    lineNumberLayer.replaceChildren();
+
+    const activeRow = this.selectionAnchor?.row;
+    for (const [rowIndex, row] of (Array.from(table.querySelectorAll('thead tr, tbody tr')) as HTMLTableRowElement[]).entries()) {
+      const lineNumber = row.dataset.sourceLineNumber;
+      if (!lineNumber) continue;
+      const item = document.createElement('div');
+      item.className = 'meo-md-html-table-line-number';
+      item.classList.toggle('is-active', rowIndex === activeRow);
+      item.textContent = lineNumber;
+      item.style.top = `${row.getBoundingClientRect().top - gutterRect.top}px`;
+      lineNumberLayer.appendChild(item);
+    }
   }
 
-  fitColumnWidths() {
+  syncNativeTableLayout() {
     if (!this.domRefs) return false;
-    const { shell, wrap, table, colEls, headerInputs, rowInputs } = this.domRefs;
-    const chPx = this.measureChPx(wrap);
-    const cellChromePx = (cellHorizontalPaddingCh * chPx) + cellBorderPx;
-    const minPx = (minColumnWidthCh * chPx) + cellChromePx;
-    const maxPx = (maxColumnWidthCh * chPx) + cellChromePx;
-    const livePreferredCh = computePreferredColumnCharWidthsFromInputs(headerInputs, rowInputs, this.tableData.colCount);
-    const preferredPx = livePreferredCh.map((ch) => Math.max(minPx, Math.min(maxPx, (ch * chPx) + cellChromePx)));
-
-    const nextAppliedWidths = new Array(colEls.length);
-    let changed = colEls.length !== this.lastAppliedWidths.length;
-    let targetTotal = 0;
-    for (let i = 0; i < colEls.length; i++) {
-      const widthPx = Math.max(1, Math.round(preferredPx[i] ?? minPx));
-      nextAppliedWidths[i] = widthPx;
-      targetTotal += widthPx;
-      if (!changed && this.lastAppliedWidths[i] !== widthPx) changed = true;
-      colEls[i].style.width = `${widthPx}px`;
-      colEls[i].style.minWidth = `${widthPx}px`;
-      colEls[i].style.maxWidth = 'none';
+    const { shell, wrap, table, colEls } = this.domRefs;
+    let changed = false;
+    for (const colEl of colEls) {
+      if (colEl.style.width || colEl.style.minWidth || colEl.style.maxWidth) {
+        changed = true;
+      }
+      colEl.style.removeProperty('width');
+      colEl.style.removeProperty('min-width');
+      colEl.style.removeProperty('max-width');
     }
-    this.lastAppliedWidths = nextAppliedWidths;
-    table.style.width = `${targetTotal}px`;
-    table.style.minWidth = `${targetTotal}px`;
-    table.style.maxWidth = 'none';
-    this.updateApplySortAnchor(shell, wrap, targetTotal);
+    if (table.style.width || table.style.minWidth || table.style.maxWidth) {
+      changed = true;
+    }
+    table.style.removeProperty('width');
+    table.style.removeProperty('min-width');
+    table.style.removeProperty('max-width');
+    this.updateApplySortAnchor(shell, wrap, Math.min(wrap.clientWidth, table.getBoundingClientRect().width));
     return changed;
   }
 
@@ -2220,10 +2268,11 @@ class HtmlTableWidget extends WidgetType {
   }
 
   recalcLayout() {
-    const widthsChanged = this.fitColumnWidths();
-    if (this.pendingResizeRows || widthsChanged) {
+    const layoutChanged = this.syncNativeTableLayout();
+    if (this.pendingResizeRows || layoutChanged) {
       this.resizeAllRows();
     }
+    this.syncTableLineNumbers();
   }
 
   scheduleLayout({ resizeRows = false } = {}) {
@@ -2311,11 +2360,14 @@ class HtmlTableWidget extends WidgetType {
     return input;
   }
 
-  createCellEditor(value, rowEl, rowInputs, container, rowIndex, colIndex) {
+  createCellEditor(value, rowEl, rowInputs, container, rowIndex, colIndex, alignment = 'left') {
     const content = document.createElement('div');
     content.className = 'meo-md-html-table-cell-content';
     const preview = this.createCellPreview(value, this.cellDiagnostics(rowIndex, colIndex), this.cellSourceRange(rowIndex, colIndex));
     const input = this.createCellInput(value, rowIndex, colIndex);
+    content.style.textAlign = alignment;
+    preview.style.textAlign = alignment;
+    input.style.textAlign = alignment;
     this.wireInput(input, rowEl, rowInputs, container, rowIndex, colIndex, preview);
     content.append(preview, input);
     return { content, input };
@@ -2364,6 +2416,13 @@ class HtmlTableWidget extends WidgetType {
     return button;
   }
 
+  createToolbarSeparator() {
+    const separator = document.createElement('span');
+    separator.className = 'meo-md-html-table-toolbar-separator';
+    separator.setAttribute('aria-hidden', 'true');
+    return separator;
+  }
+
   createTableToolbar(container) {
     const toolbar = document.createElement('div');
     toolbar.className = 'meo-md-html-table-toolbar';
@@ -2387,16 +2446,37 @@ class HtmlTableWidget extends WidgetType {
     const deleteColumn = this.createToolbarButton('Delete column', tableToolbarIcons.columnRemove, () => {
       this.deleteTargetColumn(container);
     });
+    const sortColumn = this.createToolbarButton('Sort selected column', tableToolbarIcons.sortNeutral, () => {
+      const column = this.activeColumnIndex();
+      if (column !== null) this.sortByColumn(container, column);
+    });
+    const alignColumnLeft = this.createToolbarButton('Align selected column left', tableToolbarIcons.alignLeft, () => {
+      this.setColumnAlignment(container, 'left');
+    });
+    const alignColumnCenter = this.createToolbarButton('Align selected column center', tableToolbarIcons.alignCenter, () => {
+      this.setColumnAlignment(container, 'center');
+    });
+    const alignColumnRight = this.createToolbarButton('Align selected column right', tableToolbarIcons.alignRight, () => {
+      this.setColumnAlignment(container, 'right');
+    });
+    const rowSeparator = this.createToolbarSeparator();
+    const columnSeparator = this.createToolbarSeparator();
     deleteRow.classList.add('meo-md-html-table-toolbar-delete-btn');
     deleteColumn.classList.add('meo-md-html-table-toolbar-delete-btn');
 
     toolbar.append(
       insertRowAbove,
       insertRowBelow,
+      deleteRow,
+      rowSeparator,
       insertColumnLeft,
       insertColumnRight,
-      deleteRow,
-      deleteColumn
+      deleteColumn,
+      columnSeparator,
+      alignColumnLeft,
+      alignColumnCenter,
+      alignColumnRight,
+      sortColumn
     );
 
     return {
@@ -2407,7 +2487,11 @@ class HtmlTableWidget extends WidgetType {
         deleteRow,
         insertColumnLeft,
         insertColumnRight,
-        deleteColumn
+        deleteColumn,
+        sortColumn,
+        alignColumnLeft,
+        alignColumnCenter,
+        alignColumnRight
       }
     };
   }
@@ -2463,41 +2547,34 @@ class HtmlTableWidget extends WidgetType {
     const headerInputs = [];
     const cellGrid = [];
     const allRowInputs = [];
-    const sortButtons = [];
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
+    headerRow.dataset.sourceLineNumber = String(this.tableData.startLine ?? '');
     rowEntries.push({ row: headerRow, inputs: headerInputs });
     const headerCells = [];
+    const headerAlignmentOverrides = this.headerAlignmentOverrideColumns(view);
     for (let col = 0; col < this.tableData.colCount; col++) {
       const th = document.createElement('th');
+      const headerAlignment = headerAlignmentOverrides?.has(col)
+        ? this.tableData.alignments[col] ?? 'left'
+        : 'center';
       th.dataset.tableRow = '0';
       th.dataset.tableCol = String(col);
-      const { content, input } = this.createCellEditor(this.tableData.headerCells[col] ?? '', headerRow, headerInputs, wrap, 0, col);
+      th.style.textAlign = headerAlignment;
+      const { content, input } = this.createCellEditor(
+        this.tableData.headerCells[col] ?? '',
+        headerRow,
+        headerInputs,
+        wrap,
+        0,
+        col,
+        headerAlignment
+      );
       headerInputs.push(input);
       headerCells.push(th);
       th.appendChild(content);
 
-      const sortBtn = document.createElement('button');
-      sortBtn.type = 'button';
-      sortBtn.tabIndex = -1;
-      sortBtn.className = 'meo-md-html-sort-btn';
-      this.setSortButtonIcon(sortBtn, null);
-      sortBtn.title = 'Sort column descending';
-      sortBtn.setAttribute('aria-label', 'Sort column descending');
-      sortBtn.setAttribute('aria-pressed', 'false');
-      sortBtn.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        this.sortByColumn(wrap, col);
-      });
-      sortBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-      sortButtons.push(sortBtn);
-      th.appendChild(sortBtn);
       headerRow.appendChild(th);
     }
     cellGrid.push(headerCells);
@@ -2511,15 +2588,26 @@ class HtmlTableWidget extends WidgetType {
     const sourceBodyCellGrid = [];
     for (let rowIdx = 0; rowIdx < this.tableData.rows.length; rowIdx++) {
       const tr = document.createElement('tr');
+      tr.dataset.sourceLineNumber = String((this.tableData.startLine ?? 0) + rowIdx + 2);
       const inputs = [];
       rowEntries.push({ row: tr, inputs });
       const bodyCells = [];
       const tableRowIndex = rowIdx + 1;
       for (let col = 0; col < this.tableData.colCount; col++) {
         const td = document.createElement('td');
+        const columnAlignment = this.tableData.alignments[col] ?? 'left';
         td.dataset.tableRow = String(tableRowIndex);
         td.dataset.tableCol = String(col);
-        const { content, input } = this.createCellEditor(this.tableData.rows[rowIdx][col] ?? '', tr, inputs, wrap, tableRowIndex, col);
+        td.style.textAlign = columnAlignment;
+        const { content, input } = this.createCellEditor(
+          this.tableData.rows[rowIdx][col] ?? '',
+          tr,
+          inputs,
+          wrap,
+          tableRowIndex,
+          col,
+          columnAlignment
+        );
         inputs.push(input);
         bodyCells.push(td);
         td.appendChild(content);
@@ -2535,6 +2623,13 @@ class HtmlTableWidget extends WidgetType {
     }
     table.appendChild(tbody);
 
+    const lineNumberLayer = document.createElement('div');
+    lineNumberLayer.className = 'meo-md-html-table-line-numbers';
+    const lineNumberGutter = view.dom.querySelector('.cm-lineNumbers');
+    if (lineNumberGutter instanceof HTMLElement) {
+      lineNumberGutter.appendChild(lineNumberLayer);
+    }
+    this.cleanupFns.push(() => lineNumberLayer.remove());
     wrap.append(table);
     shell.append(toolbar, wrap, applySortButton);
     this.domRefs = {
@@ -2544,6 +2639,7 @@ class HtmlTableWidget extends WidgetType {
       tbody,
       container: shell,
       toolbar,
+      lineNumberLayer,
       colEls,
       rowEntries,
       headerInputs,
@@ -2553,7 +2649,7 @@ class HtmlTableWidget extends WidgetType {
       sourceBodyRows,
       sourceBodyRowInputs: bodyRowInputs,
       sourceBodyCellGrid,
-      sortButtons,
+      sortButton: toolbarButtons.sortColumn,
       applySortButton,
       toolbarButtons
     };
@@ -2564,7 +2660,6 @@ class HtmlTableWidget extends WidgetType {
 
     if (typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(() => {
-        this.chPx = 0;
         this.scheduleLayout({ resizeRows: true });
       });
       observer.observe(wrap);
@@ -2575,8 +2670,7 @@ class HtmlTableWidget extends WidgetType {
       wrap._meoTableResizeObserver = observer;
     }
     const onTableScroll = () => {
-      const tableWidth = this.lastAppliedWidths.reduce((sum, width) => sum + width, 0);
-      this.updateApplySortAnchor(shell, wrap, tableWidth);
+      this.updateApplySortAnchor(shell, wrap, Math.min(wrap.clientWidth, table.getBoundingClientRect().width));
     };
     const onSearchStateChange = (event) => {
       const detail = event instanceof CustomEvent ? event.detail : null;

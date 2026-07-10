@@ -126,6 +126,7 @@ const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
 const isTableContentLine = (lineText: string): boolean => lineText.includes('|');
 
 export const setLivePointerSelectionActiveEffect = StateEffect.define<boolean>();
+export const setLiveDocumentIdleEffect = StateEffect.define<boolean>();
 
 const livePointerSelectionActiveField = StateField.define<boolean>({
   create() {
@@ -134,6 +135,20 @@ const livePointerSelectionActiveField = StateField.define<boolean>({
   update(value, transaction) {
     for (const effect of transaction.effects) {
       if (effect.is(setLivePointerSelectionActiveEffect)) {
+        return effect.value;
+      }
+    }
+    return value;
+  }
+});
+
+const liveDocumentIdleField = StateField.define<boolean>({
+  create() {
+    return false;
+  },
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setLiveDocumentIdleEffect)) {
         return effect.value;
       }
     }
@@ -939,7 +954,7 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
 }
 
 function collectActiveLines(state: EditorState): Set<number> {
-  if (state.field(livePointerSelectionActiveField)) {
+  if (state.field(livePointerSelectionActiveField) || state.field(liveDocumentIdleField)) {
     return new Set();
   }
 
@@ -2283,7 +2298,7 @@ function rangesOverlap(fromA, toA, fromB, toB) {
 }
 
 function overlapsSelection(state, from, to) {
-  if (state.field(livePointerSelectionActiveField)) {
+  if (state.field(livePointerSelectionActiveField) || state.field(liveDocumentIdleField)) {
     return false;
   }
 
@@ -2327,6 +2342,7 @@ export function liveModeExtensions() {
     syntaxHighlighting(highlightStyle),
     markdownTagField,
     livePointerSelectionActiveField,
+    liveDocumentIdleField,
     liveDecorationField,
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

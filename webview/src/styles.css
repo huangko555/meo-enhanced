@@ -917,7 +917,7 @@ body {
 }
 
 .cm-editor.meo-table-interaction-active .cm-gutterElement.cm-activeLineGutter {
-  color: var(--vscode-editorLineNumber-foreground);
+  color: transparent !important;
 }
 
 .cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-md-hide-line-number {
@@ -1010,7 +1010,12 @@ body {
 }
 
 .cm-editor.meo-table-interaction-active .cm-activeLine {
-  background-color: transparent;
+  background-color: transparent !important;
+}
+
+.cm-editor.meo-mode-live.meo-table-interaction-active .meo-md-hr.meo-md-hr-active::after,
+.cm-editor.meo-mode-live.meo-table-interaction-active .meo-md-hr.cm-activeLine::after {
+  display: block;
 }
 
 .cm-editor .cm-activeLine.meo-md-code-block {
@@ -2541,18 +2546,43 @@ body {
 }
 
 .cm-editor .meo-md-html-table-shell {
+  --meo-html-table-controls-width: 352px;
   position: relative;
-  padding: 30px 0;
-  width: 100%;
+  padding: 0;
+  width: calc(100% - 24px);
   max-width: 100%;
-  min-width: 0;
+  min-width: var(--meo-html-table-controls-width);
+  margin: 0;
+}
+
+.cm-editor .meo-md-html-table-line-numbers {
+  position: absolute;
+  top: 0;
+  z-index: 3;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cm-editor .meo-md-html-table-line-number {
+  position: absolute;
+  right: 8px;
+  color: var(--meo-semantic-mutedForeground, var(--vscode-editorLineNumber-foreground));
+  font: inherit;
+  line-height: var(--meo-active-editor-line-height);
+  white-space: nowrap;
+}
+
+.cm-editor .meo-md-html-table-line-number.is-active {
+  color: var(--meo-foreground);
 }
 
 .cm-editor .meo-md-html-table-wrap {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: visible;
   scrollbar-color: var(--meo-scrollbar-thumb) transparent;
   scrollbar-width: thin;
@@ -2600,14 +2630,21 @@ body {
 
 .cm-editor .meo-md-html-table {
   border-collapse: collapse;
-  table-layout: fixed;
+  width: fit-content;
+  max-width: 100%;
+  min-width: var(--meo-html-table-controls-width);
+  table-layout: auto;
 }
 
 .cm-editor .meo-md-html-table th,
 .cm-editor .meo-md-html-table td {
   position: relative;
+  min-width: 0;
   padding: 0;
   border: 1px solid var(--meo-semantic-tableBorder);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected,
@@ -2644,19 +2681,20 @@ body {
   --meo-table-sel-left: var(--meo-semantic-tableSelectionBorder);
 }
 
+.cm-editor .meo-md-html-table thead tr:nth-child(odd) th,
+.cm-editor .meo-md-html-table tbody tr:nth-child(even) td {
+  background-color: var(--meo-inset-background);
+}
+
 .cm-editor .meo-md-html-table th {
   position: relative;
-  background-color: var(--meo-inset-background);
   font-weight: inherit;
   text-align: inherit;
 }
 
 .cm-editor .meo-md-html-table-cell-content {
-  display: grid;
-}
-
-.cm-editor .meo-md-html-table-cell-content > * {
-  grid-area: 1 / 1;
+  position: relative;
+  min-width: 0;
 }
 
 .cm-editor .meo-md-html-table-cell-preview {
@@ -2665,16 +2703,11 @@ body {
   min-height: 1lh;
   padding: 0.25em 0.5em;
   color: var(--meo-foreground);
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
   word-break: normal;
   cursor: text;
-}
-
-.cm-editor .meo-md-html-table th .meo-md-html-table-cell-preview,
-.cm-editor .meo-md-html-table th textarea {
-  padding-right: 1.75em;
 }
 
 .cm-editor .meo-md-html-table-cell-preview .meo-md-link {
@@ -2700,10 +2733,14 @@ body {
 }
 
 .cm-editor .meo-md-html-table textarea {
+  position: absolute;
+  inset: 0;
   display: block;
-  width: 100%;
-  height: 100%;
-  min-height: 100%;
+  min-width: 0;
+  width: auto;
+  text-align: inherit;
+  height: auto;
+  min-height: 0;
   margin: 0;
   box-sizing: border-box;
   border: 0;
@@ -2732,9 +2769,9 @@ body {
 
 .cm-editor .meo-md-html-apply-sort-btn {
   position: absolute;
-  left: var(--meo-html-table-right-edge, 0);
-  top: 4px;
-  transform: translateX(-100%);
+  left: 274px;
+  top: -21px;
+  transform: none;
   z-index: 220;
   display: inline-flex;
   align-items: center;
@@ -2767,60 +2804,33 @@ body {
   background-color: color-mix(in srgb, var(--meo-color-base03) 88%, black) !important;
 }
 
-.cm-editor .meo-md-html-sort-btn:hover {
-  background: var(--vscode-toolbar-hoverBackground);
-}
-
-.cm-editor .meo-md-html-sort-btn {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  transform: translateY(-50%);
-  z-index: 205;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--meo-foreground);
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-}
-
 .cm-editor .meo-md-html-sort-icon {
   display: block;
   flex: 0 0 auto;
 }
 
-.cm-editor .meo-md-html-table th:hover .meo-md-html-sort-btn,
-.cm-editor .meo-md-html-sort-btn:focus,
-.cm-editor .meo-md-html-sort-btn.is-active {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .cm-editor .meo-md-html-table-toolbar {
   position: absolute;
-  top: 4px;
+  top: -21px;
   left: 0;
   z-index: 225;
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  box-sizing: border-box;
+  height: 21px;
+  padding: 1px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  background-color: var(--meo-code-background) !important;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
-.cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-toolbar {
+.cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-toolbar,
+.cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-toolbar,
+.cm-editor .meo-md-html-table-shell.has-active-sort .meo-md-html-table-toolbar {
   opacity: 1;
   pointer-events: auto;
 }
@@ -2829,8 +2839,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 17px;
   padding: 0;
   border: 0;
   border-radius: 6px;
@@ -2856,6 +2866,14 @@ body {
 
 .cm-editor .meo-md-html-table-toolbar-btn svg {
   flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.cm-editor .meo-md-html-table-toolbar-separator {
+  width: 1px;
+  height: 13px;
+  background: color-mix(in srgb, var(--meo-foreground) 50%, transparent);
 }
 
 .cm-editor .meo-md-table-header-line {

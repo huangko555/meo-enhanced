@@ -95,7 +95,7 @@
     // 分割线颜色。
     "horizontalRule": "#3e4246",
     // 表格单元格边框。
-    "tableBorder": "#3e4246",
+    "tableBorder": "#474b50",
     // 表格表头背景。
     "tableHeaderBackground": "var(--meo-inset-background)",
     // 表格选中单元格描边。
