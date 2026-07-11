@@ -154,6 +154,7 @@ let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
 let spellCheckEnabled = true;
 let contentMaxWidthEnabled = false;
+let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
 
 const CONTENT_MAX_WIDTH_ENABLED_VALUE = '800px';
 const CONTENT_MAX_WIDTH_DISABLED_VALUE = '100%';
@@ -547,7 +548,19 @@ const outlineController = createOutlineController({
   root,
   editorWrapper,
   outlineButton: outlineBtn,
-  getEditor: () => editor
+  getEditor: () => editor,
+  onVisibilityRequest: (visible) => {
+    vscode.postMessage({ type: 'setOutlineVisible', visible });
+    scheduleToolbarTextAlignment();
+  },
+  onPositionRequest: (position) => {
+    vscode.postMessage({ type: 'setOutlinePosition', position });
+    scheduleToolbarTextAlignment();
+  },
+  onUiStateChange: (state) => {
+    outlineUiState = state;
+    persistUiState();
+  }
 });
 
 editorWrapper.replaceChildren(editorHost, outlineController.sidebar, selectionMenuElements.menu);
@@ -736,12 +749,16 @@ const acknowledgeReadyHandshake = () => {
 type WebviewUiState = {
   mode?: 'live' | 'source';
   contentMaxWidthEnabled?: boolean;
+  outlineMode?: 'floating' | 'fixed';
+  outlineWidth?: number;
 };
 
 const persistUiState = () => {
   const state: WebviewUiState = {
     mode: currentMode,
-    contentMaxWidthEnabled
+    contentMaxWidthEnabled,
+    outlineMode: outlineUiState.mode,
+    outlineWidth: outlineUiState.width
   };
   vscode.setState(state);
 };
@@ -1829,6 +1846,14 @@ if (state && (state.mode === 'live' || state.mode === 'source')) {
 }
 if (typeof state?.contentMaxWidthEnabled === 'boolean') {
   setContentMaxWidthEnabled(state.contentMaxWidthEnabled, { post: false, persist: false });
+}
+if (state?.outlineMode === 'floating' || state?.outlineMode === 'fixed') {
+  outlineUiState.mode = state.outlineMode;
+  outlineController.setMode(state.outlineMode);
+}
+if (typeof state?.outlineWidth === 'number') {
+  outlineUiState.width = state.outlineWidth;
+  outlineController.setWidth(state.outlineWidth);
 }
 outlineController.setPosition('right');
 updateLineNumbersUI();

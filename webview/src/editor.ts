@@ -1,5 +1,5 @@
 import { EditorState, Compartment, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
-import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, scrollPastEnd, Decoration, type ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type ViewUpdate } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
@@ -1583,7 +1583,6 @@ export function createEditor({
       highlightActiveLine(),
       shikiCodeHighlight,
       EditorView.lineWrapping,
-      scrollPastEnd(),
       EditorView.domEventHandlers({
         pointerdown(event, view) {
           if (event.button !== 0) {
@@ -2217,6 +2216,24 @@ export function createEditor({
     getHeadings() {
       return extractHeadings(view.state);
     },
+    getViewportAnchorOffset(ratio = 0.2) {
+      const normalizedRatio = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : 0.2));
+      const height = view.scrollDOM.scrollTop + view.scrollDOM.clientHeight * normalizedRatio;
+      return view.lineBlockAtHeight(height).from;
+    },
+    getVisibleDocumentRange() {
+      const top = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
+      const bottom = view.lineBlockAtHeight(view.scrollDOM.scrollTop + view.scrollDOM.clientHeight);
+      return {
+        from: top.from,
+        to: bottom.to,
+        fromLine: view.state.doc.lineAt(top.from).number,
+        toLine: view.state.doc.lineAt(bottom.to).number
+      };
+    },
+    getScrollElement() {
+      return view.scrollDOM;
+    },
     moveHeadingSection(sourceHeadingFrom, targetHeadingFrom, placement) {
       if (placement !== 'before' && placement !== 'after') {
         return false;
@@ -2263,6 +2280,10 @@ export function createEditor({
     scrollToLine(lineNumber, align = 'center') {
       const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
       applyRevealSelection(line.from, line.from, { focusEditor: true, align });
+      if (align === 'top') {
+        // Outline navigation must survive delayed block-widget measurements.
+        restoreTopVisibleLine(line.number, 0, { syncCursor: false });
+      }
     },
     restoreTopLine(lineNumber, lineOffset) {
       restoreTopVisibleLine(lineNumber, lineOffset, { syncCursor: true });

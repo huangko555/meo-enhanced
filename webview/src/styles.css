@@ -73,6 +73,7 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -932,6 +933,7 @@ body {
 .cm-editor .cm-content {
   padding-top: 0;
   padding-right: var(--meo-editor-inline-end-padding);
+  padding-bottom: 50px;
   caret-color: var(--meo-caret-color);
   cursor: text;
   width: 100%;
@@ -2191,28 +2193,111 @@ body {
 }
 
 .outline-sidebar {
-  width: 240px;
+  position: relative;
+  width: 260px;
   height: 100%;
   display: none;
   flex-shrink: 0;
   flex-direction: column;
   overflow: hidden;
+  box-sizing: border-box;
   background-color: var(--meo-outline-background);
+  color: var(--meo-foreground);
+  user-select: none;
+  z-index: 350;
 }
 
 .editor-root.outline-visible .outline-sidebar {
   display: flex;
 }
 
+.editor-wrapper[data-outline-mode='floating'] .outline-sidebar {
+  position: absolute;
+  top: 8px;
+  bottom: 16px;
+  height: auto;
+  max-height: calc(100% - 24px);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
+}
+
+.editor-wrapper[data-outline-mode='floating'][data-outline-position='left'] .outline-sidebar {
+  left: 16px;
+}
+
+.editor-wrapper[data-outline-mode='floating'][data-outline-position='right'] .outline-sidebar {
+  right: 16px;
+}
+
+.outline-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  padding: 4px 6px 4px 10px;
+  flex-shrink: 0;
+}
+
+.outline-header-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--meo-foreground);
+}
+
+.outline-header-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--meo-muted-foreground);
+  background: transparent;
+  cursor: pointer;
+}
+
+.outline-header-button:hover {
+  color: var(--meo-foreground);
+  background: var(--meo-outline-hover-background);
+}
+
+.outline-close-button:hover {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.editor-wrapper[data-outline-mode='fixed'] .outline-header-button {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.editor-wrapper[data-outline-mode='fixed'] .outline-sidebar:hover .outline-header-button,
+.editor-wrapper[data-outline-mode='fixed'] .outline-header-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .outline-content {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding-bottom: 30px;
+  min-height: 0;
+  padding: 4px 4px 30px;
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+.outline-sidebar:hover .outline-content {
   scrollbar-color: var(
     --meo-scrollbar-thumb,
     color-mix(in srgb, var(--meo-foreground) 22%, transparent)
   ) transparent;
-  scrollbar-width: thin;
 }
 
 .outline-content::-webkit-scrollbar {
@@ -2262,14 +2347,76 @@ body {
   font-style: italic;
 }
 
+.outline-sidebar:not(:hover) .outline-content::-webkit-scrollbar-thumb {
+  background: transparent !important;
+}
+
+.outline-tree {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  list-style: none;
+}
+
+.outline-tree-children {
+  margin-left: 20px;
+  padding-left: 5px;
+  border-left: 1px solid color-mix(in srgb, var(--meo-foreground) 12%, transparent);
+}
+
+.outline-node {
+  margin: 0;
+  padding: 1px 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.outline-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.outline-fold-button {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  color: var(--meo-muted-foreground);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.outline-fold-button:hover {
+  color: var(--meo-foreground);
+  opacity: 1;
+}
+
+.outline-fold-button:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
 .outline-item {
   display: block;
   position: relative;
-  width: 100%;
-  padding: 6px 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
   border: none;
-  font-size: 12px;
-  line-height: 1.4;
+  border-radius: 3px;
+  font-size: 12.5px;
+  line-height: 1.35;
   text-align: left;
   text-overflow: ellipsis;
   overflow: hidden;
@@ -2314,6 +2461,61 @@ body {
 
 .outline-item:hover {
   background-color: var(--meo-outline-hover-background);
+}
+
+.outline-item.is-visible {
+  color: var(--meo-semantic-headingForeground, #79b8ff);
+}
+
+.outline-item strong {
+  font-weight: 700;
+}
+
+.outline-item em {
+  font-style: italic;
+}
+
+.outline-item del {
+  text-decoration: line-through;
+}
+
+.outline-item.outline-level-1 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.outline-item.outline-level-2 {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.outline-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 2;
+  transition: background-color 120ms ease;
+}
+
+.editor-wrapper[data-outline-position='left'] .outline-resizer {
+  right: -3px;
+}
+
+.editor-wrapper[data-outline-position='right'] .outline-resizer {
+  left: -3px;
+}
+
+.outline-resizer:hover {
+  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+  transition-delay: 250ms;
+}
+
+body.outline-resizing {
+  cursor: ew-resize;
+  user-select: none;
 }
 
 .cm-editor .cm-gutter.meo-git-gutter {
@@ -2617,39 +2819,7 @@ body {
 }
 
 .outline-item:active {
-  color: var(--meo-foreground);
   background-color: var(--meo-outline-active-background);
-}
-
-.outline-item.outline-level-1 {
-  font-weight: 600;
-}
-
-.outline-item.outline-level-2 {
-  padding-left: 24px;
-  font-weight: 500;
-}
-
-.outline-item.outline-level-3 {
-  padding-left: 34px;
-}
-
-.outline-item.outline-level-4 {
-  padding-left: 44px;
-}
-
-.outline-item.outline-level-5 {
-  padding-left: 54px;
-}
-
-.outline-item.outline-level-6 {
-  padding-left: 64px;
-}
-
-.outline-item.outline-level-4,
-.outline-item.outline-level-5,
-.outline-item.outline-level-6 {
-  font-size: 11px;
 }
 
 .cm-editor .meo-md-table-line {

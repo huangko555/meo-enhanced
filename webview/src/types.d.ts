@@ -16,6 +16,7 @@ type WebviewMessage =
   | { type: 'setSpellCheck'; enabled: boolean }
   | { type: 'setContentMaxWidth'; enabled: boolean }
   | { type: 'setOutlineVisible'; visible: boolean }
+  | { type: 'setOutlinePosition'; position: 'left' | 'right' }
   | { type: 'setFindOptions'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }
   | { type: 'viewPositionChanged'; topLine: number; topLineOffset?: number }
   | { type: 'openLink'; href: string }

@@ -185,6 +185,11 @@ type SetOutlineVisibleMessage = {
   visible: boolean;
 };
 
+type SetOutlinePositionMessage = {
+  type: 'setOutlinePosition';
+  position: OutlinePosition;
+};
+
 type SetContentMaxWidthMessage = {
   type: 'setContentMaxWidth';
   enabled: boolean;
@@ -315,6 +320,7 @@ type WebviewMessage =
   | SetGitChangesGutterMessage
   | SetSpellCheckMessage
   | SetOutlineVisibleMessage
+  | SetOutlinePositionMessage
   | SetContentMaxWidthMessage
   | SetFindOptionsMessage
   | ViewPositionChangedMessage
@@ -998,6 +1004,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setOutlineVisible':
         await setOutlineVisible(raw.visible);
+        return;
+      case 'setOutlinePosition':
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update('outline.position', raw.position === 'left' ? 'left' : 'right', vscode.ConfigurationTarget.Global);
         return;
       case 'setContentMaxWidth':
         await vscode.workspace
