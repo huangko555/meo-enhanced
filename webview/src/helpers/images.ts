@@ -1,4 +1,5 @@
-import { WidgetType } from '@codemirror/view';
+import { EditorView, WidgetType } from '@codemirror/view';
+import { createElement, ExternalLink, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
@@ -6,6 +7,8 @@ let imageSrcResolver: (url: string) => string | Promise<string | null | undefine
 let vscodeApi: any = null;
 
 const imageSrcCache = new Map<string, string>();
+const loadedImages = new Map<string, string>();
+const failedImages = new Set<string>();
 const pendingImageResolvers = new Map<string, ((value: string) => void)[]>();
 const imageRequestById = new Map<string, string>();
 let imageRequestCounter = 0;
@@ -32,6 +35,10 @@ const imageExtensionByMime: Record<string, string> = {
 export function initializeImageHandling(vscode: any): void {
   vscodeApi = vscode;
 }
+
+const openImageExternally = (url: string): void => {
+  vscodeApi?.postMessage({ type: 'openImageExternally', url });
+};
 
 const isImmediateImageSrc = (url: string): boolean => /^(?:https?:|data:|blob:|vscode-webview:|vscode-webview-resource:|vscode-resource:)/i.test(url);
 
@@ -207,12 +214,18 @@ export class ImageWidget extends WidgetType {
   url: string;
   altText: string;
   linkUrl: string;
+  fullscreenOverlay: HTMLElement | null;
+  fullscreenCleanup: (() => void) | null;
+  exitFullscreenHandler: ((event: KeyboardEvent) => void) | null;
 
   constructor(url: string | null | undefined, altText: string | null | undefined, linkUrl: string | null | undefined) {
     super();
     this.url = url?.trim() ?? '';
     this.altText = altText ?? '';
     this.linkUrl = linkUrl?.trim() ?? '';
+    this.fullscreenOverlay = null;
+    this.fullscreenCleanup = null;
+    this.exitFullscreenHandler = null;
   }
 
   eq(other: ImageWidget): boolean {
@@ -224,57 +237,286 @@ export class ImageWidget extends WidgetType {
     );
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view?: EditorView): HTMLElement {
     const container = document.createElement('div');
     container.className = 'meo-md-image';
-
-    if (!this.url) {
-      this.renderFallback(container);
-      return container;
-    }
-
-    const img = document.createElement('img');
-    img.className = 'meo-md-image-img';
-    img.alt = this.altText;
-    img.loading = 'lazy';
-
-    let loadingPlaceholder: HTMLElement | undefined;
-    const hideLoadingPlaceholder = () => {
-      if (loadingPlaceholder && container.contains(loadingPlaceholder)) {
-        container.removeChild(loadingPlaceholder);
-      }
-      img.classList.add('meo-md-image-loaded');
-    };
-
-    const resolveAndSetSrc = (src: string) => {
-      img.src = src;
-      if (img.complete) {
-        hideLoadingPlaceholder();
-      }
-    };
-
-    const fail = () => {
-      hideLoadingPlaceholder();
-      this.renderFallback(container);
-    };
-
-    img.addEventListener('load', hideLoadingPlaceholder);
-    img.addEventListener('error', fail);
-
-    loadingPlaceholder = document.createElement('div');
-    loadingPlaceholder.className = 'meo-md-image-loading';
-    loadingPlaceholder.textContent = 'Loading image...';
-
-    container.appendChild(loadingPlaceholder);
-    container.appendChild(img);
-    this.setImageSource(resolveAndSetSrc, fail);
 
     if (this.linkUrl) {
       container.classList.add('meo-md-image-linked');
       container.setAttribute('data-meo-link-href', this.linkUrl);
     }
 
+    if (!this.url) {
+      this.renderFallback(container);
+      return container;
+    }
+
+    const cachedSrc = loadedImages.get(this.url);
+    if (cachedSrc) {
+      const img = this.createLoadedImage(cachedSrc);
+      container.append(img, this.createImageControls(img));
+      return container;
+    }
+
+    this.renderFallback(container);
+    if (!failedImages.has(this.url)) {
+      this.loadImage(container, view);
+    }
     return container;
+  }
+
+  createLoadedImage(src: string): HTMLImageElement {
+    const img = document.createElement('img');
+    img.className = 'meo-md-image-img';
+    img.alt = this.altText;
+    img.loading = 'eager';
+    img.src = src;
+    return img;
+  }
+
+  loadImage(container: HTMLElement, view?: EditorView): void {
+    this.setImageSource((src) => {
+      const img = this.createLoadedImage(src);
+      let settled = false;
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        loadedImages.set(this.url, src);
+        failedImages.delete(this.url);
+        this.showLoadedImage(container, img, view);
+      };
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        failedImages.add(this.url);
+      };
+
+      img.addEventListener('load', succeed, { once: true });
+      img.addEventListener('error', fail, { once: true });
+      if (img.complete && img.naturalWidth > 0) {
+        succeed();
+      }
+    }, () => {
+      failedImages.add(this.url);
+    });
+  }
+
+  showLoadedImage(container: HTMLElement, img: HTMLImageElement, view?: EditorView): void {
+    const show = () => {
+      container.classList.remove('meo-md-image-fallback');
+      container.replaceChildren(img, this.createImageControls(img));
+    };
+    if (!view || !container.isConnected) {
+      show();
+      return;
+    }
+
+    view.requestMeasure({
+      read(editorView) {
+        const scrollerRect = editorView.scrollDOM.getBoundingClientRect();
+        const imageRect = container.getBoundingClientRect();
+        if (imageRect.top >= scrollerRect.top) return null;
+        const anchor = Array.from(editorView.contentDOM.querySelectorAll('.cm-line'))
+          .find((line) => line.getBoundingClientRect().top >= scrollerRect.top) as HTMLElement | undefined;
+        return anchor ? { anchor, top: anchor.getBoundingClientRect().top } : null;
+      },
+      write: (anchor) => {
+        show();
+        if (!anchor) {
+          view.requestMeasure();
+          return;
+        }
+        this.keepViewportAnchor(view, anchor);
+      },
+    });
+  }
+
+  createImageControls(img: HTMLImageElement): HTMLElement {
+    const controls = document.createElement('div');
+    controls.className = 'meo-md-image-controls';
+
+    const openExternally = document.createElement('button');
+    openExternally.type = 'button';
+    openExternally.className = 'meo-md-image-control-btn';
+    openExternally.title = 'Open with system app';
+    openExternally.setAttribute('aria-label', 'Open with system app');
+    openExternally.appendChild(createElement(ExternalLink, { width: 16, height: 16 }));
+    openExternally.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openImageExternally(this.url);
+    });
+
+    const fullscreen = document.createElement('button');
+    fullscreen.type = 'button';
+    fullscreen.className = 'meo-md-image-control-btn';
+    fullscreen.title = 'Fullscreen image';
+    fullscreen.setAttribute('aria-label', 'Fullscreen image');
+    fullscreen.appendChild(createElement(Maximize2, { width: 16, height: 16 }));
+    fullscreen.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openFullscreen(img.currentSrc || img.src);
+    });
+
+    controls.append(openExternally, fullscreen);
+    return controls;
+  }
+
+  openFullscreen(src: string): void {
+    if (!src || this.fullscreenOverlay) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'meo-md-image-fullscreen-scrim';
+    const viewer = document.createElement('div');
+    viewer.className = 'meo-md-image-fullscreen';
+    const image = document.createElement('img');
+    image.className = 'meo-md-image-fullscreen-img';
+    image.alt = this.altText;
+    image.src = src;
+    viewer.appendChild(image);
+
+    let zoom = 1;
+    let panX = 0;
+    let panY = 0;
+    let dragging = false;
+    let dragged = false;
+    let startedOnImage = false;
+    let startX = 0;
+    let startY = 0;
+    let lastX = 0;
+    let lastY = 0;
+    const applyTransform = () => {
+      image.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    };
+    const changeZoom = (delta: number) => {
+      zoom = Math.min(4, Math.max(0.25, zoom + delta));
+      applyTransform();
+    };
+
+    const controls = document.createElement('div');
+    controls.className = 'meo-md-image-fullscreen-controls';
+    const addButton = (icon: typeof ZoomIn, label: string, action: () => void) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'meo-md-image-control-btn';
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      button.appendChild(createElement(icon, { width: 16, height: 16 }));
+      button.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        action();
+      });
+      controls.appendChild(button);
+    };
+    addButton(ZoomIn, 'Zoom in', () => changeZoom(0.5));
+    addButton(ZoomOut, 'Zoom out', () => changeZoom(-0.5));
+    addButton(RotateCcw, 'Reset zoom', () => {
+      zoom = 1;
+      panX = 0;
+      panY = 0;
+      applyTransform();
+    });
+    addButton(ExternalLink, 'Open with system app', () => openImageExternally(this.url));
+    addButton(X, 'Exit fullscreen', () => this.closeFullscreen());
+    viewer.appendChild(controls);
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || (event.target instanceof Element && event.target.closest('.meo-md-image-fullscreen-controls'))) return;
+      dragging = true;
+      dragged = false;
+      startedOnImage = event.target === image;
+      startX = event.clientX;
+      startY = event.clientY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      viewer.setPointerCapture(event.pointerId);
+      viewer.classList.add('is-dragging');
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!dragging) return;
+      const deltaX = event.clientX - lastX;
+      const deltaY = event.clientY - lastY;
+      if (Math.abs(event.clientX - startX) > 3 || Math.abs(event.clientY - startY) > 3) dragged = true;
+      panX += deltaX;
+      panY += deltaY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      applyTransform();
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      const shouldExit = startedOnImage && !dragged;
+      dragging = false;
+      viewer.classList.remove('is-dragging');
+      if (viewer.hasPointerCapture(event.pointerId)) viewer.releasePointerCapture(event.pointerId);
+      if (shouldExit) this.closeFullscreen();
+    };
+    const onPointerCancel = (event: PointerEvent) => {
+      dragging = false;
+      viewer.classList.remove('is-dragging');
+      if (viewer.hasPointerCapture(event.pointerId)) viewer.releasePointerCapture(event.pointerId);
+    };
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      changeZoom(event.deltaY > 0 ? -0.25 : 0.25);
+    };
+
+    viewer.addEventListener('pointerdown', onPointerDown);
+    viewer.addEventListener('pointermove', onPointerMove);
+    viewer.addEventListener('pointerup', onPointerUp);
+    viewer.addEventListener('pointercancel', onPointerCancel);
+    viewer.addEventListener('wheel', onWheel, { passive: false });
+    overlay.appendChild(viewer);
+    document.body.appendChild(overlay);
+
+    this.fullscreenOverlay = overlay;
+    this.exitFullscreenHandler = (event) => {
+      if (event.key === 'Escape') this.closeFullscreen();
+    };
+    document.addEventListener('keydown', this.exitFullscreenHandler);
+    this.fullscreenCleanup = () => {
+      viewer.removeEventListener('pointerdown', onPointerDown);
+      viewer.removeEventListener('pointermove', onPointerMove);
+      viewer.removeEventListener('pointerup', onPointerUp);
+      viewer.removeEventListener('pointercancel', onPointerCancel);
+      viewer.removeEventListener('wheel', onWheel);
+    };
+  }
+
+  closeFullscreen(): void {
+    this.fullscreenCleanup?.();
+    this.fullscreenCleanup = null;
+    this.fullscreenOverlay?.remove();
+    this.fullscreenOverlay = null;
+    if (this.exitFullscreenHandler) {
+      document.removeEventListener('keydown', this.exitFullscreenHandler);
+      this.exitFullscreenHandler = null;
+    }
+  }
+
+  keepViewportAnchor(view: EditorView, anchor: { anchor: HTMLElement; top: number }): void {
+    let remainingFrames = 3;
+    const measure = () => {
+      view.requestMeasure({
+        read() {
+          return anchor.anchor.isConnected
+            ? anchor.anchor.getBoundingClientRect().top - anchor.top
+            : null;
+        },
+        write(delta) {
+          if (typeof delta !== 'number') return;
+          if (Math.abs(delta) > 0.5) {
+            view.scrollDOM.scrollTop += delta;
+          }
+          remainingFrames -= 1;
+          if (remainingFrames > 0) {
+            requestAnimationFrame(measure);
+          }
+        },
+      });
+    };
+    measure();
   }
 
   renderFallback(container: HTMLElement): void {
@@ -289,7 +531,7 @@ export class ImageWidget extends WidgetType {
     const resolved = imageSrcResolver(this.url);
     if (isPromiseLike(resolved)) {
       resolved.then((value) => {
-        if (!value || !document.contains(document.body)) {
+        if (!value) {
           onFail();
           return;
         }
@@ -312,6 +554,10 @@ export class ImageWidget extends WidgetType {
     }
     return true;
   }
+
+  destroy(): void {
+    this.closeFullscreen();
+  }
 }
 
 function isPromiseLike(value: unknown): value is Promise<unknown> {
@@ -327,9 +573,15 @@ function findChildNode(node: any, name: string): any {
   return null;
 }
 
+function stripMarkdownImageTitle(url: string): string {
+  const title = /^(.*?)\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^)\\]|\\.)*\))\s*$/.exec(url);
+  return (title?.[1] ?? url).trim();
+}
+
 export function getImageData(state: any, node: any): { url: string; altText: string; linkUrl: string } {
   const urlNode = findChildNode(node, 'URL');
-  const url = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to).trim() : '';
+  const rawUrl = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to).trim() : '';
+  const url = stripMarkdownImageTitle(rawUrl);
 
   let altText = '';
   const imageText = state.doc.sliceString(node.from, node.to);

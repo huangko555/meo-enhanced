@@ -2008,6 +2008,9 @@ body {
 
 .cm-editor .meo-md-image {
   display: inline-block;
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
   vertical-align: baseline;
   text-align: left;
   line-height: normal;
@@ -2016,23 +2019,15 @@ body {
 }
 
 .cm-editor .meo-md-image-img {
+  display: block;
+  width: auto;
   max-width: 100%;
-  max-height: none;
+  max-height: 240px;
   height: auto;
-  opacity: 0;
   margin: 0;
   padding: 0;
   vertical-align: bottom;
-}
-
-.cm-editor .meo-md-image-img.meo-md-image-loaded {
-  opacity: 1;
-}
-
-.cm-editor .meo-md-image-loading {
-  color: var(--meo-semantic-imageFallbackForeground);
-  font-style: italic;
-  font-size: 12px;
+  cursor: pointer;
 }
 
 .cm-editor .meo-md-image-fallback {
@@ -2052,8 +2047,84 @@ body {
   cursor: pointer;
 }
 
-.cm-editor .meo-md-image-linked .meo-md-image-img {
+.cm-editor .meo-md-image-controls,
+.meo-md-image-fullscreen-controls {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: flex;
+  gap: 4px;
+  z-index: 1;
+}
+
+.cm-editor .meo-md-image-controls {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.cm-editor .meo-md-image:hover .meo-md-image-controls,
+.cm-editor .meo-md-image:focus-within .meo-md-image-controls {
+  opacity: 1;
+}
+
+.meo-md-image-control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #ffffff;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.75));
+}
+
+.meo-md-image-control-btn:hover,
+.meo-md-image-control-btn:focus-visible {
+  background: transparent;
+  color: #ffffff;
+  outline: none;
+}
+
+.meo-md-image-control-btn svg {
+  stroke: currentColor;
+}
+
+.meo-md-image-fullscreen-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--meo-background);
+}
+
+.meo-md-image-fullscreen {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--meo-code-background);
+  cursor: grab;
+}
+
+.meo-md-image-fullscreen.is-dragging {
+  cursor: grabbing;
+}
+
+.meo-md-image-fullscreen-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 80px);
+  max-height: calc(100vh - 80px);
+  transform-origin: center;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .meo-mermaid-fullscreen-scrim {

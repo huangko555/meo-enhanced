@@ -23,7 +23,7 @@ import {
   getCodeBlockVscodeTheme,
   type VimKeybinding
 } from '../shared/extensionConfig';
-import { openLink, resolveLocalLinkTargets, resolveWebviewImageSrc, resolveWikiLinkTargets } from '../shared/documentLinks';
+import { openImageExternally, openLink, resolveLocalLinkTargets, resolveWebviewImageSrc, resolveWikiLinkTargets } from '../shared/documentLinks';
 import { GitDocumentState, hashGitBaselinePayload } from '../git/documentState';
 import { openGitRevisionForLine, openGitWorktreeForLine, resolveGitBlameForRequest } from '../git/blameActions';
 import type { GitBaselinePayload, GitBlameLineResult } from '../git/types';
@@ -116,6 +116,11 @@ type SetModeMessage = {
 type OpenLinkMessage = {
   type: 'openLink';
   href: string;
+};
+
+type OpenImageExternallyMessage = {
+  type: 'openImageExternally';
+  url: string;
 };
 
 type ResolveImageSrcMessage = {
@@ -314,6 +319,7 @@ type WebviewMessage =
   | SetFindOptionsMessage
   | ViewPositionChangedMessage
   | OpenLinkMessage
+  | OpenImageExternallyMessage
   | ResolveImageSrcMessage
   | ResolveWikiLinksMessage
   | ResolveLocalLinksMessage
@@ -1019,6 +1025,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'openLink':
         await openLink(raw.href, documentUri);
+        return;
+      case 'openImageExternally':
+        await openImageExternally(raw.url, documentUri);
         return;
       case 'resolveImageSrc': {
         const response: ResolvedImageSrcMessage = {

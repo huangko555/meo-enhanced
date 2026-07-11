@@ -19,6 +19,7 @@ type WebviewMessage =
   | { type: 'setFindOptions'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }
   | { type: 'viewPositionChanged'; topLine: number; topLineOffset?: number }
   | { type: 'openLink'; href: string }
+  | { type: 'openImageExternally'; url: string }
   | { type: 'resolveImageSrc'; requestId: string; url: string }
   | { type: 'resolveWikiLinks'; requestId: string; targets: string[] }
   | { type: 'resolveLocalLinks'; requestId: string; targets: string[] }

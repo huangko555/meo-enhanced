@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
 import * as vscode from 'vscode';
 import { safeDecodeURIComponent } from '../agents/resourceMatching';
 import { withMarkdownExtensions } from './extensionConfig';
@@ -20,6 +21,57 @@ export async function openExternalLink(rawHref: string): Promise<void> {
   } catch {
     // Ignore invalid URIs emitted by the webview.
   }
+}
+
+export async function openImageExternally(rawUrl: string, documentUri: vscode.Uri): Promise<void> {
+  const localImageUri = await resolveLocalLinkTargetUri(rawUrl, documentUri)
+    ?? resolveLocalImageUriWithoutExistenceCheck(rawUrl, documentUri);
+  if (localImageUri) {
+    await openLocalImageWithSystemApp(localImageUri);
+    return;
+  }
+  await openExternalLink(rawUrl);
+}
+
+function resolveLocalImageUriWithoutExistenceCheck(rawUrl: string, documentUri: vscode.Uri): vscode.Uri | null {
+  const trimmed = rawUrl.trim();
+  if (!looksLikeLocalHref(trimmed)) return null;
+
+  const [targetPath = ''] = trimmed.split(/[?#]/, 1);
+  if (!targetPath) return null;
+  if (/^file:/i.test(targetPath)) {
+    try {
+      return vscode.Uri.parse(targetPath, true);
+    } catch {
+      return null;
+    }
+  }
+
+  const decodedPath = safeDecodeURIComponent(targetPath).replace(/\\/g, path.sep);
+  const absolutePath = path.isAbsolute(decodedPath)
+    ? decodedPath
+    : path.resolve(path.dirname(documentUri.fsPath), decodedPath);
+  return toDocumentScopedUri(absolutePath, documentUri);
+}
+
+async function openLocalImageWithSystemApp(uri: vscode.Uri): Promise<void> {
+  if (process.platform !== 'win32' || uri.scheme !== 'file') {
+    await vscode.env.openExternal(uri);
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('explorer.exe', [uri.fsPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
 
 export async function openLink(rawHref: string, documentUri: vscode.Uri): Promise<void> {
@@ -167,11 +219,11 @@ export async function resolveLocalLinkTargetUri(rawHref: string, documentUri: vs
     }
   }
 
-  if (SCHEME_RE.test(targetPath)) {
+  const decodedPath = safeDecodeURIComponent(targetPath).replace(/\\/g, path.sep);
+  if (SCHEME_RE.test(targetPath) && !WINDOWS_ABSOLUTE_PATH_RE.test(decodedPath)) {
     return null;
   }
 
-  const decodedPath = safeDecodeURIComponent(targetPath).replace(/\\/g, path.sep);
   const basePath = path.isAbsolute(decodedPath)
     ? decodedPath
     : path.resolve(path.dirname(documentUri.fsPath), decodedPath);
@@ -284,11 +336,12 @@ function looksLikeLocalHref(rawHref: string): boolean {
   if (!targetPath) {
     return false;
   }
-  if (SCHEME_RE.test(targetPath)) {
+  const decodedTargetPath = safeDecodeURIComponent(targetPath);
+  if (SCHEME_RE.test(targetPath) && !WINDOWS_ABSOLUTE_PATH_RE.test(decodedTargetPath)) {
     return false;
   }
 
-  const normalized = safeDecodeURIComponent(targetPath).trim().replace(/\\/g, '/');
+  const normalized = decodedTargetPath.trim().replace(/\\/g, '/');
   if (!normalized) {
     return false;
   }
