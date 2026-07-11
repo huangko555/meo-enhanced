@@ -7,7 +7,8 @@ let imageSrcResolver: (url: string) => string | Promise<string | null | undefine
 let vscodeApi: any = null;
 
 const imageSrcCache = new Map<string, string>();
-const loadedImages = new Map<string, string>();
+const loadedImages = new Map<string, HTMLImageElement>();
+const pendingImageLoads = new Map<string, Promise<HTMLImageElement | null>>();
 const failedImages = new Set<string>();
 const pendingImageResolvers = new Map<string, ((value: string) => void)[]>();
 const imageRequestById = new Map<string, string>();
@@ -226,6 +227,9 @@ export class ImageWidget extends WidgetType {
     this.fullscreenOverlay = null;
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
+    if (this.url) {
+      void this.preloadImage();
+    }
   }
 
   eq(other: ImageWidget): boolean {
@@ -251,16 +255,20 @@ export class ImageWidget extends WidgetType {
       return container;
     }
 
-    const cachedSrc = loadedImages.get(this.url);
-    if (cachedSrc) {
-      const img = this.createLoadedImage(cachedSrc);
+    const cachedImage = loadedImages.get(this.url);
+    if (cachedImage) {
+      const img = this.createDisplayImage(cachedImage);
       container.append(img, this.createImageControls(img));
       return container;
     }
 
     this.renderFallback(container);
     if (!failedImages.has(this.url)) {
-      this.loadImage(container, view);
+      void this.preloadImage().then((image) => {
+        if (image) {
+          this.showLoadedImage(container, this.createDisplayImage(image), view);
+        }
+      });
     }
     return container;
   }
@@ -274,31 +282,53 @@ export class ImageWidget extends WidgetType {
     return img;
   }
 
-  loadImage(container: HTMLElement, view?: EditorView): void {
-    this.setImageSource((src) => {
-      const img = this.createLoadedImage(src);
-      let settled = false;
-      const succeed = () => {
-        if (settled) return;
-        settled = true;
-        loadedImages.set(this.url, src);
-        failedImages.delete(this.url);
-        this.showLoadedImage(container, img, view);
-      };
-      const fail = () => {
-        if (settled) return;
-        settled = true;
-        failedImages.add(this.url);
-      };
+  createDisplayImage(cachedImage: HTMLImageElement): HTMLImageElement {
+    if (!cachedImage.isConnected) {
+      cachedImage.alt = this.altText;
+      return cachedImage;
+    }
+    return this.createLoadedImage(cachedImage.currentSrc || cachedImage.src);
+  }
 
-      img.addEventListener('load', succeed, { once: true });
-      img.addEventListener('error', fail, { once: true });
-      if (img.complete && img.naturalWidth > 0) {
-        succeed();
-      }
-    }, () => {
-      failedImages.add(this.url);
+  preloadImage(): Promise<HTMLImageElement | null> {
+    const cachedImage = loadedImages.get(this.url);
+    if (cachedImage) return Promise.resolve(cachedImage);
+
+    const pendingLoad = pendingImageLoads.get(this.url);
+    if (pendingLoad) return pendingLoad;
+
+    const load = new Promise<HTMLImageElement | null>((resolve) => {
+      this.setImageSource((src) => {
+        const img = this.createLoadedImage(src);
+        let settled = false;
+        const succeed = () => {
+          if (settled) return;
+          settled = true;
+          loadedImages.set(this.url, img);
+          failedImages.delete(this.url);
+          resolve(img);
+        };
+        const fail = () => {
+          if (settled) return;
+          settled = true;
+          failedImages.add(this.url);
+          resolve(null);
+        };
+
+        img.addEventListener('load', succeed, { once: true });
+        img.addEventListener('error', fail, { once: true });
+        if (img.complete && img.naturalWidth > 0) {
+          succeed();
+        }
+      }, () => {
+        failedImages.add(this.url);
+        resolve(null);
+      });
+    }).finally(() => {
+      pendingImageLoads.delete(this.url);
     });
+    pendingImageLoads.set(this.url, load);
+    return load;
   }
 
   showLoadedImage(container: HTMLElement, img: HTMLImageElement, view?: EditorView): void {
@@ -497,18 +527,29 @@ export class ImageWidget extends WidgetType {
 
   keepViewportAnchor(view: EditorView, anchor: { anchor: HTMLElement; top: number }): void {
     let remainingFrames = 3;
+    let expectedScrollTop = view.scrollDOM.scrollTop;
     const measure = () => {
       view.requestMeasure({
         read() {
-          return anchor.anchor.isConnected
-            ? anchor.anchor.getBoundingClientRect().top - anchor.top
-            : null;
+          if (!anchor.anchor.isConnected) return null;
+          return {
+            delta: anchor.anchor.getBoundingClientRect().top - anchor.top,
+            scrollTop: view.scrollDOM.scrollTop,
+          };
         },
-        write(delta) {
-          if (typeof delta !== 'number') return;
+        write(measurement) {
+          if (!measurement) return;
+          const { delta, scrollTop } = measurement;
+          if (
+            Math.abs(scrollTop - expectedScrollTop) > 0.5
+            || Math.abs(view.scrollDOM.scrollTop - scrollTop) > 0.5
+          ) {
+            return;
+          }
           if (Math.abs(delta) > 0.5) {
             view.scrollDOM.scrollTop += delta;
           }
+          expectedScrollTop = view.scrollDOM.scrollTop;
           remainingFrames -= 1;
           if (remainingFrames > 0) {
             requestAnimationFrame(measure);
