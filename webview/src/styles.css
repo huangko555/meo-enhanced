@@ -2068,25 +2068,42 @@ body {
 }
 
 .meo-md-image-control-btn {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  color: #ffffff;
-  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--vscode-editor-foreground, var(--meo-foreground));
+  background-color: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 6px;
   cursor: pointer;
+  box-shadow: none;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.75));
+  pointer-events: auto;
 }
 
-.meo-md-image-control-btn:hover,
-.meo-md-image-control-btn:focus-visible {
-  background: transparent;
-  color: #ffffff;
-  outline: none;
+.meo-md-image-control-btn:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.meo-md-image-control-btn:hover {
+  background-color: var(
+    --vscode-toolbar-hoverBackground,
+    rgba(31, 35, 40, 0.06)
+  );
+  color: var(--vscode-editor-foreground, var(--meo-foreground));
+}
+
+.meo-md-image-control-btn:active {
+  background-color: var(
+    --vscode-toolbar-activeBackground,
+    rgba(31, 35, 40, 0.16)
+  );
 }
 
 .meo-md-image-control-btn svg {
