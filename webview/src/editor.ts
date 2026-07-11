@@ -1,4 +1,4 @@
-import { EditorState, Compartment, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type ViewUpdate } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
@@ -24,6 +24,7 @@ import {
 } from './helpers/gitDiffGutter';
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
+import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { createGitBlameHoverController } from './helpers/gitBlameHover';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
 import { resolvedSyntaxTree, extractHeadings, extractHeadingSections } from './helpers/markdownSyntax';
@@ -85,8 +86,10 @@ type MarkerReplacementContext = {
 
 const setSearchQueryEffect = StateEffect.define<SearchQueryState>();
 const refreshDecorationsEffect = StateEffect.define();
-const searchMatchMark = Decoration.mark({ class: 'meo-search-match' });
-const activeSearchMatchMark = Decoration.mark({ class: 'meo-search-match meo-search-match-active' });
+const searchMatchStyle = 'color: var(--meo-semantic-searchMatchForeground) !important; -webkit-text-fill-color: var(--meo-semantic-searchMatchForeground) !important;';
+const activeSearchMatchStyle = 'color: var(--meo-semantic-searchMatchActiveForeground) !important; -webkit-text-fill-color: var(--meo-semantic-searchMatchActiveForeground) !important;';
+const searchMatchMark = Decoration.mark({ class: 'meo-search-match', attributes: { style: searchMatchStyle } });
+const activeSearchMatchMark = Decoration.mark({ class: 'meo-search-match meo-search-match-active', attributes: { style: activeSearchMatchStyle } });
 const tableSearchStateEventName = 'meo-search-state-change';
 const existingListMarkerRegex = /^(\s*)([-+*]\s+\[[ xX~\-]\]|[-+*]|\d+[.)])\s+/;
 const existingHeadingMarkerRegex = /^(\s*)(#{1,6})\s+/;
@@ -266,6 +269,7 @@ export function createEditor({
   let pendingLiveSearchRevealToken = 0;
   let gitBlameHover = null;
   let gitDiffOverviewRuler = null;
+  let searchOverviewRuler = null;
   let editableLinkHoverPointerActive = false;
   let editableLinkHoverPosition = null;
   let editableLinkHoverMode = currentMode;
@@ -1769,7 +1773,7 @@ export function createEditor({
       ...headingCollapseSharedExtensions(),
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
-      searchMatchField,
+      Prec.high(searchMatchField),
       diagnosticDataField,
       diagnosticField,
       EditorView.updateListener.of((update) => {
@@ -1777,6 +1781,7 @@ export function createEditor({
         syncLineNumbersVisibility();
         syncGitGutterVisibility();
         emitSearchStateChange();
+        searchOverviewRuler?.refresh();
 
         if (update.selectionSet) {
           syncSelectionClass();
@@ -1892,6 +1897,22 @@ export function createEditor({
     view,
     getMode: () => currentMode,
     isGitChangesVisible: () => gitGutterVisible
+  });
+  searchOverviewRuler = createSearchOverviewRulerController({
+    view,
+    getMatches: () => {
+      const searchQuery = view.state.field(searchQueryField);
+      if (!searchQuery.text) {
+        return [];
+      }
+      const selection = view.state.selection.main;
+      const selectionFrom = Math.min(selection.from, selection.to);
+      const selectionTo = Math.max(selection.from, selection.to);
+      return findSearchMatchRanges(view.state.doc.toString(), searchQuery.text, searchQuery).map((match) => ({
+        from: match.start,
+        active: match.start === selectionFrom && match.end === selectionTo
+      }));
+    }
   });
   syncModeClasses();
   syncLineNumbersVisibility();
@@ -2012,6 +2033,8 @@ export function createEditor({
       gitBlameHover = null;
       gitDiffOverviewRuler?.destroy();
       gitDiffOverviewRuler = null;
+      searchOverviewRuler?.destroy();
+      searchOverviewRuler = null;
       if (onScroll) {
         view.scrollDOM.removeEventListener('scroll', onScroll);
         onScroll = null;

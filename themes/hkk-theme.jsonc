@@ -127,23 +127,23 @@
     // Frontmatter 数组 pill 背景。
     "frontmatterPillBackground": "#3e444d",
     // 搜索命中的文字颜色。
-    "searchMatchForeground": "#1f1f1f",
+    "searchMatchForeground": "var(--meo-background)",
     // 搜索命中的背景颜色。
-    "searchMatchBackground": "#fff59d",
+    "searchMatchBackground": "#ffe600",
     // 搜索命中的描边颜色。
-    "searchMatchBorder": "#d6b400",
+    "searchMatchBorder": "#ffe600",
     // 当前选中搜索命中文字颜色。
-    "searchMatchActiveForeground": "#1f1f1f",
+    "searchMatchActiveForeground": "var(--meo-background)",
     // 当前选中搜索命中背景颜色。
-    "searchMatchActiveBackground": "#ffff00",
+    "searchMatchActiveBackground": "#ff8c00",
     // 当前选中搜索命中描边颜色。
-    "searchMatchActiveBorder": "#f0c000",
+    "searchMatchActiveBorder": "#ff8c00",
     // 滚动条滑块颜色。
-    "scrollbarThumb": "color-mix(in srgb, var(--meo-foreground) 22%, transparent)",
+    "scrollbarThumb": "color-mix(in srgb, var(--meo-foreground) 38%, transparent)",
     // 滚动条滑块悬浮颜色。
-    "scrollbarThumbHover": "color-mix(in srgb, var(--meo-foreground) 32%, transparent)",
+    "scrollbarThumbHover": "color-mix(in srgb, var(--meo-foreground) 50%, transparent)",
     // 滚动条滑块按下颜色。
-    "scrollbarThumbActive": "color-mix(in srgb, var(--meo-foreground) 42%, transparent)",
+    "scrollbarThumbActive": "color-mix(in srgb, var(--meo-foreground) 62%, transparent)",
     // NOTE/TIP/IMPORTANT/WARNING/CAUTION 提示色。
     "alertNoteForeground": "#61afef",
     "alertNoteBackground": "color-mix(in srgb, var(--meo-semantic-alertNoteForeground) 8%, transparent)",
