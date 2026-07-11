@@ -15,7 +15,7 @@ import { sourceFileLinkField } from './helpers/sourceRawLinks';
 import { sourceUrlBoundaryField } from './helpers/sourceUrlBoundaries';
 import { sourceFootnoteMarkerField } from './helpers/sourceFootnotes';
 import { markdownTagField } from './helpers/tags';
-import { getLinkHrefAtPointer, isPrimaryModifierPointerClick } from './helpers/linkNavigation';
+import { findDocumentFragmentPosition, getLinkHrefAtPointer, isPrimaryModifierPointerClick } from './helpers/linkNavigation';
 import {
   gitDiffGutterBaselineExtensions,
   gitDiffGutterLiveRenderExtensions,
@@ -256,7 +256,7 @@ export function createEditor({
   let tableInteractionOwner: HTMLElement | null = null;
   let tableInteractionClassFrame = 0;
   let onTableInteraction = null;
-  let onTableOpenLink = null;
+  let onWidgetOpenLink = null;
   let onTableSelectionChange = null;
   let onScroll = null;
   let onWindowPointerUp = null;
@@ -265,7 +265,9 @@ export function createEditor({
   let pendingLiveSearchRevealToken = 0;
   let gitBlameHover = null;
   let gitDiffOverviewRuler = null;
-  let sourceLinkHoverPointerActive = false;
+  let editableLinkHoverPointerActive = false;
+  let editableLinkHoverPosition = null;
+  let editableLinkHoverMode = currentMode;
   const normalizeTopLineOffset = (value) => {
     if (!Number.isFinite(value)) {
       return 0;
@@ -303,6 +305,21 @@ export function createEditor({
   const targetElementFrom = (target) => (
     target instanceof Element ? target : target instanceof Node ? target.parentElement : null
   );
+  const openHref = (href, editorView) => {
+    if (href.startsWith('#')) {
+      const targetPosition = findDocumentFragmentPosition(editorView.state, href);
+      if (targetPosition !== null) {
+        editorView.dispatch({
+          selection: { anchor: targetPosition },
+          effects: EditorView.scrollIntoView(targetPosition, { y: 'start' })
+        });
+        editorView.focus();
+      }
+      return true;
+    }
+    onOpenLink?.(href);
+    return true;
+  };
   const openLinkIfModifierClick = (event, editorView) => {
     if (!isPrimaryModifierPointerClick(event)) {
       return false;
@@ -313,30 +330,60 @@ export function createEditor({
     }
     event.preventDefault();
     event.stopPropagation();
-    onOpenLink?.(href);
-    return true;
+    return openHref(href, editorView);
   };
-  const setSourceLinkHoverCursor = (editorView, active) => {
-    if (sourceLinkHoverPointerActive === active) {
+  const setEditableLinkHoverCursor = (editorView, active) => {
+    if (editableLinkHoverPointerActive === active) {
       return;
     }
-    sourceLinkHoverPointerActive = active;
+    editableLinkHoverPointerActive = active;
     const cursor = active ? 'pointer' : '';
     editorView.dom.style.cursor = cursor;
     editorView.contentDOM.style.cursor = cursor;
+    editorView.dom.classList.toggle('meo-link-modifier-hover', active);
   };
-  const updateSourceLinkHoverCursor = (event, editorView) => {
-    if (currentMode !== 'source') {
-      setSourceLinkHoverCursor(editorView, false);
-      return;
-    }
+  const isEditableLinkTarget = (target, editorView) => {
+    if (!(target instanceof Node)) return false;
+    if (currentMode === 'source') return editorView.contentDOM.contains(target);
+    const targetElement = targetElementFrom(target);
+    return currentMode === 'live' && Boolean(targetElement?.closest('.cm-activeLine'));
+  };
+  const updateEditableLinkHoverCursor = (event, editorView) => {
     const target = event.target;
-    if (!(target instanceof Node) || !editorView.contentDOM.contains(target)) {
-      setSourceLinkHoverCursor(editorView, false);
+    if (!isEditableLinkTarget(target, editorView)) {
+      editableLinkHoverPosition = null;
+      setEditableLinkHoverCursor(editorView, false);
       return;
     }
-    const href = getLinkHrefAtPointer(event, editorView, { exactTextHit: true });
-    setSourceLinkHoverCursor(editorView, Boolean(href));
+    editableLinkHoverPosition = { x: event.clientX, y: event.clientY };
+    const href = isPrimaryModifierPointerClick(event)
+      ? getLinkHrefAtPointer(event, editorView, { exactTextHit: true })
+      : '';
+    setEditableLinkHoverCursor(editorView, Boolean(href));
+  };
+  const updateEditableLinkHoverCursorForModifier = (event, editorView) => {
+    if (!editableLinkHoverPosition) {
+      setEditableLinkHoverCursor(editorView, false);
+      return;
+    }
+    const target = document.elementFromPoint(editableLinkHoverPosition.x, editableLinkHoverPosition.y);
+    if (!isEditableLinkTarget(target, editorView)) {
+      setEditableLinkHoverCursor(editorView, false);
+      return;
+    }
+    const pointerEvent = {
+      altKey: event.altKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      shiftKey: event.shiftKey,
+      clientX: editableLinkHoverPosition.x,
+      clientY: editableLinkHoverPosition.y,
+      target
+    };
+    const href = isPrimaryModifierPointerClick(pointerEvent)
+      ? getLinkHrefAtPointer(pointerEvent, editorView, { exactTextHit: true })
+      : '';
+    setEditableLinkHoverCursor(editorView, Boolean(href));
   };
   const isLiveMode = (editorView) => editorView.dom.classList.contains('meo-mode-live');
   const isPlainPrimaryPointerEvent = (event) => (
@@ -531,8 +578,10 @@ export function createEditor({
     view.dom.style.setProperty('--meo-active-editor-font-weight', isLiveModeActive ? 'var(--meo-font-live-weight)' : 'var(--meo-font-source-weight)');
     view.dom.style.setProperty('--meo-active-editor-font-size', isLiveModeActive ? 'var(--meo-font-live-size)' : 'var(--meo-font-source-size)');
     view.dom.style.setProperty('--meo-active-editor-line-height', isLiveModeActive ? 'var(--meo-line-height-live)' : 'var(--meo-line-height-source)');
-    if (currentMode !== 'source') {
-      setSourceLinkHoverCursor(view, false);
+    if (editableLinkHoverMode !== currentMode) {
+      editableLinkHoverMode = currentMode;
+      editableLinkHoverPosition = null;
+      setEditableLinkHoverCursor(view, false);
     }
   };
 
@@ -572,7 +621,9 @@ export function createEditor({
     if (view && currentMode === 'live') {
       view.dom.classList.remove('meo-live-pointer-selecting');
       view.dom.style.cursor = '';
-      view.dispatch({ effects: setLivePointerSelectionActiveEffect.of(false) });
+      view.dispatch({
+        effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null })
+      });
     }
   };
 
@@ -1581,10 +1632,17 @@ export function createEditor({
           };
 
           if (currentMode === 'live') {
+            const pointerPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            const pointerLine = pointerPos === null ? null : view.state.doc.lineAt(pointerPos).number;
+            const preservedLine = pointerLine !== null && view.state.selection.ranges.some(
+              (range) => view.state.doc.lineAt(range.head).number === pointerLine
+            ) ? pointerLine : null;
             liveSelectionPointerId = event.pointerId;
             view.dom.classList.add('meo-live-pointer-selecting');
             view.dom.style.cursor = 'text';
-            view.dispatch({ effects: setLivePointerSelectionActiveEffect.of(true) });
+            view.dispatch({
+              effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine })
+            });
           }
 
           if (view.dom.setPointerCapture) {
@@ -1687,11 +1745,24 @@ export function createEditor({
           return false;
         },
         pointermove(event, view) {
-          updateSourceLinkHoverCursor(event, view);
+          updateEditableLinkHoverCursor(event, view);
           return false;
         },
         pointerleave(_event, view) {
-          setSourceLinkHoverCursor(view, false);
+          editableLinkHoverPosition = null;
+          setEditableLinkHoverCursor(view, false);
+          return false;
+        },
+        keydown(event, view) {
+          if (event.key === 'Control' || event.key === 'Meta' || event.key === 'Alt' || event.key === 'Shift') {
+            updateEditableLinkHoverCursorForModifier(event, view);
+          }
+          return false;
+        },
+        keyup(event, view) {
+          if (event.key === 'Control' || event.key === 'Meta' || event.key === 'Alt' || event.key === 'Shift') {
+            updateEditableLinkHoverCursorForModifier(event, view);
+          }
           return false;
         }
       }),
@@ -1772,14 +1843,14 @@ export function createEditor({
     setTableInteractionActive(active, owner);
   };
   view.dom.addEventListener('meo-table-interaction', onTableInteraction);
-  onTableOpenLink = (event) => {
+  onWidgetOpenLink = (event) => {
     const href = event?.detail?.href;
     if (typeof href !== 'string' || !href) {
       return;
     }
-    onOpenLink?.(href);
+    openHref(href, view);
   };
-  view.dom.addEventListener('meo-open-link', onTableOpenLink);
+  view.dom.addEventListener('meo-open-link', onWidgetOpenLink);
   onTableSelectionChange = () => {
     emitSelectionChange();
   };
@@ -1939,9 +2010,9 @@ export function createEditor({
         view.dom.removeEventListener('meo-table-interaction', onTableInteraction);
         onTableInteraction = null;
       }
-      if (onTableOpenLink) {
-        view.dom.removeEventListener('meo-open-link', onTableOpenLink);
-        onTableOpenLink = null;
+      if (onWidgetOpenLink) {
+        view.dom.removeEventListener('meo-open-link', onWidgetOpenLink);
+        onWidgetOpenLink = null;
       }
       if (onTableSelectionChange) {
         view.dom.removeEventListener('meo-table-selection-change', onTableSelectionChange);
@@ -1964,7 +2035,7 @@ export function createEditor({
         window.cancelAnimationFrame(pendingLiveSearchRevealFrame);
         pendingLiveSearchRevealFrame = null;
       }
-      setSourceLinkHoverCursor(view, false);
+      setEditableLinkHoverCursor(view, false);
       view.destroy();
     },
     setText(textValue) {

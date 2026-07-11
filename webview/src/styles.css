@@ -1180,6 +1180,14 @@ body {
   cursor: pointer;
 }
 
+.cm-editor.meo-mode-live .cm-activeLine .meo-md-link[data-meo-link-href] {
+  cursor: text;
+}
+
+.cm-editor.meo-mode-live.meo-link-modifier-hover .cm-activeLine .meo-md-link[data-meo-link-href] {
+  cursor: pointer;
+}
+
 .cm-editor.meo-mode-live .meo-md-link-url-hidden {
   display: none;
 }
@@ -1267,6 +1275,12 @@ body {
   color: var(--meo-foreground);
 }
 
+.cm-editor .meo-md-footnote-definition-content {
+  color: var(--meo-foreground) !important;
+  -webkit-text-fill-color: var(--meo-foreground) !important;
+  text-decoration: none !important;
+}
+
 .cm-editor .cm-line.meo-md-footnote-continuation {
   padding-left: 0;
 }
@@ -1285,7 +1299,8 @@ body {
   display: inline !important;
 }
 
-.cm-editor .meo-md-link-clear-btn {
+.cm-editor .meo-md-link-clear-btn,
+.cm-editor .meo-md-link-open-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1302,15 +1317,23 @@ body {
   vertical-align: top;
 }
 
-.cm-editor .meo-md-link-clear-btn svg {
+.cm-editor .meo-md-link-clear-btn svg,
+.cm-editor .meo-md-link-open-btn svg {
   display: block;
   width: 14px;
   height: 14px;
   pointer-events: none;
 }
 
-.cm-editor .meo-md-link-clear-btn:hover {
+.cm-editor .meo-md-link-clear-btn:hover,
+.cm-editor .meo-md-link-open-btn:hover {
   color: var(--meo-foreground);
+}
+
+.cm-editor .meo-md-link-open-btn {
+  margin-left: 6px;
+  margin-right: 6px;
+  transform: translateY(2px);
 }
 
 .cm-editor .meo-md-wiki-missing-icon {

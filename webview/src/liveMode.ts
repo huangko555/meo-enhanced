@@ -2,7 +2,7 @@ import { RangeSetBuilder, StateEffect, StateField, EditorState } from '@codemirr
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass } from '@codemirror/view';
-import { createElement, AlertCircle, Delete } from 'lucide';
+import { createElement, AlertCircle, CornerDownRight, Delete, ExternalLink } from 'lucide';
 import {
   resolveCodeLanguage,
   isFenceMarker,
@@ -91,6 +91,7 @@ const footnoteMarkerDeco = Decoration.mark({
   }
 });
 const footnoteLiteralDeco = Decoration.mark({ class: 'meo-md-footnote-literal' });
+const footnoteDefinitionContentDeco = Decoration.mark({ class: 'meo-md-footnote-definition-content' });
 const wikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker meo-md-wiki-marker' });
 const activeWikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-md-link-marker-active meo-md-wiki-marker' });
 const emptyWikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker meo-md-wiki-marker meo-md-wiki-empty-marker' });
@@ -125,12 +126,17 @@ const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
 })();
 const isTableContentLine = (lineText: string): boolean => lineText.includes('|');
 
-export const setLivePointerSelectionActiveEffect = StateEffect.define<boolean>();
+type LivePointerSelectionState = {
+  active: boolean;
+  preservedLine: number | null;
+};
+
+export const setLivePointerSelectionActiveEffect = StateEffect.define<LivePointerSelectionState>();
 export const setLiveDocumentIdleEffect = StateEffect.define<boolean>();
 
-const livePointerSelectionActiveField = StateField.define<boolean>({
+const livePointerSelectionActiveField = StateField.define<LivePointerSelectionState>({
   create() {
-    return false;
+    return { active: false, preservedLine: null };
   },
   update(value, transaction) {
     for (const effect of transaction.effects) {
@@ -431,7 +437,7 @@ function getNodeHref(state, node) {
   return normalizeSourceHref(href);
 }
 
-function addLinkMark(builder, from, to, href) {
+function addLinkMark(builder, from, to, href, openButtonPos = null) {
   if (!href) {
     return;
   }
@@ -444,9 +450,17 @@ function addLinkMark(builder, from, to, href) {
       attributes: { 'data-meo-link-href': href }
     })
   );
+  if (Number.isFinite(openButtonPos)) {
+    builder.push(
+      Decoration.widget({
+        widget: new OpenLinkWidget(href),
+        side: 1
+      }).range(openButtonPos)
+    );
+  }
 }
 
-function addTrimmedUrlLinkMark(builder, from, to, rawUrl, href) {
+function addTrimmedUrlLinkMark(builder, from, to, rawUrl, href, showOpenButton = false) {
   if (!href) {
     return;
   }
@@ -457,7 +471,7 @@ function addTrimmedUrlLinkMark(builder, from, to, rawUrl, href) {
   if (range.to < to) {
     addRange(builder, range.to, to, linkBoundaryDeco);
   }
-  addLinkMark(builder, range.from, range.to, href);
+  addLinkMark(builder, range.from, range.to, href, showOpenButton ? range.to : null);
 }
 
 function findChildNode(node, name) {
@@ -510,6 +524,46 @@ class ClearLinkUrlWidget extends WidgetType {
         selection: { anchor: this.urlFrom }
       });
       view.focus();
+    });
+    return button;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+class OpenLinkWidget extends WidgetType {
+  href: string;
+
+  constructor(href: string) {
+    super();
+    this.href = href;
+  }
+
+  eq(other: WidgetType): boolean {
+    return other instanceof OpenLinkWidget && other.href === this.href;
+  }
+
+  toDOM(): HTMLElement {
+    const isDocumentFragment = this.href.startsWith('#');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'meo-md-link-open-btn';
+    button.title = isDocumentFragment ? 'Jump within document' : 'Open link';
+    button.setAttribute('aria-label', button.title);
+    button.appendChild(createElement(isDocumentFragment ? CornerDownRight : ExternalLink, { 'aria-hidden': 'true' }));
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      button.dispatchEvent(new CustomEvent('meo-open-link', {
+        bubbles: true,
+        detail: { href: this.href }
+      }));
     });
     return button;
   }
@@ -774,7 +828,10 @@ function addMarkdownLinkDecorations(builder, state, node, activeLines) {
     return;
   }
   const href = getNodeHref(state, urlNode);
-  addLinkMark(builder, textFrom, textTo, href);
+  const urlLine = state.doc.lineAt(urlNode.from);
+  const isActiveLine = activeLines.has(urlLine.number);
+  const containsImage = Boolean(findChildNode(node, 'Image'));
+  addLinkMark(builder, textFrom, textTo, href, !isActiveLine && !containsImage ? textTo : null);
 
   const localTarget = normalizeLocalLinkTarget(href);
   const localTargetStatus = isLikelyLocalLinkTarget(localTarget) ? getLocalLinkStatus(localTarget) : null;
@@ -791,8 +848,6 @@ function addMarkdownLinkDecorations(builder, state, node, activeLines) {
   if (!href) {
     return;
   }
-  const urlLine = state.doc.lineAt(urlNode.from);
-  const isActiveLine = activeLines.has(urlLine.number);
   if (!isActiveLine) {
     addRange(builder, urlNode.from, urlNode.to, hiddenLinkUrlDeco);
     return;
@@ -867,14 +922,15 @@ function getEmptyImageLinkUrl(state, node) {
   return isImageUrl(url) ? url : '';
 }
 
-function addAutolinkDecorations(builder, state, node) {
+function addAutolinkDecorations(builder, state, node, activeLines) {
   const urlNode = findChildNode(node, 'URL');
   if (!urlNode) {
     return;
   }
   const href = getNodeHref(state, urlNode);
   const rawUrl = state.doc.sliceString(urlNode.from, urlNode.to);
-  addTrimmedUrlLinkMark(builder, urlNode.from, urlNode.to, rawUrl, href);
+  const isActiveLine = activeLines.has(state.doc.lineAt(urlNode.from).number);
+  addTrimmedUrlLinkMark(builder, urlNode.from, urlNode.to, rawUrl, href, !isActiveLine);
 }
 
 function addWikiLinkDecorations(builder, state, node, activeLines) {
@@ -884,11 +940,18 @@ function addWikiLinkDecorations(builder, state, node, activeLines) {
   }
 
   const hasVisibleText = wikiLink.textFrom >= 0 && wikiLink.textTo > wikiLink.textFrom;
-  if (wikiLink.href && hasVisibleText) {
-    addLinkMark(builder, wikiLink.textFrom, wikiLink.textTo, wikiLink.href);
-  }
   const lineNo = state.doc.lineAt(node.from).number;
-  const marker = activeLines.has(lineNo)
+  const isActiveLine = activeLines.has(lineNo);
+  if (wikiLink.href && hasVisibleText) {
+    addLinkMark(
+      builder,
+      wikiLink.textFrom,
+      wikiLink.textTo,
+      wikiLink.href,
+      isActiveLine ? null : wikiLink.textTo
+    );
+  }
+  const marker = isActiveLine
     ? activeWikiLinkMarkerDeco
     : hasVisibleText
       ? wikiLinkMarkerDeco
@@ -896,7 +959,7 @@ function addWikiLinkDecorations(builder, state, node, activeLines) {
   addRange(builder, wikiLink.openFrom, wikiLink.openTo, marker);
   addRange(builder, wikiLink.closeFrom, wikiLink.closeTo, marker);
 
-  if (!activeLines.has(lineNo) && wikiLink.hideTo > wikiLink.hideFrom) {
+  if (!isActiveLine && wikiLink.hideTo > wikiLink.hideFrom) {
     addRange(builder, wikiLink.hideFrom, wikiLink.hideTo, hiddenLinkUrlDeco);
   }
 
@@ -954,8 +1017,14 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
 }
 
 function collectActiveLines(state: EditorState): Set<number> {
-  if (state.field(livePointerSelectionActiveField) || state.field(liveDocumentIdleField)) {
+  const pointerSelection = state.field(livePointerSelectionActiveField);
+  if (state.field(liveDocumentIdleField)) {
     return new Set();
+  }
+  if (pointerSelection.active) {
+    return pointerSelection.preservedLine === null
+      ? new Set()
+      : new Set([pointerSelection.preservedLine]);
   }
 
   const lines = new Set<number>();
@@ -1066,9 +1135,10 @@ function addFootnoteDefinitionDecorations(builder, state, footnotes, activeLines
     const hasResolvedTarget = definition.number !== null && definition.firstReferenceFrom !== null;
 
     if (showRawSyntax || !hasResolvedTarget) {
+      addRange(builder, definition.markerFrom, definition.markerFrom + 2, footnoteMarkerDeco);
+      addRange(builder, definition.markerFrom + 2, definition.colonFrom - 1, footnoteLiteralDeco);
+      addRange(builder, definition.colonFrom - 1, definition.colonFrom, footnoteMarkerDeco);
       addRange(builder, definition.colonFrom, definition.colonTo, activeLinkMarkerDeco);
-    }
-    if (showRawSyntax || !hasResolvedTarget) {
       continue;
     }
 
@@ -1117,6 +1187,18 @@ function addAtxHeadingPrefixMarkers(builder, state, from, activeLines) {
     return;
   }
   addRange(builder, line.from, prefixTo, markerDeco);
+}
+
+function isFootnoteDefinitionMarker(footnotes, from, to) {
+  return footnotes.definitions.some(
+    (definition) => from >= definition.markerFrom && to <= definition.colonTo
+  );
+}
+
+function isFootnoteDefinitionContent(footnotes, from, to) {
+  return footnotes.definitions.some(
+    (definition) => from >= definition.contentFrom && to <= definition.contentTo
+  );
 }
 
 function collectInlineMarkdownSyntaxRanges(text) {
@@ -1345,7 +1427,11 @@ function buildDecorations(state) {
         addRange(ranges, node.from, node.to, inlineStyleDecos.inlineCode);
       } else if (node.name === 'LinkLabel') {
         const parentName = node.node.parent?.name ?? '';
-        if (parentName === 'Link' && node.to - node.from >= 2) {
+        if (
+          parentName === 'Link' &&
+          node.to - node.from >= 2 &&
+          !isFootnoteDefinitionMarker(footnotes, node.from, node.to)
+        ) {
           const line = state.doc.lineAt(node.from);
           const markerDecoForLine = activeLines.has(line.number) ? activeLinkLabelBracketDeco : linkLabelBracketDeco;
           addRange(ranges, node.from, node.from + 1, markerDecoForLine);
@@ -1412,13 +1498,16 @@ function buildDecorations(state) {
         }
         addMarkdownLinkDecorations(ranges, state, node, activeLines);
       } else if (node.name === 'Autolink') {
-        addAutolinkDecorations(ranges, state, node);
+        addAutolinkDecorations(ranges, state, node, activeLines);
       } else if (node.name === 'URL') {
         const parentName = node.node.parent?.name ?? '';
-        if (parentName !== 'Link' && parentName !== 'Autolink') {
+        if (parentName === 'LinkReference' && isFootnoteDefinitionContent(footnotes, node.from, node.to)) {
+          addRange(ranges, node.from, node.to, footnoteDefinitionContentDeco);
+        } else if (parentName !== 'Link' && parentName !== 'Autolink') {
           const href = getNodeHref(state, node);
           const rawUrl = state.doc.sliceString(node.from, node.to);
-          addTrimmedUrlLinkMark(ranges, node.from, node.to, rawUrl, href);
+          const isActiveLine = activeLines.has(state.doc.lineAt(node.from).number);
+          addTrimmedUrlLinkMark(ranges, node.from, node.to, rawUrl, href, !isActiveLine);
         }
       } else if (node.name === 'Image') {
         const line = state.doc.lineAt(node.from);
@@ -1532,7 +1621,7 @@ function buildDecorations(state) {
   });
 
   addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, mermaidColonBlocks, diagnostics);
-  addRawFileUrlDecorations(ranges, state, tree, frontmatter);
+  addRawFileUrlDecorations(ranges, state, tree, activeLines, frontmatter);
   addSingleTildeStrikeDecorations(ranges, state, activeLines, strikeRanges, codeBlockLines);
   addListLineDecorations(ranges, state, indentSelectedLines, frontmatter, codeBlockLines);
   addMathDecorations(ranges, state, mathRanges, activeLines);
@@ -2265,7 +2354,7 @@ function hasBlockedRawFileUrlAncestor(tree, from, to) {
   return false;
 }
 
-function addRawFileUrlDecorations(builder, state, tree, frontmatter = null) {
+function addRawFileUrlDecorations(builder, state, tree, activeLines, frontmatter = null) {
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     const line = state.doc.line(lineNo);
     if (line.text.indexOf(fileSchemePrefix) === -1) {
@@ -2288,7 +2377,7 @@ function addRawFileUrlDecorations(builder, state, tree, frontmatter = null) {
       if (hasBlockedRawFileUrlAncestor(tree, from, to)) {
         continue;
       }
-      addLinkMark(builder, from, to, match.href);
+      addLinkMark(builder, from, to, match.href, activeLines.has(lineNo) ? null : to);
     }
   }
 }
@@ -2298,7 +2387,7 @@ function rangesOverlap(fromA, toA, fromB, toB) {
 }
 
 function overlapsSelection(state, from, to) {
-  if (state.field(livePointerSelectionActiveField) || state.field(liveDocumentIdleField)) {
+  if (state.field(livePointerSelectionActiveField).active || state.field(liveDocumentIdleField)) {
     return false;
   }
 

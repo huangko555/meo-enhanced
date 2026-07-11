@@ -1,6 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { extractHeadings, resolvedSyntaxTree } from './markdownSyntax';
 import { isWikiLinkNode, parseWikiLinkData } from './wikiLinks';
 import { findRawSourceUrlMatches, linkSchemeRe, normalizeSourceHref } from './rawUrls';
 
@@ -8,6 +8,8 @@ const linkReferenceCache = new WeakMap<object, Map<string, string>>();
 type LinkLookupOptions = {
   exactTextHit?: boolean;
 };
+type LinkPointerEvent = Pick<MouseEvent, 'clientX' | 'clientY' | 'target'>;
+type ModifierPointerEvent = Pick<MouseEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>;
 
 function childNodeByName(node: any, name: string): any | null {
   for (let child = node?.firstChild ?? null; child; child = child.nextSibling) {
@@ -23,6 +25,42 @@ function normalizeReferenceLabel(value: string): string {
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase();
+}
+
+function headingSlug(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{M}\p{N}_-]/gu, '');
+}
+
+function decodeFragment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+export function findDocumentFragmentPosition(state: EditorState, rawHref: string): number | null {
+  if (!rawHref.startsWith('#')) return null;
+  const decodedTarget = decodeFragment(rawHref.slice(1)).trim().toLowerCase();
+  if (!decodedTarget) return null;
+  const normalizedTarget = headingSlug(decodedTarget);
+  const slugCounts = new Map<string, number>();
+
+  for (const heading of extractHeadings(state)) {
+    const baseSlug = headingSlug(heading.text);
+    if (!baseSlug) continue;
+    const duplicateIndex = slugCounts.get(baseSlug) ?? 0;
+    slugCounts.set(baseSlug, duplicateIndex + 1);
+    const slug = duplicateIndex === 0 ? baseSlug : `${baseSlug}-${duplicateIndex}`;
+    if (decodedTarget === slug || normalizedTarget === slug) {
+      return heading.from;
+    }
+  }
+  return null;
 }
 
 function parseReferenceLabel(text: string): string {
@@ -184,7 +222,7 @@ function hrefFromSourceSyntaxAtPos(state: EditorState, pos: number, options: Lin
   return '';
 }
 
-export function isPrimaryModifierPointerClick(event: MouseEvent | PointerEvent): boolean {
+export function isPrimaryModifierPointerClick(event: ModifierPointerEvent): boolean {
   if (event.altKey || event.shiftKey) {
     return false;
   }
@@ -204,7 +242,7 @@ export function getDecoratedLinkHrefFromTarget(target: EventTarget | null): stri
 }
 
 export function getLinkHrefAtPointer(
-  event: MouseEvent | PointerEvent,
+  event: LinkPointerEvent,
   editorView: EditorView,
   options: LinkLookupOptions = {}
 ): string {
