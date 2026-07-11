@@ -160,12 +160,19 @@ const CONTENT_MAX_WIDTH_ENABLED_VALUE = '800px';
 const CONTENT_MAX_WIDTH_DISABLED_VALUE = '100%';
 const TOOLBAR_ALIGNING_CLASS = 'meo-toolbar-aligning';
 
-const outlineBtn = document.createElement('button');
-outlineBtn.type = 'button';
-outlineBtn.className = 'format-button toggle-button';
-outlineBtn.dataset.action = 'outline';
-outlineBtn.title = 'Toggle Outline';
-outlineBtn.appendChild(createElement(ListTree, { width: 18, height: 18 }));
+const createOutlineButton = (position: 'left' | 'right') => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'format-button toggle-button';
+  button.dataset.action = `outline-${position}`;
+  button.title = `Show Outline on ${position === 'left' ? 'Left' : 'Right'}`;
+  button.setAttribute('aria-label', button.title);
+  button.appendChild(createElement(ListTree, { width: 18, height: 18 }));
+  return button;
+};
+
+const outlineLeftBtn = createOutlineButton('left');
+const outlineBtn = createOutlineButton('right');
 
 const contentMaxWidthBtn = document.createElement('button');
 contentMaxWidthBtn.type = 'button';
@@ -214,8 +221,8 @@ const updateSpellCheckUI = () => {
 };
 
 const updateContentMaxWidthUI = () => {
-  contentMaxWidthBtn.classList.toggle('is-active', contentMaxWidthEnabled);
-  contentMaxWidthBtn.setAttribute('aria-pressed', contentMaxWidthEnabled ? 'true' : 'false');
+  contentMaxWidthBtn.classList.toggle('is-active', !contentMaxWidthEnabled);
+  contentMaxWidthBtn.setAttribute('aria-pressed', contentMaxWidthEnabled ? 'false' : 'true');
   contentMaxWidthBtn.title = contentMaxWidthEnabled ? 'Use Full Content Width' : 'Constrain Content Width';
 };
 
@@ -445,7 +452,26 @@ tableGrid.addEventListener('click', (event) => {
   editor.focus();
 });
 
-formatGroup.append(headingWrapper, bulletListBtn, numberedListBtn, taskBtn, separator, tableWrapper, codeBlockBtn, linkBtn, wikiLinkBtn, imageBtn, quoteBtn, hrBtn);
+const outlineLeftSeparator = document.createElement('div');
+outlineLeftSeparator.className = 'format-separator';
+outlineLeftSeparator.setAttribute('role', 'separator');
+
+formatGroup.append(
+  outlineLeftBtn,
+  outlineLeftSeparator,
+  headingWrapper,
+  bulletListBtn,
+  numberedListBtn,
+  taskBtn,
+  separator,
+  tableWrapper,
+  codeBlockBtn,
+  linkBtn,
+  wikiLinkBtn,
+  imageBtn,
+  quoteBtn,
+  hrBtn
+);
 
 const rightGroup = document.createElement('div');
 rightGroup.className = 'right-group';
@@ -494,7 +520,20 @@ const exportWrapper = document.createElement('div');
 exportWrapper.className = 'export-wrapper';
 exportWrapper.append(exportBtn, exportDropdownWrapper);
 
-rightGroup.append(findToggleBtn, contentMaxWidthBtn, outlineBtn, lineNumbersBtn, gitChangesGutterBtn, spellCheckBtn, exportWrapper);
+const outlineRightSeparator = document.createElement('div');
+outlineRightSeparator.className = 'format-separator';
+outlineRightSeparator.setAttribute('role', 'separator');
+
+rightGroup.append(
+  findToggleBtn,
+  outlineBtn,
+  outlineRightSeparator,
+  contentMaxWidthBtn,
+  lineNumbersBtn,
+  gitChangesGutterBtn,
+  spellCheckBtn,
+  exportWrapper
+);
 
 const modeGroup = document.createElement('div');
 modeGroup.className = 'mode-group';
@@ -548,6 +587,7 @@ const outlineController = createOutlineController({
   root,
   editorWrapper,
   outlineButton: outlineBtn,
+  outlineLeftButton: outlineLeftBtn,
   getEditor: () => editor,
   onVisibilityRequest: (visible) => {
     vscode.postMessage({ type: 'setOutlineVisible', visible });
@@ -2000,9 +2040,17 @@ exportHtmlOption.addEventListener('click', () => {
 exportPdfOption.addEventListener('click', () => {
   exportHandler.requestExport('pdf');
 });
-outlineBtn.addEventListener('click', () => {
-  setOutlineVisible(!outlineController.isVisible());
-});
+const showOutlineAt = (position: 'left' | 'right') => {
+  if (outlineController.isVisible() && outlineController.getPosition() === position) {
+    setOutlineVisible(false);
+    return;
+  }
+  outlineController.requestPosition(position);
+  setOutlineVisible(true);
+};
+
+outlineLeftBtn.addEventListener('click', () => showOutlineAt('left'));
+outlineBtn.addEventListener('click', () => showOutlineAt('right'));
 contentMaxWidthBtn.addEventListener('click', () => {
   setContentMaxWidthEnabled(!contentMaxWidthEnabled);
 });

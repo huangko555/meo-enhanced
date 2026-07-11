@@ -30,6 +30,7 @@ interface OutlineControllerOptions {
   root: HTMLElement;
   editorWrapper: HTMLElement;
   outlineButton: HTMLElement;
+  outlineLeftButton?: HTMLElement;
   getEditor: () => EditorApi | null;
   onVisibilityRequest?: (visible: boolean) => void;
   onPositionRequest?: (position: OutlinePosition) => void;
@@ -63,6 +64,8 @@ interface OutlineController {
   setVisible: (nextVisible: boolean) => void;
   refresh: () => void;
   setPosition: (position: OutlinePosition) => void;
+  requestPosition: (position: OutlinePosition) => void;
+  getPosition: () => OutlinePosition;
   setMode: (mode: OutlineMode) => void;
   setWidth: (width: number) => void;
   isVisible: () => boolean;
@@ -144,6 +147,7 @@ export function createOutlineController({
   root,
   editorWrapper,
   outlineButton,
+  outlineLeftButton,
   getEditor,
   onVisibilityRequest,
   onPositionRequest,
@@ -165,10 +169,13 @@ export function createOutlineController({
   const positionButton = iconButton(PanelLeft, 'toggle-position', '切换到左侧');
   const closeButton = iconButton(X, 'close', '关闭目录');
   closeButton.classList.add('outline-close-button');
-  outlineHeader.append(outlineLabel, collapseButton, expandButton, modeButton, positionButton, closeButton);
+  outlineHeader.append(outlineLabel, collapseButton, expandButton, positionButton, modeButton, closeButton);
 
   const outlineContent = document.createElement('div');
   outlineContent.className = 'outline-content';
+  const visibleRangeHighlight = document.createElement('div');
+  visibleRangeHighlight.className = 'outline-visible-range';
+  visibleRangeHighlight.hidden = true;
   const outlineResizer = document.createElement('div');
   outlineResizer.className = 'outline-resizer';
   outlineResizer.title = '拖动调整目录宽度';
@@ -313,6 +320,20 @@ export function createOutlineController({
       item.classList.add('is-visible');
       if (!visibleItems.includes(item)) visibleItems.push(item);
     }
+    const visibleRows = visibleItems
+      .map((item) => item.closest<HTMLElement>('.outline-row'))
+      .filter((row): row is HTMLElement => row !== null);
+    if (visibleRows.length === 0) {
+      visibleRangeHighlight.hidden = true;
+    } else {
+      const contentRect = outlineContent.getBoundingClientRect();
+      const rowRects = visibleRows.map((row) => row.getBoundingClientRect());
+      const top = Math.min(...rowRects.map((rect) => rect.top)) - contentRect.top + outlineContent.scrollTop;
+      const bottom = Math.max(...rowRects.map((rect) => rect.bottom)) - contentRect.top + outlineContent.scrollTop;
+      visibleRangeHighlight.style.top = `${Math.round(top)}px`;
+      visibleRangeHighlight.style.height = `${Math.ceil(bottom - top)}px`;
+      visibleRangeHighlight.hidden = false;
+    }
     const fallbackItem = findVisibleItem(activeHeadingIndex);
     scrollItemsIntoView(visibleItems.length > 0 ? visibleItems : fallbackItem ? [fallbackItem] : []);
   };
@@ -420,7 +441,7 @@ export function createOutlineController({
   };
 
   const renderTree = () => {
-    outlineContent.replaceChildren();
+    outlineContent.replaceChildren(visibleRangeHighlight);
     if (currentTreeRoots.length === 0) {
       const emptyMsg = document.createElement('div');
       emptyMsg.className = 'outline-empty';
@@ -474,13 +495,18 @@ export function createOutlineController({
   };
 
   const updateOutlineUI = () => {
-    outlineButton.classList.toggle('is-active', visible);
+    const updateToolbarButton = (button: HTMLElement, active: boolean) => {
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    };
+    updateToolbarButton(outlineButton, visible && position === 'right');
+    if (outlineLeftButton) updateToolbarButton(outlineLeftButton, visible && position === 'left');
     root.classList.toggle('outline-visible', visible);
     editorWrapper.dataset.outlineMode = mode;
     editorWrapper.dataset.outlinePosition = position;
     applyOutlineWidth();
-    updateModeButton();
     updatePositionButton();
+    updateModeButton();
   };
 
   const setVisible = (nextVisible: boolean) => {
@@ -536,8 +562,8 @@ export function createOutlineController({
           .map((node) => node.key)
       );
       renderTree();
-    } else if (action === 'toggle-mode') setMode(mode === 'floating' ? 'fixed' : 'floating');
-    else if (action === 'toggle-position') requestPosition(position === 'left' ? 'right' : 'left');
+    } else if (action === 'toggle-position') requestPosition(position === 'left' ? 'right' : 'left');
+    else if (action === 'toggle-mode') setMode(mode === 'floating' ? 'fixed' : 'floating');
   });
 
   outlineContent.addEventListener('click', (event) => {
@@ -616,7 +642,7 @@ export function createOutlineController({
   document.addEventListener('pointerdown', (event) => {
     if (!visible || mode !== 'floating') return;
     const target = event.target instanceof Node ? event.target : null;
-    if (!target || outlineSidebar.contains(target) || outlineButton.contains(target)) return;
+    if (!target || outlineSidebar.contains(target) || outlineButton.contains(target) || outlineLeftButton?.contains(target)) return;
     requestVisible(false);
   }, true);
 
@@ -646,5 +672,15 @@ export function createOutlineController({
 
   updateOutlineUI();
 
-  return { sidebar: outlineSidebar, setVisible, refresh, setPosition, setMode, setWidth, isVisible: () => visible };
+  return {
+    sidebar: outlineSidebar,
+    setVisible,
+    refresh,
+    setPosition,
+    requestPosition,
+    getPosition: () => position,
+    setMode,
+    setWidth,
+    isVisible: () => visible
+  };
 }
