@@ -257,6 +257,7 @@ export function createEditor({
   let tableInteractionClassFrame = 0;
   let onTableInteraction = null;
   let onWidgetOpenLink = null;
+  let onWidgetActivateImage = null;
   let onTableSelectionChange = null;
   let onScroll = null;
   let onWindowPointerUp = null;
@@ -1850,6 +1851,16 @@ export function createEditor({
     openHref(href, view);
   };
   view.dom.addEventListener('meo-open-link', onWidgetOpenLink);
+  onWidgetActivateImage = (event) => {
+    const from = event?.detail?.from;
+    if (!Number.isInteger(from)) {
+      return;
+    }
+    const anchor = Math.max(0, Math.min(from, view.state.doc.length));
+    view.dispatch({ selection: { anchor } });
+    view.focus();
+  };
+  view.dom.addEventListener('meo-activate-image', onWidgetActivateImage);
   onTableSelectionChange = () => {
     emitSelectionChange();
   };
@@ -2012,6 +2023,10 @@ export function createEditor({
       if (onWidgetOpenLink) {
         view.dom.removeEventListener('meo-open-link', onWidgetOpenLink);
         onWidgetOpenLink = null;
+      }
+      if (onWidgetActivateImage) {
+        view.dom.removeEventListener('meo-activate-image', onWidgetActivateImage);
+        onWidgetActivateImage = null;
       }
       if (onTableSelectionChange) {
         view.dom.removeEventListener('meo-table-selection-change', onTableSelectionChange);

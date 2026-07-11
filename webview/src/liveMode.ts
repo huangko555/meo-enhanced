@@ -1488,7 +1488,7 @@ function buildDecorations(state) {
             if (!linkSelection) {
               ranges.push(
                 Decoration.replace({
-                  widget: new ImageWidget(emptyImageUrl, '', ''),
+                  widget: new ImageWidget(emptyImageUrl, '', '', node.from),
                   inclusive: false
                 }).range(node.from, node.to)
               );
@@ -1519,7 +1519,7 @@ function buildDecorations(state) {
           if (url) {
             ranges.push(
               Decoration.widget({
-                widget: new ImageWidget(url, altText, linkUrl),
+                widget: new ImageWidget(url, altText, linkUrl, node.from),
                 side: 1,
                 block: true
               }).range(line.to)
@@ -1532,7 +1532,7 @@ function buildDecorations(state) {
         if (url) {
           ranges.push(
             Decoration.replace({
-              widget: new ImageWidget(url, altText, linkUrl),
+              widget: new ImageWidget(url, altText, linkUrl, node.from),
               inclusive: false
             }).range(node.from, node.to)
           );

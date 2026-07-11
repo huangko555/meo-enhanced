@@ -13,6 +13,16 @@ const failedImages = new Set<string>();
 const pendingImageResolvers = new Map<string, ((value: string) => void)[]>();
 const imageRequestById = new Map<string, string>();
 let imageRequestCounter = 0;
+const IMAGE_DOUBLE_CLICK_WINDOW_MS = 400;
+const IMAGE_DOUBLE_CLICK_MAX_DISTANCE_PX = 8;
+type ImageDoubleClickCandidate = {
+  x: number;
+  y: number;
+  openFullscreen: () => void;
+  timeout: number;
+};
+let pendingImageDoubleClick: ImageDoubleClickCandidate | null = null;
+let imageDoubleClickListenerInitialized = false;
 
 let imageSaveRequestCounter = 0;
 const pendingImageSaveRequests = new Map<string, {
@@ -35,6 +45,39 @@ const imageExtensionByMime: Record<string, string> = {
 
 export function initializeImageHandling(vscode: any): void {
   vscodeApi = vscode;
+  if (imageDoubleClickListenerInitialized) return;
+  imageDoubleClickListenerInitialized = true;
+  window.addEventListener('click', (event) => {
+    const pending = pendingImageDoubleClick;
+    if (!pending) return;
+    clearPendingImageDoubleClick();
+    if (
+      event.ctrlKey ||
+      event.metaKey ||
+      Math.abs(event.clientX - pending.x) > IMAGE_DOUBLE_CLICK_MAX_DISTANCE_PX ||
+      Math.abs(event.clientY - pending.y) > IMAGE_DOUBLE_CLICK_MAX_DISTANCE_PX
+    ) return;
+    event.preventDefault();
+    event.stopPropagation();
+    pending.openFullscreen();
+  }, true);
+}
+
+function clearPendingImageDoubleClick(): void {
+  if (!pendingImageDoubleClick) return;
+  window.clearTimeout(pendingImageDoubleClick.timeout);
+  pendingImageDoubleClick = null;
+}
+
+function registerImageDoubleClickCandidate(event: MouseEvent, openFullscreen: () => void): void {
+  clearPendingImageDoubleClick();
+  const pending = {
+    x: event.clientX,
+    y: event.clientY,
+    openFullscreen,
+    timeout: window.setTimeout(clearPendingImageDoubleClick, IMAGE_DOUBLE_CLICK_WINDOW_MS)
+  };
+  pendingImageDoubleClick = pending;
 }
 
 const openImageExternally = (url: string): void => {
@@ -215,15 +258,22 @@ export class ImageWidget extends WidgetType {
   url: string;
   altText: string;
   linkUrl: string;
+  sourceFrom: number | null;
   fullscreenOverlay: HTMLElement | null;
   fullscreenCleanup: (() => void) | null;
   exitFullscreenHandler: ((event: KeyboardEvent) => void) | null;
 
-  constructor(url: string | null | undefined, altText: string | null | undefined, linkUrl: string | null | undefined) {
+  constructor(
+    url: string | null | undefined,
+    altText: string | null | undefined,
+    linkUrl: string | null | undefined,
+    sourceFrom: number | null = null
+  ) {
     super();
     this.url = url?.trim() ?? '';
     this.altText = altText ?? '';
     this.linkUrl = linkUrl?.trim() ?? '';
+    this.sourceFrom = Number.isInteger(sourceFrom) ? sourceFrom : null;
     this.fullscreenOverlay = null;
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
@@ -237,7 +287,8 @@ export class ImageWidget extends WidgetType {
       other instanceof ImageWidget &&
       other.url === this.url &&
       other.altText === this.altText &&
-      other.linkUrl === this.linkUrl
+      other.linkUrl === this.linkUrl &&
+      other.sourceFrom === this.sourceFrom
     );
   }
 
@@ -254,6 +305,7 @@ export class ImageWidget extends WidgetType {
       this.renderFallback(container);
       return container;
     }
+    this.attachImagePointerInteractions(container);
 
     const cachedImage = loadedImages.get(this.url);
     if (cachedImage) {
@@ -283,11 +335,41 @@ export class ImageWidget extends WidgetType {
   }
 
   createDisplayImage(cachedImage: HTMLImageElement): HTMLImageElement {
+    let img: HTMLImageElement;
     if (!cachedImage.isConnected) {
       cachedImage.alt = this.altText;
-      return cachedImage;
+      img = cachedImage;
+    } else {
+      img = this.createLoadedImage(cachedImage.currentSrc || cachedImage.src);
     }
-    return this.createLoadedImage(cachedImage.currentSrc || cachedImage.src);
+    return img;
+  }
+
+  attachImagePointerInteractions(container: HTMLElement): void {
+    const isControlTarget = (target: EventTarget | null) => (
+      target instanceof Element && target.closest('.meo-md-image-controls') !== null
+    );
+    const activateSource = () => {
+      if (this.sourceFrom === null) return;
+      container.dispatchEvent(new CustomEvent('meo-activate-image', {
+        bubbles: true,
+        detail: { from: this.sourceFrom }
+      }));
+    };
+    container.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || isControlTarget(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    container.addEventListener('click', (event) => {
+      if (event.ctrlKey || event.metaKey || isControlTarget(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const img = container.querySelector<HTMLImageElement>('.meo-md-image-img');
+      const openFullscreen = () => this.openFullscreen(img?.currentSrc || img?.src || this.url);
+      activateSource();
+      registerImageDoubleClickCandidate(event, openFullscreen);
+    });
   }
 
   preloadImage(): Promise<HTMLImageElement | null> {
@@ -395,6 +477,7 @@ export class ImageWidget extends WidgetType {
 
   openFullscreen(src: string): void {
     if (!src || this.fullscreenOverlay) return;
+    clearPendingImageDoubleClick();
 
     const overlay = document.createElement('div');
     overlay.className = 'meo-md-image-fullscreen-scrim';
@@ -411,7 +494,7 @@ export class ImageWidget extends WidgetType {
     let panY = 0;
     let dragging = false;
     let dragged = false;
-    let startedOnImage = false;
+    let closeOnClick = false;
     let startX = 0;
     let startY = 0;
     let lastX = 0;
@@ -456,7 +539,7 @@ export class ImageWidget extends WidgetType {
       if (event.button !== 0 || (event.target instanceof Element && event.target.closest('.meo-md-image-fullscreen-controls'))) return;
       dragging = true;
       dragged = false;
-      startedOnImage = event.target === image;
+      closeOnClick = false;
       startX = event.clientX;
       startY = event.clientY;
       lastX = event.clientX;
@@ -476,16 +559,21 @@ export class ImageWidget extends WidgetType {
       applyTransform();
     };
     const onPointerUp = (event: PointerEvent) => {
-      const shouldExit = startedOnImage && !dragged;
+      if (!dragging) return;
+      closeOnClick = !dragged;
       dragging = false;
       viewer.classList.remove('is-dragging');
       if (viewer.hasPointerCapture(event.pointerId)) viewer.releasePointerCapture(event.pointerId);
-      if (shouldExit) this.closeFullscreen();
     };
     const onPointerCancel = (event: PointerEvent) => {
       dragging = false;
       viewer.classList.remove('is-dragging');
       if (viewer.hasPointerCapture(event.pointerId)) viewer.releasePointerCapture(event.pointerId);
+    };
+    const onClick = (event: MouseEvent) => {
+      if (!closeOnClick || (event.target instanceof Element && event.target.closest('.meo-md-image-fullscreen-controls'))) return;
+      closeOnClick = false;
+      this.closeFullscreen();
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -496,6 +584,7 @@ export class ImageWidget extends WidgetType {
     viewer.addEventListener('pointermove', onPointerMove);
     viewer.addEventListener('pointerup', onPointerUp);
     viewer.addEventListener('pointercancel', onPointerCancel);
+    viewer.addEventListener('click', onClick);
     viewer.addEventListener('wheel', onWheel, { passive: false });
     overlay.appendChild(viewer);
     document.body.appendChild(overlay);
@@ -510,11 +599,13 @@ export class ImageWidget extends WidgetType {
       viewer.removeEventListener('pointermove', onPointerMove);
       viewer.removeEventListener('pointerup', onPointerUp);
       viewer.removeEventListener('pointercancel', onPointerCancel);
+      viewer.removeEventListener('click', onClick);
       viewer.removeEventListener('wheel', onWheel);
     };
   }
 
   closeFullscreen(): void {
+    clearPendingImageDoubleClick();
     this.fullscreenCleanup?.();
     this.fullscreenCleanup = null;
     this.fullscreenOverlay?.remove();

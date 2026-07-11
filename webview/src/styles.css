@@ -396,7 +396,7 @@ body {
   height: 18px;
   margin: 3px 4px;
   align-self: center;
-  background-color: var(--vscode-panel-border);
+  background-color: #474b50;
 }
 
 .heading-wrapper {
