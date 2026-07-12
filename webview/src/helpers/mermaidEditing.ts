@@ -2,7 +2,7 @@ import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/s
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
-import { MermaidDiagramWidget } from './mermaidDiagram';
+import { getCachedMermaidPreviewHeight, MermaidDiagramWidget } from './mermaidDiagram';
 import { createCopyCodeButton } from './codeBlockControls';
 
 export type MermaidBlockMode = 'preview' | 'split' | 'source';
@@ -371,6 +371,10 @@ class MermaidEditingController {
     this.root.classList.toggle('is-split', mode === 'split');
     this.root.classList.toggle('is-source', mode === 'source');
     if (mode === 'split') {
+      const preferredHeight = getCachedMermaidPreviewHeight(this.block.diagramText);
+      if (preferredHeight) {
+        this.root.style.setProperty('--meo-mermaid-preview-preferred-height', `${preferredHeight}px`);
+      }
       if (!this.previewShell) {
         this.previewShell = document.createElement('div');
         this.previewShell.className = 'meo-mermaid-preview-shell';
@@ -381,6 +385,7 @@ class MermaidEditingController {
       }
       this.renderPreview();
     } else if (this.previewShell) {
+      this.root.style.removeProperty('--meo-mermaid-preview-preferred-height');
       this.destroyPreview();
       this.previewShell.remove();
       this.previewShell = null;
@@ -429,7 +434,8 @@ class MermaidEditingController {
     this.previewWidget = new MermaidDiagramWidget(
       this.block.diagramText,
       this.block.startLine,
-      this.block.endLine
+      this.block.endLine,
+      false
     );
     this.previewSticky.replaceChildren(this.previewWidget.toDOM());
   }

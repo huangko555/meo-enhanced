@@ -59,7 +59,9 @@ async function main() {
         initialize() {},
         async render(_id: string, text: string) {
           const height = text.includes('TALL_PREVIEW') ? 900 : 120;
-          return { svg: `<svg width="320" height="${height}" viewBox="0 0 320 ${height}"><text x="10" y="30">${text.length}</text></svg>` };
+          const width = text.includes('TALL_PREVIEW') ? 320 : 1200;
+          const resolvedHeight = text.includes('TALL_PREVIEW') ? height : 400;
+          return { svg: `<svg width="${width}" height="${resolvedHeight}" viewBox="0 0 ${width} ${resolvedHeight}"><text x="10" y="30">${text.length}</text></svg>` };
         }
       };
       (window as any).__collectMermaidCodeStyle = (blockSelector: string) => {
@@ -147,6 +149,7 @@ async function main() {
         sourcePaneHeight: source?.getBoundingClientRect().height ?? 0,
         sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
         previewHeight: previewBlock?.getBoundingClientRect().height ?? 0,
+        previewFrameHeight: sticky?.getBoundingClientRect().height ?? 0,
         stickyPosition: sticky ? getComputedStyle(sticky).position : null,
         hasInternalVerticalScroll: Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 1),
         nextLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
@@ -166,7 +169,8 @@ async function main() {
     if (
       splitMode.sourceHeight <= splitMode.previewHeight ||
       Math.abs(splitMode.sourcePaneHeight - splitMode.sourceHeight) > 1 ||
-      Math.abs(splitMode.previewHeight - defaultMode.previewHeight) > 1
+      splitMode.previewHeight >= defaultMode.previewHeight ||
+      Math.abs(splitMode.previewFrameHeight - defaultMode.previewHeight) > 2
     ) {
       throw new Error(`Split mode did not preserve natural pane heights: ${JSON.stringify({ defaultMode, splitMode })}`);
     }

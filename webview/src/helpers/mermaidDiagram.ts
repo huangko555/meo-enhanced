@@ -25,6 +25,7 @@ let mermaidRuntimePromise: Promise<MermaidRuntime> | null = null;
 const MERMAID_CACHE_LIMIT = 100;
 const mermaidCache = new Map<string, MermaidResult>();
 const mermaidRenderInFlight = new Map<string, Promise<MermaidResult>>();
+const mermaidPreviewHeightCache = new Map<string, number>();
 let mermaidIdCounter = 0;
 const MERMAID_MATH_CLASS = 'meoMath';
 const MERMAID_DIAGRAM_START_RE =
@@ -49,6 +50,15 @@ const MERMAID_DISPLAY_MATH_THEME_CSS =
   '.nodeLabel foreignObject{overflow:visible !important;}' +
   '.katex-display{margin:0 !important;}' +
   '.katex{line-height:1 !important;}';
+
+function mermaidPreviewHeightCacheKey(diagramText: string, themeSignature: string): string {
+  return `${themeSignature}\n${diagramText}`;
+}
+
+export function getCachedMermaidPreviewHeight(diagramText: string): number | null {
+  const key = mermaidPreviewHeightCacheKey(diagramText, getMermaidThemeConfig().signature);
+  return mermaidPreviewHeightCache.get(key) ?? null;
+}
 
 function resolveCssColor(value: string, fallback: string, property: 'color' | 'backgroundColor' = 'backgroundColor'): string {
   const trimmed = value.trim();
@@ -488,8 +498,10 @@ export class MermaidDiagramWidget extends WidgetType {
   fullscreenCleanup: (() => void) | null;
   exitFullscreenHandler: ((e: KeyboardEvent) => void) | null;
   themeSignature: string;
+  cachePreviewHeight: boolean;
+  previewResizeObserver: ResizeObserver | null;
 
-  constructor(diagramText: string, startLine: number = 0, endLine: number = 0) {
+  constructor(diagramText: string, startLine: number = 0, endLine: number = 0, cachePreviewHeight = true) {
     super();
     this.diagramText = diagramText;
     this.startLine = startLine;
@@ -510,6 +522,8 @@ export class MermaidDiagramWidget extends WidgetType {
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
     this.themeSignature = getMermaidThemeConfig().signature;
+    this.cachePreviewHeight = cachePreviewHeight;
+    this.previewResizeObserver = null;
   }
 
   eq(other: WidgetType): boolean {
@@ -535,6 +549,20 @@ export class MermaidDiagramWidget extends WidgetType {
     container.dataset.meoRenderedBlockKind = 'mermaid';
     if (this.isDisplayMath) {
       container.classList.add('meo-mermaid-math-block');
+    }
+    if (this.cachePreviewHeight && typeof ResizeObserver !== 'undefined') {
+      const cacheKey = mermaidPreviewHeightCacheKey(this.diagramText, this.themeSignature);
+      this.previewResizeObserver = new ResizeObserver(() => {
+        const height = container.getBoundingClientRect().height;
+        if (height > 0) {
+          mermaidPreviewHeightCache.delete(cacheKey);
+          mermaidPreviewHeightCache.set(cacheKey, height);
+          if (mermaidPreviewHeightCache.size > MERMAID_CACHE_LIMIT) {
+            mermaidPreviewHeightCache.delete(mermaidPreviewHeightCache.keys().next().value);
+          }
+        }
+      });
+      this.previewResizeObserver.observe(container);
     }
 
     const cached = getCachedMermaidResult(this.diagramText);
@@ -1156,6 +1184,8 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   destroy() {
+    this.previewResizeObserver?.disconnect();
+    this.previewResizeObserver = null;
     if (this.inlineCleanup) {
       this.inlineCleanup();
       this.inlineCleanup = null;

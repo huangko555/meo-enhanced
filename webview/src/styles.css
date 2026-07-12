@@ -3013,7 +3013,7 @@ body.outline-resizing {
 
 .cm-editor .meo-mermaid-editing-block {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  grid-template-columns: minmax(280px, 2fr) minmax(320px, 3fr);
   align-items: stretch;
   width: 100%;
   color: var(--meo-foreground);
@@ -3047,6 +3047,9 @@ body.outline-resizing {
 }
 
 .cm-editor .meo-mermaid-preview-sticky {
+  display: flex;
+  align-items: center;
+  min-height: min(var(--meo-mermaid-preview-preferred-height, 0px), 60vh);
   overflow: hidden;
 }
 
@@ -3116,6 +3119,7 @@ body.outline-resizing {
   .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-sticky {
     position: relative;
     top: 0;
+    min-height: 0;
   }
 }
 
