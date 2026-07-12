@@ -1617,6 +1617,26 @@ body {
   padding-left: 2ch;
 }
 
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-md-code-line-numbered {
+  padding-left: calc(var(--meo-code-line-number-width) + 4ch);
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block.meo-md-code-line-numbered::before {
+  position: absolute;
+  left: 1ch;
+  box-sizing: border-box;
+  width: calc(var(--meo-code-line-number-width) + 1ch);
+  padding-right: 1ch;
+  color: var(--meo-semantic-mutedForeground, var(--vscode-editorLineNumber-foreground));
+  text-align: right;
+  content: attr(data-meo-code-line-number);
+  pointer-events: none;
+  user-select: none;
+  border-right: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
+  opacity: 0.8;
+  -webkit-user-select: none;
+}
+
 .cm-editor.meo-mode-live .cm-line.meo-md-list-line {
   --meo-list-hanging-indent: 0ch;
   --meo-effective-list-hanging-indent: var(--meo-list-hanging-indent);

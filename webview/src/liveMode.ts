@@ -9,6 +9,7 @@ import {
   getFencedCodeInfo,
   addFenceOpeningLineMarker,
   addCodeLanguageLabel,
+  addCodeBlockLineNumbers,
   addTopLineCopyButton,
   addTopLinePillLabel,
   addMermaidDiagram,
@@ -1417,6 +1418,7 @@ function buildDecorations(state) {
             return;
           }
         }
+        addCodeBlockLineNumbers(ranges, state, node);
         addCopyCodeButton(ranges, state, node.from, node.to);
       }
 

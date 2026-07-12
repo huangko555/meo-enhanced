@@ -606,6 +606,31 @@ export function getFencedCodeInfo(state: EditorState, node: any): string | null 
   return codeInfo;
 }
 
+export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node: any): void {
+  const startLine = state.doc.lineAt(node.from);
+  const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
+  const firstContentLine = node.name === 'FencedCode' ? startLine.number + 1 : startLine.number;
+  const lastChild = node.node.lastChild;
+  const hasClosingFence = node.name === 'FencedCode'
+    && lastChild?.name === 'CodeMark'
+    && state.doc.lineAt(lastChild.from).number === endLine.number;
+  const lastContentLine = endLine.number - (hasClosingFence ? 1 : 0);
+  const lineCount = Math.max(0, lastContentLine - firstContentLine + 1);
+  const numberWidth = Math.max(2, String(lineCount).length);
+
+  for (let lineNo = firstContentLine; lineNo <= lastContentLine; lineNo += 1) {
+    const line = state.doc.line(lineNo);
+    const codeLineNumber = lineNo - firstContentLine + 1;
+    builder.push(Decoration.line({
+      class: 'meo-md-code-line-numbered',
+      attributes: {
+        'data-meo-code-line-number': String(codeLineNumber),
+        style: `--meo-code-line-number-width:${numberWidth}ch`
+      }
+    }).range(line.from));
+  }
+}
+
 class CopyCodeButtonWidget extends WidgetType {
   codeContent: string;
 
