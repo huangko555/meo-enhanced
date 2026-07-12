@@ -88,6 +88,18 @@ async function main() {
       positionEditor.view.dispatch({ changes: { from: 0, insert: 'intro\n' } });
       await waitFrames();
       const lineAfter = document.querySelector('.meo-md-html-table-line-number')?.textContent ?? '';
+      const regularLineNumber = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'))
+        .find((item) => item.textContent?.trim() === '1');
+      const tableLineNumber = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-line-number'))
+        .find((item) => item.textContent?.trim() === '2');
+      const textRight = (element: HTMLElement): number => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return range.getBoundingClientRect().right;
+      };
+      const lineNumberRightDelta = regularLineNumber && tableLineNumber
+        ? textRight(tableLineNumber) - textRight(regularLineNumber)
+        : null;
       const lineNumberNodeBeforeScroll = document.querySelector('.meo-md-html-table-line-number');
       positionEditor.view.scrollDOM.dispatchEvent(new Event('scroll'));
       await waitFrames();
@@ -146,6 +158,7 @@ async function main() {
         editingPreviewText,
         lineBefore,
         lineAfter,
+        lineNumberRightDelta,
         lineNumberNodeReused,
         interactionActive,
         borderlessActiveMatch,
@@ -158,6 +171,9 @@ async function main() {
     const failures: string[] = [];
     if (result.editingPreviewText !== 'asdx') failures.push(`editing preview remained ${JSON.stringify(result.editingPreviewText)}`);
     if (result.lineBefore !== '1' || result.lineAfter !== '2') failures.push(`table line number stayed ${result.lineBefore} -> ${result.lineAfter}`);
+    if (result.lineNumberRightDelta === null || Math.abs(result.lineNumberRightDelta) > 0.5) {
+      failures.push(`table line number right edge was offset by ${result.lineNumberRightDelta}px`);
+    }
     if (!result.lineNumberNodeReused) failures.push('table line number DOM was recreated during scroll');
     if (result.interactionActive) failures.push('table interaction remained active after keyboard focus exit');
     if (!result.borderlessActiveMatch) failures.push('borderless table did not render the active search match');

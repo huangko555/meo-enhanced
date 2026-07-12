@@ -667,57 +667,6 @@ body {
   background-color: var(--meo-semantic-codeCopyHoverBackground);
 }
 
-.cm-editor .meo-code-block-collapse-footer {
-  box-sizing: border-box;
-  display: flex;
-  justify-content: center;
-  width: 100%;
-  padding: 5px 2ch 7px;
-  background: var(--meo-code-background);
-  border-top: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
-}
-
-.cm-editor .meo-code-block-collapse-floating-host {
-  position: absolute;
-  right: 2ch;
-  bottom: 8px;
-  z-index: 12;
-  pointer-events: none;
-}
-
-.cm-editor .meo-code-block-collapse-floating {
-  pointer-events: none;
-}
-
-.cm-editor .meo-code-block-collapse-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 24px;
-  max-width: 100%;
-  padding: 3px 8px;
-  overflow: hidden;
-  color: var(--meo-semantic-codeCopyForeground);
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-  pointer-events: auto;
-  background: var(--meo-semantic-codeCopyBackground);
-  border: 1px solid transparent;
-  border-radius: 4px;
-}
-
-.cm-editor .meo-code-block-collapse-button:hover,
-.cm-editor .meo-code-block-collapse-button:focus-visible {
-  color: var(--meo-semantic-codeCopyHoverForeground);
-  background: var(--meo-semantic-codeCopyHoverBackground);
-  border-color: color-mix(in srgb, var(--meo-foreground) 20%, transparent);
-  outline: none;
-}
-
 .meo-code-language-label {
   position: absolute;
   top: 4px;
@@ -3004,7 +2953,7 @@ body.outline-resizing {
 
 .cm-editor .meo-md-html-table-line-number {
   position: absolute;
-  right: 8px;
+  right: 5px;
   color: var(--meo-semantic-mutedForeground, var(--vscode-editorLineNumber-foreground));
   font: inherit;
   line-height: var(--meo-active-editor-line-height);
