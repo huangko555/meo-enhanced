@@ -62,6 +62,53 @@ async function main() {
           return { svg: `<svg width="320" height="${height}" viewBox="0 0 320 ${height}"><text x="10" y="30">${text.length}</text></svg>` };
         }
       };
+      (window as any).__collectMermaidCodeStyle = (blockSelector: string) => {
+        const block = document.querySelector<HTMLElement>(blockSelector)!;
+        const editor = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor')!;
+        const sourceLines = editor ? Array.from(editor.querySelectorAll<HTMLElement>('.cm-line')) : [];
+        const sourceLine = sourceLines[1] ?? sourceLines[0];
+        const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+          .find((line) => line.textContent?.includes('normalCodeStyle'))!;
+        const sourceStyle = sourceLine ? getComputedStyle(sourceLine) : null;
+        const normalStyle = normalLine ? getComputedStyle(normalLine) : null;
+        const firstOpaqueBackground = (element: HTMLElement | null): string | null => {
+          for (let current = element; current && block?.contains(current); current = current.parentElement) {
+            const background = getComputedStyle(current).backgroundColor;
+            if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
+              return background;
+            }
+          }
+          return null;
+        };
+        return {
+          sourceStyle: [
+            firstOpaqueBackground(sourceLine),
+            sourceStyle?.fontFamily ?? null,
+            sourceStyle?.fontSize ?? null,
+            sourceStyle?.fontWeight ?? null,
+            sourceStyle?.lineHeight ?? null
+          ],
+          normalStyle: [
+            normalStyle?.backgroundColor ?? null,
+            normalStyle?.fontFamily ?? null,
+            normalStyle?.fontSize ?? null,
+            normalStyle?.fontWeight ?? null,
+            normalStyle?.lineHeight ?? null
+          ],
+          sourceLayers: {
+            editor: editor?.querySelector<HTMLElement>('.cm-editor')
+              ? getComputedStyle(editor.querySelector<HTMLElement>('.cm-editor')!).backgroundColor
+              : null,
+            scroller: editor?.querySelector<HTMLElement>('.cm-scroller')
+              ? getComputedStyle(editor.querySelector<HTMLElement>('.cm-scroller')!).backgroundColor
+              : null,
+            content: editor?.querySelector<HTMLElement>('.cm-content')
+              ? getComputedStyle(editor.querySelector<HTMLElement>('.cm-content')!).backgroundColor
+              : null,
+            line: sourceStyle?.backgroundColor ?? null
+          }
+        };
+      };
       const lines = Array.from({ length: 48 }, (_, index) => `node${index + 1} --> node${index + 2}`);
       const text = ['```mermaid', 'graph TD', ...lines, '```', '', 'after'].join('\n');
       (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
@@ -293,23 +340,7 @@ async function main() {
       const sourceSticky = block?.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!;
       const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
       const previewSticky = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!;
-      const sourceLines = block
-        ? Array.from(block.querySelectorAll<HTMLElement>('.meo-mermaid-source-editor .cm-line'))
-        : [];
-      const sourceLine = sourceLines[1] ?? sourceLines[0];
-      const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
-        .find((line) => line.textContent?.includes('normalCodeStyle'))!;
-      const sourceStyle = sourceLine ? getComputedStyle(sourceLine) : null;
-      const normalStyle = normalLine ? getComputedStyle(normalLine) : null;
-      const firstOpaqueBackground = (element: HTMLElement | null): string | null => {
-        for (let current = element; current && block?.contains(current); current = current.parentElement) {
-          const background = getComputedStyle(current).backgroundColor;
-          if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
-            return background;
-          }
-        }
-        return null;
-      };
+      const codeStyle = (window as any).__collectMermaidCodeStyle('.meo-mermaid-editing-block.is-split');
       return {
         blockHeight: block?.getBoundingClientRect().height ?? 0,
         sourcePaneHeight: sourcePane?.getBoundingClientRect().height ?? 0,
@@ -317,20 +348,7 @@ async function main() {
         sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
         previewHeight: preview?.getBoundingClientRect().height ?? 0,
         previewNaturalHeight: previewSticky?.getBoundingClientRect().height ?? 0,
-        sourceStyle: [
-          firstOpaqueBackground(sourceLine),
-          sourceStyle?.fontFamily ?? null,
-          sourceStyle?.fontSize ?? null,
-          sourceStyle?.fontWeight ?? null,
-          sourceStyle?.lineHeight ?? null
-        ],
-        normalStyle: [
-          normalStyle?.backgroundColor ?? null,
-          normalStyle?.fontFamily ?? null,
-          normalStyle?.fontSize ?? null,
-          normalStyle?.fontWeight ?? null,
-          normalStyle?.lineHeight ?? null
-        ]
+        ...codeStyle
       };
     });
     if (
@@ -373,61 +391,17 @@ async function main() {
     const shortSourceLayout = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source')!;
       const editor = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor')!;
-      const innerEditor = editor?.querySelector<HTMLElement>('.cm-editor')!;
-      const scroller = editor?.querySelector<HTMLElement>('.cm-scroller')!;
-      const content = editor?.querySelector<HTMLElement>('.cm-content')!;
-      const sourceLines = editor ? Array.from(editor.querySelectorAll<HTMLElement>('.cm-line')) : [];
-      const sourceLine = sourceLines[1] ?? sourceLines[0];
-      const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
-        .find((line) => line.textContent?.includes('normalCodeStyle'))!;
-      const sourceStyle = sourceLine ? getComputedStyle(sourceLine) : null;
-      const normalStyle = normalLine ? getComputedStyle(normalLine) : null;
-      const firstOpaqueBackground = (element: HTMLElement | null): string | null => {
-        for (let current = element; current && block?.contains(current); current = current.parentElement) {
-          const background = getComputedStyle(current).backgroundColor;
-          if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
-            return background;
-          }
-        }
-        return null;
-      };
+      const codeStyle = (window as any).__collectMermaidCodeStyle('.meo-mermaid-editing-block.is-source');
       return {
         blockHeight: block?.getBoundingClientRect().height ?? 0,
         editorHeight: editor?.getBoundingClientRect().height ?? 0,
-        sourceBackground: innerEditor ? getComputedStyle(innerEditor).backgroundColor : null,
-        sourceScrollerBackground: scroller ? getComputedStyle(scroller).backgroundColor : null,
-        sourceContentBackground: content ? getComputedStyle(content).backgroundColor : null,
-        sourceLineBackground: sourceStyle?.backgroundColor ?? null,
-        sourceVisibleBackground: firstOpaqueBackground(sourceLine),
-        normalBackground: normalStyle?.backgroundColor ?? null,
-        sourceFontFamily: sourceStyle?.fontFamily ?? null,
-        normalFontFamily: normalStyle?.fontFamily ?? null,
-        sourceFontSize: sourceStyle?.fontSize ?? null,
-        normalFontSize: normalStyle?.fontSize ?? null,
-        sourceFontWeight: sourceStyle?.fontWeight ?? null,
-        normalFontWeight: normalStyle?.fontWeight ?? null,
-        sourceLineHeight: sourceStyle?.lineHeight ?? null,
-        normalLineHeight: normalStyle?.lineHeight ?? null
+        ...codeStyle
       };
     });
     if (shortSourceLayout.blockHeight - shortSourceLayout.editorHeight > 1) {
       throw new Error(`Short Mermaid source mode contains vertical filler: ${JSON.stringify(shortSourceLayout)}`);
     }
-    const sourceStyleSignature = [
-      shortSourceLayout.sourceVisibleBackground,
-      shortSourceLayout.sourceFontFamily,
-      shortSourceLayout.sourceFontSize,
-      shortSourceLayout.sourceFontWeight,
-      shortSourceLayout.sourceLineHeight
-    ];
-    const normalStyleSignature = [
-      shortSourceLayout.normalBackground,
-      shortSourceLayout.normalFontFamily,
-      shortSourceLayout.normalFontSize,
-      shortSourceLayout.normalFontWeight,
-      shortSourceLayout.normalLineHeight
-    ];
-    if (JSON.stringify(sourceStyleSignature) !== JSON.stringify(normalStyleSignature)) {
+    if (JSON.stringify(shortSourceLayout.sourceStyle) !== JSON.stringify(shortSourceLayout.normalStyle)) {
       throw new Error(`Mermaid source style differs from normal code: ${JSON.stringify(shortSourceLayout)}`);
     }
 
