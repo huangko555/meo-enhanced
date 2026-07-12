@@ -1632,7 +1632,6 @@ body {
   content: attr(data-meo-code-line-number);
   pointer-events: none;
   user-select: none;
-  border-right: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
   opacity: 0.8;
   -webkit-user-select: none;
 }
