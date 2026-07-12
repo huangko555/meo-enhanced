@@ -60,6 +60,15 @@ async function main() {
         'const first = 1;',
         '',
         'const third = "a long logical line that wraps without gaining another number";',
+        'line four',
+        'line five',
+        'line six',
+        'line seven',
+        'line eight',
+        'line nine',
+        'line ten',
+        'line eleven',
+        'line twelve',
         '```',
         '',
         '```',
@@ -78,7 +87,7 @@ async function main() {
         'tail one',
         'tail two'
       ].join('\n');
-      (window as any).CodeBlockLineNumbersHarness.createEditor({
+      (window as any).__codeBlockLineNumbersEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
         parent: document.getElementById('app')!,
         text,
         initialMode: 'live',
@@ -89,16 +98,40 @@ async function main() {
 
     const result = await page.evaluate(() => {
       const lines = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-code-line-numbered'));
+      const doubleDigitLine = lines.find((line) => line.dataset.meoCodeLineNumber === '10')!;
+      const pseudoStyle = getComputedStyle(doubleDigitLine, '::before');
+      const lineStyle = getComputedStyle(doubleDigitLine);
+      const probe = document.createElement('span');
+      probe.style.position = 'fixed';
+      probe.style.visibility = 'hidden';
+      probe.style.font = lineStyle.font;
+      probe.textContent = '10';
+      document.body.appendChild(probe);
+      const requiredNumberWidth = probe.getBoundingClientRect().width;
+      probe.remove();
+      const declaredWidth = Number.parseFloat(pseudoStyle.width);
+      const availableNumberWidth = pseudoStyle.boxSizing === 'border-box'
+        ? declaredWidth
+          - Number.parseFloat(pseudoStyle.paddingLeft)
+          - Number.parseFloat(pseudoStyle.paddingRight)
+          - Number.parseFloat(pseudoStyle.borderLeftWidth)
+          - Number.parseFloat(pseudoStyle.borderRightWidth)
+        : declaredWidth;
       return {
         numbers: lines.map((line) => line.dataset.meoCodeLineNumber ?? ''),
         text: lines.map((line) => line.textContent ?? ''),
         pseudoContent: lines.map((line) => getComputedStyle(line, '::before').content),
+        availableNumberWidth,
+        requiredNumberWidth,
         mermaidNumbered: Array.from(document.querySelectorAll<HTMLElement>('.meo-md-code-line-numbered'))
           .some((line) => line.textContent?.includes('graph TD') || line.textContent?.includes('A-->B'))
       };
     });
 
-    const expectedNumbers = ['1', '2', '3', '1', '1', '2', '1', '2'];
+    const expectedNumbers = [
+      ...Array.from({ length: 12 }, (_, index) => String(index + 1)),
+      '1', '1', '2', '1', '2'
+    ];
     if (JSON.stringify(result.numbers) !== JSON.stringify(expectedNumbers)) {
       throw new Error(`Unexpected code line numbers: ${JSON.stringify(result.numbers)}`);
     }
@@ -108,8 +141,65 @@ async function main() {
     if (result.pseudoContent.some((content) => content === 'none' || content === 'normal')) {
       throw new Error(`Code line number pseudo-elements were not rendered: ${JSON.stringify(result.pseudoContent)}`);
     }
+    if (result.availableNumberWidth + 0.25 < result.requiredNumberWidth) {
+      throw new Error(
+        `Two-digit code line number was clipped: ${result.availableNumberWidth}px available, ${result.requiredNumberWidth}px required`
+      );
+    }
     if (result.mermaidNumbered) {
       throw new Error('Rendered Mermaid source received code line numbers');
+    }
+
+    await page.evaluate(() => {
+      (window as any).__codeBlockLineNumbersEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const content = Array.from({ length: 1000 }, (_, index) => `line ${index + 1}`);
+      const text = ['```ts', ...content, '```'].join('\n');
+      (window as any).__codeBlockLineNumbersEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page, 8);
+    await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      editor.view.scrollDOM.scrollTop = editor.view.scrollDOM.scrollHeight;
+    });
+    await waitForFrames(page, 12);
+
+    const fourDigitResult = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-code-line-numbered'))
+        .find((candidate) => candidate.dataset.meoCodeLineNumber === '1000');
+      if (!line) return null;
+      const pseudoStyle = getComputedStyle(line, '::before');
+      const lineStyle = getComputedStyle(line);
+      const probe = document.createElement('span');
+      probe.style.position = 'fixed';
+      probe.style.visibility = 'hidden';
+      probe.style.font = lineStyle.font;
+      probe.textContent = '1000';
+      document.body.appendChild(probe);
+      const requiredNumberWidth = probe.getBoundingClientRect().width;
+      probe.remove();
+      const declaredWidth = Number.parseFloat(pseudoStyle.width);
+      const availableNumberWidth = pseudoStyle.boxSizing === 'border-box'
+        ? declaredWidth
+          - Number.parseFloat(pseudoStyle.paddingLeft)
+          - Number.parseFloat(pseudoStyle.paddingRight)
+          - Number.parseFloat(pseudoStyle.borderLeftWidth)
+          - Number.parseFloat(pseudoStyle.borderRightWidth)
+        : declaredWidth;
+      return { availableNumberWidth, requiredNumberWidth };
+    });
+    if (!fourDigitResult) {
+      throw new Error('Four-digit code line number 1000 was not rendered');
+    }
+    if (fourDigitResult.availableNumberWidth + 0.25 < fourDigitResult.requiredNumberWidth) {
+      throw new Error(
+        `Four-digit code line number was clipped: ${fourDigitResult.availableNumberWidth}px available, ${fourDigitResult.requiredNumberWidth}px required`
+      );
     }
     console.log('code block line number checks passed');
   } finally {
