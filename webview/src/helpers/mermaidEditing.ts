@@ -254,6 +254,7 @@ class MermaidEditingController {
   private mode: Exclude<MermaidBlockMode, 'preview'>;
   private root: MermaidEditingBlockElement;
   private sourcePane: HTMLElement;
+  private sourceSticky: HTMLElement;
   private sourceHost: HTMLElement;
   private innerView: EditorView;
   private previewShell: HTMLElement | null = null;
@@ -276,9 +277,12 @@ class MermaidEditingController {
     this.root.dataset.meoMermaidAnchor = String(block.anchor);
     this.sourcePane = document.createElement('div');
     this.sourcePane.className = 'meo-mermaid-source-pane';
+    this.sourceSticky = document.createElement('div');
+    this.sourceSticky.className = 'meo-mermaid-source-sticky';
     this.sourceHost = document.createElement('div');
     this.sourceHost.className = 'meo-mermaid-source-editor';
-    this.sourcePane.appendChild(this.sourceHost);
+    this.sourceSticky.appendChild(this.sourceHost);
+    this.sourcePane.appendChild(this.sourceSticky);
     this.root.appendChild(this.sourcePane);
 
     this.innerView = new EditorView({

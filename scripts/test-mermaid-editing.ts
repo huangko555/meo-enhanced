@@ -50,7 +50,7 @@ async function main() {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-code-background:#292d31; --meo-semantic-mutedForeground:#8b949e; --meo-semantic-codeCopyForeground:#79b8ff; --meo-semantic-codeCopyBackground:transparent; --meo-semantic-codeCopyHoverForeground:#79b8ff; --meo-semantic-codeCopyHoverBackground:#343a40; --vscode-editor-font-family:monospace; --vscode-editor-font-size:14px; --vscode-editor-line-height:20px; }'
+      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-code-background:#292d31; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:"Courier New"; --meo-font-source-weight:500; --meo-font-source-size:14px; --meo-semantic-mutedForeground:#8b949e; --meo-semantic-codeCopyForeground:#79b8ff; --meo-semantic-codeCopyBackground:transparent; --meo-semantic-codeCopyHoverForeground:#79b8ff; --meo-semantic-codeCopyHoverBackground:#343a40; --vscode-editor-font-family:monospace; --vscode-editor-font-size:14px; --vscode-editor-line-height:20px; }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -58,10 +58,11 @@ async function main() {
       (window as any).mermaid = {
         initialize() {},
         async render(_id: string, text: string) {
-          return { svg: `<svg viewBox="0 0 320 120"><text x="10" y="30">${text.length}</text></svg>` };
+          const height = text.includes('TALL_PREVIEW') ? 900 : 120;
+          return { svg: `<svg width="320" height="${height}" viewBox="0 0 320 ${height}"><text x="10" y="30">${text.length}</text></svg>` };
         }
       };
-      const lines = Array.from({ length: 24 }, (_, index) => `node${index + 1} --> node${index + 2}`);
+      const lines = Array.from({ length: 48 }, (_, index) => `node${index + 1} --> node${index + 2}`);
       const text = ['```mermaid', 'graph TD', ...lines, '```', '', 'after'].join('\n');
       (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
         parent: document.getElementById('app')!,
@@ -74,6 +75,7 @@ async function main() {
 
     const defaultMode = await page.evaluate(() => ({
       preview: Boolean(document.querySelector('.meo-mermaid-block')),
+      previewHeight: document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect().height ?? 0,
       editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
       buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
     }));
@@ -86,12 +88,18 @@ async function main() {
     const splitMode = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
       const source = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
+      const sourceSticky = block?.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!;
       const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
       const sticky = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!;
+      const previewBlock = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky > .meo-mermaid-block')!;
       const scroller = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor .cm-scroller')!;
       return {
         sourceText: block?.querySelector('.meo-mermaid-source-editor')?.textContent ?? '',
         heightDelta: source && preview ? Math.abs(source.getBoundingClientRect().height - preview.getBoundingClientRect().height) : null,
+        sourceHeight: sourceSticky?.getBoundingClientRect().height ?? 0,
+        sourcePaneHeight: source?.getBoundingClientRect().height ?? 0,
+        sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
+        previewHeight: previewBlock?.getBoundingClientRect().height ?? 0,
         stickyPosition: sticky ? getComputedStyle(sticky).position : null,
         hasInternalVerticalScroll: Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 1),
         nextLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
@@ -100,21 +108,58 @@ async function main() {
     if (!splitMode.sourceText.includes('node24 --> node25') || splitMode.heightDelta === null || splitMode.heightDelta > 1) {
       throw new Error(`Split mode did not show equal-height complete source: ${JSON.stringify(splitMode)}`);
     }
-    if (splitMode.hasInternalVerticalScroll || splitMode.stickyPosition !== 'sticky' || splitMode.nextLabel !== 'Show Mermaid code only') {
+    if (
+      splitMode.hasInternalVerticalScroll ||
+      splitMode.sourceStickyPosition !== 'sticky' ||
+      splitMode.stickyPosition !== 'sticky' ||
+      splitMode.nextLabel !== 'Show Mermaid code only'
+    ) {
       throw new Error(`Unexpected split mode controls or scrolling: ${JSON.stringify(splitMode)}`);
     }
+    if (
+      splitMode.sourceHeight <= splitMode.previewHeight ||
+      Math.abs(splitMode.sourcePaneHeight - splitMode.sourceHeight) > 1 ||
+      Math.abs(splitMode.previewHeight - defaultMode.previewHeight) > 1
+    ) {
+      throw new Error(`Split mode did not preserve natural pane heights: ${JSON.stringify({ defaultMode, splitMode })}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
+      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
+      editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewportTop + 240;
+    });
+    await waitForFrames(page);
+    const codeTallerScroll = await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
+      const sourceTop = document.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!.getBoundingClientRect().top;
+      const previewTop = document.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!.getBoundingClientRect().top;
+      return { viewportTop, sourceTop, previewTop };
+    });
+    if (
+      Math.abs(codeTallerScroll.previewTop - (codeTallerScroll.viewportTop + 12)) > 3 ||
+      codeTallerScroll.sourceTop >= codeTallerScroll.viewportTop - 100
+    ) {
+      throw new Error(`Short preview did not stay visible while source scrolled: ${JSON.stringify(codeTallerScroll)}`);
+    }
+    await page.evaluate(() => {
+      (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop = 0;
+    });
+    await waitForFrames(page);
 
     await page.click('.meo-mermaid-source-editor .cm-content');
     await page.keyboard.down('Control');
     await page.keyboard.press('End');
     await page.keyboard.up('Control');
     await page.keyboard.press('Enter');
-    await page.keyboard.type('node25 --> node26');
+    await page.keyboard.type('EDITED_NODE --> EDITED_TARGET');
     await waitForFrames(page);
     const editedText = await page.evaluate(() =>
       (window as any).__mermaidEditingEditor.view.state.doc.toString()
     );
-    if (!editedText.includes('node25 --> node26')) {
+    if (!editedText.includes('EDITED_NODE --> EDITED_TARGET')) {
       throw new Error('Editing split source did not update the outer Markdown document');
     }
     await page.evaluate(() => (window as any).__mermaidEditingEditor.undo());
@@ -122,7 +167,7 @@ async function main() {
     const undoText = await page.evaluate(() =>
       (window as any).__mermaidEditingEditor.view.state.doc.toString()
     );
-    if (undoText.includes('node25 --> node26')) {
+    if (undoText.includes('EDITED_NODE --> EDITED_TARGET')) {
       throw new Error('Outer editor undo did not revert Mermaid source editing');
     }
     await page.evaluate(() => (window as any).__mermaidEditingEditor.redo());
@@ -130,7 +175,7 @@ async function main() {
     const redoText = await page.evaluate(() =>
       (window as any).__mermaidEditingEditor.view.state.doc.toString()
     );
-    if (!redoText.includes('node25 --> node26')) {
+    if (!redoText.includes('EDITED_NODE --> EDITED_TARGET')) {
       throw new Error('Outer editor redo did not restore Mermaid source editing');
     }
 
@@ -200,13 +245,190 @@ async function main() {
       return {
         columns: block ? getComputedStyle(block).gridTemplateColumns.split(' ').length : 0,
         previewBelowSource: Boolean(source && preview && preview.getBoundingClientRect().top >= source.getBoundingClientRect().bottom - 1),
+        sourceStickyPosition: source
+          ? getComputedStyle(source.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!).position
+          : null,
         stickyPosition: preview
           ? getComputedStyle(preview.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!).position
           : null
       };
     });
-    if (narrowLayout.columns !== 1 || !narrowLayout.previewBelowSource || narrowLayout.stickyPosition !== 'relative') {
+    if (
+      narrowLayout.columns !== 1 ||
+      !narrowLayout.previewBelowSource ||
+      narrowLayout.sourceStickyPosition !== 'relative' ||
+      narrowLayout.stickyPosition !== 'relative'
+    ) {
       throw new Error(`Unexpected narrow Mermaid split layout: ${JSON.stringify(narrowLayout)}`);
+    }
+
+    await page.setViewport({ width: 1100, height: 720, deviceScaleFactor: 1 });
+    await page.evaluate(() => {
+      const previous = (window as any).__mermaidEditingEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          '```mermaid',
+          'graph TD',
+          'A --> B',
+          '%% TALL_PREVIEW',
+          '```',
+          '',
+          '```typescript',
+          'const normalCodeStyle = true;',
+          '```'
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page);
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+    const shortSplitLayout = await page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
+      const sourcePane = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
+      const sourceSticky = block?.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!;
+      const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
+      const previewSticky = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!;
+      const sourceLines = block
+        ? Array.from(block.querySelectorAll<HTMLElement>('.meo-mermaid-source-editor .cm-line'))
+        : [];
+      const sourceLine = sourceLines[1] ?? sourceLines[0];
+      const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+        .find((line) => line.textContent?.includes('normalCodeStyle'))!;
+      const sourceStyle = sourceLine ? getComputedStyle(sourceLine) : null;
+      const normalStyle = normalLine ? getComputedStyle(normalLine) : null;
+      const firstOpaqueBackground = (element: HTMLElement | null): string | null => {
+        for (let current = element; current && block?.contains(current); current = current.parentElement) {
+          const background = getComputedStyle(current).backgroundColor;
+          if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
+            return background;
+          }
+        }
+        return null;
+      };
+      return {
+        blockHeight: block?.getBoundingClientRect().height ?? 0,
+        sourcePaneHeight: sourcePane?.getBoundingClientRect().height ?? 0,
+        sourceHeight: sourceSticky?.getBoundingClientRect().height ?? 0,
+        sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
+        previewHeight: preview?.getBoundingClientRect().height ?? 0,
+        previewNaturalHeight: previewSticky?.getBoundingClientRect().height ?? 0,
+        sourceStyle: [
+          firstOpaqueBackground(sourceLine),
+          sourceStyle?.fontFamily ?? null,
+          sourceStyle?.fontSize ?? null,
+          sourceStyle?.fontWeight ?? null,
+          sourceStyle?.lineHeight ?? null
+        ],
+        normalStyle: [
+          normalStyle?.backgroundColor ?? null,
+          normalStyle?.fontFamily ?? null,
+          normalStyle?.fontSize ?? null,
+          normalStyle?.fontWeight ?? null,
+          normalStyle?.lineHeight ?? null
+        ]
+      };
+    });
+    if (
+      shortSplitLayout.previewNaturalHeight <= shortSplitLayout.sourceHeight ||
+      Math.abs(shortSplitLayout.blockHeight - shortSplitLayout.previewNaturalHeight) > 1 ||
+      Math.abs(shortSplitLayout.sourcePaneHeight - shortSplitLayout.blockHeight) > 1 ||
+      shortSplitLayout.sourceStickyPosition !== 'sticky'
+    ) {
+      throw new Error(`Short Mermaid split mode did not preserve natural pane heights: ${JSON.stringify(shortSplitLayout)}`);
+    }
+    if (JSON.stringify(shortSplitLayout.sourceStyle) !== JSON.stringify(shortSplitLayout.normalStyle)) {
+      throw new Error(`Mermaid split source style differs from normal code: ${JSON.stringify(shortSplitLayout)}`);
+    }
+    await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
+      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
+      editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewportTop + 240;
+    });
+    await waitForFrames(page);
+    const previewTallerScroll = await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      const viewportTop = editor.view.scrollDOM.getBoundingClientRect().top;
+      const sourceTop = document.querySelector<HTMLElement>('.meo-mermaid-source-sticky')!.getBoundingClientRect().top;
+      const previewTop = document.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!.getBoundingClientRect().top;
+      return { viewportTop, sourceTop, previewTop };
+    });
+    if (
+      Math.abs(previewTallerScroll.sourceTop - (previewTallerScroll.viewportTop + 12)) > 3 ||
+      previewTallerScroll.previewTop >= previewTallerScroll.viewportTop - 100
+    ) {
+      throw new Error(`Short source did not stay visible while preview scrolled: ${JSON.stringify(previewTallerScroll)}`);
+    }
+    await page.evaluate(() => {
+      (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop = 0;
+    });
+    await waitForFrames(page);
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+    const shortSourceLayout = await page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-source')!;
+      const editor = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor')!;
+      const innerEditor = editor?.querySelector<HTMLElement>('.cm-editor')!;
+      const scroller = editor?.querySelector<HTMLElement>('.cm-scroller')!;
+      const content = editor?.querySelector<HTMLElement>('.cm-content')!;
+      const sourceLines = editor ? Array.from(editor.querySelectorAll<HTMLElement>('.cm-line')) : [];
+      const sourceLine = sourceLines[1] ?? sourceLines[0];
+      const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+        .find((line) => line.textContent?.includes('normalCodeStyle'))!;
+      const sourceStyle = sourceLine ? getComputedStyle(sourceLine) : null;
+      const normalStyle = normalLine ? getComputedStyle(normalLine) : null;
+      const firstOpaqueBackground = (element: HTMLElement | null): string | null => {
+        for (let current = element; current && block?.contains(current); current = current.parentElement) {
+          const background = getComputedStyle(current).backgroundColor;
+          if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
+            return background;
+          }
+        }
+        return null;
+      };
+      return {
+        blockHeight: block?.getBoundingClientRect().height ?? 0,
+        editorHeight: editor?.getBoundingClientRect().height ?? 0,
+        sourceBackground: innerEditor ? getComputedStyle(innerEditor).backgroundColor : null,
+        sourceScrollerBackground: scroller ? getComputedStyle(scroller).backgroundColor : null,
+        sourceContentBackground: content ? getComputedStyle(content).backgroundColor : null,
+        sourceLineBackground: sourceStyle?.backgroundColor ?? null,
+        sourceVisibleBackground: firstOpaqueBackground(sourceLine),
+        normalBackground: normalStyle?.backgroundColor ?? null,
+        sourceFontFamily: sourceStyle?.fontFamily ?? null,
+        normalFontFamily: normalStyle?.fontFamily ?? null,
+        sourceFontSize: sourceStyle?.fontSize ?? null,
+        normalFontSize: normalStyle?.fontSize ?? null,
+        sourceFontWeight: sourceStyle?.fontWeight ?? null,
+        normalFontWeight: normalStyle?.fontWeight ?? null,
+        sourceLineHeight: sourceStyle?.lineHeight ?? null,
+        normalLineHeight: normalStyle?.lineHeight ?? null
+      };
+    });
+    if (shortSourceLayout.blockHeight - shortSourceLayout.editorHeight > 1) {
+      throw new Error(`Short Mermaid source mode contains vertical filler: ${JSON.stringify(shortSourceLayout)}`);
+    }
+    const sourceStyleSignature = [
+      shortSourceLayout.sourceVisibleBackground,
+      shortSourceLayout.sourceFontFamily,
+      shortSourceLayout.sourceFontSize,
+      shortSourceLayout.sourceFontWeight,
+      shortSourceLayout.sourceLineHeight
+    ];
+    const normalStyleSignature = [
+      shortSourceLayout.normalBackground,
+      shortSourceLayout.normalFontFamily,
+      shortSourceLayout.normalFontSize,
+      shortSourceLayout.normalFontWeight,
+      shortSourceLayout.normalLineHeight
+    ];
+    if (JSON.stringify(sourceStyleSignature) !== JSON.stringify(normalStyleSignature)) {
+      throw new Error(`Mermaid source style differs from normal code: ${JSON.stringify(shortSourceLayout)}`);
     }
 
     console.log('Mermaid editing checks passed');
