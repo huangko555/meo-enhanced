@@ -658,6 +658,7 @@ body {
   z-index: 10;
   cursor: pointer;
   padding: 2px 8px;
+  font-size: 14px;
   color: var(--meo-semantic-codeCopyForeground);
   background-color: var(--meo-semantic-codeCopyBackground);
 }
@@ -673,6 +674,7 @@ body {
   left: calc(2ch);
   z-index: 10;
   padding: 2px 5px;
+  font-size: 14px;
   color: var(--meo-semantic-codeLanguageLabelForeground);
   background-color: var(--meo-semantic-codeLanguageLabelBackground);
   pointer-events: none;
@@ -3060,6 +3062,19 @@ body.outline-resizing {
   align-items: center;
   justify-content: center;
   width: 100%;
+  min-height: inherit;
+}
+
+.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+}
+
+.cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper svg {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
 }
 
 .cm-editor .meo-mermaid-source-editor > .cm-editor {
