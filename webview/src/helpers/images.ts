@@ -1,5 +1,5 @@
 import { EditorView, WidgetType } from '@codemirror/view';
-import { createElement, ExternalLink, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
+import { AppWindow, CornerDownRight, createElement, ExternalLink, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
@@ -412,7 +412,13 @@ export class ImageWidget extends WidgetType {
       event.stopPropagation();
     });
     container.addEventListener('click', (event) => {
-      if (event.ctrlKey || event.metaKey || isControlTarget(event.target)) return;
+      if (isControlTarget(event.target)) return;
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openLinkedImage(container);
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       const img = container.querySelector<HTMLImageElement>('.meo-md-image-img');
@@ -420,6 +426,14 @@ export class ImageWidget extends WidgetType {
       activateSource();
       registerImageDoubleClickCandidate(event, openFullscreen);
     });
+  }
+
+  openLinkedImage(target: HTMLElement): void {
+    if (!this.linkUrl) return;
+    target.dispatchEvent(new CustomEvent('meo-open-link', {
+      bubbles: true,
+      detail: { href: this.linkUrl }
+    }));
   }
 
   preloadImage(): Promise<HTMLImageElement | null> {
@@ -497,12 +511,28 @@ export class ImageWidget extends WidgetType {
     const controls = document.createElement('div');
     controls.className = 'meo-md-image-controls';
 
+    if (this.linkUrl) {
+      const isDocumentFragment = this.linkUrl.startsWith('#');
+      const openLink = document.createElement('button');
+      openLink.type = 'button';
+      openLink.className = 'meo-md-image-control-btn';
+      openLink.title = isDocumentFragment ? 'Jump within document' : 'Open link';
+      openLink.setAttribute('aria-label', openLink.title);
+      openLink.appendChild(createElement(isDocumentFragment ? CornerDownRight : ExternalLink, { width: 16, height: 16 }));
+      openLink.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openLinkedImage(openLink);
+      });
+      controls.appendChild(openLink);
+    }
+
     const openExternally = document.createElement('button');
     openExternally.type = 'button';
     openExternally.className = 'meo-md-image-control-btn';
     openExternally.title = 'Open with system app';
     openExternally.setAttribute('aria-label', 'Open with system app');
-    openExternally.appendChild(createElement(ExternalLink, { width: 16, height: 16 }));
+    openExternally.appendChild(createElement(AppWindow, { width: 16, height: 16 }));
     openExternally.addEventListener('pointerdown', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -581,7 +611,7 @@ export class ImageWidget extends WidgetType {
       panY = 0;
       applyTransform();
     });
-    addButton(ExternalLink, 'Open with system app', () => openImageExternally(this.url));
+    addButton(AppWindow, 'Open with system app', () => openImageExternally(this.url));
     addButton(X, 'Exit fullscreen', () => this.closeFullscreen());
     viewer.appendChild(controls);
 

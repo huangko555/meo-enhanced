@@ -63,21 +63,31 @@ async function main() {
       });
       const editor = harness.createEditor({
         parent: document.getElementById('app')!,
-        text: 'before\n![missing](missing.jpg) ![wide](wide.avif)![logo](logo.png)\nafter target',
+        text: 'before\n![missing](missing.jpg) [![wide](wide.avif)](#after-target)![logo](logo.png)\nafter target',
         initialMode: 'live',
         onApplyChanges() {}
       });
       (window as any).__imageLayoutEditor = editor;
+      const openedLinks: string[] = [];
+      editor.view.dom.addEventListener('meo-open-link', (event: Event) => {
+        const href = (event as CustomEvent<{ href?: string }>).detail?.href;
+        if (href) openedLinks.push(href);
+      });
       for (let index = 0; index < 12; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
       const loaded = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-image-img'));
       const wide = loaded.find((image) => image.getBoundingClientRect().width > image.getBoundingClientRect().height);
       if (!wide) throw new Error('Wide image did not render in the reproduction fixture');
+      const openLink = wide.closest<HTMLElement>('.meo-md-image')
+        ?.querySelector<HTMLButtonElement>('button[title="Jump within document"]');
+      if (!openLink) throw new Error('Linked image did not render its document jump button');
+      openLink.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       const rect = wide.getBoundingClientRect();
       return {
         imageCount: loaded.length,
         fallbackCount: document.querySelectorAll('.meo-md-image-fallback').length,
+        openedLinks,
         widePoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
       };
     });
@@ -125,6 +135,9 @@ async function main() {
     const failures: string[] = [];
     if (initial.imageCount !== 2 || initial.fallbackCount !== 1) {
       failures.push(`fixture rendered ${initial.imageCount} images and ${initial.fallbackCount} fallbacks`);
+    }
+    if (initial.openedLinks.length !== 1 || initial.openedLinks[0] !== '#after-target') {
+      failures.push(`linked image opened ${JSON.stringify(initial.openedLinks)} instead of #after-target`);
     }
     if (afterClick.selectedLine !== 3 || afterClick.sourceStillExpanded) {
       failures.push(
