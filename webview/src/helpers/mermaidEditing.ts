@@ -371,7 +371,11 @@ class MermaidEditingController {
     this.root.classList.toggle('is-split', mode === 'split');
     this.root.classList.toggle('is-source', mode === 'source');
     if (mode === 'split') {
-      const preferredHeight = getCachedMermaidPreviewHeight(this.block.diagramText);
+      const preferredHeight = getCachedMermaidPreviewHeight(
+        this.outerView,
+        this.block.diagramText,
+        this.block.startLine
+      );
       if (preferredHeight) {
         this.root.style.setProperty('--meo-mermaid-preview-preferred-height', `${preferredHeight}px`);
       }
@@ -435,7 +439,7 @@ class MermaidEditingController {
       this.block.diagramText,
       this.block.startLine,
       this.block.endLine,
-      false
+      { cachePreviewHeight: false }
     );
     this.previewSticky.replaceChildren(this.previewWidget.toDOM());
   }
