@@ -1,8 +1,9 @@
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
-import { EditorView, Decoration, WidgetType, keymap, lineNumbers } from '@codemirror/view';
+import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
 import { MermaidDiagramWidget } from './mermaidDiagram';
+import { createCopyCodeButton } from './codeBlockControls';
 
 export type MermaidBlockMode = 'preview' | 'split' | 'source';
 
@@ -32,6 +33,29 @@ type MermaidEditingBlock = {
 
 export const setMermaidBlockModeEffect = StateEffect.define<MermaidModeChange>();
 export const setMermaidSearchRevealEffect = StateEffect.define<MermaidSearchReveal>();
+const setInnerMermaidSearchRangeEffect = StateEffect.define<MermaidSearchReveal>();
+
+const innerMermaidSearchMark = Decoration.mark({
+  class: 'meo-search-match meo-search-match-active'
+});
+
+const innerMermaidSearchField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, transaction) {
+    let next = decorations.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(setInnerMermaidSearchRangeEffect)) {
+        next = effect.value
+          ? Decoration.set([innerMermaidSearchMark.range(effect.value.from, effect.value.to)])
+          : Decoration.none;
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field)
+});
 
 const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b|^[ \t]{0,3}:{3,}\s*mermaid\s*$/i;
 
@@ -64,8 +88,10 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
       };
     }
 
+    let searchRevealChanged = false;
     for (const effect of transaction.effects) {
       if (effect.is(setMermaidBlockModeEffect)) {
+        searchReveal = null;
         if (effect.value.mode === 'preview') {
           modes.delete(effect.value.anchor);
         } else {
@@ -73,6 +99,16 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
         }
       } else if (effect.is(setMermaidSearchRevealEffect)) {
         searchReveal = effect.value;
+        searchRevealChanged = true;
+      }
+    }
+
+    if (searchReveal && transaction.selection && !searchRevealChanged) {
+      const selection = transaction.state.selection.main;
+      const selectionFrom = Math.min(selection.from, selection.to);
+      const selectionTo = Math.max(selection.from, selection.to);
+      if (selectionFrom !== searchReveal.from || selectionTo !== searchReveal.to) {
+        searchReveal = null;
       }
     }
 
@@ -182,27 +218,7 @@ class MermaidToolbarWidget extends WidgetType {
     };
     modeButton.addEventListener('click', changeMode);
 
-    const copyButton = document.createElement('button');
-    copyButton.type = 'button';
-    copyButton.className = 'meo-code-block-pill meo-copy-code-btn';
-    copyButton.setAttribute('aria-label', 'Copy code');
-    copyButton.textContent = 'copy';
-    const copy = async (event: Event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(this.codeContent);
-        copyButton.textContent = 'copied';
-        copyButton.classList.add('copied');
-        setTimeout(() => {
-          copyButton.textContent = 'copy';
-          copyButton.classList.remove('copied');
-        }, 2000);
-      } catch (error) {
-        console.error('Failed to copy:', error);
-      }
-    };
-    copyButton.addEventListener('click', copy);
+    const copyButton = createCopyCodeButton(this.codeContent);
 
     toolbar.append(modeButton, copyButton);
     return toolbar;
@@ -270,6 +286,7 @@ class MermaidEditingController {
         doc: block.diagramText,
         extensions: [
           lineNumbers(),
+          innerMermaidSearchField,
           EditorView.lineWrapping,
           keymap.of([
             { key: 'Mod-z', run: () => undo(this.outerView) },
@@ -369,6 +386,7 @@ class MermaidEditingController {
 
   private setSearchReveal(searchReveal: MermaidSearchReveal): void {
     if (!searchReveal) {
+      this.innerView.dispatch({ effects: setInnerMermaidSearchRangeEffect.of(null) });
       return;
     }
     const anchor = Math.max(0, Math.min(
@@ -380,9 +398,13 @@ class MermaidEditingController {
       searchReveal.to - this.block.contentFrom
     ));
     const selection = this.innerView.state.selection.main;
-    if (selection.anchor !== anchor || selection.head !== head) {
-      this.innerView.dispatch({ selection: { anchor, head } });
-    }
+    const selectionSpec = selection.anchor !== anchor || selection.head !== head
+      ? { anchor, head }
+      : undefined;
+    this.innerView.dispatch({
+      selection: selectionSpec,
+      effects: setInnerMermaidSearchRangeEffect.of({ from: anchor, to: head })
+    });
   }
 
   private schedulePreviewRender(): void {

@@ -153,14 +153,60 @@ async function main() {
       editor.findNext('node24', { focusEditor: false });
     });
     await waitForFrames(page);
-    if (!(await page.$('.meo-mermaid-editing-block.is-split'))) {
+    if (!(await page.$('.meo-mermaid-editing-block.is-split')) || !(await page.$('.meo-mermaid-source-editor .meo-search-match-active'))) {
       throw new Error('Search match did not temporarily reveal Mermaid split mode');
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
+    });
+    await waitForFrames(page);
+    if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
+      throw new Error('Moving the selection away did not restore Mermaid preview mode');
+    }
+
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.findNext('node24', { focusEditor: false }));
+    await waitForFrames(page);
+    if (!(await page.$('.meo-mermaid-editing-block.is-split'))) {
+      throw new Error('Search navigation did not reapply temporary Mermaid split mode');
+    }
+
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+    if (!(await page.$('.meo-mermaid-editing-block.is-source')) || (await page.$('.meo-mermaid-preview-shell'))) {
+      throw new Error('Manual mode change did not override temporary Mermaid split mode');
+    }
+
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+    if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
+      throw new Error('Manual preview mode remained overridden by the previous search match');
     }
 
     await page.evaluate(() => (window as any).__mermaidEditingEditor.setSearchQuery(''));
     await waitForFrames(page);
     if (!(await page.$('.meo-mermaid-block')) || (await page.$('.meo-mermaid-editing-block'))) {
       throw new Error('Closing search did not restore Mermaid preview mode');
+    }
+
+    await page.setViewport({ width: 700, height: 720, deviceScaleFactor: 1 });
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+    const narrowLayout = await page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
+      const source = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
+      const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
+      return {
+        columns: block ? getComputedStyle(block).gridTemplateColumns.split(' ').length : 0,
+        previewBelowSource: Boolean(source && preview && preview.getBoundingClientRect().top >= source.getBoundingClientRect().bottom - 1),
+        stickyPosition: preview
+          ? getComputedStyle(preview.querySelector<HTMLElement>('.meo-mermaid-preview-sticky')!).position
+          : null
+      };
+    });
+    if (narrowLayout.columns !== 1 || !narrowLayout.previewBelowSource || narrowLayout.stickyPosition !== 'relative') {
+      throw new Error(`Unexpected narrow Mermaid split layout: ${JSON.stringify(narrowLayout)}`);
     }
 
     console.log('Mermaid editing checks passed');

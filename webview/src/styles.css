@@ -3045,6 +3045,10 @@ body.outline-resizing {
 
 .cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   height: 100%;
 }

@@ -14,6 +14,7 @@ import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
 import { getMermaidColonBlocks } from './mermaidColonBlocks';
+import { createCopyCodeButton } from './codeBlockControls';
 import {
   addMermaidToolbar,
   getMermaidBlockMode,
@@ -649,38 +650,7 @@ class CopyCodeButtonWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const container = document.createElement('span');
-    container.className = 'meo-code-block-pill meo-copy-code-btn';
-    container.setAttribute('aria-label', 'Copy code');
-    container.setAttribute('role', 'button');
-    container.setAttribute('tabindex', '0');
-    container.textContent = 'copy';
-
-    const updateText = (copied: boolean) => {
-      container.textContent = copied ? 'copied' : 'copy';
-      container.classList.toggle('copied', copied);
-    };
-
-    const copy = async (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(this.codeContent);
-        updateText(true);
-        setTimeout(() => updateText(false), 2000);
-      } catch (err) {
-        console.error('Failed to copy:', err);
-      }
-    };
-
-    container.addEventListener('click', copy);
-    container.addEventListener('keydown', async (e: KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        await copy(e);
-      }
-    });
-
-    return container;
+    return createCopyCodeButton(this.codeContent);
   }
 
   ignoreEvent(event: Event): boolean {
