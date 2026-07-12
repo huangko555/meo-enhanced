@@ -182,9 +182,9 @@ export function nextOrderedSequenceNumber(
 
   const current = orderedCountsByLevel[level];
   if (current === null || current === undefined) {
-    const parsed = Number.parseInt(orderedNumber, 10);
+    const parsed = level === 0 ? Number.parseInt(orderedNumber, 10) : 1;
     orderedCountsByLevel[level] = parsed;
-    return { expected: parsed, isAnchor: true };
+    return { expected: parsed, isAnchor: level === 0 };
   }
 
   const next = current + 1;
