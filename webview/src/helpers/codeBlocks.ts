@@ -14,6 +14,11 @@ import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
 import { getMermaidColonBlocks } from './mermaidColonBlocks';
+import {
+  addMermaidToolbar,
+  getMermaidBlockMode,
+  MermaidEditingWidget
+} from './mermaidEditing';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -810,9 +815,25 @@ export function addMermaidDiagramBlock(
     return;
   }
 
-  addTopLineCopyButton(builder, startLine.to, block.fullBlockText);
+  const anchor = startLine.from;
+  const mode = getMermaidBlockMode(
+    state,
+    anchor,
+    contentStartLine.from,
+    contentEndLine.to
+  );
+  addMermaidToolbar(builder, startLine.to, anchor, mode.effective, block.fullBlockText);
 
-  const widget = new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number);
+  const widget = mode.effective === 'preview'
+    ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number)
+    : new MermaidEditingWidget({
+      anchor,
+      contentFrom: contentStartLine.from,
+      contentTo: contentEndLine.to,
+      diagramText: block.diagramText,
+      startLine: startLine.number,
+      endLine: endLine.number
+    }, mode.effective, mode.searchReveal);
   builder.push(
     Decoration.replace({
       widget,

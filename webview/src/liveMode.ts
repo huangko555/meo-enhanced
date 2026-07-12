@@ -67,6 +67,7 @@ import {
 } from './helpers/math';
 import { diagnosticDataField } from './helpers/diagnostics';
 import { markdownTagField } from './helpers/tags';
+import { mermaidEditingStateField } from './helpers/mermaidEditing';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
@@ -2450,6 +2451,7 @@ export function liveModeExtensions() {
     markdownTagField,
     livePointerSelectionActiveField,
     liveDocumentIdleField,
+    mermaidEditingStateField,
     liveDecorationField,
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

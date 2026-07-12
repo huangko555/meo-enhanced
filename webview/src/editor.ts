@@ -47,6 +47,7 @@ import { insertTable, sourceTableHeaderLineField, tableHeaderAlignmentOverrideFi
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
+import { setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -1409,6 +1410,7 @@ export function createEditor({
       selection: { anchor: from, head: to },
       effects: [
         EditorView.scrollIntoView(from, { y: 'center' }),
+        setMermaidSearchRevealEffect.of({ from, to }),
         preserveLiveDecorationsForSearchEffect.of(undefined)
       ]
     });
@@ -2094,6 +2096,7 @@ export function createEditor({
       view.dispatch({
         effects: [
           setSearchQueryEffect.of(nextQuery),
+          setMermaidSearchRevealEffect.of(null),
           preserveLiveDecorationsForSearchEffect.of(undefined)
         ]
       });
