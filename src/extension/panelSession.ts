@@ -1044,7 +1044,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         const response: ResolvedImageSrcMessage = {
           type: 'resolvedImageSrc',
           requestId: raw.requestId,
-          resolvedUrl: resolveWebviewImageSrc(raw.url, documentUri, panel.webview)
+          resolvedUrl: await resolveWebviewImageSrc(raw.url, documentUri, panel.webview)
         };
         await postToWebview(response);
         return;

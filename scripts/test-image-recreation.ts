@@ -31,6 +31,14 @@ class FakeElement {
     return this.source;
   }
 
+  cloneNode() {
+    const clone = new FakeElement(this.tagName);
+    clone.source = this.source;
+    clone.complete = this.complete;
+    clone.naturalWidth = this.naturalWidth;
+    return clone;
+  }
+
   addEventListener() {}
   append(...children: FakeElement[]) {
     this.children.push(...children);
@@ -76,7 +84,10 @@ const secondImage = secondContainer.children.find((child: FakeElement) => child.
 if (!secondImage) {
   throw new Error('Cached image was not rendered');
 }
-if (secondImage !== firstImage && !secondImage.complete) {
+if (secondImage === firstImage) {
+  throw new Error('Cached image DOM was reused across render locations');
+}
+if (!secondImage.complete) {
   throw new Error('Cached image was recreated in an incomplete state');
 }
 

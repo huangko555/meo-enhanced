@@ -71,14 +71,21 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
   const hiddenRanges: Array<{ from: number; to: number }> = [];
   const styleRanges: Array<{ from: number; to: number; style: 'strong' | 'emphasis' | 'strikethrough' }> = [];
 
-  const visit = (node: any) => {
+  const visit = (node: any, parentName = '') => {
     if (node.name === 'StrongEmphasis') styleRanges.push({ from: node.from, to: node.to, style: 'strong' });
     else if (node.name === 'Emphasis') styleRanges.push({ from: node.from, to: node.to, style: 'emphasis' });
     else if (node.name === 'Strikethrough') styleRanges.push({ from: node.from, to: node.to, style: 'strikethrough' });
-    else if (node.name === 'EmphasisMark' || node.name === 'StrikethroughMark') {
+    else if (
+      node.name === 'EmphasisMark' ||
+      node.name === 'StrikethroughMark' ||
+      node.name === 'CodeMark' ||
+      node.name === 'LinkMark' ||
+      node.name === 'LinkLabel' ||
+      (node.name === 'URL' && (parentName === 'Link' || parentName === 'Image'))
+    ) {
       hiddenRanges.push({ from: node.from, to: node.to });
     }
-    for (let child = node.firstChild; child; child = child.nextSibling) visit(child);
+    for (let child = node.firstChild; child; child = child.nextSibling) visit(child, node.name);
   };
   visit(headingNode);
 

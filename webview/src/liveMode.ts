@@ -15,7 +15,7 @@ import {
   addMermaidDiagramBlock,
   addCopyCodeButton
 } from './helpers/codeBlocks';
-import { ImageWidget, getImageData, isImageUrl } from './helpers/images';
+import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl } from './helpers/images';
 import { highlightStyle } from './theme';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { collectEmojiRangesFromText } from './helpers/emoji';
@@ -1329,6 +1329,7 @@ function buildDecorations(state) {
     state,
     getLiveRenderedBlocks(state)
   );
+  const activeImageGroups = new Map();
   const parsedTableRanges = [];
   let tableDepth = 0;
 
@@ -1519,13 +1520,9 @@ function buildDecorations(state) {
         if (isActiveLine || imageSelection) {
           const { url, altText, linkUrl } = getImageData(state, node);
           if (url) {
-            ranges.push(
-              Decoration.widget({
-                widget: new ImageWidget(url, altText, linkUrl, node.from),
-                side: 1,
-                block: true
-              }).range(line.to)
-            );
+            const group = activeImageGroups.get(line.number) ?? { line, items: [] };
+            group.items.push({ url, altText, linkUrl, sourceFrom: node.from });
+            activeImageGroups.set(line.number, group);
           }
           return;
         }
@@ -1621,6 +1618,15 @@ function buildDecorations(state) {
       }
     },
   });
+
+  for (const { line, items } of activeImageGroups.values()) {
+    const widget = items.length === 1
+      ? new ImageWidget(items[0].url, items[0].altText, items[0].linkUrl, items[0].sourceFrom)
+      : new ImageGroupWidget(items);
+    ranges.push(
+      Decoration.widget({ widget, side: 1, block: true }).range(line.to)
+    );
+  }
 
   addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, mermaidColonBlocks, diagnostics);
   addRawFileUrlDecorations(ranges, state, tree, activeLines, frontmatter);

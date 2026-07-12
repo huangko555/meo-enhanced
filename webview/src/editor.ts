@@ -1,5 +1,5 @@
 import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
-import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
@@ -43,7 +43,7 @@ import {
   indentListByTwoSpaces,
   outdentListByTwoSpaces
 } from './helpers/listMarkers';
-import { insertTable, sourceTableHeaderLineField } from './helpers/tables';
+import { insertTable, sourceTableHeaderLineField, tableHeaderAlignmentOverrideField } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
@@ -68,6 +68,11 @@ type SearchQueryState = {
 type SearchMatchRange = {
   start: number;
   end: number;
+};
+
+type SearchMatchFieldValue = {
+  matches: SearchMatchRange[];
+  decorations: DecorationSet;
 };
 
 type InlineSelectionRange = {
@@ -97,15 +102,12 @@ const existingTaskMarkerRegex = /^[-+*]\s+\[[ xX~\-]\]/;
 const blockquoteLinePrefixRegex = /^[ \t]{0,3}(?:>[ \t]?)+/;
 const quotedCodeBlockAncestorNames = new Set(['FencedCode', 'CodeBlock']);
 
-const buildSearchDecorations = (state: EditorState, searchQuery: SearchQueryState) => {
-  if (!searchQuery.text) {
+const buildSearchDecorations = (state: EditorState, matches: SearchMatchRange[]) => {
+  if (!matches.length) {
     return Decoration.none;
   }
 
-  const builder = new RangeSetBuilder();
-  const doc = state.doc;
-  const textValue = doc.toString();
-  const matches = findSearchMatchRanges(textValue, searchQuery.text, searchQuery);
+  const builder = new RangeSetBuilder<Decoration>();
   const selection = state.selection.main;
   const selectionFrom = Math.min(selection.from, selection.to);
   const selectionTo = Math.max(selection.from, selection.to);
@@ -132,26 +134,41 @@ const searchQueryField = StateField.define({
   }
 });
 
-const searchMatchField = StateField.define<any>({
+const searchMatchField = StateField.define<SearchMatchFieldValue>({
   create() {
-    return Decoration.none;
+    return { matches: [], decorations: Decoration.none };
   },
-  update(value: any, tr: Transaction) {
-    if (tr.docChanged || tr.selection) {
-      const searchQuery = tr.state.field(searchQueryField);
-      return buildSearchDecorations(tr.state, searchQuery);
-    }
-
+  update(value, tr: Transaction) {
+    let changedQuery: SearchQueryState | null = null;
     for (const effect of tr.effects) {
       if (effect.is(setSearchQueryEffect)) {
-        return buildSearchDecorations(tr.state, effect.value);
+        changedQuery = effect.value;
+        break;
       }
+    }
+
+    if (tr.docChanged || changedQuery) {
+      const searchQuery = changedQuery ?? tr.state.field(searchQueryField);
+      const matches = searchQuery.text
+        ? findSearchMatchRanges(tr.state.doc.toString(), searchQuery.text, searchQuery)
+        : [];
+      return {
+        matches,
+        decorations: buildSearchDecorations(tr.state, matches)
+      };
+    }
+
+    if (tr.selection) {
+      return {
+        matches: value.matches,
+        decorations: buildSearchDecorations(tr.state, value.matches)
+      };
     }
 
     return value;
   },
-  provide(field: any) {
-    return EditorView.decorations.from(field);
+  provide(field) {
+    return EditorView.decorations.from(field, (value) => value.decorations);
   }
 });
 
@@ -1364,7 +1381,7 @@ export function createEditor({
     });
   };
 
-  const scheduleLiveSearchDecorationRefresh = () => {
+  const scheduleLiveSearchDecorationRefresh = (targetPosition: number | null = null) => {
     pendingLiveSearchDecorationRefreshGeneration += 1;
     const refreshGeneration = pendingLiveSearchDecorationRefreshGeneration;
     if (pendingLiveSearchDecorationRefreshFrame !== null) {
@@ -1380,7 +1397,9 @@ export function createEditor({
       if (!view || currentMode !== 'live' || refreshGeneration !== pendingLiveSearchDecorationRefreshGeneration) {
         return;
       }
-      forceParsing(view, view.state.doc.length, 500);
+      if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
+        forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
+      }
       view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(undefined) });
     });
   };
@@ -1393,7 +1412,7 @@ export function createEditor({
         preserveLiveDecorationsForSearchEffect.of(undefined)
       ]
     });
-    scheduleLiveSearchDecorationRefresh();
+    scheduleLiveSearchDecorationRefresh(to);
     scheduleLiveSearchMatchReveal(from);
     if (focusEditor) {
       view.focus();
@@ -1498,6 +1517,38 @@ export function createEditor({
     restoreScroll();
   };
 
+  let searchResultCache: {
+    doc: unknown;
+    query: string;
+    wholeWord: boolean;
+    caseSensitive: boolean;
+    matches: SearchMatchRange[];
+  } | null = null;
+  const getSearchMatches = (query: string, options: SearchOptions = {}): SearchMatchRange[] => {
+    if (!query) return [];
+    const wholeWord = options.wholeWord === true;
+    const caseSensitive = options.caseSensitive === true;
+    const activeQuery = view.state.field(searchQueryField);
+    if (
+      activeQuery.text === query &&
+      activeQuery.wholeWord === wholeWord &&
+      activeQuery.caseSensitive === caseSensitive
+    ) {
+      return view.state.field(searchMatchField).matches;
+    }
+    if (
+      searchResultCache?.doc === view.state.doc &&
+      searchResultCache.query === query &&
+      searchResultCache.wholeWord === wholeWord &&
+      searchResultCache.caseSensitive === caseSensitive
+    ) {
+      return searchResultCache.matches;
+    }
+    const matches = findSearchMatchRanges(view.state.doc.toString(), query, { wholeWord, caseSensitive });
+    searchResultCache = { doc: view.state.doc, query, wholeWord, caseSensitive, matches };
+    return matches;
+  };
+
   const findMatch = (
     query,
     backward = false,
@@ -1507,11 +1558,10 @@ export function createEditor({
       return { found: false, current: 0, total: 0 };
     }
 
-    const text = view.state.doc.toString();
     const selection = view.state.selection.main;
     const from = Math.min(selection.from, selection.to);
     const to = Math.max(selection.from, selection.to);
-    const matches = findSearchMatchRanges(text, query, searchOptions);
+    const matches = getSearchMatches(query, searchOptions);
     const total = matches.length;
 
     if (!total) {
@@ -1555,11 +1605,10 @@ export function createEditor({
       return { replaced: false, found: false, current: 0, total: 0 };
     }
 
-    const text = view.state.doc.toString();
     const selection = view.state.selection.main;
     const from = Math.min(selection.from, selection.to);
     const to = Math.max(selection.from, selection.to);
-    const matches = findSearchMatchRanges(text, query, options);
+    const matches = getSearchMatches(query, options);
     const matchIndex = findSelectedSearchMatchIndex(matches, from, to);
     if (matchIndex < 0) {
       return { replaced: false, ...findMatch(query, false, options) };
@@ -1574,7 +1623,7 @@ export function createEditor({
       return { replaced: true, ...nextMatch };
     }
 
-    const remaining = countMatches(view.state.doc.toString(), query, options);
+    const remaining = getSearchMatches(query, options).length;
     return { replaced: true, found: false, current: 0, total: remaining };
   };
 
@@ -1798,6 +1847,7 @@ export function createEditor({
         }
       }),
       ...headingCollapseSharedExtensions(),
+      tableHeaderAlignmentOverrideField,
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
@@ -1808,7 +1858,12 @@ export function createEditor({
         syncLineNumbersVisibility();
         syncGitGutterVisibility();
         emitSearchStateChange();
-        searchOverviewRuler?.refresh();
+        const searchQueryChanged = update.transactions.some((transaction) => (
+          transaction.effects.some((effect) => effect.is(setSearchQueryEffect))
+        ));
+        if (update.docChanged || update.selectionSet || searchQueryChanged) {
+          searchOverviewRuler?.refresh({ positionsChanged: update.docChanged || searchQueryChanged });
+        }
 
         if (update.selectionSet) {
           syncSelectionClass();
@@ -1928,14 +1983,11 @@ export function createEditor({
   searchOverviewRuler = createSearchOverviewRulerController({
     view,
     getMatches: () => {
-      const searchQuery = view.state.field(searchQueryField);
-      if (!searchQuery.text) {
-        return [];
-      }
+      const matches = view.state.field(searchMatchField).matches;
       const selection = view.state.selection.main;
       const selectionFrom = Math.min(selection.from, selection.to);
       const selectionTo = Math.max(selection.from, selection.to);
-      return findSearchMatchRanges(view.state.doc.toString(), searchQuery.text, searchQuery).map((match) => ({
+      return matches.map((match) => ({
         from: match.start,
         active: match.start === selectionFrom && match.end === selectionTo
       }));
@@ -2010,7 +2062,7 @@ export function createEditor({
       }
 
       const text = view.state.doc.toString();
-      const matches = findSearchMatchRanges(text, query, options);
+      const matches = getSearchMatches(query, options);
       const replaced = matches.length;
       if (!replaced) {
         return { replaced: 0, total: 0 };
@@ -2021,13 +2073,13 @@ export function createEditor({
         changes: { from: 0, to: text.length, insert: nextText },
         selection: { anchor: 0 }
       });
-      return { replaced, total: countMatches(nextText, query, options) };
+      return { replaced, total: getSearchMatches(query, options).length };
     },
     countMatches(query, options: SearchOptions = {}) {
       if (!query) {
         return 0;
       }
-      return countMatches(view.state.doc.toString(), query, options);
+      return getSearchMatches(query, options).length;
     },
     setSearchQuery(query, options: SearchOptions = {}) {
       const nextQuery = createSearchQueryState(query, options);
@@ -2668,14 +2720,6 @@ function findSearchMatchRanges(text: string, query: string, options: SearchOptio
     offset = end;
   }
   return matches;
-}
-
-function countMatches(text, query, options: SearchOptions = {}) {
-  if (!query) {
-    return 0;
-  }
-
-  return findSearchMatchRanges(text, query, options).length;
 }
 
 function findSelectedSearchMatchIndex(matches: SearchMatchRange[], from: number, to: number): number {

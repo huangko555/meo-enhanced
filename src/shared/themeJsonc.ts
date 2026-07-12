@@ -87,7 +87,15 @@ const semanticColorDescriptions: Record<SemanticColorKey, string> = {
 };
 
 export function parseThemeJsonc(text: string): unknown {
-  return JSON.parse(stripJsonComments(text));
+  const withoutBom = text.replace(/^\uFEFF/, '');
+  return JSON.parse(stripTrailingCommas(stripJsonComments(withoutBom)));
+}
+
+export function serializeThemeFile(theme: ThemeSettings, format: 'json' | 'jsonc'): string {
+  if (format === 'json') {
+    return `${JSON.stringify(serializeThemeSettings(theme), null, 2)}\n`;
+  }
+  return serializeAnnotatedThemeJsonc(theme);
 }
 
 export function serializeAnnotatedThemeJsonc(theme: ThemeSettings): string {
@@ -175,6 +183,38 @@ function stripJsonComments(text: string): string {
       }
       index += 1;
       continue;
+    }
+    result += char;
+  }
+  return result;
+}
+
+function stripTrailingCommas(text: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      result += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      result += char;
+      continue;
+    }
+    if (char === ',') {
+      let nextIndex = index + 1;
+      while (nextIndex < text.length && /\s/.test(text[nextIndex])) nextIndex += 1;
+      if (text[nextIndex] === '}' || text[nextIndex] === ']') continue;
     }
     result += char;
   }

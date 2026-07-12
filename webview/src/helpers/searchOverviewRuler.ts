@@ -11,7 +11,7 @@ type SearchOverviewRulerOptions = {
 };
 
 type SearchOverviewRulerController = {
-  refresh(): void;
+  refresh(options?: { positionsChanged?: boolean }): void;
   destroy(): void;
 };
 
@@ -44,6 +44,14 @@ export function createSearchOverviewRulerController({
   let frame = 0;
   let lastRenderKey = '';
   let resizeObserver: ResizeObserver | null = null;
+  let cachedContentHeight: number | null = null;
+  const lineTopCache = new Map<number, number>();
+
+  const invalidatePositions = () => {
+    cachedContentHeight = null;
+    lineTopCache.clear();
+    lastRenderKey = '';
+  };
 
   const ensureHost = (): HTMLElement => {
     if (host) {
@@ -70,12 +78,18 @@ export function createSearchOverviewRulerController({
       return;
     }
 
-    const contentHeight = Math.max(1, getContentHeight(view));
+    const contentHeight = cachedContentHeight ?? Math.max(1, getContentHeight(view));
+    cachedContentHeight = contentHeight;
     const activeByTop = new Map<number, boolean>();
     for (const match of matches) {
-      const block = view.lineBlockAt(match.from);
+      const lineFrom = view.state.doc.lineAt(match.from).from;
+      let blockTop = lineTopCache.get(lineFrom);
+      if (blockTop === undefined) {
+        blockTop = view.lineBlockAt(lineFrom).top;
+        lineTopCache.set(lineFrom, blockTop);
+      }
       const top = clamp(
-        Math.round((block.top / contentHeight) * trackHeight),
+        Math.round((blockTop / contentHeight) * trackHeight),
         0,
         Math.max(0, trackHeight - activeMarkerHeight)
       );
@@ -104,7 +118,8 @@ export function createSearchOverviewRulerController({
     root.hidden = false;
   };
 
-  const refresh = () => {
+  const refresh = ({ positionsChanged = false }: { positionsChanged?: boolean } = {}) => {
+    if (positionsChanged) invalidatePositions();
     if (destroyed || frame) {
       return;
     }
@@ -116,7 +131,7 @@ export function createSearchOverviewRulerController({
 
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => {
-      lastRenderKey = '';
+      invalidatePositions();
       refresh();
     });
     resizeObserver.observe(view.dom);

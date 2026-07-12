@@ -1,4 +1,4 @@
-import { StateField } from '@codemirror/state';
+import { RangeSet, RangeValue, StateEffect, StateField } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import { undo, redo } from '@codemirror/commands';
@@ -141,16 +141,55 @@ interface TableSearchMatchRange {
   end: number;
 }
 
-interface TableHeaderAlignmentOverrides {
-  [tableStartLine: string]: Set<number>;
-}
-
 const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-header-line' });
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
 const tableDelimiterRegex = /^\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn';
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+class TableHeaderAlignmentOverrideValue extends RangeValue {
+  constructor(readonly columns: ReadonlySet<number>) {
+    super();
+  }
+
+  eq(other: RangeValue): boolean {
+    if (!(other instanceof TableHeaderAlignmentOverrideValue) || other.columns.size !== this.columns.size) return false;
+    return [...this.columns].every((column) => other.columns.has(column));
+  }
+}
+
+const setTableHeaderAlignmentOverrideEffect = StateEffect.define<{
+  from: number;
+  to: number;
+  column: number;
+}>();
+
+export const tableHeaderAlignmentOverrideField = StateField.define<RangeSet<TableHeaderAlignmentOverrideValue>>({
+  create() {
+    return RangeSet.empty;
+  },
+  update(value, transaction) {
+    const mapped = value.map(transaction.changes);
+    const overrideEffects = transaction.effects.filter((effect) => effect.is(setTableHeaderAlignmentOverrideEffect));
+    if (!overrideEffects.length) return mapped;
+
+    const entries: Array<{ from: number; to: number; value: TableHeaderAlignmentOverrideValue }> = [];
+    mapped.between(0, transaction.state.doc.length, (from, to, rangeValue) => {
+      entries.push({ from, to, value: rangeValue });
+    });
+    for (const effect of overrideEffects) {
+      const existing = entries.find((entry) => entry.from === effect.value.from && entry.to === effect.value.to);
+      const columns = new Set(existing?.value.columns ?? []);
+      columns.add(effect.value.column);
+      const nextValue = new TableHeaderAlignmentOverrideValue(columns);
+      if (existing) existing.value = nextValue;
+      else entries.push({ from: effect.value.from, to: effect.value.to, value: nextValue });
+    }
+    entries.sort((left, right) => left.from - right.from || left.to - right.to);
+    return RangeSet.of(entries.map((entry) => entry.value.range(entry.from, entry.to)), true);
+  }
+});
 // Icons are inline SVG path data from Tabler Icons (MIT), vendored to avoid a
 // broad icon dependency for this table-only toolbar.
 const tableToolbarIcons: Record<string, TableToolbarIcon> = {
@@ -402,9 +441,9 @@ function shouldExpandTableCellForSearch(text: string, searchState: TableSearchSt
 }
 
 function hasSameTableSearchQuery(left: TableSearchState | null, right: TableSearchState | null): boolean {
-  return Boolean(
-    left &&
-    right &&
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
     left.text === right.text &&
     left.wholeWord === right.wholeWord &&
     left.caseSensitive === right.caseSensitive
@@ -1159,18 +1198,20 @@ function parseTableRowCells(lineText, lineFrom = 0) {
   }
 
   const segments = [];
-  for (let i = 0; i + 1 < allSeparatorPipes.length; i += 1) {
-    const rawFrom = allSeparatorPipes[i] + 1;
-    const rawTo = allSeparatorPipes[i + 1];
+  let segmentStart = innerStart;
+  for (let i = 0; i <= innerPipes.length; i += 1) {
+    const rawFrom = segmentStart;
+    const rawTo = i < innerPipes.length ? innerPipes[i] : innerEnd;
     let from = rawFrom;
     let to = rawTo;
-    if (from < to && lineText[from] === ' ') from += 1;
-    if (to > from && lineText[to - 1] === ' ') to -= 1;
+    while (from < to && /\s/.test(lineText[from])) from += 1;
+    while (to > from && /\s/.test(lineText[to - 1])) to -= 1;
     if (to <= from) {
       segments.push({ from: lineFrom + rawFrom, to: lineFrom + rawTo, cellIndex: i, empty: true });
-      continue;
+    } else {
+      segments.push({ from: lineFrom + from, to: lineFrom + to, cellIndex: i, empty: false });
     }
-    segments.push({ from: lineFrom + from, to: lineFrom + to, cellIndex: i, empty: false });
+    segmentStart = rawTo + 1;
   }
 
   const hasExplicitSingleCell = cells.length === 1 && cells[0] === '' && allSeparatorPipes.length >= 2;
@@ -1377,7 +1418,11 @@ class HtmlTableWidget extends WidgetType {
     return (
       other instanceof HtmlTableWidget &&
       other.tableData.signature === this.tableData.signature &&
-      other.tableData.indent === this.tableData.indent
+      other.tableData.indent === this.tableData.indent &&
+      other.tableData.from === this.tableData.from &&
+      other.tableData.to === this.tableData.to &&
+      other.tableData.startLine === this.tableData.startLine &&
+      other.tableData.endLine === this.tableData.endLine
     );
   }
 
@@ -1643,19 +1688,23 @@ class HtmlTableWidget extends WidgetType {
   }
 
   headerAlignmentOverrideColumns(view: EditorView) {
-    const overrides = (view.dom as any).__meoTableHeaderAlignmentOverrides as TableHeaderAlignmentOverrides | undefined;
-    return overrides?.[String(this.tableData.startLine)] ?? null;
+    const from = this.tableData.from;
+    const to = this.tableData.to;
+    if (!Number.isInteger(from) || !Number.isInteger(to)) return null;
+    const overrides = view.state.field(tableHeaderAlignmentOverrideField, false);
+    let columns: ReadonlySet<number> | null = null;
+    overrides?.between(from as number, to as number, (rangeFrom, rangeTo, value) => {
+      if (rangeFrom === from && rangeTo === to) columns = value.columns;
+    });
+    return columns;
   }
 
   markHeaderAlignmentOverride(container, column, alignment) {
     const view = this.getEditorView(container);
     if (!view) return;
-    const dom = view.dom as any;
-    const overrides = (dom.__meoTableHeaderAlignmentOverrides ??= {}) as TableHeaderAlignmentOverrides;
-    const tableKey = String(this.tableData.startLine);
-    const columns = overrides[tableKey] ?? new Set<number>();
-    columns.add(column);
-    overrides[tableKey] = columns;
+    const range = this.resolveCurrentTableRange(view, container);
+    if (!range) return;
+    view.dispatch({ effects: setTableHeaderAlignmentOverrideEffect.of({ ...range, column }) });
 
     const headerCell = this.domRefs?.cellGrid[0]?.[column];
     if (!headerCell) return;
@@ -2259,8 +2308,11 @@ class HtmlTableWidget extends WidgetType {
 
     input.addEventListener('input', () => {
       this.hasPendingCellEdits = true;
-      // The preview layer is hidden while editing. Rebuilding it on each keystroke
-      // recreates inline image DOM and resets image load opacity, which causes flicker.
+      const hadSearchMatch = input.parentElement?.classList.contains('has-search-match') ?? false;
+      if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(input.value, this.searchState))) {
+        refreshPreview();
+      }
+      // Non-search previews stay untouched while editing so inline image DOM is not recreated.
       this.resizeRow(rowEl, rowInputs);
       this.scheduleLayout();
       notifySelectionChange();
@@ -2285,11 +2337,8 @@ class HtmlTableWidget extends WidgetType {
       notifySelectionChange();
       const nextTarget = event.relatedTarget;
       if (nextTarget instanceof Node && container.contains(nextTarget)) return;
+      this.setTableInteractionActive(container, false);
       this.commit(container);
-      requestAnimationFrame(() => {
-        if (this.hasFocusedTableInput(container)) return;
-        this.setTableInteractionActive(container, false);
-      });
     });
   }
 
@@ -2333,18 +2382,28 @@ class HtmlTableWidget extends WidgetType {
     const gutterRect = gutter.getBoundingClientRect();
     lineNumberLayer.style.left = '0';
     lineNumberLayer.style.width = `${gutterRect.width}px`;
-    lineNumberLayer.replaceChildren();
 
     const activeRow = this.selectionAnchor?.row;
+    let itemIndex = 0;
     for (const [rowIndex, row] of (Array.from(table.querySelectorAll('thead tr, tbody tr')) as HTMLTableRowElement[]).entries()) {
       const lineNumber = row.dataset.sourceLineNumber;
       if (!lineNumber) continue;
-      const item = document.createElement('div');
-      item.className = 'meo-md-html-table-line-number';
+      const existingItem = lineNumberLayer.children.item(itemIndex);
+      let item: HTMLElement;
+      if (existingItem instanceof HTMLElement) {
+        item = existingItem;
+      } else {
+        item = document.createElement('div');
+        item.className = 'meo-md-html-table-line-number';
+        lineNumberLayer.appendChild(item);
+      }
       item.classList.toggle('is-active', rowIndex === activeRow);
       item.textContent = lineNumber;
       item.style.top = `${row.getBoundingClientRect().top - gutterRect.top}px`;
-      lineNumberLayer.appendChild(item);
+      itemIndex += 1;
+    }
+    while (lineNumberLayer.children.length > itemIndex) {
+      lineNumberLayer.lastElementChild?.remove();
     }
   }
 

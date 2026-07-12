@@ -48,14 +48,18 @@ export function findDocumentFragmentPosition(state: EditorState, rawHref: string
   const decodedTarget = decodeFragment(rawHref.slice(1)).trim().toLowerCase();
   if (!decodedTarget) return null;
   const normalizedTarget = headingSlug(decodedTarget);
-  const slugCounts = new Map<string, number>();
+  const occupiedSlugs = new Set<string>();
 
   for (const heading of extractHeadings(state)) {
     const baseSlug = headingSlug(heading.text);
     if (!baseSlug) continue;
-    const duplicateIndex = slugCounts.get(baseSlug) ?? 0;
-    slugCounts.set(baseSlug, duplicateIndex + 1);
-    const slug = duplicateIndex === 0 ? baseSlug : `${baseSlug}-${duplicateIndex}`;
+    let slug = baseSlug;
+    let duplicateIndex = 1;
+    while (occupiedSlugs.has(slug)) {
+      slug = `${baseSlug}-${duplicateIndex}`;
+      duplicateIndex += 1;
+    }
+    occupiedSlugs.add(slug);
     if (decodedTarget === slug || normalizedTarget === slug) {
       return heading.from;
     }

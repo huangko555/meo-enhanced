@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
+import { parser as markdownParser } from '@lezer/markdown';
 import * as vscode from 'vscode';
 import { safeDecodeURIComponent } from '../agents/resourceMatching';
 import { withMarkdownExtensions } from './extensionConfig';
@@ -24,34 +25,16 @@ export async function openExternalLink(rawHref: string): Promise<void> {
 }
 
 export async function openImageExternally(rawUrl: string, documentUri: vscode.Uri): Promise<void> {
-  const localImageUri = await resolveLocalLinkTargetUri(rawUrl, documentUri)
-    ?? resolveLocalImageUriWithoutExistenceCheck(rawUrl, documentUri);
+  const localImageUri = await resolveLocalLinkTargetUri(rawUrl, documentUri);
   if (localImageUri) {
     await openLocalImageWithSystemApp(localImageUri);
     return;
   }
-  await openExternalLink(rawUrl);
-}
-
-function resolveLocalImageUriWithoutExistenceCheck(rawUrl: string, documentUri: vscode.Uri): vscode.Uri | null {
-  const trimmed = rawUrl.trim();
-  if (!looksLikeLocalHref(trimmed)) return null;
-
-  const [targetPath = ''] = trimmed.split(/[?#]/, 1);
-  if (!targetPath) return null;
-  if (/^file:/i.test(targetPath)) {
-    try {
-      return vscode.Uri.parse(targetPath, true);
-    } catch {
-      return null;
-    }
+  if (looksLikeLocalHref(rawUrl)) {
+    console.warn('[meo] Local image target not found', { url: rawUrl });
+    return;
   }
-
-  const decodedPath = safeDecodeURIComponent(targetPath).replace(/\\/g, path.sep);
-  const absolutePath = path.isAbsolute(decodedPath)
-    ? decodedPath
-    : path.resolve(path.dirname(documentUri.fsPath), decodedPath);
-  return toDocumentScopedUri(absolutePath, documentUri);
+  await openExternalLink(rawUrl);
 }
 
 async function openLocalImageWithSystemApp(uri: vscode.Uri): Promise<void> {
@@ -257,7 +240,11 @@ export async function uriExists(uri: vscode.Uri): Promise<boolean> {
   }
 }
 
-export function resolveWebviewImageSrc(rawUrl: string, documentUri: vscode.Uri, webview: vscode.Webview): string {
+export async function resolveWebviewImageSrc(
+  rawUrl: string,
+  documentUri: vscode.Uri,
+  webview: vscode.Webview
+): Promise<string> {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
     return '';
@@ -274,26 +261,104 @@ export function resolveWebviewImageSrc(rawUrl: string, documentUri: vscode.Uri, 
     return trimmed;
   }
 
+  const imageUri = resolveLocalImageUri(trimmed, documentUri);
+
+  if (!imageUri || !(await uriExists(imageUri))) {
+    return '';
+  }
+
+  const roots = webview.options.localResourceRoots ?? [];
+  if (roots.some((root) => uriContainsResource(root, imageUri))) {
+    return webview.asWebviewUri(imageUri).toString();
+  }
+
+  return readImageAsDataUri(imageUri);
+}
+
+export function collectWebviewImageResourceRoots(documentText: string, documentUri: vscode.Uri): vscode.Uri[] {
+  const roots = new Map<string, vscode.Uri>();
+  markdownParser.parse(documentText).iterate({
+    enter(node) {
+      if (node.name !== 'Image') {
+        return;
+      }
+      const urlNode = node.node.getChild('URL');
+      if (!urlNode) {
+        return false;
+      }
+      const imageUri = resolveLocalImageUri(documentText.slice(urlNode.from, urlNode.to), documentUri);
+      if (imageUri) {
+        const resourceRoot = imageUri.scheme === 'file'
+          ? vscode.Uri.file(path.dirname(imageUri.fsPath))
+          : imageUri.with({ path: path.posix.dirname(imageUri.path), query: '', fragment: '' });
+        roots.set(resourceRoot.toString(), resourceRoot);
+      }
+      return false;
+    }
+  });
+  return Array.from(roots.values());
+}
+
+function resolveLocalImageUri(rawUrl: string, documentUri: vscode.Uri): vscode.Uri | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed || /^\/\//.test(trimmed) || ALLOWED_IMAGE_SRC_RE.test(trimmed)) {
+    return null;
+  }
+  if (SCHEME_RE.test(trimmed) && !/^file:/i.test(trimmed) && !WINDOWS_ABSOLUTE_PATH_RE.test(trimmed)) {
+    return null;
+  }
+
   const [pathPart = ''] = trimmed.split(/[?#]/, 1);
-  let filePath = '';
   if (/^file:/i.test(trimmed)) {
     try {
-      filePath = vscode.Uri.parse(pathPart, true).fsPath;
+      return vscode.Uri.parse(pathPart, true);
     } catch {
-      filePath = '';
+      return null;
     }
-  } else if (path.isAbsolute(pathPart)) {
-    filePath = pathPart;
-  } else {
-    const decoded = safeDecodeURIComponent(pathPart);
-    filePath = path.resolve(path.dirname(documentUri.fsPath), decoded);
   }
 
-  if (!filePath) {
-    return trimmed;
-  }
+  const decodedPath = safeDecodeURIComponent(pathPart).replace(/\\/g, path.sep);
+  const filePath = path.isAbsolute(decodedPath)
+    ? decodedPath
+    : path.resolve(path.dirname(documentUri.fsPath), decodedPath);
+  return toDocumentScopedUri(filePath, documentUri);
+}
 
-  return webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
+async function readImageAsDataUri(imageUri: vscode.Uri): Promise<string> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(imageUri);
+    const mediaType = getImageMediaType(imageUri.path);
+    return `data:${mediaType};base64,${Buffer.from(bytes).toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+function getImageMediaType(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+    case '.jfif': return 'image/jpeg';
+    case '.gif': return 'image/gif';
+    case '.webp': return 'image/webp';
+    case '.svg': return 'image/svg+xml';
+    case '.bmp': return 'image/bmp';
+    case '.ico': return 'image/x-icon';
+    case '.avif': return 'image/avif';
+    case '.apng': return 'image/apng';
+    case '.tif':
+    case '.tiff': return 'image/tiff';
+    default: return 'application/octet-stream';
+  }
+}
+
+function uriContainsResource(root: vscode.Uri, resource: vscode.Uri): boolean {
+  if (root.scheme !== resource.scheme || root.authority !== resource.authority) {
+    return false;
+  }
+  const relative = path.relative(root.fsPath, resource.fsPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 export function normalizeExternalHref(rawHref: string): string {

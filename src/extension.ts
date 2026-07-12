@@ -64,7 +64,8 @@ import {
 } from './shared/extensionConfig';
 import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
-import { parseThemeJsonc, serializeAnnotatedThemeJsonc } from './shared/themeJsonc';
+import { parseThemeJsonc, serializeThemeFile } from './shared/themeJsonc';
+import { collectWebviewImageResourceRoots } from './shared/documentLinks';
 import {
   runWithTimedUiTimeout,
   showTimedErrorMessage,
@@ -386,9 +387,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const theme = getThemeSettings();
       try {
+        const format = path.extname(uri.fsPath).toLowerCase() === '.json' ? 'json' : 'jsonc';
         await vscode.workspace.fs.writeFile(
           uri,
-          new TextEncoder().encode(serializeAnnotatedThemeJsonc(theme))
+          new TextEncoder().encode(serializeThemeFile(theme, format))
         );
         void showTimedInformationMessage(`Theme exported to ${uri.fsPath}`);
       } catch (error) {
@@ -666,7 +668,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     const distRoot = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist');
     panel.webview.options = {
       enableScripts: true,
-      localResourceRoots: collectLocalResourceRoots(distRoot, documentUri)
+      localResourceRoots: collectLocalResourceRoots(distRoot, documentUri, document.getText())
     };
 
     const controller = createPanelSessionController({
@@ -1088,21 +1090,19 @@ function unwrapExportRuntimeModule(mod: unknown): ExportRuntimeModule {
   throw new Error('Loaded export runtime does not expose the expected export functions.');
 }
 
-function collectLocalResourceRoots(distRoot: vscode.Uri, documentUri: vscode.Uri): vscode.Uri[] {
+function collectLocalResourceRoots(distRoot: vscode.Uri, documentUri: vscode.Uri, documentText: string): vscode.Uri[] {
   const roots = new Map<string, vscode.Uri>();
   roots.set(distRoot.toString(), distRoot);
 
   const documentDir = vscode.Uri.file(path.dirname(documentUri.fsPath));
   roots.set(documentDir.toString(), documentDir);
 
-  const documentDriveRoot = path.parse(documentUri.fsPath).root;
-  if (documentDriveRoot) {
-    const driveRootUri = vscode.Uri.file(documentDriveRoot);
-    roots.set(driveRootUri.toString(), driveRootUri);
-  }
-
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     roots.set(folder.uri.toString(), folder.uri);
+  }
+
+  for (const imageUri of collectWebviewImageResourceRoots(documentText, documentUri)) {
+    roots.set(imageUri.toString(), imageUri);
   }
 
   return Array.from(roots.values());

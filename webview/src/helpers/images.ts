@@ -6,10 +6,18 @@ const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/
 let imageSrcResolver: (url: string) => string | Promise<string | null | undefined> | null | undefined = (url) => url;
 let vscodeApi: any = null;
 
+const MAX_IMAGE_SRC_CACHE_ENTRIES = 512;
+const MAX_LOADED_IMAGE_CACHE_ENTRIES = 128;
+const MAX_FAILED_IMAGE_CACHE_ENTRIES = 256;
+const MAX_CONCURRENT_IMAGE_LOADS = 6;
+const IMAGE_FAILURE_RETRY_MS = 30_000;
+
 const imageSrcCache = new Map<string, string>();
 const loadedImages = new Map<string, HTMLImageElement>();
 const pendingImageLoads = new Map<string, Promise<HTMLImageElement | null>>();
-const failedImages = new Set<string>();
+const failedImages = new Map<string, number>();
+const queuedImageLoads: Array<() => void> = [];
+let activeImageLoads = 0;
 const pendingImageResolvers = new Map<string, ((value: string) => void)[]>();
 const imageRequestById = new Map<string, string>();
 let imageRequestCounter = 0;
@@ -28,6 +36,48 @@ let imageSaveRequestCounter = 0;
 const pendingImageSaveRequests = new Map<string, {
   resolve: (value: { success: boolean; path?: string; error?: string }) => void;
 }>();
+
+function touchCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V): void {
+  cache.delete(key);
+  cache.set(key, value);
+}
+
+function setBoundedCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V, limit: number): void {
+  touchCacheEntry(cache, key, value);
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value as K | undefined;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function getLoadedImage(url: string): HTMLImageElement | undefined {
+  const image = loadedImages.get(url);
+  if (image) touchCacheEntry(loadedImages, url, image);
+  return image;
+}
+
+function hasRecentImageFailure(url: string): boolean {
+  const failedAt = failedImages.get(url);
+  if (failedAt === undefined) return false;
+  if (Date.now() - failedAt < IMAGE_FAILURE_RETRY_MS) return true;
+  failedImages.delete(url);
+  return false;
+}
+
+function scheduleImageLoad<T>(load: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      activeImageLoads += 1;
+      load().then(resolve, reject).finally(() => {
+        activeImageLoads -= 1;
+        queuedImageLoads.shift()?.();
+      });
+    };
+    if (activeImageLoads < MAX_CONCURRENT_IMAGE_LOADS) run();
+    else queuedImageLoads.push(run);
+  });
+}
 
 const imageExtensionByMime: Record<string, string> = {
   'image/avif': 'avif',
@@ -107,7 +157,9 @@ export const settleImageSrcRequest = (requestId: string, resolvedUrl: string | u
 
   imageRequestById.delete(requestId);
   const finalUrl = resolvedUrl || rawUrl;
-  imageSrcCache.set(rawUrl, finalUrl);
+  if (resolvedUrl) {
+    setBoundedCacheEntry(imageSrcCache, rawUrl, resolvedUrl, MAX_IMAGE_SRC_CACHE_ENTRIES);
+  }
   const waiters = pendingImageResolvers.get(rawUrl) ?? [];
   pendingImageResolvers.delete(rawUrl);
   for (const resolve of waiters) {
@@ -122,6 +174,7 @@ export const resolveImageSrc = (rawUrl: string | null | undefined): string | Pro
   }
   const cached = imageSrcCache.get(url);
   if (typeof cached === 'string') {
+    touchCacheEntry(imageSrcCache, url, cached);
     return cached;
   }
   return requestImageSrcResolution(url);
@@ -307,7 +360,7 @@ export class ImageWidget extends WidgetType {
     }
     this.attachImagePointerInteractions(container);
 
-    const cachedImage = loadedImages.get(this.url);
+    const cachedImage = getLoadedImage(this.url);
     if (cachedImage) {
       const img = this.createDisplayImage(cachedImage);
       container.append(img, this.createImageControls(img));
@@ -315,7 +368,7 @@ export class ImageWidget extends WidgetType {
     }
 
     this.renderFallback(container);
-    if (!failedImages.has(this.url)) {
+    if (!hasRecentImageFailure(this.url)) {
       void this.preloadImage().then((image) => {
         if (image) {
           this.showLoadedImage(container, this.createDisplayImage(image), view);
@@ -335,13 +388,10 @@ export class ImageWidget extends WidgetType {
   }
 
   createDisplayImage(cachedImage: HTMLImageElement): HTMLImageElement {
-    let img: HTMLImageElement;
-    if (!cachedImage.isConnected) {
-      cachedImage.alt = this.altText;
-      img = cachedImage;
-    } else {
-      img = this.createLoadedImage(cachedImage.currentSrc || cachedImage.src);
-    }
+    const img = cachedImage.cloneNode(false) as HTMLImageElement;
+    img.className = 'meo-md-image-img';
+    img.alt = this.altText;
+    img.loading = 'eager';
     return img;
   }
 
@@ -373,27 +423,27 @@ export class ImageWidget extends WidgetType {
   }
 
   preloadImage(): Promise<HTMLImageElement | null> {
-    const cachedImage = loadedImages.get(this.url);
+    const cachedImage = getLoadedImage(this.url);
     if (cachedImage) return Promise.resolve(cachedImage);
 
     const pendingLoad = pendingImageLoads.get(this.url);
     if (pendingLoad) return pendingLoad;
 
-    const load = new Promise<HTMLImageElement | null>((resolve) => {
+    const load = scheduleImageLoad(() => new Promise<HTMLImageElement | null>((resolve) => {
       this.setImageSource((src) => {
         const img = this.createLoadedImage(src);
         let settled = false;
         const succeed = () => {
           if (settled) return;
           settled = true;
-          loadedImages.set(this.url, img);
+          setBoundedCacheEntry(loadedImages, this.url, img, MAX_LOADED_IMAGE_CACHE_ENTRIES);
           failedImages.delete(this.url);
           resolve(img);
         };
         const fail = () => {
           if (settled) return;
           settled = true;
-          failedImages.add(this.url);
+          setBoundedCacheEntry(failedImages, this.url, Date.now(), MAX_FAILED_IMAGE_CACHE_ENTRIES);
           resolve(null);
         };
 
@@ -403,10 +453,10 @@ export class ImageWidget extends WidgetType {
           succeed();
         }
       }, () => {
-        failedImages.add(this.url);
+        setBoundedCacheEntry(failedImages, this.url, Date.now(), MAX_FAILED_IMAGE_CACHE_ENTRIES);
         resolve(null);
       });
-    }).finally(() => {
+    })).finally(() => {
       pendingImageLoads.delete(this.url);
     });
     pendingImageLoads.set(this.url, load);
@@ -689,6 +739,63 @@ export class ImageWidget extends WidgetType {
 
   destroy(): void {
     this.closeFullscreen();
+  }
+}
+
+export interface ImageGroupItem {
+  url: string;
+  altText: string;
+  linkUrl: string;
+  sourceFrom: number;
+}
+
+export class ImageGroupWidget extends WidgetType {
+  readonly items: readonly ImageGroupItem[];
+  private readonly widgets: ImageWidget[];
+
+  constructor(items: readonly ImageGroupItem[]) {
+    super();
+    this.items = items.map((item) => ({ ...item }));
+    this.widgets = this.items.map((item) => new ImageWidget(
+      item.url,
+      item.altText,
+      item.linkUrl,
+      item.sourceFrom
+    ));
+  }
+
+  eq(other: ImageGroupWidget): boolean {
+    return (
+      other instanceof ImageGroupWidget
+      && other.items.length === this.items.length
+      && other.items.every((item, index) => {
+        const current = this.items[index];
+        return (
+          item.url === current.url
+          && item.altText === current.altText
+          && item.linkUrl === current.linkUrl
+          && item.sourceFrom === current.sourceFrom
+        );
+      })
+    );
+  }
+
+  toDOM(view?: EditorView): HTMLElement {
+    const group = document.createElement('div');
+    group.className = 'meo-md-image-group';
+    group.append(...this.widgets.map((widget) => widget.toDOM(view)));
+    return group;
+  }
+
+  ignoreEvent(event: Event): boolean {
+    if (event.type.startsWith('pointer') || event.type.startsWith('mouse')) {
+      return false;
+    }
+    return true;
+  }
+
+  destroy(): void {
+    for (const widget of this.widgets) widget.destroy();
   }
 }
 
