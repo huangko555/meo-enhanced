@@ -6,7 +6,7 @@ import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codem
 import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
-import { liveModeExtensions, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
+import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -267,6 +267,8 @@ export function createEditor({
   let onWindowPointerCancel = null;
   let pendingLiveSearchRevealFrame: number | null = null;
   let pendingLiveSearchRevealToken = 0;
+  let pendingLiveSearchDecorationRefreshFrame: number | null = null;
+  let pendingLiveSearchDecorationRefreshGeneration = 0;
   let gitBlameHover = null;
   let gitDiffOverviewRuler = null;
   let searchOverviewRuler = null;
@@ -1362,11 +1364,36 @@ export function createEditor({
     });
   };
 
+  const scheduleLiveSearchDecorationRefresh = () => {
+    pendingLiveSearchDecorationRefreshGeneration += 1;
+    const refreshGeneration = pendingLiveSearchDecorationRefreshGeneration;
+    if (pendingLiveSearchDecorationRefreshFrame !== null) {
+      window.cancelAnimationFrame(pendingLiveSearchDecorationRefreshFrame);
+    }
+    if (currentMode !== 'live') {
+      pendingLiveSearchDecorationRefreshFrame = null;
+      return;
+    }
+
+    pendingLiveSearchDecorationRefreshFrame = window.requestAnimationFrame(() => {
+      pendingLiveSearchDecorationRefreshFrame = null;
+      if (!view || currentMode !== 'live' || refreshGeneration !== pendingLiveSearchDecorationRefreshGeneration) {
+        return;
+      }
+      forceParsing(view, view.state.doc.length, 500);
+      view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(undefined) });
+    });
+  };
+
   const selectSearchMatch = (from, to, { focusEditor = true } = {}) => {
     view.dispatch({
       selection: { anchor: from, head: to },
-      effects: EditorView.scrollIntoView(from, { y: 'center' })
+      effects: [
+        EditorView.scrollIntoView(from, { y: 'center' }),
+        preserveLiveDecorationsForSearchEffect.of(undefined)
+      ]
     });
+    scheduleLiveSearchDecorationRefresh();
     scheduleLiveSearchMatchReveal(from);
     if (focusEditor) {
       view.focus();
@@ -2013,8 +2040,12 @@ export function createEditor({
         return;
       }
       view.dispatch({
-        effects: setSearchQueryEffect.of(nextQuery)
+        effects: [
+          setSearchQueryEffect.of(nextQuery),
+          preserveLiveDecorationsForSearchEffect.of(undefined)
+        ]
       });
+      scheduleLiveSearchDecorationRefresh();
     },
     hasFocus() {
       return view.hasFocus;
@@ -2035,6 +2066,10 @@ export function createEditor({
       gitDiffOverviewRuler = null;
       searchOverviewRuler?.destroy();
       searchOverviewRuler = null;
+      if (pendingLiveSearchDecorationRefreshFrame !== null) {
+        cancelAnimationFrame(pendingLiveSearchDecorationRefreshFrame);
+        pendingLiveSearchDecorationRefreshFrame = null;
+      }
       if (onScroll) {
         view.scrollDOM.removeEventListener('scroll', onScroll);
         onScroll = null;

@@ -133,6 +133,8 @@ type LivePointerSelectionState = {
 
 export const setLivePointerSelectionActiveEffect = StateEffect.define<LivePointerSelectionState>();
 export const setLiveDocumentIdleEffect = StateEffect.define<boolean>();
+export const preserveLiveDecorationsForSearchEffect = StateEffect.define<void>();
+export const refreshLiveDecorationsAfterSearchEffect = StateEffect.define<void>();
 
 const livePointerSelectionActiveField = StateField.define<LivePointerSelectionState>({
   create() {
@@ -2261,6 +2263,14 @@ const liveDecorationField = StateField.define({
     return safeBuildDecorations(state, Decoration.none, 'create');
   },
   update(decorations, transaction) {
+    // Search highlights are maintained independently. Preserving the existing
+    // live decorations prevents a transient parse result from exposing source.
+    if (
+      transaction.effects.some((effect) => effect.is(preserveLiveDecorationsForSearchEffect)) &&
+      !transaction.effects.some((effect) => effect.is(refreshLiveDecorationsAfterSearchEffect))
+    ) {
+      return decorations;
+    }
     // Recompute on every transaction so live mode stays in sync with parser updates
     // that may arrive without direct doc/selection changes.
     const next = safeBuildDecorations(transaction.state, decorations, 'update', {

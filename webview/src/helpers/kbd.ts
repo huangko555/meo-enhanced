@@ -6,6 +6,7 @@ export interface KbdTagRange {
 
 export interface ParsedKbdTag {
   content: string;
+  contentFrom: number;
   nextIndex: number;
 }
 
@@ -35,6 +36,7 @@ export function parseKbdTagAt(text: string, index: number): ParsedKbdTag | null 
   const contentEnd = contentStart + closeMatch.index;
   return {
     content: text.slice(contentStart, contentEnd),
+    contentFrom: contentStart - index,
     nextIndex: contentEnd + closeMatch[0].length
   };
 }

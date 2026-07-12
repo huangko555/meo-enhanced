@@ -3,9 +3,11 @@ import { createElement, CaseSensitive, ChevronUp, ChevronDown, Replace, ReplaceA
 export interface FindPanelElements {
   panel: HTMLDivElement;
   findInput: HTMLInputElement;
+  findClearBtn: HTMLButtonElement;
   wholeWordBtn: HTMLButtonElement;
   caseSensitiveBtn: HTMLButtonElement;
   replaceInput: HTMLInputElement;
+  replaceClearBtn: HTMLButtonElement;
   findStatus: HTMLSpanElement;
   findPrevBtn: HTMLButtonElement;
   findNextBtn: HTMLButtonElement;
@@ -30,7 +32,7 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   findRow.className = 'find-row';
 
   const findInputWrap = document.createElement('div');
-  findInputWrap.className = 'find-input-wrap';
+  findInputWrap.className = 'find-input-wrap find-input-wrap-with-status';
 
   const findInput = document.createElement('input');
   findInput.type = 'text';
@@ -40,6 +42,13 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
 
   const findStatus = document.createElement('span');
   findStatus.className = 'find-status';
+
+  const findClearBtn = document.createElement('button');
+  findClearBtn.type = 'button';
+  findClearBtn.className = 'format-button find-clear-button';
+  findClearBtn.title = 'Clear Find';
+  findClearBtn.setAttribute('aria-label', 'Clear Find');
+  findClearBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
   const wholeWordBtn = document.createElement('button');
   wholeWordBtn.type = 'button';
@@ -76,17 +85,29 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   closeBtn.setAttribute('aria-label', 'Close Find');
   closeBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
-  findInputWrap.append(findInput, findStatus);
+  findInputWrap.append(findInput, findStatus, findClearBtn);
   findRow.append(findInputWrap, wholeWordBtn, caseSensitiveBtn, findPrevBtn, findNextBtn);
 
   const replaceRow = document.createElement('div');
   replaceRow.className = 'find-row';
+
+  const replaceInputWrap = document.createElement('div');
+  replaceInputWrap.className = 'find-input-wrap';
 
   const replaceInput = document.createElement('input');
   replaceInput.type = 'text';
   replaceInput.className = 'find-input';
   replaceInput.placeholder = 'Replace';
   replaceInput.setAttribute('aria-label', 'Replace');
+
+  const replaceClearBtn = document.createElement('button');
+  replaceClearBtn.type = 'button';
+  replaceClearBtn.className = 'format-button find-clear-button';
+  replaceClearBtn.title = 'Clear Replace';
+  replaceClearBtn.setAttribute('aria-label', 'Clear Replace');
+  replaceClearBtn.appendChild(createElement(X, { width: 16, height: 16 }));
+
+  replaceInputWrap.append(replaceInput, replaceClearBtn);
 
   const replaceBtn = document.createElement('button');
   replaceBtn.type = 'button';
@@ -104,15 +125,17 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   closeSpacer.className = 'find-button-spacer';
   closeSpacer.setAttribute('aria-hidden', 'true');
 
-  replaceRow.append(replaceInput, replaceBtn, replaceAllBtn, closeSpacer, closeBtn);
+  replaceRow.append(replaceInputWrap, replaceBtn, replaceAllBtn, closeSpacer, closeBtn);
   panel.append(findRow, replaceRow);
 
   return {
     panel,
     findInput,
+    findClearBtn,
     wholeWordBtn,
     caseSensitiveBtn,
     replaceInput,
+    replaceClearBtn,
     findStatus,
     findPrevBtn,
     findNextBtn,
@@ -211,11 +234,26 @@ export const createFindPanelController = (
     }
   };
 
+  const getSelectedEditorText = (): string => {
+    const editor = getEditor();
+    const state = editor?.view?.state;
+    const selection = state?.selection?.main;
+    if (!selection || selection.empty) {
+      return '';
+    }
+    return state.doc.sliceString(Math.min(selection.from, selection.to), Math.max(selection.from, selection.to));
+  };
+
   const open = (target: 'find' | 'replace' = 'find'): void => {
+    const wasVisible = visible;
     updateFindPanelAnchor();
     visible = true;
     elements.panel.classList.add('is-visible');
     elements.toggleBtn.classList.add('is-active');
+    const selectedText = wasVisible ? '' : getSelectedEditorText();
+    if (selectedText) {
+      elements.findInput.value = selectedText;
+    }
     const editor = getEditor();
     if (editor) {
       editor.setSearchQuery(elements.findInput.value, getSearchOptions());
@@ -300,6 +338,17 @@ export const createFindPanelController = (
     return true;
   };
 
+  const clearFind = (): void => {
+    elements.findInput.value = '';
+    updateFindStatusSummary();
+    elements.findInput.focus();
+  };
+
+  const clearReplace = (): void => {
+    elements.replaceInput.value = '';
+    elements.replaceInput.focus();
+  };
+
   const isVisible = () => visible;
 
   const updateAnchor = () => {
@@ -335,6 +384,8 @@ export const createFindPanelController = (
     runFind,
     runReplace,
     runReplaceAll,
+    clearFind,
+    clearReplace,
     elements
   };
 };

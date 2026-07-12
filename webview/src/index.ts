@@ -1932,6 +1932,22 @@ findPanelElements.findInput.addEventListener('input', () => {
   findPanelController.updateFindStatusSummary();
 });
 
+findPanelElements.findClearBtn.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+});
+
+findPanelElements.findClearBtn.addEventListener('click', () => {
+  findPanelController.clearFind();
+});
+
+findPanelElements.replaceClearBtn.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+});
+
+findPanelElements.replaceClearBtn.addEventListener('click', () => {
+  findPanelController.clearReplace();
+});
+
 findPanelElements.wholeWordBtn.addEventListener('click', () => {
   findPanelController.toggleWholeWord();
   postFindOptions();

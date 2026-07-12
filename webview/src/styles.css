@@ -327,6 +327,10 @@ body {
 
 .find-input-wrap .find-input {
   width: 100%;
+  padding-right: 30px;
+}
+
+.find-input-wrap-with-status .find-input {
   padding-right: 76px;
 }
 
@@ -367,7 +371,7 @@ body {
 .find-status {
   position: absolute;
   top: 50%;
-  right: 8px;
+  right: 30px;
   transform: translateY(-50%);
   font-size: 11px;
   line-height: 1;
@@ -377,6 +381,23 @@ body {
 
 .find-status.is-error {
   color: var(--vscode-errorForeground, #f48771);
+}
+
+.find-clear-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--vscode-descriptionForeground, var(--vscode-icon-foreground));
+  background: transparent;
+}
+
+.find-clear-button:hover {
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
 }
 
 .format-group,
@@ -2702,7 +2723,7 @@ body.outline-resizing {
   top: 0;
   right: 3px;
   bottom: 0;
-  width: 4px;
+  width: 6px;
   pointer-events: none;
   z-index: 6;
 }
@@ -2906,6 +2927,7 @@ body.outline-resizing {
 .cm-editor .meo-md-html-table-shell {
   --meo-html-table-controls-width: 352px;
   position: relative;
+  z-index: 1;
   padding: 0;
   width: calc(100% - 24px);
   max-width: 100%;
@@ -3007,7 +3029,7 @@ body.outline-resizing {
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected,
 .cm-editor .meo-md-html-table td.meo-md-html-table-cell-selected {
-  background: color-mix(in srgb, var(--meo-semantic-tableSelectionBorder) 14%, transparent);
+  background: transparent;
   --meo-table-sel-top: transparent;
   --meo-table-sel-right: transparent;
   --meo-table-sel-bottom: transparent;
@@ -3017,6 +3039,16 @@ body.outline-resizing {
     inset -1px 0 0 var(--meo-table-sel-right),
     inset 0 -1px 0 var(--meo-table-sel-bottom),
     inset 1px 0 0 var(--meo-table-sel-left);
+}
+
+.cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected::before,
+.cm-editor .meo-md-html-table td.meo-md-html-table-cell-selected::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--meo-semantic-tableSelectionBorder) 14%, transparent);
 }
 
 .cm-editor .meo-md-html-table th.meo-md-html-table-cell-selected-top,
@@ -3052,6 +3084,7 @@ body.outline-resizing {
 
 .cm-editor .meo-md-html-table-cell-content {
   position: relative;
+  z-index: 1;
   min-width: 0;
 }
 
@@ -3090,6 +3123,36 @@ body.outline-resizing {
   -webkit-text-fill-color: transparent !important;
 }
 
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match .meo-md-html-table-cell-preview,
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match .meo-md-html-table-cell-preview * {
+  color: var(--meo-foreground) !important;
+  -webkit-text-fill-color: var(--meo-foreground) !important;
+}
+
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  background: var(--meo-active-line-bg);
+}
+
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match .meo-md-html-table-cell-preview {
+  position: relative;
+  z-index: 1;
+}
+
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match .meo-search-match {
+  color: var(--meo-semantic-searchMatchForeground) !important;
+  -webkit-text-fill-color: var(--meo-semantic-searchMatchForeground) !important;
+}
+
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match .meo-search-match-active {
+  color: var(--meo-semantic-searchMatchActiveForeground) !important;
+  -webkit-text-fill-color: var(--meo-semantic-searchMatchActiveForeground) !important;
+}
+
 .cm-editor .meo-md-html-table textarea {
   position: absolute;
   inset: 0;
@@ -3119,6 +3182,18 @@ body.outline-resizing {
 .cm-editor .meo-md-html-table-cell-content.is-editing textarea {
   opacity: 1;
   pointer-events: auto;
+}
+
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match textarea {
+  z-index: 2;
+  background: transparent;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  caret-color: var(--meo-caret);
+}
+
+.cm-editor .meo-md-html-table-cell-content.is-editing.has-search-match textarea:focus {
+  background: transparent;
 }
 
 .cm-editor .meo-md-html-table textarea:focus {

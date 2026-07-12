@@ -295,6 +295,8 @@ function isRedoShortcut(event) {
 const tableInlineSchemeRe = /^[a-z][a-z0-9+.-]*:/i;
 const tableInlineRawUrlRe = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|file:|www\.)[^\s<]+/i;
 const tableInlineEmojiShortcodeRe = /^:([a-zA-Z0-9_+-]+):/;
+const tableInlineTagRe = /^#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/u;
+const tableInlineTagPrefixRe = /[\p{L}\p{N}_/-]/u;
 const tableInlineEscapableChars = new Set(['\\', '*', '_', '~', '`', '[', ']', '(', ')', '!', '|', '<', '>']);
 const tableSearchStateEventName = 'meo-search-state-change';
 const tableDiagnosticSeverityClasses = [
@@ -395,6 +397,34 @@ function findTableSearchMatchRanges(text: string, searchState: TableSearchState 
   return matches;
 }
 
+function shouldExpandTableCellForSearch(text: string, searchState: TableSearchState | null): boolean {
+  return findTableSearchMatchRanges(text, searchState).length > 0;
+}
+
+function hasSameTableSearchQuery(left: TableSearchState | null, right: TableSearchState | null): boolean {
+  return Boolean(
+    left &&
+    right &&
+    left.text === right.text &&
+    left.wholeWord === right.wholeWord &&
+    left.caseSensitive === right.caseSensitive
+  );
+}
+
+function tableSearchSelectionRange(searchState: TableSearchState | null): TableCellRange | null {
+  if (!searchState || searchState.selectionTo <= searchState.selectionFrom) {
+    return null;
+  }
+  return {
+    from: searchState.selectionFrom,
+    to: searchState.selectionTo
+  };
+}
+
+function tableSearchRangeOverlapsCell(range: TableCellRange, cellRange: TableCellRange | null): boolean {
+  return Boolean(cellRange && range.from < cellRange.to && range.to > cellRange.from);
+}
+
 function appendSearchHighlightedText(
   parent: HTMLElement,
   text: string,
@@ -419,6 +449,11 @@ function appendSearchHighlightedText(
     const absoluteTo = (sourceRange?.from ?? 0) + offset + match.end;
     const isActive = Boolean(searchState && absoluteFrom === searchState.selectionFrom && absoluteTo === searchState.selectionTo);
     span.className = isActive ? 'meo-search-match meo-search-match-active' : 'meo-search-match';
+    const foreground = isActive
+      ? 'var(--meo-semantic-searchMatchActiveForeground)'
+      : 'var(--meo-semantic-searchMatchForeground)';
+    span.style.setProperty('color', foreground, 'important');
+    span.style.setProperty('-webkit-text-fill-color', foreground, 'important');
     span.textContent = text.slice(match.start, match.end);
     parent.appendChild(span);
     cursor = match.end;
@@ -534,6 +569,7 @@ function parseTableInlineCodeSpan(text, index) {
   if (close < 0) return null;
   return {
     content: text.slice(index + tickCount, close),
+    contentFrom: tickCount,
     nextIndex: close + tickCount
   };
 }
@@ -642,6 +678,7 @@ function parseTableInlineMarkdownLink(text, index, { image = false } = {}) {
 
   return {
     label: label.content,
+    labelFrom: start + 1,
     url,
     nextIndex: destination.nextIndex
   };
@@ -659,9 +696,13 @@ function parseTableInlineWikiLink(text, index) {
       const pipeIndex = content.indexOf('|');
       const rawTarget = pipeIndex >= 0 ? content.slice(0, pipeIndex).trim() : content.trim();
       const rawAlias = pipeIndex >= 0 ? content.slice(pipeIndex + 1).trim() : '';
+      const visibleRaw = pipeIndex >= 0 ? content.slice(pipeIndex + 1) : content;
+      const visibleText = rawAlias || rawTarget;
+      const visibleTextFrom = index + 2 + (pipeIndex >= 0 ? pipeIndex + 1 : 0) + (visibleRaw.search(/\S|$/));
       return {
         target: rawTarget,
-        visibleText: rawAlias || rawTarget,
+        visibleText,
+        visibleTextFrom,
         nextIndex: i + 2
       };
     }
@@ -802,11 +843,16 @@ function parseTableInlineEmojiShortcode(text, index) {
   };
 }
 
-function appendTableInlinePreviewLink(parent, label, href) {
+function appendTableInlinePreviewLink(parent, label, href, options: {
+  baseOffset?: number;
+  diagnostics?: TableCellDiagnostics[];
+  searchState?: TableSearchState | null;
+  sourceRange?: TableCellRange | null;
+} = {}) {
   const el = document.createElement('span');
   el.className = 'meo-md-link';
   if (href) el.setAttribute('data-meo-link-href', href);
-  appendTableInlinePreviewNodes(el, label, { disableLinkParsers: true });
+  appendTableInlinePreviewNodes(el, label, { ...options, disableLinkParsers: true });
   parent.appendChild(el);
 }
 
@@ -856,7 +902,14 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       flushBuffer();
       const el = document.createElement('code');
       el.className = 'meo-md-inline-code';
-      el.textContent = decodeTableInlineEscapes(code.content);
+      appendTablePlainText(
+        el,
+        decodeTableInlineEscapes(code.content),
+        baseOffset + i + code.contentFrom,
+        diagnostics,
+        searchState,
+        sourceRange
+      );
       parent.appendChild(el);
       i = code.nextIndex;
       continue;
@@ -871,7 +924,14 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         flushBuffer();
         const el = document.createElement('kbd');
         el.className = 'meo-md-kbd';
-        el.textContent = keyText;
+        appendTablePlainText(
+          el,
+          keyText,
+          baseOffset + i + kbd.contentFrom,
+          diagnostics,
+          searchState,
+          sourceRange
+        );
         parent.appendChild(el);
       }
       i = kbd.nextIndex;
@@ -903,7 +963,10 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       const wiki = parseTableInlineWikiLink(text, i);
       if (wiki) {
         flushBuffer();
-        appendTableInlinePreviewLink(parent, wiki.visibleText, tableInlineHrefFromWikiTarget(wiki.target));
+        appendTableInlinePreviewLink(parent, wiki.visibleText, tableInlineHrefFromWikiTarget(wiki.target), {
+          ...options,
+          baseOffset: baseOffset + i + wiki.visibleTextFrom
+        });
         i = wiki.nextIndex;
         continue;
       }
@@ -912,7 +975,10 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       if (link) {
         flushBuffer();
         if (link.url) {
-          appendTableInlinePreviewLink(parent, link.label, decodeTableInlineEscapes(link.url));
+          appendTableInlinePreviewLink(parent, link.label, decodeTableInlineEscapes(link.url), {
+            ...options,
+            baseOffset: baseOffset + i + link.labelFrom
+          });
         } else {
           appendTableInlinePreviewNodes(parent, link.label, {
             ...options,
@@ -926,7 +992,10 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       const autolink = parseTableInlineAutolink(text, i);
       if (autolink) {
         flushBuffer();
-        appendTableInlinePreviewLink(parent, autolink.label, autolink.href);
+        appendTableInlinePreviewLink(parent, autolink.label, autolink.href, {
+          ...options,
+          baseOffset: baseOffset + i + 1
+        });
         i = autolink.nextIndex;
         continue;
       }
@@ -964,10 +1033,24 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
     }
 
     if (!disableLinkParsers) {
+      const tag = tableInlineTagRe.exec(text.slice(i));
+      if (tag && (i === 0 || !tableInlineTagPrefixRe.test(text[i - 1]))) {
+        flushBuffer();
+        const el = document.createElement('span');
+        el.className = 'meo-md-tag';
+        appendTablePlainText(el, tag[0], baseOffset + i, diagnostics, searchState, sourceRange);
+        parent.appendChild(el);
+        i += tag[0].length;
+        continue;
+      }
+
       const rawUrl = parseTableInlineRawUrl(text, i);
       if (rawUrl) {
         flushBuffer();
-        appendTableInlinePreviewLink(parent, rawUrl.label, rawUrl.href);
+        appendTableInlinePreviewLink(parent, rawUrl.label, rawUrl.href, {
+          ...options,
+          baseOffset: baseOffset + i
+        });
         i = rawUrl.nextIndex;
         continue;
       }
@@ -1000,7 +1083,15 @@ function renderTableCellInlinePreview(
 ) {
   if (!(previewEl instanceof HTMLElement)) return;
   previewEl.replaceChildren();
-  appendTableInlinePreviewNodes(previewEl, value ?? '', { diagnostics, searchState, sourceRange });
+  const text = value ?? '';
+  const isSearchExpanded = shouldExpandTableCellForSearch(text, searchState);
+  previewEl.classList.toggle('is-search-expanded', isSearchExpanded);
+  previewEl.parentElement?.classList.toggle('has-search-match', isSearchExpanded);
+  if (isSearchExpanded) {
+    appendTablePlainText(previewEl, text, 0, diagnostics, searchState, sourceRange);
+    return;
+  }
+  appendTableInlinePreviewNodes(previewEl, text, { diagnostics, searchState, sourceRange });
 }
 
 function consumeTableInlineProtectedSpan(text, index, endIndex) {
@@ -1224,7 +1315,11 @@ function buildTableDataForLineRange(state, startLineNo, endLineNo) {
 
   const dataLines = delimiterIdx >= 0 ? lines.slice(delimiterIdx + 1, lastTableLineIdx + 1) : [];
   const alignments = delimiterIdx >= 0 ? parseDelimiterAlignments(lines[delimiterIdx].text) : [];
-  const colCount = headerLine ? headerLine.cells.length : dataLines[0] ? dataLines[0].cells.length : 0;
+  const colCount = Math.max(
+    headerLine?.cells.length ?? 0,
+    alignments.length,
+    ...dataLines.map((line) => line.cells.length)
+  );
   const tableFrom = headerLine ? headerLine.from : startLine.from;
   const tableTo = delimiterIdx >= 0 && lines[lastTableLineIdx] ? lines[lastTableLineIdx].to : endLine.to;
   const effectiveStartLine = headerLine ? headerLine.lineNo : startLine.number;
@@ -2337,8 +2432,32 @@ class HtmlTableWidget extends WidgetType {
     this.scheduleLayout({ resizeRows: true });
   }
 
+  refreshSearchSelectionCellPreviews(...searchStates: Array<TableSearchState | null>) {
+    if (!this.domRefs) return;
+    const selectionRanges = searchStates
+      .map(tableSearchSelectionRange)
+      .filter((range): range is TableCellRange => range !== null);
+    if (selectionRanges.length === 0) return;
+
+    for (const inputs of this.domRefs.allRowInputs) {
+      for (const input of inputs) {
+        const coords = this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
+        if (!coords) continue;
+        const cellRange = this.cellSourceRange(coords.row, coords.col);
+        if (selectionRanges.some((range) => tableSearchRangeOverlapsCell(range, cellRange))) {
+          this.refreshCellPreviewFromInput(input);
+        }
+      }
+    }
+  }
+
   setSearchState(searchState: TableSearchState | null) {
+    const previousSearchState = this.searchState;
     this.searchState = searchState?.text ? searchState : null;
+    if (hasSameTableSearchQuery(previousSearchState, this.searchState)) {
+      this.refreshSearchSelectionCellPreviews(previousSearchState, this.searchState);
+      return;
+    }
     this.refreshAllCellPreviews();
   }
 
