@@ -66,6 +66,14 @@ import {
 } from './helpers/math';
 import { diagnosticDataField } from './helpers/diagnostics';
 import { markdownTagField } from './helpers/tags';
+import {
+  codeBlockCollapseExtensions,
+  codeBlockCollapseViewExtensions,
+  codeBlockCollapseWidget,
+  getCodeBlockCollapseSections,
+  isCodeBlockCollapsed,
+  selectionRequiresCodeBlockExpansion
+} from './helpers/codeBlockCollapse';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
@@ -1344,6 +1352,7 @@ function buildDecorations(state) {
   }
   addForcedThematicBreakDecorations(ranges, state, activeLines, frontmatter, codeBlockLines);
   const mathRanges = collectMathRanges(state, tree, mermaidColonBlocks, renderedTableRanges, frontmatter);
+  const collapsibleCodeBlocks = getCodeBlockCollapseSections(state);
 
   tree.iterate({
     enter: (node) => {
@@ -1633,6 +1642,7 @@ function buildDecorations(state) {
   addSingleTildeStrikeDecorations(ranges, state, activeLines, strikeRanges, codeBlockLines);
   addListLineDecorations(ranges, state, indentSelectedLines, frontmatter, codeBlockLines);
   addMathDecorations(ranges, state, mathRanges, activeLines);
+  addCodeBlockCollapseDecorations(ranges, state, collapsibleCodeBlocks);
   addKbdTagDecorations(ranges, state, activeLines, renderedTableRanges, mathRanges, frontmatter, codeBlockLines);
   addEmojiDecorationsWithMath(ranges, state, mathRanges, codeBlockLines);
   addMermaidColonFenceDecorations(ranges, state, mermaidColonBlocks, activeLines);
@@ -2264,6 +2274,26 @@ function addEmojiDecorationsWithMath(
   }
 }
 
+function addCodeBlockCollapseDecorations(builder, state, sections) {
+  for (const section of sections) {
+    const collapsed = isCodeBlockCollapsed(state, section);
+    if (collapsed) {
+      builder.push(
+        Decoration.replace({ block: true, inclusive: false }).range(section.collapseFrom, section.collapseTo)
+      );
+    }
+    if (collapsed) {
+      builder.push(
+        Decoration.widget({
+          widget: codeBlockCollapseWidget(section.anchor, true, section.hiddenLineCount),
+          side: 1,
+          block: true
+        }).range(section.previewEnd)
+      );
+    }
+  }
+}
+
 const liveDecorationField = StateField.define({
   create(state) {
     return safeBuildDecorations(state, Decoration.none, 'create');
@@ -2273,7 +2303,8 @@ const liveDecorationField = StateField.define({
     // live decorations prevents a transient parse result from exposing source.
     if (
       transaction.effects.some((effect) => effect.is(preserveLiveDecorationsForSearchEffect)) &&
-      !transaction.effects.some((effect) => effect.is(refreshLiveDecorationsAfterSearchEffect))
+      !transaction.effects.some((effect) => effect.is(refreshLiveDecorationsAfterSearchEffect)) &&
+      !selectionRequiresCodeBlockExpansion(transaction.state)
     ) {
       return decorations;
     }
@@ -2448,6 +2479,8 @@ export function liveModeExtensions() {
     markdownTagField,
     livePointerSelectionActiveField,
     liveDocumentIdleField,
+    ...codeBlockCollapseExtensions(),
+    ...codeBlockCollapseViewExtensions(),
     liveDecorationField,
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

@@ -1314,8 +1314,8 @@
   "scripts": {
     "install:all": "bun install && (cd webview && bun install)",
     "test": "bun run test:unit && bun run test:browser",
-    "test:unit": "bun scripts/test-document-fragment-link.ts && bun scripts/test-webview-image-src.ts && bun scripts/test-image-recreation.ts && bun scripts/test-image-scroll-anchor.ts && bun scripts/test-outline-tree.ts && bun scripts/test-ordered-list-renumber.ts && bun scripts/test-theme-consistency.ts && bun scripts/test-theme-jsonc.ts",
-    "test:browser": "bun scripts/test-table-stability.ts && bun scripts/test-image-layout.ts",
+    "test:unit": "bun scripts/test-document-fragment-link.ts && bun scripts/test-webview-image-src.ts && bun scripts/test-image-recreation.ts && bun scripts/test-image-scroll-anchor.ts && bun scripts/test-outline-tree.ts && bun scripts/test-ordered-list-renumber.ts && bun scripts/test-code-block-collapse.ts && bun scripts/test-theme-consistency.ts && bun scripts/test-theme-jsonc.ts",
+    "test:browser": "bun scripts/test-table-stability.ts && bun scripts/test-image-layout.ts && bun scripts/test-code-block-collapse-browser.ts",
     "typecheck": "bun run typecheck:extension && bun run typecheck:webview",
     "typecheck:extension": "tsc -p tsconfig.json --noEmit",
     "typecheck:webview": "tsc -p webview/tsconfig.json --noEmit",

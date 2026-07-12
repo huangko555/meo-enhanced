@@ -7,6 +7,7 @@ import { vim, Vim } from '@replit/codemirror-vim';
 import { highlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
+import { setCodeBlockSearchTargetEffect } from './helpers/codeBlockCollapse';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -1409,7 +1410,8 @@ export function createEditor({
       selection: { anchor: from, head: to },
       effects: [
         EditorView.scrollIntoView(from, { y: 'center' }),
-        preserveLiveDecorationsForSearchEffect.of(undefined)
+        preserveLiveDecorationsForSearchEffect.of(undefined),
+        setCodeBlockSearchTargetEffect.of({ from, to })
       ]
     });
     scheduleLiveSearchDecorationRefresh(to);
@@ -2089,12 +2091,22 @@ export function createEditor({
         currentQuery.wholeWord === nextQuery.wholeWord &&
         currentQuery.caseSensitive === nextQuery.caseSensitive
       ) {
+        if (!nextQuery.text) {
+          view.dispatch({
+            effects: [
+              setCodeBlockSearchTargetEffect.of(null),
+              preserveLiveDecorationsForSearchEffect.of(undefined)
+            ]
+          });
+          scheduleLiveSearchDecorationRefresh();
+        }
         return;
       }
       view.dispatch({
         effects: [
           setSearchQueryEffect.of(nextQuery),
-          preserveLiveDecorationsForSearchEffect.of(undefined)
+          preserveLiveDecorationsForSearchEffect.of(undefined),
+          setCodeBlockSearchTargetEffect.of(null)
         ]
       });
       scheduleLiveSearchDecorationRefresh();
