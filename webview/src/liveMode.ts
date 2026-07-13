@@ -223,6 +223,54 @@ const rawFileUrlBlockedAncestorNames = new Set([
 const listLineDecoCache = new Map();
 const listIndentWidgetCache = new Map();
 const frontmatterArrayPillWidgetCache = new Map();
+const htmlBreakTagRegex = /^<br\s*\/?>$/i;
+
+class HtmlBreakWidget extends WidgetType {
+  eq(other: WidgetType): boolean {
+    return other instanceof HtmlBreakWidget;
+  }
+
+  toDOM(): HTMLElement {
+    const element = document.createElement('br');
+    element.className = 'meo-md-html-break';
+    return element;
+  }
+
+  get lineBreaks(): number {
+    return 1;
+  }
+}
+
+const htmlBreakWidget = new HtmlBreakWidget();
+
+function addHtmlBreakDecoration(builder, state, node, activeLines, frontmatter): void {
+  if (isInsideFrontmatter(frontmatter, node.from)) {
+    return;
+  }
+
+  const source = state.doc.sliceString(node.from, node.to);
+  if (!htmlBreakTagRegex.test(source)) {
+    return;
+  }
+
+  const line = state.doc.lineAt(node.from);
+  const needsVisualBreak = state.doc.sliceString(node.to, line.to).trim().length > 0;
+  if (activeLines.has(line.number)) {
+    if (needsVisualBreak) {
+      builder.push(
+        Decoration.widget({ widget: htmlBreakWidget, side: 1 }).range(node.to)
+      );
+    }
+    return;
+  }
+
+  builder.push(
+    Decoration.replace({
+      widget: needsVisualBreak ? htmlBreakWidget : undefined,
+      inclusive: false
+    }).range(node.from, node.to)
+  );
+}
 
 function isMergeConflictMarkerLine(state, pos) {
   const line = state.doc.lineAt(pos);
@@ -1545,6 +1593,8 @@ function buildDecorations(state) {
             }).range(node.from, node.to)
           );
         }
+      } else if ((node.name === 'HTMLTag' || node.name === 'HTMLBlock') && tableDepth === 0) {
+        addHtmlBreakDecoration(ranges, state, node, activeLines, frontmatter);
       }
 
       if (!node.name.endsWith('Mark')) {
