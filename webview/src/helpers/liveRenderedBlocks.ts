@@ -263,12 +263,12 @@ export function getLiveRenderedBlocks(state: EditorState): LiveRenderedBlock[] {
     if (endLine <= startLine) {
       continue;
     }
-    if (selectionTouchesLineRange(state, startLine, endLine)) {
+    const hiddenRange = resolveMathHiddenLineRange(startLine, endLine);
+    if (hiddenRange && selectionTouchesLineRange(state, hiddenRange.from, hiddenRange.to)) {
       continue;
     }
     const block = createRenderedBlock('math', startLine, endLine, null);
     if (block) {
-      const hiddenRange = resolveMathHiddenLineRange(startLine, endLine);
       if (hiddenRange) {
         block.lineNumberHiddenFrom = hiddenRange.from;
         block.lineNumberHiddenTo = hiddenRange.to;

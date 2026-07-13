@@ -68,6 +68,12 @@ import {
 import { diagnosticDataField } from './helpers/diagnostics';
 import { markdownTagField } from './helpers/tags';
 import { mermaidEditingStateField } from './helpers/mermaidEditing';
+import {
+  addLatexMathToolbar,
+  getLatexMathBlockMode,
+  LatexMathEditingWidget,
+  latexMathEditingStateField
+} from './helpers/latexMathEditing';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
@@ -1886,26 +1892,6 @@ class LatexMathWidget extends WidgetType {
     }
     if (this.fencedDisplay && this.mode === 'display') {
       wrapper.classList.add('meo-md-math-fenced-display');
-      wrapper.addEventListener('pointerdown', (event: PointerEvent) => {
-        if (event.button !== 0) {
-          return;
-        }
-        const view = EditorView.findFromDOM(wrapper);
-        if (!view) {
-          return;
-        }
-
-        // Clicking rendered fenced math should move the caret inside the block so
-        // live mode reveals the original source lines for editing.
-        const lastContentLine = Math.max(this.startLine, this.endLine - 1);
-        const targetLineNo = Math.max(1, Math.min(this.startLine + 1, lastContentLine));
-        const targetPos = view.state.doc.line(targetLineNo).from;
-
-        event.preventDefault();
-        event.stopPropagation();
-        view.dispatch({ selection: { anchor: targetPos } });
-        view.focus();
-      });
     }
     wrapper.innerHTML = this.html;
     return wrapper;
@@ -2083,9 +2069,10 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
       continue;
     }
     const fencedDisplay = mathRange.mode === 'display' && mathRange.fencedDisplay === true;
-    const editingBoundary =
+    let editingBoundary = !fencedDisplay && (
       rangeTouchesActiveLine(state, mathRange.from, mathRange.to, activeLines) ||
-      overlapsSelection(state, mathRange.from, mathRange.to);
+      overlapsSelection(state, mathRange.from, mathRange.to)
+    );
 
     if (fencedDisplay) {
       const openingLine = state.doc.lineAt(mathRange.from);
@@ -2093,6 +2080,11 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
       const startLineNo = openingLine.number;
       const endLineNo = closingLine.number;
       const renderSpan = resolveFencedMathRenderSpan(state, startLineNo, endLineNo);
+      if (renderSpan) {
+        editingBoundary =
+          rangeTouchesActiveLine(state, renderSpan.innerFrom, renderSpan.innerTo, activeLines) ||
+          overlapsSelection(state, renderSpan.innerFrom, renderSpan.innerTo);
+      }
 
       addLineClass(builder, state, openingLine.from, closingLine.to, lineStyleDecos.codeBlock);
 
@@ -2102,8 +2094,12 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
       const copyContent = renderSpan
         ? state.doc.sliceString(renderSpan.innerFrom, renderSpan.innerTo)
         : '';
-      if (copyContent) {
-        addTopLineCopyButton(builder, openingLine.to, copyContent);
+      const anchor = openingLine.from;
+      const mode = renderSpan
+        ? getLatexMathBlockMode(state, anchor, renderSpan.innerFrom, renderSpan.innerTo)
+        : null;
+      if (copyContent && mode) {
+        addLatexMathToolbar(builder, openingLine.to, anchor, mode.effective, copyContent);
       }
 
       addRange(
@@ -2119,22 +2115,29 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
         activeLines.has(closingLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
       );
 
-      if (editingBoundary) {
+      if (editingBoundary && mode?.effective === 'preview') {
         continue;
       }
 
       const html = renderLatexMathToHtml(mathRange.content, mathRange.mode);
-      if (!html) {
+      if (!html && mode?.effective === 'preview') {
         continue;
       }
 
-      if (!renderSpan) {
+      if (!renderSpan || !mode) {
         continue;
       }
 
       builder.push(
         Decoration.replace({
-          widget: getMathWidget(html, mathRange.mode, true, startLineNo, endLineNo),
+          widget: mode.effective === 'preview'
+            ? getMathWidget(html!, mathRange.mode, true, startLineNo, endLineNo)
+            : new LatexMathEditingWidget({
+              anchor,
+              contentFrom: renderSpan.innerFrom,
+              contentTo: renderSpan.innerTo,
+              sourceText: copyContent
+            }, mode.effective, mode.searchReveal),
           block: true
         }).range(renderSpan.innerFrom, renderSpan.innerTo)
       );
@@ -2452,6 +2455,7 @@ export function liveModeExtensions() {
     livePointerSelectionActiveField,
     liveDocumentIdleField,
     mermaidEditingStateField,
+    latexMathEditingStateField,
     liveDecorationField,
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

@@ -48,6 +48,7 @@ import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter'
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
 import { setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
+import { setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -1411,6 +1412,7 @@ export function createEditor({
       effects: [
         EditorView.scrollIntoView(from, { y: 'center' }),
         setMermaidSearchRevealEffect.of({ from, to }),
+        setLatexMathSearchRevealEffect.of({ from, to }),
         preserveLiveDecorationsForSearchEffect.of(undefined)
       ]
     });
@@ -2097,6 +2099,7 @@ export function createEditor({
         effects: [
           setSearchQueryEffect.of(nextQuery),
           setMermaidSearchRevealEffect.of(null),
+          setLatexMathSearchRevealEffect.of(null),
           preserveLiveDecorationsForSearchEffect.of(undefined)
         ]
       });

@@ -1619,7 +1619,8 @@ body {
   padding-left: 2ch;
 }
 
-.meo-mermaid-toolbar {
+.meo-mermaid-toolbar,
+.meo-latex-math-toolbar {
   position: absolute;
   top: 4px;
   right: 5px;
@@ -1629,11 +1630,13 @@ body {
   gap: 4px;
 }
 
-.meo-mermaid-toolbar .meo-copy-code-btn {
+.meo-mermaid-toolbar .meo-copy-code-btn,
+.meo-latex-math-toolbar .meo-copy-code-btn {
   position: static;
 }
 
-.meo-mermaid-mode-btn {
+.meo-mermaid-mode-btn,
+.meo-latex-math-mode-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1647,7 +1650,8 @@ body {
   cursor: pointer;
 }
 
-.meo-mermaid-mode-btn:hover {
+.meo-mermaid-mode-btn:hover,
+.meo-latex-math-mode-btn:hover {
   background: var(--meo-semantic-codeCopyHoverBackground);
 }
 
@@ -3013,7 +3017,8 @@ body.outline-resizing {
   white-space: nowrap;
 }
 
-.cm-editor .meo-mermaid-editing-block {
+.cm-editor .meo-mermaid-editing-block,
+.cm-editor .meo-latex-math-editing-block {
   display: grid;
   grid-template-columns: minmax(280px, 2fr) minmax(320px, 3fr);
   align-items: stretch;
@@ -3022,27 +3027,35 @@ body.outline-resizing {
   background: var(--meo-code-background);
 }
 
-.cm-editor .meo-mermaid-editing-block.is-source {
+.cm-editor .meo-mermaid-editing-block.is-source,
+.cm-editor .meo-latex-math-editing-block.is-source {
   grid-template-columns: minmax(0, 1fr);
 }
 
 .cm-editor .meo-mermaid-source-pane,
-.cm-editor .meo-mermaid-preview-shell {
+.cm-editor .meo-mermaid-preview-shell,
+.cm-editor .meo-latex-math-source-pane,
+.cm-editor .meo-latex-math-preview-shell {
   min-width: 0;
   background: var(--meo-code-background);
 }
 
-.cm-editor .meo-mermaid-preview-shell {
+.cm-editor .meo-mermaid-preview-shell,
+.cm-editor .meo-latex-math-preview-shell {
   border-left: 1px solid var(--meo-semantic-tableBorder, var(--vscode-panel-border));
 }
 
 .cm-editor .meo-mermaid-source-sticky,
-.cm-editor .meo-mermaid-preview-sticky {
+.cm-editor .meo-mermaid-preview-sticky,
+.cm-editor .meo-latex-math-source-sticky,
+.cm-editor .meo-latex-math-preview-sticky {
   width: 100%;
 }
 
 .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-source-sticky,
-.cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-sticky {
+.cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-sticky,
+.cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-source-sticky,
+.cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-preview-sticky {
   position: sticky;
   top: 12px;
   align-self: start;
@@ -3053,6 +3066,19 @@ body.outline-resizing {
   align-items: center;
   min-height: min(var(--meo-mermaid-preview-preferred-height, 0px), 60vh);
   overflow: hidden;
+}
+
+.cm-editor .meo-latex-math-preview-sticky {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+}
+
+.cm-editor .meo-latex-math-preview-error {
+  padding: 12px;
+  color: var(--vscode-errorForeground);
+  white-space: pre-wrap;
 }
 
 .cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block {
@@ -3077,7 +3103,8 @@ body.outline-resizing {
   max-height: 100%;
 }
 
-.cm-editor .meo-mermaid-source-editor > .cm-editor {
+.cm-editor .meo-mermaid-source-editor > .cm-editor,
+.cm-editor .meo-latex-math-source-editor > .cm-editor {
   height: auto;
   color: var(--meo-foreground);
   background: var(--meo-code-background);
@@ -3089,12 +3116,14 @@ body.outline-resizing {
   text-rendering: auto;
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-scroller {
+.cm-editor .meo-mermaid-source-editor .cm-scroller,
+.cm-editor .meo-latex-math-source-editor .cm-scroller {
   overflow: visible !important;
   background: var(--meo-code-background);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-gutters {
+.cm-editor .meo-mermaid-source-editor .cm-gutters,
+.cm-editor .meo-latex-math-source-editor .cm-gutters {
   border: 0;
   color: var(--meo-semantic-mutedForeground);
   background: transparent;
@@ -3102,36 +3131,43 @@ body.outline-resizing {
   font-weight: var(--meo-font-source-weight);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-content {
+.cm-editor .meo-mermaid-source-editor .cm-content,
+.cm-editor .meo-latex-math-source-editor .cm-content {
   min-width: 0;
   padding: 12px 12px 12px 4px;
   background: var(--meo-code-background);
   caret-color: var(--meo-caret);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-line {
+.cm-editor .meo-mermaid-source-editor .cm-line,
+.cm-editor .meo-latex-math-source-editor .cm-line {
   padding-left: 8px;
   background: var(--meo-code-background);
   font-family: var(--meo-font-source);
   font-weight: var(--meo-font-source-weight);
 }
 
-.cm-editor .meo-mermaid-source-editor .cm-line.cm-activeLine {
+.cm-editor .meo-mermaid-source-editor .cm-line.cm-activeLine,
+.cm-editor .meo-latex-math-source-editor .cm-line.cm-activeLine {
   background: var(--meo-code-block-active-line-bg);
 }
 
 @media (max-width: 760px) {
-  .cm-editor .meo-mermaid-editing-block.is-split {
+  .cm-editor .meo-mermaid-editing-block.is-split,
+  .cm-editor .meo-latex-math-editing-block.is-split {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-shell {
+  .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-shell,
+  .cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-preview-shell {
     border-top: 1px solid var(--meo-semantic-tableBorder, var(--vscode-panel-border));
     border-left: 0;
   }
 
   .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-source-sticky,
-  .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-sticky {
+  .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-sticky,
+  .cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-source-sticky,
+  .cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-preview-sticky {
     position: relative;
     top: 0;
     min-height: 0;
