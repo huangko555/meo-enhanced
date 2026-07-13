@@ -43,7 +43,13 @@ import {
   indentListByTwoSpaces,
   outdentListByTwoSpaces
 } from './helpers/listMarkers';
-import { insertTable, sourceTableHeaderLineField, tableHeaderAlignmentOverrideField } from './helpers/tables';
+import {
+  insertTable,
+  sourceTableHeaderLineField,
+  tableCellEditorOffsetToSourceOffset,
+  tableCellSourceOffsetToEditorOffset,
+  tableHeaderAlignmentOverrideField
+} from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
@@ -728,8 +734,8 @@ export function createEditor({
     const coords = measureTextareaSelectionStart(input, selectionStart);
     const lineHeight = parseFloat(getComputedStyle(input).lineHeight);
     return {
-      from: sourceRange.from + selectionStart,
-      to: sourceRange.from + selectionEnd,
+      from: sourceRange.from + tableCellEditorOffsetToSourceOffset(input.value, selectionStart),
+      to: sourceRange.from + tableCellEditorOffsetToSourceOffset(input.value, selectionEnd),
       anchorX: coords.left,
       anchorY: coords.top,
       anchorBottomY: coords.top + (Number.isFinite(lineHeight) ? lineHeight : 20)
@@ -1641,6 +1647,8 @@ export function createEditor({
       keymap.of([
         { key: 'Tab', run: (view) => indentListByTwoSpaces(view) || indentMore(view) },
         { key: 'Shift-Tab', run: (view) => outdentListByTwoSpaces(view) || indentLess(view) },
+        { key: 'Alt-]', run: indentListByTwoSpaces },
+        { key: 'Alt-[', run: outdentListByTwoSpaces },
         { key: 'Backspace', run: deleteBackwardSmart },
         { key: 'ArrowLeft', run: (view) => isLiveMode(view) && handleArrowLeftAtListContentStart(view) },
         { key: 'ArrowRight', run: (view) => isLiveMode(view) && handleArrowRightAtListLineStart(view) },
@@ -1654,6 +1662,7 @@ export function createEditor({
             handleEnterBeforeNestedList(view)
         },
         { key: 'Shift-Enter', run: insertTableCellLineBreak },
+        { key: 'Ctrl-Enter', run: insertTableCellLineBreak },
         { key: 'ArrowUp', run: (view) => tryEnterAdjacentTable(view, 'up') },
         { key: 'ArrowDown', run: (view) => tryEnterAdjacentTable(view, 'down') },
         ...markdownKeymap,
@@ -2489,8 +2498,8 @@ export function createEditor({
         from >= tableSourceRange.from &&
         to <= tableSourceRange.to
       ) {
-        const localFrom = from - tableSourceRange.from;
-        const localTo = to - tableSourceRange.from;
+        const localFrom = tableCellSourceOffsetToEditorOffset(activeTableInput.value, from - tableSourceRange.from);
+        const localTo = tableCellSourceOffsetToEditorOffset(activeTableInput.value, to - tableSourceRange.from);
         clearDiagnosticSuggestionState();
         updateActiveTableInput(
           activeTableInput,

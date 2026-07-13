@@ -136,6 +136,81 @@ async function main() {
       const alignmentAfterShift = document.querySelector<HTMLTableCellElement>('thead th')?.style.textAlign ?? '';
       alignmentEditor.destroy();
 
+      const listEditor = await create('| Items |\n| --- |\n| - first<br/>  3. nested<br />- second<br><br>tail `literal<br>code` |');
+      const listPreview = document.querySelector<HTMLElement>('tbody .meo-md-html-table-cell-preview')!;
+      const renderedListState = {
+        topLevelItems: listPreview.querySelectorAll(':scope > ul > li').length,
+        nestedOrderedItems: listPreview.querySelectorAll(':scope > ul > li > ol > li').length,
+        nestedOrderedStart: listPreview.querySelector<HTMLOListElement>(':scope > ul > li > ol')?.start ?? null,
+        plainLines: listPreview.querySelectorAll(':scope > .meo-md-html-table-cell-line').length,
+        inlineCodeText: listPreview.querySelector('code')?.textContent ?? '',
+        text: listPreview.textContent ?? ''
+      };
+      listEditor.destroy();
+
+      const shortcutEditor = await create('| Items |\n| --- |\n| - first |');
+      const shortcutInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      shortcutInput.focus();
+      shortcutInput.setSelectionRange(shortcutInput.value.length, shortcutInput.value.length);
+      shortcutInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      shortcutInput.setRangeText('- second', shortcutInput.selectionStart, shortcutInput.selectionEnd, 'end');
+      shortcutInput.dispatchEvent(new Event('input', { bubbles: true }));
+      shortcutInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ']',
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      const indentedTableValue = shortcutInput.value;
+      shortcutInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: '[',
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      shortcutInput.setSelectionRange(shortcutInput.value.length, shortcutInput.value.length);
+      shortcutInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true
+      }));
+      const plainEnterValue = shortcutInput.value;
+      shortcutInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      const tableShortcutValue = shortcutInput.value;
+      (document.getElementById('outside') as HTMLButtonElement).focus();
+      await waitFrames();
+      const tableShortcutSource = shortcutEditor.view.state.doc.toString();
+      shortcutEditor.destroy();
+
+      const bodyListEditor = await create('- one\n- two');
+      bodyListEditor.view.dispatch({ selection: { anchor: 3 } });
+      bodyListEditor.view.focus();
+      bodyListEditor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ']',
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      const indentedBodyValue = bodyListEditor.view.state.doc.toString();
+      bodyListEditor.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+        key: '[',
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      const outdentedBodyValue = bodyListEditor.view.state.doc.toString();
+      bodyListEditor.destroy();
+
       const performanceEditor = await create(Array.from({ length: 800 }, (_, index) => `line ${index} asd`).join('\n'));
       const originalToLocaleLowerCase = String.prototype.toLocaleLowerCase;
       let fullDocumentScans = 0;
@@ -164,6 +239,13 @@ async function main() {
         borderlessActiveMatch,
         alignmentBeforeShift,
         alignmentAfterShift,
+        renderedListState,
+        indentedTableValue,
+        plainEnterValue,
+        tableShortcutValue,
+        tableShortcutSource,
+        indentedBodyValue,
+        outdentedBodyValue,
         navigationScans
       };
     });
@@ -179,6 +261,30 @@ async function main() {
     if (!result.borderlessActiveMatch) failures.push('borderless table did not render the active search match');
     if (result.alignmentBeforeShift !== 'left' || result.alignmentAfterShift !== 'left') {
       failures.push(`manual header alignment changed after line shift: ${result.alignmentBeforeShift} -> ${result.alignmentAfterShift}`);
+    }
+    if (
+      result.renderedListState.topLevelItems !== 2 ||
+      result.renderedListState.nestedOrderedItems !== 1 ||
+      result.renderedListState.nestedOrderedStart !== 3 ||
+      result.renderedListState.plainLines !== 2 ||
+      result.renderedListState.inlineCodeText !== 'literal<br>code'
+    ) {
+      failures.push(`table cell list rendering was incorrect: ${JSON.stringify(result.renderedListState)}`);
+    }
+    if (result.indentedTableValue !== '- first<br>\n  - second') {
+      failures.push(`table Alt+] indentation produced ${JSON.stringify(result.indentedTableValue)}`);
+    }
+    if (result.plainEnterValue !== '- first<br>\n- second') {
+      failures.push(`plain table Enter changed the cell to ${JSON.stringify(result.plainEnterValue)}`);
+    }
+    if (result.tableShortcutValue !== '- first<br>\n- second<br>\n') {
+      failures.push(`table Enter shortcuts produced ${JSON.stringify(result.tableShortcutValue)}`);
+    }
+    if (!result.tableShortcutSource.includes('| - first<br>- second<br> |')) {
+      failures.push(`table shortcut source was ${JSON.stringify(result.tableShortcutSource)}`);
+    }
+    if (result.indentedBodyValue !== '  - one\n- two' || result.outdentedBodyValue !== '- one\n- two') {
+      failures.push(`body Alt bracket indentation changed ${JSON.stringify(result.indentedBodyValue)} -> ${JSON.stringify(result.outdentedBodyValue)}`);
     }
     if (result.navigationScans > 0) failures.push(`search navigation rescanned the full document ${result.navigationScans} times`);
     if (failures.length) throw new Error(failures.join('\n'));

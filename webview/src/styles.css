@@ -3321,6 +3321,25 @@ body.outline-resizing {
   cursor: text;
 }
 
+.cm-editor .meo-md-html-table-cell-line {
+  min-height: 1lh;
+}
+
+.cm-editor .meo-md-html-table-cell-list {
+  margin: 0;
+  padding-inline-start: 1.5em;
+  text-align: left;
+}
+
+.cm-editor .meo-md-html-table-cell-list .meo-md-html-table-cell-list {
+  padding-inline-start: 1.25em;
+}
+
+.cm-editor .meo-md-html-table-cell-list > li {
+  margin: 0;
+  padding: 0;
+}
+
 .cm-editor .meo-md-html-table-cell-preview .meo-md-link {
   color: var(--meo-color-base05);
   overflow-wrap: anywhere;

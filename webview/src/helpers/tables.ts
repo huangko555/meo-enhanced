@@ -336,6 +336,8 @@ const tableInlineRawUrlRe = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|file:|www\.)[^\s
 const tableInlineEmojiShortcodeRe = /^:([a-zA-Z0-9_+-]+):/;
 const tableInlineTagRe = /^#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/u;
 const tableInlineTagPrefixRe = /[\p{L}\p{N}_/-]/u;
+const tableCellBreakAtRe = /^<br\s*\/?>/i;
+const tableCellListItemRe = /^( *)(?:(?<bullet>[-+*])|(?<number>\d+)\.)\s+(?<content>.*)$/;
 const tableInlineEscapableChars = new Set(['\\', '*', '_', '~', '`', '[', ']', '(', ')', '!', '|', '<', '>']);
 const tableSearchStateEventName = 'meo-search-state-change';
 const tableDiagnosticSeverityClasses = [
@@ -434,6 +436,147 @@ function findTableSearchMatchRanges(text: string, searchState: TableSearchState 
     offset = end;
   }
   return matches;
+}
+
+interface TableCellLogicalLine {
+  text: string;
+  from: number;
+  breakText: string;
+}
+
+function splitTableCellLogicalLines(text: string): TableCellLogicalLine[] {
+  const lines: TableCellLogicalLine[] = [];
+  let lineStart = 0;
+  for (let index = 0; index < text.length;) {
+    const breakMatch = !isTableInlineEscaped(text, index) ? tableCellBreakAtRe.exec(text.slice(index)) : null;
+    if (breakMatch) {
+      lines.push({ text: text.slice(lineStart, index), from: lineStart, breakText: breakMatch[0] });
+      index += breakMatch[0].length;
+      lineStart = index;
+      continue;
+    }
+
+    const protectedNext = consumeTableInlineProtectedSpan(text, index, text.length);
+    if (protectedNext && protectedNext > index) {
+      index = protectedNext;
+      continue;
+    }
+    index += 1;
+  }
+  lines.push({ text: text.slice(lineStart), from: lineStart, breakText: '' });
+  return lines;
+}
+
+export function tableCellEditorValueToSource(value: string): string {
+  let source = '';
+  for (let index = 0; index < value.length;) {
+    const breakMatch = !isTableInlineEscaped(value, index) ? tableCellBreakAtRe.exec(value.slice(index)) : null;
+    if (breakMatch) {
+      source += breakMatch[0];
+      index += breakMatch[0].length;
+      if (value[index] === '\r') index += 1;
+      if (value[index] === '\n') index += 1;
+      continue;
+    }
+
+    const protectedNext = consumeTableInlineProtectedSpan(value, index, value.length);
+    if (protectedNext && protectedNext > index) {
+      source += value.slice(index, protectedNext);
+      index = protectedNext;
+      continue;
+    }
+    if (value[index] === '\r') {
+      if (value[index + 1] === '\n') index += 1;
+      source += '<br>';
+    } else if (value[index] === '\n') {
+      source += '<br>';
+    } else {
+      source += value[index];
+    }
+    index += 1;
+  }
+  return source;
+}
+
+export function tableCellSourceToEditorValue(value: string): string {
+  return splitTableCellLogicalLines(value)
+    .map((line) => line.text + (line.breakText ? `${line.breakText}\n` : ''))
+    .join('');
+}
+
+export function tableCellEditorOffsetToSourceOffset(value: string, offset: number): number {
+  return tableCellEditorValueToSource(value.slice(0, Math.max(0, offset))).length;
+}
+
+export function tableCellSourceOffsetToEditorOffset(value: string, offset: number): number {
+  const source = tableCellEditorValueToSource(value);
+  return tableCellSourceToEditorValue(source.slice(0, Math.max(0, offset))).length;
+}
+
+function normalizeTableCellEditorInput(input: HTMLTextAreaElement) {
+  const value = input.value;
+  const selectionStart = tableCellEditorOffsetToSourceOffset(value, input.selectionStart ?? 0);
+  const selectionEnd = tableCellEditorOffsetToSourceOffset(value, input.selectionEnd ?? input.selectionStart ?? 0);
+  const normalized = tableCellSourceToEditorValue(tableCellEditorValueToSource(value));
+  if (normalized === value) return;
+  input.value = normalized;
+  input.setSelectionRange(
+    tableCellSourceOffsetToEditorOffset(normalized, selectionStart),
+    tableCellSourceOffsetToEditorOffset(normalized, selectionEnd)
+  );
+}
+
+function replaceTableCellEditorSelection(input: HTMLTextAreaElement, insert: string) {
+  const start = input.selectionStart ?? 0;
+  const end = input.selectionEnd ?? start;
+  input.setRangeText(insert, start, end, 'end');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function adjustTableCellListIndent(input: HTMLTextAreaElement, direction: 'indent' | 'outdent') {
+  const value = input.value;
+  const selectionStart = input.selectionStart ?? 0;
+  const selectionEnd = input.selectionEnd ?? selectionStart;
+  const firstLineStart = value.lastIndexOf('\n', Math.max(0, selectionStart - 1)) + 1;
+  const endProbe = selectionEnd > selectionStart ? selectionEnd - 1 : selectionEnd;
+  const lastLineEnd = value.indexOf('\n', endProbe);
+  const rangeEnd = lastLineEnd < 0 ? value.length : lastLineEnd;
+  const changes: Array<{ from: number; to: number; insert: string }> = [];
+
+  for (let lineStart = firstLineStart; lineStart <= rangeEnd;) {
+    const lineEnd = value.indexOf('\n', lineStart);
+    const safeLineEnd = lineEnd < 0 ? value.length : lineEnd;
+    const line = value.slice(lineStart, safeLineEnd);
+    if (/^ *(?:[-+*]|\d+\.)\s+/.test(line)) {
+      if (direction === 'indent') {
+        changes.push({ from: lineStart, to: lineStart, insert: '  ' });
+      } else {
+        const indentLength = Math.min(2, /^ */.exec(line)?.[0].length ?? 0);
+        if (indentLength) changes.push({ from: lineStart, to: lineStart + indentLength, insert: '' });
+      }
+    }
+    if (lineEnd < 0 || lineEnd >= rangeEnd) break;
+    lineStart = lineEnd + 1;
+  }
+
+  if (!changes.length) return false;
+  const mapPosition = (position: number) => {
+    let mapped = position;
+    for (const change of changes) {
+      const delta = change.insert.length - (change.to - change.from);
+      if (position >= change.to) mapped += delta;
+      else if (position > change.from) mapped = change.from + change.insert.length;
+    }
+    return mapped;
+  };
+  let nextValue = value;
+  for (const change of [...changes].reverse()) {
+    nextValue = nextValue.slice(0, change.from) + change.insert + nextValue.slice(change.to);
+  }
+  input.value = nextValue;
+  input.setSelectionRange(mapPosition(selectionStart), mapPosition(selectionEnd));
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
 }
 
 function shouldExpandTableCellForSearch(text: string, searchState: TableSearchState | null): boolean {
@@ -1113,6 +1256,86 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   flushBuffer();
 }
 
+function parseTableCellListItem(line: TableCellLogicalLine) {
+  const match = tableCellListItemRe.exec(line.text);
+  if (!match?.groups || match[1].length % 2 !== 0) return null;
+  const content = match.groups.content ?? '';
+  return {
+    level: Math.floor(match[1].length / 2),
+    type: match.groups.bullet ? 'ul' : 'ol',
+    start: match.groups.number ? Number.parseInt(match.groups.number, 10) : 1,
+    content,
+    contentFrom: line.from + line.text.length - content.length
+  } as const;
+}
+
+function appendTableCellSourcePreview(
+  previewEl: HTMLElement,
+  text: string,
+  diagnostics: TableCellDiagnostics[],
+  searchState: TableSearchState | null,
+  sourceRange: TableCellRange | null
+) {
+  for (const line of splitTableCellLogicalLines(text)) {
+    const sourceLine = line.text + line.breakText;
+    appendTablePlainText(previewEl, sourceLine, line.from, diagnostics, searchState, sourceRange);
+    if (line.breakText) previewEl.appendChild(document.createElement('br'));
+  }
+}
+
+function appendTableCellRenderedPreview(
+  previewEl: HTMLElement,
+  text: string,
+  diagnostics: TableCellDiagnostics[],
+  searchState: TableSearchState | null,
+  sourceRange: TableCellRange | null
+) {
+  const listStack: Array<{ level: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null }> = [];
+  const appendInline = (parent: HTMLElement, content: string, baseOffset: number) => {
+    appendTableInlinePreviewNodes(parent, content, { baseOffset, diagnostics, searchState, sourceRange });
+  };
+
+  for (const line of splitTableCellLogicalLines(text)) {
+    const item = parseTableCellListItem(line);
+    if (!item) {
+      listStack.length = 0;
+      const lineEl = document.createElement('div');
+      lineEl.className = 'meo-md-html-table-cell-line';
+      appendInline(lineEl, line.text, line.from);
+      if (!line.text) lineEl.appendChild(document.createElement('br'));
+      previewEl.appendChild(lineEl);
+      continue;
+    }
+
+    let level = item.level;
+    if (listStack.length === 0) level = 0;
+    else level = Math.min(level, listStack.length);
+    while (listStack.length > level + 1) listStack.pop();
+
+    let entry = listStack[level];
+    if (!entry || entry.type !== item.type) {
+      listStack.length = level;
+      const parent = level > 0 ? listStack[level - 1]?.lastItem : previewEl;
+      if (!(parent instanceof HTMLElement)) {
+        level = 0;
+        listStack.length = 0;
+      }
+      const list = item.type === 'ol' ? document.createElement('ol') : document.createElement('ul');
+      list.className = 'meo-md-html-table-cell-list';
+      if (list instanceof HTMLOListElement && item.start !== 1) list.start = item.start;
+      (level > 0 ? listStack[level - 1].lastItem! : previewEl).appendChild(list);
+      entry = { level, type: item.type, list, lastItem: null };
+      listStack[level] = entry;
+    }
+
+    const listItem = document.createElement('li');
+    appendInline(listItem, item.content, item.contentFrom);
+    entry.list.appendChild(listItem);
+    entry.lastItem = listItem;
+    listStack.length = level + 1;
+  }
+}
+
 function renderTableCellInlinePreview(
   previewEl,
   value,
@@ -1127,10 +1350,10 @@ function renderTableCellInlinePreview(
   previewEl.classList.toggle('is-search-expanded', isSearchExpanded);
   previewEl.parentElement?.classList.toggle('has-search-match', isSearchExpanded);
   if (isSearchExpanded) {
-    appendTablePlainText(previewEl, text, 0, diagnostics, searchState, sourceRange);
+    appendTableCellSourcePreview(previewEl, text, diagnostics, searchState, sourceRange);
     return;
   }
-  appendTableInlinePreviewNodes(previewEl, text, { diagnostics, searchState, sourceRange });
+  appendTableCellRenderedPreview(previewEl, text, diagnostics, searchState, sourceRange);
 }
 
 function consumeTableInlineProtectedSpan(text, index, endIndex) {
@@ -1466,9 +1689,15 @@ class HtmlTableWidget extends WidgetType {
   readCellMatrix(): CellMatrix {
     if (!this.domRefs) return { headerCells: [], rows: [], alignments: [] };
     const { headerInputs, rowInputs } = this.domRefs;
-    const headerCells = normalizeRow(headerInputs.map((input) => input.value.trim()), this.tableData.colCount);
+    const headerCells = normalizeRow(
+      headerInputs.map((input) => tableCellEditorValueToSource(input.value).trim()),
+      this.tableData.colCount
+    );
 
-    const rows = rowInputs.map((inputs) => normalizeRow(inputs.map((input) => input.value.trim()), this.tableData.colCount));
+    const rows = rowInputs.map((inputs) => normalizeRow(
+      inputs.map((input) => tableCellEditorValueToSource(input.value).trim()),
+      this.tableData.colCount
+    ));
 
     return { headerCells, rows, alignments: this.tableData.alignments };
   }
@@ -1897,7 +2126,7 @@ class HtmlTableWidget extends WidgetType {
     for (let row = this.selectionRange.fromRow; row <= this.selectionRange.toRow; row++) {
       const values = [];
       for (let col = this.selectionRange.fromCol; col <= this.selectionRange.toCol; col++) {
-        values.push(this.domRefs.allRowInputs[row][col].value.trim());
+        values.push(tableCellEditorValueToSource(this.domRefs.allRowInputs[row][col].value).trim());
       }
       lines.push(values.join('\t'));
     }
@@ -2260,7 +2489,7 @@ class HtmlTableWidget extends WidgetType {
     const refreshPreview = () => {
       this.renderCellPreview(
         preview,
-        input.value,
+        tableCellEditorValueToSource(input.value),
         this.cellDiagnostics(rowIndex, colIndex),
         this.cellSourceRange(rowIndex, colIndex)
       );
@@ -2307,9 +2536,11 @@ class HtmlTableWidget extends WidgetType {
     };
 
     input.addEventListener('input', () => {
+      normalizeTableCellEditorInput(input);
       this.hasPendingCellEdits = true;
       const hadSearchMatch = input.parentElement?.classList.contains('has-search-match') ?? false;
-      if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(input.value, this.searchState))) {
+      const sourceValue = tableCellEditorValueToSource(input.value);
+      if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(sourceValue, this.searchState))) {
         refreshPreview();
       }
       // Non-search previews stay untouched while editing so inline image DOM is not recreated.
@@ -2321,6 +2552,38 @@ class HtmlTableWidget extends WidgetType {
     input.addEventListener('keyup', notifySelectionChange);
     input.addEventListener('pointerup', notifySelectionChange);
     input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        if ((event.shiftKey || event.ctrlKey) && !event.altKey && !event.metaKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          replaceTableCellEditorSelection(input, '<br>\n');
+          return;
+        }
+        if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === ']' || event.key === '[')) {
+        if (adjustTableCellListIndent(input, event.key === ']' ? 'indent' : 'outdent')) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      if (event.key === 'Backspace' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        const start = input.selectionStart ?? 0;
+        const end = input.selectionEnd ?? start;
+        const breakMatch = start === end ? /<br\s*\/?>\n$/i.exec(input.value.slice(0, start)) : null;
+        if (breakMatch) {
+          event.preventDefault();
+          event.stopPropagation();
+          input.setSelectionRange(start - breakMatch[0].length, start);
+          replaceTableCellEditorSelection(input, '');
+          return;
+        }
+      }
       const direction = event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : null;
       if (direction) onArrowVertical(event, direction);
     });
@@ -2468,7 +2731,7 @@ class HtmlTableWidget extends WidgetType {
     const coords = this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
     this.renderCellPreview(
       preview,
-      input.value,
+      tableCellEditorValueToSource(input.value),
       coords ? this.cellDiagnostics(coords.row, coords.col) : [],
       coords ? this.cellSourceRange(coords.row, coords.col) : null
     );
@@ -2540,7 +2803,7 @@ class HtmlTableWidget extends WidgetType {
     const input = document.createElement('textarea');
     input.rows = 1;
     input.spellcheck = true;
-    input.value = value;
+    input.value = tableCellSourceToEditorValue(value);
     input.dataset.tableRow = String(rowIndex);
     input.dataset.tableCol = String(colIndex);
     const sourceRange = this.cellSourceRange(rowIndex, colIndex);
