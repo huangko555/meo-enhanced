@@ -1,5 +1,13 @@
 # Markdown Editor Optimized (MEO)
 ---
+## 0.1.27
+- Added editable Mermaid and LaTeX preview, split, and source modes
+- Added HTML break rendering and list editing inside table cells
+- Added code block line numbers and selection controls
+- Added toolbar line navigation for normal text, tables, Mermaid, and LaTeX blocks
+- Improved editor viewport stability, outline navigation, and inline Markdown rendering
+- Grouped secondary toolbar actions under a persistent More menu
+
 ## 0.1.26
 - Improved dark Mermaid diagram line contrast
 - Fixed live find matches and preserve active highlight
