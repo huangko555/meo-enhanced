@@ -17,6 +17,7 @@ type WebviewMessage =
   | { type: 'setContentMaxWidth'; enabled: boolean }
   | { type: 'setOutlineVisible'; visible: boolean }
   | { type: 'setOutlinePosition'; position: 'left' | 'right' }
+  | { type: 'setOutlineWidth'; width: number }
   | { type: 'setFindOptions'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }
   | { type: 'viewPositionChanged'; topLine: number; topLineOffset?: number }
   | { type: 'openLink'; href: string }
@@ -39,7 +40,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; lineNumbers: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitDiffLineHighlights: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }

@@ -1,4 +1,5 @@
 import { createElement, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, PanelLeft, PanelRight, Pin, PinOff, X } from 'lucide';
+import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from '../../../src/shared/outlineWidth';
 import type { HeadingInlineSegment } from './markdownSyntax';
 
 export interface OutlineHeading {
@@ -71,9 +72,6 @@ interface OutlineController {
   isVisible: () => boolean;
 }
 
-const MIN_OUTLINE_WIDTH = 180;
-const MAX_OUTLINE_WIDTH = 480;
-const DEFAULT_OUTLINE_WIDTH = 260;
 const ACTIVE_VIEWPORT_RATIO = 0.2;
 const OUTLINE_SCROLL_CONTEXT_PX = 100;
 const OUTLINE_DROP_CLICK_GRACE_PERIOD_MS = 250;
@@ -136,11 +134,6 @@ function iconButton(icon, action: string, title: string): HTMLButtonElement {
   button.setAttribute('aria-label', title);
   button.appendChild(createElement(icon, { width: 14, height: 14, 'aria-hidden': 'true' }));
   return button;
-}
-
-function clampOutlineWidth(width: number): number {
-  if (!Number.isFinite(width)) return DEFAULT_OUTLINE_WIDTH;
-  return Math.min(MAX_OUTLINE_WIDTH, Math.max(MIN_OUTLINE_WIDTH, Math.round(width)));
 }
 
 export function createOutlineController({
@@ -312,7 +305,9 @@ export function createOutlineController({
   };
 
   const highlightVisibleHeadings = () => {
-    for (const item of outlineContent.querySelectorAll('.outline-item.is-visible')) item.classList.remove('is-visible');
+    for (const item of outlineContent.querySelectorAll('.outline-item.is-visible, .outline-item.is-visible-first')) {
+      item.classList.remove('is-visible', 'is-visible-first');
+    }
     const visibleItems: HTMLElement[] = [];
     for (const index of visibleHeadingIndexes) {
       const item = findVisibleItem(index);
@@ -320,6 +315,7 @@ export function createOutlineController({
       item.classList.add('is-visible');
       if (!visibleItems.includes(item)) visibleItems.push(item);
     }
+    visibleItems[0]?.classList.add('is-visible-first');
     const visibleRows = visibleItems
       .map((item) => item.closest<HTMLElement>('.outline-row'))
       .filter((row): row is HTMLElement => row !== null);
@@ -428,6 +424,7 @@ export function createOutlineController({
     item.title = node.heading.text;
     item.draggable = true;
     item.dataset.headingFrom = String(node.heading.from);
+    item.dataset.outlineKey = node.key;
     row.append(foldButton, item);
     itemNode.appendChild(row);
 
@@ -531,7 +528,7 @@ export function createOutlineController({
   };
 
   const setWidth = (nextWidth: number) => {
-    const normalizedWidth = clampOutlineWidth(nextWidth);
+    const normalizedWidth = normalizeOutlineWidth(nextWidth);
     if (width === normalizedWidth) return;
     width = normalizedWidth;
     applyOutlineWidth();
@@ -587,7 +584,21 @@ export function createOutlineController({
     }
     const headingFrom = Number.parseInt(item.dataset.headingFrom ?? '', 10);
     const headingIndex = currentOutlineHeadingIndexByFrom.get(headingFrom);
-    const heading = typeof headingIndex === 'number' ? currentOutlineHeadings[headingIndex] : null;
+    const cachedHeading = typeof headingIndex === 'number' ? currentOutlineHeadings[headingIndex] : null;
+    const latestHeadings = getEditor()?.getHeadings() ?? [];
+    const latestTree = buildOutlineTree(latestHeadings);
+    const outlineKey = item.dataset.outlineKey;
+    const keyedHeading = outlineKey
+      ? Array.from(latestTree.nodeByIndex.values()).find((node) => node.key === outlineKey)?.heading
+      : null;
+    const sameHeadingCandidates = cachedHeading
+      ? latestHeadings.filter((heading) => heading.level === cachedHeading.level && heading.text === cachedHeading.text)
+      : [];
+    const heading = keyedHeading ?? (
+      sameHeadingCandidates.length === 1
+        ? sameHeadingCandidates[0]
+        : cachedHeading
+    );
     if (heading) getEditor()?.scrollToLine(heading.line, 'top');
     if (mode === 'floating') requestVisible(false);
   });
@@ -652,7 +663,7 @@ export function createOutlineController({
     document.body.classList.add('outline-resizing');
     const onMove = (moveEvent: PointerEvent) => {
       const direction = position === 'left' ? 1 : -1;
-      const nextWidth = clampOutlineWidth(startWidth + (moveEvent.clientX - startX) * direction);
+      const nextWidth = normalizeOutlineWidth(startWidth + (moveEvent.clientX - startX) * direction);
       if (nextWidth === width) return;
       width = nextWidth;
       applyOutlineWidth();
@@ -669,6 +680,11 @@ export function createOutlineController({
     window.addEventListener('pointercancel', onUp);
     event.preventDefault();
   });
+
+  outlineResizer.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, { passive: false });
 
   updateOutlineUI();
 

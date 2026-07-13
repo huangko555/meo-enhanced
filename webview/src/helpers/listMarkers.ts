@@ -401,11 +401,15 @@ export function listMarkerData(lineText: string, orderedDisplayIndex: string | n
   const markerEndOffset = indent + markerCharLength;
   const indentColumns = indentationColumns(leadingWhitespace, style);
   const contentOffsetColumns = indentColumns + (match[0].length - indent);
+  const indentLevel = Math.floor(indentColumns / style.columns);
+  if (!orderedNumber && indentLevel % 2 === 1) {
+    classes += ' meo-md-list-marker-bullet-hollow';
+  }
 
   const result: ListMarkerData = {
     fromOffset: indent,
     leadingWhitespace,
-    indentLevel: Math.floor(indentColumns / style.columns),
+    indentLevel,
     indentColumns,
     markerEndOffset,
     toOffset: match[0].length,

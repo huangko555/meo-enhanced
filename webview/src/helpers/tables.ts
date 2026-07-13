@@ -10,6 +10,7 @@ import { isPrimaryModifierPointerClick } from './linkNavigation';
 import { wikiLinkScheme } from './wikiLinks';
 import { normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
+import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
 
 declare global {
   interface HTMLDivElement {
@@ -533,6 +534,82 @@ function replaceTableCellEditorSelection(input: HTMLTextAreaElement, insert: str
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function continueTableCellList(input: HTMLTextAreaElement) {
+  const position = input.selectionStart ?? 0;
+  if (position !== (input.selectionEnd ?? position)) return false;
+  const lineStart = input.value.lastIndexOf('\n', Math.max(0, position - 1)) + 1;
+  const nextBreak = input.value.indexOf('\n', position);
+  const lineEnd = nextBreak < 0 ? input.value.length : nextBreak;
+  if (position !== lineEnd) return false;
+
+  const lineText = input.value.slice(lineStart, lineEnd);
+  const marker = continuedListMarker(lineText);
+  if (marker) {
+    replaceTableCellEditorSelection(input, `<br>\n${marker}`);
+    return true;
+  }
+
+  const currentMarker = listMarkerData(lineText);
+  if (!currentMarker || lineText.slice(currentMarker.toOffset).trim()) return false;
+  input.setSelectionRange(lineStart, lineStart + currentMarker.toOffset);
+  replaceTableCellEditorSelection(input, '');
+  return true;
+}
+
+interface TableCellEditorChange {
+  from: number;
+  to: number;
+  insert: string;
+}
+
+function applyTableCellEditorChanges(input: HTMLTextAreaElement, changes: TableCellEditorChange[]) {
+  const selectionStart = input.selectionStart ?? 0;
+  const selectionEnd = input.selectionEnd ?? selectionStart;
+  const mapPosition = (position: number) => {
+    let mapped = position;
+    for (const change of changes) {
+      const delta = change.insert.length - (change.to - change.from);
+      if (position >= change.to) mapped += delta;
+      else if (position > change.from) mapped = change.from + change.insert.length;
+    }
+    return mapped;
+  };
+  let nextValue = input.value;
+  for (const change of [...changes].reverse()) {
+    nextValue = nextValue.slice(0, change.from) + change.insert + nextValue.slice(change.to);
+  }
+  input.value = nextValue;
+  input.setSelectionRange(mapPosition(selectionStart), mapPosition(selectionEnd));
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function renumberTableCellOrderedLists(input: HTMLTextAreaElement) {
+  const orderedCountsByLevel: Array<number | null> = [];
+  const changes: TableCellEditorChange[] = [];
+  for (let lineStart = 0; lineStart <= input.value.length;) {
+    const lineEnd = input.value.indexOf('\n', lineStart);
+    const safeLineEnd = lineEnd < 0 ? input.value.length : lineEnd;
+    const lineText = input.value.slice(lineStart, safeLineEnd);
+    const marker = listMarkerData(lineText);
+    if (!marker) {
+      orderedCountsByLevel.length = 0;
+    } else {
+      const { expected, isAnchor } = nextOrderedSequenceNumber(
+        orderedCountsByLevel,
+        marker.indentLevel,
+        marker.orderedNumber
+      );
+      if (expected !== null && !isAnchor && marker.orderedNumber !== String(expected)) {
+        const from = lineStart + marker.leadingWhitespace.length;
+        changes.push({ from, to: from + marker.orderedNumber.length, insert: String(expected) });
+      }
+    }
+    if (lineEnd < 0) break;
+    lineStart = lineEnd + 1;
+  }
+  if (changes.length) applyTableCellEditorChanges(input, changes);
+}
+
 function adjustTableCellListIndent(input: HTMLTextAreaElement, direction: 'indent' | 'outdent') {
   const value = input.value;
   const selectionStart = input.selectionStart ?? 0;
@@ -541,7 +618,7 @@ function adjustTableCellListIndent(input: HTMLTextAreaElement, direction: 'inden
   const endProbe = selectionEnd > selectionStart ? selectionEnd - 1 : selectionEnd;
   const lastLineEnd = value.indexOf('\n', endProbe);
   const rangeEnd = lastLineEnd < 0 ? value.length : lastLineEnd;
-  const changes: Array<{ from: number; to: number; insert: string }> = [];
+  const changes: TableCellEditorChange[] = [];
 
   for (let lineStart = firstLineStart; lineStart <= rangeEnd;) {
     const lineEnd = value.indexOf('\n', lineStart);
@@ -560,22 +637,8 @@ function adjustTableCellListIndent(input: HTMLTextAreaElement, direction: 'inden
   }
 
   if (!changes.length) return false;
-  const mapPosition = (position: number) => {
-    let mapped = position;
-    for (const change of changes) {
-      const delta = change.insert.length - (change.to - change.from);
-      if (position >= change.to) mapped += delta;
-      else if (position > change.from) mapped = change.from + change.insert.length;
-    }
-    return mapped;
-  };
-  let nextValue = value;
-  for (const change of [...changes].reverse()) {
-    nextValue = nextValue.slice(0, change.from) + change.insert + nextValue.slice(change.to);
-  }
-  input.value = nextValue;
-  input.setSelectionRange(mapPosition(selectionStart), mapPosition(selectionEnd));
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  applyTableCellEditorChanges(input, changes);
+  renumberTableCellOrderedLists(input);
   return true;
 }
 
@@ -2556,7 +2619,7 @@ class HtmlTableWidget extends WidgetType {
         if ((event.shiftKey || event.ctrlKey) && !event.altKey && !event.metaKey) {
           event.preventDefault();
           event.stopPropagation();
-          replaceTableCellEditorSelection(input, '<br>\n');
+          if (!continueTableCellList(input)) replaceTableCellEditorSelection(input, '<br>\n');
           return;
         }
         if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
@@ -3107,10 +3170,6 @@ class HtmlTableWidget extends WidgetType {
         this.scheduleLayout({ resizeRows: true });
       });
       observer.observe(wrap);
-      const resizeTargets = [view?.contentDOM, view?.scrollDOM, view?.dom, shell.parentElement];
-      for (const target of resizeTargets) {
-        if (target && target !== wrap) observer.observe(target);
-      }
       wrap._meoTableResizeObserver = observer;
     }
     const onEditorScroll = () => this.scheduleLayout();

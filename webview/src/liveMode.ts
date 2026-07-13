@@ -1074,6 +1074,89 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
   }
 }
 
+function addPunctuationClosingInlineStyleDecorations(
+  builder,
+  state,
+  activeLines,
+  parsedStyleRanges,
+  codeBlockLines = null,
+  blockedRanges = [],
+  frontmatter = null
+) {
+  const styles = [
+    { marker: '**', content: inlineStyleDecos.strong, inactive: strongMarkerDeco, active: activeStrongMarkerDeco },
+    { marker: '~~', content: inlineStyleDecos.strike, inactive: strikeMarkerDeco, active: activeStrikeMarkerDeco },
+    { marker: '*', content: inlineStyleDecos.em, inactive: markerDeco, active: activeLineMarkerDeco }
+  ];
+  const overlapsParsedStyle = (from, to) => parsedStyleRanges.some((range) => from < range.to && to > range.from);
+  const isEscaped = (text, index) => {
+    let backslashes = 0;
+    for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) backslashes += 1;
+    return backslashes % 2 === 1;
+  };
+
+  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
+    if (codeBlockLines?.has(lineNo)) continue;
+    const line = state.doc.line(lineNo);
+    if (
+      isInsideFrontmatterContent(frontmatter, line.from) ||
+      blockedRanges.some((range) => line.from < range.to && line.to > range.from)
+    ) {
+      continue;
+    }
+    const text = line.text;
+    let cursor = 0;
+
+    while (cursor < text.length) {
+      const style = styles.find(({ marker }) => text.startsWith(marker, cursor));
+      if (!style || isEscaped(text, cursor)) {
+        cursor += 1;
+        continue;
+      }
+      if (style.marker === '*' && (text[cursor - 1] === '*' || text[cursor + 1] === '*')) {
+        cursor += 1;
+        continue;
+      }
+      const contentFromOffset = cursor + style.marker.length;
+      if (!text[contentFromOffset] || /\s/u.test(text[contentFromOffset])) {
+        cursor += style.marker.length;
+        continue;
+      }
+
+      let close = text.indexOf(style.marker, contentFromOffset + 1);
+      while (close >= 0) {
+        const beforeClose = text[close - 1] ?? '';
+        const afterClose = text[close + style.marker.length] ?? '';
+        const invalidSingleStar = style.marker === '*' && (text[close - 1] === '*' || text[close + 1] === '*');
+        if (
+          !invalidSingleStar &&
+          !isEscaped(text, close) &&
+          /\p{P}/u.test(beforeClose) &&
+          afterClose !== '' &&
+          !/\s/u.test(afterClose)
+        ) {
+          break;
+        }
+        close = text.indexOf(style.marker, close + style.marker.length);
+      }
+      if (close < 0) {
+        cursor += style.marker.length;
+        continue;
+      }
+
+      const from = line.from + cursor;
+      const to = line.from + close + style.marker.length;
+      if (!overlapsParsedStyle(from, to)) {
+        addRange(builder, from + style.marker.length, line.from + close, style.content);
+        const markerDecoration = activeLines.has(lineNo) ? style.active : style.inactive;
+        addRange(builder, from, from + style.marker.length, markerDecoration);
+        addRange(builder, line.from + close, to, markerDecoration);
+      }
+      cursor = close + style.marker.length;
+    }
+  }
+}
+
 function collectActiveLines(state: EditorState): Set<number> {
   const pointerSelection = state.field(livePointerSelectionActiveField);
   if (state.field(liveDocumentIdleField)) {
@@ -1380,6 +1463,14 @@ function buildDecorations(state) {
   const collapsedHeadingSections = getCollapsedHeadingSections(state);
   const detailsBlocks = getDetailsBlocks(state);
   const strikeRanges = collectStrikethroughRanges(tree);
+  const parsedInlineStyleRanges = [];
+  tree.iterate({
+    enter(node) {
+      if (node.name === 'StrongEmphasis' || node.name === 'Emphasis' || node.name === 'Strikethrough' || node.name === 'InlineCode') {
+        parsedInlineStyleRanges.push({ from: node.from, to: node.to });
+      }
+    }
+  });
   const codeBlockLines = collectCodeBlockLines(state, tree, mermaidColonBlocks);
   const renderedTableRanges = collectRenderedTableRanges(
     state,
@@ -1689,6 +1780,15 @@ function buildDecorations(state) {
 
   addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, mermaidColonBlocks, diagnostics);
   addRawFileUrlDecorations(ranges, state, tree, activeLines, frontmatter);
+  addPunctuationClosingInlineStyleDecorations(
+    ranges,
+    state,
+    activeLines,
+    parsedInlineStyleRanges,
+    codeBlockLines,
+    [...renderedTableRanges, ...mathRanges],
+    frontmatter
+  );
   addSingleTildeStrikeDecorations(ranges, state, activeLines, strikeRanges, codeBlockLines);
   addListLineDecorations(ranges, state, indentSelectedLines, frontmatter, codeBlockLines);
   addMathDecorations(ranges, state, mathRanges, activeLines);

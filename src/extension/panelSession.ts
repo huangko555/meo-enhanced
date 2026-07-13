@@ -7,6 +7,7 @@ import {
   GIT_CHANGES_GUTTER_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
+  OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
   getLineNumbersEnabled,
   getGitChangesGutterEnabled,
@@ -14,6 +15,8 @@ import {
   getSpellCheckEnabled,
   getOutlinePosition,
   getOutlineVisible,
+  getOutlineWidth,
+  normalizeOutlineWidth,
   getRememberPositionLines,
   getThemeSettings,
   getVimKeybindings,
@@ -63,6 +66,7 @@ type InitMessage = {
   findOptions: FindOptions;
   outlinePosition: OutlinePosition;
   outlineVisible: boolean;
+  outlineWidth: number;
   theme: ThemeSettings;
   shikiCodeBlocks: boolean;
   codeTheme: RawVscodeTheme | null;
@@ -188,6 +192,11 @@ type SetOutlineVisibleMessage = {
 type SetOutlinePositionMessage = {
   type: 'setOutlinePosition';
   position: OutlinePosition;
+};
+
+type SetOutlineWidthMessage = {
+  type: 'setOutlineWidth';
+  width: number;
 };
 
 type SetContentMaxWidthMessage = {
@@ -321,6 +330,7 @@ type WebviewMessage =
   | SetSpellCheckMessage
   | SetOutlineVisibleMessage
   | SetOutlinePositionMessage
+  | SetOutlineWidthMessage
   | SetContentMaxWidthMessage
   | SetFindOptionsMessage
   | ViewPositionChangedMessage
@@ -429,7 +439,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
-  let isApplyingOwnChange = false;
   let gitRefreshRunning = false;
   let gitRefreshPending = false;
   let gitRefreshPendingForcePost = false;
@@ -568,6 +577,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       findOptions: getFindOptions(),
       outlinePosition: getOutlinePosition(),
       outlineVisible: getOutlineVisible(context),
+      outlineWidth: getOutlineWidth(context),
       theme: getThemeSettings(),
       shikiCodeBlocks: getUseVscodeThemeForCodeBlocks(),
       codeTheme: getCodeBlockVscodeTheme(),
@@ -1010,6 +1020,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update('outline.position', raw.position === 'left' ? 'left' : 'right', vscode.ConfigurationTarget.Global);
         return;
+      case 'setOutlineWidth':
+        if (Number.isFinite(raw.width)) {
+          await context.globalState.update(OUTLINE_WIDTH_KEY, normalizeOutlineWidth(raw.width));
+        }
+        return;
       case 'setContentMaxWidth':
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
@@ -1096,34 +1111,24 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'applyChanges':
         agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(document.uri);
-        isApplyingOwnChange = true;
-        try {
-          await enqueue(async () => {
-            await applyDocumentChanges(document, raw, sendDocChanged, sendApplied);
-          });
-        } finally {
-          isApplyingOwnChange = false;
-        }
+        await enqueue(async () => {
+          await applyDocumentChanges(document, raw, sendDocChanged, sendApplied);
+        });
         return;
       case 'draftChanged':
         pendingDraftText = raw.text;
         return;
       case 'saveDocument':
-        isApplyingOwnChange = true;
-        try {
-          await enqueue(async () => {
-            const appliedDraft = await applyPendingDraftIfNeeded();
-            if (appliedDraft) {
-              await sendDocChanged();
-            } else if (pendingDraftText !== null) {
-              await sendDocChanged();
-              return;
-            }
-            await document.save();
-          });
-        } finally {
-          isApplyingOwnChange = false;
-        }
+        await enqueue(async () => {
+          const appliedDraft = await applyPendingDraftIfNeeded();
+          if (appliedDraft) {
+            await sendDocChanged();
+          } else if (pendingDraftText !== null) {
+            await sendDocChanged();
+            return;
+          }
+          await document.save();
+        });
         return;
       case 'saveImageFromClipboard': {
         const response = await handleSaveImageFromClipboard(raw, documentUri);
@@ -1153,10 +1158,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
 
     scheduleSpellCheck();
-
-    if (isApplyingOwnChange) {
-      return;
-    }
 
     runBackground(enqueue(async () => {
       await sendDocChanged();

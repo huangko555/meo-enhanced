@@ -598,8 +598,12 @@ const outlineController = createOutlineController({
     scheduleToolbarTextAlignment();
   },
   onUiStateChange: (state) => {
+    const widthChanged = state.width !== outlineUiState.width;
     outlineUiState = state;
     persistUiState();
+    if (widthChanged) {
+      vscode.postMessage({ type: 'setOutlineWidth', width: state.width });
+    }
   }
 });
 
@@ -1448,6 +1452,7 @@ const handleInit = (message: any) => {
   }
   applyDiagnosticsFromHost(message.diagnostics);
   outlineController.setPosition(message.outlinePosition);
+  outlineController.setWidth(message.outlineWidth);
   scheduleToolbarTextAlignment();
   if (typeof message.outlineVisible === 'boolean') {
     setOutlineVisible(message.outlineVisible, { post: false });
@@ -1651,6 +1656,9 @@ window.addEventListener('message', (event) => {
     syncPendingDraftState();
     if (!setEditorTextSafely(message.text, 'docChanged')) {
       return;
+    }
+    if (outlineController.isVisible()) {
+      outlineController.refresh();
     }
     scheduleWikiLinkStatusRefresh(message.text);
     scheduleLocalLinkStatusRefresh(message.text);

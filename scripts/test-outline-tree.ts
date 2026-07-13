@@ -2,6 +2,17 @@ import { buildOutlineTree, findVisibleHeadingIndexes, type OutlineHeading } from
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { extractHeadings } from '../webview/src/helpers/markdownSyntax';
+import {
+  DEFAULT_OUTLINE_WIDTH,
+  MAX_OUTLINE_WIDTH,
+  MIN_OUTLINE_WIDTH,
+  normalizeOutlineWidth
+} from '../src/shared/outlineWidth';
+
+if (normalizeOutlineWidth(Number.NaN) !== DEFAULT_OUTLINE_WIDTH) throw new Error('Invalid outline width must use the default');
+if (normalizeOutlineWidth(MIN_OUTLINE_WIDTH - 1) !== MIN_OUTLINE_WIDTH) throw new Error('Outline width minimum was not enforced');
+if (normalizeOutlineWidth(MAX_OUTLINE_WIDTH + 1) !== MAX_OUTLINE_WIDTH) throw new Error('Outline width maximum was not enforced');
+if (normalizeOutlineWidth(300.6) !== 301) throw new Error('Outline width was not rounded');
 
 const headings: OutlineHeading[] = [
   { text: 'Root', level: 1, from: 0, line: 1 },

@@ -602,15 +602,64 @@ export class MermaidDiagramWidget extends WidgetType {
       if (!container.contains(loading)) {
         return;
       }
-      container.removeChild(loading);
-      if (result.error) {
-        this.renderError(container, result.error);
-      } else {
-        this.renderSvg(container, result.svg);
+      const showResult = () => {
+        container.removeChild(loading);
+        if (result.error) this.renderError(container, result.error);
+        else this.renderSvg(container, result.svg);
+      };
+      if (!view || !container.isConnected) {
+        showResult();
+        return;
       }
+      view.requestMeasure({
+        read(editorView) {
+          const scrollerRect = editorView.scrollDOM.getBoundingClientRect();
+          if (container.getBoundingClientRect().top >= scrollerRect.top) return null;
+          const anchor = Array.from(editorView.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
+            .find((line) => line.getBoundingClientRect().top >= scrollerRect.top);
+          return anchor ? { anchor, top: anchor.getBoundingClientRect().top } : null;
+        },
+        write: (anchor) => {
+          showResult();
+          if (anchor) this.keepViewportAnchor(view, anchor);
+          else view.requestMeasure();
+        }
+      });
     })();
 
     return container;
+  }
+
+  keepViewportAnchor(view: EditorView, anchor: { anchor: HTMLElement; top: number }): void {
+    let remainingFrames = 3;
+    let expectedScrollTop = view.scrollDOM.scrollTop;
+    const measure = () => {
+      view.requestMeasure({
+        read() {
+          if (!anchor.anchor.isConnected) return null;
+          return {
+            delta: anchor.anchor.getBoundingClientRect().top - anchor.top,
+            scrollTop: view.scrollDOM.scrollTop
+          };
+        },
+        write(measurement) {
+          if (!measurement) return;
+          if (
+            Math.abs(measurement.scrollTop - expectedScrollTop) > 0.5 ||
+            Math.abs(view.scrollDOM.scrollTop - measurement.scrollTop) > 0.5
+          ) {
+            return;
+          }
+          if (Math.abs(measurement.delta) > 0.5) {
+            view.scrollDOM.scrollTop += measurement.delta;
+          }
+          expectedScrollTop = view.scrollDOM.scrollTop;
+          remainingFrames -= 1;
+          if (remainingFrames > 0) requestAnimationFrame(measure);
+        }
+      });
+    };
+    measure();
   }
 
   renderSvg(container, svgContent) {

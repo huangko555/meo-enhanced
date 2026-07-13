@@ -7,6 +7,8 @@ import {
   validateThemePayload
 } from './themeDefaults';
 import { getActiveVscodeRawTheme, type RawVscodeTheme } from './vscodeTheme';
+import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from './outlineWidth';
+export { normalizeOutlineWidth } from './outlineWidth';
 
 export const EXTENSION_CONFIG_SECTION = 'markdownEditorOptimized';
 export const LINE_NUMBERS_SETTING_KEY = 'lineNumbers.visible';
@@ -27,6 +29,7 @@ export const LINE_NUMBERS_KEY = 'lineNumbersEnabled';
 export const GIT_CHANGES_GUTTER_KEY = 'gitChangesGutterEnabled';
 export const VIM_MODE_KEY = 'vimModeEnabled';
 export const OUTLINE_VISIBLE_KEY = 'outlineVisible';
+export const OUTLINE_WIDTH_KEY = 'outlineWidth';
 export const CONTENT_MAX_WIDTH_ENABLED_KEY = 'contentMaxWidthEnabled';
 export const MARKDOWN_FILE_EXTENSIONS = ['.md', '.markdown', '.mdx', '.mdc'] as const;
 const VSCODEVIM_EXTENSION_ID = 'vscodevim.vim';
@@ -175,6 +178,10 @@ export function getOutlinePosition(): OutlinePosition {
 
 export function getOutlineVisible(context: vscode.ExtensionContext): boolean {
   return context.globalState.get<boolean>(OUTLINE_VISIBLE_KEY, false);
+}
+
+export function getOutlineWidth(context: vscode.ExtensionContext): number {
+  return normalizeOutlineWidth(context.globalState.get<number>(OUTLINE_WIDTH_KEY, DEFAULT_OUTLINE_WIDTH));
 }
 
 export function getContentMaxWidthEnabled(context: vscode.ExtensionContext): boolean {

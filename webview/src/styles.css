@@ -1757,6 +1757,12 @@ body {
   overflow: visible;
 }
 
+.cm-editor .meo-md-list-marker-bullet-hollow .meo-md-list-marker-bullet-dot {
+  fill: none;
+  stroke: var(--meo-semantic-unorderedListMarker, var(--meo-semantic-headingForeground, #79b8ff));
+  stroke-width: 2.5;
+}
+
 .cm-editor .meo-md-list-marker-ordered {
   color: var(--meo-semantic-orderedListMarker) !important;
   font-variant-numeric: tabular-nums;
@@ -2309,7 +2315,7 @@ body {
   top: 0;
   bottom: 0;
   width: 1px;
-  background-color: var(--vscode-panel-border);
+  background-color: color-mix(in srgb, var(--meo-foreground) 28%, transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
@@ -2593,8 +2599,8 @@ body {
   background-color: var(--meo-outline-hover-background);
 }
 
-.outline-item.is-visible {
-  color: var(--meo-foreground);
+.outline-item.is-visible-first {
+  color: var(--meo-semantic-headingForeground, #79b8ff);
 }
 
 .outline-item.is-visible:hover {
@@ -2627,24 +2633,32 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 6px;
+  width: 12px;
   background: transparent;
   cursor: ew-resize;
-  z-index: 2;
+  z-index: 4;
   transition: background-color 120ms ease;
 }
 
 .editor-wrapper[data-outline-position='left'] .outline-resizer {
-  right: -3px;
+  right: -6px;
 }
 
 .editor-wrapper[data-outline-position='right'] .outline-resizer {
-  left: -3px;
+  left: -6px;
 }
 
-.outline-resizer:hover {
-  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
-  transition-delay: 250ms;
+.outline-resizer:hover,
+body.outline-resizing .outline-resizer {
+  background: #134794;
+}
+
+.outline-sidebar:has(.outline-resizer:hover) .outline-content {
+  scrollbar-color: transparent transparent;
+}
+
+.outline-sidebar:has(.outline-resizer:hover) .outline-content::-webkit-scrollbar-thumb {
+  background: transparent !important;
 }
 
 body.outline-resizing {
@@ -2746,7 +2760,7 @@ body.outline-resizing {
   right: 10px;
   bottom: 0;
   width: 3px;
-  border-left: 1px solid var(--meo-color-base03);
+  border-left: 1px solid transparent;
   pointer-events: none;
   z-index: 5;
 }
@@ -2778,7 +2792,7 @@ body.outline-resizing {
   right: 0;
   height: 5px;
   opacity: 0.65;
-  background: color-mix(in srgb, var(--vscode-editor-foreground, #ffffff) 55%, transparent);
+  background: transparent;
 }
 
 .cm-editor .meo-search-overview-ruler {
@@ -3340,6 +3354,14 @@ body.outline-resizing {
   padding: 0;
 }
 
+.cm-editor .meo-md-html-table-cell-list:is(ul) > li::marker {
+  color: var(--meo-semantic-unorderedListMarker, var(--meo-semantic-headingForeground, #79b8ff));
+}
+
+.cm-editor .meo-md-html-table-cell-list:is(ol) > li::marker {
+  color: var(--meo-semantic-orderedListMarker, var(--meo-semantic-headingForeground, #79b8ff));
+}
+
 .cm-editor .meo-md-html-table-cell-preview .meo-md-link {
   color: var(--meo-color-base05);
   overflow-wrap: anywhere;
@@ -3355,6 +3377,10 @@ body.outline-resizing {
   color: transparent;
   opacity: 1;
   pointer-events: none;
+}
+
+.cm-editor .meo-md-html-table-cell-content.is-editing:not(.has-search-match) .meo-md-html-table-cell-preview {
+  visibility: hidden;
 }
 
 .cm-editor .meo-md-html-table-cell-content.is-editing .meo-md-html-table-cell-preview * {

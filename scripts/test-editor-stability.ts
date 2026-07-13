@@ -1,0 +1,254 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import puppeteer from 'puppeteer-core';
+
+const repoRoot = path.resolve(import.meta.dir, '..');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-editor-stability-'));
+
+function findBrowserExecutable(): string {
+  const candidates = [
+    process.env.MEO_TEST_BROWSER,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+    'C:/Program Files/Google/Chrome/Application/chrome.exe'
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const executable = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!executable) throw new Error('No supported browser found');
+  return executable;
+}
+
+async function waitForFrames(page: puppeteer.Page, count = 8): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
+async function main() {
+  const build = await Bun.build({
+    entrypoints: [path.join(repoRoot, 'scripts', 'test-editor-stability-entry.ts')],
+    outdir: tempDir,
+    target: 'browser',
+    format: 'iife',
+    naming: 'bundle.js'
+  });
+  if (!build.success) throw new Error(build.logs.map(String).join('\n'));
+
+  const browser = await puppeteer.launch({
+    executablePath: findBrowserExecutable(),
+    headless: true,
+    args: ['--no-sandbox']
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 900, height: 520, deviceScaleFactor: 1 });
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    await page.addStyleTag({
+      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; }'
+    });
+    await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    const markerLines = [
+      '**还有什么：**大客户给的',
+      '*还有什么：*大客户给的',
+      '~~还有什么：~~大客户给的',
+      '**What now:**customer text',
+      '*What now;*customer text',
+      '~~What now?~~customer text',
+      '中文，**粗体一**',
+      '中文。`代码一`',
+      '中文：~~删除一~~',
+      'English. **bold two**',
+      'English: `code two`'
+    ];
+    const bodyLines = Array.from({ length: 100 }, (_, index) => `稳定锚点 ${index + 1}`);
+    const source = [...markerLines, '', ...bodyLines].join('\n');
+    await page.evaluate((text) => {
+      (window as any).__editor = (window as any).EditorStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, source);
+    await waitForFrames(page);
+
+    const markerLabels = [
+      '还有什么：', '还有什么：', '还有什么：',
+      'What now:', 'What now;', 'What now?',
+      '粗体一', '代码一', '删除一', 'bold two', 'code two'
+    ];
+    for (const [index, label] of markerLabels.entries()) {
+      const point = await page.evaluate(({ target, lineIndex }) => {
+        const line = document.querySelectorAll<HTMLElement>('.cm-line')[lineIndex];
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const offset = node.textContent?.indexOf(target) ?? -1;
+          if (offset < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, offset);
+          range.setEnd(node, offset + target.length);
+          const rect = range.getBoundingClientRect();
+          return { x: rect.left + Math.min(4, rect.width / 2), y: rect.top + rect.height / 2 };
+        }
+        return null;
+      }, { target: label, lineIndex: index });
+      if (!point) throw new Error(`Could not find marker test text: ${label}`);
+      await page.mouse.click(point.x, point.y);
+      await waitForFrames(page, 3);
+      const state = await page.evaluate((lineIndex) => {
+        const line = document.querySelectorAll<HTMLElement>('.cm-line')[lineIndex];
+        const active = line?.querySelectorAll<HTMLElement>('.meo-md-marker-active, .meo-md-code-marker-active, .meo-md-strike-marker-active') ?? [];
+        return {
+          lineText: line?.textContent ?? '',
+          visibleMarkers: Array.from(active).filter((marker) => getComputedStyle(marker).display !== 'none').length
+        };
+      }, index);
+      if (state.visibleMarkers < 2) {
+        throw new Error(`Markdown markers did not reveal after punctuation: ${JSON.stringify(state)}`);
+      }
+      if (index > 0) {
+        const previousVisible = await page.evaluate((lineIndex) => {
+          const line = document.querySelectorAll<HTMLElement>('.cm-line')[lineIndex];
+          return Array.from(line.querySelectorAll<HTMLElement>('.meo-md-marker-active, .meo-md-code-marker-active, .meo-md-strike-marker-active'))
+            .some((marker) => getComputedStyle(marker).display !== 'none');
+        }, index - 1);
+        if (previousVisible) throw new Error(`Markdown markers stayed visible on inactive line ${index}`);
+      }
+    }
+
+    await page.evaluate(() => (window as any).__editor.scrollToLine(76, 'top'));
+    await waitForFrames(page);
+    const beforeTop = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+      return line?.getBoundingClientRect().top ?? null;
+    });
+    if (beforeTop === null) throw new Error('Could not locate viewport anchor before external update');
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.setText(['后台新增 1', '后台新增 2', '后台新增 3', editor.getText()].join('\n'));
+    });
+    await waitForFrames(page);
+    const after = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+      return {
+        top: line?.getBoundingClientRect().top ?? null,
+        text: (window as any).__editor.getText()
+      };
+    });
+    if (!after.text.startsWith('后台新增 1\n后台新增 2\n后台新增 3\n')) {
+      throw new Error('External document update was not applied');
+    }
+    if (after.top === null || Math.abs(after.top - beforeTop) > 1) {
+      throw new Error(`External update moved the viewport anchor: ${beforeTop} -> ${after.top}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.setText(editor.getText()
+        .replace('稳定锚点 10', '后台改写锚点 10')
+        .replace('稳定锚点 90', '后台改写锚点 90'));
+    });
+    await waitForFrames(page);
+    const afterDisjointEdits = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+      const editor = (window as any).__editor;
+      const position = editor.getText().indexOf('稳定锚点 70');
+      return {
+        top: line?.getBoundingClientRect().top ?? null,
+        position,
+        blockTop: editor.view.lineBlockAt(position).top,
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        topVisible: editor.getTopVisiblePosition()
+      };
+    });
+    if (afterDisjointEdits.top === null || Math.abs(afterDisjointEdits.top - beforeTop) > 1) {
+      throw new Error(`Disjoint external edits moved unchanged viewport content: ${beforeTop} -> ${JSON.stringify(afterDisjointEdits)}`);
+    }
+
+    const outlineJump = await page.evaluate(() => {
+      const root = document.createElement('div');
+      const editorWrapper = document.createElement('div');
+      const outlineButton = document.createElement('button');
+      root.append(editorWrapper, outlineButton);
+      document.body.appendChild(root);
+      let headings = [
+        { text: '7. Overview', level: 2, from: 20, line: 3 },
+        { text: '7.4 Target', level: 3, from: 100, line: 10 }
+      ];
+      const scrolledLines: number[] = [];
+      const editorApi = {
+        getHeadings: () => headings,
+        getViewportAnchorOffset: () => 0,
+        getVisibleDocumentRange: () => ({ from: 20, to: 300, fromLine: 3, toLine: 20 }),
+        getScrollElement: () => editorWrapper,
+        scrollToLine: (line: number) => scrolledLines.push(line),
+        moveHeadingSection: () => false
+      };
+      const outline = (window as any).EditorStabilityHarness.createOutlineController({
+        root,
+        editorWrapper,
+        outlineButton,
+        getEditor: () => editorApi
+      });
+      outline.setVisible(true);
+      outline.refresh();
+      const visibleItems = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item.is-visible'));
+      const visibleClassState = visibleItems.map((item) => ({
+        title: item.title,
+        first: item.classList.contains('is-visible-first')
+      }));
+      const resizer = outline.sidebar.querySelector<HTMLElement>('.outline-resizer')!;
+      let wheelBubbled = false;
+      root.addEventListener('wheel', () => {
+        wheelBubbled = true;
+      });
+      const wheelAllowed = resizer.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 }));
+      const resizerWidth = getComputedStyle(resizer).width;
+
+      // Simulate a background edit that moved the target heading while the visible
+      // outline still carries its previous line number. Line 10 is now a nearby
+      // ordered-list item in the real document.
+      headings = [
+        { text: '7. Overview', level: 2, from: 20, line: 3 },
+        { text: '7.4 Target', level: 3, from: 260, line: 20 }
+      ];
+      const target = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item'))
+        .find((item) => item.title === '7.4 Target');
+      target?.click();
+      root.remove();
+      return { scrolledLines, visibleClassState, wheelAllowed, wheelBubbled, resizerWidth };
+    });
+    if (outlineJump.scrolledLines.at(-1) !== 20) {
+      throw new Error(`Stale outline item jumped to nearby ordered-list line: ${JSON.stringify(outlineJump)}`);
+    }
+    if (
+      outlineJump.visibleClassState.length !== 2 ||
+      outlineJump.visibleClassState[0]?.first !== true ||
+      outlineJump.visibleClassState[1]?.first !== false
+    ) {
+      throw new Error(`Visible outline range did not mark only its first title: ${JSON.stringify(outlineJump.visibleClassState)}`);
+    }
+    if (outlineJump.wheelAllowed || outlineJump.wheelBubbled) {
+      throw new Error(`Outline resize handle did not block wheel input: ${JSON.stringify(outlineJump)}`);
+    }
+    if (outlineJump.resizerWidth !== '12px') {
+      throw new Error(`Outline divider or scrollbar styling was not applied: ${JSON.stringify(outlineJump)}`);
+    }
+
+    console.log('editor marker and viewport stability browser tests passed');
+  } finally {
+    await browser.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+await main();

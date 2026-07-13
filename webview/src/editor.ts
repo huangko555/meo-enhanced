@@ -288,8 +288,11 @@ export function createEditor({
   let onWidgetActivateImage = null;
   let onTableSelectionChange = null;
   let onScroll = null;
+  let onViewportInteraction = null;
+  let viewportInteractionGeneration = 0;
   let onWindowPointerUp = null;
   let onWindowPointerCancel = null;
+  let onWindowBlur = null;
   let pendingLiveSearchRevealFrame: number | null = null;
   let pendingLiveSearchRevealToken = 0;
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
@@ -645,8 +648,8 @@ export function createEditor({
     }
   };
 
-  const finishLivePointerSelection = (pointerId) => {
-    if (liveSelectionPointerId !== pointerId) {
+  const clearLivePointerSelection = () => {
+    if (liveSelectionPointerId === null) {
       return;
     }
     liveSelectionPointerId = null;
@@ -656,6 +659,12 @@ export function createEditor({
       view.dispatch({
         effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null })
       });
+    }
+  };
+
+  const finishLivePointerSelection = (pointerId) => {
+    if (liveSelectionPointerId === pointerId) {
+      clearLivePointerSelection();
     }
   };
 
@@ -1501,6 +1510,39 @@ export function createEditor({
     };
   };
 
+  const captureViewportAnchor = () => {
+    const { lineBlock, hiddenTopPixels } = getTopLineMetrics();
+    return {
+      position: lineBlock.from,
+      lineOffset: normalizeTopLineOffset(hiddenTopPixels)
+    };
+  };
+
+  const restoreViewportAnchor = (position: number, lineOffset = 0) => {
+    const targetPosition = Math.min(Math.max(0, position), view.state.doc.length);
+    const targetOffset = normalizeTopLineOffset(lineOffset);
+    const targetTop = Math.max(0, view.lineBlockAt(targetPosition).top + targetOffset);
+    view.scrollDOM.scrollTop = targetTop;
+    const interactionGeneration = viewportInteractionGeneration;
+    let attempts = 0;
+    const restoreAfterLayout = () => {
+      if (viewportInteractionGeneration !== interactionGeneration || ++attempts > SCROLL_RESTORE_MAX_ATTEMPTS) {
+        return;
+      }
+      view.requestMeasure({
+        read(editorView) {
+          return Math.max(0, editorView.lineBlockAt(targetPosition).top + targetOffset);
+        },
+        write(nextTop, editorView) {
+          if (viewportInteractionGeneration !== interactionGeneration) return;
+          editorView.scrollDOM.scrollTop = nextTop;
+          requestAnimationFrame(restoreAfterLayout);
+        }
+      });
+    };
+    requestAnimationFrame(restoreAfterLayout);
+  };
+
   const restoreTopVisibleLine = (lineNumber, lineOffset = 0, { syncCursor = true } = {}) => {
     const targetLineNumber = Math.min(Math.max(1, Math.floor(lineNumber || 1)), view.state.doc.lines);
     const targetOffset = normalizeTopLineOffset(lineOffset);
@@ -1966,19 +2008,27 @@ export function createEditor({
   };
   view.dom.addEventListener('meo-table-selection-change', onTableSelectionChange);
   onWindowPointerUp = (event) => {
-    finishLivePointerSelection(event.pointerId);
+    clearLivePointerSelection();
   };
   onWindowPointerCancel = (event) => {
-    finishLivePointerSelection(event.pointerId);
+    clearLivePointerSelection();
   };
+  onWindowBlur = () => clearLivePointerSelection();
   window.addEventListener('pointerup', onWindowPointerUp, true);
   window.addEventListener('pointercancel', onWindowPointerCancel, true);
+  window.addEventListener('blur', onWindowBlur);
   onScroll = () => {
     emitSelectionChange();
     gitBlameHover?.hide();
     onViewportChange?.();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+  onViewportInteraction = () => {
+    viewportInteractionGeneration += 1;
+  };
+  view.scrollDOM.addEventListener('wheel', onViewportInteraction, { passive: true });
+  view.scrollDOM.addEventListener('touchmove', onViewportInteraction, { passive: true });
+  view.dom.addEventListener('keydown', onViewportInteraction, true);
   if (typeof onRequestGitBlame === 'function') {
     gitBlameHover = createGitBlameHoverController({
       view,
@@ -2141,6 +2191,12 @@ export function createEditor({
         view.scrollDOM.removeEventListener('scroll', onScroll);
         onScroll = null;
       }
+      if (onViewportInteraction) {
+        view.scrollDOM.removeEventListener('wheel', onViewportInteraction);
+        view.scrollDOM.removeEventListener('touchmove', onViewportInteraction);
+        view.dom.removeEventListener('keydown', onViewportInteraction, true);
+        onViewportInteraction = null;
+      }
       if (onTableInteraction) {
         view.dom.removeEventListener('meo-table-interaction', onTableInteraction);
         onTableInteraction = null;
@@ -2165,6 +2221,10 @@ export function createEditor({
         window.removeEventListener('pointercancel', onWindowPointerCancel, true);
         onWindowPointerCancel = null;
       }
+      if (onWindowBlur) {
+        window.removeEventListener('blur', onWindowBlur);
+        onWindowBlur = null;
+      }
       if (capturedPointerId !== null) {
         releasePointerCaptureIfHeld(capturedPointerId);
         capturedPointerId = null;
@@ -2186,16 +2246,24 @@ export function createEditor({
         return;
       }
 
+      const viewportAnchor = captureViewportAnchor();
       const { anchor, head } = view.state.selection.main;
       const newLength = textValue.length;
-      const mappedAnchor = Math.min(mapPositionThroughChange(anchor, syncChange), newLength);
-      const mappedHead = Math.min(mapPositionThroughChange(head, syncChange), newLength);
+      const mappedAnchor = Math.min(mapPositionThroughTextChange(anchor, currentText, textValue, syncChange), newLength);
+      const mappedHead = Math.min(mapPositionThroughTextChange(head, currentText, textValue, syncChange), newLength);
+      const mappedViewportAnchor = Math.min(
+        mapPositionThroughTextChange(viewportAnchor.position, currentText, textValue, syncChange),
+        newLength
+      );
+      clearLivePointerSelection();
+      setTableInteractionActive(false);
       applyingExternal = true;
       view.dispatch({
         changes: syncChange,
         selection: { anchor: mappedAnchor, head: mappedHead }
       });
       applyingExternal = false;
+      restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
       pendingExternalUndoSelectionPreserve = true;
       syncSelectionClass();
       emitSelectionChange();
@@ -2693,6 +2761,49 @@ function mapPositionThroughChange(position, change) {
   }
 
   return change.from + insertLength;
+}
+
+function mapPositionThroughTextChange(position, previousText, nextText, change) {
+  if (position <= change.from || position >= change.to) {
+    return mapPositionThroughChange(position, change);
+  }
+
+  const contextRadius = 80;
+  const contextFrom = Math.max(change.from, position - contextRadius);
+  const contextTo = Math.min(change.to, position + contextRadius);
+  const context = previousText.slice(contextFrom, contextTo);
+  if (context.length >= 16) {
+    const contextIndex = nextText.indexOf(context);
+    if (contextIndex >= 0 && nextText.indexOf(context, contextIndex + 1) < 0) {
+      return contextIndex + (position - contextFrom);
+    }
+  }
+
+  const lineFrom = previousText.lastIndexOf('\n', Math.max(0, position - 1)) + 1;
+  const lineBreak = previousText.indexOf('\n', position);
+  const lineTo = lineBreak < 0 ? previousText.length : lineBreak;
+  const lineText = previousText.slice(lineFrom, lineTo);
+  if (lineText.trim()) {
+    const expected = mapPositionThroughChange(position, change);
+    let bestLineFrom = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let searchFrom = 0;
+    while (searchFrom <= nextText.length) {
+      const match = nextText.indexOf(lineText, searchFrom);
+      if (match < 0) break;
+      const distance = Math.abs(match - expected);
+      if (distance < bestDistance) {
+        bestLineFrom = match;
+        bestDistance = distance;
+      }
+      searchFrom = match + Math.max(1, lineText.length);
+    }
+    if (bestLineFrom >= 0) {
+      return bestLineFrom + Math.min(position - lineFrom, lineText.length);
+    }
+  }
+
+  return mapPositionThroughChange(position, change);
 }
 
 function createSearchQueryState(query: string | null | undefined, options: SearchOptions = {}): SearchQueryState {
