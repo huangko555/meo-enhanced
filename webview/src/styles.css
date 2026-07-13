@@ -478,6 +478,29 @@ body {
   margin-right: 12px;
 }
 
+.more-tools-wrapper {
+  position: relative;
+}
+
+.more-tools-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-sideBar-background);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+}
+
+.more-tools-panel[hidden] {
+  display: none;
+}
+
 .format-separator {
   width: 1px;
   height: 18px;

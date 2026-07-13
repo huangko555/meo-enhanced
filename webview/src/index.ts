@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -635,19 +635,52 @@ const exportWrapper = document.createElement('div');
 exportWrapper.className = 'export-wrapper';
 exportWrapper.append(exportBtn, exportDropdownWrapper);
 
-const outlineRightSeparator = document.createElement('div');
-outlineRightSeparator.className = 'format-separator';
-outlineRightSeparator.setAttribute('role', 'separator');
+const moreToolsButton = document.createElement('button');
+moreToolsButton.type = 'button';
+moreToolsButton.className = 'format-button toggle-button';
+moreToolsButton.title = 'More';
+moreToolsButton.setAttribute('aria-label', 'More tools');
+moreToolsButton.setAttribute('aria-haspopup', 'true');
+moreToolsButton.setAttribute('aria-expanded', 'false');
+moreToolsButton.appendChild(createElement(Ellipsis, { width: 18, height: 18 }));
 
-rightGroup.append(
-  findToggleBtn,
-  outlineBtn,
-  outlineRightSeparator,
+const moreToolsPanel = document.createElement('div');
+moreToolsPanel.className = 'more-tools-panel';
+moreToolsPanel.setAttribute('role', 'toolbar');
+moreToolsPanel.setAttribute('aria-label', 'More tools');
+moreToolsPanel.hidden = true;
+moreToolsPanel.append(
   contentMaxWidthBtn,
   lineNumbersBtn,
   gitChangesGutterBtn,
   spellCheckBtn,
   exportWrapper
+);
+
+const moreToolsWrapper = document.createElement('div');
+moreToolsWrapper.className = 'more-tools-wrapper';
+moreToolsWrapper.append(moreToolsButton, moreToolsPanel);
+
+const setMoreToolsVisible = (visible: boolean) => {
+  moreToolsPanel.hidden = !visible;
+  moreToolsButton.classList.toggle('is-active', visible);
+  moreToolsButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
+};
+
+moreToolsButton.addEventListener('click', () => {
+  setMoreToolsVisible(moreToolsPanel.hidden);
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (!moreToolsWrapper.contains(event.target as Node)) {
+    setMoreToolsVisible(false);
+  }
+}, true);
+
+rightGroup.append(
+  findToggleBtn,
+  outlineBtn,
+  moreToolsWrapper
 );
 
 const modeGroup = document.createElement('div');
