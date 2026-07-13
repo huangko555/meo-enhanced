@@ -14,7 +14,7 @@ import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
 import { getMermaidColonBlocks } from './mermaidColonBlocks';
-import { createCopyCodeButton } from './codeBlockControls';
+import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import {
   addMermaidToolbar,
   getMermaidBlockMode,
@@ -637,20 +637,39 @@ export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node
   }
 }
 
-class CopyCodeButtonWidget extends WidgetType {
+class CodeBlockActionsWidget extends WidgetType {
   codeContent: string;
+  contentFrom: number;
+  contentTo: number;
 
-  constructor(codeContent: string) {
+  constructor(codeContent: string, contentFrom: number, contentTo: number) {
     super();
     this.codeContent = codeContent;
+    this.contentFrom = contentFrom;
+    this.contentTo = contentTo;
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof CopyCodeButtonWidget && other.codeContent === this.codeContent;
+    return other instanceof CodeBlockActionsWidget &&
+      other.codeContent === this.codeContent &&
+      other.contentFrom === this.contentFrom &&
+      other.contentTo === this.contentTo;
   }
 
-  toDOM(): HTMLElement {
-    return createCopyCodeButton(this.codeContent);
+  toDOM(view: EditorView): HTMLElement {
+    const actions = document.createElement('span');
+    actions.className = 'meo-code-block-actions';
+    actions.append(
+      createSelectAllCodeButton(() => {
+        view.dispatch({
+          selection: { anchor: this.contentFrom, head: this.contentTo },
+          scrollIntoView: true
+        });
+        view.focus();
+      }),
+      createCopyCodeButton(this.codeContent)
+    );
+    return actions;
   }
 
   ignoreEvent(event: Event): boolean {
@@ -692,11 +711,17 @@ function addTopLineWidget(builder: any[], lineEnd: number, widget: WidgetType): 
   );
 }
 
-export function addTopLineCopyButton(builder: any[], lineEnd: number, codeContent: string): void {
+export function addTopLineCopyButton(
+  builder: any[],
+  lineEnd: number,
+  codeContent: string,
+  contentFrom: number,
+  contentTo: number
+): void {
   if (!codeContent) {
     return;
   }
-  addTopLineWidget(builder, lineEnd, new CopyCodeButtonWidget(codeContent));
+  addTopLineWidget(builder, lineEnd, new CodeBlockActionsWidget(codeContent, contentFrom, contentTo));
 }
 
 export function addTopLinePillLabel(builder: any[], lineEnd: number, labelText: string | null): void {
@@ -836,7 +861,20 @@ export function addCopyCodeButton(builder: any[], state: EditorState, from: numb
     return;
   }
 
-  addTopLineCopyButton(builder, startLine.to, codeContent);
+  const lastContentLineNumber = fenceLineRegex.test(stripLeadingQuotePrefix(endLine.text, quoteDepth))
+    ? endLine.number - 1
+    : endLine.number;
+  if (lastContentLineNumber <= startLine.number) {
+    return;
+  }
+
+  addTopLineCopyButton(
+    builder,
+    startLine.to,
+    codeContent,
+    state.doc.line(startLine.number + 1).from,
+    state.doc.line(lastContentLineNumber).to
+  );
 }
 
 function getQuotedFenceDepth(lineText: string): number {

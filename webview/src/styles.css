@@ -663,6 +663,33 @@ body {
   background-color: var(--meo-semantic-codeCopyBackground);
 }
 
+.meo-code-block-actions {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.meo-code-block-actions .meo-copy-code-btn {
+  position: static;
+}
+
+.meo-select-all-code-btn {
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 14px;
+  color: var(--meo-semantic-codeCopyForeground);
+  background-color: var(--meo-semantic-codeCopyBackground);
+}
+
+.meo-select-all-code-btn:hover {
+  color: var(--meo-semantic-codeCopyHoverForeground);
+  background-color: var(--meo-semantic-codeCopyHoverBackground);
+}
+
 .meo-copy-code-btn:hover {
   color: var(--meo-semantic-codeCopyHoverForeground);
   background-color: var(--meo-semantic-codeCopyHoverBackground);
@@ -3034,7 +3061,7 @@ body.outline-resizing {
 .cm-editor .meo-mermaid-editing-block,
 .cm-editor .meo-latex-math-editing-block {
   display: grid;
-  grid-template-columns: minmax(280px, 2fr) minmax(320px, 3fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
   width: 100%;
   color: var(--meo-foreground);

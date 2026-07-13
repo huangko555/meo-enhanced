@@ -58,6 +58,6 @@ export const markdownTagField = StateField.define<DecorationSet>({
     return buildMarkdownTagDecorations(transaction.state);
   },
   provide(field) {
-    return EditorView.decorations.from(field);
+    return EditorView.outerDecorations.from(field);
   }
 });

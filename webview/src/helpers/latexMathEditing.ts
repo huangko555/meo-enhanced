@@ -2,7 +2,7 @@ import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/s
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
-import { createCopyCodeButton } from './codeBlockControls';
+import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
 
 export type LatexMathBlockMode = 'preview' | 'split' | 'source';
@@ -213,7 +213,21 @@ class LatexMathToolbarWidget extends WidgetType {
       });
     });
 
-    toolbar.append(modeButton, createCopyCodeButton(this.sourceText));
+    const selectAllButton = createSelectAllCodeButton(() => {
+      preserveAnchorWhileDispatching(
+        view,
+        this.anchor,
+        setLatexMathBlockModeEffect.of({ anchor: this.anchor, mode: 'source' })
+      );
+      requestAnimationFrame(() => {
+        const editingBlock = view.dom.querySelector<HTMLElement>(
+          `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`
+        );
+        (editingBlock as LatexMathEditingBlockElement | null)?.__meoLatexMathEditingController?.selectAll();
+      });
+    });
+
+    toolbar.append(modeButton, selectAllButton, createCopyCodeButton(this.sourceText));
     return toolbar;
   }
 
@@ -321,6 +335,14 @@ class LatexMathEditingController {
   }
 
   focus(): void {
+    this.innerView.focus();
+  }
+
+  selectAll(): void {
+    this.innerView.dispatch({
+      selection: { anchor: 0, head: this.innerView.state.doc.length },
+      scrollIntoView: true
+    });
     this.innerView.focus();
   }
 

@@ -1342,7 +1342,7 @@ function isFootnoteDefinitionContent(footnotes, from, to) {
   );
 }
 
-function collectInlineMarkdownSyntaxRanges(text) {
+export function collectInlineMarkdownSyntaxRanges(text) {
   const ranges = [];
   const patterns = [
     /\*\*|__|~~|`+/g,
@@ -1352,6 +1352,13 @@ function collectInlineMarkdownSyntaxRanges(text) {
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(text)) !== null) {
+      if (
+        match[0] === '_' &&
+        /[\p{L}\p{N}\p{M}_]/u.test(text[match.index - 1] ?? '') &&
+        /[\p{L}\p{N}\p{M}_]/u.test(text[match.index + 1] ?? '')
+      ) {
+        continue;
+      }
       ranges.push({ from: match.index, to: match.index + match[0].length });
     }
   }

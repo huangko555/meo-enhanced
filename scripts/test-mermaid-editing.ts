@@ -132,6 +132,28 @@ async function main() {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
     }
 
+    await page.click('.meo-mermaid-toolbar .meo-select-all-code-btn');
+    await waitForFrames(page);
+    const selectAllMode = await page.evaluate(() => {
+      const innerView = (document.querySelector<HTMLElement>('.meo-mermaid-editing-block') as any)
+        ?.__meoMermaidEditingController?.innerView;
+      const selection = innerView?.state.selection.main;
+      return {
+        source: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
+        selectedText: selection ? innerView.state.doc.sliceString(selection.from, selection.to) : null,
+        controls: Array.from(document.querySelector('.meo-mermaid-toolbar')?.children ?? [])
+          .map((element) => element.getAttribute('aria-label') ?? element.textContent)
+      };
+    });
+    if (!selectAllMode.source || !selectAllMode.selectedText?.startsWith('graph TD\nnode1 --> node2')) {
+      throw new Error(`Mermaid select all did not reveal and select source: ${JSON.stringify(selectAllMode)}`);
+    }
+    if (selectAllMode.controls.at(-2) !== 'Select all code' || selectAllMode.controls.at(-1) !== 'Copy code') {
+      throw new Error(`Unexpected Mermaid action order: ${JSON.stringify(selectAllMode.controls)}`);
+    }
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
     const splitMode = await page.evaluate(() => {

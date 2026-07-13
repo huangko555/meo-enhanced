@@ -32,3 +32,27 @@ export function createCopyCodeButton(codeContent: string): HTMLSpanElement {
 
   return button;
 }
+
+export function createSelectAllCodeButton(onSelectAll: () => void): HTMLSpanElement {
+  const button = document.createElement('span');
+  button.className = 'meo-code-block-pill meo-select-all-code-btn';
+  button.setAttribute('aria-label', 'Select all code');
+  button.setAttribute('role', 'button');
+  button.setAttribute('tabindex', '0');
+  button.textContent = 'all';
+
+  const selectAll = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectAll();
+  };
+
+  button.addEventListener('click', selectAll);
+  button.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      selectAll(event);
+    }
+  });
+
+  return button;
+}

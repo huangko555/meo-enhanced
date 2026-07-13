@@ -150,6 +150,37 @@ async function main() {
       throw new Error('Rendered Mermaid source received code line numbers');
     }
 
+    await page.click('.meo-code-block-actions .meo-select-all-code-btn');
+    const selectedCode = await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      const selection = editor.view.state.selection.main;
+      return {
+        text: editor.view.state.doc.sliceString(selection.from, selection.to),
+        controls: Array.from(document.querySelector('.meo-code-block-actions')?.children ?? [])
+          .map((element) => element.textContent)
+      };
+    });
+    const expectedSelectedCode = [
+      'const first = 1;',
+      '',
+      'const third = "a long logical line that wraps without gaining another number";',
+      'line four',
+      'line five',
+      'line six',
+      'line seven',
+      'line eight',
+      'line nine',
+      'line ten',
+      'line eleven',
+      'line twelve'
+    ].join('\n');
+    if (selectedCode.text !== expectedSelectedCode) {
+      throw new Error(`Select all included the wrong fenced-code range: ${JSON.stringify(selectedCode.text)}`);
+    }
+    if (JSON.stringify(selectedCode.controls) !== JSON.stringify(['all', 'copy'])) {
+      throw new Error(`Unexpected code block action order: ${JSON.stringify(selectedCode.controls)}`);
+    }
+
     await page.evaluate(() => {
       (window as any).__codeBlockLineNumbersEditor.destroy();
       document.getElementById('app')!.replaceChildren();
