@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2 } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -13,6 +13,7 @@ import { createFindPanel, createFindPanelController, type FindPanelController } 
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import { createExportHandler, type ExportHandlerContext } from './helpers/export';
 import { refreshMermaidTheme } from './helpers/mermaidDiagram';
+import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -452,12 +453,126 @@ tableGrid.addEventListener('click', (event) => {
   editor.focus();
 });
 
+const lineJumpControl = document.createElement('div');
+lineJumpControl.className = 'line-jump-control';
+
+const lineJumpInput = document.createElement('input');
+lineJumpInput.className = 'line-jump-input';
+lineJumpInput.type = 'text';
+lineJumpInput.placeholder = 'Line';
+lineJumpInput.inputMode = 'numeric';
+lineJumpInput.autocomplete = 'off';
+lineJumpInput.spellcheck = false;
+lineJumpInput.setAttribute('aria-label', 'Go to line');
+
+const lineJumpButton = document.createElement('button');
+lineJumpButton.type = 'button';
+lineJumpButton.className = 'line-jump-button';
+lineJumpButton.title = 'Go to line';
+lineJumpButton.setAttribute('aria-label', 'Go to line');
+lineJumpButton.hidden = true;
+lineJumpButton.appendChild(createElement(CornerDownLeft, { width: 14, height: 14 }));
+lineJumpControl.append(lineJumpInput, lineJumpButton);
+
+let acceptedLineJumpInput = '';
+
+const clearLineJumpError = () => {
+  lineJumpControl.classList.remove('is-error');
+  lineJumpInput.removeAttribute('aria-invalid');
+};
+
+const syncLineJumpInput = () => {
+  const hasValue = lineJumpInput.value.length > 0;
+  lineJumpControl.classList.toggle('has-value', hasValue);
+  lineJumpButton.hidden = !hasValue;
+  clearLineJumpError();
+};
+
+const clearLineJumpInput = () => {
+  acceptedLineJumpInput = '';
+  lineJumpInput.value = '';
+  syncLineJumpInput();
+};
+
+const failLineJump = () => {
+  lineJumpControl.classList.add('is-error');
+  lineJumpInput.setAttribute('aria-invalid', 'true');
+  lineJumpInput.focus();
+};
+
+const submitLineJump = () => {
+  const totalLines = editor?.view?.state?.doc?.lines ?? 0;
+  const targetLine = parseLineJumpTarget(lineJumpInput.value, totalLines);
+  if (targetLine === null || !editor) {
+    failLineJump();
+    return;
+  }
+
+  editor.scrollToLine(targetLine, 'upper');
+  clearLineJumpInput();
+  lineJumpInput.blur();
+};
+
+lineJumpInput.addEventListener('beforeinput', (event: InputEvent) => {
+  if (event.inputType.startsWith('delete')) {
+    return;
+  }
+  const selectionStart = lineJumpInput.selectionStart ?? lineJumpInput.value.length;
+  const selectionEnd = lineJumpInput.selectionEnd ?? selectionStart;
+  const nextValue = lineJumpInput.value.slice(0, selectionStart) +
+    (event.data ?? '') +
+    lineJumpInput.value.slice(selectionEnd);
+  if (!isAcceptedLineJumpInput(nextValue)) {
+    event.preventDefault();
+  }
+});
+
+lineJumpInput.addEventListener('input', () => {
+  if (!isAcceptedLineJumpInput(lineJumpInput.value)) {
+    lineJumpInput.value = acceptedLineJumpInput;
+    lineJumpInput.setSelectionRange(lineJumpInput.value.length, lineJumpInput.value.length);
+    return;
+  }
+  acceptedLineJumpInput = lineJumpInput.value;
+  syncLineJumpInput();
+});
+
+lineJumpInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && lineJumpInput.value) {
+    event.preventDefault();
+    submitLineJump();
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    clearLineJumpInput();
+    lineJumpInput.blur();
+  }
+});
+
+lineJumpInput.addEventListener('blur', (event) => {
+  if (!lineJumpControl.contains(event.relatedTarget as Node | null)) {
+    clearLineJumpInput();
+  }
+});
+
+lineJumpButton.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+});
+lineJumpButton.addEventListener('click', submitLineJump);
+
+document.addEventListener('pointerdown', (event) => {
+  if (!lineJumpControl.contains(event.target as Node)) {
+    clearLineJumpInput();
+    lineJumpInput.blur();
+  }
+}, true);
+
 const outlineLeftSeparator = document.createElement('div');
 outlineLeftSeparator.className = 'format-separator';
 outlineLeftSeparator.setAttribute('role', 'separator');
 
 formatGroup.append(
   outlineLeftBtn,
+  lineJumpControl,
   outlineLeftSeparator,
   headingWrapper,
   bulletListBtn,

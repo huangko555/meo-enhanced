@@ -255,6 +255,17 @@ type LatexMathEditingBlockElement = HTMLElement & {
   __meoLatexMathEditingController?: LatexMathEditingController;
 };
 
+export function focusLatexMathEditingOffset(view: EditorView, anchor: number, offset: number): boolean {
+  const editingBlock = view.dom.querySelector<HTMLElement>(
+    `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${anchor}"]`
+  ) as LatexMathEditingBlockElement | null;
+  if (!editingBlock?.__meoLatexMathEditingController) {
+    return false;
+  }
+  editingBlock.__meoLatexMathEditingController.focusOffset(offset);
+  return true;
+}
+
 class LatexMathEditingController {
   private outerView: EditorView;
   private block: LatexMathEditingBlock;
@@ -344,6 +355,30 @@ class LatexMathEditingController {
       scrollIntoView: true
     });
     this.innerView.focus();
+  }
+
+  focusOffset(offset: number): void {
+    const position = Math.max(0, Math.min(offset, this.innerView.state.doc.length));
+    this.innerView.dispatch({
+      selection: { anchor: position },
+      scrollIntoView: true
+    });
+    this.innerView.focus();
+    this.innerView.requestMeasure({
+      read: (innerView) => {
+        const coords = innerView.coordsAtPos(position);
+        const viewport = this.outerView.scrollDOM.getBoundingClientRect();
+        if (!coords || (coords.top >= viewport.top && coords.bottom <= viewport.bottom)) {
+          return null;
+        }
+        return coords.top - viewport.top - viewport.height * 0.3;
+      },
+      write: (delta) => {
+        if (delta !== null) {
+          this.outerView.scrollDOM.scrollTop += delta;
+        }
+      }
+    });
   }
 
   update(

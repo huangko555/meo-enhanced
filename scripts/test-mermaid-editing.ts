@@ -112,7 +112,18 @@ async function main() {
         };
       };
       const lines = Array.from({ length: 48 }, (_, index) => `node${index + 1} --> node${index + 2}`);
-      const text = ['```mermaid', 'graph TD', ...lines, '```', '', 'after'].join('\n');
+      const text = [
+        '```mermaid',
+        'graph TD',
+        ...lines,
+        '```',
+        '',
+        'after',
+        '',
+        '$$',
+        '\\frac{a}{b}',
+        '$$'
+      ].join('\n');
       (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
         parent: document.getElementById('app')!,
         text,
@@ -131,6 +142,41 @@ async function main() {
     if (!defaultMode.preview || defaultMode.editing || defaultMode.buttonLabel !== 'Edit Mermaid in split view') {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
     }
+
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(26, 'upper'));
+    await waitForFrames(page);
+    const lineJumpMode = await page.evaluate(() => {
+      const innerView = (document.querySelector<HTMLElement>('.meo-mermaid-editing-block') as any)
+        ?.__meoMermaidEditingController?.innerView;
+      const selection = innerView?.state.selection.main;
+      return {
+        source: Boolean(document.querySelector('.meo-mermaid-editing-block.is-source')),
+        selectedLine: selection ? innerView.state.doc.lineAt(selection.from).text : null
+      };
+    });
+    if (!lineJumpMode.source || lineJumpMode.selectedLine !== 'node24 --> node25') {
+      throw new Error(`Line jump did not reveal the target Mermaid source line: ${JSON.stringify(lineJumpMode)}`);
+    }
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(56, 'upper'));
+    await waitForFrames(page);
+    const latexLineJumpMode = await page.evaluate(() => {
+      const innerView = (document.querySelector<HTMLElement>('.meo-latex-math-editing-block') as any)
+        ?.__meoLatexMathEditingController?.innerView;
+      const selection = innerView?.state.selection.main;
+      return {
+        source: Boolean(document.querySelector('.meo-latex-math-editing-block.is-source')),
+        selectedLine: selection ? innerView.state.doc.lineAt(selection.from).text : null
+      };
+    });
+    if (!latexLineJumpMode.source || latexLineJumpMode.selectedLine !== '\\frac{a}{b}') {
+      throw new Error(`Line jump did not reveal the target LaTeX source line: ${JSON.stringify(latexLineJumpMode)}`);
+    }
+    await page.click('.meo-latex-math-mode-btn');
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(1, 'top'));
+    await waitForFrames(page);
 
     await page.click('.meo-mermaid-toolbar .meo-select-all-code-btn');
     await waitForFrames(page);

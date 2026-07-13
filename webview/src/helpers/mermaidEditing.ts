@@ -261,6 +261,17 @@ type MermaidEditingBlockElement = HTMLElement & {
   __meoMermaidEditingController?: MermaidEditingController;
 };
 
+export function focusMermaidEditingOffset(view: EditorView, anchor: number, offset: number): boolean {
+  const editingBlock = view.dom.querySelector<HTMLElement>(
+    `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"]`
+  ) as MermaidEditingBlockElement | null;
+  if (!editingBlock?.__meoMermaidEditingController) {
+    return false;
+  }
+  editingBlock.__meoMermaidEditingController.focusOffset(offset);
+  return true;
+}
+
 class MermaidEditingController {
   private outerView: EditorView;
   private block: MermaidEditingBlock;
@@ -355,6 +366,30 @@ class MermaidEditingController {
       scrollIntoView: true
     });
     this.innerView.focus();
+  }
+
+  focusOffset(offset: number): void {
+    const position = Math.max(0, Math.min(offset, this.innerView.state.doc.length));
+    this.innerView.dispatch({
+      selection: { anchor: position },
+      scrollIntoView: true
+    });
+    this.innerView.focus();
+    this.innerView.requestMeasure({
+      read: (innerView) => {
+        const coords = innerView.coordsAtPos(position);
+        const viewport = this.outerView.scrollDOM.getBoundingClientRect();
+        if (!coords || (coords.top >= viewport.top && coords.bottom <= viewport.bottom)) {
+          return null;
+        }
+        return coords.top - viewport.top - viewport.height * 0.3;
+      },
+      write: (delta) => {
+        if (delta !== null) {
+          this.outerView.scrollDOM.scrollTop += delta;
+        }
+      }
+    });
   }
 
   update(

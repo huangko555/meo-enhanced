@@ -174,6 +174,36 @@ async function main() {
       throw new Error(`Disjoint external edits moved unchanged viewport content: ${beforeTop} -> ${JSON.stringify(afterDisjointEdits)}`);
     }
 
+    const lineJumpFixture = Array.from({ length: 400 }, (_, index) => `line ${index + 1}`);
+    lineJumpFixture[124] = '| A | B |';
+    lineJumpFixture[125] = '| --- | --- |';
+    lineJumpFixture[126] = '| target | value |';
+    await page.evaluate((text) => {
+      const editor = (window as any).__editor;
+      editor.setText(text);
+      editor.scrollToLine(374, 'top');
+    }, lineJumpFixture.join('\n'));
+    await waitForFrames(page);
+    await page.evaluate(() => (window as any).__editor.scrollToLine(127, 'upper'));
+    await waitForFrames(page);
+    const lineJump = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const line = editor.view.state.doc.lineAt(editor.view.state.selection.main.anchor);
+      const active = document.activeElement;
+      return {
+        selectedLine: line.number,
+        sourceLine: active?.closest('tr')?.dataset.sourceLineNumber ?? null,
+        isTableInput: active instanceof HTMLTextAreaElement
+      };
+    });
+    if (
+      lineJump.selectedLine !== 127 ||
+      lineJump.sourceLine !== '127' ||
+      !lineJump.isTableInput
+    ) {
+      throw new Error(`Line jump from 374 to table row 127 failed: ${JSON.stringify(lineJump)}`);
+    }
+
     const outlineJump = await page.evaluate(() => {
       const root = document.createElement('div');
       const editorWrapper = document.createElement('div');

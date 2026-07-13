@@ -53,8 +53,9 @@ import {
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
-import { setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
-import { setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
+import { focusMermaidEditingOffset, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
+import { focusLatexMathEditingOffset, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
+import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -1442,12 +1443,14 @@ export function createEditor({
     const max = view.state.doc.length;
     const nextAnchor = Math.max(0, Math.min(anchor, max));
     const nextHead = Math.max(0, Math.min(head, max));
-    const y = align === 'top' ? 'start' : 'center';
+    const scrollOptions = align === 'upper'
+      ? { y: 'start' as const, yMargin: Math.round(view.scrollDOM.clientHeight * 0.3) }
+      : { y: align === 'top' ? 'start' as const : align === 'nearest' ? 'nearest' as const : 'center' as const };
     const selection = view.state.selection.main;
 
     if (selection.anchor === nextAnchor && selection.head === nextHead) {
       view.dispatch({
-        effects: EditorView.scrollIntoView(nextAnchor, { y })
+        effects: EditorView.scrollIntoView(nextAnchor, scrollOptions)
       });
       if (focusEditor) {
         view.focus();
@@ -1457,11 +1460,117 @@ export function createEditor({
 
     view.dispatch({
       selection: { anchor: nextAnchor, head: nextHead },
-      effects: EditorView.scrollIntoView(nextAnchor, { y })
+      effects: EditorView.scrollIntoView(nextAnchor, scrollOptions)
     });
     if (focusEditor) {
       view.focus();
     }
+  };
+
+  const isPositionVisible = (position) => {
+    const coords = view.coordsAtPos(position);
+    if (!coords) {
+      return false;
+    }
+    const viewport = view.scrollDOM.getBoundingClientRect();
+    return coords.top >= viewport.top && coords.bottom <= viewport.bottom;
+  };
+
+  const revealRenderedSourceLine = (lineNumber) => {
+    if (currentMode !== 'live') {
+      return false;
+    }
+
+    const block = getLiveRenderedBlocks(view.state).find((candidate) => (
+      (candidate.kind === 'mermaid' || candidate.kind === 'math') &&
+      lineNumber >= candidate.lineNumberHiddenFrom &&
+      lineNumber <= candidate.lineNumberHiddenTo
+    ));
+    if (!block) {
+      return false;
+    }
+
+    const openingLine = view.state.doc.line(block.startLine);
+    const targetLine = view.state.doc.line(lineNumber);
+    const contentFrom = view.state.doc.line(block.startLine + 1).from;
+    const offset = targetLine.from - contentFrom;
+    const modeEffect = block.kind === 'mermaid'
+      ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' })
+      : setLatexMathBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' });
+
+    view.dispatch({
+      selection: { anchor: targetLine.from },
+      effects: [
+        modeEffect,
+        EditorView.scrollIntoView(openingLine.from, {
+          y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
+        })
+      ]
+    });
+    view.requestMeasure({
+      read() {
+        return null;
+      },
+      write() {
+        const focusSource = () => block.kind === 'mermaid'
+          ? focusMermaidEditingOffset(view, openingLine.from, offset)
+          : focusLatexMathEditingOffset(view, openingLine.from, offset);
+        requestAnimationFrame(() => {
+          if (!focusSource()) {
+            requestAnimationFrame(focusSource);
+          }
+        });
+      }
+    });
+    return true;
+  };
+
+  const revealRenderedTableLine = (lineNumber: number) => {
+    if (currentMode !== 'live') {
+      return false;
+    }
+
+    const block = getLiveRenderedBlocks(view.state).find((candidate) => (
+      candidate.kind === 'table' &&
+      lineNumber >= candidate.startLine &&
+      lineNumber <= candidate.endLine
+    ));
+    if (!block) {
+      return false;
+    }
+
+    const targetLine = view.state.doc.line(lineNumber);
+    const rowLineNumber = lineNumber === block.delimiterLine ? block.startLine : lineNumber;
+    view.dispatch({
+      selection: { anchor: targetLine.from },
+      effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' })
+    });
+    view.requestMeasure({
+      read() {
+        return null;
+      },
+      write() {
+        const focusRow = () => {
+          const shell = view.dom.querySelector(
+            `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${block.startLine}"]`
+          ) as HTMLElement | null;
+          const input = shell?.querySelector(
+            `tr[data-source-line-number="${rowLineNumber}"] textarea`
+          ) as HTMLTextAreaElement | null;
+          if (!input) return false;
+          input.focus({ preventScroll: true });
+          input.setSelectionRange(0, 0);
+          input.closest('th, td')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+          return true;
+        };
+        requestAnimationFrame(() => {
+          if (!focusRow()) {
+            requestAnimationFrame(focusRow);
+          }
+        });
+      }
+    });
+    return true;
   };
 
   const TOP_LINE_VISIBILITY_EPSILON = 0.5;
@@ -2487,7 +2596,15 @@ export function createEditor({
     },
     scrollToLine(lineNumber, align = 'center') {
       const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
-      applyRevealSelection(line.from, line.from, { focusEditor: true, align });
+      if (align === 'upper' && revealRenderedTableLine(line.number)) {
+        return;
+      }
+      if (align === 'upper' && revealRenderedSourceLine(line.number)) {
+        return;
+      }
+      const targetIsVisible = align === 'upper' && isPositionVisible(line.from);
+      const effectiveAlign = targetIsVisible ? 'nearest' : align;
+      applyRevealSelection(line.from, line.from, { focusEditor: true, align: effectiveAlign });
       if (align === 'top') {
         // Outline navigation must survive delayed block-widget measurements.
         restoreTopVisibleLine(line.number, 0, { syncCursor: false });
