@@ -1319,15 +1319,18 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   flushBuffer();
 }
 
+function tableCellIndentColumns(text: string): number {
+  const indent = /^[ \t]*/.exec(text)?.[0] ?? '';
+  return [...indent].reduce((columns, char) => columns + (char === '\t' ? 2 : 1), 0);
+}
+
 function parseTableCellListItem(line: TableCellLogicalLine) {
   const match = tableCellListItemRe.exec(line.text);
   if (!match?.groups) return null;
-  const indentColumns = [...match[1]].reduce((columns, char) => columns + (char === '\t' ? 2 : 1), 0);
+  const indentColumns = tableCellIndentColumns(match[1]);
   const content = match.groups.content ?? '';
   return {
-    // Generated Markdown commonly varies by one space. Treat 1-3 columns as
-    // the first nested level instead of rejecting odd indentation outright.
-    level: indentColumns === 0 ? 0 : Math.max(1, Math.floor(indentColumns / 2)),
+    indentColumns,
     type: match.groups.bullet ? 'ul' : 'ol',
     start: match.groups.number ? Number.parseInt(match.groups.number, 10) : 1,
     content,
@@ -1356,7 +1359,7 @@ function appendTableCellRenderedPreview(
   searchState: TableSearchState | null,
   sourceRange: TableCellRange | null
 ) {
-  const listStack: Array<{ level: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null }> = [];
+  const listStack: Array<{ indentColumns: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null }> = [];
   const appendInline = (parent: HTMLElement, content: string, baseOffset: number) => {
     appendTableInlinePreviewNodes(parent, content, { baseOffset, diagnostics, searchState, sourceRange });
   };
@@ -1364,22 +1367,42 @@ function appendTableCellRenderedPreview(
   for (const line of splitTableCellLogicalLines(text)) {
     const item = parseTableCellListItem(line);
     if (!item) {
-      listStack.length = 0;
+      const indentColumns = tableCellIndentColumns(line.text);
+      let parent: HTMLElement = previewEl;
+      if (line.text.trim() && indentColumns > 0) {
+        for (let index = listStack.length - 1; index >= 0; index -= 1) {
+          const entry = listStack[index];
+          if (entry.lastItem && indentColumns > entry.indentColumns) {
+            listStack.length = index + 1;
+            parent = entry.lastItem;
+            break;
+          }
+        }
+      }
+      if (parent === previewEl) listStack.length = 0;
       const lineEl = document.createElement('div');
       lineEl.className = 'meo-md-html-table-cell-line';
       appendInline(lineEl, line.text, line.from);
       if (!line.text) lineEl.appendChild(document.createElement('br'));
-      previewEl.appendChild(lineEl);
+      parent.appendChild(lineEl);
       continue;
     }
 
-    let level = item.level;
-    if (listStack.length === 0) level = 0;
-    else level = Math.min(level, listStack.length);
-    while (listStack.length > level + 1) listStack.pop();
+    while (listStack.length > 0 && listStack[listStack.length - 1].indentColumns > item.indentColumns) {
+      listStack.pop();
+    }
+    let level = listStack.findIndex((entry) => entry.indentColumns === item.indentColumns);
+    if (level >= 0) {
+      listStack.length = level + 1;
+    } else {
+      while (listStack.length > 0 && listStack[listStack.length - 1].indentColumns >= item.indentColumns) {
+        listStack.pop();
+      }
+      level = listStack.length;
+    }
 
     let entry = listStack[level];
-    if (!entry || entry.type !== item.type) {
+    if (!entry || entry.indentColumns !== item.indentColumns || entry.type !== item.type) {
       listStack.length = level;
       const parent = level > 0 ? listStack[level - 1]?.lastItem : previewEl;
       if (!(parent instanceof HTMLElement)) {
@@ -1389,8 +1412,14 @@ function appendTableCellRenderedPreview(
       const list = item.type === 'ol' ? document.createElement('ol') : document.createElement('ul');
       list.className = 'meo-md-html-table-cell-list';
       if (list instanceof HTMLOListElement && item.start !== 1) list.start = item.start;
+      if (level === 0 && item.indentColumns > 0) {
+        list.style.marginInlineStart = `${item.indentColumns}ch`;
+      } else if (level > 0) {
+        const parentIndent = listStack[level - 1].indentColumns;
+        list.style.paddingInlineStart = `${Math.max(2, item.indentColumns - parentIndent)}ch`;
+      }
       (level > 0 ? listStack[level - 1].lastItem! : previewEl).appendChild(list);
-      entry = { level, type: item.type, list, lastItem: null };
+      entry = { indentColumns: item.indentColumns, type: item.type, list, lastItem: null };
       listStack[level] = entry;
     }
 

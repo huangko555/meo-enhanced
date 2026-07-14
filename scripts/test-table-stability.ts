@@ -166,6 +166,26 @@ async function main() {
       };
       listEditor.destroy();
 
+      const nestedListEditor = await create('| Items |\n| --- |\n| - 一级 A  <br>- 二级<br>       A.1<br>           - 二级<br>       1. A.2<br>- 一级 B |');
+      const nestedListPreview = document.querySelector<HTMLElement>('tbody .meo-md-html-table-cell-preview')!;
+      const directListItemText = (item: HTMLElement) => {
+        const textNode = Array.from(item.childNodes).find((node) => (
+          node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim())
+        ));
+        if (!textNode) return null;
+        const range = document.createRange();
+        range.selectNodeContents(textNode);
+        return {
+          text: textNode.textContent?.trim() ?? '',
+          left: range.getBoundingClientRect().left,
+          list: item.parentElement?.tagName.toLowerCase() ?? ''
+        };
+      };
+      const nestedListIndentState = Array.from(nestedListPreview.querySelectorAll<HTMLElement>('li'))
+        .map(directListItemText)
+        .filter((item): item is NonNullable<typeof item> => item !== null);
+      nestedListEditor.destroy();
+
       const whitespaceEditor = await create('| Items |\n| --- |\n| first<br>   indented |');
       const whitespaceLine = document.querySelectorAll<HTMLElement>('tbody .meo-md-html-table-cell-line')[1]!;
       const whitespaceState = {
@@ -459,6 +479,7 @@ async function main() {
         alignmentBeforeShift,
         alignmentAfterShift,
         renderedListState,
+        nestedListIndentState,
         whitespaceState,
         continuedUnorderedValue,
         indentedTableValue,
@@ -511,6 +532,15 @@ async function main() {
       result.renderedListState.editingPreviewVisibility !== 'hidden'
     ) {
       failures.push(`table cell list rendering was incorrect: ${JSON.stringify(result.renderedListState)}`);
+    }
+    if (
+      result.nestedListIndentState.length !== 5 ||
+      Math.abs(result.nestedListIndentState[1]?.left - result.nestedListIndentState[0]?.left) > 1 ||
+      result.nestedListIndentState[3]?.left - result.nestedListIndentState[1]?.left < 12 ||
+      result.nestedListIndentState[2]?.left - result.nestedListIndentState[3]?.left < 12 ||
+      Math.abs(result.nestedListIndentState[4]?.left - result.nestedListIndentState[0]?.left) > 1
+    ) {
+      failures.push(`nested table list indentation was not visible: ${JSON.stringify(result.nestedListIndentState)}`);
     }
     if (result.whitespaceState.text !== '   indented' || result.whitespaceState.whiteSpace !== 'pre-wrap') {
       failures.push(`table line indentation was not visible: ${JSON.stringify(result.whitespaceState)}`);
