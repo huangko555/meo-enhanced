@@ -1,5 +1,8 @@
 # Markdown Editor Optimized (MEO)
 ---
+## 0.1.29
+- Fixed visible indentation for ordered and unordered lists after continuation lines in table cells
+
 ## 0.1.28
 - Fixed external document updates and preserved the visible reading position across saves, focus changes, and asynchronous rendering
 - Improved table list indentation, multiline spacing, Enter navigation, image rendering, and multi-row or multi-column deletion
