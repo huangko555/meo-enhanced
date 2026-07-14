@@ -1,6 +1,7 @@
 import { WidgetType, type EditorView } from '@codemirror/view';
 import { createElement, ZoomIn, ZoomOut, RotateCcw, Maximize2, X } from 'lucide';
 import type { EditorState } from '@codemirror/state';
+import { beginViewportAnchor, canApplyViewportAnchor, hasRecentViewportInteraction } from './viewportStability';
 
 declare global {
   interface Window {
@@ -631,19 +632,21 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   keepViewportAnchor(view: EditorView, anchor: { anchor: HTMLElement; top: number }): void {
+    if (hasRecentViewportInteraction(view)) return;
+    const anchorGeneration = beginViewportAnchor(view);
     let remainingFrames = 3;
     let expectedScrollTop = view.scrollDOM.scrollTop;
     const measure = () => {
       view.requestMeasure({
         read() {
-          if (!anchor.anchor.isConnected) return null;
+          if (!anchor.anchor.isConnected || !canApplyViewportAnchor(view, anchorGeneration)) return null;
           return {
             delta: anchor.anchor.getBoundingClientRect().top - anchor.top,
             scrollTop: view.scrollDOM.scrollTop
           };
         },
         write(measurement) {
-          if (!measurement) return;
+          if (!measurement || !canApplyViewportAnchor(view, anchorGeneration)) return;
           if (
             Math.abs(measurement.scrollTop - expectedScrollTop) > 0.5 ||
             Math.abs(view.scrollDOM.scrollTop - measurement.scrollTop) > 0.5

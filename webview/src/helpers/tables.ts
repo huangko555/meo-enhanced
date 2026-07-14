@@ -338,7 +338,7 @@ const tableInlineEmojiShortcodeRe = /^:([a-zA-Z0-9_+-]+):/;
 const tableInlineTagRe = /^#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/u;
 const tableInlineTagPrefixRe = /[\p{L}\p{N}_/-]/u;
 const tableCellBreakAtRe = /^<br\s*\/?>/i;
-const tableCellListItemRe = /^( *)(?:(?<bullet>[-+*])|(?<number>\d+)\.)\s+(?<content>.*)$/;
+const tableCellListItemRe = /^([ \t]*)(?:(?<bullet>[-+*])|(?<number>\d+)\.)\s+(?<content>.*)$/;
 const tableInlineEscapableChars = new Set(['\\', '*', '_', '~', '`', '[', ']', '(', ')', '!', '|', '<', '>']);
 const tableSearchStateEventName = 'meo-search-state-change';
 const tableDiagnosticSeverityClasses = [
@@ -1321,10 +1321,13 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
 
 function parseTableCellListItem(line: TableCellLogicalLine) {
   const match = tableCellListItemRe.exec(line.text);
-  if (!match?.groups || match[1].length % 2 !== 0) return null;
+  if (!match?.groups) return null;
+  const indentColumns = [...match[1]].reduce((columns, char) => columns + (char === '\t' ? 2 : 1), 0);
   const content = match.groups.content ?? '';
   return {
-    level: Math.floor(match[1].length / 2),
+    // Generated Markdown commonly varies by one space. Treat 1-3 columns as
+    // the first nested level instead of rejecting odd indentation outright.
+    level: indentColumns === 0 ? 0 : Math.max(1, Math.floor(indentColumns / 2)),
     type: match.groups.bullet ? 'ul' : 'ol',
     start: match.groups.number ? Number.parseInt(match.groups.number, 10) : 1,
     content,
@@ -1927,9 +1930,20 @@ class HtmlTableWidget extends WidgetType {
   }
 
   deleteTargetRow(container) {
-    const rowIndex = this.activeBodyRowIndex();
-    if (rowIndex === null) return;
-    this.removeRowAt(container, rowIndex);
+    const selectedRange = this.selectionRange;
+    if (!selectedRange || this.selectedCellCount() <= 1) {
+      const rowIndex = this.activeBodyRowIndex();
+      if (rowIndex !== null) this.removeRowsAt(container, [rowIndex]);
+      return;
+    }
+
+    const visualRows = [];
+    for (let row = Math.max(1, selectedRange.fromRow); row <= selectedRange.toRow; row += 1) {
+      const visualIndex = row - 1;
+      const sourceIndex = this.sortState?.order?.[visualIndex] ?? visualIndex;
+      if (sourceIndex >= 0 && sourceIndex < this.tableData.rows.length) visualRows.push(sourceIndex);
+    }
+    this.removeRowsAt(container, visualRows);
   }
 
   insertColumnLeftTarget(container) {
@@ -1945,9 +1959,18 @@ class HtmlTableWidget extends WidgetType {
   }
 
   deleteTargetColumn(container) {
-    const colIndex = this.activeColumnIndex();
-    if (colIndex === null) return;
-    this.removeColumnAt(container, colIndex);
+    const selectedRange = this.selectionRange;
+    if (!selectedRange || this.selectedCellCount() <= 1) {
+      const colIndex = this.activeColumnIndex();
+      if (colIndex !== null) this.removeColumnsAt(container, [colIndex]);
+      return;
+    }
+
+    const columns = [];
+    for (let col = selectedRange.fromCol; col <= selectedRange.toCol; col += 1) {
+      if (col >= 0 && col < this.tableData.colCount) columns.push(col);
+    }
+    this.removeColumnsAt(container, columns);
   }
 
   sortByColumn(container, column) {
@@ -2483,12 +2506,22 @@ class HtmlTableWidget extends WidgetType {
   }
 
   removeRowAt(dom, rowIndex) {
+    this.removeRowsAt(dom, [rowIndex]);
+  }
+
+  removeRowsAt(dom, rowIndexes: number[]) {
+    const uniqueIndexes = [...new Set(rowIndexes)].sort((left, right) => right - left);
+    if (!uniqueIndexes.length) return;
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
-    if (matrix.rows.length <= 1) return;
-    if (rowIndex < 0 || rowIndex >= matrix.rows.length) return;
-    matrix.rows.splice(rowIndex, 1);
-    const focusRow = Math.min(rowIndex, matrix.rows.length - 1) + 1;
+    const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.rows.length);
+    if (!validIndexes.length) return;
+    const firstRemoved = Math.min(...validIndexes);
+    for (const index of validIndexes) matrix.rows.splice(index, 1);
+    if (matrix.rows.length === 0) {
+      matrix.rows.push(new Array(matrix.headerCells.length).fill(''));
+    }
+    const focusRow = Math.min(firstRemoved, matrix.rows.length - 1) + 1;
     this.commitMatrix(matrix, dom, { row: focusRow, col: this.activeColumnIndex() ?? 0 });
   }
 
@@ -2527,20 +2560,32 @@ class HtmlTableWidget extends WidgetType {
   }
 
   removeColumnAt(dom, colIndex) {
+    this.removeColumnsAt(dom, [colIndex]);
+  }
+
+  removeColumnsAt(dom, columnIndexes: number[]) {
+    const uniqueIndexes = [...new Set(columnIndexes)].sort((left, right) => right - left);
+    if (!uniqueIndexes.length) return;
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
-    if (matrix.headerCells.length <= 1) return;
-    if (colIndex < 0 || colIndex >= matrix.headerCells.length) return;
-    matrix.headerCells.splice(colIndex, 1);
+    const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.headerCells.length);
+    if (!validIndexes.length) return;
+    const firstRemoved = Math.min(...validIndexes);
+    for (const index of validIndexes) matrix.headerCells.splice(index, 1);
     matrix.rows = matrix.rows.map((row) => {
       const next = row.slice();
-      next.splice(colIndex, 1);
+      for (const index of validIndexes) next.splice(index, 1);
       return next;
     });
-    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length + 1).map((value) => value ?? null);
-    alignments.splice(colIndex, 1);
+    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length + validIndexes.length).map((value) => value ?? null);
+    for (const index of validIndexes) alignments.splice(index, 1);
+    if (matrix.headerCells.length === 0) {
+      matrix.headerCells.push('');
+      matrix.rows = matrix.rows.map(() => ['']);
+      alignments.push(null);
+    }
     matrix.alignments = alignments;
-    const focusCol = Math.min(colIndex, matrix.headerCells.length - 1);
+    const focusCol = Math.min(firstRemoved, matrix.headerCells.length - 1);
     this.commitMatrix(matrix, dom, { row: this.activeTarget.row, col: focusCol });
   }
 
@@ -2625,6 +2670,12 @@ class HtmlTableWidget extends WidgetType {
         if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault();
           event.stopPropagation();
+          if (rowIndex < this.tableData.rows.length) {
+            this.focusCellInputAt(rowIndex + 1, colIndex, 0);
+          } else {
+            this.setActionTarget({ row: rowIndex, col: colIndex });
+            this.addRowAfter(container, rowIndex - 1);
+          }
         }
         return;
       }

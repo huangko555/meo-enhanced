@@ -4,6 +4,7 @@ import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/c
 import { createElement, Code2, Eye, Pencil } from 'lucide';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
+import { beginViewportAnchor, canApplyViewportAnchor } from './viewportStability';
 
 export type LatexMathBlockMode = 'preview' | 'split' | 'source';
 
@@ -146,6 +147,7 @@ function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect
   if (beforeTop === null) {
     return;
   }
+  const anchorGeneration = beginViewportAnchor(view);
   requestAnimationFrame(() => {
     view.requestMeasure({
       read(editorView) {
@@ -153,7 +155,7 @@ function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect
         return afterTop === null ? null : afterTop - beforeTop;
       },
       write(delta, editorView) {
-        if (delta !== null) {
+        if (delta !== null && canApplyViewportAnchor(editorView, anchorGeneration)) {
           editorView.scrollDOM.scrollTop += delta;
         }
       }

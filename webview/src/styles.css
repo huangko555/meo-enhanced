@@ -220,7 +220,7 @@ body {
   top: calc(100% + 4px);
   left: 14px;
   right: 14px;
-  padding: 6px 10px;
+  padding: 6px 6px 6px 10px;
   border: 1px solid var(--vscode-inputValidation-infoBorder, var(--vscode-panel-border));
   border-radius: 6px;
   color: var(--vscode-inputValidation-infoForeground, var(--vscode-editor-foreground));
@@ -231,11 +231,42 @@ body {
   font-size: 12px;
   line-height: 1.4;
   z-index: 275;
-  pointer-events: none;
 }
 
 .editor-notice.is-visible {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.editor-notice-message {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 0;
+}
+
+.editor-notice-close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 18px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.editor-notice-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.18));
+}
+
+.editor-notice-close:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, currentColor);
+  outline-offset: -1px;
 }
 
 .editor-notice[data-kind='warning'] {
@@ -1795,42 +1826,19 @@ body {
   --meo-effective-list-hanging-indent: var(--meo-list-hanging-indent);
   --meo-task-hidden-prefix-columns: 0ch;
   --meo-list-indent-columns: 0ch;
-  --meo-list-guide-step: 2ch;
-  --meo-list-guide-offset: 0.95ch;
   padding-left: var(--meo-effective-list-hanging-indent);
   text-indent: calc(var(--meo-effective-list-hanging-indent) * -1);
-  background-image: repeating-linear-gradient(
-    to right,
-    var(--meo-semantic-listGuide) 0,
-    var(--meo-semantic-listGuide) 1px,
-    transparent 1px,
-    transparent var(--meo-list-guide-step)
-  );
-  background-size: var(--meo-list-indent-columns) 100%;
-  background-position: var(--meo-list-guide-offset) top;
-  background-repeat: no-repeat;
-}
-
-.cm-editor.meo-mode-live .cm-line.meo-md-list-line.meo-md-list-line-ordered {
-  --meo-list-guide-offset: 0.5ch;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-list-line.meo-md-list-line-selected {
-  background-image: repeating-linear-gradient(
-      to right,
-      var(--meo-semantic-listGuide) 0,
-      var(--meo-semantic-listGuide) 1px,
-      transparent 1px,
-      transparent var(--meo-list-guide-step)
-    ),
-    linear-gradient(
-      to right,
-      var(--meo-selection-bg),
-      var(--meo-selection-bg)
-    );
-  background-size: var(--meo-list-indent-columns) 100%, var(--meo-effective-list-hanging-indent) 100%;
-  background-position: var(--meo-list-guide-offset) top, left top;
-  background-repeat: no-repeat, no-repeat;
+  background-image: linear-gradient(
+    to right,
+    var(--meo-selection-bg),
+    var(--meo-selection-bg)
+  );
+  background-size: var(--meo-effective-list-hanging-indent) 100%;
+  background-position: left top;
+  background-repeat: no-repeat;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-list-line.meo-md-list-line-task {
@@ -2016,16 +2024,6 @@ body {
   -webkit-text-fill-color: var(--meo-semantic-taskDroppedForeground) !important;
   text-decoration: line-through !important;
   text-decoration-color: currentColor !important;
-}
-
-.cm-editor .meo-md-list-border {
-  --meo-list-border-width: 1ch;
-  display: inline-block;
-  box-sizing: border-box;
-  width: var(--meo-list-border-width);
-  min-width: var(--meo-list-border-width);
-  height: 100%;
-  border-left: 1px solid var(--meo-semantic-listGuide);
 }
 
 .cm-editor .meo-mermaid-block {
@@ -3444,7 +3442,7 @@ body.outline-resizing {
   min-height: 1lh;
   padding: 0.25em 0.5em;
   color: var(--meo-foreground);
-  white-space: normal;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   overflow: visible;
   word-break: normal;

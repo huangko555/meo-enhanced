@@ -7,13 +7,15 @@ import { initializeLocalLinkHandling, requestLocalLinkStatuses, scheduleLocalLin
 import { setGitDiffLineHighlightsEnabled } from './helpers/gitDiffLineHighlights';
 import { applyThemeSettings } from './helpers/theme';
 import { setShikiTheme, setShikiEnabled } from './helpers/shikiHighlighter';
-import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type EditorNotice, type FailureNoticeManager } from './helpers/errors';
+import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, normalizeEol, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import { createExportHandler, type ExportHandlerContext } from './helpers/export';
 import { refreshMermaidTheme } from './helpers/mermaidDiagram';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
+import { reconcileExternalDocument } from './helpers/documentSync';
+import { createEditorNoticeController } from './helpers/notices';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -717,6 +719,8 @@ editorNoticeBanner.className = 'editor-notice';
 editorNoticeBanner.setAttribute('role', 'status');
 editorNoticeBanner.setAttribute('aria-live', 'polite');
 editorNoticeBanner.hidden = true;
+let handleEditorNoticeDismiss = (): void => {};
+const editorNotice = createEditorNoticeController(editorNoticeBanner, () => handleEditorNoticeDismiss());
 
 toolbar.replaceChildren(formatGroup, rightGroup, modeGroup, findPanelElements.panel, editorNoticeBanner);
 
@@ -832,31 +836,8 @@ toolbarAlignmentResizeObserver.observe(editorWrapper);
 toolbarAlignmentResizeObserver.observe(editorHost);
 window.addEventListener('resize', scheduleSingleToolbarTextAlignment);
 
-const setEditorNotice = (message: string, kind = 'info') => {
-  const normalizedMessage = `${message ?? ''}`.trim();
-  if (!normalizedMessage) {
-    clearEditorNotice();
-    return;
-  }
-  editorNoticeBanner.textContent = normalizedMessage;
-  editorNoticeBanner.dataset.kind = kind;
-  editorNoticeBanner.hidden = false;
-  editorNoticeBanner.classList.add('is-visible');
-};
-
-const clearEditorNotice = () => {
-  editorNoticeBanner.textContent = '';
-  delete editorNoticeBanner.dataset.kind;
-  editorNoticeBanner.hidden = true;
-  editorNoticeBanner.classList.remove('is-visible');
-};
-
-const editorNotice: EditorNotice = {
-  setEditorNotice,
-  clearEditorNotice
-};
-
 const failureNotice = createFailureNoticeManager(editorNotice);
+handleEditorNoticeDismiss = failureNotice.clearFailureNotice;
 
 const clearGitBlameCache = ({ hideTooltip = true } = {}) => {
   gitClient?.clearBlameCache({ hideTooltip });
@@ -1117,7 +1098,7 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
     return;
   }
 
-  const { anchor, head, focus } = revealMessage;
+  const { anchor, head, focus, preserveViewport } = revealMessage;
   if (typeof anchor !== 'number' || typeof head !== 'number') {
     return;
   }
@@ -1134,7 +1115,7 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
   pendingRestoreTopLineOffset = 0;
   editor.revealSelection(clampedAnchor, clampedHead, {
     focusEditor: focus !== false,
-    align: 'center'
+    align: preserveViewport === true ? 'none' : 'center'
   });
   pendingRevealSelection = null;
   scheduleViewPositionCapture();
@@ -1774,8 +1755,9 @@ window.addEventListener('message', (event) => {
     }
 
     if (localDraftText !== null && localDraftNormalized !== incomingText) {
+      const reconciled = reconcileExternalDocument(syncedText, localDraftNormalized, incomingText);
       syncedText = incomingText;
-      pendingText = localDraftText;
+      pendingText = reconciled.pendingText;
       inFlight = false;
       inFlightText = null;
 
@@ -1784,6 +1766,9 @@ window.addEventListener('message', (event) => {
         pendingDebounce = null;
       }
 
+      if (!setEditorTextSafely(reconciled.text, 'docChanged.reconcile')) {
+        return;
+      }
       flushChanges();
       maybeSaveAfterSync();
       syncPendingDraftState();
@@ -1968,7 +1953,8 @@ window.addEventListener('paste', async (event) => {
 
   await handleImagePaste(event, editor, {
     lineNumber: lineNumberAtPaste,
-    lineOffset: lineOffsetAtPaste
+    lineOffset: lineOffsetAtPaste,
+    onError: (message) => failureNotice.setFailureNotice(`Could not paste image: ${message}`, 'warning')
   });
 });
 

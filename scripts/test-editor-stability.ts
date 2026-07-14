@@ -174,6 +174,34 @@ async function main() {
       throw new Error(`Disjoint external edits moved unchanged viewport content: ${beforeTop} -> ${JSON.stringify(afterDisjointEdits)}`);
     }
 
+    const replacementFixture = Array.from({ length: 120 }, (_, index) => `replacement line ${index + 1}`).join('\n');
+    await page.evaluate((text) => {
+      (window as any).__editor.setText(text);
+    }, replacementFixture);
+    await waitForFrames(page);
+    const replacementPosition = await page.evaluate(() => (window as any).__editor.getTopVisiblePosition());
+    if (replacementPosition.line < 65 || replacementPosition.line > 85) {
+      throw new Error(`Whole-document external update lost the nearby viewport: ${JSON.stringify(replacementPosition)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.revealSelection(editor.getText().length, editor.getText().length, {
+        focusEditor: false,
+        align: 'none'
+      });
+    });
+    await waitForFrames(page);
+    const afterPreservedReveal = await page.evaluate(() => (window as any).__editor.getTopVisiblePosition());
+    if (Math.abs(afterPreservedReveal.line - replacementPosition.line) > 1) {
+      throw new Error(`Background selection reveal moved the viewport: ${JSON.stringify({ before: replacementPosition, after: afterPreservedReveal })}`);
+    }
+
+    if (process.env.MEO_TEST_VIEWPORT_ONLY === '1') {
+      console.log('external update viewport stability checks passed');
+      return;
+    }
+
     const lineJumpFixture = Array.from({ length: 400 }, (_, index) => `line ${index + 1}`);
     lineJumpFixture[124] = '| A | B |';
     lineJumpFixture[125] = '| --- | --- |';

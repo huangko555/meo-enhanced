@@ -1,5 +1,6 @@
 import { EditorView, WidgetType } from '@codemirror/view';
 import { AppWindow, CornerDownRight, createElement, ExternalLink, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
+import { beginViewportAnchor, canApplyViewportAnchor, hasRecentViewportInteraction } from './viewportStability';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
@@ -35,7 +36,9 @@ let imageDoubleClickListenerInitialized = false;
 let imageSaveRequestCounter = 0;
 const pendingImageSaveRequests = new Map<string, {
   resolve: (value: { success: boolean; path?: string; error?: string }) => void;
+  timeout: number;
 }>();
+const IMAGE_SAVE_TIMEOUT_MS = 15_000;
 
 function touchCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V): void {
   cache.delete(key);
@@ -204,6 +207,7 @@ export const handleSavedImagePath = (message: { requestId: string; success?: boo
   const pending = pendingImageSaveRequests.get(message.requestId);
   if (pending) {
     pendingImageSaveRequests.delete(message.requestId);
+    window.clearTimeout(pending.timeout);
     if (message.success && message.path) {
       pending.resolve({ success: true, path: message.path });
     } else {
@@ -215,6 +219,7 @@ export const handleSavedImagePath = (message: { requestId: string; success?: boo
 export interface ImagePasteContext {
   lineNumber: number;
   lineOffset: number;
+  onError?: (message: string) => void;
 }
 
 export const handleImagePaste = async (
@@ -222,30 +227,51 @@ export const handleImagePaste = async (
   editor: any,
   context: ImagePasteContext
 ): Promise<boolean> => {
-  const clipboardItems = event.clipboardData?.items;
-  if (!clipboardItems) {
+  const clipboardData = event.clipboardData;
+  if (!clipboardData) {
     return false;
   }
 
-  for (const item of clipboardItems) {
-    if (!item.type.startsWith('image/')) {
-      continue;
+  const imageCandidates: Array<{ blob: Blob; mimeType: string }> = [];
+  for (const item of Array.from(clipboardData.items ?? [])) {
+    if (!item.type.startsWith('image/')) continue;
+    const blob = item.getAsFile();
+    if (blob) imageCandidates.push({ blob, mimeType: item.type });
+  }
+  if (imageCandidates.length === 0) {
+    for (const file of Array.from(clipboardData.files ?? [])) {
+      if (file.type.startsWith('image/')) imageCandidates.push({ blob: file, mimeType: file.type });
     }
+  }
+
+  const tableInput = document.activeElement instanceof HTMLTextAreaElement &&
+    document.activeElement.closest('.meo-md-html-table')
+    ? document.activeElement
+    : null;
+  const tableSelection = tableInput
+    ? {
+        start: tableInput.selectionStart ?? 0,
+        end: tableInput.selectionEnd ?? tableInput.selectionStart ?? 0
+      }
+    : null;
+
+  for (const { blob, mimeType } of imageCandidates) {
 
     event.preventDefault();
     event.stopPropagation();
 
-    const blob = item.getAsFile();
-    if (!blob) {
-      continue;
+    let imageData = '';
+    try {
+      imageData = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ''));
+        reader.onerror = () => reject(reader.error ?? new Error('Failed to read pasted image'));
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      context.onError?.(error instanceof Error ? error.message : 'Failed to read pasted image');
+      return true;
     }
-
-    const imageData = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result ?? ''));
-      reader.onerror = () => reject(reader.error ?? new Error('Failed to read pasted image'));
-      reader.readAsDataURL(blob);
-    });
 
     if (!imageData) {
       return true;
@@ -256,13 +282,17 @@ export const handleImagePaste = async (
     const dataUrlMimeType = parseDataUrlMimeType(imageData);
     const extension = (
       imageExtensionFromMimeType(dataUrlMimeType) ||
-      imageExtensionFromMimeType(item.type) ||
+      imageExtensionFromMimeType(mimeType) ||
       'png'
     );
     const fileName = `${timestamp}.${extension}`;
 
     const promise = new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
-      pendingImageSaveRequests.set(requestId, { resolve });
+      const timeout = window.setTimeout(() => {
+        pendingImageSaveRequests.delete(requestId);
+        resolve({ success: false, error: 'Timed out while saving pasted image' });
+      }, IMAGE_SAVE_TIMEOUT_MS);
+      pendingImageSaveRequests.set(requestId, { resolve, timeout });
     });
 
     vscodeApi?.postMessage({
@@ -276,6 +306,12 @@ export const handleImagePaste = async (
       const result = await promise;
       if (result.success && result.path) {
         const imageMarkdown = `![${fileName}](${result.path})`;
+        if (tableInput && tableSelection && tableInput.isConnected) {
+          tableInput.setRangeText(imageMarkdown, tableSelection.start, tableSelection.end, 'end');
+          tableInput.dispatchEvent(new Event('input', { bubbles: true }));
+          tableInput.focus({ preventScroll: true });
+          return true;
+        }
         const currentState = editor.view.state;
         const targetLineNumber = Math.min(context.lineNumber, currentState.doc.lines);
         const targetLine = currentState.doc.line(targetLineNumber);
@@ -285,9 +321,12 @@ export const handleImagePaste = async (
           selection: { anchor: insertAt + imageMarkdown.length }
         });
         editor.focus();
+      } else {
+        context.onError?.(result.error ?? 'Failed to save pasted image');
       }
-    } catch {
-      // Ignore errors - image paste failed silently
+    } catch (error) {
+      console.error('[MEO image paste]', error);
+      context.onError?.(error instanceof Error ? error.message : 'Failed to paste image');
     }
 
     return true;
@@ -697,19 +736,21 @@ export class ImageWidget extends WidgetType {
   }
 
   keepViewportAnchor(view: EditorView, anchor: { anchor: HTMLElement; top: number }): void {
+    if (hasRecentViewportInteraction(view)) return;
+    const anchorGeneration = beginViewportAnchor(view);
     let remainingFrames = 3;
     let expectedScrollTop = view.scrollDOM.scrollTop;
     const measure = () => {
       view.requestMeasure({
         read() {
-          if (!anchor.anchor.isConnected) return null;
+          if (!anchor.anchor.isConnected || !canApplyViewportAnchor(view, anchorGeneration)) return null;
           return {
             delta: anchor.anchor.getBoundingClientRect().top - anchor.top,
             scrollTop: view.scrollDOM.scrollTop,
           };
         },
         write(measurement) {
-          if (!measurement) return;
+          if (!measurement || !canApplyViewportAnchor(view, anchorGeneration)) return;
           const { delta, scrollTop } = measurement;
           if (
             Math.abs(scrollTop - expectedScrollTop) > 0.5

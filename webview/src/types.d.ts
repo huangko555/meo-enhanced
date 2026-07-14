@@ -44,7 +44,7 @@ type ExtensionMessage =
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }
-  | { type: 'revealSelection'; anchor: number; head: number; focus?: boolean }
+  | { type: 'revealSelection'; anchor: number; head: number; focus?: boolean; preserveViewport?: boolean }
   | { type: 'diagnosticsChanged'; diagnostics: EditorDiagnostic[] }
   | { type: 'themeChanged'; theme: ThemeSettings }
   | { type: 'outlinePositionChanged'; position: 'left' | 'right' }

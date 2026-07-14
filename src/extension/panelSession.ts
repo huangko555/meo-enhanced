@@ -27,6 +27,7 @@ import {
   type VimKeybinding
 } from '../shared/extensionConfig';
 import { openImageExternally, openLink, resolveLocalLinkTargets, resolveWebviewImageSrc, resolveWikiLinkTargets } from '../shared/documentLinks';
+import { resolveClipboardImageSaveRoot } from '../shared/clipboardImages';
 import { GitDocumentState, hashGitBaselinePayload } from '../git/documentState';
 import { openGitRevisionForLine, openGitWorktreeForLine, resolveGitBlameForRequest } from '../git/blameActions';
 import type { GitBaselinePayload, GitBlameLineResult } from '../git/types';
@@ -90,6 +91,7 @@ type RevealSelectionMessage = {
   anchor: number;
   head: number;
   focus?: boolean;
+  preserveViewport?: boolean;
 };
 
 type FocusEditorMessage = {
@@ -446,6 +448,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let pendingGitRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSentRevealSelectionKey: string | null = null;
   let pendingRevealSelection: RevealSelectionPayload | null = null;
+  let hasDeliveredInitialRevealSelection = false;
   let pendingRestoreTopLine: number | null = null;
   let pendingRestoreTopLineOffset = 0;
   let pendingDraftText: string | null = null;
@@ -847,14 +850,18 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       pendingRevealSelection = selection;
       return;
     }
+    const preserveViewport = hasDeliveredInitialRevealSelection;
     const message: RevealSelectionMessage = {
       type: 'revealSelection',
       anchor: selection.anchor,
-      head: selection.head
+      head: selection.head,
+      focus: preserveViewport ? false : undefined,
+      preserveViewport
     };
     const posted = await postToWebview(message);
     if (posted) {
       lastSentRevealSelectionKey = getRevealSelectionKey(selection);
+      hasDeliveredInitialRevealSelection = true;
       pendingRevealSelection = null;
     } else {
       pendingRevealSelection = selection;
@@ -1168,6 +1175,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (savedDocument.uri.toString() !== documentKey) {
       return;
     }
+    runBackground(enqueue(async () => {
+      await sendDocChanged();
+    }), 'sendDocChanged.save');
     refreshGitBaseline({ forceReload: true, delayMs: GIT_BASELINE_REFRESH_DELAY_MS });
   });
 
@@ -1208,6 +1218,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (event.webviewPanel.active) {
       onPanelActivated(event.webviewPanel);
       refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_REFRESH_DELAY_MS });
+      runBackground(enqueue(async () => {
+        await sendDocChanged();
+      }), 'sendDocChanged.viewState');
       runBackground(flushPendingRevealSelection(), 'flushPendingRevealSelection');
       runBackground(sendRevealSelectionForEditor(findEditorForDocumentReveal()), 'sendRevealSelectionForEditor.viewState');
       runBackground(postFocusEditor(), 'postFocusEditor');
@@ -1637,17 +1650,8 @@ async function handleSaveImageFromClipboard(
   message: SaveImageFromClipboardMessage,
   documentUri: vscode.Uri
 ): Promise<SavedImagePathMessage> {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
-    return {
-      type: 'savedImagePath',
-      requestId: message.requestId,
-      success: false,
-      error: 'No workspace folder open'
-    };
-  }
-
-  const workspaceRoot = (vscode.workspace.getWorkspaceFolder(documentUri) ?? workspaceFolders[0]).uri;
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
+  const saveRoot = workspaceFolder?.uri ?? vscode.Uri.file(resolveClipboardImageSaveRoot(documentUri.fsPath));
   const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
   const imageFolder = config.get<string>('imageFolder', 'assets');
 
@@ -1655,7 +1659,7 @@ async function handleSaveImageFromClipboard(
     const base64Data = message.imageData.replace(/^data:image\/[^;]+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
 
-    const assetsFolderUri = vscode.Uri.joinPath(workspaceRoot, imageFolder);
+    const assetsFolderUri = vscode.Uri.joinPath(saveRoot, imageFolder);
 
     try {
       await vscode.workspace.fs.stat(assetsFolderUri);

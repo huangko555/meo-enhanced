@@ -29,7 +29,6 @@ import { createGitBlameHoverController } from './helpers/gitBlameHover';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
 import { resolvedSyntaxTree, extractHeadings, extractHeadingSections } from './helpers/markdownSyntax';
 import {
-  sourceListBorderField,
   sourceListMarkerField,
   listMarkerData,
   handleArrowLeftAtListContentStart,
@@ -56,6 +55,7 @@ import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type Editor
 import { focusMermaidEditingOffset, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 import { focusLatexMathEditingOffset, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
+import { markViewportInteraction } from './helpers/viewportStability';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -291,6 +291,7 @@ export function createEditor({
   let onScroll = null;
   let onViewportInteraction = null;
   let viewportInteractionGeneration = 0;
+  let wheelScrollGeneration = 0;
   let onWindowPointerUp = null;
   let onWindowPointerCancel = null;
   let onWindowBlur = null;
@@ -1446,11 +1447,12 @@ export function createEditor({
     const scrollOptions = align === 'upper'
       ? { y: 'start' as const, yMargin: Math.round(view.scrollDOM.clientHeight * 0.3) }
       : { y: align === 'top' ? 'start' as const : align === 'nearest' ? 'nearest' as const : 'center' as const };
+    const scrollEffects = align === 'none' ? [] : [EditorView.scrollIntoView(nextAnchor, scrollOptions)];
     const selection = view.state.selection.main;
 
     if (selection.anchor === nextAnchor && selection.head === nextHead) {
       view.dispatch({
-        effects: EditorView.scrollIntoView(nextAnchor, scrollOptions)
+        effects: scrollEffects
       });
       if (focusEditor) {
         view.focus();
@@ -1460,7 +1462,7 @@ export function createEditor({
 
     view.dispatch({
       selection: { anchor: nextAnchor, head: nextHead },
-      effects: EditorView.scrollIntoView(nextAnchor, scrollOptions)
+      effects: scrollEffects
     });
     if (focusEditor) {
       view.focus();
@@ -2132,10 +2134,54 @@ export function createEditor({
     onViewportChange?.();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
-  onViewportInteraction = () => {
+  onViewportInteraction = (event: Event) => {
     viewportInteractionGeneration += 1;
+    markViewportInteraction(view);
+    if (currentMode !== 'live' || !(event instanceof WheelEvent) || event.ctrlKey || (!event.deltaX && !event.deltaY)) {
+      wheelScrollGeneration += 1;
+      return;
+    }
+    event.preventDefault();
+    const deltaScale = event.deltaMode === 1
+      ? Math.max(16, view.defaultLineHeight)
+      : event.deltaMode === 2
+        ? view.scrollDOM.clientHeight
+        : 1;
+    const targetTop = Math.max(
+      0,
+      Math.min(
+        view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight,
+        view.scrollDOM.scrollTop + event.deltaY * deltaScale
+      )
+    );
+    const targetLeft = Math.max(
+      0,
+      Math.min(
+        view.scrollDOM.scrollWidth - view.scrollDOM.clientWidth,
+        view.scrollDOM.scrollLeft + event.deltaX * deltaScale
+      )
+    );
+    const generation = ++wheelScrollGeneration;
+    view.scrollDOM.scrollTop = targetTop;
+    view.scrollDOM.scrollLeft = targetLeft;
+    let remainingFrames = 3;
+    const settleWheelTarget = () => {
+      if (!view || generation !== wheelScrollGeneration || remainingFrames-- <= 0) return;
+      view.requestMeasure({
+        read() {
+          return null;
+        },
+        write() {
+          if (generation !== wheelScrollGeneration) return;
+          view.scrollDOM.scrollTop = targetTop;
+          view.scrollDOM.scrollLeft = targetLeft;
+          requestAnimationFrame(settleWheelTarget);
+        }
+      });
+    };
+    requestAnimationFrame(settleWheelTarget);
   };
-  view.scrollDOM.addEventListener('wheel', onViewportInteraction, { passive: true });
+  view.scrollDOM.addEventListener('wheel', onViewportInteraction, { passive: false });
   view.scrollDOM.addEventListener('touchmove', onViewportInteraction, { passive: true });
   view.dom.addEventListener('keydown', onViewportInteraction, true);
   if (typeof onRequestGitBlame === 'function') {
@@ -2920,6 +2966,12 @@ function mapPositionThroughTextChange(position, previousText, nextText, change) 
     }
   }
 
+  const replacedLength = change.to - change.from;
+  if (replacedLength > 0 && change.insert.length > 0) {
+    const relativeOffset = (position - change.from) / replacedLength;
+    return change.from + Math.round(relativeOffset * change.insert.length);
+  }
+
   return mapPositionThroughChange(position, change);
 }
 
@@ -3242,7 +3294,6 @@ function sourceMode() {
     }),
     syntaxHighlighting(highlightStyle),
     sourceCodeBlockField,
-    sourceListBorderField,
     sourceListMarkerField,
     sourceStrikeMarkerField,
     sourceWikiMarkerField,

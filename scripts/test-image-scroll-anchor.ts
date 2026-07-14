@@ -1,4 +1,5 @@
 import { ImageWidget } from '../webview/src/helpers/images';
+import { markViewportInteraction } from '../webview/src/helpers/viewportStability';
 
 const runScenario = (userScroll: number, laterLayoutShift: number) => {
   const animationFrames: FrameRequestCallback[] = [];
@@ -13,8 +14,9 @@ const runScenario = (userScroll: number, laterLayoutShift: number) => {
     isConnected: true,
     getBoundingClientRect: () => ({ top: layoutTop - scrollDOM.scrollTop }),
   };
-  const view = {
-    scrollDOM,
+const view = {
+dom: {},
+scrollDOM,
     requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => {
       write(read());
     },
@@ -22,9 +24,10 @@ const runScenario = (userScroll: number, laterLayoutShift: number) => {
 
   const widget = new ImageWidget('', 'test', '');
   layoutTop += 240;
-  (widget as any).keepViewportAnchor(view, { anchor: anchorElement, top: 100 });
-  scrollDOM.scrollTop += userScroll;
-  layoutTop += laterLayoutShift;
+(widget as any).keepViewportAnchor(view, { anchor: anchorElement, top: 100 });
+scrollDOM.scrollTop += userScroll;
+if (userScroll !== 0) markViewportInteraction(view as any);
+layoutTop += laterLayoutShift;
   animationFrames.shift()?.(0);
   return scrollDOM.scrollTop;
 };

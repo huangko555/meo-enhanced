@@ -54,7 +54,6 @@ const listIndentStyle = {
 };
 
 const defaultListIndentStyle = listIndentStyle.twoSpaces;
-const listBorderDecoCache = new Map();
 const taskStatusByMarker: Record<string, TaskStatus> = {
   x: 'done',
   '~': 'inprogress',
@@ -67,21 +66,6 @@ const taskStatusClassByStatus: Record<TaskStatus, string> = {
   done: 'is-done',
   dropped: 'is-dropped'
 };
-
-function listBorderDecoration(widthColumns = 1) {
-  const width = Math.max(1, widthColumns);
-  let deco = listBorderDecoCache.get(width);
-  if (deco) {
-    return deco;
-  }
-
-  deco = Decoration.mark({
-    class: 'meo-md-list-border',
-    attributes: { style: `--meo-list-border-width:${width}ch;` }
-  });
-  listBorderDecoCache.set(width, deco);
-  return deco;
-}
 
 function forEachSelectionLine(state, callback) {
   const seen = new Set();
@@ -198,33 +182,6 @@ function indentationColumns(leadingWhitespace, style = defaultListIndentStyle) {
     columns += leadingWhitespace[index] === '\t' ? style.columns : 1;
   }
   return columns;
-}
-
-function listBorderOffsets(leadingWhitespace, style = defaultListIndentStyle) {
-  const offsets = [];
-  let columns = 0;
-  let levelStart = 0;
-
-  for (let index = 0; index < leadingWhitespace.length; index += 1) {
-    if (columns === 0) {
-      levelStart = index;
-    }
-    columns += leadingWhitespace[index] === '\t' ? style.columns : 1;
-    if (columns >= style.columns) {
-      offsets.push(levelStart);
-      columns = 0;
-    }
-  }
-
-  return offsets;
-}
-
-function addListIndentBorders(addRange, lineStart, leadingWhitespace, style = defaultListIndentStyle) {
-  for (const offset of listBorderOffsets(leadingWhitespace, style)) {
-    const char = leadingWhitespace[offset];
-    const borderWidth = char === '\t' ? style.columns : 1;
-    addRange(lineStart + offset, lineStart + offset + 1, listBorderDecoration(borderWidth));
-  }
 }
 
 function listIndentDeleteLength(leadingWhitespace, style = defaultListIndentStyle) {
@@ -875,31 +832,6 @@ export function collectOrderedListRenumberChanges(state) {
   return changes;
 }
 
-function computeSourceListBorders(state) {
-  const stylesByLine = detectListIndentStylesByLine(state);
-  const frontmatter = parseFrontmatter(state);
-  const ranges = new RangeSetBuilder();
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
-    const line = state.doc.line(lineNo);
-    if (lineIsInFrontmatterContent(frontmatter, line)) {
-      continue;
-    }
-    const lineText = state.doc.sliceString(line.from, line.to);
-    const style = lineIndentStyle(lineNo, stylesByLine);
-    const marker = listMarkerData(lineText, null, style);
-    if (!marker || marker.fromOffset === 0) {
-      continue;
-    }
-    addListIndentBorders(
-      (from, to, deco) => ranges.add(from, to, deco),
-      line.from,
-      marker.leadingWhitespace,
-      style
-    );
-  }
-  return ranges.finish();
-}
-
 function computeSourceListMarkers(state) {
   const stylesByLine = detectListIndentStylesByLine(state);
   const ranges = new RangeSetBuilder();
@@ -926,27 +858,6 @@ function computeSourceListMarkers(state) {
   }
   return ranges.finish();
 }
-
-export const sourceListBorderField = StateField.define<any>({
-  create(state: EditorState) {
-    try {
-      return computeSourceListBorders(state);
-    } catch {
-      return Decoration.none;
-    }
-  },
-  update(borders: any, transaction: Transaction) {
-    if (!transaction.docChanged) {
-      return borders;
-    }
-    try {
-      return computeSourceListBorders(transaction.state);
-    } catch {
-      return borders;
-    }
-  },
-  provide: (field: any) => EditorView.decorations.from(field)
-});
 
 export const sourceListMarkerField = StateField.define<any>({
   create(state: EditorState) {

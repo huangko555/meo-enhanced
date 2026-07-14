@@ -47,7 +47,7 @@ async function main() {
     const page = await browser.newPage();
     await page.setContent('<!doctype html><button id="outside">outside</button><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
-    await page.addStyleTag({ content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-caret:#e6edf3; --meo-semantic-tableBorder:#474b50; --meo-semantic-tableSelectionBorder:#79b8ff; --meo-semantic-unorderedListMarker:#79b8ff; --meo-semantic-orderedListMarker:#79b8ff; --meo-semantic-searchMatchForeground:#202223; --meo-semantic-searchMatchBackground:#ffe600; --meo-semantic-searchMatchBorder:#ffe600; --meo-semantic-searchMatchActiveForeground:#202223; --meo-semantic-searchMatchActiveBackground:#ff8c00; --meo-semantic-searchMatchActiveBorder:#ff8c00; }' });
+    await page.addStyleTag({ content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-caret:#e6edf3; --meo-semantic-tableBorder:#474b50; --meo-semantic-tableSelectionBorder:#79b8ff; --meo-semantic-unorderedListMarker:#79b8ff; --meo-semantic-orderedListMarker:#79b8ff; --meo-semantic-listGuide:#3e444d; --meo-semantic-searchMatchForeground:#202223; --meo-semantic-searchMatchBackground:#ffe600; --meo-semantic-searchMatchBorder:#ffe600; --meo-semantic-searchMatchActiveForeground:#202223; --meo-semantic-searchMatchActiveBackground:#ff8c00; --meo-semantic-searchMatchActiveBorder:#ff8c00; }' });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
     const result = await page.evaluate(async () => {
@@ -147,10 +147,11 @@ async function main() {
       const alignmentAfterShift = document.querySelector<HTMLTableCellElement>('thead th')?.style.textAlign ?? '';
       alignmentEditor.destroy();
 
-      const listEditor = await create('| Items |\n| --- |\n| - first<br/>  3. nested<br />- second<br><br>tail `literal<br>code` |');
+      const listEditor = await create('| Items |\n| --- |\n| - first<br/>   3. nested<br />- second<br><br>tail `literal<br>code` |');
       const listPreview = document.querySelector<HTMLElement>('tbody .meo-md-html-table-cell-preview')!;
       const unorderedMarkerColor = getComputedStyle(listPreview.querySelector(':scope > ul > li')!, '::marker').color;
-      const orderedMarkerColor = getComputedStyle(listPreview.querySelector(':scope > ul > li > ol > li')!, '::marker').color;
+      const orderedListItem = listPreview.querySelector<HTMLElement>(':scope > ul > li > ol > li');
+      const orderedMarkerColor = orderedListItem ? getComputedStyle(orderedListItem, '::marker').color : '';
       document.querySelector<HTMLTextAreaElement>('tbody textarea')!.focus();
       const renderedListState = {
         topLevelItems: listPreview.querySelectorAll(':scope > ul > li').length,
@@ -164,6 +165,14 @@ async function main() {
         editingPreviewVisibility: getComputedStyle(listPreview).visibility
       };
       listEditor.destroy();
+
+      const whitespaceEditor = await create('| Items |\n| --- |\n| first<br>   indented |');
+      const whitespaceLine = document.querySelectorAll<HTMLElement>('tbody .meo-md-html-table-cell-line')[1]!;
+      const whitespaceState = {
+        text: whitespaceLine.textContent ?? '',
+        whiteSpace: getComputedStyle(whitespaceLine).whiteSpace
+      };
+      whitespaceEditor.destroy();
 
       const shortcutEditor = await create('| Items |\n| --- |\n| - first |');
       const shortcutInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
@@ -191,13 +200,6 @@ async function main() {
         bubbles: true,
         cancelable: true
       }));
-      shortcutInput.setSelectionRange(shortcutInput.value.length, shortcutInput.value.length);
-      shortcutInput.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Enter',
-        bubbles: true,
-        cancelable: true
-      }));
-      const plainEnterValue = shortcutInput.value;
       shortcutInput.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'Enter',
         ctrlKey: true,
@@ -211,6 +213,77 @@ async function main() {
       await waitFrames();
       const tableShortcutSource = shortcutEditor.view.state.doc.toString();
       shortcutEditor.destroy();
+
+      const navigationEditor = await create('| A | B |\n| --- | --- |\n| one | two |\n| three | four |');
+      const firstNavigationInput = document.querySelector<HTMLTextAreaElement>('textarea[data-table-row="1"][data-table-col="1"]')!;
+      firstNavigationInput.focus();
+      firstNavigationInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true
+      }));
+      await waitFrames();
+      const middleNavigationTarget = document.activeElement instanceof HTMLTextAreaElement
+        ? { row: document.activeElement.dataset.tableRow, col: document.activeElement.dataset.tableCol }
+        : null;
+      (document.activeElement as HTMLTextAreaElement)?.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true
+      }));
+      await waitFrames();
+      const lastNavigationTarget = document.activeElement instanceof HTMLTextAreaElement
+        ? { row: document.activeElement.dataset.tableRow, col: document.activeElement.dataset.tableCol }
+        : null;
+      const navigationSource = navigationEditor.view.state.doc.toString();
+      navigationEditor.destroy();
+
+      const dragSelectCells = (fromCell: HTMLElement, toCell: HTMLElement, pointerId: number) => {
+        const table = fromCell.closest('table')!;
+        const targetRect = toCell.getBoundingClientRect();
+        fromCell.dispatchEvent(new PointerEvent('pointerdown', {
+          button: 0,
+          pointerId,
+          bubbles: true,
+          cancelable: true
+        }));
+        table.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId,
+          clientX: targetRect.left + targetRect.width / 2,
+          clientY: targetRect.top + targetRect.height / 2,
+          bubbles: true,
+          cancelable: true
+        }));
+        table.dispatchEvent(new PointerEvent('pointerup', {
+          pointerId,
+          bubbles: true,
+          cancelable: true
+        }));
+      };
+
+      const deleteRowsEditor = await create('| A | B |\n| --- | --- |\n| r1a | r1b |\n| r2a | r2b |\n| r3a | r3b |');
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!,
+        21
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames();
+      const deleteRowsSource = deleteRowsEditor.view.state.doc.toString();
+      deleteRowsEditor.destroy();
+
+      const deleteColumnsEditor = await create('| A | B | C |\n| --- | --- | --- |\n| a | b | c |\n| d | e | f |');
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="1"]')!,
+        22
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames();
+      const deleteColumnsSource = deleteColumnsEditor.view.state.doc.toString();
+      deleteColumnsEditor.destroy();
 
       const orderedShortcutEditor = await create('| Items |\n| --- |\n| 3. third |');
       const orderedShortcutInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
@@ -253,6 +326,61 @@ async function main() {
       const outdentedOrderedValue = orderedIndentInput.value;
       orderedIndentEditor.destroy();
 
+      const pastedImageMessages: any[] = [];
+      harness.initializeImageHandling({
+        postMessage(message: any) {
+          pastedImageMessages.push(message);
+          if (message.type === 'saveImageFromClipboard') {
+            queueMicrotask(() => harness.handleSavedImagePath({
+              type: 'savedImagePath',
+              requestId: message.requestId,
+              success: true,
+              path: 'images/pasted.png'
+            }));
+          }
+        }
+      });
+      const tablePasteEditor = await create('| A | B |\n| --- | --- |\n| left | right |');
+      const tablePasteInput = document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!;
+      tablePasteInput.focus();
+      tablePasteInput.setSelectionRange(2, 2);
+      const imageBlob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+      const pasteEvent = {
+        clipboardData: {
+          items: [{ type: 'image/png', getAsFile: () => imageBlob }]
+        },
+        preventDefault() {},
+        stopPropagation() {}
+      } as unknown as ClipboardEvent;
+      const tablePasteLine = tablePasteEditor.view.state.doc.lineAt(tablePasteEditor.view.state.selection.main.head);
+      await harness.handleImagePaste(pasteEvent, tablePasteEditor, {
+        lineNumber: tablePasteLine.number,
+        lineOffset: tablePasteEditor.view.state.selection.main.head - tablePasteLine.from
+      });
+      await waitFrames();
+      const tablePasteValue = tablePasteInput.value;
+      const tablePasteSource = tablePasteEditor.view.state.doc.toString();
+      tablePasteEditor.destroy();
+
+      const bodyPasteEditor = await create('before after');
+      bodyPasteEditor.view.dispatch({ selection: { anchor: 7 } });
+      const bodyPasteLine = bodyPasteEditor.view.state.doc.lineAt(7);
+      const fileOnlyPasteEvent = {
+        clipboardData: {
+          items: [],
+          files: [imageBlob]
+        },
+        preventDefault() {},
+        stopPropagation() {}
+      } as unknown as ClipboardEvent;
+      const bodyPasteHandled = await harness.handleImagePaste(fileOnlyPasteEvent, bodyPasteEditor, {
+        lineNumber: bodyPasteLine.number,
+        lineOffset: 7 - bodyPasteLine.from
+      });
+      await waitFrames();
+      const bodyPasteSource = bodyPasteEditor.view.state.doc.toString();
+      bodyPasteEditor.destroy();
+
       const bodyListEditor = await create('- one\n- two');
       bodyListEditor.view.dispatch({ selection: { anchor: 3 } });
       bodyListEditor.view.focus();
@@ -275,10 +403,28 @@ async function main() {
       const bodyMarkerEditor = await create('- parent\n  - child');
       const nestedBodyMarker = document.querySelectorAll<HTMLElement>('.meo-md-list-marker-bullet')[1];
       const nestedBodyDot = nestedBodyMarker?.querySelector<SVGElement>('.meo-md-list-marker-bullet-dot');
+      const bodyListLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-list-line'));
+      const bodyListGuideBackgrounds = bodyListLines
+        .map((line) => getComputedStyle(line).backgroundImage)
+        .filter((backgroundImage) => backgroundImage !== 'none');
+      const nestedBodyGuideCount = bodyListLines.reduce((lineCount, line) => {
+        return lineCount + [line, ...line.querySelectorAll<HTMLElement>('*')].reduce((count, element) => {
+            return count + ['', '::before', '::after'].filter((pseudo) => {
+              const style = getComputedStyle(element, pseudo || undefined);
+              const hasLeftBorder = parseFloat(style.borderLeftWidth) > 0 &&
+                style.borderLeftStyle !== 'none' &&
+                style.borderLeftColor !== 'rgba(0, 0, 0, 0)';
+              const hasGuideBackground = style.backgroundImage.includes('repeating-linear-gradient');
+              return hasLeftBorder || hasGuideBackground;
+            }).length;
+          }, 0);
+      }, 0);
       const bodyNestedMarkerState = {
         hollow: nestedBodyMarker?.classList.contains('meo-md-list-marker-bullet-hollow') ?? false,
         fill: nestedBodyDot ? getComputedStyle(nestedBodyDot).fill : '',
-        stroke: nestedBodyDot ? getComputedStyle(nestedBodyDot).stroke : ''
+        stroke: nestedBodyDot ? getComputedStyle(nestedBodyDot).stroke : '',
+        guideCount: nestedBodyGuideCount,
+        guideBackgrounds: bodyListGuideBackgrounds
       };
       bodyMarkerEditor.destroy();
 
@@ -313,15 +459,25 @@ async function main() {
         alignmentBeforeShift,
         alignmentAfterShift,
         renderedListState,
+        whitespaceState,
         continuedUnorderedValue,
         indentedTableValue,
-        plainEnterValue,
         tableShortcutValue,
         tableShortcutSource,
+        middleNavigationTarget,
+        lastNavigationTarget,
+        navigationSource,
+        deleteRowsSource,
+        deleteColumnsSource,
         continuedOrderedValue,
         exitedEmptyOrderedItemValue,
         indentedOrderedValue,
         outdentedOrderedValue,
+        pastedImageMessageCount: pastedImageMessages.length,
+        tablePasteValue,
+        tablePasteSource,
+        bodyPasteHandled,
+        bodyPasteSource,
         indentedBodyValue,
         outdentedBodyValue,
         bodyNestedMarkerState,
@@ -356,20 +512,33 @@ async function main() {
     ) {
       failures.push(`table cell list rendering was incorrect: ${JSON.stringify(result.renderedListState)}`);
     }
+    if (result.whitespaceState.text !== '   indented' || result.whitespaceState.whiteSpace !== 'pre-wrap') {
+      failures.push(`table line indentation was not visible: ${JSON.stringify(result.whitespaceState)}`);
+    }
     if (result.continuedUnorderedValue !== '- first<br>\n- ') {
       failures.push(`unordered table continuation produced ${JSON.stringify(result.continuedUnorderedValue)}`);
     }
     if (result.indentedTableValue !== '- first<br>\n  - second') {
       failures.push(`table Alt+] indentation produced ${JSON.stringify(result.indentedTableValue)}`);
     }
-    if (result.plainEnterValue !== '- first<br>\n- second') {
-      failures.push(`plain table Enter changed the cell to ${JSON.stringify(result.plainEnterValue)}`);
-    }
     if (result.tableShortcutValue !== '- first<br>\n- second<br>\n- ') {
       failures.push(`table Enter shortcuts produced ${JSON.stringify(result.tableShortcutValue)}`);
     }
     if (!result.tableShortcutSource.includes('| - first<br>- second<br>- third |')) {
       failures.push(`table shortcut source was ${JSON.stringify(result.tableShortcutSource)}`);
+    }
+    if (
+      result.middleNavigationTarget?.row !== '2' || result.middleNavigationTarget?.col !== '1' ||
+      result.lastNavigationTarget?.row !== '3' || result.lastNavigationTarget?.col !== '1' ||
+      !result.navigationSource.includes('|  |  |')
+    ) {
+      failures.push(`plain table Enter navigation failed: ${JSON.stringify({ middle: result.middleNavigationTarget, last: result.lastNavigationTarget, source: result.navigationSource })}`);
+    }
+    if (result.deleteRowsSource.includes('r1a') || result.deleteRowsSource.includes('r2a') || !result.deleteRowsSource.includes('r3a')) {
+      failures.push(`multi-cell row deletion used only one active row: ${JSON.stringify(result.deleteRowsSource)}`);
+    }
+    if (result.deleteColumnsSource.includes('| A |') || result.deleteColumnsSource.includes('| B |') || !result.deleteColumnsSource.includes('| C |')) {
+      failures.push(`multi-cell column deletion used only one active column: ${JSON.stringify(result.deleteColumnsSource)}`);
     }
     if (result.indentedBodyValue !== '  - one\n- two' || result.outdentedBodyValue !== '- one\n- two') {
       failures.push(`body Alt bracket indentation changed ${JSON.stringify(result.indentedBodyValue)} -> ${JSON.stringify(result.outdentedBodyValue)}`);
@@ -383,8 +552,20 @@ async function main() {
     ) {
       failures.push(`ordered table indentation changed ${JSON.stringify(result.indentedOrderedValue)} -> ${JSON.stringify(result.outdentedOrderedValue)}`);
     }
+    if (result.pastedImageMessageCount !== 2) {
+      failures.push(`table image paste sent ${result.pastedImageMessageCount} save requests`);
+    }
+    if (!/^ri!\[\d+\.png\]\(images\/pasted\.png\)ght$/.test(result.tablePasteValue)) {
+      failures.push(`table image paste inserted outside the focused cell: ${JSON.stringify({ value: result.tablePasteValue, source: result.tablePasteSource })}`);
+    }
+    if (!result.bodyPasteHandled || !/^before !\[\d+\.png\]\(images\/pasted\.png\)after$/.test(result.bodyPasteSource)) {
+      failures.push(`file-only body image paste was ignored: ${JSON.stringify({ handled: result.bodyPasteHandled, source: result.bodyPasteSource })}`);
+    }
     if (!result.bodyNestedMarkerState.hollow || result.bodyNestedMarkerState.fill !== 'none' || result.bodyNestedMarkerState.stroke !== 'rgb(121, 184, 255)') {
       failures.push(`nested body bullet was not hollow: ${JSON.stringify(result.bodyNestedMarkerState)}`);
+    }
+    if (result.bodyNestedMarkerState.guideCount !== 0 || result.bodyNestedMarkerState.guideBackgrounds.length !== 0) {
+      failures.push(`nested list still rendered ${result.bodyNestedMarkerState.guideCount} indentation guides`);
     }
     if (result.navigationScans > 0) failures.push(`search navigation rescanned the full document ${result.navigationScans} times`);
     if (failures.length) throw new Error(failures.join('\n'));
