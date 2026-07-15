@@ -643,6 +643,110 @@ async function main() {
       failures.push(`nested list still rendered ${result.bodyNestedMarkerState.guideCount} indentation guides`);
     }
     if (result.navigationScans > 0) failures.push(`search navigation rescanned the full document ${result.navigationScans} times`);
+
+    await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      (window as any).__openedExternalHrefs = [];
+      const editor = harness.createEditor({
+        parent: app,
+        text: '[body external](https://body.example) [body internal](#表格宽度测试)\n\n| Links | Editing |\n| --- | --- |\n| [table external](https://table.example) [table internal](#表格宽度测试) | active |\n\n# 表格宽度测试',
+        initialMode: 'live',
+        onApplyChanges() {},
+        onOpenLink(href: string) {
+          (window as any).__openedExternalHrefs.push(href);
+        }
+      });
+      (window as any).__linkInteractionEditor = editor;
+      (window as any).__openedLinkHrefs = [];
+      app.addEventListener('meo-open-link', ((event: CustomEvent<{ href: string }>) => {
+        (window as any).__openedLinkHrefs.push(event.detail.href);
+      }) as EventListener);
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus();
+    });
+
+    const clickOpenButton = async (index: number): Promise<string | null> => {
+      const buttons = await page.$$('.meo-md-link-open-btn');
+      const button = buttons[index];
+      if (!button) return `button ${index} was missing`;
+      try {
+        await button.click();
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    const tableExternalClickError = await clickOpenButton(2);
+    const bodyExternalClickError = await clickOpenButton(0);
+    await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    const bodyExternalExitedTable = await page.evaluate(() => {
+      const editor = (window as any).__linkInteractionEditor;
+      return !(document.activeElement instanceof HTMLTextAreaElement) &&
+        !editor.view.dom.classList.contains('meo-table-interaction-active');
+    });
+    const bodyLinks = await page.$$('.meo-md-link');
+    const bodyTitleClickError = bodyLinks[0]
+      ? await bodyLinks[0].click().then(() => null, (error) => error instanceof Error ? error.message : String(error))
+      : 'body link title was missing';
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    const bodyTitleResult = await page.evaluate(() => {
+      const editor = (window as any).__linkInteractionEditor;
+      const firstBodyLine = document.querySelector<HTMLElement>('.cm-content > .cm-line');
+      return {
+        urlStillHidden: Boolean(firstBodyLine?.querySelector('.meo-md-link-url-hidden')),
+        selectionHead: editor.view.state.selection.main.head
+      };
+    });
+    await page.evaluate(() => document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus());
+    const tableInternalClickError = await clickOpenButton(3);
+    const tableInternalTargetLine = await page.evaluate(() => {
+      const editor = (window as any).__linkInteractionEditor;
+      return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text;
+    });
+    const bodyInternalClickError = await clickOpenButton(1);
+    const bodyInternalTargetLine = await page.evaluate(() => {
+      const editor = (window as any).__linkInteractionEditor;
+      return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text;
+    });
+    const interactionResult = await page.evaluate(() => {
+      const editor = (window as any).__linkInteractionEditor;
+      const result = {
+        openedHrefs: (window as any).__openedLinkHrefs,
+        openedExternalHrefs: (window as any).__openedExternalHrefs,
+        tableInteractionActive: editor.view.dom.classList.contains('meo-table-interaction-active'),
+        pointerSelectionActive: editor.view.dom.classList.contains('meo-live-pointer-selecting')
+      };
+      editor.destroy();
+      return result;
+    });
+    const clickErrors = [tableExternalClickError, tableInternalClickError, bodyExternalClickError, bodyInternalClickError, bodyTitleClickError]
+      .filter((error): error is string => error !== null);
+    if (
+      clickErrors.length > 0 ||
+      JSON.stringify(interactionResult.openedHrefs) !== JSON.stringify([
+        'https://table.example',
+        'https://body.example',
+        '#表格宽度测试',
+        '#表格宽度测试'
+      ]) ||
+      JSON.stringify(interactionResult.openedExternalHrefs) !== JSON.stringify([
+        'https://table.example',
+        'https://body.example'
+      ]) ||
+      !bodyExternalExitedTable ||
+      tableInternalTargetLine !== '# 表格宽度测试' ||
+      bodyInternalTargetLine !== '# 表格宽度测试' ||
+      bodyTitleResult.urlStillHidden ||
+      bodyTitleResult.selectionHead > 40 ||
+      interactionResult.tableInteractionActive ||
+      interactionResult.pointerSelectionActive
+    ) {
+      failures.push(`physical link interaction chain failed: ${JSON.stringify({ clickErrors, bodyExternalExitedTable, bodyTitleResult, tableInternalTargetLine, bodyInternalTargetLine, ...interactionResult })}`);
+    }
     if (failures.length) throw new Error(failures.join('\n'));
     console.log('table stability checks passed');
   } finally {

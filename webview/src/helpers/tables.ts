@@ -2274,6 +2274,8 @@ class HtmlTableWidget extends WidgetType {
   wireTableSelection(table) {
     const getWrap = () => this.domRefs?.wrap ?? table;
     const getContainer = () => this.domRefs?.container ?? getWrap();
+    let pendingOutsidePointerId: number | null = null;
+    let pendingOutsideCleanup: (() => void) | null = null;
 
     const onWrapPointerDown = (event) => {
       if (!(event.target instanceof Node)) return;
@@ -2384,14 +2386,36 @@ class HtmlTableWidget extends WidgetType {
       if (isSelectionMenuTarget(event.target)) {
         return;
       }
-      if (container.contains(event.target) && isModifierLinkActivationEvent(event)) return;
-      if (!container.contains(event.target)) {
-        this.exitTableInteraction(wrap);
-      }
-      if (isTableControlTarget(event.target)) {
+      const isOutsideTable = !container.contains(event.target);
+      if (!isOutsideTable && isModifierLinkActivationEvent(event)) return;
+      if (!isOutsideTable && isTableControlTarget(event.target)) {
         return;
       }
       const active = document.activeElement;
+      if (isOutsideTable) {
+        const shell = container.closest('.meo-md-html-table-shell');
+        const hasActiveInteraction = (
+          (active instanceof HTMLElement && table.contains(active)) ||
+          this.selectedCellCount() > 0 ||
+          shell?.classList.contains('is-interacting')
+        );
+        if (!hasActiveInteraction) return;
+        pendingOutsidePointerId = event.pointerId;
+        pendingOutsideCleanup = () => {
+          if (this.selectedCellCount() > 1) {
+            this.exitTableInteraction(wrap);
+            return;
+          }
+
+          const currentActive = document.activeElement;
+          if (currentActive instanceof HTMLElement && table.contains(currentActive)) {
+            currentActive.blur();
+          } else {
+            this.exitTableInteraction(wrap);
+          }
+        };
+        return;
+      }
       if (!(active instanceof HTMLElement) || !table.contains(active)) return;
       if (active === event.target || active.contains(event.target)) return;
 
@@ -2405,21 +2429,16 @@ class HtmlTableWidget extends WidgetType {
         return;
       }
 
-      // Defer blur/selection cleanup until after the current click event finishes.
-      // `focusout` handles commit when a table input actually loses focus.
-      setTimeout(() => {
-        if (this.selectedCellCount() > 1) {
-          this.exitTableInteraction(wrap);
-          return;
-        }
+    };
 
-        const currentActive = document.activeElement;
-        if (currentActive instanceof HTMLElement && table.contains(currentActive)) {
-          currentActive.blur();
-        } else {
-          this.exitTableInteraction(wrap);
-        }
-      }, 0);
+    const onDocumentPointerEnd = (event: PointerEvent) => {
+      if (event.pointerId !== pendingOutsidePointerId || !pendingOutsideCleanup) return;
+      const cleanup = pendingOutsideCleanup;
+      pendingOutsidePointerId = null;
+      pendingOutsideCleanup = null;
+      // The browser dispatches click after pointerup. Delay the table commit until
+      // that click reaches its original target so re-rendering cannot invalidate it.
+      setTimeout(cleanup, 0);
     };
 
     table.addEventListener('pointerdown', onPointerDown);
@@ -2431,6 +2450,8 @@ class HtmlTableWidget extends WidgetType {
     table.addEventListener('keydown', onKeyDown, true);
     table.addEventListener('focusout', onFocusOut);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
+    document.addEventListener('pointerup', onDocumentPointerEnd, true);
+    document.addEventListener('pointercancel', onDocumentPointerEnd, true);
     const onCommitTableEdits = (event) => {
       const hadPendingEdits = this.hasPendingCellEdits;
       this.commit(getWrap());
@@ -2449,6 +2470,8 @@ class HtmlTableWidget extends WidgetType {
       table.removeEventListener('keydown', onKeyDown, true);
       table.removeEventListener('focusout', onFocusOut);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+      document.removeEventListener('pointerup', onDocumentPointerEnd, true);
+      document.removeEventListener('pointercancel', onDocumentPointerEnd, true);
       document.removeEventListener('meo-commit-table-edits', onCommitTableEdits);
     });
   }
