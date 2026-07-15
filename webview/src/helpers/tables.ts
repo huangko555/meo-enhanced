@@ -2282,6 +2282,7 @@ class HtmlTableWidget extends WidgetType {
       const container = getContainer();
       if (!container.contains(event.target)) return;
       if (isModifierLinkActivationEvent(event)) return;
+      if (isTableControlTarget(event.target)) return;
       this.setTableInteractionActive(getWrap(), true);
     };
 

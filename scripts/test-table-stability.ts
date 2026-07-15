@@ -649,9 +649,10 @@ async function main() {
       const app = document.getElementById('app')!;
       app.replaceChildren();
       (window as any).__openedExternalHrefs = [];
+      const linkTargetSpacer = Array.from({ length: 80 }, (_, index) => `spacer ${index + 1}`).join('\n');
       const editor = harness.createEditor({
         parent: app,
-        text: '[body external](https://body.example) [body internal](#表格宽度测试)\n\n| Links | Editing |\n| --- | --- |\n| [table external](https://table.example) [table internal](#表格宽度测试) | active |\n\n# 表格宽度测试',
+        text: `[body external](https://body.example) [body internal](#表格宽度测试)\n\n| Links | Editing |\n| --- | --- |\n| [table external](https://table.example) [table internal](#表格宽度测试) | active |\n\n${linkTargetSpacer}\n\n# 表格宽度测试\n\n${linkTargetSpacer}`,
         initialMode: 'live',
         onApplyChanges() {},
         onOpenLink(href: string) {
@@ -669,8 +670,8 @@ async function main() {
       document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus();
     });
 
-    const clickOpenButton = async (index: number): Promise<string | null> => {
-      const buttons = await page.$$('.meo-md-link-open-btn');
+    const clickOpenButton = async (selector: string, index: number): Promise<string | null> => {
+      const buttons = await page.$$(selector);
       const button = buttons[index];
       if (!button) return `button ${index} was missing`;
       try {
@@ -680,8 +681,8 @@ async function main() {
         return error instanceof Error ? error.message : String(error);
       }
     };
-    const tableExternalClickError = await clickOpenButton(2);
-    const bodyExternalClickError = await clickOpenButton(0);
+    const tableExternalClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 0);
+    const bodyExternalClickError = await clickOpenButton('.meo-md-link-open-btn', 0);
     await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
     const bodyExternalExitedTable = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
@@ -701,13 +702,30 @@ async function main() {
         selectionHead: editor.view.state.selection.main.head
       };
     });
-    await page.evaluate(() => document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus());
-    const tableInternalClickError = await clickOpenButton(3);
-    const tableInternalTargetLine = await page.evaluate(() => {
-      const editor = (window as any).__linkInteractionEditor;
-      return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text;
+    const tableInternalClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 1);
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
-    const bodyInternalClickError = await clickOpenButton(1);
+    const tableInternalTargetState = await page.evaluate(() => {
+      const editor = (window as any).__linkInteractionEditor;
+      const selectionHead = editor.view.state.selection.main.head;
+      const targetCoords = editor.view.coordsAtPos(selectionHead);
+      const viewportRect = editor.view.scrollDOM.getBoundingClientRect();
+      return {
+        line: editor.view.state.doc.lineAt(selectionHead).text,
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        targetViewportOffset: targetCoords ? targetCoords.top - viewportRect.top : null
+      };
+    });
+    await page.evaluate(async () => {
+      const editor = (window as any).__linkInteractionEditor;
+      editor.view.scrollDOM.scrollTop = 0;
+      editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    const bodyInternalClickError = await clickOpenButton('.meo-md-link-open-btn', 1);
     const bodyInternalTargetLine = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
       return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text;
@@ -738,14 +756,17 @@ async function main() {
         'https://body.example'
       ]) ||
       !bodyExternalExitedTable ||
-      tableInternalTargetLine !== '# 表格宽度测试' ||
+      tableInternalTargetState.line !== '# 表格宽度测试' ||
+      tableInternalTargetState.scrollTop < 100 ||
+      tableInternalTargetState.targetViewportOffset === null ||
+      Math.abs(tableInternalTargetState.targetViewportOffset) > 40 ||
       bodyInternalTargetLine !== '# 表格宽度测试' ||
       bodyTitleResult.urlStillHidden ||
       bodyTitleResult.selectionHead > 40 ||
       interactionResult.tableInteractionActive ||
       interactionResult.pointerSelectionActive
     ) {
-      failures.push(`physical link interaction chain failed: ${JSON.stringify({ clickErrors, bodyExternalExitedTable, bodyTitleResult, tableInternalTargetLine, bodyInternalTargetLine, ...interactionResult })}`);
+      failures.push(`physical link interaction chain failed: ${JSON.stringify({ clickErrors, bodyExternalExitedTable, bodyTitleResult, tableInternalTargetState, bodyInternalTargetLine, ...interactionResult })}`);
     }
     if (failures.length) throw new Error(failures.join('\n'));
     console.log('table stability checks passed');
