@@ -1,5 +1,10 @@
 # Markdown Editor Optimized (MEO)
 ---
+## 0.1.30
+- Centralized viewport stabilization to prevent asynchronous Mermaid, image, and layout updates from moving the current reading position
+- Added reliable external and document-internal link controls to rendered table cells, including stable focus and table re-entry behavior
+- Matched the floating outline background with the docked outline and kept code block select-all focused at the start of the selection
+
 ## 0.1.29
 - Fixed visible indentation for ordered and unordered lists after continuation lines in table cells
 
