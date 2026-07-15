@@ -2277,15 +2277,6 @@ class HtmlTableWidget extends WidgetType {
     let pendingOutsidePointerId: number | null = null;
     let pendingOutsideCleanup: (() => void) | null = null;
 
-    const onWrapPointerDown = (event) => {
-      if (!(event.target instanceof Node)) return;
-      const container = getContainer();
-      if (!container.contains(event.target)) return;
-      if (isModifierLinkActivationEvent(event)) return;
-      if (isTableControlTarget(event.target)) return;
-      this.setTableInteractionActive(getWrap(), true);
-    };
-
     const onPointerDown = (event) => {
       if (event.button !== 0) return;
       const modifierHref = getModifierLinkActivationHref(event);
@@ -2443,7 +2434,6 @@ class HtmlTableWidget extends WidgetType {
     };
 
     table.addEventListener('pointerdown', onPointerDown);
-    getContainer().addEventListener('pointerdown', onWrapPointerDown, true);
     table.addEventListener('pointermove', onPointerMove);
     table.addEventListener('pointerup', endPointerSelection);
     table.addEventListener('pointercancel', endPointerSelection);
@@ -2463,7 +2453,6 @@ class HtmlTableWidget extends WidgetType {
     document.addEventListener('meo-commit-table-edits', onCommitTableEdits);
     this.cleanupFns.push(() => {
       table.removeEventListener('pointerdown', onPointerDown);
-      getContainer().removeEventListener('pointerdown', onWrapPointerDown, true);
       table.removeEventListener('pointermove', onPointerMove);
       table.removeEventListener('pointerup', endPointerSelection);
       table.removeEventListener('pointercancel', endPointerSelection);

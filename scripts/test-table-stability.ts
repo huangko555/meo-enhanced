@@ -684,17 +684,29 @@ async function main() {
     const tableInternalFromCellClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 1);
     const tableInternalFromCellSamples = await page.evaluate(async () => {
       const editor = (window as any).__linkInteractionEditor;
-      const samples: Array<{ line: string; scrollTop: number; targetViewportOffset: number | null; interactionActive: boolean }> = [];
+      const samples: Array<{
+        line: string;
+        scrollTop: number;
+        targetViewportOffset: number | null;
+        interactionActive: boolean;
+        editorFocused: boolean;
+        domSelectionInsideEditor: boolean;
+        domSelectionCollapsed: boolean;
+      }> = [];
       for (let frame = 0; frame < 8; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         const selectionHead = editor.view.state.selection.main.head;
         const targetCoords = editor.view.coordsAtPos(selectionHead);
         const viewportRect = editor.view.scrollDOM.getBoundingClientRect();
+        const domSelection = window.getSelection();
         samples.push({
           line: editor.view.state.doc.lineAt(selectionHead).text,
           scrollTop: editor.view.scrollDOM.scrollTop,
           targetViewportOffset: targetCoords ? targetCoords.top - viewportRect.top : null,
-          interactionActive: editor.view.dom.classList.contains('meo-table-interaction-active')
+          interactionActive: editor.view.dom.classList.contains('meo-table-interaction-active'),
+          editorFocused: editor.view.hasFocus && document.activeElement === editor.view.contentDOM,
+          domSelectionInsideEditor: Boolean(domSelection?.focusNode && editor.view.contentDOM.contains(domSelection.focusNode)),
+          domSelectionCollapsed: Boolean(domSelection?.isCollapsed)
         });
       }
       return samples;
@@ -770,7 +782,7 @@ async function main() {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
-    const reentryCell = await page.$('tbody td[data-table-row="1"][data-table-col="1"]');
+    const reentryCell = await page.$('tbody td[data-table-row="1"][data-table-col="1"] .meo-md-html-table-cell-preview');
     const reentryClickError = reentryCell
       ? await reentryCell.click().then(() => null, (error) => error instanceof Error ? error.message : String(error))
       : 'reentry table cell was missing';
@@ -795,7 +807,72 @@ async function main() {
       editor.destroy();
       return result;
     });
-    const clickErrors = [tableInternalFromCellClickError, tableExternalClickError, tableInternalClickError, bodyExternalClickError, bodyInternalClickError, bodyTitleClickError, reentryClickError]
+
+    await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const editor = harness.createEditor({
+        parent: app,
+        text: '| Link | Editing |\n| --- | --- |\n| [jump](#nearby-target) | active |\n\n# Nearby target',
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__immediateReentryEditor = editor;
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus();
+    });
+    const immediateJumpClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 0);
+    const immediateJumpState = await page.evaluate(() => {
+      const editor = (window as any).__immediateReentryEditor;
+      const domSelection = window.getSelection();
+      const preview = document.querySelector<HTMLElement>('tbody td[data-table-row="1"][data-table-col="1"] .meo-md-html-table-cell-preview');
+      (window as any).__tableActivatedBeforeCellFocus = false;
+      preview?.addEventListener('pointerdown', () => {
+        (window as any).__tableActivatedBeforeCellFocus = (
+          editor.view.dom.classList.contains('meo-table-interaction-active') &&
+          !(document.activeElement instanceof HTMLTextAreaElement)
+        );
+      }, { once: true });
+      return {
+        line: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text,
+        editorFocused: editor.view.hasFocus && document.activeElement === editor.view.contentDOM,
+        domSelectionInsideEditor: Boolean(domSelection?.focusNode && editor.view.contentDOM.contains(domSelection.focusNode))
+      };
+    });
+    const immediateReentryCell = await page.$('tbody td[data-table-row="1"][data-table-col="1"] .meo-md-html-table-cell-preview');
+    const immediateReentryClickError = immediateReentryCell
+      ? await immediateReentryCell.click().then(() => null, (error) => error instanceof Error ? error.message : String(error))
+      : 'immediate reentry table cell was missing';
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    const immediateReentryState = await page.evaluate(() => {
+      const editor = (window as any).__immediateReentryEditor;
+      const active = document.activeElement;
+      const result = {
+        row: active instanceof HTMLTextAreaElement ? active.dataset.tableRow : null,
+        col: active instanceof HTMLTextAreaElement ? active.dataset.tableCol : null,
+        interactionActive: editor.view.dom.classList.contains('meo-table-interaction-active'),
+        activatedBeforeFocus: Boolean((window as any).__tableActivatedBeforeCellFocus)
+      };
+      editor.destroy();
+      return result;
+    });
+    const clickErrors = [
+      tableInternalFromCellClickError,
+      tableExternalClickError,
+      tableInternalClickError,
+      bodyExternalClickError,
+      bodyInternalClickError,
+      bodyTitleClickError,
+      reentryClickError,
+      immediateJumpClickError,
+      immediateReentryClickError
+    ]
       .filter((error): error is string => error !== null);
     if (
       clickErrors.length > 0 ||
@@ -815,6 +892,9 @@ async function main() {
       tableInternalFromCellState.scrollTop < 100 ||
       tableInternalFromCellState.targetViewportOffset === null ||
       Math.abs(tableInternalFromCellState.targetViewportOffset) > 40 ||
+      !tableInternalFromCellState.editorFocused ||
+      !tableInternalFromCellState.domSelectionInsideEditor ||
+      !tableInternalFromCellState.domSelectionCollapsed ||
       tableInternalTargetState.line !== '# 表格宽度测试' ||
       tableInternalTargetState.scrollTop < 100 ||
       tableInternalTargetState.targetViewportOffset === null ||
@@ -826,9 +906,16 @@ async function main() {
       bodyTitleResult.urlStillHidden ||
       bodyTitleResult.selectionHead > 40 ||
       !interactionResult.tableInteractionActive ||
-      interactionResult.pointerSelectionActive
+      interactionResult.pointerSelectionActive ||
+      immediateJumpState.line !== '# Nearby target' ||
+      !immediateJumpState.editorFocused ||
+      !immediateJumpState.domSelectionInsideEditor ||
+      immediateReentryState.row !== '1' ||
+      immediateReentryState.col !== '1' ||
+      !immediateReentryState.interactionActive ||
+      immediateReentryState.activatedBeforeFocus
     ) {
-      failures.push(`physical link interaction chain failed: ${JSON.stringify({ clickErrors, bodyExternalExitedTable, bodyTitleResult, tableInternalFromCellSamples, tableInternalTargetState, bodyInternalTargetLine, tableReentryState, ...interactionResult })}`);
+      failures.push(`physical link interaction chain failed: ${JSON.stringify({ clickErrors, bodyExternalExitedTable, bodyTitleResult, tableInternalFromCellSamples, tableInternalTargetState, bodyInternalTargetLine, tableReentryState, immediateJumpState, immediateReentryState, ...interactionResult })}`);
     }
     if (failures.length) throw new Error(failures.join('\n'));
     console.log('table stability checks passed');
