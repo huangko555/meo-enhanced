@@ -681,6 +681,33 @@ async function main() {
         return error instanceof Error ? error.message : String(error);
       }
     };
+    const tableInternalFromCellClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 1);
+    const tableInternalFromCellSamples = await page.evaluate(async () => {
+      const editor = (window as any).__linkInteractionEditor;
+      const samples: Array<{ line: string; scrollTop: number; targetViewportOffset: number | null; interactionActive: boolean }> = [];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const selectionHead = editor.view.state.selection.main.head;
+        const targetCoords = editor.view.coordsAtPos(selectionHead);
+        const viewportRect = editor.view.scrollDOM.getBoundingClientRect();
+        samples.push({
+          line: editor.view.state.doc.lineAt(selectionHead).text,
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          targetViewportOffset: targetCoords ? targetCoords.top - viewportRect.top : null,
+          interactionActive: editor.view.dom.classList.contains('meo-table-interaction-active')
+        });
+      }
+      return samples;
+    });
+    const tableInternalFromCellState = tableInternalFromCellSamples.at(-1)!;
+    await page.evaluate(async () => {
+      const editor = (window as any).__linkInteractionEditor;
+      editor.view.scrollDOM.scrollTop = 0;
+      editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus();
+    });
     const tableExternalClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 0);
     const bodyExternalClickError = await clickOpenButton('.meo-md-link-open-btn', 0);
     await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -718,17 +745,44 @@ async function main() {
         targetViewportOffset: targetCoords ? targetCoords.top - viewportRect.top : null
       };
     });
+    const scroller = await page.$('.cm-scroller');
+    const scrollerBox = await scroller?.boundingBox();
+    if (scrollerBox) {
+      await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
+      await page.mouse.wheel({ deltaY: -10_000 });
+    }
     await page.evaluate(async () => {
-      const editor = (window as any).__linkInteractionEditor;
-      editor.view.scrollDOM.scrollTop = 0;
-      editor.view.scrollDOM.dispatchEvent(new Event('scroll'));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      for (let frame = 0; frame < 4; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
     });
     const bodyInternalClickError = await clickOpenButton('.meo-md-link-open-btn', 1);
     const bodyInternalTargetLine = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
       return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text;
+    });
+    if (scrollerBox) {
+      await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
+      await page.mouse.wheel({ deltaY: -10_000 });
+    }
+    await page.evaluate(async () => {
+      for (let frame = 0; frame < 4; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const reentryCell = await page.$('tbody td[data-table-row="1"][data-table-col="1"]');
+    const reentryClickError = reentryCell
+      ? await reentryCell.click().then(() => null, (error) => error instanceof Error ? error.message : String(error))
+      : 'reentry table cell was missing';
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    const tableReentryState = await page.evaluate(() => {
+      const editor = (window as any).__linkInteractionEditor;
+      const active = document.activeElement;
+      return {
+        row: active instanceof HTMLTextAreaElement ? active.dataset.tableRow : null,
+        col: active instanceof HTMLTextAreaElement ? active.dataset.tableCol : null,
+        interactionActive: editor.view.dom.classList.contains('meo-table-interaction-active')
+      };
     });
     const interactionResult = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
@@ -741,11 +795,12 @@ async function main() {
       editor.destroy();
       return result;
     });
-    const clickErrors = [tableExternalClickError, tableInternalClickError, bodyExternalClickError, bodyInternalClickError, bodyTitleClickError]
+    const clickErrors = [tableInternalFromCellClickError, tableExternalClickError, tableInternalClickError, bodyExternalClickError, bodyInternalClickError, bodyTitleClickError, reentryClickError]
       .filter((error): error is string => error !== null);
     if (
       clickErrors.length > 0 ||
       JSON.stringify(interactionResult.openedHrefs) !== JSON.stringify([
+        '#表格宽度测试',
         'https://table.example',
         'https://body.example',
         '#表格宽度测试',
@@ -756,17 +811,24 @@ async function main() {
         'https://body.example'
       ]) ||
       !bodyExternalExitedTable ||
+      tableInternalFromCellState.line !== '# 表格宽度测试' ||
+      tableInternalFromCellState.scrollTop < 100 ||
+      tableInternalFromCellState.targetViewportOffset === null ||
+      Math.abs(tableInternalFromCellState.targetViewportOffset) > 40 ||
       tableInternalTargetState.line !== '# 表格宽度测试' ||
       tableInternalTargetState.scrollTop < 100 ||
       tableInternalTargetState.targetViewportOffset === null ||
       Math.abs(tableInternalTargetState.targetViewportOffset) > 40 ||
       bodyInternalTargetLine !== '# 表格宽度测试' ||
+      tableReentryState.row !== '1' ||
+      tableReentryState.col !== '1' ||
+      !tableReentryState.interactionActive ||
       bodyTitleResult.urlStillHidden ||
       bodyTitleResult.selectionHead > 40 ||
-      interactionResult.tableInteractionActive ||
+      !interactionResult.tableInteractionActive ||
       interactionResult.pointerSelectionActive
     ) {
-      failures.push(`physical link interaction chain failed: ${JSON.stringify({ clickErrors, bodyExternalExitedTable, bodyTitleResult, tableInternalTargetState, bodyInternalTargetLine, ...interactionResult })}`);
+      failures.push(`physical link interaction chain failed: ${JSON.stringify({ clickErrors, bodyExternalExitedTable, bodyTitleResult, tableInternalFromCellSamples, tableInternalTargetState, bodyInternalTargetLine, tableReentryState, ...interactionResult })}`);
     }
     if (failures.length) throw new Error(failures.join('\n'));
     console.log('table stability checks passed');

@@ -336,14 +336,18 @@ export function createEditor({
   );
   const openHref = (href, editorView) => {
     if (href.startsWith('#')) {
-      const targetPosition = findDocumentFragmentPosition(editorView.state, href);
-      if (targetPosition !== null) {
+      const initialTargetPosition = findDocumentFragmentPosition(editorView.state, href);
+      if (initialTargetPosition !== null) {
+        // Focusing can commit an active table cell and rebuild layout. Complete
+        // that transition before resolving and scrolling to the fragment.
+        editorView.focus();
+        const targetPosition = findDocumentFragmentPosition(editorView.state, href);
+        if (targetPosition === null) return true;
         viewportController?.markInteraction();
         editorView.dispatch({
           selection: { anchor: targetPosition },
           effects: EditorView.scrollIntoView(targetPosition, { y: 'start' })
         });
-        editorView.focus();
       }
       return true;
     }
