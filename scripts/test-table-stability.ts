@@ -83,16 +83,44 @@ async function main() {
       const editingPreviewText = editingInput.parentElement?.querySelector('.meo-md-html-table-cell-preview')?.textContent ?? '';
       editingEditor.destroy();
 
-      const inlineEditingEditor = await create('| A |\n| --- |\n| before `literal` #tag [link](https://example.com) **bold** |');
-      const inlineEditingInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      const inlineEditingEditor = await create('| A | B |\n| --- | --- |\n| before `literal` #tag [external](https://example.com) [internal](#target) **bold** | editing |');
+      const inlineEditingInputs = document.querySelectorAll<HTMLTextAreaElement>('tbody textarea');
+      const inlineEditingInput = inlineEditingInputs[0]!;
       const inlineEditingPreview = inlineEditingInput.parentElement!.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
       const inlineDecorationCount = inlineEditingPreview.querySelectorAll('code, .meo-md-tag, .meo-md-link, .meo-md-strong').length;
+      const inlineLinkButtonElements = Array.from(inlineEditingPreview.querySelectorAll<HTMLButtonElement>('.meo-md-link-open-btn'));
+      const inlineLinkButtons = inlineLinkButtonElements
+        .map((button) => button.getAttribute('aria-label'));
+      const inlineOpenedHrefs: string[] = [];
+      const onInlineOpenLink = ((event: CustomEvent<{ href: string }>) => {
+        inlineOpenedHrefs.push(event.detail.href);
+      }) as EventListener;
+      app.addEventListener('meo-open-link', onInlineOpenLink);
+      inlineEditingInputs[1]!.focus();
+      for (const button of inlineLinkButtonElements) {
+        button.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+        button.click();
+      }
+      app.removeEventListener('meo-open-link', onInlineOpenLink);
+      const linkButtonsPreservedEditingCell = document.activeElement === inlineEditingInputs[1];
       inlineEditingInput.focus();
-      inlineEditingInput.value = '11before `literal` #tag [link](https://example.com) **bold**';
+      inlineEditingInput.value = '11before `literal` #tag [external](https://example.com) [internal](#target) **bold**';
       inlineEditingInput.setSelectionRange(2, 2);
       inlineEditingInput.dispatchEvent(new Event('input', { bubbles: true }));
       const inlineEditingPreviewVisibility = getComputedStyle(inlineEditingPreview).visibility;
       inlineEditingEditor.destroy();
+
+      const bodyLinkEditor = await create('intro\n\n[external](https://example.com) [internal](#target)');
+      const bodyLinkButtonElements = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-link-open-btn'));
+      const bodyLinkButtons = bodyLinkButtonElements.map((button) => button.getAttribute('aria-label'));
+      const bodyOpenedHrefs: string[] = [];
+      const onBodyOpenLink = ((event: CustomEvent<{ href: string }>) => {
+        bodyOpenedHrefs.push(event.detail.href);
+      }) as EventListener;
+      app.addEventListener('meo-open-link', onBodyOpenLink);
+      bodyLinkButtonElements.forEach((button) => button.click());
+      app.removeEventListener('meo-open-link', onBodyOpenLink);
+      bodyLinkEditor.destroy();
 
       const positionEditor = await create('| A |\n| --- |\n| value |');
       const lineBefore = document.querySelector('.meo-md-html-table-line-number')?.textContent ?? '';
@@ -469,7 +497,12 @@ async function main() {
       return {
         editingPreviewText,
         inlineDecorationCount,
+        inlineLinkButtons,
+        inlineOpenedHrefs,
+        linkButtonsPreservedEditingCell,
         inlineEditingPreviewVisibility,
+        bodyLinkButtons,
+        bodyOpenedHrefs,
         lineBefore,
         lineAfter,
         lineNumberRightDelta,
@@ -508,8 +541,20 @@ async function main() {
 
     const failures: string[] = [];
     if (result.editingPreviewText !== 'asdx') failures.push(`editing preview remained ${JSON.stringify(result.editingPreviewText)}`);
-    if (result.inlineDecorationCount !== 4 || result.inlineEditingPreviewVisibility !== 'hidden') {
-      failures.push(`inline preview decorations stayed visible while editing: ${JSON.stringify({ count: result.inlineDecorationCount, visibility: result.inlineEditingPreviewVisibility })}`);
+    if (
+      result.inlineDecorationCount !== 5 ||
+      JSON.stringify(result.inlineLinkButtons) !== JSON.stringify(['Open link', 'Jump within document']) ||
+      JSON.stringify(result.inlineOpenedHrefs) !== JSON.stringify(['https://example.com', '#target']) ||
+      !result.linkButtonsPreservedEditingCell ||
+      result.inlineEditingPreviewVisibility !== 'hidden'
+    ) {
+      failures.push(`inline preview link controls were incomplete: ${JSON.stringify({ count: result.inlineDecorationCount, buttons: result.inlineLinkButtons, openedHrefs: result.inlineOpenedHrefs, preservedEditingCell: result.linkButtonsPreservedEditingCell, visibility: result.inlineEditingPreviewVisibility })}`);
+    }
+    if (
+      JSON.stringify(result.bodyLinkButtons) !== JSON.stringify(['Open link', 'Jump within document']) ||
+      JSON.stringify(result.bodyOpenedHrefs) !== JSON.stringify(['https://example.com', '#target'])
+    ) {
+      failures.push(`body link controls regressed: ${JSON.stringify({ buttons: result.bodyLinkButtons, openedHrefs: result.bodyOpenedHrefs })}`);
     }
     if (result.lineBefore !== '1' || result.lineAfter !== '2') failures.push(`table line number stayed ${result.lineBefore} -> ${result.lineAfter}`);
     if (result.lineNumberRightDelta === null || Math.abs(result.lineNumberRightDelta) > 0.5) {

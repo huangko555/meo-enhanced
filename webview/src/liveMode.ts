@@ -2,7 +2,7 @@ import { RangeSetBuilder, StateEffect, StateField, EditorState } from '@codemirr
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass } from '@codemirror/view';
-import { createElement, AlertCircle, CornerDownRight, Delete, ExternalLink } from 'lucide';
+import { createElement, AlertCircle, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
   isFenceMarker,
@@ -57,6 +57,7 @@ import { getLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRen
 import { getMermaidColonBlocks, rangeOverlapsMermaidColonBlock } from './helpers/mermaidColonBlocks';
 import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls';
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
+import { createOpenLinkButton } from './helpers/linkOpenButton';
 import { collectInlineFootnoteMarkerRanges } from './helpers/inlineFootnotes';
 import {
   collectLatexMathRanges,
@@ -604,26 +605,7 @@ class OpenLinkWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const isDocumentFragment = this.href.startsWith('#');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'meo-md-link-open-btn';
-    button.title = isDocumentFragment ? 'Jump within document' : 'Open link';
-    button.setAttribute('aria-label', button.title);
-    button.appendChild(createElement(isDocumentFragment ? CornerDownRight : ExternalLink, { 'aria-hidden': 'true' }));
-    button.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      button.dispatchEvent(new CustomEvent('meo-open-link', {
-        bubbles: true,
-        detail: { href: this.href }
-      }));
-    });
-    return button;
+    return createOpenLinkButton(this.href);
   }
 
   ignoreEvent(): boolean {

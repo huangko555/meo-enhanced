@@ -235,6 +235,7 @@ async function main() {
     const outlineJump = await page.evaluate(() => {
       const root = document.createElement('div');
       const editorWrapper = document.createElement('div');
+      editorWrapper.className = 'editor-wrapper';
       const outlineButton = document.createElement('button');
       root.append(editorWrapper, outlineButton);
       document.body.appendChild(root);
@@ -258,8 +259,14 @@ async function main() {
         getEditor: () => editorApi
       });
       editorWrapper.appendChild(outline.sidebar);
+      editorWrapper.style.setProperty('--meo-background', 'rgb(12, 34, 56)');
+      editorWrapper.style.setProperty('--meo-outline-background', 'rgb(1, 2, 3)');
       outline.setVisible(true);
       outline.refresh();
+      outline.setMode('fixed');
+      const fixedBackground = getComputedStyle(outline.sidebar).backgroundColor;
+      outline.setMode('floating');
+      const floatingBackground = getComputedStyle(outline.sidebar).backgroundColor;
       const visibleItems = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item.is-visible'));
       const visibleClassState = visibleItems.map((item) => ({
         title: item.title,
@@ -284,7 +291,15 @@ async function main() {
         .find((item) => item.title === '7.4 Target');
       target?.click();
       root.remove();
-      return { scrolledLines, visibleClassState, wheelAllowed, wheelBubbled, resizerWidth };
+      return {
+        fixedBackground,
+        floatingBackground,
+        scrolledLines,
+        visibleClassState,
+        wheelAllowed,
+        wheelBubbled,
+        resizerWidth
+      };
     });
     if (outlineJump.scrolledLines.at(-1) !== 20) {
       throw new Error(`Stale outline item jumped to nearby ordered-list line: ${JSON.stringify(outlineJump)}`);
@@ -301,6 +316,12 @@ async function main() {
     }
     if (outlineJump.resizerWidth !== '12px') {
       throw new Error(`Outline divider or scrollbar styling was not applied: ${JSON.stringify(outlineJump)}`);
+    }
+    if (
+      outlineJump.fixedBackground !== 'rgb(12, 34, 56)' ||
+      outlineJump.floatingBackground !== outlineJump.fixedBackground
+    ) {
+      throw new Error(`Floating outline background differed from fixed mode: ${JSON.stringify(outlineJump)}`);
     }
 
     console.log('editor marker and viewport stability browser tests passed');

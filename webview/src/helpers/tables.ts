@@ -12,6 +12,7 @@ import { normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
 import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
 import { getViewportController } from './viewportController';
+import { createOpenLinkButton } from './linkOpenButton';
 
 declare global {
   interface HTMLDivElement {
@@ -147,7 +148,7 @@ const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
 const tableDelimiterRegex = /^\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
-const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn';
+const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn';
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 class TableHeaderAlignmentOverrideValue extends RangeValue {
@@ -1100,6 +1101,7 @@ function appendTableInlinePreviewLink(parent, label, href, options: {
   if (href) el.setAttribute('data-meo-link-href', href);
   appendTableInlinePreviewNodes(el, label, { ...options, disableLinkParsers: true });
   parent.appendChild(el);
+  if (href) parent.appendChild(createOpenLinkButton(href));
 }
 
 function appendTableInlinePreviewImage(parent, altText, url) {

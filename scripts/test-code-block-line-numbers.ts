@@ -155,7 +155,11 @@ async function main() {
       const editor = (window as any).__codeBlockLineNumbersEditor;
       const selection = editor.view.state.selection.main;
       return {
+        anchor: selection.anchor,
+        from: selection.from,
+        head: selection.head,
         text: editor.view.state.doc.sliceString(selection.from, selection.to),
+        to: selection.to,
         controls: Array.from(document.querySelector('.meo-code-block-actions')?.children ?? [])
           .map((element) => element.textContent)
       };
@@ -177,6 +181,9 @@ async function main() {
     if (selectedCode.text !== expectedSelectedCode) {
       throw new Error(`Select all included the wrong fenced-code range: ${JSON.stringify(selectedCode.text)}`);
     }
+    if (selectedCode.head !== selectedCode.from || selectedCode.anchor !== selectedCode.to) {
+      throw new Error(`Select all left the cursor at the code block end: ${JSON.stringify(selectedCode)}`);
+    }
     if (JSON.stringify(selectedCode.controls) !== JSON.stringify(['all', 'copy'])) {
       throw new Error(`Unexpected code block action order: ${JSON.stringify(selectedCode.controls)}`);
     }
@@ -194,6 +201,29 @@ async function main() {
       });
     });
     await waitForFrames(page, 8);
+    const longBlockScrollBefore = await page.evaluate(() => (
+      (window as any).__codeBlockLineNumbersEditor.view.scrollDOM.scrollTop
+    ));
+    await page.click('.meo-code-block-actions .meo-select-all-code-btn');
+    await waitForFrames(page, 2);
+    const longBlockSelection = await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      const selection = editor.view.state.selection.main;
+      return {
+        anchor: selection.anchor,
+        from: selection.from,
+        head: selection.head,
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        to: selection.to
+      };
+    });
+    if (
+      longBlockSelection.head !== longBlockSelection.from ||
+      longBlockSelection.anchor !== longBlockSelection.to ||
+      Math.abs(longBlockSelection.scrollTop - longBlockScrollBefore) > 1
+    ) {
+      throw new Error(`Selecting a long code block moved away from its start: ${JSON.stringify({ longBlockScrollBefore, longBlockSelection })}`);
+    }
     await page.evaluate(() => {
       const editor = (window as any).__codeBlockLineNumbersEditor;
       editor.view.scrollDOM.scrollTop = editor.view.scrollDOM.scrollHeight;

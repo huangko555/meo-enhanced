@@ -662,7 +662,7 @@ class CodeBlockActionsWidget extends WidgetType {
     actions.append(
       createSelectAllCodeButton(() => {
         view.dispatch({
-          selection: { anchor: this.contentFrom, head: this.contentTo },
+          selection: { anchor: this.contentTo, head: this.contentFrom },
           scrollIntoView: true
         });
         view.focus();

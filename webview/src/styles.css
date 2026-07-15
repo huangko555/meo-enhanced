@@ -2455,6 +2455,7 @@ body {
   max-height: calc(100% - 24px);
   border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
+  background-color: var(--meo-background);
   box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
 }
 
