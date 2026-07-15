@@ -8,7 +8,7 @@ const flushFrames = async (animationFrames: FrameRequestCallback[]): Promise<voi
   }
 };
 
-const runScenario = async ({ userScroll = 0, laterLayoutShift = 0 } = {}) => {
+const runScenario = async ({ laterLayoutShift = 0 } = {}) => {
   const animationFrames: FrameRequestCallback[] = [];
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
@@ -23,7 +23,8 @@ const runScenario = async ({ userScroll = 0, laterLayoutShift = 0 } = {}) => {
     scrollHeight: 5000,
     scrollWidth: 900,
     clientHeight: 500,
-    clientWidth: 900
+    clientWidth: 900,
+    getBoundingClientRect: () => ({ top: 0, bottom: 500, height: 500 })
   };
   const anchorElement = {
     isConnected: true,
@@ -32,16 +33,25 @@ const runScenario = async ({ userScroll = 0, laterLayoutShift = 0 } = {}) => {
   const view = {
     dom: {},
     scrollDOM,
+    contentDOM: { querySelectorAll: () => [anchorElement] },
+    posAtDOM: () => 42,
+    lineBlockAt: () => ({ top: layoutTop }),
     requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => {
       write(read());
     }
   };
   const controller = new ViewportController(view as any, { attachInteractions: false });
 
-  layoutTop += 240;
-  controller.preserveElementAnchor({ element: anchorElement as any, top: 100 });
-  scrollDOM.scrollTop += userScroll;
-  if (userScroll !== 0) controller.markInteraction();
+  controller.preserveLayoutChange({
+    element: {
+      isConnected: true,
+      getBoundingClientRect: () => ({ top: -100, bottom: 0 })
+    } as any,
+    from: 1,
+    to: 2
+  }, () => {
+    layoutTop += 240;
+  });
   layoutTop += laterLayoutShift;
   await flushFrames(animationFrames);
 
@@ -55,10 +65,95 @@ if (preservedScrollTop !== 1280) {
   throw new Error(`Layout changes above the reading anchor moved the viewport: ${preservedScrollTop}`);
 }
 
-const userControlledScrollTop = await runScenario({ userScroll: -80, laterLayoutShift: 40 });
-if (userControlledScrollTop !== 920) {
-  throw new Error(`Layout correction overrode active user scrolling: ${userControlledScrollTop}`);
+const concurrentFrames: FrameRequestCallback[] = [];
+const concurrentMeasures: Array<{
+  read: () => unknown;
+  write: (value: unknown) => void;
+}> = [];
+const originalConcurrentRequestAnimationFrame = globalThis.requestAnimationFrame;
+globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+  concurrentFrames.push(callback);
+  return concurrentFrames.length;
+};
+let concurrentLayoutTop = 1100;
+let crossLayoutShift = 0;
+const concurrentScrollDOM = {
+  scrollTop: 1000,
+  scrollLeft: 0,
+  scrollHeight: 5000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, height: 500 })
+};
+const concurrentLine = {
+  getBoundingClientRect: () => ({
+    top: concurrentLayoutTop + crossLayoutShift - concurrentScrollDOM.scrollTop
+  })
+};
+const concurrentView = {
+  dom: {},
+  scrollDOM: concurrentScrollDOM,
+  contentDOM: { querySelectorAll: () => [concurrentLine] },
+  posAtDOM: () => 42,
+  lineBlockAtHeight: () => ({ from: 10, top: 900 + crossLayoutShift }),
+  lineBlockAt: (position: number) => ({
+    top: position === 10 ? 900 + crossLayoutShift : concurrentLayoutTop + crossLayoutShift
+  }),
+  requestMeasure: (measure?: { read: () => unknown; write: (value: unknown) => void }) => {
+    if (measure) concurrentMeasures.push(measure);
+  }
+};
+const flushConcurrentCycle = async (): Promise<void> => {
+  const batch = concurrentMeasures.splice(0);
+  const values = batch.map((measure) => measure.read());
+  batch.forEach((measure, index) => measure.write(values[index]));
+  await Promise.resolve();
+};
+const flushConcurrentWork = async (): Promise<void> => {
+  while (concurrentMeasures.length > 0 || concurrentFrames.length > 0) {
+    if (concurrentMeasures.length > 0) await flushConcurrentCycle();
+    while (concurrentFrames.length > 0) concurrentFrames.shift()?.(0);
+    await Promise.resolve();
+  }
+};
+const concurrentController = new ViewportController(concurrentView as any, { attachInteractions: false });
+const concurrentRegion = {
+  element: {
+    isConnected: true,
+    getBoundingClientRect: () => ({ top: -100, bottom: 0 })
+  } as any,
+  from: 1,
+  to: 2
+};
+concurrentController.preserveLayoutChange(concurrentRegion, () => { concurrentLayoutTop += 240; });
+await flushConcurrentCycle();
+concurrentController.preserveLayoutChange(concurrentRegion, () => { concurrentLayoutTop += 100; });
+await flushConcurrentWork();
+if (concurrentScrollDOM.scrollTop !== 1340) {
+  throw new Error(`Concurrent layout changes lost part of their compensation: ${concurrentScrollDOM.scrollTop}`);
 }
+
+concurrentScrollDOM.scrollTop = 1000;
+concurrentLayoutTop = 1100;
+crossLayoutShift = 0;
+concurrentController.restoreDocumentAnchor({ position: 10, lineOffset: 0 });
+concurrentController.preserveLayoutChange(concurrentRegion, () => { crossLayoutShift += 240; });
+await flushConcurrentWork();
+if (concurrentScrollDOM.scrollTop !== 1140) {
+  throw new Error(`Document and layout transactions competed at ${concurrentScrollDOM.scrollTop}`);
+}
+
+concurrentScrollDOM.scrollTop = 1000;
+crossLayoutShift = 0;
+concurrentController.preserveScrollPosition(() => { concurrentScrollDOM.scrollTop = 1300; });
+concurrentController.preserveLayoutChange(concurrentRegion, () => { crossLayoutShift += 240; });
+await flushConcurrentWork();
+if (concurrentScrollDOM.scrollTop !== 1240) {
+  throw new Error(`Scroll preservation failed to absorb a layout change: ${concurrentScrollDOM.scrollTop}`);
+}
+concurrentController.destroy();
+globalThis.requestAnimationFrame = originalConcurrentRequestAnimationFrame;
 
 const documentFrames: FrameRequestCallback[] = [];
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -150,6 +245,8 @@ const wheelView = {
   dom: wheelDom,
   scrollDOM: wheelScrollDOM,
   defaultLineHeight: 20,
+  lineBlockAtHeight: (height: number) => ({ from: 42, top: height }),
+  lineBlockAt: () => ({ top: 1000 }),
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
 };
 const wheelController = new ViewportController(wheelView as any);
@@ -168,16 +265,21 @@ wheelScrollDOM.dispatch('scroll', {});
 await Promise.resolve();
 await flushFrames(wheelFrames);
 
+wheelController.markInteraction();
+wheelScrollDOM.scrollTop = 1000;
+dispatchWheel(-80);
+wheelScrollDOM.scrollTop = 920;
+wheelScrollDOM.dispatch('scroll', {});
+wheelScrollDOM.scrollTop = 840;
+wheelScrollDOM.dispatch('scroll', {});
+await flushFrames(wheelFrames);
+if (wheelScrollDOM.scrollTop !== 840) {
+  throw new Error(`Native upward momentum rebounded to ${wheelScrollDOM.scrollTop}`);
+}
+
 wheelScrollDOM.scrollTop = 1300;
 dispatchWheel(-80);
 wheelScrollDOM.scrollTop = 1220;
-wheelController.preserveElementAnchor({
-  element: {
-    isConnected: true,
-    getBoundingClientRect: () => ({ top: 500 })
-  } as any,
-  top: 0
-});
 wheelScrollDOM.dispatch('scroll', {});
 await Promise.resolve();
 await flushFrames(wheelFrames);
@@ -185,25 +287,8 @@ await flushFrames(wheelFrames);
 if (defaultPrevented) {
   throw new Error('Viewport controller prevented native wheel scrolling');
 }
-if (wheelScrollDOM.scrollTop !== 840) {
-  throw new Error(`Continuous wheel gesture resumed from corrected layout position: ${wheelScrollDOM.scrollTop}`);
-}
-
-wheelController.markInteraction();
-wheelScrollDOM.scrollTop = 1000;
-const firstAnchor = {
-  isConnected: true,
-  getBoundingClientRect: () => ({ top: 1300 - wheelScrollDOM.scrollTop })
-};
-const laterAnchor = {
-  isConnected: true,
-  getBoundingClientRect: () => ({ top: 1800 - wheelScrollDOM.scrollTop })
-};
-wheelController.preserveElementAnchor({ element: firstAnchor as any, top: 100 });
-wheelController.preserveElementAnchor({ element: laterAnchor as any, top: 100 });
-await flushFrames(wheelFrames);
-if (wheelScrollDOM.scrollTop !== 1200) {
-  throw new Error(`Concurrent layout anchors did not preserve the original reading anchor: ${wheelScrollDOM.scrollTop}`);
+if (wheelScrollDOM.scrollTop !== 1220) {
+  throw new Error(`Viewport controller overrode native wheel scrolling: ${wheelScrollDOM.scrollTop}`);
 }
 
 wheelController.markInteraction();
@@ -214,8 +299,8 @@ wheelScrollDOM.scrollTop = 1080;
 wheelScrollDOM.dispatch('scroll', {});
 wheelScrollDOM.scrollTop = 1280;
 wheelController.reconcileAfterEditorUpdate();
-if (wheelScrollDOM.scrollTop !== 1080) {
-  throw new Error(`Touch gesture lost its authoritative target: ${wheelScrollDOM.scrollTop}`);
+if (wheelScrollDOM.scrollTop !== 1280) {
+  throw new Error(`Viewport controller overrode native touch scrolling: ${wheelScrollDOM.scrollTop}`);
 }
 wheelScrollDOM.dispatch('touchend', { touches: [] });
 await flushFrames(wheelFrames);

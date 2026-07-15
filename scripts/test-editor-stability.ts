@@ -257,6 +257,7 @@ async function main() {
         outlineButton,
         getEditor: () => editorApi
       });
+      editorWrapper.appendChild(outline.sidebar);
       outline.setVisible(true);
       outline.refresh();
       const visibleItems = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item.is-visible'));

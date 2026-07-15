@@ -3216,7 +3216,6 @@ body.outline-resizing {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: inherit;
 }
 
 .cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper {

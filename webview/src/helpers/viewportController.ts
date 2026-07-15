@@ -1,10 +1,5 @@
 import type { EditorView } from '@codemirror/view';
 
-export interface ViewportElementAnchor {
-  element: HTMLElement;
-  top: number;
-}
-
 export interface ViewportDocumentAnchor {
   position: number;
   lineOffset: number;
@@ -13,6 +8,12 @@ export interface ViewportDocumentAnchor {
 export interface ViewportScrollDelta {
   top?: number;
   left?: number;
+}
+
+export interface ViewportLayoutRegion {
+  element: HTMLElement;
+  from: number;
+  to: number;
 }
 
 interface ViewportControllerOptions {
@@ -30,6 +31,18 @@ interface ScrollTarget {
   left?: number;
 }
 
+interface LayoutAnchor {
+  position: number;
+  viewportOffset: number;
+}
+
+interface ActiveLayoutAnchor extends LayoutAnchor {
+  frameScheduled: boolean;
+  remainingFrames: number;
+  revision: number;
+  stableFrames: number;
+}
+
 interface StabilizeOptions {
   onSettled?: () => void;
   schedule?: 'immediate' | 'next-frame';
@@ -39,16 +52,9 @@ interface ActiveScrollTarget {
   changedSinceFrame: boolean;
   frameScheduled: boolean;
   generation: number;
-  intent: 'navigate' | 'preserve' | 'user-scroll';
   position: ScrollPosition;
   remainingFrames: number;
   stableFrames: number;
-}
-
-interface TouchGestureStart {
-  clientX: number;
-  clientY: number;
-  scroll: ScrollPosition;
 }
 
 const MAX_SETTLE_FRAMES = 8;
@@ -65,13 +71,14 @@ export class ViewportController {
   private generation = 0;
   private destroyed = false;
   private interactionsAttached = false;
-  private wheelTargetTop: number | null = null;
-  private wheelTargetLeft: number | null = null;
   private lastWheelAt = Number.NEGATIVE_INFINITY;
   private lastTouchMoveAt = Number.NEGATIVE_INFINITY;
-  private elementAnchorGeneration: number | null = null;
-  private touchGestureStart: TouchGestureStart | null = null;
+  private lastScrollDirection: -1 | 0 | 1 = 0;
+  private interactionGeneration = 0;
   private activeScrollTarget: ActiveScrollTarget | null = null;
+  private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
+  private anchorStabilizationGeneration: number | null = null;
+  private lastTouchY: number | null = null;
   private readonly getMode: () => 'live' | 'source';
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => this.scheduleActiveScrollFrame();
@@ -100,11 +107,62 @@ export class ViewportController {
   }
 
   markInteraction(): void {
+    this.interactionGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
-    this.resetWheelGesture();
+    this.activeLayoutAnchor = null;
+    this.anchorStabilizationGeneration = null;
+    this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
-    this.touchGestureStart = null;
+    this.lastTouchY = null;
+  }
+
+  preserveLayoutChange(region: ViewportLayoutRegion, mutate: () => void): void {
+    if (this.destroyed || !region.element.isConnected) {
+      mutate();
+      return;
+    }
+    this.view.requestMeasure({
+      read: () => {
+        const from = Math.min(region.from, region.to);
+        const to = Math.max(region.from, region.to);
+        const activeAnchor = this.activeLayoutAnchor;
+        return {
+          anchor: activeAnchor && (activeAnchor.position < from || activeAnchor.position > to)
+            ? { position: activeAnchor.position, viewportOffset: activeAnchor.viewportOffset }
+            : this.captureLayoutAnchor(region),
+          from,
+          interactionGeneration: this.interactionGeneration,
+          to
+        };
+      },
+      write: ({ anchor, from, interactionGeneration, to }) => {
+        mutate();
+        if (!anchor || interactionGeneration !== this.interactionGeneration) {
+          this.view.requestMeasure();
+          return;
+        }
+        if (this.hasActiveDocumentAnchorStabilization()) {
+          this.view.requestMeasure();
+          return;
+        }
+        if (this.activeScrollTarget?.generation === this.generation) {
+          this.generation += 1;
+          this.activeScrollTarget = null;
+        }
+        const activeAnchor = this.activeLayoutAnchor;
+        if (!activeAnchor || (activeAnchor.position >= from && activeAnchor.position <= to)) {
+          this.activeLayoutAnchor = {
+            ...anchor,
+            frameScheduled: false,
+            remainingFrames: MAX_SETTLE_FRAMES,
+            revision: 0,
+            stableFrames: 0
+          };
+        }
+        this.restartLayoutStabilization();
+      }
+    });
   }
 
   /** Reconciles after CodeMirror has finished its own height and scroll anchoring. */
@@ -124,7 +182,7 @@ export class ViewportController {
       left: current.left + (delta.left ?? 0)
     }, current);
     this.writeScrollPosition(target);
-    this.stabilizeScrollPosition(target, 'next-frame', 'navigate');
+    this.stabilizeScrollPosition(target);
   }
 
   captureDocumentAnchor(): ViewportDocumentAnchor {
@@ -174,9 +232,16 @@ export class ViewportController {
   }
 
   preserveScrollPosition(mutate: () => void): void {
-    const target = this.readScrollPosition();
+    const anchor = this.captureDocumentAnchor();
+    const left = this.view.scrollDOM.scrollLeft;
     mutate();
-    if (!this.isUserScrolling()) this.stabilizeScrollPosition(target, 'next-frame', 'preserve');
+    if (this.isUserScrolling()) return;
+    this.stabilize(() => ({
+      left,
+      top: Math.max(0, this.view.lineBlockAt(anchor.position).top + anchor.lineOffset)
+    }), {
+      schedule: 'next-frame'
+    });
   }
 
   preservePositionWhileMutation(position: number, mutate: () => void): void {
@@ -194,29 +259,12 @@ export class ViewportController {
     });
   }
 
-  preserveElementAnchor(anchor: ViewportElementAnchor): void {
-    if (this.isUserScrolling()) return;
-    if (this.elementAnchorGeneration === this.generation) return;
-    const generation = this.generation + 1;
-    this.elementAnchorGeneration = generation;
-    this.stabilize(() => {
-      if (!anchor.element.isConnected) return null;
-      return {
-        top: this.view.scrollDOM.scrollTop + anchor.element.getBoundingClientRect().top - anchor.top
-      };
-    }, {
-      onSettled: () => {
-        if (this.elementAnchorGeneration === generation) this.elementAnchorGeneration = null;
-      }
-    });
-  }
-
   destroy(): void {
     this.destroyed = true;
     this.generation += 1;
     this.activeScrollTarget = null;
-    this.elementAnchorGeneration = null;
-    this.resetWheelGesture();
+    this.activeLayoutAnchor = null;
+    this.anchorStabilizationGeneration = null;
     controllerByDom.delete(this.view.dom);
     if (this.interactionsAttached) {
       this.view.scrollDOM.removeEventListener('wheel', this.onWheel);
@@ -234,9 +282,14 @@ export class ViewportController {
   private stabilize(readTarget: () => ScrollTarget | null, options: StabilizeOptions = {}): void {
     const generation = ++this.generation;
     this.activeScrollTarget = null;
+    this.activeLayoutAnchor = null;
+    this.anchorStabilizationGeneration = generation;
     let attempts = 0;
     let stableFrames = 0;
     const finish = () => {
+      if (this.anchorStabilizationGeneration === generation) {
+        this.anchorStabilizationGeneration = null;
+      }
       if (options.onSettled) requestAnimationFrame(() => {
         if (!this.destroyed && generation === this.generation) options.onSettled?.();
       });
@@ -277,25 +330,20 @@ export class ViewportController {
     else measure();
   }
 
-  private stabilizeScrollPosition(
-    target: ScrollPosition,
-    schedule: 'after-scroll' | 'next-frame',
-    intent: ActiveScrollTarget['intent']
-  ): void {
+  private stabilizeScrollPosition(target: ScrollPosition): void {
     const generation = ++this.generation;
+    this.activeLayoutAnchor = null;
+    this.anchorStabilizationGeneration = null;
     const activeTarget: ActiveScrollTarget = {
       changedSinceFrame: false,
       frameScheduled: false,
       generation,
-      intent,
       position: target,
       remainingFrames: MAX_SETTLE_FRAMES,
       stableFrames: 0
     };
     this.activeScrollTarget = activeTarget;
-    // Native wheel/trackpad scrolling owns the first write. Its scroll event
-    // schedules reconciliation after the browser and CodeMirror have moved.
-    if (schedule === 'next-frame') this.scheduleActiveScrollFrame();
+    this.scheduleActiveScrollFrame();
   }
 
   private scheduleActiveScrollFrame(): void {
@@ -330,66 +378,63 @@ export class ViewportController {
     return false;
   }
 
+  private hasActiveDocumentAnchorStabilization(): boolean {
+    return this.anchorStabilizationGeneration === this.generation;
+  }
+
   private handleWheel(event: WheelEvent): void {
     if (this.getMode() !== 'live' || event.ctrlKey || (!event.deltaX && !event.deltaY)) {
       this.markInteraction();
       return;
     }
-
-    const wheelAt = performance.now();
-    const continuingGesture = wheelAt - this.lastWheelAt <= WHEEL_GESTURE_IDLE_MS;
+    this.generation += 1;
+    this.activeScrollTarget = null;
+    this.lastWheelAt = performance.now();
+    this.lastScrollDirection = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : this.lastScrollDirection;
     const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
       ? Math.max(16, this.view.defaultLineHeight)
       : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
         ? this.view.scrollDOM.clientHeight
         : 1;
     const current = this.readScrollPosition();
-    const target = this.resolveScrollTarget({
-      top: (continuingGesture && this.wheelTargetTop !== null ? this.wheelTargetTop : current.top) +
-        event.deltaY * deltaScale,
-      left: (continuingGesture && this.wheelTargetLeft !== null ? this.wheelTargetLeft : current.left) +
-        event.deltaX * deltaScale
-    }, current);
-
-    this.wheelTargetTop = target.top;
-    this.wheelTargetLeft = target.left;
-    this.lastWheelAt = wheelAt;
-    this.stabilizeScrollPosition(target, 'after-scroll', 'user-scroll');
+    const expected = this.resolveScrollTarget({ top: current.top + event.deltaY * deltaScale }, current);
+    this.mergeNativeScrollIntoLayoutAnchor(expected.top - current.top);
   }
 
   private handleTouchStart(event: TouchEvent): void {
     const touch = event.touches[0];
-    this.markInteraction();
-    if (this.getMode() !== 'live' || !touch) return;
+    if (this.getMode() !== 'live' || !touch) {
+      this.markInteraction();
+      return;
+    }
+    this.generation += 1;
+    this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
-    this.touchGestureStart = {
-      clientX: touch.clientX,
-      clientY: touch.clientY,
-      scroll: this.readScrollPosition()
-    };
+    this.lastTouchY = touch.clientY;
   }
 
   private handleTouchMove(event: TouchEvent): void {
     const touch = event.touches[0];
-    const start = this.touchGestureStart;
-    if (this.getMode() !== 'live' || !touch || !start) {
+    if (this.getMode() !== 'live' || !touch) {
       this.markInteraction();
       return;
     }
+    this.generation += 1;
+    this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
-    const current = this.readScrollPosition();
-    const target = this.resolveScrollTarget({
-      top: start.scroll.top + start.clientY - touch.clientY,
-      left: start.scroll.left + start.clientX - touch.clientX
-    }, current);
-    this.stabilizeScrollPosition(target, 'after-scroll', 'user-scroll');
+    if (this.lastTouchY !== null) {
+      const current = this.readScrollPosition();
+      const expected = this.resolveScrollTarget({ top: current.top + this.lastTouchY - touch.clientY }, current);
+      this.mergeNativeScrollIntoLayoutAnchor(expected.top - current.top);
+    }
+    this.lastTouchY = touch.clientY;
   }
 
   private finishTouchGesture(): void {
     this.generation += 1;
     this.activeScrollTarget = null;
-    this.touchGestureStart = null;
     this.lastTouchMoveAt = performance.now();
+    this.lastTouchY = null;
   }
 
   private readScrollPosition(): ScrollPosition {
@@ -397,6 +442,102 @@ export class ViewportController {
       top: this.view.scrollDOM.scrollTop,
       left: this.view.scrollDOM.scrollLeft
     };
+  }
+
+  private captureLayoutAnchor(region: ViewportLayoutRegion): LayoutAnchor | null {
+    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+    const regionRect = region.element.getBoundingClientRect();
+    if (regionRect.top >= scrollerRect.bottom) return null;
+
+    const from = Math.min(region.from, region.to);
+    const to = Math.max(region.from, region.to);
+    const candidates = Array.from(this.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
+      .map((line) => ({
+        position: this.view.posAtDOM(line),
+        top: line.getBoundingClientRect().top
+      }))
+      .filter((candidate) => (
+        (candidate.position < from || candidate.position > to) &&
+        candidate.top >= scrollerRect.top && candidate.top < scrollerRect.bottom
+      ));
+    if (candidates.length === 0) return null;
+
+    let anchor: (typeof candidates)[number] | undefined;
+    const scrollDirection = this.isUserScrolling() ? this.lastScrollDirection : 0;
+    if (regionRect.bottom <= scrollerRect.top) {
+      anchor = candidates[0];
+    } else if (scrollDirection < 0) {
+      anchor = candidates.find((candidate) => candidate.position > to) ?? candidates.at(-1);
+    } else if (scrollDirection > 0) {
+      anchor = candidates.slice().reverse().find((candidate) => candidate.position < from) ?? candidates[0];
+    } else {
+      const readingY = scrollerRect.top + scrollerRect.height * 0.25;
+      anchor = candidates.reduce((closest, candidate) => (
+        Math.abs(candidate.top - readingY) < Math.abs(closest.top - readingY) ? candidate : closest
+      ));
+    }
+    return anchor ? {
+      position: anchor.position,
+      viewportOffset: anchor.top - scrollerRect.top
+    } : null;
+  }
+
+  private restartLayoutStabilization(): void {
+    const activeAnchor = this.activeLayoutAnchor;
+    if (!activeAnchor) return;
+    activeAnchor.remainingFrames = MAX_SETTLE_FRAMES;
+    activeAnchor.stableFrames = 0;
+    activeAnchor.revision += 1;
+    this.scheduleLayoutMeasure();
+  }
+
+  private scheduleLayoutMeasure(): void {
+    const activeAnchor = this.activeLayoutAnchor;
+    if (!activeAnchor || activeAnchor.frameScheduled || activeAnchor.remainingFrames <= 0) return;
+    activeAnchor.frameScheduled = true;
+    this.view.requestMeasure({
+      read: () => {
+        const current = this.activeLayoutAnchor;
+        if (!current || current !== activeAnchor) return null;
+        return {
+          revision: current.revision,
+          target: this.resolveScrollTarget({
+            top: this.view.lineBlockAt(current.position).top - current.viewportOffset
+          }, this.readScrollPosition())
+        };
+      },
+      write: (measurement) => {
+        activeAnchor.frameScheduled = false;
+        if (!measurement || this.activeLayoutAnchor !== activeAnchor) return;
+        queueMicrotask(() => {
+          if (
+            this.activeLayoutAnchor !== activeAnchor ||
+            measurement.revision !== activeAnchor.revision
+          ) {
+            this.scheduleLayoutMeasure();
+            return;
+          }
+          activeAnchor.remainingFrames -= 1;
+          const changed = this.writeScrollPosition(measurement.target);
+          activeAnchor.stableFrames = changed ? 0 : activeAnchor.stableFrames + 1;
+          if (
+            activeAnchor.stableFrames >= REQUIRED_STABLE_FRAMES ||
+            activeAnchor.remainingFrames <= 0
+          ) {
+            this.activeLayoutAnchor = null;
+            return;
+          }
+          requestAnimationFrame(() => this.scheduleLayoutMeasure());
+        });
+      }
+    });
+  }
+
+  private mergeNativeScrollIntoLayoutAnchor(deltaTop: number): void {
+    const activeAnchor = this.activeLayoutAnchor;
+    if (!activeAnchor || Math.abs(deltaTop) <= POSITION_EPSILON) return;
+    activeAnchor.viewportOffset -= deltaTop;
+    this.restartLayoutStabilization();
   }
 
   private resolveScrollTarget(target: ScrollTarget, fallback: ScrollPosition): ScrollPosition {
@@ -417,14 +558,7 @@ export class ViewportController {
     return topChanged || leftChanged;
   }
 
-  private resetWheelGesture(): void {
-    this.wheelTargetTop = null;
-    this.wheelTargetLeft = null;
-    this.lastWheelAt = Number.NEGATIVE_INFINITY;
-  }
-
   private isUserScrolling(): boolean {
-    return this.activeScrollTarget?.intent === 'user-scroll' ||
-      performance.now() - Math.max(this.lastWheelAt, this.lastTouchMoveAt) <= WHEEL_GESTURE_IDLE_MS;
+    return performance.now() - Math.max(this.lastWheelAt, this.lastTouchMoveAt) <= WHEEL_GESTURE_IDLE_MS;
   }
 }

@@ -43,6 +43,11 @@ function createFixture(): string {
   lines[132] = '```typescript';
   for (let index = 133; index <= 220; index += 1) lines[index] = `const line${index - 132} = ${index - 132};`;
   lines[221] = '```';
+  lines[230] = '## Tall Mermaid';
+  lines[231] = '```mermaid';
+  lines[232] = 'flowchart TD';
+  lines[233] = '  Start --> Step18 --> End';
+  lines[234] = '```';
   return lines.join('\n');
 }
 
@@ -83,8 +88,8 @@ async function main() {
       window.mermaid = {
         initialize() {},
         async render(id, source) {
-          await new Promise(resolve => setTimeout(resolve, source.includes('Check') ? 80 : 5));
-          const height = source.includes('Step18') ? 640 : source.includes('sequenceDiagram') ? 260 : 120;
+          await new Promise(resolve => setTimeout(resolve, source.includes('Step18') ? 650 : source.includes('Check') ? 80 : 5));
+          const height = source.includes('Step18') ? 3000 : source.includes('sequenceDiagram') ? 260 : 120;
           return { svg: '<svg width="800" height="' + height + '" viewBox="0 0 800 ' + height + '"></svg>' };
         }
       };
@@ -152,12 +157,29 @@ async function main() {
 
     await page.mouse.move(450, 260);
     const wheelScrollTops: number[] = [];
+    const wheelVisualPositions: number[] = [];
     for (let index = 0; index < 8; index += 1) {
       await page.mouse.wheel({ deltaY: -80 });
       await waitForFrames(page, 1);
       wheelScrollTops.push(await page.evaluate(() =>
         document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!.scrollTop
       ));
+      wheelVisualPositions.push(await page.evaluate(() => {
+        const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+        const scrollerRect = scroller.getBoundingClientRect();
+        const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.bottom > scrollerRect.top && rect.top < scrollerRect.bottom;
+        });
+        const text = line?.textContent ?? '';
+        const stableMatch = text.match(/^stable line (\d+)/);
+        const codeMatch = text.match(/^const line(\d+)/);
+        const documentLine = stableMatch ? Number(stableMatch[1]) : codeMatch ? 133 + Number(codeMatch[1]) : 0;
+        const lineHeight = line ? Number.parseFloat(getComputedStyle(line).lineHeight) : 0;
+        return documentLine > 0 && lineHeight > 0
+          ? documentLine * lineHeight - line!.getBoundingClientRect().top
+          : Number.NaN;
+      }));
     }
     await new Promise((resolve) => setTimeout(resolve, 180));
     await waitForFrames(page);
@@ -170,8 +192,8 @@ async function main() {
     const beforeLine = lineNumber(before.text);
     const afterUpdateLine = lineNumber(afterUpdate.text);
     const afterThemeLine = lineNumber(afterTheme.text);
-    const wheelMovedOnlyUp = wheelScrollTops.every((scrollTop, index) => (
-      scrollTop <= (index === 0 ? afterTheme.scrollTop : wheelScrollTops[index - 1]) + 0.5
+    const wheelMovedOnlyUp = wheelVisualPositions.every((position, index) => (
+      Number.isFinite(position) && (index === 0 || position <= wheelVisualPositions[index - 1] + 1)
     ));
     if (
       beforeLine === null || afterUpdateLine === null || afterThemeLine === null ||
@@ -181,7 +203,63 @@ async function main() {
       Math.abs((afterTheme.top ?? 0) - (afterUpdate.top ?? 0)) > 1 ||
       !wheelMovedOnlyUp
     ) {
-      throw new Error(`Implicit webview updates moved the visual anchor: ${JSON.stringify({ before, afterUpdate, afterTheme, wheelScrollTops, afterUpwardScroll })}`);
+      throw new Error(`Implicit webview updates moved the visual anchor: ${JSON.stringify({ before, afterUpdate, afterTheme, wheelScrollTops, wheelVisualPositions, afterUpwardScroll })}`);
+    }
+
+    const tallMermaidBefore = await page.evaluate(async () => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      scroller.scrollTop = scroller.scrollHeight;
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const pending = document.querySelector<HTMLElement>('.meo-mermaid-loading')
+          ?.closest<HTMLElement>('.meo-mermaid-block') ?? null;
+        if (pending) {
+          const viewportTop = scroller.getBoundingClientRect().top;
+          scroller.scrollTop += pending.getBoundingClientRect().top - viewportTop - 80;
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const pendingBottom = pending.getBoundingClientRect().bottom;
+          const anchor = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+            .find((line) => (
+              line.getBoundingClientRect().top >= pendingBottom &&
+              Boolean(line.textContent?.trim()) && line.textContent?.trim() !== '```'
+            ));
+          return {
+            text: anchor?.textContent ?? null,
+            top: anchor?.getBoundingClientRect().top ?? null,
+            blockTop: pending.getBoundingClientRect().top
+          };
+        }
+        scroller.scrollTop = Math.max(0, scroller.scrollTop - 120);
+      }
+      return null;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const tallMermaidWheelDelta = -20;
+    const tallMermaidWheelCount = 6;
+    for (let index = 0; index < tallMermaidWheelCount; index += 1) {
+      await page.mouse.wheel({ deltaY: tallMermaidWheelDelta });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitForFrames(page);
+    const tallMermaidAfter = await page.evaluate((anchorText) => {
+      const anchor = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === anchorText);
+      return {
+        text: anchor?.textContent ?? null,
+        top: anchor?.getBoundingClientRect().top ?? null,
+        rendered: Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]'))
+      };
+    }, tallMermaidBefore?.text ?? null);
+    if (
+      !tallMermaidBefore || tallMermaidBefore.top === null ||
+      !tallMermaidAfter.rendered || tallMermaidAfter.top === null ||
+      Math.abs(
+        tallMermaidAfter.top - tallMermaidBefore.top +
+        tallMermaidWheelDelta * tallMermaidWheelCount
+      ) > 1
+    ) {
+      throw new Error(`Tall Mermaid displaced the visible reading anchor: ${JSON.stringify({ tallMermaidBefore, tallMermaidAfter })}`);
     }
     console.log('webview viewport checks passed');
   } finally {

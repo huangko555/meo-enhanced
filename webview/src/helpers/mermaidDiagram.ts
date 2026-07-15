@@ -26,6 +26,7 @@ let mermaidRuntimePromise: Promise<MermaidRuntime> | null = null;
 const MERMAID_CACHE_LIMIT = 100;
 const mermaidCache = new Map<string, MermaidResult>();
 const mermaidRenderInFlight = new Map<string, Promise<MermaidResult>>();
+const mermaidEstimatedHeightCache = new Map<string, number>();
 const mermaidPreviewHeightCache = new WeakMap<HTMLElement, Map<string, number>>();
 let mermaidIdCounter = 0;
 const MERMAID_MATH_CLASS = 'meoMath';
@@ -52,8 +53,18 @@ const MERMAID_DISPLAY_MATH_THEME_CSS =
   '.katex-display{margin:0 !important;}' +
   '.katex{line-height:1 !important;}';
 
-function mermaidPreviewHeightCacheKey(diagramText: string, themeSignature: string, startLine: number): string {
-  return `${startLine}\n${themeSignature}\n${diagramText}`;
+function mermaidLayoutSignature(content: HTMLElement): string {
+  const style = getComputedStyle(content);
+  return `${content.clientWidth}|${style.fontSize}|${style.lineHeight}|${globalThis.devicePixelRatio ?? 1}`;
+}
+
+function mermaidPreviewHeightCacheKey(
+  diagramText: string,
+  themeSignature: string,
+  startLine: number,
+  layoutSignature: string
+): string {
+  return `${startLine}\n${themeSignature}\n${layoutSignature}\n${diagramText}`;
 }
 
 export function getCachedMermaidPreviewHeight(
@@ -61,7 +72,12 @@ export function getCachedMermaidPreviewHeight(
   diagramText: string,
   startLine: number
 ): number | null {
-  const key = mermaidPreviewHeightCacheKey(diagramText, getMermaidThemeConfig().signature, startLine);
+  const key = mermaidPreviewHeightCacheKey(
+    diagramText,
+    getMermaidThemeConfig().signature,
+    startLine,
+    mermaidLayoutSignature(view.contentDOM)
+  );
   return mermaidPreviewHeightCache.get(view.dom)?.get(key) ?? null;
 }
 
@@ -344,21 +360,60 @@ async function initMermaid() {
   return runtime;
 }
 
-function getCachedMermaidResult(diagramText) {
-  const cached = mermaidCache.get(diagramText);
+function getCachedMermaidResult(cacheKey: string): MermaidResult | null {
+  const cached = mermaidCache.get(cacheKey);
   if (!cached) {
     return null;
   }
-  mermaidCache.delete(diagramText);
-  mermaidCache.set(diagramText, cached);
+  mermaidCache.delete(cacheKey);
+  mermaidCache.set(cacheKey, cached);
   return cached;
 }
 
-function cacheMermaidResult(diagramText, result) {
-  if (mermaidCache.has(diagramText)) {
-    mermaidCache.delete(diagramText);
+function mermaidResultCacheKey(diagramText: string, themeSignature = getMermaidThemeConfig().signature): string {
+  return `${themeSignature}\n${diagramText}`;
+}
+
+function currentMermaidContentWidth(element?: HTMLElement): number {
+  const ownContent = element?.closest<HTMLElement>('.cm-content');
+  if (ownContent && ownContent.clientWidth > 0) return ownContent.clientWidth;
+  return Array.from(
+    document.querySelectorAll<HTMLElement>('.editor-host > .cm-editor .cm-content')
+  ).find((content) => content.clientWidth > 0)?.clientWidth ?? 0;
+}
+
+function mermaidEstimatedHeightKey(resultCacheKey: string, contentWidth: number): string {
+  return `${resultCacheKey}\nwidth:${Math.max(0, Math.round(contentWidth))}`;
+}
+
+function cacheMermaidEstimatedHeight(cacheKey: string, height: number): void {
+  mermaidEstimatedHeightCache.delete(cacheKey);
+  mermaidEstimatedHeightCache.set(cacheKey, height);
+  if (mermaidEstimatedHeightCache.size > MERMAID_CACHE_LIMIT) {
+    const oldestKey = mermaidEstimatedHeightCache.keys().next().value;
+    if (oldestKey) mermaidEstimatedHeightCache.delete(oldestKey);
   }
-  mermaidCache.set(diagramText, result);
+}
+
+function estimateCachedMermaidHeight(svgContent: string | undefined, contentWidth: number): number {
+  if (!svgContent) return -1;
+  const svgTag = svgContent.match(/<svg\b[^>]*>/i)?.[0] ?? '';
+  const width = Number(svgTag.match(/\bwidth=["']([\d.]+)(?:px)?["']/i)?.[1]);
+  const height = Number(svgTag.match(/\bheight=["']([\d.]+)(?:px)?["']/i)?.[1]);
+  const viewBox = svgTag.match(/\bviewBox=["'][\d.-]+[ ,]+[\d.-]+[ ,]+([\d.]+)[ ,]+([\d.]+)["']/i);
+  const intrinsicWidth = width > 0 ? width : Number(viewBox?.[1]);
+  const intrinsicHeight = height > 0 ? height : Number(viewBox?.[2]);
+  if (!(intrinsicWidth > 0) || !(intrinsicHeight > 0)) return -1;
+  const availableWidth = Math.max(0, contentWidth - 24);
+  const scale = availableWidth > 0 ? Math.min(1, availableWidth / intrinsicWidth) : 1;
+  return intrinsicHeight * scale + 24;
+}
+
+function cacheMermaidResult(cacheKey: string, result: MermaidResult): void {
+  if (mermaidCache.has(cacheKey)) {
+    mermaidCache.delete(cacheKey);
+  }
+  mermaidCache.set(cacheKey, result);
 
   if (mermaidCache.size <= MERMAID_CACHE_LIMIT) {
     return;
@@ -373,7 +428,7 @@ function cacheMermaidResult(diagramText, result) {
 async function renderMermaidDiagram(diagramText: string): Promise<MermaidResult> {
   const normalizedDiagramText = normalizeMermaidDiagramText(diagramText);
   const { signature } = getMermaidThemeConfig();
-  const cacheKey = `${signature}\n${diagramText}`;
+  const cacheKey = mermaidResultCacheKey(diagramText, signature);
   const cached = getCachedMermaidResult(cacheKey);
   if (cached) {
     return cached;
@@ -408,6 +463,7 @@ async function renderMermaidDiagram(diagramText: string): Promise<MermaidResult>
 export function refreshMermaidTheme(): void {
   mermaidCache.clear();
   mermaidRenderInFlight.clear();
+  mermaidEstimatedHeightCache.clear();
   mermaidInitialized = false;
   mermaidThemeSignature = '';
 }
@@ -505,6 +561,7 @@ export class MermaidDiagramWidget extends WidgetType {
   themeSignature: string;
   cachePreviewHeight: boolean;
   previewResizeObserver: ResizeObserver | null;
+  measuredHeight: number;
 
   constructor(
     diagramText: string,
@@ -534,6 +591,15 @@ export class MermaidDiagramWidget extends WidgetType {
     this.themeSignature = getMermaidThemeConfig().signature;
     this.cachePreviewHeight = options.cachePreviewHeight ?? true;
     this.previewResizeObserver = null;
+    const resultCacheKey = mermaidResultCacheKey(this.diagramText, this.themeSignature);
+    const contentWidth = currentMermaidContentWidth();
+    this.measuredHeight = mermaidEstimatedHeightCache.get(
+      mermaidEstimatedHeightKey(resultCacheKey, contentWidth)
+    ) ?? estimateCachedMermaidHeight(mermaidCache.get(resultCacheKey)?.svg, contentWidth);
+  }
+
+  get estimatedHeight(): number {
+    return this.measuredHeight;
   }
 
   eq(other: WidgetType): boolean {
@@ -561,10 +627,24 @@ export class MermaidDiagramWidget extends WidgetType {
       container.classList.add('meo-mermaid-math-block');
     }
     if (this.cachePreviewHeight && view && typeof ResizeObserver !== 'undefined') {
-      const cacheKey = mermaidPreviewHeightCacheKey(this.diagramText, this.themeSignature, this.startLine);
       this.previewResizeObserver = new ResizeObserver(() => {
         const height = container.getBoundingClientRect().height;
-        if (height > 0) {
+        if (height > 0 && container.querySelector('.meo-mermaid-svg-wrapper')) {
+          const content = container.closest<HTMLElement>('.cm-content') ?? view.contentDOM;
+          const cacheKey = mermaidPreviewHeightCacheKey(
+            this.diagramText,
+            this.themeSignature,
+            this.startLine,
+            mermaidLayoutSignature(content)
+          );
+          this.measuredHeight = height;
+          cacheMermaidEstimatedHeight(
+            mermaidEstimatedHeightKey(
+              mermaidResultCacheKey(this.diagramText, this.themeSignature),
+              currentMermaidContentWidth(container)
+            ),
+            height
+          );
           let viewCache = mermaidPreviewHeightCache.get(view.dom);
           if (!viewCache) {
             viewCache = new Map();
@@ -583,7 +663,7 @@ export class MermaidDiagramWidget extends WidgetType {
       this.previewResizeObserver.observe(container);
     }
 
-    const cached = getCachedMermaidResult(this.diagramText);
+    const cached = getCachedMermaidResult(mermaidResultCacheKey(this.diagramText, this.themeSignature));
     if (cached) {
       if (cached.error) {
         this.renderError(container, cached.error);
@@ -612,22 +692,19 @@ export class MermaidDiagramWidget extends WidgetType {
         showResult();
         return;
       }
-      view.requestMeasure({
-        read(editorView) {
-          const scrollerRect = editorView.scrollDOM.getBoundingClientRect();
-          if (container.getBoundingClientRect().top >= scrollerRect.top) return null;
-          const anchor = Array.from(editorView.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
-            .find((line) => line.getBoundingClientRect().top >= scrollerRect.top);
-          return anchor ? { anchor, top: anchor.getBoundingClientRect().top } : null;
-        },
-        write: (anchor) => {
-          showResult();
-          if (anchor) {
-            getViewportController(view)?.preserveElementAnchor({ element: anchor.anchor, top: anchor.top });
-          }
-          else view.requestMeasure();
-        }
-      });
+      const controller = getViewportController(view);
+      if (!controller || this.startLine <= 0 || this.endLine <= 0) {
+        showResult();
+        view.requestMeasure();
+        return;
+      }
+      const startLine = view.state.doc.line(Math.min(this.startLine, view.state.doc.lines));
+      const endLine = view.state.doc.line(Math.min(this.endLine, view.state.doc.lines));
+      controller.preserveLayoutChange({
+        element: container,
+        from: startLine.from,
+        to: endLine.to
+      }, showResult);
     })();
 
     return container;

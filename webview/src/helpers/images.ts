@@ -526,24 +526,17 @@ export class ImageWidget extends WidgetType {
       return;
     }
 
-    view.requestMeasure({
-      read(editorView) {
-        const scrollerRect = editorView.scrollDOM.getBoundingClientRect();
-        const imageRect = container.getBoundingClientRect();
-        if (imageRect.top >= scrollerRect.top) return null;
-        const anchor = Array.from(editorView.contentDOM.querySelectorAll('.cm-line'))
-          .find((line) => line.getBoundingClientRect().top >= scrollerRect.top) as HTMLElement | undefined;
-        return anchor ? { anchor, top: anchor.getBoundingClientRect().top } : null;
-      },
-      write: (anchor) => {
-        show();
-        if (!anchor) {
-          view.requestMeasure();
-          return;
-        }
-        getViewportController(view)?.preserveElementAnchor({ element: anchor.anchor, top: anchor.top });
-      },
-    });
+    const controller = getViewportController(view);
+    if (controller && this.sourceFrom !== null) {
+      controller.preserveLayoutChange({
+        element: container,
+        from: this.sourceFrom,
+        to: this.sourceFrom
+      }, show);
+      return;
+    }
+    show();
+    view.requestMeasure();
   }
 
   createImageControls(img: HTMLImageElement): HTMLElement {
