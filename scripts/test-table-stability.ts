@@ -644,6 +644,32 @@ async function main() {
     }
     if (result.navigationScans > 0) failures.push(`search navigation rescanned the full document ${result.navigationScans} times`);
 
+    const waitForPageFrames = (count = 1) => page.evaluate(async (frameCount) => {
+      for (let frame = 0; frame < frameCount; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    }, count);
+    const clickPageElement = async (selector: string, index = 0): Promise<string | null> => {
+      const elements = await page.$$(selector);
+      const element = elements[index];
+      if (!element) return `${selector} element ${index} was missing`;
+      try {
+        await element.click();
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    const wheelEditorToTop = async (): Promise<string | null> => {
+      const scroller = await page.$('.cm-scroller');
+      const box = await scroller?.boundingBox();
+      if (!box) return 'editor scroller was missing';
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel({ deltaY: -10_000 });
+      await waitForPageFrames(4);
+      return null;
+    };
+
     await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;
       const app = document.getElementById('app')!;
@@ -670,18 +696,7 @@ async function main() {
       document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus();
     });
 
-    const clickOpenButton = async (selector: string, index: number): Promise<string | null> => {
-      const buttons = await page.$$(selector);
-      const button = buttons[index];
-      if (!button) return `button ${index} was missing`;
-      try {
-        await button.click();
-        return null;
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-      }
-    };
-    const tableInternalFromCellClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 1);
+    const tableInternalFromCellClickError = await clickPageElement('tbody .meo-md-link-open-btn', 1);
     const tableInternalFromCellSamples = await page.evaluate(async () => {
       const editor = (window as any).__linkInteractionEditor;
       const samples: Array<{
@@ -720,19 +735,16 @@ async function main() {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus();
     });
-    const tableExternalClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 0);
-    const bodyExternalClickError = await clickOpenButton('.meo-md-link-open-btn', 0);
+    const tableExternalClickError = await clickPageElement('tbody .meo-md-link-open-btn');
+    const bodyExternalClickError = await clickPageElement('.meo-md-link-open-btn');
     await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
     const bodyExternalExitedTable = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
       return !(document.activeElement instanceof HTMLTextAreaElement) &&
         !editor.view.dom.classList.contains('meo-table-interaction-active');
     });
-    const bodyLinks = await page.$$('.meo-md-link');
-    const bodyTitleClickError = bodyLinks[0]
-      ? await bodyLinks[0].click().then(() => null, (error) => error instanceof Error ? error.message : String(error))
-      : 'body link title was missing';
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    const bodyTitleClickError = await clickPageElement('.meo-md-link');
+    await waitForPageFrames();
     const bodyTitleResult = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
       const firstBodyLine = document.querySelector<HTMLElement>('.cm-content > .cm-line');
@@ -741,11 +753,8 @@ async function main() {
         selectionHead: editor.view.state.selection.main.head
       };
     });
-    const tableInternalClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 1);
-    await page.evaluate(async () => {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    });
+    const tableInternalClickError = await clickPageElement('tbody .meo-md-link-open-btn', 1);
+    await waitForPageFrames(2);
     const tableInternalTargetState = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
       const selectionHead = editor.view.state.selection.main.head;
@@ -757,36 +766,17 @@ async function main() {
         targetViewportOffset: targetCoords ? targetCoords.top - viewportRect.top : null
       };
     });
-    const scroller = await page.$('.cm-scroller');
-    const scrollerBox = await scroller?.boundingBox();
-    if (scrollerBox) {
-      await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
-      await page.mouse.wheel({ deltaY: -10_000 });
-    }
-    await page.evaluate(async () => {
-      for (let frame = 0; frame < 4; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-    });
-    const bodyInternalClickError = await clickOpenButton('.meo-md-link-open-btn', 1);
+    const firstWheelError = await wheelEditorToTop();
+    const bodyInternalClickError = await clickPageElement('.meo-md-link-open-btn', 1);
     const bodyInternalTargetLine = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
       return editor.view.state.doc.lineAt(editor.view.state.selection.main.head).text;
     });
-    if (scrollerBox) {
-      await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
-      await page.mouse.wheel({ deltaY: -10_000 });
-    }
-    await page.evaluate(async () => {
-      for (let frame = 0; frame < 4; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-    });
-    const reentryCell = await page.$('tbody td[data-table-row="1"][data-table-col="1"] .meo-md-html-table-cell-preview');
-    const reentryClickError = reentryCell
-      ? await reentryCell.click().then(() => null, (error) => error instanceof Error ? error.message : String(error))
-      : 'reentry table cell was missing';
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    const secondWheelError = await wheelEditorToTop();
+    const reentryClickError = await clickPageElement(
+      'tbody td[data-table-row="1"][data-table-col="1"] .meo-md-html-table-cell-preview'
+    );
+    await waitForPageFrames();
     const tableReentryState = await page.evaluate(() => {
       const editor = (window as any).__linkInteractionEditor;
       const active = document.activeElement;
@@ -824,7 +814,7 @@ async function main() {
       }
       document.querySelectorAll<HTMLTextAreaElement>('tbody textarea')[1]!.focus();
     });
-    const immediateJumpClickError = await clickOpenButton('tbody .meo-md-link-open-btn', 0);
+    const immediateJumpClickError = await clickPageElement('tbody .meo-md-link-open-btn');
     const immediateJumpState = await page.evaluate(() => {
       const editor = (window as any).__immediateReentryEditor;
       const domSelection = window.getSelection();
@@ -842,14 +832,10 @@ async function main() {
         domSelectionInsideEditor: Boolean(domSelection?.focusNode && editor.view.contentDOM.contains(domSelection.focusNode))
       };
     });
-    const immediateReentryCell = await page.$('tbody td[data-table-row="1"][data-table-col="1"] .meo-md-html-table-cell-preview');
-    const immediateReentryClickError = immediateReentryCell
-      ? await immediateReentryCell.click().then(() => null, (error) => error instanceof Error ? error.message : String(error))
-      : 'immediate reentry table cell was missing';
-    await page.evaluate(async () => {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    });
+    const immediateReentryClickError = await clickPageElement(
+      'tbody td[data-table-row="1"][data-table-col="1"] .meo-md-html-table-cell-preview'
+    );
+    await waitForPageFrames(2);
     const immediateReentryState = await page.evaluate(() => {
       const editor = (window as any).__immediateReentryEditor;
       const active = document.activeElement;
@@ -869,6 +855,8 @@ async function main() {
       bodyExternalClickError,
       bodyInternalClickError,
       bodyTitleClickError,
+      firstWheelError,
+      secondWheelError,
       reentryClickError,
       immediateJumpClickError,
       immediateReentryClickError

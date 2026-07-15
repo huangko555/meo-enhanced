@@ -2275,7 +2275,32 @@ class HtmlTableWidget extends WidgetType {
     const getWrap = () => this.domRefs?.wrap ?? table;
     const getContainer = () => this.domRefs?.container ?? getWrap();
     let pendingOutsidePointerId: number | null = null;
-    let pendingOutsideCleanup: (() => void) | null = null;
+    let outsidePointerExitTimer: number | null = null;
+
+    const hasActiveTableInteraction = () => {
+      const active = document.activeElement;
+      const shell = getContainer().closest('.meo-md-html-table-shell');
+      return (
+        (active instanceof HTMLElement && table.contains(active)) ||
+        this.selectedCellCount() > 0 ||
+        Boolean(shell?.classList.contains('is-interacting'))
+      );
+    };
+
+    const exitAfterOutsidePointer = () => {
+      const wrap = getWrap();
+      if (this.selectedCellCount() > 1) {
+        this.exitTableInteraction(wrap);
+        return;
+      }
+
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && table.contains(active)) {
+        active.blur();
+        return;
+      }
+      this.exitTableInteraction(wrap);
+    };
 
     const onPointerDown = (event) => {
       if (event.button !== 0) return;
@@ -2385,27 +2410,8 @@ class HtmlTableWidget extends WidgetType {
       }
       const active = document.activeElement;
       if (isOutsideTable) {
-        const shell = container.closest('.meo-md-html-table-shell');
-        const hasActiveInteraction = (
-          (active instanceof HTMLElement && table.contains(active)) ||
-          this.selectedCellCount() > 0 ||
-          shell?.classList.contains('is-interacting')
-        );
-        if (!hasActiveInteraction) return;
+        if (!hasActiveTableInteraction()) return;
         pendingOutsidePointerId = event.pointerId;
-        pendingOutsideCleanup = () => {
-          if (this.selectedCellCount() > 1) {
-            this.exitTableInteraction(wrap);
-            return;
-          }
-
-          const currentActive = document.activeElement;
-          if (currentActive instanceof HTMLElement && table.contains(currentActive)) {
-            currentActive.blur();
-          } else {
-            this.exitTableInteraction(wrap);
-          }
-        };
         return;
       }
       if (!(active instanceof HTMLElement) || !table.contains(active)) return;
@@ -2420,17 +2426,18 @@ class HtmlTableWidget extends WidgetType {
         }
         return;
       }
-
     };
 
     const onDocumentPointerEnd = (event: PointerEvent) => {
-      if (event.pointerId !== pendingOutsidePointerId || !pendingOutsideCleanup) return;
-      const cleanup = pendingOutsideCleanup;
+      if (event.pointerId !== pendingOutsidePointerId) return;
       pendingOutsidePointerId = null;
-      pendingOutsideCleanup = null;
       // The browser dispatches click after pointerup. Delay the table commit until
       // that click reaches its original target so re-rendering cannot invalidate it.
-      setTimeout(cleanup, 0);
+      if (outsidePointerExitTimer !== null) window.clearTimeout(outsidePointerExitTimer);
+      outsidePointerExitTimer = window.setTimeout(() => {
+        outsidePointerExitTimer = null;
+        exitAfterOutsidePointer();
+      }, 0);
     };
 
     table.addEventListener('pointerdown', onPointerDown);
@@ -2463,6 +2470,11 @@ class HtmlTableWidget extends WidgetType {
       document.removeEventListener('pointerup', onDocumentPointerEnd, true);
       document.removeEventListener('pointercancel', onDocumentPointerEnd, true);
       document.removeEventListener('meo-commit-table-edits', onCommitTableEdits);
+      pendingOutsidePointerId = null;
+      if (outsidePointerExitTimer !== null) {
+        window.clearTimeout(outsidePointerExitTimer);
+        outsidePointerExitTimer = null;
+      }
     });
   }
 
