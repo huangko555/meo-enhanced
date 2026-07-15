@@ -55,7 +55,7 @@ import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type Editor
 import { focusMermaidEditingOffset, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 import { focusLatexMathEditingOffset, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
-import { markViewportInteraction } from './helpers/viewportStability';
+import { ViewportController } from './helpers/viewportController';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -289,9 +289,7 @@ export function createEditor({
   let onWidgetActivateImage = null;
   let onTableSelectionChange = null;
   let onScroll = null;
-  let onViewportInteraction = null;
-  let viewportInteractionGeneration = 0;
-  let wheelScrollGeneration = 0;
+  let viewportController: ViewportController;
   let onWindowPointerUp = null;
   let onWindowPointerCancel = null;
   let onWindowBlur = null;
@@ -305,12 +303,6 @@ export function createEditor({
   let editableLinkHoverPointerActive = false;
   let editableLinkHoverPosition = null;
   let editableLinkHoverMode = currentMode;
-  const normalizeTopLineOffset = (value) => {
-    if (!Number.isFinite(value)) {
-      return 0;
-    }
-    return Math.max(0, Number(value));
-  };
   const vimExtensionsForState = () => (vimModeEnabled ? vim() : []);
   const getLineStartOffset = (docText, targetLineNumber) => {
     const targetLine = Math.max(1, Math.floor(targetLineNumber));
@@ -346,6 +338,7 @@ export function createEditor({
     if (href.startsWith('#')) {
       const targetPosition = findDocumentFragmentPosition(editorView.state, href);
       if (targetPosition !== null) {
+        viewportController?.markInteraction();
         editorView.dispatch({
           selection: { anchor: targetPosition },
           effects: EditorView.scrollIntoView(targetPosition, { y: 'start' })
@@ -1394,7 +1387,7 @@ export function createEditor({
           if (!measure || currentMode !== 'live' || revealToken !== pendingLiveSearchRevealToken) {
             return;
           }
-          editorView.scrollDOM.scrollTop = measure.targetTop;
+          viewportController.navigateBy({ top: measure.targetTop - editorView.scrollDOM.scrollTop });
         }
       });
     });
@@ -1424,6 +1417,7 @@ export function createEditor({
   };
 
   const selectSearchMatch = (from, to, { focusEditor = true } = {}) => {
+    viewportController.markInteraction();
     view.dispatch({
       selection: { anchor: from, head: to },
       effects: [
@@ -1449,6 +1443,7 @@ export function createEditor({
       : { y: align === 'top' ? 'start' as const : align === 'nearest' ? 'nearest' as const : 'center' as const };
     const scrollEffects = align === 'none' ? [] : [EditorView.scrollIntoView(nextAnchor, scrollOptions)];
     const selection = view.state.selection.main;
+    if (scrollEffects.length > 0) viewportController.markInteraction();
 
     if (selection.anchor === nextAnchor && selection.head === nextHead) {
       view.dispatch({
@@ -1500,6 +1495,7 @@ export function createEditor({
       ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' })
       : setLatexMathBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' });
 
+    viewportController.markInteraction();
     view.dispatch({
       selection: { anchor: targetLine.from },
       effects: [
@@ -1543,6 +1539,7 @@ export function createEditor({
 
     const targetLine = view.state.doc.line(lineNumber);
     const rowLineNumber = lineNumber === block.delimiterLine ? block.startLine : lineNumber;
+    viewportController.markInteraction();
     view.dispatch({
       selection: { anchor: targetLine.from },
       effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' })
@@ -1575,33 +1572,9 @@ export function createEditor({
     return true;
   };
 
-  const TOP_LINE_VISIBILITY_EPSILON = 0.5;
-  const SCROLL_RESTORE_EPSILON = 0.5;
-  const SCROLL_RESTORE_MAX_ATTEMPTS = 3;
-
-  const getTopLineMetrics = (scrollTopValue = view.scrollDOM.scrollTop) => {
-    const scrollTop = Math.max(0, scrollTopValue);
-    const lineBlock = view.lineBlockAtHeight(scrollTop);
-    const line = view.state.doc.lineAt(lineBlock.from);
-    return {
-      line,
-      lineBlock,
-      hiddenTopPixels: scrollTop - lineBlock.top
-    };
-  };
-
-  const topVisibleLineAtCurrentScroll = () => {
-    const { line, hiddenTopPixels } = getTopLineMetrics();
-    if (hiddenTopPixels <= TOP_LINE_VISIBILITY_EPSILON) {
-      return line;
-    }
-
-    const nextLineNumber = Math.min(view.state.doc.lines, line.number + 1);
-    return view.state.doc.line(nextLineNumber);
-  };
-
   const syncCursorToTopVisibleLine = () => {
-    const line = topVisibleLineAtCurrentScroll();
+    const position = viewportController.getTopVisiblePosition();
+    const line = view.state.doc.line(position.line);
     const anchor = line.from;
     const selection = view.state.selection.main;
     if (selection.anchor === anchor && selection.head === anchor) {
@@ -1614,70 +1587,25 @@ export function createEditor({
   };
 
   const computeTopVisiblePosition = () => {
-    const { line, hiddenTopPixels } = getTopLineMetrics();
+    const position = viewportController.getTopVisiblePosition();
     return {
-      lineNumber: line.number,
-      lineOffset: normalizeTopLineOffset(hiddenTopPixels)
+      lineNumber: position.line,
+      lineOffset: position.lineOffset
     };
   };
 
-  const captureViewportAnchor = () => {
-    const { lineBlock, hiddenTopPixels } = getTopLineMetrics();
-    return {
-      position: lineBlock.from,
-      lineOffset: normalizeTopLineOffset(hiddenTopPixels)
-    };
-  };
+  const captureViewportAnchor = () => viewportController.captureDocumentAnchor();
 
   const restoreViewportAnchor = (position: number, lineOffset = 0) => {
-    const targetPosition = Math.min(Math.max(0, position), view.state.doc.length);
-    const targetOffset = normalizeTopLineOffset(lineOffset);
-    const targetTop = Math.max(0, view.lineBlockAt(targetPosition).top + targetOffset);
-    view.scrollDOM.scrollTop = targetTop;
-    const interactionGeneration = viewportInteractionGeneration;
-    let attempts = 0;
-    const restoreAfterLayout = () => {
-      if (viewportInteractionGeneration !== interactionGeneration || ++attempts > SCROLL_RESTORE_MAX_ATTEMPTS) {
-        return;
-      }
-      view.requestMeasure({
-        read(editorView) {
-          return Math.max(0, editorView.lineBlockAt(targetPosition).top + targetOffset);
-        },
-        write(nextTop, editorView) {
-          if (viewportInteractionGeneration !== interactionGeneration) return;
-          editorView.scrollDOM.scrollTop = nextTop;
-          requestAnimationFrame(restoreAfterLayout);
-        }
-      });
-    };
-    requestAnimationFrame(restoreAfterLayout);
+    viewportController.restoreDocumentAnchor({ position, lineOffset });
   };
 
   const restoreTopVisibleLine = (lineNumber, lineOffset = 0, { syncCursor = true } = {}) => {
-    const targetLineNumber = Math.min(Math.max(1, Math.floor(lineNumber || 1)), view.state.doc.lines);
-    const targetOffset = normalizeTopLineOffset(lineOffset);
-    let attempts = 0;
-    const restoreScroll = () => {
-      if (!view || ++attempts > SCROLL_RESTORE_MAX_ATTEMPTS) {
-        if (syncCursor && view) {
-          syncCursorToTopVisibleLine();
-        }
-        return;
-      }
-      const targetLine = view.state.doc.line(targetLineNumber);
-      const targetTop = Math.max(0, view.lineBlockAt(targetLine.from).top + targetOffset);
-      const currentTop = view.scrollDOM.scrollTop;
-      view.scrollDOM.scrollTop = targetTop;
-      if (Math.abs(currentTop - targetTop) <= SCROLL_RESTORE_EPSILON) {
-        if (syncCursor) {
-          syncCursorToTopVisibleLine();
-        }
-        return;
-      }
-      requestAnimationFrame(restoreScroll);
-    };
-    restoreScroll();
+    viewportController.restoreTopVisibleLine(
+      lineNumber,
+      lineOffset,
+      syncCursor ? syncCursorToTopVisibleLine : undefined
+    );
   };
 
   let searchResultCache: {
@@ -2020,6 +1948,7 @@ export function createEditor({
       diagnosticDataField,
       diagnosticField,
       EditorView.updateListener.of((update) => {
+        viewportController?.reconcileAfterEditorUpdate();
         syncModeClasses();
         syncLineNumbersVisibility();
         syncGitGutterVisibility();
@@ -2087,6 +2016,9 @@ export function createEditor({
     parent,
     scrollTo: initialScrollTo
   });
+  viewportController = new ViewportController(view, {
+    getMode: () => currentMode === 'live' ? 'live' : 'source'
+  });
   if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
@@ -2134,56 +2066,6 @@ export function createEditor({
     onViewportChange?.();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
-  onViewportInteraction = (event: Event) => {
-    viewportInteractionGeneration += 1;
-    markViewportInteraction(view);
-    if (currentMode !== 'live' || !(event instanceof WheelEvent) || event.ctrlKey || (!event.deltaX && !event.deltaY)) {
-      wheelScrollGeneration += 1;
-      return;
-    }
-    event.preventDefault();
-    const deltaScale = event.deltaMode === 1
-      ? Math.max(16, view.defaultLineHeight)
-      : event.deltaMode === 2
-        ? view.scrollDOM.clientHeight
-        : 1;
-    const targetTop = Math.max(
-      0,
-      Math.min(
-        view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight,
-        view.scrollDOM.scrollTop + event.deltaY * deltaScale
-      )
-    );
-    const targetLeft = Math.max(
-      0,
-      Math.min(
-        view.scrollDOM.scrollWidth - view.scrollDOM.clientWidth,
-        view.scrollDOM.scrollLeft + event.deltaX * deltaScale
-      )
-    );
-    const generation = ++wheelScrollGeneration;
-    view.scrollDOM.scrollTop = targetTop;
-    view.scrollDOM.scrollLeft = targetLeft;
-    let remainingFrames = 3;
-    const settleWheelTarget = () => {
-      if (!view || generation !== wheelScrollGeneration || remainingFrames-- <= 0) return;
-      view.requestMeasure({
-        read() {
-          return null;
-        },
-        write() {
-          if (generation !== wheelScrollGeneration) return;
-          view.scrollDOM.scrollTop = targetTop;
-          view.scrollDOM.scrollLeft = targetLeft;
-          requestAnimationFrame(settleWheelTarget);
-        }
-      });
-    };
-    requestAnimationFrame(settleWheelTarget);
-  };
-  view.scrollDOM.addEventListener('wheel', onViewportInteraction, { passive: false });
-  view.scrollDOM.addEventListener('touchmove', onViewportInteraction, { passive: true });
-  view.dom.addEventListener('keydown', onViewportInteraction, true);
   if (typeof onRequestGitBlame === 'function') {
     gitBlameHover = createGitBlameHoverController({
       view,
@@ -2346,12 +2228,6 @@ export function createEditor({
         view.scrollDOM.removeEventListener('scroll', onScroll);
         onScroll = null;
       }
-      if (onViewportInteraction) {
-        view.scrollDOM.removeEventListener('wheel', onViewportInteraction);
-        view.scrollDOM.removeEventListener('touchmove', onViewportInteraction);
-        view.dom.removeEventListener('keydown', onViewportInteraction, true);
-        onViewportInteraction = null;
-      }
       if (onTableInteraction) {
         view.dom.removeEventListener('meo-table-interaction', onTableInteraction);
         onTableInteraction = null;
@@ -2390,6 +2266,7 @@ export function createEditor({
         pendingLiveSearchRevealFrame = null;
       }
       setEditableLinkHoverCursor(view, false);
+      viewportController.destroy();
       view.destroy();
     },
     setText(textValue) {
@@ -2633,6 +2510,7 @@ export function createEditor({
       }
 
       const nextAnchor = Math.min(adjustedInsertionPoint, nextText.length);
+      viewportController.markInteraction();
       view.dispatch({
         changes: { from: 0, to: currentText.length, insert: nextText },
         selection: { anchor: nextAnchor },
@@ -2677,6 +2555,9 @@ export function createEditor({
     },
     refreshDecorations() {
       view.dispatch({ effects: refreshDecorationsEffect.of(null) });
+    },
+    preserveViewport(mutate: () => void) {
+      viewportController.preserveDocumentAnchorWhileMutation(mutate);
     },
     setDiagnostics(diagnostics: EditorDiagnostic[]) {
       currentDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];

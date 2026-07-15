@@ -4,7 +4,7 @@ import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/c
 import { createElement, Code2, Eye, Pencil } from 'lucide';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
-import { beginViewportAnchor, canApplyViewportAnchor } from './viewportStability';
+import { getViewportController } from './viewportController';
 
 export type LatexMathBlockMode = 'preview' | 'split' | 'source';
 
@@ -142,25 +142,12 @@ function nextLatexMathMode(mode: LatexMathBlockMode): LatexMathBlockMode {
 }
 
 function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect: StateEffect<unknown>): void {
-  const beforeTop = view.coordsAtPos(anchor)?.top ?? null;
-  view.dispatch({ effects: effect });
-  if (beforeTop === null) {
+  const controller = getViewportController(view);
+  if (!controller) {
+    view.dispatch({ effects: effect });
     return;
   }
-  const anchorGeneration = beginViewportAnchor(view);
-  requestAnimationFrame(() => {
-    view.requestMeasure({
-      read(editorView) {
-        const afterTop = editorView.coordsAtPos(Math.min(anchor, editorView.state.doc.length))?.top ?? null;
-        return afterTop === null ? null : afterTop - beforeTop;
-      },
-      write(delta, editorView) {
-        if (delta !== null && canApplyViewportAnchor(editorView, anchorGeneration)) {
-          editorView.scrollDOM.scrollTop += delta;
-        }
-      }
-    });
-  });
+  controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects: effect }));
 }
 
 class LatexMathToolbarWidget extends WidgetType {
@@ -377,7 +364,7 @@ class LatexMathEditingController {
       },
       write: (delta) => {
         if (delta !== null) {
-          this.outerView.scrollDOM.scrollTop += delta;
+          getViewportController(this.outerView)?.navigateBy({ top: delta });
         }
       }
     });

@@ -1664,10 +1664,14 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'themeChanged') {
     withMessageErrorBoundary('themeChanged handler', () => {
-      applyThemeSettings(message.theme);
-      refreshMermaidTheme();
-      setShikiTheme(message.codeTheme);
-      editor?.refreshDecorations();
+      const applyThemeChange = () => {
+        applyThemeSettings(message.theme);
+        refreshMermaidTheme();
+        setShikiTheme(message.codeTheme);
+        editor?.refreshDecorations();
+      };
+      if (editor) editor.preserveViewport(applyThemeChange);
+      else applyThemeChange();
     });
     return;
   }

@@ -139,6 +139,17 @@ async function main() {
     await waitForFrames(page, 1);
     const afterUpdate = await readViewport();
 
+    await page.evaluate((theme) => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'themeChanged', theme, codeTheme: null }
+      }));
+    }, {
+      ...defaultThemeSettings,
+      fonts: { ...defaultThemeSettings.fonts, liveFontSize: 18 }
+    });
+    await waitForFrames(page);
+    const afterTheme = await readViewport();
+
     await page.mouse.move(450, 260);
     const wheelScrollTops: number[] = [];
     for (let index = 0; index < 8; index += 1) {
@@ -158,15 +169,19 @@ async function main() {
     };
     const beforeLine = lineNumber(before.text);
     const afterUpdateLine = lineNumber(afterUpdate.text);
+    const afterThemeLine = lineNumber(afterTheme.text);
     const wheelMovedOnlyUp = wheelScrollTops.every((scrollTop, index) => (
-      scrollTop <= (index === 0 ? afterUpdate.scrollTop : wheelScrollTops[index - 1]) + 0.5
+      scrollTop <= (index === 0 ? afterTheme.scrollTop : wheelScrollTops[index - 1]) + 0.5
     ));
     if (
-      beforeLine === null || afterUpdateLine === null ||
+      beforeLine === null || afterUpdateLine === null || afterThemeLine === null ||
       beforeLine > 12 ||
-      Math.abs(afterUpdateLine - beforeLine) > 1 || !wheelMovedOnlyUp
+      Math.abs(afterUpdateLine - beforeLine) > 1 ||
+      Math.abs(afterThemeLine - afterUpdateLine) > 1 ||
+      Math.abs((afterTheme.top ?? 0) - (afterUpdate.top ?? 0)) > 1 ||
+      !wheelMovedOnlyUp
     ) {
-      throw new Error(`Implicit webview updates moved the visual anchor: ${JSON.stringify({ before, afterUpdate, wheelScrollTops, afterUpwardScroll })}`);
+      throw new Error(`Implicit webview updates moved the visual anchor: ${JSON.stringify({ before, afterUpdate, afterTheme, wheelScrollTops, afterUpwardScroll })}`);
     }
     console.log('webview viewport checks passed');
   } finally {

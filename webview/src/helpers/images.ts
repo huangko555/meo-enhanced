@@ -1,6 +1,6 @@
 import { EditorView, WidgetType } from '@codemirror/view';
 import { AppWindow, CornerDownRight, createElement, ExternalLink, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
-import { beginViewportAnchor, canApplyViewportAnchor, hasRecentViewportInteraction } from './viewportStability';
+import { getViewportController } from './viewportController';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
@@ -541,7 +541,7 @@ export class ImageWidget extends WidgetType {
           view.requestMeasure();
           return;
         }
-        this.keepViewportAnchor(view, anchor);
+        getViewportController(view)?.preserveElementAnchor({ element: anchor.anchor, top: anchor.top });
       },
     });
   }
@@ -733,43 +733,6 @@ export class ImageWidget extends WidgetType {
       document.removeEventListener('keydown', this.exitFullscreenHandler);
       this.exitFullscreenHandler = null;
     }
-  }
-
-  keepViewportAnchor(view: EditorView, anchor: { anchor: HTMLElement; top: number }): void {
-    if (hasRecentViewportInteraction(view)) return;
-    const anchorGeneration = beginViewportAnchor(view);
-    let remainingFrames = 3;
-    let expectedScrollTop = view.scrollDOM.scrollTop;
-    const measure = () => {
-      view.requestMeasure({
-        read() {
-          if (!anchor.anchor.isConnected || !canApplyViewportAnchor(view, anchorGeneration)) return null;
-          return {
-            delta: anchor.anchor.getBoundingClientRect().top - anchor.top,
-            scrollTop: view.scrollDOM.scrollTop,
-          };
-        },
-        write(measurement) {
-          if (!measurement || !canApplyViewportAnchor(view, anchorGeneration)) return;
-          const { delta, scrollTop } = measurement;
-          if (
-            Math.abs(scrollTop - expectedScrollTop) > 0.5
-            || Math.abs(view.scrollDOM.scrollTop - scrollTop) > 0.5
-          ) {
-            return;
-          }
-          if (Math.abs(delta) > 0.5) {
-            view.scrollDOM.scrollTop += delta;
-          }
-          expectedScrollTop = view.scrollDOM.scrollTop;
-          remainingFrames -= 1;
-          if (remainingFrames > 0) {
-            requestAnimationFrame(measure);
-          }
-        },
-      });
-    };
-    measure();
   }
 
   renderFallback(container: HTMLElement): void {

@@ -11,6 +11,7 @@ import { wikiLinkScheme } from './wikiLinks';
 import { normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
 import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
+import { getViewportController } from './viewportController';
 
 declare global {
   interface HTMLDivElement {
@@ -2257,14 +2258,14 @@ class HtmlTableWidget extends WidgetType {
     const wrap = this.domRefs?.wrap ?? table;
     const view = this.getEditorView(wrap);
     if (!view) return true;
-    const { scrollTop, scrollLeft } = view.scrollDOM;
-    this.commit(wrap);
-    if (isUndoShortcut(event)) undo(view);
-    else redo(view);
-    requestAnimationFrame(() => {
-      view.scrollDOM.scrollTop = scrollTop;
-      view.scrollDOM.scrollLeft = scrollLeft;
-    });
+    const applyHistory = () => {
+      this.commit(wrap);
+      if (isUndoShortcut(event)) undo(view);
+      else redo(view);
+    };
+    const controller = getViewportController(view);
+    if (controller) controller.preserveScrollPosition(applyHistory);
+    else applyHistory();
     return true;
   }
 
@@ -2474,18 +2475,6 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  restoreScrollPositionAfterCommit(view: EditorView, scrollTop: number, scrollLeft: number) {
-    const restore = () => {
-      view.scrollDOM.scrollTop = scrollTop;
-      view.scrollDOM.scrollLeft = scrollLeft;
-    };
-
-    requestAnimationFrame(() => {
-      restore();
-      requestAnimationFrame(restore);
-    });
-  }
-
   commitMatrix(matrix, dom, focusTarget: PendingCellFocus | null = null, { preserveScrollPosition = false } = {}) {
     const view = this.getEditorView(dom);
     if (!view) return;
@@ -2505,11 +2494,10 @@ class HtmlTableWidget extends WidgetType {
       return;
     }
 
-    const { scrollTop, scrollLeft } = view.scrollDOM;
-    view.dispatch({ changes: { from: range.from, to: range.to, insert: markdown } });
-    if (preserveScrollPosition) {
-      this.restoreScrollPositionAfterCommit(view, scrollTop, scrollLeft);
-    }
+    const applyCommit = () => view.dispatch({ changes: { from: range.from, to: range.to, insert: markdown } });
+    const controller = preserveScrollPosition ? getViewportController(view) : null;
+    if (controller) controller.preserveScrollPosition(applyCommit);
+    else applyCommit();
     this.hasPendingCellEdits = false;
     if (focusTarget) {
       this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
