@@ -31,4 +31,23 @@ const generation = tracker.getGeneration();
 tracker.initialize('D');
 assert(tracker.getGeneration() === generation, 'reinitializing identical content should not create a revision');
 
+const explicitSaveTracker = new SavedRevisionTracker({ mergeWindowMs: 10_000 });
+explicitSaveTracker.initialize('A');
+let explicitPreSaveRevision = explicitSaveTracker.getCurrentEditBaseline();
+assert(explicitSaveTracker.noteExplicitSave('B', explicitPreSaveRevision) === true, 'an explicit changed save should create a revision');
+assert(explicitSaveTracker.getCurrentEditBaseline()?.text === 'B', 'an explicit changed save should advance the disk revision');
+assert(explicitSaveTracker.getRecentSaveBaseline()?.text === 'A', 'the first explicit save should compare against its preceding revision');
+explicitPreSaveRevision = explicitSaveTracker.getCurrentEditBaseline();
+assert(explicitSaveTracker.noteExplicitSave('B', explicitPreSaveRevision) === true, 're-saving unchanged content should advance the explicit checkpoint');
+assert(explicitSaveTracker.getRecentSaveBaseline()?.text === 'B', 'the second explicit save should clear recent-save changes');
+explicitPreSaveRevision = explicitSaveTracker.getCurrentEditBaseline();
+assert(explicitSaveTracker.noteExplicitSave('B', explicitPreSaveRevision) === false, 'an already-cleared explicit checkpoint should be stable');
+
+const interleavedSaveTracker = new SavedRevisionTracker({ mergeWindowMs: 10_000 });
+interleavedSaveTracker.initialize('A');
+const capturedPreSaveRevision = interleavedSaveTracker.getCurrentEditBaseline();
+interleavedSaveTracker.noteDiskRevision('B', 1_000);
+interleavedSaveTracker.noteExplicitSave('B', capturedPreSaveRevision);
+assert(interleavedSaveTracker.getRecentSaveBaseline()?.text === 'A', 'an automatic save event must not turn the first explicit save into a repeated save');
+
 console.log('saved revision tracker checks passed');

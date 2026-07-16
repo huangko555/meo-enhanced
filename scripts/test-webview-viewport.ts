@@ -112,6 +112,34 @@ async function main() {
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
+    const toolbarLayout = await page.evaluate(() => {
+      const label = (element: HTMLElement): string => {
+        if (element.dataset.action) return element.dataset.action;
+        if (element.classList.contains('line-jump-control')) return 'line-jump';
+        if (element.classList.contains('format-separator')) return 'separator';
+        if (element.classList.contains('changes-controls')) return 'changes';
+        if (element.classList.contains('more-tools-wrapper')) return 'more';
+        return element.className;
+      };
+      return {
+        left: Array.from(document.querySelector<HTMLElement>('.format-group')!.children).map(label),
+        right: Array.from(document.querySelector<HTMLElement>('.right-group')!.children).map(label)
+      };
+    });
+    if (
+      JSON.stringify(toolbarLayout.left.slice(0, 4)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'separator']) ||
+      JSON.stringify(toolbarLayout.right) !== JSON.stringify(['find', 'outline-right', 'changes', 'more'])
+    ) {
+      throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);
+    }
+    await page.click('[data-action="save"]');
+    await waitForFrames(page, 2);
+    const saveMessages = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'saveDocument').length);
+    if (saveMessages !== 1) {
+      throw new Error(`Toolbar save did not request a save: ${saveMessages}`);
+    }
     const readViewport = () => page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const viewport = scroller.getBoundingClientRect();

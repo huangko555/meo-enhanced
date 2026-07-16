@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis, ChevronDown, UserRound } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis, ChevronDown, UserRound } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -667,9 +667,18 @@ const outlineLeftSeparator = document.createElement('div');
 outlineLeftSeparator.className = 'format-separator';
 outlineLeftSeparator.setAttribute('role', 'separator');
 
+const saveBtn = document.createElement('button');
+saveBtn.type = 'button';
+saveBtn.className = 'format-button';
+saveBtn.dataset.action = 'save';
+saveBtn.title = 'Save (Ctrl+S)';
+saveBtn.setAttribute('aria-label', 'Save document');
+saveBtn.appendChild(createElement(Save, { width: 18, height: 18 }));
+
 formatGroup.append(
   outlineLeftBtn,
   lineJumpControl,
+  saveBtn,
   outlineLeftSeparator,
   headingWrapper,
   bulletListBtn,
@@ -776,8 +785,8 @@ document.addEventListener('pointerdown', (event) => {
 
 rightGroup.append(
   findToggleBtn,
-  changesControls,
   outlineBtn,
+  changesControls,
   moreToolsWrapper
 );
 
@@ -1370,6 +1379,10 @@ const requestSave = async () => {
 
   maybeSaveAfterSync();
 };
+
+saveBtn.addEventListener('click', () => {
+  void requestSave();
+});
 
 const setEditorTextSafely = (text: string, context: string): boolean => {
   if (!editor) {

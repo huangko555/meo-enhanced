@@ -62,6 +62,30 @@ export class SavedRevisionTracker {
     return true;
   }
 
+  noteExplicitSave(text: string, previousDisk: SavedTextSnapshot | null): boolean {
+    const next = snapshot(text);
+    if (!previousDisk) {
+      const changed = next.contentHash !== this.latestDisk?.contentHash || this.recentSaveBaseline !== null;
+      this.latestDisk = next;
+      this.recentSaveBaseline = null;
+      this.lastDiskRevisionAt = null;
+      if (changed) {
+        this.generation += 1;
+      }
+      return changed;
+    }
+
+    const changed = next.contentHash !== this.latestDisk?.contentHash ||
+      previousDisk.contentHash !== this.recentSaveBaseline?.contentHash;
+    this.latestDisk = next;
+    this.recentSaveBaseline = previousDisk;
+    this.lastDiskRevisionAt = null;
+    if (changed) {
+      this.generation += 1;
+    }
+    return changed;
+  }
+
   getCurrentEditBaseline(): SavedTextSnapshot | null {
     return this.latestDisk;
   }
