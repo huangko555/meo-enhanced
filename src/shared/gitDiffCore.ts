@@ -150,6 +150,19 @@ export function lcsDiffRuns(baseLines: string[], currentLines: string[], limits:
     if (i + 1 < n && baseLines[i + 1] === currentLines[j]) {
       pushRun('delete', 1);
       i += 1;
+    } else if (j + 1 < m && baseLines[i] === currentLines[j + 1]) {
+      pushRun('insert', 1);
+      j += 1;
+    } else if (i === j) {
+      // Equal-score LCS paths around repeated lines (especially blank lines)
+      // should keep edits on the same visual line instead of inventing a move.
+      pushRun('delete', 1);
+      pushRun('insert', 1);
+      i += 1;
+      j += 1;
+    } else if (i < j) {
+      pushRun('delete', 1);
+      i += 1;
     } else {
       pushRun('insert', 1);
       j += 1;

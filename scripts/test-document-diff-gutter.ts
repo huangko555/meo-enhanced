@@ -278,6 +278,7 @@ async function main() {
       const left = Number.parseFloat(style.left) || 0;
       const width = Number.parseFloat(style.borderLeftWidth) || 0;
       return {
+        left: markerRect.left + left,
         right: markerRect.left + left + width,
         width,
         y: markerRect.top
@@ -296,11 +297,21 @@ async function main() {
     if (!expandedHitTooltipVisible) {
       throw new Error('Deleted content tooltip hit area did not extend beyond the visible triangle');
     }
-    const expandedTriangleWidth = await sourceMarker!.evaluate((element) => (
-      Number.parseFloat(getComputedStyle(element, '::after').borderLeftWidth) || 0
-    ));
-    if (expandedTriangleWidth <= sourceTriangle.width) {
-      throw new Error(`Deleted triangle did not expand on hover: ${sourceTriangle.width} -> ${expandedTriangleWidth}`);
+    const expandedTriangle = await sourceMarker!.evaluate((element) => {
+      const markerRect = element.getBoundingClientRect();
+      const style = getComputedStyle(element, '::after');
+      const left = markerRect.left + (Number.parseFloat(style.left) || 0);
+      const width = Number.parseFloat(style.borderLeftWidth) || 0;
+      return { left, right: left + width, width };
+    });
+    if (expandedTriangle.width <= sourceTriangle.width) {
+      throw new Error(`Deleted triangle did not expand on hover: ${sourceTriangle.width} -> ${expandedTriangle.width}`);
+    }
+    if (expandedTriangle.left >= sourceTriangle.left || Math.abs(expandedTriangle.right - sourceTriangle.right) > 0.1) {
+      throw new Error(`Deleted triangle did not expand leftward with a fixed tip: ${JSON.stringify({
+        before: sourceTriangle,
+        after: expandedTriangle
+      })}`);
     }
 
     await page.evaluate(() => {

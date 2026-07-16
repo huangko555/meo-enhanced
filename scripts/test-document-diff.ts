@@ -86,6 +86,43 @@ assertEqual(clearedMiddleLine.lineChanges, [
 ], 'clearing a line without removing its newline is a modification');
 assertEqual(clearedMiddleLine.deletedGaps, [], 'clearing a line does not invent a deleted line');
 
+const adjacentEditsStartingFromEmptyLine = compareDocuments(
+  'before\n\nClick reveal keeps the break\n\nafter',
+  'before\n123\nClick reveal keeps the break123\n\nafter'
+);
+assertEqual(adjacentEditsStartingFromEmptyLine.lineChanges, [
+  { line: 2, kind: 'modified' },
+  { line: 3, kind: 'modified' }
+], 'adjacent edited lines keep their identities when the first baseline line is empty');
+assertEqual(
+  adjacentEditsStartingFromEmptyLine.deletedGaps,
+  [],
+  'adjacent edits starting from an empty line do not invent a deletion'
+);
+
+const adjacentEditsBeforeRepeatedDivider = compareDocuments(
+  'before\n---\nsection\n---\nafter',
+  'before\n123\nsection123\n---\nafter'
+);
+assertEqual(adjacentEditsBeforeRepeatedDivider.lineChanges, [
+  { line: 2, kind: 'modified' },
+  { line: 3, kind: 'modified' }
+], 'adjacent edits keep their identities before a repeated non-empty line');
+assertEqual(adjacentEditsBeforeRepeatedDivider.deletedGaps, [], 'a repeated non-empty line does not invent a deletion');
+
+const structuralChangesAroundBlankLine = compareDocuments(
+  'before\nremoved\n\nafter',
+  'before\n\nadded\nafter'
+);
+assertEqual(structuralChangesAroundBlankLine.lineChanges, [
+  { line: 3, kind: 'added' }
+], 'a real insertion around an unchanged blank line remains added');
+assertEqual(structuralChangesAroundBlankLine.deletedGaps, [{
+  boundary: 1,
+  baselineFromLine: 2,
+  baselineToLine: 2
+}], 'a real deletion around an unchanged blank line remains deleted');
+
 const clearedFinalLine = compareDocuments('first\ntext', 'first\n');
 assertEqual(clearedFinalLine.lineChanges, [
   { line: 2, kind: 'modified' }

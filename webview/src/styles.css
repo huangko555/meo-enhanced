@@ -2928,6 +2928,7 @@ body.outline-resizing {
 }
 
 .cm-editor .meo-git-gutter-marker.is-deleted.is-hit-hover::after {
+  left: -2px;
   border-left-width: 7px;
 }
 
