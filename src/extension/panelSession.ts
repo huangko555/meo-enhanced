@@ -12,6 +12,7 @@ import {
   getContentMaxWidthEnabled,
   getLineNumbersEnabled,
   getGitChangesGutterEnabled,
+  getGitBlameEnabled,
   getGitDiffLineHighlightsEnabled,
   getDiffBaselineMode,
   getSpellCheckEnabled,
@@ -62,6 +63,7 @@ type InitMessage = {
   mode: EditorMode;
   lineNumbers: boolean;
   gitChangesGutter: boolean;
+  gitBlameEnabled: boolean;
   gitDiffLineHighlights: boolean;
   diffBaselineMode: DiffBaselineMode;
   spellCheckEnabled: boolean;
@@ -184,6 +186,11 @@ type SetGitChangesGutterMessage = {
   type: 'setGitChangesGutter';
   visible?: boolean;
   enabled?: boolean;
+};
+
+type SetGitBlameMessage = {
+  type: 'setGitBlame';
+  enabled: boolean;
 };
 
 type SetSpellCheckMessage = {
@@ -339,6 +346,7 @@ type WebviewMessage =
   | SetModeMessage
   | SetLineNumbersMessage
   | SetGitChangesGutterMessage
+  | SetGitBlameMessage
   | SetDiffBaselineModeMessage
   | SetSpellCheckMessage
   | SetOutlineVisibleMessage
@@ -407,6 +415,7 @@ type PanelSessionControllerParams = {
   getFindOptions: () => FindOptions;
   setFindOptions: (options: FindOptions) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
+  updateGitBlameEnabled: (enabled: boolean) => Promise<void>;
   onPanelActivated: (panel: vscode.WebviewPanel) => void;
   onPanelViewStateChanged: () => void;
   onPanelDisposed: (panel: vscode.WebviewPanel) => void;
@@ -423,6 +432,7 @@ export type PanelSession = {
   rejectPendingExportSnapshots: (reason: Error) => void;
   refreshGitBaseline: (options?: RefreshGitBaselineOptions) => void;
   setDiffBaselineMode: (mode: DiffBaselineMode) => void;
+  setGitBlameEnabled: (enabled: boolean) => void;
   refreshSpellDiagnostics: () => void;
   getGitRepoRoot: () => string | null;
 };
@@ -445,6 +455,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     getFindOptions,
     setFindOptions,
     setOutlineVisible,
+    updateGitBlameEnabled,
     onPanelActivated,
     onPanelViewStateChanged,
     onPanelDisposed
@@ -453,6 +464,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const documentKey = document.uri.toString();
   let mode: EditorMode = 'live';
   let diffBaselineMode: DiffBaselineMode = getDiffBaselineMode();
+  let gitBlameEnabled = getGitBlameEnabled();
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
@@ -672,6 +684,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       mode,
       lineNumbers: getLineNumbersEnabled(context),
       gitChangesGutter: getGitChangesGutterEnabled(context),
+      gitBlameEnabled,
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       diffBaselineMode,
       spellCheckEnabled: getSpellCheckEnabled(),
@@ -1116,6 +1129,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       lastSentDiffBaselineHash = '';
       refreshGitBaseline({ forcePost: true, forceReload: nextMode === 'git-head' });
     },
+    setGitBlameEnabled: (enabled) => {
+      gitBlameEnabled = enabled === true;
+    },
     refreshSpellDiagnostics: () => scheduleSpellCheck(0),
     getGitRepoRoot: () => gitDocumentState.getRepoRoot()
   };
@@ -1155,6 +1171,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .update(GIT_CHANGES_GUTTER_SETTING_KEY, visible, vscode.ConfigurationTarget.Global);
         return;
       }
+      case 'setGitBlame':
+        gitBlameEnabled = raw.enabled === true;
+        await updateGitBlameEnabled(gitBlameEnabled);
+        return;
       case 'setDiffBaselineMode':
         diffBaselineMode = raw.mode;
         lastSentDiffBaselineHash = '';
@@ -1248,6 +1268,17 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         rejectPendingExportSnapshot(raw.requestId, new Error(raw.message || 'Failed to collect export snapshot.'));
         return;
       case 'requestGitBlame': {
+        if (!gitBlameEnabled) {
+          const response: GitBlameResultMessage = {
+            type: 'gitBlameResult',
+            requestId: raw.requestId,
+            lineNumber: raw.lineNumber,
+            localEditGeneration: raw.localEditGeneration,
+            result: { kind: 'unavailable', reason: 'error' }
+          };
+          await postToWebview(response);
+          return;
+        }
         const resolved = await resolveGitBlameForRequest(documentUri, raw, document.getText(), gitDocumentState);
         const response: GitBlameResultMessage = {
           type: 'gitBlameResult',
@@ -1260,9 +1291,15 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       }
       case 'openGitRevisionForLine':
+        if (!gitBlameEnabled) {
+          return;
+        }
         await openGitRevisionForLine(documentUri, raw, document.getText(), gitDocumentState);
         return;
       case 'openGitWorktreeForLine':
+        if (!gitBlameEnabled) {
+          return;
+        }
         await openGitWorktreeForLine(documentUri, raw, document.getText(), gitDocumentState);
         return;
       case 'applyChanges':

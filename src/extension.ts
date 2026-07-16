@@ -30,6 +30,7 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY,
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
+  GIT_BLAME_SETTING_KEY,
   GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY,
   DIFF_BASELINE_MODE_SETTING_KEY,
   LINE_NUMBERS_LEGACY_SETTING_KEY,
@@ -49,6 +50,7 @@ import {
   getExportEditorFontEnvironment,
   getExportPdfBrowserPath,
   getGitChangesGutterEnabled,
+  getGitBlameEnabled,
   getGitDiffLineHighlightsEnabled,
   getDiffBaselineMode,
   getLineNumbersEnabled,
@@ -477,6 +479,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   private readonly activePanels = new Set<vscode.WebviewPanel>();
   private readonly panelSessions = new Map<vscode.WebviewPanel, PanelSession>();
   private readonly spellDiagnosticCollection = vscode.languages.createDiagnosticCollection('meo-spell');
+  private gitBlameSettingQueue: Promise<void> = Promise.resolve();
+  private pendingGitBlameSettingUpdates = 0;
+  private desiredGitBlameEnabled = getGitBlameEnabled();
   private lastActivePanel: vscode.WebviewPanel | null = null;
 
   constructor(
@@ -498,6 +503,33 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     if (watcher) {
       this.context.subscriptions.push(watcher);
     }
+  }
+
+  private applyGitBlameEnabled(enabled: boolean): void {
+    this.desiredGitBlameEnabled = enabled === true;
+    this.broadcast({ type: 'gitBlameChanged', enabled: this.desiredGitBlameEnabled });
+    for (const session of this.panelSessions.values()) {
+      session.setGitBlameEnabled(this.desiredGitBlameEnabled);
+    }
+  }
+
+  private updateGitBlameEnabled(enabled: boolean): Promise<void> {
+    const targetEnabled = enabled === true;
+    this.applyGitBlameEnabled(targetEnabled);
+    this.pendingGitBlameSettingUpdates += 1;
+    const update = this.gitBlameSettingQueue.then(() => vscode.workspace
+      .getConfiguration(EXTENSION_CONFIG_SECTION)
+      .update(GIT_BLAME_SETTING_KEY, targetEnabled, vscode.ConfigurationTarget.Global));
+    const trackedUpdate = update.catch((error) => {
+      if (this.desiredGitBlameEnabled === targetEnabled) {
+        this.applyGitBlameEnabled(getGitBlameEnabled());
+      }
+      throw error;
+    }).finally(() => {
+      this.pendingGitBlameSettingUpdates = Math.max(0, this.pendingGitBlameSettingUpdates - 1);
+    });
+    this.gitBlameSettingQueue = trackedUpdate.catch(() => undefined);
+    return trackedUpdate;
   }
 
   async exportActiveDocument(format: ExportFormat): Promise<void> {
@@ -566,6 +598,14 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       this.broadcast({ type: 'gitChangesGutterChanged', enabled });
       for (const session of this.panelSessions.values()) {
         session.refreshGitBaseline({ forcePost: true, forceReload: true, delayMs: enabled ? 150 : 0 });
+      }
+    }
+
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_BLAME_SETTING_KEY}`)) {
+      const enabled = getGitBlameEnabled();
+      const isStaleQueuedValue = this.pendingGitBlameSettingUpdates > 0 && enabled !== this.desiredGitBlameEnabled;
+      if (!isStaleQueuedValue) {
+        this.applyGitBlameEnabled(enabled);
       }
     }
 
@@ -692,6 +732,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       getFindOptions: () => this.getFindOptions(),
       setFindOptions: (options) => this.setFindOptions(options),
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
+      updateGitBlameEnabled: (enabled) => this.updateGitBlameEnabled(enabled),
       onPanelActivated: (activePanel) => {
         this.lastActivePanel = activePanel;
       },

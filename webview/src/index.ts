@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis, ChevronDown } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis, ChevronDown, UserRound } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -154,6 +154,7 @@ let vimLeaderState = '\\';
 
 let lineNumbersVisible = true;
 let gitChangesGutterVisible = true;
+let gitBlameEnabled = false;
 let gitDiffLineHighlightsEnabled = true;
 let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
 let spellCheckEnabled = true;
@@ -246,6 +247,13 @@ spellCheckBtn.dataset.action = 'spellCheck';
 spellCheckBtn.title = 'Disable Spellcheck';
 spellCheckBtn.appendChild(createElement(SpellCheck2, { width: 18, height: 18 }));
 
+const gitBlameBtn = document.createElement('button');
+gitBlameBtn.type = 'button';
+gitBlameBtn.className = 'format-button toggle-button';
+gitBlameBtn.dataset.action = 'gitBlame';
+gitBlameBtn.title = 'Show Line Authors';
+gitBlameBtn.appendChild(createElement(UserRound, { width: 18, height: 18 }));
+
 const updateLineNumbersUI = () => {
   lineNumbersBtn.classList.toggle('is-active', lineNumbersVisible);
   lineNumbersBtn.setAttribute('aria-pressed', lineNumbersVisible ? 'true' : 'false');
@@ -283,6 +291,13 @@ const updateSpellCheckUI = () => {
   spellCheckBtn.classList.toggle('is-active', spellCheckEnabled);
   spellCheckBtn.setAttribute('aria-pressed', spellCheckEnabled ? 'true' : 'false');
   spellCheckBtn.title = spellCheckEnabled ? 'Disable Spellcheck' : 'Enable Spellcheck';
+};
+
+const updateGitBlameUI = () => {
+  gitBlameBtn.classList.toggle('is-active', gitBlameEnabled);
+  gitBlameBtn.setAttribute('aria-pressed', gitBlameEnabled ? 'true' : 'false');
+  gitBlameBtn.title = gitBlameEnabled ? 'Hide Line Authors' : 'Show Line Authors';
+  gitBlameBtn.setAttribute('aria-label', gitBlameBtn.title);
 };
 
 const updateContentMaxWidthUI = () => {
@@ -341,6 +356,20 @@ const setSpellCheckEnabled = (enabled, { post = true } = {}) => {
   }
 };
 
+const setGitBlameEnabled = (enabled, { post = true } = {}) => {
+  const nextEnabled = enabled === true;
+  const changed = nextEnabled !== gitBlameEnabled;
+  gitBlameEnabled = nextEnabled;
+  editor?.setGitBlameEnabled(gitBlameEnabled);
+  if (!gitBlameEnabled) {
+    clearGitBlameCache();
+  }
+  updateGitBlameUI();
+  if (post && changed) {
+    vscode.postMessage({ type: 'setGitBlame', enabled: gitBlameEnabled });
+  }
+};
+
 const setContentMaxWidthEnabled = (enabled, { post = true, persist = true } = {}) => {
   const nextEnabled = enabled === true;
   const changed = nextEnabled !== contentMaxWidthEnabled;
@@ -394,6 +423,10 @@ const toggleGitChangesGutter = () => {
 
 const toggleSpellCheck = () => {
   setSpellCheckEnabled(!spellCheckEnabled);
+};
+
+const toggleGitBlame = () => {
+  setGitBlameEnabled(!gitBlameEnabled);
 };
 
 const separator = document.createElement('div');
@@ -716,6 +749,7 @@ moreToolsPanel.hidden = true;
 moreToolsPanel.append(
   contentMaxWidthBtn,
   lineNumbersBtn,
+  gitBlameBtn,
   spellCheckBtn,
   exportWrapper
 );
@@ -1256,7 +1290,7 @@ gitClient = createGitClient({
 });
 
 const requestGitBlameForLine = ({ lineNumber }: { lineNumber: number }) => {
-  if (!gitClient) {
+  if (!gitBlameEnabled || !gitClient) {
     return Promise.resolve({ kind: 'unavailable', reason: 'error' });
   }
   return gitClient.requestBlameForLine({ lineNumber });
@@ -1524,6 +1558,7 @@ const mountInitialEditor = async () => {
       initialTopLineOffset,
       initialLineNumbers: lineNumbersVisible,
       initialGitGutter: gitChangesGutterVisible,
+      initialGitBlame: gitBlameEnabled,
       initialVimMode: vimModeEnabled,
       initialVimKeybindings: vimKeybindingsState,
       initialVimLeader: vimLeaderState,
@@ -1647,6 +1682,9 @@ const handleInit = (message: any) => {
   }
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
+  }
+  if (typeof message.gitBlameEnabled === 'boolean') {
+    setGitBlameEnabled(message.gitBlameEnabled, { post: false });
   }
   if (message.diffBaselineMode === 'current-edit' || message.diffBaselineMode === 'recent-save' || message.diffBaselineMode === 'git-head') {
     setDiffBaselineMode(message.diffBaselineMode, { post: false });
@@ -1916,6 +1954,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'gitChangesGutterChanged') {
     setGitChangesGutterVisible(message.enabled, { post: false });
+    return;
+  }
+
+  if (message.type === 'gitBlameChanged') {
+    setGitBlameEnabled(message.enabled, { post: false });
     return;
   }
 
@@ -2311,6 +2354,7 @@ contentMaxWidthBtn.addEventListener('click', () => {
 lineNumbersBtn.addEventListener('click', toggleLineNumbers);
 gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
 spellCheckBtn.addEventListener('click', toggleSpellCheck);
+gitBlameBtn.addEventListener('click', toggleGitBlame);
 
 persistUiState();
 vscode.postMessage({ type: 'setMode', mode: currentMode });

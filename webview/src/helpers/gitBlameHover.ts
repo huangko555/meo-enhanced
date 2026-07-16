@@ -354,6 +354,7 @@ function normalizeTrailingEofVisualLineHit(doc, lineNumber, gutterRowElement, ma
 export function createGitBlameHoverController({
   view,
   getMode,
+  enabled = false,
   requestBlame,
   openRevisionForLine,
   openWorktreeForLine
@@ -364,6 +365,7 @@ export function createGitBlameHoverController({
   document.body.appendChild(hoverOverlay);
 
   let hoverTimer = null;
+  let blameEnabled = enabled === true;
   let activeLineNumber = 0;
   let hoverToken = 0;
   let destroyed = false;
@@ -951,7 +953,7 @@ export function createGitBlameHoverController({
     anchorRect,
     { proxiedFromTrailingEof = false, effectiveChangeKind = null, requestLineNumber = lineNumber } = {}
   ) => {
-    if (destroyed || !isSupportedMode(getMode?.()) || lineNumber < 1) {
+    if (destroyed || !blameEnabled || !isSupportedMode(getMode?.()) || lineNumber < 1) {
       hide();
       return;
     }
@@ -1011,7 +1013,7 @@ export function createGitBlameHoverController({
   };
 
   const onMouseMove = (event) => {
-    if (destroyed) {
+    if (destroyed || !blameEnabled) {
       return;
     }
 
@@ -1159,6 +1161,7 @@ export function createGitBlameHoverController({
     if (
       !pointerDownWasLeftButton ||
       destroyed ||
+      !blameEnabled ||
       !isSupportedMode(getMode?.()) ||
       view.dom.classList.contains('meo-git-gutter-hidden')
     ) {
@@ -1174,7 +1177,7 @@ export function createGitBlameHoverController({
   };
   const pointerDownCapture = true;
   const onClick = (event) => {
-    if (destroyed || !isSupportedMode(getMode?.()) || view.dom.classList.contains('meo-git-gutter-hidden')) {
+    if (destroyed || !blameEnabled || !isSupportedMode(getMode?.()) || view.dom.classList.contains('meo-git-gutter-hidden')) {
       return;
     }
     if (event.button !== 0 || event.defaultPrevented) {
@@ -1242,6 +1245,12 @@ export function createGitBlameHoverController({
 
   return {
     hide,
+    setEnabled(nextEnabled) {
+      blameEnabled = nextEnabled === true;
+      if (!blameEnabled) {
+        hide();
+      }
+    },
     destroy() {
       if (destroyed) {
         return;

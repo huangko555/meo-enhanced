@@ -198,6 +198,7 @@ export function createEditor({
   initialTopLineOffset = 0,
   initialLineNumbers = true,
   initialGitGutter = true,
+  initialGitBlame = false,
   initialVimMode = false,
   initialVimKeybindings = [],
   initialVimLeader = '\\',
@@ -2076,6 +2077,7 @@ export function createEditor({
     gitBlameHover = createGitBlameHoverController({
       view,
       getMode: () => currentMode,
+      enabled: initialGitBlame === true,
       requestBlame: onRequestGitBlame,
       openRevisionForLine: onOpenGitRevisionForLine,
       openWorktreeForLine: onOpenGitWorktreeForLine
@@ -2651,6 +2653,9 @@ export function createEditor({
       applyGitBaseline(view, snapshot);
       gitBlameHover?.hide();
       gitDiffOverviewRuler?.refresh();
+    },
+    setGitBlameEnabled(enabled) {
+      gitBlameHover?.setEnabled(enabled === true);
     },
     clearGitUiTransientState() {
       gitBlameHover?.hide();

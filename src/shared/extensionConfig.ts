@@ -13,6 +13,7 @@ export { normalizeOutlineWidth } from './outlineWidth';
 export const EXTENSION_CONFIG_SECTION = 'markdownEditorOptimized';
 export const LINE_NUMBERS_SETTING_KEY = 'lineNumbers.visible';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
+export const GIT_BLAME_SETTING_KEY = 'gitBlame.enabled';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
 export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
 export const SPELL_CHECK_SETTING_KEY = 'spellCheck.enabled';
@@ -70,6 +71,10 @@ export function getGitChangesGutterEnabled(context: vscode.ExtensionContext): bo
     GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
     GIT_CHANGES_GUTTER_LEGACY_SETTING_KEY
   ]);
+}
+
+export function getGitBlameEnabled(): boolean {
+  return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(GIT_BLAME_SETTING_KEY, false);
 }
 
 export function getGitDiffLineHighlightsEnabled(): boolean {

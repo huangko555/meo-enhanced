@@ -1,0 +1,137 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import puppeteer from 'puppeteer-core';
+import { defaultThemeSettings } from '../src/shared/themeDefaults';
+
+const repoRoot = path.resolve(import.meta.dir, '..');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-git-blame-toggle-'));
+
+function findBrowserExecutable(): string {
+  const candidates = [
+    process.env.MEO_TEST_BROWSER,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+    'C:/Program Files/Google/Chrome/Application/chrome.exe'
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const executable = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!executable) throw new Error('No supported browser found');
+  return executable;
+}
+
+async function waitForFrames(page: puppeteer.Page, count = 4): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
+async function main(): Promise<void> {
+  const build = await Bun.build({
+    entrypoints: [path.join(repoRoot, 'scripts', 'test-webview-viewport-entry.ts')],
+    outdir: tempDir,
+    target: 'browser',
+    format: 'iife',
+    naming: 'bundle.js'
+  });
+  if (!build.success) throw new Error(build.logs.map(String).join('\n'));
+
+  const browser = await puppeteer.launch({ executablePath: findBrowserExecutable(), headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 900, height: 500, deviceScaleFactor: 1 });
+    await page.setContent(`<!doctype html><body><div id="app" class="editor-root">
+      <div class="mode-toolbar meo-preload-toolbar"></div>
+      <div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div>
+    </div></body>`);
+    await page.addStyleTag({ content: 'html,body,#app{height:100%;margin:0} #app{display:flex;flex-direction:column}' });
+    await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    await page.addScriptTag({ content: `
+      window.__hostMessages = [];
+      window.acquireVsCodeApi = () => ({
+        postMessage(message) { window.__hostMessages.push(message); },
+        getState() { return undefined; },
+        setState() {}
+      });
+    ` });
+    await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    await page.evaluate((theme) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'init', text: 'first\nsecond', version: 1, diagnostics: [], mode: 'source',
+        lineNumbers: true, gitChangesGutter: true, gitBlameEnabled: false,
+        gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
+        spellCheckEnabled: false, contentMaxWidthEnabled: false,
+        vimMode: false, vimKeybindings: [], vimLeader: '\\',
+        findOptions: { wholeWord: false, caseSensitive: false },
+        outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
+        theme, shikiCodeBlocks: false, codeTheme: null
+      }}));
+    }, defaultThemeSettings);
+    await page.waitForSelector('.editor-host > .cm-editor');
+    await waitForFrames(page, 8);
+
+    const blameButton = await page.$('[data-action="gitBlame"]');
+    if (!blameButton) throw new Error('More tools did not contain the line author toggle');
+    const initialButtonState = await blameButton.evaluate((button) => ({
+      pressed: button.getAttribute('aria-pressed'),
+      insideMore: Boolean(button.closest('.more-tools-panel'))
+    }));
+    if (initialButtonState.pressed !== 'false' || !initialButtonState.insideMore) {
+      throw new Error(`Line author toggle did not default off inside More: ${JSON.stringify(initialButtonState)}`);
+    }
+
+    const hoverPoint = await page.evaluate(() => {
+      const gutter = document.querySelector<HTMLElement>('.cm-gutter.meo-git-gutter')!;
+      const line = document.querySelector<HTMLElement>('.cm-content .cm-line')!;
+      const gutterRect = gutter.getBoundingClientRect();
+      const lineRect = line.getBoundingClientRect();
+      return { x: gutterRect.left + 1, y: (lineRect.top + lineRect.bottom) / 2 };
+    });
+    await page.mouse.move(hoverPoint.x, hoverPoint.y);
+    await waitForFrames(page, 2);
+    const disabledRequests = await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'requestGitBlame').length);
+    if (disabledRequests !== 0) throw new Error('Disabled line authors still requested Git blame');
+
+    await page.click('[aria-label="More tools"]');
+    await blameButton.click();
+    await page.click('[aria-label="More tools"]');
+    const enabledState = await blameButton.evaluate((button) => button.getAttribute('aria-pressed'));
+    if (enabledState !== 'true') throw new Error('Line author toggle did not become enabled');
+    const settingMessage = await page.evaluate(() => (window as any).__hostMessages.find((message: any) => message.type === 'setGitBlame'));
+    if (!settingMessage || settingMessage.enabled !== true) throw new Error('Enabling line authors did not persist the setting');
+
+    await page.mouse.move(hoverPoint.x + 100, hoverPoint.y);
+    await page.mouse.move(hoverPoint.x, hoverPoint.y);
+    await page.waitForFunction(() => (window as any).__hostMessages.some((message: any) => message.type === 'requestGitBlame'));
+    const request = await page.evaluate(() => (window as any).__hostMessages.find((message: any) => message.type === 'requestGitBlame'));
+    await page.evaluate((message) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'gitBlameResult', requestId: message.requestId, lineNumber: message.lineNumber,
+        localEditGeneration: message.localEditGeneration,
+        result: { kind: 'commit', commit: '1234567890abcdef', shortCommit: '12345678', author: 'Example Author', authorTimeUnix: 1_700_000_000, summary: 'Example commit' }
+      }}));
+    }, request);
+    await page.waitForFunction(() => document.querySelector('.meo-git-blame-tooltip')?.textContent?.includes('Example Author'));
+
+    await page.click('[aria-label="More tools"]');
+    await blameButton.click();
+    const disabledState = await blameButton.evaluate((button) => button.getAttribute('aria-pressed'));
+    const tooltipHidden = await page.$eval('.meo-git-blame-tooltip', (tooltip) => (tooltip as HTMLElement).hidden);
+    if (disabledState !== 'false' || !tooltipHidden) throw new Error('Disabling line authors did not immediately hide the tooltip');
+    await page.evaluate(() => { (window as any).__hostMessages = []; });
+    await page.mouse.move(hoverPoint.x + 100, hoverPoint.y);
+    await page.mouse.move(hoverPoint.x, hoverPoint.y);
+    await waitForFrames(page, 2);
+    const requestsAfterDisable = await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'requestGitBlame').length);
+    if (requestsAfterDisable !== 0) throw new Error('Disabling line authors did not stop later Git blame requests');
+
+    console.log('git blame toggle checks passed');
+  } finally {
+    await browser.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+await main();
