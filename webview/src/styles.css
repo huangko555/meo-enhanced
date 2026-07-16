@@ -2927,6 +2927,10 @@ body.outline-resizing {
   bottom: -3px;
 }
 
+.cm-editor .meo-git-gutter-marker.is-deleted.is-hit-hover::after {
+  border-left-width: 7px;
+}
+
 .cm-editor .meo-git-gutter-marker:hover .meo-git-gutter-stripe {
   left: -2px;
   width: 5px;
@@ -3092,7 +3096,8 @@ body.outline-resizing {
   display: none;
 }
 
-.meo-deletion-tooltip {
+.meo-deletion-tooltip,
+.meo-modified-tooltip {
   position: fixed;
   z-index: 31;
   min-width: 220px;
@@ -3108,14 +3113,20 @@ body.outline-resizing {
   pointer-events: none;
 }
 
-.meo-deletion-tooltip-title {
+.meo-deletion-tooltip-title,
+.meo-modified-tooltip-title {
   margin-bottom: 6px;
   color: var(--git-deleted);
   font-size: 12px;
   font-weight: 600;
 }
 
-.meo-deletion-tooltip-content {
+.meo-modified-tooltip-title {
+  color: var(--git-changed);
+}
+
+.meo-deletion-tooltip-content,
+.meo-modified-tooltip-content {
   max-height: 320px;
   margin: 0;
   overflow: hidden;
@@ -3124,13 +3135,15 @@ body.outline-resizing {
   font: 11px/1.45 var(--vscode-editor-font-family, monospace);
 }
 
-.meo-deletion-tooltip-more {
+.meo-deletion-tooltip-more,
+.meo-modified-tooltip-more {
   margin-top: 6px;
   color: var(--vscode-descriptionForeground, var(--vscode-editorLineNumber-foreground));
   font-size: 11px;
 }
 
-.meo-deletion-tooltip-more:empty {
+.meo-deletion-tooltip-more:empty,
+.meo-modified-tooltip-more:empty {
   display: none;
 }
 

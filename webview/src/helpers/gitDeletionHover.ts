@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view';
-import { getDeletedGapRangesPreview } from './gitDiffGutter';
+import { getBaselineRangesPreview, getDeletedGapRangesPreview } from './gitDiffGutter';
 
-type DeletionHoverController = {
+type DiffContentHoverController = {
   hide(): void;
   destroy(): void;
 };
@@ -10,9 +10,23 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-const DELETION_HIT_HORIZONTAL_PADDING_PX = 8;
+const DELETION_HIT_LEFT_PADDING_PX = 7;
+const DELETION_TRIANGLE_MAX_GUTTER_OVERFLOW_PX = 4;
 const DELETION_HIT_VERTICAL_PADDING_PX = 7;
 const deletionMarkerHitCache = new WeakMap<MouseEvent, { view: EditorView; marker: HTMLElement | null }>();
+
+function parseLineRanges(raw: string | undefined): Array<[number, number]> {
+  try {
+    const parsed = JSON.parse(raw ?? '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((range): range is [number, number] => (
+          Array.isArray(range) && range.length === 2 && Number.isInteger(range[0]) && Number.isInteger(range[1])
+        ))
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 export function findDeletionMarkerForMouseEvent(
   view: EditorView,
@@ -30,8 +44,8 @@ export function findDeletionMarkerForMouseEvent(
   }
   const gutterRect = gutter.getBoundingClientRect();
   if (
-    clientX < gutterRect.left - DELETION_HIT_HORIZONTAL_PADDING_PX ||
-    clientX > gutterRect.right + DELETION_HIT_HORIZONTAL_PADDING_PX
+    clientX < gutterRect.left - DELETION_HIT_LEFT_PADDING_PX ||
+    clientX > gutterRect.right + DELETION_TRIANGLE_MAX_GUTTER_OVERFLOW_PX
   ) {
     deletionMarkerHitCache.set(event, { view, marker: null });
     return null;
@@ -41,10 +55,13 @@ export function findDeletionMarkerForMouseEvent(
   let nearestVerticalDistance = Number.POSITIVE_INFINITY;
   for (const marker of gutter.querySelectorAll<HTMLElement>('.meo-git-gutter-marker.is-deleted')) {
     const rect = marker.getBoundingClientRect();
+    const triangleStyle = window.getComputedStyle(marker, '::after');
+    const triangleLeft = rect.left + (Number.parseFloat(triangleStyle.left) || 0);
+    const triangleRight = triangleLeft + (Number.parseFloat(triangleStyle.borderLeftWidth) || 0);
     const triangleY = marker.classList.contains('is-deleted-at-end') ? rect.bottom : rect.top;
     if (
-      clientX >= rect.left - DELETION_HIT_HORIZONTAL_PADDING_PX &&
-      clientX <= rect.right + DELETION_HIT_HORIZONTAL_PADDING_PX &&
+      clientX >= triangleLeft - DELETION_HIT_LEFT_PADDING_PX &&
+      clientX <= triangleRight &&
       clientY >= triangleY - DELETION_HIT_VERTICAL_PADDING_PX &&
       clientY <= triangleY + DELETION_HIT_VERTICAL_PADDING_PX
     ) {
@@ -59,7 +76,16 @@ export function findDeletionMarkerForMouseEvent(
   return nearestMarker;
 }
 
-export function createGitDeletionHoverController(view: EditorView): DeletionHoverController {
+export function findModifiedMarkerForMouseEvent(
+  view: EditorView,
+  event: MouseEvent
+): HTMLElement | null {
+  const target = event.target instanceof Element ? event.target : null;
+  const marker = target?.closest<HTMLElement>('.meo-git-gutter-marker.is-modified') ?? null;
+  return marker && view.dom.contains(marker) ? marker : null;
+}
+
+export function createGitDiffContentHoverController(view: EditorView): DiffContentHoverController {
   const root = document.createElement('div');
   root.className = 'meo-deletion-tooltip';
   root.hidden = true;
@@ -73,23 +99,48 @@ export function createGitDeletionHoverController(view: EditorView): DeletionHove
   root.append(title, content, more);
   document.body.appendChild(root);
 
+  const modifiedRoot = document.createElement('div');
+  modifiedRoot.className = 'meo-modified-tooltip';
+  modifiedRoot.hidden = true;
+  const modifiedTitle = document.createElement('div');
+  modifiedTitle.className = 'meo-modified-tooltip-title';
+  modifiedTitle.textContent = 'Before change';
+  const modifiedContent = document.createElement('pre');
+  modifiedContent.className = 'meo-modified-tooltip-content';
+  const modifiedMore = document.createElement('div');
+  modifiedMore.className = 'meo-modified-tooltip-more';
+  modifiedRoot.append(modifiedTitle, modifiedContent, modifiedMore);
+  document.body.appendChild(modifiedRoot);
+
   let destroyed = false;
   let activeKey = '';
+  let activeDeletionMarker: HTMLElement | null = null;
+
+  const setActiveDeletionMarker = (marker: HTMLElement | null) => {
+    if (activeDeletionMarker === marker) {
+      return;
+    }
+    activeDeletionMarker?.classList.remove('is-hit-hover');
+    activeDeletionMarker = marker;
+    activeDeletionMarker?.classList.add('is-hit-hover');
+  };
 
   const hide = () => {
     activeKey = '';
+    setActiveDeletionMarker(null);
     root.hidden = true;
+    modifiedRoot.hidden = true;
   };
 
-  const position = (marker: Element) => {
+  const position = (tooltipRoot: HTMLElement, marker: Element) => {
     const markerRect = marker.getBoundingClientRect();
-    const tooltipRect = root.getBoundingClientRect();
+    const tooltipRect = tooltipRoot.getBoundingClientRect();
     let left = markerRect.right + 10;
     if (left + tooltipRect.width > window.innerWidth - 8) {
       left = markerRect.left - tooltipRect.width - 10;
     }
-    root.style.left = `${clamp(left, 8, Math.max(8, window.innerWidth - tooltipRect.width - 8))}px`;
-    root.style.top = `${clamp(markerRect.top, 8, Math.max(8, window.innerHeight - tooltipRect.height - 8))}px`;
+    tooltipRoot.style.left = `${clamp(left, 8, Math.max(8, window.innerWidth - tooltipRect.width - 8))}px`;
+    tooltipRoot.style.top = `${clamp(markerRect.top, 8, Math.max(8, window.innerHeight - tooltipRect.height - 8))}px`;
   };
 
   const onMouseMove = (event: MouseEvent) => {
@@ -97,49 +148,63 @@ export function createGitDeletionHoverController(view: EditorView): DeletionHove
       return;
     }
     const marker = findDeletionMarkerForMouseEvent(view, event);
-    if (!marker) {
-      hide();
-      return;
-    }
-
-    const markerElement = marker as HTMLElement;
-    const baselineFromLine = Number.parseInt(markerElement.dataset.meoBaselineFromLine ?? '', 10);
-    const baselineToLine = Number.parseInt(markerElement.dataset.meoBaselineToLine ?? '', 10);
-    let ranges: Array<[number, number]> = [];
-    try {
-      const parsed = JSON.parse(markerElement.dataset.meoDeletionRanges ?? '[]');
-      if (Array.isArray(parsed)) {
-        ranges = parsed.filter((range): range is [number, number] => (
-          Array.isArray(range) && range.length === 2 && Number.isInteger(range[0]) && Number.isInteger(range[1])
-        ));
+    if (marker) {
+      setActiveDeletionMarker(marker);
+      const baselineFromLine = Number.parseInt(marker.dataset.meoBaselineFromLine ?? '', 10);
+      const baselineToLine = Number.parseInt(marker.dataset.meoBaselineToLine ?? '', 10);
+      const ranges = parseLineRanges(marker.dataset.meoDeletionRanges);
+      if (!ranges.length && Number.isInteger(baselineFromLine) && Number.isInteger(baselineToLine)) {
+        ranges.push([baselineFromLine, baselineToLine]);
       }
-    } catch {
-      ranges = [];
-    }
-    if (!ranges.length && Number.isInteger(baselineFromLine) && Number.isInteger(baselineToLine)) {
-      ranges = [[baselineFromLine, baselineToLine]];
-    }
-    if (!ranges.length) {
-      hide();
-      return;
-    }
-    const key = JSON.stringify(ranges);
-    if (key === activeKey && !root.hidden) {
-      position(marker);
+      if (!ranges.length) {
+        hide();
+        return;
+      }
+      const key = `deleted:${JSON.stringify(ranges)}`;
+      if (key === activeKey && !root.hidden) {
+        position(root, marker);
+        return;
+      }
+
+      const preview = getDeletedGapRangesPreview(view.state, ranges);
+      if (!preview) {
+        hide();
+        return;
+      }
+      activeKey = key;
+      title.textContent = `Deleted ${preview.totalLines} ${preview.totalLines === 1 ? 'line' : 'lines'}`;
+      content.textContent = preview.text;
+      more.textContent = preview.truncated ? 'More deleted content is not shown.' : '';
+      modifiedRoot.hidden = true;
+      root.hidden = false;
+      position(root, marker);
       return;
     }
 
-    const preview = getDeletedGapRangesPreview(view.state, ranges);
+    const modifiedMarker = findModifiedMarkerForMouseEvent(view, event);
+    setActiveDeletionMarker(null);
+    const rawRanges = modifiedMarker?.dataset.meoModifiedRanges;
+    if (!modifiedMarker || !rawRanges) {
+      hide();
+      return;
+    }
+    const key = `modified:${rawRanges}`;
+    if (key === activeKey && !modifiedRoot.hidden) {
+      position(modifiedRoot, modifiedMarker);
+      return;
+    }
+    const modifiedRanges = parseLineRanges(rawRanges);
+    const preview = getBaselineRangesPreview(view.state, modifiedRanges);
     if (!preview) {
       hide();
       return;
     }
     activeKey = key;
-    title.textContent = `Deleted ${preview.totalLines} ${preview.totalLines === 1 ? 'line' : 'lines'}`;
-    content.textContent = preview.text;
-    more.textContent = preview.truncated ? 'More deleted content is not shown.' : '';
-    root.hidden = false;
-    position(marker);
+    modifiedContent.textContent = preview.text;
+    modifiedMore.textContent = preview.truncated ? 'More original content is not shown.' : '';
+    root.hidden = true;
+    modifiedRoot.hidden = false;
+    position(modifiedRoot, modifiedMarker);
   };
 
   const onMouseLeave = () => hide();
@@ -154,10 +219,12 @@ export function createGitDeletionHoverController(view: EditorView): DeletionHove
         return;
       }
       destroyed = true;
+      setActiveDeletionMarker(null);
       view.dom.removeEventListener('mousemove', onMouseMove);
       view.dom.removeEventListener('mouseleave', onMouseLeave);
       view.scrollDOM.removeEventListener('scroll', hide);
       root.remove();
+      modifiedRoot.remove();
     }
   };
 }

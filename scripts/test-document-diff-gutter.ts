@@ -103,6 +103,66 @@ async function main() {
 
     await page.evaluate(() => {
       const editor = (window as any).__editor;
+      editor.setMode('source');
+      editor.setText('first\ncurrent value\nlast');
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: 'first\noriginal value\nlast'
+      });
+    });
+    await waitForFrames(page, 4);
+    const modifiedMarker = await page.$('.meo-git-gutter-marker.is-modified');
+    const modifiedRect = await modifiedMarker?.boundingBox();
+    if (!modifiedRect) throw new Error('Modified marker had no layout box');
+    await page.mouse.move(modifiedRect.x + modifiedRect.width / 2, modifiedRect.y + modifiedRect.height / 2);
+    await waitForFrames(page, 2);
+    const modifiedTooltip = await page.evaluate(() => {
+      const root = document.querySelector<HTMLElement>('.meo-modified-tooltip');
+      return { hidden: root?.hidden, text: root?.textContent ?? '' };
+    });
+    if (modifiedTooltip.hidden || !modifiedTooltip.text.includes('original value')) {
+      throw new Error(`Modified content tooltip was incorrect: ${JSON.stringify(modifiedTooltip)}`);
+    }
+    await page.mouse.move(modifiedRect.x - 2, modifiedRect.y + modifiedRect.height / 2);
+    await waitForFrames(page, 2);
+    const modifiedHoverState = await modifiedMarker!.evaluate((element) => ({
+      stripeWidth: element.querySelector<HTMLElement>('.meo-git-gutter-stripe')?.getBoundingClientRect().width ?? 0,
+      tooltipVisible: !document.querySelector<HTMLElement>('.meo-modified-tooltip')?.hidden
+    }));
+    if (modifiedHoverState.stripeWidth <= modifiedRect.width || !modifiedHoverState.tooltipVisible) {
+      throw new Error(`Modified marker did not retain its existing expanded hover behavior: ${JSON.stringify(modifiedHoverState)}`);
+    }
+
+    await page.evaluate(() => {
+      (window as any).__editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: 'first\nsaved value\nlast'
+      });
+    });
+    await waitForFrames(page, 2);
+    const staleModifiedTooltipVisible = await page.$eval(
+      '.meo-modified-tooltip',
+      (element) => !(element as HTMLElement).hidden
+    );
+    if (staleModifiedTooltipVisible) {
+      throw new Error('Modified tooltip remained visible after the diff baseline changed');
+    }
+    await page.mouse.move(modifiedRect.x + modifiedRect.width / 2, modifiedRect.y + modifiedRect.height / 2);
+    await waitForFrames(page, 2);
+    const refreshedModifiedTooltipText = await page.$eval(
+      '.meo-modified-tooltip',
+      (element) => element.textContent ?? ''
+    );
+    if (!refreshedModifiedTooltipText.includes('saved value') || refreshedModifiedTooltipText.includes('original value')) {
+      throw new Error(`Modified tooltip did not refresh after the baseline changed: ${refreshedModifiedTooltipText}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
       const text = '| Name |\n| --- |\n| kept one |\n| kept two |\n\nafter';
       editor.setText(text);
       editor.revealSelection(text.length, text.length, { focus: false });
@@ -149,6 +209,38 @@ async function main() {
 
     await page.evaluate(() => {
       const editor = (window as any).__editor;
+      const text = '```mermaid\nflowchart LR\nA --> C\nC --> E\n```\n\nafter';
+      editor.setText(text);
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: '```mermaid\nflowchart LR\nA --> B\nC --> D\n```\n\nafter'
+      });
+    });
+    await waitForFrames(page, 8);
+    const liveModifiedMarker = await page.$('.meo-git-gutter-marker.is-modified');
+    const liveModifiedRect = await liveModifiedMarker?.boundingBox();
+    if (!liveModifiedRect) throw new Error('Live Mermaid modified marker had no layout box');
+    await page.mouse.move(
+      liveModifiedRect.x + liveModifiedRect.width / 2,
+      liveModifiedRect.y + liveModifiedRect.height / 2
+    );
+    await waitForFrames(page, 2);
+    const liveModifiedTooltip = await page.evaluate(() => {
+      const root = document.querySelector<HTMLElement>('.meo-modified-tooltip');
+      return { hidden: root?.hidden, text: root?.textContent ?? '' };
+    });
+    if (
+      liveModifiedTooltip.hidden ||
+      !liveModifiedTooltip.text.includes('A --> B\nC --> D') ||
+      liveModifiedTooltip.text.includes('A --> B\n…\nC --> D')
+    ) {
+      throw new Error(`Live modified tooltip omitted original source: ${JSON.stringify(liveModifiedTooltip)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
       const text = '$$\na\nc\n$$\n\nafter';
       editor.setText(text);
       editor.revealSelection(text.length, text.length, { focus: false });
@@ -180,12 +272,35 @@ async function main() {
     const sourceMarker = await page.$('.meo-git-gutter-marker.is-deleted');
     const sourceRect = await sourceMarker?.boundingBox();
     if (!sourceRect) throw new Error('Source deleted marker had no layout box for hit-area check');
+    const sourceTriangle = await sourceMarker!.evaluate((element) => {
+      const markerRect = element.getBoundingClientRect();
+      const style = getComputedStyle(element, '::after');
+      const left = Number.parseFloat(style.left) || 0;
+      const width = Number.parseFloat(style.borderLeftWidth) || 0;
+      return {
+        right: markerRect.left + left + width,
+        width,
+        y: markerRect.top
+      };
+    });
     await page.mouse.move(sourceRect.x + 80, sourceRect.y + 1);
+    await page.mouse.move(sourceTriangle.right + 1, sourceTriangle.y);
+    await waitForFrames(page, 2);
+    const rightOutsideTooltipVisible = await page.$eval('.meo-deletion-tooltip', (element) => !(element as HTMLElement).hidden);
+    if (rightOutsideTooltipVisible) {
+      throw new Error('Deleted content tooltip extended past the visible triangle on the right');
+    }
     await page.mouse.move(sourceRect.x - 6, sourceRect.y + 1);
     await waitForFrames(page, 2);
     const expandedHitTooltipVisible = await page.$eval('.meo-deletion-tooltip', (element) => !(element as HTMLElement).hidden);
     if (!expandedHitTooltipVisible) {
       throw new Error('Deleted content tooltip hit area did not extend beyond the visible triangle');
+    }
+    const expandedTriangleWidth = await sourceMarker!.evaluate((element) => (
+      Number.parseFloat(getComputedStyle(element, '::after').borderLeftWidth) || 0
+    ));
+    if (expandedTriangleWidth <= sourceTriangle.width) {
+      throw new Error(`Deleted triangle did not expand on hover: ${sourceTriangle.width} -> ${expandedTriangleWidth}`);
     }
 
     await page.evaluate(() => {

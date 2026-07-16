@@ -26,7 +26,7 @@ import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { createGitBlameHoverController } from './helpers/gitBlameHover';
-import { createGitDeletionHoverController } from './helpers/gitDeletionHover';
+import { createGitDiffContentHoverController } from './helpers/gitDeletionHover';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
 import { resolvedSyntaxTree, extractHeadings, extractHeadingSections } from './helpers/markdownSyntax';
 import {
@@ -300,7 +300,7 @@ export function createEditor({
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
   let pendingLiveSearchDecorationRefreshGeneration = 0;
   let gitBlameHover = null;
-  let gitDeletionHover = null;
+  let gitDiffContentHover = null;
   let gitDiffOverviewRuler = null;
   let searchOverviewRuler = null;
   let editableLinkHoverPointerActive = false;
@@ -2083,7 +2083,7 @@ export function createEditor({
       openWorktreeForLine: onOpenGitWorktreeForLine
     });
   }
-  gitDeletionHover = createGitDeletionHoverController(view);
+  gitDiffContentHover = createGitDiffContentHoverController(view);
   gitDiffOverviewRuler = createGitDiffOverviewRulerController({
     view,
     getMode: () => currentMode,
@@ -2225,8 +2225,8 @@ export function createEditor({
       view.dom.classList.remove('meo-live-pointer-selecting');
       gitBlameHover?.destroy();
       gitBlameHover = null;
-      gitDeletionHover?.destroy();
-      gitDeletionHover = null;
+      gitDiffContentHover?.destroy();
+      gitDiffContentHover = null;
       gitDiffOverviewRuler?.destroy();
       gitDiffOverviewRuler = null;
       searchOverviewRuler?.destroy();
@@ -2651,6 +2651,7 @@ export function createEditor({
     },
     setGitBaseline(snapshot) {
       applyGitBaseline(view, snapshot);
+      gitDiffContentHover?.hide();
       gitBlameHover?.hide();
       gitDiffOverviewRuler?.refresh();
     },

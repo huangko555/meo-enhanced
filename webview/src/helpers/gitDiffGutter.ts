@@ -26,6 +26,7 @@ interface BaselineSnapshot {
 export interface MarkerFlags {
   added: boolean;
   modified: boolean;
+  modifiedRanges?: Array<[number, number]>;
   deleted?: boolean;
   deletionBoundary?: number;
   deletionAtEnd?: boolean;
@@ -110,6 +111,9 @@ class GitGutterMarker extends GutterMarker {
     }
     if (this.flags.modified) {
       el.classList.add('is-modified');
+      if (this.flags.modifiedRanges?.length) {
+        el.dataset.meoModifiedRanges = JSON.stringify(this.flags.modifiedRanges);
+      }
     }
     if (this.flags.deleted) {
       el.classList.add('is-deleted');
@@ -185,6 +189,24 @@ function emptyMarkerFlags(): MarkerFlags {
   };
 }
 
+function mergeLineRanges(
+  ranges: ReadonlyArray<readonly [number, number]>
+): Array<[number, number]> {
+  const sorted = ranges
+    .map(([fromLine, toLine]) => [fromLine, toLine] as [number, number])
+    .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  const merged: Array<[number, number]> = [];
+  for (const range of sorted) {
+    const previous = merged[merged.length - 1];
+    if (previous && range[0] <= previous[1] + 1) {
+      previous[1] = Math.max(previous[1], range[1]);
+    } else {
+      merged.push(range);
+    }
+  }
+  return merged;
+}
+
 function coalesceTrailingEofVisualLineFlag(doc: any, lineFlags: (MarkerFlags | undefined)[] | null): (MarkerFlags | undefined)[] | null {
   if (!Array.isArray(lineFlags) || !isTrailingEofVisualLine(doc, doc.lines) || doc.lines < 2) {
     return lineFlags;
@@ -201,6 +223,10 @@ function coalesceTrailingEofVisualLineFlag(doc: any, lineFlags: (MarkerFlags | u
   const previousHadChange = !!(previousFlags.added || previousFlags.modified);
   if (trailingFlags.modified) {
     previousFlags.modified = true;
+    previousFlags.modifiedRanges = mergeLineRanges([
+      ...(previousFlags.modifiedRanges ?? []),
+      ...(trailingFlags.modifiedRanges ?? [])
+    ]);
   }
   if (trailingFlags.added) {
     if (previousFlags.added) {
@@ -256,6 +282,7 @@ function getTrailingEofProxyFlags(
   return {
     added: previousFlags?.trailingEofProxyOnly ? false : !!previousFlags?.added,
     modified: previousFlags?.trailingEofProxyOnly ? true : !!previousFlags?.modified,
+    modifiedRanges: previousFlags?.modifiedRanges,
     eofProxy: true
   };
 }
@@ -293,9 +320,14 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
     if (change.line < 1 || change.line > state.doc.lines) {
       continue;
     }
+    const baselineLine = result.currentToBaselineLine[change.line] ?? 0;
     lineFlags[change.line - 1] = change.kind === 'added'
       ? { ...emptyMarkerFlags(), added: true }
-      : { ...emptyMarkerFlags(), modified: true };
+      : {
+          ...emptyMarkerFlags(),
+          modified: true,
+          modifiedRanges: baselineLine > 0 ? [[baselineLine, baselineLine]] : undefined
+        };
   }
 
   for (const gap of result.deletedGaps) {
@@ -408,6 +440,22 @@ function liveCollapsedBlockMarkerFlags(
     liveBlockStartLine: block.startLine,
     liveBlockEndLine: block.endLine
   };
+  const seenModifiedRanges = new Set<string>();
+  const modifiedRanges = lineFlags
+    .slice(Math.max(0, block.startLine - 1), block.endLine)
+    .flatMap((candidate) => candidate?.modifiedRanges ?? [])
+    .filter(([fromLine, toLine]) => {
+      const key = `${fromLine}:${toLine}`;
+      if (seenModifiedRanges.has(key)) {
+        return false;
+      }
+      seenModifiedRanges.add(key);
+      return true;
+    });
+  flags.modifiedRanges = mergeLineRanges(modifiedRanges);
+  if (!flags.modifiedRanges.length) {
+    delete flags.modifiedRanges;
+  }
   const deletions = lineFlags
     .slice(Math.max(0, block.startLine - 1), block.endLine)
     .filter((candidate): candidate is MarkerFlags => candidate?.deleted === true);
@@ -600,6 +648,14 @@ export function getDeletedGapPreview(
 }
 
 export function getDeletedGapRangesPreview(
+  state: EditorState,
+  ranges: ReadonlyArray<readonly [number, number]>,
+  options: { maxLines?: number; maxChars?: number } = {}
+): { text: string; totalLines: number; shownLines: number; truncated: boolean } | null {
+  return getBaselineRangesPreview(state, ranges, options);
+}
+
+export function getBaselineRangesPreview(
   state: EditorState,
   ranges: ReadonlyArray<readonly [number, number]>,
   options: { maxLines?: number; maxChars?: number } = {}

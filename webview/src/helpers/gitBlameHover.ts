@@ -1,5 +1,5 @@
 import { gitDiffLineFlagsField } from './gitDiffGutter';
-import { findDeletionMarkerForMouseEvent } from './gitDeletionHover';
+import { findDeletionMarkerForMouseEvent, findModifiedMarkerForMouseEvent } from './gitDeletionHover';
 import { getLiveGitCollapsedBlockAtLine, getLiveRenderedBlockAtLine } from './liveRenderedBlocks';
 
 const hoverDelayMs = 0;
@@ -1031,7 +1031,7 @@ export function createGitBlameHoverController({
     }
 
     const target = event.target instanceof Element ? event.target : null;
-    if (findDeletionMarkerForMouseEvent(view, event)) {
+    if (findDeletionMarkerForMouseEvent(view, event) || findModifiedMarkerForMouseEvent(view, event)) {
       hide();
       return;
     }
