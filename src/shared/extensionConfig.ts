@@ -14,6 +14,7 @@ export const EXTENSION_CONFIG_SECTION = 'markdownEditorOptimized';
 export const LINE_NUMBERS_SETTING_KEY = 'lineNumbers.visible';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
+export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
 export const SPELL_CHECK_SETTING_KEY = 'spellCheck.enabled';
 export const VIM_MODE_BEHAVIOR_SETTING_KEY = 'vimMode.behavior';
 export const VIM_MODE_SETTING_KEY = 'vimMode.enabled';
@@ -38,6 +39,7 @@ const VSCODE_NEOVIM_EXTENSION_ID = 'asvetliakov.vscode-neovim';
 export type OutlinePosition = 'left' | 'right';
 export type ExportHtmlImageMode = 'embedded' | 'linked';
 export type VimModeBehavior = 'auto' | 'enabled' | 'disabled';
+export type DiffBaselineMode = 'current-edit' | 'recent-save' | 'git-head';
 
 export function getThemeSettings(): ThemeSettings {
   const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
@@ -178,6 +180,16 @@ export function getOutlinePosition(): OutlinePosition {
 
 export function getOutlineVisible(context: vscode.ExtensionContext): boolean {
   return context.globalState.get<boolean>(OUTLINE_VISIBLE_KEY, false);
+}
+
+export function getDiffBaselineMode(): DiffBaselineMode {
+  const value = vscode.workspace
+    .getConfiguration(EXTENSION_CONFIG_SECTION)
+    .get<string>(DIFF_BASELINE_MODE_SETTING_KEY, 'current-edit');
+  if (value === 'recent-save' || value === 'git-head') {
+    return value;
+  }
+  return 'current-edit';
 }
 
 export function getOutlineWidth(context: vscode.ExtensionContext): number {

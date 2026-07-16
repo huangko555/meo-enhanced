@@ -65,6 +65,7 @@ interface PixelSegment {
   height: number;
   added: boolean;
   modified: boolean;
+  deleted: boolean;
 }
 
 interface GitDiffOverviewRulerController {
@@ -197,7 +198,8 @@ export function createGitDiffOverviewRulerController({
         top,
         height: bottom - top,
         added: segment.added,
-        modified: segment.modified
+        modified: segment.modified,
+        deleted: segment.deleted
       });
     }
 
@@ -209,7 +211,7 @@ export function createGitDiffOverviewRulerController({
       trackMetrics.fileEndY,
       trackMetrics.showFileEndLine ? 1 : 0,
       pixelSegments.map((segment) => (
-        `${segment.top}:${segment.height}:${segment.added ? 1 : 0}:${segment.modified ? 1 : 0}`
+        `${segment.top}:${segment.height}:${segment.added ? 1 : 0}:${segment.modified ? 1 : 0}:${segment.deleted ? 1 : 0}`
       )).join(',')
     ].join('|');
 
@@ -227,6 +229,9 @@ export function createGitDiffOverviewRulerController({
       }
       if (segment.modified) {
         marker.classList.add('is-modified');
+      }
+      if (segment.deleted) {
+        marker.classList.add('is-deleted');
       }
       marker.style.top = `${segment.top}px`;
       marker.style.height = `${segment.height}px`;

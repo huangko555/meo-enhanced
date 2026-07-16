@@ -1,11 +1,13 @@
 export type GitBaselinePayload = {
   available: boolean;
+  mode?: 'current-edit' | 'recent-save' | 'git-head';
+  generation?: number;
   repoRoot?: string;
   headOid?: string | null;
   tracked: boolean;
   gitPath?: string;
   baseText?: string | null;
-  reason?: 'not-file' | 'git-unavailable' | 'not-repo' | 'ignored' | 'too-large' | 'binary' | 'error';
+  reason?: 'not-file' | 'git-unavailable' | 'not-repo' | 'ignored' | 'too-large' | 'binary' | 'error' | 'no-baseline';
   maxBytesExceeded?: boolean;
 };
 

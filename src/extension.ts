@@ -31,6 +31,7 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY,
+  DIFF_BASELINE_MODE_SETTING_KEY,
   LINE_NUMBERS_LEGACY_SETTING_KEY,
   LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY,
   LINE_NUMBERS_SETTING_KEY,
@@ -49,6 +50,7 @@ import {
   getExportPdfBrowserPath,
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
+  getDiffBaselineMode,
   getLineNumbersEnabled,
   getOutlinePosition,
   getOutlineVisible,
@@ -569,6 +571,14 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY}`)) {
       this.broadcast({ type: 'gitDiffLineHighlightsChanged', enabled: getGitDiffLineHighlightsEnabled() });
+    }
+
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${DIFF_BASELINE_MODE_SETTING_KEY}`)) {
+      const baselineMode = getDiffBaselineMode();
+      this.broadcast({ type: 'diffBaselineModeChanged', mode: baselineMode });
+      for (const session of this.panelSessions.values()) {
+        session.setDiffBaselineMode(baselineMode);
+      }
     }
 
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${CONTENT_MAX_WIDTH_SETTING_KEY}`)) {

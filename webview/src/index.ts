@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis, ChevronDown } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -155,6 +155,7 @@ let vimLeaderState = '\\';
 let lineNumbersVisible = true;
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
+let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
 let spellCheckEnabled = true;
 let contentMaxWidthEnabled = false;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
@@ -195,8 +196,48 @@ const gitChangesGutterBtn = document.createElement('button');
 gitChangesGutterBtn.type = 'button';
 gitChangesGutterBtn.className = 'format-button toggle-button is-active';
 gitChangesGutterBtn.dataset.action = 'gitChangesGutter';
-gitChangesGutterBtn.title = 'Hide Git Changes Gutter';
+gitChangesGutterBtn.title = 'Hide Changes';
 gitChangesGutterBtn.appendChild(createElement(GitCompare, { width: 18, height: 18 }));
+
+const diffBaselineMenuButton = document.createElement('button');
+diffBaselineMenuButton.type = 'button';
+diffBaselineMenuButton.className = 'format-button changes-baseline-menu-button';
+diffBaselineMenuButton.title = 'Choose Change Baseline';
+diffBaselineMenuButton.setAttribute('aria-label', diffBaselineMenuButton.title);
+diffBaselineMenuButton.setAttribute('aria-haspopup', 'menu');
+diffBaselineMenuButton.setAttribute('aria-expanded', 'false');
+diffBaselineMenuButton.appendChild(createElement(ChevronDown, { width: 12, height: 12 }));
+
+const diffBaselineMenu = document.createElement('div');
+diffBaselineMenu.className = 'changes-baseline-menu';
+diffBaselineMenu.setAttribute('role', 'menu');
+diffBaselineMenu.hidden = true;
+
+const diffBaselineOptions = [
+  { mode: 'current-edit', label: 'Current Edits', description: 'Latest saved disk version' },
+  { mode: 'recent-save', label: 'Recent Save', description: 'Before the latest save batch' },
+  { mode: 'git-head', label: 'Git HEAD', description: 'File at Git HEAD' }
+] as const;
+
+for (const option of diffBaselineOptions) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'changes-baseline-option';
+  button.dataset.baselineMode = option.mode;
+  button.setAttribute('role', 'menuitemradio');
+  const label = document.createElement('span');
+  label.className = 'changes-baseline-option-label';
+  label.textContent = option.label;
+  const description = document.createElement('span');
+  description.className = 'changes-baseline-option-description';
+  description.textContent = option.description;
+  button.append(label, description);
+  diffBaselineMenu.appendChild(button);
+}
+
+const changesControls = document.createElement('div');
+changesControls.className = 'changes-controls';
+changesControls.append(gitChangesGutterBtn, diffBaselineMenuButton, diffBaselineMenu);
 
 const spellCheckBtn = document.createElement('button');
 spellCheckBtn.type = 'button';
@@ -214,7 +255,28 @@ const updateLineNumbersUI = () => {
 const updateGitChangesGutterUI = () => {
   gitChangesGutterBtn.classList.toggle('is-active', gitChangesGutterVisible);
   gitChangesGutterBtn.setAttribute('aria-pressed', gitChangesGutterVisible ? 'true' : 'false');
-  gitChangesGutterBtn.title = gitChangesGutterVisible ? 'Hide Git Changes' : 'Show Git Changes';
+  const modeLabel = diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Changes';
+  gitChangesGutterBtn.title = gitChangesGutterVisible ? `Hide Changes (${modeLabel})` : `Show Changes (${modeLabel})`;
+  for (const option of diffBaselineMenu.querySelectorAll<HTMLElement>('.changes-baseline-option')) {
+    const active = option.dataset.baselineMode === diffBaselineMode;
+    option.classList.toggle('is-active', active);
+    option.setAttribute('aria-checked', active ? 'true' : 'false');
+  }
+};
+
+const setDiffBaselineMode = (
+  mode: 'current-edit' | 'recent-save' | 'git-head',
+  { post = true }: { post?: boolean } = {}
+) => {
+  if (mode !== 'current-edit' && mode !== 'recent-save' && mode !== 'git-head') {
+    return;
+  }
+  const changed = mode !== diffBaselineMode;
+  diffBaselineMode = mode;
+  updateGitChangesGutterUI();
+  if (post && changed) {
+    vscode.postMessage({ type: 'setDiffBaselineMode', mode });
+  }
 };
 
 const updateSpellCheckUI = () => {
@@ -654,7 +716,6 @@ moreToolsPanel.hidden = true;
 moreToolsPanel.append(
   contentMaxWidthBtn,
   lineNumbersBtn,
-  gitChangesGutterBtn,
   spellCheckBtn,
   exportWrapper
 );
@@ -681,9 +742,35 @@ document.addEventListener('pointerdown', (event) => {
 
 rightGroup.append(
   findToggleBtn,
+  changesControls,
   outlineBtn,
   moreToolsWrapper
 );
+
+const setDiffBaselineMenuVisible = (visible: boolean) => {
+  diffBaselineMenu.hidden = !visible;
+  diffBaselineMenuButton.classList.toggle('is-active', visible);
+  diffBaselineMenuButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
+};
+
+diffBaselineMenuButton.addEventListener('click', () => {
+  setDiffBaselineMenuVisible(diffBaselineMenu.hidden);
+});
+
+diffBaselineMenu.addEventListener('click', (event) => {
+  const option = (event.target as Element).closest<HTMLElement>('.changes-baseline-option');
+  const mode = option?.dataset.baselineMode;
+  if (mode === 'current-edit' || mode === 'recent-save' || mode === 'git-head') {
+    setDiffBaselineMode(mode);
+    setDiffBaselineMenuVisible(false);
+  }
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (!changesControls.contains(event.target as Node)) {
+    setDiffBaselineMenuVisible(false);
+  }
+}, true);
 
 const modeGroup = document.createElement('div');
 modeGroup.className = 'mode-group';
@@ -1561,6 +1648,9 @@ const handleInit = (message: any) => {
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
   }
+  if (message.diffBaselineMode === 'current-edit' || message.diffBaselineMode === 'recent-save' || message.diffBaselineMode === 'git-head') {
+    setDiffBaselineMode(message.diffBaselineMode, { post: false });
+  }
   if (typeof message.spellCheckEnabled === 'boolean') {
     setSpellCheckEnabled(message.spellCheckEnabled, { post: false });
   }
@@ -1835,6 +1925,11 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'diffBaselineModeChanged') {
+    setDiffBaselineMode(message.mode, { post: false });
+    return;
+  }
+
   if (message.type === 'spellCheckChanged') {
     setSpellCheckEnabled(message.enabled, { post: false });
     return;
@@ -1871,9 +1966,6 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'gitBaselineChanged') {
-    if (typeof message.version === 'number' && message.version < documentVersion) {
-      return;
-    }
     gitClient?.handleMessage(message, { editor });
     return;
   }

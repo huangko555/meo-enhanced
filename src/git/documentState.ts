@@ -11,6 +11,7 @@ export function hashGitBaselinePayload(payload: GitBaselinePayload): string {
   const hash = createHash('sha1');
   hash.update(JSON.stringify({
     available: payload.available,
+    mode: payload.mode ?? 'git-head',
     repoRoot: payload.repoRoot ?? null,
     headOid: payload.headOid ?? null,
     tracked: payload.tracked,
@@ -39,7 +40,6 @@ export class GitDocumentState {
   private withTextCache: GitBaselinePayload | null = null;
   private metadataPromise: Promise<GitBaselinePayload> | null = null;
   private withTextPromise: Promise<GitBaselinePayload> | null = null;
-  private lastSentBaselineHash = '';
 
   constructor(
     private readonly filePath: string,
@@ -48,14 +48,6 @@ export class GitDocumentState {
 
   getRepoRoot(): string | null {
     return this.withTextCache?.repoRoot ?? this.metadataCache?.repoRoot ?? null;
-  }
-
-  getLastSentBaselineHash(): string {
-    return this.lastSentBaselineHash;
-  }
-
-  setLastSentBaselineHash(hash: string): void {
-    this.lastSentBaselineHash = hash;
   }
 
   async resolveBaseline(options: ResolveBaselineOptions = {}): Promise<GitBaselinePayload> {

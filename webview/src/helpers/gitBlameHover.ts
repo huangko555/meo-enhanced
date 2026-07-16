@@ -1028,6 +1028,10 @@ export function createGitBlameHoverController({
     }
 
     const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.meo-git-gutter-marker.is-deleted')) {
+      hide();
+      return;
+    }
     if (target?.closest('.meo-md-fold-toggle')) {
       hide();
       return;

@@ -9,6 +9,23 @@ export type DiffLcsLimits = {
   maxCells?: number;
 };
 
+export type DocumentLineChange = {
+  line: number;
+  kind: 'added' | 'modified';
+};
+
+export type DeletedGap = {
+  boundary: number;
+  baselineFromLine: number;
+  baselineToLine: number;
+};
+
+export type DocumentDiff = {
+  lineChanges: DocumentLineChange[];
+  deletedGaps: DeletedGap[];
+  currentToBaselineLine: Int32Array;
+};
+
 type DiffSegment = {
   baseStart: number;
   baseEnd: number;
@@ -33,6 +50,17 @@ export function normalizeDiffLine(lineText: string): string {
 
 export function splitDiffLines(text: string): string[] {
   return `${text ?? ''}`.split('\n').map(normalizeDiffLine);
+}
+
+function splitDocumentContentLines(text: string): string[] {
+  if (text === '') {
+    return [];
+  }
+  const lines = splitDiffLines(text);
+  if (text.endsWith('\n')) {
+    lines.pop();
+  }
+  return lines;
 }
 
 function hasLaterLineOccurrence(lines: string[], startIndex: number, lineText: string, maxLookahead = 64): boolean {
@@ -563,4 +591,150 @@ export function buildCurrentToBaselineLineMap(
   const baseLines = splitDiffLines(baseText);
   const currentLines = splitDiffLines(currentText);
   return buildCurrentToBaselineLineMapFromLines(baseLines, currentLines, limits);
+}
+
+function pushDeletedGap(deletedGaps: DeletedGap[], gap: DeletedGap): void {
+  const previous = deletedGaps[deletedGaps.length - 1];
+  if (
+    previous &&
+    previous.boundary === gap.boundary &&
+    previous.baselineToLine + 1 === gap.baselineFromLine
+  ) {
+    previous.baselineToLine = gap.baselineToLine;
+    return;
+  }
+  deletedGaps.push(gap);
+}
+
+function buildDocumentDiffFromRuns(
+  runs: DiffRun[],
+  currentLineCount: number
+): DocumentDiff {
+  const lineChanges: DocumentLineChange[] = [];
+  const deletedGaps: DeletedGap[] = [];
+  const currentToBaselineLine = new Int32Array(currentLineCount + 1);
+  let baselineLine = 1;
+  let currentLine = 1;
+
+  const applyReplacement = (deletedCount: number, insertedCount: number) => {
+    const pairCount = Math.min(deletedCount, insertedCount);
+    for (let offset = 0; offset < pairCount; offset += 1) {
+      currentToBaselineLine[currentLine + offset] = baselineLine + offset;
+      lineChanges.push({ line: currentLine + offset, kind: 'modified' });
+    }
+    for (let offset = pairCount; offset < insertedCount; offset += 1) {
+      lineChanges.push({ line: currentLine + offset, kind: 'added' });
+    }
+    if (deletedCount > pairCount) {
+      pushDeletedGap(deletedGaps, {
+        boundary: currentLine + pairCount - 1,
+        baselineFromLine: baselineLine + pairCount,
+        baselineToLine: baselineLine + deletedCount - 1
+      });
+    }
+    baselineLine += deletedCount;
+    currentLine += insertedCount;
+  };
+
+  for (let index = 0; index < runs.length; index += 1) {
+    const run = runs[index];
+    if (run.type === 'equal') {
+      for (let offset = 0; offset < run.count; offset += 1) {
+        currentToBaselineLine[currentLine + offset] = baselineLine + offset;
+      }
+      baselineLine += run.count;
+      currentLine += run.count;
+      continue;
+    }
+
+    const next = runs[index + 1];
+    if (run.type === 'delete' && next?.type === 'insert') {
+      applyReplacement(run.count, next.count);
+      index += 1;
+      continue;
+    }
+    if (run.type === 'insert' && next?.type === 'delete') {
+      applyReplacement(next.count, run.count);
+      index += 1;
+      continue;
+    }
+
+    if (run.type === 'insert') {
+      for (let offset = 0; offset < run.count; offset += 1) {
+        lineChanges.push({ line: currentLine + offset, kind: 'added' });
+      }
+      currentLine += run.count;
+      continue;
+    }
+
+    pushDeletedGap(deletedGaps, {
+      boundary: currentLine - 1,
+      baselineFromLine: baselineLine,
+      baselineToLine: baselineLine + run.count - 1
+    });
+    baselineLine += run.count;
+  }
+
+  return { lineChanges, deletedGaps, currentToBaselineLine };
+}
+
+function buildDocumentDiffFromMapping(
+  baseLines: string[],
+  currentLines: string[],
+  currentToBaselineLine: Int32Array
+): DocumentDiff {
+  const lineChanges: DocumentLineChange[] = [];
+  const deletedGaps: DeletedGap[] = [];
+  let previousBaselineLine = 0;
+  let previousCurrentLine = 0;
+
+  for (let currentLine = 1; currentLine <= currentLines.length; currentLine += 1) {
+    const baselineLine = currentToBaselineLine[currentLine] ?? 0;
+    if (baselineLine <= 0) {
+      lineChanges.push({ line: currentLine, kind: 'added' });
+      continue;
+    }
+    if (baselineLine > previousBaselineLine + 1) {
+      pushDeletedGap(deletedGaps, {
+        boundary: previousCurrentLine,
+        baselineFromLine: previousBaselineLine + 1,
+        baselineToLine: baselineLine - 1
+      });
+    }
+    if (baseLines[baselineLine - 1] !== currentLines[currentLine - 1]) {
+      lineChanges.push({ line: currentLine, kind: 'modified' });
+    }
+    previousBaselineLine = baselineLine;
+    previousCurrentLine = currentLine;
+  }
+
+  if (previousBaselineLine < baseLines.length) {
+    pushDeletedGap(deletedGaps, {
+      boundary: currentLines.length,
+      baselineFromLine: previousBaselineLine + 1,
+      baselineToLine: baseLines.length
+    });
+  }
+
+  return { lineChanges, deletedGaps, currentToBaselineLine };
+}
+
+export function compareDocuments(
+  baseText: string,
+  currentText: string,
+  limits: DiffLcsLimits = {}
+): DocumentDiff {
+  const baseLines = splitDocumentContentLines(baseText);
+  const currentLines = splitDocumentContentLines(currentText);
+
+  const effectiveLimits: DiffLcsLimits = {
+    maxLines: limits.maxLines ?? DEFAULT_EXACT_DIFF_MAX_LINES,
+    maxCells: limits.maxCells ?? DEFAULT_EXACT_DIFF_MAX_CELLS
+  };
+  const runs = lcsDiffRuns(baseLines, currentLines, effectiveLimits);
+  if (runs) {
+    return buildDocumentDiffFromRuns(runs, currentLines.length);
+  }
+  const mapping = buildCurrentToBaselineLineMapFromLines(baseLines, currentLines, effectiveLimits) ?? new Int32Array(currentLines.length + 1);
+  return buildDocumentDiffFromMapping(baseLines, currentLines, mapping);
 }

@@ -64,6 +64,7 @@ export function createGitClient({
 }: GitClientOptions): GitClient {
   let gitBaselineSnapshot: any = null;
   let pendingGitBaselineBeforeEditorMount: any = null;
+  let baselineGeneration = -1;
   let gitBlameRequestCounter = 0;
   let localEditGeneration = 0;
   const pendingGitBlameRequests = new Map<string, PendingBlameRequest>();
@@ -190,6 +191,13 @@ export function createGitClient({
 
   const handleMessage = (message: any, { editor }: { editor?: any } = {}): boolean => {
     if (message.type === 'gitBaselineChanged') {
+      const incomingGeneration = Number.isFinite(message.payload?.generation)
+        ? Number(message.payload.generation)
+        : 0;
+      if (incomingGeneration < baselineGeneration) {
+        return true;
+      }
+      baselineGeneration = incomingGeneration;
       gitBaselineSnapshot = message.payload ?? null;
       if (editor) {
         editor.setGitBaseline(gitBaselineSnapshot);

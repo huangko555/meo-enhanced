@@ -1,9 +1,7 @@
 import { RangeSetBuilder, StateEffect, StateField, EditorState, Transaction } from '@codemirror/state';
 import { GutterMarker, gutter, EditorView } from '@codemirror/view';
 import {
-  buildCurrentToBaselineLineMapFromLines,
-  lcsDiffRuns,
-  normalizeDiffLine,
+  compareDocuments,
   splitDiffLines
 } from '../../../src/shared/gitDiffCore';
 import { getLiveGitCollapsedBlockAtLine, getLiveGitCollapsedBlocks } from './liveRenderedBlocks';
@@ -20,6 +18,7 @@ interface BaselineSnapshot {
   tracked: boolean;
   baseText: string | null;
   baseLines: string[] | null;
+  mode?: 'current-edit' | 'recent-save' | 'git-head';
   headOid?: string | null;
   reason?: 'not-file' | 'git-unavailable' | 'not-repo' | 'ignored' | 'too-large' | 'binary' | 'error';
 }
@@ -27,6 +26,12 @@ interface BaselineSnapshot {
 export interface MarkerFlags {
   added: boolean;
   modified: boolean;
+  deleted?: boolean;
+  deletionBoundary?: number;
+  deletionAtEnd?: boolean;
+  baselineFromLine?: number;
+  baselineToLine?: number;
+  deletionRanges?: Array<[number, number]>;
   eofProxy?: boolean;
   trailingEofProxyOnly?: boolean;
   trailingEofProxySource?: boolean;
@@ -49,6 +54,9 @@ function normalizeBaselineSnapshot(snapshot: any): BaselineSnapshot {
   return {
     available: snapshot.available === true,
     tracked: snapshot.tracked === true,
+    mode: snapshot.mode === 'current-edit' || snapshot.mode === 'recent-save' || snapshot.mode === 'git-head'
+      ? snapshot.mode
+      : 'git-head',
     headOid: typeof snapshot.headOid === 'string' ? snapshot.headOid : snapshot.headOid === null ? null : undefined,
     baseText,
     baseLines: typeof baseText === 'string' ? splitDiffLines(baseText) : null,
@@ -103,8 +111,26 @@ class GitGutterMarker extends GutterMarker {
     if (this.flags.modified) {
       el.classList.add('is-modified');
     }
+    if (this.flags.deleted) {
+      el.classList.add('is-deleted');
+      if (this.flags.deletionAtEnd) {
+        el.classList.add('is-deleted-at-end');
+      }
+      if (Number.isInteger(this.flags.deletionBoundary)) {
+        el.dataset.meoDeletionBoundary = String(this.flags.deletionBoundary);
+      }
+      if (Number.isInteger(this.flags.baselineFromLine)) {
+        el.dataset.meoBaselineFromLine = String(this.flags.baselineFromLine);
+      }
+      if (Number.isInteger(this.flags.baselineToLine)) {
+        el.dataset.meoBaselineToLine = String(this.flags.baselineToLine);
+      }
+      if (this.flags.deletionRanges?.length) {
+        el.dataset.meoDeletionRanges = JSON.stringify(this.flags.deletionRanges);
+      }
+    }
 
-    if (!this.flags.added && !this.flags.modified) {
+    if (!this.flags.added && !this.flags.modified && !this.flags.deleted) {
       el.classList.add('is-empty');
     }
 
@@ -124,6 +150,7 @@ class GitGutterSpacerMarker extends GutterMarker {
   }
 }
 
+const MAX_MARKER_CACHE_SIZE = 512;
 const markerCache = new Map<string, GitGutterMarker>();
 const spacerMarker = new GitGutterSpacerMarker();
 
@@ -132,18 +159,15 @@ function gitMarker(flags: MarkerFlags): GitGutterMarker {
   let marker = markerCache.get(key);
   if (!marker) {
     marker = new GitGutterMarker(flags);
+    if (markerCache.size >= MAX_MARKER_CACHE_SIZE) {
+      const oldestKey = markerCache.keys().next().value;
+      if (typeof oldestKey === 'string') {
+        markerCache.delete(oldestKey);
+      }
+    }
     markerCache.set(key, marker);
   }
   return marker;
-}
-
-function getDocLines(doc: any): string[] {
-  const lines = new Array(doc.lines);
-  for (let i = 1; i <= doc.lines; i += 1) {
-    const line = doc.line(i);
-    lines[i - 1] = normalizeDiffLine(doc.sliceString(line.from, line.to));
-  }
-  return lines;
 }
 
 function isTrailingEofVisualLine(doc: any, lineNo: number): boolean {
@@ -187,6 +211,14 @@ function coalesceTrailingEofVisualLineFlag(doc: any, lineFlags: (MarkerFlags | u
       previousFlags.modified = true;
     }
   }
+  if (trailingFlags.deleted) {
+    previousFlags.deleted = true;
+    previousFlags.deletionBoundary = trailingFlags.deletionBoundary;
+    previousFlags.deletionAtEnd = true;
+    previousFlags.baselineFromLine = trailingFlags.baselineFromLine;
+    previousFlags.baselineToLine = trailingFlags.baselineToLine;
+    previousFlags.deletionRanges = trailingFlags.deletionRanges;
+  }
   previousFlags.trailingEofProxySource = true;
   lineFlags[previousIndex] = previousFlags;
   lineFlags[trailingIndex] = undefined;
@@ -228,112 +260,6 @@ function getTrailingEofProxyFlags(
   };
 }
 
-function buildLineFlagsFromRuns(runs: any[] | null, currentLineCount: number): (MarkerFlags | undefined)[] {
-  const lineFlags: (MarkerFlags | undefined)[] = new Array(currentLineCount);
-  if (!runs) {
-    return lineFlags;
-  }
-
-  let currentLineNo = 1;
-
-  for (let i = 0; i < runs.length; i += 1) {
-    const run = runs[i];
-    if (run.type === 'equal') {
-      currentLineNo += run.count;
-      continue;
-    }
-
-    if (run.type === 'insert') {
-      const next = runs[i + 1];
-      if (next?.type === 'delete') {
-        const pairCount = Math.min(run.count, next.count);
-        for (let offset = 0; offset < pairCount; offset += 1) {
-          const index = currentLineNo - 1 + offset;
-          if (index < 0 || index >= currentLineCount) {
-            continue;
-          }
-          const flags = lineFlags[index] ?? (lineFlags[index] = emptyMarkerFlags());
-          flags.modified = true;
-        }
-        for (let offset = pairCount; offset < run.count; offset += 1) {
-          const index = currentLineNo - 1 + offset;
-          if (index < 0 || index >= currentLineCount) {
-            continue;
-          }
-          const flags = lineFlags[index] ?? (lineFlags[index] = emptyMarkerFlags());
-          flags.added = true;
-        }
-        currentLineNo += run.count;
-        i += 1;
-        continue;
-      }
-
-      for (let offset = 0; offset < run.count; offset += 1) {
-        const index = currentLineNo - 1 + offset;
-        if (index < 0 || index >= currentLineCount) {
-          continue;
-        }
-        const flags = lineFlags[index] ?? (lineFlags[index] = emptyMarkerFlags());
-        flags.added = true;
-      }
-      currentLineNo += run.count;
-      continue;
-    }
-
-    if (run.type === 'delete') {
-      const next = runs[i + 1];
-      if (next?.type === 'insert') {
-        const pairCount = Math.min(run.count, next.count);
-        for (let offset = 0; offset < pairCount; offset += 1) {
-          const index = currentLineNo - 1 + offset;
-          if (index < 0 || index >= currentLineCount) {
-            continue;
-          }
-          const flags = lineFlags[index] ?? (lineFlags[index] = emptyMarkerFlags());
-          flags.modified = true;
-        }
-        for (let offset = pairCount; offset < next.count; offset += 1) {
-          const index = currentLineNo - 1 + offset;
-          if (index < 0 || index >= currentLineCount) {
-            continue;
-          }
-          const flags = lineFlags[index] ?? (lineFlags[index] = emptyMarkerFlags());
-          flags.added = true;
-        }
-        currentLineNo += next.count;
-        i += 1;
-        continue;
-      }
-    }
-  }
-
-  return lineFlags;
-}
-
-function buildLineFlagsFromMapping(baseLines: string[], currentLines: string[], mapping: Record<number, number> | null): (MarkerFlags | undefined)[] {
-  const lineFlags: (MarkerFlags | undefined)[] = new Array(currentLines.length);
-  if (!mapping) {
-    return lineFlags;
-  }
-
-  for (let lineNo = 1; lineNo <= currentLines.length; lineNo += 1) {
-    const mappedBaseLineNo = mapping[lineNo] ?? 0;
-    if (mappedBaseLineNo <= 0) {
-      lineFlags[lineNo - 1] = { ...emptyMarkerFlags(), added: true };
-      continue;
-    }
-
-    const baseText = baseLines[mappedBaseLineNo - 1];
-    const currentText = currentLines[lineNo - 1];
-    if (baseText === currentText) {
-      continue;
-    }
-    lineFlags[lineNo - 1] = { ...emptyMarkerFlags(), modified: true };
-  }
-
-  return lineFlags;
-}
-
 function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): (MarkerFlags | undefined)[] | null {
   if (!canRenderGitDiffBaseline(baseline)) {
     return null;
@@ -358,24 +284,38 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
     return null;
   }
 
-  const baseLines = Array.isArray(baseline.baseLines) ? baseline.baseLines : splitDiffLines(baseline.baseText);
-  const currentLines = getDocLines(state.doc);
-  const mapping = buildCurrentToBaselineLineMapFromLines(baseLines, currentLines, {
+  const result = compareDocuments(baseline.baseText, state.doc.sliceString(0, state.doc.length), {
     maxLines: MAX_DIFF_LINES,
     maxCells: MAX_DIFF_CELLS
   });
-  if (mapping) {
-    return buildLineFlagsFromMapping(baseLines, currentLines, mapping);
-  }
-  const runs = lcsDiffRuns(baseLines, currentLines, {
-    maxLines: MAX_DIFF_LINES,
-    maxCells: MAX_DIFF_CELLS
-  });
-  if (!runs) {
-    return null;
+  const lineFlags: (MarkerFlags | undefined)[] = new Array(state.doc.lines);
+  for (const change of result.lineChanges) {
+    if (change.line < 1 || change.line > state.doc.lines) {
+      continue;
+    }
+    lineFlags[change.line - 1] = change.kind === 'added'
+      ? { ...emptyMarkerFlags(), added: true }
+      : { ...emptyMarkerFlags(), modified: true };
   }
 
-  return buildLineFlagsFromRuns(runs, currentLines.length);
+  for (const gap of result.deletedGaps) {
+    const deletionAtEnd = gap.boundary >= state.doc.lines;
+    const targetLine = deletionAtEnd
+      ? state.doc.lines
+      : Math.max(1, Math.min(state.doc.lines, gap.boundary + 1));
+    const flags = lineFlags[targetLine - 1] ?? (lineFlags[targetLine - 1] = emptyMarkerFlags());
+    flags.deleted = true;
+    flags.deletionBoundary = gap.boundary;
+    flags.deletionAtEnd = deletionAtEnd;
+    flags.baselineFromLine = gap.baselineFromLine;
+    flags.baselineToLine = gap.baselineToLine;
+    flags.deletionRanges = [
+      ...(flags.deletionRanges ?? []),
+      [gap.baselineFromLine, gap.baselineToLine]
+    ];
+  }
+
+  return lineFlags;
 }
 
 function buildCoalescedDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): (MarkerFlags | undefined)[] | null {
@@ -420,7 +360,7 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
   const collapsedBlocks = getLiveGitCollapsedBlocks(state, lineFlags);
   let collapsedBlockIndex = 0;
   let activeCollapsedBlock = collapsedBlocks[collapsedBlockIndex] ?? null;
-  let activeCollapsedFlags = activeCollapsedBlock ? liveCollapsedBlockMarkerFlags(activeCollapsedBlock) : null;
+  let activeCollapsedFlags = activeCollapsedBlock ? liveCollapsedBlockMarkerFlags(activeCollapsedBlock, lineFlags) : null;
 
   const trailingEofProxyFlags = getTrailingEofProxyFlags(state.doc, lineFlags);
 
@@ -430,7 +370,7 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
     while (activeCollapsedBlock && lineNo > activeCollapsedBlock.endLine) {
       collapsedBlockIndex += 1;
       activeCollapsedBlock = collapsedBlocks[collapsedBlockIndex] ?? null;
-      activeCollapsedFlags = activeCollapsedBlock ? liveCollapsedBlockMarkerFlags(activeCollapsedBlock) : null;
+      activeCollapsedFlags = activeCollapsedBlock ? liveCollapsedBlockMarkerFlags(activeCollapsedBlock, lineFlags) : null;
     }
 
     if (activeCollapsedBlock && lineNo >= activeCollapsedBlock.startLine && activeCollapsedFlags) {
@@ -455,20 +395,45 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
   return builder.finish();
 }
 
-function liveCollapsedBlockMarkerFlags(block: { startLine: number; endLine: number; aggregateChangeKind: 'added' | 'modified' }): MarkerFlags {
-  return block.aggregateChangeKind === 'modified'
-    ? {
-        ...emptyMarkerFlags(),
-        modified: true,
-        liveBlockStartLine: block.startLine,
-        liveBlockEndLine: block.endLine
-      }
-    : {
-        ...emptyMarkerFlags(),
-        added: true,
-        liveBlockStartLine: block.startLine,
-        liveBlockEndLine: block.endLine
-      };
+function liveCollapsedBlockMarkerFlags(
+  block: { startLine: number; endLine: number; aggregateChangeKind: 'added' | 'modified' | 'deleted' },
+  lineFlags: readonly (MarkerFlags | undefined)[]
+): MarkerFlags {
+  const flags: MarkerFlags = {
+    ...emptyMarkerFlags(),
+    added: block.aggregateChangeKind === 'added',
+    modified: block.aggregateChangeKind === 'modified',
+    liveBlockStartLine: block.startLine,
+    liveBlockEndLine: block.endLine
+  };
+  const deletions = lineFlags
+    .slice(Math.max(0, block.startLine - 1), block.endLine)
+    .filter((candidate): candidate is MarkerFlags => candidate?.deleted === true);
+  const deletion = deletions[0];
+  if (deletion) {
+    flags.deleted = true;
+    flags.deletionBoundary = deletion.deletionBoundary;
+    flags.deletionAtEnd = deletion.deletionAtEnd;
+    flags.baselineFromLine = deletion.baselineFromLine;
+    flags.baselineToLine = deletion.baselineToLine;
+    const seenRanges = new Set<string>();
+    flags.deletionRanges = deletions.flatMap((candidate) => {
+      const ranges = candidate.deletionRanges?.length
+        ? candidate.deletionRanges
+        : Number.isInteger(candidate.baselineFromLine) && Number.isInteger(candidate.baselineToLine)
+          ? [[candidate.baselineFromLine!, candidate.baselineToLine!] as [number, number]]
+          : [];
+      return ranges.filter(([fromLine, toLine]) => {
+        const key = `${fromLine}:${toLine}`;
+        if (seenRanges.has(key)) {
+          return false;
+        }
+        seenRanges.add(key);
+        return true;
+      });
+    });
+  }
+  return flags;
 }
 
 function liveCollapsedBlockMarkerAtPos(
@@ -481,7 +446,7 @@ function liveCollapsedBlockMarkerAtPos(
   }
   const lineNo = state.doc.lineAt(Math.max(0, Math.min(pos, state.doc.length))).number;
   const block = getLiveGitCollapsedBlockAtLine(state, lineFlags, lineNo);
-  return block ? gitMarker(liveCollapsedBlockMarkerFlags(block)) : null;
+  return block ? gitMarker(liveCollapsedBlockMarkerFlags(block, lineFlags)) : null;
 }
 
 export const gitDiffLineFlagsField = StateField.define<(MarkerFlags | undefined)[] | null>({
@@ -568,6 +533,7 @@ interface DiffSegment {
   toLine: number;
   added: boolean;
   modified: boolean;
+  deleted: boolean;
 }
 
 export function getGitDiffOverviewSegments(state: EditorState): DiffSegment[] {
@@ -591,7 +557,8 @@ export function getGitDiffOverviewSegments(state: EditorState): DiffSegment[] {
     const flags = lineFlags[lineNo - 1];
     const added = !!flags?.added;
     const modified = !!flags?.modified || !!flags?.trailingEofProxyOnly;
-    if (!added && !modified) {
+    const deleted = !!flags?.deleted;
+    if (!added && !modified && !deleted) {
       flush();
       continue;
     }
@@ -600,14 +567,15 @@ export function getGitDiffOverviewSegments(state: EditorState): DiffSegment[] {
       active &&
       active.toLine + 1 === lineNo &&
       active.added === added &&
-      active.modified === modified
+      active.modified === modified &&
+      active.deleted === deleted
     ) {
       active.toLine = lineNo;
       continue;
     }
 
     flush();
-    active = { fromLine: lineNo, toLine: lineNo, added, modified };
+    active = { fromLine: lineNo, toLine: lineNo, added, modified, deleted };
   }
 
   flush();
@@ -618,4 +586,53 @@ export function setGitBaseline(view: EditorView, snapshot: any): void {
   view.dispatch({
     effects: setGitBaselineEffect.of(snapshot)
   });
+}
+
+export function getDeletedGapPreview(
+  state: EditorState,
+  baselineFromLine: number,
+  baselineToLine: number,
+  options: { maxLines?: number; maxChars?: number } = {}
+): { text: string; totalLines: number; shownLines: number; truncated: boolean } | null {
+  return getDeletedGapRangesPreview(state, [[baselineFromLine, baselineToLine]], options);
+}
+
+export function getDeletedGapRangesPreview(
+  state: EditorState,
+  ranges: ReadonlyArray<readonly [number, number]>,
+  options: { maxLines?: number; maxChars?: number } = {}
+): { text: string; totalLines: number; shownLines: number; truncated: boolean } | null {
+  const baseline = state.field(gitBaselineField, false);
+  const validRanges = ranges.filter(([fromLine, toLine]) => (
+    Number.isInteger(fromLine) && Number.isInteger(toLine) && fromLine >= 1 && toLine >= fromLine
+  ));
+  if (!baseline?.baseLines || !validRanges.length) {
+    return null;
+  }
+  const totalLines = validRanges.reduce((total, [fromLine, toLine]) => total + toLine - fromLine + 1, 0);
+  const maxLines = Math.max(1, options.maxLines ?? 20);
+  const maxChars = Math.max(1, options.maxChars ?? 4096);
+  const chunks: string[] = [];
+  let shownLines = 0;
+  for (const [fromLine, toLine] of validRanges) {
+    const remainingLines = maxLines - shownLines;
+    if (remainingLines <= 0) {
+      break;
+    }
+    const selected = baseline.baseLines.slice(fromLine - 1, Math.min(toLine, fromLine - 1 + remainingLines));
+    chunks.push(selected.join('\n'));
+    shownLines += selected.length;
+  }
+  let text = chunks.join('\n…\n');
+  let truncated = shownLines < totalLines;
+  if (text.length > maxChars) {
+    text = text.slice(0, maxChars);
+    truncated = true;
+  }
+  return {
+    text,
+    totalLines,
+    shownLines,
+    truncated
+  };
 }
