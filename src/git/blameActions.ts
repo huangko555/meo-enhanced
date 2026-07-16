@@ -31,10 +31,7 @@ function resolveBlameUnavailableReason(
   return 'error';
 }
 
-// The shared mapper now scales via anchors/heuristics and only uses exact LCS on
-// bounded chunks, so these are chunk limits rather than global failure caps.
-const MAX_BLAME_LINE_MAP_EXACT_CHUNK_LINES = 6000;
-const MAX_BLAME_LINE_MAP_EXACT_CHUNK_CELLS = 4_000_000;
+const MAX_BLAME_LINE_MAP_COMPUTATION_TIME_MS = 100;
 const MAX_BLAME_SNAPSHOT_TEXT_CHARS = 500 * 1024;
 const blameLineMapCache = new Map<string, Int32Array | null>();
 
@@ -403,8 +400,7 @@ function getMappedBaselineLineForRequest(
   let mapping = blameLineMapCache.get(cacheKey);
   if (mapping === undefined) {
     mapping = buildCurrentToBaselineLineMapShared(baseline.baseText, currentText, {
-      maxLines: MAX_BLAME_LINE_MAP_EXACT_CHUNK_LINES,
-      maxCells: MAX_BLAME_LINE_MAP_EXACT_CHUNK_CELLS
+      maxComputationTimeMs: MAX_BLAME_LINE_MAP_COMPUTATION_TIME_MS
     });
     blameLineMapCache.set(cacheKey, mapping);
     if (blameLineMapCache.size > 6) {

@@ -9,6 +9,7 @@ import { getLiveGitCollapsedBlockAtLine, getLiveGitCollapsedBlocks } from './liv
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
 const MAX_DIFF_LINES = 1200;
 const MAX_DIFF_CELLS = 1_500_000;
+const MAX_DIFF_COMPUTATION_TIME_MS = 50;
 const NON_RENDERABLE_GIT_BASELINE_REASONS = new Set(['not-repo', 'ignored']);
 
 export const setGitBaselineEffect = StateEffect.define<any>();
@@ -311,22 +312,34 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
     return null;
   }
 
+  const baselineLineCount = baseline.baseLines?.length ?? splitDiffLines(baseline.baseText).length;
+  if (
+    state.doc.lines > MAX_DIFF_LINES ||
+    baselineLineCount > MAX_DIFF_LINES ||
+    state.doc.lines * baselineLineCount > MAX_DIFF_CELLS
+  ) {
+    return null;
+  }
+
   const result = compareDocuments(baseline.baseText, state.doc.sliceString(0, state.doc.length), {
-    maxLines: MAX_DIFF_LINES,
-    maxCells: MAX_DIFF_CELLS
+    maxComputationTimeMs: MAX_DIFF_COMPUTATION_TIME_MS
   });
+  if (result.hitTimeout || result.failed) {
+    return null;
+  }
   const lineFlags: (MarkerFlags | undefined)[] = new Array(state.doc.lines);
   for (const change of result.lineChanges) {
     if (change.line < 1 || change.line > state.doc.lines) {
       continue;
     }
-    const baselineLine = result.currentToBaselineLine[change.line] ?? 0;
     lineFlags[change.line - 1] = change.kind === 'added'
       ? { ...emptyMarkerFlags(), added: true }
       : {
           ...emptyMarkerFlags(),
           modified: true,
-          modifiedRanges: baselineLine > 0 ? [[baselineLine, baselineLine]] : undefined
+          modifiedRanges: change.baselineFromLine && change.baselineToLine
+            ? [[change.baselineFromLine, change.baselineToLine]]
+            : undefined
         };
   }
 

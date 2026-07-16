@@ -163,6 +163,58 @@ async function main() {
 
     await page.evaluate(() => {
       const editor = (window as any).__editor;
+      editor.setMode('source');
+      editor.setText('before\nLONG\n\n\nHEADING\n\nafter');
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: 'before\n\n\nLONG\n\nHEADING\n\nafter'
+      });
+    });
+    await waitForFrames(page, 4);
+    const blankLineMoveMarkers = await page.evaluate(() => ({
+      added: document.querySelectorAll('.meo-git-gutter-marker.is-added').length,
+      modified: document.querySelectorAll('.meo-git-gutter-marker.is-modified').length,
+      deleted: Array.from(document.querySelectorAll<HTMLElement>('.meo-git-gutter-marker.is-deleted')).map((marker) => ({
+        from: marker.dataset.meoBaselineFromLine,
+        to: marker.dataset.meoBaselineToLine
+      }))
+    }));
+    if (
+      blankLineMoveMarkers.added !== 1 ||
+      blankLineMoveMarkers.modified !== 0 ||
+      blankLineMoveMarkers.deleted.length !== 1 ||
+      blankLineMoveMarkers.deleted[0]?.from !== '2' ||
+      blankLineMoveMarkers.deleted[0]?.to !== '3'
+    ) {
+      throw new Error(`Blank-line edits displaced an unchanged text anchor: ${JSON.stringify(blankLineMoveMarkers)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const baselineLines = Array.from({ length: 1201 }, (_, index) => `stable ${index}`);
+      const currentLines = [...baselineLines];
+      currentLines[600] = 'changed 600';
+      editor.setText(currentLines.join('\n'));
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: baselineLines.join('\n')
+      });
+    });
+    await waitForFrames(page, 4);
+    const oversizedMarkerCount = await page.$$eval(
+      '.meo-git-gutter-marker.is-added, .meo-git-gutter-marker.is-modified, .meo-git-gutter-marker.is-deleted',
+      (markers) => markers.length
+    );
+    if (oversizedMarkerCount !== 0) {
+      throw new Error(`Diff markers rendered past the 1200-line safety limit: ${oversizedMarkerCount}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
       const text = '| Name |\n| --- |\n| kept one |\n| kept two |\n\nafter';
       editor.setText(text);
       editor.revealSelection(text.length, text.length, { focus: false });

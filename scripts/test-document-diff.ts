@@ -1,4 +1,7 @@
-import { compareDocuments } from '../src/shared/gitDiffCore';
+import {
+  buildCurrentToBaselineLineMapFromLines,
+  compareDocuments
+} from '../src/shared/gitDiffCore';
 
 function assertEqual(actual: unknown, expected: unknown, label: string): void {
   const actualJson = JSON.stringify(actual);
@@ -33,22 +36,18 @@ const replacementWithExtraDeletion = compareDocuments(
   'first\nnew\nlast'
 );
 assertEqual(replacementWithExtraDeletion.lineChanges, [
-  { line: 2, kind: 'modified' }
-], 'paired replacement is marked modified');
-assertEqual(replacementWithExtraDeletion.deletedGaps, [{
-  boundary: 2,
-  baselineFromLine: 3,
-  baselineToLine: 4
-}], 'unpaired replacement lines remain visible as a deletion gap');
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 4 }
+], 'a replacement hunk is marked modified across its complete original range');
+assertEqual(replacementWithExtraDeletion.deletedGaps, [], 'a replacement hunk does not invent a separate deletion marker');
 
 const replacementWithExtraInsertion = compareDocuments(
   'first\nold\nlast',
   'first\nnew one\nnew two\nlast'
 );
 assertEqual(replacementWithExtraInsertion.lineChanges, [
-  { line: 2, kind: 'modified' },
-  { line: 3, kind: 'added' }
-], 'splitting one line keeps one modified line and marks the extra line added');
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 2 },
+  { line: 3, kind: 'modified', baselineFromLine: 2, baselineToLine: 2 }
+], 'all current lines in a replacement hunk are marked modified');
 assertEqual(replacementWithExtraInsertion.deletedGaps, [], 'splitting one line does not invent a deletion');
 
 const replacementWithSingleDeletion = compareDocuments(
@@ -56,13 +55,9 @@ const replacementWithSingleDeletion = compareDocuments(
   'first\nnew\nlast'
 );
 assertEqual(replacementWithSingleDeletion.lineChanges, [
-  { line: 2, kind: 'modified' }
-], 'merging two lines keeps one modified line');
-assertEqual(replacementWithSingleDeletion.deletedGaps, [{
-  boundary: 2,
-  baselineFromLine: 3,
-  baselineToLine: 3
-}], 'merging two lines leaves one deleted line');
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 3 }
+], 'merging lines exposes the complete original range as one modified hunk');
+assertEqual(replacementWithSingleDeletion.deletedGaps, [], 'merged replacement content does not create a second deletion marker');
 
 const insertion = compareDocuments('first\nlast', 'first\nnew\nlast');
 assertEqual(insertion.lineChanges, [{ line: 2, kind: 'added' }], 'inserted line is marked added');
@@ -70,19 +65,19 @@ assertEqual(insertion.deletedGaps, [], 'insertion has no deletion gap');
 
 const ambiguousInlineDeletion = compareDocuments('a\nab', 'a\na');
 assertEqual(ambiguousInlineDeletion.lineChanges, [
-  { line: 2, kind: 'modified' }
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 2 }
 ], 'inline deletion keeps the original line identity when adjacent text is ambiguous');
 assertEqual(ambiguousInlineDeletion.deletedGaps, [], 'inline deletion does not invent a deleted line');
 
 const leadingInlineDeletionNearDuplicate = compareDocuments('ab\na', 'a\na');
 assertEqual(leadingInlineDeletionNearDuplicate.lineChanges, [
-  { line: 1, kind: 'modified' }
+  { line: 1, kind: 'modified', baselineFromLine: 1, baselineToLine: 1 }
 ], 'inline deletion keeps its line identity when it becomes equal to the next line');
 assertEqual(leadingInlineDeletionNearDuplicate.deletedGaps, [], 'leading inline deletion does not invent a deleted line');
 
 const clearedMiddleLine = compareDocuments('first\ntext\nlast', 'first\n\nlast');
 assertEqual(clearedMiddleLine.lineChanges, [
-  { line: 2, kind: 'modified' }
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 2 }
 ], 'clearing a line without removing its newline is a modification');
 assertEqual(clearedMiddleLine.deletedGaps, [], 'clearing a line does not invent a deleted line');
 
@@ -91,8 +86,8 @@ const adjacentEditsStartingFromEmptyLine = compareDocuments(
   'before\n123\nClick reveal keeps the break123\n\nafter'
 );
 assertEqual(adjacentEditsStartingFromEmptyLine.lineChanges, [
-  { line: 2, kind: 'modified' },
-  { line: 3, kind: 'modified' }
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 3 },
+  { line: 3, kind: 'modified', baselineFromLine: 2, baselineToLine: 3 }
 ], 'adjacent edited lines keep their identities when the first baseline line is empty');
 assertEqual(
   adjacentEditsStartingFromEmptyLine.deletedGaps,
@@ -105,8 +100,8 @@ const adjacentEditsBeforeRepeatedDivider = compareDocuments(
   'before\n123\nsection123\n---\nafter'
 );
 assertEqual(adjacentEditsBeforeRepeatedDivider.lineChanges, [
-  { line: 2, kind: 'modified' },
-  { line: 3, kind: 'modified' }
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 3 },
+  { line: 3, kind: 'modified', baselineFromLine: 2, baselineToLine: 3 }
 ], 'adjacent edits keep their identities before a repeated non-empty line');
 assertEqual(adjacentEditsBeforeRepeatedDivider.deletedGaps, [], 'a repeated non-empty line does not invent a deletion');
 
@@ -123,15 +118,28 @@ assertEqual(structuralChangesAroundBlankLine.deletedGaps, [{
   baselineToLine: 2
 }], 'a real deletion around an unchanged blank line remains deleted');
 
+const deletionBeforeTextAndInsertionAfterIt = compareDocuments(
+  'before\n\n\nLONG\n\nHEADING\n\nafter',
+  'before\nLONG\n\n\nHEADING\n\nafter'
+);
+assertEqual(deletionBeforeTextAndInsertionAfterIt.lineChanges, [
+  { line: 3, kind: 'added' }
+], 'unchanged non-empty lines remain anchors when blank lines move around them');
+assertEqual(deletionBeforeTextAndInsertionAfterIt.deletedGaps, [{
+  boundary: 1,
+  baselineFromLine: 2,
+  baselineToLine: 3
+}], 'blank lines deleted before unchanged text stay attached before that text');
+
 const clearedFinalLine = compareDocuments('first\ntext', 'first\n');
 assertEqual(clearedFinalLine.lineChanges, [
-  { line: 2, kind: 'modified' }
+  { line: 2, kind: 'modified', baselineFromLine: 2, baselineToLine: 2 }
 ], 'clearing the final line keeps the trailing empty line identity');
 assertEqual(clearedFinalLine.deletedGaps, [], 'clearing the final line does not invent a deleted line');
 
 const clearedOnlyLine = compareDocuments('text', '');
 assertEqual(clearedOnlyLine.lineChanges, [
-  { line: 1, kind: 'modified' }
+  { line: 1, kind: 'modified', baselineFromLine: 1, baselineToLine: 1 }
 ], 'clearing the only editor line is a modification');
 assertEqual(clearedOnlyLine.deletedGaps, [], 'clearing the only editor line does not delete the line itself');
 
@@ -160,12 +168,17 @@ assertEqual(crlfOnly.deletedGaps, [], 'line-ending normalization does not invent
 const wholeDocumentDeletion = compareDocuments('first\nsecond', '');
 assertEqual(wholeDocumentDeletion.lineChanges, [{
   line: 1,
-  kind: 'modified'
-}], 'clearing a document keeps its only editor line as modified');
-assertEqual(wholeDocumentDeletion.deletedGaps, [{
-  boundary: 1,
-  baselineFromLine: 2,
+  kind: 'modified',
+  baselineFromLine: 1,
   baselineToLine: 2
-}], 'clearing a document deletes only the remaining structural line');
+}], 'clearing a document keeps its only editor line as modified');
+assertEqual(wholeDocumentDeletion.deletedGaps, [], 'clearing a document is represented by one complete modified hunk');
+
+const timeoutBaseLines = Array.from({ length: 1200 }, (_, index) => `original ${index}`);
+const timeoutCurrentLines = Array.from({ length: 1200 }, (_, index) => `modified ${index}`);
+const timedOutLineMap = buildCurrentToBaselineLineMapFromLines(timeoutBaseLines, timeoutCurrentLines, {
+  maxComputationTimeMs: 1
+});
+assertEqual(timedOutLineMap, null, 'a timed-out line map is discarded instead of caching approximate blame identities');
 
 console.log('document diff checks passed');
