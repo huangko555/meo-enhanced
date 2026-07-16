@@ -778,9 +778,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         }
         const snapshot = savedRevisionUnavailableReason
           ? null
-          : diffBaselineMode === 'recent-save'
-            ? savedRevisionTracker.getRecentSaveBaseline()
-            : savedRevisionTracker.getCurrentEditBaseline();
+          : savedRevisionTracker.getDiffBaseline(diffBaselineMode);
         payload = snapshot
           ? {
               available: true,

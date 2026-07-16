@@ -52,25 +52,14 @@ export function splitDiffLines(text: string): string[] {
   return `${text ?? ''}`.split('\n').map(normalizeDiffLine);
 }
 
-function splitDocumentContentLines(text: string): string[] {
+function splitDocumentContentLines(text: string, logicalLines = splitDiffLines(text)): string[] {
   if (text === '') {
     return [];
   }
-  const lines = splitDiffLines(text);
   if (text.endsWith('\n')) {
-    lines.pop();
+    return logicalLines.slice(0, -1);
   }
-  return lines;
-}
-
-function hasLaterLineOccurrence(lines: string[], startIndex: number, lineText: string, maxLookahead = 64): boolean {
-  const limit = Math.min(lines.length, startIndex + 1 + maxLookahead);
-  for (let index = startIndex + 1; index < limit; index += 1) {
-    if (lines[index] === lineText) {
-      return true;
-    }
-  }
-  return false;
+  return logicalLines;
 }
 
 function buildLcsMatrix(a: string[], b: string[]): { matrix: Uint32Array; rowSize: number } {
@@ -128,19 +117,22 @@ export function lcsDiffRuns(baseLines: string[], currentLines: string[], limits:
     const insertScore = matrix[i * rowSize + (j + 1)];
 
     if (baseLines[i] === currentLines[j]) {
-      const equalScore = matrix[(i + 1) * rowSize + (j + 1)] + 1;
-      const optionalEqual = Math.max(deleteScore, insertScore) === equalScore;
-      const ambiguousRepeatedLine = optionalEqual && (
-        hasLaterLineOccurrence(baseLines, i, baseLines[i]) ||
-        hasLaterLineOccurrence(currentLines, j, currentLines[j])
-      );
+      pushRun('equal', 1);
+      i += 1;
+      j += 1;
+      continue;
+    }
 
-      if (!ambiguousRepeatedLine) {
-        pushRun('equal', 1);
-        i += 1;
-        j += 1;
-        continue;
-      }
+    const nextDiagonalMatches = i + 1 < n &&
+      j + 1 < m &&
+      baseLines[i + 1] === currentLines[j + 1];
+    const diagonalScore = matrix[(i + 1) * rowSize + (j + 1)];
+    if (nextDiagonalMatches && diagonalScore === Math.max(deleteScore, insertScore)) {
+      pushRun('delete', 1);
+      pushRun('insert', 1);
+      i += 1;
+      j += 1;
+      continue;
     }
 
     if (deleteScore > insertScore) {
@@ -724,8 +716,17 @@ export function compareDocuments(
   currentText: string,
   limits: DiffLcsLimits = {}
 ): DocumentDiff {
-  const baseLines = splitDocumentContentLines(baseText);
-  const currentLines = splitDocumentContentLines(currentText);
+  const logicalBaseLines = splitDiffLines(baseText);
+  const logicalCurrentLines = splitDiffLines(currentText);
+  let baseLines = splitDocumentContentLines(baseText, logicalBaseLines);
+  let currentLines = splitDocumentContentLines(currentText, logicalCurrentLines);
+  if (
+    baseText !== '' &&
+    (currentText === '' || logicalBaseLines.length === logicalCurrentLines.length)
+  ) {
+    baseLines = logicalBaseLines;
+    currentLines = logicalCurrentLines;
+  }
 
   const effectiveLimits: DiffLcsLimits = {
     maxLines: limits.maxLines ?? DEFAULT_EXACT_DIFF_MAX_LINES,

@@ -9,6 +9,8 @@ export type SavedRevisionTrackerOptions = {
   mergeWindowMs?: number;
 };
 
+export type SavedRevisionDiffMode = 'current-edit' | 'recent-save';
+
 function snapshot(text: string): SavedTextSnapshot {
   return {
     text,
@@ -66,6 +68,13 @@ export class SavedRevisionTracker {
 
   getRecentSaveBaseline(): SavedTextSnapshot | null {
     return this.recentSaveBaseline;
+  }
+
+  getDiffBaseline(mode: SavedRevisionDiffMode): SavedTextSnapshot | null {
+    if (mode === 'recent-save') {
+      return this.recentSaveBaseline ?? this.latestDisk;
+    }
+    return this.latestDisk;
   }
 
   getGeneration(): number {

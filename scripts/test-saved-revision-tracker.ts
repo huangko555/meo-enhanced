@@ -10,11 +10,14 @@ const tracker = new SavedRevisionTracker({ mergeWindowMs: 10_000 });
 tracker.initialize('A');
 
 assert(tracker.getCurrentEditBaseline()?.text === 'A', 'initial disk text should be the current-edit baseline');
+assert(tracker.getDiffBaseline('current-edit')?.text === 'A', 'current-edit mode should use the opened disk revision');
 assert(tracker.getRecentSaveBaseline() === null, 'opening a document should not invent recent-save history');
+assert(tracker.getDiffBaseline('recent-save')?.text === 'A', 'recent-save mode should fall back to the opened disk revision');
 
 assert(tracker.noteDiskRevision('B', 1_000) === true, 'first changed disk revision should be accepted');
 assert(tracker.getCurrentEditBaseline()?.text === 'B', 'current-edit baseline should advance on every disk revision');
 assert(tracker.getRecentSaveBaseline()?.text === 'A', 'first save should expose the version before the save');
+assert(tracker.getDiffBaseline('recent-save')?.text === 'A', 'recent-save mode should prefer actual save history after the first save');
 
 assert(tracker.noteDiskRevision('B', 1_100) === false, 'duplicate save and watcher events should be ignored');
 assert(tracker.noteDiskRevision('C', 5_000) === true, 'changed content inside the merge window should be accepted');
