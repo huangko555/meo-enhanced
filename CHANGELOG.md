@@ -1,5 +1,11 @@
 # Markdown Editor Optimized (MEO)
 ---
+## 0.1.31
+- Added current-edit, recent-save, and Git HEAD change baselines with an explicit save checkpoint action
+- Replaced custom line pairing with VS Code Quick Diff semantics for stable added, modified, and deleted markers around repeated blank lines
+- Added original-content previews for modified and deleted markers, including deduplicated Mermaid, LaTeX, and table block markers
+- Added an optional line author hover toggle, disabled by default, and refined toolbar action placement
+
 ## 0.1.30
 - Centralized viewport stabilization to prevent asynchronous Mermaid, image, and layout updates from moving the current reading position
 - Added reliable external and document-internal link controls to rendered table cells, including stable focus and table re-entry behavior
