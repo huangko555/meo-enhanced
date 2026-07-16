@@ -115,10 +115,11 @@ async function main() {
       });
     });
     await waitForFrames(page, 8);
-    const liveMarker = await page.$('.meo-git-gutter-marker.is-deleted');
-    if (!liveMarker) {
-      throw new Error('Deleted marker was lost inside a Live rendered table');
+    const liveMarkers = await page.$$('.meo-git-gutter-marker.is-deleted');
+    if (liveMarkers.length !== 1) {
+      throw new Error(`Live table deletion rendered ${liveMarkers.length} markers instead of one`);
     }
+    const liveMarker = liveMarkers[0];
     const liveRect = await liveMarker.boundingBox();
     if (!liveRect) throw new Error('Live deleted marker had no layout box');
     await page.mouse.move(liveRect.x + 1, liveRect.y + 1);
@@ -126,6 +127,98 @@ async function main() {
     const liveTooltipText = await page.$eval('.meo-deletion-tooltip', (element) => element.textContent ?? '');
     if (!liveTooltipText.includes('removed one') || !liveTooltipText.includes('removed two')) {
       throw new Error(`Live deleted tooltip omitted a deletion gap: ${liveTooltipText}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const text = '```mermaid\nflowchart LR\nA --> B\nC --> D\n```\n\nafter';
+      editor.setText(text);
+      editor.revealSelection(text.length, text.length, { focus: false });
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: '```mermaid\nflowchart LR\nA --> B\nB --> C\nC --> D\n```\n\nafter'
+      });
+    });
+    await waitForFrames(page, 8);
+    const mermaidDeletionMarkers = await page.$$('.meo-git-gutter-marker.is-deleted');
+    if (mermaidDeletionMarkers.length !== 1) {
+      throw new Error(`Live Mermaid deletion rendered ${mermaidDeletionMarkers.length} markers instead of one`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const text = '$$\na\nc\n$$\n\nafter';
+      editor.setText(text);
+      editor.revealSelection(text.length, text.length, { focus: false });
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: '$$\na\nb\nc\n$$\n\nafter'
+      });
+    });
+    await waitForFrames(page, 8);
+    const mathDeletionMarkers = await page.$$('.meo-git-gutter-marker.is-deleted');
+    if (mathDeletionMarkers.length !== 1) {
+      throw new Error(`Live display-math deletion rendered ${mathDeletionMarkers.length} markers instead of one`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.setMode('source');
+      editor.setText('first\nlast');
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: 'first\nremoved one\nremoved two\nlast'
+      });
+    });
+    await waitForFrames(page, 4);
+    const sourceMarker = await page.$('.meo-git-gutter-marker.is-deleted');
+    const sourceRect = await sourceMarker?.boundingBox();
+    if (!sourceRect) throw new Error('Source deleted marker had no layout box for hit-area check');
+    await page.mouse.move(sourceRect.x + 80, sourceRect.y + 1);
+    await page.mouse.move(sourceRect.x - 6, sourceRect.y + 1);
+    await waitForFrames(page, 2);
+    const expandedHitTooltipVisible = await page.$eval('.meo-deletion-tooltip', (element) => !(element as HTMLElement).hidden);
+    if (!expandedHitTooltipVisible) {
+      throw new Error('Deleted content tooltip hit area did not extend beyond the visible triangle');
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.setText('first\nmiddle\nlast');
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: 'first\nremoved upper\nmiddle\nremoved lower\nlast'
+      });
+      const editorRoot = document.querySelector<HTMLElement>('.cm-editor');
+      if (editorRoot) {
+        editorRoot.style.transform = 'scaleY(0.5)';
+        editorRoot.style.transformOrigin = 'top left';
+      }
+    });
+    await waitForFrames(page, 4);
+    const adjacentMarkers = await page.evaluate(() => Array.from(
+      document.querySelectorAll<HTMLElement>('.meo-git-gutter-marker.is-deleted')
+    ).map((marker) => {
+      const rect = marker.getBoundingClientRect();
+      return { left: rect.left, top: rect.top };
+    }).sort((left, right) => left.top - right.top));
+    if (adjacentMarkers.length !== 2) {
+      throw new Error(`Adjacent deletions rendered ${adjacentMarkers.length} markers instead of two`);
+    }
+    const lowerMarker = adjacentMarkers[1];
+    await page.mouse.move(lowerMarker.left + 1, lowerMarker.top - 4);
+    await waitForFrames(page, 2);
+    const adjacentTooltipText = await page.$eval('.meo-deletion-tooltip', (element) => element.textContent ?? '');
+    if (!adjacentTooltipText.includes('removed lower') || adjacentTooltipText.includes('removed upper')) {
+      throw new Error(`Overlapping deletion hit areas selected the wrong marker: ${adjacentTooltipText}`);
     }
 
     console.log('document diff gutter checks passed');

@@ -1,4 +1,5 @@
 import { gitDiffLineFlagsField } from './gitDiffGutter';
+import { findDeletionMarkerForMouseEvent } from './gitDeletionHover';
 import { getLiveGitCollapsedBlockAtLine, getLiveRenderedBlockAtLine } from './liveRenderedBlocks';
 
 const hoverDelayMs = 0;
@@ -1030,7 +1031,7 @@ export function createGitBlameHoverController({
     }
 
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('.meo-git-gutter-marker.is-deleted')) {
+    if (findDeletionMarkerForMouseEvent(view, event)) {
       hide();
       return;
     }

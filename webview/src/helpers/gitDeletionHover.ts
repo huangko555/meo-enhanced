@@ -10,6 +10,55 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+const DELETION_HIT_HORIZONTAL_PADDING_PX = 8;
+const DELETION_HIT_VERTICAL_PADDING_PX = 7;
+const deletionMarkerHitCache = new WeakMap<MouseEvent, { view: EditorView; marker: HTMLElement | null }>();
+
+export function findDeletionMarkerForMouseEvent(
+  view: EditorView,
+  event: MouseEvent
+): HTMLElement | null {
+  const cached = deletionMarkerHitCache.get(event);
+  if (cached?.view === view) {
+    return cached.marker;
+  }
+  const { clientX, clientY } = event;
+  const gutter = view.dom.querySelector<HTMLElement>('.cm-gutter.meo-git-gutter');
+  if (!gutter) {
+    deletionMarkerHitCache.set(event, { view, marker: null });
+    return null;
+  }
+  const gutterRect = gutter.getBoundingClientRect();
+  if (
+    clientX < gutterRect.left - DELETION_HIT_HORIZONTAL_PADDING_PX ||
+    clientX > gutterRect.right + DELETION_HIT_HORIZONTAL_PADDING_PX
+  ) {
+    deletionMarkerHitCache.set(event, { view, marker: null });
+    return null;
+  }
+
+  let nearestMarker: HTMLElement | null = null;
+  let nearestVerticalDistance = Number.POSITIVE_INFINITY;
+  for (const marker of gutter.querySelectorAll<HTMLElement>('.meo-git-gutter-marker.is-deleted')) {
+    const rect = marker.getBoundingClientRect();
+    const triangleY = marker.classList.contains('is-deleted-at-end') ? rect.bottom : rect.top;
+    if (
+      clientX >= rect.left - DELETION_HIT_HORIZONTAL_PADDING_PX &&
+      clientX <= rect.right + DELETION_HIT_HORIZONTAL_PADDING_PX &&
+      clientY >= triangleY - DELETION_HIT_VERTICAL_PADDING_PX &&
+      clientY <= triangleY + DELETION_HIT_VERTICAL_PADDING_PX
+    ) {
+      const verticalDistance = Math.abs(clientY - triangleY);
+      if (verticalDistance < nearestVerticalDistance) {
+        nearestMarker = marker;
+        nearestVerticalDistance = verticalDistance;
+      }
+    }
+  }
+  deletionMarkerHitCache.set(event, { view, marker: nearestMarker });
+  return nearestMarker;
+}
+
 export function createGitDeletionHoverController(view: EditorView): DeletionHoverController {
   const root = document.createElement('div');
   root.className = 'meo-deletion-tooltip';
@@ -47,9 +96,8 @@ export function createGitDeletionHoverController(view: EditorView): DeletionHove
     if (destroyed) {
       return;
     }
-    const target = event.target instanceof Element ? event.target : null;
-    const marker = target?.closest('.meo-git-gutter-marker.is-deleted');
-    if (!marker || !view.dom.contains(marker)) {
+    const marker = findDeletionMarkerForMouseEvent(view, event);
+    if (!marker) {
       hide();
       return;
     }

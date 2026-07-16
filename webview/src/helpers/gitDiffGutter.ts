@@ -374,7 +374,9 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
     }
 
     if (activeCollapsedBlock && lineNo >= activeCollapsedBlock.startLine && activeCollapsedFlags) {
-      builder.add(line.from, line.from, gitMarker(activeCollapsedFlags));
+      if (!activeCollapsedFlags.deleted) {
+        builder.add(line.from, line.from, gitMarker(activeCollapsedFlags));
+      }
       continue;
     }
 
