@@ -1832,6 +1832,76 @@ async function main() {
       failures.push(`adjacent table deletion was swallowed by a modified marker: ${JSON.stringify({ state: adjacentTableDiffState, deletedTooltip: adjacentDeletedTooltip, modifiedTooltip: adjacentModifiedTooltip })}`);
     }
 
+    const emptyTableRowDeletionState = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const baseText = '| A   | B   |\n| --- | --- |\n|     |     |\n|     |     |\n|     |     |';
+      const editor = harness.createEditor({
+        parent: app,
+        text: baseText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText
+      });
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const cell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!;
+      const table = cell.closest('table')!;
+      const rect = cell.getBoundingClientRect();
+      cell.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        pointerId: 83,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      table.dispatchEvent(new PointerEvent('pointerup', {
+        button: 0,
+        pointerId: 83,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+      for (let frame = 0; frame < 5; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const markers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker.is-deleted')
+      ).map((marker) => ({
+        liveFrom: marker.dataset.meoLiveBlockStartLine,
+        deletionRanges: marker.dataset.meoDeletionRanges
+      }));
+      const source = editor.view.state.doc.toString();
+      editor.destroy();
+      return { source, markers };
+    });
+    const emptyDeletionRanges = emptyTableRowDeletionState.markers.flatMap((marker) => {
+      try {
+        return JSON.parse(marker.deletionRanges ?? '[]') as Array<[number, number]>;
+      } catch {
+        return [];
+      }
+    });
+    if (
+      emptyTableRowDeletionState.source !== '| A   | B   |\n| --- | --- |\n|     |     |\n|     |     |' ||
+      emptyTableRowDeletionState.markers.length !== 1 ||
+      emptyDeletionRanges.length !== 1 ||
+      emptyDeletionRanges[0][0] !== emptyDeletionRanges[0][1]
+    ) {
+      failures.push(`deleting one empty table row produced duplicate or widened deletion markers: ${JSON.stringify(emptyTableRowDeletionState)}`);
+    }
+
     await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;
       const app = document.getElementById('app')!;

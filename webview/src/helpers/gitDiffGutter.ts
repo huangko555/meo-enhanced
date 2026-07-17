@@ -4,7 +4,11 @@ import {
   compareDocuments,
   splitDiffLines
 } from '../../../src/shared/gitDiffCore';
-import { getLiveGitCollapsedBlockAtLine, getLiveGitCollapsedBlocks } from './liveRenderedBlocks';
+import {
+  getLiveGitCollapsedBlockAtLine,
+  getLiveGitCollapsedBlocks,
+  getLiveRenderedBlockAtLine
+} from './liveRenderedBlocks';
 import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
   clearTableRowDiffProvenanceEffect,
@@ -188,6 +192,81 @@ function subtractLineRanges(
   return remaining;
 }
 
+function reconcileSnapshotTableDeletions(
+  state: EditorState,
+  baselineLines: readonly string[],
+  lineFlags: (MarkerFlags | undefined)[],
+  deletedRows: ReadonlyArray<{
+    at: number;
+    baselineRanges: Array<[number, number]>;
+  }>
+): void {
+  const candidates = lineFlags.flatMap((flags, lineIndex) => (flags?.deletionRanges ?? []).map((range, rangeIndex) => ({
+    lineIndex,
+    rangeIndex,
+    range
+  })));
+  const claimedCandidates = new Set<string>();
+  const removals = new Map<number, Set<number>>();
+
+  const sameBaselineText = (
+    left: readonly [number, number],
+    right: readonly [number, number]
+  ) => {
+    if (left[1] - left[0] !== right[1] - right[0]) return false;
+    for (let offset = 0; offset <= left[1] - left[0]; offset += 1) {
+      if (baselineLines[left[0] + offset - 1] !== baselineLines[right[0] + offset - 1]) return false;
+    }
+    return true;
+  };
+
+  for (const record of deletedRows) {
+    const targetLine = state.doc.lineAt(Math.max(0, Math.min(record.at, state.doc.length))).number;
+    const tableBlock = getLiveRenderedBlockAtLine(state, targetLine);
+    for (const provenanceRange of record.baselineRanges) {
+      const matching = candidates
+        .filter((candidate) => {
+          const key = `${candidate.lineIndex}:${candidate.rangeIndex}`;
+          if (claimedCandidates.has(key) || !sameBaselineText(candidate.range, provenanceRange)) return false;
+          const exactRange = candidate.range[0] === provenanceRange[0] && candidate.range[1] === provenanceRange[1];
+          if (exactRange) return true;
+          if (tableBlock?.kind !== 'table') return false;
+          const candidateLine = candidate.lineIndex + 1;
+          return candidateLine >= tableBlock.startLine && candidateLine <= tableBlock.endLine + 1;
+        })
+        .sort((left, right) => {
+          const leftExact = left.range[0] === provenanceRange[0] && left.range[1] === provenanceRange[1];
+          const rightExact = right.range[0] === provenanceRange[0] && right.range[1] === provenanceRange[1];
+          if (leftExact !== rightExact) return leftExact ? -1 : 1;
+          return Math.abs(left.lineIndex + 1 - targetLine) - Math.abs(right.lineIndex + 1 - targetLine);
+        });
+      const candidate = matching[0];
+      if (!candidate) continue;
+      claimedCandidates.add(`${candidate.lineIndex}:${candidate.rangeIndex}`);
+      const lineRemovals = removals.get(candidate.lineIndex) ?? new Set<number>();
+      lineRemovals.add(candidate.rangeIndex);
+      removals.set(candidate.lineIndex, lineRemovals);
+    }
+  }
+
+  for (const [lineIndex, rangeIndexes] of removals) {
+    const flags = lineFlags[lineIndex];
+    if (!flags?.deletionRanges) continue;
+    flags.deletionRanges = flags.deletionRanges.filter((_range, index) => !rangeIndexes.has(index));
+    if (!flags.deletionRanges.length) {
+      flags.deleted = false;
+      flags.deletionRanges = undefined;
+      flags.deletionBoundary = undefined;
+      flags.deletionAtEnd = undefined;
+      flags.baselineFromLine = undefined;
+      flags.baselineToLine = undefined;
+      continue;
+    }
+    flags.baselineFromLine = Math.min(...flags.deletionRanges.map(([from]) => from));
+    flags.baselineToLine = Math.max(...flags.deletionRanges.map(([, to]) => to));
+  }
+}
+
 function coalesceTrailingEofVisualLineFlag(doc: any, lineFlags: (MarkerFlags | undefined)[] | null): (MarkerFlags | undefined)[] | null {
   if (!Array.isArray(lineFlags) || !isTrailingEofVisualLine(doc, doc.lines) || doc.lines < 2) {
     return lineFlags;
@@ -360,6 +439,12 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
   });
 
   const deletedRows = getDeletedTableRows(state);
+  reconcileSnapshotTableDeletions(
+    state,
+    baseline.baseLines ?? splitDiffLines(baseline.baseText),
+    lineFlags,
+    deletedRows
+  );
   const deletedBaselineRanges = mergeLineRanges(deletedRows.flatMap((record) => record.baselineRanges));
   if (deletedBaselineRanges.length) {
     for (const flags of lineFlags) {
