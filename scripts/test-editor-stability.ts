@@ -66,7 +66,8 @@ async function main() {
       'English: `code two`'
     ];
     const bodyLines = Array.from({ length: 100 }, (_, index) => `稳定锚点 ${index + 1}`);
-    const source = [...markerLines, '', ...bodyLines].join('\n');
+    const headingStrikeLine = '# 标题里的 ~~删除线~~';
+    const source = [...markerLines, headingStrikeLine, '', ...bodyLines].join('\n');
     await page.evaluate((text) => {
       (window as any).__editor = (window as any).EditorStabilityHarness.createEditor({
         parent: document.getElementById('app')!,
@@ -76,6 +77,34 @@ async function main() {
       });
     }, source);
     await waitForFrames(page);
+
+    const headingStrikeSelectionColors = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('标题里的'));
+      const strike = line?.querySelector<HTMLElement>('.meo-md-strike') ?? null;
+      const heading = line?.querySelector<HTMLElement>('.meo-md-heading-content') ?? null;
+      if (!strike || !heading) return null;
+      const normal = getComputedStyle(strike);
+      const selected = getComputedStyle(strike, '::selection');
+      const headingStyle = getComputedStyle(heading);
+      return {
+        normalColor: normal.color,
+        normalTextFillColor: normal.webkitTextFillColor,
+        selectionColor: selected.color,
+        selectionTextFillColor: selected.webkitTextFillColor,
+        headingColor: headingStyle.color,
+        headingTextFillColor: headingStyle.webkitTextFillColor
+      };
+    });
+    if (
+      !headingStrikeSelectionColors ||
+      headingStrikeSelectionColors.normalColor !== headingStrikeSelectionColors.headingColor ||
+      headingStrikeSelectionColors.normalTextFillColor !== headingStrikeSelectionColors.headingTextFillColor ||
+      headingStrikeSelectionColors.selectionColor !== headingStrikeSelectionColors.headingColor ||
+      headingStrikeSelectionColors.selectionTextFillColor !== headingStrikeSelectionColors.headingTextFillColor
+    ) {
+      throw new Error(`Selected heading strike changed foreground color: ${JSON.stringify(headingStrikeSelectionColors)}`);
+    }
 
     const markerLabels = [
       '还有什么：', '还有什么：', '还有什么：',
