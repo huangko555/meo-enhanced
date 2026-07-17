@@ -19,7 +19,7 @@ import {
 } from './localLinks';
 import {
   appendInlineMappedText,
-  resolveInlineSourceOffsetAtPoint,
+  resolveInlineCaretAtPoint,
   setInlineSourceRange
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
@@ -2191,21 +2191,27 @@ class HtmlTableWidget extends WidgetType {
   pointerCaretForCell(cell, clientX, clientY, { nearestFallback = true } = {}) {
     const input = cell.querySelector('textarea');
     const preview = cell.querySelector('.meo-md-html-table-cell-preview');
-    if (!(input instanceof HTMLTextAreaElement) || !(preview instanceof HTMLElement)) return null;
+    if (!(input instanceof HTMLTextAreaElement) || !(preview instanceof HTMLElement)) {
+      return { domCaret: null, editorOffset: null };
+    }
 
     const previousInputPointerEvents = input.style.pointerEvents;
     const previousPreviewVisibility = preview.style.visibility;
-    let sourceOffset: number | null = null;
+    let resolution = { domCaret: null, sourceOffset: null };
     try {
       input.style.pointerEvents = 'none';
       preview.style.visibility = 'visible';
-      sourceOffset = resolveInlineSourceOffsetAtPoint(preview, clientX, clientY, { nearestFallback });
+      resolution = resolveInlineCaretAtPoint(preview, clientX, clientY, { nearestFallback });
     } finally {
       input.style.pointerEvents = previousInputPointerEvents;
       preview.style.visibility = previousPreviewVisibility;
     }
-    if (sourceOffset === null) return null;
-    return tableCellSourceOffsetToEditorOffset(input.value, sourceOffset);
+    return {
+      domCaret: resolution.domCaret,
+      editorOffset: resolution.sourceOffset === null
+        ? null
+        : tableCellSourceOffsetToEditorOffset(input.value, resolution.sourceOffset)
+    };
   }
 
   focusCellInputAt(row, col, caret = null) {
@@ -2375,7 +2381,17 @@ class HtmlTableWidget extends WidgetType {
     let outsidePointerExitTimer: number | null = null;
     let textSelectionInput: HTMLTextAreaElement | null = null;
     let textSelectionAnchorCaret: number | null = null;
+    let textSelectionCurrentCaret: number | null = null;
     let textSelectionCell: CellCoords | null = null;
+    let textSelectionCrossedCell = false;
+    let textSelectionDomAnchor: { node: Node; offset: number } | null = null;
+
+    const markTextSelectionCrossedCell = () => {
+      if (!textSelectionCell) return;
+      textSelectionCrossedCell = true;
+      textSelectionDomAnchor = null;
+      document.getSelection()?.removeAllRanges();
+    };
 
     const hasActiveTableInteraction = () => {
       const active = document.activeElement;
@@ -2427,19 +2443,22 @@ class HtmlTableWidget extends WidgetType {
       }
       const anchor = current;
       this.selectionAnchor = anchor;
+      this.setActionTarget(anchor);
       this.applySelection(this.normalizeSelectionRange(anchor, current));
       this.selectionPointerId = event.pointerId;
       this.isDraggingSelection = true;
 
       const input = cell.querySelector('textarea');
-      const caret = this.pointerCaretForCell(cell, event.clientX, event.clientY);
+      const pointerCaret = this.pointerCaretForCell(cell, event.clientX, event.clientY);
+      const caret = pointerCaret.editorOffset;
       if (input instanceof HTMLTextAreaElement) {
         textSelectionInput = input;
         textSelectionAnchorCaret = caret ?? input.value.length;
+        textSelectionCurrentCaret = textSelectionAnchorCaret;
         textSelectionCell = current;
+        textSelectionCrossedCell = false;
+        textSelectionDomAnchor = pointerCaret.domCaret;
       }
-      event.preventDefault();
-      this.focusCellInput(cell, { caret });
       try {
         table.setPointerCapture?.(event.pointerId);
       } catch {
@@ -2452,42 +2471,82 @@ class HtmlTableWidget extends WidgetType {
       if (!this.isDraggingSelection || this.selectionPointerId !== event.pointerId) return;
       const el = document.elementFromPoint(event.clientX, event.clientY);
       const cell = this.findCellElement(el);
-      if (!cell || !this.selectionAnchor) return;
+      if (!cell || !this.selectionAnchor) {
+        if (!cell) markTextSelectionCrossedCell();
+        return;
+      }
       const current = this.coordsFromCell(cell);
       if (!current) return;
       if (
         textSelectionInput &&
         textSelectionAnchorCaret !== null &&
         textSelectionCell &&
+        !textSelectionCrossedCell &&
         current.row === textSelectionCell.row &&
         current.col === textSelectionCell.col
       ) {
-        const caret = this.pointerCaretForCell(cell, event.clientX, event.clientY, { nearestFallback: false });
+        const pointerCaret = this.pointerCaretForCell(cell, event.clientX, event.clientY, { nearestFallback: false });
+        const caret = pointerCaret.editorOffset;
         if (caret !== null) {
-          textSelectionInput.setSelectionRange(
-            Math.min(textSelectionAnchorCaret, caret),
-            Math.max(textSelectionAnchorCaret, caret),
-            caret < textSelectionAnchorCaret ? 'backward' : 'forward'
-          );
-          this.emitTableSelectionChange(getWrap());
+          textSelectionCurrentCaret = caret;
+        }
+        const domCaret = pointerCaret.domCaret;
+        if (textSelectionDomAnchor && domCaret) {
+          const selection = document.getSelection();
+          try {
+            selection?.setBaseAndExtent(
+              textSelectionDomAnchor.node,
+              textSelectionDomAnchor.offset,
+              domCaret.node,
+              domCaret.offset
+            );
+          } catch {
+            selection?.removeAllRanges();
+          }
         }
         return;
       }
-      textSelectionInput = null;
-      textSelectionAnchorCaret = null;
-      textSelectionCell = null;
+      markTextSelectionCrossedCell();
+      this.setTableInteractionActive(getWrap(), true);
       this.applySelection(this.normalizeSelectionRange(this.selectionAnchor, current));
     };
 
     const endPointerSelection = (event) => {
       if (this.selectionPointerId !== event.pointerId) return;
+      const pendingInput = textSelectionInput;
+      const anchorCaret = textSelectionAnchorCaret;
+      const currentCaret = textSelectionCurrentCaret;
+      const shouldEnterTextEditing = (
+        event.type === 'pointerup' &&
+        !textSelectionCrossedCell &&
+        pendingInput instanceof HTMLTextAreaElement &&
+        anchorCaret !== null &&
+        currentCaret !== null
+      );
       this.isDraggingSelection = false;
       this.selectionPointerId = null;
       textSelectionInput = null;
       textSelectionAnchorCaret = null;
+      textSelectionCurrentCaret = null;
       textSelectionCell = null;
+      textSelectionCrossedCell = false;
+      textSelectionDomAnchor = null;
       if (table.hasPointerCapture?.(event.pointerId)) {
         table.releasePointerCapture?.(event.pointerId);
+      }
+      if (event.type !== 'pointerup') {
+        document.getSelection()?.removeAllRanges();
+      }
+      if (shouldEnterTextEditing) {
+        event.preventDefault();
+        document.getSelection()?.removeAllRanges();
+        this.focusTableInput(pendingInput, anchorCaret);
+        pendingInput.setSelectionRange(
+          Math.min(anchorCaret, currentCaret),
+          Math.max(anchorCaret, currentCaret),
+          currentCaret < anchorCaret ? 'backward' : 'forward'
+        );
+        this.emitTableSelectionChange(getWrap());
       }
     };
 
@@ -2560,7 +2619,21 @@ class HtmlTableWidget extends WidgetType {
       }
     };
 
+    const onDocumentPointerMove = (event: PointerEvent) => {
+      if (this.selectionPointerId !== event.pointerId) return;
+      if (table.hasPointerCapture?.(event.pointerId)) return;
+      if (event.target instanceof Node && table.contains(event.target)) return;
+      markTextSelectionCrossedCell();
+    };
+
     const onDocumentPointerEnd = (event: PointerEvent) => {
+      if (this.selectionPointerId === event.pointerId) {
+        const targetInsideTable = event.target instanceof Node && table.contains(event.target);
+        if (!targetInsideTable) markTextSelectionCrossedCell();
+        if (!table.hasPointerCapture?.(event.pointerId) || !targetInsideTable) {
+          endPointerSelection(event);
+        }
+      }
       if (event.pointerId !== pendingOutsidePointerId) return;
       pendingOutsidePointerId = null;
       // The browser dispatches click after pointerup. Delay the table commit until
@@ -2576,10 +2649,12 @@ class HtmlTableWidget extends WidgetType {
     table.addEventListener('pointermove', onPointerMove);
     table.addEventListener('pointerup', endPointerSelection);
     table.addEventListener('pointercancel', endPointerSelection);
+    table.addEventListener('lostpointercapture', endPointerSelection);
     table.addEventListener('copy', onCopy);
     table.addEventListener('keydown', onKeyDown, true);
     table.addEventListener('focusout', onFocusOut);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
+    document.addEventListener('pointermove', onDocumentPointerMove, true);
     document.addEventListener('pointerup', onDocumentPointerEnd, true);
     document.addEventListener('pointercancel', onDocumentPointerEnd, true);
     const onCommitTableEdits = (event) => {
@@ -2595,10 +2670,12 @@ class HtmlTableWidget extends WidgetType {
       table.removeEventListener('pointermove', onPointerMove);
       table.removeEventListener('pointerup', endPointerSelection);
       table.removeEventListener('pointercancel', endPointerSelection);
+      table.removeEventListener('lostpointercapture', endPointerSelection);
       table.removeEventListener('copy', onCopy);
       table.removeEventListener('keydown', onKeyDown, true);
       table.removeEventListener('focusout', onFocusOut);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+      document.removeEventListener('pointermove', onDocumentPointerMove, true);
       document.removeEventListener('pointerup', onDocumentPointerEnd, true);
       document.removeEventListener('pointercancel', onDocumentPointerEnd, true);
       document.removeEventListener('meo-commit-table-edits', onCommitTableEdits);

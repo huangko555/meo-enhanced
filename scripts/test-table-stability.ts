@@ -208,6 +208,11 @@ async function main() {
         bubbles: true,
         cancelable: true
       }));
+      const clickEntryStateBeforePointerUp = {
+        inputFocused: document.activeElement === caretInput,
+        editing: caretInput.parentElement?.classList.contains('is-editing') ?? false,
+        previewVisibility: getComputedStyle(caretPreview).visibility
+      };
       alphaText.dispatchEvent(new PointerEvent('pointerup', {
         button: 0,
         pointerId: 41,
@@ -241,6 +246,11 @@ async function main() {
         bubbles: true,
         cancelable: true
       }));
+      const markdownEntryStateBeforePointerUp = {
+        inputFocused: document.activeElement === markdownInput,
+        editing: markdownInput.parentElement?.classList.contains('is-editing') ?? false,
+        renderedText: markdownPreview.textContent
+      };
       wideText.dispatchEvent(new PointerEvent('pointerup', {
         button: 0,
         pointerId: 43,
@@ -280,6 +290,11 @@ async function main() {
         bubbles: true,
         cancelable: true
       }));
+      const dragStateBeforePointerUp = {
+        inputFocused: document.activeElement === caretInput,
+        editing: caretInput.parentElement?.classList.contains('is-editing') ?? false,
+        previewVisibility: getComputedStyle(caretPreview).visibility
+      };
       caretCell.closest('table')!.dispatchEvent(new PointerEvent('pointerup', {
         pointerId: 42,
         clientX: dragEndRect.right,
@@ -288,6 +303,67 @@ async function main() {
         cancelable: true
       }));
       const draggedText = caretInput.value.slice(caretInput.selectionStart, caretInput.selectionEnd);
+      caretInput.blur();
+      await waitFrames(1);
+      const table = caretCell.closest('table')!;
+      const dispatchSelectionStart = (pointerId: number) => {
+        dragTextElement.dispatchEvent(new PointerEvent('pointerdown', {
+          button: 0,
+          pointerId,
+          clientX: dragStartRect.right,
+          clientY: dragStartRect.top + dragStartRect.height / 2,
+          bubbles: true,
+          cancelable: true
+        }));
+      };
+      const selectedPreviewText = () => {
+        const selection = document.getSelection();
+        return selection?.anchorNode && caretPreview.contains(selection.anchorNode)
+          ? selection.toString()
+          : '';
+      };
+      dispatchSelectionStart(44);
+      table.dispatchEvent(new PointerEvent('pointercancel', {
+        pointerId: 44,
+        bubbles: true,
+        cancelable: true
+      }));
+      const cancelledPointerState = {
+        inputFocused: document.activeElement === caretInput,
+        editing: caretInput.parentElement?.classList.contains('is-editing') ?? false,
+        selectedPreviewText: selectedPreviewText()
+      };
+      dispatchSelectionStart(45);
+      table.dispatchEvent(new PointerEvent('lostpointercapture', {
+        pointerId: 45
+      }));
+      const lostCaptureState = {
+        inputFocused: document.activeElement === caretInput,
+        editing: caretInput.parentElement?.classList.contains('is-editing') ?? false,
+        selectedPreviewText: selectedPreviewText()
+      };
+      const outside = document.getElementById('outside')!;
+      const outsideRect = outside.getBoundingClientRect();
+      dispatchSelectionStart(46);
+      outside.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 46,
+        clientX: outsideRect.left + outsideRect.width / 2,
+        clientY: outsideRect.top + outsideRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      outside.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 46,
+        clientX: outsideRect.left + outsideRect.width / 2,
+        clientY: outsideRect.top + outsideRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      const outsideReleaseState = {
+        inputFocused: document.activeElement === caretInput,
+        editing: caretInput.parentElement?.classList.contains('is-editing') ?? false,
+        selectedPreviewText: selectedPreviewText()
+      };
       caretEditor.destroy();
 
       const diffEditor = await create('| A |\n| --- |\n| one |\n| changed |\n| three |');
@@ -466,10 +542,11 @@ async function main() {
           bubbles: true,
           cancelable: true
         }));
+        return document.activeElement instanceof HTMLTextAreaElement && table.contains(document.activeElement);
       };
 
       const deleteRowsEditor = await create('| A | B |\n| --- | --- |\n| r1a | r1b |\n| r2a | r2b |\n| r3a | r3b |');
-      dragSelectCells(
+      const crossCellDragFocusedInput = dragSelectCells(
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
         document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!,
         21
@@ -704,7 +781,14 @@ async function main() {
         renderedLocalLinkHrefs,
         clickCaretOffset,
         mappedCaretOffset,
+        clickEntryStateBeforePointerUp,
+        markdownEntryStateBeforePointerUp,
+        dragStateBeforePointerUp,
         draggedText,
+        cancelledPointerState,
+        lostCaptureState,
+        outsideReleaseState,
+        crossCellDragFocusedInput,
         maxWidthDelta: Math.max(...widthsBeforeEntry.flatMap((width, index) => [
           Math.abs(width - widthsAfterEntry[index]),
           Math.abs(width - widthsAfterMarkdownEntry[index])
@@ -749,8 +833,35 @@ async function main() {
     if (result.clickCaretOffset !== 3) {
       failures.push(`table pointer entry placed the caret at ${result.clickCaretOffset} instead of 3 (mapped ${result.mappedCaretOffset})`);
     }
+    if (
+      result.clickEntryStateBeforePointerUp.inputFocused ||
+      result.clickEntryStateBeforePointerUp.editing ||
+      result.clickEntryStateBeforePointerUp.previewVisibility === 'hidden' ||
+      result.markdownEntryStateBeforePointerUp.inputFocused ||
+      result.markdownEntryStateBeforePointerUp.editing ||
+      result.markdownEntryStateBeforePointerUp.renderedText !== 'wide value' ||
+      result.dragStateBeforePointerUp.inputFocused ||
+      result.dragStateBeforePointerUp.editing ||
+      result.dragStateBeforePointerUp.previewVisibility === 'hidden'
+    ) {
+      failures.push(`table exposed Markdown source before pointerup: ${JSON.stringify({ click: result.clickEntryStateBeforePointerUp, markdown: result.markdownEntryStateBeforePointerUp, drag: result.dragStateBeforePointerUp })}`);
+    }
     if (result.draggedText !== 'lpha b') {
       failures.push(`same-cell pointer drag selected ${JSON.stringify(result.draggedText)}`);
+    }
+    if (
+      result.cancelledPointerState.inputFocused ||
+      result.cancelledPointerState.editing ||
+      result.cancelledPointerState.selectedPreviewText !== '' ||
+      result.lostCaptureState.inputFocused ||
+      result.lostCaptureState.editing ||
+      result.lostCaptureState.selectedPreviewText !== '' ||
+      result.outsideReleaseState.inputFocused ||
+      result.outsideReleaseState.editing ||
+      result.outsideReleaseState.selectedPreviewText !== '' ||
+      result.crossCellDragFocusedInput
+    ) {
+      failures.push(`table pointer cleanup entered source mode or retained selection: ${JSON.stringify({ cancel: result.cancelledPointerState, lostCapture: result.lostCaptureState, outside: result.outsideReleaseState, crossCellFocused: result.crossCellDragFocusedInput })}`);
     }
     if (result.maxWidthDelta > 0.5) {
       failures.push(`table column width changed by ${result.maxWidthDelta}px when Markdown source became editable`);
@@ -868,6 +979,66 @@ async function main() {
       await waitForPageFrames(4);
       return null;
     };
+
+    const physicalSelectionPoints = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      (window as any).__physicalSelectionEditor = harness.createEditor({
+        parent: app,
+        text: '| A |\n| --- |\n| alpha bravo charlie |',
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const preview = document.querySelector<HTMLElement>('tbody .meo-md-html-table-cell-preview')!;
+      const mapped = Array.from(preview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
+        .find((element) => element.textContent?.includes('alpha bravo'))!;
+      const textNode = mapped.firstChild!;
+      const pointAt = (offset: number) => {
+        const range = document.createRange();
+        range.setStart(textNode, Math.max(0, offset - 1));
+        range.setEnd(textNode, offset);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.right, y: rect.top + rect.height / 2 };
+      };
+      return { start: pointAt(1), end: pointAt(7) };
+    });
+    await page.mouse.move(physicalSelectionPoints.start.x, physicalSelectionPoints.start.y);
+    await page.mouse.down();
+    await page.mouse.move(physicalSelectionPoints.end.x, physicalSelectionPoints.end.y, { steps: 4 });
+    const physicalDragState = await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      const preview = input.parentElement!.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+      return {
+        inputFocused: document.activeElement === input,
+        editing: input.parentElement?.classList.contains('is-editing') ?? false,
+        previewVisibility: getComputedStyle(preview).visibility,
+        selectedPreviewText: document.getSelection()?.toString() ?? ''
+      };
+    });
+    await page.mouse.up();
+    const physicalPointerUpState = await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      const result = {
+        inputFocused: document.activeElement === input,
+        selectedText: input.value.slice(input.selectionStart, input.selectionEnd)
+      };
+      (window as any).__physicalSelectionEditor.destroy();
+      return result;
+    });
+    if (
+      physicalDragState.inputFocused ||
+      physicalDragState.editing ||
+      physicalDragState.previewVisibility === 'hidden' ||
+      physicalDragState.selectedPreviewText !== 'lpha b' ||
+      !physicalPointerUpState.inputFocused ||
+      physicalPointerUpState.selectedText !== 'lpha b'
+    ) {
+      failures.push(`physical table drag did not defer source mode until pointerup: ${JSON.stringify({ drag: physicalDragState, up: physicalPointerUpState })}`);
+    }
 
     await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;

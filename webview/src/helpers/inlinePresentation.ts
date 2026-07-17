@@ -3,6 +3,16 @@ export interface InlineSourceRange {
   to: number;
 }
 
+export interface InlineDomCaret {
+  node: Node;
+  offset: number;
+}
+
+export interface InlineCaretResolution {
+  domCaret: InlineDomCaret | null;
+  sourceOffset: number | null;
+}
+
 const sourceFromAttribute = 'data-meo-source-from';
 const sourceToAttribute = 'data-meo-source-to';
 const mappedSourceSelector = `[${sourceFromAttribute}][${sourceToAttribute}]`;
@@ -56,6 +66,27 @@ function caretPointAt(clientX: number, clientY: number): { node: Node; offset: n
   return range ? { node: range.startContainer, offset: range.startOffset } : null;
 }
 
+function resolveDomCaret(
+  root: HTMLElement,
+  caret: InlineDomCaret | null,
+  mapped: HTMLElement | null,
+  clientX: number
+): InlineDomCaret | null {
+  if (!caret || !root.contains(caret.node)) return null;
+  if (mapped?.dataset.meoSourceAtom === 'true' && mapped.parentNode) {
+    const siblings = Array.from(mapped.parentNode.childNodes);
+    const index = siblings.indexOf(mapped);
+    if (index >= 0) {
+      const rect = mapped.getBoundingClientRect();
+      return {
+        node: mapped.parentNode,
+        offset: index + (clientX > rect.left + rect.width / 2 ? 1 : 0)
+      };
+    }
+  }
+  return caret;
+}
+
 function sourceOffsetInsideMappedElement(
   element: HTMLElement,
   caretNode: Node,
@@ -103,15 +134,31 @@ export function resolveInlineSourceOffsetAtPoint(
   clientY: number,
   options: { nearestFallback?: boolean } = {}
 ): number | null {
+  return resolveInlineCaretAtPoint(root, clientX, clientY, options).sourceOffset;
+}
+
+export function resolveInlineCaretAtPoint(
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+  options: { nearestFallback?: boolean } = {}
+): InlineCaretResolution {
   const caret = caretPointAt(clientX, clientY);
   const mapped = mappedElementForNode(root, caret?.node ?? null);
   const sourceRange = readInlineSourceRange(mapped);
+  let sourceOffset: number | null = null;
   if (caret && mapped && sourceRange) {
     if (mapped.dataset.meoSourceAtom === 'true') {
       const rect = mapped.getBoundingClientRect();
-      return clientX <= rect.left + rect.width / 2 ? sourceRange.from : sourceRange.to;
+      sourceOffset = clientX <= rect.left + rect.width / 2 ? sourceRange.from : sourceRange.to;
+    } else {
+      sourceOffset = sourceOffsetInsideMappedElement(mapped, caret.node, caret.offset, sourceRange);
     }
-    return sourceOffsetInsideMappedElement(mapped, caret.node, caret.offset, sourceRange);
+  } else if (options.nearestFallback !== false) {
+    sourceOffset = nearestMappedOffset(root, clientX, clientY);
   }
-  return options.nearestFallback === false ? null : nearestMappedOffset(root, clientX, clientY);
+  return {
+    domCaret: resolveDomCaret(root, caret, mapped, clientX),
+    sourceOffset
+  };
 }
