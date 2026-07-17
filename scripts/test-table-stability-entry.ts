@@ -5,7 +5,8 @@ import {
   initializeImageHandling,
   setImageSrcResolver
 } from '../webview/src/helpers/images';
-import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
+import { getLocalLinkStatus, replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
+import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlinePresentation';
 
 (globalThis as typeof globalThis & {
   TableStabilityHarness?: {
@@ -15,6 +16,8 @@ import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
     initializeImageHandling: typeof initializeImageHandling;
     setImageSrcResolver: typeof setImageSrcResolver;
     replaceLocalLinkStatuses: typeof replaceLocalLinkStatuses;
+    getLocalLinkStatus: typeof getLocalLinkStatus;
+    resolveInlineSourceOffsetAtPoint: typeof resolveInlineSourceOffsetAtPoint;
   };
 }).TableStabilityHarness = {
   createEditor,
@@ -22,5 +25,7 @@ import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
   handleSavedImagePath,
   initializeImageHandling,
   setImageSrcResolver,
-  replaceLocalLinkStatuses
+  replaceLocalLinkStatuses,
+  getLocalLinkStatus,
+  resolveInlineSourceOffsetAtPoint
 };

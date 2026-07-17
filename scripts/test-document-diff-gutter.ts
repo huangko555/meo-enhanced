@@ -228,17 +228,20 @@ async function main() {
     });
     await waitForFrames(page, 8);
     const liveMarkers = await page.$$('.meo-git-gutter-marker.is-deleted');
-    if (liveMarkers.length !== 1) {
-      throw new Error(`Live table deletion rendered ${liveMarkers.length} markers instead of one`);
+    if (liveMarkers.length !== 2) {
+      throw new Error(`Live table deletion rendered ${liveMarkers.length} row markers instead of two`);
     }
-    const liveMarker = liveMarkers[0];
-    const liveRect = await liveMarker.boundingBox();
-    if (!liveRect) throw new Error('Live deleted marker had no layout box');
-    await page.mouse.move(liveRect.x + 1, liveRect.y + 1);
-    await waitForFrames(page, 2);
-    const liveTooltipText = await page.$eval('.meo-deletion-tooltip', (element) => element.textContent ?? '');
+    const liveTooltipTexts: string[] = [];
+    for (const liveMarker of liveMarkers) {
+      const liveRect = await liveMarker.boundingBox();
+      if (!liveRect) throw new Error('Live deleted row marker had no layout box');
+      await page.mouse.move(liveRect.x + 1, liveRect.y + 1);
+      await waitForFrames(page, 2);
+      liveTooltipTexts.push(await page.$eval('.meo-deletion-tooltip', (element) => element.textContent ?? ''));
+    }
+    const liveTooltipText = liveTooltipTexts.join('\n');
     if (!liveTooltipText.includes('removed one') || !liveTooltipText.includes('removed two')) {
-      throw new Error(`Live deleted tooltip omitted a deletion gap: ${liveTooltipText}`);
+      throw new Error(`Live deleted row tooltips omitted a deletion gap: ${liveTooltipText}`);
     }
 
     await page.evaluate(() => {

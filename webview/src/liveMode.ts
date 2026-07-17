@@ -70,6 +70,7 @@ import {
   type LatexMathMode
 } from './helpers/math';
 import { diagnosticDataField } from './helpers/diagnostics';
+import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import { mermaidEditingStateField } from './helpers/mermaidEditing';
 import {
@@ -1527,7 +1528,7 @@ function buildDecorations(state) {
       } else if (node.name === 'Table') {
         const tableInfo = parseTableInfo(state, node);
         parsedTableRanges.push({ from: tableInfo.from, to: tableInfo.to });
-        addTableDecorations(ranges, state, node, diagnostics);
+        addTableDecorations(ranges, state, node, diagnostics, state.field(gitDiffLineFlagsField, false));
       } else if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
         addLineClass(ranges, state, node.from, node.to, lineStyleDecos.codeBlock);
         if (node.name === 'FencedCode') {
@@ -2493,7 +2494,14 @@ function addFallbackTableDecorations(builder, state, tree, parsedTableRanges, me
     if (overlapsParsedTableRange(from, to, parsedTableRanges)) continue;
     if (isInsideCodeBlock(tree, from)) continue;
     if (rangeOverlapsMermaidColonBlock(mermaidColonBlocks, from, to)) continue;
-    addTableDecorationsForLineRange(builder, state, block.startLineNo, block.endLineNo, diagnostics);
+    addTableDecorationsForLineRange(
+      builder,
+      state,
+      block.startLineNo,
+      block.endLineNo,
+      diagnostics,
+      state.field(gitDiffLineFlagsField, false)
+    );
   }
 }
 

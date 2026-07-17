@@ -3298,6 +3298,19 @@ body.outline-resizing {
   white-space: nowrap;
 }
 
+.cm-editor .meo-md-html-table-diff-markers {
+  position: absolute;
+  top: 0;
+  z-index: 4;
+  display: block;
+  pointer-events: none;
+}
+
+.cm-editor .meo-md-html-table-diff-marker {
+  position: absolute;
+  pointer-events: auto;
+}
+
 .cm-editor .meo-mermaid-editing-block,
 .cm-editor .meo-latex-math-editing-block {
   display: grid;

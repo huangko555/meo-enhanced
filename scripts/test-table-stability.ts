@@ -131,6 +131,9 @@ async function main() {
       ]);
       missingLinkEditor.refreshDecorations();
       await waitFrames();
+      const missingLinkStatusAfterRefresh = harness.getLocalLinkStatus('missing.md');
+      const renderedLocalLinkHrefs = Array.from(document.querySelectorAll<HTMLElement>('[data-meo-link-href]'))
+        .map((element) => element.getAttribute('data-meo-link-href'));
       const bodyMissingIndicators = Array.from(document.querySelectorAll<HTMLElement>(
         '.cm-line > .meo-md-local-link-missing-icon, .cm-line .meo-md-local-link-missing-icon'
       )).filter((indicator) => !indicator.closest('.meo-md-html-table-shell'));
@@ -179,6 +182,135 @@ async function main() {
       const interactionActive = interactionEditor.view.dom.classList.contains('meo-table-interaction-active');
       interactionEditor.destroy();
 
+      const caretEditor = await create('| A | B |\n| --- | --- |\n| alpha bravo charlie | **wide** value |');
+      const caretCell = document.querySelector<HTMLTableCellElement>('td[data-table-row="1"][data-table-col="0"]')!;
+      const caretPreview = caretCell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+      const caretInput = caretCell.querySelector<HTMLTextAreaElement>('textarea')!;
+      const widthsBeforeEntry = Array.from(document.querySelectorAll<HTMLTableCellElement>('tbody td'))
+        .map((cell) => cell.getBoundingClientRect().width);
+      const alphaText = Array.from(caretPreview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
+        .find((element) => element.textContent?.includes('alpha bravo'))!;
+      const alphaNode = alphaText.firstChild!;
+      const caretRange = document.createRange();
+      caretRange.setStart(alphaNode, 2);
+      caretRange.setEnd(alphaNode, 3);
+      const caretRect = caretRange.getBoundingClientRect();
+      const mappedCaretOffset = harness.resolveInlineSourceOffsetAtPoint(
+        caretPreview,
+        caretRect.right,
+        caretRect.top + caretRect.height / 2
+      );
+      alphaText.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        pointerId: 41,
+        clientX: caretRect.right,
+        clientY: caretRect.top + caretRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      alphaText.dispatchEvent(new PointerEvent('pointerup', {
+        button: 0,
+        pointerId: 41,
+        clientX: caretRect.right,
+        clientY: caretRect.top + caretRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      await waitFrames(1);
+      const clickCaretOffset = caretInput.selectionStart;
+      const widthsAfterEntry = Array.from(document.querySelectorAll<HTMLTableCellElement>('tbody td'))
+        .map((cell) => cell.getBoundingClientRect().width);
+
+      caretInput.blur();
+      await waitFrames(1);
+      const markdownCell = document.querySelector<HTMLTableCellElement>('td[data-table-row="1"][data-table-col="1"]')!;
+      const markdownPreview = markdownCell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+      const markdownInput = markdownCell.querySelector<HTMLTextAreaElement>('textarea')!;
+      const wideText = Array.from(markdownPreview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
+        .find((element) => element.textContent === 'wide')!;
+      const wideNode = wideText.firstChild!;
+      const wideRange = document.createRange();
+      wideRange.setStart(wideNode, 1);
+      wideRange.setEnd(wideNode, 2);
+      const wideRect = wideRange.getBoundingClientRect();
+      wideText.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        pointerId: 43,
+        clientX: wideRect.right,
+        clientY: wideRect.top + wideRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      wideText.dispatchEvent(new PointerEvent('pointerup', {
+        button: 0,
+        pointerId: 43,
+        clientX: wideRect.right,
+        clientY: wideRect.top + wideRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      await waitFrames(1);
+      const widthsAfterMarkdownEntry = Array.from(document.querySelectorAll<HTMLTableCellElement>('tbody td'))
+        .map((cell) => cell.getBoundingClientRect().width);
+      markdownInput.blur();
+      await waitFrames(1);
+      const dragTextElement = Array.from(caretPreview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
+        .find((element) => element.textContent?.includes('alpha bravo'))!;
+      const dragTextNode = dragTextElement.firstChild!;
+      const dragStartRange = document.createRange();
+      dragStartRange.setStart(dragTextNode, 0);
+      dragStartRange.setEnd(dragTextNode, 1);
+      const dragStartRect = dragStartRange.getBoundingClientRect();
+      const dragEndRange = document.createRange();
+      dragEndRange.setStart(dragTextNode, 6);
+      dragEndRange.setEnd(dragTextNode, 7);
+      const dragEndRect = dragEndRange.getBoundingClientRect();
+      dragTextElement.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        pointerId: 42,
+        clientX: dragStartRect.right,
+        clientY: dragStartRect.top + dragStartRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      caretCell.closest('table')!.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 42,
+        clientX: dragEndRect.right,
+        clientY: dragEndRect.top + dragEndRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      caretCell.closest('table')!.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 42,
+        clientX: dragEndRect.right,
+        clientY: dragEndRect.top + dragEndRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      const draggedText = caretInput.value.slice(caretInput.selectionStart, caretInput.selectionEnd);
+      caretEditor.destroy();
+
+      const diffEditor = await create('| A |\n| --- |\n| one |\n| changed |\n| three |');
+      diffEditor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: '| A |\n| --- |\n| one |\n| old |\n| three |'
+      });
+      await waitFrames(5);
+      const tableDiffMarkers = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker'));
+      const tableDiffMarkerLines = tableDiffMarkers.map((marker) => ({
+        from: marker.dataset.meoLiveBlockStartLine,
+        to: marker.dataset.meoLiveBlockEndLine,
+        modified: marker.classList.contains('is-modified')
+      }));
+      const aggregateTableDiffMarkerCount = Array.from(document.querySelectorAll<HTMLElement>('.meo-git-gutter-marker'))
+        .filter((marker) => (
+          !marker.classList.contains('meo-md-html-table-diff-marker') &&
+          Number(marker.dataset.meoLiveBlockEndLine) - Number(marker.dataset.meoLiveBlockStartLine) > 0
+        )).length;
+      diffEditor.destroy();
+
       const borderlessEditor = await create('A | B\n--- | ---\nasd | value');
       borderlessEditor.setSearchQuery('asd');
       borderlessEditor.findNext('asd', { focusEditor: false });
@@ -220,9 +352,13 @@ async function main() {
       const nestedListEditor = await create('| Items |\n| --- |\n| - 一级 A  <br>- 二级<br>       A.1<br>           - 二级<br>       1. A.2<br>- 一级 B |');
       const nestedListPreview = document.querySelector<HTMLElement>('tbody .meo-md-html-table-cell-preview')!;
       const directListItemText = (item: HTMLElement) => {
-        const textNode = Array.from(item.childNodes).find((node) => (
-          node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim())
-        ));
+        const textNode = document.createTreeWalker(item, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            return node.parentElement?.closest('li') === item && node.textContent?.trim()
+              ? NodeFilter.FILTER_ACCEPT
+              : NodeFilter.FILTER_SKIP;
+          }
+        }).nextNode();
         if (!textNode) return null;
         const range = document.createRange();
         range.selectNodeContents(textNode);
@@ -563,7 +699,18 @@ async function main() {
         indentedBodyValue,
         outdentedBodyValue,
         bodyNestedMarkerState,
-        navigationScans
+        navigationScans,
+        missingLinkStatusAfterRefresh,
+        renderedLocalLinkHrefs,
+        clickCaretOffset,
+        mappedCaretOffset,
+        draggedText,
+        maxWidthDelta: Math.max(...widthsBeforeEntry.flatMap((width, index) => [
+          Math.abs(width - widthsAfterEntry[index]),
+          Math.abs(width - widthsAfterMarkdownEntry[index])
+        ])),
+        tableDiffMarkerLines,
+        aggregateTableDiffMarkerCount
       };
     });
 
@@ -591,7 +738,7 @@ async function main() {
       result.missingIndicatorColors.some((color) => color !== 'rgb(224, 108, 117)') ||
       result.resolvedMissingIndicatorCount !== 0
     ) {
-      failures.push(`missing local link indicators were inconsistent: ${JSON.stringify({ initial: result.initialMissingIndicatorCount, body: result.bodyMissingIndicatorCount, table: result.tableMissingIndicatorCount, colors: result.missingIndicatorColors, resolved: result.resolvedMissingIndicatorCount })}`);
+      failures.push(`missing local link indicators were inconsistent: ${JSON.stringify({ initial: result.initialMissingIndicatorCount, body: result.bodyMissingIndicatorCount, table: result.tableMissingIndicatorCount, colors: result.missingIndicatorColors, resolved: result.resolvedMissingIndicatorCount, status: result.missingLinkStatusAfterRefresh, hrefs: result.renderedLocalLinkHrefs })}`);
     }
     if (result.lineBefore !== '1' || result.lineAfter !== '2') failures.push(`table line number stayed ${result.lineBefore} -> ${result.lineAfter}`);
     if (result.lineNumberRightDelta === null || Math.abs(result.lineNumberRightDelta) > 0.5) {
@@ -599,6 +746,21 @@ async function main() {
     }
     if (!result.lineNumberNodeReused) failures.push('table line number DOM was recreated during scroll');
     if (result.interactionActive) failures.push('table interaction remained active after keyboard focus exit');
+    if (result.clickCaretOffset !== 3) {
+      failures.push(`table pointer entry placed the caret at ${result.clickCaretOffset} instead of 3 (mapped ${result.mappedCaretOffset})`);
+    }
+    if (result.draggedText !== 'lpha b') {
+      failures.push(`same-cell pointer drag selected ${JSON.stringify(result.draggedText)}`);
+    }
+    if (result.maxWidthDelta > 0.5) {
+      failures.push(`table column width changed by ${result.maxWidthDelta}px when Markdown source became editable`);
+    }
+    if (
+      JSON.stringify(result.tableDiffMarkerLines) !== JSON.stringify([{ from: '4', to: '4', modified: true }]) ||
+      result.aggregateTableDiffMarkerCount !== 0
+    ) {
+      failures.push(`table diff markers were not source-row granular: ${JSON.stringify({ rows: result.tableDiffMarkerLines, aggregate: result.aggregateTableDiffMarkerCount })}`);
+    }
     if (!result.borderlessActiveMatch) failures.push('borderless table did not render the active search match');
     if (result.alignmentBeforeShift !== 'left' || result.alignmentAfterShift !== 'left') {
       failures.push(`manual header alignment changed after line shift: ${result.alignmentBeforeShift} -> ${result.alignmentAfterShift}`);

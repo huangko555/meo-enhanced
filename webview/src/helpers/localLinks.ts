@@ -2,6 +2,7 @@ import { AlertCircle, createElement } from 'lucide';
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const HOSTNAME_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+const LOCAL_DOCUMENT_EXTENSION_RE = /\.(?:md|markdown|mdx|mdc)$/i;
 
 const localLinkStatusByTarget = new Map<string, boolean>();
 let vscodeApi: any = null;
@@ -150,6 +151,9 @@ export function isLikelyLocalLinkTarget(rawTarget: string): boolean {
   }
   if (pathLike.toLowerCase().startsWith('www.')) {
     return false;
+  }
+  if (LOCAL_DOCUMENT_EXTENSION_RE.test(pathLike)) {
+    return true;
   }
 
   const firstSegment = pathLike.split('/', 1)[0] ?? '';

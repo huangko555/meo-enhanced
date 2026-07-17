@@ -17,6 +17,12 @@ import {
   createMissingLocalLinkIndicator,
   isMissingLocalLinkTarget
 } from './localLinks';
+import {
+  appendInlineMappedText,
+  resolveInlineSourceOffsetAtPoint,
+  setInlineSourceRange
+} from './inlinePresentation';
+import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 
 declare global {
   interface HTMLDivElement {
@@ -37,6 +43,19 @@ interface TableData {
   headerCells?: string[];
   diagnostics?: TableCellDiagnostics[][][];
   sourceRanges?: TableCellRange[][];
+  diffFlagsByLine?: Record<number, TableDiffFlags>;
+}
+
+interface TableDiffFlags {
+  added?: boolean;
+  modified?: boolean;
+  modifiedRanges?: Array<[number, number]>;
+  deleted?: boolean;
+  deletionAtEnd?: boolean;
+  deletionBoundary?: number;
+  baselineFromLine?: number;
+  baselineToLine?: number;
+  deletionRanges?: Array<[number, number]>;
 }
 
 interface RowEntry {
@@ -54,6 +73,7 @@ interface DomRefs {
   shell: HTMLElement;
   wrap: HTMLElement;
   lineNumberLayer: HTMLElement;
+  diffMarkerLayer: HTMLElement;
   cellGrid: HTMLTableCellElement[][];
   rowEntries: RowEntry[];
   sourceBodyRows: HTMLTableRowElement[];
@@ -685,14 +705,18 @@ function appendSearchHighlightedText(
 ) {
   const matches = findTableSearchMatchRanges(text, searchState);
   if (matches.length === 0) {
-    parent.appendChild(document.createTextNode(text));
+    appendInlineMappedText(parent, text, { from: offset, to: offset + text.length });
     return;
   }
 
   let cursor = 0;
   for (const match of matches) {
     if (match.start > cursor) {
-      parent.appendChild(document.createTextNode(text.slice(cursor, match.start)));
+      appendInlineMappedText(
+        parent,
+        text.slice(cursor, match.start),
+        { from: offset + cursor, to: offset + match.start }
+      );
     }
 
     const span = document.createElement('span');
@@ -706,12 +730,13 @@ function appendSearchHighlightedText(
     span.style.setProperty('color', foreground, 'important');
     span.style.setProperty('-webkit-text-fill-color', foreground, 'important');
     span.textContent = text.slice(match.start, match.end);
+    setInlineSourceRange(span, { from: offset + match.start, to: offset + match.end });
     parent.appendChild(span);
     cursor = match.end;
   }
 
   if (cursor < text.length) {
-    parent.appendChild(document.createTextNode(text.slice(cursor)));
+    appendInlineMappedText(parent, text.slice(cursor), { from: offset + cursor, to: offset + text.length });
   }
 }
 
@@ -1126,14 +1151,15 @@ export function refreshTableLocalLinkIndicators(root: ParentNode): void {
   }
 }
 
-function appendTableInlinePreviewImage(parent, altText, url) {
+function appendTableInlinePreviewImage(parent, altText, url, sourceRange: TableCellRange) {
   if (!url) {
-    parent.appendChild(document.createTextNode(`![${altText}]()`));
+    appendInlineMappedText(parent, `![${altText}]()`, sourceRange);
     return;
   }
   const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), '').toDOM();
   if (dom instanceof HTMLElement) {
     dom.setAttribute('data-meo-link-href', url);
+    setInlineSourceRange(dom, sourceRange, { atomic: true });
   }
   parent.appendChild(dom);
 }
@@ -1162,7 +1188,19 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
 
   for (let i = 0; i < text.length;) {
     if (text[i] === '\\' && i + 1 < text.length && tableInlineEscapableChars.has(text[i + 1])) {
-      appendToBuffer(text[i + 1], i);
+      flushBuffer();
+      const mapped = appendInlineMappedText(parent, text[i + 1], {
+        from: baseOffset + i,
+        to: baseOffset + i + 2
+      });
+      if (diagnostics.length) {
+        const diagnostic = diagnostics.find((candidate) => candidate.from < baseOffset + i + 2 && candidate.to > baseOffset + i);
+        if (diagnostic) {
+          const severityClass = tableDiagnosticSeverityClasses[diagnostic.severity] ?? tableDiagnosticSeverityClasses[0];
+          mapped.classList.add('meo-diagnostic', severityClass);
+          mapped.title = tableDiagnosticTitle(diagnostic);
+        }
+      }
       i += 2;
       continue;
     }
@@ -1172,6 +1210,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       flushBuffer();
       const el = document.createElement('code');
       el.className = 'meo-md-inline-code';
+      setInlineSourceRange(el, { from: baseOffset + i, to: baseOffset + code.nextIndex });
       appendTablePlainText(
         el,
         decodeTableInlineEscapes(code.content),
@@ -1194,6 +1233,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         flushBuffer();
         const el = document.createElement('kbd');
         el.className = 'meo-md-kbd';
+        setInlineSourceRange(el, { from: baseOffset + i, to: baseOffset + kbd.nextIndex });
         appendTablePlainText(
           el,
           keyText,
@@ -1213,6 +1253,11 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       const mathElement = createLatexMathElement(math.content, math.mode);
       if (mathElement) {
         flushBuffer();
+        setInlineSourceRange(
+          mathElement,
+          { from: baseOffset + math.from, to: baseOffset + math.to },
+          { atomic: true }
+        );
         parent.appendChild(mathElement);
       } else {
         appendToBuffer(text.slice(math.from, math.to), math.from);
@@ -1224,7 +1269,12 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
     const image = parseTableInlineMarkdownLink(text, i, { image: true });
     if (image) {
       flushBuffer();
-      appendTableInlinePreviewImage(parent, image.label, decodeTableInlineEscapes(image.url));
+      appendTableInlinePreviewImage(
+        parent,
+        image.label,
+        decodeTableInlineEscapes(image.url),
+        { from: baseOffset + i, to: baseOffset + image.nextIndex }
+      );
       i = image.nextIndex;
       continue;
     }
@@ -1332,6 +1382,11 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       const el = document.createElement('span');
       el.className = 'meo-md-emoji';
       el.textContent = emoji.emoji;
+      setInlineSourceRange(
+        el,
+        { from: baseOffset + i, to: baseOffset + emoji.nextIndex },
+        { atomic: true }
+      );
       parent.appendChild(el);
       i = emoji.nextIndex;
       continue;
@@ -2122,15 +2177,35 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  focusCellInput(cell, { updateSelection = false } = {}) {
+  focusCellInput(cell, { updateSelection = false, caret = null } = {}) {
     const input = cell.querySelector('textarea');
-    if (!this.focusTableInput(input)) return false;
+    if (!this.focusTableInput(input, caret)) return false;
     if (!updateSelection) return true;
     const coords = this.coordsFromCell(cell);
     if (coords) {
       this.setSingleCellSelection(coords);
     }
     return true;
+  }
+
+  pointerCaretForCell(cell, clientX, clientY, { nearestFallback = true } = {}) {
+    const input = cell.querySelector('textarea');
+    const preview = cell.querySelector('.meo-md-html-table-cell-preview');
+    if (!(input instanceof HTMLTextAreaElement) || !(preview instanceof HTMLElement)) return null;
+
+    const previousInputPointerEvents = input.style.pointerEvents;
+    const previousPreviewVisibility = preview.style.visibility;
+    let sourceOffset: number | null = null;
+    try {
+      input.style.pointerEvents = 'none';
+      preview.style.visibility = 'visible';
+      sourceOffset = resolveInlineSourceOffsetAtPoint(preview, clientX, clientY, { nearestFallback });
+    } finally {
+      input.style.pointerEvents = previousInputPointerEvents;
+      preview.style.visibility = previousPreviewVisibility;
+    }
+    if (sourceOffset === null) return null;
+    return tableCellSourceOffsetToEditorOffset(input.value, sourceOffset);
   }
 
   focusCellInputAt(row, col, caret = null) {
@@ -2298,6 +2373,9 @@ class HtmlTableWidget extends WidgetType {
     const getContainer = () => this.domRefs?.container ?? getWrap();
     let pendingOutsidePointerId: number | null = null;
     let outsidePointerExitTimer: number | null = null;
+    let textSelectionInput: HTMLTextAreaElement | null = null;
+    let textSelectionAnchorCaret: number | null = null;
+    let textSelectionCell: CellCoords | null = null;
 
     const hasActiveTableInteraction = () => {
       const active = document.activeElement;
@@ -2352,11 +2430,21 @@ class HtmlTableWidget extends WidgetType {
       this.applySelection(this.normalizeSelectionRange(anchor, current));
       this.selectionPointerId = event.pointerId;
       this.isDraggingSelection = true;
-      table.setPointerCapture?.(event.pointerId);
 
-      if (!(event.target instanceof HTMLTextAreaElement)) {
-        event.preventDefault();
-        this.focusCellInput(cell);
+      const input = cell.querySelector('textarea');
+      const caret = this.pointerCaretForCell(cell, event.clientX, event.clientY);
+      if (input instanceof HTMLTextAreaElement) {
+        textSelectionInput = input;
+        textSelectionAnchorCaret = caret ?? input.value.length;
+        textSelectionCell = current;
+      }
+      event.preventDefault();
+      this.focusCellInput(cell, { caret });
+      try {
+        table.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Synthetic pointer events and already-released pointers cannot be
+        // captured. Selection still works through the table listeners.
       }
     };
 
@@ -2367,6 +2455,27 @@ class HtmlTableWidget extends WidgetType {
       if (!cell || !this.selectionAnchor) return;
       const current = this.coordsFromCell(cell);
       if (!current) return;
+      if (
+        textSelectionInput &&
+        textSelectionAnchorCaret !== null &&
+        textSelectionCell &&
+        current.row === textSelectionCell.row &&
+        current.col === textSelectionCell.col
+      ) {
+        const caret = this.pointerCaretForCell(cell, event.clientX, event.clientY, { nearestFallback: false });
+        if (caret !== null) {
+          textSelectionInput.setSelectionRange(
+            Math.min(textSelectionAnchorCaret, caret),
+            Math.max(textSelectionAnchorCaret, caret),
+            caret < textSelectionAnchorCaret ? 'backward' : 'forward'
+          );
+          this.emitTableSelectionChange(getWrap());
+        }
+        return;
+      }
+      textSelectionInput = null;
+      textSelectionAnchorCaret = null;
+      textSelectionCell = null;
       this.applySelection(this.normalizeSelectionRange(this.selectionAnchor, current));
     };
 
@@ -2374,6 +2483,9 @@ class HtmlTableWidget extends WidgetType {
       if (this.selectionPointerId !== event.pointerId) return;
       this.isDraggingSelection = false;
       this.selectionPointerId = null;
+      textSelectionInput = null;
+      textSelectionAnchorCaret = null;
+      textSelectionCell = null;
       if (table.hasPointerCapture?.(event.pointerId)) {
         table.releasePointerCapture?.(event.pointerId);
       }
@@ -2441,11 +2553,9 @@ class HtmlTableWidget extends WidgetType {
 
       const targetCell = this.findCellElement(event.target);
       if (targetCell) {
-        const targetInput = targetCell.querySelector('textarea');
-        if (targetInput !== active) {
-          event.preventDefault();
-          this.focusCellInput(targetCell, { updateSelection: true });
-        }
+        // The table's pointer handler owns caret placement. Focusing here in the
+        // document capture phase used to discard the pointer coordinates and
+        // forced every newly-entered cell to the end.
         return;
       }
     };
@@ -2882,7 +2992,45 @@ class HtmlTableWidget extends WidgetType {
       this.resizeAllRows();
     }
     this.syncTableLineNumbers();
+    this.syncTableDiffMarkers();
     this.updateStickyControls();
+  }
+
+  syncTableDiffMarkers() {
+    if (!this.domRefs) return;
+    const { table, diffMarkerLayer } = this.domRefs;
+    const gutter = this.view?.dom.querySelector('.meo-git-gutter');
+    if (!(gutter instanceof HTMLElement)) return;
+    if (diffMarkerLayer.parentElement !== gutter) gutter.appendChild(diffMarkerLayer);
+
+    const gutterRect = gutter.getBoundingClientRect();
+    diffMarkerLayer.style.left = '0';
+    diffMarkerLayer.style.width = `${gutterRect.width}px`;
+    let itemIndex = 0;
+    for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>('thead tr, tbody tr'))) {
+      const lineNumber = Number.parseInt(row.dataset.sourceLineNumber ?? '', 10);
+      const flags = this.tableData.diffFlagsByLine?.[lineNumber];
+      if (!flags || (!flags.added && !flags.modified && !flags.deleted)) continue;
+
+      const existingItem = diffMarkerLayer.children.item(itemIndex);
+      let item: HTMLElement;
+      if (existingItem instanceof HTMLElement) {
+        item = existingItem;
+      } else {
+        item = document.createElement('span');
+        diffMarkerLayer.appendChild(item);
+      }
+      updateGitDiffMarkerElement(item, {
+        ...flags,
+        liveBlockStartLine: lineNumber,
+        liveBlockEndLine: lineNumber
+      }, 'meo-md-html-table-diff-marker');
+      const rowRect = row.getBoundingClientRect();
+      item.style.top = `${rowRect.top - gutterRect.top}px`;
+      item.style.height = `${rowRect.height}px`;
+      itemIndex += 1;
+    }
+    while (diffMarkerLayer.children.length > itemIndex) diffMarkerLayer.lastElementChild?.remove();
   }
 
   scheduleLayout({ resizeRows = false } = {}) {
@@ -3256,6 +3404,11 @@ class HtmlTableWidget extends WidgetType {
       lineNumberGutter.appendChild(lineNumberLayer);
     }
     this.cleanupFns.push(() => lineNumberLayer.remove());
+    const diffMarkerLayer = document.createElement('div');
+    diffMarkerLayer.className = 'meo-md-html-table-diff-markers';
+    const diffGutter = view.dom.querySelector('.meo-git-gutter');
+    if (diffGutter instanceof HTMLElement) diffGutter.appendChild(diffMarkerLayer);
+    this.cleanupFns.push(() => diffMarkerLayer.remove());
     wrap.append(table);
     shell.append(toolbar, wrap, applySortButton);
     this.domRefs = {
@@ -3265,6 +3418,7 @@ class HtmlTableWidget extends WidgetType {
       tbody,
       container: shell,
       lineNumberLayer,
+      diffMarkerLayer,
       rowEntries,
       headerInputs,
       rowInputs: bodyRowInputs,
@@ -3368,14 +3522,14 @@ export function parseTableInfo(state, tableNode) {
   };
 }
 
-export function addTableDecorations(builder, state, tableNode, diagnostics: EditorDiagnostic[] = []) {
+export function addTableDecorations(builder, state, tableNode, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
   const data = buildTableData(state, tableNode);
-  addTableWidgetDecoration(builder, data, diagnostics);
+  addTableWidgetDecoration(builder, data, diagnostics, diffLineFlags);
 }
 
-export function addTableDecorationsForLineRange(builder, state, startLineNo, endLineNo, diagnostics: EditorDiagnostic[] = []) {
+export function addTableDecorationsForLineRange(builder, state, startLineNo, endLineNo, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
   const data = buildTableDataForLineRange(state, startLineNo, endLineNo);
-  addTableWidgetDecoration(builder, data, diagnostics);
+  addTableWidgetDecoration(builder, data, diagnostics, diffLineFlags);
 }
 
 function collectCellDiagnostics(
@@ -3435,7 +3589,47 @@ function collectTableSourceRanges(data): TableCellRange[][] {
   return rows;
 }
 
-function addTableWidgetDecoration(builder, data, diagnostics: EditorDiagnostic[] = []) {
+function mergeTableDiffRanges(
+  left: Array<[number, number]> | undefined,
+  right: Array<[number, number]> | undefined
+): Array<[number, number]> | undefined {
+  const ranges = [...(left ?? []), ...(right ?? [])];
+  if (!ranges.length) return undefined;
+  const seen = new Set<string>();
+  return ranges.filter(([from, to]) => {
+    const key = `${from}:${to}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function collectTableDiffFlags(data, diffLineFlags): Record<number, TableDiffFlags> {
+  if (!Array.isArray(diffLineFlags)) return {};
+  const result: Record<number, TableDiffFlags> = {};
+  const visibleLines = [data.headerLine, ...data.dataLines].filter(Boolean);
+  for (const line of visibleLines) {
+    const flags = diffLineFlags[line.lineNo - 1];
+    if (flags) result[line.lineNo] = { ...flags };
+  }
+  const delimiterLine = data.delimiterIdx >= 0 ? data.lines[data.delimiterIdx] : null;
+  const delimiterFlags = delimiterLine ? diffLineFlags[delimiterLine.lineNo - 1] : null;
+  if (delimiterFlags && data.headerLine) {
+    const current = result[data.headerLine.lineNo] ?? {};
+    result[data.headerLine.lineNo] = {
+      ...current,
+      ...delimiterFlags,
+      added: current.added || delimiterFlags.added,
+      modified: current.modified || delimiterFlags.modified,
+      deleted: current.deleted || delimiterFlags.deleted,
+      modifiedRanges: mergeTableDiffRanges(current.modifiedRanges, delimiterFlags.modifiedRanges),
+      deletionRanges: mergeTableDiffRanges(current.deletionRanges, delimiterFlags.deletionRanges)
+    };
+  }
+  return result;
+}
+
+function addTableWidgetDecoration(builder, data, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
   const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
   if (colCount === 0 || !headerLine) return;
 
@@ -3443,12 +3637,14 @@ function addTableWidgetDecoration(builder, data, diagnostics: EditorDiagnostic[]
   const normalizedAlignments = normalizeRow(alignments, colCount).map((value) => value ?? null);
   const headerCells = normalizeRow(headerLine.cells, colCount);
   const rows = dataLines.map((line) => normalizeRow(line.cells, colCount));
+  const diffFlagsByLine = collectTableDiffFlags(data, diffLineFlags);
   const signature = JSON.stringify({
     colCount,
     headerCells,
     rows,
     normalizedAlignments,
-    diagnostics: collectTableDiagnostics(data, diagnostics)
+    diagnostics: collectTableDiagnostics(data, diagnostics),
+    diffFlagsByLine
   });
 
   builder.push(
@@ -3467,7 +3663,8 @@ function addTableWidgetDecoration(builder, data, diagnostics: EditorDiagnostic[]
           startLine,
           endLine,
           diagnostics: collectTableDiagnostics(data, diagnostics),
-          sourceRanges: collectTableSourceRanges(data)
+          sourceRanges: collectTableSourceRanges(data),
+          diffFlagsByLine
         }
       )
     }).range(from, to)

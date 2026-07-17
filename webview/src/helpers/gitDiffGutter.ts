@@ -5,6 +5,7 @@ import {
   splitDiffLines
 } from '../../../src/shared/gitDiffCore';
 import { getLiveGitCollapsedBlockAtLine, getLiveGitCollapsedBlocks } from './liveRenderedBlocks';
+import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
 
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
 const MAX_DIFF_LINES = 1200;
@@ -95,55 +96,7 @@ class GitGutterMarker extends GutterMarker {
   }
 
   toDOM(): HTMLElement {
-    const el = document.createElement('span');
-    el.className = 'meo-git-gutter-marker';
-    if (Number.isInteger(this.flags.liveBlockStartLine)) {
-      el.dataset.meoLiveBlockStartLine = String(this.flags.liveBlockStartLine);
-    }
-    if (Number.isInteger(this.flags.liveBlockEndLine)) {
-      el.dataset.meoLiveBlockEndLine = String(this.flags.liveBlockEndLine);
-    }
-    if (this.flags.eofProxy) {
-      el.classList.add('is-eof-proxy');
-    }
-
-    if (this.flags.added) {
-      el.classList.add('is-added');
-    }
-    if (this.flags.modified) {
-      el.classList.add('is-modified');
-      if (this.flags.modifiedRanges?.length) {
-        el.dataset.meoModifiedRanges = JSON.stringify(this.flags.modifiedRanges);
-      }
-    }
-    if (this.flags.deleted) {
-      el.classList.add('is-deleted');
-      if (this.flags.deletionAtEnd) {
-        el.classList.add('is-deleted-at-end');
-      }
-      if (Number.isInteger(this.flags.deletionBoundary)) {
-        el.dataset.meoDeletionBoundary = String(this.flags.deletionBoundary);
-      }
-      if (Number.isInteger(this.flags.baselineFromLine)) {
-        el.dataset.meoBaselineFromLine = String(this.flags.baselineFromLine);
-      }
-      if (Number.isInteger(this.flags.baselineToLine)) {
-        el.dataset.meoBaselineToLine = String(this.flags.baselineToLine);
-      }
-      if (this.flags.deletionRanges?.length) {
-        el.dataset.meoDeletionRanges = JSON.stringify(this.flags.deletionRanges);
-      }
-    }
-
-    if (!this.flags.added && !this.flags.modified && !this.flags.deleted) {
-      el.classList.add('is-empty');
-    }
-
-    const stripe = document.createElement('span');
-    stripe.className = 'meo-git-gutter-stripe';
-    el.appendChild(stripe);
-
-    return el;
+    return createGitDiffMarkerElement(this.flags);
   }
 }
 
@@ -509,7 +462,9 @@ function liveCollapsedBlockMarkerAtPos(
   }
   const lineNo = state.doc.lineAt(Math.max(0, Math.min(pos, state.doc.length))).number;
   const block = getLiveGitCollapsedBlockAtLine(state, lineFlags, lineNo);
-  return block ? gitMarker(liveCollapsedBlockMarkerFlags(block, lineFlags)) : null;
+  // Tables render one marker per visible source row inside their widget. Keeping
+  // the collapsed widget marker would paint the entire table as one change.
+  return block && block.kind !== 'table' ? gitMarker(liveCollapsedBlockMarkerFlags(block, lineFlags)) : null;
 }
 
 export const gitDiffLineFlagsField = StateField.define<(MarkerFlags | undefined)[] | null>({
