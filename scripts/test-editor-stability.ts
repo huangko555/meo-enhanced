@@ -113,7 +113,7 @@ async function main() {
       'English: `code two`'
     ];
     const bodyLines = Array.from({ length: 100 }, (_, index) => `稳定锚点 ${index + 1}`);
-    const headingStrikeLine = '# 标题里的 *斜体* ~~删除线~~ `代码`';
+    const headingStrikeLine = '# 标题里的 **粗体** *斜体* ~~删除线~~ `代码`';
     const source = [...markerLines, headingStrikeLine, '', ...bodyLines].join('\n');
     await page.evaluate((text) => {
       (window as any).__editor = (window as any).EditorStabilityHarness.createEditor({
@@ -192,15 +192,21 @@ async function main() {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((candidate) => candidate.textContent?.includes('标题里的'));
       const syntaxMarker = line?.querySelector<HTMLElement>('.meo-md-marker-active:not(.meo-md-strike-marker-active)') ?? null;
+      const strongMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-strong-marker-active') ?? []);
       const strikeMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-strike-marker-active') ?? []);
-      if (!syntaxMarker || strikeMarkers.length !== 2) return null;
+      if (!syntaxMarker || strongMarkers.length !== 2 || strikeMarkers.length !== 2) return null;
       const syntax = getComputedStyle(syntaxMarker);
+      const strong = getComputedStyle(strongMarkers[0]);
       return {
         syntaxColor: syntax.color,
         syntaxTextFillColor: syntax.webkitTextFillColor,
+        strongMarkerStyle: strongMarkers[0].getAttribute('style') ?? '',
+        strongMarkerColor: strong.color,
+        strongMarkerTextFillColor: strong.webkitTextFillColor,
         strikeMarkers: strikeMarkers.map((marker) => {
           const style = getComputedStyle(marker);
           return {
+            inlineStyle: marker.getAttribute('style') ?? '',
             color: style.color,
             textFillColor: style.webkitTextFillColor,
             textDecorationLine: style.textDecorationLine,
@@ -213,6 +219,9 @@ async function main() {
     if (
       !headingStrikeMarkerColors ||
       headingStrikeMarkerColors.strikeMarkers.some((marker) => (
+        marker.inlineStyle !== headingStrikeMarkerColors.strongMarkerStyle ||
+        marker.color !== headingStrikeMarkerColors.strongMarkerColor ||
+        marker.textFillColor !== headingStrikeMarkerColors.strongMarkerTextFillColor ||
         marker.color !== headingStrikeMarkerColors.syntaxColor ||
         marker.textFillColor !== headingStrikeMarkerColors.syntaxTextFillColor ||
         marker.textDecorationLine !== 'none' ||

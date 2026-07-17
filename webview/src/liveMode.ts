@@ -82,6 +82,9 @@ import {
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
+const markdownSyntaxMarkerAttributes = {
+  style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
+};
 const frontmatterBoundaryMarkerDeco = Decoration.mark({ class: 'meo-md-frontmatter-boundary-marker' });
 const linkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker' });
 const activeLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-md-link-marker-active' });
@@ -108,23 +111,25 @@ const footnoteDefinitionContentDeco = Decoration.mark({ class: 'meo-md-footnote-
 const wikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker meo-md-wiki-marker' });
 const activeWikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-md-link-marker-active meo-md-wiki-marker' });
 const emptyWikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker meo-md-wiki-marker meo-md-wiki-empty-marker' });
-const strikeMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-strike-marker' });
-const activeStrikeMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-md-strike-marker-active' });
+const strikeMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker meo-md-strike-marker',
+  attributes: markdownSyntaxMarkerAttributes
+});
+const activeStrikeMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker-active meo-md-strike-marker-active',
+  attributes: markdownSyntaxMarkerAttributes
+});
 const codeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker' });
 const activeCodeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker-active' });
 const fenceMarkerDeco = Decoration.mark({ class: 'meo-md-fence-marker' });
 const headingContentDeco = Decoration.mark({ class: 'meo-md-heading-content' });
 const strongMarkerDeco = Decoration.mark({
   class: 'meo-md-marker meo-md-strong-marker',
-  attributes: {
-    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
-  }
+  attributes: markdownSyntaxMarkerAttributes
 });
 const activeStrongMarkerDeco = Decoration.mark({
   class: 'meo-md-marker-active meo-md-strong-marker-active',
-  attributes: {
-    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
-  }
+  attributes: markdownSyntaxMarkerAttributes
 });
 const hrMarkerDeco = Decoration.mark({ class: 'meo-md-hr-marker' });
 const hiddenLinkUrlDeco = Decoration.mark({ class: 'meo-md-link-url-hidden' });
