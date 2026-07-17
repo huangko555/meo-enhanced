@@ -743,7 +743,7 @@ exportWrapper.append(exportBtn, exportDropdownWrapper);
 
 const moreToolsButton = document.createElement('button');
 moreToolsButton.type = 'button';
-moreToolsButton.className = 'format-button toggle-button';
+moreToolsButton.className = 'format-button';
 moreToolsButton.title = 'More';
 moreToolsButton.setAttribute('aria-label', 'More tools');
 moreToolsButton.setAttribute('aria-haspopup', 'true');

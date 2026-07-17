@@ -72,6 +72,33 @@ async function main(): Promise<void> {
     await page.waitForSelector('.editor-host > .cm-editor');
     await waitForFrames(page, 8);
 
+    const closedMoreAppearance = await page.$eval('[aria-label="More tools"]', (button) => {
+      const reference = document.createElement('span');
+      reference.style.color = 'var(--vscode-editor-foreground)';
+      document.body.appendChild(reference);
+      const appearance = {
+        color: getComputedStyle(button).color,
+        opacity: getComputedStyle(button).opacity,
+        foreground: getComputedStyle(reference).color
+      };
+      reference.remove();
+      return appearance;
+    });
+    await page.click('[aria-label="More tools"]');
+    const openMoreAppearance = await page.$eval('[aria-label="More tools"]', (button) => ({
+      color: getComputedStyle(button).color,
+      opacity: getComputedStyle(button).opacity
+    }));
+    await page.click('[aria-label="More tools"]');
+    if (
+      closedMoreAppearance.opacity !== '1' ||
+      openMoreAppearance.opacity !== '1' ||
+      closedMoreAppearance.color !== closedMoreAppearance.foreground ||
+      openMoreAppearance.color !== closedMoreAppearance.foreground
+    ) {
+      throw new Error(`More button did not keep the toolbar foreground: ${JSON.stringify({ closedMoreAppearance, openMoreAppearance })}`);
+    }
+
     const blameButton = await page.$('[data-action="gitBlame"]');
     if (!blameButton) throw new Error('More tools did not contain the line author toggle');
     const initialButtonState = await blameButton.evaluate((button) => ({
