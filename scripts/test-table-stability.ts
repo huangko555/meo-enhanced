@@ -121,6 +121,12 @@ async function main() {
       ) ?? null;
       const tableImage = tableImagePreview?.querySelector<HTMLElement>('.meo-md-image') ?? null;
       let tableImageEditingBeforeRelease = false;
+      let tableImageForcedScrollCount = 0;
+      if (tableImageCell) {
+        tableImageCell.scrollIntoView = () => {
+          tableImageForcedScrollCount += 1;
+        };
+      }
       if (tableImage) {
         const rect = tableImage.getBoundingClientRect();
         const pointer = {
@@ -139,6 +145,7 @@ async function main() {
       const tableImageClickState = {
         rendered: Boolean(tableImage),
         editingBeforeRelease: tableImageEditingBeforeRelease,
+        forcedScrollCount: tableImageForcedScrollCount,
         previewHtml: tableImagePreview?.innerHTML ?? '',
         previewText: tableImagePreview?.textContent ?? '',
         inputFocused: document.activeElement === tableImageInput,
@@ -1148,6 +1155,7 @@ async function main() {
     if (
       !result.tableImageClickState.rendered ||
       result.tableImageClickState.editingBeforeRelease ||
+      result.tableImageClickState.forcedScrollCount !== 0 ||
       !result.tableImageClickState.inputFocused ||
       !result.tableImageClickState.editing ||
       result.tableImageClickState.rawMarkdown !== '![pixel](https://example.com/pixel.png)' ||

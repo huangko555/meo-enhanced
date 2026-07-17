@@ -2177,13 +2177,15 @@ class HtmlTableWidget extends WidgetType {
     return this.parseCellCoords(cell.dataset.tableRow, cell.dataset.tableCol);
   }
 
-  focusTableInput(input, caret = null) {
+  focusTableInput(input, caret = null, { scrollCellIntoView = true } = {}) {
     if (!(input instanceof HTMLTextAreaElement)) return false;
     this.setCellEditingState(input, true);
     input.focus({ preventScroll: true });
     const nextCaret = Math.min(Math.max(caret ?? input.value.length, 0), input.value.length);
     input.setSelectionRange(nextCaret, nextCaret);
-    input.closest(tableCellSelector)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    if (scrollCellIntoView) {
+      input.closest(tableCellSelector)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
     const container = input.closest('.meo-md-html-table-wrap');
     if (container instanceof HTMLElement) {
       this.emitTableSelectionChange(container);
@@ -2583,7 +2585,7 @@ class HtmlTableWidget extends WidgetType {
       if (shouldEnterTextEditing) {
         event.preventDefault();
         document.getSelection()?.removeAllRanges();
-        this.focusTableInput(pendingInput, anchorCaret);
+        this.focusTableInput(pendingInput, anchorCaret, { scrollCellIntoView: false });
         pendingInput.setSelectionRange(
           Math.min(anchorCaret, currentCaret),
           Math.max(anchorCaret, currentCaret),
