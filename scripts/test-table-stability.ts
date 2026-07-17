@@ -577,6 +577,43 @@ async function main() {
       const deleteRowsSource = deleteRowsEditor.view.state.doc.toString();
       deleteRowsEditor.destroy();
 
+      const sortedDeleteEditor = await create('| N    |\n| ---- |\n| 3    |\n| 1    |\n| 2    |');
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        23
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Sort selected column descending"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!,
+        24
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames();
+      const sortedNoncontiguousDeleteSource = sortedDeleteEditor.view.state.doc.toString();
+      sortedDeleteEditor.destroy();
+
+      const pendingEditDeleteEditor = await create('| A             |\n| ------------- |\n| keep          |\n| removed one   |\n| removed two   |\n| last          |');
+      const retainedInput = document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="1"][data-table-col="0"] textarea'
+      )!;
+      retainedInput.focus();
+      retainedInput.value = 'changed';
+      retainedInput.dispatchEvent(new Event('input', { bubbles: true }));
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="3"][data-table-col="0"]')!,
+        25
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames();
+      const pendingEditDeleteSource = pendingEditDeleteEditor.view.state.doc.toString();
+      pendingEditDeleteEditor.destroy();
+
       const deleteColumnsEditor = await create('| A | B | C |\n| --- | --- | --- |\n| a | b | c |\n| d | e | f |');
       dragSelectCells(
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
@@ -783,6 +820,8 @@ async function main() {
         lastNavigationTarget,
         navigationSource,
         deleteRowsSource,
+        sortedNoncontiguousDeleteSource,
+        pendingEditDeleteSource,
         deleteColumnsSource,
         continuedOrderedValue,
         exitedEmptyOrderedItemValue,
@@ -945,6 +984,12 @@ async function main() {
     }
     if (result.deleteRowsSource.includes('r1a') || result.deleteRowsSource.includes('r2a') || !result.deleteRowsSource.includes('r3a')) {
       failures.push(`multi-cell row deletion used only one active row: ${JSON.stringify(result.deleteRowsSource)}`);
+    }
+    if (result.sortedNoncontiguousDeleteSource !== '| N    |\n| ---- |\n| 1    |') {
+      failures.push(`sorted noncontiguous EOF row delete produced ${JSON.stringify(result.sortedNoncontiguousDeleteSource)}`);
+    }
+    if (result.pendingEditDeleteSource !== '| A             |\n| ------------- |\n| changed |\n| last          |') {
+      failures.push(`row delete with a retained pending edit rewrote unrelated lines: ${JSON.stringify(result.pendingEditDeleteSource)}`);
     }
     if (result.deleteColumnsSource.includes('| A |') || result.deleteColumnsSource.includes('| B |') || !result.deleteColumnsSource.includes('| C |')) {
       failures.push(`multi-cell column deletion used only one active column: ${JSON.stringify(result.deleteColumnsSource)}`);

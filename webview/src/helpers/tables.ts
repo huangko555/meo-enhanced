@@ -2793,9 +2793,14 @@ class HtmlTableWidget extends WidgetType {
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.rows.length);
     if (!validIndexes.length) return;
     const firstRemoved = Math.min(...validIndexes);
-    if (!this.hasPendingCellEdits && validIndexes.length < matrix.rows.length) {
+    if (validIndexes.length < matrix.rows.length) {
       const focusRow = Math.min(firstRemoved, matrix.rows.length - validIndexes.length - 1) + 1;
-      if (this.removeSourceRowsAt(dom, validIndexes, { row: focusRow, col: this.activeColumnIndex() ?? 0 })) {
+      if (this.removeSourceRowsAt(
+        dom,
+        matrix,
+        validIndexes,
+        { row: focusRow, col: this.activeColumnIndex() ?? 0 }
+      )) {
         return;
       }
     }
@@ -2807,7 +2812,12 @@ class HtmlTableWidget extends WidgetType {
     this.commitMatrix(matrix, dom, { row: focusRow, col: this.activeColumnIndex() ?? 0 });
   }
 
-  removeSourceRowsAt(dom, rowIndexes: number[], focusTarget: PendingCellFocus) {
+  removeSourceRowsAt(
+    dom,
+    matrix: CellMatrix,
+    rowIndexes: number[],
+    focusTarget: PendingCellFocus
+  ) {
     const view = this.getEditorView(dom);
     if (!view) return false;
     const range = this.resolveCurrentTableRange(view, dom);
@@ -2815,6 +2825,7 @@ class HtmlTableWidget extends WidgetType {
 
     const tableStartLine = view.state.doc.lineAt(range.from).number;
     const sortedIndexes = [...rowIndexes].sort((left, right) => left - right);
+    const removedIndexes = new Set(sortedIndexes);
     const groups: Array<{ from: number; to: number }> = [];
     for (const index of sortedIndexes) {
       const previous = groups[groups.length - 1];
@@ -2822,7 +2833,7 @@ class HtmlTableWidget extends WidgetType {
       else groups.push({ from: index, to: index });
     }
 
-    const changes = groups.map((group) => {
+    const changes: Array<{ from: number; to: number; insert?: string }> = groups.map((group) => {
       const fromLine = tableStartLine + 2 + group.from;
       const toLine = tableStartLine + 2 + group.to;
       const deletionEndsDocument = toLine === view.state.doc.lines;
@@ -2834,7 +2845,24 @@ class HtmlTableWidget extends WidgetType {
         : view.state.doc.line(toLine + 1).from;
       return { from, to };
     });
+    if (this.hasPendingCellEdits) {
+      const rowsEqual = (left: string[], right: string[]) => (
+        left.length === right.length && left.every((value, index) => value === right[index])
+      );
+      const serializeRow = (cells: string[]) => `${this.tableData.indent}| ${cells.join(' | ')} |`;
+      if (!rowsEqual(matrix.headerCells, this.tableData.headerCells)) {
+        const line = view.state.doc.line(tableStartLine);
+        changes.push({ from: line.from, to: line.to, insert: serializeRow(matrix.headerCells) });
+      }
+      for (let index = 0; index < matrix.rows.length; index += 1) {
+        if (removedIndexes.has(index) || rowsEqual(matrix.rows[index], this.tableData.rows[index])) continue;
+        const line = view.state.doc.line(tableStartLine + 2 + index);
+        changes.push({ from: line.from, to: line.to, insert: serializeRow(matrix.rows[index]) });
+      }
+    }
+    changes.sort((left, right) => left.from - right.from || left.to - right.to);
     view.dispatch({ changes });
+    this.hasPendingCellEdits = false;
     this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
     return true;
   }
