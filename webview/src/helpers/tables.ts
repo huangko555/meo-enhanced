@@ -13,6 +13,10 @@ import type { EditorDiagnostic } from './diagnostics';
 import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
 import { getViewportController } from './viewportController';
 import { createOpenLinkButton } from './linkOpenButton';
+import {
+  createMissingLocalLinkIndicator,
+  isMissingLocalLinkTarget
+} from './localLinks';
 
 declare global {
   interface HTMLDivElement {
@@ -1100,8 +1104,26 @@ function appendTableInlinePreviewLink(parent, label, href, options: {
   el.className = 'meo-md-link';
   if (href) el.setAttribute('data-meo-link-href', href);
   appendTableInlinePreviewNodes(el, label, { ...options, disableLinkParsers: true });
+  if (isMissingLocalLinkTarget(href)) parent.appendChild(createMissingLocalLinkIndicator());
   parent.appendChild(el);
   if (href) parent.appendChild(createOpenLinkButton(href));
+}
+
+export function refreshTableLocalLinkIndicators(root: ParentNode): void {
+  const links = root.querySelectorAll<HTMLElement>(
+    '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href]'
+  );
+  for (const link of links) {
+    const indicator = link.previousElementSibling?.classList.contains('meo-md-local-link-missing-icon')
+      ? link.previousElementSibling
+      : null;
+    const href = link.getAttribute('data-meo-link-href') ?? '';
+    if (isMissingLocalLinkTarget(href)) {
+      if (!indicator) link.before(createMissingLocalLinkIndicator());
+    } else {
+      indicator?.remove();
+    }
+  }
 }
 
 function appendTableInlinePreviewImage(parent, altText, url) {

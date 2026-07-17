@@ -1607,8 +1607,12 @@ body {
   height: 12px;
   margin-right: 4px;
   line-height: 1;
-  color: var(--meo-color-base04);
   vertical-align: middle;
+}
+
+#app .cm-editor .meo-md-local-link-missing-icon {
+  color: #e06c75 !important;
+  -webkit-text-fill-color: #e06c75 !important;
 }
 
 .cm-editor .meo-md-local-link-missing-icon svg {

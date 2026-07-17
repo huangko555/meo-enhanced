@@ -1,3 +1,5 @@
+import { AlertCircle, createElement } from 'lucide';
+
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const HOSTNAME_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 
@@ -80,6 +82,24 @@ export function getLocalLinkStatus(target: string | null | undefined): boolean |
     return null;
   }
   return localLinkStatusByTarget.get(normalized) === true;
+}
+
+export function isMissingLocalLinkTarget(target: string | null | undefined): boolean {
+  const normalized = normalizeLocalLinkTarget(target ?? '');
+  return Boolean(
+    normalized &&
+    isLikelyLocalLinkTarget(normalized) &&
+    getLocalLinkStatus(normalized) === false
+  );
+}
+
+export function createMissingLocalLinkIndicator(): HTMLElement {
+  const badge = document.createElement('span');
+  badge.className = 'meo-md-local-link-missing-icon';
+  badge.title = 'Local file link target not found';
+  badge.setAttribute('aria-label', 'Local file link target not found');
+  badge.appendChild(createElement(AlertCircle, { 'aria-hidden': 'true' }));
+  return badge;
 }
 
 export function normalizeLocalLinkTarget(rawTarget: string): string {

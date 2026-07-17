@@ -122,6 +122,29 @@ async function main() {
       app.removeEventListener('meo-open-link', onBodyOpenLink);
       bodyLinkEditor.destroy();
 
+      harness.replaceLocalLinkStatuses([]);
+      const missingLinkEditor = await create('> [quoted missing](missing.md)\n\n| Links |\n| --- |\n| [table missing](missing.md) [present](present.md) [external](https://example.com) |');
+      const initialMissingIndicatorCount = document.querySelectorAll('.meo-md-local-link-missing-icon').length;
+      harness.replaceLocalLinkStatuses([
+        { target: 'missing.md', exists: false },
+        { target: 'present.md', exists: true }
+      ]);
+      missingLinkEditor.refreshDecorations();
+      await waitFrames();
+      const bodyMissingIndicators = Array.from(document.querySelectorAll<HTMLElement>(
+        '.cm-line > .meo-md-local-link-missing-icon, .cm-line .meo-md-local-link-missing-icon'
+      )).filter((indicator) => !indicator.closest('.meo-md-html-table-shell'));
+      const tableMissingIndicators = Array.from(document.querySelectorAll<HTMLElement>(
+        '.meo-md-html-table-cell-preview .meo-md-local-link-missing-icon'
+      ));
+      const missingIndicatorColors = [...bodyMissingIndicators, ...tableMissingIndicators]
+        .map((indicator) => getComputedStyle(indicator).color);
+      harness.replaceLocalLinkStatuses([{ target: 'missing.md', exists: true }]);
+      missingLinkEditor.refreshDecorations();
+      await waitFrames();
+      const resolvedMissingIndicatorCount = document.querySelectorAll('.meo-md-local-link-missing-icon').length;
+      missingLinkEditor.destroy();
+
       const positionEditor = await create('| A |\n| --- |\n| value |');
       const lineBefore = document.querySelector('.meo-md-html-table-line-number')?.textContent ?? '';
       positionEditor.view.dispatch({ changes: { from: 0, insert: 'intro\n' } });
@@ -503,6 +526,11 @@ async function main() {
         inlineEditingPreviewVisibility,
         bodyLinkButtons,
         bodyOpenedHrefs,
+        initialMissingIndicatorCount,
+        bodyMissingIndicatorCount: bodyMissingIndicators.length,
+        tableMissingIndicatorCount: tableMissingIndicators.length,
+        missingIndicatorColors,
+        resolvedMissingIndicatorCount,
         lineBefore,
         lineAfter,
         lineNumberRightDelta,
@@ -555,6 +583,15 @@ async function main() {
       JSON.stringify(result.bodyOpenedHrefs) !== JSON.stringify(['https://example.com', '#target'])
     ) {
       failures.push(`body link controls regressed: ${JSON.stringify({ buttons: result.bodyLinkButtons, openedHrefs: result.bodyOpenedHrefs })}`);
+    }
+    if (
+      result.initialMissingIndicatorCount !== 0 ||
+      result.bodyMissingIndicatorCount !== 1 ||
+      result.tableMissingIndicatorCount !== 1 ||
+      result.missingIndicatorColors.some((color) => color !== 'rgb(224, 108, 117)') ||
+      result.resolvedMissingIndicatorCount !== 0
+    ) {
+      failures.push(`missing local link indicators were inconsistent: ${JSON.stringify({ initial: result.initialMissingIndicatorCount, body: result.bodyMissingIndicatorCount, table: result.tableMissingIndicatorCount, colors: result.missingIndicatorColors, resolved: result.resolvedMissingIndicatorCount })}`);
     }
     if (result.lineBefore !== '1' || result.lineAfter !== '2') failures.push(`table line number stayed ${result.lineBefore} -> ${result.lineAfter}`);
     if (result.lineNumberRightDelta === null || Math.abs(result.lineNumberRightDelta) > 0.5) {

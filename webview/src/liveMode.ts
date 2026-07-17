@@ -45,7 +45,10 @@ import {
   isThematicBreakLine
 } from './helpers/frontmatter';
 import { isWikiLinkNode, parseWikiLinkData, getWikiLinkStatus } from './helpers/wikiLinks';
-import { getLocalLinkStatus, normalizeLocalLinkTarget, isLikelyLocalLinkTarget } from './helpers/localLinks';
+import {
+  createMissingLocalLinkIndicator,
+  isMissingLocalLinkTarget
+} from './helpers/localLinks';
 import { mergeConflictSourceExtensions, parseMergeConflicts } from './helpers/mergeConflicts';
 import {
   AlertType,
@@ -638,12 +641,7 @@ class MissingLocalLinkWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const badge = document.createElement('span');
-    badge.className = 'meo-md-local-link-missing-icon';
-    badge.title = 'Local file link target not found';
-    badge.setAttribute('aria-label', 'Local file link target not found');
-    badge.appendChild(createElement(AlertCircle, { 'aria-hidden': 'true' }));
-    return badge;
+    return createMissingLocalLinkIndicator();
   }
 
   ignoreEvent(): boolean {
@@ -873,9 +871,7 @@ function addMarkdownLinkDecorations(builder, state, node, activeLines) {
   const containsImage = Boolean(findChildNode(node, 'Image'));
   addLinkMark(builder, textFrom, textTo, href, !isActiveLine && !containsImage ? textTo : null);
 
-  const localTarget = normalizeLocalLinkTarget(href);
-  const localTargetStatus = isLikelyLocalLinkTarget(localTarget) ? getLocalLinkStatus(localTarget) : null;
-  if (localTarget && localTargetStatus === false) {
+  if (isMissingLocalLinkTarget(href)) {
     const iconPos = textFrom < textTo ? textFrom : node.from + 1;
     builder.push(
       Decoration.widget({

@@ -46,6 +46,7 @@ import {
 import {
   insertTable,
   sourceTableHeaderLineField,
+  refreshTableLocalLinkIndicators,
   tableCellEditorOffsetToSourceOffset,
   tableCellSourceOffsetToEditorOffset,
   tableHeaderAlignmentOverrideField
@@ -2566,6 +2567,7 @@ export function createEditor({
     },
     refreshDecorations() {
       view.dispatch({ effects: refreshDecorationsEffect.of(null) });
+      refreshTableLocalLinkIndicators(view.dom);
     },
     preserveViewport(mutate: () => void) {
       viewportController.preserveDocumentAnchorWhileMutation(mutate);

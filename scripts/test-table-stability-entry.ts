@@ -5,6 +5,7 @@ import {
   initializeImageHandling,
   setImageSrcResolver
 } from '../webview/src/helpers/images';
+import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
 
 (globalThis as typeof globalThis & {
   TableStabilityHarness?: {
@@ -13,11 +14,13 @@ import {
     handleSavedImagePath: typeof handleSavedImagePath;
     initializeImageHandling: typeof initializeImageHandling;
     setImageSrcResolver: typeof setImageSrcResolver;
+    replaceLocalLinkStatuses: typeof replaceLocalLinkStatuses;
   };
 }).TableStabilityHarness = {
   createEditor,
   handleImagePaste,
   handleSavedImagePath,
   initializeImageHandling,
-  setImageSrcResolver
+  setImageSrcResolver,
+  replaceLocalLinkStatuses
 };
