@@ -27,6 +27,53 @@ async function waitForFrames(page: puppeteer.Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function countRenderedHeadingStrikePixels(page: puppeteer.Page): Promise<{ heading: number; foreground: number }> {
+  const rect = await page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent?.includes('标题里的'));
+    const strike = line?.querySelector<HTMLElement>('.meo-md-strike') ?? null;
+    const bounds = strike?.getBoundingClientRect();
+    return bounds ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height } : null;
+  });
+  if (!rect) throw new Error('Could not capture selected heading strike pixels');
+  const png = await page.screenshot({
+    clip: {
+      x: Math.max(0, Math.floor(rect.x)),
+      y: Math.max(0, Math.floor(rect.y)),
+      width: Math.max(1, Math.ceil(rect.width)),
+      height: Math.max(1, Math.ceil(rect.height))
+    },
+    encoding: 'base64'
+  });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const colors = {
+      heading: [121, 184, 255],
+      foreground: [230, 237, 243]
+    };
+    const counts = { heading: 0, foreground: 0 };
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      for (const [name, color] of Object.entries(colors) as Array<[keyof typeof counts, number[]]>) {
+        const distance = Math.hypot(
+          pixels[offset] - color[0],
+          pixels[offset + 1] - color[1],
+          pixels[offset + 2] - color[2]
+        );
+        if (distance < 36) counts[name] += 1;
+      }
+    }
+    return counts;
+  }, png);
+}
+
 async function main() {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-editor-stability-entry.ts')],
@@ -48,7 +95,7 @@ async function main() {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; }'
+      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -66,7 +113,7 @@ async function main() {
       'English: `code two`'
     ];
     const bodyLines = Array.from({ length: 100 }, (_, index) => `稳定锚点 ${index + 1}`);
-    const headingStrikeLine = '# 标题里的 ~~删除线~~';
+    const headingStrikeLine = '# 标题里的 *斜体* ~~删除线~~ `代码`';
     const source = [...markerLines, headingStrikeLine, '', ...bodyLines].join('\n');
     await page.evaluate((text) => {
       (window as any).__editor = (window as any).EditorStabilityHarness.createEditor({
@@ -77,6 +124,34 @@ async function main() {
       });
     }, source);
     await waitForFrames(page);
+
+    const headingSelectionDrag = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('标题里的'));
+      if (!line) return null;
+      const pointForText = (target: string, atEnd: boolean) => {
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const offset = node.textContent?.indexOf(target) ?? -1;
+          if (offset < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, offset);
+          range.setEnd(node, offset + target.length);
+          const rect = range.getBoundingClientRect();
+          return { x: atEnd ? rect.right - 1 : rect.left + 1, y: rect.top + rect.height / 2 };
+        }
+        return null;
+      };
+      const start = pointForText('斜体', false);
+      const end = pointForText('代码', true);
+      return start && end ? { start, end } : null;
+    });
+    if (!headingSelectionDrag) throw new Error('Could not locate mixed heading selection endpoints');
+    await page.mouse.move(headingSelectionDrag.start.x, headingSelectionDrag.start.y);
+    await page.mouse.down();
+    await page.mouse.move(headingSelectionDrag.end.x, headingSelectionDrag.end.y, { steps: 8 });
+    await page.mouse.up();
+    await waitForFrames(page, 3);
 
     const headingStrikeSelectionColors = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -108,16 +183,11 @@ async function main() {
       throw new Error(`Selected heading strike changed foreground color: ${JSON.stringify(headingStrikeSelectionColors)}`);
     }
 
-    const headingStrikePoint = await page.evaluate(() => {
-      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((candidate) => candidate.textContent?.includes('标题里的'));
-      const strike = line?.querySelector<HTMLElement>('.meo-md-strike') ?? null;
-      const rect = strike?.getBoundingClientRect();
-      return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
-    });
-    if (!headingStrikePoint) throw new Error('Could not locate heading strike for marker color test');
-    await page.mouse.click(headingStrikePoint.x, headingStrikePoint.y);
-    await waitForFrames(page, 3);
+    const headingStrikePixelCounts = await countRenderedHeadingStrikePixels(page);
+    if (headingStrikePixelCounts.heading <= headingStrikePixelCounts.foreground) {
+      throw new Error(`Selected heading strike rendered as foreground white: ${JSON.stringify(headingStrikePixelCounts)}`);
+    }
+
     const headingStrikeMarkerColors = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((candidate) => candidate.textContent?.includes('标题里的'));
