@@ -1,4 +1,5 @@
 import { createEditor } from '../webview/src/editor';
+import { Transaction } from '@codemirror/state';
 import {
   handleImagePaste,
   handleSavedImagePath,
@@ -18,6 +19,7 @@ import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlineP
     replaceLocalLinkStatuses: typeof replaceLocalLinkStatuses;
     getLocalLinkStatus: typeof getLocalLinkStatus;
     resolveInlineSourceOffsetAtPoint: typeof resolveInlineSourceOffsetAtPoint;
+    addToHistoryAnnotation: (value: boolean) => ReturnType<typeof Transaction.addToHistory.of>;
   };
 }).TableStabilityHarness = {
   createEditor,
@@ -27,5 +29,6 @@ import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlineP
   setImageSrcResolver,
   replaceLocalLinkStatuses,
   getLocalLinkStatus,
-  resolveInlineSourceOffsetAtPoint
+  resolveInlineSourceOffsetAtPoint,
+  addToHistoryAnnotation: (value: boolean) => Transaction.addToHistory.of(value)
 };

@@ -664,6 +664,174 @@ async function main() {
       }));
       insertDiffEditor.destroy();
 
+      const sparseEditBase = '| A      | B      | C      |\n| ------ | ------ | ------ |\n| one    |';
+      const sparseEditEditor = await create(sparseEditBase);
+      sparseEditEditor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: sparseEditBase
+      });
+      const sparseEditInput = document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="1"][data-table-col="2"] textarea'
+      )!;
+      sparseEditInput.focus();
+      sparseEditInput.value = 'three';
+      sparseEditInput.dispatchEvent(new Event('input', { bubbles: true }));
+      (document.getElementById('outside') as HTMLButtonElement).focus();
+      await waitFrames(5);
+      const sparseEditSource = sparseEditEditor.view.state.doc.toString();
+      const sparseEditMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        modified: marker.classList.contains('is-modified')
+      }));
+      sparseEditEditor.destroy();
+
+      const explicitEmptyEditor = await create('| A | B | C |\n| --- | --- | --- |\n|a||c|');
+      const explicitEmptyInput = document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="1"][data-table-col="1"] textarea'
+      )!;
+      explicitEmptyInput.focus();
+      explicitEmptyInput.value = 'b';
+      explicitEmptyInput.dispatchEvent(new Event('input', { bubbles: true }));
+      (document.getElementById('outside') as HTMLButtonElement).focus();
+      await waitFrames(3);
+      const explicitEmptySource = explicitEmptyEditor.view.state.doc.toString();
+      explicitEmptyEditor.destroy();
+
+      const paddedEmptyEditor = await create('| A |\n| --- |\n|    |');
+      const paddedEmptyInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      paddedEmptyInput.focus();
+      paddedEmptyInput.value = 'long';
+      paddedEmptyInput.dispatchEvent(new Event('input', { bubbles: true }));
+      (document.getElementById('outside') as HTMLButtonElement).focus();
+      await waitFrames(3);
+      const paddedEmptySource = paddedEmptyEditor.view.state.doc.toString();
+      paddedEmptyEditor.destroy();
+
+      const pendingAppendBase = '| A      |\n| ------ |\n| old    |';
+      const pendingAppendEditor = await create(pendingAppendBase);
+      pendingAppendEditor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: pendingAppendBase
+      });
+      const pendingAppendInput = document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="1"][data-table-col="0"] textarea'
+      )!;
+      pendingAppendInput.focus();
+      pendingAppendInput.value = 'new';
+      pendingAppendInput.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames(5);
+      const pendingAppendSource = pendingAppendEditor.view.state.doc.toString();
+      const pendingAppendMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        added: marker.classList.contains('is-added'),
+        modified: marker.classList.contains('is-modified')
+      }));
+      pendingAppendEditor.destroy();
+
+      const pendingPrependBase = '| A      |\n| ------ |\n| old    |';
+      const pendingPrependEditor = await create(pendingPrependBase);
+      pendingPrependEditor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: pendingPrependBase
+      });
+      const pendingPrependInput = document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="1"][data-table-col="0"] textarea'
+      )!;
+      pendingPrependInput.focus();
+      pendingPrependInput.value = 'new';
+      pendingPrependInput.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector<HTMLButtonElement>('button[title="Insert row above"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames(5);
+      const pendingPrependSource = pendingPrependEditor.view.state.doc.toString();
+      const pendingPrependMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        added: marker.classList.contains('is-added'),
+        modified: marker.classList.contains('is-modified')
+      }));
+      pendingPrependEditor.view.dispatch({
+        changes: { from: 0, to: 0, insert: 'intro\n' },
+        annotations: harness.addToHistoryAnnotation(false)
+      });
+      await waitFrames(3);
+      document.querySelector<HTMLTableElement>('.meo-md-html-table')!.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'z',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      await waitFrames(5);
+      const pendingPrependUndoSource = pendingPrependEditor.view.state.doc.toString();
+      document.querySelector<HTMLTableElement>('.meo-md-html-table')!.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'y',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      await waitFrames(5);
+      const pendingPrependRedoSource = pendingPrependEditor.view.state.doc.toString();
+      const pendingPrependRedoMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        added: marker.classList.contains('is-added'),
+        modified: marker.classList.contains('is-modified')
+      }));
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        27
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames(5);
+      const trackedRowDeleteSource = pendingPrependEditor.view.state.doc.toString();
+      document.querySelector<HTMLTableElement>('.meo-md-html-table')!.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'z',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      await waitFrames(5);
+      const trackedRowDeleteUndoSource = pendingPrependEditor.view.state.doc.toString();
+      const trackedRowDeleteUndoMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        added: marker.classList.contains('is-added'),
+        modified: marker.classList.contains('is-modified')
+      }));
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        28
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Insert column right"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames(5);
+      const trackedRowAfterColumnMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        added: marker.classList.contains('is-added'),
+        modified: marker.classList.contains('is-modified')
+      }));
+      pendingPrependEditor.destroy();
+
       const deleteColumnsEditor = await create('| A | B | C |\n| --- | --- | --- |\n| a | b | c |\n| d | e | f |');
       dragSelectCells(
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
@@ -876,6 +1044,21 @@ async function main() {
         editDiffMarkers,
         insertDiffSource,
         insertDiffMarkers,
+        sparseEditSource,
+        sparseEditMarkers,
+        explicitEmptySource,
+        paddedEmptySource,
+        pendingAppendSource,
+        pendingAppendMarkers,
+        pendingPrependSource,
+        pendingPrependMarkers,
+        pendingPrependUndoSource,
+        pendingPrependRedoSource,
+        pendingPrependRedoMarkers,
+        trackedRowDeleteSource,
+        trackedRowDeleteUndoSource,
+        trackedRowDeleteUndoMarkers,
+        trackedRowAfterColumnMarkers,
         deleteColumnsSource,
         continuedOrderedValue,
         exitedEmptyOrderedItemValue,
@@ -1057,6 +1240,48 @@ async function main() {
     ) {
       failures.push(`row insertion produced a table-wide diff: ${JSON.stringify({ source: result.insertDiffSource, markers: result.insertDiffMarkers })}`);
     }
+    if (
+      result.sparseEditSource !== '| A      | B      | C      |\n| ------ | ------ | ------ |\n| one    |  | three |' ||
+      JSON.stringify(result.sparseEditMarkers) !== JSON.stringify([{ line: '3', modified: true }])
+    ) {
+      failures.push(`sparse row edit was lost or normalized unrelated source: ${JSON.stringify({ source: result.sparseEditSource, markers: result.sparseEditMarkers })}`);
+    }
+    if (result.explicitEmptySource !== '| A | B | C |\n| --- | --- | --- |\n|a|b|c|') {
+      failures.push(`explicit zero-width cell edit normalized its row: ${JSON.stringify(result.explicitEmptySource)}`);
+    }
+    if (result.paddedEmptySource !== '| A |\n| --- |\n| long |') {
+      failures.push(`padded empty cell edit dropped its edge spacing: ${JSON.stringify(result.paddedEmptySource)}`);
+    }
+    if (
+      result.pendingAppendSource !== '| A      |\n| ------ |\n| new    |\n|  |' ||
+      JSON.stringify(result.pendingAppendMarkers) !== JSON.stringify([
+        { line: '3', added: false, modified: true },
+        { line: '4', added: true, modified: false }
+      ])
+    ) {
+      failures.push(`EOF row insertion did not preserve its pending cell edit: ${JSON.stringify({ source: result.pendingAppendSource, markers: result.pendingAppendMarkers })}`);
+    }
+    if (
+      result.pendingPrependSource !== '| A      |\n| ------ |\n|  |\n| new    |' ||
+      result.pendingPrependUndoSource !== 'intro\n| A      |\n| ------ |\n| old    |' ||
+      result.pendingPrependRedoSource !== `intro\n${result.pendingPrependSource}` ||
+      JSON.stringify(result.pendingPrependMarkers) !== JSON.stringify([
+        { line: '3', added: true, modified: false },
+        { line: '4', added: false, modified: true }
+      ]) ||
+      JSON.stringify(result.pendingPrependRedoMarkers) !== JSON.stringify([
+        { line: '4', added: true, modified: false },
+        { line: '5', added: false, modified: true }
+      ]) ||
+      result.trackedRowDeleteSource !== 'intro\n| A      |\n| ------ |\n| new    |' ||
+      result.trackedRowDeleteUndoSource !== result.pendingPrependRedoSource ||
+      JSON.stringify(result.trackedRowDeleteUndoMarkers) !== JSON.stringify(result.pendingPrependRedoMarkers) ||
+      !result.trackedRowAfterColumnMarkers.some((marker) => (
+        marker.line === '4' && marker.added && !marker.modified
+      ))
+    ) {
+      failures.push(`row insertion history lost its added-row identity: ${JSON.stringify({ source: result.pendingPrependSource, markers: result.pendingPrependMarkers, undo: result.pendingPrependUndoSource, redo: result.pendingPrependRedoSource, redoMarkers: result.pendingPrependRedoMarkers, deleted: result.trackedRowDeleteSource, deleteUndo: result.trackedRowDeleteUndoSource, deleteUndoMarkers: result.trackedRowDeleteUndoMarkers, afterColumnMarkers: result.trackedRowAfterColumnMarkers })}`);
+    }
     if (result.deleteColumnsSource.includes('| A |') || result.deleteColumnsSource.includes('| B |') || !result.deleteColumnsSource.includes('| C |')) {
       failures.push(`multi-cell column deletion used only one active column: ${JSON.stringify(result.deleteColumnsSource)}`);
     }
@@ -1139,7 +1364,24 @@ async function main() {
         const rect = range.getBoundingClientRect();
         return { x: rect.right, y: rect.top + rect.height / 2 };
       };
-      return { start: pointAt(1), end: pointAt(7) };
+      const selectedRange = document.createRange();
+      selectedRange.setStart(textNode, 1);
+      selectedRange.setEnd(textNode, 7);
+      const selectedRect = selectedRange.getBoundingClientRect();
+      return {
+        start: pointAt(1),
+        end: pointAt(7),
+        clip: {
+          x: Math.max(0, selectedRect.left - 2),
+          y: Math.max(0, selectedRect.top - 2),
+          width: selectedRect.width + 4,
+          height: selectedRect.height + 4
+        }
+      };
+    });
+    const unselectedPixels = await page.screenshot({
+      clip: physicalSelectionPoints.clip,
+      encoding: 'base64'
     });
     await page.mouse.move(physicalSelectionPoints.start.x, physicalSelectionPoints.start.y);
     await page.mouse.down();
@@ -1154,6 +1396,41 @@ async function main() {
         selectedPreviewText: document.getSelection()?.toString() ?? '',
         selectionBackground: getComputedStyle(preview, '::selection').backgroundColor
       };
+    });
+    const selectedPixels = await page.screenshot({
+      clip: physicalSelectionPoints.clip,
+      encoding: 'base64'
+    });
+    const selectionPixelChangeRatio = await page.evaluate(async ({ before, after }) => {
+      const loadPixels = async (base64: string) => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${base64}`;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height).data;
+      };
+      const [beforePixels, afterPixels] = await Promise.all([loadPixels(before), loadPixels(after)]);
+      let changed = 0;
+      const pixelCount = Math.min(beforePixels.length, afterPixels.length) / 4;
+      for (let offset = 0; offset < pixelCount * 4; offset += 4) {
+        const delta = Math.abs(beforePixels[offset] - afterPixels[offset]) +
+          Math.abs(beforePixels[offset + 1] - afterPixels[offset + 1]) +
+          Math.abs(beforePixels[offset + 2] - afterPixels[offset + 2]);
+        if (delta >= 24) changed += 1;
+      }
+      return pixelCount > 0 ? changed / pixelCount : 0;
+    }, { before: String(unselectedPixels), after: String(selectedPixels) });
+    const nativeTableTextDragPrevented = await page.evaluate(() => {
+      const previewText = document.querySelector<HTMLElement>(
+        'tbody .meo-md-html-table-cell-preview [data-meo-source-from]'
+      )!;
+      const dragEvent = new DragEvent('dragstart', { bubbles: true, cancelable: true });
+      const dispatched = previewText.dispatchEvent(dragEvent);
+      return dragEvent.defaultPrevented && !dispatched;
     });
     await page.mouse.up();
     const physicalPointerUpState = await page.evaluate(() => {
@@ -1173,10 +1450,12 @@ async function main() {
       physicalDragState.selectionBackground === '' ||
       physicalDragState.selectionBackground === 'transparent' ||
       physicalDragState.selectionBackground === 'rgba(0, 0, 0, 0)' ||
+      selectionPixelChangeRatio < 0.08 ||
+      !nativeTableTextDragPrevented ||
       !physicalPointerUpState.inputFocused ||
       physicalPointerUpState.selectedText !== 'lpha b'
     ) {
-      failures.push(`physical table drag did not visibly select before pointerup: ${JSON.stringify({ drag: physicalDragState, up: physicalPointerUpState })}`);
+      failures.push(`physical table drag did not visibly select before pointerup: ${JSON.stringify({ drag: physicalDragState, selectionPixelChangeRatio, nativeTableTextDragPrevented, up: physicalPointerUpState })}`);
     }
 
     const deletedTableDiffState = await page.evaluate(async () => {

@@ -23,6 +23,11 @@ import {
   setInlineSourceRange
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
+import {
+  createMarkInsertedTableRowEffect,
+  createRemapInsertedTableRowEffects,
+  getInsertedTableRowsInRange
+} from './tableInsertedRows';
 
 declare global {
   interface HTMLDivElement {
@@ -2140,7 +2145,10 @@ class HtmlTableWidget extends WidgetType {
 
   applyCurrentSort(container) {
     if (!this.sortState) return;
-    this.commitMatrix(this.readCellMatrix(), container, null, { preserveScrollPosition: true });
+    this.commitMatrix(this.readCellMatrix(), container, null, {
+      preserveScrollPosition: true,
+      sourceRowOrder: this.sortState.order
+    });
     this.sortState = null;
     this.updateSortControls();
   }
@@ -2581,6 +2589,12 @@ class HtmlTableWidget extends WidgetType {
       event.clipboardData?.setData('text/plain', text);
     };
 
+    const onDragStart = (event: DragEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (!event.target.closest('.meo-md-html-table-cell-preview')) return;
+      event.preventDefault();
+    };
+
     const onKeyDown = (event) => {
       if (this.handleHistoryShortcut(event, table)) {
         return;
@@ -2674,6 +2688,7 @@ class HtmlTableWidget extends WidgetType {
     table.addEventListener('pointercancel', endPointerSelection);
     table.addEventListener('lostpointercapture', endPointerSelection);
     table.addEventListener('copy', onCopy);
+    table.addEventListener('dragstart', onDragStart);
     table.addEventListener('keydown', onKeyDown, true);
     table.addEventListener('focusout', onFocusOut);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
@@ -2695,6 +2710,7 @@ class HtmlTableWidget extends WidgetType {
       table.removeEventListener('pointercancel', endPointerSelection);
       table.removeEventListener('lostpointercapture', endPointerSelection);
       table.removeEventListener('copy', onCopy);
+      table.removeEventListener('dragstart', onDragStart);
       table.removeEventListener('keydown', onKeyDown, true);
       table.removeEventListener('focusout', onFocusOut);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
@@ -2722,33 +2738,76 @@ class HtmlTableWidget extends WidgetType {
   collectPendingCellSourceChanges(view: EditorView, excludedBodyRows = new Set<number>()) {
     if (!this.domRefs) return [];
     const changes: Array<{ from: number; to: number; insert: string }> = [];
-    const collectRow = (inputs: HTMLTextAreaElement[]) => {
+    const tableStartLine = view.state.doc.lineAt(
+      Math.max(0, Math.min(this.tableData.from ?? 0, view.state.doc.length))
+    ).number;
+    const collectRow = (inputs: HTMLTextAreaElement[], originalCells: string[], lineNumber: number) => {
+      const line = view.state.doc.line(lineNumber);
+      const parsed = parseTableRowCells(line.text, line.from);
       const rowChanges: Array<{ from: number; to: number; insert: string }> = [];
       let requiresRowReplacement = false;
-      for (const input of inputs) {
+      const missingCellChanges: Array<{ index: number; insert: string }> = [];
+      let missingCellInsertion: { from: number; to: number; insert: string } | null = null;
+      for (let index = 0; index < inputs.length; index += 1) {
+        const input = inputs[index];
+        const insert = tableCellEditorValueToSource(input.value).trim();
+        if ((originalCells[index] ?? '') === insert) continue;
         const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
         const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
         if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > view.state.doc.length) {
           requiresRowReplacement = true;
           continue;
         }
+        if (from === to) {
+          const segment = parsed.segments[index];
+          if (segment && segment.from === from && segment.to === to) {
+            rowChanges.push({ from, to, insert });
+          } else {
+            missingCellChanges.push({ index, insert });
+          }
+          continue;
+        }
         const current = view.state.doc.sliceString(from, to);
-        const insert = tableCellEditorValueToSource(input.value).trim();
-        if (current.trim() === insert) continue;
-        if (from === to) requiresRowReplacement = true;
-        rowChanges.push({ from, to, insert });
+        let paddedInsert = insert;
+        if (current.trim() === '' && insert !== '') {
+          const leadingPadding = current.slice(0, Math.min(1, current.length));
+          const trailingPadding = current.length > 1 ? current.slice(-1) : '';
+          const innerWidth = Math.max(0, current.length - leadingPadding.length - trailingPadding.length);
+          paddedInsert = `${leadingPadding}${insert}${' '.repeat(Math.max(0, innerWidth - insert.length))}${trailingPadding}`;
+        }
+        rowChanges.push({ from, to, insert: paddedInsert });
       }
-      if (!rowChanges.length) return;
+      if (!rowChanges.length && !missingCellChanges.length && !requiresRowReplacement) return;
       rowChanges.sort((left, right) => left.from - right.from || left.to - right.to);
       for (let index = 1; index < rowChanges.length; index += 1) {
         if (rowChanges[index].from < rowChanges[index - 1].to) requiresRowReplacement = true;
       }
+      if (missingCellChanges.length) {
+        const firstMissingIndex = parsed.cells.length;
+        const lastMissingIndex = Math.max(...missingCellChanges.map(({ index }) => index));
+        if (missingCellChanges.some(({ index }) => index < firstMissingIndex)) {
+          requiresRowReplacement = true;
+        } else {
+          const missingValues = inputs
+            .slice(firstMissingIndex, lastMissingIndex + 1)
+            .map((input) => tableCellEditorValueToSource(input.value).trim());
+          const trimmedEnd = line.text.trimEnd().length;
+          const hasTrailingPipe = trimmedEnd > 0 && line.text[trimmedEnd - 1] === '|';
+          missingCellInsertion = {
+            from: hasTrailingPipe ? line.from + trimmedEnd - 1 : line.to,
+            to: hasTrailingPipe ? line.from + trimmedEnd - 1 : line.to,
+            insert: hasTrailingPipe
+              ? `| ${missingValues.join(' | ')} `
+              : ` | ${missingValues.join(' | ')}`
+          };
+        }
+      }
       if (!requiresRowReplacement) {
         changes.push(...rowChanges);
+        if (missingCellInsertion) changes.push(missingCellInsertion);
         return;
       }
 
-      const line = view.state.doc.lineAt(rowChanges[0].from);
       const cells = inputs.map((input) => tableCellEditorValueToSource(input.value).trim());
       changes.push({
         from: line.from,
@@ -2757,10 +2816,14 @@ class HtmlTableWidget extends WidgetType {
       });
     };
 
-    collectRow(this.domRefs.headerInputs);
+    collectRow(this.domRefs.headerInputs, this.tableData.headerCells ?? [], tableStartLine);
     for (let rowIndex = 0; rowIndex < this.domRefs.sourceBodyRowInputs.length; rowIndex += 1) {
       if (excludedBodyRows.has(rowIndex)) continue;
-      collectRow(this.domRefs.sourceBodyRowInputs[rowIndex]);
+      collectRow(
+        this.domRefs.sourceBodyRowInputs[rowIndex],
+        this.tableData.rows[rowIndex] ?? [],
+        tableStartLine + rowIndex + 2
+      );
     }
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
     return changes;
@@ -2785,7 +2848,15 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  commitMatrix(matrix, dom, focusTarget: PendingCellFocus | null = null, { preserveScrollPosition = false } = {}) {
+  commitMatrix(
+    matrix,
+    dom,
+    focusTarget: PendingCellFocus | null = null,
+    {
+      preserveScrollPosition = false,
+      sourceRowOrder = null
+    }: { preserveScrollPosition?: boolean; sourceRowOrder?: number[] | null } = {}
+  ) {
     const view = this.getEditorView(dom);
     if (!view) return;
 
@@ -2804,7 +2875,34 @@ class HtmlTableWidget extends WidgetType {
       return;
     }
 
-    const applyCommit = () => view.dispatch({ changes: { from: range.from, to: range.to, insert: markdown } });
+    const effectiveSourceRowOrder = sourceRowOrder ?? (
+      rows.length === this.tableData.rows.length
+        ? rows.map((_row, index) => index)
+        : []
+    );
+    const markdownLineOffsets: number[] = [];
+    let markdownOffset = 0;
+    for (const line of markdown.split('\n')) {
+      markdownLineOffsets.push(markdownOffset);
+      markdownOffset += line.length + 1;
+    }
+    const trackedRowMappings = getInsertedTableRowsInRange(view.state, range.from, range.to)
+      .map((trackedRow) => {
+        const sourceRowIndex = view.state.doc.lineAt(trackedRow.from).number - tableStartLine - 2;
+        const nextRowIndex = effectiveSourceRowOrder.indexOf(sourceRowIndex);
+        if (nextRowIndex < 0) return null;
+        return {
+          id: trackedRow.id,
+          oldOffset: trackedRow.from - range.from,
+          newOffset: markdownLineOffsets[nextRowIndex + 2]
+        };
+      })
+      .filter((mapping): mapping is { id: number; oldOffset: number; newOffset: number } => mapping !== null);
+    const effects = createRemapInsertedTableRowEffects(view.state, range.from, trackedRowMappings);
+    const applyCommit = () => view.dispatch({
+      changes: { from: range.from, to: range.to, insert: markdown },
+      effects
+    });
     const controller = preserveScrollPosition ? getViewportController(view) : null;
     if (controller) controller.preserveScrollPosition(applyCommit);
     else applyCommit();
@@ -2821,7 +2919,15 @@ class HtmlTableWidget extends WidgetType {
     const insertAt = Math.min(Math.max(rowIndex + 1, 0), matrix.rows.length);
     if (this.insertSourceRowAt(dom, insertAt, matrix.headerCells.length)) return;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
-    this.commitMatrix(matrix, dom, { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 });
+    const sourceRowOrder = matrix.rows.map((_row, index) => (
+      index < insertAt ? index : index === insertAt ? -1 : index - 1
+    ));
+    this.commitMatrix(
+      matrix,
+      dom,
+      { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 },
+      { sourceRowOrder }
+    );
   }
 
   addRowBefore(dom, rowIndex) {
@@ -2831,7 +2937,15 @@ class HtmlTableWidget extends WidgetType {
     const insertAt = Math.min(Math.max(rowIndex, 0), matrix.rows.length);
     if (this.insertSourceRowAt(dom, insertAt, matrix.headerCells.length)) return;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
-    this.commitMatrix(matrix, dom, { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 });
+    const sourceRowOrder = matrix.rows.map((_row, index) => (
+      index < insertAt ? index : index === insertAt ? -1 : index - 1
+    ));
+    this.commitMatrix(
+      matrix,
+      dom,
+      { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 },
+      { sourceRowOrder }
+    );
   }
 
   insertSourceRowAt(dom, insertAt: number, colCount: number) {
@@ -2843,15 +2957,18 @@ class HtmlTableWidget extends WidgetType {
     const tableStartLine = view.state.doc.lineAt(range.from).number;
     const blankRow = `${this.tableData.indent}| ${new Array(colCount).fill('').join(' | ')} |`;
     const changes = this.collectPendingCellSourceChanges(view);
+    let insertedRowEffect: ReturnType<typeof createMarkInsertedTableRowEffect>;
     if (insertAt < this.tableData.rows.length) {
       const line = view.state.doc.line(tableStartLine + 2 + insertAt);
       changes.push({ from: line.from, to: line.from, insert: `${blankRow}\n` });
+      insertedRowEffect = createMarkInsertedTableRowEffect(view.state, line.from, -1);
     } else {
       const previousLine = view.state.doc.line(tableStartLine + 1 + this.tableData.rows.length);
       changes.push({ from: previousLine.to, to: previousLine.to, insert: `\n${blankRow}` });
+      insertedRowEffect = createMarkInsertedTableRowEffect(view.state, previousLine.to, -1, 1);
     }
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
-    view.dispatch({ changes });
+    view.dispatch({ changes, effects: insertedRowEffect });
     this.hasPendingCellEdits = false;
     this.scheduleFocusCellAfterCommit(
       view,
@@ -2888,7 +3005,15 @@ class HtmlTableWidget extends WidgetType {
       matrix.rows.push(new Array(matrix.headerCells.length).fill(''));
     }
     const focusRow = Math.min(firstRemoved, matrix.rows.length - 1) + 1;
-    this.commitMatrix(matrix, dom, { row: focusRow, col: this.activeColumnIndex() ?? 0 });
+    const sourceRowOrder = this.tableData.rows
+      .map((_row, index) => index)
+      .filter((index) => !validIndexes.includes(index));
+    this.commitMatrix(
+      matrix,
+      dom,
+      { row: focusRow, col: this.activeColumnIndex() ?? 0 },
+      { sourceRowOrder }
+    );
   }
 
   removeSourceRowsAt(
@@ -3856,6 +3981,7 @@ function collectTableDiffFlags(data, diffLineFlags): Record<number, TableDiffFla
       deletionRanges: mergeTableDiffRanges(current.deletionRanges, delimiterFlags.deletionRanges)
     };
   }
+
   return result;
 }
 

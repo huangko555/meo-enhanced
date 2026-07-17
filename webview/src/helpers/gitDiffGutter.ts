@@ -6,6 +6,11 @@ import {
 } from '../../../src/shared/gitDiffCore';
 import { getLiveGitCollapsedBlockAtLine, getLiveGitCollapsedBlocks } from './liveRenderedBlocks';
 import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
+import {
+  clearInsertedTableRowsEffect,
+  insertedTableRowsField,
+  insertedTableRowsHistoryExtension
+} from './tableInsertedRows';
 
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
 const MAX_DIFF_LINES = 1200;
@@ -313,6 +318,16 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
     ];
   }
 
+  state.field(insertedTableRowsField, false)?.ranges.between(0, state.doc.length, (from) => {
+    const lineIndex = state.doc.lineAt(from).number - 1;
+    lineFlags[lineIndex] = {
+      ...(lineFlags[lineIndex] ?? emptyMarkerFlags()),
+      added: true,
+      modified: false,
+      modifiedRanges: undefined
+    };
+  });
+
   return lineFlags;
 }
 
@@ -535,7 +550,12 @@ const gitDiffGutterLiveExtension = gutter({
 });
 
 export function gitDiffGutterBaselineExtensions(): any[] {
-  return [gitBaselineField, gitDiffLineFlagsField];
+  return [
+    gitBaselineField,
+    insertedTableRowsField,
+    insertedTableRowsHistoryExtension,
+    gitDiffLineFlagsField
+  ];
 }
 
 export function gitDiffGutterRenderExtensions(): any[] {
@@ -602,7 +622,10 @@ export function getGitDiffOverviewSegments(state: EditorState): DiffSegment[] {
 
 export function setGitBaseline(view: EditorView, snapshot: any): void {
   view.dispatch({
-    effects: setGitBaselineEffect.of(snapshot)
+    effects: [
+      setGitBaselineEffect.of(snapshot),
+      clearInsertedTableRowsEffect.of(null)
+    ]
   });
 }
 
