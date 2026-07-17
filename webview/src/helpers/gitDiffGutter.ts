@@ -7,10 +7,11 @@ import {
 import { getLiveGitCollapsedBlockAtLine, getLiveGitCollapsedBlocks } from './liveRenderedBlocks';
 import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
-  clearInsertedTableRowsEffect,
-  insertedTableRowsField,
-  insertedTableRowsHistoryExtension
-} from './tableInsertedRows';
+  clearTableRowDiffProvenanceEffect,
+  getDeletedTableRows,
+  tableRowDiffProvenanceField,
+  tableRowDiffProvenanceHistoryExtension
+} from './tableRowDiffProvenance';
 
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
 const MAX_DIFF_LINES = 1200;
@@ -33,6 +34,7 @@ interface BaselineSnapshot {
 export interface MarkerFlags {
   added: boolean;
   modified: boolean;
+  baselineLineNumber?: number;
   modifiedRanges?: Array<[number, number]>;
   deleted?: boolean;
   deletionBoundary?: number;
@@ -164,6 +166,26 @@ function mergeLineRanges(
     }
   }
   return merged;
+}
+
+function subtractLineRanges(
+  ranges: ReadonlyArray<readonly [number, number]>,
+  excludedRanges: ReadonlyArray<readonly [number, number]>
+): Array<[number, number]> {
+  let remaining = mergeLineRanges(ranges);
+  for (const [excludedFrom, excludedTo] of mergeLineRanges(excludedRanges)) {
+    const next: Array<[number, number]> = [];
+    for (const [from, to] of remaining) {
+      if (excludedTo < from || excludedFrom > to) {
+        next.push([from, to]);
+        continue;
+      }
+      if (excludedFrom > from) next.push([from, excludedFrom - 1]);
+      if (excludedTo < to) next.push([excludedTo + 1, to]);
+    }
+    remaining = next;
+  }
+  return remaining;
 }
 
 function coalesceTrailingEofVisualLineFlag(doc: any, lineFlags: (MarkerFlags | undefined)[] | null): (MarkerFlags | undefined)[] | null {
@@ -318,7 +340,16 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
     ];
   }
 
-  state.field(insertedTableRowsField, false)?.ranges.between(0, state.doc.length, (from) => {
+  for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
+    const baselineLineNumber = result.currentToBaselineLine[lineNumber];
+    if (baselineLineNumber > 0) {
+      const flags = lineFlags[lineNumber - 1] ?? (lineFlags[lineNumber - 1] = emptyMarkerFlags());
+      flags.baselineLineNumber = baselineLineNumber;
+    }
+  }
+
+  const provenance = state.field(tableRowDiffProvenanceField, false);
+  provenance?.insertedRanges.between(0, state.doc.length, (from) => {
     const lineIndex = state.doc.lineAt(from).number - 1;
     lineFlags[lineIndex] = {
       ...(lineFlags[lineIndex] ?? emptyMarkerFlags()),
@@ -327,6 +358,33 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
       modifiedRanges: undefined
     };
   });
+
+  const deletedRows = getDeletedTableRows(state);
+  const deletedBaselineRanges = mergeLineRanges(deletedRows.flatMap((record) => record.baselineRanges));
+  if (deletedBaselineRanges.length) {
+    for (const flags of lineFlags) {
+      if (!flags?.modifiedRanges?.length) continue;
+      flags.modifiedRanges = subtractLineRanges(flags.modifiedRanges, deletedBaselineRanges);
+      if (!flags.modifiedRanges.length) {
+        flags.modified = false;
+        flags.modifiedRanges = undefined;
+      }
+    }
+  }
+  for (const record of deletedRows) {
+    if (!record.baselineRanges.length) continue;
+    const lineNumber = state.doc.lineAt(Math.max(0, Math.min(record.at, state.doc.length))).number;
+    const flags = lineFlags[lineNumber - 1] ?? (lineFlags[lineNumber - 1] = emptyMarkerFlags());
+    flags.deleted = true;
+    flags.deletionAtEnd = record.deletionAtEnd;
+    flags.deletionBoundary = record.deletionAtEnd ? lineNumber : Math.max(0, lineNumber - 1);
+    flags.deletionRanges = mergeLineRanges([
+      ...(flags.deletionRanges ?? []),
+      ...record.baselineRanges
+    ]);
+    flags.baselineFromLine = Math.min(...flags.deletionRanges.map(([from]) => from));
+    flags.baselineToLine = Math.max(...flags.deletionRanges.map(([, to]) => to));
+  }
 
   return lineFlags;
 }
@@ -351,7 +409,7 @@ function buildGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (Mark
       continue;
     }
     const flags = lineFlags[lineNo - 1];
-    if (!flags) {
+    if (!flags || (!flags.added && !flags.modified && !flags.deleted)) {
       continue;
     }
     if (flags.trailingEofProxyOnly) {
@@ -401,7 +459,7 @@ function buildLiveGitGutterMarkersFromLineFlags(state: EditorState, lineFlags: (
     }
 
     const flags = lineFlags[lineNo - 1];
-    if (!flags || flags.trailingEofProxyOnly) {
+    if (!flags || flags.trailingEofProxyOnly || (!flags.added && !flags.modified && !flags.deleted)) {
       continue;
     }
     builder.add(line.from, line.from, gitMarker(flags));
@@ -552,8 +610,8 @@ const gitDiffGutterLiveExtension = gutter({
 export function gitDiffGutterBaselineExtensions(): any[] {
   return [
     gitBaselineField,
-    insertedTableRowsField,
-    insertedTableRowsHistoryExtension,
+    tableRowDiffProvenanceField,
+    tableRowDiffProvenanceHistoryExtension,
     gitDiffLineFlagsField
   ];
 }
@@ -624,7 +682,7 @@ export function setGitBaseline(view: EditorView, snapshot: any): void {
   view.dispatch({
     effects: [
       setGitBaselineEffect.of(snapshot),
-      clearInsertedTableRowsEffect.of(null)
+      clearTableRowDiffProvenanceEffect.of(null)
     ]
   });
 }

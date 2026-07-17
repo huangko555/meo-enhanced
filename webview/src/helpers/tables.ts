@@ -24,10 +24,11 @@ import {
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
+  createMarkDeletedTableRowsEffect,
   createMarkInsertedTableRowEffect,
   createRemapInsertedTableRowEffects,
   getInsertedTableRowsInRange
-} from './tableInsertedRows';
+} from './tableRowDiffProvenance';
 
 declare global {
   interface HTMLDivElement {
@@ -54,6 +55,7 @@ interface TableData {
 interface TableDiffFlags {
   added?: boolean;
   modified?: boolean;
+  baselineLineNumber?: number;
   modifiedRanges?: Array<[number, number]>;
   deleted?: boolean;
   deletionAtEnd?: boolean;
@@ -2449,6 +2451,12 @@ class HtmlTableWidget extends WidgetType {
         this.applySelection(this.normalizeSelectionRange(current, current));
         return;
       }
+      // Preview text selection is owned by this pointer pipeline. Preventing the
+      // browser's default pointer action keeps the active textarea alive until
+      // pointerup and prevents native text/image drag sessions from competing
+      // with the DOM Selection that pointermove updates below.
+      event.preventDefault();
+      document.getSelection()?.removeAllRanges();
       const anchor = current;
       this.selectionAnchor = anchor;
       this.setActionTarget(anchor);
@@ -3036,6 +3044,33 @@ class HtmlTableWidget extends WidgetType {
       else groups.push({ from: index, to: index });
     }
 
+    const deletionEffects = groups.flatMap((group) => {
+      const baselineLines = sortedIndexes
+        .filter((index) => index >= group.from && index <= group.to)
+        .map((index) => this.tableData.diffFlagsByLine?.[tableStartLine + 2 + index]?.baselineLineNumber)
+        .filter((lineNumber): lineNumber is number => typeof lineNumber === 'number' && lineNumber > 0)
+        .sort((left, right) => left - right);
+      const baselineRanges: Array<[number, number]> = [];
+      for (const lineNumber of baselineLines) {
+        const previous = baselineRanges[baselineRanges.length - 1];
+        if (previous && lineNumber <= previous[1] + 1) previous[1] = Math.max(previous[1], lineNumber);
+        else baselineRanges.push([lineNumber, lineNumber]);
+      }
+      if (!baselineRanges.length) return [];
+
+      const fromLine = tableStartLine + 2 + group.from;
+      const deletionAtEnd = group.to === this.tableData.rows.length - 1;
+      const anchor = deletionAtEnd
+        ? Math.max(0, view.state.doc.line(fromLine).from - 1)
+        : view.state.doc.line(fromLine).from;
+      return [createMarkDeletedTableRowsEffect(
+        view.state,
+        anchor,
+        deletionAtEnd ? -1 : 1,
+        baselineRanges,
+        deletionAtEnd
+      )];
+    });
     const changes: Array<{ from: number; to: number; insert?: string }> = groups.map((group) => {
       const fromLine = tableStartLine + 2 + group.from;
       const toLine = tableStartLine + 2 + group.to;
@@ -3050,7 +3085,7 @@ class HtmlTableWidget extends WidgetType {
     });
     changes.push(...this.collectPendingCellSourceChanges(view, removedIndexes));
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
-    view.dispatch({ changes });
+    view.dispatch({ changes, effects: deletionEffects });
     this.hasPendingCellEdits = false;
     this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
     return true;

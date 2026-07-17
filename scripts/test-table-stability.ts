@@ -1339,6 +1339,32 @@ async function main() {
       await waitForPageFrames(4);
       return null;
     };
+    const screenshotPixelChangeRatio = async (before: string, after: string) => page.evaluate(async (images) => {
+      const loadPixels = async (base64: string) => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${base64}`;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height).data;
+      };
+      const [beforePixels, afterPixels] = await Promise.all([
+        loadPixels(images.before),
+        loadPixels(images.after)
+      ]);
+      let changed = 0;
+      const pixelCount = Math.min(beforePixels.length, afterPixels.length) / 4;
+      for (let offset = 0; offset < pixelCount * 4; offset += 4) {
+        const delta = Math.abs(beforePixels[offset] - afterPixels[offset]) +
+          Math.abs(beforePixels[offset + 1] - afterPixels[offset + 1]) +
+          Math.abs(beforePixels[offset + 2] - afterPixels[offset + 2]);
+        if (delta >= 24) changed += 1;
+      }
+      return pixelCount > 0 ? changed / pixelCount : 0;
+    }, { before, after });
 
     const physicalSelectionPoints = await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;
@@ -1401,29 +1427,10 @@ async function main() {
       clip: physicalSelectionPoints.clip,
       encoding: 'base64'
     });
-    const selectionPixelChangeRatio = await page.evaluate(async ({ before, after }) => {
-      const loadPixels = async (base64: string) => {
-        const image = new Image();
-        image.src = `data:image/png;base64,${base64}`;
-        await image.decode();
-        const canvas = document.createElement('canvas');
-        canvas.width = image.naturalWidth;
-        canvas.height = image.naturalHeight;
-        const context = canvas.getContext('2d')!;
-        context.drawImage(image, 0, 0);
-        return context.getImageData(0, 0, canvas.width, canvas.height).data;
-      };
-      const [beforePixels, afterPixels] = await Promise.all([loadPixels(before), loadPixels(after)]);
-      let changed = 0;
-      const pixelCount = Math.min(beforePixels.length, afterPixels.length) / 4;
-      for (let offset = 0; offset < pixelCount * 4; offset += 4) {
-        const delta = Math.abs(beforePixels[offset] - afterPixels[offset]) +
-          Math.abs(beforePixels[offset + 1] - afterPixels[offset + 1]) +
-          Math.abs(beforePixels[offset + 2] - afterPixels[offset + 2]);
-        if (delta >= 24) changed += 1;
-      }
-      return pixelCount > 0 ? changed / pixelCount : 0;
-    }, { before: String(unselectedPixels), after: String(selectedPixels) });
+    const selectionPixelChangeRatio = await screenshotPixelChangeRatio(
+      String(unselectedPixels),
+      String(selectedPixels)
+    );
     const nativeTableTextDragPrevented = await page.evaluate(() => {
       const previewText = document.querySelector<HTMLElement>(
         'tbody .meo-md-html-table-cell-preview [data-meo-source-from]'
@@ -1456,6 +1463,114 @@ async function main() {
       physicalPointerUpState.selectedText !== 'lpha b'
     ) {
       failures.push(`physical table drag did not visibly select before pointerup: ${JSON.stringify({ drag: physicalDragState, selectionPixelChangeRatio, nativeTableTextDragPrevented, up: physicalPointerUpState })}`);
+    }
+
+    const runFocusedTableDrag = async (crossTable: boolean) => {
+      const points = await page.evaluate(async (useSecondTable) => {
+        const harness = (window as any).TableStabilityHarness;
+        const app = document.getElementById('app')!;
+        app.replaceChildren();
+        const text = useSecondTable
+          ? '| A |\n| --- |\n| focus |\n\n| B |\n| --- |\n| **alpha bravo** and *charlie* |'
+          : '| A | B |\n| --- | --- |\n| focus | **alpha bravo** and *charlie* |';
+        const editor = harness.createEditor({
+          parent: app,
+          text,
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+        (window as any).__focusedTableDragEditor = editor;
+        for (let frame = 0; frame < 3; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const tables = Array.from(document.querySelectorAll<HTMLTableElement>('.meo-md-html-table'));
+        const firstInput = tables[0].querySelector<HTMLTextAreaElement>('tbody textarea')!;
+        firstInput.focus();
+        firstInput.setSelectionRange(2, 2);
+        const targetTable = useSecondTable ? tables[1] : tables[0];
+        const targetPreview = useSecondTable
+          ? targetTable.querySelector<HTMLElement>('tbody .meo-md-html-table-cell-preview')!
+          : targetTable.querySelectorAll<HTMLElement>('tbody .meo-md-html-table-cell-preview')[1]!;
+        (window as any).__focusedTableDragTargetPreview = targetPreview;
+        const mapped = Array.from(targetPreview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
+          .find((element) => element.textContent?.includes('alpha bravo'))!;
+        const textNode = document.createTreeWalker(mapped, NodeFilter.SHOW_TEXT).nextNode()!;
+        const pointAt = (offset: number) => {
+          const range = document.createRange();
+          range.setStart(textNode, Math.max(0, offset - 1));
+          range.setEnd(textNode, offset);
+          const rect = range.getBoundingClientRect();
+          return { x: rect.right, y: rect.top + rect.height / 2 };
+        };
+        const selectedRange = document.createRange();
+        selectedRange.setStart(textNode, 1);
+        selectedRange.setEnd(textNode, 7);
+        const selectedRect = selectedRange.getBoundingClientRect();
+        (window as any).__uncancelledTableDragStarts = 0;
+        const onDragStart = (event: DragEvent) => {
+          if (!event.defaultPrevented) (window as any).__uncancelledTableDragStarts += 1;
+        };
+        document.addEventListener('dragstart', onDragStart);
+        (window as any).__removeFocusedTableDragListener = () => {
+          document.removeEventListener('dragstart', onDragStart);
+        };
+        return {
+          start: pointAt(1),
+          end: pointAt(7),
+          clip: {
+            x: Math.max(0, selectedRect.left - 2),
+            y: Math.max(0, selectedRect.top - 2),
+            width: selectedRect.width + 4,
+            height: selectedRect.height + 4
+          }
+        };
+      }, crossTable);
+      const before = await page.screenshot({ clip: points.clip, encoding: 'base64' });
+      await page.mouse.move(points.start.x, points.start.y);
+      await page.mouse.down();
+      await page.mouse.move(points.end.x, points.end.y, { steps: 4 });
+      const during = await page.evaluate(() => {
+        const tables = Array.from(document.querySelectorAll<HTMLTableElement>('.meo-md-html-table'));
+        const focusedInput = tables[0].querySelector<HTMLTextAreaElement>('tbody textarea')!;
+        return {
+          focusedInputStillActive: document.activeElement === focusedInput,
+          selectedPreviewText: document.getSelection()?.toString() ?? '',
+          originalTargetConnected: Boolean((window as any).__focusedTableDragTargetPreview?.isConnected),
+          originalTargetStillRendered: document.contains((window as any).__focusedTableDragTargetPreview)
+        };
+      });
+      const after = await page.screenshot({ clip: points.clip, encoding: 'base64' });
+      const pixelChangeRatio = await screenshotPixelChangeRatio(String(before), String(after));
+      await page.mouse.up();
+      const up = await page.evaluate(() => {
+        const active = document.activeElement;
+        const result = {
+          selectedText: active instanceof HTMLTextAreaElement
+            ? active.value.slice(active.selectionStart, active.selectionEnd)
+            : '',
+          uncancelledDragStarts: (window as any).__uncancelledTableDragStarts ?? 0
+        };
+        (window as any).__removeFocusedTableDragListener?.();
+        (window as any).__focusedTableDragEditor.destroy();
+        return result;
+      });
+      return { during, pixelChangeRatio, up };
+    };
+    const focusedSameTableDrag = await runFocusedTableDrag(false);
+    const focusedCrossTableDrag = await runFocusedTableDrag(true);
+    for (const [label, state] of [
+      ['same table', focusedSameTableDrag],
+      ['cross table', focusedCrossTableDrag]
+    ] as const) {
+      if (
+        !state.during.focusedInputStillActive ||
+        state.during.selectedPreviewText !== 'lpha b' ||
+        state.pixelChangeRatio < 0.08 ||
+        state.up.selectedText !== 'lpha b' ||
+        state.up.uncancelledDragStarts !== 0
+      ) {
+        failures.push(`focused ${label} drag was not visibly owned by the target table: ${JSON.stringify(state)}`);
+      }
     }
 
     const deletedTableDiffState = await page.evaluate(async () => {
@@ -1567,6 +1682,154 @@ async function main() {
       deletedTableDiffTooltip.modifiedVisible
     ) {
       failures.push(`deleted table rows did not render a row-scoped deletion change: ${JSON.stringify({ markers: deletedTableDiffState, tooltip: deletedTableDiffTooltip })}`);
+    }
+
+    const adjacentTableDiffState = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const baseText = '| A             |\n| ------------- |\n| keep          |\n| removed one   |\n| removed two   |\n| old value     |\n| last          |';
+      const editor = harness.createEditor({
+        parent: app,
+        text: baseText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText
+      });
+      (window as any).__adjacentTableDiffEditor = editor;
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const editedInput = document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="4"][data-table-col="0"] textarea'
+      )!;
+      editedInput.focus();
+      editedInput.value = 'new value';
+      editedInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const fromCell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!;
+      const toCell = document.querySelector<HTMLElement>('td[data-table-row="3"][data-table-col="0"]')!;
+      const table = fromCell.closest('table')!;
+      const targetRect = toCell.getBoundingClientRect();
+      fromCell.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        pointerId: 82,
+        bubbles: true,
+        cancelable: true
+      }));
+      table.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 82,
+        clientX: targetRect.left + targetRect.width / 2,
+        clientY: targetRect.top + targetRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      table.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 82,
+        bubbles: true,
+        cancelable: true
+      }));
+      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+      for (let frame = 0; frame < 5; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const markers = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker'));
+      const markerState = markers.map((marker) => ({
+        classes: marker.className,
+        baselineFrom: marker.dataset.meoBaselineFromLine,
+        baselineTo: marker.dataset.meoBaselineToLine,
+        modifiedRanges: marker.dataset.meoModifiedRanges,
+        liveFrom: marker.dataset.meoLiveBlockStartLine
+      }));
+      document.querySelector<HTMLTableElement>('.meo-md-html-table')!.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'z',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      for (let frame = 0; frame < 5; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const undoSource = editor.view.state.doc.toString();
+      const undoDeletedMarkerCount = document.querySelectorAll(
+        '.meo-md-html-table-diff-marker.is-deleted'
+      ).length;
+      document.querySelector<HTMLTableElement>('.meo-md-html-table')!.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'y',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      for (let frame = 0; frame < 5; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const redoSource = editor.view.state.doc.toString();
+      const redoMarkers = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker'));
+      const pointFor = (marker: HTMLElement | undefined, kind: 'deleted' | 'modified') => {
+        if (!marker) return null;
+        const rect = marker.getBoundingClientRect();
+        return {
+          x: rect.left + Math.min(2, rect.width / 2),
+          y: kind === 'deleted' ? rect.top + 1 : rect.top + rect.height / 2
+        };
+      };
+      return {
+        source: editor.view.state.doc.toString(),
+        markers: markerState,
+        undoSource,
+        undoDeletedMarkerCount,
+        redoSource,
+        deletedPoint: pointFor(redoMarkers.find((marker) => marker.classList.contains('is-deleted')), 'deleted'),
+        modifiedPoint: pointFor(redoMarkers.find((marker) => marker.classList.contains('is-modified')), 'modified')
+      };
+    });
+    const readVisibleDiffTooltip = () => page.evaluate(() => {
+      const deletion = document.querySelector<HTMLElement>('.meo-deletion-tooltip');
+      const modified = document.querySelector<HTMLElement>('.meo-modified-tooltip');
+      return {
+        deletionVisible: Boolean(deletion && !deletion.hidden),
+        deletionText: deletion?.textContent ?? '',
+        modifiedVisible: Boolean(modified && !modified.hidden),
+        modifiedText: modified?.textContent ?? ''
+      };
+    });
+    let adjacentDeletedTooltip = null;
+    if (adjacentTableDiffState.deletedPoint) {
+      await page.mouse.move(adjacentTableDiffState.deletedPoint.x, adjacentTableDiffState.deletedPoint.y);
+      await waitForPageFrames(2);
+      adjacentDeletedTooltip = await readVisibleDiffTooltip();
+    }
+    let adjacentModifiedTooltip = null;
+    if (adjacentTableDiffState.modifiedPoint) {
+      await page.mouse.move(adjacentTableDiffState.modifiedPoint.x, adjacentTableDiffState.modifiedPoint.y);
+      await waitForPageFrames(2);
+      adjacentModifiedTooltip = await readVisibleDiffTooltip();
+    }
+    await page.evaluate(() => (window as any).__adjacentTableDiffEditor.destroy());
+    const adjacentDeletedMarkers = adjacentTableDiffState.markers.filter((marker) => marker.classes.includes('is-deleted'));
+    const adjacentModifiedMarkers = adjacentTableDiffState.markers.filter((marker) => marker.classes.includes('is-modified'));
+    if (
+      adjacentTableDiffState.source !== '| A             |\n| ------------- |\n| keep          |\n| new value     |\n| last          |' ||
+      adjacentTableDiffState.undoSource !== '| A             |\n| ------------- |\n| keep          |\n| removed one   |\n| removed two   |\n| old value     |\n| last          |' ||
+      adjacentTableDiffState.undoDeletedMarkerCount !== 0 ||
+      adjacentTableDiffState.redoSource !== '| A             |\n| ------------- |\n| keep          |\n| new value     |\n| last          |' ||
+      adjacentDeletedMarkers.length !== 1 ||
+      adjacentDeletedMarkers[0]?.baselineFrom !== '4' ||
+      adjacentDeletedMarkers[0]?.baselineTo !== '5' ||
+      adjacentModifiedMarkers.length !== 1 ||
+      adjacentModifiedMarkers[0]?.modifiedRanges !== '[[6,6]]' ||
+      !adjacentDeletedTooltip?.deletionVisible ||
+      adjacentDeletedTooltip.deletionText.includes('old value') ||
+      !adjacentModifiedTooltip?.modifiedVisible ||
+      adjacentModifiedTooltip.modifiedText.includes('removed one') ||
+      adjacentModifiedTooltip.modifiedText.includes('removed two')
+    ) {
+      failures.push(`adjacent table deletion was swallowed by a modified marker: ${JSON.stringify({ state: adjacentTableDiffState, deletedTooltip: adjacentDeletedTooltip, modifiedTooltip: adjacentModifiedTooltip })}`);
     }
 
     await page.evaluate(async () => {
