@@ -264,7 +264,7 @@ async function main() {
         .map((cell) => cell.getBoundingClientRect().width);
       markdownInput.blur();
       await waitFrames(1);
-      const dragTextElement = Array.from(caretPreview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
+      let dragTextElement = Array.from(caretPreview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
         .find((element) => element.textContent?.includes('alpha bravo'))!;
       const dragTextNode = dragTextElement.firstChild!;
       const dragStartRange = document.createRange();
@@ -275,6 +275,26 @@ async function main() {
       dragEndRange.setStart(dragTextNode, 6);
       dragEndRange.setEnd(dragTextNode, 7);
       const dragEndRect = dragEndRange.getBoundingClientRect();
+      dragTextElement.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        pointerId: 47,
+        clientX: dragStartRect.right,
+        clientY: dragStartRect.top + dragStartRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      caretCell.closest('table')!.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 47,
+        clientX: dragEndRect.right,
+        clientY: dragEndRect.top + dragEndRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      const releaseOnlyDraggedText = caretInput.value.slice(caretInput.selectionStart, caretInput.selectionEnd);
+      caretInput.blur();
+      await waitFrames(1);
+      dragTextElement = Array.from(caretPreview.querySelectorAll<HTMLElement>('[data-meo-source-from]'))
+        .find((element) => element.textContent?.includes('alpha bravo'))!;
       dragTextElement.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0,
         pointerId: 42,
@@ -788,6 +808,7 @@ async function main() {
         cancelledPointerState,
         lostCaptureState,
         outsideReleaseState,
+        releaseOnlyDraggedText,
         crossCellDragFocusedInput,
         maxWidthDelta: Math.max(...widthsBeforeEntry.flatMap((width, index) => [
           Math.abs(width - widthsAfterEntry[index]),
@@ -848,6 +869,9 @@ async function main() {
     }
     if (result.draggedText !== 'lpha b') {
       failures.push(`same-cell pointer drag selected ${JSON.stringify(result.draggedText)}`);
+    }
+    if (result.releaseOnlyDraggedText !== 'lpha b') {
+      failures.push(`table drag ignored the pointerup position and selected ${JSON.stringify(result.releaseOnlyDraggedText)}`);
     }
     if (
       result.cancelledPointerState.inputFocused ||
@@ -1038,6 +1062,117 @@ async function main() {
       physicalPointerUpState.selectedText !== 'lpha b'
     ) {
       failures.push(`physical table drag did not defer source mode until pointerup: ${JSON.stringify({ drag: physicalDragState, up: physicalPointerUpState })}`);
+    }
+
+    const deletedTableDiffState = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const baseText = '| A             |\n| ------------- |\n| keep          |\n| removed one   |\n| removed two   |\n| last          |';
+      const editor = harness.createEditor({
+        parent: app,
+        text: baseText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText
+      });
+      (window as any).__deletedTableDiffEditor = editor;
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const fromCell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!;
+      const toCell = document.querySelector<HTMLElement>('td[data-table-row="3"][data-table-col="0"]')!;
+      const table = fromCell.closest('table')!;
+      const targetRect = toCell.getBoundingClientRect();
+      fromCell.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        pointerId: 81,
+        bubbles: true,
+        cancelable: true
+      }));
+      table.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 81,
+        clientX: targetRect.left + targetRect.width / 2,
+        clientY: targetRect.top + targetRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      table.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 81,
+        bubbles: true,
+        cancelable: true
+      }));
+      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+      for (let frame = 0; frame < 5; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const tableDeletedMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker.is-deleted')
+      );
+      const tableMarkerClasses = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => marker.className);
+      const aggregateMarkers = Array.from(document.querySelectorAll<HTMLElement>(
+        '.meo-git-gutter-marker.is-added, .meo-git-gutter-marker.is-modified, .meo-git-gutter-marker.is-deleted'
+      )).filter((marker) => !marker.classList.contains('meo-md-html-table-diff-marker'));
+      const hoverMarker = tableDeletedMarkers[0] ?? aggregateMarkers[0] ?? null;
+      const rect = hoverMarker?.getBoundingClientRect();
+      const gutterRect = document.querySelector<HTMLElement>('.cm-gutter.meo-git-gutter')?.getBoundingClientRect();
+      const deletionAtEnd = hoverMarker?.classList.contains('is-deleted-at-end') ?? false;
+      return {
+        source: editor.view.state.doc.toString(),
+        markerGutterLeftDelta: rect && gutterRect ? rect.left - gutterRect.left : null,
+        tableMarkerClasses,
+        tableDeletedMarkers: tableDeletedMarkers.map((marker) => ({
+          baselineFrom: marker.dataset.meoBaselineFromLine,
+          baselineTo: marker.dataset.meoBaselineToLine,
+          liveFrom: marker.dataset.meoLiveBlockStartLine,
+          liveTo: marker.dataset.meoLiveBlockEndLine
+        })),
+        aggregateMarkerClasses: aggregateMarkers.map((marker) => marker.className),
+        hoverPoint: rect ? {
+          x: rect.left + Math.min(2, rect.width / 2),
+          y: deletionAtEnd ? rect.bottom - 1 : rect.top + 1
+        } : null
+      };
+    });
+    if (deletedTableDiffState.hoverPoint) {
+      await page.mouse.move(deletedTableDiffState.hoverPoint.x, deletedTableDiffState.hoverPoint.y);
+      await waitForPageFrames(2);
+    }
+    const deletedTableDiffTooltip = await page.evaluate(() => {
+      const deletion = document.querySelector<HTMLElement>('.meo-deletion-tooltip');
+      const modified = document.querySelector<HTMLElement>('.meo-modified-tooltip');
+      const result = {
+        deletionVisible: Boolean(deletion && !deletion.hidden),
+        deletionText: deletion?.textContent ?? '',
+        modifiedVisible: Boolean(modified && !modified.hidden),
+        modifiedText: modified?.textContent ?? ''
+      };
+      (window as any).__deletedTableDiffEditor.destroy();
+      return result;
+    });
+    if (
+      deletedTableDiffState.source !== '| A             |\n| ------------- |\n| keep          |\n| last          |' ||
+      deletedTableDiffState.markerGutterLeftDelta === null ||
+      Math.abs(deletedTableDiffState.markerGutterLeftDelta) > 0.5 ||
+      deletedTableDiffState.tableDeletedMarkers.length !== 1 ||
+      deletedTableDiffState.tableDeletedMarkers[0]?.baselineFrom !== '4' ||
+      deletedTableDiffState.tableDeletedMarkers[0]?.baselineTo !== '5' ||
+      deletedTableDiffState.aggregateMarkerClasses.length !== 0 ||
+      !deletedTableDiffTooltip.deletionVisible ||
+      !deletedTableDiffTooltip.deletionText.includes('removed one') ||
+      !deletedTableDiffTooltip.deletionText.includes('removed two') ||
+      deletedTableDiffTooltip.deletionText.includes('| A |') ||
+      deletedTableDiffTooltip.modifiedVisible
+    ) {
+      failures.push(`deleted table rows did not render a row-scoped deletion change: ${JSON.stringify({ markers: deletedTableDiffState, tooltip: deletedTableDiffTooltip })}`);
     }
 
     await page.evaluate(async () => {

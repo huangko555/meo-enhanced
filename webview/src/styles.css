@@ -2856,6 +2856,7 @@ body.outline-resizing {
 }
 
 .cm-editor .cm-gutter.meo-git-gutter {
+  position: relative;
   width: 3px;
   min-width: 3px;
   overflow: visible;

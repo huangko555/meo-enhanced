@@ -2515,7 +2515,30 @@ class HtmlTableWidget extends WidgetType {
       if (this.selectionPointerId !== event.pointerId) return;
       const pendingInput = textSelectionInput;
       const anchorCaret = textSelectionAnchorCaret;
-      const currentCaret = textSelectionCurrentCaret;
+      let currentCaret = textSelectionCurrentCaret;
+      if (
+        event.type === 'pointerup' &&
+        !textSelectionCrossedCell &&
+        pendingInput instanceof HTMLTextAreaElement &&
+        textSelectionCell
+      ) {
+        const releaseCell = this.findCellElement(document.elementFromPoint(event.clientX, event.clientY));
+        const releaseCoords = releaseCell ? this.coordsFromCell(releaseCell) : null;
+        if (
+          releaseCell &&
+          releaseCoords?.row === textSelectionCell.row &&
+          releaseCoords?.col === textSelectionCell.col
+        ) {
+          const releaseCaret = this.pointerCaretForCell(
+            releaseCell,
+            event.clientX,
+            event.clientY
+          ).editorOffset;
+          if (releaseCaret !== null) currentCaret = releaseCaret;
+        } else {
+          markTextSelectionCrossedCell();
+        }
+      }
       const shouldEnterTextEditing = (
         event.type === 'pointerup' &&
         !textSelectionCrossedCell &&
@@ -2770,12 +2793,50 @@ class HtmlTableWidget extends WidgetType {
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.rows.length);
     if (!validIndexes.length) return;
     const firstRemoved = Math.min(...validIndexes);
+    if (!this.hasPendingCellEdits && validIndexes.length < matrix.rows.length) {
+      const focusRow = Math.min(firstRemoved, matrix.rows.length - validIndexes.length - 1) + 1;
+      if (this.removeSourceRowsAt(dom, validIndexes, { row: focusRow, col: this.activeColumnIndex() ?? 0 })) {
+        return;
+      }
+    }
     for (const index of validIndexes) matrix.rows.splice(index, 1);
     if (matrix.rows.length === 0) {
       matrix.rows.push(new Array(matrix.headerCells.length).fill(''));
     }
     const focusRow = Math.min(firstRemoved, matrix.rows.length - 1) + 1;
     this.commitMatrix(matrix, dom, { row: focusRow, col: this.activeColumnIndex() ?? 0 });
+  }
+
+  removeSourceRowsAt(dom, rowIndexes: number[], focusTarget: PendingCellFocus) {
+    const view = this.getEditorView(dom);
+    if (!view) return false;
+    const range = this.resolveCurrentTableRange(view, dom);
+    if (!range) return false;
+
+    const tableStartLine = view.state.doc.lineAt(range.from).number;
+    const sortedIndexes = [...rowIndexes].sort((left, right) => left - right);
+    const groups: Array<{ from: number; to: number }> = [];
+    for (const index of sortedIndexes) {
+      const previous = groups[groups.length - 1];
+      if (previous && index === previous.to + 1) previous.to = index;
+      else groups.push({ from: index, to: index });
+    }
+
+    const changes = groups.map((group) => {
+      const fromLine = tableStartLine + 2 + group.from;
+      const toLine = tableStartLine + 2 + group.to;
+      const deletionEndsDocument = toLine === view.state.doc.lines;
+      const from = deletionEndsDocument
+        ? view.state.doc.line(fromLine).from - 1
+        : view.state.doc.line(fromLine).from;
+      const to = deletionEndsDocument
+        ? view.state.doc.line(toLine).to
+        : view.state.doc.line(toLine + 1).from;
+      return { from, to };
+    });
+    view.dispatch({ changes });
+    this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
+    return true;
   }
 
   addColumnAfter(dom, colIndex) {
