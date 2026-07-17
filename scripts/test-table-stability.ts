@@ -1902,6 +1902,89 @@ async function main() {
       failures.push(`deleting one empty table row produced duplicate or widened deletion markers: ${JSON.stringify(emptyTableRowDeletionState)}`);
     }
 
+    const repeatedEmptyTableRowDeletionState = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const emptyRow = '|     |     |';
+      const baseText = ['| A   | B   |', '| --- | --- |', ...new Array(6).fill(emptyRow)].join('\n');
+      const editor = harness.createEditor({
+        parent: app,
+        text: baseText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText
+      });
+      const waitFrames = async (count: number) => {
+        for (let frame = 0; frame < count; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      const deleteRow = async (row: number, pointerId: number) => {
+        const cell = document.querySelector<HTMLElement>(
+          `td[data-table-row="${row}"][data-table-col="0"]`
+        )!;
+        const table = cell.closest('table')!;
+        const rect = cell.getBoundingClientRect();
+        cell.dispatchEvent(new PointerEvent('pointerdown', {
+          button: 0,
+          pointerId,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          bubbles: true,
+          cancelable: true
+        }));
+        table.dispatchEvent(new PointerEvent('pointerup', {
+          button: 0,
+          pointerId,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          bubbles: true,
+          cancelable: true
+        }));
+        document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
+          .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+        await waitFrames(5);
+      };
+      await waitFrames(3);
+      await deleteRow(2, 84);
+      await deleteRow(4, 85);
+      const markers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker.is-deleted')
+      ).map((marker) => ({
+        liveFrom: marker.dataset.meoLiveBlockStartLine,
+        deletionRanges: marker.dataset.meoDeletionRanges
+      }));
+      const source = editor.view.state.doc.toString();
+      editor.destroy();
+      return { source, markers };
+    });
+    const expectedRepeatedEmptyDeletionSource = [
+      '| A   | B   |',
+      '| --- | --- |',
+      ...new Array(4).fill('|     |     |')
+    ].join('\n');
+    const repeatedEmptyDeletionRanges = repeatedEmptyTableRowDeletionState.markers.flatMap((marker) => {
+      try {
+        return JSON.parse(marker.deletionRanges ?? '[]') as Array<[number, number]>;
+      } catch {
+        return [];
+      }
+    });
+    if (
+      repeatedEmptyTableRowDeletionState.source !== expectedRepeatedEmptyDeletionSource ||
+      repeatedEmptyTableRowDeletionState.markers.length !== 2 ||
+      repeatedEmptyDeletionRanges.length !== 2 ||
+      repeatedEmptyDeletionRanges.some(([from, to]) => from !== to)
+    ) {
+      failures.push(`deleting two separate empty table rows retained an aggregate snapshot marker: ${JSON.stringify(repeatedEmptyTableRowDeletionState)}`);
+    }
+
     await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;
       const app = document.getElementById('app')!;

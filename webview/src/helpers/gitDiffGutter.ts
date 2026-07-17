@@ -201,58 +201,63 @@ function reconcileSnapshotTableDeletions(
     baselineRanges: Array<[number, number]>;
   }>
 ): void {
-  const candidates = lineFlags.flatMap((flags, lineIndex) => (flags?.deletionRanges ?? []).map((range, rangeIndex) => ({
-    lineIndex,
-    rangeIndex,
-    range
-  })));
-  const claimedCandidates = new Set<string>();
-  const removals = new Map<number, Set<number>>();
-
-  const sameBaselineText = (
-    left: readonly [number, number],
-    right: readonly [number, number]
-  ) => {
-    if (left[1] - left[0] !== right[1] - right[0]) return false;
-    for (let offset = 0; offset <= left[1] - left[0]; offset += 1) {
-      if (baselineLines[left[0] + offset - 1] !== baselineLines[right[0] + offset - 1]) return false;
+  const candidates = lineFlags.flatMap((flags, lineIndex) => (flags?.deletionRanges ?? []).flatMap(
+    ([fromLine, toLine], rangeIndex) => {
+      const lines = [];
+      for (let baselineLine = fromLine; baselineLine <= toLine; baselineLine += 1) {
+        lines.push({ lineIndex, rangeIndex, baselineLine });
+      }
+      return lines;
     }
-    return true;
-  };
+  ));
+  const claimedCandidates = new Set<string>();
+  const removals = new Map<number, number[]>();
 
   for (const record of deletedRows) {
     const targetLine = state.doc.lineAt(Math.max(0, Math.min(record.at, state.doc.length))).number;
     const tableBlock = getLiveRenderedBlockAtLine(state, targetLine);
-    for (const provenanceRange of record.baselineRanges) {
-      const matching = candidates
-        .filter((candidate) => {
-          const key = `${candidate.lineIndex}:${candidate.rangeIndex}`;
-          if (claimedCandidates.has(key) || !sameBaselineText(candidate.range, provenanceRange)) return false;
-          const exactRange = candidate.range[0] === provenanceRange[0] && candidate.range[1] === provenanceRange[1];
-          if (exactRange) return true;
-          if (tableBlock?.kind !== 'table') return false;
-          const candidateLine = candidate.lineIndex + 1;
-          return candidateLine >= tableBlock.startLine && candidateLine <= tableBlock.endLine + 1;
-        })
-        .sort((left, right) => {
-          const leftExact = left.range[0] === provenanceRange[0] && left.range[1] === provenanceRange[1];
-          const rightExact = right.range[0] === provenanceRange[0] && right.range[1] === provenanceRange[1];
-          if (leftExact !== rightExact) return leftExact ? -1 : 1;
-          return Math.abs(left.lineIndex + 1 - targetLine) - Math.abs(right.lineIndex + 1 - targetLine);
-        });
-      const candidate = matching[0];
-      if (!candidate) continue;
-      claimedCandidates.add(`${candidate.lineIndex}:${candidate.rangeIndex}`);
-      const lineRemovals = removals.get(candidate.lineIndex) ?? new Set<number>();
-      lineRemovals.add(candidate.rangeIndex);
-      removals.set(candidate.lineIndex, lineRemovals);
+    for (const [fromLine, toLine] of record.baselineRanges) {
+      for (let provenanceLine = fromLine; provenanceLine <= toLine; provenanceLine += 1) {
+        let candidate: (typeof candidates)[number] | undefined;
+        let candidateDistance = Number.POSITIVE_INFINITY;
+        for (const next of candidates) {
+          const key = `${next.lineIndex}:${next.rangeIndex}:${next.baselineLine}`;
+          if (claimedCandidates.has(key)) continue;
+          if (next.baselineLine === provenanceLine) {
+            candidate = next;
+            break;
+          }
+          if (tableBlock?.kind !== 'table') continue;
+          const candidateLine = next.lineIndex + 1;
+          if (
+            candidateLine < tableBlock.startLine ||
+            candidateLine > tableBlock.endLine + 1 ||
+            baselineLines[next.baselineLine - 1] !== baselineLines[provenanceLine - 1]
+          ) {
+            continue;
+          }
+          const distance = Math.abs(candidateLine - targetLine);
+          if (distance < candidateDistance) {
+            candidate = next;
+            candidateDistance = distance;
+          }
+        }
+        if (!candidate) continue;
+        claimedCandidates.add(`${candidate.lineIndex}:${candidate.rangeIndex}:${candidate.baselineLine}`);
+        const lineRemovals = removals.get(candidate.lineIndex) ?? [];
+        lineRemovals.push(candidate.baselineLine);
+        removals.set(candidate.lineIndex, lineRemovals);
+      }
     }
   }
 
-  for (const [lineIndex, rangeIndexes] of removals) {
+  for (const [lineIndex, baselineLineNumbers] of removals) {
     const flags = lineFlags[lineIndex];
     if (!flags?.deletionRanges) continue;
-    flags.deletionRanges = flags.deletionRanges.filter((_range, index) => !rangeIndexes.has(index));
+    flags.deletionRanges = subtractLineRanges(
+      flags.deletionRanges,
+      baselineLineNumbers.map((lineNumber) => [lineNumber, lineNumber])
+    );
     if (!flags.deletionRanges.length) {
       flags.deleted = false;
       flags.deletionRanges = undefined;
