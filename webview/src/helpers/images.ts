@@ -351,6 +351,7 @@ export class ImageWidget extends WidgetType {
   altText: string;
   linkUrl: string;
   sourceFrom: number | null;
+  pointerInteractionOwner: 'widget' | 'parent';
   fullscreenOverlay: HTMLElement | null;
   fullscreenCleanup: (() => void) | null;
   exitFullscreenHandler: ((event: KeyboardEvent) => void) | null;
@@ -359,13 +360,15 @@ export class ImageWidget extends WidgetType {
     url: string | null | undefined,
     altText: string | null | undefined,
     linkUrl: string | null | undefined,
-    sourceFrom: number | null = null
+    sourceFrom: number | null = null,
+    options: { pointerInteractionOwner?: 'widget' | 'parent' } = {}
   ) {
     super();
     this.url = url?.trim() ?? '';
     this.altText = altText ?? '';
     this.linkUrl = linkUrl?.trim() ?? '';
     this.sourceFrom = Number.isInteger(sourceFrom) ? sourceFrom : null;
+    this.pointerInteractionOwner = options.pointerInteractionOwner ?? 'widget';
     this.fullscreenOverlay = null;
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
@@ -380,7 +383,8 @@ export class ImageWidget extends WidgetType {
       other.url === this.url &&
       other.altText === this.altText &&
       other.linkUrl === this.linkUrl &&
-      other.sourceFrom === this.sourceFrom
+      other.sourceFrom === this.sourceFrom &&
+      other.pointerInteractionOwner === this.pointerInteractionOwner
     );
   }
 
@@ -397,7 +401,9 @@ export class ImageWidget extends WidgetType {
       this.renderFallback(container);
       return container;
     }
-    this.attachImagePointerInteractions(container);
+    if (this.pointerInteractionOwner === 'widget') {
+      this.attachImagePointerInteractions(container);
+    }
 
     const cachedImage = getLoadedImage(this.url);
     if (cachedImage) {

@@ -1163,7 +1163,11 @@ function appendTableInlinePreviewImage(parent, altText, url, sourceRange: TableC
     appendInlineMappedText(parent, `![${altText}]()`, sourceRange);
     return;
   }
-  const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), '').toDOM();
+  // Table cells own pointer selection so image clicks enter the cell editor on
+  // pointerup instead of being consumed by the standalone image interaction.
+  const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), '', null, {
+    pointerInteractionOwner: 'parent'
+  }).toDOM();
   if (dom instanceof HTMLElement) {
     dom.setAttribute('data-meo-link-href', url);
     setInlineSourceRange(dom, sourceRange, { atomic: true });

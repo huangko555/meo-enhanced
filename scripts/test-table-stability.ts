@@ -110,6 +110,44 @@ async function main() {
       const inlineEditingPreviewVisibility = getComputedStyle(inlineEditingPreview).visibility;
       inlineEditingEditor.destroy();
 
+      const tableImageMarkdown = '![pixel](https://example.com/pixel.png)';
+      const tableImageEditor = await create(`| Image |\n| --- |\n| ${tableImageMarkdown} |`);
+      const tableImageCell = document.querySelector<HTMLTableCellElement>(
+        'tbody td[data-table-row="1"][data-table-col="0"]'
+      );
+      const tableImageInput = tableImageCell?.querySelector<HTMLTextAreaElement>('textarea') ?? null;
+      const tableImagePreview = tableImageCell?.querySelector<HTMLElement>(
+        '.meo-md-html-table-cell-preview'
+      ) ?? null;
+      const tableImage = tableImagePreview?.querySelector<HTMLElement>('.meo-md-image') ?? null;
+      let tableImageEditingBeforeRelease = false;
+      if (tableImage) {
+        const rect = tableImage.getBoundingClientRect();
+        const pointer = {
+          button: 0,
+          pointerId: 39,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          bubbles: true,
+          cancelable: true
+        };
+        tableImage.dispatchEvent(new PointerEvent('pointerdown', pointer));
+        tableImageEditingBeforeRelease = tableImageInput?.parentElement?.classList.contains('is-editing') ?? false;
+        tableImage.dispatchEvent(new PointerEvent('pointerup', pointer));
+        await waitFrames(1);
+      }
+      const tableImageClickState = {
+        rendered: Boolean(tableImage),
+        editingBeforeRelease: tableImageEditingBeforeRelease,
+        previewHtml: tableImagePreview?.innerHTML ?? '',
+        previewText: tableImagePreview?.textContent ?? '',
+        inputFocused: document.activeElement === tableImageInput,
+        editing: tableImageInput?.parentElement?.classList.contains('is-editing') ?? false,
+        rawMarkdown: tableImageInput?.value ?? '',
+        previewVisibility: tableImagePreview ? getComputedStyle(tableImagePreview).visibility : null
+      };
+      tableImageEditor.destroy();
+
       const bodyLinkEditor = await create('intro\n\n[external](https://example.com) [internal](#target)');
       const bodyLinkButtonElements = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-link-open-btn'));
       const bodyLinkButtons = bodyLinkButtonElements.map((button) => button.getAttribute('aria-label'));
@@ -1012,6 +1050,7 @@ async function main() {
         inlineOpenedHrefs,
         linkButtonsPreservedEditingCell,
         inlineEditingPreviewVisibility,
+        tableImageClickState,
         bodyLinkButtons,
         bodyOpenedHrefs,
         initialMissingIndicatorCount,
@@ -1105,6 +1144,16 @@ async function main() {
       result.inlineEditingPreviewVisibility !== 'hidden'
     ) {
       failures.push(`inline preview link controls were incomplete: ${JSON.stringify({ count: result.inlineDecorationCount, buttons: result.inlineLinkButtons, openedHrefs: result.inlineOpenedHrefs, preservedEditingCell: result.linkButtonsPreservedEditingCell, visibility: result.inlineEditingPreviewVisibility })}`);
+    }
+    if (
+      !result.tableImageClickState.rendered ||
+      result.tableImageClickState.editingBeforeRelease ||
+      !result.tableImageClickState.inputFocused ||
+      !result.tableImageClickState.editing ||
+      result.tableImageClickState.rawMarkdown !== '![pixel](https://example.com/pixel.png)' ||
+      result.tableImageClickState.previewVisibility !== 'hidden'
+    ) {
+      failures.push(`table image click did not reveal its Markdown source: ${JSON.stringify(result.tableImageClickState)}`);
     }
     if (
       JSON.stringify(result.bodyLinkButtons) !== JSON.stringify(['Open link', 'Jump within document']) ||
