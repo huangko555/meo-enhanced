@@ -614,6 +614,56 @@ async function main() {
       const pendingEditDeleteSource = pendingEditDeleteEditor.view.state.doc.toString();
       pendingEditDeleteEditor.destroy();
 
+      const editDiffBase = '| A      |\n| ------ |\n| old    |\n| keep   |';
+      const editDiffEditor = await create(editDiffBase);
+      editDiffEditor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: editDiffBase
+      });
+      const editDiffInput = document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="1"][data-table-col="0"] textarea'
+      )!;
+      editDiffInput.focus();
+      editDiffInput.value = 'new';
+      editDiffInput.dispatchEvent(new Event('input', { bubbles: true }));
+      (document.getElementById('outside') as HTMLButtonElement).focus();
+      await waitFrames(5);
+      const editDiffSource = editDiffEditor.view.state.doc.toString();
+      const editDiffMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        modified: marker.classList.contains('is-modified')
+      }));
+      editDiffEditor.destroy();
+
+      const insertDiffBase = '| A      |\n| ------ |\n| one    |\n| two    |';
+      const insertDiffEditor = await create(insertDiffBase);
+      insertDiffEditor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: insertDiffBase
+      });
+      dragSelectCells(
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
+        26
+      );
+      document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames(5);
+      const insertDiffSource = insertDiffEditor.view.state.doc.toString();
+      const insertDiffMarkers = Array.from(
+        document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
+      ).map((marker) => ({
+        line: marker.dataset.meoLiveBlockStartLine,
+        added: marker.classList.contains('is-added')
+      }));
+      insertDiffEditor.destroy();
+
       const deleteColumnsEditor = await create('| A | B | C |\n| --- | --- | --- |\n| a | b | c |\n| d | e | f |');
       dragSelectCells(
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
@@ -822,6 +872,10 @@ async function main() {
         deleteRowsSource,
         sortedNoncontiguousDeleteSource,
         pendingEditDeleteSource,
+        editDiffSource,
+        editDiffMarkers,
+        insertDiffSource,
+        insertDiffMarkers,
         deleteColumnsSource,
         continuedOrderedValue,
         exitedEmptyOrderedItemValue,
@@ -988,8 +1042,20 @@ async function main() {
     if (result.sortedNoncontiguousDeleteSource !== '| N    |\n| ---- |\n| 1    |') {
       failures.push(`sorted noncontiguous EOF row delete produced ${JSON.stringify(result.sortedNoncontiguousDeleteSource)}`);
     }
-    if (result.pendingEditDeleteSource !== '| A             |\n| ------------- |\n| changed |\n| last          |') {
+    if (result.pendingEditDeleteSource !== '| A             |\n| ------------- |\n| changed          |\n| last          |') {
       failures.push(`row delete with a retained pending edit rewrote unrelated lines: ${JSON.stringify(result.pendingEditDeleteSource)}`);
+    }
+    if (
+      result.editDiffSource !== '| A      |\n| ------ |\n| new    |\n| keep   |' ||
+      JSON.stringify(result.editDiffMarkers) !== JSON.stringify([{ line: '3', modified: true }])
+    ) {
+      failures.push(`single-cell edit produced a table-wide diff: ${JSON.stringify({ source: result.editDiffSource, markers: result.editDiffMarkers })}`);
+    }
+    if (
+      result.insertDiffSource !== '| A      |\n| ------ |\n| one    |\n|  |\n| two    |' ||
+      JSON.stringify(result.insertDiffMarkers) !== JSON.stringify([{ line: '4', added: true }])
+    ) {
+      failures.push(`row insertion produced a table-wide diff: ${JSON.stringify({ source: result.insertDiffSource, markers: result.insertDiffMarkers })}`);
     }
     if (result.deleteColumnsSource.includes('| A |') || result.deleteColumnsSource.includes('| B |') || !result.deleteColumnsSource.includes('| C |')) {
       failures.push(`multi-cell column deletion used only one active column: ${JSON.stringify(result.deleteColumnsSource)}`);
@@ -1085,7 +1151,8 @@ async function main() {
         inputFocused: document.activeElement === input,
         editing: input.parentElement?.classList.contains('is-editing') ?? false,
         previewVisibility: getComputedStyle(preview).visibility,
-        selectedPreviewText: document.getSelection()?.toString() ?? ''
+        selectedPreviewText: document.getSelection()?.toString() ?? '',
+        selectionBackground: getComputedStyle(preview, '::selection').backgroundColor
       };
     });
     await page.mouse.up();
@@ -1103,10 +1170,13 @@ async function main() {
       physicalDragState.editing ||
       physicalDragState.previewVisibility === 'hidden' ||
       physicalDragState.selectedPreviewText !== 'lpha b' ||
+      physicalDragState.selectionBackground === '' ||
+      physicalDragState.selectionBackground === 'transparent' ||
+      physicalDragState.selectionBackground === 'rgba(0, 0, 0, 0)' ||
       !physicalPointerUpState.inputFocused ||
       physicalPointerUpState.selectedText !== 'lpha b'
     ) {
-      failures.push(`physical table drag did not defer source mode until pointerup: ${JSON.stringify({ drag: physicalDragState, up: physicalPointerUpState })}`);
+      failures.push(`physical table drag did not visibly select before pointerup: ${JSON.stringify({ drag: physicalDragState, up: physicalPointerUpState })}`);
     }
 
     const deletedTableDiffState = await page.evaluate(async () => {

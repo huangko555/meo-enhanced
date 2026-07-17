@@ -19,7 +19,11 @@
   --meo-scrollbar-thumb-active: var(--meo-semantic-scrollbarThumbActive, color-mix(in srgb, var(--meo-foreground) 62%, transparent));
   --meo-surface-background: var(--vscode-sideBar-background);
   --meo-active-line-bg: color-mix(in srgb, var(--vscode-editor-selectionBackground) 20%, transparent 80%);
-  --meo-selection-bg: color-mix(in srgb, var(--vscode-editor-selectionBackground) 55%, transparent 45%);
+  --meo-selection-bg: color-mix(
+    in srgb,
+    var(--vscode-editor-selectionBackground, #264f78) 55%,
+    transparent 45%
+  );
   --meo-inline-code-background: var(--meo-code-background);
   --meo-code-block-active-line-bg: var(--meo-semantic-codeBlockActiveLineBackground, color-mix(
     in srgb,

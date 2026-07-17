@@ -2712,7 +2712,58 @@ class HtmlTableWidget extends WidgetType {
 
   commit(dom) {
     if (!this.hasPendingCellEdits) return;
-    this.commitMatrix(this.readCellMatrix(), dom);
+    const view = this.getEditorView(dom);
+    if (!view) return;
+    const changes = this.collectPendingCellSourceChanges(view);
+    if (changes.length) view.dispatch({ changes });
+    this.hasPendingCellEdits = false;
+  }
+
+  collectPendingCellSourceChanges(view: EditorView, excludedBodyRows = new Set<number>()) {
+    if (!this.domRefs) return [];
+    const changes: Array<{ from: number; to: number; insert: string }> = [];
+    const collectRow = (inputs: HTMLTextAreaElement[]) => {
+      const rowChanges: Array<{ from: number; to: number; insert: string }> = [];
+      let requiresRowReplacement = false;
+      for (const input of inputs) {
+        const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
+        const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+        if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > view.state.doc.length) {
+          requiresRowReplacement = true;
+          continue;
+        }
+        const current = view.state.doc.sliceString(from, to);
+        const insert = tableCellEditorValueToSource(input.value).trim();
+        if (current.trim() === insert) continue;
+        if (from === to) requiresRowReplacement = true;
+        rowChanges.push({ from, to, insert });
+      }
+      if (!rowChanges.length) return;
+      rowChanges.sort((left, right) => left.from - right.from || left.to - right.to);
+      for (let index = 1; index < rowChanges.length; index += 1) {
+        if (rowChanges[index].from < rowChanges[index - 1].to) requiresRowReplacement = true;
+      }
+      if (!requiresRowReplacement) {
+        changes.push(...rowChanges);
+        return;
+      }
+
+      const line = view.state.doc.lineAt(rowChanges[0].from);
+      const cells = inputs.map((input) => tableCellEditorValueToSource(input.value).trim());
+      changes.push({
+        from: line.from,
+        to: line.to,
+        insert: `${this.tableData.indent}| ${cells.join(' | ')} |`
+      });
+    };
+
+    collectRow(this.domRefs.headerInputs);
+    for (let rowIndex = 0; rowIndex < this.domRefs.sourceBodyRowInputs.length; rowIndex += 1) {
+      if (excludedBodyRows.has(rowIndex)) continue;
+      collectRow(this.domRefs.sourceBodyRowInputs[rowIndex]);
+    }
+    changes.sort((left, right) => left.from - right.from || left.to - right.to);
+    return changes;
   }
 
   scheduleFocusCellAfterCommit(view: EditorView, tableStartLine: number, focusTarget: PendingCellFocus) {
@@ -2768,6 +2819,7 @@ class HtmlTableWidget extends WidgetType {
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return;
     const insertAt = Math.min(Math.max(rowIndex + 1, 0), matrix.rows.length);
+    if (this.insertSourceRowAt(dom, insertAt, matrix.headerCells.length)) return;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
     this.commitMatrix(matrix, dom, { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 });
   }
@@ -2777,8 +2829,36 @@ class HtmlTableWidget extends WidgetType {
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return;
     const insertAt = Math.min(Math.max(rowIndex, 0), matrix.rows.length);
+    if (this.insertSourceRowAt(dom, insertAt, matrix.headerCells.length)) return;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
     this.commitMatrix(matrix, dom, { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 });
+  }
+
+  insertSourceRowAt(dom, insertAt: number, colCount: number) {
+    const view = this.getEditorView(dom);
+    if (!view || colCount <= 0) return false;
+    const range = this.resolveCurrentTableRange(view, dom);
+    if (!range) return false;
+
+    const tableStartLine = view.state.doc.lineAt(range.from).number;
+    const blankRow = `${this.tableData.indent}| ${new Array(colCount).fill('').join(' | ')} |`;
+    const changes = this.collectPendingCellSourceChanges(view);
+    if (insertAt < this.tableData.rows.length) {
+      const line = view.state.doc.line(tableStartLine + 2 + insertAt);
+      changes.push({ from: line.from, to: line.from, insert: `${blankRow}\n` });
+    } else {
+      const previousLine = view.state.doc.line(tableStartLine + 1 + this.tableData.rows.length);
+      changes.push({ from: previousLine.to, to: previousLine.to, insert: `\n${blankRow}` });
+    }
+    changes.sort((left, right) => left.from - right.from || left.to - right.to);
+    view.dispatch({ changes });
+    this.hasPendingCellEdits = false;
+    this.scheduleFocusCellAfterCommit(
+      view,
+      tableStartLine,
+      { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 }
+    );
+    return true;
   }
 
   removeRowAt(dom, rowIndex) {
@@ -2797,7 +2877,6 @@ class HtmlTableWidget extends WidgetType {
       const focusRow = Math.min(firstRemoved, matrix.rows.length - validIndexes.length - 1) + 1;
       if (this.removeSourceRowsAt(
         dom,
-        matrix,
         validIndexes,
         { row: focusRow, col: this.activeColumnIndex() ?? 0 }
       )) {
@@ -2814,7 +2893,6 @@ class HtmlTableWidget extends WidgetType {
 
   removeSourceRowsAt(
     dom,
-    matrix: CellMatrix,
     rowIndexes: number[],
     focusTarget: PendingCellFocus
   ) {
@@ -2845,21 +2923,7 @@ class HtmlTableWidget extends WidgetType {
         : view.state.doc.line(toLine + 1).from;
       return { from, to };
     });
-    if (this.hasPendingCellEdits) {
-      const rowsEqual = (left: string[], right: string[]) => (
-        left.length === right.length && left.every((value, index) => value === right[index])
-      );
-      const serializeRow = (cells: string[]) => `${this.tableData.indent}| ${cells.join(' | ')} |`;
-      if (!rowsEqual(matrix.headerCells, this.tableData.headerCells)) {
-        const line = view.state.doc.line(tableStartLine);
-        changes.push({ from: line.from, to: line.to, insert: serializeRow(matrix.headerCells) });
-      }
-      for (let index = 0; index < matrix.rows.length; index += 1) {
-        if (removedIndexes.has(index) || rowsEqual(matrix.rows[index], this.tableData.rows[index])) continue;
-        const line = view.state.doc.line(tableStartLine + 2 + index);
-        changes.push({ from: line.from, to: line.to, insert: serializeRow(matrix.rows[index]) });
-      }
-    }
+    changes.push(...this.collectPendingCellSourceChanges(view, removedIndexes));
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
     view.dispatch({ changes });
     this.hasPendingCellEdits = false;
