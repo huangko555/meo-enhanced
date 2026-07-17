@@ -193,38 +193,47 @@ async function main() {
         .find((candidate) => candidate.textContent?.includes('标题里的'));
       const syntaxMarker = line?.querySelector<HTMLElement>('.meo-md-marker-active:not(.meo-md-strike-marker-active)') ?? null;
       const strongMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-strong-marker-active') ?? []);
+      const emMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-em-marker-active') ?? []);
       const strikeMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-strike-marker-active') ?? []);
-      if (!syntaxMarker || strongMarkers.length !== 2 || strikeMarkers.length !== 2) return null;
+      if (!syntaxMarker || strongMarkers.length !== 2 || emMarkers.length !== 2 || strikeMarkers.length !== 2) return null;
       const syntax = getComputedStyle(syntaxMarker);
       const strong = getComputedStyle(strongMarkers[0]);
+      const markerState = (marker: HTMLElement) => {
+        const style = getComputedStyle(marker);
+        return {
+          inlineStyle: marker.getAttribute('style') ?? '',
+          color: style.color,
+          textFillColor: style.webkitTextFillColor,
+          fontStyle: style.fontStyle,
+          textDecorationLine: style.textDecorationLine,
+          className: marker.className,
+          parentClassName: marker.parentElement?.className ?? ''
+        };
+      };
       return {
         syntaxColor: syntax.color,
         syntaxTextFillColor: syntax.webkitTextFillColor,
         strongMarkerStyle: strongMarkers[0].getAttribute('style') ?? '',
         strongMarkerColor: strong.color,
         strongMarkerTextFillColor: strong.webkitTextFillColor,
-        strikeMarkers: strikeMarkers.map((marker) => {
-          const style = getComputedStyle(marker);
-          return {
-            inlineStyle: marker.getAttribute('style') ?? '',
-            color: style.color,
-            textFillColor: style.webkitTextFillColor,
-            textDecorationLine: style.textDecorationLine,
-            className: marker.className,
-            parentClassName: marker.parentElement?.className ?? ''
-          };
-        })
+        strongMarkers: strongMarkers.map(markerState),
+        emMarkers: emMarkers.map(markerState),
+        strikeMarkers: strikeMarkers.map(markerState)
       };
     });
     if (
       !headingStrikeMarkerColors ||
-      headingStrikeMarkerColors.strikeMarkers.some((marker) => (
+      [...headingStrikeMarkerColors.strongMarkers, ...headingStrikeMarkerColors.emMarkers, ...headingStrikeMarkerColors.strikeMarkers]
+        .some((marker) => (
         marker.inlineStyle !== headingStrikeMarkerColors.strongMarkerStyle ||
         marker.color !== headingStrikeMarkerColors.strongMarkerColor ||
         marker.textFillColor !== headingStrikeMarkerColors.strongMarkerTextFillColor ||
         marker.color !== headingStrikeMarkerColors.syntaxColor ||
         marker.textFillColor !== headingStrikeMarkerColors.syntaxTextFillColor ||
+        marker.fontStyle !== 'normal' ||
         marker.textDecorationLine !== 'none' ||
+        marker.parentClassName.includes('meo-md-strong') ||
+        marker.parentClassName.includes('meo-md-em') ||
         marker.parentClassName.includes('meo-md-strike')
       ))
     ) {

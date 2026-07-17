@@ -83,7 +83,7 @@ import {
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
 const markdownSyntaxMarkerAttributes = {
-  style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
+  style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important; font-style: normal !important; text-decoration: none !important;'
 };
 const frontmatterBoundaryMarkerDeco = Decoration.mark({ class: 'meo-md-frontmatter-boundary-marker' });
 const linkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker' });
@@ -117,6 +117,14 @@ const strikeMarkerDeco = Decoration.mark({
 });
 const activeStrikeMarkerDeco = Decoration.mark({
   class: 'meo-md-marker-active meo-md-strike-marker-active',
+  attributes: markdownSyntaxMarkerAttributes
+});
+const emMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker meo-md-em-marker',
+  attributes: markdownSyntaxMarkerAttributes
+});
+const activeEmMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker-active meo-md-em-marker-active',
   attributes: markdownSyntaxMarkerAttributes
 });
 const codeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker' });
@@ -407,40 +415,27 @@ const inlineStyleDecos = {
   inlineCode: Decoration.mark({ class: 'meo-md-inline-code' })
 };
 
-function addStrongEmphasisDecorations(builder, state, node, activeLines) {
+function addDelimitedInlineStyleDecoration(builder, state, node, decoration, markers) {
   const text = state.doc.sliceString(node.from, node.to);
-  const markerLength = (
-    (text.startsWith('**') && text.endsWith('**')) ||
-    (text.startsWith('__') && text.endsWith('__'))
-  ) ? 2 : 0;
-  if (!markerLength || node.to - node.from < markerLength * 2) {
-    addRange(builder, node.from, node.to, inlineStyleDecos.strong);
+  const marker = markers.find((candidate) => text.startsWith(candidate) && text.endsWith(candidate));
+  if (!marker) {
+    addRange(builder, node.from, node.to, decoration);
     return;
   }
+  if (node.to - node.from <= marker.length * 2) return;
+  addRange(builder, node.from + marker.length, node.to - marker.length, decoration);
+}
 
-  addRange(builder, node.from + markerLength, node.to - markerLength, inlineStyleDecos.strong);
+function addEmphasisDecorations(builder, state, node) {
+  addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.em, ['*', '_']);
+}
 
-  const line = state.doc.lineAt(node.from);
-  const markerDecoration = activeLines.has(line.number) ? activeStrongMarkerDeco : strongMarkerDeco;
-  addRange(builder, node.from, node.from + markerLength, markerDecoration);
-  addRange(builder, node.to - markerLength, node.to, markerDecoration);
+function addStrongEmphasisDecorations(builder, state, node) {
+  addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.strong, ['**', '__']);
 }
 
 function addStrikethroughDecorations(builder, state, node) {
-  const text = state.doc.sliceString(node.from, node.to);
-  const markerLength = text.startsWith('~~') && text.endsWith('~~')
-    ? 2
-    : text.startsWith('~') && text.endsWith('~')
-      ? 1
-      : 0;
-  if (!markerLength) {
-    addRange(builder, node.from, node.to, inlineStyleDecos.strike);
-    return;
-  }
-  if (node.to - node.from <= markerLength * 2) {
-    return;
-  }
-  addRange(builder, node.from + markerLength, node.to - markerLength, inlineStyleDecos.strike);
+  addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.strike, ['~~', '~']);
 }
 
 function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLines) {
@@ -1087,7 +1082,7 @@ function addPunctuationClosingInlineStyleDecorations(
   const styles = [
     { marker: '**', content: inlineStyleDecos.strong, inactive: strongMarkerDeco, active: activeStrongMarkerDeco },
     { marker: '~~', content: inlineStyleDecos.strike, inactive: strikeMarkerDeco, active: activeStrikeMarkerDeco },
-    { marker: '*', content: inlineStyleDecos.em, inactive: markerDeco, active: activeLineMarkerDeco }
+    { marker: '*', content: inlineStyleDecos.em, inactive: emMarkerDeco, active: activeEmMarkerDeco }
   ];
   const overlapsParsedStyle = (from, to) => parsedStyleRanges.some((range) => from < range.to && to > range.from);
   const isEscaped = (text, index) => {
@@ -1577,9 +1572,9 @@ function buildDecorations(state) {
       }
 
       if (node.name === 'Emphasis') {
-        addRange(ranges, node.from, node.to, inlineStyleDecos.em);
+        addEmphasisDecorations(ranges, state, node);
       } else if (node.name === 'StrongEmphasis') {
-        addStrongEmphasisDecorations(ranges, state, node, activeLines);
+        addStrongEmphasisDecorations(ranges, state, node);
       } else if (node.name === 'Strikethrough') {
         addStrikethroughDecorations(ranges, state, node);
       } else if (node.name === 'InlineCode' || node.name === 'CodeText') {
@@ -1715,6 +1710,11 @@ function buildDecorations(state) {
       if (isFenceMarker(state, node.from, node.to)) {
         // Show fence markers on all lines (not just active)
         addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, fenceMarkerDeco, activeLineMarkerDeco);
+      } else if (node.name === 'EmphasisMark') {
+        const parentName = node.node.parent?.name;
+        const inactiveDeco = parentName === 'StrongEmphasis' ? strongMarkerDeco : emMarkerDeco;
+        const activeDeco = parentName === 'StrongEmphasis' ? activeStrongMarkerDeco : activeEmMarkerDeco;
+        addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, inactiveDeco, activeDeco);
       } else if (node.name === 'StrikethroughMark') {
         addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, strikeMarkerDeco, activeStrikeMarkerDeco);
       } else if (node.name === 'CodeMark') {
