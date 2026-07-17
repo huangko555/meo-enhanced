@@ -244,10 +244,7 @@ async function main() {
         marker.textElementFontStyle !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontStyle ||
         marker.textElementFontWeight !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontWeight ||
         marker.textElementTextDecorationLine !== headingStrikeMarkerColors.syntaxMarkerState.textElementTextDecorationLine ||
-        marker.strikeAncestorClassName !== '' ||
-        marker.parentClassName.includes('meo-md-strong') ||
-        marker.parentClassName.includes('meo-md-em') ||
-        marker.parentClassName.includes('meo-md-strike')
+        marker.strikeAncestorClassName !== ''
       ))
     ) {
       throw new Error(`Inline style markers did not match Markdown syntax presentation: ${JSON.stringify(headingStrikeMarkerColors)}`);
@@ -525,6 +522,57 @@ async function main() {
       outlineJump.floatingBackground !== outlineJump.fixedBackground
     ) {
       throw new Error(`Floating outline background differed from fixed mode: ${JSON.stringify(outlineJump)}`);
+    }
+
+    await page.evaluate((text) => {
+      (window as any).__editor.setText(text);
+    }, '# 标题普通 **粗体 *粗斜* `粗码`** *斜体 `斜码`* `独码`');
+    await waitForFrames(page);
+    const inlineStyleComposition = await page.evaluate(() => {
+      const line = document.querySelector<HTMLElement>('.cm-line');
+      if (!line) return null;
+      const textStyle = (target: string) => {
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.includes(target) || !(node.parentElement instanceof HTMLElement)) continue;
+          const style = getComputedStyle(node.parentElement);
+          return {
+            fontFamily: style.fontFamily,
+            fontStyle: style.fontStyle,
+            fontWeight: style.fontWeight,
+            textDecorationLine: style.textDecorationLine
+          };
+        }
+        return null;
+      };
+      return {
+        heading: textStyle('标题普通'),
+        strong: textStyle('粗体'),
+        strongEm: textStyle('粗斜'),
+        strongCode: textStyle('粗码'),
+        em: textStyle('斜体'),
+        emCode: textStyle('斜码'),
+        standaloneCode: textStyle('独码')
+      };
+    });
+    if (
+      !inlineStyleComposition?.heading ||
+      !inlineStyleComposition.strong ||
+      !inlineStyleComposition.strongEm ||
+      !inlineStyleComposition.strongCode ||
+      !inlineStyleComposition.em ||
+      !inlineStyleComposition.emCode ||
+      !inlineStyleComposition.standaloneCode ||
+      Number(inlineStyleComposition.strong.fontWeight) <= Number(inlineStyleComposition.heading.fontWeight) ||
+      inlineStyleComposition.strongEm.fontWeight !== inlineStyleComposition.strong.fontWeight ||
+      inlineStyleComposition.strongEm.fontStyle !== 'italic' ||
+      inlineStyleComposition.strongCode.fontWeight !== inlineStyleComposition.strong.fontWeight ||
+      inlineStyleComposition.strongCode.fontFamily !== inlineStyleComposition.standaloneCode.fontFamily ||
+      inlineStyleComposition.emCode.fontStyle !== inlineStyleComposition.em.fontStyle ||
+      inlineStyleComposition.emCode.fontFamily !== inlineStyleComposition.standaloneCode.fontFamily ||
+      inlineStyleComposition.strongCode.textDecorationLine !== 'none'
+    ) {
+      throw new Error(`Live inline styles did not compose by property: ${JSON.stringify(inlineStyleComposition)}`);
     }
 
     console.log('editor marker and viewport stability browser tests passed');

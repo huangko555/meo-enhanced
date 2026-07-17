@@ -918,6 +918,7 @@ body {
   --meo-active-editor-font-weight: var(--meo-font-live-weight);
   --meo-active-editor-font-size: var(--meo-font-live-size);
   --meo-active-editor-line-height: var(--meo-line-height-live);
+  --meo-markdown-marker-font-weight: var(--meo-font-live-weight);
 }
 
 .cm-editor.meo-mode-source {
@@ -1339,6 +1340,11 @@ body {
   --meo-heading-token-weight: var(--meo-heading-6-weight);
 }
 
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) {
+  font-weight: var(--meo-heading-token-weight);
+  --meo-markdown-marker-font-weight: var(--meo-heading-token-weight);
+}
+
 .cm-editor.meo-mode-live .meo-md-heading-content,
 .cm-editor.meo-mode-live .meo-md-heading-content .meo-md-em,
 .cm-editor.meo-mode-live .meo-md-heading-content .meo-md-strong,
@@ -1373,7 +1379,14 @@ body {
 .cm-editor .meo-md-strong {
   color: var(--meo-foreground) !important;
   -webkit-text-fill-color: var(--meo-foreground) !important;
-  font-weight: 600;
+  font-weight: bolder;
+}
+
+.cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active),
+.cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active) * {
+  font-style: normal !important;
+  font-weight: var(--meo-markdown-marker-font-weight) !important;
+  text-decoration: none !important;
 }
 
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strong,
@@ -1728,10 +1741,18 @@ body {
   -webkit-text-fill-color: var(--meo-semantic-tagForeground) !important;
 }
 
-.cm-editor.meo-mode-live .meo-md-inline-code,
-.cm-editor.meo-mode-live .meo-md-inline-code * {
+.cm-editor.meo-mode-live .meo-md-inline-code {
   font-family: var(--meo-font-source);
   font-weight: var(--meo-font-source-weight);
+}
+
+.cm-editor.meo-mode-live .meo-md-inline-code * {
+  font-family: inherit;
+  font-weight: inherit;
+}
+
+.cm-editor.meo-mode-live .meo-md-strong .meo-md-inline-code {
+  font-weight: inherit;
 }
 
 .cm-editor .meo-md-inline-code,

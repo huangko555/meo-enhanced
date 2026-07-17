@@ -2,7 +2,7 @@ import { HighlightStyle } from '@codemirror/language';
 import { resolveTheme, SYNTAX_TAG_SPECS, type SyntaxTokenStyleSpec } from '../../src/shared/themeDefaults';
 
 const defaultTheme = resolveTheme();
-const liveDecoratedInlineTokenIds = new Set(['emphasis', 'strong', 'strikethrough']);
+const liveDecoratedMarkdownTokenIds = new Set(['heading', 'emphasis', 'strong', 'strikethrough']);
 
 const buildSpec = (spec: SyntaxTokenStyleSpec) => {
   const color = `var(--meo-token-${spec.id}-color, ${defaultTheme.syntaxTokens[spec.id]})`;
@@ -30,6 +30,6 @@ function createHighlightStyle(excludedTokenIds: ReadonlySet<string> = new Set())
 
 export const sourceHighlightStyle = createHighlightStyle();
 
-// Live Mode owns rendered inline presentation through liveMode decorations.
+// Live Mode owns rendered Markdown presentation through decorations and line styles.
 // Excluding these parser tags prevents their styles from leaking onto Markdown markers.
-export const liveHighlightStyle = createHighlightStyle(liveDecoratedInlineTokenIds);
+export const liveHighlightStyle = createHighlightStyle(liveDecoratedMarkdownTokenIds);
