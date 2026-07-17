@@ -3318,6 +3318,8 @@ body.outline-resizing {
 
 .cm-editor .meo-mermaid-editing-block,
 .cm-editor .meo-latex-math-editing-block {
+  --meo-split-preview-available-height: max(0px, calc(100vh - 48px));
+
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
@@ -3363,7 +3365,13 @@ body.outline-resizing {
 .cm-editor .meo-mermaid-preview-sticky {
   display: flex;
   align-items: center;
-  min-height: min(var(--meo-mermaid-preview-preferred-height, 0px), 60vh);
+  min-height: min(
+    100%,
+    max(
+      var(--meo-mermaid-preview-preferred-height, 0px),
+      var(--meo-split-preview-available-height)
+    )
+  );
   overflow: hidden;
 }
 
@@ -3371,7 +3379,7 @@ body.outline-resizing {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100%;
+  min-height: min(100%, var(--meo-split-preview-available-height));
 }
 
 .cm-editor .meo-latex-math-preview-error {

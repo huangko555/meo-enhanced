@@ -218,6 +218,9 @@ async function main() {
         sourceStickyPosition: sourceSticky ? getComputedStyle(sourceSticky).position : null,
         previewHeight: previewBlock?.getBoundingClientRect().height ?? 0,
         previewFrameHeight: sticky?.getBoundingClientRect().height ?? 0,
+        availablePreviewHeight: source
+          ? Math.min(source.getBoundingClientRect().height, window.innerHeight - 48)
+          : 0,
         stickyPosition: sticky ? getComputedStyle(sticky).position : null,
         hasInternalVerticalScroll: Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 1),
         nextLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
@@ -238,9 +241,9 @@ async function main() {
       splitMode.sourceHeight <= splitMode.previewHeight ||
       Math.abs(splitMode.sourcePaneHeight - splitMode.sourceHeight) > 1 ||
       splitMode.previewHeight >= defaultMode.previewHeight ||
-      Math.abs(splitMode.previewFrameHeight - defaultMode.previewHeight) > 2
+      Math.abs(splitMode.previewFrameHeight - splitMode.availablePreviewHeight) > 2
     ) {
-      throw new Error(`Split mode did not preserve natural pane heights: ${JSON.stringify({ defaultMode, splitMode })}`);
+      throw new Error(`Split preview did not use the available vertical space: ${JSON.stringify({ defaultMode, splitMode })}`);
     }
 
     await page.evaluate(() => {
@@ -475,6 +478,53 @@ async function main() {
     }
     if (JSON.stringify(shortSourceLayout.sourceStyle) !== JSON.stringify(shortSourceLayout.normalStyle)) {
       throw new Error(`Mermaid source style differs from normal code: ${JSON.stringify(shortSourceLayout)}`);
+    }
+
+    await page.evaluate(() => {
+      const previous = (window as any).__mermaidEditingEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: ['$$', 'x', ...new Array(30).fill(''), '$$'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page);
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page);
+    const latexSplitLayout = await page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>('.meo-latex-math-editing-block.is-split')!;
+      const source = block?.querySelector<HTMLElement>('.meo-latex-math-source-pane')!;
+      const preview = block?.querySelector<HTMLElement>('.meo-latex-math-preview-shell')!;
+      const sticky = block?.querySelector<HTMLElement>('.meo-latex-math-preview-sticky')!;
+      const formula = sticky?.querySelector<HTMLElement>('.meo-md-math-display')!;
+      const sourceRect = source?.getBoundingClientRect();
+      const previewRect = preview?.getBoundingClientRect();
+      const stickyRect = sticky?.getBoundingClientRect();
+      const formulaRect = formula?.getBoundingClientRect();
+      return {
+        sourceHeight: sourceRect?.height ?? 0,
+        previewHeight: previewRect?.height ?? 0,
+        frameHeight: stickyRect?.height ?? 0,
+        availablePreviewHeight: sourceRect
+          ? Math.min(sourceRect.height, window.innerHeight - 48)
+          : 0,
+        formulaInsideFrame: Boolean(
+          stickyRect &&
+          formulaRect &&
+          formulaRect.top >= stickyRect.top - 1 &&
+          formulaRect.bottom <= stickyRect.bottom + 1
+        )
+      };
+    });
+    if (
+      Math.abs(latexSplitLayout.sourceHeight - latexSplitLayout.previewHeight) > 1 ||
+      Math.abs(latexSplitLayout.frameHeight - latexSplitLayout.availablePreviewHeight) > 2 ||
+      !latexSplitLayout.formulaInsideFrame
+    ) {
+      throw new Error(`LaTeX split preview did not use the available vertical space: ${JSON.stringify(latexSplitLayout)}`);
     }
 
     console.log('Mermaid editing checks passed');
