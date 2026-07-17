@@ -113,7 +113,7 @@ async function main() {
       'English: `code two`'
     ];
     const bodyLines = Array.from({ length: 100 }, (_, index) => `稳定锚点 ${index + 1}`);
-    const headingStrikeLine = '# 标题里的 **粗体** *斜体* ~~删除线~~ `代码`';
+    const headingStrikeLine = '# 标题里的 **粗体 `内`** *斜体* ~~删除线~~ `外`';
     const source = [...markerLines, headingStrikeLine, '', ...bodyLines].join('\n');
     await page.evaluate((text) => {
       (window as any).__editor = (window as any).EditorStabilityHarness.createEditor({
@@ -143,7 +143,7 @@ async function main() {
         return null;
       };
       const start = pointForText('斜体', false);
-      const end = pointForText('代码', true);
+      const end = pointForText('外', true);
       return start && end ? { start, end } : null;
     });
     if (!headingSelectionDrag) throw new Error('Could not locate mixed heading selection endpoints');
@@ -239,7 +239,7 @@ async function main() {
         marker.textFillColor !== headingStrikeMarkerColors.syntaxMarkerState.textFillColor ||
         marker.fontStyle !== 'normal' ||
         marker.textDecorationLine !== 'none' ||
-        marker.textElementColor !== headingStrikeMarkerColors.syntaxMarkerState.textElementColor ||
+        marker.textElementColor !== headingStrikeMarkerColors.strongMarkers[0].textElementColor ||
         marker.textElementTextFillColor !== headingStrikeMarkerColors.syntaxMarkerState.textElementTextFillColor ||
         marker.textElementFontStyle !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontStyle ||
         marker.textElementFontWeight !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontWeight ||
@@ -251,6 +251,33 @@ async function main() {
       ))
     ) {
       throw new Error(`Inline style markers did not match Markdown syntax presentation: ${JSON.stringify(headingStrikeMarkerColors)}`);
+    }
+
+    const inlineCodeMarkerStyles = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('标题里的'));
+      const markers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-code-marker-active') ?? []);
+      if (markers.length !== 4) return null;
+      return markers.map((marker) => {
+        const textElement = Array.from(marker.querySelectorAll<HTMLElement>('span')).at(-1) ?? marker;
+        const style = getComputedStyle(textElement);
+        return {
+          color: style.color,
+          textFillColor: style.webkitTextFillColor,
+          fontStyle: style.fontStyle,
+          fontWeight: style.fontWeight,
+          textDecorationLine: style.textDecorationLine
+        };
+      });
+    });
+    if (
+      !inlineCodeMarkerStyles ||
+      inlineCodeMarkerStyles.slice(0, 2).some((style) => (
+        JSON.stringify(style) !== JSON.stringify(inlineCodeMarkerStyles[2])
+      )) ||
+      JSON.stringify(inlineCodeMarkerStyles[2]) !== JSON.stringify(inlineCodeMarkerStyles[3])
+    ) {
+      throw new Error(`Nested inline-code markers did not match standalone markers: ${JSON.stringify(inlineCodeMarkerStyles)}`);
     }
 
     const markerLabels = [
