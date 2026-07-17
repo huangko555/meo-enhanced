@@ -48,7 +48,7 @@ async function main() {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; }'
+      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -104,6 +104,47 @@ async function main() {
       headingStrikeSelectionColors.selectionTextFillColor !== headingStrikeSelectionColors.headingTextFillColor
     ) {
       throw new Error(`Selected heading strike changed foreground color: ${JSON.stringify(headingStrikeSelectionColors)}`);
+    }
+
+    const headingStrikePoint = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('标题里的'));
+      const strike = line?.querySelector<HTMLElement>('.meo-md-strike') ?? null;
+      const rect = strike?.getBoundingClientRect();
+      return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+    });
+    if (!headingStrikePoint) throw new Error('Could not locate heading strike for marker color test');
+    await page.mouse.click(headingStrikePoint.x, headingStrikePoint.y);
+    await waitForFrames(page, 3);
+    const headingStrikeMarkerColors = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('标题里的'));
+      const syntaxMarker = line?.querySelector<HTMLElement>('.meo-md-marker-active:not(.meo-md-strike-marker-active)') ?? null;
+      const strikeMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-strike-marker-active') ?? []);
+      if (!syntaxMarker || strikeMarkers.length !== 2) return null;
+      const syntax = getComputedStyle(syntaxMarker);
+      return {
+        syntaxColor: syntax.color,
+        syntaxTextFillColor: syntax.webkitTextFillColor,
+        strikeMarkers: strikeMarkers.map((marker) => {
+          const style = getComputedStyle(marker);
+          return {
+            color: style.color,
+            textFillColor: style.webkitTextFillColor,
+            className: marker.className,
+            parentClassName: marker.parentElement?.className ?? ''
+          };
+        })
+      };
+    });
+    if (
+      !headingStrikeMarkerColors ||
+      headingStrikeMarkerColors.strikeMarkers.some((marker) => (
+        marker.color !== headingStrikeMarkerColors.syntaxColor ||
+        marker.textFillColor !== headingStrikeMarkerColors.syntaxTextFillColor
+      ))
+    ) {
+      throw new Error(`Heading strike markers did not use Markdown syntax color: ${JSON.stringify(headingStrikeMarkerColors)}`);
     }
 
     const markerLabels = [
