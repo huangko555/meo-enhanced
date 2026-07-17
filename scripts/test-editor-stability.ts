@@ -90,6 +90,7 @@ async function main() {
       return {
         normalColor: normal.color,
         normalTextFillColor: normal.webkitTextFillColor,
+        normalTextDecorationLine: normal.textDecorationLine,
         selectionColor: selected.color,
         selectionTextFillColor: selected.webkitTextFillColor,
         headingColor: headingStyle.color,
@@ -100,6 +101,7 @@ async function main() {
       !headingStrikeSelectionColors ||
       headingStrikeSelectionColors.normalColor !== headingStrikeSelectionColors.headingColor ||
       headingStrikeSelectionColors.normalTextFillColor !== headingStrikeSelectionColors.headingTextFillColor ||
+      headingStrikeSelectionColors.normalTextDecorationLine !== 'line-through' ||
       headingStrikeSelectionColors.selectionColor !== headingStrikeSelectionColors.headingColor ||
       headingStrikeSelectionColors.selectionTextFillColor !== headingStrikeSelectionColors.headingTextFillColor
     ) {
@@ -131,6 +133,7 @@ async function main() {
           return {
             color: style.color,
             textFillColor: style.webkitTextFillColor,
+            textDecorationLine: style.textDecorationLine,
             className: marker.className,
             parentClassName: marker.parentElement?.className ?? ''
           };
@@ -141,7 +144,9 @@ async function main() {
       !headingStrikeMarkerColors ||
       headingStrikeMarkerColors.strikeMarkers.some((marker) => (
         marker.color !== headingStrikeMarkerColors.syntaxColor ||
-        marker.textFillColor !== headingStrikeMarkerColors.syntaxTextFillColor
+        marker.textFillColor !== headingStrikeMarkerColors.syntaxTextFillColor ||
+        marker.textDecorationLine !== 'none' ||
+        marker.parentClassName.includes('meo-md-strike')
       ))
     ) {
       throw new Error(`Heading strike markers did not use Markdown syntax color: ${JSON.stringify(headingStrikeMarkerColors)}`);

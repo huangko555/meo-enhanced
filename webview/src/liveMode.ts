@@ -421,6 +421,23 @@ function addStrongEmphasisDecorations(builder, state, node, activeLines) {
   addRange(builder, node.to - markerLength, node.to, markerDecoration);
 }
 
+function addStrikethroughDecorations(builder, state, node) {
+  const text = state.doc.sliceString(node.from, node.to);
+  const markerLength = text.startsWith('~~') && text.endsWith('~~')
+    ? 2
+    : text.startsWith('~') && text.endsWith('~')
+      ? 1
+      : 0;
+  if (!markerLength) {
+    addRange(builder, node.from, node.to, inlineStyleDecos.strike);
+    return;
+  }
+  if (node.to - node.from <= markerLength * 2) {
+    return;
+  }
+  addRange(builder, node.from + markerLength, node.to - markerLength, inlineStyleDecos.strike);
+}
+
 function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLines) {
   if (frontmatter.contentTo > frontmatter.contentFrom) {
     addLineClass(builder, state, frontmatter.contentFrom, frontmatter.contentTo, lineStyleDecos.frontmatterContent);
@@ -1559,7 +1576,7 @@ function buildDecorations(state) {
       } else if (node.name === 'StrongEmphasis') {
         addStrongEmphasisDecorations(ranges, state, node, activeLines);
       } else if (node.name === 'Strikethrough') {
-        addRange(ranges, node.from, node.to, inlineStyleDecos.strike);
+        addStrikethroughDecorations(ranges, state, node);
       } else if (node.name === 'InlineCode' || node.name === 'CodeText') {
         addRange(ranges, node.from, node.to, inlineStyleDecos.inlineCode);
       } else if (node.name === 'LinkLabel') {
