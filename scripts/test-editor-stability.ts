@@ -196,23 +196,30 @@ async function main() {
       const emMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-em-marker-active') ?? []);
       const strikeMarkers = Array.from(line?.querySelectorAll<HTMLElement>('.meo-md-strike-marker-active') ?? []);
       if (!syntaxMarker || strongMarkers.length !== 2 || emMarkers.length !== 2 || strikeMarkers.length !== 2) return null;
-      const syntax = getComputedStyle(syntaxMarker);
       const strong = getComputedStyle(strongMarkers[0]);
       const markerState = (marker: HTMLElement) => {
         const style = getComputedStyle(marker);
+        const textElement = Array.from(marker.querySelectorAll<HTMLElement>('span')).at(-1) ?? marker;
+        const textStyle = getComputedStyle(textElement);
         return {
           inlineStyle: marker.getAttribute('style') ?? '',
           color: style.color,
           textFillColor: style.webkitTextFillColor,
           fontStyle: style.fontStyle,
           textDecorationLine: style.textDecorationLine,
+          textElementColor: textStyle.color,
+          textElementTextFillColor: textStyle.webkitTextFillColor,
+          textElementFontStyle: textStyle.fontStyle,
+          textElementFontWeight: textStyle.fontWeight,
+          textElementTextDecorationLine: textStyle.textDecorationLine,
           className: marker.className,
-          parentClassName: marker.parentElement?.className ?? ''
+          parentClassName: marker.parentElement?.className ?? '',
+          strikeAncestorClassName: marker.closest('.meo-md-strike')?.className ?? ''
         };
       };
+      const syntaxMarkerState = markerState(syntaxMarker);
       return {
-        syntaxColor: syntax.color,
-        syntaxTextFillColor: syntax.webkitTextFillColor,
+        syntaxMarkerState,
         strongMarkerStyle: strongMarkers[0].getAttribute('style') ?? '',
         strongMarkerColor: strong.color,
         strongMarkerTextFillColor: strong.webkitTextFillColor,
@@ -228,16 +235,22 @@ async function main() {
         marker.inlineStyle !== headingStrikeMarkerColors.strongMarkerStyle ||
         marker.color !== headingStrikeMarkerColors.strongMarkerColor ||
         marker.textFillColor !== headingStrikeMarkerColors.strongMarkerTextFillColor ||
-        marker.color !== headingStrikeMarkerColors.syntaxColor ||
-        marker.textFillColor !== headingStrikeMarkerColors.syntaxTextFillColor ||
+        marker.color !== headingStrikeMarkerColors.syntaxMarkerState.color ||
+        marker.textFillColor !== headingStrikeMarkerColors.syntaxMarkerState.textFillColor ||
         marker.fontStyle !== 'normal' ||
         marker.textDecorationLine !== 'none' ||
+        marker.textElementColor !== headingStrikeMarkerColors.syntaxMarkerState.textElementColor ||
+        marker.textElementTextFillColor !== headingStrikeMarkerColors.syntaxMarkerState.textElementTextFillColor ||
+        marker.textElementFontStyle !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontStyle ||
+        marker.textElementFontWeight !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontWeight ||
+        marker.textElementTextDecorationLine !== headingStrikeMarkerColors.syntaxMarkerState.textElementTextDecorationLine ||
+        marker.strikeAncestorClassName !== '' ||
         marker.parentClassName.includes('meo-md-strong') ||
         marker.parentClassName.includes('meo-md-em') ||
         marker.parentClassName.includes('meo-md-strike')
       ))
     ) {
-      throw new Error(`Heading strike markers did not use Markdown syntax color: ${JSON.stringify(headingStrikeMarkerColors)}`);
+      throw new Error(`Inline style markers did not match Markdown syntax presentation: ${JSON.stringify(headingStrikeMarkerColors)}`);
     }
 
     const markerLabels = [

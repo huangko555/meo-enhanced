@@ -17,7 +17,7 @@ import {
   addCopyCodeButton
 } from './helpers/codeBlocks';
 import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl } from './helpers/images';
-import { highlightStyle } from './theme';
+import { liveHighlightStyle } from './theme';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { collectEmojiRangesFromText } from './helpers/emoji';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
@@ -82,9 +82,6 @@ import {
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
-const markdownSyntaxMarkerAttributes = {
-  style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important; font-style: normal !important; text-decoration: none !important;'
-};
 const frontmatterBoundaryMarkerDeco = Decoration.mark({ class: 'meo-md-frontmatter-boundary-marker' });
 const linkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker' });
 const activeLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-md-link-marker-active' });
@@ -112,32 +109,26 @@ const wikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-m
 const activeWikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active meo-md-link-marker-active meo-md-wiki-marker' });
 const emptyWikiLinkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker meo-md-wiki-marker meo-md-wiki-empty-marker' });
 const strikeMarkerDeco = Decoration.mark({
-  class: 'meo-md-marker meo-md-strike-marker',
-  attributes: markdownSyntaxMarkerAttributes
+  class: 'meo-md-marker meo-md-strike-marker'
 });
 const activeStrikeMarkerDeco = Decoration.mark({
-  class: 'meo-md-marker-active meo-md-strike-marker-active',
-  attributes: markdownSyntaxMarkerAttributes
+  class: 'meo-md-marker-active meo-md-strike-marker-active'
 });
 const emMarkerDeco = Decoration.mark({
-  class: 'meo-md-marker meo-md-em-marker',
-  attributes: markdownSyntaxMarkerAttributes
+  class: 'meo-md-marker meo-md-em-marker'
 });
 const activeEmMarkerDeco = Decoration.mark({
-  class: 'meo-md-marker-active meo-md-em-marker-active',
-  attributes: markdownSyntaxMarkerAttributes
+  class: 'meo-md-marker-active meo-md-em-marker-active'
 });
 const codeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker' });
 const activeCodeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker-active' });
 const fenceMarkerDeco = Decoration.mark({ class: 'meo-md-fence-marker' });
 const headingContentDeco = Decoration.mark({ class: 'meo-md-heading-content' });
 const strongMarkerDeco = Decoration.mark({
-  class: 'meo-md-marker meo-md-strong-marker',
-  attributes: markdownSyntaxMarkerAttributes
+  class: 'meo-md-marker meo-md-strong-marker'
 });
 const activeStrongMarkerDeco = Decoration.mark({
-  class: 'meo-md-marker-active meo-md-strong-marker-active',
-  attributes: markdownSyntaxMarkerAttributes
+  class: 'meo-md-marker-active meo-md-strong-marker-active'
 });
 const hrMarkerDeco = Decoration.mark({ class: 'meo-md-hr-marker' });
 const hiddenLinkUrlDeco = Decoration.mark({ class: 'meo-md-link-url-hidden' });
@@ -2615,7 +2606,7 @@ export function liveModeExtensions() {
       codeLanguages: resolveCodeLanguage,
       extensions: [{ remove: ['SetextHeading'] }]
     }),
-    syntaxHighlighting(highlightStyle),
+    syntaxHighlighting(liveHighlightStyle),
     markdownTagField,
     livePointerSelectionActiveField,
     liveDocumentIdleField,

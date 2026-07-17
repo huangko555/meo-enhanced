@@ -4,7 +4,7 @@ import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, re
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { vim, Vim } from '@replit/codemirror-vim';
-import { highlightStyle } from './theme';
+import { sourceHighlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
@@ -3190,7 +3190,7 @@ function sourceMode() {
       codeLanguages: resolveCodeLanguage,
       extensions: [{ remove: ['SetextHeading'] }]
     }),
-    syntaxHighlighting(highlightStyle),
+    syntaxHighlighting(sourceHighlightStyle),
     sourceCodeBlockField,
     sourceListMarkerField,
     sourceStrikeMarkerField,
