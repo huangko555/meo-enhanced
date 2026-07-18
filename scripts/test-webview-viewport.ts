@@ -132,6 +132,34 @@ async function main() {
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);
     }
+    const measureToolbarStart = () => page.evaluate(() => {
+      const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
+      const firstButton = document.querySelector<HTMLElement>('.format-group > .format-button')!;
+      return {
+        paddingLeft: Number.parseFloat(getComputedStyle(toolbar).paddingLeft),
+        firstButtonOffset: firstButton.getBoundingClientRect().left - toolbar.getBoundingClientRect().left
+      };
+    });
+    const initialToolbarStart = await measureToolbarStart();
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'lineNumbersChanged', enabled: false } }));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'contentMaxWidthChanged', enabled: true } }));
+    });
+    await waitForFrames(page);
+    const toggledToolbarStart = await measureToolbarStart();
+    if (
+      initialToolbarStart.paddingLeft !== 0 ||
+      Math.abs(initialToolbarStart.firstButtonOffset) > 0.5 ||
+      toggledToolbarStart.paddingLeft !== 0 ||
+      Math.abs(toggledToolbarStart.firstButtonOffset) > 0.5
+    ) {
+      throw new Error(`Toolbar did not remain left-aligned: ${JSON.stringify({ initialToolbarStart, toggledToolbarStart })}`);
+    }
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'lineNumbersChanged', enabled: true } }));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'contentMaxWidthChanged', enabled: false } }));
+    });
+    await waitForFrames(page);
     await page.click('[data-action="save"]');
     await waitForFrames(page, 2);
     const saveMessages = await page.evaluate(() => (

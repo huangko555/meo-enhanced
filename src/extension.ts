@@ -1020,7 +1020,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       .toString();
     const nonce = getNonce();
     const initialHtmlClass = getContentMaxWidthEnabled(this.context)
-      ? ' class="meo-content-max-width-enabled meo-toolbar-aligning"'
+      ? ' class="meo-content-max-width-enabled"'
       : '';
     const csp = [
       "default-src 'none'",

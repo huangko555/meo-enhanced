@@ -61,8 +61,6 @@
   --meo-active-editor-line-height: 1.5;
   --meo-content-max-width: 100%;
   --meo-editor-inline-end-padding: 16px;
-  --meo-toolbar-format-optical-offset: 5px;
-  --meo-toolbar-format-offset: 0px;
   --meo-task-checkbox-size: 17px;
   --git-added: #4a9e82;
   --git-changed: #317ae7;
@@ -203,20 +201,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 14px 8px 82px;
+  padding: 8px 14px 8px 0;
   background-color: var(--vscode-sideBar-background);
-}
-
-.editor-root:has(.cm-editor.meo-line-numbers-hidden) .mode-toolbar {
-  padding-left: 17px;
-}
-
-.mode-toolbar .format-group {
-  margin-left: var(--meo-toolbar-format-offset);
-}
-
-.meo-content-max-width-enabled.meo-toolbar-aligning .mode-toolbar {
-  visibility: hidden;
 }
 
 .editor-notice {
@@ -818,10 +804,6 @@ body {
 }
 
 @media (max-width: 920px) {
-  .mode-toolbar {
-    padding-left: 14px;
-  }
-
   .find-panel {
     right: -10px;
   }
