@@ -347,6 +347,11 @@ body {
   background: var(--vscode-input-background);
 }
 
+.find-input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--vscode-input-foreground));
+  opacity: 1;
+}
+
 .find-input-wrap .find-input {
   width: 100%;
   padding-right: 30px;
@@ -405,7 +410,7 @@ body {
   color: var(--vscode-errorForeground, #f48771);
 }
 
-.find-clear-button {
+.find-input-wrap .find-clear-button {
   position: absolute;
   top: 0;
   right: 0;
@@ -413,12 +418,12 @@ body {
   min-width: 24px;
   height: 24px;
   padding: 0;
-  color: var(--vscode-descriptionForeground, var(--vscode-icon-foreground));
+  color: var(--vscode-input-placeholderForeground, var(--vscode-input-foreground));
   background: transparent;
 }
 
-.find-clear-button:hover {
-  color: var(--vscode-editor-foreground);
+.find-input-wrap .find-clear-button:hover {
+  color: var(--vscode-input-placeholderForeground, var(--vscode-input-foreground));
   background: var(--vscode-toolbar-hoverBackground);
 }
 
@@ -3072,7 +3077,7 @@ body.outline-resizing .preview-frame {
   top: 0;
   right: 10px;
   bottom: 0;
-  width: 6px;
+  width: 4px;
   border-left: 1px solid transparent;
   pointer-events: none;
   z-index: 5;

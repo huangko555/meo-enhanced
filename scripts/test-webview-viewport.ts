@@ -384,6 +384,34 @@ async function main() {
     if (!previewFindPanelOpened) {
       throw new Error('Ctrl+F inside Preview did not open the find panel');
     }
+    const findClearColors = await page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>('.find-panel')!;
+      panel.style.setProperty('--vscode-input-placeholderForeground', 'rgb(128, 136, 144)');
+      panel.style.setProperty('--vscode-descriptionForeground', 'rgb(255, 255, 255)');
+      panel.style.setProperty('--vscode-editor-foreground', 'rgb(255, 255, 255)');
+      const findInput = panel.querySelector<HTMLInputElement>('[placeholder="Find"]')!;
+      const replaceInput = panel.querySelector<HTMLInputElement>('[placeholder="Replace"]')!;
+      return {
+        findPlaceholder: getComputedStyle(findInput, '::placeholder').color,
+        replacePlaceholder: getComputedStyle(replaceInput, '::placeholder').color,
+        findClear: getComputedStyle(panel.querySelector<HTMLElement>('[aria-label="Clear Find"]')!).color,
+        replaceClear: getComputedStyle(panel.querySelector<HTMLElement>('[aria-label="Clear Replace"]')!).color
+      };
+    });
+    await page.hover('.find-panel [aria-label="Clear Find"]');
+    const hoveredFindClearColor = await page.$eval(
+      '.find-panel [aria-label="Clear Find"]',
+      (element) => getComputedStyle(element).color
+    );
+    if (
+      findClearColors.findPlaceholder !== 'rgb(128, 136, 144)' ||
+      findClearColors.replacePlaceholder !== findClearColors.findPlaceholder ||
+      findClearColors.findClear !== findClearColors.findPlaceholder ||
+      findClearColors.replaceClear !== findClearColors.replacePlaceholder ||
+      hoveredFindClearColor !== findClearColors.findPlaceholder
+    ) {
+      throw new Error(`Find and Replace clear icons did not match their placeholder text: ${JSON.stringify({ ...findClearColors, hoveredFindClearColor })}`);
+    }
     await page.type('.find-panel .find-input[placeholder="Find"]', 'Tall Mermaid');
     await waitForFrames(page, 2);
     const previewFindState = await page.evaluate(() => {

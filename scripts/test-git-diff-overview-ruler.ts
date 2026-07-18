@@ -67,8 +67,8 @@ async function main(): Promise<void> {
       '.meo-git-overview-ruler-marker',
       (element) => element.getBoundingClientRect().width
     );
-    if (width !== 6) {
-      throw new Error(`Git diff overview marker width must be 6px, received ${width}px`);
+    if (width !== 4) {
+      throw new Error(`Git diff overview marker width must be 4px, received ${width}px`);
     }
 
     const currentText = createTallMermaidFixture('TARGET_CHANGE');
