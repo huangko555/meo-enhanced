@@ -88,6 +88,11 @@ interface DomRefs {
   sourceBodyCellGrid: HTMLTableCellElement[][];
   sortButton: HTMLButtonElement;
   applySortButton: HTMLButtonElement;
+  stickyChrome: HTMLDivElement;
+  stickyHeaderViewport: HTMLDivElement;
+  stickyTable: HTMLTableElement;
+  stickyColgroup: HTMLTableColElement[];
+  stickyHeaderRow: HTMLTableRowElement;
   toolbarButtons: {
     insertRowAbove: HTMLButtonElement;
     insertRowBelow: HTMLButtonElement;
@@ -180,6 +185,8 @@ const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-
 const tableDelimiterRegex = /^\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn';
+const tableToolbarHeight = 21;
+const minimumStickyBodyRowCount = 2;
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 class TableHeaderAlignmentOverrideValue extends RangeValue {
@@ -2168,6 +2175,8 @@ class HtmlTableWidget extends WidgetType {
     for (const element of Array.from(headerCell.querySelectorAll('.meo-md-html-table-cell-content, .meo-md-html-table-cell-preview, textarea')) as HTMLElement[]) {
       element.style.textAlign = alignment;
     }
+    this.refreshStickyHeaderContent();
+    this.scheduleLayout();
   }
 
   applyCurrentSort(container) {
@@ -2351,6 +2360,7 @@ class HtmlTableWidget extends WidgetType {
       shell.classList.toggle('is-interacting', active);
     }
     this.updateStickyControls();
+    this.updateStickyHeader();
     const view = this.getEditorView(container);
     if (!view) return;
     view.dom.dispatchEvent(new CustomEvent('meo-table-interaction', { detail: { active, owner: shell } }));
@@ -3248,6 +3258,7 @@ class HtmlTableWidget extends WidgetType {
       }
       // Non-search previews stay untouched while editing so inline image DOM is not recreated.
       this.resizeRow(rowEl, rowInputs);
+      if (rowIndex === 0) this.refreshStickyHeaderContent();
       this.scheduleLayout();
       notifySelectionChange();
     });
@@ -3390,6 +3401,103 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
+  refreshStickyHeaderContent() {
+    if (!this.domRefs) return;
+    const { table, headerInputs, stickyHeaderRow } = this.domRefs;
+    const sourceCells = Array.from(table.tHead?.rows[0]?.cells ?? []);
+    const nextCells = sourceCells.map((sourceCell, column) => {
+      const cell = document.createElement('th');
+      cell.style.textAlign = sourceCell.style.textAlign;
+      const preview = document.createElement('div');
+      preview.className = 'meo-md-html-table-cell-preview';
+      renderTableCellInlinePreview(
+        preview,
+        tableCellEditorValueToSource(headerInputs[column]?.value ?? ''),
+        this.cellDiagnostics(0, column),
+        this.searchState,
+        this.cellSourceRange(0, column)
+      );
+      for (const interactive of Array.from(preview.querySelectorAll('button, textarea, input, select'))) {
+        interactive.remove();
+      }
+      for (const link of Array.from(preview.querySelectorAll('a[href]'))) {
+        link.removeAttribute('href');
+        link.removeAttribute('tabindex');
+      }
+      cell.appendChild(preview);
+      return cell;
+    });
+    stickyHeaderRow.replaceChildren(...nextCells);
+  }
+
+  hideStickyHeader() {
+    if (!this.domRefs) return;
+    const { stickyChrome } = this.domRefs;
+    stickyChrome.classList.remove('is-visible', 'has-sticky-controls');
+    stickyChrome.style.removeProperty('top');
+    stickyChrome.style.removeProperty('left');
+    stickyChrome.style.removeProperty('width');
+    stickyChrome.style.removeProperty('height');
+  }
+
+  updateStickyHeader() {
+    if (!this.domRefs || !this.view) return;
+    const {
+      shell,
+      table,
+      tbody,
+      stickyChrome,
+      stickyHeaderViewport,
+      stickyTable,
+      stickyColgroup
+    } = this.domRefs;
+    const headerRow = table.tHead?.rows[0];
+    const bodyRows = tbody.rows;
+    if (!headerRow || bodyRows.length < minimumStickyBodyRowCount) {
+      this.hideStickyHeader();
+      return;
+    }
+
+    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+    const tableRect = table.getBoundingClientRect();
+    const headerRect = headerRow.getBoundingClientRect();
+    const controlsVisible = shell.classList.contains('is-controls-sticky') && (
+      shell.matches(':focus-within') ||
+      shell.classList.contains('is-interacting') ||
+      shell.classList.contains('has-active-sort')
+    );
+    const controlsHeight = controlsVisible ? tableToolbarHeight : 0;
+    const stickyHeaderTop = scrollerRect.top + controlsHeight;
+    const tableNeedsStickyHeader = tableRect.height > scrollerRect.height + 1;
+    const headerScrolledPastTop = headerRect.bottom <= stickyHeaderTop;
+    const lastRowsStart = bodyRows[bodyRows.length - minimumStickyBodyRowCount]?.getBoundingClientRect().top ?? 0;
+    const enoughRowsRemain = lastRowsStart >= stickyHeaderTop + headerRect.height;
+    const visibleLeft = Math.max(tableRect.left, scrollerRect.left);
+    const visibleRight = Math.min(tableRect.right, scrollerRect.right);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+
+    if (!tableNeedsStickyHeader || !headerScrolledPastTop || !enoughRowsRemain || visibleWidth <= 0) {
+      this.hideStickyHeader();
+      return;
+    }
+
+    stickyChrome.classList.add('is-visible');
+    stickyChrome.classList.toggle('has-sticky-controls', controlsVisible);
+    stickyChrome.style.top = `${Math.round(scrollerRect.top)}px`;
+    stickyChrome.style.left = `${Math.round(visibleLeft)}px`;
+    stickyChrome.style.width = `${Math.round(visibleWidth)}px`;
+    stickyChrome.style.height = `${Math.ceil(controlsHeight + headerRect.height)}px`;
+    stickyHeaderViewport.style.height = `${Math.ceil(headerRect.height)}px`;
+    stickyTable.style.width = `${tableRect.width}px`;
+    stickyTable.style.transform = `translateX(${tableRect.left - visibleLeft}px)`;
+
+    const sourceCells = Array.from(headerRow.cells);
+    for (let index = 0; index < stickyColgroup.length; index += 1) {
+      const width = sourceCells[index]?.getBoundingClientRect().width ?? 0;
+      stickyColgroup[index].style.width = `${width}px`;
+    }
+  }
+
   updateStickyControls() {
     if (!this.domRefs || !this.view) return;
     const { shell, table } = this.domRefs;
@@ -3405,7 +3513,7 @@ class HtmlTableWidget extends WidgetType {
     const scrollerRect = scroller.getBoundingClientRect();
     const tableRect = table.getBoundingClientRect();
     const shellRect = shell.getBoundingClientRect();
-    const controlsHeight = 21;
+    const controlsHeight = tableToolbarHeight;
     const shouldStick = tableRect.top <= scrollerRect.top + controlsHeight && tableRect.bottom > scrollerRect.top + controlsHeight;
     shell.classList.toggle('is-controls-sticky', shouldStick);
     if (shouldStick) {
@@ -3424,6 +3532,7 @@ class HtmlTableWidget extends WidgetType {
     this.syncTableLineNumbers();
     this.syncTableDiffMarkers();
     this.updateStickyControls();
+    this.updateStickyHeader();
   }
 
   syncTableDiffMarkers() {
@@ -3509,6 +3618,7 @@ class HtmlTableWidget extends WidgetType {
         this.refreshCellPreviewFromInput(inputs[col]);
       }
     }
+    this.refreshStickyHeaderContent();
     this.scheduleLayout({ resizeRows: true });
   }
 
@@ -3519,6 +3629,7 @@ class HtmlTableWidget extends WidgetType {
       .filter((range): range is TableCellRange => range !== null);
     if (selectionRanges.length === 0) return;
 
+    let refreshedHeader = false;
     for (const inputs of this.domRefs.allRowInputs) {
       for (const input of inputs) {
         const coords = this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
@@ -3526,8 +3637,13 @@ class HtmlTableWidget extends WidgetType {
         const cellRange = this.cellSourceRange(coords.row, coords.col);
         if (selectionRanges.some((range) => tableSearchRangeOverlapsCell(range, cellRange))) {
           this.refreshCellPreviewFromInput(input);
+          if (coords.row === 0) refreshedHeader = true;
         }
       }
+    }
+    if (refreshedHeader) {
+      this.refreshStickyHeaderContent();
+      this.scheduleLayout();
     }
   }
 
@@ -3716,6 +3832,7 @@ class HtmlTableWidget extends WidgetType {
     }
     const shell = document.createElement('div');
     shell.className = 'meo-md-html-table-shell';
+    shell.style.setProperty('--meo-html-table-toolbar-height', `${tableToolbarHeight}px`);
     const wrap = document.createElement('div');
     wrap.className = 'meo-md-html-table-wrap';
     if (Number.isFinite(this.tableData.startLine)) {
@@ -3827,6 +3944,26 @@ class HtmlTableWidget extends WidgetType {
     }
     table.appendChild(tbody);
 
+    const stickyChrome = document.createElement('div');
+    stickyChrome.className = 'meo-md-html-table-sticky-chrome';
+    stickyChrome.setAttribute('aria-hidden', 'true');
+    stickyChrome.setAttribute('inert', '');
+    const stickyToolbarBand = document.createElement('div');
+    stickyToolbarBand.className = 'meo-md-html-table-sticky-toolbar-band';
+    const stickyHeaderViewport = document.createElement('div');
+    stickyHeaderViewport.className = 'meo-md-html-table-sticky-header';
+    const stickyTable = document.createElement('table');
+    stickyTable.className = 'meo-md-html-table meo-md-html-table-sticky-table';
+    const stickyColgroupElement = document.createElement('colgroup');
+    const stickyColgroup = Array.from({ length: this.tableData.colCount }, () => document.createElement('col'));
+    stickyColgroupElement.append(...stickyColgroup);
+    const stickyThead = document.createElement('thead');
+    const stickyHeaderRow = document.createElement('tr');
+    stickyThead.appendChild(stickyHeaderRow);
+    stickyTable.append(stickyColgroupElement, stickyThead);
+    stickyHeaderViewport.appendChild(stickyTable);
+    stickyChrome.append(stickyToolbarBand, stickyHeaderViewport);
+
     const lineNumberLayer = document.createElement('div');
     lineNumberLayer.className = 'meo-md-html-table-line-numbers';
     const lineNumberGutter = view.dom.querySelector('.cm-lineNumbers');
@@ -3840,7 +3977,7 @@ class HtmlTableWidget extends WidgetType {
     if (diffGutter instanceof HTMLElement) diffGutter.appendChild(diffMarkerLayer);
     this.cleanupFns.push(() => diffMarkerLayer.remove());
     wrap.append(table);
-    shell.append(toolbar, wrap, applySortButton);
+    shell.append(toolbar, wrap, applySortButton, stickyChrome);
     this.domRefs = {
       shell,
       wrap,
@@ -3859,8 +3996,14 @@ class HtmlTableWidget extends WidgetType {
       sourceBodyCellGrid,
       sortButton: toolbarButtons.sortColumn,
       applySortButton,
+      stickyChrome,
+      stickyHeaderViewport,
+      stickyTable,
+      stickyColgroup,
+      stickyHeaderRow,
       toolbarButtons
     };
+    this.refreshStickyHeaderContent();
     this.updateActionTargetStyles();
     this.wireTableSelection(table);
     this.pendingResizeRows = true;

@@ -3638,6 +3638,49 @@ body.outline-resizing {
   text-align: inherit;
 }
 
+.cm-editor .meo-md-html-table-sticky-chrome {
+  position: fixed;
+  z-index: 210;
+  display: none;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--meo-background);
+}
+
+.cm-editor .meo-md-html-table-sticky-chrome.is-visible {
+  display: block;
+}
+
+.cm-editor .meo-md-html-table-sticky-toolbar-band {
+  display: none;
+  width: 100%;
+  height: var(--meo-html-table-toolbar-height);
+  background: var(--meo-background);
+}
+
+.cm-editor .meo-md-html-table-sticky-chrome.has-sticky-controls .meo-md-html-table-sticky-toolbar-band {
+  display: block;
+}
+
+.cm-editor .meo-md-html-table-sticky-header {
+  width: 100%;
+  overflow: hidden;
+  background: var(--meo-inset-background);
+  box-shadow: 0 1px 0 var(--meo-semantic-tableBorder), 0 3px 8px rgba(0, 0, 0, 0.16);
+}
+
+.cm-editor .meo-md-html-table.meo-md-html-table-sticky-table {
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.cm-editor .meo-md-html-table-sticky-table th {
+  box-sizing: border-box;
+}
+
 .cm-editor .meo-md-html-table-cell-content {
   position: relative;
   z-index: 1;
@@ -3790,7 +3833,7 @@ body.outline-resizing {
 .cm-editor .meo-md-html-apply-sort-btn {
   position: absolute;
   left: 274px;
-  top: -21px;
+  top: calc(-1 * var(--meo-html-table-toolbar-height));
   transform: none;
   z-index: 220;
   display: inline-flex;
@@ -3837,14 +3880,14 @@ body.outline-resizing {
 
 .cm-editor .meo-md-html-table-toolbar {
   position: absolute;
-  top: -21px;
+  top: calc(-1 * var(--meo-html-table-toolbar-height));
   left: 0;
   z-index: 225;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   box-sizing: border-box;
-  height: 21px;
+  height: var(--meo-html-table-toolbar-height);
   padding: 1px;
   border: 1px solid var(--vscode-button-border, transparent);
   border-radius: 4px;
