@@ -121,6 +121,12 @@ async function main() {
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
+    const initialPreviewPreloadRequests = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'requestPreviewRender').length);
+    if (initialPreviewPreloadRequests !== 1) {
+      throw new Error(`Live initialization must preload Preview exactly once, received ${initialPreviewPreloadRequests}`);
+    }
     const toolbarLayout = await page.evaluate(() => {
       const label = (element: HTMLElement): string => {
         if (element.dataset.action) return element.dataset.action;

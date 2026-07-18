@@ -170,6 +170,11 @@ ${headingWeightVarsCss}
   --meo-line-height: ${lineHeight};
   --meo-code-line-height: ${sourceLineHeight};
   --meo-code-bg: ${codeBlockBackgroundColor};
+  --meo-mermaid-background: var(--meo-code-bg);
+  --meo-mermaid-node-background: ${appearance === 'light' ? '#ffffff' : sideBarBackgroundColor};
+  --meo-mermaid-foreground: var(--meo-fg);
+  --meo-mermaid-border: ${appearance === 'light' ? '#8c959f' : previewMutedColor};
+  --meo-mermaid-line: ${appearance === 'light' ? '#57606a' : previewMutedColor};
   --meo-sidebar-bg: ${sideBarBackgroundColor};
   --meo-page-bg: color-mix(in srgb, var(--meo-bg) 86%, var(--meo-border) 14%);
   --meo-panel-bg: color-mix(in srgb, var(--meo-bg) 96%, var(--meo-fg) 4%);
@@ -835,9 +840,6 @@ th:empty::before {
   max-width: 100%;
   height: auto;
   display: block;
-}
-.meo-export-mermaid .meo-export-mermaid-svg .node rect {
-  fill: var(--meo-code-bg) !important;
 }
 .meo-export-mermaid > pre.meo-export-code-block {
   margin: 0;

@@ -41,13 +41,18 @@ try {
     }
   }, { runtime, entry });
 
+  const markdownText = '```mermaid\nflowchart LR\n  Start --> Check --> Done\n```';
   const rendered = renderMarkdownToHtml({
-    markdownText: '```mermaid\nflowchart LR\n  Start --> Check --> Done\n```',
+    markdownText,
     markdownFilePath: 'C:/tmp/preview-mermaid.md',
     target: 'html'
   });
-  const lightStyles = buildPreviewStyles(defaultThemeSettings, {}, 'light');
-  const darkStyles = buildPreviewStyles(defaultThemeSettings, {}, 'dark');
+  const styleEnvironment = {
+    editorBackgroundColor: '#20252b',
+    editorForegroundColor: '#d8dee9'
+  };
+  const lightStyles = buildPreviewStyles(defaultThemeSettings, styleEnvironment, 'light');
+  const darkStyles = buildPreviewStyles(defaultThemeSettings, styleEnvironment, 'dark');
   const liveSvg = await page.evaluate(async () => {
     const renderLiveMermaid = (window as typeof window & { __renderLiveMermaid?: () => Promise<string> })
       .__renderLiveMermaid;
@@ -63,16 +68,24 @@ try {
     (window as typeof window & { __previewRenderedAt?: number }).__previewRenderedAt = 0;
   });
   const previewStartedAt = await page.evaluate(() => performance.now());
-  await page.evaluate(({ html, hasMermaid, lightStyles, darkStyles }) => {
+  const previewRequestId = await page.evaluate((text) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    controller.preload(text);
+    const messages = (window as typeof window & { __previewMessages?: Array<{ type?: string; requestId?: string }> })
+      .__previewMessages ?? [];
+    return messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+  }, markdownText);
+  if (!previewRequestId) throw new Error('Live mode did not preload Preview');
+  await page.evaluate(({ requestId, html, hasMermaid, lightStyles, darkStyles }) => {
     const controller = (window as typeof window & { __previewController?: any }).__previewController;
     controller.handleRendered({
       type: 'previewRendered',
-      requestId: '',
+      requestId,
       html,
       hasMermaid,
       styles: { light: lightStyles, dark: darkStyles }
     });
-  }, { html: rendered.html, hasMermaid: rendered.hasMermaid, lightStyles, darkStyles });
+  }, { requestId: previewRequestId, html: rendered.html, hasMermaid: rendered.hasMermaid, lightStyles, darkStyles });
 
   await page.waitForFunction(
     (startedAt) => ((window as typeof window & { __previewRenderedAt?: number }).__previewRenderedAt ?? 0) > startedAt,
@@ -88,22 +101,87 @@ try {
   if (mermaidReadyAfterMs > 700) {
     throw new Error(`Preview Mermaid was blocked behind hidden Live renders for ${Math.round(mermaidReadyAfterMs)}ms`);
   }
-  const { darkNodeFill, darkPanelFill } = await page.evaluate(() => {
+  const { darkNodeFill, darkNodeText, darkPaletteFill, darkPaletteText } = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
     const node = frameDocument?.querySelector<SVGElement>('.meo-export-mermaid.is-rendered .node rect');
+    const nodeLabel = frameDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-rendered .nodeLabel');
     const page = frameDocument?.querySelector<HTMLElement>('.meo-export-page');
-    const probe = frameDocument?.createElement('span');
-    if (page && probe) {
-      probe.style.color = 'var(--meo-code-bg)';
-      page.appendChild(probe);
+    const fillProbe = frameDocument?.createElement('span');
+    const textProbe = frameDocument?.createElement('span');
+    if (page && fillProbe && textProbe) {
+      fillProbe.style.color = 'var(--meo-mermaid-node-background)';
+      textProbe.style.color = 'var(--meo-mermaid-foreground)';
+      page.append(fillProbe, textProbe);
     }
+    const normalizeColor = (value: string) => {
+      const srgb = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/i.exec(value);
+      return srgb
+        ? `rgb(${srgb.slice(1).map((channel) => Math.round(Number(channel) * 255)).join(', ')})`
+        : value;
+    };
     return {
       darkNodeFill: node ? frameDocument?.defaultView?.getComputedStyle(node).fill ?? '' : '',
-      darkPanelFill: probe ? frameDocument?.defaultView?.getComputedStyle(probe).color ?? '' : ''
+      darkNodeText: nodeLabel ? frameDocument?.defaultView?.getComputedStyle(nodeLabel).color ?? '' : '',
+      darkPaletteFill: fillProbe ? normalizeColor(frameDocument?.defaultView?.getComputedStyle(fillProbe).color ?? '') : '',
+      darkPaletteText: textProbe ? frameDocument?.defaultView?.getComputedStyle(textProbe).color ?? '' : ''
     };
   });
-  if (!darkNodeFill || !darkPanelFill || darkNodeFill !== darkPanelFill) {
-    throw new Error(`Dark Preview Mermaid nodes must use ${darkPanelFill}, received ${darkNodeFill}`);
+  if (
+    !darkNodeFill || !darkPaletteFill || darkNodeFill !== darkPaletteFill ||
+    !darkNodeText || !darkPaletteText || darkNodeText !== darkPaletteText
+  ) {
+    throw new Error(`Dark Preview Mermaid palette mismatch: ${JSON.stringify({ darkNodeFill, darkNodeText, darkPaletteFill, darkPaletteText })}`);
+  }
+  const cachedSwitch = await page.evaluate((text) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const messages = (window as typeof window & { __previewMessages?: Array<{ type?: string }> }).__previewMessages ?? [];
+    const before = messages.filter((message) => message.type === 'requestPreviewRender').length;
+    controller.setVisible(true);
+    controller.requestRender(text, { restoreLine: 1 });
+    return {
+      before,
+      after: messages.filter((message) => message.type === 'requestPreviewRender').length,
+      rendered: Boolean(document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+        ?.querySelector('.meo-export-mermaid.is-rendered svg'))
+    };
+  }, markdownText);
+  if (!cachedSwitch.rendered || cachedSwitch.after !== cachedSwitch.before) {
+    throw new Error(`First Live-to-Preview switch did not use the prepared document: ${JSON.stringify(cachedSwitch)}`);
+  }
+  await page.evaluate(() => {
+    (window as typeof window & { __previewController?: any }).__previewController.setAppearance('light');
+  });
+  await page.waitForFunction((darkFill) => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const node = frameDocument?.querySelector<SVGElement>('.meo-export-mermaid.is-rendered .node rect');
+    return Boolean(node && frameDocument?.defaultView?.getComputedStyle(node).fill !== darkFill);
+  }, {}, darkNodeFill);
+  const lightPalette = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const page = frameDocument?.querySelector<HTMLElement>('.meo-export-page');
+    const readPaletteColor = (name: string) => {
+      const probe = frameDocument?.createElement('span');
+      if (!page || !probe) return '';
+      probe.style.color = `var(${name})`;
+      page.appendChild(probe);
+      const value = frameDocument.defaultView?.getComputedStyle(probe).color ?? '';
+      probe.remove();
+      return value;
+    };
+    const node = frameDocument?.querySelector<SVGElement>('.meo-export-mermaid.is-rendered .node rect');
+    const label = frameDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-rendered .nodeLabel');
+    return {
+      nodeFill: node ? frameDocument?.defaultView?.getComputedStyle(node).fill ?? '' : '',
+      nodeText: label ? frameDocument?.defaultView?.getComputedStyle(label).color ?? '' : '',
+      paletteFill: readPaletteColor('--meo-mermaid-node-background'),
+      paletteText: readPaletteColor('--meo-mermaid-foreground')
+    };
+  });
+  if (
+    !lightPalette.nodeFill || lightPalette.nodeFill !== lightPalette.paletteFill ||
+    !lightPalette.nodeText || lightPalette.nodeText !== lightPalette.paletteText
+  ) {
+    throw new Error(`Light Preview Mermaid palette mismatch: ${JSON.stringify(lightPalette)}`);
   }
   console.log('Preview Mermaid runtime test passed');
 } finally {

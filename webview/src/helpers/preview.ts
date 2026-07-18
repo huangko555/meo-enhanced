@@ -1,10 +1,6 @@
 import { createElement, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
-import {
-  loadMermaidRuntime,
-  restoreMermaidEditorTheme,
-  runExclusiveMermaidOperation
-} from './mermaidDiagram';
+import { createPreviewMermaidRenderer } from './previewMermaid';
 import type { OutlineHeading } from './outline';
 import type { PreviewAppearance, PreviewRenderErrorMessage, PreviewRenderedMessage } from '../../../src/shared/preview';
 
@@ -13,9 +9,6 @@ type PreviewControllerOptions = {
   onRendered?: () => void;
   onFindRequested?: () => void;
 };
-
-const PREVIEW_MERMAID_CACHE_LIMIT = 100;
-const previewMermaidSvgCache = new Map<string, string>();
 
 export function createPreviewController({ vscode, onRendered, onFindRequested }: PreviewControllerOptions) {
   const host = document.createElement('div');
@@ -62,7 +55,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   let pendingText = '';
   let latestRenderedText = '';
   let latestPayload: PreviewRenderedMessage | null = null;
-  let mermaidRenderQueue: Promise<void> = Promise.resolve();
+  const previewMermaidRenderer = createPreviewMermaidRenderer();
   let searchQuery = '';
   let searchOptions = { wholeWord: false, caseSensitive: false };
   let searchMatches: HTMLElement[] = [];
@@ -171,23 +164,6 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     return { found: true, current: activeSearchIndex + 1, total: searchMatches.length };
   };
 
-  const renderPreviewMermaid = (
-    frameDocument: Document,
-    renderAppearance: PreviewAppearance,
-    onDiagramRendered?: () => void
-  ): Promise<void> => {
-    mermaidRenderQueue = mermaidRenderQueue
-      .catch(() => undefined)
-      .then(() => runExclusiveMermaidOperation(async () => {
-        try {
-          await renderMermaidBlocks(frameDocument, renderAppearance, onDiagramRendered);
-        } finally {
-          await restoreMermaidEditorTheme();
-        }
-      }, 'high'));
-    return mermaidRenderQueue;
-  };
-
   const updateThemeToggle = () => {
     for (const button of [lightAppearanceButton, darkAppearanceButton]) {
       const active = button.dataset.appearance === appearance;
@@ -234,7 +210,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       };
       finishRender();
       if (latestPayload?.hasMermaid) {
-        void renderPreviewMermaid(frameDocument, appearance, keepPosition).finally(keepPosition);
+        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
       }
     };
     frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style data-meo-preview-styles>${styles}</style><style>.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
@@ -259,7 +235,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     };
     finish();
     if (latestPayload.hasMermaid) {
-      void renderPreviewMermaid(frameDocument, appearance, keepPosition).finally(keepPosition);
+      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
     }
   };
 
@@ -281,7 +257,10 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     }
   };
 
-  const requestRender = (text: string, { restoreLine = null }: { restoreLine?: number | null } = {}) => {
+  const requestRender = (
+    text: string,
+    { restoreLine = null, background = false }: { restoreLine?: number | null; background?: boolean } = {}
+  ) => {
     if (latestPayload && text === latestRenderedText && frame.contentDocument?.querySelector('.meo-export-doc')) {
       setStatus(null);
       if (restoreLine !== null) {
@@ -290,11 +269,16 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       onRendered?.();
       return;
     }
+    if (pendingRequestId && text === pendingText) {
+      if (restoreLine !== null) pendingRestoreLine = restoreLine;
+      if (!background) setStatus('正在生成预览…');
+      return;
+    }
     const requestId = `preview-${Date.now()}-${requestCounter += 1}`;
     pendingRequestId = requestId;
     pendingRestoreLine = restoreLine;
     pendingText = text;
-    setStatus('正在生成预览…');
+    if (!background) setStatus('正在生成预览…');
     vscode.postMessage({
       type: 'requestPreviewRender',
       requestId,
@@ -309,6 +293,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     }
     latestPayload = message;
     latestRenderedText = pendingText;
+    pendingRequestId = '';
     setStatus(null);
     const restoreLine = pendingRestoreLine;
     pendingRestoreLine = null;
@@ -317,6 +302,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
 
   const handleRenderError = (message: PreviewRenderErrorMessage) => {
     if (message.requestId === pendingRequestId) {
+      pendingRequestId = '';
       setStatus(message.message || 'Preview 生成失败');
     }
   };
@@ -461,6 +447,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     host,
     appearanceControl,
     requestRender,
+    preload: (text: string) => requestRender(text, { background: true }),
     handleRendered,
     handleRenderError,
     setAppearance,
@@ -559,91 +546,6 @@ function bindPreviewWheelFallback(frameDocument: Document): void {
       }
     });
   }, { passive: true });
-}
-
-async function renderMermaidBlocks(
-  frameDocument: Document,
-  appearance: PreviewAppearance,
-  onDiagramRendered?: () => void
-): Promise<void> {
-  const viewportCenter = (frameDocument.defaultView?.innerHeight ?? 0) / 2;
-  const blocks = Array.from(frameDocument.querySelectorAll<HTMLElement>('.meo-export-mermaid[data-source-b64]'))
-    .map((block, documentIndex) => ({ block, documentIndex }))
-    .sort((left, right) =>
-      Math.abs(left.block.getBoundingClientRect().top - viewportCenter)
-      - Math.abs(right.block.getBoundingClientRect().top - viewportCenter)
-    );
-  if (blocks.length === 0) {
-    return;
-  }
-  const mermaid = await loadMermaidRuntime();
-  const styleRoot = frameDocument.querySelector<HTMLElement>('.meo-export-page') ?? frameDocument.documentElement;
-  const frameStyles = frameDocument.defaultView?.getComputedStyle(styleRoot);
-  const readColor = (name: string, fallback: string) => frameStyles?.getPropertyValue(name).trim() || fallback;
-  const background = readColor('--meo-bg', appearance === 'dark' ? '#20252b' : '#ffffff');
-  const panelBackground = readColor('--meo-code-bg', background);
-  const foreground = readColor('--meo-fg', appearance === 'dark' ? '#d8dee9' : '#1f2328');
-  const muted = readColor('--meo-muted', appearance === 'dark' ? '#9aa4af' : '#59636e');
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'strict',
-    theme: 'base',
-    themeVariables: {
-      background,
-      mainBkg: panelBackground,
-      secondBkg: panelBackground,
-      tertiaryColor: panelBackground,
-      primaryColor: panelBackground,
-      primaryTextColor: foreground,
-      primaryBorderColor: muted,
-      nodeBorder: muted,
-      lineColor: muted,
-      textColor: foreground,
-      nodeTextColor: foreground,
-      edgeLabelBackground: background,
-      clusterBkg: background,
-      clusterBorder: muted,
-      titleColor: foreground,
-      darkMode: appearance === 'dark'
-    }
-  });
-  let index = 0;
-  for (const { block, documentIndex } of blocks) {
-    const source = decodeBase64Utf8(block.dataset.sourceB64 ?? '');
-    if (!source) {
-      continue;
-    }
-    const cacheKey = `${appearance}\n${background}\n${panelBackground}\n${foreground}\n${muted}\nblock:${documentIndex}\n${source}`;
-    try {
-      const cachedSvg = previewMermaidSvgCache.get(cacheKey);
-      const result = cachedSvg
-        ? { svg: cachedSvg }
-        : await mermaid.render(`meo-preview-mermaid-${Date.now()}-${index += 1}`, source);
-      const svg = typeof result === 'string' ? result : result?.svg;
-      if (svg) {
-        previewMermaidSvgCache.delete(cacheKey);
-        previewMermaidSvgCache.set(cacheKey, svg);
-        if (previewMermaidSvgCache.size > PREVIEW_MERMAID_CACHE_LIMIT) {
-          const oldestKey = previewMermaidSvgCache.keys().next().value;
-          if (oldestKey) previewMermaidSvgCache.delete(oldestKey);
-        }
-        block.classList.add('is-rendered');
-        block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
-        onDiagramRendered?.();
-      }
-    } catch {
-      block.classList.add('is-error');
-    }
-  }
-}
-
-function decodeBase64Utf8(value: string): string {
-  try {
-    const binary = window.atob(value);
-    return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
-  } catch {
-    return '';
-  }
 }
 
 function escapeHtmlAttribute(value: string): string {

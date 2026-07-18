@@ -1807,6 +1807,9 @@ window.addEventListener('message', (event) => {
           reason: 'init'
         });
       }
+      if (nextMode !== 'preview') {
+        previewController.preload(message.text);
+      }
       failureNotice.updateEditorNotice();
     });
     return;

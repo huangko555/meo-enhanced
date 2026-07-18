@@ -340,17 +340,12 @@ function buildRuntimeScript(hasMermaid: boolean): string {
 
   const getMermaidThemeConfig = () => {
     const bodyStyles = getComputedStyle(document.body);
-    const background = getExportThemeColor('--meo-code-bg', bodyStyles.backgroundColor || '#ffffff');
+    const background = getExportThemeColor('--meo-mermaid-background', bodyStyles.backgroundColor || '#ffffff');
     const darkMode = isProbablyDarkColor(background);
-    const nodeBackground = darkMode
-      ? getExportThemeColor('--meo-panel-bg', '#2f343d')
-      : '#ffffff';
-    const foreground = darkMode
-      ? getExportThemeColor('--meo-fg', '#c9d1d9', 'color')
-      : '#1f2328';
-    const border = darkMode
-      ? getExportThemeColor('--meo-fg', '#c9d1d9', 'color')
-      : '#6e7781';
+    const nodeBackground = getExportThemeColor('--meo-mermaid-node-background', darkMode ? '#2b333b' : '#ffffff');
+    const foreground = getExportThemeColor('--meo-mermaid-foreground', darkMode ? '#e6edf3' : '#24292f', 'color');
+    const border = getExportThemeColor('--meo-mermaid-border', darkMode ? '#768390' : '#8c959f', 'color');
+    const line = getExportThemeColor('--meo-mermaid-line', darkMode ? '#8b949e' : '#57606a', 'color');
     return {
       startOnLoad: false,
       securityLevel: 'strict',
@@ -364,7 +359,7 @@ function buildRuntimeScript(hasMermaid: boolean): string {
         primaryTextColor: foreground,
         primaryBorderColor: border,
         nodeBorder: border,
-        lineColor: border,
+        lineColor: line,
         textColor: foreground,
         nodeTextColor: foreground,
         edgeLabelBackground: background,
