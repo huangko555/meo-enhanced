@@ -440,9 +440,10 @@ body {
   display: inline-flex;
   align-items: center;
   height: 24px;
-  padding: 2px;
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--vscode-panel-border, #474b50) 72%, transparent);
   border-radius: 7px;
+  overflow: hidden;
   background: color-mix(
     in srgb,
     var(--vscode-input-background, var(--vscode-sideBar-background)) 62%,
@@ -480,10 +481,19 @@ body {
 .preview-appearance-button {
   position: relative;
   min-width: 62px;
+  border-radius: 0;
 }
 
 .preview-appearance-button + .preview-appearance-button {
-  margin-left: -3px;
+  margin-left: 0;
+}
+
+.preview-appearance-button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.preview-appearance-button:last-child {
+  border-radius: 0 6px 6px 0;
 }
 
 .preview-appearance-button:not(.is-active):hover,
