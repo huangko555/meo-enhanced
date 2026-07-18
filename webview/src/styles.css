@@ -443,7 +443,7 @@ body {
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--vscode-panel-border, #474b50) 72%, transparent);
   border-radius: 7px;
-  overflow: hidden;
+  overflow: visible;
   background: color-mix(
     in srgb,
     var(--vscode-input-background, var(--vscode-sideBar-background)) 62%,
@@ -473,6 +473,9 @@ body {
 
 .preview-appearance-button.is-active {
   z-index: 1;
+  height: 24px;
+  margin-top: -1px;
+  margin-bottom: -1px;
   color: var(--vscode-button-foreground, var(--vscode-editor-foreground));
   background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
@@ -492,8 +495,18 @@ body {
   border-radius: 6px 0 0 6px;
 }
 
+.preview-appearance-button:first-child.is-active {
+  margin-left: -1px;
+  border-radius: 7px 0 0 7px;
+}
+
 .preview-appearance-button:last-child {
   border-radius: 0 6px 6px 0;
+}
+
+.preview-appearance-button:last-child.is-active {
+  margin-right: -1px;
+  border-radius: 0 7px 7px 0;
 }
 
 .preview-appearance-button:not(.is-active):hover,
