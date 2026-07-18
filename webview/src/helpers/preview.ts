@@ -56,6 +56,113 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   let latestRenderedText = '';
   let latestPayload: PreviewRenderedMessage | null = null;
   let mermaidRenderQueue: Promise<void> = Promise.resolve();
+  let searchQuery = '';
+  let searchOptions = { wholeWord: false, caseSensitive: false };
+  let searchMatches: HTMLElement[] = [];
+  let activeSearchIndex = -1;
+
+  const clearSearchMatches = (): void => {
+    const frameDocument = frame.contentDocument;
+    for (const match of Array.from(frameDocument?.querySelectorAll<HTMLElement>('.meo-preview-search-match') ?? [])) {
+      const parent = match.parentNode;
+      match.replaceWith(frameDocument!.createTextNode(match.textContent ?? ''));
+      parent?.normalize();
+    }
+    searchMatches = [];
+    activeSearchIndex = -1;
+  };
+
+  const refreshSearchMatches = (): void => {
+    clearSearchMatches();
+    const frameDocument = frame.contentDocument;
+    const root = frameDocument?.querySelector<HTMLElement>('.meo-export-doc');
+    if (!frameDocument || !root || !searchQuery) {
+      return;
+    }
+    const query = searchOptions.caseSensitive ? searchQuery : searchQuery.toLocaleLowerCase();
+    const textNodes: Text[] = [];
+    const walker = frameDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        const parent = node.parentElement;
+        return parent && !parent.closest('script, style, noscript, svg')
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      }
+    });
+    while (walker.nextNode()) {
+      textNodes.push(walker.currentNode as Text);
+    }
+    for (const textNode of textNodes) {
+      const rawText = textNode.data;
+      const comparableText = searchOptions.caseSensitive ? rawText : rawText.toLocaleLowerCase();
+      const ranges: Array<{ start: number; end: number }> = [];
+      let offset = 0;
+      while (offset <= comparableText.length - query.length) {
+        const start = comparableText.indexOf(query, offset);
+        if (start < 0) {
+          break;
+        }
+        const end = start + query.length;
+        const isWordChar = (value: string) => /[\p{L}\p{N}_]/u.test(value);
+        const wholeWordMatch = !searchOptions.wholeWord || (
+          !isWordChar(rawText[start - 1] ?? '') && !isWordChar(rawText[end] ?? '')
+        );
+        if (wholeWordMatch) {
+          ranges.push({ start, end });
+        }
+        offset = Math.max(end, start + 1);
+      }
+      if (ranges.length === 0) {
+        continue;
+      }
+      const fragment = frameDocument.createDocumentFragment();
+      let cursor = 0;
+      for (const range of ranges) {
+        fragment.append(frameDocument.createTextNode(rawText.slice(cursor, range.start)));
+        const mark = frameDocument.createElement('mark');
+        mark.className = 'meo-preview-search-match';
+        mark.textContent = rawText.slice(range.start, range.end);
+        fragment.append(mark);
+        searchMatches.push(mark);
+        cursor = range.end;
+      }
+      fragment.append(frameDocument.createTextNode(rawText.slice(cursor)));
+      textNode.replaceWith(fragment);
+    }
+  };
+
+  const setSearchQuery = (
+    query: string,
+    options: { wholeWord?: boolean; caseSensitive?: boolean } = {}
+  ): void => {
+    const nextOptions = {
+      wholeWord: options.wholeWord === true,
+      caseSensitive: options.caseSensitive === true
+    };
+    if (
+      query === searchQuery &&
+      nextOptions.wholeWord === searchOptions.wholeWord &&
+      nextOptions.caseSensitive === searchOptions.caseSensitive
+    ) {
+      return;
+    }
+    searchQuery = query;
+    searchOptions = nextOptions;
+    refreshSearchMatches();
+  };
+
+  const findSearchMatch = (query: string, options: Record<string, unknown>, direction: 1 | -1) => {
+    setSearchQuery(query, options);
+    if (searchMatches.length === 0) {
+      return { found: false, current: 0, total: 0 };
+    }
+    activeSearchIndex = (activeSearchIndex + direction + searchMatches.length) % searchMatches.length;
+    for (const [index, match] of searchMatches.entries()) {
+      match.classList.toggle('is-active', index === activeSearchIndex);
+    }
+    searchMatches[activeSearchIndex].scrollIntoView({ block: 'center', inline: 'nearest' });
+    return { found: true, current: activeSearchIndex + 1, total: searchMatches.length };
+  };
 
   const renderPreviewMermaid = (frameDocument: Document, renderAppearance: PreviewAppearance): Promise<void> => {
     mermaidRenderQueue = mermaidRenderQueue
@@ -97,6 +204,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
       }
       bindPreviewLinks(frameDocument, vscode);
       bindPreviewWheelFallback(frameDocument);
+      refreshSearchMatches();
       const finishRender = () => {
         // Mermaid replaces placeholders asynchronously, so restore again after its layout settles.
         if (restoreLine !== null) {
@@ -110,7 +218,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
         finishRender();
       }
     };
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style data-meo-preview-styles>${styles}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style data-meo-preview-styles>${styles}</style><style>.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {
@@ -346,6 +454,16 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     },
     getTopVisiblePosition,
     restoreTopLine,
+    getSearchAdapter: () => ({
+      setSearchQuery,
+      countMatches: () => searchMatches.length,
+      findNext: (query: string, options: Record<string, unknown>) => findSearchMatch(query, options, 1),
+      findPrevious: (query: string, options: Record<string, unknown>) => findSearchMatch(query, options, -1),
+      focus: () => {
+        frame.focus();
+        frame.contentWindow?.focus();
+      }
+    }),
     getOutlineAdapter: () => outlineAdapter
   };
 }
@@ -355,12 +473,26 @@ function bindPreviewLinks(
   vscode: { postMessage: (message: WebviewMessage) => void }
 ): void {
   frameDocument.addEventListener('click', (event) => {
-    const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;
+    const FrameElement = frameDocument.defaultView?.Element;
+    const target = FrameElement && event.target instanceof FrameElement
+      ? event.target.closest<HTMLAnchorElement>('a[href]')
+      : null;
     if (!target) {
       return;
     }
     const href = target.getAttribute('href')?.trim() ?? '';
-    if (!href || href.startsWith('#')) {
+    if (!href) {
+      return;
+    }
+    if (href.startsWith('#')) {
+      event.preventDefault();
+      let fragmentId = href.slice(1);
+      try {
+        fragmentId = decodeURIComponent(fragmentId);
+      } catch {
+        // Keep the literal fragment when it contains malformed escaping.
+      }
+      frameDocument.getElementById(fragmentId)?.scrollIntoView({ block: 'start' });
       return;
     }
     event.preventDefault();

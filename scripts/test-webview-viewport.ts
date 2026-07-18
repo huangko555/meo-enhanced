@@ -313,7 +313,7 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'previewRendered',
         requestId,
-        html: '<h1 id="intro" data-source-line="1">Intro</h1><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div>',
+        html: '<h1 id="intro" data-source-line="1">Intro</h1><p>Footnote reference <a id="fnref-1" href="#fn-1">1</a></p><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div><ol><li id="fn-1">Footnote content <a href="#fnref-1">Back</a></li></ol>',
         hasMermaid: true,
         styles: {
           dark: 'html,body{margin:0;background:#20252b;color:#fff}.meo-export-doc{padding:20px}',
@@ -336,6 +336,64 @@ async function main() {
     if (!darkPreviewMermaidFill || darkPreviewMermaidFill === '#ffffff') {
       throw new Error(`Dark Preview Mermaid used a light node fill: ${darkPreviewMermaidFill}`);
     }
+    await page.evaluate(() => {
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<HTMLAnchorElement>('#fnref-1')!.click();
+    });
+    await waitForFrames(page, 2);
+    const footnoteJumpState = await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return {
+        documentPresent: Boolean(frameDocument.querySelector('.meo-export-doc')),
+        targetTop: frameDocument.querySelector<HTMLElement>('#fn-1')?.getBoundingClientRect().top ?? null,
+        viewportHeight: frameDocument.defaultView?.innerHeight ?? 0
+      };
+    });
+    if (
+      !footnoteJumpState.documentPresent ||
+      footnoteJumpState.targetTop === null ||
+      footnoteJumpState.targetTop < 0 ||
+      footnoteJumpState.targetTop >= footnoteJumpState.viewportHeight
+    ) {
+      throw new Error(`Preview footnote navigation replaced or missed the document: ${JSON.stringify(footnoteJumpState)}`);
+    }
+    await page.click('[data-action="find"]');
+    await page.type('.find-panel .find-input[placeholder="Find"]', 'Tall Mermaid');
+    await waitForFrames(page, 2);
+    const previewFindState = await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const replaceRow = document.querySelector<HTMLElement>('.find-replace-row')!;
+      return {
+        status: document.querySelector<HTMLElement>('.find-status')?.textContent,
+        matches: frameDocument.querySelectorAll('.meo-preview-search-match').length,
+        replaceVisible: getComputedStyle(replaceRow).display !== 'none'
+      };
+    });
+    if (previewFindState.status !== '1 matches' || previewFindState.matches !== 1 || previewFindState.replaceVisible) {
+      throw new Error(`Preview content search is unavailable: ${JSON.stringify(previewFindState)}`);
+    }
+    await page.keyboard.press('Enter');
+    await waitForFrames(page, 2);
+    const activePreviewMatch = await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const match = frameDocument.querySelector<HTMLElement>('.meo-preview-search-match.is-active');
+      const rect = match?.getBoundingClientRect();
+      return {
+        status: document.querySelector<HTMLElement>('.find-status')?.textContent,
+        visible: Boolean(rect && rect.bottom > 0 && rect.top < (frameDocument.defaultView?.innerHeight ?? 0))
+      };
+    });
+    if (activePreviewMatch.status !== '1/1' || !activePreviewMatch.visible) {
+      throw new Error(`Preview search did not reveal the active match: ${JSON.stringify(activePreviewMatch)}`);
+    }
+    await page.click('[data-action="find"]');
+    await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const anchor = frameDocument.querySelector<HTMLElement>('#anchor-133')!;
+      const scrollElement = frameDocument.scrollingElement!;
+      const rect = anchor.getBoundingClientRect();
+      scrollElement.scrollTop += rect.top + rect.height * ((138 - 133) / (222 - 133 + 1));
+    });
     const darkPreviewState = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const toggle = document.querySelector<HTMLElement>('.preview-appearance-button[data-appearance="light"]')!;

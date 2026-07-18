@@ -827,7 +827,12 @@ previewButton.title = 'Preview';
 modeGroup.append(liveButton, sourceButton, previewButton);
 
 const findPanelElements = createFindPanel(findToggleBtn);
-const findPanelController = createFindPanelController(findPanelElements, () => editor, toolbar, modeGroup);
+const findPanelController = createFindPanelController(
+  findPanelElements,
+  () => currentMode === 'preview' ? previewController.getSearchAdapter() : editor,
+  toolbar,
+  modeGroup
+);
 
 const selectionMenuElements = createSelectionMenu();
 const selectionMenuController = createSelectionMenuController(selectionMenuElements, () => editor);

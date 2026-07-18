@@ -89,7 +89,7 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   findRow.append(findInputWrap, wholeWordBtn, caseSensitiveBtn, findPrevBtn, findNextBtn);
 
   const replaceRow = document.createElement('div');
-  replaceRow.className = 'find-row';
+  replaceRow.className = 'find-row find-replace-row';
 
   const replaceInputWrap = document.createElement('div');
   replaceInputWrap.className = 'find-input-wrap';
