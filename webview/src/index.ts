@@ -861,6 +861,7 @@ let editor: any = null;
 let outlineController: ReturnType<typeof createOutlineController>;
 const previewController = createPreviewController({
   vscode,
+  onFindRequested: () => findPanelController.open('find'),
   onRendered: () => {
     if (outlineController?.isVisible()) {
       outlineController.refresh();
@@ -1436,6 +1437,15 @@ const queueChanges = (nextText: string) => {
 
 const updateModeUI = () => {
   root.dataset.mode = currentMode;
+  const replaceDisabled = currentMode === 'preview';
+  for (const control of [
+    findPanelElements.replaceInput,
+    findPanelElements.replaceClearBtn,
+    findPanelElements.replaceBtn,
+    findPanelElements.replaceAllBtn
+  ]) {
+    control.disabled = replaceDisabled;
+  }
   const buttons = [liveButton, sourceButton, previewButton];
   for (const button of buttons) {
     const selected = button.dataset.mode === currentMode;

@@ -23,6 +23,7 @@ interface MermaidResult {
 let mermaidInitialized = false;
 let mermaidThemeSignature = '';
 let mermaidRuntimePromise: Promise<MermaidRuntime> | null = null;
+let mermaidOperationQueue: Promise<void> = Promise.resolve();
 const MERMAID_CACHE_LIMIT = 100;
 const mermaidCache = new Map<string, MermaidResult>();
 const mermaidRenderInFlight = new Map<string, Promise<MermaidResult>>();
@@ -307,7 +308,7 @@ function getMermaidRuntime() {
   return runtime;
 }
 
-function loadMermaidRuntime() {
+export function loadMermaidRuntime() {
   const existing = getMermaidRuntime();
   if (existing) {
     return Promise.resolve(existing);
@@ -326,6 +327,7 @@ function loadMermaidRuntime() {
     const script = document.createElement('script');
     script.src = source;
     script.async = true;
+    script.nonce = document.body.dataset.meoScriptNonce ?? '';
     script.dataset.meoMermaidRuntime = 'true';
     script.onload = () => {
       const runtime = getMermaidRuntime();
@@ -368,6 +370,22 @@ function getCachedMermaidResult(cacheKey: string): MermaidResult | null {
   mermaidCache.delete(cacheKey);
   mermaidCache.set(cacheKey, cached);
   return cached;
+}
+
+export async function restoreMermaidEditorTheme(): Promise<void> {
+  const runtime = await loadMermaidRuntime();
+  const { signature, config } = getMermaidThemeConfig();
+  runtime.initialize(config);
+  mermaidThemeSignature = signature;
+  mermaidInitialized = true;
+}
+
+export function runExclusiveMermaidOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = mermaidOperationQueue
+    .catch(() => undefined)
+    .then(operation);
+  mermaidOperationQueue = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 function mermaidResultCacheKey(diagramText: string, themeSignature = getMermaidThemeConfig().signature): string {
@@ -440,8 +458,10 @@ async function renderMermaidDiagram(diagramText: string): Promise<MermaidResult>
   }
 
   const id = `mermaid-${++mermaidIdCounter}`;
-  const renderPromise: Promise<MermaidResult> = initMermaid()
-    .then((runtime) => runtime.render(id, normalizedDiagramText))
+  const renderPromise: Promise<MermaidResult> = runExclusiveMermaidOperation(async () => {
+    const runtime = await initMermaid();
+    return runtime.render(id, normalizedDiagramText);
+  })
     .then(({ svg }) => {
       const result: MermaidResult = { svg };
       cacheMermaidResult(cacheKey, result);

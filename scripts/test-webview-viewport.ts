@@ -81,6 +81,7 @@ async function main() {
     await page.addScriptTag({ content: `
       window.__hostMessages = [];
       window.__mermaidInitializeConfigs = [];
+      window.__mermaidConfig = null;
       document.body.dataset.meoMermaidSrc = ${JSON.stringify(previewMermaidRuntimeSrc)};
       window.acquireVsCodeApi = () => ({
         postMessage(message) { window.__hostMessages.push(message); },
@@ -88,11 +89,17 @@ async function main() {
         setState(state) { window.__webviewState = state; }
       });
       window.mermaid = {
-        initialize(config) { window.__mermaidInitializeConfigs.push(config); },
+        initialize(config) {
+          window.__mermaidConfig = config;
+          window.__mermaidInitializeConfigs.push(config);
+        },
         async render(id, source) {
           await new Promise(resolve => setTimeout(resolve, source.includes('Step18') ? 650 : source.includes('Check') ? 80 : 5));
           const height = source.includes('Step18') ? 3000 : source.includes('sequenceDiagram') ? 260 : 120;
-          return { svg: '<svg width="800" height="' + height + '" viewBox="0 0 800 ' + height + '"></svg>' };
+          const variables = window.__mermaidConfig?.themeVariables ?? {};
+          const fill = variables.primaryColor ?? '#ffffff';
+          const stroke = variables.primaryBorderColor ?? '#000000';
+          return { svg: '<svg width="800" height="' + height + '" viewBox="0 0 800 ' + height + '"><rect data-mermaid-node width="160" height="80" fill="' + fill + '" stroke="' + stroke + '"></rect></svg>' };
         }
       };
     ` });
@@ -357,19 +364,39 @@ async function main() {
     ) {
       throw new Error(`Preview footnote navigation replaced or missed the document: ${JSON.stringify(footnoteJumpState)}`);
     }
-    await page.click('[data-action="find"]');
+    await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      frameDocument.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'f',
+        code: 'KeyF',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+    });
+    const previewFindPanelOpened = await page.$eval('.find-panel', (element) => element.classList.contains('is-visible'));
+    if (!previewFindPanelOpened) {
+      throw new Error('Ctrl+F inside Preview did not open the find panel');
+    }
     await page.type('.find-panel .find-input[placeholder="Find"]', 'Tall Mermaid');
     await waitForFrames(page, 2);
     const previewFindState = await page.evaluate(() => {
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const replaceRow = document.querySelector<HTMLElement>('.find-replace-row')!;
+      const replaceInput = replaceRow.querySelector<HTMLInputElement>('[placeholder="Replace"]')!;
       return {
         status: document.querySelector<HTMLElement>('.find-status')?.textContent,
         matches: frameDocument.querySelectorAll('.meo-preview-search-match').length,
-        replaceVisible: getComputedStyle(replaceRow).display !== 'none'
+        replaceVisible: getComputedStyle(replaceRow).display !== 'none',
+        replaceDisabled: replaceInput.disabled
       };
     });
-    if (previewFindState.status !== '1 matches' || previewFindState.matches !== 1 || previewFindState.replaceVisible) {
+    if (
+      previewFindState.status !== '1 matches' ||
+      previewFindState.matches !== 1 ||
+      !previewFindState.replaceVisible ||
+      !previewFindState.replaceDisabled
+    ) {
       throw new Error(`Preview content search is unavailable: ${JSON.stringify(previewFindState)}`);
     }
     await page.keyboard.press('Enter');
@@ -546,20 +573,16 @@ async function main() {
       throw new Error(`Preview appearance was not persisted globally: ${JSON.stringify(appearanceMessages)}`);
     }
     const mermaidThemeIsolation = await page.evaluate(() => {
-      const frameWindow = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow as Window & {
-        __mermaidInitializeConfigs?: Array<{ themeVariables?: { darkMode?: boolean } }>;
-      };
-      const previewConfigs = frameWindow.__mermaidInitializeConfigs ?? [];
       const editorConfigs = (window as typeof window & {
         __mermaidInitializeConfigs?: Array<{ themeVariables?: { darkMode?: boolean } }>;
       }).__mermaidInitializeConfigs ?? [];
       return {
-        previewSawDark: previewConfigs.some((config) => config.themeVariables?.darkMode === true),
-        previewEndedLight: previewConfigs.at(-1)?.themeVariables?.darkMode === false,
-        editorStayedDark: editorConfigs.every((config) => config.themeVariables?.darkMode !== false)
+        previewSawDark: editorConfigs.some((config) => config.themeVariables?.darkMode === true),
+        previewSawLight: editorConfigs.some((config) => config.themeVariables?.darkMode === false),
+        editorEndedDark: editorConfigs.at(-1)?.themeVariables?.darkMode === true
       };
     });
-    if (!mermaidThemeIsolation.previewSawDark || !mermaidThemeIsolation.previewEndedLight || !mermaidThemeIsolation.editorStayedDark) {
+    if (!mermaidThemeIsolation.previewSawDark || !mermaidThemeIsolation.previewSawLight || !mermaidThemeIsolation.editorEndedDark) {
       throw new Error(`Preview Mermaid theme was not isolated: ${JSON.stringify(mermaidThemeIsolation)}`);
     }
     await page.click('.preview-toolbar-action[data-format="html"]');

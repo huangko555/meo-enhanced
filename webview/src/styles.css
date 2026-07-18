@@ -3686,7 +3686,15 @@ body.outline-resizing .preview-frame {
 }
 
 .editor-root[data-mode='preview'] .find-replace-row {
-  display: none;
+  display: flex;
+}
+
+.editor-root[data-mode='preview'] .find-replace-row > :not(.find-close-button):not(.find-button-spacer) {
+  opacity: 0.45;
+}
+
+.editor-root[data-mode='preview'] .find-replace-row :disabled {
+  cursor: default;
 }
 
 .cm-editor .meo-md-html-table-sticky-chrome.is-visible {
