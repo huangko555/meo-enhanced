@@ -46,7 +46,8 @@ try {
     markdownFilePath: 'C:/tmp/preview-mermaid.md',
     target: 'html'
   });
-  const styles = buildPreviewStyles(defaultThemeSettings, {}, 'light');
+  const lightStyles = buildPreviewStyles(defaultThemeSettings, {}, 'light');
+  const darkStyles = buildPreviewStyles(defaultThemeSettings, {}, 'dark');
   const liveSvg = await page.evaluate(async () => {
     const renderLiveMermaid = (window as typeof window & { __renderLiveMermaid?: () => Promise<string> })
       .__renderLiveMermaid;
@@ -55,21 +56,55 @@ try {
   if (!liveSvg.includes('<svg')) {
     throw new Error('Live Mermaid must render before switching to Preview');
   }
-  await page.evaluate(({ html, hasMermaid, styles }) => {
+  await page.evaluate(async () => {
+    (window as typeof window & { __queueSlowLiveOperations?: (count: number, delayMs: number) => void })
+      .__queueSlowLiveOperations?.(3, 300);
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    (window as typeof window & { __previewRenderedAt?: number }).__previewRenderedAt = 0;
+  });
+  const previewStartedAt = await page.evaluate(() => performance.now());
+  await page.evaluate(({ html, hasMermaid, lightStyles, darkStyles }) => {
     const controller = (window as typeof window & { __previewController?: any }).__previewController;
     controller.handleRendered({
       type: 'previewRendered',
       requestId: '',
       html,
       hasMermaid,
-      styles: { light: styles, dark: styles }
+      styles: { light: lightStyles, dark: darkStyles }
     });
-  }, { html: rendered.html, hasMermaid: rendered.hasMermaid, styles });
+  }, { html: rendered.html, hasMermaid: rendered.hasMermaid, lightStyles, darkStyles });
+
+  await page.waitForFunction(
+    (startedAt) => ((window as typeof window & { __previewRenderedAt?: number }).__previewRenderedAt ?? 0) > startedAt,
+    { timeout: 250 },
+    previewStartedAt
+  );
 
   await page.waitForFunction(() => Boolean(
     document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
       ?.querySelector('.meo-export-mermaid.is-rendered svg')
   ), { timeout: 5000 });
+  const mermaidReadyAfterMs = await page.evaluate((startedAt) => performance.now() - startedAt, previewStartedAt);
+  if (mermaidReadyAfterMs > 700) {
+    throw new Error(`Preview Mermaid was blocked behind hidden Live renders for ${Math.round(mermaidReadyAfterMs)}ms`);
+  }
+  const { darkNodeFill, darkPanelFill } = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const node = frameDocument?.querySelector<SVGElement>('.meo-export-mermaid.is-rendered .node rect');
+    const page = frameDocument?.querySelector<HTMLElement>('.meo-export-page');
+    const probe = frameDocument?.createElement('span');
+    if (page && probe) {
+      probe.style.color = 'var(--meo-code-bg)';
+      page.appendChild(probe);
+    }
+    return {
+      darkNodeFill: node ? frameDocument?.defaultView?.getComputedStyle(node).fill ?? '' : '',
+      darkPanelFill: probe ? frameDocument?.defaultView?.getComputedStyle(probe).color ?? '' : ''
+    };
+  });
+  if (!darkNodeFill || !darkPanelFill || darkNodeFill !== darkPanelFill) {
+    throw new Error(`Dark Preview Mermaid nodes must use ${darkPanelFill}, received ${darkNodeFill}`);
+  }
   console.log('Preview Mermaid runtime test passed');
 } finally {
   await browser.close();

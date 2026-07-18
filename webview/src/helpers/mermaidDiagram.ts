@@ -22,7 +22,16 @@ interface MermaidResult {
 
 let mermaidInitialized = false;
 let mermaidThemeSignature = '';
-let mermaidOperationQueue: Promise<void> = Promise.resolve();
+type MermaidOperationPriority = 'normal' | 'high';
+type MermaidOperationJob = {
+  operation: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
+};
+
+let mermaidOperationRunning = false;
+const mermaidHighPriorityOperations: MermaidOperationJob[] = [];
+const mermaidNormalPriorityOperations: MermaidOperationJob[] = [];
 const MERMAID_CACHE_LIMIT = 100;
 const mermaidCache = new Map<string, MermaidResult>();
 const mermaidRenderInFlight = new Map<string, Promise<MermaidResult>>();
@@ -343,12 +352,32 @@ export async function restoreMermaidEditorTheme(): Promise<void> {
   mermaidInitialized = true;
 }
 
-export function runExclusiveMermaidOperation<T>(operation: () => Promise<T>): Promise<T> {
-  const result = mermaidOperationQueue
-    .catch(() => undefined)
-    .then(operation);
-  mermaidOperationQueue = result.then(() => undefined, () => undefined);
-  return result;
+function runNextMermaidOperation(): void {
+  if (mermaidOperationRunning) return;
+  const job = mermaidHighPriorityOperations.shift() ?? mermaidNormalPriorityOperations.shift();
+  if (!job) return;
+  mermaidOperationRunning = true;
+  void job.operation()
+    .then(job.resolve, job.reject)
+    .finally(() => {
+      mermaidOperationRunning = false;
+      runNextMermaidOperation();
+    });
+}
+
+export function runExclusiveMermaidOperation<T>(
+  operation: () => Promise<T>,
+  priority: MermaidOperationPriority = 'normal'
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const job: MermaidOperationJob = {
+      operation,
+      resolve: (value) => resolve(value as T),
+      reject
+    };
+    (priority === 'high' ? mermaidHighPriorityOperations : mermaidNormalPriorityOperations).push(job);
+    runNextMermaidOperation();
+  });
 }
 
 function mermaidResultCacheKey(diagramText: string, themeSignature = getMermaidThemeConfig().signature): string {

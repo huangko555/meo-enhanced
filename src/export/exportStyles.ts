@@ -836,6 +836,9 @@ th:empty::before {
   height: auto;
   display: block;
 }
+.meo-export-mermaid .meo-export-mermaid-svg .node rect {
+  fill: var(--meo-code-bg) !important;
+}
 .meo-export-mermaid > pre.meo-export-code-block {
   margin: 0;
   border: 0;
