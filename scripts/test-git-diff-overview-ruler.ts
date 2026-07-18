@@ -25,6 +25,15 @@ function createTallMermaidFixture(targetText: string): string {
   return lines.join('\n');
 }
 
+function createTableFixture(value: string): string {
+  return [
+    '| Name | Value |',
+    '| --- | --- |',
+    `| ${value} | stable |`,
+    '| unchanged | stable |'
+  ].join('\n');
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-editor-stability-entry.ts')],
@@ -67,8 +76,52 @@ async function main(): Promise<void> {
       '.meo-git-overview-ruler-marker',
       (element) => element.getBoundingClientRect().width
     );
-    if (width !== 4) {
-      throw new Error(`Git diff overview marker width must be 4px, received ${width}px`);
+    if (width !== 3) {
+      throw new Error(`Git diff overview marker width must be 3px, received ${width}px`);
+    }
+
+    const tableCurrent = createTableFixture('changed');
+    const tableBase = createTableFixture('original');
+    await page.evaluate(({ current, base }) => {
+      (window as any).__editor.destroy();
+      document.getElementById('app')!.textContent = '';
+      const editor = (window as any).EditorStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: current,
+        initialMode: 'live',
+        initialGitGutter: true,
+        onApplyChanges() {}
+      });
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: base
+      });
+      (window as any).__editor = editor;
+    }, { current: tableCurrent, base: tableBase });
+    await page.waitForSelector('.meo-md-html-table tbody tr[data-source-line-number="3"]');
+    await waitForFrames(page);
+    const tableMarkerGeometry = await page.evaluate(() => {
+      const track = document.querySelector<HTMLElement>('.meo-git-overview-ruler')!;
+      const marker = track.querySelector<HTMLElement>('.meo-git-overview-ruler-marker')!;
+      const row = document.querySelector<HTMLElement>('.meo-md-html-table tbody tr[data-source-line-number="3"]')!;
+      const scroll = (window as any).__editor.getScrollElement() as HTMLElement;
+      const scrollRect = scroll.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const expectedTop = ((scroll.scrollTop + rowRect.top - scrollRect.top) / scroll.scrollHeight) * track.clientHeight;
+      return {
+        markerTop: Number.parseFloat(marker.style.top),
+        markerHeight: Number.parseFloat(marker.style.height),
+        rowHeight: rowRect.height,
+        expectedTop
+      };
+    });
+    if (
+      tableMarkerGeometry.markerHeight > tableMarkerGeometry.rowHeight + 4 ||
+      Math.abs(tableMarkerGeometry.markerTop - tableMarkerGeometry.expectedTop) > 4
+    ) {
+      throw new Error(`Table diff overview marker did not follow the changed row: ${JSON.stringify(tableMarkerGeometry)}`);
     }
 
     const currentText = createTallMermaidFixture('TARGET_CHANGE');

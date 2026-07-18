@@ -3077,7 +3077,7 @@ body.outline-resizing .preview-frame {
   top: 0;
   right: 10px;
   bottom: 0;
-  width: 4px;
+  width: 3px;
   border-left: 1px solid transparent;
   pointer-events: none;
   z-index: 5;
@@ -3092,20 +3092,20 @@ body.outline-resizing .preview-frame {
   left: 0;
   right: 0;
   border-radius: 1px;
-  opacity: 0.95;
+  opacity: 1;
   background: transparent;
 }
 
 .cm-editor .meo-git-overview-ruler-marker.is-added {
-  background: color-mix(in srgb, var(--git-added) 50%, transparent);
+  background: var(--git-added);
 }
 
 .cm-editor .meo-git-overview-ruler-marker.is-modified {
-  background: color-mix(in srgb, var(--git-changed) 50%, transparent);
+  background: var(--git-changed);
 }
 
 .cm-editor .meo-git-overview-ruler-marker.is-deleted {
-  background: color-mix(in srgb, var(--git-deleted) 70%, transparent);
+  background: var(--git-deleted);
 }
 
 .cm-editor .meo-git-overview-ruler-file-end {

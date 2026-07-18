@@ -2124,6 +2124,7 @@ export function createEditor({
   onScroll = () => {
     emitSelectionChange();
     gitBlameHover?.hide();
+    gitDiffOverviewRuler?.refresh();
     onViewportChange?.();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });

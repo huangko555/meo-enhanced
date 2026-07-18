@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { getGitDiffOverviewSegments } from './gitDiffGutter';
+import { getLiveRenderedBlockAtLine } from './liveRenderedBlocks';
 
 const minMarkerHeightPx = 2;
 
@@ -9,7 +10,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 interface TrackMetrics {
-  contentHeight: number;
+  scrollHeight: number;
+  contentBottom: number;
   fileEndY: number;
   showFileEndLine: boolean;
 }
@@ -18,16 +20,18 @@ function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
   const scrollEl = view?.scrollDOM;
   if (!scrollEl || trackHeight <= 0) {
     return {
-      contentHeight: Math.max(1, trackHeight),
+      scrollHeight: Math.max(1, trackHeight),
+      contentBottom: Math.max(1, trackHeight),
       fileEndY: trackHeight,
       showFileEndLine: false
     };
   }
 
-  const totalScrollHeight = Math.max(0, scrollEl.scrollHeight || 0);
+  const totalScrollHeight = Math.max(trackHeight, scrollEl.scrollHeight || 0);
   if (totalScrollHeight <= 0) {
     return {
-      contentHeight: Math.max(1, trackHeight),
+      scrollHeight: Math.max(1, trackHeight),
+      contentBottom: Math.max(1, trackHeight),
       fileEndY: trackHeight,
       showFileEndLine: false
     };
@@ -54,10 +58,58 @@ function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
   const fileEndRatio = clamp(contentBottom / totalScrollHeight, 0, 1);
   const fileEndY = clamp(Math.round(trackHeight * fileEndRatio), 0, trackHeight);
   return {
-    contentHeight: Math.max(1, contentBottom),
+    scrollHeight: totalScrollHeight,
+    contentBottom: Math.max(1, contentBottom),
     fileEndY,
     showFileEndLine: fileEndY > 0 && fileEndY < trackHeight
   };
+}
+
+interface LineGeometry {
+  top: number;
+  bottom: number;
+}
+
+function getLiveTableRowGeometry(view: EditorView): Map<number, LineGeometry> {
+  const rows = new Map<number, LineGeometry>();
+  const scrollRect = view.scrollDOM.getBoundingClientRect();
+  const scrollTop = view.scrollDOM.scrollTop;
+  for (const row of view.dom.querySelectorAll<HTMLElement>(
+    '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tr[data-source-line-number]'
+  )) {
+    const lineNumber = Number.parseInt(row.dataset.sourceLineNumber ?? '', 10);
+    if (!Number.isInteger(lineNumber) || lineNumber < 1) {
+      continue;
+    }
+    const rowRect = row.getBoundingClientRect();
+    const top = scrollTop + rowRect.top - scrollRect.top;
+    const bottom = top + rowRect.height;
+    if (Number.isFinite(top) && Number.isFinite(bottom) && bottom > top) {
+      rows.set(lineNumber, { top, bottom });
+    }
+  }
+  return rows;
+}
+
+function getLineGeometry(
+  view: EditorView,
+  lineNumber: number,
+  tableRows: Map<number, LineGeometry>
+): LineGeometry | null {
+  const tableRow = tableRows.get(lineNumber);
+  if (tableRow) {
+    return tableRow;
+  }
+  try {
+    const line = view.state.doc.line(lineNumber);
+    const block = view.lineBlockAt(line.from);
+    if (Number.isFinite(block?.top) && Number.isFinite(block?.bottom) && block.bottom > block.top) {
+      return { top: block.top, bottom: block.bottom };
+    }
+  } catch {
+    // Keep the line-based fallback if CodeMirror cannot measure this range yet.
+  }
+  return null;
 }
 
 interface PixelSegment {
@@ -152,6 +204,7 @@ export function createGitDiffOverviewRulerController({
 
     const totalLines = Math.max(1, view.state.doc.lines);
     const segments = getGitDiffOverviewSegments(view.state);
+    const tableRows = getLiveTableRowGeometry(view);
     if (!segments.length) {
       const renderKey = `track-only:${mode}:no-segments:${totalLines}:${trackHeight}:${trackMetrics.fileEndY}:${trackMetrics.showFileEndLine ? 1 : 0}`;
       if (renderKey === lastRenderKey) {
@@ -173,17 +226,19 @@ export function createGitDiffOverviewRulerController({
     for (const segment of segments) {
       let topRatio = (segment.fromLine - 1) / totalLines;
       let bottomRatio = segment.toLine / totalLines;
-      try {
-        const fromLine = view.state.doc.line(segment.fromLine);
-        const toLine = view.state.doc.line(segment.toLine);
-        const fromBlock = view.lineBlockAt(fromLine.from);
-        const toBlock = view.lineBlockAt(toLine.from);
-        if (Number.isFinite(fromBlock?.top) && Number.isFinite(toBlock?.bottom)) {
-          topRatio = fromBlock.top / trackMetrics.contentHeight;
-          bottomRatio = toBlock.bottom / trackMetrics.contentHeight;
-        }
-      } catch {
-        // Keep the line-based fallback if CodeMirror cannot measure this range yet.
+      const fromGeometry = getLineGeometry(view, segment.fromLine, tableRows);
+      const toGeometry = getLineGeometry(view, segment.toLine, tableRows);
+      const isTableSegment = mode === 'live' && (
+        getLiveRenderedBlockAtLine(view.state, segment.fromLine)?.kind === 'table' ||
+        getLiveRenderedBlockAtLine(view.state, segment.toLine)?.kind === 'table'
+      );
+      const hasTableRowGeometry = tableRows.has(segment.fromLine) && tableRows.has(segment.toLine);
+      if (fromGeometry && toGeometry && (!isTableSegment || hasTableRowGeometry)) {
+        topRatio = fromGeometry.top / trackMetrics.scrollHeight;
+        bottomRatio = toGeometry.bottom / trackMetrics.scrollHeight;
+      } else {
+        topRatio = (topRatio * trackMetrics.contentBottom) / trackMetrics.scrollHeight;
+        bottomRatio = (bottomRatio * trackMetrics.contentBottom) / trackMetrics.scrollHeight;
       }
       let top = Math.floor(topRatio * trackHeight);
       let bottom = Math.ceil(bottomRatio * trackHeight);

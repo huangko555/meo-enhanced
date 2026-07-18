@@ -10,6 +10,61 @@ type PreviewControllerOptions = {
   onFindRequested?: () => void;
 };
 
+const previewScrollbarStyles = `
+html,
+body {
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--meo-fg) 38%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 10px !important;
+  height: 10px !important;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  -webkit-appearance: none;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  -webkit-appearance: none;
+  background: color-mix(in srgb, var(--meo-fg) 38%, transparent) !important;
+  background-clip: border-box !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  -webkit-appearance: none;
+  background: color-mix(in srgb, var(--meo-fg) 50%, transparent) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html::-webkit-scrollbar-thumb:active,
+body::-webkit-scrollbar-thumb:active {
+  -webkit-appearance: none;
+  background: color-mix(in srgb, var(--meo-fg) 62%, transparent) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html::-webkit-scrollbar-corner,
+body::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+`;
+
 export function createPreviewController({ vscode, onRendered, onFindRequested }: PreviewControllerOptions) {
   const host = document.createElement('div');
   host.className = 'preview-host';
@@ -213,7 +268,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
       }
     };
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style data-meo-preview-styles>${styles}</style><style>.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {
