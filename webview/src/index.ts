@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Ellipsis, ChevronDown, UserRound } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, SlidersHorizontal, UserRound, Check } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -162,7 +162,6 @@ let contentMaxWidthEnabled = false;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
 
 const CONTENT_MAX_WIDTH_ENABLED_VALUE = '800px';
-const CONTENT_MAX_WIDTH_DISABLED_VALUE = '100%';
 
 const createOutlineButton = (position: 'left' | 'right') => {
   const button = document.createElement('button');
@@ -178,19 +177,38 @@ const createOutlineButton = (position: 'left' | 'right') => {
 const outlineLeftBtn = createOutlineButton('left');
 const outlineBtn = createOutlineButton('right');
 
+const appendMoreToolsOptionContent = (
+  button: HTMLButtonElement,
+  icon: Parameters<typeof createElement>[0],
+  labelText: string
+) => {
+  const iconElement = document.createElement('span');
+  iconElement.className = 'more-tools-option-icon';
+  iconElement.appendChild(createElement(icon, { width: 16, height: 16 }));
+  const label = document.createElement('span');
+  label.className = 'more-tools-option-label';
+  label.textContent = labelText;
+  const check = document.createElement('span');
+  check.className = 'more-tools-option-check';
+  check.appendChild(createElement(Check, { width: 14, height: 14 }));
+  button.append(iconElement, label, check);
+};
+
 const contentMaxWidthBtn = document.createElement('button');
 contentMaxWidthBtn.type = 'button';
-contentMaxWidthBtn.className = 'format-button toggle-button';
+contentMaxWidthBtn.className = 'more-tools-option more-tools-toggle-option';
 contentMaxWidthBtn.dataset.action = 'contentMaxWidth';
 contentMaxWidthBtn.title = 'Constrain Content Width';
-contentMaxWidthBtn.appendChild(createElement(PanelLeftRightDashed, { width: 18, height: 18 }));
+contentMaxWidthBtn.setAttribute('role', 'menuitemcheckbox');
+appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, 'Constrain Width');
 
 const lineNumbersBtn = document.createElement('button');
 lineNumbersBtn.type = 'button';
-lineNumbersBtn.className = 'format-button toggle-button is-active';
+lineNumbersBtn.className = 'more-tools-option more-tools-toggle-option is-active';
 lineNumbersBtn.dataset.action = 'lineNumbers';
 lineNumbersBtn.title = 'Hide Line Numbers';
-lineNumbersBtn.appendChild(createElement(Hash, { width: 18, height: 18 }));
+lineNumbersBtn.setAttribute('role', 'menuitemcheckbox');
+appendMoreToolsOptionContent(lineNumbersBtn, Hash, 'Line Numbers');
 
 const gitChangesGutterBtn = document.createElement('button');
 gitChangesGutterBtn.type = 'button';
@@ -199,63 +217,46 @@ gitChangesGutterBtn.dataset.action = 'gitChangesGutter';
 gitChangesGutterBtn.title = 'Hide Changes';
 gitChangesGutterBtn.appendChild(createElement(GitCompare, { width: 18, height: 18 }));
 
-const diffBaselineMenuButton = document.createElement('button');
-diffBaselineMenuButton.type = 'button';
-diffBaselineMenuButton.className = 'format-button changes-baseline-menu-button';
-diffBaselineMenuButton.title = 'Choose Change Baseline';
-diffBaselineMenuButton.setAttribute('aria-label', diffBaselineMenuButton.title);
-diffBaselineMenuButton.setAttribute('aria-haspopup', 'menu');
-diffBaselineMenuButton.setAttribute('aria-expanded', 'false');
-diffBaselineMenuButton.appendChild(createElement(ChevronDown, { width: 12, height: 12 }));
-
-const diffBaselineMenu = document.createElement('div');
-diffBaselineMenu.className = 'changes-baseline-menu';
-diffBaselineMenu.setAttribute('role', 'menu');
-diffBaselineMenu.hidden = true;
-
 const diffBaselineOptions = [
-  { mode: 'current-edit', label: 'Current Edits', description: 'Latest saved disk version' },
-  { mode: 'recent-save', label: 'Recent Save', description: 'Before the latest save batch' },
-  { mode: 'git-head', label: 'Git HEAD', description: 'File at Git HEAD' }
+  { mode: 'current-edit', label: 'Current Edits' },
+  { mode: 'recent-save', label: 'Recent Save' },
+  { mode: 'git-head', label: 'Git HEAD' }
 ] as const;
 
+const diffBaselineButtons: HTMLButtonElement[] = [];
 for (const option of diffBaselineOptions) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'changes-baseline-option';
+  button.className = 'more-tools-option changes-baseline-option';
   button.dataset.baselineMode = option.mode;
   button.setAttribute('role', 'menuitemradio');
-  const label = document.createElement('span');
-  label.className = 'changes-baseline-option-label';
-  label.textContent = option.label;
-  const description = document.createElement('span');
-  description.className = 'changes-baseline-option-description';
-  description.textContent = option.description;
-  button.append(label, description);
-  diffBaselineMenu.appendChild(button);
+  appendMoreToolsOptionContent(button, GitCompare, option.label);
+  diffBaselineButtons.push(button);
 }
 
 const changesControls = document.createElement('div');
 changesControls.className = 'changes-controls';
-changesControls.append(gitChangesGutterBtn, diffBaselineMenuButton, diffBaselineMenu);
+changesControls.append(gitChangesGutterBtn);
 
 const spellCheckBtn = document.createElement('button');
 spellCheckBtn.type = 'button';
-spellCheckBtn.className = 'format-button toggle-button is-active';
+spellCheckBtn.className = 'more-tools-option more-tools-toggle-option is-active';
 spellCheckBtn.dataset.action = 'spellCheck';
 spellCheckBtn.title = 'Disable Spellcheck';
-spellCheckBtn.appendChild(createElement(SpellCheck2, { width: 18, height: 18 }));
+spellCheckBtn.setAttribute('role', 'menuitemcheckbox');
+appendMoreToolsOptionContent(spellCheckBtn, SpellCheck2, 'Spellcheck');
 
 const gitBlameBtn = document.createElement('button');
 gitBlameBtn.type = 'button';
-gitBlameBtn.className = 'format-button toggle-button';
+gitBlameBtn.className = 'more-tools-option more-tools-toggle-option';
 gitBlameBtn.dataset.action = 'gitBlame';
 gitBlameBtn.title = 'Show Line Authors';
-gitBlameBtn.appendChild(createElement(UserRound, { width: 18, height: 18 }));
+gitBlameBtn.setAttribute('role', 'menuitemcheckbox');
+appendMoreToolsOptionContent(gitBlameBtn, UserRound, 'Line Authors');
 
 const updateLineNumbersUI = () => {
   lineNumbersBtn.classList.toggle('is-active', lineNumbersVisible);
-  lineNumbersBtn.setAttribute('aria-pressed', lineNumbersVisible ? 'true' : 'false');
+  lineNumbersBtn.setAttribute('aria-checked', lineNumbersVisible ? 'true' : 'false');
   lineNumbersBtn.title = lineNumbersVisible ? 'Hide Line Numbers' : 'Show Line Numbers';
 };
 
@@ -264,7 +265,7 @@ const updateGitChangesGutterUI = () => {
   gitChangesGutterBtn.setAttribute('aria-pressed', gitChangesGutterVisible ? 'true' : 'false');
   const modeLabel = diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Changes';
   gitChangesGutterBtn.title = gitChangesGutterVisible ? `Hide Changes (${modeLabel})` : `Show Changes (${modeLabel})`;
-  for (const option of diffBaselineMenu.querySelectorAll<HTMLElement>('.changes-baseline-option')) {
+  for (const option of diffBaselineButtons) {
     const active = option.dataset.baselineMode === diffBaselineMode;
     option.classList.toggle('is-active', active);
     option.setAttribute('aria-checked', active ? 'true' : 'false');
@@ -288,21 +289,21 @@ const setDiffBaselineMode = (
 
 const updateSpellCheckUI = () => {
   spellCheckBtn.classList.toggle('is-active', spellCheckEnabled);
-  spellCheckBtn.setAttribute('aria-pressed', spellCheckEnabled ? 'true' : 'false');
+  spellCheckBtn.setAttribute('aria-checked', spellCheckEnabled ? 'true' : 'false');
   spellCheckBtn.title = spellCheckEnabled ? 'Disable Spellcheck' : 'Enable Spellcheck';
 };
 
 const updateGitBlameUI = () => {
   gitBlameBtn.classList.toggle('is-active', gitBlameEnabled);
-  gitBlameBtn.setAttribute('aria-pressed', gitBlameEnabled ? 'true' : 'false');
+  gitBlameBtn.setAttribute('aria-checked', gitBlameEnabled ? 'true' : 'false');
   gitBlameBtn.title = gitBlameEnabled ? 'Hide Line Authors' : 'Show Line Authors';
   gitBlameBtn.setAttribute('aria-label', gitBlameBtn.title);
 };
 
 const updateContentMaxWidthUI = () => {
-  contentMaxWidthBtn.classList.toggle('is-active', !contentMaxWidthEnabled);
-  contentMaxWidthBtn.setAttribute('aria-pressed', contentMaxWidthEnabled ? 'false' : 'true');
-  contentMaxWidthBtn.title = contentMaxWidthEnabled ? 'Use Full Content Width' : 'Constrain Content Width';
+  contentMaxWidthBtn.classList.toggle('is-active', contentMaxWidthEnabled);
+  contentMaxWidthBtn.setAttribute('aria-checked', contentMaxWidthEnabled ? 'true' : 'false');
+  contentMaxWidthBtn.title = contentMaxWidthEnabled ? 'Disable Constrained Width' : 'Constrain Content Width';
 };
 
 const syncGitDiffLineHighlights = () => {
@@ -375,10 +376,11 @@ const setContentMaxWidthEnabled = (enabled, { post = true, persist = true } = {}
     contentMaxWidthEnabled = nextEnabled;
   }
   document.documentElement.classList.toggle('meo-content-max-width-enabled', contentMaxWidthEnabled);
-  document.documentElement.style.setProperty(
-    '--meo-content-max-width',
-    contentMaxWidthEnabled ? CONTENT_MAX_WIDTH_ENABLED_VALUE : CONTENT_MAX_WIDTH_DISABLED_VALUE
-  );
+  if (contentMaxWidthEnabled) {
+    document.documentElement.style.setProperty('--meo-content-max-width', CONTENT_MAX_WIDTH_ENABLED_VALUE);
+  } else {
+    document.documentElement.style.removeProperty('--meo-content-max-width');
+  }
   updateContentMaxWidthUI();
   if (persist) {
     persistUiState();
@@ -697,63 +699,52 @@ findToggleBtn.dataset.action = 'find';
 findToggleBtn.title = 'Find and Replace';
 findToggleBtn.appendChild(createElement(Search, { width: 18, height: 18 }));
 
-const exportBtn = document.createElement('button');
-exportBtn.type = 'button';
-exportBtn.className = 'format-button export-button';
-exportBtn.dataset.action = 'export';
-exportBtn.title = 'Export';
-exportBtn.setAttribute('aria-label', 'Export');
-exportBtn.appendChild(createElement(Share, { width: 18, height: 18 }));
-
-const exportDropdown = document.createElement('div');
-exportDropdown.className = 'export-dropdown';
-exportDropdown.setAttribute('role', 'menu');
-exportDropdown.setAttribute('aria-label', 'Export formats');
-
-const exportDropdownWrapper = document.createElement('div');
-exportDropdownWrapper.className = 'export-dropdown-wrapper';
-
 const exportHtmlOption = document.createElement('button');
 exportHtmlOption.type = 'button';
-exportHtmlOption.className = 'export-dropdown-option';
+exportHtmlOption.className = 'more-tools-option more-tools-action-option';
 exportHtmlOption.dataset.format = 'html';
 exportHtmlOption.title = 'Export as HTML';
-exportHtmlOption.textContent = 'HTML';
+exportHtmlOption.setAttribute('role', 'menuitem');
+appendMoreToolsOptionContent(exportHtmlOption, Share, 'Export HTML');
 
 const exportPdfOption = document.createElement('button');
 exportPdfOption.type = 'button';
-exportPdfOption.className = 'export-dropdown-option';
+exportPdfOption.className = 'more-tools-option more-tools-action-option';
 exportPdfOption.dataset.format = 'pdf';
 exportPdfOption.title = 'Export as PDF';
-exportPdfOption.textContent = 'PDF';
-
-exportDropdown.append(exportHtmlOption, exportPdfOption);
-exportDropdownWrapper.appendChild(exportDropdown);
-
-const exportWrapper = document.createElement('div');
-exportWrapper.className = 'export-wrapper';
-exportWrapper.append(exportBtn, exportDropdownWrapper);
+exportPdfOption.setAttribute('role', 'menuitem');
+appendMoreToolsOptionContent(exportPdfOption, Share, 'Export PDF');
 
 const moreToolsButton = document.createElement('button');
 moreToolsButton.type = 'button';
 moreToolsButton.className = 'format-button';
 moreToolsButton.title = 'More';
 moreToolsButton.setAttribute('aria-label', 'More tools');
-moreToolsButton.setAttribute('aria-haspopup', 'true');
+moreToolsButton.setAttribute('aria-haspopup', 'menu');
 moreToolsButton.setAttribute('aria-expanded', 'false');
-moreToolsButton.appendChild(createElement(Ellipsis, { width: 18, height: 18 }));
+moreToolsButton.appendChild(createElement(SlidersHorizontal, { width: 18, height: 18 }));
 
 const moreToolsPanel = document.createElement('div');
 moreToolsPanel.className = 'more-tools-panel';
-moreToolsPanel.setAttribute('role', 'toolbar');
+moreToolsPanel.setAttribute('role', 'menu');
 moreToolsPanel.setAttribute('aria-label', 'More tools');
 moreToolsPanel.hidden = true;
+const changesSeparator = document.createElement('div');
+changesSeparator.className = 'more-tools-separator';
+changesSeparator.setAttribute('role', 'separator');
+const exportSeparator = document.createElement('div');
+exportSeparator.className = 'more-tools-separator';
+exportSeparator.setAttribute('role', 'separator');
 moreToolsPanel.append(
+  ...diffBaselineButtons,
+  changesSeparator,
   contentMaxWidthBtn,
   lineNumbersBtn,
   gitBlameBtn,
   spellCheckBtn,
-  exportWrapper
+  exportSeparator,
+  exportHtmlOption,
+  exportPdfOption
 );
 
 const moreToolsWrapper = document.createElement('div');
@@ -783,30 +774,13 @@ rightGroup.append(
   moreToolsWrapper
 );
 
-const setDiffBaselineMenuVisible = (visible: boolean) => {
-  diffBaselineMenu.hidden = !visible;
-  diffBaselineMenuButton.classList.toggle('is-active', visible);
-  diffBaselineMenuButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
-};
-
-diffBaselineMenuButton.addEventListener('click', () => {
-  setDiffBaselineMenuVisible(diffBaselineMenu.hidden);
-});
-
-diffBaselineMenu.addEventListener('click', (event) => {
+moreToolsPanel.addEventListener('click', (event) => {
   const option = (event.target as Element).closest<HTMLElement>('.changes-baseline-option');
   const mode = option?.dataset.baselineMode;
   if (mode === 'current-edit' || mode === 'recent-save' || mode === 'git-head') {
     setDiffBaselineMode(mode);
-    setDiffBaselineMenuVisible(false);
   }
 });
-
-document.addEventListener('pointerdown', (event) => {
-  if (!changesControls.contains(event.target as Node)) {
-    setDiffBaselineMenuVisible(false);
-  }
-}, true);
 
 const modeGroup = document.createElement('div');
 modeGroup.className = 'mode-group';
@@ -2288,9 +2262,11 @@ wikiLinkBtn.addEventListener('click', () => handleFormatAction('wikiLink'));
 imageBtn.addEventListener('click', () => handleFormatAction('image'));
 exportHtmlOption.addEventListener('click', () => {
   exportHandler.requestExport('html');
+  setMoreToolsVisible(false);
 });
 exportPdfOption.addEventListener('click', () => {
   exportHandler.requestExport('pdf');
+  setMoreToolsVisible(false);
 });
 const showOutlineAt = (position: 'left' | 'right') => {
   if (outlineController.isVisible() && outlineController.getPosition() === position) {

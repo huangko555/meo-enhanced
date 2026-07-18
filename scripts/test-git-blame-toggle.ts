@@ -102,10 +102,10 @@ async function main(): Promise<void> {
     const blameButton = await page.$('[data-action="gitBlame"]');
     if (!blameButton) throw new Error('More tools did not contain the line author toggle');
     const initialButtonState = await blameButton.evaluate((button) => ({
-      pressed: button.getAttribute('aria-pressed'),
+      checked: button.getAttribute('aria-checked'),
       insideMore: Boolean(button.closest('.more-tools-panel'))
     }));
-    if (initialButtonState.pressed !== 'false' || !initialButtonState.insideMore) {
+    if (initialButtonState.checked !== 'false' || !initialButtonState.insideMore) {
       throw new Error(`Line author toggle did not default off inside More: ${JSON.stringify(initialButtonState)}`);
     }
 
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     await page.click('[aria-label="More tools"]');
     await blameButton.click();
     await page.click('[aria-label="More tools"]');
-    const enabledState = await blameButton.evaluate((button) => button.getAttribute('aria-pressed'));
+    const enabledState = await blameButton.evaluate((button) => button.getAttribute('aria-checked'));
     if (enabledState !== 'true') throw new Error('Line author toggle did not become enabled');
     const settingMessage = await page.evaluate(() => (window as any).__hostMessages.find((message: any) => message.type === 'setGitBlame'));
     if (!settingMessage || settingMessage.enabled !== true) throw new Error('Enabling line authors did not persist the setting');
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
 
     await page.click('[aria-label="More tools"]');
     await blameButton.click();
-    const disabledState = await blameButton.evaluate((button) => button.getAttribute('aria-pressed'));
+    const disabledState = await blameButton.evaluate((button) => button.getAttribute('aria-checked'));
     const tooltipHidden = await page.$eval('.meo-git-blame-tooltip', (tooltip) => (tooltip as HTMLElement).hidden);
     if (disabledState !== 'false' || !tooltipHidden) throw new Error('Disabling line authors did not immediately hide the tooltip');
     await page.evaluate(() => { (window as any).__hostMessages = []; });

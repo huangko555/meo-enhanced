@@ -201,7 +201,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 14px 8px 30px;
+  padding: 8px 14px 8px 10px;
   background-color: var(--vscode-sideBar-background);
 }
 
@@ -508,69 +508,6 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0;
-}
-
-.changes-controls > .format-button:first-child {
-  border-radius: 6px 0 0 6px;
-}
-
-.changes-baseline-menu-button {
-  width: 16px;
-  min-width: 16px;
-  padding: 0;
-  border-radius: 0 6px 6px 0;
-}
-
-.changes-baseline-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 300;
-  width: 240px;
-  padding: 4px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
-  background: var(--vscode-sideBar-background);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
-}
-
-.changes-baseline-menu[hidden] {
-  display: none;
-}
-
-.changes-baseline-option {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--vscode-editor-foreground);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.changes-baseline-option:hover,
-.changes-baseline-option:focus-visible {
-  background: var(--vscode-toolbar-hoverBackground);
-  outline: none;
-}
-
-.changes-baseline-option.is-active {
-  background: var(--vscode-list-activeSelectionBackground, var(--vscode-toolbar-hoverBackground));
-}
-
-.changes-baseline-option-label {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.changes-baseline-option-description {
-  margin-top: 2px;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
 }
 
 .more-tools-panel {
@@ -579,8 +516,10 @@ body {
   right: 0;
   z-index: 300;
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 200px;
   padding: 4px;
   border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
@@ -590,6 +529,57 @@ body {
 
 .more-tools-panel[hidden] {
   display: none;
+}
+
+.more-tools-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.more-tools-option:hover,
+.more-tools-option:focus-visible,
+.changes-baseline-option.is-active {
+  background: var(--vscode-toolbar-hoverBackground);
+  outline: none;
+}
+
+.more-tools-option-icon,
+.more-tools-option-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.more-tools-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more-tools-option-check {
+  visibility: hidden;
+}
+
+.more-tools-option.is-active .more-tools-option-check {
+  visibility: visible;
+}
+
+.more-tools-separator {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--vscode-panel-border);
 }
 
 .format-separator {
@@ -633,62 +623,6 @@ body {
 
 .table-wrapper {
   position: relative;
-}
-
-.export-wrapper {
-  position: relative;
-}
-
-.export-dropdown-wrapper {
-  position: absolute;
-  top: 100%;
-  left: calc(50% + 1px);
-  transform: translateX(-50%);
-  padding: 5px 25px;
-  z-index: 100;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease;
-}
-
-.export-dropdown {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px;
-  width: fit-content;
-  background-color: var(--vscode-sideBar-background);
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
-}
-
-.export-dropdown-option {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--vscode-editor-foreground);
-  background-color: transparent;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-}
-
-.export-wrapper:hover .export-dropdown-wrapper,
-.export-wrapper:focus-within .export-dropdown-wrapper {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.export-dropdown-option:hover,
-.export-dropdown-option:focus-visible {
-  background-color: var(--vscode-toolbar-hoverBackground);
-  outline: none;
 }
 
 .table-dropdown-wrapper {
@@ -777,6 +711,7 @@ body {
 
 .format-button:hover,
 .heading-dropdown-option:hover,
+.more-tools-wrapper > .format-button.is-active,
 .mode-button.is-active {
   background-color: var(--vscode-toolbar-hoverBackground);
 }

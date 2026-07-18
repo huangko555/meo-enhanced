@@ -132,6 +132,35 @@ async function main() {
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);
     }
+    await page.click('[aria-label="More tools"]');
+    const moreToolsLayout = await page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>('.more-tools-panel')!;
+      const options = Array.from(panel.querySelectorAll<HTMLElement>(':scope > .more-tools-option'));
+      return {
+        labels: options.map((option) => option.querySelector('.more-tools-option-label')?.textContent),
+        directChildren: options.every((option) => option.parentElement === panel),
+        baselineIcons: options.slice(0, 3).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
+        exportIcons: options.slice(-2).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
+        separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length
+      };
+    });
+    if (
+      JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
+        'Current Edits', 'Recent Save', 'Git HEAD',
+        'Constrain Width', 'Line Numbers', 'Line Authors', 'Spellcheck',
+        'Export HTML', 'Export PDF'
+      ]) ||
+      !moreToolsLayout.directChildren ||
+      moreToolsLayout.separatorCount !== 2 ||
+      moreToolsLayout.baselineIcons.some((icon) => !icon) ||
+      moreToolsLayout.exportIcons.some((icon) => !icon) ||
+      new Set(moreToolsLayout.baselineIcons).size !== 1 ||
+      new Set(moreToolsLayout.exportIcons).size !== 1 ||
+      moreToolsLayout.baselineIcons[0] === moreToolsLayout.exportIcons[0]
+    ) {
+      throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
+    }
+    await page.click('[aria-label="More tools"]');
     const measureToolbarStart = () => page.evaluate(() => {
       const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
       const firstButton = document.querySelector<HTMLElement>('.format-group > .format-button')!;
@@ -147,19 +176,45 @@ async function main() {
     });
     await waitForFrames(page);
     const toggledToolbarStart = await measureToolbarStart();
+    const constrainedWidthState = await page.evaluate(() => {
+      const button = document.querySelector<HTMLElement>('[data-action="contentMaxWidth"]')!;
+      return {
+        active: button.classList.contains('is-active'),
+        checked: button.getAttribute('aria-checked'),
+        widthOverride: document.documentElement.style.getPropertyValue('--meo-content-max-width')
+      };
+    });
     if (
-      initialToolbarStart.paddingLeft !== 30 ||
-      Math.abs(initialToolbarStart.firstButtonOffset - 30) > 0.5 ||
-      toggledToolbarStart.paddingLeft !== 30 ||
-      Math.abs(toggledToolbarStart.firstButtonOffset - 30) > 0.5
+      initialToolbarStart.paddingLeft !== 10 ||
+      Math.abs(initialToolbarStart.firstButtonOffset - 10) > 0.5 ||
+      toggledToolbarStart.paddingLeft !== 10 ||
+      Math.abs(toggledToolbarStart.firstButtonOffset - 10) > 0.5 ||
+      !constrainedWidthState.active ||
+      constrainedWidthState.checked !== 'true' ||
+      constrainedWidthState.widthOverride !== '800px'
     ) {
-      throw new Error(`Toolbar did not keep the expected left inset: ${JSON.stringify({ initialToolbarStart, toggledToolbarStart })}`);
+      throw new Error(`Toolbar settings did not update as expected: ${JSON.stringify({ initialToolbarStart, toggledToolbarStart, constrainedWidthState })}`);
     }
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'lineNumbersChanged', enabled: true } }));
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'contentMaxWidthChanged', enabled: false } }));
     });
     await waitForFrames(page);
+    const unconstrainedWidthState = await page.evaluate(() => {
+      const button = document.querySelector<HTMLElement>('[data-action="contentMaxWidth"]')!;
+      return {
+        active: button.classList.contains('is-active'),
+        checked: button.getAttribute('aria-checked'),
+        widthOverride: document.documentElement.style.getPropertyValue('--meo-content-max-width')
+      };
+    });
+    if (
+      unconstrainedWidthState.active ||
+      unconstrainedWidthState.checked !== 'false' ||
+      unconstrainedWidthState.widthOverride !== ''
+    ) {
+      throw new Error(`Disabled constrained width still changed the layout: ${JSON.stringify(unconstrainedWidthState)}`);
+    }
     await page.click('[data-action="save"]');
     await waitForFrames(page, 2);
     const saveMessages = await page.evaluate(() => (
