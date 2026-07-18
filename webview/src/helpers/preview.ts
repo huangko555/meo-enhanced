@@ -2,6 +2,7 @@ import { createElement, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import type { OutlineHeading } from './outline';
 import type { PreviewAppearance, PreviewRenderErrorMessage, PreviewRenderedMessage } from '../../../src/shared/preview';
+import { restoreMermaidEditorTheme } from './mermaidDiagram';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
@@ -36,7 +37,17 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   let requestCounter = 0;
   let pendingRequestId = '';
   let pendingRestoreLine: number | null = null;
+  let pendingText = '';
+  let latestRenderedText = '';
   let latestPayload: PreviewRenderedMessage | null = null;
+
+  const restoreEditorMermaidTheme = async (): Promise<void> => {
+    try {
+      await restoreMermaidEditorTheme();
+    } catch {
+      // Preview remains readable even if the shared Mermaid runtime is unavailable.
+    }
+  };
 
   const updateThemeToggle = () => {
     const switchToLight = appearance === 'dark';
@@ -83,7 +94,9 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
         onRendered?.();
       };
       if (latestPayload?.hasMermaid) {
-        void renderMermaidBlocks(frameDocument, appearance).finally(finishRender);
+        void renderMermaidBlocks(frameDocument, appearance)
+          .finally(restoreEditorMermaidTheme)
+          .finally(finishRender);
       } else {
         finishRender();
       }
@@ -106,16 +119,27 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
       onRendered?.();
     };
     if (latestPayload.hasMermaid) {
-      void renderMermaidBlocks(frameDocument, appearance).finally(finish);
+      void renderMermaidBlocks(frameDocument, appearance)
+        .finally(restoreEditorMermaidTheme)
+        .finally(finish);
     } else {
       finish();
     }
   };
 
   const requestRender = (text: string, { restoreLine = null }: { restoreLine?: number | null } = {}) => {
+    if (latestPayload && text === latestRenderedText && frame.contentDocument?.querySelector('.meo-export-doc')) {
+      setStatus(null);
+      if (restoreLine !== null) {
+        restoreTopLine(restoreLine);
+      }
+      onRendered?.();
+      return;
+    }
     const requestId = `preview-${Date.now()}-${requestCounter += 1}`;
     pendingRequestId = requestId;
     pendingRestoreLine = restoreLine;
+    pendingText = text;
     setStatus('正在生成预览…');
     vscode.postMessage({
       type: 'requestPreviewRender',
@@ -130,6 +154,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
       return;
     }
     latestPayload = message;
+    latestRenderedText = pendingText;
     setStatus(null);
     const restoreLine = pendingRestoreLine;
     pendingRestoreLine = null;
@@ -172,7 +197,10 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
         return { element, ...range };
       }
       if (range.start > line) {
-        const fallback = candidate ?? element;
+        const candidateRange = candidate ? getSourceRange(candidate) : null;
+        const fallback = candidateRange && line - candidateRange.end <= range.start - line
+          ? candidate
+          : element;
         const fallbackRange = getSourceRange(fallback)!;
         return { element: fallback, ...fallbackRange };
       }

@@ -499,9 +499,11 @@ strong { color: var(--meo-strong); }
 em { font-style: italic; }
 code {
   font-family: var(--meo-font-code);
-  font-weight: var(--meo-font-weight-code);
-  font-size: var(--meo-font-size-code);
-  line-height: var(--meo-code-line-height);
+  font-weight: inherit;
+  font-size: 1em;
+  line-height: inherit;
+  font-style: inherit;
+  text-decoration: inherit;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
   text-rendering: auto;
@@ -617,6 +619,11 @@ pre.meo-export-code-block {
 }
 pre.meo-export-code-block code {
   display: block;
+  font-weight: var(--meo-font-weight-code);
+  font-size: var(--meo-font-size-code);
+  line-height: var(--meo-code-line-height);
+  font-style: normal;
+  text-decoration: none;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -658,7 +665,7 @@ table {
 }
 th, td {
   border: 1px solid var(--meo-table-border);
-  padding: 0.45em 0.6em;
+  padding: 0.55em 0.85em;
   vertical-align: top;
   text-align: left;
   min-height: 1lh;
@@ -668,29 +675,25 @@ th {
   color: var(--meo-fg);
 }
 
-${previewControlledPalette ? `
 .meo-table-scroll {
+  width: 100%;
   max-width: 100%;
   margin: 0 0 1em;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
+  overflow: visible;
 }
 .meo-table-scroll table {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   margin: 0;
 }
 .meo-table-scroll th,
 .meo-table-scroll td {
-  min-width: 8ch;
-  max-width: 36ch;
   overflow-wrap: anywhere;
+  word-break: normal;
 }
 .meo-table-scroll ul,
 .meo-table-scroll ol {
   padding-inline-start: 2em;
 }
-` : ''}
 
 td:empty::before,
 th:empty::before {

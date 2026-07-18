@@ -370,6 +370,14 @@ function getCachedMermaidResult(cacheKey: string): MermaidResult | null {
   return cached;
 }
 
+export async function restoreMermaidEditorTheme(): Promise<void> {
+  const runtime = await loadMermaidRuntime();
+  const { signature, config } = getMermaidThemeConfig();
+  runtime.initialize(config);
+  mermaidThemeSignature = signature;
+  mermaidInitialized = true;
+}
+
 function mermaidResultCacheKey(diagramText: string, themeSignature = getMermaidThemeConfig().signature): string {
   return `${themeSignature}\n${diagramText}`;
 }

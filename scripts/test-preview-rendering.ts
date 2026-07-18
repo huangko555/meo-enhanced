@@ -119,14 +119,17 @@ if (!lightPreviewStyles.includes('--meo-link: #1f2328')) {
 if (!darkPreviewStyles.includes('padding-inline-start: 1.5em')) {
   throw new Error('Preview lists must retain readable indentation in documents and table cells');
 }
-if (!darkPreviewStyles.includes('.meo-table-scroll') || !darkPreviewStyles.includes('width: max-content')) {
-  throw new Error('Preview tables must keep intrinsic column widths inside a horizontal scroll container');
+if (!darkPreviewStyles.includes('.meo-table-scroll') || darkPreviewStyles.includes('width: max-content')) {
+  throw new Error('Preview tables must fit the reading surface without relying on horizontal scrolling');
 }
 if (!exportStyles.includes('--meo-bg: #ffffff')) {
   throw new Error('Exports must always use the white Meo Reading palette');
 }
 if (!exportStyles.includes('max-width: 900px')) {
   throw new Error('Meo Reading must constrain HTML documents to a readable measure');
+}
+if (!exportStyles.includes('.meo-table-scroll') || !exportStyles.includes('overflow-wrap: anywhere')) {
+  throw new Error('HTML and PDF exports must fit wide tables to the printable reading surface');
 }
 
 console.log('Preview rendering tests passed');

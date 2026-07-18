@@ -64,13 +64,14 @@ async function main() {
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ content: `
       window.__hostMessages = [];
+      window.__mermaidInitializeConfigs = [];
       window.acquireVsCodeApi = () => ({
         postMessage(message) { window.__hostMessages.push(message); },
         getState() { return window.__webviewState; },
         setState(state) { window.__webviewState = state; }
       });
       window.mermaid = {
-        initialize() {},
+        initialize(config) { window.__mermaidInitializeConfigs.push(config); },
         async render(id, source) {
           await new Promise(resolve => setTimeout(resolve, source.includes('Step18') ? 650 : source.includes('Check') ? 80 : 5));
           const height = source.includes('Step18') ? 3000 : source.includes('sequenceDiagram') ? 260 : 120;
@@ -259,8 +260,8 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'previewRendered',
         requestId,
-        html: '<h1 id="intro" data-source-line="1">Intro</h1><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div>',
-        hasMermaid: false,
+        html: '<h1 id="intro" data-source-line="1">Intro</h1><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div>',
+        hasMermaid: true,
         styles: {
           dark: 'html,body{margin:0;background:#20252b;color:#fff}.meo-export-doc{padding:20px}',
           light: 'html,body{margin:0;background:#fff;color:#1f2328}.meo-export-doc{padding:20px}'
@@ -411,6 +412,19 @@ async function main() {
     if (themeSwitchPreservedDocument !== 'preserve-document') {
       throw new Error('Preview theme switching rebuilt the iframe document');
     }
+    try {
+      await page.waitForFunction(() => {
+        const configs = (window as typeof window & { __mermaidInitializeConfigs?: Array<{ themeVariables?: { darkMode?: boolean } }> })
+          .__mermaidInitializeConfigs ?? [];
+        const sawPreviewLight = configs.some((config) => config.themeVariables?.darkMode === false);
+        return sawPreviewLight && configs.at(-1)?.themeVariables?.darkMode === true;
+      }, { timeout: 3000 });
+    } catch {
+      const configs = await page.evaluate(() => (
+        (window as typeof window & { __mermaidInitializeConfigs?: unknown[] }).__mermaidInitializeConfigs ?? []
+      ));
+      throw new Error(`Preview Mermaid theme leaked into Live mode: ${JSON.stringify(configs)}`);
+    }
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 2);
     const previewExitVisibleLine = await page.evaluate(() => {
@@ -424,6 +438,52 @@ async function main() {
     if (!previewExitVisibleLine) {
       throw new Error('Leaving Preview did not preserve the visible document position');
     }
+    await page.evaluate((text) => {
+      const selection = text.indexOf('## Short Mermaid');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor: selection, head: selection, focus: false
+      }}));
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      scroller.scrollTop = scroller.scrollHeight * (77 / 280);
+    }, initialText);
+    await waitForFrames(page, 2);
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const shortHeading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === '## Short Mermaid');
+      if (shortHeading) {
+        scroller.scrollTop += shortHeading.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      }
+    });
+    await waitForFrames(page, 2);
+    const previewRequestsBeforeCachedSwitch = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'requestPreviewRender').length);
+    await page.click('[data-mode="preview"]');
+    await waitForFrames(page, 2);
+    const cachedSwitchState = await page.evaluate(() => {
+      const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? [];
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      return {
+        requests: messages.filter((message) => message.type === 'requestPreviewRender').length,
+        shortHeadingTop: frame.contentDocument!.querySelector<HTMLElement>('#short-mermaid')!.getBoundingClientRect().top
+      };
+    });
+    if (
+      cachedSwitchState.requests !== previewRequestsBeforeCachedSwitch ||
+      Math.abs(cachedSwitchState.shortHeadingTop) > 4
+    ) {
+      throw new Error(`Unchanged Preview switch was not immediate: ${JSON.stringify({ previewRequestsBeforeCachedSwitch, cachedSwitchState })}`);
+    }
+    await page.click('[data-mode="live"]');
+    await waitForFrames(page, 2);
+    await page.evaluate((text) => {
+      const selection = text.indexOf('## Tall Mermaid');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor: selection, head: selection, focus: false
+      }}));
+    }, initialText);
+    await waitForFrames(page, 8);
     await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]')), { timeout: 3000 });
     await page.evaluate((text) => {
       const selection = text.indexOf('const line10');
