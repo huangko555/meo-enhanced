@@ -272,6 +272,9 @@ export function createEditor({
     applyVimKeybindings(vimKeybindings, vimLeader);
   }
   let applyingExternal = false;
+  let imeCompositionActive = false;
+  let imeCompositionChanged = false;
+  let imeCompositionFlushTimer: number | null = null;
   let capturedPointerId = null;
   let liveSelectionPointerId = null;
   let inlineCodeClick = null;
@@ -307,6 +310,34 @@ export function createEditor({
   let editableLinkHoverPointerActive = false;
   let editableLinkHoverPosition = null;
   let editableLinkHoverMode = currentMode;
+  const publishComposedDocumentChange = () => {
+    if (!view || applyingExternal || applyingRenumber) {
+      return;
+    }
+    const renumberChanges = collectOrderedListRenumberChanges(view.state);
+    if (renumberChanges.length) {
+      applyingRenumber = true;
+      view.dispatch({
+        changes: renumberChanges,
+        annotations: Transaction.addToHistory.of(false)
+      });
+      applyingRenumber = false;
+    }
+    onApplyChanges(view.state.doc.toString());
+  };
+  const scheduleImeCompositionFlush = () => {
+    if (imeCompositionFlushTimer !== null) {
+      window.clearTimeout(imeCompositionFlushTimer);
+    }
+    imeCompositionFlushTimer = window.setTimeout(() => {
+      imeCompositionFlushTimer = null;
+      if (!imeCompositionChanged || imeCompositionActive) {
+        return;
+      }
+      imeCompositionChanged = false;
+      publishComposedDocumentChange();
+    }, 20);
+  };
   const vimExtensionsForState = () => (vimModeEnabled ? vim() : []);
   const getLineStartOffset = (docText, targetLineNumber) => {
     const targetLine = Math.max(1, Math.floor(targetLineNumber));
@@ -1767,6 +1798,33 @@ export function createEditor({
       shikiCodeHighlight,
       EditorView.lineWrapping,
       EditorView.domEventHandlers({
+        beforeinput(event) {
+          if (imeCompositionActive && event.inputType === 'insertText' && !event.isComposing) {
+            imeCompositionActive = false;
+            scheduleImeCompositionFlush();
+          }
+          return false;
+        },
+        blur() {
+          if (imeCompositionActive) {
+            imeCompositionActive = false;
+            scheduleImeCompositionFlush();
+          }
+          return false;
+        },
+        compositionstart() {
+          imeCompositionActive = true;
+          if (imeCompositionFlushTimer !== null) {
+            window.clearTimeout(imeCompositionFlushTimer);
+            imeCompositionFlushTimer = null;
+          }
+          return false;
+        },
+        compositionend() {
+          imeCompositionActive = false;
+          scheduleImeCompositionFlush();
+          return false;
+        },
         pointerdown(event, view) {
           if (event.button !== 0) {
             frontmatterBoundaryClick = null;
@@ -1988,24 +2046,19 @@ export function createEditor({
 
         pendingExternalUndoSelectionPreserve = false;
 
+        if (imeCompositionActive) {
+          imeCompositionChanged = true;
+          return;
+        }
+
+        imeCompositionChanged = false;
+
         if (isHistoryReplayUpdate(update)) {
           onApplyChanges(update.state.doc.toString());
           return;
         }
 
-        const renumberChanges = collectOrderedListRenumberChanges(update.state);
-        if (renumberChanges.length) {
-          applyingRenumber = true;
-          view.dispatch({
-            changes: renumberChanges,
-            annotations: Transaction.addToHistory.of(false)
-          });
-          applyingRenumber = false;
-          onApplyChanges(view.state.doc.toString());
-          return;
-        }
-
-        onApplyChanges(update.state.doc.toString());
+        publishComposedDocumentChange();
       })
     ]
   });
@@ -2239,6 +2292,10 @@ export function createEditor({
       if (onScroll) {
         view.scrollDOM.removeEventListener('scroll', onScroll);
         onScroll = null;
+      }
+      if (imeCompositionFlushTimer !== null) {
+        window.clearTimeout(imeCompositionFlushTimer);
+        imeCompositionFlushTimer = null;
       }
       if (onTableInteraction) {
         view.dom.removeEventListener('meo-table-interaction', onTableInteraction);

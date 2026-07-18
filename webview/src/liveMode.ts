@@ -73,6 +73,7 @@ import { diagnosticDataField } from './helpers/diagnostics';
 import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import { mermaidEditingStateField } from './helpers/mermaidEditing';
+import { collectPunctuationClosingInlineStyles } from './helpers/inlineStyleFallback';
 import {
   addLatexMathToolbar,
   getLatexMathBlockMode,
@@ -129,6 +130,18 @@ const strongMarkerDeco = Decoration.mark({
 });
 const activeStrongMarkerDeco = Decoration.mark({
   class: 'meo-md-marker-active meo-md-strong-marker-active'
+});
+class InlineSyntaxBoundaryWidget extends WidgetType {
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'meo-md-inline-syntax-boundary';
+    span.setAttribute('aria-hidden', 'true');
+    return span;
+  }
+}
+const inlineSyntaxBoundaryDeco = Decoration.widget({
+  widget: new InlineSyntaxBoundaryWidget(),
+  side: -1
 });
 const hrMarkerDeco = Decoration.mark({ class: 'meo-md-hr-marker' });
 const hiddenLinkUrlDeco = Decoration.mark({ class: 'meo-md-link-url-hidden' });
@@ -1033,6 +1046,14 @@ function addLineAwareRange(builder, activeLines, lineNo, from, to, inactiveDeco,
   addRange(builder, from, to, activeLines.has(lineNo) ? activeDeco : inactiveDeco);
 }
 
+function addInlineMarkerRange(builder, activeLines, lineNo, from, to, inactiveDeco, activeDeco, closing = false) {
+  const active = activeLines.has(lineNo);
+  addRange(builder, from, to, active ? activeDeco : inactiveDeco);
+  if (active && closing) {
+    builder.push(inlineSyntaxBoundaryDeco.range(to));
+  }
+}
+
 function addSingleTildeStrikeDecorations(builder, state, activeLines, existingStrikeRanges, codeBlockLines = null) {
   const pairs = collectSingleTildeStrikePairs(state, existingStrikeRanges);
   for (const pair of pairs) {
@@ -1040,7 +1061,7 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
       continue;
     }
     addRange(builder, pair.strikeFrom, pair.strikeTo, inlineStyleDecos.strike);
-    addLineAwareRange(
+    addInlineMarkerRange(
       builder,
       activeLines,
       pair.lineNo,
@@ -1049,14 +1070,15 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
       strikeMarkerDeco,
       activeStrikeMarkerDeco
     );
-    addLineAwareRange(
+    addInlineMarkerRange(
       builder,
       activeLines,
       pair.lineNo,
       pair.closeFrom,
       pair.closeTo,
       strikeMarkerDeco,
-      activeStrikeMarkerDeco
+      activeStrikeMarkerDeco,
+      true
     );
   }
 }
@@ -1070,16 +1092,10 @@ function addPunctuationClosingInlineStyleDecorations(
   blockedRanges = [],
   frontmatter = null
 ) {
-  const styles = [
-    { marker: '**', content: inlineStyleDecos.strong, inactive: strongMarkerDeco, active: activeStrongMarkerDeco },
-    { marker: '~~', content: inlineStyleDecos.strike, inactive: strikeMarkerDeco, active: activeStrikeMarkerDeco },
-    { marker: '*', content: inlineStyleDecos.em, inactive: emMarkerDeco, active: activeEmMarkerDeco }
-  ];
-  const overlapsParsedStyle = (from, to) => parsedStyleRanges.some((range) => from < range.to && to > range.from);
-  const isEscaped = (text, index) => {
-    let backslashes = 0;
-    for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) backslashes += 1;
-    return backslashes % 2 === 1;
+  const decorationsByNodeName = {
+    StrongEmphasis: { content: inlineStyleDecos.strong, inactive: strongMarkerDeco, active: activeStrongMarkerDeco },
+    Strikethrough: { content: inlineStyleDecos.strike, inactive: strikeMarkerDeco, active: activeStrikeMarkerDeco },
+    Emphasis: { content: inlineStyleDecos.em, inactive: emMarkerDeco, active: activeEmMarkerDeco }
   };
 
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
@@ -1091,55 +1107,28 @@ function addPunctuationClosingInlineStyleDecorations(
     ) {
       continue;
     }
-    const text = line.text;
-    let cursor = 0;
-
-    while (cursor < text.length) {
-      const style = styles.find(({ marker }) => text.startsWith(marker, cursor));
-      if (!style || isEscaped(text, cursor)) {
-        cursor += 1;
-        continue;
-      }
-      if (style.marker === '*' && (text[cursor - 1] === '*' || text[cursor + 1] === '*')) {
-        cursor += 1;
-        continue;
-      }
-      const contentFromOffset = cursor + style.marker.length;
-      if (!text[contentFromOffset] || /\s/u.test(text[contentFromOffset])) {
-        cursor += style.marker.length;
-        continue;
-      }
-
-      let close = text.indexOf(style.marker, contentFromOffset + 1);
-      while (close >= 0) {
-        const beforeClose = text[close - 1] ?? '';
-        const afterClose = text[close + style.marker.length] ?? '';
-        const invalidSingleStar = style.marker === '*' && (text[close - 1] === '*' || text[close + 1] === '*');
-        if (
-          !invalidSingleStar &&
-          !isEscaped(text, close) &&
-          /\p{P}/u.test(beforeClose) &&
-          afterClose !== '' &&
-          !/\s/u.test(afterClose)
-        ) {
-          break;
-        }
-        close = text.indexOf(style.marker, close + style.marker.length);
-      }
-      if (close < 0) {
-        cursor += style.marker.length;
-        continue;
-      }
-
-      const from = line.from + cursor;
-      const to = line.from + close + style.marker.length;
-      if (!overlapsParsedStyle(from, to)) {
-        addRange(builder, from + style.marker.length, line.from + close, style.content);
-        const markerDecoration = activeLines.has(lineNo) ? style.active : style.inactive;
-        addRange(builder, from, from + style.marker.length, markerDecoration);
-        addRange(builder, line.from + close, to, markerDecoration);
-      }
-      cursor = close + style.marker.length;
+    for (const range of collectPunctuationClosingInlineStyles(line.text, line.from, parsedStyleRanges)) {
+      const style = decorationsByNodeName[range.nodeName];
+      addRange(builder, range.contentFrom, range.contentTo, style.content);
+      addInlineMarkerRange(
+        builder,
+        activeLines,
+        lineNo,
+        range.from,
+        range.contentFrom,
+        style.inactive,
+        style.active
+      );
+      addInlineMarkerRange(
+        builder,
+        activeLines,
+        lineNo,
+        range.closeFrom,
+        range.to,
+        style.inactive,
+        style.active,
+        true
+      );
     }
   }
 }
@@ -1461,7 +1450,7 @@ function buildDecorations(state) {
   tree.iterate({
     enter(node) {
       if (node.name === 'StrongEmphasis' || node.name === 'Emphasis' || node.name === 'Strikethrough' || node.name === 'InlineCode') {
-        parsedInlineStyleRanges.push({ from: node.from, to: node.to });
+        parsedInlineStyleRanges.push({ from: node.from, to: node.to, nodeName: node.name });
       }
     }
   });
@@ -1705,11 +1694,38 @@ function buildDecorations(state) {
         const parentName = node.node.parent?.name;
         const inactiveDeco = parentName === 'StrongEmphasis' ? strongMarkerDeco : emMarkerDeco;
         const activeDeco = parentName === 'StrongEmphasis' ? activeStrongMarkerDeco : activeEmMarkerDeco;
-        addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, inactiveDeco, activeDeco);
+        addInlineMarkerRange(
+          ranges,
+          activeLines,
+          line.number,
+          node.from,
+          node.to,
+          inactiveDeco,
+          activeDeco,
+          node.node.parent?.to === node.to
+        );
       } else if (node.name === 'StrikethroughMark') {
-        addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, strikeMarkerDeco, activeStrikeMarkerDeco);
+        addInlineMarkerRange(
+          ranges,
+          activeLines,
+          line.number,
+          node.from,
+          node.to,
+          strikeMarkerDeco,
+          activeStrikeMarkerDeco,
+          node.node.parent?.to === node.to
+        );
       } else if (node.name === 'CodeMark') {
-        addLineAwareRange(ranges, activeLines, line.number, node.from, node.to, codeMarkerDeco, activeCodeMarkerDeco);
+        addInlineMarkerRange(
+          ranges,
+          activeLines,
+          line.number,
+          node.from,
+          node.to,
+          codeMarkerDeco,
+          activeCodeMarkerDeco,
+          node.node.parent?.to === node.to
+        );
       } else if (node.name === 'LinkMark') {
         const parentName = node.node.parent?.name ?? '';
         if (

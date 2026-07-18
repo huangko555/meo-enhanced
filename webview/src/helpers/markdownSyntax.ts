@@ -1,5 +1,6 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
+import { collectPunctuationClosingInlineStyles, type InlineStyleNodeName } from './inlineStyleFallback';
 
 export function resolvedSyntaxTree(state: EditorState, timeout: number = 50): any {
   return ensureSyntaxTree(state, state.doc.length, timeout) ?? syntaxTree(state);
@@ -69,12 +70,17 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
   const contentFrom = headingNode.from + prefixLength;
   const contentTo = Math.max(contentFrom, headingNode.to - suffixLength);
   const hiddenRanges: Array<{ from: number; to: number }> = [];
-  const styleRanges: Array<{ from: number; to: number; style: 'strong' | 'emphasis' | 'strikethrough' }> = [];
+  const styleRanges: Array<{
+    from: number;
+    to: number;
+    style: 'strong' | 'emphasis' | 'strikethrough';
+    nodeName: InlineStyleNodeName;
+  }> = [];
 
   const visit = (node: any, parentName = '') => {
-    if (node.name === 'StrongEmphasis') styleRanges.push({ from: node.from, to: node.to, style: 'strong' });
-    else if (node.name === 'Emphasis') styleRanges.push({ from: node.from, to: node.to, style: 'emphasis' });
-    else if (node.name === 'Strikethrough') styleRanges.push({ from: node.from, to: node.to, style: 'strikethrough' });
+    if (node.name === 'StrongEmphasis') styleRanges.push({ from: node.from, to: node.to, style: 'strong', nodeName: node.name });
+    else if (node.name === 'Emphasis') styleRanges.push({ from: node.from, to: node.to, style: 'emphasis', nodeName: node.name });
+    else if (node.name === 'Strikethrough') styleRanges.push({ from: node.from, to: node.to, style: 'strikethrough', nodeName: node.name });
     else if (
       node.name === 'EmphasisMark' ||
       node.name === 'StrikethroughMark' ||
@@ -88,6 +94,24 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
     for (let child = node.firstChild; child; child = child.nextSibling) visit(child, node.name);
   };
   visit(headingNode);
+
+  const fallbackStyleByNodeName = {
+    StrongEmphasis: 'strong',
+    Emphasis: 'emphasis',
+    Strikethrough: 'strikethrough'
+  } as const;
+  for (const range of collectPunctuationClosingInlineStyles(raw, headingNode.from, styleRanges)) {
+    styleRanges.push({
+      from: range.from,
+      to: range.to,
+      style: fallbackStyleByNodeName[range.nodeName],
+      nodeName: range.nodeName
+    });
+    hiddenRanges.push(
+      { from: range.from, to: range.contentFrom },
+      { from: range.closeFrom, to: range.to }
+    );
+  }
 
   const boundaries = new Set([contentFrom, contentTo]);
   for (const range of [...hiddenRanges, ...styleRanges]) {

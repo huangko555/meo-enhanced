@@ -3187,6 +3187,8 @@ class HtmlTableWidget extends WidgetType {
   }
 
   wireInput(input, rowEl, rowInputs, container, rowIndex, colIndex, preview) {
+    let compositionActive = false;
+    let compositionEndedAt = Number.NEGATIVE_INFINITY;
     const refreshPreview = () => {
       this.renderCellPreview(
         preview,
@@ -3252,7 +3254,18 @@ class HtmlTableWidget extends WidgetType {
     input.addEventListener('select', notifySelectionChange);
     input.addEventListener('keyup', notifySelectionChange);
     input.addEventListener('pointerup', notifySelectionChange);
+    input.addEventListener('compositionstart', () => {
+      compositionActive = true;
+    });
+    input.addEventListener('compositionend', () => {
+      compositionActive = false;
+      compositionEndedAt = performance.now();
+    });
     input.addEventListener('keydown', (event) => {
+      const followsCompositionEnd = performance.now() - compositionEndedAt < 100;
+      if (compositionActive || event.isComposing || event.keyCode === 229 || (
+        followsCompositionEnd && (event.key === 'Enter' || event.key === ' ')
+      )) return;
       if (event.key === 'Enter') {
         if ((event.shiftKey || event.ctrlKey) && !event.altKey && !event.metaKey) {
           event.preventDefault();
