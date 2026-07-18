@@ -595,6 +595,7 @@ function ensureMermaidRuntime(frameDocument: Document): Promise<any> {
     }
     const script = frameDocument.createElement('script');
     script.src = src;
+    script.nonce = document.body.dataset.meoScriptNonce ?? '';
     script.addEventListener('load', () => resolve(frameWindow?.mermaid), { once: true });
     script.addEventListener('error', () => reject(new Error('Failed to load Mermaid runtime')), { once: true });
     frameDocument.head.appendChild(script);

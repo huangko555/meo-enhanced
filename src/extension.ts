@@ -1083,7 +1083,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
       </head>
-      <body data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-katex-src="${katexStyleUri}">
+      <body data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-katex-src="${katexStyleUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">
           ${getWebviewPreloadShellMarkup()}
         </div>
