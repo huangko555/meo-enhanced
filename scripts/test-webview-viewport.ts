@@ -148,12 +148,12 @@ async function main() {
     await waitForFrames(page);
     const toggledToolbarStart = await measureToolbarStart();
     if (
-      initialToolbarStart.paddingLeft !== 0 ||
-      Math.abs(initialToolbarStart.firstButtonOffset) > 0.5 ||
-      toggledToolbarStart.paddingLeft !== 0 ||
-      Math.abs(toggledToolbarStart.firstButtonOffset) > 0.5
+      initialToolbarStart.paddingLeft !== 30 ||
+      Math.abs(initialToolbarStart.firstButtonOffset - 30) > 0.5 ||
+      toggledToolbarStart.paddingLeft !== 30 ||
+      Math.abs(toggledToolbarStart.firstButtonOffset - 30) > 0.5
     ) {
-      throw new Error(`Toolbar did not remain left-aligned: ${JSON.stringify({ initialToolbarStart, toggledToolbarStart })}`);
+      throw new Error(`Toolbar did not keep the expected left inset: ${JSON.stringify({ initialToolbarStart, toggledToolbarStart })}`);
     }
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'lineNumbersChanged', enabled: true } }));
