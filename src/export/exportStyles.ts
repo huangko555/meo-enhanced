@@ -80,12 +80,12 @@ export function buildExportStyles(theme: ThemeSettings, environment: ExportStyle
     resolveHeadingFontSize(fonts.h6FontSize, '1em', 'em')
   ];
   const headingFontWeights = [
-    resolveHeadingFontWeight(fonts.h1FontWeight, '600'),
-    resolveHeadingFontWeight(fonts.h2FontWeight, '600'),
-    resolveHeadingFontWeight(fonts.h3FontWeight, '600'),
-    resolveHeadingFontWeight(fonts.h4FontWeight, '600'),
-    resolveHeadingFontWeight(fonts.h5FontWeight, '600'),
-    resolveHeadingFontWeight(fonts.h6FontWeight, '600')
+    resolveHeadingFontWeight(fonts.h1FontWeight, '400'),
+    resolveHeadingFontWeight(fonts.h2FontWeight, '400'),
+    resolveHeadingFontWeight(fonts.h3FontWeight, '400'),
+    resolveHeadingFontWeight(fonts.h4FontWeight, '400'),
+    resolveHeadingFontWeight(fonts.h5FontWeight, '400'),
+    resolveHeadingFontWeight(fonts.h6FontWeight, '400')
   ];
   const headingSizeVarsCss = headingFontSizes
     .map((fontSize, index) => `  --meo-heading-${index + 1}-size: ${fontSize};`)

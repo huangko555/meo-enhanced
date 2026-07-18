@@ -43,13 +43,13 @@
   --meo-heading-4-size: 1.2em;
   --meo-heading-5-size: 1.1em;
   --meo-heading-6-size: 1em;
-  --meo-heading-1-weight: 600;
-  --meo-heading-2-weight: 600;
-  --meo-heading-3-weight: 600;
-  --meo-heading-4-weight: 600;
-  --meo-heading-5-weight: 600;
-  --meo-heading-6-weight: 600;
-  --meo-heading-token-weight: 600;
+  --meo-heading-1-weight: 400;
+  --meo-heading-2-weight: 400;
+  --meo-heading-3-weight: 400;
+  --meo-heading-4-weight: 400;
+  --meo-heading-5-weight: 400;
+  --meo-heading-6-weight: 400;
+  --meo-heading-token-weight: 400;
   --meo-active-editor-font: var(--vscode-editor-font-family);
   --meo-active-editor-font-weight: var(--vscode-editor-font-weight);
   --meo-active-editor-font-size: var(--vscode-editor-font-size, 13px);
@@ -1389,6 +1389,12 @@ body {
   text-decoration: none !important;
 }
 
+.cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active)::selection,
+.cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active) *::selection {
+  color: var(--meo-semantic-markdownSyntax) !important;
+  -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
+}
+
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strong,
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike {
   color: var(--meo-semantic-headingForeground, #79b8ff) !important;
@@ -1396,7 +1402,8 @@ body {
 }
 
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike::selection,
-.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike *::selection {
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike .meo-md-heading-content::selection,
+.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike .meo-md-heading-content *::selection {
   color: var(--meo-semantic-headingForeground, #79b8ff) !important;
   -webkit-text-fill-color: var(--meo-semantic-headingForeground, #79b8ff) !important;
 }
@@ -2766,6 +2773,7 @@ body {
   border: none;
   border-radius: 3px;
   font-size: 12.5px;
+  font-weight: 400;
   line-height: 1.35;
   text-align: left;
   text-overflow: ellipsis;
@@ -2836,12 +2844,10 @@ body {
 
 .outline-item.outline-level-1 {
   font-size: 14px;
-  font-weight: 600;
 }
 
 .outline-item.outline-level-2 {
   font-size: 13px;
-  font-weight: 500;
 }
 
 .outline-resizer {

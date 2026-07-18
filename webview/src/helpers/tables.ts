@@ -997,9 +997,29 @@ function findTableInlineClosingMarker(text, startIndex, marker, { singleTilde = 
   const markerLen = marker.length;
   for (let i = startIndex; i <= text.length - markerLen; i += 1) {
     if (!text.startsWith(marker, i)) continue;
-    if (!canCloseTableInlineDelimiter(text, i, marker)) continue;
-    if (singleTilde && (text[i - 1] === '~' || text[i + 1] === '~')) continue;
-    return i;
+    const delimiter = marker[0];
+    let runEnd = i + markerLen;
+    while (text[runEnd] === delimiter && !isTableInlineEscaped(text, runEnd)) {
+      runEnd += 1;
+    }
+    const runLength = runEnd - i;
+    // An even run belongs to nested strong markup, not to a surrounding
+    // single-character emphasis span. For odd runs, the outer delimiter is
+    // the final character (or pair) in the run.
+    if (markerLen === 1 && runLength > 1 && runLength % 2 === 0) {
+      i = runEnd - 1;
+      continue;
+    }
+    const close = runEnd - markerLen;
+    if (!canCloseTableInlineDelimiter(text, close, marker)) {
+      i = runEnd - 1;
+      continue;
+    }
+    if (singleTilde && (text[close - 1] === '~' || text[close + 1] === '~')) {
+      i = runEnd - 1;
+      continue;
+    }
+    return close;
   }
   return -1;
 }
@@ -1337,6 +1357,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       flushBuffer();
       if (span.kind === 'em') {
         const el = document.createElement('em');
+        el.className = 'meo-md-em';
         appendTableInlinePreviewNodes(el, span.content, {
           ...options,
           baseOffset: baseOffset + i + 1

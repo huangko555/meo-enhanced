@@ -10,6 +10,8 @@ const schemaSemanticProperties = themeSchema.properties.semanticColors.propertie
 const packageDefaultSemanticColors = themeSchema.default.semanticColors;
 const snippetTheme = JSON.parse(themeSchema.defaultSnippets[0].body);
 const fileTheme = parseThemeJsonc(fs.readFileSync(path.join(repoRoot, 'themes', 'hkk-theme.jsonc'), 'utf8')) as any;
+const fontSchemaProperties = themeSchema.properties.fonts.properties;
+const packageDefaultFonts = themeSchema.default.fonts;
 
 const failures: string[] = [];
 for (const key of semanticColorKeys) {
@@ -26,6 +28,22 @@ for (const key of semanticColorKeys) {
   }
   if (fileTheme.semanticColors[key] !== expected) {
     failures.push(`hkk-theme.jsonc semanticColors.${key} differs: ${fileTheme.semanticColors[key]} !== ${expected}`);
+  }
+}
+
+for (const key of Object.keys(defaultThemeSettings.fonts) as Array<keyof typeof defaultThemeSettings.fonts>) {
+  const expected = defaultThemeSettings.fonts[key];
+  if (packageDefaultFonts[key] !== expected) {
+    failures.push(`package default fonts.${key} differs: ${packageDefaultFonts[key]} !== ${expected}`);
+  }
+  if (snippetTheme.fonts[key] !== expected) {
+    failures.push(`default snippet fonts.${key} differs: ${snippetTheme.fonts[key]} !== ${expected}`);
+  }
+  if (fileTheme.fonts[key] !== expected) {
+    failures.push(`hkk-theme.jsonc fonts.${key} differs: ${fileTheme.fonts[key]} !== ${expected}`);
+  }
+  if (fontSchemaProperties[key]?.default !== expected) {
+    failures.push(`schema default fonts.${key} differs: ${fontSchemaProperties[key]?.default} !== ${expected}`);
   }
 }
 

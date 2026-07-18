@@ -9,7 +9,7 @@ import {
 const vscodeEditorFontFamily = 'var(--vscode-editor-font-family)';
 const vscodeEditorFontSize = 'var(--vscode-editor-font-size, 13px)';
 const styleValueInjectionPattern = /[\n\r;{}]/g;
-const defaultHeadingFontWeight = '600';
+const defaultHeadingFontWeight = '400';
 const headingSizeFallbacks = ['1.6em', '1.5em', '1.3em', '1.2em', '1.1em', '1em'] as const;
 
 const resolveEditorFontWeight = (): string => {

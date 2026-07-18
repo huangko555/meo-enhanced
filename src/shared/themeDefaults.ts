@@ -539,12 +539,12 @@ export const defaultThemeFonts: ThemeFonts = {
   h4FontSize: 1.2,
   h5FontSize: 1.1,
   h6FontSize: 1,
-  h1FontWeight: '600',
-  h2FontWeight: '600',
-  h3FontWeight: '600',
-  h4FontWeight: '600',
-  h5FontWeight: '600',
-  h6FontWeight: '600',
+  h1FontWeight: '400',
+  h2FontWeight: '400',
+  h3FontWeight: '400',
+  h4FontWeight: '400',
+  h5FontWeight: '400',
+  h6FontWeight: '400',
   liveLineHeight: defaultThemeLineHeight,
   sourceLineHeight: defaultThemeLineHeight
 };

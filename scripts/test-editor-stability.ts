@@ -113,7 +113,7 @@ async function main() {
       'English: `code two`'
     ];
     const bodyLines = Array.from({ length: 100 }, (_, index) => `稳定锚点 ${index + 1}`);
-    const headingStrikeLine = '# 标题里的 **粗体 `内`** *斜体* ~~删除线~~ `外`';
+    const headingStrikeLine = '# 标题里的 **粗体 `内`** ~~删除中的 *斜体*~~ `外`';
     const source = [...markerLines, headingStrikeLine, '', ...bodyLines].join('\n');
     await page.evaluate((text) => {
       (window as any).__editor = (window as any).EditorStabilityHarness.createEditor({
@@ -157,10 +157,16 @@ async function main() {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((candidate) => candidate.textContent?.includes('标题里的'));
       const strike = line?.querySelector<HTMLElement>('.meo-md-strike') ?? null;
+      const nestedEmMarker = line?.querySelector<HTMLElement>(
+        '.meo-md-strike :is(.meo-md-em-marker, .meo-md-em-marker-active)'
+      ) ?? null;
+      const nestedEmMarkerText = nestedEmMarker?.firstElementChild as HTMLElement | null;
       const heading = line?.querySelector<HTMLElement>('.meo-md-heading-content') ?? null;
-      if (!strike || !heading) return null;
+      if (!strike || !nestedEmMarkerText || !heading) return null;
       const normal = getComputedStyle(strike);
       const selected = getComputedStyle(strike, '::selection');
+      const markerNormal = getComputedStyle(nestedEmMarkerText);
+      const markerSelected = getComputedStyle(nestedEmMarkerText, '::selection');
       const headingStyle = getComputedStyle(heading);
       return {
         normalColor: normal.color,
@@ -168,6 +174,10 @@ async function main() {
         normalTextDecorationLine: normal.textDecorationLine,
         selectionColor: selected.color,
         selectionTextFillColor: selected.webkitTextFillColor,
+        markerColor: markerNormal.color,
+        markerTextFillColor: markerNormal.webkitTextFillColor,
+        markerSelectionColor: markerSelected.color,
+        markerSelectionTextFillColor: markerSelected.webkitTextFillColor,
         headingColor: headingStyle.color,
         headingTextFillColor: headingStyle.webkitTextFillColor
       };
@@ -178,7 +188,9 @@ async function main() {
       headingStrikeSelectionColors.normalTextFillColor !== headingStrikeSelectionColors.headingTextFillColor ||
       headingStrikeSelectionColors.normalTextDecorationLine !== 'line-through' ||
       headingStrikeSelectionColors.selectionColor !== headingStrikeSelectionColors.headingColor ||
-      headingStrikeSelectionColors.selectionTextFillColor !== headingStrikeSelectionColors.headingTextFillColor
+      headingStrikeSelectionColors.selectionTextFillColor !== headingStrikeSelectionColors.headingTextFillColor ||
+      headingStrikeSelectionColors.markerSelectionColor !== headingStrikeSelectionColors.markerTextFillColor ||
+      headingStrikeSelectionColors.markerSelectionTextFillColor !== headingStrikeSelectionColors.markerTextFillColor
     ) {
       throw new Error(`Selected heading strike changed foreground color: ${JSON.stringify(headingStrikeSelectionColors)}`);
     }
@@ -243,8 +255,7 @@ async function main() {
         marker.textElementTextFillColor !== headingStrikeMarkerColors.syntaxMarkerState.textElementTextFillColor ||
         marker.textElementFontStyle !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontStyle ||
         marker.textElementFontWeight !== headingStrikeMarkerColors.syntaxMarkerState.textElementFontWeight ||
-        marker.textElementTextDecorationLine !== headingStrikeMarkerColors.syntaxMarkerState.textElementTextDecorationLine ||
-        marker.strikeAncestorClassName !== ''
+        marker.textElementTextDecorationLine !== headingStrikeMarkerColors.syntaxMarkerState.textElementTextDecorationLine
       ))
     ) {
       throw new Error(`Inline style markers did not match Markdown syntax presentation: ${JSON.stringify(headingStrikeMarkerColors)}`);
@@ -440,7 +451,16 @@ async function main() {
       root.append(editorWrapper, outlineButton);
       document.body.appendChild(root);
       let headings = [
-        { text: '7. Overview', level: 2, from: 20, line: 3 },
+        {
+          text: '7. Overview bold',
+          inlineSegments: [
+            { text: '7. Overview ', strong: false, emphasis: false, strikethrough: false },
+            { text: 'bold', strong: true, emphasis: false, strikethrough: false }
+          ],
+          level: 1,
+          from: 20,
+          line: 3
+        },
         { text: '7.4 Target', level: 3, from: 100, line: 10 }
       ];
       const scrolledLines: number[] = [];
@@ -479,12 +499,18 @@ async function main() {
       });
       const wheelAllowed = resizer.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 }));
       const resizerWidth = getComputedStyle(resizer).width;
+      const firstOutlineItem = outline.sidebar.querySelector<HTMLElement>('.outline-level-1')!;
+      const firstOutlineStrong = firstOutlineItem.querySelector<HTMLElement>('strong')!;
+      const outlineWeights = {
+        normal: getComputedStyle(firstOutlineItem).fontWeight,
+        strong: getComputedStyle(firstOutlineStrong).fontWeight
+      };
 
       // Simulate a background edit that moved the target heading while the visible
       // outline still carries its previous line number. Line 10 is now a nearby
       // ordered-list item in the real document.
       headings = [
-        { text: '7. Overview', level: 2, from: 20, line: 3 },
+        { text: '7. Overview bold', level: 1, from: 20, line: 3 },
         { text: '7.4 Target', level: 3, from: 260, line: 20 }
       ];
       const target = Array.from(outline.sidebar.querySelectorAll<HTMLButtonElement>('.outline-item'))
@@ -498,7 +524,8 @@ async function main() {
         visibleClassState,
         wheelAllowed,
         wheelBubbled,
-        resizerWidth
+        resizerWidth,
+        outlineWeights
       };
     });
     if (outlineJump.scrolledLines.at(-1) !== 20) {
@@ -516,6 +543,9 @@ async function main() {
     }
     if (outlineJump.resizerWidth !== '12px') {
       throw new Error(`Outline divider or scrollbar styling was not applied: ${JSON.stringify(outlineJump)}`);
+    }
+    if (outlineJump.outlineWeights.normal !== '400' || Number(outlineJump.outlineWeights.strong) <= 400) {
+      throw new Error(`Outline base and explicit strong weights were not distinct: ${JSON.stringify(outlineJump.outlineWeights)}`);
     }
     if (
       outlineJump.fixedBackground !== 'rgb(12, 34, 56)' ||
@@ -563,6 +593,7 @@ async function main() {
       !inlineStyleComposition.em ||
       !inlineStyleComposition.emCode ||
       !inlineStyleComposition.standaloneCode ||
+      Number(inlineStyleComposition.heading.fontWeight) !== 400 ||
       Number(inlineStyleComposition.strong.fontWeight) <= Number(inlineStyleComposition.heading.fontWeight) ||
       inlineStyleComposition.strongEm.fontWeight !== inlineStyleComposition.strong.fontWeight ||
       inlineStyleComposition.strongEm.fontStyle !== 'italic' ||

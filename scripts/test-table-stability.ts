@@ -110,6 +110,26 @@ async function main() {
       const inlineEditingPreviewVisibility = getComputedStyle(inlineEditingPreview).visibility;
       inlineEditingEditor.destroy();
 
+      const nestedInlineEditor = await create([
+        '| Combination |',
+        '| --- |',
+        '| ***bold italic*** |',
+        '| **bold with `code`** |',
+        '| *italic with **bold*** |',
+        '| ~~strike with **bold**~~ |'
+      ].join('\n'));
+      const nestedInlinePreviews = Array.from(document.querySelectorAll<HTMLElement>(
+        'tbody .meo-md-html-table-cell-preview'
+      ));
+      const nestedInlineState = {
+        texts: nestedInlinePreviews.map((preview) => preview.textContent ?? ''),
+        strongEm: Boolean(nestedInlinePreviews[0]?.querySelector('strong > em')),
+        strongCode: Boolean(nestedInlinePreviews[1]?.querySelector('strong > code')),
+        emStrong: Boolean(nestedInlinePreviews[2]?.querySelector('em > strong')),
+        strikeStrong: Boolean(nestedInlinePreviews[3]?.querySelector('.meo-md-strike > strong'))
+      };
+      nestedInlineEditor.destroy();
+
       const tableImageMarkdown = '![pixel](https://example.com/pixel.png)';
       const tableImageEditor = await create(`| Image |\n| --- |\n| ${tableImageMarkdown} |`);
       const tableImageCell = document.querySelector<HTMLTableCellElement>(
@@ -1057,6 +1077,7 @@ async function main() {
         inlineOpenedHrefs,
         linkButtonsPreservedEditingCell,
         inlineEditingPreviewVisibility,
+        nestedInlineState,
         tableImageClickState,
         bodyLinkButtons,
         bodyOpenedHrefs,
@@ -1151,6 +1172,20 @@ async function main() {
       result.inlineEditingPreviewVisibility !== 'hidden'
     ) {
       failures.push(`inline preview link controls were incomplete: ${JSON.stringify({ count: result.inlineDecorationCount, buttons: result.inlineLinkButtons, openedHrefs: result.inlineOpenedHrefs, preservedEditingCell: result.linkButtonsPreservedEditingCell, visibility: result.inlineEditingPreviewVisibility })}`);
+    }
+    if (
+      JSON.stringify(result.nestedInlineState.texts) !== JSON.stringify([
+        'bold italic',
+        'bold with code',
+        'italic with bold',
+        'strike with bold'
+      ]) ||
+      !result.nestedInlineState.strongEm ||
+      !result.nestedInlineState.strongCode ||
+      !result.nestedInlineState.emStrong ||
+      !result.nestedInlineState.strikeStrong
+    ) {
+      failures.push(`nested table inline styles did not compose: ${JSON.stringify(result.nestedInlineState)}`);
     }
     if (
       !result.tableImageClickState.rendered ||
