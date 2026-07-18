@@ -37,6 +37,7 @@ interface OutlineControllerOptions {
   onVisibilityRequest?: (visible: boolean) => void;
   onPositionRequest?: (position: OutlinePosition) => void;
   onUiStateChange?: (state: OutlineUiState) => void;
+  onResizeEnd?: () => void;
 }
 
 export interface OutlineTreeNode {
@@ -146,7 +147,8 @@ export function createOutlineController({
   canReorder,
   onVisibilityRequest,
   onPositionRequest,
-  onUiStateChange
+  onUiStateChange,
+  onResizeEnd
 }: OutlineControllerOptions): OutlineController {
   const outlineSidebar = document.createElement('div');
   outlineSidebar.className = 'outline-sidebar';
@@ -683,6 +685,7 @@ export function createOutlineController({
         outlineResizer.releasePointerCapture(pointerId);
       }
       document.body.classList.remove('outline-resizing');
+      onResizeEnd?.();
       notifyUiState();
     };
     window.addEventListener('pointermove', onMove);

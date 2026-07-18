@@ -317,6 +317,44 @@ async function main() {
     if (resizedOutline.width < outlineWidthBefore + 60 || resizedOutline.resizing) {
       throw new Error(`Preview outline resize stalled over the iframe: ${JSON.stringify({ outlineWidthBefore, resizedOutline })}`);
     }
+    const scrollBeforeResizeWheel = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      frame.contentDocument!.scrollingElement!.scrollTop = 300;
+      return frame.contentDocument!.scrollingElement!.scrollTop;
+    });
+    const previewBox = await page.$eval<HTMLIFrameElement, { x: number; y: number }>('.preview-frame', (element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(previewBox.x, previewBox.y);
+    await page.mouse.wheel({ deltaY: 180 });
+    await waitForFrames(page, 2);
+    const resizeWheelState = await page.evaluate(({ x, y }) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      return {
+        scrollTop: frame.contentDocument!.scrollingElement!.scrollTop,
+        pointerTarget: document.elementFromPoint(x, y)?.className ?? null,
+        parentActive: document.activeElement?.className ?? null,
+        frameActive: frame.contentDocument!.activeElement?.tagName ?? null
+      };
+    }, previewBox);
+    if (resizeWheelState.scrollTop <= scrollBeforeResizeWheel) {
+      throw new Error(`Preview scrolling remained stuck after resizing the outline: ${JSON.stringify(resizeWheelState)}`);
+    }
+    const syntheticWheelBefore = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const scrollingElement = frame.contentDocument!.scrollingElement!;
+      const before = scrollingElement.scrollTop;
+      frame.contentDocument!.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true }));
+      return before;
+    });
+    await waitForFrames(page, 2);
+    const syntheticWheelAfter = await page.evaluate(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+    ));
+    if (syntheticWheelAfter <= syntheticWheelBefore) {
+      throw new Error(`Preview wheel fallback did not recover scrolling: ${JSON.stringify({ syntheticWheelBefore, syntheticWheelAfter })}`);
+    }
     await page.click('.outline-item[title="Tall Mermaid"]');
     await waitForFrames(page, 2);
     const outlineScrollTop = await page.evaluate(() => (
@@ -351,6 +389,10 @@ async function main() {
     await page.mouse.move(resizedBox.x + 80, resizedBox.y, { steps: 8 });
     await page.mouse.up();
     await page.click('[data-action="outline-right"]');
+    await page.evaluate(() => {
+      const frameBody = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.body;
+      frameBody.dataset.themeSwitchSentinel = 'preserve-document';
+    });
     await page.click('.preview-theme-toggle');
     await page.waitForFunction(() => {
       return document.querySelector<HTMLElement>('.preview-theme-toggle')?.getAttribute('aria-pressed') === 'true';
@@ -362,6 +404,12 @@ async function main() {
     });
     if (lightPreviewBackground !== 'rgb(255, 255, 255)') {
       throw new Error(`Preview light theme did not render: ${lightPreviewBackground}`);
+    }
+    const themeSwitchPreservedDocument = await page.evaluate(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.body.dataset.themeSwitchSentinel
+    ));
+    if (themeSwitchPreservedDocument !== 'preserve-document') {
+      throw new Error('Preview theme switching rebuilt the iframe document');
     }
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 2);

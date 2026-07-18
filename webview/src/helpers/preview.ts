@@ -55,13 +55,10 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     status.textContent = message ?? '';
   };
 
-  const renderFrame = (preserveScroll = false, restoreLine: number | null = null) => {
+  const renderFrame = (restoreLine: number | null = null) => {
     if (!latestPayload) {
       return;
     }
-    const previousScrollTop = preserveScroll
-      ? Number(frame.contentDocument?.scrollingElement?.scrollTop ?? 0)
-      : 0;
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
     const katexLink = katexHref
       ? `<link rel="stylesheet" href="${escapeHtmlAttribute(katexHref)}">`
@@ -72,17 +69,15 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
       if (!frameDocument) {
         return;
       }
-      const scrollElement = frameDocument.scrollingElement;
-      if (scrollElement) {
-        scrollElement.scrollTop = previousScrollTop;
-      }
-      if (!preserveScroll && restoreLine !== null) {
+      frameDocument.body.tabIndex = -1;
+      if (restoreLine !== null) {
         restoreTopLine(restoreLine);
       }
       bindPreviewLinks(frameDocument, vscode);
+      bindPreviewWheelFallback(frameDocument);
       const finishRender = () => {
         // Mermaid replaces placeholders asynchronously, so restore again after its layout settles.
-        if (!preserveScroll && restoreLine !== null) {
+        if (restoreLine !== null) {
           restoreTopLine(restoreLine);
         }
         onRendered?.();
@@ -93,7 +88,28 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
         finishRender();
       }
     };
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style>${styles}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style data-meo-preview-styles>${styles}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+  };
+
+  const applyAppearanceToFrame = () => {
+    const frameDocument = frame.contentDocument;
+    const styleElement = frameDocument?.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
+    if (!latestPayload || !frameDocument || !styleElement) {
+      return;
+    }
+    const scrollTop = Number(frameDocument.scrollingElement?.scrollTop ?? 0);
+    styleElement.textContent = latestPayload.styles[appearance];
+    const finish = () => {
+      if (frameDocument.scrollingElement) {
+        frameDocument.scrollingElement.scrollTop = scrollTop;
+      }
+      onRendered?.();
+    };
+    if (latestPayload.hasMermaid) {
+      void renderMermaidBlocks(frameDocument, appearance).finally(finish);
+    } else {
+      finish();
+    }
   };
 
   const requestRender = (text: string, { restoreLine = null }: { restoreLine?: number | null } = {}) => {
@@ -117,7 +133,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     setStatus(null);
     const restoreLine = pendingRestoreLine;
     pendingRestoreLine = null;
-    renderFrame(false, restoreLine);
+    renderFrame(restoreLine);
   };
 
   const handleRenderError = (message: PreviewRenderErrorMessage) => {
@@ -129,7 +145,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   themeToggle.addEventListener('click', () => {
     appearance = appearance === 'dark' ? 'light' : 'dark';
     updateThemeToggle();
-    renderFrame(true);
+    applyAppearanceToFrame();
   });
   updateThemeToggle();
 
@@ -266,6 +282,11 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     setVisible: (visible: boolean) => {
       host.hidden = !visible;
     },
+    focus: () => {
+      frame.focus();
+      frame.contentWindow?.focus();
+      frame.contentDocument?.body.focus({ preventScroll: true });
+    },
     getTopVisiblePosition,
     restoreTopLine,
     getOutlineAdapter: () => outlineAdapter
@@ -288,6 +309,29 @@ function bindPreviewLinks(
     event.preventDefault();
     vscode.postMessage({ type: 'openLink', href });
   });
+}
+
+function bindPreviewWheelFallback(frameDocument: Document): void {
+  frameDocument.addEventListener('wheel', (event) => {
+    if (event.ctrlKey) {
+      return;
+    }
+    const scrollElement = frameDocument.scrollingElement;
+    if (!scrollElement) {
+      return;
+    }
+    const before = scrollElement.scrollTop;
+    const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? frameDocument.defaultView?.innerHeight ?? 1
+        : 1;
+    frameDocument.defaultView?.requestAnimationFrame(() => {
+      if (scrollElement.scrollTop === before) {
+        scrollElement.scrollTop += event.deltaY * deltaScale;
+      }
+    });
+  }, { passive: true });
 }
 
 async function renderMermaidBlocks(frameDocument: Document, appearance: PreviewAppearance): Promise<void> {

@@ -863,6 +863,13 @@ outlineController = createOutlineController({
   onPositionRequest: (position) => {
     vscode.postMessage({ type: 'setOutlinePosition', position });
   },
+  onResizeEnd: () => {
+    if (currentMode === 'preview') {
+      previewController.focus();
+    } else {
+      editor?.focus();
+    }
+  },
   onUiStateChange: (state) => {
     const widthChanged = state.width !== outlineUiState.width;
     outlineUiState = state;

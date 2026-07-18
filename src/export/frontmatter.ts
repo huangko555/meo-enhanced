@@ -1,6 +1,8 @@
+import { sliceSourceMappedMarkdown, type SourceMappedMarkdown } from './sourceMappedMarkdown';
+
 export type ExtractedExportFrontmatter = {
   frontmatterHtml: string;
-  bodyMarkdown: string;
+  body: SourceMappedMarkdown;
 };
 
 type YamlFieldOffsets = {
@@ -13,25 +15,29 @@ type YamlArrayItem = {
   text: string;
 };
 
-export function extractExportFrontmatter(markdownText: string): ExtractedExportFrontmatter {
-  const lines = String(markdownText ?? '').split(/\r?\n/);
+export function extractExportFrontmatter(source: SourceMappedMarkdown): ExtractedExportFrontmatter {
+  const lines = String(source.markdown ?? '').split(/\r?\n/);
   if (lines.length < 2) {
-    return { frontmatterHtml: '', bodyMarkdown: markdownText };
+    return { frontmatterHtml: '', body: source };
   }
 
   const firstLine = stripLeadingBom(lines[0] ?? '');
   if (firstLine.trim() !== '---') {
-    return { frontmatterHtml: '', bodyMarkdown: markdownText };
+    return { frontmatterHtml: '', body: source };
   }
 
   const closingLineIndex = findFrontmatterClosingLine(lines);
   if (closingLineIndex < 1) {
-    return { frontmatterHtml: '', bodyMarkdown: markdownText };
+    return { frontmatterHtml: '', body: source };
   }
 
   return {
-    frontmatterHtml: renderFrontmatterHtml(lines.slice(1, closingLineIndex)),
-    bodyMarkdown: lines.slice(closingLineIndex + 1).join('\n')
+    frontmatterHtml: renderFrontmatterHtml(
+      lines.slice(1, closingLineIndex),
+      source.sourceLines[0] ?? 1,
+      source.sourceLines[closingLineIndex] ?? closingLineIndex + 1
+    ),
+    body: sliceSourceMappedMarkdown(source, closingLineIndex + 1)
   };
 }
 
@@ -45,14 +51,14 @@ function findFrontmatterClosingLine(lines: string[]): number {
   return -1;
 }
 
-function renderFrontmatterHtml(contentLines: string[]): string {
+function renderFrontmatterHtml(contentLines: string[], sourceLine: number, sourceEndLine: number): string {
   const linesHtml = contentLines.map((line) => {
     const renderedLine = renderFrontmatterLineHtml(line);
     return `<div class="meo-export-frontmatter-line">${renderedLine || '&nbsp;'}</div>`;
   }).join('');
 
   return [
-    '<div class="meo-export-frontmatter">',
+    `<div class="meo-export-frontmatter" data-source-line="${sourceLine}" data-source-end-line="${sourceEndLine}">`,
     '<div class="meo-export-frontmatter-boundary is-opening"><span class="meo-export-frontmatter-label">frontmatter</span></div>',
     linesHtml,
     '<div class="meo-export-frontmatter-boundary is-closing" aria-hidden="true">---</div>',

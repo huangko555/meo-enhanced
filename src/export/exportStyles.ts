@@ -352,8 +352,8 @@ h1, h2 {
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
 }
-ul { padding-left: 1.5em; }
-ol { padding-left: 1.8em; }
+ul { padding-inline-start: 1.5em; }
+ol { padding-inline-start: 1.8em; }
 li + li { margin-top: 0.2em; }
 li > ul,
 li > ol {
@@ -667,6 +667,30 @@ th {
   background: var(--meo-table-header-bg);
   color: var(--meo-fg);
 }
+
+${previewControlledPalette ? `
+.meo-table-scroll {
+  max-width: 100%;
+  margin: 0 0 1em;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+.meo-table-scroll table {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+}
+.meo-table-scroll th,
+.meo-table-scroll td {
+  min-width: 8ch;
+  max-width: 36ch;
+  overflow-wrap: anywhere;
+}
+.meo-table-scroll ul,
+.meo-table-scroll ol {
+  padding-inline-start: 2em;
+}
+` : ''}
 
 td:empty::before,
 th:empty::before {

@@ -7,6 +7,41 @@ const rendered = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview.md',
   target: 'html'
 });
+const looseTable = renderMarkdownToHtml({
+  markdownText: [
+    '| Type | | Type | | | Content | Notes |',
+    '| --- | --- | --- | --- | --- |',
+    '| Link | | | [VS Code](https://code.visualstudio.com/) | #table/tag |',
+    '| Style | | | **Bold** and *italic* | `inline code` |'
+  ].join('\n'),
+  markdownFilePath: 'C:/tmp/preview-table.md',
+  target: 'html'
+});
+const tableCellList = renderMarkdownToHtml({
+  markdownText: '| Items |\n| --- |\n| - Apple<br>- Banana |',
+  markdownFilePath: 'C:/tmp/preview-table-list.md',
+  target: 'html'
+});
+const bodyBreakList = renderMarkdownToHtml({
+  markdownText: '- Apple<br>- Banana',
+  markdownFilePath: 'C:/tmp/preview-body-list.md',
+  target: 'html'
+});
+const adjacentTable = renderMarkdownToHtml({
+  markdownText: 'Intro\n| A |\n| --- |\n| value |\n## Target',
+  markdownFilePath: 'C:/tmp/preview-adjacent-table.md',
+  target: 'html'
+});
+const transformedSources = renderMarkdownToHtml({
+  markdownText: '---\ntitle: Test\n---\nReference[^note]\n\n[^note]: Footnote\n\n## Target',
+  markdownFilePath: 'C:/tmp/preview-source-map.md',
+  target: 'html'
+});
+const tableLikeCode = renderMarkdownToHtml({
+  markdownText: '```text\n| A | B |\n| --- |\n```',
+  markdownFilePath: 'C:/tmp/preview-table-code.md',
+  target: 'html'
+});
 
 if (!rendered.html.includes('id="intro"') || !rendered.html.includes('id="intro-2"')) {
   throw new Error('Preview headings must receive stable, unique anchors');
@@ -19,6 +54,33 @@ if (!rendered.html.includes('<p data-source-line="3" data-source-end-line="3">Pa
 }
 if (!rendered.html.includes('data-source-line="5"') || !rendered.html.includes('data-source-end-line="7"')) {
   throw new Error('Preview fenced blocks must retain source lines for viewport preservation');
+}
+if (!looseTable.html.includes('<table')) {
+  throw new Error('Preview must apply the same tolerant table recognition as Live mode');
+}
+if (!looseTable.html.includes('<div class="meo-table-scroll">')) {
+  throw new Error('Preview tables must render inside an overflow container');
+}
+if (!tableCellList.html.includes('<ul') || !tableCellList.html.includes('<li>Apple</li>')) {
+  throw new Error('Preview table cells must render break-separated Markdown lists');
+}
+if (!bodyBreakList.html.includes('<ul') || !bodyBreakList.html.includes('>Apple</li>')) {
+  throw new Error('Preview paragraphs must render break-separated Markdown lists');
+}
+if (!adjacentTable.html.includes('<h2 data-source-line="5"')) {
+  throw new Error('Preview source positions must refer to original Markdown lines after compatibility normalization');
+}
+if (!transformedSources.html.includes('<h2 data-source-line="8"')) {
+  throw new Error('Preview source positions must survive frontmatter and footnote extraction');
+}
+if (!transformedSources.html.includes('class="meo-export-frontmatter" data-source-line="1" data-source-end-line="3"')) {
+  throw new Error('Preview frontmatter must participate in viewport position mapping');
+}
+if (!transformedSources.html.includes('class="footnotes" data-source-line="6" data-source-end-line="7"')) {
+  throw new Error('Preview footnotes must participate in viewport position mapping');
+}
+if (!tableLikeCode.html.includes('| --- |') || tableLikeCode.html.includes('| --- | --- |')) {
+  throw new Error('Preview table compatibility must not rewrite fenced code');
 }
 
 const environment = {
@@ -53,6 +115,12 @@ if (!lightPreviewStyles.includes('--meo-bg: #ffffff')) {
 }
 if (!lightPreviewStyles.includes('--meo-link: #1f2328')) {
   throw new Error('Light Preview links must use the neutral reading foreground');
+}
+if (!darkPreviewStyles.includes('padding-inline-start: 1.5em')) {
+  throw new Error('Preview lists must retain readable indentation in documents and table cells');
+}
+if (!darkPreviewStyles.includes('.meo-table-scroll') || !darkPreviewStyles.includes('width: max-content')) {
+  throw new Error('Preview tables must keep intrinsic column widths inside a horizontal scroll container');
 }
 if (!exportStyles.includes('--meo-bg: #ffffff')) {
   throw new Error('Exports must always use the white Meo Reading palette');

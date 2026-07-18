@@ -5,6 +5,7 @@ import sanitizeHtml from 'sanitize-html';
 import { rewriteExportImageSrc, type ExportHtmlImageMode } from './assetPaths';
 import { extractExportFrontmatter } from './frontmatter';
 import { prepareMarkdownWithFootnotes } from './footnotes';
+import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 import { installMathTransform } from './mathTransform';
 import { Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 
@@ -44,10 +45,11 @@ export type RenderMarkdownResult = {
 export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMarkdownResult {
   let hasMermaid = false;
   let hasMath = false;
+  let bodySourceLines: number[] | null = null;
   const embeddedImageDataUrlCache = new Map<string, string | null>();
-  const normalizedMarkdown = normalizeMarkdownForExport(options.markdownText);
-  const extractedFrontmatter = extractExportFrontmatter(normalizedMarkdown);
-  const shouldEnableMathTransform = extractedFrontmatter.bodyMarkdown.includes('$');
+  const normalized = normalizeMarkdownForExportWithSourceMap(options.markdownText);
+  const extractedFrontmatter = extractExportFrontmatter(normalized);
+  const shouldEnableMathTransform = extractedFrontmatter.body.markdown.includes('$');
 
   const md = new MarkdownIt({
     html: true,
@@ -82,7 +84,12 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     }
   });
   md.use(emoji);
-  installSourcePositionAndHeadingAnchorTransform(md);
+  installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
+    start: bodySourceLines?.[startIndex] ?? 0,
+    end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
+  }));
+  installTableContainerTransform(md);
+  installTableCellListTransform(md);
   installTaskListTransform(md);
   installKbdFallbackTransform(md);
   installAlertTransform(md);
@@ -110,13 +117,14 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     return defaultImageRule(tokens, idx, opts, env, self);
   };
 
-  const preparedMarkdown = prepareMarkdownWithFootnotes(extractedFrontmatter.bodyMarkdown, {
+  const preparedMarkdown = prepareMarkdownWithFootnotes(extractedFrontmatter.body, {
     target: options.target,
     outputFilePath: options.outputFilePath,
     renderMarkdown: (markdownText) => md.render(markdownText),
     normalizeMarkdown: normalizeMarkdownForExport
   });
-  const bodyHtml = md.render(preparedMarkdown.bodyMarkdown);
+  bodySourceLines = preparedMarkdown.body.sourceLines;
+  const bodyHtml = md.render(preparedMarkdown.body.markdown);
   const rawHtml = [
     extractedFrontmatter.frontmatterHtml,
     bodyHtml,
@@ -220,15 +228,21 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   return { html, hasMermaid, hasMath };
 }
 
-function installSourcePositionAndHeadingAnchorTransform(md: MarkdownIt): void {
+function installSourcePositionAndHeadingAnchorTransform(
+  md: MarkdownIt,
+  resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number }
+): void {
   md.core.ruler.after('inline', 'meo-heading-anchors', (state: any) => {
     const slugCounts = new Map<string, number>();
     const tokens = state.tokens as any[];
 
     for (let index = 0; index < tokens.length; index += 1) {
       const headingOpen = tokens[index];
-      const sourceLine = Array.isArray(headingOpen.map) ? Number(headingOpen.map[0]) + 1 : 0;
-      const sourceEndLine = Array.isArray(headingOpen.map) ? Number(headingOpen.map[1]) : 0;
+      const sourceRange = Array.isArray(headingOpen.map)
+        ? resolveSourceRange(Number(headingOpen.map[0]), Number(headingOpen.map[1]))
+        : null;
+      const sourceLine = sourceRange?.start ?? 0;
+      const sourceEndLine = sourceRange?.end ?? 0;
       if ((headingOpen.nesting === 1 || headingOpen.type === 'fence') && sourceLine > 0) {
         headingOpen.attrSet('data-source-line', String(sourceLine));
         headingOpen.attrSet('data-source-end-line', String(Math.max(sourceLine, sourceEndLine)));
@@ -247,6 +261,90 @@ function installSourcePositionAndHeadingAnchorTransform(md: MarkdownIt): void {
   });
 }
 
+function installTableContainerTransform(md: MarkdownIt): void {
+  const defaultTableOpen = md.renderer.rules.table_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+  const defaultTableClose = md.renderer.rules.table_close ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+  md.renderer.rules.table_open = (tokens, idx, options, env, self) => (
+    `<div class="meo-table-scroll">${defaultTableOpen(tokens, idx, options, env, self)}`
+  );
+  md.renderer.rules.table_close = (tokens, idx, options, env, self) => (
+    `${defaultTableClose(tokens, idx, options, env, self)}</div>`
+  );
+}
+
+function installTableCellListTransform(md: MarkdownIt): void {
+  md.core.ruler.after('inline', 'meo_table_cell_lists', (state) => {
+    for (let index = 1; index < state.tokens.length; index += 1) {
+      const inlineNode = state.tokens[index];
+      const parentType = state.tokens[index - 1]?.type;
+      if (inlineNode.type !== 'inline' || (parentType !== 'td_open' && parentType !== 'th_open')) {
+        continue;
+      }
+      const renderedList = renderBreakSeparatedCellList(inlineNode.content, md);
+      if (!renderedList) {
+        continue;
+      }
+      const htmlNode = new state.Token('html_inline', '', 0);
+      htmlNode.content = renderedList;
+      inlineNode.children = [htmlNode];
+    }
+  });
+}
+
+function renderBreakSeparatedCellList(content: string, md: MarkdownIt): string | null {
+  const lines = content.split(/<br\s*\/?\s*>|\r?\n/gi).filter((line) => line.trim() !== '');
+  const items = lines.map((line) => {
+    const match = /^([ \t]*)(?:([-+*])|(\d+)\.)\s+(.+)$/.exec(line);
+    if (!match) {
+      return null;
+    }
+    const indent = [...match[1]].reduce((columns, char) => columns + (char === '\t' ? 2 : 1), 0);
+    return {
+      indent,
+      type: match[3] ? 'ol' as const : 'ul' as const,
+      start: match[3] ? Number.parseInt(match[3], 10) : 1,
+      content: match[4]
+    };
+  });
+  if (items.length === 0 || items.some((item) => item === null)) {
+    return null;
+  }
+
+  let html = '';
+  const stack: Array<{ indent: number; type: 'ul' | 'ol'; liOpen: boolean }> = [];
+  for (const item of items) {
+    if (!item) continue;
+    while (stack.length > 0 && item.indent < stack[stack.length - 1].indent) {
+      const current = stack.pop()!;
+      if (current.liOpen) html += '</li>';
+      html += `</${current.type}>`;
+    }
+    const current = stack[stack.length - 1];
+    if (!current || item.indent > current.indent) {
+      const start = item.type === 'ol' && item.start !== 1 ? ` start="${item.start}"` : '';
+      html += `<${item.type}${start}>`;
+      stack.push({ indent: item.indent, type: item.type, liOpen: false });
+    } else {
+      if (current.liOpen) html += '</li>';
+      if (current.type !== item.type) {
+        html += `</${current.type}>`;
+        stack.pop();
+        const start = item.type === 'ol' && item.start !== 1 ? ` start="${item.start}"` : '';
+        html += `<${item.type}${start}>`;
+        stack.push({ indent: item.indent, type: item.type, liOpen: false });
+      }
+    }
+    html += `<li>${md.renderInline(item.content)}`;
+    stack[stack.length - 1].liOpen = true;
+  }
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.liOpen) html += '</li>';
+    html += `</${current.type}>`;
+  }
+  return html;
+}
+
 function slugifyHeading(value: string): string {
   return String(value ?? '')
     .trim()
@@ -258,7 +356,95 @@ function slugifyHeading(value: string): string {
 }
 
 function normalizeMarkdownForExport(markdownText: string): string {
-  return ensureBlankLinesAroundTableBlocks(normalizeMermaidColonFences(markdownText));
+  return normalizeMarkdownForExportWithSourceMap(markdownText).markdown;
+}
+
+function normalizeMarkdownForExportWithSourceMap(markdownText: string): SourceMappedMarkdown {
+  const normalized = normalizeLooseTableDelimiters(normalizeMermaidColonFences(markdownText));
+  const expandedLists = expandBreakSeparatedBodyLists(normalized);
+  return ensureBlankLinesAroundTableBlocks(expandedLists.markdown, expandedLists.sourceLines);
+}
+
+function expandBreakSeparatedBodyLists(markdownText: string): { markdown: string; sourceLines: number[] } {
+  const lines = String(markdownText ?? '').split(/\r?\n/);
+  const out: string[] = [];
+  const sourceLines: number[] = [];
+  let inFence = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    const fence = parseFenceLine(line);
+    if (fence) {
+      if (!inFence) {
+        inFence = true;
+        fenceChar = fence.char;
+        fenceLen = fence.length;
+      } else if (fence.char === fenceChar && fence.length >= fenceLen) {
+        inFence = false;
+        fenceChar = '';
+        fenceLen = 0;
+      }
+    }
+    const expanded = !inFence && !line.includes('|')
+      ? line.replace(/<br\s*\/?\s*>\s*(?=(?:[-+*]|\d+\.)\s+)/gi, '\n').split('\n')
+      : [line];
+    for (const expandedLine of expanded) {
+      out.push(expandedLine);
+      sourceLines.push(index + 1);
+    }
+  }
+  return { markdown: out.join('\n'), sourceLines };
+}
+
+function normalizeLooseTableDelimiters(markdownText: string): string {
+  const lines = String(markdownText ?? '').split(/\r?\n/);
+  let inFence = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const fence = parseFenceLine(lines[index] ?? '');
+    if (fence) {
+      if (!inFence) {
+        inFence = true;
+        fenceChar = fence.char;
+        fenceLen = fence.length;
+      } else if (fence.char === fenceChar && fence.length >= fenceLen) {
+        inFence = false;
+        fenceChar = '';
+        fenceLen = 0;
+      }
+      continue;
+    }
+    if (inFence || index === 0) {
+      continue;
+    }
+    const delimiter = lines[index] ?? '';
+    if (!isTableDelimiterLine(delimiter)) {
+      continue;
+    }
+    const headerColumnCount = countTableCells(lines[index - 1] ?? '');
+    const delimiterCells = splitTableCells(delimiter);
+    if (headerColumnCount <= delimiterCells.length) {
+      continue;
+    }
+    const leadingPipe = delimiter.trimStart().startsWith('|');
+    const trailingPipe = delimiter.trimEnd().endsWith('|');
+    while (delimiterCells.length < headerColumnCount) {
+      delimiterCells.push('---');
+    }
+    lines[index] = `${leadingPipe ? '| ' : ''}${delimiterCells.join(' | ')}${trailingPipe ? ' |' : ''}`;
+  }
+  return lines.join('\n');
+}
+
+function countTableCells(line: string): number {
+  return splitTableCells(line).length;
+}
+
+function splitTableCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed.split(/(?<!\\)\|/).map((cell) => cell.trim());
 }
 
 function normalizeMermaidColonFences(markdownText: string): string {
@@ -347,9 +533,13 @@ function isMermaidColonFenceCloseLine(line: string, colonCount: number): boolean
   return new RegExp(`^[ \\t]{0,3}:{${colonCount},}\\s*$`).test(line.trimEnd());
 }
 
-function ensureBlankLinesAroundTableBlocks(markdownText: string): string {
+function ensureBlankLinesAroundTableBlocks(
+  markdownText: string,
+  inputSourceLines: number[]
+): { markdown: string; sourceLines: number[] } {
   const lines = String(markdownText ?? '').split(/\r?\n/);
   const out: string[] = [];
+  const sourceLines: number[] = [];
   let inFence = false;
   let fenceChar = '';
   let fenceLen = 0;
@@ -369,38 +559,46 @@ function ensureBlankLinesAroundTableBlocks(markdownText: string): string {
         fenceLen = 0;
       }
       out.push(line);
+      sourceLines.push(inputSourceLines[i] ?? i + 1);
       continue;
     }
 
     if (inFence) {
       out.push(line);
+      sourceLines.push(inputSourceLines[i] ?? i + 1);
       continue;
     }
 
     if (!isTableHeaderLine(line) || !isTableDelimiterLine(lines[i + 1] ?? '')) {
       out.push(line);
+      sourceLines.push(inputSourceLines[i] ?? i + 1);
       continue;
     }
 
     if (out.length > 0 && out[out.length - 1].trim() !== '') {
       out.push('');
+      sourceLines.push(inputSourceLines[i] ?? i + 1);
     }
 
     out.push(line);
+    sourceLines.push(inputSourceLines[i] ?? i + 1);
     i += 1;
     out.push(lines[i] ?? '');
+    sourceLines.push(inputSourceLines[i] ?? i + 1);
 
     while (i + 1 < lines.length && isTableRowLine(lines[i + 1] ?? '')) {
       i += 1;
       out.push(lines[i] ?? '');
+      sourceLines.push(inputSourceLines[i] ?? i + 1);
     }
 
     if (i + 1 < lines.length && (lines[i + 1] ?? '').trim() !== '') {
       out.push('');
+      sourceLines.push(inputSourceLines[i + 1] ?? i + 2);
     }
   }
 
-  return out.join('\n');
+  return { markdown: out.join('\n'), sourceLines };
 }
 
 function isTableHeaderLine(line: string): boolean {

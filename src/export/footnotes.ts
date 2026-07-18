@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 
 export type PrepareMarkdownWithFootnotesOptions = {
   target: 'html' | 'pdf';
@@ -8,7 +9,7 @@ export type PrepareMarkdownWithFootnotesOptions = {
 };
 
 export type PreparedMarkdownWithFootnotes = {
-  bodyMarkdown: string;
+  body: SourceMappedMarkdown;
   footnotesHtml: string;
 };
 
@@ -17,15 +18,17 @@ type ExportFootnoteDefinition = {
   number: number | null;
   contentMarkdown: string;
   referenceIds: string[];
+  sourceLine: number;
+  sourceEndLine: number;
 };
 
 const definitionMarkerPattern = /^[ \t]{0,3}\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
 
 export function prepareMarkdownWithFootnotes(
-  markdownText: string,
+  source: SourceMappedMarkdown,
   options: PrepareMarkdownWithFootnotesOptions
 ): PreparedMarkdownWithFootnotes {
-  const extracted = extractExportFootnotes(markdownText);
+  const extracted = extractExportFootnotes(source);
   const numberByLabel = new Map<string, number>();
   const referenceCountsByLabel = new Map<string, number>();
   const hrefPrefix = getInternalDocumentHrefPrefix(options);
@@ -71,7 +74,10 @@ export function prepareMarkdownWithFootnotes(
     .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
 
   return {
-    bodyMarkdown: bodyLines.join('\n'),
+    body: {
+      markdown: bodyLines.join('\n'),
+      sourceLines: extracted.bodySourceLines
+    },
     footnotesHtml: renderFootnotesHtml(footnotes, hrefPrefix, options)
   };
 }
@@ -121,12 +127,13 @@ function getInternalDocumentHrefPrefix(options: PrepareMarkdownWithFootnotesOpti
   return fileName ? encodeURIComponent(fileName) : '';
 }
 
-function extractExportFootnotes(markdownText: string): {
+function extractExportFootnotes(source: SourceMappedMarkdown): {
   bodyLines: string[];
+  bodySourceLines: number[];
   definitions: ExportFootnoteDefinition[];
   definitionByLabel: Map<string, ExportFootnoteDefinition>;
 } {
-  const lines = String(markdownText ?? '').split(/\r?\n/);
+  const lines = String(source.markdown ?? '').split(/\r?\n/);
   const consumedLineNumbers = new Set<number>();
   const definitions: ExportFootnoteDefinition[] = [];
   const definitionByLabel = new Map<string, ExportFootnoteDefinition>();
@@ -149,6 +156,7 @@ function extractExportFootnotes(markdownText: string): {
     }
 
     consumedLineNumbers.add(index);
+    const definitionStartIndex = index;
     const contentLines = [line.slice(markerMatch[0].length)];
 
     while (index + 1 < lines.length) {
@@ -177,7 +185,9 @@ function extractExportFootnotes(markdownText: string): {
       normalizedLabel,
       number: null,
       contentMarkdown: contentLines.join('\n'),
-      referenceIds: []
+      referenceIds: [],
+      sourceLine: source.sourceLines[definitionStartIndex] ?? definitionStartIndex + 1,
+      sourceEndLine: source.sourceLines[index] ?? index + 1
     };
 
     definitions.push(definition);
@@ -186,6 +196,7 @@ function extractExportFootnotes(markdownText: string): {
 
   return {
     bodyLines: lines.filter((_, index) => !consumedLineNumbers.has(index)),
+    bodySourceLines: source.sourceLines.filter((_, index) => !consumedLineNumbers.has(index)),
     definitions,
     definitionByLabel
   };
@@ -261,8 +272,10 @@ function renderFootnotesHtml(
   }
 
   const itemsHtml = footnotes.map((footnote) => renderFootnoteItemHtml(footnote, hrefPrefix, options)).join('');
+  const sourceLine = Math.min(...footnotes.map((footnote) => footnote.sourceLine));
+  const sourceEndLine = Math.max(...footnotes.map((footnote) => footnote.sourceEndLine));
   return [
-    '<section class="footnotes">',
+    `<section class="footnotes" data-source-line="${sourceLine}" data-source-end-line="${sourceEndLine}">`,
     '<hr>',
     '<ol class="footnotes-list">',
     itemsHtml,
@@ -288,7 +301,7 @@ function renderFootnoteItemHtml(
     : '';
 
   return [
-    `<li id="fn-${number}" class="footnote-item">`,
+    `<li id="fn-${number}" class="footnote-item" data-source-line="${footnote.sourceLine}" data-source-end-line="${footnote.sourceEndLine}">`,
     indexHtml,
     `<div class="footnote-body">${appendFootnoteBacklink(contentHtml, backlinkHtml)}</div>`,
     '</li>'
