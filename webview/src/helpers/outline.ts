@@ -32,6 +32,7 @@ interface OutlineControllerOptions {
   editorWrapper: HTMLElement;
   outlineButton: HTMLElement;
   outlineLeftButton?: HTMLElement;
+  additionalOutlineLeftButtons?: HTMLElement[];
   getEditor: () => EditorApi | null;
   canReorder?: () => boolean;
   onVisibilityRequest?: (visible: boolean) => void;
@@ -143,6 +144,7 @@ export function createOutlineController({
   editorWrapper,
   outlineButton,
   outlineLeftButton,
+  additionalOutlineLeftButtons = [],
   getEditor,
   canReorder,
   onVisibilityRequest,
@@ -501,7 +503,9 @@ export function createOutlineController({
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
     };
     updateToolbarButton(outlineButton, visible && position === 'right');
-    if (outlineLeftButton) updateToolbarButton(outlineLeftButton, visible && position === 'left');
+    for (const button of [outlineLeftButton, ...additionalOutlineLeftButtons]) {
+      if (button) updateToolbarButton(button, visible && position === 'left');
+    }
     root.classList.toggle('outline-visible', visible);
     editorWrapper.dataset.outlineMode = mode;
     editorWrapper.dataset.outlinePosition = position;
@@ -660,7 +664,13 @@ export function createOutlineController({
   document.addEventListener('pointerdown', (event) => {
     if (!visible || mode !== 'floating') return;
     const target = event.target instanceof Node ? event.target : null;
-    if (!target || outlineSidebar.contains(target) || outlineButton.contains(target) || outlineLeftButton?.contains(target)) return;
+    if (
+      !target ||
+      outlineSidebar.contains(target) ||
+      outlineButton.contains(target) ||
+      outlineLeftButton?.contains(target) ||
+      additionalOutlineLeftButtons.some((button) => button.contains(target))
+    ) return;
     requestVisible(false);
   }, true);
 

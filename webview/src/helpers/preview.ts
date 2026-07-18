@@ -21,9 +21,25 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   frame.title = 'Markdown Preview';
   frame.setAttribute('sandbox', 'allow-same-origin');
 
-  const themeToggle = document.createElement('button');
-  themeToggle.type = 'button';
-  themeToggle.className = 'preview-theme-toggle';
+  const appearanceControl = document.createElement('div');
+  appearanceControl.className = 'preview-appearance-control';
+  appearanceControl.setAttribute('role', 'group');
+  appearanceControl.setAttribute('aria-label', 'Preview appearance');
+
+  const createAppearanceButton = (value: PreviewAppearance, label: string) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'preview-appearance-button';
+    button.dataset.appearance = value;
+    button.append(
+      createElement(value === 'light' ? Sun : Moon, { width: 14, height: 14, 'aria-hidden': 'true' }),
+      document.createTextNode(label)
+    );
+    return button;
+  };
+  const lightAppearanceButton = createAppearanceButton('light', 'Light');
+  const darkAppearanceButton = createAppearanceButton('dark', 'Dark');
+  appearanceControl.append(lightAppearanceButton, darkAppearanceButton);
 
   const status = document.createElement('div');
   status.className = 'preview-status';
@@ -31,7 +47,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   status.setAttribute('aria-live', 'polite');
   status.hidden = true;
 
-  host.append(frame, themeToggle, status);
+  host.append(frame, status);
 
   let appearance: PreviewAppearance = 'dark';
   let requestCounter = 0;
@@ -50,15 +66,11 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   };
 
   const updateThemeToggle = () => {
-    const switchToLight = appearance === 'dark';
-    themeToggle.replaceChildren(createElement(switchToLight ? Sun : Moon, {
-      width: 17,
-      height: 17,
-      'aria-hidden': 'true'
-    }));
-    themeToggle.title = switchToLight ? '切换为白色背景' : '切换为暗色背景';
-    themeToggle.setAttribute('aria-label', themeToggle.title);
-    themeToggle.setAttribute('aria-pressed', appearance === 'light' ? 'true' : 'false');
+    for (const button of [lightAppearanceButton, darkAppearanceButton]) {
+      const active = button.dataset.appearance === appearance;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
   };
 
   const setStatus = (message: string | null) => {
@@ -167,10 +179,19 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     }
   };
 
-  themeToggle.addEventListener('click', () => {
-    appearance = appearance === 'dark' ? 'light' : 'dark';
-    updateThemeToggle();
-    applyAppearanceToFrame();
+  appearanceControl.addEventListener('click', (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest<HTMLButtonElement>('.preview-appearance-button[data-appearance]')
+      : null;
+    const nextAppearance = button?.dataset.appearance;
+    if (nextAppearance !== 'light' && nextAppearance !== 'dark') {
+      return;
+    }
+    if (appearance !== nextAppearance) {
+      appearance = nextAppearance;
+      updateThemeToggle();
+      applyAppearanceToFrame();
+    }
   });
   updateThemeToggle();
 
@@ -300,6 +321,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
 
   return {
     host,
+    appearanceControl,
     requestRender,
     handleRendered,
     handleRenderError,

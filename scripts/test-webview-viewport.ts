@@ -125,23 +125,18 @@ async function main() {
         labels: options.map((option) => option.querySelector('.more-tools-option-label')?.textContent),
         directChildren: options.every((option) => option.parentElement === panel),
         baselineIcons: options.slice(0, 3).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
-        exportIcons: options.slice(-2).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
         separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length
       };
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         'Current Edits', 'Recent Save', 'Git HEAD',
-        'Constrain Width', 'Line Numbers', 'Line Authors', 'Spellcheck',
-        'Export HTML', 'Export PDF'
+        'Constrain Width', 'Line Numbers', 'Line Authors', 'Spellcheck'
       ]) ||
       !moreToolsLayout.directChildren ||
-      moreToolsLayout.separatorCount !== 2 ||
+      moreToolsLayout.separatorCount !== 1 ||
       moreToolsLayout.baselineIcons.some((icon) => !icon) ||
-      moreToolsLayout.exportIcons.some((icon) => !icon) ||
-      new Set(moreToolsLayout.baselineIcons).size !== 1 ||
-      new Set(moreToolsLayout.exportIcons).size !== 1 ||
-      moreToolsLayout.baselineIcons[0] === moreToolsLayout.exportIcons[0]
+      new Set(moreToolsLayout.baselineIcons).size !== 1
     ) {
       throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
     }
@@ -213,6 +208,38 @@ async function main() {
       (element) => element.scrollTop
     );
     await page.click('[data-mode="preview"]');
+    const previewToolbarLayout = await page.evaluate(() => {
+      const group = document.querySelector<HTMLElement>('.preview-format-group')!;
+      return {
+        mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
+        visible: getComputedStyle(group).display !== 'none',
+        items: Array.from(group.querySelectorAll(':scope > button, :scope > .preview-appearance-control > button')).map((element) => (
+          (element as HTMLElement).dataset.action ||
+          (element as HTMLElement).dataset.appearance ||
+          element.textContent?.trim()
+        )),
+        moreExports: document.querySelectorAll('.more-tools-panel [data-format]').length,
+        floatingThemeToggle: Boolean(document.querySelector('.preview-host .preview-theme-toggle'))
+      };
+    });
+    if (
+      !previewToolbarLayout.visible ||
+      JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
+        'outline-left', 'light', 'dark', 'Export HTML', 'Export PDF'
+      ]) ||
+      previewToolbarLayout.moreExports !== 0 ||
+      previewToolbarLayout.floatingThemeToggle
+    ) {
+      throw new Error(`Unexpected Preview toolbar: ${JSON.stringify(previewToolbarLayout)}`);
+    }
+    await page.click('.preview-toolbar-action[data-format="html"]');
+    await page.click('.preview-toolbar-action[data-format="pdf"]');
+    const previewExportFormats = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportDocument').map((message) => message.format));
+    if (JSON.stringify(previewExportFormats) !== JSON.stringify(['html', 'pdf'])) {
+      throw new Error(`Preview export buttons did not request both formats: ${JSON.stringify(previewExportFormats)}`);
+    }
     let previewRequestId = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
       return messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
@@ -274,7 +301,7 @@ async function main() {
     });
     const darkPreviewState = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-      const toggle = document.querySelector<HTMLElement>('.preview-theme-toggle')!;
+      const toggle = document.querySelector<HTMLElement>('.preview-appearance-button[data-appearance="light"]')!;
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
         editorHidden: document.querySelector<HTMLElement>('.editor-host')?.hidden,
@@ -394,9 +421,9 @@ async function main() {
       const frameBody = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.body;
       frameBody.dataset.themeSwitchSentinel = 'preserve-document';
     });
-    await page.click('.preview-theme-toggle');
+    await page.click('.preview-appearance-button[data-appearance="light"]');
     await page.waitForFunction(() => {
-      return document.querySelector<HTMLElement>('.preview-theme-toggle')?.getAttribute('aria-pressed') === 'true';
+      return document.querySelector<HTMLElement>('.preview-appearance-button[data-appearance="light"]')?.getAttribute('aria-pressed') === 'true';
     });
     await waitForFrames(page, 4);
     const lightPreviewBackground = await page.evaluate(() => {

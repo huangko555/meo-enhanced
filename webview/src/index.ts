@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -176,6 +176,8 @@ const createOutlineButton = (position: 'left' | 'right') => {
 };
 
 const outlineLeftBtn = createOutlineButton('left');
+const previewOutlineLeftBtn = createOutlineButton('left');
+previewOutlineLeftBtn.classList.add('preview-outline-button');
 const outlineBtn = createOutlineButton('right');
 
 const appendMoreToolsOptionContent = (
@@ -702,19 +704,35 @@ findToggleBtn.appendChild(createElement(Search, { width: 18, height: 18 }));
 
 const exportHtmlOption = document.createElement('button');
 exportHtmlOption.type = 'button';
-exportHtmlOption.className = 'more-tools-option more-tools-action-option';
+exportHtmlOption.className = 'preview-toolbar-action';
 exportHtmlOption.dataset.format = 'html';
 exportHtmlOption.title = 'Export as HTML';
-exportHtmlOption.setAttribute('role', 'menuitem');
-appendMoreToolsOptionContent(exportHtmlOption, Share, 'Export HTML');
+exportHtmlOption.append(
+  createElement(FileCode2, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  document.createTextNode('Export HTML')
+);
 
 const exportPdfOption = document.createElement('button');
 exportPdfOption.type = 'button';
-exportPdfOption.className = 'more-tools-option more-tools-action-option';
+exportPdfOption.className = 'preview-toolbar-action';
 exportPdfOption.dataset.format = 'pdf';
 exportPdfOption.title = 'Export as PDF';
-exportPdfOption.setAttribute('role', 'menuitem');
-appendMoreToolsOptionContent(exportPdfOption, Share, 'Export PDF');
+exportPdfOption.append(
+  createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
+  document.createTextNode('Export PDF')
+);
+
+const previewAppearanceSlot = document.createElement('span');
+const previewFormatGroup = document.createElement('div');
+previewFormatGroup.className = 'preview-format-group';
+previewFormatGroup.setAttribute('role', 'group');
+previewFormatGroup.setAttribute('aria-label', 'Preview tools');
+previewFormatGroup.append(
+  previewOutlineLeftBtn,
+  previewAppearanceSlot,
+  exportHtmlOption,
+  exportPdfOption
+);
 
 const moreToolsButton = document.createElement('button');
 moreToolsButton.type = 'button';
@@ -733,19 +751,13 @@ moreToolsPanel.hidden = true;
 const changesSeparator = document.createElement('div');
 changesSeparator.className = 'more-tools-separator';
 changesSeparator.setAttribute('role', 'separator');
-const exportSeparator = document.createElement('div');
-exportSeparator.className = 'more-tools-separator';
-exportSeparator.setAttribute('role', 'separator');
 moreToolsPanel.append(
   ...diffBaselineButtons,
   changesSeparator,
   contentMaxWidthBtn,
   lineNumbersBtn,
   gitBlameBtn,
-  spellCheckBtn,
-  exportSeparator,
-  exportHtmlOption,
-  exportPdfOption
+  spellCheckBtn
 );
 
 const moreToolsWrapper = document.createElement('div');
@@ -828,7 +840,7 @@ editorNoticeBanner.hidden = true;
 let handleEditorNoticeDismiss = (): void => {};
 const editorNotice = createEditorNoticeController(editorNoticeBanner, () => handleEditorNoticeDismiss());
 
-toolbar.replaceChildren(formatGroup, rightGroup, modeGroup, findPanelElements.panel, editorNoticeBanner);
+toolbar.replaceChildren(formatGroup, previewFormatGroup, rightGroup, modeGroup, findPanelElements.panel, editorNoticeBanner);
 
 const existingEditorWrapper = root.querySelector('.editor-wrapper');
 const editorWrapper = existingEditorWrapper instanceof HTMLElement ? existingEditorWrapper : document.createElement('div');
@@ -850,11 +862,13 @@ const previewController = createPreviewController({
     }
   }
 });
+previewAppearanceSlot.replaceWith(previewController.appearanceControl);
 outlineController = createOutlineController({
   root,
   editorWrapper,
   outlineButton: outlineBtn,
   outlineLeftButton: outlineLeftBtn,
+  additionalOutlineLeftButtons: [previewOutlineLeftBtn],
   getEditor: () => currentMode === 'preview' ? previewController.getOutlineAdapter() : editor,
   canReorder: () => currentMode !== 'preview',
   onVisibilityRequest: (visible) => {
@@ -2349,11 +2363,9 @@ wikiLinkBtn.addEventListener('click', () => handleFormatAction('wikiLink'));
 imageBtn.addEventListener('click', () => handleFormatAction('image'));
 exportHtmlOption.addEventListener('click', () => {
   exportHandler.requestExport('html');
-  setMoreToolsVisible(false);
 });
 exportPdfOption.addEventListener('click', () => {
   exportHandler.requestExport('pdf');
-  setMoreToolsVisible(false);
 });
 const showOutlineAt = (position: 'left' | 'right') => {
   if (outlineController.isVisible() && outlineController.getPosition() === position) {
@@ -2365,6 +2377,7 @@ const showOutlineAt = (position: 'left' | 'right') => {
 };
 
 outlineLeftBtn.addEventListener('click', () => showOutlineAt('left'));
+previewOutlineLeftBtn.addEventListener('click', () => showOutlineAt('left'));
 outlineBtn.addEventListener('click', () => showOutlineAt('right'));
 contentMaxWidthBtn.addEventListener('click', () => {
   setContentMaxWidthEnabled(!contentMaxWidthEnabled);
