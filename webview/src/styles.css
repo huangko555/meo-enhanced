@@ -895,10 +895,10 @@ body {
 }
 
 .mode-button.is-active {
-  color: var(--vscode-editor-foreground);
+  color: var(--meo-semantic-headingForeground, #79b8ff);
   background: color-mix(
     in srgb,
-    var(--vscode-editor-foreground) 16%,
+    var(--meo-semantic-headingForeground, #79b8ff) 16%,
     var(--vscode-sideBar-background)
   );
 }

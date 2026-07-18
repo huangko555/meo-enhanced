@@ -1500,6 +1500,9 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
         editor.restoreTopLine?.(transitionViewPosition.topLine, transitionViewPosition.topLineOffset);
       }
       syncGitDiffLineHighlights();
+      if (outlineController.isVisible()) {
+        outlineController.refresh();
+      }
       if (shouldRestoreEditorFocus) {
         editor.focus();
       }
@@ -1524,6 +1527,9 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
           editor.setMode('source');
           currentMode = 'source';
           updateModeUI();
+          if (outlineController.isVisible()) {
+            outlineController.refresh();
+          }
           failureNotice.updateEditorNotice();
           if (shouldRestoreEditorFocus) {
             editor.focus();
