@@ -22,7 +22,6 @@ interface MermaidResult {
 
 let mermaidInitialized = false;
 let mermaidThemeSignature = '';
-let mermaidRuntimePromise: Promise<MermaidRuntime> | null = null;
 let mermaidOperationQueue: Promise<void> = Promise.resolve();
 const MERMAID_CACHE_LIMIT = 100;
 const mermaidCache = new Map<string, MermaidResult>();
@@ -310,24 +309,7 @@ export function loadMermaidRuntime() {
     return Promise.resolve(existing);
   }
 
-  if (mermaidRuntimePromise) {
-    return mermaidRuntimePromise;
-  }
-
-  mermaidRuntimePromise = import('mermaid')
-    .then((module) => {
-      const runtime = module.default as MermaidRuntime;
-      if (!runtime || typeof runtime.render !== 'function') {
-        throw new Error('Bundled Mermaid runtime unavailable');
-      }
-      return runtime;
-    })
-    .catch((error) => {
-      mermaidRuntimePromise = null;
-      throw error;
-    });
-
-  return mermaidRuntimePromise;
+  return Promise.reject(new Error('Preloaded Mermaid runtime unavailable'));
 }
 
 async function initMermaid() {
