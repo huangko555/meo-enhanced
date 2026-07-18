@@ -827,11 +827,37 @@ body {
 }
 
 .mode-group {
+  position: relative;
   display: inline-flex;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
-  padding: 2px;
+  align-items: center;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0;
   background: transparent;
+}
+
+.mode-group::before,
+.mode-group::after {
+  content: '';
+  position: absolute;
+  inset: 1px 0;
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.mode-group::before {
+  z-index: 0;
+  background: color-mix(
+    in srgb,
+    var(--vscode-input-background, var(--vscode-sideBar-background)) 62%,
+    var(--vscode-sideBar-background)
+  );
+}
+
+.mode-group::after {
+  z-index: 2;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, #474b50) 72%, transparent);
 }
 
 @media (max-width: 920px) {
@@ -852,10 +878,33 @@ body {
 }
 
 .mode-button {
+  position: relative;
+  z-index: 1;
+  height: 22px;
   min-width: 52px;
+  padding: 0 8px;
+  border-radius: 5px;
   cursor: pointer;
-  color: var(--vscode-foreground);
+  color: var(--vscode-descriptionForeground, var(--vscode-foreground));
   background: transparent;
+}
+
+.mode-button.is-active {
+  color: var(--vscode-editor-foreground);
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-foreground) 16%,
+    var(--vscode-sideBar-background)
+  );
+}
+
+.mode-button:not(.is-active):hover {
+  color: var(--vscode-editor-foreground);
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-foreground) 8%,
+    transparent
+  );
 }
 
 .meo-copy-code-btn {
