@@ -3072,7 +3072,7 @@ body.outline-resizing .preview-frame {
   top: 0;
   right: 10px;
   bottom: 0;
-  width: 3px;
+  width: 6px;
   border-left: 1px solid transparent;
   pointer-events: none;
   z-index: 5;

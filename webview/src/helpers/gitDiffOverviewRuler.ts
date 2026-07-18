@@ -9,7 +9,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 interface TrackMetrics {
-  drawableHeight: number;
+  contentHeight: number;
   fileEndY: number;
   showFileEndLine: boolean;
 }
@@ -18,7 +18,7 @@ function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
   const scrollEl = view?.scrollDOM;
   if (!scrollEl || trackHeight <= 0) {
     return {
-      drawableHeight: trackHeight,
+      contentHeight: Math.max(1, trackHeight),
       fileEndY: trackHeight,
       showFileEndLine: false
     };
@@ -27,7 +27,7 @@ function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
   const totalScrollHeight = Math.max(0, scrollEl.scrollHeight || 0);
   if (totalScrollHeight <= 0) {
     return {
-      drawableHeight: trackHeight,
+      contentHeight: Math.max(1, trackHeight),
       fileEndY: trackHeight,
       showFileEndLine: false
     };
@@ -54,7 +54,7 @@ function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
   const fileEndRatio = clamp(contentBottom / totalScrollHeight, 0, 1);
   const fileEndY = clamp(Math.round(trackHeight * fileEndRatio), 0, trackHeight);
   return {
-    drawableHeight: Math.max(0, fileEndY),
+    contentHeight: Math.max(1, contentBottom),
     fileEndY,
     showFileEndLine: fileEndY > 0 && fileEndY < trackHeight
   };
@@ -171,24 +171,36 @@ export function createGitDiffOverviewRulerController({
 
     const pixelSegments: PixelSegment[] = [];
     for (const segment of segments) {
-      const topRatio = (segment.fromLine - 1) / totalLines;
-      const bottomRatio = segment.toLine / totalLines;
-      let top = Math.floor(topRatio * trackMetrics.drawableHeight);
-      let bottom = Math.ceil(bottomRatio * trackMetrics.drawableHeight);
+      let topRatio = (segment.fromLine - 1) / totalLines;
+      let bottomRatio = segment.toLine / totalLines;
+      try {
+        const fromLine = view.state.doc.line(segment.fromLine);
+        const toLine = view.state.doc.line(segment.toLine);
+        const fromBlock = view.lineBlockAt(fromLine.from);
+        const toBlock = view.lineBlockAt(toLine.from);
+        if (Number.isFinite(fromBlock?.top) && Number.isFinite(toBlock?.bottom)) {
+          topRatio = fromBlock.top / trackMetrics.contentHeight;
+          bottomRatio = toBlock.bottom / trackMetrics.contentHeight;
+        }
+      } catch {
+        // Keep the line-based fallback if CodeMirror cannot measure this range yet.
+      }
+      let top = Math.floor(topRatio * trackHeight);
+      let bottom = Math.ceil(bottomRatio * trackHeight);
       let height = Math.max(minMarkerHeightPx, bottom - top);
 
-      top = clamp(top, 0, Math.max(0, trackMetrics.drawableHeight - 1));
-      if (top + height > trackMetrics.drawableHeight) {
-        if (height >= trackMetrics.drawableHeight) {
+      top = clamp(top, 0, Math.max(0, trackHeight - 1));
+      if (top + height > trackHeight) {
+        if (height >= trackHeight) {
           top = 0;
-          height = trackMetrics.drawableHeight;
+          height = trackHeight;
         } else {
-          top = Math.max(0, trackMetrics.drawableHeight - height);
+          top = Math.max(0, trackHeight - height);
         }
       }
       bottom = top + height;
-      if (bottom > trackMetrics.drawableHeight) {
-        bottom = trackMetrics.drawableHeight;
+      if (bottom > trackHeight) {
+        bottom = trackHeight;
       }
       if (bottom <= top) {
         continue;
