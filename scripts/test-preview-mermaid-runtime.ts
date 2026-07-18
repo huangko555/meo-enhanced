@@ -6,7 +6,6 @@ import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
 import { defaultThemeSettings } from '../src/shared/themeDefaults';
 
-const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runtime-'));
 const browser = await launchTestBrowser();
 
@@ -19,14 +18,11 @@ try {
   });
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
-  const runtime = fs.readFileSync(path.join(repoRoot, 'webview', 'dist', 'mermaid.min.js'), 'utf8');
-  const runtimeSrc = `data:text/javascript;base64,${Buffer.from(runtime).toString('base64')}`;
   const page = await browser.newPage();
   await page.setContent('<!doctype html><body></body>');
-  await page.evaluate((src) => {
-    document.body.dataset.meoMermaidSrc = src;
+  await page.evaluate(() => {
     document.body.dataset.meoScriptNonce = 'preview-runtime-test';
-  }, runtimeSrc);
+  });
   await page.addScriptTag({ path: path.join(tempDir, 'test-preview-mermaid-runtime-entry.js') });
   await page.evaluate(() => {
     const csp = document.createElement('meta');

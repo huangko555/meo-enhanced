@@ -296,10 +296,6 @@ function applyMermaidThemeClass(element: HTMLElement): void {
   element.classList.toggle('meo-mermaid-dark-theme', !lightTheme);
 }
 
-function getMermaidRuntimeSource() {
-  return document.body?.dataset?.meoMermaidSrc ?? '';
-}
-
 function getMermaidRuntime() {
   const runtime = globalThis.mermaid ?? window.mermaid;
   if (!runtime || typeof runtime.render !== 'function') {
@@ -318,33 +314,18 @@ export function loadMermaidRuntime() {
     return mermaidRuntimePromise;
   }
 
-  const source = getMermaidRuntimeSource();
-  if (!source) {
-    return Promise.reject(new Error('Missing Mermaid runtime source'));
-  }
-
-  mermaidRuntimePromise = new Promise<MermaidRuntime>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = source;
-    script.async = true;
-    script.nonce = document.body.dataset.meoScriptNonce ?? '';
-    script.dataset.meoMermaidRuntime = 'true';
-    script.onload = () => {
-      const runtime = getMermaidRuntime();
-      if (!runtime) {
-        reject(new Error('Mermaid runtime loaded but unavailable'));
-        return;
+  mermaidRuntimePromise = import('mermaid')
+    .then((module) => {
+      const runtime = module.default as MermaidRuntime;
+      if (!runtime || typeof runtime.render !== 'function') {
+        throw new Error('Bundled Mermaid runtime unavailable');
       }
-      resolve(runtime);
-    };
-    script.onerror = () => {
-      reject(new Error('Failed to load Mermaid runtime'));
-    };
-    document.head.appendChild(script);
-  }).catch((error) => {
-    mermaidRuntimePromise = null;
-    throw error;
-  });
+      return runtime;
+    })
+    .catch((error) => {
+      mermaidRuntimePromise = null;
+      throw error;
+    });
 
   return mermaidRuntimePromise;
 }
