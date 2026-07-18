@@ -1,5 +1,11 @@
 export type PreviewAppearance = 'dark' | 'light';
 
+export const PREVIEW_APPEARANCE_STATE_KEY = 'previewAppearance';
+
+export function normalizePreviewAppearance(value: unknown): PreviewAppearance {
+  return value === 'light' ? 'light' : 'dark';
+}
+
 export type PreviewStyles = Record<PreviewAppearance, string>;
 
 export type PreviewStyleEnvironment = {

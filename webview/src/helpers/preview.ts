@@ -2,14 +2,13 @@ import { createElement, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import type { OutlineHeading } from './outline';
 import type { PreviewAppearance, PreviewRenderErrorMessage, PreviewRenderedMessage } from '../../../src/shared/preview';
-import { restoreMermaidEditorTheme } from './mermaidDiagram';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
   onRendered?: () => void;
 };
 
-let mermaidRuntimePromise: Promise<any> | null = null;
+const previewMermaidRuntimePromises = new WeakMap<Document, Promise<any>>();
 
 export function createPreviewController({ vscode, onRendered }: PreviewControllerOptions) {
   const host = document.createElement('div');
@@ -19,7 +18,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   const frame = document.createElement('iframe');
   frame.className = 'preview-frame';
   frame.title = 'Markdown Preview';
-  frame.setAttribute('sandbox', 'allow-same-origin');
+  frame.setAttribute('sandbox', 'allow-same-origin allow-scripts');
 
   const appearanceControl = document.createElement('div');
   appearanceControl.className = 'preview-appearance-control';
@@ -56,13 +55,13 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   let pendingText = '';
   let latestRenderedText = '';
   let latestPayload: PreviewRenderedMessage | null = null;
+  let mermaidRenderQueue: Promise<void> = Promise.resolve();
 
-  const restoreEditorMermaidTheme = async (): Promise<void> => {
-    try {
-      await restoreMermaidEditorTheme();
-    } catch {
-      // Preview remains readable even if the shared Mermaid runtime is unavailable.
-    }
+  const renderPreviewMermaid = (frameDocument: Document, renderAppearance: PreviewAppearance): Promise<void> => {
+    mermaidRenderQueue = mermaidRenderQueue
+      .catch(() => undefined)
+      .then(() => renderMermaidBlocks(frameDocument, renderAppearance));
+    return mermaidRenderQueue;
   };
 
   const updateThemeToggle = () => {
@@ -106,9 +105,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
         onRendered?.();
       };
       if (latestPayload?.hasMermaid) {
-        void renderMermaidBlocks(frameDocument, appearance)
-          .finally(restoreEditorMermaidTheme)
-          .finally(finishRender);
+        void renderPreviewMermaid(frameDocument, appearance).finally(finishRender);
       } else {
         finishRender();
       }
@@ -131,11 +128,27 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
       onRendered?.();
     };
     if (latestPayload.hasMermaid) {
-      void renderMermaidBlocks(frameDocument, appearance)
-        .finally(restoreEditorMermaidTheme)
-        .finally(finish);
+      void renderPreviewMermaid(frameDocument, appearance).finally(finish);
     } else {
       finish();
+    }
+  };
+
+  const setAppearance = (
+    nextAppearance: PreviewAppearance,
+    { post = false }: { post?: boolean } = {}
+  ): void => {
+    if (nextAppearance !== 'light' && nextAppearance !== 'dark') {
+      return;
+    }
+    const changed = appearance !== nextAppearance;
+    appearance = nextAppearance;
+    updateThemeToggle();
+    if (changed) {
+      applyAppearanceToFrame();
+    }
+    if (post) {
+      vscode.postMessage({ type: 'setPreviewAppearance', appearance });
     }
   };
 
@@ -187,11 +200,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     if (nextAppearance !== 'light' && nextAppearance !== 'dark') {
       return;
     }
-    if (appearance !== nextAppearance) {
-      appearance = nextAppearance;
-      updateThemeToggle();
-      applyAppearanceToFrame();
-    }
+    setAppearance(nextAppearance, { post: true });
   });
   updateThemeToggle();
 
@@ -325,10 +334,8 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     requestRender,
     handleRendered,
     handleRenderError,
-    resetAppearance: () => {
-      appearance = 'dark';
-      updateThemeToggle();
-    },
+    setAppearance,
+    getAppearance: () => appearance,
     setVisible: (visible: boolean) => {
       host.hidden = !visible;
     },
@@ -389,7 +396,7 @@ async function renderMermaidBlocks(frameDocument: Document, appearance: PreviewA
   if (blocks.length === 0) {
     return;
   }
-  const mermaid = await ensureMermaidRuntime();
+  const mermaid = await ensureMermaidRuntime(frameDocument);
   const frameStyles = frameDocument.defaultView?.getComputedStyle(frameDocument.documentElement);
   const readColor = (name: string, fallback: string) => frameStyles?.getPropertyValue(name).trim() || fallback;
   const background = readColor('--meo-bg', appearance === 'dark' ? '#20252b' : '#ffffff');
@@ -438,30 +445,33 @@ async function renderMermaidBlocks(frameDocument: Document, appearance: PreviewA
   }
 }
 
-function ensureMermaidRuntime(): Promise<any> {
-  const existing = (globalThis as any).mermaid;
+function ensureMermaidRuntime(frameDocument: Document): Promise<any> {
+  const frameWindow = frameDocument.defaultView as (Window & { mermaid?: any }) | null;
+  const existing = frameWindow?.mermaid;
   if (existing) {
     return Promise.resolve(existing);
   }
-  if (mermaidRuntimePromise) {
-    return mermaidRuntimePromise;
+  const pending = previewMermaidRuntimePromises.get(frameDocument);
+  if (pending) {
+    return pending;
   }
-  mermaidRuntimePromise = new Promise((resolve, reject) => {
+  const runtimePromise = new Promise((resolve, reject) => {
     const src = document.body.dataset.meoMermaidSrc;
     if (!src) {
       reject(new Error('Mermaid runtime is unavailable'));
       return;
     }
-    const script = document.createElement('script');
+    const script = frameDocument.createElement('script');
     script.src = src;
-    script.addEventListener('load', () => resolve((globalThis as any).mermaid), { once: true });
+    script.addEventListener('load', () => resolve(frameWindow?.mermaid), { once: true });
     script.addEventListener('error', () => reject(new Error('Failed to load Mermaid runtime')), { once: true });
-    document.head.appendChild(script);
+    frameDocument.head.appendChild(script);
   }).catch((error) => {
-    mermaidRuntimePromise = null;
+    previewMermaidRuntimePromises.delete(frameDocument);
     throw error;
   });
-  return mermaidRuntimePromise;
+  previewMermaidRuntimePromises.set(frameDocument, runtimePromise);
+  return runtimePromise;
 }
 
 function decodeBase64Utf8(value: string): string {

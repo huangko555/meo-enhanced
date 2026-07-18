@@ -1,4 +1,5 @@
 import { defaultCodeBlockBackgroundColor, themeColorKeys } from '../../../src/shared/themeDefaults';
+import type { PreviewAppearance } from '../../../src/shared/preview';
 
 export interface ExportStyleEnvironment extends Record<string, unknown> {
   editorBackgroundColor: string;
@@ -124,6 +125,7 @@ export interface ExportHandlerContext {
   flushChanges: () => void;
   normalizeEol: (text: string) => string;
   setPendingDebounce: (value: number | null) => void;
+  getPreviewAppearance: () => PreviewAppearance;
 }
 
 export const createExportHandler = (context: ExportHandlerContext) => {
@@ -178,7 +180,11 @@ export const createExportHandler = (context: ExportHandlerContext) => {
     if (format !== 'html' && format !== 'pdf') {
       return;
     }
-    context.vscode.postMessage({ type: 'exportDocument', format });
+    context.vscode.postMessage({
+      type: 'exportDocument',
+      format,
+      appearance: context.getPreviewAppearance()
+    });
   };
 
   return {

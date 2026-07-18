@@ -93,6 +93,7 @@ const environment = {
 const darkPreviewStyles = buildPreviewStyles(defaultThemeSettings, environment, 'dark');
 const lightPreviewStyles = buildPreviewStyles(defaultThemeSettings, environment, 'light');
 const exportStyles = buildExportStyles(defaultThemeSettings, environment);
+const darkExportStyles = buildExportStyles(defaultThemeSettings, environment, 'dark');
 
 if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
   throw new Error('Dark Preview must use the current document background');
@@ -123,7 +124,10 @@ if (!darkPreviewStyles.includes('.meo-table-scroll') || darkPreviewStyles.includ
   throw new Error('Preview tables must fit the reading surface without relying on horizontal scrolling');
 }
 if (!exportStyles.includes('--meo-bg: #ffffff')) {
-  throw new Error('Exports must always use the white Meo Reading palette');
+  throw new Error('Light Preview exports must use the white Meo Reading background');
+}
+if (!darkExportStyles.includes('--meo-bg: #20252b')) {
+  throw new Error('Dark Preview exports must keep the active dark reading background');
 }
 if (!exportStyles.includes('max-width: 900px')) {
   throw new Error('Meo Reading must constrain HTML documents to a readable measure');

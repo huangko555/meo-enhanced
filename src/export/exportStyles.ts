@@ -13,8 +13,12 @@ export type ExportStyleEnvironment = PreviewStyleEnvironment & {
   meoThemeColors?: Partial<Record<ThemeColorKey, string>>;
 };
 
-export function buildExportStyles(theme: ThemeSettings, environment: ExportStyleEnvironment = {}): string {
-  return buildReadingStyles(theme, environment, 'light', 'export');
+export function buildExportStyles(
+  theme: ThemeSettings,
+  environment: ExportStyleEnvironment = {},
+  appearance: PreviewAppearance = 'light'
+): string {
+  return buildReadingStyles(theme, environment, appearance, 'export');
 }
 
 export function buildPreviewStyles(

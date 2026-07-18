@@ -68,7 +68,12 @@ import {
 } from './shared/extensionConfig';
 import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
-import type { PreviewRenderResult } from './shared/preview';
+import {
+  normalizePreviewAppearance,
+  PREVIEW_APPEARANCE_STATE_KEY,
+  type PreviewAppearance,
+  type PreviewRenderResult
+} from './shared/preview';
 import { parseThemeJsonc, serializeThemeFile } from './shared/themeJsonc';
 import { collectWebviewImageResourceRoots } from './shared/documentLinks';
 import {
@@ -110,6 +115,7 @@ type ExportRuntimeModule = {
     target: ExportFormat;
     htmlImageMode: ExportHtmlImageMode;
     theme: ThemeSettings;
+    appearance: PreviewAppearance;
     styleEnvironment?: ExportStyleEnvironment;
     editorFontEnvironment?: {
       editorFontFamily?: string;
@@ -735,7 +741,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       context: this.context,
       spellDiagnosticCollection: this.spellDiagnosticCollection,
       agentReviewHandoff: this.agentReviewHandoff,
-      onExportDocument: (session, format) => this.exportSessionDocument(session, format),
+      onExportDocument: (session, format, appearance) => this.exportSessionDocument(session, format, appearance),
       renderPreview: async (options) => {
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
         return exportRuntime.renderPreviewDocument({
@@ -745,6 +751,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       },
       getFindOptions: () => this.getFindOptions(),
       setFindOptions: (options) => this.setFindOptions(options),
+      getPreviewAppearance: () => this.getPreviewAppearance(),
+      setPreviewAppearance: (appearance) => this.setPreviewAppearance(appearance),
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
       updateGitBlameEnabled: (enabled) => this.updateGitBlameEnabled(enabled),
       onPanelActivated: (activePanel) => {
@@ -802,6 +810,19 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.broadcast({ type: 'findOptionsChanged', findOptions: nextOptions });
   }
 
+  private getPreviewAppearance(): PreviewAppearance {
+    return normalizePreviewAppearance(this.context.globalState.get(PREVIEW_APPEARANCE_STATE_KEY));
+  }
+
+  private async setPreviewAppearance(appearance: PreviewAppearance): Promise<void> {
+    const nextAppearance = normalizePreviewAppearance(appearance);
+    if (this.getPreviewAppearance() === nextAppearance) {
+      return;
+    }
+    await this.context.globalState.update(PREVIEW_APPEARANCE_STATE_KEY, nextAppearance);
+    this.broadcast({ type: 'previewAppearanceChanged', appearance: nextAppearance });
+  }
+
   private async setOutlineVisible(visible: boolean): Promise<void> {
     const nextVisible = visible === true;
     if (getOutlineVisible(this.context) === nextVisible) {
@@ -833,7 +854,11 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     return first.done ? null : first.value;
   }
 
-  private async exportSessionDocument(session: PanelSession, format: ExportFormat): Promise<void> {
+  private async exportSessionDocument(
+    session: PanelSession,
+    format: ExportFormat,
+    appearance: PreviewAppearance = this.getPreviewAppearance()
+  ): Promise<void> {
     this.lastActivePanel = session.panel;
 
     if (session.documentUri.scheme !== 'file') {
@@ -866,7 +891,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
               outputFileUri: saveUri,
               target: format,
               htmlImageMode: getExportHtmlImageMode(),
-              styleEnvironment: snapshot.environment
+              styleEnvironment: snapshot.environment,
+              appearance
             });
 
             const browserExecutablePath = getExportPdfBrowserPath();
@@ -928,6 +954,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       target: ExportFormat;
       htmlImageMode: ExportHtmlImageMode;
       styleEnvironment?: ExportStyleEnvironment;
+      appearance: PreviewAppearance;
     }
   ): Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }> {
     const mermaidRuntimeSrc = pathToFileURL(
@@ -944,6 +971,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       target: params.target,
       htmlImageMode: params.htmlImageMode,
       theme: getThemeSettings(),
+      appearance: params.appearance,
       styleEnvironment: params.styleEnvironment,
       editorFontEnvironment: getExportEditorFontEnvironment(),
       mermaidRuntimeSrc,

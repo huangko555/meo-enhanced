@@ -1738,7 +1738,8 @@ const exportHandlerContext: ExportHandlerContext = {
   get inFlight() { return inFlight; },
   flushChanges,
   normalizeEol,
-  setPendingDebounce: (value) => { pendingDebounce = value; }
+  setPendingDebounce: (value) => { pendingDebounce = value; },
+  getPreviewAppearance: () => previewController.getAppearance()
 };
 
 const exportHandler = createExportHandler(exportHandlerContext);
@@ -1775,7 +1776,7 @@ window.addEventListener('message', (event) => {
       inFlightText = null;
       saveAfterSync = false;
       syncPendingDraftState();
-      previewController.resetAppearance();
+      previewController.setAppearance(message.previewAppearance === 'light' ? 'light' : 'dark');
 
       handleInit(message);
       if (hasLocalModePreference) {
@@ -1839,6 +1840,11 @@ window.addEventListener('message', (event) => {
       ? lastEditableMode
       : currentMode === 'live' ? 'source' : 'live';
     applyMode(nextMode, { userTriggered: true, reason: 'command' });
+    return;
+  }
+
+  if (message.type === 'previewAppearanceChanged') {
+    previewController.setAppearance(message.appearance === 'light' ? 'light' : 'dark');
     return;
   }
 

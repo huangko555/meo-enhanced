@@ -62,9 +62,26 @@ async function main() {
     </div></body>`);
     await page.addStyleTag({ content: 'html,body,#app{height:100%;margin:0} #app{display:flex;flex-direction:column}' });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    const previewMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
+      window.__mermaidInitializeConfigs = [];
+      window.__mermaidConfig = null;
+      window.mermaid = {
+        initialize(config) {
+          window.__mermaidConfig = config;
+          window.__mermaidInitializeConfigs.push(config);
+        },
+        async render(id, source) {
+          const variables = window.__mermaidConfig?.themeVariables ?? {};
+          const fill = variables.primaryColor ?? '#ffffff';
+          const stroke = variables.primaryBorderColor ?? '#000000';
+          return { svg: '<svg width="800" height="120" viewBox="0 0 800 120"><rect data-mermaid-node width="160" height="80" fill="' + fill + '" stroke="' + stroke + '"></rect></svg>' };
+        }
+      };
+    `, 'utf8').toString('base64')}`;
     await page.addScriptTag({ content: `
       window.__hostMessages = [];
       window.__mermaidInitializeConfigs = [];
+      document.body.dataset.meoMermaidSrc = ${JSON.stringify(previewMermaidRuntimeSrc)};
       window.acquireVsCodeApi = () => ({
         postMessage(message) { window.__hostMessages.push(message); },
         getState() { return window.__webviewState; },
@@ -84,7 +101,7 @@ async function main() {
     const initialText = createFixture();
     await page.evaluate(({ text, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text, version: 1, diagnostics: [], mode: 'live',
+        type: 'init', text, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
@@ -237,11 +254,17 @@ async function main() {
     }
     await page.click('.preview-toolbar-action[data-format="html"]');
     await page.click('.preview-toolbar-action[data-format="pdf"]');
-    const previewExportFormats = await page.evaluate(() => (
-      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string }> }).__hostMessages ?? []
-    ).filter((message) => message.type === 'exportDocument').map((message) => message.format));
-    if (JSON.stringify(previewExportFormats) !== JSON.stringify(['html', 'pdf'])) {
-      throw new Error(`Preview export buttons did not request both formats: ${JSON.stringify(previewExportFormats)}`);
+    const previewExportRequests = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string; appearance?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportDocument').map((message) => ({
+      format: message.format,
+      appearance: message.appearance
+    })));
+    if (JSON.stringify(previewExportRequests) !== JSON.stringify([
+      { format: 'html', appearance: 'dark' },
+      { format: 'pdf', appearance: 'dark' }
+    ])) {
+      throw new Error(`Preview export buttons did not request both formats with the current appearance: ${JSON.stringify(previewExportRequests)}`);
     }
     let previewRequestId = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
@@ -302,6 +325,17 @@ async function main() {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
       return frame?.contentDocument?.querySelector('#tall-mermaid');
     });
+    await page.waitForFunction(() => Boolean(
+      document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+        ?.querySelector('.meo-export-mermaid.is-rendered [data-mermaid-node]')
+    ));
+    const darkPreviewMermaidFill = await page.evaluate(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<SVGElement>('[data-mermaid-node]')!.getAttribute('fill')
+    ));
+    if (!darkPreviewMermaidFill || darkPreviewMermaidFill === '#ffffff') {
+      throw new Error(`Dark Preview Mermaid used a light node fill: ${darkPreviewMermaidFill}`);
+    }
     const darkPreviewState = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const toggle = document.querySelector<HTMLElement>('.preview-appearance-button[data-appearance="light"]')!;
@@ -429,6 +463,11 @@ async function main() {
       return document.querySelector<HTMLElement>('.preview-appearance-button[data-appearance="light"]')?.getAttribute('aria-pressed') === 'true';
     });
     await waitForFrames(page, 4);
+    await page.waitForFunction((darkFill) => {
+      const node = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<SVGElement>('[data-mermaid-node]');
+      return Boolean(node?.getAttribute('fill') && node.getAttribute('fill') !== darkFill);
+    }, {}, darkPreviewMermaidFill);
     const lightPreviewBackground = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       return getComputedStyle(frame.contentDocument!.body).backgroundColor;
@@ -442,18 +481,35 @@ async function main() {
     if (themeSwitchPreservedDocument !== 'preserve-document') {
       throw new Error('Preview theme switching rebuilt the iframe document');
     }
-    try {
-      await page.waitForFunction(() => {
-        const configs = (window as typeof window & { __mermaidInitializeConfigs?: Array<{ themeVariables?: { darkMode?: boolean } }> })
-          .__mermaidInitializeConfigs ?? [];
-        const sawPreviewLight = configs.some((config) => config.themeVariables?.darkMode === false);
-        return sawPreviewLight && configs.at(-1)?.themeVariables?.darkMode === true;
-      }, { timeout: 3000 });
-    } catch {
-      const configs = await page.evaluate(() => (
-        (window as typeof window & { __mermaidInitializeConfigs?: unknown[] }).__mermaidInitializeConfigs ?? []
-      ));
-      throw new Error(`Preview Mermaid theme leaked into Live mode: ${JSON.stringify(configs)}`);
+    const appearanceMessages = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string; appearance?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'setPreviewAppearance').map((message) => message.appearance));
+    if (JSON.stringify(appearanceMessages) !== JSON.stringify(['light'])) {
+      throw new Error(`Preview appearance was not persisted globally: ${JSON.stringify(appearanceMessages)}`);
+    }
+    const mermaidThemeIsolation = await page.evaluate(() => {
+      const frameWindow = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow as Window & {
+        __mermaidInitializeConfigs?: Array<{ themeVariables?: { darkMode?: boolean } }>;
+      };
+      const previewConfigs = frameWindow.__mermaidInitializeConfigs ?? [];
+      const editorConfigs = (window as typeof window & {
+        __mermaidInitializeConfigs?: Array<{ themeVariables?: { darkMode?: boolean } }>;
+      }).__mermaidInitializeConfigs ?? [];
+      return {
+        previewSawDark: previewConfigs.some((config) => config.themeVariables?.darkMode === true),
+        previewEndedLight: previewConfigs.at(-1)?.themeVariables?.darkMode === false,
+        editorStayedDark: editorConfigs.every((config) => config.themeVariables?.darkMode !== false)
+      };
+    });
+    if (!mermaidThemeIsolation.previewSawDark || !mermaidThemeIsolation.previewEndedLight || !mermaidThemeIsolation.editorStayedDark) {
+      throw new Error(`Preview Mermaid theme was not isolated: ${JSON.stringify(mermaidThemeIsolation)}`);
+    }
+    await page.click('.preview-toolbar-action[data-format="html"]');
+    const lightExportAppearance = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string; appearance?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportDocument').at(-1)?.appearance);
+    if (lightExportAppearance !== 'light') {
+      throw new Error(`Light Preview export did not keep the active appearance: ${lightExportAppearance}`);
     }
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 2);

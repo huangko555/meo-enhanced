@@ -38,7 +38,7 @@ import type { GitBaselinePayload, GitBlameLineResult } from '../git/types';
 import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
 import type { ExportStyleEnvironment } from '../export/runtime';
 import type { ThemeSettings } from '../shared/themeDefaults';
-import type { PreviewRenderRequestMessage, PreviewRenderResult } from '../shared/preview';
+import type { PreviewAppearance, PreviewRenderRequestMessage, PreviewRenderResult } from '../shared/preview';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
 import type { OutlinePosition } from '../shared/extensionConfig';
 import {
@@ -62,6 +62,7 @@ type InitMessage = {
   version: number;
   diagnostics: SerializedDiagnostic[];
   mode: EditorMode;
+  previewAppearance: PreviewAppearance;
   lineNumbers: boolean;
   gitChangesGutter: boolean;
   gitBlameEnabled: boolean;
@@ -162,6 +163,12 @@ type SaveDocumentMessage = {
 type ExportDocumentMessage = {
   type: 'exportDocument';
   format: ExportFormat;
+  appearance: PreviewAppearance;
+};
+
+type SetPreviewAppearanceMessage = {
+  type: 'setPreviewAppearance';
+  appearance: PreviewAppearance;
 };
 
 type ExportSnapshotMessage = {
@@ -363,6 +370,7 @@ type WebviewMessage =
   | ResolveLocalLinksMessage
   | SaveDocumentMessage
   | ExportDocumentMessage
+  | SetPreviewAppearanceMessage
   | ExportSnapshotMessage
   | ExportSnapshotErrorMessage
   | PreviewRenderRequestMessage
@@ -413,7 +421,7 @@ type PanelSessionControllerParams = {
   context: vscode.ExtensionContext;
   spellDiagnosticCollection: vscode.DiagnosticCollection;
   agentReviewHandoff: AgentReviewHandoffController;
-  onExportDocument: (session: PanelSession, format: ExportFormat) => Promise<void>;
+  onExportDocument: (session: PanelSession, format: ExportFormat, appearance: PreviewAppearance) => Promise<void>;
   renderPreview: (options: {
     markdownText: string;
     sourceDocumentPath: string;
@@ -421,6 +429,8 @@ type PanelSessionControllerParams = {
   }) => Promise<PreviewRenderResult>;
   getFindOptions: () => FindOptions;
   setFindOptions: (options: FindOptions) => Promise<void>;
+  getPreviewAppearance: () => PreviewAppearance;
+  setPreviewAppearance: (appearance: PreviewAppearance) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
   updateGitBlameEnabled: (enabled: boolean) => Promise<void>;
   onPanelActivated: (panel: vscode.WebviewPanel) => void;
@@ -462,6 +472,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     renderPreview,
     getFindOptions,
     setFindOptions,
+    getPreviewAppearance,
+    setPreviewAppearance,
     setOutlineVisible,
     updateGitBlameEnabled,
     onPanelActivated,
@@ -690,6 +702,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       version: document.version,
       diagnostics: serializeDiagnostics(document),
       mode,
+      previewAppearance: getPreviewAppearance(),
       lineNumbers: getLineNumbersEnabled(context),
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitBlameEnabled,
@@ -1229,7 +1242,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         }
         return;
       case 'exportDocument':
-        await onExportDocument(session, raw.format);
+        await onExportDocument(session, raw.format, raw.appearance);
+        return;
+      case 'setPreviewAppearance':
+        await setPreviewAppearance(raw.appearance);
         return;
       case 'openLink':
         await openLink(raw.href, documentUri);
