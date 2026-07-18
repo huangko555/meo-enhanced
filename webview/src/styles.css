@@ -3644,12 +3644,28 @@ body.outline-resizing {
   display: none;
   box-sizing: border-box;
   overflow: hidden;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
   background: var(--meo-background);
 }
 
 .cm-editor .meo-md-html-table-sticky-chrome.is-visible {
   display: block;
+}
+
+.cm-editor .meo-md-html-table-sticky-chrome::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: var(--vscode-editorStickyScroll-border, var(--meo-semantic-tableBorder));
+}
+
+.cm-editor .meo-md-html-table-sticky-chrome * {
+  cursor: default !important;
 }
 
 .cm-editor .meo-md-html-table-sticky-toolbar-band {
@@ -3667,7 +3683,7 @@ body.outline-resizing {
   width: 100%;
   overflow: hidden;
   background: var(--meo-inset-background);
-  box-shadow: 0 1px 0 var(--meo-semantic-tableBorder), 0 3px 8px rgba(0, 0, 0, 0.16);
+  box-shadow: none;
 }
 
 .cm-editor .meo-md-html-table.meo-md-html-table-sticky-table {

@@ -186,8 +186,15 @@ const tableDelimiterRegex = /^\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn';
 const tableToolbarHeight = 21;
+const stickyHeaderSeparatorDepth = 4;
+const minimumStickyTableViewportRatio = 0.5;
 const minimumStickyBodyRowCount = 2;
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function tableHasReachedStickyThreshold(tableRect: DOMRect, scrollerRect: DOMRect) {
+  const stickyBottom = scrollerRect.top + tableToolbarHeight;
+  return tableRect.top <= stickyBottom && tableRect.bottom > stickyBottom;
+}
 
 class TableHeaderAlignmentOverrideValue extends RangeValue {
   constructor(readonly columns: ReadonlySet<number>) {
@@ -3461,22 +3468,23 @@ class HtmlTableWidget extends WidgetType {
     const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
     const tableRect = table.getBoundingClientRect();
     const headerRect = headerRow.getBoundingClientRect();
-    const controlsVisible = shell.classList.contains('is-controls-sticky') && (
+    const controlsSticky = shell.classList.contains('is-controls-sticky');
+    const controlsVisible = controlsSticky && (
       shell.matches(':focus-within') ||
       shell.classList.contains('is-interacting') ||
       shell.classList.contains('has-active-sort')
     );
     const controlsHeight = controlsVisible ? tableToolbarHeight : 0;
     const stickyHeaderTop = scrollerRect.top + controlsHeight;
-    const tableNeedsStickyHeader = tableRect.height > scrollerRect.height + 1;
-    const headerScrolledPastTop = headerRect.bottom <= stickyHeaderTop;
+    const tableNeedsStickyHeader = tableRect.height >= scrollerRect.height * minimumStickyTableViewportRatio;
+    const reachedStickyThreshold = tableHasReachedStickyThreshold(tableRect, scrollerRect);
     const lastRowsStart = bodyRows[bodyRows.length - minimumStickyBodyRowCount]?.getBoundingClientRect().top ?? 0;
     const enoughRowsRemain = lastRowsStart >= stickyHeaderTop + headerRect.height;
     const visibleLeft = Math.max(tableRect.left, scrollerRect.left);
     const visibleRight = Math.min(tableRect.right, scrollerRect.right);
     const visibleWidth = Math.max(0, visibleRight - visibleLeft);
 
-    if (!tableNeedsStickyHeader || !headerScrolledPastTop || !enoughRowsRemain || visibleWidth <= 0) {
+    if (!tableNeedsStickyHeader || !reachedStickyThreshold || !enoughRowsRemain || visibleWidth <= 0) {
       this.hideStickyHeader();
       return;
     }
@@ -3486,7 +3494,7 @@ class HtmlTableWidget extends WidgetType {
     stickyChrome.style.top = `${Math.round(scrollerRect.top)}px`;
     stickyChrome.style.left = `${Math.round(visibleLeft)}px`;
     stickyChrome.style.width = `${Math.round(visibleWidth)}px`;
-    stickyChrome.style.height = `${Math.ceil(controlsHeight + headerRect.height)}px`;
+    stickyChrome.style.height = `${Math.ceil(controlsHeight + headerRect.height + stickyHeaderSeparatorDepth)}px`;
     stickyHeaderViewport.style.height = `${Math.ceil(headerRect.height)}px`;
     stickyTable.style.width = `${tableRect.width}px`;
     stickyTable.style.transform = `translateX(${tableRect.left - visibleLeft}px)`;
@@ -3513,8 +3521,7 @@ class HtmlTableWidget extends WidgetType {
     const scrollerRect = scroller.getBoundingClientRect();
     const tableRect = table.getBoundingClientRect();
     const shellRect = shell.getBoundingClientRect();
-    const controlsHeight = tableToolbarHeight;
-    const shouldStick = tableRect.top <= scrollerRect.top + controlsHeight && tableRect.bottom > scrollerRect.top + controlsHeight;
+    const shouldStick = tableHasReachedStickyThreshold(tableRect, scrollerRect);
     shell.classList.toggle('is-controls-sticky', shouldStick);
     if (shouldStick) {
       shell.style.setProperty('--meo-html-table-sticky-top', `${Math.round(scrollerRect.top)}px`);
@@ -3947,7 +3954,6 @@ class HtmlTableWidget extends WidgetType {
     const stickyChrome = document.createElement('div');
     stickyChrome.className = 'meo-md-html-table-sticky-chrome';
     stickyChrome.setAttribute('aria-hidden', 'true');
-    stickyChrome.setAttribute('inert', '');
     const stickyToolbarBand = document.createElement('div');
     stickyToolbarBand.className = 'meo-md-html-table-sticky-toolbar-band';
     const stickyHeaderViewport = document.createElement('div');

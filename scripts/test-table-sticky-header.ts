@@ -79,8 +79,11 @@ async function main() {
       };
 
       const longRows = Array.from({ length: 28 }, (_, index) => `| ${index + 1} | row ${index + 1} |`);
+      const beforeLongTable = Array.from({ length: 6 }, (_, index) => `before long table ${index + 1}`);
       const afterLongTable = Array.from({ length: 24 }, (_, index) => `after long table ${index + 1}`);
       const longEditor = await create([
+        ...beforeLongTable,
+        '',
         '| 编号 | 内容 |',
         '| ---: | :--- |',
         ...longRows,
@@ -95,6 +98,11 @@ async function main() {
       const visibleHeader = visibleChrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-header');
       const originalHeaderCells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table thead th'));
       const stickyHeaderCells = Array.from(visibleHeader?.querySelectorAll<HTMLElement>('th') ?? []);
+      const visibleHeaderRect = visibleHeader?.getBoundingClientRect();
+      const separatorStyle = visibleChrome ? getComputedStyle(visibleChrome, '::after') : null;
+      const hitElement = visibleHeaderRect
+        ? document.elementFromPoint(visibleHeaderRect.left + 4, visibleHeaderRect.top + visibleHeaderRect.height / 2)
+        : null;
       const passiveState = {
         initiallyHidden: longInitiallyHidden,
         visible: Boolean(visibleChrome && getComputedStyle(visibleChrome).display !== 'none'),
@@ -102,6 +110,15 @@ async function main() {
         scrollerTop: scrollerRect.top,
         text: stickyHeaderCells.map((cell) => cell.textContent?.trim() ?? ''),
         interactiveCount: visibleChrome?.querySelectorAll('textarea, input, select, button, a[href]').length ?? -1,
+        cursor: visibleHeader ? getComputedStyle(visibleHeader).cursor : '',
+        hitCursor: hitElement ? getComputedStyle(hitElement).cursor : '',
+        hitElement: hitElement instanceof Element ? `${hitElement.tagName}.${hitElement.className}` : '',
+        shadow: visibleHeader ? getComputedStyle(visibleHeader).boxShadow : '',
+        separatorHeight: separatorStyle ? Number.parseFloat(separatorStyle.height) : 0,
+        separatorColor: separatorStyle?.backgroundColor ?? '',
+        separatorSpace: visibleChrome && visibleHeader
+          ? visibleChrome.getBoundingClientRect().height - visibleHeader.getBoundingClientRect().height
+          : 0,
         widthDeltas: stickyHeaderCells.map((cell, index) => (
           Math.abs(cell.getBoundingClientRect().width - originalHeaderCells[index].getBoundingClientRect().width)
         ))
@@ -180,6 +197,25 @@ async function main() {
       };
       shortEditor.destroy();
 
+      const fittingRows = Array.from({ length: 7 }, (_, index) => `| ${index + 1} | fitting row ${index + 1} |`);
+      const fittingEditor = await create([
+        '| Fit A | Fit B |',
+        '| --- | --- |',
+        ...fittingRows,
+        '',
+        trailingLines
+      ].join('\n'));
+      const fittingTable = document.querySelector<HTMLElement>('.meo-md-html-table')!;
+      const fittingScroller = fittingEditor.view.scrollDOM as HTMLElement;
+      const fittingTableFitsViewport = fittingTable.getBoundingClientRect().height <= fittingScroller.getBoundingClientRect().height;
+      await scrollPastHeader(fittingEditor);
+      const fittingChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
+      const fittingState = {
+        fitsViewport: fittingTableFitsViewport,
+        visible: Boolean(fittingChrome && getComputedStyle(fittingChrome).display !== 'none')
+      };
+      fittingEditor.destroy();
+
       const spacerLines = Array.from({ length: 18 }, (_, index) => `between tables ${index + 1}`);
       const multiEditor = await create([
         '| Short A | Short B |',
@@ -219,6 +255,7 @@ async function main() {
         syncedHeaderText,
         hiddenAtTableEnd,
         shortState,
+        fittingState,
         multiState
       };
     });
@@ -231,6 +268,12 @@ async function main() {
       Math.abs(result.passiveState.top - result.passiveState.scrollerTop) > 1 ||
       JSON.stringify(result.passiveState.text) !== JSON.stringify(['编号', '内容']) ||
       result.passiveState.interactiveCount !== 0 ||
+      result.passiveState.cursor !== 'default' ||
+      result.passiveState.hitCursor !== 'default' ||
+      result.passiveState.shadow !== 'none' ||
+      Math.abs(result.passiveState.separatorHeight - 1) > 0.5 ||
+      result.passiveState.separatorColor === 'rgba(0, 0, 0, 0)' ||
+      result.passiveState.separatorSpace < 3.5 ||
       result.passiveState.widthDeltas.some((delta: number) => delta > 1)
     ) {
       failures.push(`long table sticky header was incorrect: ${JSON.stringify(result.passiveState)}`);
@@ -265,6 +308,9 @@ async function main() {
     if (result.syncedHeaderText !== '新编号') failures.push(`sticky header content stayed ${JSON.stringify(result.syncedHeaderText)}`);
     if (!result.hiddenAtTableEnd) failures.push('sticky header remained visible after the table body ended');
     if (result.shortState.visible) failures.push('short table unexpectedly enabled its sticky header');
+    if (!result.fittingState.fitsViewport || !result.fittingState.visible) {
+      failures.push(`viewport-fitting long table did not enable its sticky header: ${JSON.stringify(result.fittingState)}`);
+    }
     if (JSON.stringify(result.multiState) !== JSON.stringify([false, true])) {
       failures.push(`multiple table sticky headers were not isolated: ${JSON.stringify(result.multiState)}`);
     }
