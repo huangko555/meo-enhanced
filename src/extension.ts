@@ -68,6 +68,7 @@ import {
 } from './shared/extensionConfig';
 import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
+import type { PreviewRenderResult } from './shared/preview';
 import { parseThemeJsonc, serializeThemeFile } from './shared/themeJsonc';
 import { collectWebviewImageResourceRoots } from './shared/documentLinks';
 import {
@@ -120,6 +121,12 @@ type ExportRuntimeModule = {
     baseHref: string;
     title: string;
   }) => { htmlDocument: string; hasMermaid: boolean; hasMath: boolean };
+  renderPreviewDocument: (options: {
+    markdownText: string;
+    sourceDocumentPath: string;
+    theme: ThemeSettings;
+    styleEnvironment?: ExportStyleEnvironment;
+  }) => PreviewRenderResult;
   writeFinalizedHtmlExport: (options: {
     htmlDocument: string;
     outputHtmlPath: string;
@@ -729,6 +736,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       spellDiagnosticCollection: this.spellDiagnosticCollection,
       agentReviewHandoff: this.agentReviewHandoff,
       onExportDocument: (session, format) => this.exportSessionDocument(session, format),
+      renderPreview: async (options) => {
+        const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
+        return exportRuntime.renderPreviewDocument({
+          ...options,
+          theme: getThemeSettings()
+        });
+      },
       getFindOptions: () => this.getFindOptions(),
       setFindOptions: (options) => this.setFindOptions(options),
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
@@ -1041,7 +1055,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
       </head>
-      <body data-meo-mermaid-src="${mermaidRuntimeUri}">
+      <body data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-katex-src="${katexStyleUri}">
         <div id="app" class="editor-root">
           ${getWebviewPreloadShellMarkup()}
         </div>
@@ -1126,6 +1140,7 @@ function unwrapExportRuntimeModule(mod: unknown): ExportRuntimeModule {
     if (
       candidate &&
       typeof candidate.renderExportHtmlDocument === 'function' &&
+      typeof candidate.renderPreviewDocument === 'function' &&
       typeof candidate.writeFinalizedHtmlExport === 'function' &&
       typeof candidate.renderPdfFromHtmlExport === 'function'
     ) {

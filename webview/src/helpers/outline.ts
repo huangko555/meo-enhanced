@@ -33,6 +33,7 @@ interface OutlineControllerOptions {
   outlineButton: HTMLElement;
   outlineLeftButton?: HTMLElement;
   getEditor: () => EditorApi | null;
+  canReorder?: () => boolean;
   onVisibilityRequest?: (visible: boolean) => void;
   onPositionRequest?: (position: OutlinePosition) => void;
   onUiStateChange?: (state: OutlineUiState) => void;
@@ -142,6 +143,7 @@ export function createOutlineController({
   outlineButton,
   outlineLeftButton,
   getEditor,
+  canReorder,
   onVisibilityRequest,
   onPositionRequest,
   onUiStateChange
@@ -422,7 +424,7 @@ export function createOutlineController({
     item.className = `outline-item outline-level-${node.heading.level}`;
     appendHeadingContent(item, node.heading);
     item.title = node.heading.text;
-    item.draggable = true;
+    item.draggable = canReorder?.() !== false;
     item.dataset.headingFrom = String(node.heading.from);
     item.dataset.outlineKey = node.key;
     row.append(foldButton, item);
@@ -605,7 +607,10 @@ export function createOutlineController({
 
   outlineContent.addEventListener('dragstart', (event) => {
     const item = event.target instanceof Element ? event.target.closest<HTMLElement>('.outline-item') : null;
-    if (!item || !outlineContent.contains(item)) return;
+    if (!item || !outlineContent.contains(item) || canReorder?.() === false) {
+      event.preventDefault();
+      return;
+    }
     const sourceFrom = Number.parseInt(item.dataset.headingFrom ?? '', 10);
     if (!getEditor() || !currentOutlineHeadingIndexByFrom.has(sourceFrom)) {
       event.preventDefault();

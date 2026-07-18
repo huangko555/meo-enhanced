@@ -1,5 +1,9 @@
 declare function acquireVsCodeApi(): VsCodeWebviewApi;
 
+type PreviewRenderRequestMessage = import('../../src/shared/preview').PreviewRenderRequestMessage;
+type PreviewRenderedMessage = import('../../src/shared/preview').PreviewRenderedMessage;
+type PreviewRenderErrorMessage = import('../../src/shared/preview').PreviewRenderErrorMessage;
+
 interface VsCodeWebviewApi {
   getState?(): unknown;
   setState?(state: unknown): void;
@@ -10,7 +14,7 @@ type WebviewMessage =
   | { type: 'ready' }
   | { type: 'applyChanges'; content?: string; baseVersion: number; changes?: { from: number; to: number; insert: string }[] }
   | { type: 'draftChanged'; text: string | null }
-  | { type: 'setMode'; mode: 'live' | 'source' }
+  | { type: 'setMode'; mode: 'live' | 'source' | 'preview' }
   | { type: 'setLineNumbers'; visible: boolean }
   | { type: 'setGitChangesGutter'; visible: boolean }
   | { type: 'setGitBlame'; enabled: boolean }
@@ -32,6 +36,7 @@ type WebviewMessage =
   | { type: 'exportDocument'; format: 'html' | 'pdf' }
   | { type: 'exportSnapshot'; requestId: string; text: string; environment?: Record<string, unknown> }
   | { type: 'exportSnapshotError'; requestId: string; error: string; message?: string }
+  | PreviewRenderRequestMessage
   | { type: 'saveImageFromClipboard'; requestId: string; imageData: string; fileName: string };
 
 type VimKeybinding = {
@@ -42,7 +47,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }
@@ -65,7 +70,9 @@ type ExtensionMessage =
   | { type: 'resolvedWikiLinks'; requestId: string; results: Array<{ target: string; exists: boolean }> }
   | { type: 'resolvedLocalLinks'; requestId: string; results: Array<{ target: string; exists: boolean }> }
   | { type: 'diagnosticSuggestionsResult'; requestId: string; from: number; to: number; suggestions: string[] }
-  | { type: 'savedImagePath'; requestId: string; success: boolean; path?: string; error?: string };
+  | { type: 'savedImagePath'; requestId: string; success: boolean; path?: string; error?: string }
+  | PreviewRenderedMessage
+  | PreviewRenderErrorMessage;
 
 interface ThemeSettings {
   id: string;

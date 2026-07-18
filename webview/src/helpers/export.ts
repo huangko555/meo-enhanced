@@ -1,6 +1,6 @@
 import { defaultCodeBlockBackgroundColor, themeColorKeys } from '../../../src/shared/themeDefaults';
 
-export interface ExportStyleEnvironment {
+export interface ExportStyleEnvironment extends Record<string, unknown> {
   editorBackgroundColor: string;
   editorForegroundColor: string;
   codeBlockBackgroundColor: string;

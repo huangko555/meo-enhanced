@@ -38,6 +38,7 @@ import type { GitBaselinePayload, GitBlameLineResult } from '../git/types';
 import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
 import type { ExportStyleEnvironment } from '../export/runtime';
 import type { ThemeSettings } from '../shared/themeDefaults';
+import type { PreviewRenderRequestMessage, PreviewRenderResult } from '../shared/preview';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
 import type { OutlinePosition } from '../shared/extensionConfig';
 import {
@@ -47,7 +48,7 @@ import {
   MEO_SPELL_DIAGNOSTIC_SOURCE
 } from '../spell/spellDiagnostics';
 
-export type EditorMode = 'live' | 'source';
+export type EditorMode = 'live' | 'source' | 'preview';
 export type ExportFormat = 'html' | 'pdf';
 
 type FindOptions = {
@@ -364,6 +365,7 @@ type WebviewMessage =
   | ExportDocumentMessage
   | ExportSnapshotMessage
   | ExportSnapshotErrorMessage
+  | PreviewRenderRequestMessage
   | RequestGitBlameMessage
   | OpenGitRevisionForLineMessage
   | OpenGitWorktreeForLineMessage
@@ -412,6 +414,11 @@ type PanelSessionControllerParams = {
   spellDiagnosticCollection: vscode.DiagnosticCollection;
   agentReviewHandoff: AgentReviewHandoffController;
   onExportDocument: (session: PanelSession, format: ExportFormat) => Promise<void>;
+  renderPreview: (options: {
+    markdownText: string;
+    sourceDocumentPath: string;
+    styleEnvironment?: ExportStyleEnvironment;
+  }) => Promise<PreviewRenderResult>;
   getFindOptions: () => FindOptions;
   setFindOptions: (options: FindOptions) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
@@ -452,6 +459,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     spellDiagnosticCollection,
     agentReviewHandoff,
     onExportDocument,
+    renderPreview,
     getFindOptions,
     setFindOptions,
     setOutlineVisible,
@@ -1265,6 +1273,29 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'exportSnapshotError':
         rejectPendingExportSnapshot(raw.requestId, new Error(raw.message || 'Failed to collect export snapshot.'));
         return;
+      case 'requestPreviewRender': {
+        try {
+          const rendered = await renderPreview({
+            markdownText: raw.text,
+            sourceDocumentPath: documentUri.fsPath,
+            styleEnvironment: raw.environment
+          });
+          await postToWebview({
+            type: 'previewRendered',
+            requestId: raw.requestId,
+            html: rendered.html,
+            hasMermaid: rendered.hasMermaid,
+            styles: rendered.styles
+          });
+        } catch (error) {
+          await postToWebview({
+            type: 'previewRenderError',
+            requestId: raw.requestId,
+            message: error instanceof Error ? error.message : 'Failed to render Preview'
+          });
+        }
+        return;
+      }
       case 'requestGitBlame': {
         if (!gitBlameEnabled) {
           const response: GitBlameResultMessage = {

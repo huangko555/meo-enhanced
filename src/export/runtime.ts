@@ -1,10 +1,11 @@
 import { renderMarkdownToHtml } from './renderMarkdown';
 import { buildExportHtmlDocument as buildStandaloneExportHtmlDocument } from './exportHtmlTemplate';
-import { buildExportStyles, type ExportStyleEnvironment } from './exportStyles';
+import { buildExportStyles, buildPreviewStyles, type ExportStyleEnvironment } from './exportStyles';
 import { writeFinalizedHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
 import type { ExportHtmlImageMode } from './assetPaths';
 import type { ThemeSettings } from '../shared/themeDefaults';
+import type { PreviewRenderResult } from '../shared/preview';
 
 export type ExportRuntimeBuildHtmlOptions = {
   markdownText: string;
@@ -58,8 +59,31 @@ function renderExportHtmlDocument(
   return { htmlDocument, hasMermaid, hasMath };
 }
 
+function renderPreviewDocument(options: {
+  markdownText: string;
+  sourceDocumentPath: string;
+  theme: ThemeSettings;
+  styleEnvironment?: ExportStyleEnvironment;
+}): PreviewRenderResult {
+  const rendered = renderMarkdownToHtml({
+    markdownText: options.markdownText,
+    markdownFilePath: options.sourceDocumentPath,
+    target: 'html',
+    htmlImageMode: 'embedded'
+  });
+  return {
+    html: rendered.html,
+    hasMermaid: rendered.hasMermaid,
+    styles: {
+      dark: buildPreviewStyles(options.theme, options.styleEnvironment, 'dark'),
+      light: buildPreviewStyles(options.theme, options.styleEnvironment, 'light')
+    }
+  };
+}
+
 const exportRuntime = {
   renderExportHtmlDocument,
+  renderPreviewDocument,
   writeFinalizedHtmlExport,
   renderPdfFromHtmlExport
 };

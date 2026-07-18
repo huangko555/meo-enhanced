@@ -223,6 +223,94 @@ async function main() {
     if (saveMessages !== 1) {
       throw new Error(`Toolbar save did not request a save: ${saveMessages}`);
     }
+    await page.click('[data-mode="preview"]');
+    let previewRequestId = await page.evaluate(() => {
+      const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
+      return messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    });
+    if (!previewRequestId) {
+      throw new Error('Preview mode did not request rendered Markdown');
+    }
+    await page.evaluate((requestId) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'previewRenderError', requestId, message: 'Preview test error'
+      }}));
+    }, previewRequestId);
+    const previewError = await page.$eval('.preview-status', (element) => element.textContent);
+    if (previewError !== 'Preview test error') {
+      throw new Error(`Preview render error was not shown: ${previewError}`);
+    }
+    const stalePreviewRequestId = previewRequestId;
+    await page.click('[data-mode="preview"]');
+    previewRequestId = await page.evaluate(() => {
+      const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
+      return messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    });
+    await page.evaluate((requestId) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'previewRendered', requestId, html: '<h1 id="stale">Stale</h1>', hasMermaid: false,
+        styles: { dark: 'body{background:red}', light: 'body{background:red}' }
+      }}));
+    }, stalePreviewRequestId);
+    await waitForFrames(page, 2);
+    const stalePreviewApplied = await page.evaluate(() => (
+      Boolean(document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.querySelector('#stale'))
+    ));
+    if (stalePreviewApplied) {
+      throw new Error('A stale Preview response replaced the current request');
+    }
+    await page.evaluate((requestId) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'previewRendered',
+        requestId,
+        html: '<h1 id="intro" data-source-line="1">Intro</h1><div style="height:900px"></div><h2 id="details" data-source-line="20">Details</h2>',
+        hasMermaid: false,
+        styles: {
+          dark: 'html,body{margin:0;background:#20252b;color:#fff}.meo-export-doc{padding:20px}',
+          light: 'html,body{margin:0;background:#fff;color:#1f2328}.meo-export-doc{padding:20px}'
+        }
+      }}));
+    }, previewRequestId);
+    await page.waitForFunction(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+      return frame?.contentDocument?.querySelector('#details');
+    });
+    const darkPreviewState = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const toggle = document.querySelector<HTMLElement>('.preview-theme-toggle')!;
+      return {
+        mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
+        editorHidden: document.querySelector<HTMLElement>('.editor-host')?.hidden,
+        previewHidden: document.querySelector<HTMLElement>('.preview-host')?.hidden,
+        pressed: toggle.getAttribute('aria-pressed'),
+        background: getComputedStyle(frame.contentDocument!.body).backgroundColor
+      };
+    });
+    if (
+      darkPreviewState.mode !== 'preview' ||
+      !darkPreviewState.editorHidden ||
+      darkPreviewState.previewHidden ||
+      darkPreviewState.pressed !== 'false' ||
+      darkPreviewState.background !== 'rgb(32, 37, 43)'
+    ) {
+      throw new Error(`Unexpected dark Preview state: ${JSON.stringify(darkPreviewState)}`);
+    }
+    await page.click('[data-action="outline-right"]');
+    await page.click('.outline-item[title="Details"]');
+    await waitForFrames(page, 2);
+    const outlineScrollTop = await page.evaluate(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+    ));
+    if (outlineScrollTop <= 0) {
+      throw new Error('Preview outline did not jump to the selected heading');
+    }
+    await page.click('.preview-theme-toggle');
+    await page.waitForFunction(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+      return frame?.contentDocument && getComputedStyle(frame.contentDocument.body).backgroundColor === 'rgb(255, 255, 255)';
+    });
+    await page.click('[data-mode="live"]');
+    await page.click('[data-action="outline-right"]');
     const readViewport = () => page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const viewport = scroller.getBoundingClientRect();

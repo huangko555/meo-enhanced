@@ -16,6 +16,7 @@ import { refreshMermaidTheme } from './helpers/mermaidDiagram';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { reconcileExternalDocument } from './helpers/documentSync';
 import { createEditorNoticeController } from './helpers/notices';
+import { createPreviewController } from './helpers/preview';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -803,7 +804,15 @@ sourceButton.textContent = 'Source';
 sourceButton.setAttribute('role', 'tab');
 sourceButton.title = 'Source';
 
-modeGroup.append(liveButton, sourceButton);
+const previewButton = document.createElement('button');
+previewButton.type = 'button';
+previewButton.className = 'mode-button';
+previewButton.dataset.mode = 'preview';
+previewButton.textContent = 'Preview';
+previewButton.setAttribute('role', 'tab');
+previewButton.title = 'Preview';
+
+modeGroup.append(liveButton, sourceButton, previewButton);
 
 const findPanelElements = createFindPanel(findToggleBtn);
 const findPanelController = createFindPanelController(findPanelElements, () => editor, toolbar, modeGroup);
@@ -832,12 +841,22 @@ const editorHost = existingEditorHost instanceof HTMLElement ? existingEditorHos
 editorHost.className = 'editor-host';
 
 let editor: any = null;
-const outlineController = createOutlineController({
+let outlineController: ReturnType<typeof createOutlineController>;
+const previewController = createPreviewController({
+  vscode,
+  onRendered: () => {
+    if (outlineController?.isVisible()) {
+      outlineController.refresh();
+    }
+  }
+});
+outlineController = createOutlineController({
   root,
   editorWrapper,
   outlineButton: outlineBtn,
   outlineLeftButton: outlineLeftBtn,
-  getEditor: () => editor,
+  getEditor: () => currentMode === 'preview' ? previewController.getOutlineAdapter() : editor,
+  canReorder: () => currentMode !== 'preview',
   onVisibilityRequest: (visible) => {
     vscode.postMessage({ type: 'setOutlineVisible', visible });
   },
@@ -854,7 +873,7 @@ const outlineController = createOutlineController({
   }
 });
 
-editorWrapper.replaceChildren(editorHost, outlineController.sidebar, selectionMenuElements.menu);
+editorWrapper.replaceChildren(editorHost, previewController.host, outlineController.sidebar, selectionMenuElements.menu);
 root.replaceChildren(toolbar, editorWrapper);
 
 let documentVersion = 0;
@@ -864,7 +883,8 @@ let syncedText = '';
 let inFlight = false;
 let inFlightText: string | null = null;
 let saveAfterSync = false;
-let currentMode: 'live' | 'source' = 'live';
+let currentMode: 'live' | 'source' | 'preview' = 'live';
+let lastEditableMode: 'live' | 'source' = 'live';
 let hasLocalModePreference = false;
 let pendingInitialText: string | null = null;
 let initialEditorMountQueued = false;
@@ -974,7 +994,8 @@ const acknowledgeReadyHandshake = () => {
 };
 
 type WebviewUiState = {
-  mode?: 'live' | 'source';
+  mode?: 'live' | 'source' | 'preview';
+  lastEditableMode?: 'live' | 'source';
   contentMaxWidthEnabled?: boolean;
   outlineMode?: 'floating' | 'fixed';
   outlineWidth?: number;
@@ -983,6 +1004,7 @@ type WebviewUiState = {
 const persistUiState = () => {
   const state: WebviewUiState = {
     mode: currentMode,
+    lastEditableMode,
     contentMaxWidthEnabled,
     outlineMode: outlineUiState.mode,
     outlineWidth: outlineUiState.width
@@ -1354,7 +1376,7 @@ const setEditorTextSafely = (text: string, context: string): boolean => {
 
 const shortcutHandlerContext: ShortcutHandlerContext = {
   get editor() { return editor; },
-  get currentMode() { return currentMode; },
+  get currentMode() { return currentMode === 'preview' ? lastEditableMode : currentMode; },
   get vimModeEnabled() { return vimModeEnabled; },
   get pendingText() { return pendingText; },
   get syncedText() { return syncedText; },
@@ -1388,7 +1410,7 @@ const queueChanges = (nextText: string) => {
 
 const updateModeUI = () => {
   root.dataset.mode = currentMode;
-  const buttons = [liveButton, sourceButton];
+  const buttons = [liveButton, sourceButton, previewButton];
   for (const button of buttons) {
     const selected = button.dataset.mode === currentMode;
     button.classList.toggle('is-active', selected);
@@ -1397,8 +1419,8 @@ const updateModeUI = () => {
   }
 };
 
-const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
-  if (mode !== 'live' && mode !== 'source') {
+const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
+  if (mode !== 'live' && mode !== 'source' && mode !== 'preview') {
     return false;
   }
 
@@ -1407,13 +1429,30 @@ const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userT
   const shouldRestoreEditorFocus = modeToggleShouldRestoreEditorFocus;
   modeToggleShouldRestoreEditorFocus = false;
   currentMode = mode;
+  if (mode === 'live' || mode === 'source') {
+    lastEditableMode = mode;
+  }
   clearGitBlameCache();
   if (userTriggered) {
     hasLocalModePreference = true;
   }
   updateModeUI();
 
-  if (editor) {
+  previewController.setVisible(mode === 'preview');
+  editorHost.hidden = mode === 'preview';
+
+  if (mode === 'preview') {
+    if (document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    selectionMenuController.hide();
+    findPanelController.close();
+    previewController.requestRender(getCurrentEditorText());
+    syncGitDiffLineHighlights();
+    if (outlineController.isVisible()) {
+      outlineController.refresh();
+    }
+  } else if (editor) {
     try {
       editor.setMode(mode);
       syncGitDiffLineHighlights();
@@ -1456,6 +1495,8 @@ const applyMode = (mode: 'live' | 'source', { post = true, persist = true, userT
       }
 
       currentMode = previousMode;
+      previewController.setVisible(previousMode === 'preview');
+      editorHost.hidden = previousMode === 'preview';
       updateModeUI();
       failureNotice.updateEditorNotice();
       return false;
@@ -1490,7 +1531,7 @@ const mountInitialEditor = async () => {
     editor = createEditor({
       parent: editorHost,
       text: initialText,
-      initialMode: currentMode,
+      initialMode: lastEditableMode,
       initialTopLine,
       initialTopLineOffset,
       initialLineNumbers: lineNumbersVisible,
@@ -1705,6 +1746,7 @@ window.addEventListener('message', (event) => {
       inFlightText = null;
       saveAfterSync = false;
       syncPendingDraftState();
+      previewController.resetAppearance();
 
       handleInit(message);
       if (hasLocalModePreference) {
@@ -1732,6 +1774,9 @@ window.addEventListener('message', (event) => {
         refreshMermaidTheme();
         setShikiTheme(message.codeTheme);
         editor?.refreshDecorations();
+        if (currentMode === 'preview') {
+          previewController.requestRender(getCurrentEditorText());
+        }
       };
       if (editor) editor.preserveViewport(applyThemeChange);
       else applyThemeChange();
@@ -1759,8 +1804,25 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'toggleMode') {
-    applyMode(currentMode === 'live' ? 'source' : 'live', { userTriggered: true, reason: 'command' });
+    const nextMode = currentMode === 'preview'
+      ? lastEditableMode
+      : currentMode === 'live' ? 'source' : 'live';
+    applyMode(nextMode, { userTriggered: true, reason: 'command' });
     return;
+  }
+
+  if (message.type === 'previewRendered') {
+    previewController.handleRendered(message);
+    return;
+  }
+
+  if (message.type === 'previewRenderError') {
+    previewController.handleRenderError(message);
+    return;
+  }
+
+  if (message.type === 'docChanged' && currentMode === 'preview') {
+    window.setTimeout(() => previewController.requestRender(getCurrentEditorText()), 0);
   }
 
   if (message.type === 'docChanged' && !editor && pendingInitialText !== null) {
@@ -2088,6 +2150,9 @@ window.addEventListener('resize', () => {
 });
 
 const state = vscode.getState() as WebviewUiState | undefined;
+if (state?.lastEditableMode === 'live' || state?.lastEditableMode === 'source') {
+  lastEditableMode = state.lastEditableMode;
+}
 if (state && (state.mode === 'live' || state.mode === 'source')) {
   applyMode(state.mode, { post: false, persist: false });
   hasLocalModePreference = true;
@@ -2115,6 +2180,10 @@ liveButton.addEventListener('click', () => {
 
 sourceButton.addEventListener('click', () => {
   applyMode('source', { userTriggered: true });
+});
+
+previewButton.addEventListener('click', () => {
+  applyMode('preview', { userTriggered: true });
 });
 
 const preserveEditorFocusOnModePointerToggle = (event: PointerEvent) => {
