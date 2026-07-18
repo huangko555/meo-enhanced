@@ -14,7 +14,7 @@ interface EditorApi {
   getHeadings(): OutlineHeading[];
   getViewportAnchorOffset(ratio?: number): number;
   getVisibleDocumentRange(): { from: number; to: number; fromLine: number; toLine: number };
-  getScrollElement(): HTMLElement;
+  getScrollElement(): EventTarget;
   scrollToLine(line: number, position: string): void;
   moveHeadingSection(sourceFrom: number, targetFrom: number, placement: 'before' | 'after'): boolean;
 }
@@ -189,7 +189,7 @@ export function createOutlineController({
   let visibleHeadingIndexes = new Set<number>();
   let outlineDragState: OutlineDragState | null = null;
   let suppressOutlineClickUntil = 0;
-  let boundScrollElement: HTMLElement | null = null;
+  let boundScrollElement: EventTarget | null = null;
   let scrollFrame = 0;
 
   const notifyUiState = () => onUiStateChange?.({ mode, width });
@@ -665,7 +665,9 @@ export function createOutlineController({
   outlineResizer.addEventListener('pointerdown', (event) => {
     const startX = event.clientX;
     const startWidth = width;
+    const pointerId = event.pointerId;
     document.body.classList.add('outline-resizing');
+    outlineResizer.setPointerCapture(pointerId);
     const onMove = (moveEvent: PointerEvent) => {
       const direction = position === 'left' ? 1 : -1;
       const nextWidth = normalizeOutlineWidth(startWidth + (moveEvent.clientX - startX) * direction);
@@ -677,6 +679,9 @@ export function createOutlineController({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+      if (outlineResizer.hasPointerCapture(pointerId)) {
+        outlineResizer.releasePointerCapture(pointerId);
+      }
       document.body.classList.remove('outline-resizing');
       notifyUiState();
     };

@@ -14,7 +14,7 @@ export type ExportStyleEnvironment = PreviewStyleEnvironment & {
 };
 
 export function buildExportStyles(theme: ThemeSettings, environment: ExportStyleEnvironment = {}): string {
-  return buildReadingStyles(theme, environment, 'light');
+  return buildReadingStyles(theme, environment, 'light', 'export');
 }
 
 export function buildPreviewStyles(
@@ -22,14 +22,16 @@ export function buildPreviewStyles(
   environment: ExportStyleEnvironment = {},
   appearance: PreviewAppearance = 'dark'
 ): string {
-  return buildReadingStyles(theme, environment, appearance);
+  return buildReadingStyles(theme, environment, appearance, 'preview');
 }
 
 function buildReadingStyles(
   theme: ThemeSettings,
   environment: ExportStyleEnvironment,
-  appearance: PreviewAppearance
+  appearance: PreviewAppearance,
+  target: 'export' | 'preview'
 ): string {
+  const previewControlledPalette = target === 'preview';
   const colors = resolveThemeColors(theme, environment);
   const fonts = theme.fonts ?? defaultThemeFonts;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
@@ -40,23 +42,40 @@ function buildReadingStyles(
     colors.base03;
   const darkForegroundColor = sanitizeCssColor(environment.editorForegroundColor ?? '') || colors.base01;
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
-  const editorForegroundColor = appearance === 'light' ? '#1f2328' : darkForegroundColor;
+  const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
+  const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
+  const editorForegroundColor = previewControlledPalette
+    ? previewForegroundColor
+    : appearance === 'light' ? '#1f2328' : darkForegroundColor;
   const defaultCodeBlockColor = appearance === 'light'
     ? '#f6f8fa'
     : `color-mix(in srgb, ${editorBackgroundColor} 80%, ${colors.base03} 20%)`;
   const defaultSurfaceColor = appearance === 'light'
     ? '#f6f8fa'
     : `color-mix(in srgb, ${editorBackgroundColor} 86%, ${colors.base03} 14%)`;
-  const codeBlockBackgroundColor =
-    appearance === 'light'
+  const codeBlockBackgroundColor = previewControlledPalette
+    ? appearance === 'light'
+      ? defaultCodeBlockColor
+      : `color-mix(in srgb, ${editorBackgroundColor} 82%, #000000 18%)`
+    : appearance === 'light'
       ? defaultCodeBlockColor
       : sanitizeCssColor(environment.codeBlockBackgroundColor ?? '') || defaultCodeBlockColor;
-  const sideBarBackgroundColor = appearance === 'light'
+  const sideBarBackgroundColor = previewControlledPalette
+    ? appearance === 'light'
+      ? defaultSurfaceColor
+      : `color-mix(in srgb, ${editorBackgroundColor} 92%, ${previewForegroundColor} 8%)`
+    : appearance === 'light'
     ? defaultSurfaceColor
     : sanitizeCssColor(environment.sideBarBackgroundColor ?? '') || defaultSurfaceColor;
-  const panelBorderColor = appearance === 'light'
+  const panelBorderColor = previewControlledPalette
+    ? appearance === 'light' ? '#d0d7de' : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`
+    : appearance === 'light'
     ? '#d0d7de'
     : sanitizeCssColor(environment.panelBorderColor ?? '') || colors.base03;
+  const readingMutedColor = previewControlledPalette
+    ? previewMutedColor
+    : appearance === 'light' ? '#656d76' : colors.base02;
+  const readingForegroundColor = previewControlledPalette ? previewForegroundColor : null;
   const liveFont = resolveThemeFontChoice(
     sanitizeCssFont(environment.liveFontFamily ?? ''),
     sanitizeCssFont(fonts.liveFont),
@@ -123,19 +142,19 @@ function buildReadingStyles(
   --meo-font-system-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --meo-bg: ${editorBackgroundColor};
   --meo-fg: ${editorForegroundColor};
-  --meo-muted: ${appearance === 'light' ? '#656d76' : colors.base02};
-  --meo-border: ${appearance === 'light' ? '#d0d7de' : colors.base03};
-  --meo-base04: ${appearance === 'light' ? '#1f2328' : colors.base04};
-  --meo-base05: ${appearance === 'light' ? '#0969da' : colors.base05};
-  --meo-base07: ${appearance === 'light' ? '#57606a' : colors.base07};
-  --meo-base08: ${appearance === 'light' ? '#0550ae' : colors.base08};
-  --meo-base09: ${appearance === 'light' ? '#953800' : colors.base09};
-  --meo-heading: ${appearance === 'light' ? '#1f2328' : colors.base04};
-  --meo-link: ${appearance === 'light' ? '#0969da' : colors.base05};
-  --meo-accent-2: ${appearance === 'light' ? '#8250df' : colors.base06};
-  --meo-strong: ${appearance === 'light' ? '#1f2328' : colors.base07};
-  --meo-number: ${appearance === 'light' ? '#0550ae' : colors.base08};
-  --meo-quote: ${appearance === 'light' ? '#656d76' : colors.base07};
+  --meo-muted: ${readingMutedColor};
+  --meo-border: ${previewControlledPalette ? panelBorderColor : appearance === 'light' ? '#d0d7de' : colors.base03};
+  --meo-base04: ${readingForegroundColor ?? (appearance === 'light' ? '#1f2328' : colors.base04)};
+  --meo-base05: ${readingForegroundColor ?? (appearance === 'light' ? '#0969da' : colors.base05)};
+  --meo-base07: ${readingForegroundColor ?? (appearance === 'light' ? '#57606a' : colors.base07)};
+  --meo-base08: ${readingForegroundColor ?? (appearance === 'light' ? '#0550ae' : colors.base08)};
+  --meo-base09: ${readingForegroundColor ?? (appearance === 'light' ? '#953800' : colors.base09)};
+  --meo-heading: ${readingForegroundColor ?? (appearance === 'light' ? '#1f2328' : colors.base04)};
+  --meo-link: ${readingForegroundColor ?? (appearance === 'light' ? '#0969da' : colors.base05)};
+  --meo-accent-2: ${readingForegroundColor ?? (appearance === 'light' ? '#8250df' : colors.base06)};
+  --meo-strong: ${readingForegroundColor ?? (appearance === 'light' ? '#1f2328' : colors.base07)};
+  --meo-number: ${readingForegroundColor ?? (appearance === 'light' ? '#0550ae' : colors.base08)};
+  --meo-quote: ${previewControlledPalette ? readingMutedColor : appearance === 'light' ? '#656d76' : colors.base07};
   --meo-font-body: ${liveFont};
   --meo-font-code: ${sourceFont};
   --meo-font-weight-body: ${liveFontWeight};

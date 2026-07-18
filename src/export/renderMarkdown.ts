@@ -82,7 +82,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     }
   });
   md.use(emoji);
-  installHeadingAnchorTransform(md);
+  installSourcePositionAndHeadingAnchorTransform(md);
   installTaskListTransform(md);
   installKbdFallbackTransform(md);
   installAlertTransform(md);
@@ -155,7 +155,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     allowedAttributes: {
       a: ['href', 'name', 'target', 'rel', 'title'],
       img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
-      '*': ['class', 'style', 'id', 'data-source-b64', 'data-source-line', 'aria-hidden'],
+      '*': ['class', 'style', 'id', 'data-source-b64', 'data-source-line', 'data-source-end-line', 'aria-hidden'],
       th: ['colspan', 'rowspan', 'style'],
       td: ['colspan', 'rowspan', 'style'],
       code: ['class'],
@@ -220,13 +220,19 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   return { html, hasMermaid, hasMath };
 }
 
-function installHeadingAnchorTransform(md: MarkdownIt): void {
+function installSourcePositionAndHeadingAnchorTransform(md: MarkdownIt): void {
   md.core.ruler.after('inline', 'meo-heading-anchors', (state: any) => {
     const slugCounts = new Map<string, number>();
     const tokens = state.tokens as any[];
 
     for (let index = 0; index < tokens.length; index += 1) {
       const headingOpen = tokens[index];
+      const sourceLine = Array.isArray(headingOpen.map) ? Number(headingOpen.map[0]) + 1 : 0;
+      const sourceEndLine = Array.isArray(headingOpen.map) ? Number(headingOpen.map[1]) : 0;
+      if ((headingOpen.nesting === 1 || headingOpen.type === 'fence') && sourceLine > 0) {
+        headingOpen.attrSet('data-source-line', String(sourceLine));
+        headingOpen.attrSet('data-source-end-line', String(Math.max(sourceLine, sourceEndLine)));
+      }
       if (headingOpen.type !== 'heading_open') {
         continue;
       }
@@ -237,10 +243,6 @@ function installHeadingAnchorTransform(md: MarkdownIt): void {
       slugCounts.set(baseSlug, occurrence);
       headingOpen.attrSet('id', occurrence === 1 ? baseSlug : `${baseSlug}-${occurrence}`);
 
-      const sourceLine = Array.isArray(headingOpen.map) ? Number(headingOpen.map[0]) + 1 : 0;
-      if (sourceLine > 0) {
-        headingOpen.attrSet('data-source-line', String(sourceLine));
-      }
     }
   });
 }

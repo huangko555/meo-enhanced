@@ -35,6 +35,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   let appearance: PreviewAppearance = 'dark';
   let requestCounter = 0;
   let pendingRequestId = '';
+  let pendingRestoreLine: number | null = null;
   let latestPayload: PreviewRenderedMessage | null = null;
 
   const updateThemeToggle = () => {
@@ -54,7 +55,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     status.textContent = message ?? '';
   };
 
-  const renderFrame = (preserveScroll = false) => {
+  const renderFrame = (preserveScroll = false, restoreLine: number | null = null) => {
     if (!latestPayload) {
       return;
     }
@@ -75,19 +76,30 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
       if (scrollElement) {
         scrollElement.scrollTop = previousScrollTop;
       }
+      if (!preserveScroll && restoreLine !== null) {
+        restoreTopLine(restoreLine);
+      }
       bindPreviewLinks(frameDocument, vscode);
-      if (latestPayload?.hasMermaid) {
-        void renderMermaidBlocks(frameDocument, appearance).finally(() => onRendered?.());
-      } else {
+      const finishRender = () => {
+        // Mermaid replaces placeholders asynchronously, so restore again after its layout settles.
+        if (!preserveScroll && restoreLine !== null) {
+          restoreTopLine(restoreLine);
+        }
         onRendered?.();
+      };
+      if (latestPayload?.hasMermaid) {
+        void renderMermaidBlocks(frameDocument, appearance).finally(finishRender);
+      } else {
+        finishRender();
       }
     };
     frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style>${styles}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
   };
 
-  const requestRender = (text: string) => {
+  const requestRender = (text: string, { restoreLine = null }: { restoreLine?: number | null } = {}) => {
     const requestId = `preview-${Date.now()}-${requestCounter += 1}`;
     pendingRequestId = requestId;
+    pendingRestoreLine = restoreLine;
     setStatus('正在生成预览…');
     vscode.postMessage({
       type: 'requestPreviewRender',
@@ -103,7 +115,9 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     }
     latestPayload = message;
     setStatus(null);
-    renderFrame();
+    const restoreLine = pendingRestoreLine;
+    pendingRestoreLine = null;
+    renderFrame(false, restoreLine);
   };
 
   const handleRenderError = (message: PreviewRenderErrorMessage) => {
@@ -120,6 +134,73 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   updateThemeToggle();
 
   const getFrameDocument = () => frame.contentDocument;
+  const getSourceElements = (): HTMLElement[] => Array.from(
+    getFrameDocument()?.querySelectorAll<HTMLElement>('[data-source-line]') ?? []
+  );
+  const getSourceRange = (element: HTMLElement): { start: number; end: number } | null => {
+    const start = Number.parseInt(element.dataset.sourceLine ?? '', 10);
+    if (!Number.isFinite(start)) {
+      return null;
+    }
+    const parsedEnd = Number.parseInt(element.dataset.sourceEndLine ?? '', 10);
+    return { start, end: Number.isFinite(parsedEnd) ? Math.max(start, parsedEnd) : start };
+  };
+  const findSourceElement = (line: number): { element: HTMLElement; start: number; end: number } | null => {
+    let candidate: HTMLElement | null = null;
+    for (const element of getSourceElements()) {
+      const range = getSourceRange(element);
+      if (!range) {
+        continue;
+      }
+      if (line >= range.start && line <= range.end) {
+        return { element, ...range };
+      }
+      if (range.start > line) {
+        const fallback = candidate ?? element;
+        const fallbackRange = getSourceRange(fallback)!;
+        return { element: fallback, ...fallbackRange };
+      }
+      candidate = element;
+    }
+    if (!candidate) {
+      return null;
+    }
+    const range = getSourceRange(candidate)!;
+    return { element: candidate, ...range };
+  };
+  const restoreTopLine = (line: number): void => {
+    const source = findSourceElement(line);
+    const scrollElement = getFrameDocument()?.scrollingElement;
+    if (!source || !scrollElement) {
+      return;
+    }
+    const lineSpan = Math.max(1, source.end - source.start + 1);
+    const ratio = Math.max(0, Math.min(1, (line - source.start) / lineSpan));
+    const rect = source.element.getBoundingClientRect();
+    scrollElement.scrollTop += rect.top + rect.height * ratio;
+  };
+  const getTopVisiblePosition = (): { topLine: number; topLineOffset: number } | null => {
+    const elements = getSourceElements();
+    if (elements.length === 0) {
+      return null;
+    }
+    const viewportAnchor = 8;
+    let candidate = elements[0];
+    for (const element of elements) {
+      if (element.getBoundingClientRect().top > viewportAnchor) {
+        break;
+      }
+      candidate = element;
+    }
+    const range = getSourceRange(candidate);
+    if (!range) {
+      return null;
+    }
+    const rect = candidate.getBoundingClientRect();
+    const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (viewportAnchor - rect.top) / rect.height)) : 0;
+    const topLine = Math.round(range.start + (range.end - range.start) * ratio);
+    return { topLine, topLineOffset: 0 };
+  };
   const getHeadings = (): OutlineHeading[] => {
     const headingElements = Array.from(
       getFrameDocument()?.querySelectorAll<HTMLElement>('h1[data-source-line], h2[data-source-line], h3[data-source-line], h4[data-source-line], h5[data-source-line], h6[data-source-line]') ?? []
@@ -138,7 +219,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
   const getVisibleDocumentRange = () => {
     const headings = getHeadings();
     const viewportHeight = frame.contentWindow?.innerHeight ?? host.clientHeight;
-    const elements = Array.from(getFrameDocument()?.querySelectorAll<HTMLElement>('[data-source-line]') ?? []);
+    const elements = getSourceElements();
     const visibleLines = elements
       .filter((element) => {
         const rect = element.getBoundingClientRect();
@@ -157,7 +238,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     getViewportAnchorOffset: (ratio = 0.2) => {
       const anchorY = (frame.contentWindow?.innerHeight ?? host.clientHeight) * ratio;
       let activeLine = 1;
-      for (const heading of Array.from(getFrameDocument()?.querySelectorAll<HTMLElement>('[data-source-line]') ?? [])) {
+      for (const heading of getSourceElements()) {
         if (heading.getBoundingClientRect().top > anchorY) {
           break;
         }
@@ -166,7 +247,7 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
       return activeLine;
     },
     getVisibleDocumentRange,
-    getScrollElement: () => (getFrameDocument()?.scrollingElement ?? frame) as HTMLElement,
+    getScrollElement: () => getFrameDocument() ?? frame,
     scrollToLine: (line: number) => {
       getFrameDocument()?.querySelector<HTMLElement>(`[data-source-line="${line}"]`)?.scrollIntoView({ block: 'start' });
     },
@@ -185,6 +266,8 @@ export function createPreviewController({ vscode, onRendered }: PreviewControlle
     setVisible: (visible: boolean) => {
       host.hidden = !visible;
     },
+    getTopVisiblePosition,
+    restoreTopLine,
     getOutlineAdapter: () => outlineAdapter
   };
 }
@@ -213,10 +296,34 @@ async function renderMermaidBlocks(frameDocument: Document, appearance: PreviewA
     return;
   }
   const mermaid = await ensureMermaidRuntime();
+  const frameStyles = frameDocument.defaultView?.getComputedStyle(frameDocument.documentElement);
+  const readColor = (name: string, fallback: string) => frameStyles?.getPropertyValue(name).trim() || fallback;
+  const background = readColor('--meo-bg', appearance === 'dark' ? '#20252b' : '#ffffff');
+  const panelBackground = readColor('--meo-code-bg', background);
+  const foreground = readColor('--meo-fg', appearance === 'dark' ? '#d8dee9' : '#1f2328');
+  const muted = readColor('--meo-muted', appearance === 'dark' ? '#9aa4af' : '#59636e');
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
-    theme: appearance === 'dark' ? 'dark' : 'default'
+    theme: 'base',
+    themeVariables: {
+      background,
+      mainBkg: panelBackground,
+      secondBkg: panelBackground,
+      tertiaryColor: panelBackground,
+      primaryColor: panelBackground,
+      primaryTextColor: foreground,
+      primaryBorderColor: muted,
+      nodeBorder: muted,
+      lineColor: muted,
+      textColor: foreground,
+      nodeTextColor: foreground,
+      edgeLabelBackground: background,
+      clusterBkg: background,
+      clusterBorder: muted,
+      titleColor: foreground,
+      darkMode: appearance === 'dark'
+    }
   });
   let index = 0;
   for (const block of blocks) {

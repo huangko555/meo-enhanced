@@ -1426,6 +1426,9 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
 
   commitEditorTransientEdits();
   const previousMode = currentMode;
+  const transitionViewPosition = previousMode === 'preview'
+    ? previewController.getTopVisiblePosition()
+    : getTopVisiblePosition();
   const shouldRestoreEditorFocus = modeToggleShouldRestoreEditorFocus;
   modeToggleShouldRestoreEditorFocus = false;
   currentMode = mode;
@@ -1447,7 +1450,9 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
     }
     selectionMenuController.hide();
     findPanelController.close();
-    previewController.requestRender(getCurrentEditorText());
+    previewController.requestRender(getCurrentEditorText(), {
+      restoreLine: transitionViewPosition?.topLine ?? null
+    });
     syncGitDiffLineHighlights();
     if (outlineController.isVisible()) {
       outlineController.refresh();
@@ -1455,6 +1460,9 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
   } else if (editor) {
     try {
       editor.setMode(mode);
+      if (previousMode === 'preview' && transitionViewPosition) {
+        editor.restoreTopLine?.(transitionViewPosition.topLine, transitionViewPosition.topLineOffset);
+      }
       syncGitDiffLineHighlights();
       if (shouldRestoreEditorFocus) {
         editor.focus();
@@ -1775,7 +1783,9 @@ window.addEventListener('message', (event) => {
         setShikiTheme(message.codeTheme);
         editor?.refreshDecorations();
         if (currentMode === 'preview') {
-          previewController.requestRender(getCurrentEditorText());
+          previewController.requestRender(getCurrentEditorText(), {
+            restoreLine: previewController.getTopVisiblePosition()?.topLine ?? null
+          });
         }
       };
       if (editor) editor.preserveViewport(applyThemeChange);
@@ -1822,7 +1832,8 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'docChanged' && currentMode === 'preview') {
-    window.setTimeout(() => previewController.requestRender(getCurrentEditorText()), 0);
+    const restoreLine = previewController.getTopVisiblePosition()?.topLine ?? null;
+    window.setTimeout(() => previewController.requestRender(getCurrentEditorText(), { restoreLine }), 0);
   }
 
   if (message.type === 'docChanged' && !editor && pendingInitialText !== null) {

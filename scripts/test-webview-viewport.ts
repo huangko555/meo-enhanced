@@ -207,6 +207,10 @@ async function main() {
     if (saveMessages !== 1) {
       throw new Error(`Toolbar save did not request a save: ${saveMessages}`);
     }
+    const editorScrollTopBeforePreview = await page.$eval<HTMLElement, number>(
+      '.editor-host > .cm-editor .cm-scroller',
+      (element) => element.scrollTop
+    );
     await page.click('[data-mode="preview"]');
     let previewRequestId = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
@@ -225,11 +229,19 @@ async function main() {
       throw new Error(`Preview render error was not shown: ${previewError}`);
     }
     const stalePreviewRequestId = previewRequestId;
+    await page.click('[data-mode="live"]');
+    await page.$eval<HTMLElement, number>('.editor-host > .cm-editor .cm-scroller', (element, scrollTop) => {
+      element.scrollTop = scrollTop;
+    }, editorScrollTopBeforePreview);
+    await waitForFrames(page, 2);
     await page.click('[data-mode="preview"]');
     previewRequestId = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
       return messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
     });
+    if (!previewRequestId || previewRequestId === stalePreviewRequestId) {
+      throw new Error('Re-entering Preview did not create a new render request');
+    }
     await page.evaluate((requestId) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'previewRendered', requestId, html: '<h1 id="stale">Stale</h1>', hasMermaid: false,
@@ -247,7 +259,7 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'previewRendered',
         requestId,
-        html: '<h1 id="intro" data-source-line="1">Intro</h1><div style="height:900px"></div><h2 id="details" data-source-line="20">Details</h2>',
+        html: '<h1 id="intro" data-source-line="1">Intro</h1><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div>',
         hasMermaid: false,
         styles: {
           dark: 'html,body{margin:0;background:#20252b;color:#fff}.meo-export-doc{padding:20px}',
@@ -257,7 +269,7 @@ async function main() {
     }, previewRequestId);
     await page.waitForFunction(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
-      return frame?.contentDocument?.querySelector('#details');
+      return frame?.contentDocument?.querySelector('#tall-mermaid');
     });
     const darkPreviewState = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
@@ -279,8 +291,33 @@ async function main() {
     ) {
       throw new Error(`Unexpected dark Preview state: ${JSON.stringify(darkPreviewState)}`);
     }
+    const restoredPreviewAnchor = await page.evaluate(() => {
+      const anchor = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<HTMLElement>('#anchor-133')!;
+      const rect = anchor.getBoundingClientRect();
+      return rect.top + rect.height * ((138 - 133) / (222 - 133 + 1));
+    });
+    if (Math.abs(restoredPreviewAnchor) > 4) {
+      throw new Error(`Preview did not restore the editor viewport: ${restoredPreviewAnchor}`);
+    }
     await page.click('[data-action="outline-right"]');
-    await page.click('.outline-item[title="Details"]');
+    const outlineWidthBefore = await page.$eval<HTMLElement, number>('.outline-sidebar', (element) => element.getBoundingClientRect().width);
+    const resizerBox = await page.$eval<HTMLElement, { x: number; y: number }>('.outline-resizer', (element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + 80 };
+    });
+    await page.mouse.move(resizerBox.x, resizerBox.y);
+    await page.mouse.down();
+    await page.mouse.move(resizerBox.x - 80, resizerBox.y, { steps: 8 });
+    await page.mouse.up();
+    const resizedOutline = await page.evaluate(() => ({
+      width: document.querySelector<HTMLElement>('.outline-sidebar')!.getBoundingClientRect().width,
+      resizing: document.body.classList.contains('outline-resizing')
+    }));
+    if (resizedOutline.width < outlineWidthBefore + 60 || resizedOutline.resizing) {
+      throw new Error(`Preview outline resize stalled over the iframe: ${JSON.stringify({ outlineWidthBefore, resizedOutline })}`);
+    }
+    await page.click('.outline-item[title="Tall Mermaid"]');
     await waitForFrames(page, 2);
     const outlineScrollTop = await page.evaluate(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
@@ -288,12 +325,74 @@ async function main() {
     if (outlineScrollTop <= 0) {
       throw new Error('Preview outline did not jump to the selected heading');
     }
+    await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      frame.contentDocument!.querySelector<HTMLElement>('#short-mermaid')!.scrollIntoView({ block: 'start' });
+      frame.contentDocument!.dispatchEvent(new Event('scroll'));
+    });
+    await waitForFrames(page, 2);
+    const topOutlineVisible = await page.$eval('.outline-item[title="Short Mermaid"]', (element) => element.classList.contains('is-visible'));
+    await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      frame.contentDocument!.scrollingElement!.scrollTop = frame.contentDocument!.scrollingElement!.scrollHeight;
+      frame.contentDocument!.dispatchEvent(new Event('scroll'));
+    });
+    await waitForFrames(page, 2);
+    const bottomOutlineVisible = await page.$eval('.outline-item[title="Tall Mermaid"]', (element) => element.classList.contains('is-visible'));
+    if (!topOutlineVisible || !bottomOutlineVisible) {
+      throw new Error(`Preview scrolling did not update the outline: ${JSON.stringify({ topOutlineVisible, bottomOutlineVisible })}`);
+    }
+    const resizedBox = await page.$eval<HTMLElement, { x: number; y: number }>('.outline-resizer', (element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + 80 };
+    });
+    await page.mouse.move(resizedBox.x, resizedBox.y);
+    await page.mouse.down();
+    await page.mouse.move(resizedBox.x + 80, resizedBox.y, { steps: 8 });
+    await page.mouse.up();
+    await page.click('[data-action="outline-right"]');
     await page.click('.preview-theme-toggle');
     await page.waitForFunction(() => {
-      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
-      return frame?.contentDocument && getComputedStyle(frame.contentDocument.body).backgroundColor === 'rgb(255, 255, 255)';
+      return document.querySelector<HTMLElement>('.preview-theme-toggle')?.getAttribute('aria-pressed') === 'true';
     });
+    await waitForFrames(page, 4);
+    const lightPreviewBackground = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      return getComputedStyle(frame.contentDocument!.body).backgroundColor;
+    });
+    if (lightPreviewBackground !== 'rgb(255, 255, 255)') {
+      throw new Error(`Preview light theme did not render: ${lightPreviewBackground}`);
+    }
     await page.click('[data-mode="live"]');
+    await waitForFrames(page, 2);
+    const previewExitVisibleLine = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const viewport = scroller.getBoundingClientRect();
+      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
+        const rect = line.getBoundingClientRect();
+        return line.textContent === '## Tall Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+    });
+    if (!previewExitVisibleLine) {
+      throw new Error('Leaving Preview did not preserve the visible document position');
+    }
+    await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]')), { timeout: 3000 });
+    await page.evaluate((text) => {
+      const selection = text.indexOf('const line10');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor: selection, head: selection, focus: false
+      }}));
+    }, initialText);
+    await waitForFrames(page, 2);
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const anchorCodeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === 'const line10 = 10;');
+      if (anchorCodeLine) {
+        scroller.scrollTop += anchorCodeLine.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      }
+    });
+    await waitForFrames(page, 2);
     await page.click('[data-action="outline-right"]');
     const readViewport = () => page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
