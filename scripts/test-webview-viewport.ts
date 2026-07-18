@@ -146,7 +146,8 @@ async function main() {
       const firstButton = document.querySelector<HTMLElement>('.format-group > .format-button')!;
       return {
         paddingLeft: Number.parseFloat(getComputedStyle(toolbar).paddingLeft),
-        firstButtonOffset: firstButton.getBoundingClientRect().left - toolbar.getBoundingClientRect().left
+        firstButtonOffset: firstButton.getBoundingClientRect().left - toolbar.getBoundingClientRect().left,
+        toolbarHeight: toolbar.getBoundingClientRect().height
       };
     });
     const initialToolbarStart = await measureToolbarStart();
@@ -212,6 +213,7 @@ async function main() {
       const group = document.querySelector<HTMLElement>('.preview-format-group')!;
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
+        toolbarHeight: document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect().height,
         visible: getComputedStyle(group).display !== 'none',
         items: Array.from(group.querySelectorAll(':scope > button, :scope > .preview-appearance-control > button')).map((element) => (
           (element as HTMLElement).dataset.action ||
@@ -224,13 +226,14 @@ async function main() {
     });
     if (
       !previewToolbarLayout.visible ||
+      Math.abs(previewToolbarLayout.toolbarHeight - initialToolbarStart.toolbarHeight) > 0.5 ||
       JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
         'outline-left', 'light', 'dark', 'Export HTML', 'Export PDF'
       ]) ||
       previewToolbarLayout.moreExports !== 0 ||
       previewToolbarLayout.floatingThemeToggle
     ) {
-      throw new Error(`Unexpected Preview toolbar: ${JSON.stringify(previewToolbarLayout)}`);
+      throw new Error(`Unexpected Preview toolbar: ${JSON.stringify({ initialToolbarStart, previewToolbarLayout })}`);
     }
     await page.click('.preview-toolbar-action[data-format="html"]');
     await page.click('.preview-toolbar-action[data-format="pdf"]');

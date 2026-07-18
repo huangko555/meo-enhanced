@@ -436,9 +436,10 @@ body {
 }
 
 .preview-appearance-control {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  height: 26px;
+  height: 24px;
   padding: 2px;
   border: 1px solid color-mix(in srgb, var(--vscode-panel-border, #474b50) 72%, transparent);
   border-radius: 7px;
@@ -451,6 +452,7 @@ body {
 
 .preview-appearance-button,
 .preview-toolbar-action {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -469,9 +471,19 @@ body {
 }
 
 .preview-appearance-button.is-active {
+  z-index: 1;
   color: var(--vscode-button-foreground, var(--vscode-editor-foreground));
   background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.preview-appearance-button {
+  position: relative;
+  min-width: 62px;
+}
+
+.preview-appearance-button + .preview-appearance-button {
+  margin-left: -3px;
 }
 
 .preview-appearance-button:not(.is-active):hover,
@@ -487,7 +499,7 @@ body {
 }
 
 .preview-toolbar-action {
-  height: 26px;
+  height: 24px;
   border: 1px solid transparent;
 }
 
