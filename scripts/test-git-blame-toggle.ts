@@ -1,26 +1,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import puppeteer from 'puppeteer-core';
+import type { Page } from 'puppeteer-core';
+import { launchTestBrowser } from './browser-test-helpers';
 import { defaultThemeSettings } from '../src/shared/themeDefaults';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-git-blame-toggle-'));
 
-function findBrowserExecutable(): string {
-  const candidates = [
-    process.env.MEO_TEST_BROWSER,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-    'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-    'C:/Program Files/Google/Chrome/Application/chrome.exe'
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  const executable = candidates.find((candidate) => fs.existsSync(candidate));
-  if (!executable) throw new Error('No supported browser found');
-  return executable;
-}
-
-async function waitForFrames(page: puppeteer.Page, count = 4): Promise<void> {
+async function waitForFrames(page: Page, count = 4): Promise<void> {
   await page.evaluate(async (frameCount) => {
     for (let index = 0; index < frameCount; index += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -38,7 +26,7 @@ async function main(): Promise<void> {
   });
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
-  const browser = await puppeteer.launch({ executablePath: findBrowserExecutable(), headless: true, args: ['--no-sandbox'] });
+  const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 900, height: 500, deviceScaleFactor: 1 });

@@ -1,23 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import puppeteer from 'puppeteer-core';
+import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-sticky-header-'));
-
-function findBrowserExecutable(): string {
-  const candidates = [
-    process.env.MEO_TEST_BROWSER,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-    'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-    'C:/Program Files/Google/Chrome/Application/chrome.exe'
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  const executable = candidates.find((candidate) => fs.existsSync(candidate));
-  if (!executable) throw new Error('No supported browser found');
-  return executable;
-}
 
 async function main() {
   const build = await Bun.build({
@@ -29,11 +16,7 @@ async function main() {
   });
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
-  const browser = await puppeteer.launch({
-    executablePath: findBrowserExecutable(),
-    headless: true,
-    args: ['--no-sandbox', '--edge-skip-compat-layer-relaunch']
-  });
+  const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 960, height: 360 });
