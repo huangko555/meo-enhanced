@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, SlidersHorizontal, UserRound, Check } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, Share, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -722,7 +722,7 @@ moreToolsButton.title = 'More';
 moreToolsButton.setAttribute('aria-label', 'More tools');
 moreToolsButton.setAttribute('aria-haspopup', 'menu');
 moreToolsButton.setAttribute('aria-expanded', 'false');
-moreToolsButton.appendChild(createElement(SlidersHorizontal, { width: 18, height: 18 }));
+moreToolsButton.appendChild(createElement(Settings2, { width: 18, height: 18 }));
 
 const moreToolsPanel = document.createElement('div');
 moreToolsPanel.className = 'more-tools-panel';

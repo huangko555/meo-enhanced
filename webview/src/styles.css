@@ -579,7 +579,7 @@ body {
 .more-tools-separator {
   height: 1px;
   margin: 3px 6px;
-  background: var(--vscode-panel-border);
+  background-color: #474b50;
 }
 
 .format-separator {
