@@ -77,7 +77,7 @@ async function main() {
     if (initial.placeholders !== 1) {
       throw new Error(`Expected one collapsed language code block, got ${JSON.stringify(initial)}`);
     }
-    if (!initial.expandText.includes('9 hidden lines')) {
+    if (initial.expandText.trim() !== 'Show 9 more lines') {
       throw new Error(`Unexpected expand label: ${JSON.stringify(initial.expandText)}`);
     }
     const actionUserSelect = await page.$eval(
@@ -119,7 +119,7 @@ async function main() {
       footerCount: document.querySelectorAll('.meo-md-long-code-footer').length,
       footerText: document.querySelector('.meo-md-long-code-footer')?.textContent ?? ''
     }));
-    if (expanded.placeholders !== 0 || expanded.footerCount !== 1 || expanded.footerText.trim() !== 'Collapse') {
+    if (expanded.placeholders !== 0 || expanded.footerCount !== 1 || expanded.footerText.trim() !== 'Show less') {
       throw new Error(`Manual expansion failed: ${JSON.stringify(expanded)}`);
     }
     await page.evaluate(() => {
@@ -138,7 +138,7 @@ async function main() {
       collapsedAgain.placeholders !== 1 ||
       collapsedAgain.footerCount !== 0 ||
       !collapsedAgain.selectionEmpty ||
-      collapsedAgain.nativeSelectionText.includes('Expand')
+      collapsedAgain.nativeSelectionText.includes('Show 9 more lines')
     ) {
       throw new Error(`Manual collapse failed: ${JSON.stringify(collapsedAgain)}`);
     }
@@ -224,7 +224,7 @@ async function main() {
       editor.findNext('needle', { focusEditor: false });
     });
     await waitForFrames(page);
-    if (await page.$eval('.meo-md-long-code-footer', (element) => element.textContent?.trim()) !== 'Collapse') {
+    if (await page.$eval('.meo-md-long-code-footer', (element) => element.textContent?.trim()) !== 'Show less') {
       throw new Error('Search did not temporarily expand the first matching code block');
     }
 
@@ -294,6 +294,10 @@ async function main() {
     if (!tallFirstLine) {
       throw new Error('Could not locate the tall code block');
     }
+    const fixedControlCenter = await page.$eval('.meo-md-long-code-placeholder', (element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left + rect.width / 2;
+    });
     await page.mouse.click(tallFirstLine.x, tallFirstLine.y);
     await waitForFrames(page);
     await page.evaluate(() => {
@@ -314,6 +318,25 @@ async function main() {
     await waitForFrames(page);
     await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
+      const position = editor.view.state.doc.toString().indexOf('const tall100');
+      const block = editor.view.lineBlockAt(position);
+      editor.view.scrollDOM.scrollTop = block.top - editor.view.scrollDOM.clientHeight + 80;
+    });
+    await waitForFrames(page);
+    const fixedFooterState = await page.evaluate(() => {
+      const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
+      const footer = document.querySelector('.meo-md-long-code-footer')?.getBoundingClientRect();
+      const floating = document.querySelector<HTMLButtonElement>('.meo-long-code-floating-action');
+      return {
+        footerVisible: Boolean(footer && footer.bottom >= scroller.top && footer.top <= scroller.bottom),
+        floatingVisible: Boolean(floating && !floating.hidden)
+      };
+    });
+    if (!fixedFooterState.footerVisible || fixedFooterState.floatingVisible) {
+      throw new Error(`Floating button overlapped the visible fixed footer: ${JSON.stringify(fixedFooterState)}`);
+    }
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
       const position = editor.view.state.doc.toString().indexOf('const tall50');
       const block = editor.view.lineBlockAt(position);
       editor.view.scrollDOM.scrollTop = block.top - editor.view.scrollDOM.clientHeight / 2;
@@ -322,6 +345,13 @@ async function main() {
     const floatingInsideBlock = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => !button.hidden);
     if (!floatingInsideBlock) {
       throw new Error('Floating collapse button was not shown while viewport bottom was inside an expanded block');
+    }
+    const floatingHorizontalOffset = await page.evaluate(() => {
+      const floating = document.querySelector('.meo-long-code-floating-action')!.getBoundingClientRect();
+      return floating.left + floating.width / 2;
+    }).then((floatingCenter) => Math.abs(floatingCenter - fixedControlCenter));
+    if (floatingHorizontalOffset > 1) {
+      throw new Error(`Floating collapse button was not centered over the code content: ${floatingHorizontalOffset}`);
     }
     await page.click('.meo-long-code-floating-action');
     await waitForFrames(page);

@@ -5,6 +5,7 @@ import { getFencedCodeInfo } from './codeBlocks';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
+const COLLAPSE_LABEL = 'Show less';
 
 type LongCodeBlockDescriptor = {
   anchor: number;
@@ -164,10 +165,12 @@ function makeActionButton(
   button.type = 'button';
   button.className = 'meo-long-code-action';
   button.setAttribute('aria-expanded', action === 'collapse' ? 'true' : 'false');
-  button.setAttribute('aria-label', action === 'expand' ? 'Expand code block' : 'Collapse code block');
+  button.setAttribute('aria-label', action === 'expand'
+    ? `Show ${hiddenLineCount} more lines of code`
+    : 'Show less code');
   button.textContent = action === 'expand'
-    ? `Expand${hiddenLineCount > 0 ? ` ${hiddenLineCount} hidden lines` : ''}`
-    : 'Collapse';
+    ? `Show ${hiddenLineCount} more lines`
+    : COLLAPSE_LABEL;
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -368,6 +371,7 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
 class LongCodeFloatingButtonPlugin {
   button: HTMLButtonElement;
   view: EditorView;
+  private horizontalOffset = 0;
   private readonly onScroll = (): void => this.refresh();
   private readonly onPointerDown = (event: PointerEvent): void => {
     const target = event.target instanceof Element ? event.target : null;
@@ -393,8 +397,8 @@ class LongCodeFloatingButtonPlugin {
     this.button = document.createElement('button');
     this.button.type = 'button';
     this.button.className = 'meo-long-code-floating-action';
-    this.button.textContent = 'Collapse';
-    this.button.setAttribute('aria-label', 'Collapse code block');
+    this.button.textContent = COLLAPSE_LABEL;
+    this.button.setAttribute('aria-label', 'Show less code');
     this.button.hidden = true;
     this.button.addEventListener('click', (event) => {
       event.preventDefault();
@@ -428,8 +432,17 @@ class LongCodeFloatingButtonPlugin {
       read: (view) => {
         const state = view.state.field(longCodeBlockStateField, false);
         const scroller = view.scrollDOM.getBoundingClientRect();
+        const content = view.contentDOM.getBoundingClientRect();
+        const staticContainer = view.dom.querySelector<HTMLElement>(
+          '.meo-md-long-code-placeholder, .meo-md-long-code-footer'
+        );
+        const staticRect = staticContainer?.getBoundingClientRect() ?? null;
+        const contentCenter = content.left + content.width / 2;
+        const horizontalOffset = staticRect
+          ? staticRect.left + staticRect.width / 2 - contentCenter
+          : this.horizontalOffset;
         if (!state || scroller.width <= 0 || scroller.height <= 0) {
-          return { visible: false, anchor: 0, left: 0, top: 0 };
+          return { visible: false, anchor: 0, left: 0, top: 0, horizontalOffset };
         }
 
         const probeY = scroller.bottom - 8;
@@ -444,18 +457,30 @@ class LongCodeFloatingButtonPlugin {
             const endBottom = scroller.top + end.bottom - view.scrollDOM.scrollTop;
             return startTop <= probeY && endBottom > scroller.bottom;
           })
+          .filter((candidate) => {
+            const footer = view.dom.querySelector<HTMLElement>(
+              `.meo-md-long-code-footer[data-long-code-anchor="${candidate.anchor}"]`
+            );
+            if (!footer) {
+              return true;
+            }
+            const rect = footer.getBoundingClientRect();
+            return rect.bottom < scroller.top || rect.top > scroller.bottom;
+          })
           .sort((left, right) => right.start - left.start)[0];
 
         return block
           ? {
               visible: true,
               anchor: block.anchor,
-              left: scroller.left + scroller.width / 2,
-              top: scroller.bottom - 34
+              left: contentCenter + horizontalOffset,
+              top: scroller.bottom - 34,
+              horizontalOffset
             }
-          : { visible: false, anchor: 0, left: 0, top: 0 };
+          : { visible: false, anchor: 0, left: 0, top: 0, horizontalOffset };
       },
       write: (measure) => {
+        this.horizontalOffset = measure.horizontalOffset;
         if (!measure.visible) {
           this.button.hidden = true;
           return;
