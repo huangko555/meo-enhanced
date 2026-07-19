@@ -1551,7 +1551,9 @@ async function main() {
         for (let frame = 0; frame < 3; frame += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         }
-        const tables = Array.from(document.querySelectorAll<HTMLTableElement>('.meo-md-html-table'));
+        const tables = Array.from(document.querySelectorAll<HTMLTableElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
+        ));
         const firstInput = tables[0].querySelector<HTMLTextAreaElement>('tbody textarea')!;
         firstInput.focus();
         firstInput.setSelectionRange(2, 2);
@@ -1598,7 +1600,9 @@ async function main() {
       await page.mouse.down();
       await page.mouse.move(points.end.x, points.end.y, { steps: 4 });
       const during = await page.evaluate(() => {
-        const tables = Array.from(document.querySelectorAll<HTMLTableElement>('.meo-md-html-table'));
+        const tables = Array.from(document.querySelectorAll<HTMLTableElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
+        ));
         const focusedInput = tables[0].querySelector<HTMLTextAreaElement>('tbody textarea')!;
         return {
           focusedInputStillActive: document.activeElement === focusedInput,
