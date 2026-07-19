@@ -101,6 +101,16 @@ export function collectColorRangesFromText(text: string, offset = 0): ColorRange
     .map((range) => ({ ...range, from: range.from + offset, to: range.to + offset }));
 }
 
+export function createColorSwatchElement(value: string): HTMLSpanElement {
+  const swatch = document.createElement('span');
+  swatch.className = 'meo-md-color-swatch';
+  swatch.style.backgroundColor = value;
+  swatch.title = value;
+  swatch.setAttribute('role', 'img');
+  swatch.setAttribute('aria-label', `Color ${value}`);
+  return swatch;
+}
+
 export class ColorSwatchWidget extends WidgetType {
   readonly value: string;
 
@@ -114,13 +124,7 @@ export class ColorSwatchWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const swatch = document.createElement('span');
-    swatch.className = 'meo-md-color-swatch';
-    swatch.style.backgroundColor = this.value;
-    swatch.title = this.value;
-    swatch.setAttribute('role', 'img');
-    swatch.setAttribute('aria-label', `Color ${this.value}`);
-    return swatch;
+    return createColorSwatchElement(this.value);
   }
 
   ignoreEvent(): boolean {

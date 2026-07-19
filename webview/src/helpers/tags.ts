@@ -1,6 +1,7 @@
 import { RangeSetBuilder, StateField } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import { collectColorRangesFromText } from './colorSwatches';
 
 const markdownTagDeco = Decoration.mark({ class: 'meo-md-tag' });
 const markdownTagRegex = /(^|[^\p{L}\p{N}_/-])#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/gu;
@@ -32,13 +33,15 @@ function buildMarkdownTagDecorations(state: any): DecorationSet {
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
     const line = state.doc.line(lineNumber);
     const text = line.text;
+    const colorRanges = collectColorRangesFromText(text, line.from);
     markdownTagRegex.lastIndex = 0;
     for (const match of text.matchAll(markdownTagRegex)) {
       const prefixLength = match[1]?.length ?? 0;
       const rawIndex = match.index ?? 0;
       const from = line.from + rawIndex + prefixLength;
       const to = from + 1 + (match[2]?.length ?? 0);
-      if (to <= from + 1 || hasBlockedTagAncestor(state, from)) {
+      const isColor = colorRanges.some((range) => range.from === from && range.to === to);
+      if (to <= from + 1 || isColor || hasBlockedTagAncestor(state, from)) {
         continue;
       }
       builder.add(from, to, markdownTagDeco);

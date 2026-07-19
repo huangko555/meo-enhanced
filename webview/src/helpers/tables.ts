@@ -13,6 +13,7 @@ import type { EditorDiagnostic } from './diagnostics';
 import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
 import { getViewportController } from './viewportController';
 import { createOpenLinkButton } from './linkOpenButton';
+import { collectColorRangesFromText, createColorSwatchElement } from './colorSwatches';
 import {
   createMissingLocalLinkIndicator,
   isMissingLocalLinkTarget
@@ -1217,6 +1218,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   sourceRange?: TableCellRange | null;
 } = {}) {
   const { baseOffset = 0, diagnostics = [], disableLinkParsers = false, searchState = null, sourceRange = null } = options;
+  const colorRangesByStart = new Map(collectColorRangesFromText(text).map((range) => [range.from, range]));
   let buffer = '';
   let bufferStart = 0;
   const flushBuffer = () => {
@@ -1398,9 +1400,19 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       continue;
     }
 
+    const tag = disableLinkParsers ? null : tableInlineTagRe.exec(text.slice(i));
+    const isTag = Boolean(tag && (i === 0 || !tableInlineTagPrefixRe.test(text[i - 1])));
+    const color = colorRangesByStart.get(i);
+    if (color && (!isTag || tag![0].length === color.value.length)) {
+      flushBuffer();
+      parent.appendChild(createColorSwatchElement(color.value));
+      appendTablePlainText(parent, color.value, baseOffset + i, diagnostics, searchState, sourceRange);
+      i = color.to;
+      continue;
+    }
+
     if (!disableLinkParsers) {
-      const tag = tableInlineTagRe.exec(text.slice(i));
-      if (tag && (i === 0 || !tableInlineTagPrefixRe.test(text[i - 1]))) {
+      if (tag && isTag) {
         flushBuffer();
         const el = document.createElement('span');
         el.className = 'meo-md-tag';

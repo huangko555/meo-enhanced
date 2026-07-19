@@ -3,6 +3,15 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { markdownTagField } from '../webview/src/helpers/tags';
 
+function decoratedTags(text: string): string[] {
+  const state = EditorState.create({ doc: text, extensions: [markdownTagField] });
+  const tags: string[] = [];
+  for (const decorations of state.facet(EditorView.outerDecorations)) {
+    decorations.between(0, state.doc.length, (from, to) => tags.push(state.sliceDoc(from, to)));
+  }
+  return tags;
+}
+
 const intrawordText = 'hu_jjd #hu_jjd #123_dkkg';
 const intrawordRanges = collectInlineMarkdownSyntaxRanges(intrawordText);
 if (intrawordRanges.some((range) => intrawordText.slice(range.from, range.to) === '_')) {
@@ -24,6 +33,13 @@ for (const decorations of outerTagDecorations) {
 }
 if (tagRanges.length !== 1 || tagRanges[0].from !== 0 || tagRanges[0].to !== tagState.doc.length) {
   throw new Error(`Tag decoration was not kept as one outer range: ${JSON.stringify(tagRanges)}`);
+}
+
+const colorAndTagText = '#f00 #face #ff0000 #ff000080 #todo #project/alpha #12345 #abc/tag';
+const colorAndTags = decoratedTags(colorAndTagText);
+const expectedTags = ['#todo', '#project/alpha', '#12345', '#abc/tag'];
+if (JSON.stringify(colorAndTags) !== JSON.stringify(expectedTags)) {
+  throw new Error(`Colors and Markdown tags were not classified separately: ${JSON.stringify(colorAndTags)}`);
 }
 
 console.log('inline underscore checks passed');
