@@ -448,7 +448,7 @@ body {
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
 }
 
@@ -457,7 +457,7 @@ body {
   position: absolute;
   z-index: 0;
   inset: 1px 0;
-  border-radius: 5px;
+  border-radius: 8px;
   background: color-mix(
     in srgb,
     var(--vscode-input-background, var(--vscode-sideBar-background)) 62%,
@@ -471,7 +471,7 @@ body {
   z-index: 2;
   inset: 1px 0;
   border: 1px solid color-mix(in srgb, var(--vscode-panel-border, #474b50) 72%, transparent);
-  border-radius: 5px;
+  border-radius: 8px;
   pointer-events: none;
 }
 
@@ -506,14 +506,18 @@ body {
   z-index: 1;
   height: 22px;
   min-width: 62px;
-  border-radius: 5px;
+  border-radius: 8px;
 }
 
 .preview-appearance-button + .preview-appearance-button {
   margin-left: 0;
 }
 
-.preview-appearance-button:not(.is-active):hover,
+.preview-appearance-button:not(.is-active):hover {
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+}
+
 .preview-toolbar-action:hover {
   color: var(--vscode-editor-foreground);
   background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.18));
@@ -540,10 +544,10 @@ body {
 .line-jump-input {
   box-sizing: border-box;
   width: 100%;
-  height: 24px;
+  height: 22px;
   padding: 0 7px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 8px;
   outline: none;
   color: var(--vscode-input-foreground, var(--vscode-editor-foreground));
   background: color-mix(
@@ -552,7 +556,7 @@ body {
     var(--vscode-sideBar-background)
   );
   font: inherit;
-  line-height: 22px;
+  line-height: 20px;
 }
 
 .line-jump-input::placeholder {
@@ -837,7 +841,7 @@ body {
   align-items: center;
   height: 24px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 0;
   background: transparent;
 }
@@ -847,7 +851,7 @@ body {
   content: '';
   position: absolute;
   inset: 1px 0;
-  border-radius: 5px;
+  border-radius: 8px;
   pointer-events: none;
 }
 
@@ -888,28 +892,20 @@ body {
   height: 22px;
   min-width: 52px;
   padding: 0 8px;
-  border-radius: 5px;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--vscode-descriptionForeground, var(--vscode-foreground));
   background: transparent;
 }
 
 .mode-button.is-active {
-  color: var(--meo-semantic-headingForeground, #79b8ff);
-  background: color-mix(
-    in srgb,
-    var(--meo-semantic-headingForeground, #79b8ff) 16%,
-    var(--vscode-sideBar-background)
-  );
+  color: #ffffff;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
 }
 
 .mode-button:not(.is-active):hover {
   color: var(--vscode-editor-foreground);
-  background: color-mix(
-    in srgb,
-    var(--vscode-editor-foreground) 8%,
-    transparent
-  );
+  background: transparent;
 }
 
 .meo-copy-code-btn {
