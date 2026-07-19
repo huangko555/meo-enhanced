@@ -1400,10 +1400,10 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       continue;
     }
 
-    const tag = disableLinkParsers ? null : tableInlineTagRe.exec(text.slice(i));
-    const isTag = Boolean(tag && (i === 0 || !tableInlineTagPrefixRe.test(text[i - 1])));
+    const tagMatch = disableLinkParsers ? null : tableInlineTagRe.exec(text.slice(i));
+    const tag = tagMatch && (i === 0 || !tableInlineTagPrefixRe.test(text[i - 1])) ? tagMatch : null;
     const color = colorRangesByStart.get(i);
-    if (color && (!isTag || tag![0].length === color.value.length)) {
+    if (color && (!tag || tag[0].length === color.value.length)) {
       flushBuffer();
       parent.appendChild(createColorSwatchElement(color.value));
       appendTablePlainText(parent, color.value, baseOffset + i, diagnostics, searchState, sourceRange);
@@ -1412,7 +1412,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
     }
 
     if (!disableLinkParsers) {
-      if (tag && isTag) {
+      if (tag) {
         flushBuffer();
         const el = document.createElement('span');
         el.className = 'meo-md-tag';

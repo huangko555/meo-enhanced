@@ -11,6 +11,7 @@ src/**
 .gitignore
 **/*.map
 **/*.ts
+*.vsix
 **/.vscode-test.*
 scripts/**
 releases/**
