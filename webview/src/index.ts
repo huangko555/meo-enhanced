@@ -1497,7 +1497,11 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
     try {
       editor.setMode(mode);
       if (previousMode === 'preview' && transitionViewPosition) {
-        editor.restoreTopLine?.(transitionViewPosition.topLine, transitionViewPosition.topLineOffset);
+        editor.restoreTopLine?.(
+          transitionViewPosition.topLine,
+          transitionViewPosition.topLineOffset,
+          { syncCursor: false }
+        );
       }
       syncGitDiffLineHighlights();
       if (outlineController.isVisible()) {
@@ -1883,8 +1887,12 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'docChanged' && currentMode === 'preview') {
-    const restoreLine = previewController.getTopVisiblePosition()?.topLine ?? null;
-    window.setTimeout(() => previewController.requestRender(getCurrentEditorText(), { restoreLine }), 0);
+    const incomingText = normalizeEol(message.text);
+    const currentText = normalizeEol(getCurrentEditorText());
+    if (incomingText !== currentText) {
+      const restoreLine = previewController.getTopVisiblePosition()?.topLine ?? null;
+      window.setTimeout(() => previewController.requestRender(getCurrentEditorText(), { restoreLine }), 0);
+    }
   }
 
   if (message.type === 'docChanged' && !editor && pendingInitialText !== null) {

@@ -2606,8 +2606,8 @@ export function createEditor({
         restoreTopVisibleLine(line.number, 0, { syncCursor: false });
       }
     },
-    restoreTopLine(lineNumber, lineOffset) {
-      restoreTopVisibleLine(lineNumber, lineOffset, { syncCursor: true });
+    restoreTopLine(lineNumber, lineOffset, { syncCursor = true } = {}) {
+      restoreTopVisibleLine(lineNumber, lineOffset, { syncCursor });
     },
     getTopVisiblePosition() {
       const position = computeTopVisiblePosition();

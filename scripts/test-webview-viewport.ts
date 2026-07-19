@@ -16,8 +16,23 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function positionPreviewElement(page: Page, selector: string, ratio = 0): Promise<void> {
+  await page.evaluate(({ targetSelector, targetRatio }) => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const element = frameDocument.querySelector<HTMLElement>(targetSelector)!;
+    const rect = element.getBoundingClientRect();
+    frameDocument.scrollingElement!.scrollTop += rect.top + rect.height * targetRatio;
+  }, { targetSelector: selector, targetRatio: ratio });
+}
+
 function createFixture(): string {
   const lines = Array.from({ length: 280 }, (_, index) => `stable line ${index + 1}`);
+  lines[14] = '```javascript';
+  for (let index = 15; index <= 34; index += 1) lines[index] = `const collapsed${index - 14} = ${index - 14};`;
+  lines[35] = '```';
+  lines[44] = '```python';
+  for (let index = 45; index <= 54; index += 1) lines[index] = `short_${index - 44} = ${index - 44}`;
+  lines[55] = '```';
   lines[77] = '## Short Mermaid';
   lines[78] = '```mermaid';
   lines[79] = 'flowchart LR';
@@ -28,7 +43,7 @@ function createFixture(): string {
   lines[110] = '  User->>Editor: Update';
   lines[111] = '  Editor-->>User: Render';
   lines[112] = '```';
-  lines[132] = '```typescript';
+  lines[132] = '```';
   for (let index = 133; index <= 220; index += 1) lines[index] = `const line${index - 132} = ${index - 132};`;
   lines[221] = '```';
   lines[230] = '## Tall Mermaid';
@@ -342,7 +357,7 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'previewRendered',
         requestId,
-        html: '<h1 id="intro" data-source-line="1">Intro</h1><p>Footnote reference <a id="fnref-1" href="#fn-1">1</a></p><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div><ol><li id="fn-1">Footnote content <a href="#fnref-1">Back</a></li></ol>',
+        html: '<h1 id="intro" data-source-line="1">Intro</h1><p>Footnote reference <a id="fnref-1" href="#fn-1">1</a></p><pre id="collapsed-long-code" data-source-line="15" data-source-end-line="36" style="height:440px">Long code block</pre><pre id="short-code" data-source-line="45" data-source-end-line="56" style="height:240px">Short code block</pre><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div><ol><li id="fn-1">Footnote content <a href="#fnref-1">Back</a></li></ol>',
         hasMermaid: true,
         styles: {
           dark: 'html,body{margin:0;background:#20252b;color:#fff}.meo-export-doc{padding:20px}',
@@ -365,6 +380,49 @@ async function main() {
     if (!darkPreviewMermaidFill || darkPreviewMermaidFill === '#ffffff') {
       throw new Error(`Dark Preview Mermaid used a light node fill: ${darkPreviewMermaidFill}`);
     }
+    await positionPreviewElement(page, '#collapsed-long-code', 0.7);
+    await page.click('[data-mode="live"]');
+    await waitForFrames(page, 16);
+    const collapsedLongBlockState = await page.evaluate(() => ({
+      placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+      footers: document.querySelectorAll('.meo-md-long-code-footer').length
+    }));
+    if (collapsedLongBlockState.placeholders !== 1 || collapsedLongBlockState.footers !== 0) {
+      throw new Error(`Preview positioning expanded a collapsed long code block: ${JSON.stringify(collapsedLongBlockState)}`);
+    }
+
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await waitForFrames(page, 2);
+    await page.click('[data-mode="preview"]');
+    await waitForFrames(page, 2);
+    await positionPreviewElement(page, '#collapsed-long-code', 0.7);
+    await page.click('[data-mode="live"]');
+    await waitForFrames(page, 16);
+    const expandedLongBlockState = await page.evaluate(() => ({
+      placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+      footers: document.querySelectorAll('.meo-md-long-code-footer').length
+    }));
+    if (expandedLongBlockState.placeholders !== 0 || expandedLongBlockState.footers !== 1) {
+      throw new Error(`Preview positioning lost a manually expanded long code block: ${JSON.stringify(expandedLongBlockState)}`);
+    }
+
+    await page.click('[data-mode="preview"]');
+    await waitForFrames(page, 2);
+    await positionPreviewElement(page, '#short-code', 0.5);
+    await page.click('[data-mode="live"]');
+    await waitForFrames(page, 16);
+    const shortCodeBlockVisible = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!.getBoundingClientRect();
+      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
+        const rect = line.getBoundingClientRect();
+        return line.textContent?.startsWith('short_') && rect.bottom >= scroller.top && rect.top <= scroller.bottom;
+      });
+    });
+    if (!shortCodeBlockVisible) {
+      throw new Error('Preview positioning did not preserve a short code block location');
+    }
+    await page.click('[data-mode="preview"]');
+    await waitForFrames(page, 2);
     await page.evaluate(() => {
       document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
         .querySelector<HTMLAnchorElement>('#fnref-1')!.click();
@@ -499,6 +557,28 @@ async function main() {
     });
     if (Math.abs(restoredPreviewAnchor) > 4) {
       throw new Error(`Preview did not restore the editor viewport: ${restoredPreviewAnchor}`);
+    }
+    const previewScrollBeforeSameDocumentMessage = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const scrollingElement = frame.contentDocument!.scrollingElement!;
+      scrollingElement.scrollTop += 13;
+      return scrollingElement.scrollTop;
+    });
+    await page.evaluate((text) => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'docChanged', text, version: 2 }
+      }));
+    }, initialText);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await waitForFrames(page, 2);
+    const previewScrollAfterSameDocumentMessage = await page.evaluate(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+    ));
+    if (Math.abs(previewScrollAfterSameDocumentMessage - previewScrollBeforeSameDocumentMessage) > 0.5) {
+      throw new Error(`Unchanged docChanged moved the Preview viewport: ${JSON.stringify({
+        previewScrollBeforeSameDocumentMessage,
+        previewScrollAfterSameDocumentMessage
+      })}`);
     }
     await page.click('[data-action="outline-right"]');
     const outlineWidthBefore = await page.$eval<HTMLElement, number>('.outline-sidebar', (element) => element.getBoundingClientRect().width);
