@@ -1,5 +1,13 @@
 # Markdown Editor Optimized (MEO)
 ---
+## 0.1.32
+- Added a persistent read-only Preview mode with stable navigation, search, toolbar actions, and export appearance
+- Improved Mermaid and LaTeX rendering consistency across Live and Preview modes
+- Added collapsible long code blocks in Live mode with search-aware expansion and accessible controls
+- Added Live color value previews in normal text and rendered tables while keeping colors distinct from Markdown tags
+- Improved viewport restoration across documents and editor modes without unexpectedly expanding folded code blocks
+- Refined toolbar controls, sticky table headers, inline table rendering, and cross-table interaction stability
+
 ## 0.1.31
 - Added current-edit, recent-save, and Git HEAD change baselines with an explicit save checkpoint action
 - Replaced custom line pairing with VS Code Quick Diff semantics for stable added, modified, and deleted markers around repeated blank lines
