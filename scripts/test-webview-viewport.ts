@@ -234,11 +234,27 @@ async function main() {
     if (saveMessages !== 1) {
       throw new Error(`Toolbar save did not request a save: ${saveMessages}`);
     }
+    for (const mode of ['source', 'live'] as const) {
+      await page.click(`[data-mode="${mode}"]`);
+      await waitForFrames(page, 2);
+      const persistedMode = await page.evaluate(() => (
+        (window as typeof window & { __webviewState?: { mode?: string } }).__webviewState?.mode
+      ));
+      if (persistedMode !== mode) {
+        throw new Error(`Webview did not persist ${mode} mode: ${persistedMode}`);
+      }
+    }
     const editorScrollTopBeforePreview = await page.$eval<HTMLElement, number>(
       '.editor-host > .cm-editor .cm-scroller',
       (element) => element.scrollTop
     );
     await page.click('[data-mode="preview"]');
+    const persistedPreviewMode = await page.evaluate(() => (
+      (window as typeof window & { __webviewState?: { mode?: string } }).__webviewState?.mode
+    ));
+    if (persistedPreviewMode !== 'preview') {
+      throw new Error(`Webview did not persist preview mode: ${persistedPreviewMode}`);
+    }
     const previewToolbarLayout = await page.evaluate(() => {
       const group = document.querySelector<HTMLElement>('.preview-format-group')!;
       return {

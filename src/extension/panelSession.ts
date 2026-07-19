@@ -51,6 +51,12 @@ import {
 export type EditorMode = 'live' | 'source' | 'preview';
 export type ExportFormat = 'html' | 'pdf';
 
+const EDITOR_MODE_STATE_KEY = 'editorMode';
+
+function isEditorMode(value: unknown): value is EditorMode {
+  return value === 'live' || value === 'source' || value === 'preview';
+}
+
 type FindOptions = {
   wholeWord: boolean;
   caseSensitive: boolean;
@@ -482,7 +488,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   } = params;
 
   const documentKey = document.uri.toString();
-  let mode: EditorMode = 'live';
+  const persistedMode = context.globalState.get(EDITOR_MODE_STATE_KEY);
+  let mode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
   let diffBaselineMode: DiffBaselineMode = getDiffBaselineMode();
   let gitBlameEnabled = getGitBlameEnabled();
   let applyQueue: Promise<void> = Promise.resolve();
@@ -1168,7 +1175,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_STARTUP_DELAY_MS });
         return;
       case 'setMode':
+        if (!isEditorMode(raw.mode)) {
+          return;
+        }
         mode = raw.mode;
+        await context.globalState.update(EDITOR_MODE_STATE_KEY, mode);
         return;
       case 'setLineNumbers': {
         const visible = raw.visible ?? raw.enabled;

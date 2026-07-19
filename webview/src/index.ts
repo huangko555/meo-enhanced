@@ -2215,7 +2215,7 @@ const state = vscode.getState() as WebviewUiState | undefined;
 if (state?.lastEditableMode === 'live' || state?.lastEditableMode === 'source') {
   lastEditableMode = state.lastEditableMode;
 }
-if (state && (state.mode === 'live' || state.mode === 'source')) {
+if (state && (state.mode === 'live' || state.mode === 'source' || state.mode === 'preview')) {
   applyMode(state.mode, { post: false, persist: false });
   hasLocalModePreference = true;
 } else {
@@ -2418,6 +2418,8 @@ spellCheckBtn.addEventListener('click', toggleSpellCheck);
 gitBlameBtn.addEventListener('click', toggleGitBlame);
 
 persistUiState();
-vscode.postMessage({ type: 'setMode', mode: currentMode });
+if (hasLocalModePreference) {
+  vscode.postMessage({ type: 'setMode', mode: currentMode });
+}
 scheduleReadyHandshake();
 scheduleEditorBundleWarmupAfterReady();
