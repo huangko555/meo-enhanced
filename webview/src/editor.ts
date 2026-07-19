@@ -6,7 +6,7 @@ import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codem
 import { vim, Vim } from '@replit/codemirror-vim';
 import { sourceHighlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
-import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
+import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect, setLongCodeBlockSearchRevealEffect } from './liveMode';
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -1461,6 +1461,7 @@ export function createEditor({
       selection: { anchor: from, head: to },
       effects: [
         EditorView.scrollIntoView(from, { y: 'center' }),
+        setLongCodeBlockSearchRevealEffect.of({ from, to }),
         setMermaidSearchRevealEffect.of({ from, to }),
         setLatexMathSearchRevealEffect.of({ from, to }),
         preserveLiveDecorationsForSearchEffect.of(undefined)
@@ -2258,6 +2259,7 @@ export function createEditor({
       view.dispatch({
         effects: [
           setSearchQueryEffect.of(nextQuery),
+          setLongCodeBlockSearchRevealEffect.of(null),
           setMermaidSearchRevealEffect.of(null),
           setLatexMathSearchRevealEffect.of(null),
           preserveLiveDecorationsForSearchEffect.of(undefined)

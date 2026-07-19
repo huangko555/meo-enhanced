@@ -75,6 +75,9 @@ import { markdownTagField } from './helpers/tags';
 import { mermaidEditingStateField } from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles } from './helpers/inlineStyleFallback';
 import { addColorSwatchDecoration, collectColorRangesFromText } from './helpers/colorSwatches';
+import { longCodeBlockExtensions } from './helpers/longCodeBlocks';
+
+export { setLongCodeBlockSearchRevealEffect } from './helpers/longCodeBlocks';
 import {
   addLatexMathToolbar,
   getLatexMathBlockMode,
@@ -2693,6 +2696,7 @@ export function liveModeExtensions() {
     mermaidEditingStateField,
     latexMathEditingStateField,
     liveDecorationField,
+    ...longCodeBlockExtensions(),
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),
     ...headingCollapseSharedExtensions(),

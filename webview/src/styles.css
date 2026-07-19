@@ -934,6 +934,58 @@ body {
   position: static;
 }
 
+.cm-editor .meo-md-long-code-placeholder,
+.cm-editor .meo-md-long-code-footer {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.4em;
+  padding: 6px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
+  background: var(--meo-code-background);
+}
+
+.meo-long-code-action,
+.meo-long-code-floating-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: var(--meo-semantic-codeCopyForeground, var(--meo-foreground));
+  background: var(--meo-semantic-codeCopyBackground, transparent);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+}
+
+.meo-long-code-action {
+  border: none;
+}
+
+.meo-long-code-action:hover,
+.meo-long-code-floating-action:hover {
+  color: var(--meo-semantic-codeCopyHoverForeground, var(--meo-foreground));
+  background: var(--meo-semantic-codeCopyHoverBackground, var(--meo-outline-hover-background));
+}
+
+.meo-long-code-floating-action {
+  position: fixed;
+  z-index: 220;
+  border: 1px solid color-mix(in srgb, var(--meo-foreground) 18%, transparent);
+  transform: translateX(-50%);
+}
+
+.meo-long-code-floating-action[hidden] {
+  display: none;
+}
+
 .meo-select-all-code-btn {
   cursor: pointer;
   padding: 2px 8px;
