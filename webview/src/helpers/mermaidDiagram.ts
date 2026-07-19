@@ -480,7 +480,7 @@ export function refreshMermaidTheme(): void {
   mermaidThemeSignature = '';
 }
 
-function isDisplayMathDiagram(diagramText) {
+export function isDisplayMathDiagram(diagramText: string): boolean {
   return MERMAID_DISPLAY_MATH_RE.test(diagramText.trim());
 }
 
@@ -498,7 +498,7 @@ function escapeForMermaidLabel(text) {
   return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-function normalizeMermaidDiagramText(diagramText) {
+export function normalizeMermaidDiagramText(diagramText: string): string {
   const trimmed = diagramText.trim();
   if (!trimmed || MERMAID_DIAGRAM_START_RE.test(trimmed)) {
     return diagramText;
@@ -518,7 +518,7 @@ function normalizeMermaidDiagramText(diagramText) {
     'flowchart LR',
     `  MATH["${escapedMath}"]`,
     '  style MATH fill:transparent,stroke:transparent,stroke-width:0px',
-    `  classDef ${MERMAID_MATH_CLASS} padding:0px;`,
+    `  classDef ${MERMAID_MATH_CLASS} font-size:22px,padding:0px;`,
     `  class MATH ${MERMAID_MATH_CLASS}`
   ].join('\n');
 }

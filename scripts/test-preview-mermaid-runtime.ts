@@ -31,7 +31,7 @@ try {
   const runtime = fs.readFileSync(path.join(repoRoot, 'webview', 'dist', 'mermaid.min.js'), 'utf8');
   const entry = fs.readFileSync(path.join(tempDir, 'test-preview-mermaid-runtime-entry.js'), 'utf8');
   const page = await browser.newPage();
-  await page.setContent(`<!doctype html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-preview-runtime-test'"></head><body></body>`);
+  await page.setContent(`<!doctype html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; font-src data:; script-src 'nonce-preview-runtime-test'"></head><body></body>`);
   await page.evaluate(({ runtime, entry }) => {
     for (const source of [runtime, entry]) {
       const script = document.createElement('script');
@@ -40,8 +40,37 @@ try {
       document.head.appendChild(script);
     }
   }, { runtime, entry });
+  const katexCss = fs.readFileSync(path.join(repoRoot, 'webview', 'dist', 'katex', 'katex-embedded.css'), 'utf8');
+  await page.evaluate(async (css) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = `data:text/css,${encodeURIComponent(css)}`;
+    await new Promise<void>((resolve, reject) => {
+      link.addEventListener('load', () => resolve(), { once: true });
+      link.addEventListener('error', () => reject(new Error('Failed to load KaTeX test stylesheet')), { once: true });
+      document.head.appendChild(link);
+    });
+    document.body.dataset.meoKatexSrc = link.href;
+  }, katexCss);
 
-  const markdownText = '```mermaid\nflowchart LR\n  Start --> Check --> Done\n```';
+  const markdownText = [
+    '```mermaid',
+    'flowchart LR',
+    '  Start --> Check --> Done',
+    '```',
+    '',
+    '```mermaid',
+    '$$',
+    '\\frac{a}{b}',
+    '$$',
+    '```',
+    '',
+    '独立公式：$E = mc^2$',
+    '',
+    '$$',
+    '\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}',
+    '$$'
+  ].join('\n');
   const rendered = renderMarkdownToHtml({
     markdownText,
     markdownFilePath: 'C:/tmp/preview-mermaid.md',
@@ -93,10 +122,59 @@ try {
     previewStartedAt
   );
 
-  await page.waitForFunction(() => Boolean(
-    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
-      ?.querySelector('.meo-export-mermaid.is-rendered svg')
-  ), { timeout: 5000 });
+  await page.waitForFunction(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    return Boolean(
+      frameDocument?.querySelectorAll('.meo-export-mermaid.is-rendered svg').length === 2 &&
+      frameDocument.querySelector('.meo-export-mermaid.is-math .katex')
+    );
+  }, { timeout: 5000 });
+  await page.evaluate(() => {
+    (window as typeof window & { __previewController?: any }).__previewController?.setVisible(true);
+  });
+  const previewMathFont = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const katex = frameDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-math .katex');
+    return katex ? frameDocument?.defaultView?.getComputedStyle(katex).fontFamily ?? '' : '';
+  });
+  if (!previewMathFont.includes('KaTeX_Main')) {
+    throw new Error(`Preview iframe did not receive KaTeX styles: ${previewMathFont}`);
+  }
+  const displayMathLayout = await page.evaluate(async () => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const formula = frameDocument?.querySelector<HTMLElement>('.meo-export-math-display');
+    if (!formula) return null;
+    await frameDocument?.fonts.load('19px KaTeX_Size2');
+    const largeOperator = formula.querySelector<HTMLElement>('.op-symbol.large-op');
+    const style = frameDocument.defaultView?.getComputedStyle(formula);
+    const operatorStyle = largeOperator
+      ? frameDocument.defaultView?.getComputedStyle(largeOperator)
+      : null;
+    return {
+      overflowX: style?.overflowX ?? '',
+      paddingTop: Number.parseFloat(style?.paddingTop ?? '0'),
+      paddingBottom: Number.parseFloat(style?.paddingBottom ?? '0'),
+      clientWidth: formula.clientWidth,
+      scrollWidth: formula.scrollWidth,
+      height: formula.getBoundingClientRect().height,
+      fontsLoaded: frameDocument?.fonts.check('16px KaTeX_Size2') ?? false,
+      operatorFont: operatorStyle?.fontFamily ?? '',
+      operatorHeight: largeOperator?.getBoundingClientRect().height ?? 0
+    };
+  });
+  if (
+    !displayMathLayout ||
+    !['hidden', 'clip'].includes(displayMathLayout.overflowX) ||
+    displayMathLayout.paddingTop <= 0 ||
+    displayMathLayout.paddingBottom <= 0 ||
+    displayMathLayout.clientWidth <= 0 ||
+    displayMathLayout.height > 120 ||
+    !displayMathLayout.fontsLoaded ||
+    !displayMathLayout.operatorFont.includes('KaTeX_Size2') ||
+    displayMathLayout.operatorHeight <= 0
+  ) {
+    throw new Error(`Preview display math layout is unstable: ${JSON.stringify(displayMathLayout)}`);
+  }
   const mermaidReadyAfterMs = await page.evaluate((startedAt) => performance.now() - startedAt, previewStartedAt);
   if (mermaidReadyAfterMs > 700) {
     throw new Error(`Preview Mermaid was blocked behind hidden Live renders for ${Math.round(mermaidReadyAfterMs)}ms`);

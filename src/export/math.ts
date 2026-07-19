@@ -1,4 +1,4 @@
-import katex from 'katex';
+import { renderMathToHtml } from '../shared/mathRenderer';
 
 export type LatexMathMode = 'inline' | 'display';
 
@@ -11,8 +11,6 @@ export interface LatexMathRange {
   fencedDisplay?: boolean;
 }
 
-const MATH_RENDER_CACHE_LIMIT = 300;
-const mathHtmlCache = new Map<string, string | null>();
 const INLINE_MATH_MARKDOWN_STRUCTURE_MARKERS = ['**', '__', '~~', '`', '](', '!['] as const;
 const INLINE_MATH_PROSE_LENGTH_LIMIT = 120;
 const INLINE_MATH_CURRENCY_CONTENT_RE = /^[0-9][0-9\s,._%+-]*$/;
@@ -264,53 +262,6 @@ export function collectLatexMathRanges(text: string): LatexMathRange[] {
   return ranges;
 }
 
-function getCachedMathHtml(cacheKey: string): string | null | undefined {
-  const cached = mathHtmlCache.get(cacheKey);
-  if (cached === undefined) {
-    return undefined;
-  }
-  mathHtmlCache.delete(cacheKey);
-  mathHtmlCache.set(cacheKey, cached);
-  return cached;
-}
-
-function pushMathHtmlCache(cacheKey: string, value: string | null): void {
-  if (mathHtmlCache.has(cacheKey)) {
-    mathHtmlCache.delete(cacheKey);
-  }
-  mathHtmlCache.set(cacheKey, value);
-  if (mathHtmlCache.size <= MATH_RENDER_CACHE_LIMIT) {
-    return;
-  }
-  const oldestKey = mathHtmlCache.keys().next().value;
-  if (oldestKey !== undefined) {
-    mathHtmlCache.delete(oldestKey);
-  }
-}
-
 export function renderLatexMathToHtml(content: string, mode: LatexMathMode): string | null {
-  const normalized = String(content ?? '').trim();
-  if (!normalized) {
-    return null;
-  }
-
-  const cacheKey = `${mode}:${normalized}`;
-  const cached = getCachedMathHtml(cacheKey);
-  if (cached !== undefined) {
-    return cached;
-  }
-
-  try {
-    const html = katex.renderToString(normalized, {
-      displayMode: mode === 'display',
-      throwOnError: true,
-      strict: 'ignore',
-      output: 'html'
-    });
-    pushMathHtmlCache(cacheKey, html);
-    return html;
-  } catch {
-    pushMathHtmlCache(cacheKey, null);
-    return null;
-  }
+  return renderMathToHtml(content, mode);
 }

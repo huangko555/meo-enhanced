@@ -1055,7 +1055,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'index.css'))
       .toString();
     const katexStyleUri = webview
-      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'katex', 'katex.min.css'))
+      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'katex', 'katex-embedded.css'))
       .toString();
     const mermaidRuntimeUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'mermaid.min.js'))
@@ -1067,7 +1067,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     const csp = [
       "default-src 'none'",
       `img-src ${webview.cspSource} https: http: data: blob:`,
-      `font-src ${webview.cspSource}`,
+      `font-src ${webview.cspSource} data:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `script-src ${webview.cspSource} 'nonce-${nonce}' 'wasm-unsafe-eval'`
     ].join('; ');

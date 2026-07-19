@@ -65,6 +65,39 @@ body::-webkit-scrollbar-corner {
 }
 `;
 
+function collectPreviewKatexStyles(katexHref: string): string {
+  if (!katexHref) {
+    return '';
+  }
+
+  const stylesheet = Array.from(document.styleSheets).find((sheet) => (
+    sheet.href === katexHref ||
+    Boolean(sheet.href && /katex(?:\.min|-embedded)?\.css(?:$|[?#])/i.test(sheet.href))
+  ));
+  if (!stylesheet) {
+    return '';
+  }
+
+  try {
+    return Array.from(stylesheet.cssRules)
+      .map((rule) => rule.cssText)
+      .join('\n')
+      .replace(/url\(\s*(["']?)([^"'()]+)\1\s*\)/g, (_match, _quote, rawUrl: string) => {
+        const url = rawUrl.trim();
+        if (/^(?:data:|blob:|https?:|vscode-webview:|#)/i.test(url)) {
+          return `url("${url}")`;
+        }
+        try {
+          return `url("${new URL(url, katexHref).toString()}")`;
+        } catch {
+          return `url("${url}")`;
+        }
+      });
+  } catch {
+    return '';
+  }
+}
+
 export function createPreviewController({ vscode, onRendered, onFindRequested }: PreviewControllerOptions) {
   const host = document.createElement('div');
   host.className = 'preview-host';
@@ -237,9 +270,12 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       return;
     }
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
-    const katexLink = katexHref
-      ? `<link rel="stylesheet" href="${escapeHtmlAttribute(katexHref)}">`
-      : '';
+    const katexInlineStyles = collectPreviewKatexStyles(katexHref).replace(/<\/style/gi, '<\\/style');
+    const katexStylesTag = katexInlineStyles
+      ? `<style data-meo-preview-katex>${katexInlineStyles}</style>`
+      : katexHref
+        ? `<link rel="stylesheet" href="${escapeHtmlAttribute(katexHref)}">`
+        : '';
     const styles = latestPayload.styles[appearance].replace(/<\/style/gi, '<\\/style');
     frame.onload = () => {
       const frameDocument = frame.contentDocument;
@@ -268,7 +304,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
       }
     };
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexLink}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {

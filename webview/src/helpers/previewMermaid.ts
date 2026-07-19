@@ -1,6 +1,8 @@
 import type { PreviewAppearance } from '../../../src/shared/preview';
 import {
   loadMermaidRuntime,
+  isDisplayMathDiagram,
+  normalizeMermaidDiagramText,
   restoreMermaidEditorTheme,
   runExclusiveMermaidOperation
 } from './mermaidDiagram';
@@ -79,7 +81,9 @@ async function renderMermaidBlocks(
     },
     htmlLabels: true,
     markdownAutoWrap: true,
-    flowchart: { htmlLabels: true }
+    flowchart: { htmlLabels: true },
+    legacyMathML: true,
+    forceLegacyMathML: true
   });
 
   let renderIndex = 0;
@@ -100,13 +104,15 @@ async function renderMermaidBlocks(
 
     try {
       const cachedSvg = previewMermaidSvgCache.get(cacheKey);
+      const normalizedSource = normalizeMermaidDiagramText(source);
       const result = cachedSvg
         ? { svg: cachedSvg }
-        : await mermaid.render(`meo-preview-mermaid-${Date.now()}-${renderIndex += 1}`, source);
+        : await mermaid.render(`meo-preview-mermaid-${Date.now()}-${renderIndex += 1}`, normalizedSource);
       const svg = typeof result === 'string' ? result : result?.svg;
       if (!svg) continue;
 
       cachePreviewMermaidSvg(cacheKey, svg);
+      block.classList.toggle('is-math', isDisplayMathDiagram(source));
       block.classList.add('is-rendered');
       block.classList.remove('is-error');
       block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;

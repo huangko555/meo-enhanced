@@ -7,6 +7,7 @@ import { extractExportFrontmatter } from './frontmatter';
 import { prepareMarkdownWithFootnotes } from './footnotes';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 import { installMathTransform } from './mathTransform';
+import { collectLatexMathRanges, renderLatexMathToHtml } from './math';
 import { Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 
 const POWER_QUERY_KEYWORDS =
@@ -21,6 +22,7 @@ const FENCE_LANGUAGE_ALIASES: Record<string, string> = {
   cs: 'csharp',
   'c#': 'csharp'
 };
+const MATH_FENCE_LANGUAGES = new Set(['latex', 'tex', 'math', 'katex']);
 const OPENING_KBD_TAG_RE = /^<kbd\b[^>]*>$/i;
 const CLOSING_KBD_TAG_RE = /^<\/kbd\s*>$/i;
 
@@ -123,6 +125,34 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     renderMarkdown: (markdownText) => md.render(markdownText),
     normalizeMarkdown: normalizeMarkdownForExport
   });
+  const defaultFenceRule = md.renderer.rules.fence ?? ((tokens, idx, opts, _env, self) => (
+    self.renderToken(tokens, idx, opts)
+  ));
+  md.renderer.rules.fence = (tokens, idx, opts, env, self) => {
+    const fenceBlock = tokens[idx];
+    const language = normalizeFenceLanguage(fenceBlock.info);
+    if (!MATH_FENCE_LANGUAGES.has(language)) {
+      return defaultFenceRule(tokens, idx, opts, env, self);
+    }
+
+    const source = String(fenceBlock.content ?? '').trim();
+    const ranges = collectLatexMathRanges(source);
+    const mathContent = ranges.length === 1 && ranges[0].from === 0 && ranges[0].to === source.length
+      ? ranges[0].content
+      : source.replace(/^\$\$\s*/, '').replace(/\s*\$\$$/, '').trim();
+    const renderedMath = renderLatexMathToHtml(mathContent, 'display');
+    if (!renderedMath) {
+      return defaultFenceRule(tokens, idx, opts, env, self);
+    }
+
+    hasMath = true;
+    const sourceLine = fenceBlock.attrGet('data-source-line');
+    const sourceEndLine = fenceBlock.attrGet('data-source-end-line');
+    const sourceAttrs = sourceLine
+      ? ` data-source-line="${escapeHtmlAttr(sourceLine)}"${sourceEndLine ? ` data-source-end-line="${escapeHtmlAttr(sourceEndLine)}"` : ''}`
+      : '';
+    return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${sourceAttrs}>${renderedMath}</div>`;
+  };
   bodySourceLines = preparedMarkdown.body.sourceLines;
   const bodyHtml = md.render(preparedMarkdown.body.markdown);
   const rawHtml = [
@@ -168,7 +198,26 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       td: ['colspan', 'rowspan', 'style'],
       code: ['class'],
       div: ['class', 'data-source-b64'],
-      svg: ['xmlns', 'width', 'height', 'viewbox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin'],
+      svg: [
+        'xmlns',
+        'width',
+        'height',
+        'viewbox',
+        'viewBox',
+        'preserveaspectratio',
+        'preserveAspectRatio',
+        'fill',
+        'stroke',
+        'stroke-width',
+        'stroke-linecap',
+        'stroke-linejoin',
+        'stroke-miterlimit',
+        'stroke-dasharray',
+        'stroke-dashoffset',
+        'stroke-opacity',
+        'fill-rule',
+        'fill-opacity'
+      ],
       path: ['d'],
       circle: ['cx', 'cy', 'r'],
       line: ['x1', 'x2', 'y1', 'y2'],
@@ -202,14 +251,17 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     },
     transformTags: {
       svg: (tagName, attribs) => {
+        const viewBox = attribs.viewBox ?? attribs.viewbox;
+        const preserveAspectRatio = attribs.preserveAspectRatio ?? attribs.preserveaspectratio;
+        const normalizedAttributes = { ...attribs };
+        delete normalizedAttributes.viewbox;
+        delete normalizedAttributes.preserveaspectratio;
         return {
           tagName,
           attribs: {
-            ...attribs,
-            viewBox: attribs.viewbox,
-            'stroke-width': attribs['stroke-width'],
-            'stroke-linecap': attribs['stroke-linecap'],
-            'stroke-linejoin': attribs['stroke-linejoin']
+            ...normalizedAttributes,
+            ...(viewBox ? { viewBox } : {}),
+            ...(preserveAspectRatio ? { preserveAspectRatio } : {})
           }
         };
       },
@@ -243,7 +295,7 @@ function installSourcePositionAndHeadingAnchorTransform(
         : null;
       const sourceLine = sourceRange?.start ?? 0;
       const sourceEndLine = sourceRange?.end ?? 0;
-      if ((headingOpen.nesting === 1 || headingOpen.type === 'fence') && sourceLine > 0) {
+      if ((headingOpen.nesting === 1 || headingOpen.type === 'fence' || headingOpen.type === 'meo_math_block') && sourceLine > 0) {
         headingOpen.attrSet('data-source-line', String(sourceLine));
         headingOpen.attrSet('data-source-end-line', String(Math.max(sourceLine, sourceEndLine)));
       }

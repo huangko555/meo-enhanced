@@ -1,4 +1,4 @@
-import katex from 'katex';
+import { renderMathToHtml } from '../../../src/shared/mathRenderer';
 
 export type LatexMathMode = 'inline' | 'display';
 
@@ -26,9 +26,6 @@ interface SimpleRange {
   to: number;
 }
 
-const MATH_RENDER_CACHE_LIMIT = 300;
-const mathHtmlCache = new Map<string, string | null>();
-const loggedMathRenderErrors = new Set<string>();
 const INLINE_MATH_MARKDOWN_STRUCTURE_MARKERS = ['**', '__', '~~', '`', '](', '!['] as const;
 const INLINE_MATH_PROSE_LENGTH_LIMIT = 120;
 const INLINE_MATH_CURRENCY_CONTENT_RE = /^[0-9][0-9\s,._%+-]*$/;
@@ -445,65 +442,8 @@ export function collectLatexMathRanges(
   return ranges;
 }
 
-function pushMathRenderCache(key: string, value: string | null): void {
-  if (mathHtmlCache.has(key)) {
-    mathHtmlCache.delete(key);
-  }
-  mathHtmlCache.set(key, value);
-  if (mathHtmlCache.size <= MATH_RENDER_CACHE_LIMIT) {
-    return;
-  }
-  const oldestKey = mathHtmlCache.keys().next().value;
-  if (oldestKey !== undefined) {
-    mathHtmlCache.delete(oldestKey);
-  }
-}
-
-function getMathRenderCache(key: string): string | null | undefined {
-  const cached = mathHtmlCache.get(key);
-  if (cached === undefined) {
-    return undefined;
-  }
-  mathHtmlCache.delete(key);
-  mathHtmlCache.set(key, cached);
-  return cached;
-}
-
 export function renderLatexMathToHtml(content: string, mode: LatexMathMode): string | null {
-  const normalized = String(content ?? '').trim();
-  if (!normalized) {
-    return null;
-  }
-
-  const cacheKey = `${mode}:${normalized}`;
-  const cached = getMathRenderCache(cacheKey);
-  if (cached !== undefined) {
-    return cached;
-  }
-
-  try {
-    const html = katex.renderToString(normalized, {
-      displayMode: mode === 'display',
-      throwOnError: true,
-      strict: 'ignore',
-      output: 'html'
-    });
-    pushMathRenderCache(cacheKey, html);
-    return html;
-  } catch (error: unknown) {
-    const message = String(error instanceof Error ? error.message : error);
-    const logKey = `${mode}:${normalized}:${message}`;
-    if (!loggedMathRenderErrors.has(logKey)) {
-      loggedMathRenderErrors.add(logKey);
-      console.warn('[MEO math] KaTeX render failed', {
-        mode,
-        message,
-        expression: normalized.slice(0, 160)
-      });
-    }
-    pushMathRenderCache(cacheKey, null);
-    return null;
-  }
+  return renderMathToHtml(content, mode);
 }
 
 export function createLatexMathElement(content: string, mode: LatexMathMode): HTMLElement | null {

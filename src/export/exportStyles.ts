@@ -553,7 +553,7 @@ kbd {
 
 .meo-export-math {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   max-width: 100%;
   vertical-align: baseline;
 }
@@ -564,16 +564,18 @@ kbd {
 
 .meo-export-math-display {
   display: block;
-  margin: 0.35em 0;
+  margin: 0.25em 0;
   text-align: center;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
   break-inside: avoid;
   page-break-inside: avoid;
 }
 
 .meo-export-math-display .katex-display {
+  max-width: 100%;
   margin: 0;
+  overflow: visible;
 }
 
 .meo-export-math-display.meo-export-math-fenced-display {
@@ -581,13 +583,13 @@ kbd {
   align-items: center;
   justify-content: center;
   width: 100%;
-  margin: 0 0 1em;
-  padding: 24px 16px;
-  border: 1px solid var(--meo-code-border);
+  margin: 0;
+  padding: 0.45em 0;
+  border: 0;
   border-radius: 0;
   background: var(--meo-code-bg);
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
   line-height: 1;
   text-align: center;
 }
@@ -833,8 +835,9 @@ th:empty::before {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 24px 16px;
-  overflow: auto;
+  max-width: 100%;
+  padding: 0.45em 0;
+  overflow: hidden;
 }
 .meo-export-mermaid .meo-export-mermaid-svg svg {
   max-width: 100%;
@@ -847,10 +850,12 @@ th:empty::before {
   border-radius: 0;
 }
 .meo-export-mermaid.is-math {
+  margin: 0 0 0.9em;
+  border: 0;
   background: var(--meo-code-bg);
 }
 .meo-export-mermaid.is-math .meo-export-mermaid-svg {
-  padding: 24px 16px;
+  padding: 0.45em 0;
 }
 .meo-export-mermaid .katex-display {
   margin: 0 !important;

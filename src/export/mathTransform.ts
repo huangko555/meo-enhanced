@@ -241,6 +241,49 @@ export function installMathTransform(
     onRenderedMath?: () => void;
   } = {}
 ): void {
+  md.block.ruler.before('fence', 'meo-math-block', (state: any, startLine: number, endLine: number, silent: boolean) => {
+    const start = state.bMarks[startLine] + state.tShift[startLine];
+    const end = state.eMarks[startLine];
+    if (state.src.slice(start, end).trim() !== '$$') {
+      return false;
+    }
+
+    for (let line = startLine + 1; line < endLine; line += 1) {
+      const lineStart = state.bMarks[line] + state.tShift[line];
+      const lineEnd = state.eMarks[line];
+      if (state.src.slice(lineStart, lineEnd).trim() !== '$$') {
+        continue;
+      }
+      if (silent) {
+        return true;
+      }
+
+      const content = state.getLines(startLine + 1, line, state.blkIndent, false).trim();
+      if (!content) {
+        return false;
+      }
+      const mathBlock = state.push('meo_math_block', 'div', 0);
+      mathBlock.block = true;
+      mathBlock.content = content;
+      mathBlock.map = [startLine, line + 1];
+      mathBlock.markup = '$$';
+      state.line = line + 1;
+      return true;
+    }
+
+    return false;
+  });
+
+  md.renderer.rules.meo_math_block = (tokens, idx, _options, _env, self) => {
+    const mathBlock = tokens[idx];
+    const renderedMath = renderLatexMathToHtml(String(mathBlock.content ?? ''), 'display');
+    if (!renderedMath) {
+      return `<pre>${md.utils.escapeHtml(`$$\n${mathBlock.content}\n$$`)}</pre>\n`;
+    }
+    options.onRenderedMath?.();
+    return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${self.renderAttrs(mathBlock)}>${renderedMath}</div>\n`;
+  };
+
   md.core.ruler.after('inline', 'meo-math-transform', (state: any) => {
     if (!String(state.src ?? '').includes('$')) {
       return;

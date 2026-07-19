@@ -42,6 +42,41 @@ const tableLikeCode = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview-table-code.md',
   target: 'html'
 });
+const math = renderMarkdownToHtml({
+  markdownText: [
+    '行内公式：$E = mc^2$，$a^2 + b^2 = c^2$',
+    '',
+    '$$',
+    '\\int_{-\\infty}^{\\infty} e^{-x^2} \\, dx = \\sqrt{\\pi}',
+    '',
+    '$$',
+    '',
+    '```latex',
+    '$$',
+    '\\iiint_V',
+    '$$',
+    '```'
+  ].join('\n'),
+  markdownFilePath: 'C:/tmp/preview-math.md',
+  target: 'html'
+});
+const formulaCoverageExpressions = [
+  '\\frac{a}{b}',
+  '\\sqrt{x}',
+  '\\sum_{i=1}^{n} i',
+  '\\prod_{k=1}^{n} k',
+  '\\lim_{x \\to 0} \\frac{\\sin x}{x}',
+  '\\mathbf{A} + \\mathbb{R}',
+  '\\vec{v} \\cdot \\hat{n}',
+  '\\left\\lVert x \\right\\rVert',
+  '\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}',
+  '\\alpha + \\beta + \\gamma + \\Delta + \\Omega'
+];
+const formulaCoverage = renderMarkdownToHtml({
+  markdownText: formulaCoverageExpressions.map((expression) => `$${expression}$`).join('  '),
+  markdownFilePath: 'C:/tmp/preview-math-coverage.md',
+  target: 'html'
+});
 
 if (!rendered.html.includes('id="intro"') || !rendered.html.includes('id="intro-2"')) {
   throw new Error('Preview headings must receive stable, unique anchors');
@@ -81,6 +116,23 @@ if (!transformedSources.html.includes('class="footnotes" data-source-line="6" da
 }
 if (!tableLikeCode.html.includes('| --- |') || tableLikeCode.html.includes('| --- | --- |')) {
   throw new Error('Preview table compatibility must not rewrite fenced code');
+}
+if (
+  !math.html.includes('class="meo-export-math meo-export-math-inline"') ||
+  !math.html.includes('class="meo-export-math meo-export-math-display meo-export-math-fenced-display"') ||
+  (math.html.match(/class="katex/g) ?? []).length < 3 ||
+  !math.html.includes('preserveAspectRatio="xMinYMin slice"') ||
+  math.html.includes('$$') ||
+  math.html.includes('class="language-latex"') ||
+  math.html.includes('\\iiint_V')
+) {
+  throw new Error('Preview math must render inline, display, and latex fenced formulas with KaTeX');
+}
+if (
+  formulaCoverageExpressions.some((expression) => formulaCoverage.html.includes(expression)) ||
+  (formulaCoverage.html.match(/class="katex/g) ?? []).length < formulaCoverageExpressions.length
+) {
+  throw new Error('Preview math coverage must render common fractions, roots, operators, accents, matrices, and symbols');
 }
 
 const environment = {
