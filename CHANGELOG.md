@@ -1,5 +1,9 @@
 # Markdown Editor Optimized (MEO)
 ---
+## 0.1.33
+- Fixed Preview link navigation so external and local document links open consistently without clearing the preview or invoking the `vscode-webview` protocol
+- Preserved accessible mouse and keyboard interaction for brokered Preview links, including pointer cursors and page anchors
+
 ## 0.1.32
 - Added a persistent read-only Preview mode with stable navigation, search, toolbar actions, and export appearance
 - Improved Mermaid and LaTeX rendering consistency across Live and Preview modes
