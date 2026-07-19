@@ -137,6 +137,7 @@ type SetModeMessage = {
 type OpenLinkMessage = {
   type: 'openLink';
   href: string;
+  source?: 'preview';
 };
 
 type OpenImageExternallyMessage = {
@@ -1259,7 +1260,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await setPreviewAppearance(raw.appearance);
         return;
       case 'openLink':
-        await openLink(raw.href, documentUri);
+        await openLink(raw.href, documentUri, {
+          localEditor: raw.source === 'preview' ? 'default' : 'associated'
+        });
         return;
       case 'openImageExternally':
         await openImageExternally(raw.url, documentUri);

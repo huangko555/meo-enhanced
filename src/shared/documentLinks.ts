@@ -57,11 +57,21 @@ async function openLocalImageWithSystemApp(uri: vscode.Uri): Promise<void> {
   });
 }
 
-export async function openLink(rawHref: string, documentUri: vscode.Uri): Promise<void> {
+type LocalLinkEditor = 'associated' | 'default';
+
+type OpenLinkOptions = {
+  localEditor?: LocalLinkEditor;
+};
+
+export async function openLink(
+  rawHref: string,
+  documentUri: vscode.Uri,
+  { localEditor = 'associated' }: OpenLinkOptions = {}
+): Promise<void> {
   if (await openWikiLink(rawHref, documentUri)) {
     return;
   }
-  if (await openLocalLink(rawHref, documentUri)) {
+  if (await openLocalLink(rawHref, documentUri, localEditor)) {
     return;
   }
   if (looksLikeLocalHref(rawHref)) {
@@ -76,15 +86,25 @@ export async function openLink(rawHref: string, documentUri: vscode.Uri): Promis
   await openExternalLink(rawHref);
 }
 
-export async function openLocalLink(rawHref: string, documentUri: vscode.Uri): Promise<boolean> {
+export async function openLocalLink(
+  rawHref: string,
+  documentUri: vscode.Uri,
+  localEditor: LocalLinkEditor = 'associated'
+): Promise<boolean> {
   const targetUri = await resolveLocalLinkTargetUri(rawHref, documentUri);
   if (!targetUri) {
     return false;
   }
 
-  await vscode.commands.executeCommand('vscode.open', targetUri, {
-    preview: false
-  });
+  if (localEditor === 'default') {
+    await vscode.commands.executeCommand('vscode.openWith', targetUri, 'default', {
+      preview: false
+    });
+  } else {
+    await vscode.commands.executeCommand('vscode.open', targetUri, {
+      preview: false
+    });
+  }
   return true;
 }
 

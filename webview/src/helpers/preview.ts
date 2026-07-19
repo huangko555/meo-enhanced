@@ -304,7 +304,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
       }
     };
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {
@@ -588,20 +588,33 @@ function bindPreviewLinks(
   frameDocument: Document,
   vscode: { postMessage: (message: WebviewMessage) => void }
 ): void {
-  frameDocument.addEventListener('click', (event) => {
-    const FrameElement = frameDocument.defaultView?.Element;
-    const target = FrameElement && event.target instanceof FrameElement
-      ? event.target.closest<HTMLAnchorElement>('a[href]')
+  for (const link of frameDocument.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    const href = link.getAttribute('href')?.trim() ?? '';
+    if (!href) {
+      continue;
+    }
+    link.dataset.meoPreviewHref = href;
+    link.removeAttribute('href');
+    link.setAttribute('role', 'link');
+    if (!link.hasAttribute('tabindex')) {
+      link.tabIndex = 0;
+    }
+  }
+
+  const activateLink = (event: Event) => {
+    const target = typeof (event.target as Element | null)?.closest === 'function'
+      ? (event.target as Element).closest<HTMLAnchorElement>('a[data-meo-preview-href]')
       : null;
     if (!target) {
       return;
     }
-    const href = target.getAttribute('href')?.trim() ?? '';
+    const href = target.dataset.meoPreviewHref?.trim() ?? '';
     if (!href) {
       return;
     }
+    event.preventDefault();
+    event.stopPropagation();
     if (href.startsWith('#')) {
-      event.preventDefault();
       let fragmentId = href.slice(1);
       try {
         fragmentId = decodeURIComponent(fragmentId);
@@ -611,9 +624,16 @@ function bindPreviewLinks(
       frameDocument.getElementById(fragmentId)?.scrollIntoView({ block: 'start' });
       return;
     }
-    event.preventDefault();
-    vscode.postMessage({ type: 'openLink', href });
-  });
+    vscode.postMessage({ type: 'openLink', href, source: 'preview' });
+  };
+
+  frameDocument.addEventListener('click', activateLink, { capture: true });
+  frameDocument.addEventListener('auxclick', activateLink, { capture: true });
+  frameDocument.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      activateLink(event);
+    }
+  }, { capture: true });
 }
 
 function bindPreviewWheelFallback(frameDocument: Document): void {
