@@ -74,6 +74,7 @@ import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import { mermaidEditingStateField } from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles } from './helpers/inlineStyleFallback';
+import { addColorSwatchDecoration, collectColorRangesFromText } from './helpers/colorSwatches';
 import {
   addLatexMathToolbar,
   getLatexMathBlockMode,
@@ -1807,6 +1808,19 @@ function buildDecorations(state) {
   addSingleTildeStrikeDecorations(ranges, state, activeLines, strikeRanges, codeBlockLines);
   addListLineDecorations(ranges, state, indentSelectedLines, frontmatter, codeBlockLines);
   addMathDecorations(ranges, state, mathRanges, activeLines);
+  addColorSwatchDecorations(
+    ranges,
+    state,
+    tree,
+    activeLines,
+    [
+      ...collectInlineCodeRanges(tree),
+      ...collectCodeBlockRanges(state, tree, mermaidColonBlocks),
+      ...renderedTableRanges,
+      ...mathRanges,
+      ...(frontmatter ? [{ from: frontmatter.openingFrom, to: frontmatter.closingTo }] : [])
+    ]
+  );
   addKbdTagDecorations(ranges, state, activeLines, renderedTableRanges, mathRanges, frontmatter, codeBlockLines);
   addEmojiDecorationsWithMath(ranges, state, mathRanges, codeBlockLines);
   addMermaidColonFenceDecorations(ranges, state, mermaidColonBlocks, activeLines);
@@ -2432,6 +2446,56 @@ function addEmojiDecorationsWithMath(
         }).range(emojiRange.from, emojiRange.to)
       );
     }
+  }
+}
+
+const colorExcludedSyntaxNodes = new Set([
+  'Link',
+  'Image',
+  'Autolink',
+  'URL',
+  'LinkLabel',
+  'LinkReference',
+  'HTMLTag',
+  'InlineHTML',
+  'HTMLBlock'
+]);
+
+function collectColorExcludedRanges(tree): Array<{ from: number; to: number }> {
+  const ranges: Array<{ from: number; to: number }> = [];
+  tree.iterate({
+    enter(node) {
+      if (colorExcludedSyntaxNodes.has(node.name)) {
+        ranges.push({ from: node.from, to: node.to });
+        return false;
+      }
+    }
+  });
+  return ranges;
+}
+
+function addColorSwatchDecorations(
+  ranges,
+  state,
+  tree,
+  activeLines,
+  excludedRanges
+) {
+  const colorRanges = collectColorRangesFromText(state.doc.toString());
+  const syntaxExcludedRanges = [
+    ...collectColorExcludedRanges(tree),
+    ...excludedRanges
+  ];
+
+  for (const colorRange of colorRanges) {
+    if (syntaxExcludedRanges.some((range) => rangesOverlap(colorRange.from, colorRange.to, range.from, range.to))) {
+      continue;
+    }
+    const line = state.doc.lineAt(colorRange.from);
+    if (activeLines.has(line.number) || overlapsSelection(state, colorRange.from, colorRange.to)) {
+      continue;
+    }
+    addColorSwatchDecoration(ranges, colorRange);
   }
 }
 

@@ -1831,6 +1831,22 @@ body {
   font-weight: inherit;
 }
 
+.cm-editor.meo-mode-live .meo-md-color-swatch {
+  display: inline-block;
+  width: 0.78em;
+  height: 0.78em;
+  margin: 0 0.28em 0 0.08em;
+  vertical-align: -0.08em;
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+  border-radius: 2px;
+  box-sizing: border-box;
+  pointer-events: none;
+  background-image: linear-gradient(45deg, color-mix(in srgb, currentColor 18%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, currentColor 18%, transparent) 75%), linear-gradient(45deg, color-mix(in srgb, currentColor 18%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, currentColor 18%, transparent) 75%);
+  background-position: 0 0, 3px 3px;
+  background-size: 6px 6px;
+  background-blend-mode: multiply;
+}
+
 .cm-editor .meo-md-inline-code,
 .cm-editor .meo-md-inline-code *,
 .cm-editor .cm-line.meo-md-code-block,
