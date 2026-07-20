@@ -1,5 +1,11 @@
 # Markdown Editor Optimized (MEO)
 ---
+## 0.1.34
+- Added a two-click discard action that reloads unsaved content without losing the current reading position
+- Improved Preview scrolling, cross-surface search selection, search highlight cleanup, and overview ruler accuracy
+- Refined sticky table headers, table controls, long-code actions, document jump icons, and cross-device heading typography
+- Fixed Windows absolute-path images in Preview, HTML export, and PDF export while preserving remote image URLs
+
 ## 0.1.33
 - Fixed Preview link navigation so external and local document links open consistently without clearing the preview or invoking the `vscode-webview` protocol
 - Preserved accessible mouse and keyboard interaction for brokered Preview links, including pointer cursors and page anchors
