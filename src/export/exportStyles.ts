@@ -110,21 +110,28 @@ function buildReadingStyles(
   const lineHeight = Math.max(1.7, clampLineHeight(environment.liveLineHeight ?? fonts.liveLineHeight ?? defaultThemeFonts.liveLineHeight));
   const sourceLineHeight = clampLineHeight(environment.sourceLineHeight ?? fonts.sourceLineHeight ?? defaultThemeFonts.sourceLineHeight);
   const headingFontSizes = [
-    '2em',
-    '1.5em',
-    '1.25em',
-    '1.08em',
-    '1em',
-    '0.92em'
-  ];
+    fonts.h1FontSize,
+    fonts.h2FontSize,
+    fonts.h3FontSize,
+    fonts.h4FontSize,
+    fonts.h5FontSize,
+    fonts.h6FontSize
+  ].map((fontSize, index) => {
+    const fallback = defaultThemeFonts[`h${index + 1}FontSize` as keyof typeof defaultThemeFonts];
+    const value = typeof fontSize === 'number' && Number.isFinite(fontSize) ? fontSize : fallback;
+    return `${value}em`;
+  });
   const headingFontWeights = [
-    '700',
-    '650',
-    '650',
-    '600',
-    '600',
-    '600'
-  ];
+    fonts.h1FontWeight,
+    fonts.h2FontWeight,
+    fonts.h3FontWeight,
+    fonts.h4FontWeight,
+    fonts.h5FontWeight,
+    fonts.h6FontWeight
+  ].map((fontWeight, index) => sanitizeFontWeight(
+    fontWeight,
+    defaultThemeFonts[`h${index + 1}FontWeight` as keyof typeof defaultThemeFonts] as string
+  ));
   const headingSizeVarsCss = headingFontSizes
     .map((fontSize, index) => `  --meo-heading-${index + 1}-size: ${fontSize};`)
     .join('\n');
@@ -504,7 +511,7 @@ sup.footnote-ref {
   color: var(--meo-muted);
 }
 
-strong { color: var(--meo-strong); }
+strong { color: var(--meo-strong); font-weight: 700; }
 em { font-style: italic; }
 code {
   font-family: var(--meo-font-code);

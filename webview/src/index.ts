@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -673,10 +673,19 @@ saveBtn.title = 'Save (Ctrl+S)';
 saveBtn.setAttribute('aria-label', 'Save document');
 saveBtn.appendChild(createElement(Save, { width: 18, height: 18 }));
 
+const discardBtn = document.createElement('button');
+discardBtn.type = 'button';
+discardBtn.className = 'format-button';
+discardBtn.dataset.action = 'discard';
+discardBtn.title = 'Discard unsaved changes (double-click)';
+discardBtn.setAttribute('aria-label', 'Discard unsaved changes');
+discardBtn.appendChild(createElement(StickyNoteOff, { width: 18, height: 18 }));
+
 formatGroup.append(
   outlineLeftBtn,
   lineJumpControl,
   saveBtn,
+  discardBtn,
   outlineLeftSeparator,
   headingWrapper,
   bulletListBtn,
@@ -831,7 +840,18 @@ const findPanelController = createFindPanelController(
   findPanelElements,
   () => currentMode === 'preview' ? previewController.getSearchAdapter() : editor,
   toolbar,
-  modeGroup
+  modeGroup,
+  () => {
+    if (currentMode === 'preview') {
+      return previewController.getSelectedText();
+    }
+    for (const textarea of root.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea')) {
+      if (textarea.selectionEnd > textarea.selectionStart) {
+        return textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
+      }
+    }
+    return '';
+  }
 );
 
 const selectionMenuElements = createSelectionMenu();
@@ -1357,6 +1377,47 @@ saveBtn.addEventListener('click', () => {
   void requestSave();
 });
 
+const discardConfirmationWindowMs = 500;
+let discardConfirmationTimer: number | null = null;
+
+const clearDiscardConfirmation = () => {
+  if (discardConfirmationTimer !== null) {
+    window.clearTimeout(discardConfirmationTimer);
+    discardConfirmationTimer = null;
+  }
+  discardBtn.classList.remove('is-discard-armed');
+};
+
+const discardUnsavedChanges = () => {
+  const position = currentMode === 'preview'
+    ? previewController.getTopVisiblePosition()
+    : getTopVisiblePosition();
+  if (pendingDebounce !== null) {
+    window.clearTimeout(pendingDebounce);
+    pendingDebounce = null;
+  }
+  pendingText = null;
+  inFlight = false;
+  inFlightText = null;
+  saveAfterSync = false;
+  syncPendingDraftState();
+  vscode.postMessage({
+    type: 'discardChanges',
+    topLine: position?.topLine ?? 1,
+    topLineOffset: position?.topLineOffset ?? 0
+  });
+};
+
+discardBtn.addEventListener('click', () => {
+  if (discardConfirmationTimer !== null) {
+    clearDiscardConfirmation();
+    discardUnsavedChanges();
+    return;
+  }
+  discardBtn.classList.add('is-discard-armed');
+  discardConfirmationTimer = window.setTimeout(clearDiscardConfirmation, discardConfirmationWindowMs);
+});
+
 const setEditorTextSafely = (text: string, context: string): boolean => {
   if (!editor) {
     return false;
@@ -1467,6 +1528,9 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
     : getTopVisiblePosition();
   const shouldRestoreEditorFocus = modeToggleShouldRestoreEditorFocus;
   modeToggleShouldRestoreEditorFocus = false;
+  if (previousMode !== mode) {
+    findPanelController.close();
+  }
   currentMode = mode;
   if (mode === 'live' || mode === 'source') {
     lastEditableMode = mode;
@@ -1485,7 +1549,6 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
       document.activeElement.blur();
     }
     selectionMenuController.hide();
-    findPanelController.close();
     previewController.requestRender(getCurrentEditorText(), {
       restoreLine: transitionViewPosition?.topLine ?? null
     });
@@ -1883,6 +1946,33 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'previewRenderError') {
     previewController.handleRenderError(message);
+    return;
+  }
+
+  if (message.type === 'discardedChanges') {
+    if (pendingDebounce !== null) {
+      window.clearTimeout(pendingDebounce);
+      pendingDebounce = null;
+    }
+    documentVersion = message.version;
+    syncedText = normalizeEol(message.text);
+    pendingText = null;
+    inFlight = false;
+    inFlightText = null;
+    saveAfterSync = false;
+    syncPendingDraftState();
+    if (!setEditorTextSafely(message.text, 'discardedChanges')) {
+      return;
+    }
+    if (currentMode === 'preview') {
+      previewController.requestRender(message.text, { restoreLine: message.topLine });
+    } else {
+      editor?.restoreTopLine?.(message.topLine, message.topLineOffset ?? 0, { syncCursor: false });
+    }
+    outlineController.refresh();
+    scheduleWikiLinkStatusRefresh(message.text);
+    scheduleLocalLinkStatusRefresh(message.text);
+    findPanelController.updateFindStatusSummary();
     return;
   }
 

@@ -1,5 +1,5 @@
 import { EditorView, WidgetType } from '@codemirror/view';
-import { AppWindow, CornerDownRight, createElement, ExternalLink, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
+import { AppWindow, createElement, ExternalLink, Maximize2, RotateCcw, SquareArrowRightEnter, X, ZoomIn, ZoomOut } from 'lucide';
 import { getViewportController } from './viewportController';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
@@ -556,7 +556,7 @@ export class ImageWidget extends WidgetType {
       openLink.className = 'meo-md-image-control-btn';
       openLink.title = isDocumentFragment ? 'Jump within document' : 'Open link';
       openLink.setAttribute('aria-label', openLink.title);
-      openLink.appendChild(createElement(isDocumentFragment ? CornerDownRight : ExternalLink, { width: 16, height: 16 }));
+      openLink.appendChild(createElement(isDocumentFragment ? SquareArrowRightEnter : ExternalLink, { width: 16, height: 16 }));
       openLink.addEventListener('pointerdown', (event) => {
         event.preventDefault();
         event.stopPropagation();

@@ -147,6 +147,14 @@ const lightPreviewStyles = buildPreviewStyles(defaultThemeSettings, environment,
 const exportStyles = buildExportStyles(defaultThemeSettings, environment);
 const darkExportStyles = buildExportStyles(defaultThemeSettings, environment, 'dark');
 
+if (
+  !darkPreviewStyles.includes('--meo-heading-1-size: 1.6em') ||
+  !darkPreviewStyles.includes('--meo-heading-1-weight: 400') ||
+  !darkPreviewStyles.includes('strong { color: var(--meo-strong); font-weight: 700; }')
+) {
+  throw new Error('Preview headings and strong text must use the same explicit theme typography as Live mode');
+}
+
 if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
   throw new Error('Dark Preview must use the current document background');
 }

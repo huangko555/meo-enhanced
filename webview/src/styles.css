@@ -809,6 +809,10 @@ body {
   background-color: transparent;
 }
 
+.format-button.is-discard-armed {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
 .format-button svg,
 .heading-dropdown-option svg {
   display: block;
@@ -979,6 +983,7 @@ body {
   position: fixed;
   z-index: 220;
   border: 1px solid color-mix(in srgb, var(--meo-foreground) 18%, transparent);
+  background: var(--meo-code-background);
   transform: translateX(-50%);
 }
 
@@ -1496,7 +1501,7 @@ body {
 .cm-editor .meo-md-strong {
   color: var(--meo-foreground) !important;
   -webkit-text-fill-color: var(--meo-foreground) !important;
-  font-weight: bolder;
+  font-weight: 700;
 }
 
 .cm-editor.meo-mode-live :is(.meo-md-marker, .meo-md-marker-active, .meo-md-code-marker, .meo-md-code-marker-active),
@@ -3848,7 +3853,7 @@ body.outline-resizing .preview-frame {
   bottom: 0;
   left: 0;
   height: 1px;
-  background: var(--vscode-editorStickyScroll-border, var(--meo-semantic-tableBorder));
+  background: var(--meo-semantic-tableBorder, var(--vscode-panel-border, currentColor));
 }
 
 .cm-editor .meo-md-html-table-sticky-chrome * {
@@ -4044,6 +4049,8 @@ body.outline-resizing .preview-frame {
   justify-content: center;
   appearance: none;
   width: max-content;
+  box-sizing: border-box;
+  height: 22px;
   padding: 2px 8px;
   border: 1px solid var(--vscode-button-border, transparent);
   border-radius: 4px;
@@ -4118,7 +4125,7 @@ body.outline-resizing .preview-frame {
   align-items: center;
   justify-content: center;
   width: 22px;
-  height: 17px;
+  height: 20px;
   padding: 0;
   border: 0;
   border-radius: 6px;

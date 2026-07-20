@@ -164,7 +164,13 @@ type ResolveLocalLinksMessage = {
 };
 
 type SaveDocumentMessage = {
-  type: 'saveDocument';
+type: 'saveDocument';
+};
+
+type DiscardChangesMessage = {
+type: 'discardChanges';
+topLine: number;
+topLineOffset?: number;
 };
 
 type ExportDocumentMessage = {
@@ -358,6 +364,7 @@ type DiagnosticsChangedMessage = {
 type WebviewMessage =
   | ApplyChangesMessage
   | DraftChangedMessage
+  | DiscardChangesMessage
   | SetModeMessage
   | SetLineNumbersMessage
   | SetGitChangesGutterMessage
@@ -1369,6 +1376,20 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'draftChanged':
         pendingDraftText = raw.text;
+        return;
+      case 'discardChanges':
+        pendingDraftText = null;
+        await enqueue(async () => {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+          await refreshSavedRevisionNow();
+          await postToWebview({
+            type: 'discardedChanges',
+            text: document.getText(),
+            version: document.version,
+            topLine: raw.topLine,
+            topLineOffset: raw.topLineOffset ?? 0
+          });
+        });
         return;
       case 'saveDocument':
         await enqueue(async () => {

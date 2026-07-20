@@ -9,14 +9,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-interface TrackMetrics {
+export interface TrackMetrics {
   scrollHeight: number;
   contentBottom: number;
   fileEndY: number;
   showFileEndLine: boolean;
 }
 
-function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
+export function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
   const scrollEl = view?.scrollDOM;
   if (!scrollEl || trackHeight <= 0) {
     return {
@@ -65,12 +65,12 @@ function getTrackMetrics(view: EditorView, trackHeight: number): TrackMetrics {
   };
 }
 
-interface LineGeometry {
+export interface LineGeometry {
   top: number;
   bottom: number;
 }
 
-function getLiveTableRowGeometry(view: EditorView): Map<number, LineGeometry> {
+export function getLiveTableRowGeometry(view: EditorView): Map<number, LineGeometry> {
   const rows = new Map<number, LineGeometry>();
   const scrollRect = view.scrollDOM.getBoundingClientRect();
   const scrollTop = view.scrollDOM.scrollTop;
@@ -91,7 +91,7 @@ function getLiveTableRowGeometry(view: EditorView): Map<number, LineGeometry> {
   return rows;
 }
 
-function getLineGeometry(
+export function getLineGeometry(
   view: EditorView,
   lineNumber: number,
   tableRows: Map<number, LineGeometry>

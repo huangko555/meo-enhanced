@@ -186,10 +186,9 @@ const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-
 const tableDelimiterRegex = /^\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn';
-const tableToolbarHeight = 21;
-const stickyHeaderSeparatorDepth = 4;
+const tableToolbarHeight = 24;
+const stickyHeaderSeparatorDepth = 3;
 const minimumStickyTableViewportRatio = 0.5;
-const minimumStickyBodyRowCount = 2;
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 function tableHasReachedStickyThreshold(tableRect: DOMRect, scrollerRect: DOMRect) {
@@ -3472,7 +3471,7 @@ class HtmlTableWidget extends WidgetType {
     } = this.domRefs;
     const headerRow = table.tHead?.rows[0];
     const bodyRows = tbody.rows;
-    if (!headerRow || bodyRows.length < minimumStickyBodyRowCount) {
+    if (!headerRow || bodyRows.length === 0) {
       this.hideStickyHeader();
       return;
     }
@@ -3490,13 +3489,12 @@ class HtmlTableWidget extends WidgetType {
     const stickyHeaderTop = scrollerRect.top + controlsHeight;
     const tableNeedsStickyHeader = tableRect.height >= scrollerRect.height * minimumStickyTableViewportRatio;
     const reachedStickyThreshold = tableHasReachedStickyThreshold(tableRect, scrollerRect);
-    const lastRowsStart = bodyRows[bodyRows.length - minimumStickyBodyRowCount]?.getBoundingClientRect().top ?? 0;
-    const enoughRowsRemain = lastRowsStart >= stickyHeaderTop + headerRect.height;
+    const enoughContentRemains = tableRect.bottom >= stickyHeaderTop + headerRect.height + stickyHeaderSeparatorDepth;
     const visibleLeft = Math.max(tableRect.left, scrollerRect.left);
     const visibleRight = Math.min(tableRect.right, scrollerRect.right);
     const visibleWidth = Math.max(0, visibleRight - visibleLeft);
 
-    if (!tableNeedsStickyHeader || !reachedStickyThreshold || !enoughRowsRemain || visibleWidth <= 0) {
+    if (!tableNeedsStickyHeader || !reachedStickyThreshold || !enoughContentRemains || visibleWidth <= 0) {
       this.hideStickyHeader();
       return;
     }

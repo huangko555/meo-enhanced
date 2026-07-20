@@ -150,7 +150,8 @@ export const createFindPanelController = (
   elements: FindPanelElements,
   getEditor: () => any,
   toolbar: HTMLElement,
-  modeGroup: HTMLElement
+  modeGroup: HTMLElement,
+  getSelectedSurfaceText?: () => string
 ) => {
   let visible = false;
 
@@ -235,6 +236,10 @@ export const createFindPanelController = (
   };
 
   const getSelectedEditorText = (): string => {
+    const surfaceText = getSelectedSurfaceText?.() ?? '';
+    if (surfaceText) {
+      return surfaceText;
+    }
     const editor = getEditor();
     const state = editor?.view?.state;
     const selection = state?.selection?.main;

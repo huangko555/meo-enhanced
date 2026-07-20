@@ -157,7 +157,7 @@ async function main() {
       };
     });
     if (
-      JSON.stringify(toolbarLayout.left.slice(0, 4)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'separator']) ||
+      JSON.stringify(toolbarLayout.left.slice(0, 5)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'discard', 'separator']) ||
       JSON.stringify(toolbarLayout.right) !== JSON.stringify(['find', 'outline-right', 'changes', 'more'])
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);

@@ -28,6 +28,7 @@ async function main() {
         --meo-inset-background: #2a2d2f;
         --meo-foreground: #e6edf3;
         --meo-semantic-tableBorder: #474b50;
+        --vscode-editorStickyScroll-border: transparent;
       }
       html, body, #app { height: 100%; margin: 0; }
     ` });
@@ -180,6 +181,52 @@ async function main() {
       };
       shortEditor.destroy();
 
+      const tallTailEditor = await create([
+        '| Tall A | Tall B |',
+        '| --- | --- |',
+        ...Array.from({ length: 10 }, (_, index) => `| ${index + 1} | tall row ${index + 1} |`),
+        '',
+        trailingLines
+      ].join('\n'));
+      const tallTailScroller = tallTailEditor.view.scrollDOM as HTMLElement;
+      const tallTailRows = Array.from(document.querySelectorAll<HTMLTableRowElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr'
+      ));
+      const tallSecondLastRow = tallTailRows.at(-2)!;
+      tallSecondLastRow.style.height = '280px';
+      window.dispatchEvent(new Event('resize'));
+      await waitFrames();
+      const tallTailScrollerRect = tallTailScroller.getBoundingClientRect();
+      const tallSecondLastRect = tallSecondLastRow.getBoundingClientRect();
+      tallTailScroller.scrollTop += tallSecondLastRect.top - tallTailScrollerRect.top + 12;
+      tallTailScroller.dispatchEvent(new Event('scroll'));
+      await waitFrames();
+      const tallTailChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
+      const tallTailTable = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const tallTailState = {
+        visible: Boolean(tallTailChrome && getComputedStyle(tallTailChrome).display !== 'none'),
+        remainingPixels: tallTailTable.getBoundingClientRect().bottom - tallTailScrollerRect.top
+      };
+      tallTailEditor.destroy();
+
+      const toolbarEditor = await create('| A | B |\n| --- | --- |\n| one | two |\n| three | four |');
+      const toolbarInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      toolbarInput.focus();
+      await waitFrames();
+      const toolbarElement = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
+      const toolbarButton = toolbarElement.querySelector<HTMLElement>('.meo-md-html-table-toolbar-btn')!;
+      const sortButton = toolbarElement.querySelector<HTMLButtonElement>('[aria-label^="Sort selected column"]')!;
+      sortButton.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+      await waitFrames();
+      const applyButton = document.querySelector<HTMLElement>('.meo-md-html-apply-sort-btn')!;
+      const toolbarSizeState = {
+        toolbarHeight: toolbarElement.getBoundingClientRect().height,
+        buttonHeight: toolbarButton.getBoundingClientRect().height,
+        applyHeight: applyButton.getBoundingClientRect().height,
+        applyVisible: getComputedStyle(applyButton).display !== 'none'
+      };
+      toolbarEditor.destroy();
+
       const fittingRows = Array.from({ length: 7 }, (_, index) => `| ${index + 1} | fitting row ${index + 1} |`);
       const fittingEditor = await create([
         '| Fit A | Fit B |',
@@ -238,6 +285,8 @@ async function main() {
         syncedHeaderText,
         hiddenAtTableEnd,
         shortState,
+        tallTailState,
+        toolbarSizeState,
         fittingState,
         multiState
       };
@@ -256,7 +305,7 @@ async function main() {
       result.passiveState.shadow !== 'none' ||
       Math.abs(result.passiveState.separatorHeight - 1) > 0.5 ||
       result.passiveState.separatorColor === 'rgba(0, 0, 0, 0)' ||
-      result.passiveState.separatorSpace < 3.5 ||
+      result.passiveState.separatorSpace < 2.5 ||
       result.passiveState.widthDeltas.some((delta: number) => delta > 1)
     ) {
       failures.push(`long table sticky header was incorrect: ${JSON.stringify(result.passiveState)}`);
@@ -271,11 +320,11 @@ async function main() {
     if (
       !result.activeState.hasToolbarBand ||
       result.activeState.chromeTop === null ||
-      Math.abs(result.activeState.bandHeight - 21) > 1 ||
+      Math.abs(result.activeState.bandHeight - 24) > 1 ||
       result.activeState.bandBackground !== 'rgb(32, 34, 35)' ||
       Math.abs(result.activeState.toolbarTop - result.activeState.chromeTop) > 1 ||
       result.activeState.headerTop === null ||
-      Math.abs(result.activeState.headerTop - result.activeState.chromeTop - 21) > 1 ||
+      Math.abs(result.activeState.headerTop - result.activeState.chromeTop - 24) > 1 ||
       Math.abs(result.activeState.bandWidth - result.activeState.chromeWidth) > 1
     ) {
       failures.push(`sticky toolbar stack was incorrect: ${JSON.stringify(result.activeState)}`);
@@ -291,6 +340,17 @@ async function main() {
     if (result.syncedHeaderText !== '新编号') failures.push(`sticky header content stayed ${JSON.stringify(result.syncedHeaderText)}`);
     if (!result.hiddenAtTableEnd) failures.push('sticky header remained visible after the table body ended');
     if (result.shortState.visible) failures.push('short table unexpectedly enabled its sticky header');
+    if (!result.tallTailState.visible || result.tallTailState.remainingPixels < 200) {
+      failures.push(`sticky header disappeared while a tall trailing row remained: ${JSON.stringify(result.tallTailState)}`);
+    }
+    if (
+      !result.toolbarSizeState.applyVisible ||
+      result.toolbarSizeState.toolbarHeight < 24 ||
+      result.toolbarSizeState.buttonHeight < 20 ||
+      result.toolbarSizeState.applyHeight < 22
+    ) {
+      failures.push(`table controls remained too small: ${JSON.stringify(result.toolbarSizeState)}`);
+    }
     if (!result.fittingState.fitsViewport || !result.fittingState.visible) {
       failures.push(`viewport-fitting long table did not enable its sticky header: ${JSON.stringify(result.fittingState)}`);
     }

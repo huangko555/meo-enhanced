@@ -33,6 +33,7 @@ type WebviewMessage =
   | { type: 'resolveLocalLinks'; requestId: string; targets: string[] }
   | { type: 'requestDiagnosticSuggestions'; requestId: string; from: number; to: number; message: string; source?: string; code?: string }
   | { type: 'saveDocument' }
+  | { type: 'discardChanges'; topLine: number; topLineOffset?: number }
   | { type: 'exportDocument'; format: 'html' | 'pdf'; appearance: 'dark' | 'light' }
   | { type: 'setPreviewAppearance'; appearance: 'dark' | 'light' }
   | { type: 'exportSnapshot'; requestId: string; text: string; environment?: Record<string, unknown> }
@@ -51,6 +52,7 @@ type ExtensionMessage =
   | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; previewAppearance: 'dark' | 'light'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'previewAppearanceChanged'; appearance: 'dark' | 'light' }
   | { type: 'docChanged'; text: string; version: number }
+  | { type: 'discardedChanges'; text: string; version: number; topLine: number; topLineOffset?: number }
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }
   | { type: 'revealSelection'; anchor: number; head: number; focus?: boolean; preserveViewport?: boolean }

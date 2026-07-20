@@ -553,6 +553,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     },
     getTopVisiblePosition,
     restoreTopLine,
+    getSelectedText: () => frame.contentWindow?.getSelection()?.toString() ?? '',
     getSearchAdapter: () => ({
       setSearchQuery,
       countMatches: () => searchMatches.length,
@@ -645,18 +646,14 @@ function bindPreviewWheelFallback(frameDocument: Document): void {
     if (!scrollElement) {
       return;
     }
-    const before = scrollElement.scrollTop;
     const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
       ? 16
       : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
         ? frameDocument.defaultView?.innerHeight ?? 1
         : 1;
-    frameDocument.defaultView?.requestAnimationFrame(() => {
-      if (scrollElement.scrollTop === before) {
-        scrollElement.scrollTop += event.deltaY * deltaScale;
-      }
-    });
-  }, { passive: true });
+    event.preventDefault();
+    scrollElement.scrollTop += event.deltaY * deltaScale;
+  }, { passive: false });
 }
 
 function escapeHtmlAttribute(value: string): string {

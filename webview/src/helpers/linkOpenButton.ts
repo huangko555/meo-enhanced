@@ -1,4 +1,4 @@
-import { CornerDownRight, createElement, ExternalLink } from 'lucide';
+import { createElement, ExternalLink, SquareArrowRightEnter } from 'lucide';
 
 export function createOpenLinkButton(href: string): HTMLButtonElement {
   const isDocumentFragment = href.startsWith('#');
@@ -7,7 +7,7 @@ export function createOpenLinkButton(href: string): HTMLButtonElement {
   button.className = 'meo-md-link-open-btn';
   button.title = isDocumentFragment ? 'Jump within document' : 'Open link';
   button.setAttribute('aria-label', button.title);
-  button.appendChild(createElement(isDocumentFragment ? CornerDownRight : ExternalLink, { 'aria-hidden': 'true' }));
+  button.appendChild(createElement(isDocumentFragment ? SquareArrowRightEnter : ExternalLink, { 'aria-hidden': 'true' }));
   button.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     event.stopPropagation();

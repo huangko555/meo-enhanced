@@ -45,7 +45,7 @@ export function rewriteExportImageSrc(rawSrc: string, options: RewriteExportImag
     return input;
   }
 
-  if (SCHEME_RE.test(pathPart) && !/^file:/i.test(pathPart)) {
+  if (SCHEME_RE.test(pathPart) && !/^file:/i.test(pathPart) && !hasWindowsDrivePrefix(pathPart)) {
     return input;
   }
 

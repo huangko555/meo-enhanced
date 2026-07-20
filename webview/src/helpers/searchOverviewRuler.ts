@@ -1,4 +1,5 @@
 import type { EditorView } from '@codemirror/view';
+import { getLineGeometry, getLiveTableRowGeometry, getTrackMetrics } from './gitDiffOverviewRuler';
 
 type SearchOverviewMatch = {
   from: number;
@@ -22,19 +23,6 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function getContentHeight(view: EditorView): number {
-  try {
-    const lastLine = view.state.doc.line(view.state.doc.lines);
-    const lastBlock = view.lineBlockAt(lastLine.from);
-    if (lastBlock.bottom > 0) {
-      return lastBlock.bottom;
-    }
-  } catch {
-    // Fall back to CodeMirror's measured content height.
-  }
-  return Math.max(1, view.contentHeight || view.scrollDOM.scrollHeight || 1);
-}
-
 export function createSearchOverviewRulerController({
   view,
   getMatches
@@ -44,12 +32,8 @@ export function createSearchOverviewRulerController({
   let frame = 0;
   let lastRenderKey = '';
   let resizeObserver: ResizeObserver | null = null;
-  let cachedContentHeight: number | null = null;
-  const lineTopCache = new Map<number, number>();
 
   const invalidatePositions = () => {
-    cachedContentHeight = null;
-    lineTopCache.clear();
     lastRenderKey = '';
   };
 
@@ -78,18 +62,17 @@ export function createSearchOverviewRulerController({
       return;
     }
 
-    const contentHeight = cachedContentHeight ?? Math.max(1, getContentHeight(view));
-    cachedContentHeight = contentHeight;
+    const trackMetrics = getTrackMetrics(view, trackHeight);
+    const tableRows = getLiveTableRowGeometry(view);
+    const totalLines = Math.max(1, view.state.doc.lines);
     const activeByTop = new Map<number, boolean>();
     for (const match of matches) {
-      const lineFrom = view.state.doc.lineAt(match.from).from;
-      let blockTop = lineTopCache.get(lineFrom);
-      if (blockTop === undefined) {
-        blockTop = view.lineBlockAt(lineFrom).top;
-        lineTopCache.set(lineFrom, blockTop);
-      }
+      const lineNumber = view.state.doc.lineAt(match.from).number;
+      const geometry = getLineGeometry(view, lineNumber, tableRows);
+      const blockTop = geometry?.top
+        ?? ((lineNumber - 1) / totalLines) * trackMetrics.contentBottom;
       const top = clamp(
-        Math.round((blockTop / contentHeight) * trackHeight),
+        Math.round((blockTop / trackMetrics.scrollHeight) * trackHeight),
         0,
         Math.max(0, trackHeight - activeMarkerHeight)
       );
@@ -98,7 +81,7 @@ export function createSearchOverviewRulerController({
     const markers = [...activeByTop.entries()]
       .map(([top, active]) => ({ top, active }))
       .sort((left, right) => left.top - right.top);
-    const renderKey = `${trackHeight}|${contentHeight}|${markers.map((marker) => `${marker.top}:${marker.active ? 1 : 0}`).join(',')}`;
+    const renderKey = `${trackHeight}|${trackMetrics.scrollHeight}|${markers.map((marker) => `${marker.top}:${marker.active ? 1 : 0}`).join(',')}`;
     if (renderKey === lastRenderKey) {
       return;
     }

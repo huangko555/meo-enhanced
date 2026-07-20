@@ -346,6 +346,14 @@ async function main() {
     if (!floatingInsideBlock) {
       throw new Error('Floating collapse button was not shown while viewport bottom was inside an expanded block');
     }
+    const floatingBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => {
+      const color = getComputedStyle(button).backgroundColor;
+      const alphaMatch = /rgba?\([^)]*(?:,|\/)\s*([\d.]+)\s*\)$/.exec(color);
+      return { color, alpha: color === 'transparent' ? 0 : Number(alphaMatch?.[1] ?? 1) };
+    });
+    if (floatingBackground.alpha < 1) {
+      throw new Error(`Floating collapse button background was translucent: ${JSON.stringify(floatingBackground)}`);
+    }
     const floatingHorizontalOffset = await page.evaluate(() => {
       const floating = document.querySelector('.meo-long-code-floating-action')!.getBoundingClientRect();
       return floating.left + floating.width / 2;
