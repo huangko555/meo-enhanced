@@ -2,7 +2,7 @@
 
 基于 [Markdown Editor Optimized（MEO）](https://github.com/vadimmelnicuk/meo) 修改的 VS Code Markdown 编辑器。
 
-![演示](./docs/demo.gif)
+![演示](https://raw.githubusercontent.com/huangko555/meo-enhanced/main/docs/demo.gif)
 
 ## 主要改动
 
@@ -16,6 +16,8 @@
 - 新增 Mermaid 源码、分栏和预览编辑模式，以及可编辑的 LaTeX 块模式。
 - 新增代码块行号和长代码块折叠。
 - 新增长表格吸顶表头，并支持在表格单元格中编辑列表。
+- 新增带缩进表格的渲染支持，保留表格原有层级缩进。
+- 新增跨单元格选择复制，可通过 `Ctrl/Cmd + C` 复制为文本。
 - 新增图片双击预览、图片链接操作和更完整的本地图片处理。
 - 新增颜色值预览，并区分颜色文本与 Markdown 标签。
 - 新增工具栏行号跳转和编辑模式记忆。
@@ -28,6 +30,7 @@
 - 优化 Mermaid、数学公式、代码块和内联 Markdown 的实时编辑体验。
 - 优化预览模式的视口保持、主题切换、表格布局和导出一致性。
 - 优化查找控件、工具栏、模式切换器和滚动条的布局与样式。
+- 优化行号跳转框以及 Live / Source / Preview、Light / Dark 切换器的边框和对齐。
 - 优化 Git 差异算法，使重复行、表格行和连续删除的标记更稳定。
 - 将 HKK 设为默认主题，并完善主题导入、语义颜色和 JSONC 配置处理。
 
@@ -36,6 +39,8 @@
 - 修复中文等输入法组合输入时的编辑异常和样式边界问题。
 - 修复粗体、斜体、删除线等嵌套格式互相污染或标记颜色错误的问题。
 - 修复表格点击后滚动跳动、选择丢失、拖动终点错误和删除错行等问题。
+- 修复吸顶表头边线显示不完整，以及普通链接偶发无法展开的问题。
+- 修复与原版 MEO 同时安装或进行 F5 调试时命令、配置和编辑器标识冲突的问题。
 - 修复图片滚动闪烁、路径解析、重新创建和预览尺寸不稳定的问题。
 - 修复 Mermaid 预览高度、分栏尺寸、主题和运行时加载问题。
 - 修复数学公式在实时模式、预览和导出结果中表现不一致的问题。
@@ -51,6 +56,8 @@
 - 移除表格差异中重复的删除间隙和删除标记。
 
 ## 使用
+
+可从 [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) 下载 `.vsix`，然后在 VS Code 中执行 **Extensions: Install from VSIX...** 安装。
 
 1. 在资源管理器中右键 `.md`、`.markdown`、`.mdx` 或 `.mdc` 文件，选择 **Open With MEO Enhanced**。
 2. 执行命令 **MEO Enhanced: Set as Default**，可将其设为 Markdown 默认编辑器。
