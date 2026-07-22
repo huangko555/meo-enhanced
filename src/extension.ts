@@ -86,8 +86,8 @@ import {
 } from './shared/timedUi';
 import type { ExportStyleEnvironment } from './export/runtime';
 
-const VIEW_TYPE = 'markdownEditorOptimized.editor';
-const ACTIVE_EDITOR_CONTEXT_KEY = 'markdownEditorOptimized.activeEditor';
+const VIEW_TYPE = 'meoEnhanced.editor';
+const ACTIVE_EDITOR_CONTEXT_KEY = 'meoEnhanced.activeEditor';
 const FIND_OPTIONS_STATE_KEY = 'findOptions';
 const CUSTOM_THEMES_STATE_KEY = 'customThemes';
 
@@ -274,7 +274,7 @@ export function activate(context: vscode.ExtensionContext): void {
   void migrateLegacyToggleSettings(context);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.open', async (uriLike?: unknown) => {
+    vscode.commands.registerCommand('meoEnhanced.open', async (uriLike?: unknown) => {
       const targetUri = getPreferredCommandUri(uriLike);
       if (!targetUri) {
         return;
@@ -298,7 +298,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.toggleEditor', async (uriLike?: unknown) => {
+    vscode.commands.registerCommand('meoEnhanced.toggleEditor', async (uriLike?: unknown) => {
       const targetUri = getPreferredCommandUri(uriLike);
       if (!targetUri || !isMarkdownDocumentPath((targetUri.path || targetUri.fsPath || '').toLowerCase())) {
         return;
@@ -313,14 +313,14 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.setDefaultEditor', async () => {
+    vscode.commands.registerCommand('meoEnhanced.setDefaultEditor', async () => {
       await syncEditorAssociations(true);
       void showTimedInformationMessage('MEO Enhanced is now set as the default editor for Markdown files.');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.resetThemeToDefault', async () => {
+    vscode.commands.registerCommand('meoEnhanced.resetThemeToDefault', async () => {
       await resetThemeSettingsToDefault();
       provider.notifyThemeChanged();
       void showTimedInformationMessage('MEO Enhanced theme was reset to default.');
@@ -328,7 +328,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.selectTheme', async () => {
+    vscode.commands.registerCommand('meoEnhanced.selectTheme', async () => {
       const themeItems = buildThemeQuickPickItems(context);
       const selectedTheme = await showTimedQuickPick(
         themeItems,
@@ -355,7 +355,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.importTheme', async () => {
+    vscode.commands.registerCommand('meoEnhanced.importTheme', async () => {
       const openFiles = await vscode.window.showOpenDialog({
         title: 'Import Theme JSON / JSONC',
         filters: { 'Theme JSON': ['json', 'jsonc'] },
@@ -390,7 +390,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.exportTheme', async () => {
+    vscode.commands.registerCommand('meoEnhanced.exportTheme', async () => {
       const uri = await vscode.window.showSaveDialog({
         title: 'Export Theme JSONC',
         filters: { 'Theme JSONC': ['jsonc'], 'Theme JSON': ['json'] },
@@ -417,7 +417,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.deleteImportedTheme', async () => {
+    vscode.commands.registerCommand('meoEnhanced.deleteImportedTheme', async () => {
       const importedThemes = getImportedThemes(context);
       if (!importedThemes.length) {
         void showTimedInformationMessage('No imported themes to delete.');
@@ -470,19 +470,19 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.toggleMode', async () => {
+    vscode.commands.registerCommand('meoEnhanced.toggleMode', async () => {
       await provider.toggleActiveEditorMode();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.exportHtml', async () => {
+    vscode.commands.registerCommand('meoEnhanced.exportHtml', async () => {
       await provider.exportActiveDocument('html');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('markdownEditorOptimized.exportPdf', async () => {
+    vscode.commands.registerCommand('meoEnhanced.exportPdf', async () => {
       await provider.exportActiveDocument('pdf');
     })
   );

@@ -612,11 +612,32 @@ async function main() {
         document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!,
         21
       );
+      const copyData = new DataTransfer();
+      document.activeElement?.dispatchEvent(new ClipboardEvent('copy', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: copyData
+      }));
+      const crossCellCopiedText = copyData.getData('text/plain');
       document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames();
       const deleteRowsSource = deleteRowsEditor.view.state.doc.toString();
       deleteRowsEditor.destroy();
+
+      const indentedTableSource = '  | A | B |\n  | --- | --- |\n  | left | right |';
+      const indentedTableEditor = await create(indentedTableSource);
+      await waitFrames();
+      const indentedTableState = {
+        rendered: Boolean(document.querySelector('.meo-md-html-table')),
+        source: indentedTableEditor.view.state.doc.toString()
+      };
+      indentedTableEditor.destroy();
+
+      const indentedCodeEditor = await create('    | code |\n    | --- |\n    | value |');
+      await waitFrames();
+      const indentedCodeRenderedAsTable = Boolean(document.querySelector('.meo-md-html-table'));
+      indentedCodeEditor.destroy();
 
       const sortedDeleteEditor = await create('| N    |\n| ---- |\n| 3    |\n| 1    |\n| 2    |');
       dragSelectCells(
@@ -1129,6 +1150,9 @@ async function main() {
         outsideReleaseState,
         releaseOnlyDraggedText,
         crossCellDragFocusedInput,
+        crossCellCopiedText,
+        indentedTableState,
+        indentedCodeRenderedAsTable,
         maxWidthDelta: Math.max(...widthsBeforeEntry.flatMap((width, index) => [
           Math.abs(width - widthsAfterEntry[index]),
           Math.abs(width - widthsAfterMarkdownEntry[index])
@@ -1138,7 +1162,50 @@ async function main() {
       };
     });
 
+    await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const editor = harness.createEditor({
+        parent: app,
+        text: '| A | B |\n| --- | --- |\n| r1a | r1b |\n| r2a | r2b |',
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__keyboardCopyEditor = editor;
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const fromCell = document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!;
+      const toCell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!;
+      const table = fromCell.closest('table')!;
+      const targetRect = toCell.getBoundingClientRect();
+      fromCell.dispatchEvent(new PointerEvent('pointerdown', { button: 0, pointerId: 91, bubbles: true, cancelable: true }));
+      table.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 91,
+        clientX: targetRect.left + targetRect.width / 2,
+        clientY: targetRect.top + targetRect.height / 2,
+        bubbles: true,
+        cancelable: true
+      }));
+      table.dispatchEvent(new PointerEvent('pointerup', { pointerId: 91, bubbles: true, cancelable: true }));
+      (window as any).__keyboardCopiedText = '';
+      document.addEventListener('copy', (event) => {
+        (window as any).__keyboardCopiedText = event.clipboardData?.getData('text/plain') ?? '';
+      }, { once: true });
+    });
+    await page.keyboard.down('Control');
+    await page.keyboard.press('KeyC');
+    await page.keyboard.up('Control');
+    const keyboardCopiedText = await page.evaluate(() => {
+      (window as any).__keyboardCopyEditor.destroy();
+      return (window as any).__keyboardCopiedText;
+    });
+
     const failures: string[] = [];
+    if (keyboardCopiedText !== 'r1a\tr1b\nr2a\tr2b') {
+      failures.push(`real Ctrl+C did not copy the selected table cells as TSV: ${JSON.stringify(keyboardCopiedText)}`);
+    }
     if (result.editingPreviewText !== 'asdx') failures.push(`editing preview remained ${JSON.stringify(result.editingPreviewText)}`);
     if (
       result.inlineDecorationCount !== 5 ||
@@ -1233,6 +1300,15 @@ async function main() {
     }
     if (result.maxWidthDelta > 0.5) {
       failures.push(`table column width changed by ${result.maxWidthDelta}px when Markdown source became editable`);
+    }
+    if (result.crossCellCopiedText !== 'r1a\tr1b\nr2a\tr2b') {
+      failures.push(`multi-cell Ctrl+C target did not receive the existing TSV copy handler: ${JSON.stringify(result.crossCellCopiedText)}`);
+    }
+    if (!result.indentedTableState.rendered || result.indentedTableState.source !== '  | A | B |\n  | --- | --- |\n  | left | right |') {
+      failures.push(`common-indent table was not rendered without changing source indentation: ${JSON.stringify(result.indentedTableState)}`);
+    }
+    if (result.indentedCodeRenderedAsTable) {
+      failures.push('four-space indented code block was incorrectly rendered as a table');
     }
     if (
       JSON.stringify(result.tableDiffMarkerLines) !== JSON.stringify([{ from: '4', to: '4', modified: true }]) ||

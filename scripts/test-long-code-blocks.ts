@@ -354,6 +354,16 @@ async function main() {
     if (floatingBackground.alpha < 1) {
       throw new Error(`Floating collapse button background was translucent: ${JSON.stringify(floatingBackground)}`);
     }
+    await page.hover('.meo-long-code-floating-action');
+    const floatingHoverBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => getComputedStyle(button).backgroundColor);
+    await page.mouse.down();
+    const floatingActiveBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => getComputedStyle(button).backgroundColor);
+    await page.mouse.move(0, 0);
+    await page.mouse.up();
+    if (floatingHoverBackground === 'transparent' || floatingHoverBackground.startsWith('rgba(0, 0, 0, 0') ||
+        floatingActiveBackground === 'transparent' || floatingActiveBackground.startsWith('rgba(0, 0, 0, 0')) {
+      throw new Error(`Floating collapse button became transparent during interaction: ${JSON.stringify({ floatingHoverBackground, floatingActiveBackground })}`);
+    }
     const floatingHorizontalOffset = await page.evaluate(() => {
       const floating = document.querySelector('.meo-long-code-floating-action')!.getBoundingClientRect();
       return floating.left + floating.width / 2;

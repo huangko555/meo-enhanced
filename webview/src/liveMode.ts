@@ -2562,10 +2562,12 @@ function detectTableBlocks(state) {
     const delimiterText = state.doc.sliceString(delimiterLine.from, delimiterLine.to);
     if (isThematicBreakLine(delimiterText)) continue;
     if (!isTableDelimiterLine(delimiterText)) continue;
+    const commonIndent = /^[ \t]*/.exec(delimiterText)?.[0] ?? '';
 
     const headerLineNo = lineNo - 1;
     const headerLine = state.doc.line(headerLineNo);
     const headerText = state.doc.sliceString(headerLine.from, headerLine.to);
+    if (!headerText.startsWith(commonIndent) || (/^[ \t]*/.exec(headerText)?.[0] ?? '') !== commonIndent) continue;
     if (!isTableContentLine(headerText)) continue;
 
     let endLineNo = lineNo;
@@ -2573,6 +2575,7 @@ function detectTableBlocks(state) {
       const rowLine = state.doc.line(rowLineNo);
       const rowText = state.doc.sliceString(rowLine.from, rowLine.to);
       if (!isTableContentLine(rowText)) break;
+      if ((/^[ \t]*/.exec(rowText)?.[0] ?? '') !== commonIndent) break;
       endLineNo = rowLineNo;
     }
 
@@ -2588,7 +2591,9 @@ function addFallbackTableDecorations(builder, state, tree, parsedTableRanges, me
     const from = state.doc.line(block.startLineNo).from;
     const to = state.doc.line(block.endLineNo).to;
     if (overlapsParsedTableRange(from, to, parsedTableRanges)) continue;
-    if (isInsideCodeBlock(tree, from)) continue;
+    const headerText = state.doc.line(block.startLineNo).text;
+    const syntaxProbe = from + (/^[ \t]*/.exec(headerText)?.[0].length ?? 0);
+    if (isInsideCodeBlock(tree, syntaxProbe)) continue;
     if (rangeOverlapsMermaidColonBlock(mermaidColonBlocks, from, to)) continue;
     addTableDecorationsForLineRange(
       builder,

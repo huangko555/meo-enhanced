@@ -42,66 +42,66 @@
     ],
     "commands": [
       {
-        "command": "markdownEditorOptimized.open",
+        "command": "meoEnhanced.open",
         "title": "Open With MEO Enhanced",
         "icon": "$(book)"
       },
       {
-        "command": "markdownEditorOptimized.toggleEditor",
+        "command": "meoEnhanced.toggleEditor",
         "title": "MEO"
       },
       {
-        "command": "markdownEditorOptimized.setDefaultEditor",
+        "command": "meoEnhanced.setDefaultEditor",
         "title": "MEO Enhanced: Set as Default",
         "icon": "$(check)"
       },
       {
-        "command": "markdownEditorOptimized.resetThemeToDefault",
+        "command": "meoEnhanced.resetThemeToDefault",
         "title": "MEO Enhanced: Reset Theme to Default",
         "icon": "$(discard)"
       },
       {
-        "command": "markdownEditorOptimized.selectTheme",
+        "command": "meoEnhanced.selectTheme",
         "title": "MEO Enhanced: Select Theme"
       },
       {
-        "command": "markdownEditorOptimized.importTheme",
+        "command": "meoEnhanced.importTheme",
         "title": "MEO Enhanced: Import Theme JSON"
       },
       {
-        "command": "markdownEditorOptimized.exportTheme",
+        "command": "meoEnhanced.exportTheme",
         "title": "MEO Enhanced: Export Theme JSON"
       },
       {
-        "command": "markdownEditorOptimized.deleteImportedTheme",
+        "command": "meoEnhanced.deleteImportedTheme",
         "title": "MEO Enhanced: Delete Imported Theme"
       },
       {
-        "command": "markdownEditorOptimized.toggleMode",
+        "command": "meoEnhanced.toggleMode",
         "title": "MEO Enhanced: Toggle Live/Source Mode",
         "icon": "$(sync)"
       },
       {
-        "command": "markdownEditorOptimized.exportHtml",
+        "command": "meoEnhanced.exportHtml",
         "title": "MEO Enhanced: Export as HTML",
         "icon": "$(export)"
       },
       {
-        "command": "markdownEditorOptimized.exportPdf",
+        "command": "meoEnhanced.exportPdf",
         "title": "MEO Enhanced: Export as PDF",
         "icon": "$(file-pdf)"
       }
     ],
     "keybindings": [
       {
-        "command": "markdownEditorOptimized.toggleMode",
+        "command": "meoEnhanced.toggleMode",
         "key": "alt+shift+m",
-        "when": "markdownEditorOptimized.activeEditor"
+        "when": "meoEnhanced.activeEditor"
       }
     ],
     "customEditors": [
       {
-        "viewType": "markdownEditorOptimized.editor",
+        "viewType": "meoEnhanced.editor",
         "displayName": "MEO Enhanced",
         "selector": [
           {
@@ -123,21 +123,21 @@
     "menus": {
       "editor/title": [
         {
-          "command": "markdownEditorOptimized.toggleEditor",
+          "command": "meoEnhanced.toggleEditor",
           "when": "resourceFilename =~ /\\.(md|markdown|mdx|mdc)$/",
           "group": "navigation@-1"
         }
       ],
       "explorer/context": [
         {
-          "command": "markdownEditorOptimized.open",
+          "command": "meoEnhanced.open",
           "when": "resourceFilename =~ /\\.(md|markdown|mdx|mdc)$/",
           "group": "navigation"
         }
       ],
       "editor/title/context": [
         {
-          "command": "markdownEditorOptimized.open",
+          "command": "meoEnhanced.open",
           "when": "resourceFilename =~ /\\.(md|markdown|mdx|mdc)$/",
           "group": "navigation"
         }
@@ -145,10 +145,10 @@
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {
-        "*.md": "markdownEditorOptimized.editor",
-        "*.markdown": "markdownEditorOptimized.editor",
-        "*.mdx": "markdownEditorOptimized.editor",
-        "*.mdc": "markdownEditorOptimized.editor",
+        "*.md": "meoEnhanced.editor",
+        "*.markdown": "meoEnhanced.editor",
+        "*.mdx": "meoEnhanced.editor",
+        "*.mdc": "meoEnhanced.editor",
         "git:/**/*.md": "default",
         "git:/**/*.markdown": "default",
         "git:/**/*.mdx": "default",
@@ -170,13 +170,13 @@
     "configuration": {
       "title": "MEO Enhanced",
       "properties": {
-        "markdownEditorOptimized.useAsDefault": {
+        "meoEnhanced.useAsDefault": {
           "type": "boolean",
           "default": true,
           "order": 1,
           "description": "Use MEO Enhanced as the default editor for Markdown files"
         },
-        "markdownEditorOptimized.outline.position": {
+        "meoEnhanced.outline.position": {
           "type": "string",
           "enum": [
             "left",
@@ -190,31 +190,31 @@
           "order": 2,
           "description": "Position of the contents outline sidebar."
         },
-        "markdownEditorOptimized.contentMaxWidth.visible": {
+        "meoEnhanced.contentMaxWidth.visible": {
           "type": "boolean",
           "default": false,
           "order": 3,
           "description": "Constrain the editor content to a centered 800px column."
         },
-        "markdownEditorOptimized.lineNumbers.visible": {
+        "meoEnhanced.lineNumbers.visible": {
           "type": "boolean",
           "default": true,
           "order": 4,
           "description": "Show line numbers."
         },
-        "markdownEditorOptimized.gitChanges.visible": {
+        "meoEnhanced.gitChanges.visible": {
           "type": "boolean",
           "default": true,
           "order": 5,
           "description": "Show change indicators in the editor."
         },
-        "markdownEditorOptimized.gitBlame.enabled": {
+        "meoEnhanced.gitBlame.enabled": {
           "type": "boolean",
           "default": false,
           "order": 6,
           "description": "Show Git author and commit details when hovering over lines in the change gutter."
         },
-        "markdownEditorOptimized.changes.baseline": {
+        "meoEnhanced.changes.baseline": {
           "type": "string",
           "enum": [
             "current-edit",
@@ -230,27 +230,27 @@
           "order": 6,
           "description": "Choose the baseline used for change indicators."
         },
-        "markdownEditorOptimized.gitChanges.lineHighlights": {
+        "meoEnhanced.gitChanges.lineHighlights": {
           "type": "boolean",
           "default": true,
           "order": 6,
           "description": "Show subtle line coloring for modified lines in Source mode."
         },
-        "markdownEditorOptimized.spellCheck.enabled": {
+        "meoEnhanced.spellCheck.enabled": {
           "type": "boolean",
           "default": true,
           "order": 6,
           "description": "Show built-in spelling diagnostics in MEO Enhanced when no external spell checker diagnostics are available."
         },
-        "markdownEditorOptimized.vimMode.enabled": {
+        "meoEnhanced.vimMode.enabled": {
           "type": "boolean",
           "default": false,
           "order": 6,
           "description": "Legacy Vim keybinding override.",
-          "deprecationMessage": "Use markdownEditorOptimized.vimMode.behavior instead.",
-          "markdownDeprecationMessage": "Use `markdownEditorOptimized.vimMode.behavior` instead."
+          "deprecationMessage": "Use meoEnhanced.vimMode.behavior instead.",
+          "markdownDeprecationMessage": "Use `meoEnhanced.vimMode.behavior` instead."
         },
-        "markdownEditorOptimized.vimMode.behavior": {
+        "meoEnhanced.vimMode.behavior": {
           "type": "string",
           "enum": [
             "auto",
@@ -266,34 +266,34 @@
           "order": 6,
           "description": "Controls Vim emulation in Source and Live mode."
         },
-        "markdownEditorOptimized.codeBlocks.useVscodeTheme": {
+        "meoEnhanced.codeBlocks.useVscodeTheme": {
           "type": "boolean",
           "default": false,
           "order": 7,
           "description": "Highlight fenced code blocks using your active VS Code color theme."
         },
-        "markdownEditorOptimized.rememberPosition.lines": {
+        "meoEnhanced.rememberPosition.lines": {
           "type": "number",
           "default": 100,
           "minimum": 0,
           "order": 7,
           "description": "Markdown files with at least this many lines will remember the last viewed line and restore the scroll position when opened."
         },
-        "markdownEditorOptimized.export.browserPath": {
+        "meoEnhanced.export.browserPath": {
           "type": "string",
           "default": "",
           "order": 7,
           "description": "Optional path to a Chrome/Edge executable used for browser-based export rendering (PDF and HTML finalize). Leave empty to auto-detect."
         },
-        "markdownEditorOptimized.export.pdf.browserPath": {
+        "meoEnhanced.export.pdf.browserPath": {
           "type": "string",
           "default": "",
           "order": 7,
-          "description": "Deprecated: use markdownEditorOptimized.export.browserPath.",
-          "deprecationMessage": "Use markdownEditorOptimized.export.browserPath instead.",
-          "markdownDeprecationMessage": "Use `markdownEditorOptimized.export.browserPath` instead."
+          "description": "Deprecated: use meoEnhanced.export.browserPath.",
+          "deprecationMessage": "Use meoEnhanced.export.browserPath instead.",
+          "markdownDeprecationMessage": "Use `meoEnhanced.export.browserPath` instead."
         },
-        "markdownEditorOptimized.export.html.imageMode": {
+        "meoEnhanced.export.html.imageMode": {
           "type": "string",
           "enum": [
             "embedded",
@@ -307,13 +307,13 @@
           "order": 8,
           "description": "How local images are handled during HTML export."
         },
-        "markdownEditorOptimized.imageFolder": {
+        "meoEnhanced.imageFolder": {
           "type": "string",
           "default": "assets",
           "order": 9,
           "description": "Folder name to save pasted images (relative to workspace root)."
         },
-        "markdownEditorOptimized.theme": {
+        "meoEnhanced.theme": {
           "type": "object",
           "default": {
             "id": "hkk",
@@ -442,7 +442,7 @@
             }
           ],
           "description": "Theme payload containing the editor background, base palette colors, independent semantic Markdown/UI colors, optional token overrides, and font settings.",
-          "markdownDescription": "[Select Theme](command:markdownEditorOptimized.selectTheme) | [Import Theme](command:markdownEditorOptimized.importTheme) | [Export Theme](command:markdownEditorOptimized.exportTheme) | [Delete Imported Theme](command:markdownEditorOptimized.deleteImportedTheme) | [Reset Theme to Default](command:markdownEditorOptimized.resetThemeToDefault)",
+          "markdownDescription": "[Select Theme](command:meoEnhanced.selectTheme) | [Import Theme](command:meoEnhanced.importTheme) | [Export Theme](command:meoEnhanced.exportTheme) | [Delete Imported Theme](command:meoEnhanced.deleteImportedTheme) | [Reset Theme to Default](command:meoEnhanced.resetThemeToDefault)",
           "properties": {
             "id": {
               "type": "string",
@@ -1336,7 +1336,7 @@
   "scripts": {
     "install:all": "bun install && (cd webview && bun install)",
     "test": "bun run test:unit && bun run test:browser",
-    "test:unit": "bun scripts/test-document-diff.ts && bun scripts/test-saved-revision-tracker.ts && bun scripts/test-document-fragment-link.ts && bun scripts/test-document-links.ts && bun scripts/test-document-sync.ts && bun scripts/test-clipboard-image-root.ts && bun scripts/test-webview-image-src.ts && bun scripts/test-image-recreation.ts && bun scripts/test-preview-export-images.ts && bun scripts/test-viewport-controller.ts && bun scripts/test-outline-tree.ts && bun scripts/test-preview-rendering.ts && bun scripts/test-export-appearance.ts && bun scripts/test-inline-underscore.ts && bun scripts/test-inline-style-fallback.ts && bun scripts/test-color-swatches.ts && bun scripts/test-line-jump.ts && bun scripts/test-ordered-list-renumber.ts && bun scripts/test-theme-consistency.ts && bun scripts/test-theme-jsonc.ts",
+    "test:unit": "bun scripts/test-extension-namespace.ts && bun scripts/test-document-diff.ts && bun scripts/test-saved-revision-tracker.ts && bun scripts/test-document-fragment-link.ts && bun scripts/test-document-links.ts && bun scripts/test-document-sync.ts && bun scripts/test-clipboard-image-root.ts && bun scripts/test-webview-image-src.ts && bun scripts/test-image-recreation.ts && bun scripts/test-preview-export-images.ts && bun scripts/test-viewport-controller.ts && bun scripts/test-outline-tree.ts && bun scripts/test-preview-rendering.ts && bun scripts/test-export-appearance.ts && bun scripts/test-inline-underscore.ts && bun scripts/test-inline-style-fallback.ts && bun scripts/test-color-swatches.ts && bun scripts/test-line-jump.ts && bun scripts/test-ordered-list-renumber.ts && bun scripts/test-theme-consistency.ts && bun scripts/test-theme-jsonc.ts",
     "test:browser": "bun run test:browser-launch && bun scripts/test-preview-layout.ts && bun scripts/test-preview-links.ts && bun scripts/test-preview-mermaid-runtime.ts && bun scripts/test-export-colors.ts && bun scripts/test-document-diff-gutter.ts && bun scripts/test-git-diff-overview-ruler.ts && bun scripts/test-search-overview-ruler.ts && bun scripts/test-git-blame-toggle.ts && bun scripts/test-table-stability.ts && bun scripts/test-table-color-swatches.ts && bun scripts/test-table-sticky-header.ts && bun scripts/test-editor-notice.ts && bun scripts/test-webview-viewport.ts && bun scripts/test-webview-search-controls.ts && bun scripts/test-code-block-line-numbers.ts && bun scripts/test-long-code-blocks.ts && bun scripts/test-mermaid-editing.ts && bun scripts/test-html-break-rendering.ts && bun scripts/test-editor-stability.ts && bun scripts/test-ime-composition.ts && bun scripts/test-image-layout.ts",
     "test:browser-launch": "bun scripts/test-browser-launch.ts",
     "test:code-block-line-numbers": "bun scripts/test-code-block-line-numbers.ts",

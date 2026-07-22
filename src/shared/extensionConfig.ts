@@ -10,7 +10,7 @@ import { getActiveVscodeRawTheme, type RawVscodeTheme } from './vscodeTheme';
 import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from './outlineWidth';
 export { normalizeOutlineWidth } from './outlineWidth';
 
-export const EXTENSION_CONFIG_SECTION = 'markdownEditorOptimized';
+export const EXTENSION_CONFIG_SECTION = 'meoEnhanced';
 export const LINE_NUMBERS_SETTING_KEY = 'lineNumbers.visible';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_BLAME_SETTING_KEY = 'gitBlame.enabled';
@@ -276,7 +276,7 @@ export async function resetThemeSettingsToDefault(): Promise<void> {
 export async function syncEditorAssociations(useAsDefault: boolean): Promise<void> {
   const config = vscode.workspace.getConfiguration('workbench');
   const inspected = config.inspect<Record<string, string>>('editorAssociations');
-  const markdownAssociation = useAsDefault ? 'markdownEditorOptimized.editor' : 'default';
+  const markdownAssociation = useAsDefault ? 'meoEnhanced.editor' : 'default';
 
   await syncEditorAssociationsForTarget(
     config,

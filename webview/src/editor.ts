@@ -277,6 +277,7 @@ export function createEditor({
   let imeCompositionFlushTimer: number | null = null;
   let capturedPointerId = null;
   let liveSelectionPointerId = null;
+  let liveSelectionGeneration = 0;
   let inlineCodeClick = null;
   let checkboxClick = null;
   let frontmatterBoundaryClick = null;
@@ -696,9 +697,18 @@ export function createEditor({
     }
   };
 
-  const finishLivePointerSelection = (pointerId) => {
+  const finishLivePointerSelection = (pointerId, defer = false) => {
     if (liveSelectionPointerId === pointerId) {
-      clearLivePointerSelection();
+      if (defer) {
+        const generation = liveSelectionGeneration;
+        requestAnimationFrame(() => {
+          if (liveSelectionPointerId === pointerId && liveSelectionGeneration === generation) {
+            clearLivePointerSelection();
+          }
+        });
+      } else {
+        clearLivePointerSelection();
+      }
     }
   };
 
@@ -1878,6 +1888,7 @@ export function createEditor({
             const preservedLine = pointerLine !== null && view.state.selection.ranges.some(
               (range) => view.state.doc.lineAt(range.head).number === pointerLine
             ) ? pointerLine : null;
+            liveSelectionGeneration += 1;
             liveSelectionPointerId = event.pointerId;
             view.dom.classList.add('meo-live-pointer-selecting');
             view.dom.style.cursor = 'text';
@@ -1899,7 +1910,7 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
-          finishLivePointerSelection(event.pointerId);
+          finishLivePointerSelection(event.pointerId, true);
 
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;

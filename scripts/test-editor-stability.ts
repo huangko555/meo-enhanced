@@ -107,6 +107,18 @@ async function main() {
         onApplyChanges() {}
       });
     }, source);
+    const linePlaceholderAlignment = await page.evaluate(() => {
+      const input = document.createElement('input');
+      input.className = 'line-jump-input';
+      input.placeholder = 'Line';
+      document.body.appendChild(input);
+      const alignment = getComputedStyle(input, '::placeholder').textAlign;
+      input.remove();
+      return alignment;
+    });
+    if (linePlaceholderAlignment !== 'center') {
+      throw new Error(`Line jump placeholder was not centered: ${linePlaceholderAlignment}`);
+    }
     await waitForFrames(page);
 
     const headingSelectionDrag = await page.evaluate(() => {
@@ -588,6 +600,35 @@ async function main() {
       inlineStyleComposition.strongCode.textDecorationLine !== 'none'
     ) {
       throw new Error(`Live inline styles did not compose by property: ${JSON.stringify(inlineStyleComposition)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.setText('anchor\n[普通链接](https://example.com/path)\ntail');
+      editor.view.dispatch({ selection: { anchor: 0 } });
+    });
+    await waitForFrames(page, 3);
+    const ordinaryLinkPoint = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('普通链接'))!;
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const offset = node.textContent?.indexOf('普通链接') ?? -1;
+        if (offset < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset + 4);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+      throw new Error('Could not locate ordinary Markdown link label');
+    });
+    await page.mouse.click(ordinaryLinkPoint.x, ordinaryLinkPoint.y);
+    await waitForFrames(page, 3);
+    const ordinaryLinkText = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent?.includes('普通链接'))?.textContent ?? '');
+    if (!ordinaryLinkText.includes('https://example.com/path')) {
+      throw new Error(`Ordinary Markdown link did not reveal its destination after click: ${ordinaryLinkText}`);
     }
 
     console.log('editor marker and viewport stability browser tests passed');

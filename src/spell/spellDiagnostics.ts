@@ -22,7 +22,7 @@ export function shouldRunMeoSpellCheck(document: vscode.TextDocument): boolean {
   }
 
   const meoEnabled = vscode.workspace
-    .getConfiguration('markdownEditorOptimized', document.uri)
+    .getConfiguration('meoEnhanced', document.uri)
     .get<boolean>('spellCheck.enabled', true);
   if (!meoEnabled) {
     return false;

@@ -5,7 +5,7 @@ import { parseThemeJsonc } from '../src/shared/themeJsonc';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-const themeSchema = packageJson.contributes.configuration.properties['markdownEditorOptimized.theme'];
+const themeSchema = packageJson.contributes.configuration.properties['meoEnhanced.theme'];
 const schemaSemanticProperties = themeSchema.properties.semanticColors.properties;
 const packageDefaultSemanticColors = themeSchema.default.semanticColors;
 const snippetTheme = JSON.parse(themeSchema.defaultSnippets[0].body);

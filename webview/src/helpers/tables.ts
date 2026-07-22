@@ -183,7 +183,7 @@ interface TableSearchMatchRange {
 
 const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-header-line' });
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
-const tableDelimiterRegex = /^\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
+const tableDelimiterRegex = /^\s*\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn';
 const tableToolbarHeight = 24;
@@ -2580,6 +2580,7 @@ class HtmlTableWidget extends WidgetType {
       markTextSelectionCrossedCell();
       this.setTableInteractionActive(getWrap(), true);
       this.applySelection(this.normalizeSelectionRange(this.selectionAnchor, current));
+      table.focus({ preventScroll: true });
     };
 
     const endPointerSelection = (event) => {
@@ -3881,6 +3882,7 @@ class HtmlTableWidget extends WidgetType {
 
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
+    table.tabIndex = -1;
     const rowEntries = [];
     const headerInputs = [];
     const cellGrid = [];

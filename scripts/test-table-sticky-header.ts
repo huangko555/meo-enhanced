@@ -302,7 +302,7 @@ async function main() {
       result.passiveState.interactiveCount !== 0 ||
       result.passiveState.cursor !== 'default' ||
       result.passiveState.hitCursor !== 'default' ||
-      result.passiveState.shadow !== 'none' ||
+      !result.passiveState.shadow.includes('inset') ||
       Math.abs(result.passiveState.separatorHeight - 1) > 0.5 ||
       result.passiveState.separatorColor === 'rgba(0, 0, 0, 0)' ||
       result.passiveState.separatorSpace < 2.5 ||
