@@ -124,7 +124,7 @@ async function main() {
     if (lineInputStyle.placeholderAlignment !== 'center') {
       throw new Error(`Line jump placeholder was not centered: ${lineInputStyle.placeholderAlignment}`);
     }
-    if (lineInputStyle.borderWidth !== '1px' || lineInputStyle.borderColor !== 'rgb(95, 99, 104)') {
+    if (lineInputStyle.borderWidth !== '1px' || lineInputStyle.borderColor !== 'rgb(118, 123, 128)') {
       throw new Error(`Line jump input did not use the 1px gray border: ${JSON.stringify(lineInputStyle)}`);
     }
     const genericFocusOutline = await page.evaluate(() => {
