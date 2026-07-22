@@ -119,6 +119,19 @@ async function main() {
     if (linePlaceholderAlignment !== 'center') {
       throw new Error(`Line jump placeholder was not centered: ${linePlaceholderAlignment}`);
     }
+    const genericFocusOutline = await page.evaluate(() => {
+      const button = document.createElement('button');
+      button.textContent = 'focus probe';
+      document.body.appendChild(button);
+      button.focus();
+      const style = getComputedStyle(button);
+      const result = { style: style.outlineStyle, width: style.outlineWidth };
+      button.remove();
+      return result;
+    });
+    if (genericFocusOutline.style !== 'none' && genericFocusOutline.width !== '0px') {
+      throw new Error(`Generic focused control retained a browser outline: ${JSON.stringify(genericFocusOutline)}`);
+    }
     await waitForFrames(page);
 
     const headingSelectionDrag = await page.evaluate(() => {

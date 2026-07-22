@@ -988,6 +988,12 @@ body {
   transform: translateX(-50%);
 }
 
+/* Interaction state is shown by component borders, backgrounds, and selections. */
+:focus,
+:focus-visible {
+  outline: none !important;
+}
+
 .meo-long-code-floating-action:hover,
 .meo-long-code-floating-action:focus-visible {
   background-color: var(--meo-code-background);

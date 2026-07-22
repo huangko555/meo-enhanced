@@ -612,6 +612,8 @@ async function main() {
         document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!,
         21
       );
+      const focusedTableStyle = getComputedStyle(document.querySelector('.meo-md-html-table')!);
+      const focusedTableOutline = { style: focusedTableStyle.outlineStyle, width: focusedTableStyle.outlineWidth };
       const copyData = new DataTransfer();
       deleteRowsEditor.view.contentDOM.dispatchEvent(new ClipboardEvent('copy', {
         bubbles: true,
@@ -1156,6 +1158,7 @@ async function main() {
         outsideReleaseState,
         releaseOnlyDraggedText,
         crossCellDragFocusedInput,
+        focusedTableOutline,
         crossCellCopiedText,
         indentedTableState,
         indentedCodeRenderedAsTable,
@@ -1306,6 +1309,9 @@ async function main() {
     }
     if (result.maxWidthDelta > 0.5) {
       failures.push(`table column width changed by ${result.maxWidthDelta}px when Markdown source became editable`);
+    }
+    if (result.focusedTableOutline.style !== 'none' && result.focusedTableOutline.width !== '0px') {
+      failures.push(`focused table retained a browser outline: ${JSON.stringify(result.focusedTableOutline)}`);
     }
     if (result.crossCellCopiedText !== 'r1a\tr1b\nr2a\tr2b') {
       failures.push(`multi-cell Ctrl+C target did not receive the existing TSV copy handler: ${JSON.stringify(result.crossCellCopiedText)}`);
