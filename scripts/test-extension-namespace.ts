@@ -26,6 +26,7 @@ if (offenders.length > 0) {
 }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+const launchJson = JSON.parse(fs.readFileSync(path.join(repoRoot, '.vscode', 'launch.json'), 'utf8'));
 const expectedPrefix = 'meoEnhanced.';
 const privateIds = [
   ...packageJson.contributes.commands.map((entry: { command: string }) => entry.command),
@@ -36,6 +37,11 @@ const invalidIds = privateIds.filter((id) => !id.startsWith(expectedPrefix));
 
 if (invalidIds.length > 0) {
   throw new Error(`Extension-private IDs are outside ${expectedPrefix}: ${invalidIds.join(', ')}`);
+}
+
+const runConfiguration = launchJson.configurations.find((configuration: { name: string }) => configuration.name === 'Run');
+if (!runConfiguration?.args?.includes('--disable-extension=vadimmelnicuk.meo')) {
+  throw new Error('F5 must disable the installed original MEO extension so restored legacy editor tabs cannot mask development changes');
 }
 
 console.log('extension namespace checks passed');
