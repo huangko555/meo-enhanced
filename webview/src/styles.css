@@ -989,6 +989,14 @@ body {
 }
 
 .meo-long-code-floating-action:hover,
+.meo-long-code-floating-action:focus-visible {
+  background-color: var(--meo-code-background);
+  background-image: linear-gradient(
+    var(--meo-semantic-codeCopyHoverBackground, var(--meo-outline-hover-background, rgba(127, 127, 127, 0.2))),
+    var(--meo-semantic-codeCopyHoverBackground, var(--meo-outline-hover-background, rgba(127, 127, 127, 0.2)))
+  );
+}
+
 .meo-long-code-floating-action:active {
   background: var(--meo-code-background);
 }
@@ -3451,13 +3459,14 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-md-html-table-shell {
   --meo-html-table-controls-width: 352px;
+  --meo-html-table-indent: 0ch;
   position: relative;
   z-index: 1;
   padding: 0;
-  width: calc(100% - 24px);
+  width: calc(100% - 24px - var(--meo-html-table-indent));
   max-width: 100%;
   min-width: var(--meo-html-table-controls-width);
-  margin: 0;
+  margin: 0 0 0 var(--meo-html-table-indent);
 }
 
 .cm-editor .meo-md-html-table-line-numbers {

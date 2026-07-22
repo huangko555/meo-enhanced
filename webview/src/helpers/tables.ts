@@ -2650,6 +2650,7 @@ class HtmlTableWidget extends WidgetType {
       const text = this.selectedTextAsTsv();
       if (!text) return;
       event.preventDefault();
+      event.stopPropagation();
       event.clipboardData?.setData('text/plain', text);
     };
 
@@ -2751,7 +2752,7 @@ class HtmlTableWidget extends WidgetType {
     table.addEventListener('pointerup', endPointerSelection);
     table.addEventListener('pointercancel', endPointerSelection);
     table.addEventListener('lostpointercapture', endPointerSelection);
-    table.addEventListener('copy', onCopy);
+    document.addEventListener('copy', onCopy, true);
     table.addEventListener('dragstart', onDragStart);
     table.addEventListener('keydown', onKeyDown, true);
     table.addEventListener('focusout', onFocusOut);
@@ -2773,7 +2774,7 @@ class HtmlTableWidget extends WidgetType {
       table.removeEventListener('pointerup', endPointerSelection);
       table.removeEventListener('pointercancel', endPointerSelection);
       table.removeEventListener('lostpointercapture', endPointerSelection);
-      table.removeEventListener('copy', onCopy);
+      document.removeEventListener('copy', onCopy, true);
       table.removeEventListener('dragstart', onDragStart);
       table.removeEventListener('keydown', onKeyDown, true);
       table.removeEventListener('focusout', onFocusOut);
@@ -3851,6 +3852,7 @@ class HtmlTableWidget extends WidgetType {
     const shell = document.createElement('div');
     shell.className = 'meo-md-html-table-shell';
     shell.style.setProperty('--meo-html-table-toolbar-height', `${tableToolbarHeight}px`);
+    shell.style.setProperty('--meo-html-table-indent', `${tableCellIndentColumns(this.tableData.indent ?? '')}ch`);
     const wrap = document.createElement('div');
     wrap.className = 'meo-md-html-table-wrap';
     if (Number.isFinite(this.tableData.startLine)) {

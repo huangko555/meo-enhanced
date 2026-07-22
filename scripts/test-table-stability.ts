@@ -613,7 +613,7 @@ async function main() {
         21
       );
       const copyData = new DataTransfer();
-      document.activeElement?.dispatchEvent(new ClipboardEvent('copy', {
+      deleteRowsEditor.view.contentDOM.dispatchEvent(new ClipboardEvent('copy', {
         bubbles: true,
         cancelable: true,
         clipboardData: copyData
@@ -625,12 +625,18 @@ async function main() {
       const deleteRowsSource = deleteRowsEditor.view.state.doc.toString();
       deleteRowsEditor.destroy();
 
+      const unindentedLayoutEditor = await create('| A | B |\n| --- | --- |\n| left | right |');
+      await waitFrames();
+      const unindentedTableLeft = document.querySelector<HTMLElement>('.meo-md-html-table-shell')!.getBoundingClientRect().left;
+      unindentedLayoutEditor.destroy();
+
       const indentedTableSource = '  | A | B |\n  | --- | --- |\n  | left | right |';
       const indentedTableEditor = await create(indentedTableSource);
       await waitFrames();
       const indentedTableState = {
         rendered: Boolean(document.querySelector('.meo-md-html-table')),
-        source: indentedTableEditor.view.state.doc.toString()
+        source: indentedTableEditor.view.state.doc.toString(),
+        leftOffset: document.querySelector<HTMLElement>('.meo-md-html-table-shell')!.getBoundingClientRect().left - unindentedTableLeft
       };
       indentedTableEditor.destroy();
 
@@ -1192,7 +1198,7 @@ async function main() {
       (window as any).__keyboardCopiedText = '';
       document.addEventListener('copy', (event) => {
         (window as any).__keyboardCopiedText = event.clipboardData?.getData('text/plain') ?? '';
-      }, { once: true });
+      }, { capture: true, once: true });
     });
     await page.keyboard.down('Control');
     await page.keyboard.press('KeyC');
@@ -1304,7 +1310,7 @@ async function main() {
     if (result.crossCellCopiedText !== 'r1a\tr1b\nr2a\tr2b') {
       failures.push(`multi-cell Ctrl+C target did not receive the existing TSV copy handler: ${JSON.stringify(result.crossCellCopiedText)}`);
     }
-    if (!result.indentedTableState.rendered || result.indentedTableState.source !== '  | A | B |\n  | --- | --- |\n  | left | right |') {
+    if (!result.indentedTableState.rendered || result.indentedTableState.source !== '  | A | B |\n  | --- | --- |\n  | left | right |' || result.indentedTableState.leftOffset <= 1) {
       failures.push(`common-indent table was not rendered without changing source indentation: ${JSON.stringify(result.indentedTableState)}`);
     }
     if (result.indentedCodeRenderedAsTable) {

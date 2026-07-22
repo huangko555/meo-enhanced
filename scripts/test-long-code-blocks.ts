@@ -347,20 +347,25 @@ async function main() {
       throw new Error('Floating collapse button was not shown while viewport bottom was inside an expanded block');
     }
     const floatingBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => {
-      const color = getComputedStyle(button).backgroundColor;
+      const style = getComputedStyle(button);
+      const color = style.backgroundColor;
       const alphaMatch = /rgba?\([^)]*(?:,|\/)\s*([\d.]+)\s*\)$/.exec(color);
-      return { color, alpha: color === 'transparent' ? 0 : Number(alphaMatch?.[1] ?? 1) };
+      return { color, image: style.backgroundImage, alpha: color === 'transparent' ? 0 : Number(alphaMatch?.[1] ?? 1) };
     });
     if (floatingBackground.alpha < 1) {
       throw new Error(`Floating collapse button background was translucent: ${JSON.stringify(floatingBackground)}`);
     }
     await page.hover('.meo-long-code-floating-action');
-    const floatingHoverBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => getComputedStyle(button).backgroundColor);
+    const floatingHoverBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => {
+      const style = getComputedStyle(button);
+      return { color: style.backgroundColor, image: style.backgroundImage };
+    });
     await page.mouse.down();
     const floatingActiveBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => getComputedStyle(button).backgroundColor);
     await page.mouse.move(0, 0);
     await page.mouse.up();
-    if (floatingHoverBackground === 'transparent' || floatingHoverBackground.startsWith('rgba(0, 0, 0, 0') ||
+    if ((floatingHoverBackground.color === floatingBackground.color && floatingHoverBackground.image === floatingBackground.image) ||
+        floatingHoverBackground.color === 'transparent' || floatingHoverBackground.color.startsWith('rgba(0, 0, 0, 0') ||
         floatingActiveBackground === 'transparent' || floatingActiveBackground.startsWith('rgba(0, 0, 0, 0')) {
       throw new Error(`Floating collapse button became transparent during interaction: ${JSON.stringify({ floatingHoverBackground, floatingActiveBackground })}`);
     }
