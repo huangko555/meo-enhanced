@@ -1,4 +1,7 @@
-# Markdown Editor Optimized (MEO)
+# MEO Enhanced
+
+This changelog retains the release history of the original Markdown Editor
+Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.1.34
 - Added a two-click discard action that reloads unsaved content without losing the current reading position

@@ -315,7 +315,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('markdownEditorOptimized.setDefaultEditor', async () => {
       await syncEditorAssociations(true);
-      void showTimedInformationMessage('Markdown Editor Optimized is now set as the default editor for Markdown files.');
+      void showTimedInformationMessage('MEO Enhanced is now set as the default editor for Markdown files.');
     })
   );
 
@@ -323,7 +323,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('markdownEditorOptimized.resetThemeToDefault', async () => {
       await resetThemeSettingsToDefault();
       provider.notifyThemeChanged();
-      void showTimedInformationMessage('Markdown Editor Optimized theme was reset to default.');
+      void showTimedInformationMessage('MEO Enhanced theme was reset to default.');
     })
   );
 
@@ -548,7 +548,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   async exportActiveDocument(format: ExportFormat): Promise<void> {
     const session = this.getActiveSession();
     if (!session) {
-      void showTimedWarningMessage('Open a Markdown file in Markdown Editor Optimized before exporting.');
+      void showTimedWarningMessage('Open a Markdown file in MEO Enhanced before exporting.');
       return;
     }
 
@@ -1078,7 +1078,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta http-equiv="Content-Security-Policy" content="${csp};" />
-        <title>Markdown Editor Optimized</title>
+        <title>MEO Enhanced</title>
         <style>${getWebviewPreloadShellCss()}</style>
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />

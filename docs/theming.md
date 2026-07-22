@@ -1,6 +1,6 @@
 # MEO Theming Guide
 
-Guide on how to customise the editor background, colors, syntax highlighting, fonts, heading sizes, and line-height in Markdown Editor Optimized.
+Guide on how to customise the editor background, colors, syntax highlighting, fonts, heading sizes, and line-height in MEO Enhanced.
 
 ## Quick Start
 
@@ -25,11 +25,11 @@ Guide on how to customise the editor background, colors, syntax highlighting, fo
 
 ## Commands
 
-1. `Markdown Editor Optimized: Select Theme`
-2. `Markdown Editor Optimized: Import Theme JSON`
-3. `Markdown Editor Optimized: Export Theme JSON`
-4. `Markdown Editor Optimized: Delete Imported Theme`
-5. `Markdown Editor Optimized: Reset Theme to Default`
+1. `MEO Enhanced: Select Theme`
+2. `MEO Enhanced: Import Theme JSON`
+3. `MEO Enhanced: Export Theme JSON`
+4. `MEO Enhanced: Delete Imported Theme`
+5. `MEO Enhanced: Reset Theme to Default`
 
 ## id
 

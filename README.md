@@ -1,60 +1,72 @@
-# Markdown Editor Optimized (MEO)
+# MEO Enhanced
 
-An optimized markdown editor with live editing mode for VS Code.
+基于 [Markdown Editor Optimized（MEO）](https://github.com/vadimmelnicuk/meo) 修改的 VS Code Markdown 编辑器。
 
-[![](https://vsmarketplacebadges.dev/version-short/vadimmelnicuk.meo.svg)](https://marketplace.visualstudio.com/items?itemName=vadimmelnicuk.meo)
+![演示](./docs/demo.gif)
 
-![demo](https://raw.githubusercontent.com/vadimmelnicuk/meo/main/docs/demo.gif)
+## 主要改动
 
-## Features
-### Writing & Editing
+以下内容以本项目分叉时的上游 `v0.1.26` 为基准。
 
-- **Live/Source modes** - Switch between clean writing and raw markdown in a single tab
-- **Toolbar formatting** - Insert headings, lists, tasks, tables, code blocks, links, images, and quotes in one click
-- **Floating selection menu** - Instantly apply bold, italic, strikethrough, inline code, or links on any text selection
-- **Spellcheck** - Fix issues with built-in spelling suggestions
-- **Interactive editing** - Toggle tasks, open links, find/replace, render full-screen Mermaid diagrams, and LaTeX syntax
-- **Images** - Paste images directly into notes with inline rendering and automatic path resolution
+### 新增
 
-### Navigation & Organisation
+- 新增只读预览模式，以及预览工具栏、外观切换、搜索和链接导航。
+- 新增文档改动基线，可对比当前编辑、最近保存和 Git HEAD，并支持手动保存检查点。
+- 新增行作者开关、删除内容预览、差异概览标记和搜索概览标记。
+- 新增 Mermaid 源码、分栏和预览编辑模式，以及可编辑的 LaTeX 块模式。
+- 新增代码块行号和长代码块折叠。
+- 新增长表格吸顶表头，并支持在表格单元格中编辑列表。
+- 新增图片双击预览、图片链接操作和更完整的本地图片处理。
+- 新增颜色值预览，并区分颜色文本与 Markdown 标签。
+- 新增工具栏行号跳转和编辑模式记忆。
 
-- **Contents outline sidebar** - Jump to and reorder sections in long documents with ease
-- **Table editing** - Insert and edit tables inline without writing raw syntax
-- **Scroll memory** - Reopening a long file restores your previous scroll position
+### 优化
 
-### Git and Agents Integration
+- 优化表格的行列编辑、拖动、选择、删除和差异显示。
+- 优化文档大纲的展示、折叠、拖动排序和滚动同步。
+- 优化图片、链接和文档片段的点击与跳转交互。
+- 优化 Mermaid、数学公式、代码块和内联 Markdown 的实时编辑体验。
+- 优化预览模式的视口保持、主题切换、表格布局和导出一致性。
+- 优化查找控件、工具栏、模式切换器和滚动条的布局与样式。
+- 优化 Git 差异算法，使重复行、表格行和连续删除的标记更稳定。
+- 将 HKK 设为默认主题，并完善主题导入、语义颜色和 JSONC 配置处理。
 
-- **Change visualisations** - See insertions, modifications, and merge conflicts inline
-- **Git blame** - View commit information for any line directly in the editor
-- **GitHub syntax** - Renders GitHub-specific markdown including collapsible details, footnotes, alerts, kbd, and emojis
-- **GitHub Copilot** - Support of native changes review experience
+### 修复
 
-### Customisation & Export
+- 修复中文等输入法组合输入时的编辑异常和样式边界问题。
+- 修复粗体、斜体、删除线等嵌套格式互相污染或标记颜色错误的问题。
+- 修复表格点击后滚动跳动、选择丢失、拖动终点错误和删除错行等问题。
+- 修复图片滚动闪烁、路径解析、重新创建和预览尺寸不稳定的问题。
+- 修复 Mermaid 预览高度、分栏尺寸、主题和运行时加载问题。
+- 修复数学公式在实时模式、预览和导出结果中表现不一致的问题。
+- 修复预览搜索、链接导航、滚动位置和外观状态无法保持的问题。
+- 修复大纲在不同编辑模式下定位或滚动不同步的问题。
+- 修复长代码块控制按钮、行号对齐和内联渲染问题。
+- 修复重复文本、表格编辑和连续删除场景中的 Git 差异错位问题。
 
-- **Theming** - [Guide](./docs/theming.md) - Customise syntax colors, background, fonts, and line height to match your style
-- **Default themes** - One Monokai, One Dark Pro, Dracula, Gruvbox, Nord, Solarized Dark, Catppuccin Mocha, Tokyo Night, GitHub Dark, and GitHub Light
-- **Export** - Save your document as HTML or PDF
+### 移除
 
-## Getting Started
+- 移除早期的代码块折叠实现，替换为只针对长代码块的折叠方式。
+- 移除代码块行号分隔线，简化代码块视觉样式。
+- 移除表格差异中重复的删除间隙和删除标记。
 
-1. Right-click any `.md`, `.markdown`, `.mdx`, or `.mdc` file in the Explorer → **Open With Markdown Editor Optimized**
-2. Set as default: `Cmd/Ctrl + Shift + P` → **Markdown Editor Optimized: Set as Default**
-3. Toggle between Live/Source modes: `Option/Alt + Shift + M`
+## 使用
 
-## Acknowledgements
+1. 在资源管理器中右键 `.md`、`.markdown`、`.mdx` 或 `.mdc` 文件，选择 **Open With MEO Enhanced**。
+2. 执行命令 **MEO Enhanced: Set as Default**，可将其设为 Markdown 默认编辑器。
+3. 使用 `Alt/Option + Shift + M` 切换实时模式和源码模式。
 
-- [VS Code](https://code.visualstudio.com/) - Extension platform
-- [CodeMirror](https://codemirror.net/) - Core editor component
-- [Obsidian](https://obsidian.md/) - Inspiration
+## 致谢
 
-## Feedback & Contributions
+- [Markdown Editor Optimized](https://github.com/vadimmelnicuk/meo) — 原始项目
+- [VS Code](https://code.visualstudio.com/) — 扩展平台
+- [CodeMirror](https://codemirror.net/) — 编辑器核心
+- [Obsidian](https://obsidian.md/) — 交互设计参考
 
-For any issues, suggestions, or feature requests, please [open a ticket](https://github.com/vadimmelnicuk/meo/issues).
+## 变更记录
 
-## Changelog
+详细记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-Please refer to [CHANGELOG.md](CHANGELOG.md) for details about ongoing changes.
-
-## License
+## 许可证
 
 [MIT License](LICENSE)

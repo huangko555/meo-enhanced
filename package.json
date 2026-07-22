@@ -1,9 +1,9 @@
 {
-  "name": "meo",
-  "displayName": "Markdown Editor Optimized",
-  "description": "An optimized markdown editor with live editing mode for VS Code.",
-  "version": "0.1.34",
-  "publisher": "vadimmelnicuk",
+  "name": "meo-enhanced",
+  "displayName": "MEO Enhanced",
+  "description": "An enhanced Markdown editor with live editing mode for VS Code.",
+  "version": "0.1.0",
+  "publisher": "your-publisher",
   "private": true,
   "icon": "logo.png",
   "engines": {
@@ -24,7 +24,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/vadimmelnicuk/meo.git"
+    "url": "https://github.com/huangko555/meo-enhanced.git"
   },
   "main": "./dist/extension.js",
   "activationEvents": [
@@ -43,7 +43,7 @@
     "commands": [
       {
         "command": "markdownEditorOptimized.open",
-        "title": "Open With Markdown Editor Optimized",
+        "title": "Open With MEO Enhanced",
         "icon": "$(book)"
       },
       {
@@ -52,43 +52,43 @@
       },
       {
         "command": "markdownEditorOptimized.setDefaultEditor",
-        "title": "Markdown Editor Optimized: Set as Default",
+        "title": "MEO Enhanced: Set as Default",
         "icon": "$(check)"
       },
       {
         "command": "markdownEditorOptimized.resetThemeToDefault",
-        "title": "Markdown Editor Optimized: Reset Theme to Default",
+        "title": "MEO Enhanced: Reset Theme to Default",
         "icon": "$(discard)"
       },
       {
         "command": "markdownEditorOptimized.selectTheme",
-        "title": "Markdown Editor Optimized: Select Theme"
+        "title": "MEO Enhanced: Select Theme"
       },
       {
         "command": "markdownEditorOptimized.importTheme",
-        "title": "Markdown Editor Optimized: Import Theme JSON"
+        "title": "MEO Enhanced: Import Theme JSON"
       },
       {
         "command": "markdownEditorOptimized.exportTheme",
-        "title": "Markdown Editor Optimized: Export Theme JSON"
+        "title": "MEO Enhanced: Export Theme JSON"
       },
       {
         "command": "markdownEditorOptimized.deleteImportedTheme",
-        "title": "Markdown Editor Optimized: Delete Imported Theme"
+        "title": "MEO Enhanced: Delete Imported Theme"
       },
       {
         "command": "markdownEditorOptimized.toggleMode",
-        "title": "Markdown Editor Optimized: Toggle Live/Source Mode",
+        "title": "MEO Enhanced: Toggle Live/Source Mode",
         "icon": "$(sync)"
       },
       {
         "command": "markdownEditorOptimized.exportHtml",
-        "title": "Markdown Editor Optimized: Export as HTML",
+        "title": "MEO Enhanced: Export as HTML",
         "icon": "$(export)"
       },
       {
         "command": "markdownEditorOptimized.exportPdf",
-        "title": "Markdown Editor Optimized: Export as PDF",
+        "title": "MEO Enhanced: Export as PDF",
         "icon": "$(file-pdf)"
       }
     ],
@@ -102,7 +102,7 @@
     "customEditors": [
       {
         "viewType": "markdownEditorOptimized.editor",
-        "displayName": "Markdown Editor Optimized",
+        "displayName": "MEO Enhanced",
         "selector": [
           {
             "filenamePattern": "*.md"
@@ -168,13 +168,13 @@
       }
     },
     "configuration": {
-      "title": "Markdown Editor Optimized",
+      "title": "MEO Enhanced",
       "properties": {
         "markdownEditorOptimized.useAsDefault": {
           "type": "boolean",
           "default": true,
           "order": 1,
-          "description": "Use Markdown Editor Optimized as the default editor for Markdown files"
+          "description": "Use MEO Enhanced as the default editor for Markdown files"
         },
         "markdownEditorOptimized.outline.position": {
           "type": "string",
@@ -240,7 +240,7 @@
           "type": "boolean",
           "default": true,
           "order": 6,
-          "description": "Show built-in spelling diagnostics in Markdown Editor Optimized when no external spell checker diagnostics are available."
+          "description": "Show built-in spelling diagnostics in MEO Enhanced when no external spell checker diagnostics are available."
         },
         "markdownEditorOptimized.vimMode.enabled": {
           "type": "boolean",
@@ -259,8 +259,8 @@
           ],
           "enumDescriptions": [
             "Enable Vim emulation automatically when VSCodeVim (vscodevim.vim) is installed and enabled, or when VSCode Neovim (asvetliakov.vscode-neovim) is installed.",
-            "Always enable Vim emulation in Markdown Editor Optimized.",
-            "Always disable Vim keybindings in Markdown Editor Optimized."
+            "Always enable Vim emulation in MEO Enhanced.",
+            "Always disable Vim keybindings in MEO Enhanced."
           ],
           "default": "auto",
           "order": 6,

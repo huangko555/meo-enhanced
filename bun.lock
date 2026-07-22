@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "markdown-editor-optimized",
+      "name": "meo-enhanced",
       "dependencies": {
         "@codemirror/commands": "6.8.1",
         "@codemirror/lang-cpp": "^6.0.3",
