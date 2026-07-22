@@ -79,7 +79,7 @@ async function main() {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; --vscode-panel-border:#6f7378; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
+      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -124,7 +124,7 @@ async function main() {
     if (lineInputStyle.placeholderAlignment !== 'center') {
       throw new Error(`Line jump placeholder was not centered: ${lineInputStyle.placeholderAlignment}`);
     }
-    if (lineInputStyle.borderWidth !== '1px' || lineInputStyle.borderColor !== 'rgb(111, 115, 120)') {
+    if (lineInputStyle.borderWidth !== '1px' || lineInputStyle.borderColor !== 'rgb(95, 99, 104)') {
       throw new Error(`Line jump input did not use the 1px gray border: ${JSON.stringify(lineInputStyle)}`);
     }
     const genericFocusOutline = await page.evaluate(() => {
