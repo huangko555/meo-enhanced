@@ -5,11 +5,10 @@ import { spawnSync } from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
 const dist = path.join(root, 'webview', 'dist');
 const katexDist = path.join(dist, 'katex');
-const clean = process.argv.includes('--clean');
 
-if (clean) {
-  rmSync(dist, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-}
+// Bun emits content-hashed chunks but does not remove hashes from earlier builds.
+// Always rebuild from an empty directory so stale chunks cannot enter the VSIX.
+rmSync(dist, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 mkdirSync(katexDist, { recursive: true });
 
 const build = spawnSync(process.execPath, [

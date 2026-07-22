@@ -3,6 +3,8 @@
 out/**
 output/**
 node_modules/**
+bun.lock
+tsconfig.json
 webview/node_modules/**
 webview/src/**
 webview/.gitignore

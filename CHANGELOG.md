@@ -3,6 +3,14 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.1.1
+- Isolated commands, settings, editor identifiers, and F5 debugging from the original MEO extension
+- Added indented table rendering that preserves document hierarchy and restored multi-cell clipboard copy
+- Fixed sticky table header borders, ordinary link expansion, and floating long-code action states
+- Refined the line jump input and Live / Source / Preview and Light / Dark switcher borders and alignment
+- Removed browser focus outlines throughout the Webview while preserving component interaction states
+- Prevented stale content-hashed Webview chunks from accumulating in VSIX packages
+
 ## 0.1.34
 - Added a two-click discard action that reloads unsaved content without losing the current reading position
 - Improved Preview scrolling, cross-surface search selection, search highlight cleanup, and overview ruler accuracy
