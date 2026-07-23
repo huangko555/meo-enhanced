@@ -153,12 +153,14 @@ async function main() {
       };
       return {
         left: Array.from(document.querySelector<HTMLElement>('.format-group')!.children).map(label),
-        right: Array.from(document.querySelector<HTMLElement>('.right-group')!.children).map(label)
+        right: Array.from(document.querySelector<HTMLElement>('.right-group')!.children).map(label),
+        changes: Array.from(document.querySelector<HTMLElement>('.changes-controls')!.children).map(label)
       };
     });
     if (
       JSON.stringify(toolbarLayout.left.slice(0, 5)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'discard', 'separator']) ||
-      JSON.stringify(toolbarLayout.right) !== JSON.stringify(['find', 'outline-right', 'changes', 'more'])
+      JSON.stringify(toolbarLayout.right) !== JSON.stringify(['changes', 'more', 'separator', 'find', 'outline-right']) ||
+      JSON.stringify(toolbarLayout.changes) !== JSON.stringify(['fixedBaseline', 'gitChangesGutter'])
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);
     }

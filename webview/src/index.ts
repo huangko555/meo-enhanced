@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check, Pin } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check, MapPin } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -225,7 +225,7 @@ const fixedBaselineBtn = document.createElement('button');
 fixedBaselineBtn.type = 'button';
 fixedBaselineBtn.className = 'format-button toggle-button';
 fixedBaselineBtn.dataset.action = 'fixedBaseline';
-fixedBaselineBtn.appendChild(createElement(Pin, { width: 18, height: 18 }));
+fixedBaselineBtn.appendChild(createElement(MapPin, { width: 18, height: 18 }));
 
 const diffBaselineOptions = [
   { mode: 'current-edit', label: 'Current Edits' },
@@ -245,8 +245,8 @@ for (const option of diffBaselineOptions) {
 }
 
 const changesControls = document.createElement('div');
-changesControls.className = 'changes-controls';
-changesControls.append(gitChangesGutterBtn, fixedBaselineBtn);
+changesControls.className = 'changes-controls preview-hidden-toolbar-control';
+changesControls.append(fixedBaselineBtn, gitChangesGutterBtn);
 
 const spellCheckBtn = document.createElement('button');
 spellCheckBtn.type = 'button';
@@ -795,8 +795,12 @@ moreToolsPanel.append(
 );
 
 const moreToolsWrapper = document.createElement('div');
-moreToolsWrapper.className = 'more-tools-wrapper';
+moreToolsWrapper.className = 'more-tools-wrapper preview-hidden-toolbar-control';
 moreToolsWrapper.append(moreToolsButton, moreToolsPanel);
+
+const rightToolsSeparator = document.createElement('div');
+rightToolsSeparator.className = 'format-separator preview-hidden-toolbar-control';
+rightToolsSeparator.setAttribute('role', 'separator');
 
 const setMoreToolsVisible = (visible: boolean) => {
   moreToolsPanel.hidden = !visible;
@@ -815,10 +819,11 @@ document.addEventListener('pointerdown', (event) => {
 }, true);
 
 rightGroup.append(
-  findToggleBtn,
-  outlineBtn,
   changesControls,
-  moreToolsWrapper
+  moreToolsWrapper,
+  rightToolsSeparator,
+  findToggleBtn,
+  outlineBtn
 );
 
 moreToolsPanel.addEventListener('click', (event) => {
@@ -954,6 +959,7 @@ let pendingText: string | null = null;
 let syncedText = '';
 let inFlight = false;
 let inFlightText: string | null = null;
+let inFlightBaseVersion: number | null = null;
 let saveAfterSync = false;
 let currentMode: 'live' | 'source' | 'preview' = 'live';
 let lastEditableMode: 'live' | 'source' = 'live';
@@ -1352,6 +1358,7 @@ const flushChanges = () => {
 
   inFlight = true;
   inFlightText = nextText;
+  inFlightBaseVersion = documentVersion;
   syncPendingDraftState();
   vscode.postMessage(message);
 };
@@ -2030,7 +2037,21 @@ window.addEventListener('message', (event) => {
     const localDraftText = pendingText ?? inFlightText;
     const localDraftNormalized = localDraftText === null ? null : normalizeEol(localDraftText);
 
-    documentVersion = message.version;
+    documentVersion = Math.max(documentVersion, message.version);
+
+    // VS Code can deliver the previous edit's docChanged after its applied
+    // acknowledgement. The current request was already based on that version,
+    // so this message only confirms its base and must not replace newer input.
+    if (
+      inFlight
+      && inFlightBaseVersion !== null
+      && message.version <= inFlightBaseVersion
+      && incomingText !== inFlightNormalized
+    ) {
+      syncedText = incomingText;
+      syncPendingDraftState();
+      return;
+    }
 
     if (incomingText === currentText) {
       syncedText = currentText;
@@ -2117,7 +2138,10 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'applied') {
-    documentVersion = message.version;
+    documentVersion = Math.max(documentVersion, message.version);
+    if (inFlight && inFlightBaseVersion !== null && message.version <= inFlightBaseVersion) {
+      return;
+    }
     if (inFlightText !== null) {
       syncedText = normalizeEol(inFlightText);
     }

@@ -37,6 +37,24 @@ const transformedSources = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview-source-map.md',
   target: 'html'
 });
+const propertiesFrontmatter = renderMarkdownToHtml({
+  markdownText: [
+    '---',
+    'title: Properties preview',
+    'tags: [Markdown, Editor]',
+    'metadata:',
+    '  owner: Example',
+    '  notes: |',
+    '    Keep: this nested YAML content.',
+    '  - https://example.com/docs',
+    '"a:b": quoted key',
+    '# Preserve comments',
+    '---',
+    '# Body'
+  ].join('\n'),
+  markdownFilePath: 'C:/tmp/preview-properties.md',
+  target: 'html'
+});
 const tableLikeCode = renderMarkdownToHtml({
   markdownText: '```text\n| A | B |\n| --- |\n```',
   markdownFilePath: 'C:/tmp/preview-table-code.md',
@@ -110,6 +128,24 @@ if (!transformedSources.html.includes('<h2 data-source-line="8"')) {
 }
 if (!transformedSources.html.includes('class="meo-export-frontmatter" data-source-line="1" data-source-end-line="3"')) {
   throw new Error('Preview frontmatter must participate in viewport position mapping');
+}
+if (
+  !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-header"')
+  || !propertiesFrontmatter.html.includes('>Properties<')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-property"')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-key">title</span>')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-pill">Markdown</span>')
+) {
+  throw new Error('Preview frontmatter must render an Obsidian-style Properties layout');
+}
+if (
+  !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-raw"')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-raw">    Keep: this nested YAML content.</div>')
+  || !propertiesFrontmatter.html.includes('https://example.com/docs')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-key">"a:b"</span>')
+  || !propertiesFrontmatter.html.includes('# Preserve comments')
+) {
+  throw new Error('Preview Properties must preserve complex and unstructured YAML lines');
 }
 if (!transformedSources.html.includes('class="footnotes" data-source-line="6" data-source-end-line="7"')) {
   throw new Error('Preview footnotes must participate in viewport position mapping');

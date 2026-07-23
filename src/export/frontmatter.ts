@@ -1,4 +1,5 @@
 import { sliceSourceMappedMarkdown, type SourceMappedMarkdown } from './sourceMappedMarkdown';
+import { findYamlMappingSeparator } from '../shared/yamlFrontmatter';
 
 export type ExtractedExportFrontmatter = {
   frontmatterHtml: string;
@@ -13,6 +14,11 @@ type YamlFieldOffsets = {
 
 type YamlArrayItem = {
   text: string;
+};
+
+type RenderedFrontmatterLine = {
+  kind: 'property' | 'raw';
+  html: string;
 };
 
 export function extractExportFrontmatter(source: SourceMappedMarkdown): ExtractedExportFrontmatter {
@@ -52,42 +58,79 @@ function findFrontmatterClosingLine(lines: string[]): number {
 }
 
 function renderFrontmatterHtml(contentLines: string[], sourceLine: number, sourceEndLine: number): string {
+  let blockScalarParentIndent: number | null = null;
   const linesHtml = contentLines.map((line) => {
-    const renderedLine = renderFrontmatterLineHtml(line);
-    return `<div class="meo-export-frontmatter-line">${renderedLine || '&nbsp;'}</div>`;
+    const indentation = yamlIndentationWidth(line);
+    const isBlank = line.trim().length === 0;
+    const isBlockScalarContent = blockScalarParentIndent !== null
+      && (isBlank || indentation > blockScalarParentIndent);
+    if (blockScalarParentIndent !== null && !isBlockScalarContent) {
+      blockScalarParentIndent = null;
+    }
+
+    const renderedLine = isBlockScalarContent
+      ? { kind: 'raw' as const, html: escapeHtml(line) }
+      : renderFrontmatterLineHtml(line);
+    if (!isBlockScalarContent && isYamlBlockScalarHeader(line)) {
+      blockScalarParentIndent = indentation;
+    }
+    return `<div class="meo-export-frontmatter-line is-${renderedLine.kind}">${renderedLine.html || '&nbsp;'}</div>`;
   }).join('');
 
   return [
-    `<div class="meo-export-frontmatter" data-source-line="${sourceLine}" data-source-end-line="${sourceEndLine}">`,
-    '<div class="meo-export-frontmatter-boundary is-opening"><span class="meo-export-frontmatter-label">frontmatter</span></div>',
+    `<section class="meo-export-frontmatter" data-source-line="${sourceLine}" data-source-end-line="${sourceEndLine}">`,
+    '<div class="meo-export-frontmatter-header"><span class="meo-export-frontmatter-header-icon" aria-hidden="true"></span><span>Properties</span></div>',
     linesHtml,
-    '<div class="meo-export-frontmatter-boundary is-closing" aria-hidden="true">---</div>',
-    '</div>'
+    '</section>'
   ].join('');
 }
 
-function renderFrontmatterLineHtml(line: string): string {
+function isYamlBlockScalarHeader(line: string): boolean {
+  const offsets = yamlFrontmatterFieldOffsets(line);
+  if (offsets?.valueFromOffset === null || offsets?.valueFromOffset === undefined) {
+    return false;
+  }
+  const value = line.slice(offsets.valueFromOffset).trim();
+  return /^[|>][1-9+-]{0,2}(?:\s+#.*)?$/.test(value);
+}
+
+function yamlIndentationWidth(line: string): number {
+  let width = 0;
+  for (const character of line) {
+    if (character === ' ') {
+      width += 1;
+    } else if (character === '\t') {
+      width += 2;
+    } else {
+      break;
+    }
+  }
+  return width;
+}
+
+function renderFrontmatterLineHtml(line: string): RenderedFrontmatterLine {
   const offsets = yamlFrontmatterFieldOffsets(line);
   if (!offsets) {
-    return escapeHtml(line);
+    return { kind: 'raw', html: escapeHtml(line) };
   }
 
   const beforeKey = line.slice(0, offsets.keyFromOffset);
-  const key = line.slice(offsets.keyFromOffset, offsets.keyToOffset);
-  const beforeValue = offsets.valueFromOffset === null
-    ? line.slice(offsets.keyToOffset)
-    : line.slice(offsets.keyToOffset, offsets.valueFromOffset);
+  const key = line.slice(offsets.keyFromOffset, offsets.keyToOffset - 1).trimEnd();
   const value = offsets.valueFromOffset === null ? '' : line.slice(offsets.valueFromOffset);
   const arrayItems = parseSimpleYamlFlowArrayItems(line, offsets.valueFromOffset);
 
-  return [
-    escapeHtml(beforeKey),
-    `<span class="meo-export-frontmatter-key">${escapeHtml(key)}</span>`,
-    escapeHtml(beforeValue),
-    arrayItems
-      ? renderFrontmatterArrayHtml(arrayItems)
-      : (value ? `<span class="meo-export-frontmatter-value">${escapeHtml(value)}</span>` : '')
-  ].join('');
+  return {
+    kind: 'property',
+    html: [
+      '<span class="meo-export-frontmatter-key-cell">',
+      beforeKey ? `<span class="meo-export-frontmatter-prefix" aria-hidden="true">${escapeHtml(beforeKey)}</span>` : '',
+      `<span class="meo-export-frontmatter-key">${escapeHtml(key)}</span>`,
+      '</span>',
+      '<span class="meo-export-frontmatter-value">',
+      arrayItems ? renderFrontmatterArrayHtml(arrayItems) : (value ? escapeHtml(value) : '&nbsp;'),
+      '</span>'
+    ].join('')
+  };
 }
 
 function renderFrontmatterArrayHtml(items: YamlArrayItem[]): string {
@@ -114,7 +157,7 @@ function yamlFrontmatterFieldOffsets(lineText: string): YamlFieldOffsets | null 
     return null;
   }
 
-  const colonOffset = lineText.indexOf(':', offset);
+  const colonOffset = findYamlMappingSeparator(lineText, offset);
   if (colonOffset < 0) {
     return null;
   }

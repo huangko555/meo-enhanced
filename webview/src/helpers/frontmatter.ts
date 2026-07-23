@@ -1,5 +1,6 @@
 import { StateField, RangeSetBuilder, EditorState } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
+import { findYamlMappingSeparator } from '../../../src/shared/yamlFrontmatter';
 
 const thematicBreakRe = /^[ \t]{0,3}(?:([-*_])(?:[ \t]*\1){2,})[ \t]*$/;
 const frontmatterCache = new WeakMap<object, FrontmatterInfo | null>();
@@ -142,7 +143,7 @@ export function yamlFrontmatterFieldOffsets(lineText: string): YamlFieldOffsets 
     return null;
   }
 
-  const colonOffset = lineText.indexOf(':', offset);
+  const colonOffset = findYamlMappingSeparator(lineText, offset);
   if (colonOffset < 0) {
     return null;
   }

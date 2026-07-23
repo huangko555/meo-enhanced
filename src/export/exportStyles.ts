@@ -288,47 +288,79 @@ body[data-meo-export-target='pdf'] hr {
 .meo-export-doc > :last-child { margin-bottom: 0; }
 
 .meo-export-frontmatter {
-  margin: 0 0 1em;
-  color: var(--meo-base07);
-  font-family: var(--meo-font-code);
-  font-weight: var(--meo-font-weight-code);
-  font-size: var(--meo-font-size-code);
+  margin: 0 0 1.35em;
+  padding: 10px 12px 12px;
+  border: 1px solid color-mix(in srgb, var(--meo-border) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--meo-bg) 92%, var(--meo-border) 8%);
+  color: var(--meo-fg);
+  font-family: var(--meo-font-body);
+  font-weight: var(--meo-font-weight-body);
+  font-size: 0.92em;
 }
 
-.meo-export-frontmatter-boundary {
-  min-height: 1.4em;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.meo-export-frontmatter-label {
-  display: inline-block;
+.meo-export-frontmatter-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  margin-bottom: 5px;
+  padding: 0 6px;
   color: var(--meo-muted);
-  font-size: 11px;
-  line-height: 1.4em;
-  text-transform: lowercase;
+  font-size: 0.82em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
-.meo-export-frontmatter-boundary.is-closing {
-  color: var(--meo-muted);
+.meo-export-frontmatter-header-icon {
+  width: 3px;
+  height: 3px;
+  margin: 0 7px 6px 1px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 7px 0 currentColor, 0 7px currentColor, 7px 7px currentColor;
 }
 
 .meo-export-frontmatter-line {
-  min-height: 1.2em;
+  min-height: 1.7em;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.meo-export-frontmatter-line.is-property {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.32fr) minmax(0, 1fr);
+  align-items: start;
+  column-gap: 16px;
+}
+
+.meo-export-frontmatter-line.is-raw {
+  color: var(--meo-muted);
+  font-family: var(--meo-font-code);
+  font-size: var(--meo-font-size-code);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.meo-export-frontmatter-line + .meo-export-frontmatter-line {
-  margin-top: 0.2em;
+.meo-export-frontmatter-key-cell {
+  min-width: 0;
+  color: var(--meo-muted);
+  white-space: pre;
+}
+
+.meo-export-frontmatter-prefix {
+  opacity: 0.7;
 }
 
 .meo-export-frontmatter-key {
-  color: var(--meo-base07);
+  font-weight: 500;
 }
 
 .meo-export-frontmatter-value {
+  min-width: 0;
   color: var(--meo-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .meo-export-frontmatter-array {
@@ -898,6 +930,10 @@ th:empty::before {
 @media (max-width: 700px) {
   .meo-export-page { padding: 12px; }
   .meo-export-doc { padding: 16px; }
+  .meo-export-frontmatter-line.is-property {
+    grid-template-columns: minmax(90px, 0.36fr) minmax(0, 1fr);
+    column-gap: 10px;
+  }
 }
 
 @page {

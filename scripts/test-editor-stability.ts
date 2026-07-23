@@ -79,7 +79,7 @@ async function main() {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
+      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-semantic-mutedForeground:#8b949e; --meo-semantic-tableBorder:#3e444d; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -107,6 +107,84 @@ async function main() {
         onApplyChanges() {}
       });
     }, source);
+    const frontmatterProperties = await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.style.width = '760px';
+      document.body.appendChild(host);
+      const text = [
+        '---',
+        'title: Properties preview',
+        'tags: [Markdown, Editor]',
+        'metadata:',
+        '  owner: Example',
+        '  - https://example.com/docs',
+        '---',
+        '# Body'
+      ].join('\n');
+      const editor = (window as any).EditorStabilityHarness.createEditor({
+        parent: host,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+
+      editor.view.dispatch({ selection: { anchor: text.length } });
+      const opening = host.querySelector<HTMLElement>('.meo-md-frontmatter-opening');
+      const initial = {
+        text: editor.getText(),
+        hasOpening: Boolean(opening),
+        hasClosing: Boolean(host.querySelector('.meo-md-frontmatter-closing')),
+        label: host.querySelector<HTMLElement>('.meo-code-language-label')?.textContent ?? '',
+        pills: host.querySelectorAll('.meo-md-frontmatter-pill').length,
+        cardShadow: opening ? getComputedStyle(opening).boxShadow : 'none'
+      };
+
+      const tagsOffset = text.indexOf('[Markdown, Editor]') + 2;
+      editor.view.dispatch({ selection: { anchor: tagsOffset } });
+      const activeTagsLine = Array.from(host.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('tags:'));
+      const active = {
+        pills: host.querySelectorAll('.meo-md-frontmatter-pill').length,
+        lineText: activeTagsLine?.textContent ?? ''
+      };
+
+      const editOffset = editor.getText().indexOf('Example') + 'Example'.length;
+      editor.view.dispatch({ changes: { from: editOffset, to: editOffset, insert: ' Updated' } });
+      const editedText = editor.getText();
+      editor.setMode('source');
+      const sourceMode = {
+        text: editor.getText(),
+        liveBoundaries: host.querySelectorAll('.meo-md-frontmatter-boundary').length,
+        delimiters: host.querySelectorAll('.meo-md-frontmatter-delimiter-line').length
+      };
+
+      editor.destroy();
+      host.remove();
+      return { initial, active, editedText, sourceMode };
+    });
+    if (
+      !frontmatterProperties.initial.hasOpening
+      || !frontmatterProperties.initial.hasClosing
+      || frontmatterProperties.initial.label !== 'Properties'
+      || frontmatterProperties.initial.pills !== 2
+      || frontmatterProperties.initial.cardShadow === 'none'
+    ) {
+      throw new Error(`Live Frontmatter did not render as Properties: ${JSON.stringify(frontmatterProperties.initial)}`);
+    }
+    if (
+      frontmatterProperties.active.pills !== 0
+      || !frontmatterProperties.active.lineText.includes('[Markdown, Editor]')
+      || !frontmatterProperties.editedText.includes('owner: Example Updated')
+    ) {
+      throw new Error(`Live Frontmatter was not directly editable: ${JSON.stringify(frontmatterProperties)}`);
+    }
+    if (
+      frontmatterProperties.sourceMode.text !== frontmatterProperties.editedText
+      || frontmatterProperties.sourceMode.liveBoundaries !== 0
+      || frontmatterProperties.sourceMode.delimiters !== 2
+    ) {
+      throw new Error(`Source mode Frontmatter was changed by Properties rendering: ${JSON.stringify(frontmatterProperties.sourceMode)}`);
+    }
     const lineInputStyle = await page.evaluate(() => {
       const input = document.createElement('input');
       input.className = 'line-jump-input';

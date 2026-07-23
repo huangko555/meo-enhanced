@@ -212,7 +212,8 @@ const lineStyleDecos = {
   footnote: Decoration.line({ class: 'meo-md-footnote-line' }),
   footnoteContinuation: Decoration.line({ class: 'meo-md-footnote-line meo-md-footnote-continuation' }),
   frontmatterContent: Decoration.line({ class: 'meo-md-frontmatter-content' }),
-  frontmatterBoundary: Decoration.line({ class: 'meo-md-hr meo-md-frontmatter-boundary' }),
+  frontmatterOpening: Decoration.line({ class: 'meo-md-hr meo-md-frontmatter-boundary meo-md-frontmatter-opening' }),
+  frontmatterClosing: Decoration.line({ class: 'meo-md-hr meo-md-frontmatter-boundary meo-md-frontmatter-closing' }),
   hrActive: Decoration.line({ class: 'meo-md-hr-active' }),
   hr: Decoration.line({ class: 'meo-md-hr' })
 };
@@ -479,7 +480,13 @@ function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLi
   ];
 
   for (const boundary of boundaries) {
-    addLineClass(builder, state, boundary.from, boundary.to, lineStyleDecos.frontmatterBoundary);
+    addLineClass(
+      builder,
+      state,
+      boundary.from,
+      boundary.to,
+      boundary.isOpening ? lineStyleDecos.frontmatterOpening : lineStyleDecos.frontmatterClosing
+    );
     const lineNo = state.doc.lineAt(boundary.from).number;
     const boundarySelected = overlapsSelection(state, boundary.from, boundary.to);
     if (activeLines.has(lineNo) || boundarySelected) {
@@ -488,7 +495,7 @@ function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLi
     } else {
       if (boundary.isOpening) {
         const line = state.doc.lineAt(boundary.from);
-        addTopLinePillLabel(builder, line.to, 'frontmatter');
+        addTopLinePillLabel(builder, line.to, 'Properties');
         addRange(builder, boundary.from, boundary.to, frontmatterBoundaryMarkerDeco);
       }
     }
