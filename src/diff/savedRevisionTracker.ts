@@ -22,6 +22,7 @@ export class SavedRevisionTracker {
   private readonly mergeWindowMs: number;
   private latestDisk: SavedTextSnapshot | null = null;
   private recentSaveBaseline: SavedTextSnapshot | null = null;
+  private pinnedBaseline: SavedTextSnapshot | null = null;
   private lastDiskRevisionAt: number | null = null;
   private generation = 0;
 
@@ -92,6 +93,26 @@ export class SavedRevisionTracker {
 
   getRecentSaveBaseline(): SavedTextSnapshot | null {
     return this.recentSaveBaseline;
+  }
+
+  pinLatestSavedBaseline(): SavedTextSnapshot | null {
+    if (!this.latestDisk) {
+      return null;
+    }
+    this.pinnedBaseline = this.latestDisk;
+    return this.pinnedBaseline;
+  }
+
+  releasePinnedBaseline(): boolean {
+    if (!this.pinnedBaseline) {
+      return false;
+    }
+    this.pinnedBaseline = null;
+    return true;
+  }
+
+  getPinnedBaseline(): SavedTextSnapshot | null {
+    return this.pinnedBaseline;
   }
 
   getDiffBaseline(mode: SavedRevisionDiffMode): SavedTextSnapshot | null {

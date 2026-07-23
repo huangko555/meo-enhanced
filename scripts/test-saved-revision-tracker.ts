@@ -50,4 +50,16 @@ interleavedSaveTracker.noteDiskRevision('B', 1_000);
 interleavedSaveTracker.noteExplicitSave('B', capturedPreSaveRevision);
 assert(interleavedSaveTracker.getRecentSaveBaseline()?.text === 'A', 'an automatic save event must not turn the first explicit save into a repeated save');
 
+const fixedBaselineTracker = new SavedRevisionTracker({ mergeWindowMs: 10_000 });
+assert(fixedBaselineTracker.pinLatestSavedBaseline() === null, 'pinning should fail before a saved disk revision exists');
+fixedBaselineTracker.initialize('A');
+assert(fixedBaselineTracker.pinLatestSavedBaseline()?.text === 'A', 'pinning should capture the latest saved disk revision');
+fixedBaselineTracker.noteDiskRevision('B', 1_000);
+fixedBaselineTracker.noteDiskRevision('C', 20_000);
+assert(fixedBaselineTracker.getPinnedBaseline()?.text === 'A', 'later saves must not advance a pinned baseline');
+assert(fixedBaselineTracker.releasePinnedBaseline() === true, 'releasing an active pinned baseline should report a change');
+assert(fixedBaselineTracker.getPinnedBaseline() === null, 'releasing should restore normal baseline resolution');
+assert(fixedBaselineTracker.releasePinnedBaseline() === false, 'releasing an inactive pinned baseline should be stable');
+assert(fixedBaselineTracker.pinLatestSavedBaseline()?.text === 'C', 'pinning again should capture the newest saved revision');
+
 console.log('saved revision tracker checks passed');

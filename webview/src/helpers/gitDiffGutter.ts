@@ -30,7 +30,7 @@ interface BaselineSnapshot {
   tracked: boolean;
   baseText: string | null;
   baseLines: string[] | null;
-  mode?: 'current-edit' | 'recent-save' | 'git-head';
+  mode?: 'current-edit' | 'recent-save' | 'git-head' | 'fixed';
   headOid?: string | null;
   reason?: 'not-file' | 'git-unavailable' | 'not-repo' | 'ignored' | 'too-large' | 'binary' | 'error';
 }
@@ -68,7 +68,7 @@ function normalizeBaselineSnapshot(snapshot: any): BaselineSnapshot {
   return {
     available: snapshot.available === true,
     tracked: snapshot.tracked === true,
-    mode: snapshot.mode === 'current-edit' || snapshot.mode === 'recent-save' || snapshot.mode === 'git-head'
+    mode: snapshot.mode === 'current-edit' || snapshot.mode === 'recent-save' || snapshot.mode === 'git-head' || snapshot.mode === 'fixed'
       ? snapshot.mode
       : 'git-head',
     headOid: typeof snapshot.headOid === 'string' ? snapshot.headOid : snapshot.headOid === null ? null : undefined,

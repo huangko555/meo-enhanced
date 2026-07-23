@@ -617,6 +617,7 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 2px;
 }
 
 .more-tools-panel {
@@ -657,11 +658,17 @@ body {
   cursor: pointer;
 }
 
-.more-tools-option:hover,
+.more-tools-option:hover:not(:disabled),
 .more-tools-option:focus-visible,
 .changes-baseline-option.is-active {
   background: var(--vscode-toolbar-hoverBackground);
   outline: none;
+}
+
+.more-tools-option:disabled {
+  color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+  cursor: default;
+  opacity: 0.55;
 }
 
 .more-tools-option-icon,

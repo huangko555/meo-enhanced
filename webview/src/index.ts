@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check, Pin } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -158,6 +158,7 @@ let gitChangesGutterVisible = true;
 let gitBlameEnabled = false;
 let gitDiffLineHighlightsEnabled = true;
 let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
+let fixedBaselineActive = false;
 let spellCheckEnabled = true;
 let contentMaxWidthEnabled = false;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
@@ -220,6 +221,12 @@ gitChangesGutterBtn.dataset.action = 'gitChangesGutter';
 gitChangesGutterBtn.title = 'Hide Changes';
 gitChangesGutterBtn.appendChild(createElement(GitCompare, { width: 18, height: 18 }));
 
+const fixedBaselineBtn = document.createElement('button');
+fixedBaselineBtn.type = 'button';
+fixedBaselineBtn.className = 'format-button toggle-button';
+fixedBaselineBtn.dataset.action = 'fixedBaseline';
+fixedBaselineBtn.appendChild(createElement(Pin, { width: 18, height: 18 }));
+
 const diffBaselineOptions = [
   { mode: 'current-edit', label: 'Current Edits' },
   { mode: 'recent-save', label: 'Recent Save' },
@@ -239,7 +246,7 @@ for (const option of diffBaselineOptions) {
 
 const changesControls = document.createElement('div');
 changesControls.className = 'changes-controls';
-changesControls.append(gitChangesGutterBtn);
+changesControls.append(gitChangesGutterBtn, fixedBaselineBtn);
 
 const spellCheckBtn = document.createElement('button');
 spellCheckBtn.type = 'button';
@@ -266,12 +273,22 @@ const updateLineNumbersUI = () => {
 const updateGitChangesGutterUI = () => {
   gitChangesGutterBtn.classList.toggle('is-active', gitChangesGutterVisible);
   gitChangesGutterBtn.setAttribute('aria-pressed', gitChangesGutterVisible ? 'true' : 'false');
-  const modeLabel = diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Changes';
+  const modeLabel = fixedBaselineActive
+    ? 'Fixed Baseline'
+    : diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Changes';
   gitChangesGutterBtn.title = gitChangesGutterVisible ? `Hide Changes (${modeLabel})` : `Show Changes (${modeLabel})`;
+  fixedBaselineBtn.classList.toggle('is-active', fixedBaselineActive);
+  fixedBaselineBtn.setAttribute('aria-pressed', fixedBaselineActive ? 'true' : 'false');
+  fixedBaselineBtn.title = fixedBaselineActive
+    ? 'Release Fixed Baseline'
+    : 'Pin Latest Saved Version as Baseline';
+  fixedBaselineBtn.setAttribute('aria-label', fixedBaselineBtn.title);
   for (const option of diffBaselineButtons) {
     const active = option.dataset.baselineMode === diffBaselineMode;
     option.classList.toggle('is-active', active);
     option.setAttribute('aria-checked', active ? 'true' : 'false');
+    option.disabled = fixedBaselineActive;
+    option.setAttribute('aria-disabled', fixedBaselineActive ? 'true' : 'false');
   }
 };
 
@@ -282,12 +299,20 @@ const setDiffBaselineMode = (
   if (mode !== 'current-edit' && mode !== 'recent-save' && mode !== 'git-head') {
     return;
   }
+  if (fixedBaselineActive) {
+    return;
+  }
   const changed = mode !== diffBaselineMode;
   diffBaselineMode = mode;
   updateGitChangesGutterUI();
   if (post && changed) {
     vscode.postMessage({ type: 'setDiffBaselineMode', mode });
   }
+};
+
+const setFixedBaselineActive = (active: boolean) => {
+  fixedBaselineActive = active;
+  updateGitChangesGutterUI();
 };
 
 const updateSpellCheckUI = () => {
@@ -1783,6 +1808,9 @@ const handleInit = (message: any) => {
   if (message.diffBaselineMode === 'current-edit' || message.diffBaselineMode === 'recent-save' || message.diffBaselineMode === 'git-head') {
     setDiffBaselineMode(message.diffBaselineMode, { post: false });
   }
+  if (typeof message.fixedBaselineActive === 'boolean') {
+    setFixedBaselineActive(message.fixedBaselineActive);
+  }
   if (typeof message.spellCheckEnabled === 'boolean') {
     setSpellCheckEnabled(message.spellCheckEnabled, { post: false });
   }
@@ -2127,6 +2155,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'diffBaselineModeChanged') {
     setDiffBaselineMode(message.mode, { post: false });
+    return;
+  }
+
+  if (message.type === 'fixedBaselineChanged') {
+    setFixedBaselineActive(message.active === true);
     return;
   }
 
@@ -2512,6 +2545,9 @@ contentMaxWidthBtn.addEventListener('click', () => {
 });
 lineNumbersBtn.addEventListener('click', toggleLineNumbers);
 gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
+fixedBaselineBtn.addEventListener('click', () => {
+  vscode.postMessage({ type: 'setFixedBaseline', enabled: !fixedBaselineActive });
+});
 spellCheckBtn.addEventListener('click', toggleSpellCheck);
 gitBlameBtn.addEventListener('click', toggleGitBlame);
 

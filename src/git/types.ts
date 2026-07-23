@@ -1,6 +1,6 @@
 export type GitBaselinePayload = {
   available: boolean;
-  mode?: 'current-edit' | 'recent-save' | 'git-head';
+  mode?: 'current-edit' | 'recent-save' | 'git-head' | 'fixed';
   generation?: number;
   repoRoot?: string;
   headOid?: string | null;
