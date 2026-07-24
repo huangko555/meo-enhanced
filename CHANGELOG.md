@@ -3,6 +3,16 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.1.2
+- Added a fixed baseline workflow that can pin the latest valid saved version and switch back to the selected Changes mode without releasing the baseline.
+- Added Obsidian-style Frontmatter Properties in Live and Preview while preserving direct editing and complex YAML content.
+- Preserved list indentation for code blocks, Mermaid diagrams, display math, and long-code controls.
+- Added consistent rounded corners to rendered block elements in Live and Preview.
+- Fixed occasional cursor jumps after pressing Enter and typing quickly.
+- Fixed invalid Preview fence markup that left an empty block before nested code blocks.
+- Fixed document position loss when switching between Live, Source, and Preview modes.
+- Fixed list-indented tables rendering as source text or misaligning with adjacent block content in Preview.
+
 ## MEO Enhanced 0.1.1
 - Isolated commands, settings, editor identifiers, and F5 debugging from the original MEO extension
 - Added indented table rendering that preserves document hierarchy and restored multi-cell clipboard copy

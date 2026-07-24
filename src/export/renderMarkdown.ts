@@ -49,6 +49,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   let hasMath = false;
   let bodySourceLines: number[] | null = null;
   const embeddedImageDataUrlCache = new Map<string, string | null>();
+  const originalSourceLines = String(options.markdownText ?? '').split(/\r?\n/);
   const normalized = normalizeMarkdownForExportWithSourceMap(options.markdownText);
   const extractedFrontmatter = extractExportFrontmatter(normalized);
   const shouldEnableMathTransform = extractedFrontmatter.body.markdown.includes('$');
@@ -64,7 +65,9 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     start: bodySourceLines?.[startIndex] ?? 0,
     end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
   }));
-  installTableContainerTransform(md);
+  installTableContainerTransform(md, (sourceLine) => (
+    countLeadingIndentColumns(originalSourceLines[sourceLine - 1] ?? '')
+  ));
   installTableCellListTransform(md);
   installTaskListTransform(md);
   installKbdFallbackTransform(md);
@@ -225,7 +228,8 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     allowProtocolRelative: false,
     allowedStyles: {
       '*': {
-        'text-align': [/^left$/i, /^right$/i, /^center$/i, /^justify$/i]
+        'text-align': [/^left$/i, /^right$/i, /^center$/i, /^justify$/i],
+        '--meo-table-indent': [/^\d+(?:\.\d+)?ch$/i]
       },
       span: {
         position: [/^(?:static|relative|absolute)$/i],
@@ -306,12 +310,17 @@ function installSourcePositionAndHeadingAnchorTransform(
   });
 }
 
-function installTableContainerTransform(md: MarkdownIt): void {
+function installTableContainerTransform(md: MarkdownIt, resolveIndent: (sourceLine: number) => number): void {
   const defaultTableOpen = md.renderer.rules.table_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
   const defaultTableClose = md.renderer.rules.table_close ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
-  md.renderer.rules.table_open = (tokens, idx, options, env, self) => (
-    `<div class="meo-table-scroll">${defaultTableOpen(tokens, idx, options, env, self)}`
-  );
+  md.renderer.rules.table_open = (tokens, idx, options, env, self) => {
+    const sourceLine = Number(tokens[idx]?.attrGet('data-source-line') ?? 0);
+    const indent = tokens[idx]?.level === 0 && sourceLine > 0 ? resolveIndent(sourceLine) : 0;
+    const wrapperAttributes = indent > 0
+      ? ` class="meo-table-scroll meo-export-indented-table" style="--meo-table-indent:${indent}ch"`
+      : ' class="meo-table-scroll"';
+    return `<div${wrapperAttributes}>${defaultTableOpen(tokens, idx, options, env, self)}`;
+  };
   md.renderer.rules.table_close = (tokens, idx, options, env, self) => (
     `${defaultTableClose(tokens, idx, options, env, self)}</div>`
   );
@@ -492,6 +501,13 @@ function splitTableCells(line: string): string[] {
   return trimmed.split(/(?<!\\)\|/).map((cell) => cell.trim());
 }
 
+function countLeadingIndentColumns(line: string): number {
+  const leadingWhitespace = line.match(/^[ \t]*/)?.[0] ?? '';
+  return [...leadingWhitespace].reduce((columns, character) => (
+    character === '\t' ? columns + 4 - (columns % 4) : columns + 1
+  ), 0);
+}
+
 function normalizeMermaidColonFences(markdownText: string): string {
   const lines = String(markdownText ?? '').split(/\r?\n/);
   const out: string[] = [];
@@ -625,15 +641,26 @@ function ensureBlankLinesAroundTableBlocks(
       sourceLines.push(inputSourceLines[i] ?? i + 1);
     }
 
-    out.push(line);
+    const tableIndent = line.match(/^[ \t]*/)?.[0] ?? '';
+    const tableIndentColumns = countLeadingIndentColumns(line);
+    const keepParserIndent = tableIndentColumns <= 3 || isTableNestedUnderList(lines, i, tableIndentColumns);
+    const normalizeTableLine = (tableLine: string): string => (
+      !tableIndent
+        ? tableLine
+        : keepParserIndent
+          ? `${tableIndent}${tableLine.trimStart()}`
+          : tableLine.trimStart()
+    );
+
+    out.push(normalizeTableLine(line));
     sourceLines.push(inputSourceLines[i] ?? i + 1);
     i += 1;
-    out.push(lines[i] ?? '');
+    out.push(normalizeTableLine(lines[i] ?? ''));
     sourceLines.push(inputSourceLines[i] ?? i + 1);
 
     while (i + 1 < lines.length && isTableRowLine(lines[i + 1] ?? '')) {
       i += 1;
-      out.push(lines[i] ?? '');
+      out.push(normalizeTableLine(lines[i] ?? ''));
       sourceLines.push(inputSourceLines[i] ?? i + 1);
     }
 
@@ -644,6 +671,26 @@ function ensureBlankLinesAroundTableBlocks(
   }
 
   return { markdown: out.join('\n'), sourceLines };
+}
+
+function isTableNestedUnderList(lines: string[], tableLineIndex: number, tableIndentColumns: number): boolean {
+  for (let index = tableLineIndex - 1; index >= 0; index -= 1) {
+    const line = lines[index] ?? '';
+    if (!line.trim()) {
+      continue;
+    }
+    const listMarker = /^(?<indent>[ \t]*)(?<marker>[-+*]|\d+\.)\s+/.exec(line);
+    if (listMarker?.groups) {
+      const contentIndent = countLeadingIndentColumns(listMarker.groups.indent)
+        + listMarker.groups.marker.length
+        + 1;
+      return tableIndentColumns >= contentIndent;
+    }
+    if (countLeadingIndentColumns(line) === 0) {
+      return false;
+    }
+  }
+  return false;
 }
 
 function isTableHeaderLine(line: string): boolean {

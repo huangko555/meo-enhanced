@@ -5,6 +5,10 @@ export interface ViewportDocumentAnchor {
   lineOffset: number;
 }
 
+type RestoreDocumentAnchorOptions = {
+  force?: boolean;
+};
+
 export interface ViewportScrollDelta {
   top?: number;
   left?: number;
@@ -202,8 +206,12 @@ export class ViewportController {
     };
   }
 
-  restoreDocumentAnchor(anchor: ViewportDocumentAnchor, onSettled?: () => void): void {
-    if (this.isUserScrolling()) return;
+  restoreDocumentAnchor(
+    anchor: ViewportDocumentAnchor,
+    onSettled?: () => void,
+    { force = false }: RestoreDocumentAnchorOptions = {}
+  ): void {
+    if (!force && this.isUserScrolling()) return;
     const position = Math.min(Math.max(0, anchor.position), this.view.state?.doc?.length ?? anchor.position);
     const lineOffset = Number.isFinite(anchor.lineOffset) ? Math.max(0, anchor.lineOffset) : 0;
     this.stabilize(
@@ -215,14 +223,15 @@ export class ViewportController {
   restoreTopVisibleLine(
     lineNumber: number,
     lineOffset = 0,
-    onSettled?: () => void
+    onSettled?: () => void,
+    options: RestoreDocumentAnchorOptions = {}
   ): void {
     const normalizedLine = Math.min(
       Math.max(1, Math.floor(Number.isFinite(lineNumber) ? lineNumber : 1)),
       this.view.state.doc.lines
     );
     const line = this.view.state.doc.line(normalizedLine);
-    this.restoreDocumentAnchor({ position: line.from, lineOffset }, onSettled);
+    this.restoreDocumentAnchor({ position: line.from, lineOffset }, onSettled, options);
   }
 
   preserveDocumentAnchorWhileMutation(mutate: () => void): void {

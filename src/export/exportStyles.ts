@@ -734,6 +734,10 @@ th {
   margin: 0 0 1em;
   overflow: visible;
 }
+.meo-table-scroll.meo-export-indented-table {
+  width: calc(100% - var(--meo-table-indent));
+  margin-left: var(--meo-table-indent);
+}
 .meo-table-scroll table {
   width: 100%;
   margin: 0;

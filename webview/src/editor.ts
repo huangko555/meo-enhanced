@@ -1650,11 +1650,12 @@ export function createEditor({
     viewportController.restoreDocumentAnchor({ position, lineOffset });
   };
 
-  const restoreTopVisibleLine = (lineNumber, lineOffset = 0, { syncCursor = true } = {}) => {
+  const restoreTopVisibleLine = (lineNumber, lineOffset = 0, { syncCursor = true, force = false } = {}) => {
     viewportController.restoreTopVisibleLine(
       lineNumber,
       lineOffset,
-      syncCursor ? syncCursorToTopVisibleLine : undefined
+      syncCursor ? syncCursorToTopVisibleLine : undefined,
+      { force }
     );
   };
 
@@ -2393,6 +2394,7 @@ export function createEditor({
       }
 
       const topPosition = computeTopVisiblePosition();
+      viewportController.markInteraction();
 
       const previousMode = currentMode;
       currentMode = nextMode;
@@ -2415,7 +2417,7 @@ export function createEditor({
       syncModeClasses();
       syncGitGutterVisibility();
 
-      restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false });
+      restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false, force: true });
     },
     setLineNumbers(visible) {
       const nextVisible = visible !== false;
@@ -2617,8 +2619,8 @@ export function createEditor({
         restoreTopVisibleLine(line.number, 0, { syncCursor: false });
       }
     },
-    restoreTopLine(lineNumber, lineOffset, { syncCursor = true } = {}) {
-      restoreTopVisibleLine(lineNumber, lineOffset, { syncCursor });
+    restoreTopLine(lineNumber, lineOffset, { syncCursor = true, force = false } = {}) {
+      restoreTopVisibleLine(lineNumber, lineOffset, { syncCursor, force });
     },
     getTopVisiblePosition() {
       const position = computeTopVisiblePosition();

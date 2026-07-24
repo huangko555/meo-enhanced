@@ -775,6 +775,96 @@ async function main() {
     ) {
       throw new Error(`Unchanged Preview switch was not immediate: ${JSON.stringify({ previewRequestsBeforeCachedSwitch, cachedSwitchState })}`);
     }
+    await page.click('[data-mode="source"]');
+    await waitForFrames(page, 2);
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 }));
+      scroller.scrollTop = scroller.scrollHeight * (230 / 280);
+    });
+    await waitForFrames(page, 4);
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const tallHeading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === '## Tall Mermaid');
+      if (tallHeading) {
+        scroller.scrollTop += tallHeading.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      }
+    });
+    await waitForFrames(page, 2);
+    const sourceHeadingTop = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === '## Tall Mermaid');
+      return heading ? heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
+    });
+    if (sourceHeadingTop === null || Math.abs(sourceHeadingTop) > 4) {
+      throw new Error(`Source test setup did not position the target heading: ${sourceHeadingTop}`);
+    }
+    await page.click('[data-mode="preview"]');
+    await waitForFrames(page, 2);
+    const sourcePreviewHeadingTop = await page.evaluate(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<HTMLElement>('#tall-mermaid')!.getBoundingClientRect().top
+    ));
+    if (Math.abs(sourcePreviewHeadingTop) > 4) {
+      throw new Error(`Source to Preview lost the visible document position: ${sourcePreviewHeadingTop}`);
+    }
+    await positionPreviewElement(page, '#short-mermaid', 0);
+    await page.click('[data-mode="source"]');
+    await waitForFrames(page, 2);
+    const previewSourceVisibleLine = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const viewport = scroller.getBoundingClientRect();
+      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
+        const rect = line.getBoundingClientRect();
+        return line.textContent === '## Short Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+    });
+    if (!previewSourceVisibleLine) {
+      throw new Error('Preview to Source lost the visible document position');
+    }
+    await page.click('[data-mode="live"]');
+    await waitForFrames(page, 2);
+    const sourceLiveVisibleLine = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const viewport = scroller.getBoundingClientRect();
+      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
+        const rect = line.getBoundingClientRect();
+        return line.textContent === '## Short Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+    });
+    if (!sourceLiveVisibleLine) {
+      throw new Error('Source to Live lost the visible document position');
+    }
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 }));
+      scroller.scrollTop = scroller.scrollHeight * (230 / 280);
+    });
+    await waitForFrames(page, 4);
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const tallHeading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === '## Tall Mermaid');
+      if (tallHeading) {
+        scroller.scrollTop += tallHeading.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      }
+    });
+    await waitForFrames(page, 2);
+    await page.click('[data-mode="source"]');
+    await waitForFrames(page, 2);
+    const liveSourceVisibleLine = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const viewport = scroller.getBoundingClientRect();
+      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
+        const rect = line.getBoundingClientRect();
+        return line.textContent === '## Tall Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+    });
+    if (!liveSourceVisibleLine) {
+      throw new Error('Live to Source lost the visible document position');
+    }
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 2);
     await page.evaluate((text) => {

@@ -1609,7 +1609,7 @@ const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist =
         editor.restoreTopLine?.(
           transitionViewPosition.topLine,
           transitionViewPosition.topLineOffset,
-          { syncCursor: false }
+          { syncCursor: false, force: true }
         );
       }
       syncGitDiffLineHighlights();

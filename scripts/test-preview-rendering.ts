@@ -37,6 +37,27 @@ const transformedSources = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview-source-map.md',
   target: 'html'
 });
+const nestedIndentedTable = renderMarkdownToHtml({
+  markdownText: [
+    '- Parent list item',
+    '',
+    '  | Name | Value |',
+    '| --- | --- |',
+    '| Alpha | One |',
+    '| Beta | Two |'
+  ].join('\n'),
+  markdownFilePath: 'C:/tmp/preview-indented-table.md',
+  target: 'html'
+});
+const standaloneIndentedTable = renderMarkdownToHtml({
+  markdownText: [
+    '  | Name | Value |',
+    '  | --- | --- |',
+    '  | Alpha | One |'
+  ].join('\n'),
+  markdownFilePath: 'C:/tmp/preview-standalone-indented-table.md',
+  target: 'html'
+});
 const propertiesFrontmatter = renderMarkdownToHtml({
   markdownText: [
     '---',
@@ -157,6 +178,21 @@ if (!transformedSources.html.includes('class="footnotes" data-source-line="6" da
 }
 if (!tableLikeCode.html.includes('| --- |') || tableLikeCode.html.includes('| --- | --- |')) {
   throw new Error('Preview table compatibility must not rewrite fenced code');
+}
+if (
+  !nestedIndentedTable.html.includes('<table')
+  || !/<li\b[^>]*>[\s\S]*class="meo-table-scroll"[\s\S]*<table[\s\S]*<\/li>/.test(nestedIndentedTable.html)
+  || nestedIndentedTable.html.includes('meo-export-indented-table')
+  || nestedIndentedTable.html.includes('| Name | Value |')
+) {
+  throw new Error('Preview must keep a list-indented Markdown table aligned inside its list item');
+}
+if (
+  !standaloneIndentedTable.html.includes('<table')
+  || !standaloneIndentedTable.html.includes('class="meo-table-scroll meo-export-indented-table"')
+  || !standaloneIndentedTable.html.includes('style="--meo-table-indent:2ch"')
+) {
+  throw new Error('Preview must preserve standalone indented Markdown tables');
 }
 if (
   nestedCodeBlock.html.includes('<pre><code')
