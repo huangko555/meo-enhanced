@@ -993,8 +993,8 @@ body {
   justify-content: center;
   min-height: 2.4em;
   padding: 6px 12px;
+  border: 0;
   border-top: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
   background: var(--meo-code-background);
 }
 
@@ -1051,6 +1051,13 @@ body {
 
 .meo-long-code-floating-action:active {
   background: var(--meo-code-background);
+}
+
+.cm-editor.meo-mode-live .meo-md-long-code-placeholder,
+.cm-editor.meo-mode-live .meo-md-long-code-footer {
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  overflow: hidden;
 }
 
 .meo-long-code-floating-action[hidden] {
@@ -2067,6 +2074,21 @@ body {
   background: var(--meo-code-background);
 }
 
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block-start {
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block-end {
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block-end.meo-md-code-block-before-footer {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .cm-editor.meo-mode-live .cm-line.meo-md-code-block,
 .cm-editor.meo-mode-live .cm-line.meo-md-code-block * {
   font-family: var(--meo-font-source);
@@ -2339,6 +2361,7 @@ body {
 
 .cm-editor .meo-mermaid-block {
   padding: 12px;
+  border-radius: 6px;
   overflow: hidden;
   user-select: none;
   text-align: center;
@@ -3561,8 +3584,10 @@ body.outline-resizing .preview-frame {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
   width: 100%;
+  border-radius: 6px;
   color: var(--meo-foreground);
   background: var(--meo-code-background);
+  overflow: hidden;
 }
 
 .cm-editor .meo-mermaid-editing-block.is-source,

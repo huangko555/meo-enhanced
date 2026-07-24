@@ -11,6 +11,7 @@ type LongCodeBlockDescriptor = {
   anchor: number;
   start: number;
   end: number;
+  endLineFrom: number;
   contentFrom: number;
   contentTo: number;
   collapsedFrom: number;
@@ -74,6 +75,7 @@ function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescr
         anchor: node.from,
         start: startLine.from,
         end: endLine.to,
+        endLineFrom: endLine.from,
         contentFrom: contentStartLine.from,
         contentTo: contentEndLine.to,
         collapsedFrom,
@@ -257,6 +259,11 @@ function buildLongCodeDecorations(
         block: true,
         side: 1
       })
+    });
+    ranges.push({
+      from: block.endLineFrom,
+      to: block.endLineFrom,
+      decoration: Decoration.line({ class: 'meo-md-code-block-before-footer' })
     });
   }
   return Decoration.set(ranges.map((range) => range.decoration.range(range.from, range.to)), true);

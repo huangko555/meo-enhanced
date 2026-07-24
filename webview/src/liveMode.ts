@@ -209,6 +209,8 @@ const lineStyleDecos = {
   quote: Decoration.line({ class: 'meo-md-quote' }),
   mergeIncomingHeader: Decoration.line({ class: 'meo-merge-line meo-merge-incoming-header' }),
   codeBlock: Decoration.line({ class: 'meo-md-code-block' }),
+  codeBlockStart: Decoration.line({ class: 'meo-md-code-block-start' }),
+  codeBlockEnd: Decoration.line({ class: 'meo-md-code-block-end' }),
   footnote: Decoration.line({ class: 'meo-md-footnote-line' }),
   footnoteContinuation: Decoration.line({ class: 'meo-md-footnote-line meo-md-footnote-continuation' }),
   frontmatterContent: Decoration.line({ class: 'meo-md-frontmatter-content' }),
@@ -1588,6 +1590,8 @@ function buildDecorations(state) {
         addTableDecorations(ranges, state, node, diagnostics, state.field(gitDiffLineFlagsField, false));
       } else if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
         addLineClass(ranges, state, node.from, node.to, lineStyleDecos.codeBlock);
+        ranges.push(lineStyleDecos.codeBlockStart.range(state.doc.lineAt(node.from).from));
+        ranges.push(lineStyleDecos.codeBlockEnd.range(state.doc.lineAt(Math.max(node.to - 1, node.from)).from));
         if (node.name === 'FencedCode') {
           addFenceOpeningLineMarker(
             ranges,
@@ -2328,6 +2332,8 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
       }
 
       addLineClass(builder, state, openingLine.from, closingLine.to, lineStyleDecos.codeBlock);
+      builder.push(lineStyleDecos.codeBlockStart.range(openingLine.from));
+      builder.push(lineStyleDecos.codeBlockEnd.range(closingLine.from));
 
       if (!activeLines.has(openingLine.number)) {
         addTopLinePillLabel(builder, openingLine.to, 'latex');

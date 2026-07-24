@@ -63,6 +63,12 @@ html::-webkit-scrollbar-corner,
 body::-webkit-scrollbar-corner {
   background: transparent !important;
 }
+
+.meo-export-doc pre.meo-export-code-block,
+.meo-export-doc .meo-export-mermaid,
+.meo-export-doc .meo-export-math-display.meo-export-math-fenced-display {
+  border-radius: 6px;
+}
 `;
 
 function collectPreviewKatexStyles(katexHref: string): string {
