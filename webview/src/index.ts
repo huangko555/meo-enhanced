@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check, MapPin } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check, MapPin, MapPinOff } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -158,6 +158,7 @@ let gitChangesGutterVisible = true;
 let gitBlameEnabled = false;
 let gitDiffLineHighlightsEnabled = true;
 let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
+let fixedBaselinePinned = false;
 let fixedBaselineActive = false;
 let spellCheckEnabled = true;
 let contentMaxWidthEnabled = false;
@@ -227,6 +228,13 @@ fixedBaselineBtn.className = 'format-button toggle-button';
 fixedBaselineBtn.dataset.action = 'fixedBaseline';
 fixedBaselineBtn.appendChild(createElement(MapPin, { width: 18, height: 18 }));
 
+const releaseFixedBaselineBtn = document.createElement('button');
+releaseFixedBaselineBtn.type = 'button';
+releaseFixedBaselineBtn.className = 'more-tools-option fixed-baseline-release-option';
+releaseFixedBaselineBtn.dataset.action = 'releaseFixedBaseline';
+releaseFixedBaselineBtn.setAttribute('role', 'menuitem');
+appendMoreToolsOptionContent(releaseFixedBaselineBtn, MapPinOff, 'Release Fixed Baseline');
+
 const diffBaselineOptions = [
   { mode: 'current-edit', label: 'Current Edits' },
   { mode: 'recent-save', label: 'Recent Save' },
@@ -278,17 +286,19 @@ const updateGitChangesGutterUI = () => {
     : diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Changes';
   gitChangesGutterBtn.title = gitChangesGutterVisible ? `Hide Changes (${modeLabel})` : `Show Changes (${modeLabel})`;
   fixedBaselineBtn.classList.toggle('is-active', fixedBaselineActive);
+  fixedBaselineBtn.classList.toggle('is-standby', fixedBaselinePinned && !fixedBaselineActive);
   fixedBaselineBtn.setAttribute('aria-pressed', fixedBaselineActive ? 'true' : 'false');
-  fixedBaselineBtn.title = fixedBaselineActive
-    ? 'Release Fixed Baseline'
-    : 'Pin Latest Saved Version as Baseline';
+  fixedBaselineBtn.title = !fixedBaselinePinned
+    ? 'Pin Latest Saved Version as Baseline'
+    : fixedBaselineActive
+      ? `Show Changes (${diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Selected Mode'})`
+      : 'Show Fixed Baseline';
   fixedBaselineBtn.setAttribute('aria-label', fixedBaselineBtn.title);
+  releaseFixedBaselineBtn.disabled = !fixedBaselinePinned;
   for (const option of diffBaselineButtons) {
     const active = option.dataset.baselineMode === diffBaselineMode;
     option.classList.toggle('is-active', active);
     option.setAttribute('aria-checked', active ? 'true' : 'false');
-    option.disabled = fixedBaselineActive;
-    option.setAttribute('aria-disabled', fixedBaselineActive ? 'true' : 'false');
   }
 };
 
@@ -299,19 +309,18 @@ const setDiffBaselineMode = (
   if (mode !== 'current-edit' && mode !== 'recent-save' && mode !== 'git-head') {
     return;
   }
-  if (fixedBaselineActive) {
-    return;
-  }
   const changed = mode !== diffBaselineMode;
+  const leavesFixedBaseline = fixedBaselineActive;
   diffBaselineMode = mode;
   updateGitChangesGutterUI();
-  if (post && changed) {
+  if (post && (changed || leavesFixedBaseline)) {
     vscode.postMessage({ type: 'setDiffBaselineMode', mode });
   }
 };
 
-const setFixedBaselineActive = (active: boolean) => {
-  fixedBaselineActive = active;
+const setFixedBaselineState = (pinned: boolean, active: boolean) => {
+  fixedBaselinePinned = pinned;
+  fixedBaselineActive = pinned && active;
   updateGitChangesGutterUI();
 };
 
@@ -782,10 +791,15 @@ moreToolsPanel.className = 'more-tools-panel';
 moreToolsPanel.setAttribute('role', 'menu');
 moreToolsPanel.setAttribute('aria-label', 'More tools');
 moreToolsPanel.hidden = true;
+const releaseFixedBaselineSeparator = document.createElement('div');
+releaseFixedBaselineSeparator.className = 'more-tools-separator';
+releaseFixedBaselineSeparator.setAttribute('role', 'separator');
 const changesSeparator = document.createElement('div');
 changesSeparator.className = 'more-tools-separator';
 changesSeparator.setAttribute('role', 'separator');
 moreToolsPanel.append(
+  releaseFixedBaselineBtn,
+  releaseFixedBaselineSeparator,
   ...diffBaselineButtons,
   changesSeparator,
   contentMaxWidthBtn,
@@ -1815,8 +1829,8 @@ const handleInit = (message: any) => {
   if (message.diffBaselineMode === 'current-edit' || message.diffBaselineMode === 'recent-save' || message.diffBaselineMode === 'git-head') {
     setDiffBaselineMode(message.diffBaselineMode, { post: false });
   }
-  if (typeof message.fixedBaselineActive === 'boolean') {
-    setFixedBaselineActive(message.fixedBaselineActive);
+  if (typeof message.fixedBaselinePinned === 'boolean' && typeof message.fixedBaselineActive === 'boolean') {
+    setFixedBaselineState(message.fixedBaselinePinned, message.fixedBaselineActive);
   }
   if (typeof message.spellCheckEnabled === 'boolean') {
     setSpellCheckEnabled(message.spellCheckEnabled, { post: false });
@@ -2183,7 +2197,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'fixedBaselineChanged') {
-    setFixedBaselineActive(message.active === true);
+    setFixedBaselineState(message.pinned === true, message.active === true);
     return;
   }
 
@@ -2571,6 +2585,13 @@ lineNumbersBtn.addEventListener('click', toggleLineNumbers);
 gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
 fixedBaselineBtn.addEventListener('click', () => {
   vscode.postMessage({ type: 'setFixedBaseline', enabled: !fixedBaselineActive });
+});
+releaseFixedBaselineBtn.addEventListener('click', () => {
+  if (!fixedBaselinePinned) {
+    return;
+  }
+  vscode.postMessage({ type: 'releaseFixedBaseline' });
+  setMoreToolsVisible(false);
 });
 spellCheckBtn.addEventListener('click', toggleSpellCheck);
 gitBlameBtn.addEventListener('click', toggleGitBlame);

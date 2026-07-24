@@ -18,6 +18,7 @@ type WebviewMessage =
   | { type: 'setLineNumbers'; visible: boolean }
   | { type: 'setGitChangesGutter'; visible: boolean }
   | { type: 'setFixedBaseline'; enabled: boolean }
+  | { type: 'releaseFixedBaseline' }
   | { type: 'setGitBlame'; enabled: boolean }
   | { type: 'setDiffBaselineMode'; mode: 'current-edit' | 'recent-save' | 'git-head' }
   | { type: 'setSpellCheck'; enabled: boolean }
@@ -50,7 +51,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; previewAppearance: 'dark' | 'light'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; fixedBaselineActive: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; previewAppearance: 'dark' | 'light'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; fixedBaselinePinned: boolean; fixedBaselineActive: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'previewAppearanceChanged'; appearance: 'dark' | 'light' }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'discardedChanges'; text: string; version: number; topLine: number; topLineOffset?: number }
@@ -66,7 +67,7 @@ type ExtensionMessage =
   | { type: 'gitBlameChanged'; enabled: boolean }
   | { type: 'gitDiffLineHighlightsChanged'; enabled: boolean }
   | { type: 'diffBaselineModeChanged'; mode: 'current-edit' | 'recent-save' | 'git-head' }
-  | { type: 'fixedBaselineChanged'; active: boolean }
+  | { type: 'fixedBaselineChanged'; pinned: boolean; active: boolean }
   | { type: 'spellCheckChanged'; enabled: boolean }
   | { type: 'contentMaxWidthChanged'; enabled: boolean }
   | { type: 'vimModeChanged'; enabled: boolean }

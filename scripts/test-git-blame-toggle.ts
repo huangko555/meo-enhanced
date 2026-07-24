@@ -49,7 +49,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', text: 'first\nsecond', version: 1, diagnostics: [], mode: 'source',
         lineNumbers: true, gitChangesGutter: true, gitBlameEnabled: false,
-        gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselineActive: false,
+        gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },
@@ -73,10 +73,7 @@ async function main(): Promise<void> {
     const pinMessage = await page.evaluate(() => (window as any).__hostMessages.find((message: any) => message.type === 'setFixedBaseline'));
     if (!pinMessage || pinMessage.enabled !== true) throw new Error('Fixed baseline toggle did not request pinning');
     await page.evaluate(() => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'fixedBaselineChanged', active: true } }));
-      window.dispatchEvent(new MessageEvent('message', {
-        data: { type: 'diffBaselineModeChanged', mode: 'git-head' }
-      }));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'fixedBaselineChanged', pinned: true, active: true } }));
     });
     await page.click('[aria-label="More tools"]');
     const pinnedUi = await page.evaluate(() => ({
@@ -84,19 +81,38 @@ async function main(): Promise<void> {
       title: document.querySelector('[data-action="fixedBaseline"]')?.getAttribute('title'),
       modesDisabled: Array.from(document.querySelectorAll<HTMLButtonElement>('.changes-baseline-option'))
         .every((button) => button.disabled),
-      activeMode: document.querySelector('.changes-baseline-option.is-active')?.getAttribute('data-baseline-mode')
+      activeMode: document.querySelector('.changes-baseline-option.is-active')?.getAttribute('data-baseline-mode'),
+      releaseDisabled: document.querySelector<HTMLButtonElement>('[data-action="releaseFixedBaseline"]')?.disabled,
+      firstOption: document.querySelector('.more-tools-panel > .more-tools-option')?.getAttribute('data-action')
     }));
     await page.click('[aria-label="More tools"]');
-    if (pinnedUi.pressed !== 'true' || pinnedUi.title !== 'Release Fixed Baseline'
-      || !pinnedUi.modesDisabled || pinnedUi.activeMode !== 'current-edit') {
+    if (pinnedUi.pressed !== 'true' || pinnedUi.title !== 'Show Changes (Current Edits)'
+      || pinnedUi.modesDisabled || pinnedUi.activeMode !== 'current-edit'
+      || pinnedUi.releaseDisabled !== false || pinnedUi.firstOption !== 'releaseFixedBaseline') {
       throw new Error(`Fixed baseline active UI was incorrect: ${JSON.stringify(pinnedUi)}`);
     }
     await fixedBaselineButton.click();
-    const releaseMessage = await page.evaluate(() => (window as any).__hostMessages
+    const returnToChangesMessage = await page.evaluate(() => (window as any).__hostMessages
       .filter((message: any) => message.type === 'setFixedBaseline').at(-1));
-    if (!releaseMessage || releaseMessage.enabled !== false) throw new Error('Fixed baseline toggle did not request release');
+    if (!returnToChangesMessage || returnToChangesMessage.enabled !== false) throw new Error('Fixed baseline toggle did not request the selected Changes mode');
     await page.evaluate(() => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'fixedBaselineChanged', active: false } }));
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'fixedBaselineChanged', pinned: true, active: false } }));
+    });
+    const standbyUi = await fixedBaselineButton.evaluate((button) => ({
+      pressed: button.getAttribute('aria-pressed'),
+      title: button.getAttribute('title'),
+      standby: button.classList.contains('is-standby')
+    }));
+    if (standbyUi.pressed !== 'false' || standbyUi.title !== 'Show Fixed Baseline' || !standbyUi.standby) {
+      throw new Error(`Fixed baseline standby UI was incorrect: ${JSON.stringify(standbyUi)}`);
+    }
+    await page.click('[aria-label="More tools"]');
+    await page.click('[data-action="releaseFixedBaseline"]');
+    const releaseMessage = await page.evaluate(() => (window as any).__hostMessages
+      .filter((message: any) => message.type === 'releaseFixedBaseline').at(-1));
+    if (!releaseMessage) throw new Error('More tools did not request releasing the fixed baseline');
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'fixedBaselineChanged', pinned: false, active: false } }));
     });
 
     const closedMoreAppearance = await page.$eval('[aria-label="More tools"]', (button) => {

@@ -851,6 +851,37 @@ body {
   background-color: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 40%, transparent);
 }
 
+.format-button[data-action='fixedBaseline'].is-standby {
+  position: relative;
+  color: var(--vscode-descriptionForeground, var(--vscode-icon-foreground));
+  background-color: transparent;
+  opacity: 1;
+}
+
+.format-button[data-action='fixedBaseline'].is-standby::before {
+  position: absolute;
+  right: 5px;
+  bottom: 2px;
+  left: 5px;
+  height: 2px;
+  border-radius: 1px;
+  background-color: var(--vscode-testing-iconPassed, #73c991);
+  content: '';
+  pointer-events: none;
+}
+
+.format-button[data-action='fixedBaseline'].is-standby svg {
+  opacity: 0.5;
+}
+
+.format-button[data-action='fixedBaseline'].is-standby:hover svg {
+  opacity: 1;
+}
+
+.fixed-baseline-release-option .more-tools-option-icon {
+  color: var(--vscode-testing-iconFailed, #f14c4c);
+}
+
 .heading-dropdown-option {
   transition: background-color 0.12s ease;
 }

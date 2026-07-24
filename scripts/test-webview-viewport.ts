@@ -171,17 +171,18 @@ async function main() {
       return {
         labels: options.map((option) => option.querySelector('.more-tools-option-label')?.textContent),
         directChildren: options.every((option) => option.parentElement === panel),
-        baselineIcons: options.slice(0, 3).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
+        baselineIcons: options.slice(1, 4).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
         separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length
       };
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
+        'Release Fixed Baseline',
         'Current Edits', 'Recent Save', 'Git HEAD',
         'Constrain Width', 'Line Numbers', 'Line Authors', 'Spellcheck'
       ]) ||
       !moreToolsLayout.directChildren ||
-      moreToolsLayout.separatorCount !== 1 ||
+      moreToolsLayout.separatorCount !== 2 ||
       moreToolsLayout.baselineIcons.some((icon) => !icon) ||
       new Set(moreToolsLayout.baselineIcons).size !== 1
     ) {
