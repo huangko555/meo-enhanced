@@ -1,5 +1,9 @@
 import { sliceSourceMappedMarkdown, type SourceMappedMarkdown } from './sourceMappedMarkdown';
-import { findYamlMappingSeparator } from '../shared/yamlFrontmatter';
+import {
+  findYamlMappingSeparator,
+  isYamlBlockScalarValue,
+  yamlIndentationWidth
+} from '../shared/yamlFrontmatter';
 
 export type ExtractedExportFrontmatter = {
   frontmatterHtml: string;
@@ -90,22 +94,7 @@ function isYamlBlockScalarHeader(line: string): boolean {
   if (offsets?.valueFromOffset === null || offsets?.valueFromOffset === undefined) {
     return false;
   }
-  const value = line.slice(offsets.valueFromOffset).trim();
-  return /^[|>][1-9+-]{0,2}(?:\s+#.*)?$/.test(value);
-}
-
-function yamlIndentationWidth(line: string): number {
-  let width = 0;
-  for (const character of line) {
-    if (character === ' ') {
-      width += 1;
-    } else if (character === '\t') {
-      width += 2;
-    } else {
-      break;
-    }
-  }
-  return width;
+  return isYamlBlockScalarValue(line.slice(offsets.valueFromOffset));
 }
 
 function renderFrontmatterLineHtml(line: string): RenderedFrontmatterLine {

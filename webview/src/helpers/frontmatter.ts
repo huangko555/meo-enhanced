@@ -1,6 +1,10 @@
 import { StateField, RangeSetBuilder, EditorState } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
-import { findYamlMappingSeparator } from '../../../src/shared/yamlFrontmatter';
+import {
+  findYamlMappingSeparator,
+  isYamlBlockScalarValue,
+  yamlIndentationWidth
+} from '../../../src/shared/yamlFrontmatter';
 
 const thematicBreakRe = /^[ \t]{0,3}(?:([-*_])(?:[ \t]*\1){2,})[ \t]*$/;
 const frontmatterCache = new WeakMap<object, FrontmatterInfo | null>();
@@ -41,6 +45,23 @@ interface YamlFieldRange {
   keyTo: number;
   valueFrom: number | null;
   valueTo: number;
+}
+
+type YamlFrontmatterLayoutLine =
+  | ({ kind: 'field' } & YamlFieldRange)
+  | { kind: 'block-content'; line: LineInfo }
+  | { kind: 'scalar-list'; line: LineInfo }
+  | { kind: 'raw'; line: LineInfo };
+
+function isYamlScalarListLine(lineText: string): boolean {
+  const trimmed = lineText.trimStart();
+  if (!trimmed.startsWith('-') || !/\s/.test(trimmed[1] ?? '')) {
+    return false;
+  }
+  const value = trimmed.slice(1).trimStart();
+  return value.length > 0
+    && !value.startsWith('#')
+    && findYamlMappingSeparator(value, 0) < 0;
 }
 
 function isFrontmatterDelimiterLine(lineText: string): boolean {
@@ -266,21 +287,52 @@ export function forEachFrontmatterContentLine(state: EditorState, frontmatter: F
   }
 }
 
-export function forEachYamlFrontmatterField(state: EditorState, frontmatter: FrontmatterInfo | null, callback: (range: YamlFieldRange) => void): void {
-  forEachFrontmatterContentLine(state, frontmatter, (line) => {
+export function forEachYamlFrontmatterLayoutLine(
+  state: EditorState,
+  frontmatter: FrontmatterInfo | null,
+  callback: (entry: YamlFrontmatterLayoutLine) => void
+): void {
+  const range = frontmatterContentLineRange(state, frontmatter);
+  if (!range) {
+    return;
+  }
+
+  let blockScalarParentIndent: number | null = null;
+  for (let lineNo = range.startLineNo; lineNo <= range.endLineNo; lineNo += 1) {
+    const line = state.doc.line(lineNo);
+    const indentation = yamlIndentationWidth(line.text);
+    const isBlank = line.text.trim().length === 0;
+    const isBlockScalarContent = blockScalarParentIndent !== null
+      && (isBlank || indentation > blockScalarParentIndent);
+    if (blockScalarParentIndent !== null && !isBlockScalarContent) {
+      blockScalarParentIndent = null;
+    }
+    if (isBlockScalarContent) {
+      callback({ kind: 'block-content', line });
+      continue;
+    }
+
     const offsets = yamlFrontmatterFieldOffsets(line.text);
     if (!offsets) {
-      return;
+      callback({ kind: isYamlScalarListLine(line.text) ? 'scalar-list' : 'raw', line });
+      continue;
     }
 
     callback({
+      kind: 'field',
       line,
       keyFrom: line.from + offsets.keyFromOffset,
       keyTo: line.from + offsets.keyToOffset,
       valueFrom: offsets.valueFromOffset === null ? null : line.from + offsets.valueFromOffset,
       valueTo: line.to
     });
-  });
+    if (
+      offsets.valueFromOffset !== null
+      && isYamlBlockScalarValue(line.text.slice(offsets.valueFromOffset))
+    ) {
+      blockScalarParentIndent = indentation;
+    }
+  }
 }
 
 function buildSourceFrontmatterDecorations(state: EditorState): any {
@@ -293,20 +345,19 @@ function buildSourceFrontmatterDecorations(state: EditorState): any {
   const openingLine = state.doc.lineAt(frontmatter.openingFrom);
   builder.add(openingLine.from, openingLine.from, sourceFrontmatterDelimiterLineDeco);
 
-  forEachFrontmatterContentLine(state, frontmatter, (line) => {
+  forEachYamlFrontmatterLayoutLine(state, frontmatter, (entry) => {
+    const { line } = entry;
     builder.add(line.from, line.from, sourceFrontmatterContentLineDeco);
 
-    const offsets = yamlFrontmatterFieldOffsets(line.text);
-    if (!offsets) {
+    if (entry.kind !== 'field') {
       return;
     }
 
-    builder.add(line.from + offsets.keyFromOffset, line.from + offsets.keyToOffset, sourceFrontmatterKeyDeco);
+    builder.add(entry.keyFrom, entry.keyTo, sourceFrontmatterKeyDeco);
 
-    if (offsets.valueFromOffset !== null) {
-      const valueFrom = line.from + offsets.valueFromOffset;
-      if (valueFrom < line.to) {
-        builder.add(valueFrom, line.to, sourceFrontmatterValueDeco);
+    if (entry.valueFrom !== null) {
+      if (entry.valueFrom < line.to) {
+        builder.add(entry.valueFrom, line.to, sourceFrontmatterValueDeco);
       }
     }
   });

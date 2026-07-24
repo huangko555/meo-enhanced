@@ -37,7 +37,7 @@ import {
 } from './helpers/listMarkers';
 import { addTableDecorations, addTableDecorationsForLineRange, isTableDelimiterLine, parseTableInfo } from './helpers/tables';
 import {
-  forEachYamlFrontmatterField,
+  forEachYamlFrontmatterLayoutLine,
   parseFrontmatter,
   parseSimpleYamlFlowArrayValue,
   isInsideFrontmatter,
@@ -212,6 +212,8 @@ const lineStyleDecos = {
   footnote: Decoration.line({ class: 'meo-md-footnote-line' }),
   footnoteContinuation: Decoration.line({ class: 'meo-md-footnote-line meo-md-footnote-continuation' }),
   frontmatterContent: Decoration.line({ class: 'meo-md-frontmatter-content' }),
+  frontmatterProperty: Decoration.line({ class: 'meo-md-frontmatter-property' }),
+  frontmatterBlockContent: Decoration.line({ class: 'meo-md-frontmatter-property meo-md-frontmatter-block-content' }),
   frontmatterOpening: Decoration.line({ class: 'meo-md-hr meo-md-frontmatter-boundary meo-md-frontmatter-opening' }),
   frontmatterClosing: Decoration.line({ class: 'meo-md-hr meo-md-frontmatter-boundary meo-md-frontmatter-closing' }),
   hrActive: Decoration.line({ class: 'meo-md-hr-active' }),
@@ -246,6 +248,14 @@ const rawFileUrlBlockedAncestorNames = new Set([
   'HTMLBlock',
   'Table'
 ]);
+
+function addFrontmatterValueUrlDecorations(builder, valueFrom: number, valueText: string) {
+  for (const match of findRawSourceUrlMatches(valueText)) {
+    const urlFrom = valueFrom + match.index;
+    const rawUrl = valueText.slice(match.index, match.index + match.length);
+    addTrimmedUrlLinkMark(builder, urlFrom, urlFrom + match.length, rawUrl, match.href, true);
+  }
+}
 
 const listLineDecoCache = new Map();
 const listIndentWidgetCache = new Map();
@@ -450,25 +460,53 @@ function addStrikethroughDecorations(builder, state, node) {
 function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLines) {
   if (frontmatter.contentTo > frontmatter.contentFrom) {
     addLineClass(builder, state, frontmatter.contentFrom, frontmatter.contentTo, lineStyleDecos.frontmatterContent);
-    forEachYamlFrontmatterField(state, frontmatter, ({ line, keyFrom, keyTo, valueFrom, valueTo }) => {
-      addRange(builder, keyFrom, keyTo, frontmatterKeyDeco);
+    const propertyLineDeco = lineStyleDecos.frontmatterProperty;
+
+    forEachYamlFrontmatterLayoutLine(state, frontmatter, (entry) => {
+      const { line } = entry;
+      if (entry.kind === 'block-content') {
+        addLineClass(builder, state, line.from, line.to, lineStyleDecos.frontmatterBlockContent);
+        if (line.from < line.to) {
+          addFrontmatterValueUrlDecorations(builder, line.from, line.text);
+          addRange(builder, line.from, line.to, frontmatterValueDeco);
+        }
+        return;
+      }
+      if (entry.kind === 'scalar-list') {
+        addLineClass(builder, state, line.from, line.to, propertyLineDeco);
+        if (line.from < line.to) {
+          addFrontmatterValueUrlDecorations(builder, line.from, line.text);
+          addRange(builder, line.from, line.to, frontmatterValueDeco);
+        }
+        return;
+      }
+      if (entry.kind !== 'field') {
+        return;
+      }
+
+      const { keyTo, valueFrom, valueTo } = entry;
+      addLineClass(builder, state, line.from, line.to, propertyLineDeco);
+      const lineIsActive = activeLines.has(line.number) || overlapsSelection(state, line.from, line.to);
+      addRange(builder, line.from, keyTo, frontmatterKeyDeco);
       if (valueFrom !== null && valueFrom < valueTo) {
-        const lineIsActive = activeLines.has(line.number);
         const selectionOverlapsValue = overlapsSelection(state, valueFrom, valueTo);
+        const valueText = line.text.slice(valueFrom - line.from);
         const parsedArrayValue = !lineIsActive && !selectionOverlapsValue
           ? parseSimpleYamlFlowArrayValue(line.text, valueFrom - line.from)
           : null;
 
         if (parsedArrayValue) {
+          const arrayFrom = line.from + parsedArrayValue.fromOffset;
           builder.push(
             Decoration.replace({
               widget: frontmatterArrayPillsWidget(parsedArrayValue.items.map((item) => item.text)),
               inclusive: false
-            }).range(line.from + parsedArrayValue.fromOffset, line.from + parsedArrayValue.toOffset)
+            }).range(arrayFrom, line.from + parsedArrayValue.toOffset)
           );
           return;
         }
 
+        addFrontmatterValueUrlDecorations(builder, valueFrom, valueText);
         addRange(builder, valueFrom, valueTo, frontmatterValueDeco);
       }
     });
@@ -496,8 +534,8 @@ function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLi
       if (boundary.isOpening) {
         const line = state.doc.lineAt(boundary.from);
         addTopLinePillLabel(builder, line.to, 'Properties');
-        addRange(builder, boundary.from, boundary.to, frontmatterBoundaryMarkerDeco);
       }
+      addRange(builder, boundary.from, boundary.to, frontmatterBoundaryMarkerDeco);
     }
   }
 }
@@ -698,7 +736,7 @@ class FrontmatterArrayPillsWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const container = document.createElement('span');
-    container.className = 'meo-md-frontmatter-array-pills';
+    container.className = 'meo-md-frontmatter-value meo-md-frontmatter-array-pills';
     container.setAttribute('aria-hidden', 'true');
     for (const labelText of this.itemLabels) {
       const pill = document.createElement('span');
@@ -706,6 +744,17 @@ class FrontmatterArrayPillsWidget extends WidgetType {
       pill.textContent = labelText;
       container.appendChild(pill);
     }
+    container.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const view = EditorView.findFromDOM(container);
+      if (!view) {
+        return;
+      }
+      const anchor = view.posAtDOM(container);
+      view.dispatch({ selection: { anchor: Math.min(anchor + 1, view.state.doc.length) } });
+      view.focus();
+    });
     return container;
   }
 
@@ -1651,6 +1700,9 @@ function buildDecorations(state) {
         } else if (parentName !== 'Link' && parentName !== 'Autolink') {
           const href = getNodeHref(state, node);
           const rawUrl = state.doc.sliceString(node.from, node.to);
+          if (isInsideFrontmatterContent(frontmatter, node.from)) {
+            return;
+          }
           const isActiveLine = activeLines.has(state.doc.lineAt(node.from).number);
           addTrimmedUrlLinkMark(ranges, node.from, node.to, rawUrl, href, !isActiveLine);
         }

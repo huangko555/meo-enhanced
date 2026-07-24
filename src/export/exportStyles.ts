@@ -345,7 +345,8 @@ body[data-meo-export-target='pdf'] hr {
 .meo-export-frontmatter-key-cell {
   min-width: 0;
   color: var(--meo-muted);
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .meo-export-frontmatter-prefix {
@@ -374,14 +375,16 @@ body[data-meo-export-target='pdf'] hr {
 .meo-export-frontmatter-pill {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   min-height: 1.35em;
   padding: 0 6px;
   border-radius: 999px;
   background: var(--meo-border);
   color: var(--meo-fg);
   font-size: 0.92em;
+  white-space: normal;
+  overflow-wrap: anywhere;
   line-height: 1.1;
-  white-space: nowrap;
 }
 
 h1, h2, h3, h4, h5, h6 {

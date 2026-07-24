@@ -50,3 +50,21 @@ export function findYamlMappingSeparator(lineText: string, startOffset: number):
 
   return -1;
 }
+
+export function isYamlBlockScalarValue(value: string): boolean {
+  return /^[|>][1-9+-]{0,2}(?:\s+#.*)?$/.test(value.trim());
+}
+
+export function yamlIndentationWidth(line: string): number {
+  let width = 0;
+  for (const character of line) {
+    if (character === ' ') {
+      width += 1;
+    } else if (character === '\t') {
+      width += 2;
+    } else {
+      break;
+    }
+  }
+  return width;
+}
