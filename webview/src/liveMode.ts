@@ -84,6 +84,7 @@ import {
   LatexMathEditingWidget,
   latexMathEditingStateField
 } from './helpers/latexMathEditing';
+import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
@@ -261,6 +262,7 @@ function addFrontmatterValueUrlDecorations(builder, valueFrom: number, valueText
 
 const listLineDecoCache = new Map();
 const listIndentWidgetCache = new Map();
+const blockIndentLineDecoCache = new Map<number, ReturnType<typeof Decoration.line>>();
 const frontmatterArrayPillWidgetCache = new Map();
 const htmlBreakTagRegex = /^<br\s*\/?>$/i;
 
@@ -763,6 +765,26 @@ class FrontmatterArrayPillsWidget extends WidgetType {
   ignoreEvent(): boolean {
     return true;
   }
+}
+
+function blockIndentLineDeco(indentColumns: number) {
+  const normalized = Math.max(0, Math.round(indentColumns));
+  let decoration = blockIndentLineDecoCache.get(normalized);
+  if (!decoration) {
+    decoration = Decoration.line({
+      class: 'meo-live-indented-block-line',
+      attributes: { style: `${liveBlockIndentProperty}:${normalized}ch` }
+    });
+    blockIndentLineDecoCache.set(normalized, decoration);
+  }
+  return decoration;
+}
+
+function addBlockIndentLines(builder, state, from, to, indentColumns: number) {
+  if (indentColumns <= 0) {
+    return;
+  }
+  addLineClass(builder, state, from, to, blockIndentLineDeco(indentColumns));
 }
 
 function frontmatterArrayPillsWidget(itemLabels) {
@@ -1589,7 +1611,9 @@ function buildDecorations(state) {
         parsedTableRanges.push({ from: tableInfo.from, to: tableInfo.to });
         addTableDecorations(ranges, state, node, diagnostics, state.field(gitDiffLineFlagsField, false));
       } else if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
+        const indentColumns = getLiveListBlockIndentColumns(state, node.from, node.node);
         addLineClass(ranges, state, node.from, node.to, lineStyleDecos.codeBlock);
+        addBlockIndentLines(ranges, state, node.from, node.to, indentColumns);
         ranges.push(lineStyleDecos.codeBlockStart.range(state.doc.lineAt(node.from).from));
         ranges.push(lineStyleDecos.codeBlockEnd.range(state.doc.lineAt(Math.max(node.to - 1, node.from)).from));
         if (node.name === 'FencedCode') {
@@ -2024,8 +2048,10 @@ function addMermaidColonFenceDecorations(builder, state, mermaidColonBlocks, act
   for (const block of mermaidColonBlocks) {
     const startLine = state.doc.line(block.startLine);
     const endLine = state.doc.line(block.endLine);
+    const indentColumns = getLiveListBlockIndentColumns(state, startLine.from);
 
     addLineClass(builder, state, startLine.from, endLine.to, lineStyleDecos.codeBlock);
+    addBlockIndentLines(builder, state, startLine.from, endLine.to, indentColumns);
 
     addRange(
       builder,
@@ -2048,7 +2074,8 @@ function addMermaidColonFenceDecorations(builder, state, mermaidColonBlocks, act
       startLine: block.startLine,
       endLine: block.endLine,
       diagramText: block.diagramText,
-      fullBlockText: block.fullBlockText
+      fullBlockText: block.fullBlockText,
+      indentColumns
     });
   }
 }
@@ -2096,13 +2123,15 @@ class LatexMathWidget extends WidgetType {
   fencedDisplay: boolean;
   startLine: number;
   endLine: number;
+  indentColumns: number;
 
   constructor(
     html: string,
     mode: LatexMathMode,
     fencedDisplay = false,
     startLine = 0,
-    endLine = 0
+    endLine = 0,
+    indentColumns = 0
   ) {
     super();
     this.html = html;
@@ -2110,6 +2139,7 @@ class LatexMathWidget extends WidgetType {
     this.fencedDisplay = fencedDisplay;
     this.startLine = startLine;
     this.endLine = endLine;
+    this.indentColumns = indentColumns;
   }
 
   eq(other: WidgetType): boolean {
@@ -2119,7 +2149,8 @@ class LatexMathWidget extends WidgetType {
       other.mode === this.mode &&
       other.fencedDisplay === this.fencedDisplay &&
       other.startLine === this.startLine &&
-      other.endLine === this.endLine
+      other.endLine === this.endLine &&
+      other.indentColumns === this.indentColumns
     );
   }
 
@@ -2138,6 +2169,7 @@ class LatexMathWidget extends WidgetType {
     if (this.fencedDisplay && this.mode === 'display') {
       wrapper.classList.add('meo-md-math-fenced-display');
     }
+    applyLiveBlockIndent(wrapper, this.indentColumns);
     wrapper.innerHTML = this.html;
     return wrapper;
   }
@@ -2155,9 +2187,10 @@ function getMathWidget(
   mode: LatexMathMode,
   fencedDisplay = false,
   startLine = 0,
-  endLine = 0
+  endLine = 0,
+  indentColumns = 0
 ): WidgetType {
-  const key = `${mode}:${fencedDisplay ? 1 : 0}:${startLine}:${endLine}:${html}`;
+  const key = `${mode}:${fencedDisplay ? 1 : 0}:${startLine}:${endLine}:${indentColumns}:${html}`;
   let widget = mathWidgetCache.get(key);
   if (widget) {
     mathWidgetCache.delete(key);
@@ -2165,7 +2198,7 @@ function getMathWidget(
     return widget;
   }
 
-  widget = new LatexMathWidget(html, mode, fencedDisplay, startLine, endLine);
+  widget = new LatexMathWidget(html, mode, fencedDisplay, startLine, endLine, indentColumns);
   mathWidgetCache.set(key, widget);
   if (mathWidgetCache.size > MATH_WIDGET_CACHE_LIMIT) {
     const oldestKey = mathWidgetCache.keys().next().value;
@@ -2324,6 +2357,7 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
       const closingLine = state.doc.lineAt(Math.max(mathRange.to - 1, mathRange.from));
       const startLineNo = openingLine.number;
       const endLineNo = closingLine.number;
+      const indentColumns = getLiveListBlockIndentColumns(state, openingLine.from);
       const renderSpan = resolveFencedMathRenderSpan(state, startLineNo, endLineNo);
       if (renderSpan) {
         editingBoundary =
@@ -2332,6 +2366,7 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
       }
 
       addLineClass(builder, state, openingLine.from, closingLine.to, lineStyleDecos.codeBlock);
+      addBlockIndentLines(builder, state, openingLine.from, closingLine.to, indentColumns);
       builder.push(lineStyleDecos.codeBlockStart.range(openingLine.from));
       builder.push(lineStyleDecos.codeBlockEnd.range(closingLine.from));
 
@@ -2378,12 +2413,13 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
       builder.push(
         Decoration.replace({
           widget: mode.effective === 'preview'
-            ? getMathWidget(html!, mathRange.mode, true, startLineNo, endLineNo)
+            ? getMathWidget(html!, mathRange.mode, true, startLineNo, endLineNo, indentColumns)
             : new LatexMathEditingWidget({
               anchor,
               contentFrom: renderSpan.innerFrom,
               contentTo: renderSpan.innerTo,
-              sourceText: copyContent
+              sourceText: copyContent,
+              indentColumns
             }, mode.effective, mode.searchReveal),
           block: true
         }).range(renderSpan.innerFrom, renderSpan.innerTo)

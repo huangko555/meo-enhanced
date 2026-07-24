@@ -57,33 +57,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     html: true,
     linkify: true,
     breaks: true,
-    langPrefix: 'language-',
-    highlight(code, info) {
-      const language = normalizeFenceLanguage(info);
-      if (language === 'mermaid') {
-        hasMermaid = true;
-        const sourceB64 = Buffer.from(code, 'utf8').toString('base64');
-        return [
-          `<div class="meo-export-mermaid" data-source-b64="${escapeHtmlAttr(sourceB64)}">`,
-          '<pre class="meo-export-code-block"><code class="language-mermaid">',
-          escapeHtml(code),
-          '</code></pre>',
-          '</div>'
-        ].join('');
-      }
-
-      const highlighted = highlightFence(code, language);
-      const className = language ? ` class="hljs language-${escapeHtmlAttr(language)}"` : ' class="hljs"';
-      const languageLabel = language
-        ? `<div class="meo-export-code-language-label">${escapeHtml(language)}</div>`
-        : '';
-      return [
-        '<div class="meo-export-code-block-wrap">',
-        languageLabel,
-        `<pre class="meo-export-code-block"><code${className}>${highlighted}</code></pre>`,
-        '</div>'
-      ].join('');
-    }
+    langPrefix: 'language-'
   });
   md.use(emoji);
   installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
@@ -125,33 +99,52 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     renderMarkdown: (markdownText) => md.render(markdownText),
     normalizeMarkdown: normalizeMarkdownForExport
   });
-  const defaultFenceRule = md.renderer.rules.fence ?? ((tokens, idx, opts, _env, self) => (
-    self.renderToken(tokens, idx, opts)
-  ));
-  md.renderer.rules.fence = (tokens, idx, opts, env, self) => {
+  md.renderer.rules.fence = (tokens, idx) => {
     const fenceBlock = tokens[idx];
     const language = normalizeFenceLanguage(fenceBlock.info);
-    if (!MATH_FENCE_LANGUAGES.has(language)) {
-      return defaultFenceRule(tokens, idx, opts, env, self);
-    }
-
-    const source = String(fenceBlock.content ?? '').trim();
-    const ranges = collectLatexMathRanges(source);
-    const mathContent = ranges.length === 1 && ranges[0].from === 0 && ranges[0].to === source.length
-      ? ranges[0].content
-      : source.replace(/^\$\$\s*/, '').replace(/\s*\$\$$/, '').trim();
-    const renderedMath = renderLatexMathToHtml(mathContent, 'display');
-    if (!renderedMath) {
-      return defaultFenceRule(tokens, idx, opts, env, self);
-    }
-
-    hasMath = true;
     const sourceLine = fenceBlock.attrGet('data-source-line');
     const sourceEndLine = fenceBlock.attrGet('data-source-end-line');
     const sourceAttrs = sourceLine
       ? ` data-source-line="${escapeHtmlAttr(sourceLine)}"${sourceEndLine ? ` data-source-end-line="${escapeHtmlAttr(sourceEndLine)}"` : ''}`
       : '';
-    return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${sourceAttrs}>${renderedMath}</div>`;
+    const source = String(fenceBlock.content ?? '');
+
+    if (MATH_FENCE_LANGUAGES.has(language)) {
+      const trimmedSource = source.trim();
+      const ranges = collectLatexMathRanges(trimmedSource);
+      const mathContent = ranges.length === 1 && ranges[0].from === 0 && ranges[0].to === trimmedSource.length
+        ? ranges[0].content
+        : trimmedSource.replace(/^\$\$\s*/, '').replace(/\s*\$\$$/, '').trim();
+      const renderedMath = renderLatexMathToHtml(mathContent, 'display');
+      if (renderedMath) {
+        hasMath = true;
+        return `<div class="meo-export-math meo-export-math-display meo-export-math-fenced-display"${sourceAttrs}>${renderedMath}</div>`;
+      }
+    }
+
+    if (language === 'mermaid') {
+      hasMermaid = true;
+      const sourceB64 = Buffer.from(source, 'utf8').toString('base64');
+      return [
+        `<div class="meo-export-mermaid" data-source-b64="${escapeHtmlAttr(sourceB64)}"${sourceAttrs}>`,
+        '<pre class="meo-export-code-block"><code class="language-mermaid">',
+        escapeHtml(source),
+        '</code></pre>',
+        '</div>'
+      ].join('');
+    }
+
+    const highlighted = highlightFence(source, language);
+    const className = language ? ` class="hljs language-${escapeHtmlAttr(language)}"` : ' class="hljs"';
+    const languageLabel = language
+      ? `<div class="meo-export-code-language-label">${escapeHtml(language)}</div>`
+      : '';
+    return [
+      `<div class="meo-export-code-block-wrap"${sourceAttrs}>`,
+      languageLabel,
+      `<pre class="meo-export-code-block"><code${className}>${highlighted}</code></pre>`,
+      '</div>'
+    ].join('');
   };
   bodySourceLines = preparedMarkdown.body.sourceLines;
   const bodyHtml = md.render(preparedMarkdown.body.markdown);

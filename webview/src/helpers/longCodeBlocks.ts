@@ -2,6 +2,7 @@ import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/s
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { getFencedCodeInfo } from './codeBlocks';
+import { applyLiveBlockIndent, getLiveListBlockIndentColumns } from './blockIndent';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
@@ -12,6 +13,7 @@ type LongCodeBlockDescriptor = {
   start: number;
   end: number;
   endLineFrom: number;
+  indentColumns: number;
   contentFrom: number;
   contentTo: number;
   collapsedFrom: number;
@@ -76,6 +78,7 @@ function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescr
         start: startLine.from,
         end: endLine.to,
         endLineFrom: endLine.from,
+        indentColumns: getLiveListBlockIndentColumns(state, node.from, node.node),
         contentFrom: contentStartLine.from,
         contentTo: contentEndLine.to,
         collapsedFrom,
@@ -184,7 +187,8 @@ function makeActionButton(
 class LongCodePlaceholderWidget extends WidgetType {
   constructor(
     readonly anchor: number,
-    readonly hiddenLineCount: number
+    readonly hiddenLineCount: number,
+    readonly indentColumns: number
   ) {
     super();
   }
@@ -192,13 +196,15 @@ class LongCodePlaceholderWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return other instanceof LongCodePlaceholderWidget &&
       other.anchor === this.anchor &&
-      other.hiddenLineCount === this.hiddenLineCount;
+      other.hiddenLineCount === this.hiddenLineCount &&
+      other.indentColumns === this.indentColumns;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const container = document.createElement('div');
     container.className = 'meo-md-long-code-placeholder';
     container.dataset.longCodeAnchor = String(this.anchor);
+    applyLiveBlockIndent(container, this.indentColumns);
     container.appendChild(makeActionButton(view, 'expand', this.anchor, this.hiddenLineCount));
     return container;
   }
@@ -209,18 +215,21 @@ class LongCodePlaceholderWidget extends WidgetType {
 }
 
 class LongCodeFooterWidget extends WidgetType {
-  constructor(readonly anchor: number) {
+  constructor(readonly anchor: number, readonly indentColumns: number) {
     super();
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof LongCodeFooterWidget && other.anchor === this.anchor;
+    return other instanceof LongCodeFooterWidget &&
+      other.anchor === this.anchor &&
+      other.indentColumns === this.indentColumns;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const container = document.createElement('div');
     container.className = 'meo-md-long-code-footer';
     container.dataset.longCodeAnchor = String(this.anchor);
+    applyLiveBlockIndent(container, this.indentColumns);
     container.appendChild(makeActionButton(view, 'collapse', this.anchor));
     return container;
   }
@@ -244,7 +253,7 @@ function buildLongCodeDecorations(
           from: block.collapsedFrom,
           to: block.end,
           decoration: Decoration.replace({
-            widget: new LongCodePlaceholderWidget(block.anchor, block.hiddenLineCount),
+            widget: new LongCodePlaceholderWidget(block.anchor, block.hiddenLineCount, block.indentColumns),
             block: true
           })
         });
@@ -255,7 +264,7 @@ function buildLongCodeDecorations(
       from: block.end,
       to: block.end,
       decoration: Decoration.widget({
-        widget: new LongCodeFooterWidget(block.anchor),
+        widget: new LongCodeFooterWidget(block.anchor, block.indentColumns),
         block: true,
         side: 1
       })
@@ -378,7 +387,6 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
 class LongCodeFloatingButtonPlugin {
   button: HTMLButtonElement;
   view: EditorView;
-  private horizontalOffset = 0;
   private readonly onScroll = (): void => this.refresh();
   private readonly onPointerDown = (event: PointerEvent): void => {
     const target = event.target instanceof Element ? event.target : null;
@@ -440,16 +448,9 @@ class LongCodeFloatingButtonPlugin {
         const state = view.state.field(longCodeBlockStateField, false);
         const scroller = view.scrollDOM.getBoundingClientRect();
         const content = view.contentDOM.getBoundingClientRect();
-        const staticContainer = view.dom.querySelector<HTMLElement>(
-          '.meo-md-long-code-placeholder, .meo-md-long-code-footer'
-        );
-        const staticRect = staticContainer?.getBoundingClientRect() ?? null;
         const contentCenter = content.left + content.width / 2;
-        const horizontalOffset = staticRect
-          ? staticRect.left + staticRect.width / 2 - contentCenter
-          : this.horizontalOffset;
         if (!state || scroller.width <= 0 || scroller.height <= 0) {
-          return { visible: false, anchor: 0, left: 0, top: 0, horizontalOffset };
+          return { visible: false, anchor: 0, left: 0, top: 0 };
         }
 
         const probeY = scroller.bottom - 8;
@@ -476,18 +477,24 @@ class LongCodeFloatingButtonPlugin {
           })
           .sort((left, right) => right.start - left.start)[0];
 
+        const visibleCodeLine = Array.from(
+          view.dom.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block')
+        ).map((line) => line.getBoundingClientRect())
+          .find((rect) => rect.top <= probeY && rect.bottom >= probeY);
+        const blockCenter = visibleCodeLine
+          ? visibleCodeLine.left + visibleCodeLine.width / 2
+          : contentCenter;
+
         return block
           ? {
               visible: true,
               anchor: block.anchor,
-              left: contentCenter + horizontalOffset,
-              top: scroller.bottom - 34,
-              horizontalOffset
+              left: blockCenter,
+              top: scroller.bottom - 34
             }
-          : { visible: false, anchor: 0, left: 0, top: 0, horizontalOffset };
+          : { visible: false, anchor: 0, left: 0, top: 0 };
       },
       write: (measure) => {
-        this.horizontalOffset = measure.horizontalOffset;
         if (!measure.visible) {
           this.button.hidden = true;
           return;

@@ -60,6 +60,11 @@ const tableLikeCode = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview-table-code.md',
   target: 'html'
 });
+const nestedCodeBlock = renderMarkdownToHtml({
+  markdownText: '- Nested code:\n\n  ```javascript\n  const nested = true;\n  ```',
+  markdownFilePath: 'C:/tmp/preview-nested-code.md',
+  target: 'html'
+});
 const math = renderMarkdownToHtml({
   markdownText: [
     '行内公式：$E = mc^2$，$a^2 + b^2 = c^2$',
@@ -152,6 +157,14 @@ if (!transformedSources.html.includes('class="footnotes" data-source-line="6" da
 }
 if (!tableLikeCode.html.includes('| --- |') || tableLikeCode.html.includes('| --- | --- |')) {
   throw new Error('Preview table compatibility must not rewrite fenced code');
+}
+if (
+  nestedCodeBlock.html.includes('<pre><code')
+  || (nestedCodeBlock.html.match(/<pre\b/g) ?? []).length !== 1
+  || !nestedCodeBlock.html.includes('<div class="meo-export-code-block-wrap" data-source-line="3"')
+  || !/<li\b[^>]*>[\s\S]*<div class="meo-export-code-block-wrap"[\s\S]*<\/li>/.test(nestedCodeBlock.html)
+) {
+  throw new Error('Preview nested code fences must render as one valid custom code block');
 }
 if (
   !math.html.includes('class="meo-export-math meo-export-math-inline"') ||

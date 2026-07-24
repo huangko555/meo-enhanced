@@ -405,6 +405,169 @@ async function main() {
       throw new Error('Floating collapse button remained visible when viewport bottom moved into prose');
     }
 
+    const nestedLongLines = Array.from({ length: 80 }, (_, index) => `  const nested${index + 1} = ${index + 1};`);
+    const nestedText = [
+      '```js',
+      'const top = true;',
+      '```',
+      '',
+      '- nested code',
+      '',
+      '  ```js',
+      ...nestedLongLines,
+      '  ```'
+    ].join('\n');
+    await page.evaluate((content) => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__longCodeBlocksEditor = (window as any).LongCodeBlocksHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: content,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, nestedText);
+    await waitForFrames(page);
+
+    const collapsedNestedLayout = await page.evaluate(() => {
+      const starts = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block-start'));
+      const placeholder = document.querySelector<HTMLElement>('.meo-md-long-code-placeholder');
+      const top = starts[0]?.getBoundingClientRect();
+      const nested = starts[1]?.getBoundingClientRect();
+      const control = placeholder?.getBoundingClientRect();
+      return {
+        topLeft: top?.left ?? 0,
+        nestedLeft: nested?.left ?? 0,
+        nestedCenter: nested ? nested.left + nested.width / 2 : 0,
+        controlCenter: control ? control.left + control.width / 2 : 0
+      };
+    });
+    if (
+      collapsedNestedLayout.nestedLeft <= collapsedNestedLayout.topLeft ||
+      Math.abs(collapsedNestedLayout.controlCenter - collapsedNestedLayout.nestedCenter) > 1
+    ) {
+      throw new Error(`Nested collapsed code layout lost its indentation: ${JSON.stringify(collapsedNestedLayout)}`);
+    }
+
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await waitForFrames(page);
+    const expandedNestedLayout = await page.evaluate(() => {
+      const nested = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block-start'))[1]?.getBoundingClientRect();
+      const footer = document.querySelector<HTMLElement>('.meo-md-long-code-footer')?.getBoundingClientRect();
+      return {
+        nestedCenter: nested ? nested.left + nested.width / 2 : 0,
+        footerCenter: footer ? footer.left + footer.width / 2 : 0
+      };
+    });
+    if (Math.abs(expandedNestedLayout.footerCenter - expandedNestedLayout.nestedCenter) > 1) {
+      throw new Error(`Nested fixed Show less was not centered over its code block: ${JSON.stringify(expandedNestedLayout)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const position = editor.view.state.doc.toString().indexOf('const nested40');
+      const block = editor.view.lineBlockAt(position);
+      editor.view.scrollDOM.scrollTop = block.top - editor.view.scrollDOM.clientHeight / 2;
+    });
+    await waitForFrames(page);
+    const floatingNestedLayout = await page.evaluate(() => {
+      const floating = document.querySelector<HTMLButtonElement>('.meo-long-code-floating-action');
+      const floatingRect = floating?.getBoundingClientRect();
+      const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
+      const probeY = scroller.bottom - 8;
+      const visibleLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+        .map((line) => line.getBoundingClientRect())
+        .find((rect) => rect.top <= probeY && rect.bottom >= probeY);
+      return {
+        visible: Boolean(floating && !floating.hidden),
+        lineCenter: visibleLine ? visibleLine.left + visibleLine.width / 2 : 0,
+        floatingCenter: floatingRect ? floatingRect.left + floatingRect.width / 2 : 0
+      };
+    });
+    if (
+      !floatingNestedLayout.visible ||
+      Math.abs(floatingNestedLayout.floatingCenter - floatingNestedLayout.lineCenter) > 1
+    ) {
+      throw new Error(`Nested floating Show less was not centered over its code block: ${JSON.stringify(floatingNestedLayout)}`);
+    }
+
+    const nestedRenderedBlocksText = [
+      '```js',
+      'const top = true;',
+      '```',
+      '',
+      '- nested blocks',
+      '',
+      '  ```mermaid',
+      '  graph TD',
+      '  A-->B',
+      '  ```',
+      '',
+      '  $$',
+      '  x^2',
+      '  $$'
+    ].join('\n');
+    await page.evaluate((content) => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__longCodeBlocksEditor = (window as any).LongCodeBlocksHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: content,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, nestedRenderedBlocksText);
+    await waitForFrames(page, 12);
+
+    const renderedBlockLayout = await page.evaluate(() => {
+      const top = document.querySelector<HTMLElement>('.cm-line.meo-md-code-block-start')?.getBoundingClientRect();
+      const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect();
+      const math = document.querySelector<HTMLElement>('.meo-md-math-fenced-display')?.getBoundingClientRect();
+      return {
+        topLeft: top?.left ?? 0,
+        topRight: top?.right ?? 0,
+        mermaidLeft: mermaid?.left ?? 0,
+        mermaidRight: mermaid?.right ?? 0,
+        mathLeft: math?.left ?? 0,
+        mathRight: math?.right ?? 0
+      };
+    });
+    if (
+      renderedBlockLayout.mermaidLeft <= renderedBlockLayout.topLeft ||
+      renderedBlockLayout.mathLeft <= renderedBlockLayout.topLeft ||
+      Math.abs(renderedBlockLayout.mermaidRight - renderedBlockLayout.topRight) > 1 ||
+      Math.abs(renderedBlockLayout.mathRight - renderedBlockLayout.topRight) > 1
+    ) {
+      throw new Error(`Nested Mermaid or math block lost its indentation: ${JSON.stringify(renderedBlockLayout)}`);
+    }
+
+    await page.click('.meo-mermaid-mode-btn');
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page, 12);
+    const editingBlockLayout = await page.evaluate(() => {
+      const top = document.querySelector<HTMLElement>('.cm-line.meo-md-code-block-start')?.getBoundingClientRect();
+      const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')?.getBoundingClientRect();
+      const math = document.querySelector<HTMLElement>('.meo-latex-math-editing-block')?.getBoundingClientRect();
+      return {
+        topLeft: top?.left ?? 0,
+        topRight: top?.right ?? 0,
+        mermaidLeft: mermaid?.left ?? 0,
+        mermaidRight: mermaid?.right ?? 0,
+        mathLeft: math?.left ?? 0,
+        mathRight: math?.right ?? 0
+      };
+    });
+    if (
+      editingBlockLayout.mermaidLeft <= editingBlockLayout.topLeft ||
+      editingBlockLayout.mathLeft <= editingBlockLayout.topLeft ||
+      Math.abs(editingBlockLayout.mermaidRight - editingBlockLayout.topRight) > 1 ||
+      Math.abs(editingBlockLayout.mathRight - editingBlockLayout.topRight) > 1
+    ) {
+      throw new Error(`Nested Mermaid or math editing block lost its indentation: ${JSON.stringify(editingBlockLayout)}`);
+    }
+
     console.log('long code block checks passed');
   } finally {
     await browser.close();

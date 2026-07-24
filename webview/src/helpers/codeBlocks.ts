@@ -20,6 +20,7 @@ import {
   getMermaidBlockMode,
   MermaidEditingWidget
 } from './mermaidEditing';
+import { getLiveListBlockIndentColumns } from './blockIndent';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -778,7 +779,8 @@ export function addMermaidDiagram(builder: any[], state: EditorState, node: any)
     startLine: startLine.number,
     endLine: endLine.number,
     diagramText,
-    fullBlockText
+    fullBlockText,
+    indentColumns: getLiveListBlockIndentColumns(state, node.from, node.node)
   });
 }
 
@@ -790,6 +792,7 @@ export function addMermaidDiagramBlock(
     endLine: number;
     diagramText: string;
     fullBlockText: string;
+    indentColumns?: number;
   }
 ): void {
   if (!block.diagramText.trim()) {
@@ -811,6 +814,7 @@ export function addMermaidDiagramBlock(
   }
 
   const anchor = startLine.from;
+  const indentColumns = block.indentColumns ?? 0;
   const mode = getMermaidBlockMode(
     state,
     anchor,
@@ -820,14 +824,15 @@ export function addMermaidDiagramBlock(
   addMermaidToolbar(builder, startLine.to, anchor, mode.effective, block.fullBlockText);
 
   const widget = mode.effective === 'preview'
-    ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number)
+    ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number, { indentColumns })
     : new MermaidEditingWidget({
       anchor,
       contentFrom: contentStartLine.from,
       contentTo: contentEndLine.to,
       diagramText: block.diagramText,
       startLine: startLine.number,
-      endLine: endLine.number
+      endLine: endLine.number,
+      indentColumns
     }, mode.effective, mode.searchReveal);
   builder.push(
     Decoration.replace({

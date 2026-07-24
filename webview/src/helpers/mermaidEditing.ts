@@ -5,6 +5,7 @@ import { createElement, Code2, Eye, Pencil } from 'lucide';
 import { getCachedMermaidPreviewHeight, MermaidDiagramWidget } from './mermaidDiagram';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { getViewportController } from './viewportController';
+import { applyLiveBlockIndent } from './blockIndent';
 
 export type MermaidBlockMode = 'preview' | 'split' | 'source';
 
@@ -30,6 +31,7 @@ type MermaidEditingBlock = {
   diagramText: string;
   startLine: number;
   endLine: number;
+  indentColumns: number;
 };
 
 export const setMermaidBlockModeEffect = StateEffect.define<MermaidModeChange>();
@@ -519,18 +521,25 @@ export class MermaidEditingWidget extends WidgetType {
     return other instanceof MermaidEditingWidget &&
       other.block.anchor === this.block.anchor &&
       other.block.diagramText === this.block.diagramText &&
+      other.block.indentColumns === this.block.indentColumns &&
       other.mode === this.mode &&
       other.searchReveal?.from === this.searchReveal?.from &&
       other.searchReveal?.to === this.searchReveal?.to;
   }
 
   toDOM(view: EditorView): HTMLElement {
-    return new MermaidEditingController(view, this.block, this.mode, this.searchReveal).dom;
+    const dom = new MermaidEditingController(view, this.block, this.mode, this.searchReveal).dom;
+    applyLiveBlockIndent(dom, this.block.indentColumns);
+    return dom;
   }
 
   updateDOM(dom: HTMLElement, view: EditorView): boolean {
     const controller = (dom as MermaidEditingBlockElement).__meoMermaidEditingController;
-    return controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
+    const updated = controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
+    if (updated) {
+      applyLiveBlockIndent(dom, this.block.indentColumns);
+    }
+    return updated;
   }
 
   ignoreEvent(): boolean {

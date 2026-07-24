@@ -4614,3 +4614,10 @@ body.outline-resizing .preview-frame {
 .cm-editor.meo-mode-live .cm-line.meo-md-alert .meo-md-alert-label-active {
   color: var(--meo-alert-color) !important;
 }
+
+.cm-editor.meo-mode-live .cm-line.meo-live-indented-block-line,
+.cm-editor.meo-mode-live .meo-live-indented-block {
+  box-sizing: border-box;
+  width: calc(100% - var(--meo-live-block-indent));
+  margin-left: var(--meo-live-block-indent);
+}

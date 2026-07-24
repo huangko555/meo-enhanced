@@ -5,6 +5,7 @@ import { createElement, Code2, Eye, Pencil } from 'lucide';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
 import { getViewportController } from './viewportController';
+import { applyLiveBlockIndent } from './blockIndent';
 
 export type LatexMathBlockMode = 'preview' | 'split' | 'source';
 
@@ -28,6 +29,7 @@ type LatexMathEditingBlock = {
   contentFrom: number;
   contentTo: number;
   sourceText: string;
+  indentColumns: number;
 };
 
 export const setLatexMathBlockModeEffect = StateEffect.define<LatexMathModeChange>();
@@ -492,18 +494,25 @@ export class LatexMathEditingWidget extends WidgetType {
     return other instanceof LatexMathEditingWidget &&
       other.block.anchor === this.block.anchor &&
       other.block.sourceText === this.block.sourceText &&
+      other.block.indentColumns === this.block.indentColumns &&
       other.mode === this.mode &&
       other.searchReveal?.from === this.searchReveal?.from &&
       other.searchReveal?.to === this.searchReveal?.to;
   }
 
   toDOM(view: EditorView): HTMLElement {
-    return new LatexMathEditingController(view, this.block, this.mode, this.searchReveal).dom;
+    const dom = new LatexMathEditingController(view, this.block, this.mode, this.searchReveal).dom;
+    applyLiveBlockIndent(dom, this.block.indentColumns);
+    return dom;
   }
 
   updateDOM(dom: HTMLElement, view: EditorView): boolean {
     const controller = (dom as LatexMathEditingBlockElement).__meoLatexMathEditingController;
-    return controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
+    const updated = controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
+    if (updated) {
+      applyLiveBlockIndent(dom, this.block.indentColumns);
+    }
+    return updated;
   }
 
   ignoreEvent(): boolean {

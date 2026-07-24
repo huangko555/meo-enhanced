@@ -2,6 +2,7 @@ import { WidgetType, type EditorView } from '@codemirror/view';
 import { createElement, ZoomIn, ZoomOut, RotateCcw, Maximize2, X } from 'lucide';
 import type { EditorState } from '@codemirror/state';
 import { getViewportController } from './viewportController';
+import { applyLiveBlockIndent } from './blockIndent';
 
 declare global {
   interface Window {
@@ -574,12 +575,13 @@ export class MermaidDiagramWidget extends WidgetType {
   cachePreviewHeight: boolean;
   previewResizeObserver: ResizeObserver | null;
   measuredHeight: number;
+  indentColumns: number;
 
   constructor(
     diagramText: string,
     startLine: number = 0,
     endLine: number = 0,
-    options: { cachePreviewHeight?: boolean } = {}
+    options: { cachePreviewHeight?: boolean; indentColumns?: number } = {}
   ) {
     super();
     this.diagramText = diagramText;
@@ -602,6 +604,7 @@ export class MermaidDiagramWidget extends WidgetType {
     this.exitFullscreenHandler = null;
     this.themeSignature = getMermaidThemeConfig().signature;
     this.cachePreviewHeight = options.cachePreviewHeight ?? true;
+    this.indentColumns = options.indentColumns ?? 0;
     this.previewResizeObserver = null;
     const resultCacheKey = mermaidResultCacheKey(this.diagramText, this.themeSignature);
     const contentWidth = currentMermaidContentWidth();
@@ -620,6 +623,7 @@ export class MermaidDiagramWidget extends WidgetType {
       other.diagramText === this.diagramText &&
       other.startLine === this.startLine &&
       other.endLine === this.endLine &&
+      other.indentColumns === this.indentColumns &&
       other.themeSignature === this.themeSignature
     );
   }
@@ -627,6 +631,7 @@ export class MermaidDiagramWidget extends WidgetType {
   toDOM(view?: EditorView) {
     const container = document.createElement('div');
     container.className = 'meo-mermaid-block';
+    applyLiveBlockIndent(container, this.indentColumns);
     applyMermaidThemeClass(container);
     if (this.startLine > 0) {
       container.dataset.meoRenderedBlockStartLine = String(this.startLine);
