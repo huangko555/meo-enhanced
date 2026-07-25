@@ -3,6 +3,10 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.1.5
+- Prioritized right-side toolbar controls in narrow windows and indicated covered left-side tools with a non-interactive ellipsis.
+- Disabled text selection throughout the toolbar.
+
 ## MEO Enhanced 0.1.4
 - Matched the outer borders of the mode and Preview appearance controls to their active pill background while preserving the full-size selection indicator.
 
