@@ -3,6 +3,10 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.1.3
+- Refined the Live / Source / Preview and Light / Dark controls with consistent pill styling and content-aware widths.
+- Improved the line jump input alignment and simplified line navigation to use Enter without an inline action button.
+
 ## MEO Enhanced 0.1.2
 - Added a fixed baseline workflow that can pin the latest valid saved version and switch back to the selected Changes mode without releasing the baseline.
 - Added Obsidian-style Frontmatter Properties in Live and Preview while preserving direct editing and complex YAML content.

@@ -122,7 +122,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   const createAppearanceButton = (value: PreviewAppearance, label: string) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'preview-appearance-button';
+    button.className = 'preview-appearance-button segmented-control-button';
     button.dataset.appearance = value;
     button.append(
       createElement(value === 'light' ? Sun : Moon, { width: 14, height: 14, 'aria-hidden': 'true' }),

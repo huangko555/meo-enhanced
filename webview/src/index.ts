@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, CornerDownLeft, Settings2, UserRound, Check, MapPin, MapPinOff } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, UserRound, Check, MapPin, MapPinOff } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -594,14 +594,7 @@ lineJumpInput.autocomplete = 'off';
 lineJumpInput.spellcheck = false;
 lineJumpInput.setAttribute('aria-label', 'Go to line');
 
-const lineJumpButton = document.createElement('button');
-lineJumpButton.type = 'button';
-lineJumpButton.className = 'line-jump-button';
-lineJumpButton.title = 'Go to line';
-lineJumpButton.setAttribute('aria-label', 'Go to line');
-lineJumpButton.hidden = true;
-lineJumpButton.appendChild(createElement(CornerDownLeft, { width: 14, height: 14 }));
-lineJumpControl.append(lineJumpInput, lineJumpButton);
+lineJumpControl.append(lineJumpInput);
 
 let acceptedLineJumpInput = '';
 
@@ -611,9 +604,6 @@ const clearLineJumpError = () => {
 };
 
 const syncLineJumpInput = () => {
-  const hasValue = lineJumpInput.value.length > 0;
-  lineJumpControl.classList.toggle('has-value', hasValue);
-  lineJumpButton.hidden = !hasValue;
   clearLineJumpError();
 };
 
@@ -682,11 +672,6 @@ lineJumpInput.addEventListener('blur', (event) => {
     clearLineJumpInput();
   }
 });
-
-lineJumpButton.addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-});
-lineJumpButton.addEventListener('click', submitLineJump);
 
 document.addEventListener('pointerdown', (event) => {
   if (!lineJumpControl.contains(event.target as Node)) {
@@ -855,7 +840,7 @@ modeGroup.setAttribute('aria-label', 'Markdown mode');
 
 const liveButton = document.createElement('button');
 liveButton.type = 'button';
-liveButton.className = 'mode-button';
+liveButton.className = 'mode-button segmented-control-button';
 liveButton.dataset.mode = 'live';
 liveButton.textContent = 'Live';
 liveButton.setAttribute('role', 'tab');
@@ -863,7 +848,7 @@ liveButton.title = 'Live';
 
 const sourceButton = document.createElement('button');
 sourceButton.type = 'button';
-sourceButton.className = 'mode-button';
+sourceButton.className = 'mode-button segmented-control-button';
 sourceButton.dataset.mode = 'source';
 sourceButton.textContent = 'Source';
 sourceButton.setAttribute('role', 'tab');
@@ -871,7 +856,7 @@ sourceButton.title = 'Source';
 
 const previewButton = document.createElement('button');
 previewButton.type = 'button';
-previewButton.className = 'mode-button';
+previewButton.className = 'mode-button segmented-control-button';
 previewButton.dataset.mode = 'preview';
 previewButton.textContent = 'Preview';
 previewButton.setAttribute('role', 'tab');
