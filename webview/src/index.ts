@@ -871,7 +871,7 @@ toolbarOverflowIndicator.appendChild(createElement(Ellipsis, { width: 18, height
 
 const toolbarRight = document.createElement('div');
 toolbarRight.className = 'toolbar-right';
-toolbarRight.append(toolbarOverflowIndicator, rightGroup, modeGroup);
+toolbarRight.append(rightGroup, modeGroup);
 
 const findPanelElements = createFindPanel(findToggleBtn);
 const findPanelController = createFindPanelController(
@@ -903,15 +903,52 @@ editorNoticeBanner.hidden = true;
 let handleEditorNoticeDismiss = (): void => {};
 const editorNotice = createEditorNoticeController(editorNoticeBanner, () => handleEditorNoticeDismiss());
 
-toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarRight, findPanelElements.panel, editorNoticeBanner);
+toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarRight, findPanelElements.panel, editorNoticeBanner);
 
 const syncToolbarOverflow = () => {
+  const toolbarBounds = toolbar.getBoundingClientRect();
   const visibleLeftGroup = previewFormatGroup.getClientRects().length > 0
     ? previewFormatGroup
     : formatGroup;
-  const leftBounds = visibleLeftGroup.getBoundingClientRect();
-  const rightBounds = rightGroup.getBoundingClientRect();
-  toolbarRight.classList.toggle('has-left-overflow', leftBounds.right > rightBounds.left);
+  const leftItems = Array.from(visibleLeftGroup.children).filter((child): child is HTMLElement => (
+    child instanceof HTMLElement && getComputedStyle(child).display !== 'none'
+  ));
+  const rightBoundary = toolbarRight.getBoundingClientRect().left;
+  const hasOverflow = leftItems.some((item) => item.getBoundingClientRect().right > rightBoundary);
+
+  for (const group of [formatGroup, previewFormatGroup]) {
+    for (const child of group.children) {
+      child.classList.remove('toolbar-overflow-hidden');
+    }
+  }
+
+  if (!hasOverflow) {
+    toolbarOverflowIndicator.hidden = true;
+    return;
+  }
+
+  const indicatorWidth = 24;
+  const indicatorGap = 4;
+  let visibleCount = 0;
+  for (const item of leftItems) {
+    if (item.getBoundingClientRect().right + indicatorGap + indicatorWidth > rightBoundary) break;
+    visibleCount += 1;
+  }
+
+  while (visibleCount > 0 && leftItems[visibleCount - 1].classList.contains('format-separator')) {
+    visibleCount -= 1;
+  }
+
+  leftItems.forEach((item, index) => {
+    item.classList.toggle('toolbar-overflow-hidden', index >= visibleCount);
+  });
+
+  const leftGroupBounds = visibleLeftGroup.getBoundingClientRect();
+  const indicatorLeft = visibleCount > 0
+    ? leftItems[visibleCount - 1].getBoundingClientRect().right - toolbarBounds.left + indicatorGap
+    : leftGroupBounds.left - toolbarBounds.left;
+  toolbarOverflowIndicator.style.left = `${indicatorLeft}px`;
+  toolbarOverflowIndicator.hidden = false;
 };
 
 const toolbarResizeObserver = new ResizeObserver(syncToolbarOverflow);
