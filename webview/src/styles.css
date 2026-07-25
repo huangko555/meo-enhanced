@@ -470,7 +470,7 @@ body {
   position: absolute;
   z-index: 2;
   inset: 1px 0;
-  border: 1px solid #54595e;
+  border: 1px solid var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
   border-radius: 999px;
   pointer-events: none;
 }
@@ -888,7 +888,7 @@ body {
 
 .mode-group::after {
   z-index: 2;
-  border: 1px solid #54595e;
+  border: 1px solid var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
 }
 
 @media (max-width: 920px) {

@@ -3,6 +3,9 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.1.4
+- Matched the outer borders of the mode and Preview appearance controls to their active pill background while preserving the full-size selection indicator.
+
 ## MEO Enhanced 0.1.3
 - Refined the Live / Source / Preview and Light / Dark controls with consistent pill styling and content-aware widths.
 - Improved the line jump input alignment and simplified line navigation to use Enter without an inline action button.
