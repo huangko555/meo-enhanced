@@ -199,7 +199,6 @@ body {
   position: relative;
   z-index: 500;
   display: flex;
-  justify-content: space-between;
   align-items: center;
   padding: 8px 14px 8px 10px;
   background-color: var(--vscode-sideBar-background);
@@ -576,8 +575,36 @@ body {
 }
 
 .right-group {
-  margin-left: auto;
+  margin-left: 0;
   margin-right: 12px;
+}
+
+.toolbar-right {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  white-space: nowrap;
+  background-color: var(--vscode-sideBar-background);
+}
+
+.toolbar-overflow-indicator {
+  display: none;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--vscode-descriptionForeground, var(--vscode-icon-foreground));
+  background-color: var(--vscode-sideBar-background);
+  pointer-events: none;
+}
+
+.toolbar-right.has-left-overflow .toolbar-overflow-indicator {
+  display: inline-flex;
 }
 
 .more-tools-wrapper {

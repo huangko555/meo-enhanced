@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, UserRound, Check, MapPin, MapPinOff } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, UserRound, Check, MapPin, MapPinOff, Ellipsis } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -864,6 +864,15 @@ previewButton.title = 'Preview';
 
 modeGroup.append(liveButton, sourceButton, previewButton);
 
+const toolbarOverflowIndicator = document.createElement('span');
+toolbarOverflowIndicator.className = 'toolbar-overflow-indicator';
+toolbarOverflowIndicator.setAttribute('aria-hidden', 'true');
+toolbarOverflowIndicator.appendChild(createElement(Ellipsis, { width: 18, height: 18 }));
+
+const toolbarRight = document.createElement('div');
+toolbarRight.className = 'toolbar-right';
+toolbarRight.append(toolbarOverflowIndicator, rightGroup, modeGroup);
+
 const findPanelElements = createFindPanel(findToggleBtn);
 const findPanelController = createFindPanelController(
   findPanelElements,
@@ -894,7 +903,24 @@ editorNoticeBanner.hidden = true;
 let handleEditorNoticeDismiss = (): void => {};
 const editorNotice = createEditorNoticeController(editorNoticeBanner, () => handleEditorNoticeDismiss());
 
-toolbar.replaceChildren(formatGroup, previewFormatGroup, rightGroup, modeGroup, findPanelElements.panel, editorNoticeBanner);
+toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarRight, findPanelElements.panel, editorNoticeBanner);
+
+const syncToolbarOverflow = () => {
+  const visibleLeftGroup = previewFormatGroup.getClientRects().length > 0
+    ? previewFormatGroup
+    : formatGroup;
+  const leftBounds = visibleLeftGroup.getBoundingClientRect();
+  const rightBounds = rightGroup.getBoundingClientRect();
+  toolbarRight.classList.toggle('has-left-overflow', leftBounds.right > rightBounds.left);
+};
+
+const toolbarResizeObserver = new ResizeObserver(syncToolbarOverflow);
+toolbarResizeObserver.observe(toolbar);
+toolbarResizeObserver.observe(formatGroup);
+toolbarResizeObserver.observe(previewFormatGroup);
+toolbarResizeObserver.observe(rightGroup);
+toolbarResizeObserver.observe(modeGroup);
+requestAnimationFrame(syncToolbarOverflow);
 
 const existingEditorWrapper = root.querySelector('.editor-wrapper');
 const editorWrapper = existingEditorWrapper instanceof HTMLElement ? existingEditorWrapper : document.createElement('div');
