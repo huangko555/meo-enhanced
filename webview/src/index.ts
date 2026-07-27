@@ -2631,6 +2631,11 @@ contentMaxWidthBtn.addEventListener('click', () => {
 });
 lineNumbersBtn.addEventListener('click', toggleLineNumbers);
 gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
+fixedBaselineBtn.addEventListener('pointerdown', (event) => {
+  if (event.button === 0 && editor?.hasFocus()) {
+    event.preventDefault();
+  }
+});
 fixedBaselineBtn.addEventListener('click', () => {
   vscode.postMessage({ type: 'setFixedBaseline', enabled: !fixedBaselineActive });
 });

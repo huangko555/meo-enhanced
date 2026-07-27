@@ -18,7 +18,7 @@ export function buildExportStyles(
   environment: ExportStyleEnvironment = {},
   appearance: PreviewAppearance = 'light'
 ): string {
-  return buildReadingStyles(theme, environment, appearance, 'export');
+  return buildReadingStyles(theme, environment, appearance);
 }
 
 export function buildPreviewStyles(
@@ -26,16 +26,14 @@ export function buildPreviewStyles(
   environment: ExportStyleEnvironment = {},
   appearance: PreviewAppearance = 'dark'
 ): string {
-  return buildReadingStyles(theme, environment, appearance, 'preview');
+  return buildReadingStyles(theme, environment, appearance);
 }
 
 function buildReadingStyles(
   theme: ThemeSettings,
   environment: ExportStyleEnvironment,
-  appearance: PreviewAppearance,
-  target: 'export' | 'preview'
+  appearance: PreviewAppearance
 ): string {
-  const readingControlledPalette = target === 'preview' || appearance === 'dark';
   const colors = resolveThemeColors(theme, environment);
   const fonts = theme.fonts ?? defaultThemeFonts;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
@@ -44,42 +42,27 @@ function buildReadingStyles(
     sanitizeCssColor(environment.editorBackgroundColor ?? '') ||
     sanitizeCssColor(theme.backgroundColor ?? '') ||
     colors.base03;
-  const darkForegroundColor = sanitizeCssColor(environment.editorForegroundColor ?? '') || colors.base01;
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
-  const editorForegroundColor = readingControlledPalette
-    ? previewForegroundColor
-    : appearance === 'light' ? '#1f2328' : darkForegroundColor;
+  const editorForegroundColor = previewForegroundColor;
   const defaultCodeBlockColor = appearance === 'light'
     ? '#f6f8fa'
     : `color-mix(in srgb, ${editorBackgroundColor} 80%, ${colors.base03} 20%)`;
   const defaultSurfaceColor = appearance === 'light'
     ? '#f6f8fa'
     : `color-mix(in srgb, ${editorBackgroundColor} 86%, ${colors.base03} 14%)`;
-  const codeBlockBackgroundColor = readingControlledPalette
-    ? appearance === 'light'
-      ? defaultCodeBlockColor
-      : `color-mix(in srgb, ${editorBackgroundColor} 82%, #000000 18%)`
-    : appearance === 'light'
-      ? defaultCodeBlockColor
-      : sanitizeCssColor(environment.codeBlockBackgroundColor ?? '') || defaultCodeBlockColor;
-  const sideBarBackgroundColor = readingControlledPalette
-    ? appearance === 'light'
-      ? defaultSurfaceColor
-      : `color-mix(in srgb, ${editorBackgroundColor} 92%, ${previewForegroundColor} 8%)`
-    : appearance === 'light'
+  const codeBlockBackgroundColor = appearance === 'light'
+    ? defaultCodeBlockColor
+    : `color-mix(in srgb, ${editorBackgroundColor} 82%, #000000 18%)`;
+  const sideBarBackgroundColor = appearance === 'light'
     ? defaultSurfaceColor
-    : sanitizeCssColor(environment.sideBarBackgroundColor ?? '') || defaultSurfaceColor;
-  const panelBorderColor = readingControlledPalette
-    ? appearance === 'light' ? '#d0d7de' : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`
-    : appearance === 'light'
+    : `color-mix(in srgb, ${editorBackgroundColor} 92%, ${previewForegroundColor} 8%)`;
+  const panelBorderColor = appearance === 'light'
     ? '#d0d7de'
-    : sanitizeCssColor(environment.panelBorderColor ?? '') || colors.base03;
-  const readingMutedColor = readingControlledPalette
-    ? previewMutedColor
-    : appearance === 'light' ? '#656d76' : colors.base02;
-  const readingForegroundColor = readingControlledPalette ? previewForegroundColor : null;
+    : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
+  const readingMutedColor = previewMutedColor;
+  const readingForegroundColor = previewForegroundColor;
   const liveFont = resolveThemeFontChoice(
     sanitizeCssFont(environment.liveFontFamily ?? ''),
     sanitizeCssFont(fonts.liveFont),
@@ -145,7 +128,6 @@ function buildReadingStyles(
       return `h${level} { font-size: var(--meo-heading-${level}-size); font-weight: var(--meo-heading-${level}-weight);${opacity} }`;
     })
     .join('\n');
-
   return `
 :root {
   color-scheme: ${appearance};
@@ -154,18 +136,18 @@ function buildReadingStyles(
   --meo-bg: ${editorBackgroundColor};
   --meo-fg: ${editorForegroundColor};
   --meo-muted: ${readingMutedColor};
-  --meo-border: ${readingControlledPalette ? panelBorderColor : appearance === 'light' ? '#d0d7de' : colors.base03};
-  --meo-base04: ${readingForegroundColor ?? (appearance === 'light' ? '#1f2328' : colors.base04)};
-  --meo-base05: ${readingForegroundColor ?? (appearance === 'light' ? '#0969da' : colors.base05)};
-  --meo-base07: ${readingForegroundColor ?? (appearance === 'light' ? '#57606a' : colors.base07)};
-  --meo-base08: ${readingForegroundColor ?? (appearance === 'light' ? '#0550ae' : colors.base08)};
-  --meo-base09: ${readingForegroundColor ?? (appearance === 'light' ? '#953800' : colors.base09)};
-  --meo-heading: ${readingForegroundColor ?? (appearance === 'light' ? '#1f2328' : colors.base04)};
-  --meo-link: ${readingForegroundColor ?? (appearance === 'light' ? '#0969da' : colors.base05)};
-  --meo-accent-2: ${readingForegroundColor ?? (appearance === 'light' ? '#8250df' : colors.base06)};
-  --meo-strong: ${readingForegroundColor ?? (appearance === 'light' ? '#1f2328' : colors.base07)};
-  --meo-number: ${readingForegroundColor ?? (appearance === 'light' ? '#0550ae' : colors.base08)};
-  --meo-quote: ${readingControlledPalette ? readingMutedColor : appearance === 'light' ? '#656d76' : colors.base07};
+  --meo-border: ${panelBorderColor};
+  --meo-base04: ${readingForegroundColor};
+  --meo-base05: ${readingForegroundColor};
+  --meo-base07: ${readingForegroundColor};
+  --meo-base08: ${readingForegroundColor};
+  --meo-base09: ${readingForegroundColor};
+  --meo-heading: ${readingForegroundColor};
+  --meo-link: ${readingForegroundColor};
+  --meo-accent-2: ${readingForegroundColor};
+  --meo-strong: ${readingForegroundColor};
+  --meo-number: ${readingForegroundColor};
+  --meo-quote: ${readingMutedColor};
   --meo-font-body: ${liveFont};
   --meo-font-code: ${sourceFont};
   --meo-font-weight-body: ${liveFontWeight};
@@ -262,6 +244,13 @@ html[data-meo-export-target='pdf'] .meo-export-page,
 body[data-meo-export-target='pdf'] .meo-export-page {
   width: calc(100% + 8px);
   margin-right: -8px;
+}
+
+html[data-meo-export-target='pdf'] .meo-export-mermaid-svg svg,
+body[data-meo-export-target='pdf'] .meo-export-mermaid-svg svg {
+  width: auto;
+  min-width: 0;
+  max-height: calc(297mm - 1in - 80px);
 }
 
 html[data-meo-export-target='pdf'] hr,
@@ -394,11 +383,6 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 0.65em;
 }
 ${headingRulesCss}
-
-h1, h2 {
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--meo-hr);
-}
 
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
@@ -628,7 +612,7 @@ kbd {
   margin: 0;
   padding: 0.45em 0;
   border: 0;
-  border-radius: 0;
+  border-radius: 6px;
   background: var(--meo-code-bg);
   overflow-x: clip;
   overflow-y: visible;
@@ -644,7 +628,7 @@ th .meo-export-math-display {
 pre.meo-export-code-block {
   padding: 24px 16px;
   overflow: auto;
-  border-radius: 0;
+  border-radius: 6px;
   border: 1px solid var(--meo-code-border);
   background: var(--meo-code-bg);
 }
@@ -872,7 +856,7 @@ th:empty::before {
 
 .meo-export-mermaid {
   margin: 0 0 1em;
-  border-radius: 0;
+  border-radius: 6px;
   border: 1px solid var(--meo-code-border);
   background: var(--meo-code-bg);
   overflow: hidden;

@@ -229,8 +229,18 @@ const environment = {
 };
 const darkPreviewStyles = buildPreviewStyles(defaultThemeSettings, environment, 'dark');
 const lightPreviewStyles = buildPreviewStyles(defaultThemeSettings, environment, 'light');
-const exportStyles = buildExportStyles(defaultThemeSettings, environment);
+const exportStyles = buildExportStyles(defaultThemeSettings, environment, 'light');
 const darkExportStyles = buildExportStyles(defaultThemeSettings, environment, 'dark');
+
+if (/h1, h2\s*\{[^}]*border-bottom:/s.test(darkPreviewStyles)) {
+  throw new Error('Preview headings must not render a fixed divider line');
+}
+if (/h1, h2\s*\{[^}]*border-bottom:/s.test(exportStyles)) {
+  throw new Error('Export headings must match Preview without a fixed divider line');
+}
+if (exportStyles !== lightPreviewStyles || darkExportStyles !== darkPreviewStyles) {
+  throw new Error('Export and Preview must share one reading stylesheet for the same appearance');
+}
 
 if (
   !darkPreviewStyles.includes('--meo-heading-1-size: 1.6em') ||

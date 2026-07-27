@@ -191,6 +191,22 @@ export class ViewportController {
 
   captureDocumentAnchor(): ViewportDocumentAnchor {
     const scrollTop = Math.max(0, this.view.scrollDOM.scrollTop);
+    const canInspectLayout = typeof this.view.scrollDOM.getBoundingClientRect === 'function'
+      && typeof this.view.contentDOM?.querySelectorAll === 'function';
+    if (canInspectLayout) {
+      const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      const renderedBlock = Array.from(
+        this.view.contentDOM.querySelectorAll<HTMLElement>('[data-meo-rendered-block-start-line]')
+      ).find((block) => {
+        const rect = block.getBoundingClientRect();
+        return rect.top <= scrollerRect.top && rect.bottom > scrollerRect.top;
+      });
+      const renderedBlockStartLine = Number(renderedBlock?.dataset.meoRenderedBlockStartLine);
+      if (Number.isFinite(renderedBlockStartLine) && renderedBlockStartLine > 0) {
+        const contextLine = this.view.state.doc.line(Math.max(1, Math.floor(renderedBlockStartLine) - 1));
+        return { position: contextLine.from, lineOffset: 0 };
+      }
+    }
     const lineBlock = this.view.lineBlockAtHeight(scrollTop);
     return {
       position: lineBlock.from,

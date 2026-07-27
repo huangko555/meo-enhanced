@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await page.evaluate((theme) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text: 'first\nsecond', version: 1, diagnostics: [], mode: 'source',
+        type: 'init', text: 'first\nsecond', version: 1, diagnostics: [], mode: 'live',
         lineNumbers: true, gitChangesGutter: true, gitBlameEnabled: false,
         gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false,
@@ -62,6 +62,7 @@ async function main(): Promise<void> {
 
     const fixedBaselineButton = await page.$('[data-action="fixedBaseline"]');
     if (!fixedBaselineButton) throw new Error('Toolbar did not contain the fixed baseline toggle');
+    await page.click('.cm-content');
     const initialFixedState = await fixedBaselineButton.evaluate((button) => ({
       pressed: button.getAttribute('aria-pressed'),
       title: button.getAttribute('title')
@@ -70,6 +71,10 @@ async function main(): Promise<void> {
       throw new Error(`Fixed baseline toggle did not default off: ${JSON.stringify(initialFixedState)}`);
     }
     await fixedBaselineButton.click();
+    const editorKeptFocus = await page.evaluate(() => (
+      document.querySelector('.cm-editor')?.contains(document.activeElement) ?? false
+    ));
+    if (!editorKeptFocus) throw new Error('Fixed baseline toggle moved focus away from the Live editor');
     const pinMessage = await page.evaluate(() => (window as any).__hostMessages.find((message: any) => message.type === 'setFixedBaseline'));
     if (!pinMessage || pinMessage.enabled !== true) throw new Error('Fixed baseline toggle did not request pinning');
     await page.evaluate(() => {

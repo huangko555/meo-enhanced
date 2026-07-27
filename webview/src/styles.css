@@ -3604,7 +3604,7 @@ body.outline-resizing .preview-frame {
   border-radius: 6px;
   color: var(--meo-foreground);
   background: var(--meo-code-background);
-  overflow: hidden;
+  overflow: clip;
 }
 
 .cm-editor .meo-mermaid-editing-block.is-source,

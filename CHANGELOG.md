@@ -3,6 +3,13 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.1.7
+- Fixed stale table interaction state that could prevent Markdown markers, links, and images from expanding when clicked.
+- Prevented the fixed-baseline toolbar action from briefly shifting the editor viewport.
+- Fixed sticky positioning for the shorter pane while editing Mermaid diagrams in split mode.
+- Unified Preview and export reading styles in both light and dark appearances, removed heading dividers, and preserved rounded rendered blocks.
+- Scaled oversized Mermaid diagrams to the printable A4 area to prevent blank PDF pages and cross-page clipping.
+
 ## MEO Enhanced 0.1.6
 - Hid incomplete left-side toolbar controls as whole items and moved the non-interactive white ellipsis to the end of the visible left group.
 

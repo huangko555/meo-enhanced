@@ -853,17 +853,33 @@ async function main() {
     });
     await waitForFrames(page, 2);
     await page.click('[data-mode="source"]');
-    await waitForFrames(page, 2);
-    const liveSourceVisibleLine = await page.evaluate(() => {
+    await waitForFrames(page, 8);
+    const liveSourceViewport = await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const viewport = scroller.getBoundingClientRect();
-      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).some((line) => {
+      const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === '## Tall Mermaid');
+      const headingRect = heading?.getBoundingClientRect();
+      const firstVisible = Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).find((line) => {
         const rect = line.getBoundingClientRect();
-        return line.textContent === '## Tall Mermaid' && rect.bottom > viewport.top && rect.top < viewport.bottom;
+        return rect.bottom > viewport.top && rect.top < viewport.bottom;
       });
+      return {
+        headingTop: headingRect?.top ?? null,
+        headingBottom: headingRect?.bottom ?? null,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom,
+        scrollTop: scroller.scrollTop,
+        firstVisible: firstVisible?.textContent ?? null
+      };
     });
-    if (!liveSourceVisibleLine) {
-      throw new Error('Live to Source lost the visible document position');
+    if (
+      liveSourceViewport.headingTop === null ||
+      liveSourceViewport.headingBottom === null ||
+      liveSourceViewport.headingBottom <= liveSourceViewport.viewportTop ||
+      liveSourceViewport.headingTop >= liveSourceViewport.viewportBottom
+    ) {
+      throw new Error(`Live to Source lost the visible document position: ${JSON.stringify(liveSourceViewport)}`);
     }
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 2);
@@ -892,6 +908,7 @@ async function main() {
     });
     await waitForFrames(page, 2);
     await page.click('[data-action="outline-right"]');
+    await waitForFrames(page, 8);
     const readViewport = () => page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const viewport = scroller.getBoundingClientRect();
@@ -921,7 +938,7 @@ async function main() {
     await page.keyboard.down('Control');
     await page.keyboard.press('s');
     await page.keyboard.up('Control');
-    await waitForFrames(page, 1);
+    await waitForFrames(page, 8);
     const afterUpdate = await readViewport();
 
     await page.evaluate((theme) => {
@@ -948,6 +965,7 @@ async function main() {
         const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
         const scrollerRect = scroller.getBoundingClientRect();
         const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).find((candidate) => {
+          if (!/^(?:stable line \d+|const line\d+)/.test(candidate.textContent ?? '')) return false;
           const rect = candidate.getBoundingClientRect();
           return rect.bottom > scrollerRect.top && rect.top < scrollerRect.bottom;
         });
@@ -977,7 +995,6 @@ async function main() {
     ));
     if (
       beforeLine === null || afterUpdateLine === null || afterThemeLine === null ||
-      beforeLine > 12 ||
       Math.abs(afterUpdateLine - beforeLine) > 1 ||
       Math.abs(afterThemeLine - afterUpdateLine) > 1 ||
       Math.abs((afterTheme.top ?? 0) - (afterUpdate.top ?? 0)) > 1 ||

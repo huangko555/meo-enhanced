@@ -703,9 +703,37 @@ async function main() {
 
     await page.evaluate(() => {
       const editor = (window as any).__editor;
-      editor.setText('anchor\n[普通链接](https://example.com/path)\ntail');
+      editor.setText('anchor\n**粗体**\n[普通链接](https://example.com/path)\n![示例](https://example.invalid/image.png)\ntail');
       editor.view.dispatch({ selection: { anchor: 0 } });
     });
+    await waitForFrames(page, 3);
+    const activateStaleTableInteraction = () => page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const staleOwner = document.createElement('div');
+      staleOwner.className = 'meo-md-html-table-shell';
+      editor.view.dom.dispatchEvent(new CustomEvent('meo-table-interaction', {
+        detail: { active: true, owner: staleOwner }
+      }));
+    });
+    await activateStaleTableInteraction();
+    const boldPoint = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('粗体'))!;
+      const text = Array.from(line.childNodes).find((node) => node.textContent?.includes('粗体'))!;
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.click(boldPoint.x, boldPoint.y);
+    await waitForFrames(page, 3);
+    const boldMarkerVisible = await page.evaluate(() => {
+      const marker = document.querySelector<HTMLElement>('.meo-md-strong-marker-active');
+      return Boolean(marker && getComputedStyle(marker).display !== 'none');
+    });
+    if (!boldMarkerVisible) throw new Error('Inline Markdown markers did not recover from stale table interaction');
+
+    await activateStaleTableInteraction();
     await waitForFrames(page, 3);
     const ordinaryLinkPoint = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -724,10 +752,33 @@ async function main() {
     });
     await page.mouse.click(ordinaryLinkPoint.x, ordinaryLinkPoint.y);
     await waitForFrames(page, 3);
-    const ordinaryLinkText = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-      .find((candidate) => candidate.textContent?.includes('普通链接'))?.textContent ?? '');
-    if (!ordinaryLinkText.includes('https://example.com/path')) {
-      throw new Error(`Ordinary Markdown link did not reveal its destination after click: ${ordinaryLinkText}`);
+    const ordinaryLinkState = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('普通链接'));
+      return {
+        text: line?.textContent ?? '',
+        hiddenUrlCount: line?.querySelectorAll('.meo-md-link-url-hidden').length ?? 0,
+        tableInteractionActive: document.querySelector('.cm-editor')?.classList.contains('meo-table-interaction-active') ?? false
+      };
+    });
+    if (ordinaryLinkState.hiddenUrlCount !== 0) {
+      throw new Error(`Ordinary Markdown link did not recover from stale table interaction: ${JSON.stringify(ordinaryLinkState)}`);
+    }
+
+    await activateStaleTableInteraction();
+    await page.click('.meo-md-image');
+    await waitForFrames(page, 3);
+    const imageSourceState = await page.evaluate(() => ({
+      selectionHead: (window as any).__editor.view.state.selection.main.head,
+      lines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).map((line) => ({
+        innerText: line.innerText,
+        textContent: line.textContent ?? ''
+      }))
+    }));
+    if (
+      !imageSourceState.lines.some((line) => line.innerText.includes('![示例](https://example.invalid/image.png)'))
+    ) {
+      throw new Error(`Markdown image source did not recover from stale table interaction: ${JSON.stringify(imageSourceState)}`);
     }
 
     console.log('editor marker and viewport stability browser tests passed');

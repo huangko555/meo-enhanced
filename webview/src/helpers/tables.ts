@@ -4055,6 +4055,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   destroy(dom) {
+    this.setTableInteractionActive(dom, false);
     for (const cleanup of this.cleanupFns) cleanup();
     this.cleanupFns = [];
     dom?._meoTableResizeObserver?.disconnect();

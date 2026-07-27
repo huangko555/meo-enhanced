@@ -1854,6 +1854,10 @@ export function createEditor({
             return false;
           }
 
+          if (tableInteractionActive && !targetElement?.closest('.meo-md-html-table-shell')) {
+            setTableInteractionActive(false);
+          }
+
           trackDiagnosticClick(event, view);
           trackFrontmatterBoundaryClick(event, view);
 
@@ -2114,6 +2118,9 @@ export function createEditor({
     const from = event?.detail?.from;
     if (!Number.isInteger(from)) {
       return;
+    }
+    if (tableInteractionActive) {
+      setTableInteractionActive(false);
     }
     const anchor = Math.max(0, Math.min(from, view.state.doc.length));
     view.dispatch({ selection: { anchor } });
