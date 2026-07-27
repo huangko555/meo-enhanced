@@ -384,6 +384,11 @@ h1, h2, h3, h4, h5, h6 {
 }
 ${headingRulesCss}
 
+h1, h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--meo-hr);
+}
+
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
 }
