@@ -40,6 +40,8 @@ const mermaidEstimatedHeightCache = new Map<string, number>();
 const mermaidPreviewHeightCache = new WeakMap<HTMLElement, Map<string, number>>();
 let mermaidIdCounter = 0;
 const MERMAID_MATH_CLASS = 'meoMath';
+const MERMAID_LABEL_WRAP_THEME_CSS =
+  '.nodeLabel p{white-space:normal!important;overflow-wrap:anywhere!important;word-break:break-word!important;}';
 const MERMAID_DIAGRAM_START_RE =
   /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph|quadrantChart|requirementDiagram|c4Context|xychart(?:-beta)?|sankey-beta|block-beta|packet-beta|radar-beta)\b/i;
 const MERMAID_DISPLAY_MATH_RE = /^\$\$[\s\S]*\$\$$/;
@@ -237,6 +239,10 @@ function isMermaidDarkTheme(background: string): boolean {
 
 function getMermaidThemeConfig() {
   const bodyStyles = getComputedStyle(document.body);
+  const editor = document.querySelector<HTMLElement>('.cm-editor');
+  const fontFamily = editor
+    ? getComputedStyle(editor).fontFamily
+    : bodyStyles.fontFamily;
   const background = getThemeCssColor('--meo-code-background', bodyStyles.backgroundColor || '#ffffff');
   const darkMode = isMermaidDarkTheme(background);
   const nodeBackground = darkMode
@@ -255,6 +261,7 @@ function getMermaidThemeConfig() {
     foreground,
     border,
     accent,
+    fontFamily,
     darkMode ? 'dark' : 'light'
   ].join('|');
 
@@ -264,6 +271,7 @@ function getMermaidThemeConfig() {
       startOnLoad: false,
       securityLevel: 'strict',
       theme: 'base',
+      fontFamily,
       themeVariables: {
         background,
         mainBkg: nodeBackground,
@@ -280,12 +288,15 @@ function getMermaidThemeConfig() {
         clusterBkg: background,
         clusterBorder: border,
         titleColor: foreground,
+        fontFamily,
         darkMode
       },
       htmlLabels: true,
       markdownAutoWrap: true,
+      themeCSS: MERMAID_LABEL_WRAP_THEME_CSS,
       flowchart: {
-        htmlLabels: true
+        htmlLabels: true,
+        wrappingWidth: 200
       },
       // VS Code webviews can vary in MathML support, so force KaTeX-backed output.
       legacyMathML: true,
@@ -452,6 +463,7 @@ async function renderMermaidDiagram(diagramText: string): Promise<MermaidResult>
 
   const id = `mermaid-${++mermaidIdCounter}`;
   const renderPromise: Promise<MermaidResult> = runExclusiveMermaidOperation(async () => {
+    await document.fonts?.ready;
     const runtime = await initMermaid();
     return runtime.render(id, normalizedDiagramText);
   })

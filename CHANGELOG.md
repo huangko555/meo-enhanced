@@ -3,6 +3,10 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.1.9
+- Fixed long Mermaid node labels being clipped or overflowing their nodes by enabling reliable Chinese text wrapping and matching node height to the wrapped content.
+- Matched Mermaid label measurement to the active editor font after fonts finish loading for consistent rendering across installed and development builds.
+
 ## MEO Enhanced 0.1.8
 - Restored the shared level-one and level-two heading divider in Preview and HTML/PDF exports for both light and dark appearances.
 

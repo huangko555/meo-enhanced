@@ -32,6 +32,8 @@ try {
   const entry = fs.readFileSync(path.join(tempDir, 'test-preview-mermaid-runtime-entry.js'), 'utf8');
   const page = await browser.newPage();
   await page.setContent(`<!doctype html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; font-src data:; script-src 'nonce-preview-runtime-test'"></head><body></body>`);
+  await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+  await page.addStyleTag({ content: ':root { --meo-font-live: "Sarasa Term SC", "Cascadia Mono", Consolas, monospace; --meo-font-live-size: 15px; --meo-code-background: #20252b; --meo-foreground: #d8dee9; --meo-surface-background: #20252b; } .cm-line { white-space: pre; }' });
   await page.evaluate(({ runtime, entry }) => {
     for (const source of [runtime, entry]) {
       const script = document.createElement('script');
@@ -89,6 +91,54 @@ try {
   });
   if (!liveSvg.includes('<svg')) {
     throw new Error('Live Mermaid must render before switching to Preview');
+  }
+  await page.evaluate(() => {
+    const renderEditorMermaid = (window as typeof window & { __renderEditorMermaid?: (source: string) => HTMLElement })
+      .__renderEditorMermaid;
+    renderEditorMermaid?.([
+      'flowchart LR',
+      '  A[列表项列表项列表项列表项列表项] --> B[Mermaid]',
+      '  B --> C[保持缩进]'
+    ].join('\n'));
+  });
+  await page.waitForSelector('.cm-editor .meo-mermaid-block .nodeLabel');
+  const editorLongLabelLayout = await page.evaluate(() => {
+    const label = Array.from(document.querySelectorAll<HTMLElement>('.cm-editor .nodeLabel'))
+      .find((element) => element.textContent?.includes('列表项列表项'));
+    const paragraph = label?.querySelector<HTMLElement>('p') ?? label;
+    const range = label ? document.createRange() : null;
+    if (label && range) range.selectNodeContents(label);
+    const labelBox = range?.getBoundingClientRect();
+    const clippingBox = label?.closest<SVGForeignObjectElement>('foreignObject')?.getBoundingClientRect();
+    return labelBox && clippingBox
+      ? {
+          label: { left: labelBox.left, top: labelBox.top, right: labelBox.right, bottom: labelBox.bottom },
+          clipping: { left: clippingBox.left, top: clippingBox.top, right: clippingBox.right, bottom: clippingBox.bottom },
+          font: label ? getComputedStyle(label).font : '',
+          clippingOverflow: label?.closest<SVGForeignObjectElement>('foreignObject')
+            ? getComputedStyle(label.closest<SVGForeignObjectElement>('foreignObject')!).overflow
+            : '',
+          lineCount: range?.getClientRects().length ?? 0,
+          whiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : '',
+          overflowWrap: paragraph ? getComputedStyle(paragraph).overflowWrap : '',
+          wordBreak: paragraph ? getComputedStyle(paragraph).wordBreak : '',
+          html: label?.innerHTML ?? ''
+        }
+      : null;
+  });
+  if (
+    !editorLongLabelLayout ||
+    !editorLongLabelLayout.font.includes('Sarasa Term SC') ||
+    editorLongLabelLayout.clippingOverflow === 'visible' ||
+    editorLongLabelLayout.lineCount < 2 ||
+    editorLongLabelLayout.whiteSpace !== 'normal' ||
+    editorLongLabelLayout.overflowWrap !== 'anywhere' ||
+    editorLongLabelLayout.label.left < editorLongLabelLayout.clipping.left - 0.5 ||
+    editorLongLabelLayout.label.top < editorLongLabelLayout.clipping.top - 0.5 ||
+    editorLongLabelLayout.label.right > editorLongLabelLayout.clipping.right + 0.5 ||
+    editorLongLabelLayout.label.bottom > editorLongLabelLayout.clipping.bottom + 0.5
+  ) {
+    throw new Error(`Editor Mermaid node label is clipped: ${JSON.stringify(editorLongLabelLayout)}`);
   }
   await page.evaluate(async () => {
     (window as typeof window & { __queueSlowLiveOperations?: (count: number, delayMs: number) => void })
