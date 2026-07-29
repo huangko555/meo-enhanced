@@ -220,7 +220,8 @@ export function extractDetailsBlocks(state: EditorState): DetailsBlockInfo[] {
         });
       }
 
-      if (!detailsCloseTagPattern.test(rawText)) {
+      const closeTagMatch = rawText.match(detailsCloseTagPattern);
+      if (!closeTagMatch || typeof closeTagMatch.index !== 'number') {
         return;
       }
 
@@ -229,7 +230,8 @@ export function extractDetailsBlocks(state: EditorState): DetailsBlockInfo[] {
         return;
       }
 
-      const closingLine = state.doc.lineAt(node.from);
+      const closingFrom = node.from + closeTagMatch.index;
+      const closingLine = state.doc.lineAt(closingFrom);
 
       detailsBlocks.push({
         kind: 'details',
@@ -242,8 +244,8 @@ export function extractDetailsBlocks(state: EditorState): DetailsBlockInfo[] {
         sectionFrom: openBlock.anchorFrom,
         sectionTo: closingLine.to,
         bodyFrom: openBlock.anchorTo,
-        bodyTo: node.from,
-        closingFrom: node.from,
+        bodyTo: closingFrom,
+        closingFrom,
         closingTo: closingLine.to,
         summaryText: openBlock.summaryText,
         defaultCollapsed: openBlock.defaultCollapsed

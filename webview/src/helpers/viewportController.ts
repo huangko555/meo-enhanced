@@ -275,7 +275,11 @@ export class ViewportController {
     });
   }
 
-  preservePositionWhileMutation(position: number, mutate: () => void): void {
+  preservePositionWhileMutation(
+    position: number,
+    mutate: () => void,
+    schedule: StabilizeOptions['schedule'] = 'next-frame'
+  ): void {
     const targetPosition = Math.min(Math.max(0, position), this.view.state.doc.length);
     const beforeTop = this.view.coordsAtPos(targetPosition)?.top ?? null;
     mutate();
@@ -286,7 +290,7 @@ export class ViewportController {
         top: this.view.scrollDOM.scrollTop + afterTop - beforeTop
       };
     }, {
-      schedule: 'next-frame'
+      schedule
     });
   }
 

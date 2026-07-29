@@ -40,7 +40,9 @@ async function main(): Promise<void> {
       ...Array.from({ length: 80 }, (_, index) => `before ${index + 1}`),
       '<details>',
       '<summary>Visible summary</summary>',
-      ...Array.from({ length: 6 }, (_, index) => `details body ${index + 1}`),
+      ...Array.from({ length: 6 }, (_, index) => index === 0
+        ? 'details body 1 with **source markers**'
+        : `details body ${index + 1}`),
       '</details>',
       ...Array.from({ length: 60 }, (_, index) => `stable anchor ${index + 1}`)
     ].join('\n');
@@ -55,18 +57,117 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     await page.evaluate(() => (window as any).__editor.scrollToLine(82, 'top'));
     await waitForFrames(page);
+    await page.evaluate(() => (window as any).__editor.view.dispatch({ selection: { anchor: 0 } }));
+    await waitForFrames(page);
 
-    const beforeTop = await page.evaluate(() => {
+    const detailsGutterClickPoint = await page.evaluate(() => {
       const editor = (window as any).__editor;
       const scroller = editor.view.scrollDOM as HTMLElement;
       const summaryLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((line) => line.textContent?.includes('Visible summary'))!;
-      const anchorLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('stable anchor 2'))!;
       const scrollerTop = scroller.getBoundingClientRect().top;
-      scroller.scrollTop += summaryLine.getBoundingClientRect().top - scrollerTop + 8;
-      return anchorLine.getBoundingClientRect().top;
+      scroller.scrollTop += summaryLine.getBoundingClientRect().top - scrollerTop - 8;
+      const summaryRect = summaryLine.getBoundingClientRect();
+      const toggle = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-fold-toggle'))
+        .filter((element) => !element.classList.contains('meo-md-fold-toggle-spacer'))
+        .reduce((closest, element) => (
+          Math.abs(element.getBoundingClientRect().top - summaryRect.top) <
+            Math.abs(closest.getBoundingClientRect().top - summaryRect.top)
+            ? element
+            : closest
+        ));
+      const toggleRect = toggle.getBoundingClientRect();
+      (window as any).__detailsAnchorFrames = [{
+        rawSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('<details>')),
+        summaryTop: summaryLine.getBoundingClientRect().top
+      }];
+      const sampleAnchor = () => {
+        const currentSummary = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((line) => line.textContent?.includes('Visible summary'));
+        (window as any).__detailsAnchorFrames.push({
+          rawSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+            .some((line) => line.textContent?.includes('<details>')),
+          summaryTop: currentSummary?.getBoundingClientRect().top ?? null
+        });
+        if ((window as any).__detailsAnchorFrames.length < 14) requestAnimationFrame(sampleAnchor);
+      };
+      requestAnimationFrame(sampleAnchor);
+      return {
+        x: toggleRect.left + toggleRect.width / 2,
+        y: toggleRect.top + toggleRect.height / 2
+      };
     });
+    await page.mouse.click(detailsGutterClickPoint.x, detailsGutterClickPoint.y);
+    await waitForFrames(page, 16);
+    const detailsAnchorFrames = await page.evaluate(() => (window as any).__detailsAnchorFrames as Array<{
+      rawSourceVisible: boolean;
+      summaryTop: number | null;
+    }>);
+    const detailsSummaryBeforeTop = detailsAnchorFrames[0].summaryTop;
+    if (
+      detailsSummaryBeforeTop === null ||
+      detailsAnchorFrames.some((frame) => (
+        frame.summaryTop === null || Math.abs(frame.summaryTop - detailsSummaryBeforeTop) > 1 ||
+        frame.rawSourceVisible
+      ))
+    ) {
+      throw new Error(`Details gutter toggle redrew or moved content across frames: ${JSON.stringify(detailsAnchorFrames)}`);
+    }
+    const detailsAfterExpand = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
+    });
+    if (detailsAfterExpand?.collapsed !== false) {
+      throw new Error(`Details gutter click did not expand the block: ${JSON.stringify(detailsAfterExpand)}`);
+    }
+
+    const detailsCollapseClickPoint = await page.evaluate(() => {
+      const summaryLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('Visible summary'))!;
+      const summaryRect = summaryLine.getBoundingClientRect();
+      const toggle = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-fold-toggle'))
+        .filter((element) => !element.classList.contains('meo-md-fold-toggle-spacer'))
+        .reduce((closest, element) => (
+          Math.abs(element.getBoundingClientRect().top - summaryRect.top) <
+            Math.abs(closest.getBoundingClientRect().top - summaryRect.top)
+            ? element
+            : closest
+        ));
+      const toggleRect = toggle.getBoundingClientRect();
+      (window as any).__detailsCollapseFrames = [{ summaryTop: summaryRect.top }];
+      const sampleAnchor = () => {
+        const currentSummary = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((line) => line.textContent?.includes('Visible summary'));
+        (window as any).__detailsCollapseFrames.push({
+          summaryTop: currentSummary?.getBoundingClientRect().top ?? null
+        });
+        if ((window as any).__detailsCollapseFrames.length < 14) requestAnimationFrame(sampleAnchor);
+      };
+      requestAnimationFrame(sampleAnchor);
+      return { x: toggleRect.left + toggleRect.width / 2, y: toggleRect.top + toggleRect.height / 2 };
+    });
+    await page.mouse.click(detailsCollapseClickPoint.x, detailsCollapseClickPoint.y);
+    await waitForFrames(page, 16);
+    const detailsCollapseFrames = await page.evaluate(() => (window as any).__detailsCollapseFrames as Array<{
+      summaryTop: number | null;
+    }>);
+    const detailsCollapseSummaryBeforeTop = detailsCollapseFrames[0].summaryTop;
+    if (
+      detailsCollapseSummaryBeforeTop === null ||
+      detailsCollapseFrames.some((frame) => (
+        frame.summaryTop === null || Math.abs(frame.summaryTop - detailsCollapseSummaryBeforeTop) > 1
+      ))
+    ) {
+      throw new Error(`Details gutter collapse moved its summary across frames: ${JSON.stringify(detailsCollapseFrames)}`);
+    }
+    const detailsAfterCollapse = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
+    });
+    if (detailsAfterCollapse?.collapsed !== true) {
+      throw new Error(`Details gutter click did not collapse the block: ${JSON.stringify(detailsAfterCollapse)}`);
+    }
 
     await page.evaluate(() => {
       const editor = (window as any).__editor;
@@ -74,11 +175,44 @@ async function main(): Promise<void> {
       (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
     });
     await waitForFrames(page);
-
-    const afterTop = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-      .find((line) => line.textContent?.includes('stable anchor 2'))?.getBoundingClientRect().top ?? null);
-    if (afterTop === null || Math.abs(afterTop - beforeTop) > 1) {
-      throw new Error(`Expanding details moved unchanged viewport content: ${beforeTop} -> ${afterTop}`);
+    const detailsExpandedState = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
+    });
+    if (detailsExpandedState?.collapsed !== false) {
+      throw new Error(`Details did not expand before source-mode check: ${JSON.stringify(detailsExpandedState)}`);
+    }
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const scroller = editor.view.scrollDOM as HTMLElement;
+      const summaryLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('Visible summary'))!;
+      const scrollerTop = scroller.getBoundingClientRect().top;
+      scroller.scrollTop += summaryLine.getBoundingClientRect().top - scrollerTop - 8;
+    });
+    await waitForFrames(page);
+    const detailsSourceClickPoint = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const anchor = editor.getText().indexOf('<details>');
+      const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('details body 1'))!;
+      const rect = bodyLine.getBoundingClientRect();
+      return { anchor, x: rect.left + Math.min(120, rect.width / 2), y: (rect.top + rect.bottom) / 2 };
+    });
+    await page.mouse.click(detailsSourceClickPoint.x, detailsSourceClickPoint.y);
+    await waitForFrames(page);
+    const sourceToggleResult = await page.evaluate((anchor) => {
+      const editor = (window as any).__editor;
+      const sourceVisible = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .some((line) => line.textContent?.includes('**source markers**'));
+      const toggled = (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+      return { sourceVisible, toggled };
+    }, detailsSourceClickPoint.anchor);
+    await waitForFrames(page);
+    const detailsBodyStillVisible = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .some((line) => line.textContent?.includes('details body 1')));
+    if (!sourceToggleResult.sourceVisible || sourceToggleResult.toggled || !detailsBodyStillVisible) {
+      throw new Error(`Details source mode must reject folding: ${JSON.stringify({ ...sourceToggleResult, detailsBodyStillVisible })}`);
     }
 
     const quoteSource = [

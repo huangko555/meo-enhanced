@@ -2,6 +2,7 @@ import { RangeSetBuilder, StateEffect, StateField, Transaction, EditorState } fr
 import { EditorView, GutterMarker, gutter } from '@codemirror/view';
 import { createElement, ChevronDown } from 'lucide';
 import { extractDetailsBlocks, extractHeadingSections, HeadingSection, DetailsBlockInfo } from './markdownSyntax';
+import { getViewportController } from './viewportController';
 
 const toggleHeadingCollapseEffect = StateEffect.define<number>();
 const expandHeadingCollapseEffect = StateEffect.define<number[]>();
@@ -275,9 +276,22 @@ export function getDetailsBlocks(state: EditorState): DetailsBlockState[] {
   }));
 }
 
+function isDetailsSourceLineActive(state: EditorState, detailsBlock: DetailsBlockInfo): boolean {
+  return state.selection.ranges.some((range) => (
+    range.head >= detailsBlock.sectionFrom && range.head <= detailsBlock.sectionTo
+  ));
+}
+
 export function toggleCollapsibleSection(view: EditorView, anchor: number): boolean {
   const section = getCollapsibleSectionAnchorMap(view.state).get(anchor);
   if (!section) {
+    return false;
+  }
+
+  if (
+    section.kind === 'details' && section.detailsBlock &&
+    isDetailsSourceLineActive(view.state, section.detailsBlock)
+  ) {
     return false;
   }
 
@@ -290,8 +304,17 @@ export function toggleCollapsibleSection(view: EditorView, anchor: number): bool
     transactionSpec.selection = { anchor: section.lineFrom };
   }
 
-  view.dispatch(transactionSpec);
-  view.focus();
+  const mutate = () => {
+    view.dispatch(transactionSpec);
+    view.focus();
+  };
+  const detailsBlock = section.detailsBlock;
+  const viewportController = getViewportController(view);
+  if (detailsBlock && viewportController) {
+    viewportController.preservePositionWhileMutation(section.lineFrom, mutate, 'immediate');
+  } else {
+    mutate();
+  }
   return true;
 }
 
