@@ -17,6 +17,7 @@ import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump
 import { reconcileExternalDocument } from './helpers/documentSync';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
+import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -997,6 +998,8 @@ editorWrapper.removeAttribute('aria-hidden');
 const existingEditorHost = editorWrapper.querySelector('.editor-host');
 const editorHost = existingEditorHost instanceof HTMLElement ? existingEditorHost : document.createElement('div');
 editorHost.className = 'editor-host';
+const editorScrollToTopController = createDocumentScrollToTopController();
+editorHost.appendChild(editorScrollToTopController.button);
 
 let editor: any = null;
 let outlineController: ReturnType<typeof createOutlineController>;
@@ -1792,6 +1795,7 @@ const mountInitialEditor = async () => {
       onOpenGitRevisionForLine: openGitRevisionForLine,
       onOpenGitWorktreeForLine: openGitWorktreeForLine
     });
+    editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
     editor.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
     gitClient?.applyBaselineToEditor(editor);
     syncGitDiffLineHighlights();

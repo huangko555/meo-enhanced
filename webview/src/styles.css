@@ -110,10 +110,54 @@ body {
 }
 
 .editor-host {
+  position: relative;
   min-height: 0;
   min-width: 0;
   flex: 1;
   background: var(--meo-background);
+}
+
+.document-scroll-top {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 240;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--meo-foreground) 22%, transparent);
+  border-radius: 50%;
+  color: var(--meo-foreground);
+  background: var(--vscode-editorWidget-background, var(--meo-code-background));
+  box-shadow: 0 4px 14px rgb(0 0 0 / 28%);
+  cursor: pointer;
+}
+
+.document-scroll-top[hidden] {
+  display: none;
+}
+
+.document-scroll-top:hover,
+.document-scroll-top:focus-visible {
+  background-color: var(--vscode-toolbar-hoverBackground, var(--meo-outline-hover-background));
+}
+
+.document-scroll-top:active {
+  background-color: var(--vscode-toolbar-activeBackground, var(--meo-outline-active-background));
+}
+
+.document-scroll-top svg {
+  pointer-events: none;
+}
+
+.editor-root.outline-visible
+  .editor-wrapper[data-outline-mode='floating'][data-outline-position='right']
+  .document-scroll-top {
+  right: calc(var(--meo-outline-width, 260px) + 32px);
 }
 
 .selection-inline-menu {

@@ -1,6 +1,7 @@
 import { createElement, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
+import { createDocumentScrollToTopController } from './scrollToTop';
 import type { OutlineHeading } from './outline';
 import type { PreviewAppearance, PreviewRenderErrorMessage, PreviewRenderedMessage } from '../../../src/shared/preview';
 
@@ -134,7 +135,8 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   status.setAttribute('aria-live', 'polite');
   status.hidden = true;
 
-  host.append(frame, status);
+  const scrollToTopController = createDocumentScrollToTopController();
+  host.append(frame, status, scrollToTopController.button);
 
   let appearance: PreviewAppearance = 'dark';
   let requestCounter = 0;
@@ -282,6 +284,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       if (!frameDocument) {
         return;
       }
+      scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
       if (restoreLine !== null) {
         restoreTopLine(restoreLine);
@@ -297,6 +300,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       };
       const finishRender = () => {
         keepPosition();
+        scrollToTopController.sync();
         onRendered?.();
       };
       finishRender();
@@ -304,6 +308,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
       }
     };
+    scrollToTopController.setScrollElement(null);
     frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
   };
 

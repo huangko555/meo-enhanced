@@ -1107,6 +1107,80 @@ async function main() {
     ) {
       throw new Error(`Tall Mermaid displaced the visible reading anchor: ${JSON.stringify({ tallMermaidBefore, tallMermaidAfter })}`);
     }
+
+    const testEditorScrollToTop = async (mode: 'live' | 'source') => {
+      await page.click(`[data-mode="${mode}"]`);
+      await waitForFrames(page);
+      await page.evaluate(() => {
+        const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+        scroller.scrollTop = 0;
+        scroller.dispatchEvent(new Event('scroll'));
+      });
+      await waitForFrames(page, 2);
+      const hiddenAtTop = await page.$eval('.editor-host > .document-scroll-top', (button) => (button as HTMLButtonElement).hidden);
+      await page.evaluate(() => {
+        const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+        scroller.scrollTop = 320;
+        scroller.dispatchEvent(new Event('scroll'));
+      });
+      await waitForFrames(page, 2);
+      const visibleAfterScroll = await page.$eval('.editor-host > .document-scroll-top', (button) => !(button as HTMLButtonElement).hidden);
+      await page.click('.editor-host > .document-scroll-top');
+      const afterClick = await page.evaluate(() => {
+        const button = document.querySelector<HTMLButtonElement>('.editor-host > .document-scroll-top')!;
+        const style = getComputedStyle(button);
+        return {
+          hidden: button.hidden,
+          scrollTop: document.querySelector<HTMLElement>('.editor-host .cm-scroller')!.scrollTop,
+          width: style.width,
+          height: style.height,
+          borderRadius: style.borderRadius
+        };
+      });
+      if (
+        !hiddenAtTop || !visibleAfterScroll || afterClick.scrollTop !== 0 || !afterClick.hidden ||
+        afterClick.width !== afterClick.height || afterClick.borderRadius !== '50%'
+      ) {
+        throw new Error(`${mode} scroll-to-top button failed: ${JSON.stringify({ hiddenAtTop, visibleAfterScroll, afterClick })}`);
+      }
+    };
+
+    await testEditorScrollToTop('live');
+    await testEditorScrollToTop('source');
+
+    await page.click('[data-mode="preview"]');
+    await page.waitForSelector('.preview-host:not([hidden]) .preview-frame');
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      frameDocument.scrollingElement!.scrollTop = 0;
+      frameDocument.dispatchEvent(new Event('scroll'));
+    });
+    await waitForFrames(page, 2);
+    const previewHiddenAtTop = await page.$eval('.preview-host > .document-scroll-top', (button) => (button as HTMLButtonElement).hidden);
+    await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      frameDocument.scrollingElement!.scrollTop = 320;
+      frameDocument.dispatchEvent(new Event('scroll'));
+    });
+    await waitForFrames(page, 2);
+    const previewVisibleAfterScroll = await page.$eval('.preview-host > .document-scroll-top', (button) => !(button as HTMLButtonElement).hidden);
+    await page.click('.preview-host > .document-scroll-top');
+    const previewAfterClick = await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const button = document.querySelector<HTMLButtonElement>('.preview-host > .document-scroll-top')!;
+      return { hidden: button.hidden, scrollTop: frameDocument.scrollingElement!.scrollTop };
+    });
+    if (
+      !previewHiddenAtTop || !previewVisibleAfterScroll ||
+      previewAfterClick.scrollTop !== 0 || !previewAfterClick.hidden
+    ) {
+      throw new Error(`Preview scroll-to-top button failed: ${JSON.stringify({
+        previewHiddenAtTop,
+        previewVisibleAfterScroll,
+        previewAfterClick
+      })}`);
+    }
     console.log('webview viewport checks passed');
   } finally {
     await browser.close();

@@ -199,6 +199,7 @@ export function createOutlineController({
   const notifyUiState = () => onUiStateChange?.({ mode, width });
   const applyOutlineWidth = () => {
     outlineSidebar.style.width = `${width}px`;
+    editorWrapper.style.setProperty('--meo-outline-width', `${width}px`);
   };
 
   const buildOutlineSubtreeEndIndexes = (headings: OutlineHeading[]): number[] => {
