@@ -60,6 +60,31 @@ async function main(): Promise<void> {
     await page.evaluate(() => (window as any).__editor.view.dispatch({ selection: { anchor: 0 } }));
     await waitForFrames(page);
 
+    const defaultCollapsedSourceState = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const anchor = editor.getText().indexOf('<details>');
+      editor.view.dispatch({ selection: { anchor: anchor + 1 } });
+      return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
+    });
+    await waitForFrames(page);
+    const defaultCollapsedSourceDom = await page.evaluate(() => ({
+      bodyVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .some((line) => line.textContent?.includes('details body 1')),
+      sourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .some((line) => line.textContent?.includes('<details>'))
+    }));
+    if (
+      defaultCollapsedSourceState?.collapsed !== true ||
+      !defaultCollapsedSourceDom.sourceVisible || defaultCollapsedSourceDom.bodyVisible
+    ) {
+      throw new Error(`Default-collapsed details changed state when revealing source: ${JSON.stringify({
+        defaultCollapsedSourceState,
+        defaultCollapsedSourceDom
+      })}`);
+    }
+    await page.evaluate(() => (window as any).__editor.view.dispatch({ selection: { anchor: 0 } }));
+    await waitForFrames(page);
+
     const detailsGutterClickPoint = await page.evaluate(() => {
       const editor = (window as any).__editor;
       const scroller = editor.view.scrollDOM as HTMLElement;
@@ -209,10 +234,119 @@ async function main(): Promise<void> {
       return { sourceVisible, toggled };
     }, detailsSourceClickPoint.anchor);
     await waitForFrames(page);
-    const detailsBodyStillVisible = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-      .some((line) => line.textContent?.includes('details body 1')));
-    if (!sourceToggleResult.sourceVisible || sourceToggleResult.toggled || !detailsBodyStillVisible) {
-      throw new Error(`Details source mode must reject folding: ${JSON.stringify({ ...sourceToggleResult, detailsBodyStillVisible })}`);
+    const detailsAfterSourceCollapse = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return {
+        bodyVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('details body 1')),
+        details: (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0],
+        selectionHead: editor.view.state.selection.main.head
+      };
+    });
+    if (
+      !sourceToggleResult.sourceVisible || !sourceToggleResult.toggled ||
+      detailsAfterSourceCollapse.details?.collapsed !== true || detailsAfterSourceCollapse.bodyVisible ||
+      detailsAfterSourceCollapse.selectionHead !== detailsAfterSourceCollapse.details?.lineFrom
+    ) {
+      throw new Error(`Details source mode must allow folding without reopening: ${JSON.stringify({
+        ...sourceToggleResult,
+        ...detailsAfterSourceCollapse
+      })}`);
+    }
+
+    const sourceExpandResult = await page.evaluate((anchor) => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+    }, detailsSourceClickPoint.anchor);
+    await waitForFrames(page);
+    const detailsAfterSourceExpand = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
+    });
+    if (!sourceExpandResult || detailsAfterSourceExpand?.collapsed !== false) {
+      throw new Error(`Default-collapsed details source mode must allow re-expanding: ${JSON.stringify({
+        sourceExpandResult,
+        detailsAfterSourceExpand
+      })}`);
+    }
+
+    const defaultOpenSource = [
+      ...Array.from({ length: 20 }, (_, index) => `before open ${index + 1}`),
+      '<details open>',
+      '<summary>Default open summary</summary>',
+      'default open body with **source markers**',
+      '</details>',
+      ...Array.from({ length: 20 }, (_, index) => `after open ${index + 1}`)
+    ].join('\n');
+    await page.evaluate((text) => {
+      const editor = (window as any).__editor;
+      editor.setText(text);
+      editor.view.dispatch({ selection: { anchor: 0 } });
+      editor.scrollToLine(22, 'top');
+    }, defaultOpenSource);
+    await waitForFrames(page);
+    const defaultOpenSourceClickPoint = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('default open body'))!;
+      const rect = bodyLine.getBoundingClientRect();
+      return {
+        anchor: editor.getText().indexOf('<details open>'),
+        x: rect.left + Math.min(140, rect.width / 2),
+        y: (rect.top + rect.bottom) / 2
+      };
+    });
+    await page.mouse.click(defaultOpenSourceClickPoint.x, defaultOpenSourceClickPoint.y);
+    await waitForFrames(page);
+    const defaultOpenBeforeToggle = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return {
+        details: (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0],
+        sourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('**source markers**'))
+      };
+    });
+    if (defaultOpenBeforeToggle.details?.collapsed !== false || !defaultOpenBeforeToggle.sourceVisible) {
+      throw new Error(`Default-open details changed state when revealing source: ${JSON.stringify(defaultOpenBeforeToggle)}`);
+    }
+    const defaultOpenCollapseResult = await page.evaluate((anchor) => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+    }, defaultOpenSourceClickPoint.anchor);
+    await waitForFrames(page);
+    const defaultOpenAfterCollapse = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return {
+        bodyVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('default open body')),
+        details: (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0],
+        selectionHead: editor.view.state.selection.main.head
+      };
+    });
+    if (
+      !defaultOpenCollapseResult || defaultOpenAfterCollapse.details?.collapsed !== true ||
+      defaultOpenAfterCollapse.bodyVisible ||
+      defaultOpenAfterCollapse.selectionHead !== defaultOpenAfterCollapse.details?.lineFrom
+    ) {
+      throw new Error(`Default-open details source mode must allow folding: ${JSON.stringify({
+        defaultOpenCollapseResult,
+        defaultOpenAfterCollapse
+      })}`);
+    }
+    const defaultOpenExpandResult = await page.evaluate((anchor) => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+    }, defaultOpenSourceClickPoint.anchor);
+    await waitForFrames(page);
+    const defaultOpenAfterExpand = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
+    });
+    if (!defaultOpenExpandResult || defaultOpenAfterExpand?.collapsed !== false) {
+      throw new Error(`Default-open details source mode must allow re-expanding: ${JSON.stringify({
+        defaultOpenExpandResult,
+        defaultOpenAfterExpand
+      })}`);
     }
 
     const quoteSource = [

@@ -276,22 +276,9 @@ export function getDetailsBlocks(state: EditorState): DetailsBlockState[] {
   }));
 }
 
-function isDetailsSourceLineActive(state: EditorState, detailsBlock: DetailsBlockInfo): boolean {
-  return state.selection.ranges.some((range) => (
-    range.head >= detailsBlock.sectionFrom && range.head <= detailsBlock.sectionTo
-  ));
-}
-
 export function toggleCollapsibleSection(view: EditorView, anchor: number): boolean {
   const section = getCollapsibleSectionAnchorMap(view.state).get(anchor);
   if (!section) {
-    return false;
-  }
-
-  if (
-    section.kind === 'details' && section.detailsBlock &&
-    isDetailsSourceLineActive(view.state, section.detailsBlock)
-  ) {
     return false;
   }
 
@@ -300,7 +287,12 @@ export function toggleCollapsibleSection(view: EditorView, anchor: number): bool
     effects: toggleHeadingCollapseEffect.of(section.anchor),
     annotations: Transaction.addToHistory.of(false)
   };
-  if (!isCollapsed && section.kind === 'heading') {
+  const selectionTouchesCollapsedContent = view.state.selection.ranges.some((range) => (
+    range.empty
+      ? range.from > section.collapseFrom && range.from < section.collapseTo
+      : range.from < section.collapseTo && range.to > section.collapseFrom
+  ));
+  if (!isCollapsed && (section.kind === 'heading' || selectionTouchesCollapsedContent)) {
     transactionSpec.selection = { anchor: section.lineFrom };
   }
 
