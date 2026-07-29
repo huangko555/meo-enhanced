@@ -28,6 +28,28 @@ function hasBlockedTagAncestor(state: any, position: number): boolean {
   return false;
 }
 
+function isInsideMarkdownLinkDestination(text: string, position: number): boolean {
+  let depth = 1;
+  for (let index = position - 1; index >= 0; index -= 1) {
+    if (text[index] === '\\') {
+      index -= 1;
+      continue;
+    }
+    if (text[index] === ')') {
+      depth += 1;
+      continue;
+    }
+    if (text[index] !== '(') {
+      continue;
+    }
+    depth -= 1;
+    if (depth === 0) {
+      return index > 0 && text[index - 1] === ']';
+    }
+  }
+  return false;
+}
+
 function buildMarkdownTagDecorations(state: any): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
@@ -40,8 +62,14 @@ function buildMarkdownTagDecorations(state: any): DecorationSet {
       const rawIndex = match.index ?? 0;
       const from = line.from + rawIndex + prefixLength;
       const to = from + 1 + (match[2]?.length ?? 0);
+      const linePosition = from - line.from;
       const isColor = colorRanges.some((range) => range.from === from && range.to === to);
-      if (to <= from + 1 || isColor || hasBlockedTagAncestor(state, from)) {
+      if (
+        to <= from + 1 ||
+        isColor ||
+        isInsideMarkdownLinkDestination(text, linePosition) ||
+        hasBlockedTagAncestor(state, from)
+      ) {
         continue;
       }
       builder.add(from, to, markdownTagDeco);

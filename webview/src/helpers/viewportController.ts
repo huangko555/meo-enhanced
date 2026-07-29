@@ -447,6 +447,12 @@ export class ViewportController {
   private handlePotentialLayoutInteraction(event: PointerEvent): void {
     this.markInteraction();
     if (this.getMode() !== 'live' || event.button !== 0 || event.target === this.view.scrollDOM) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest(
+        '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-code-block-start, .meo-md-code-block-end'
+      )
+    ) return;
     const pointerPosition = this.view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
       this.view.posAtCoords({ x: this.view.contentDOM.getBoundingClientRect().left + 1, y: event.clientY });
     this.startInteractionLayoutStabilization(

@@ -15,6 +15,232 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function assertSourceClickKeepsViewport(
+  page: Page,
+  blockSelector: string,
+  lineText: string,
+  controllerProperty: '__meoMermaidEditingController' | '__meoLatexMathEditingController'
+): Promise<void> {
+  const before = await page.evaluate(({ selector, text }) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(selector)!;
+    const line = Array.from(block.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent === text)!;
+    const property = selector.includes('latex')
+      ? '__meoLatexMathEditingController'
+      : '__meoMermaidEditingController';
+    const innerView = (block as any)[property]?.innerView;
+    const viewport = editor.view.scrollDOM.getBoundingClientRect();
+    const lineRect = line.getBoundingClientRect();
+    editor.view.scrollDOM.scrollTop += lineRect.top - viewport.top - viewport.height / 2;
+    const positionedRect = line.getBoundingClientRect();
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      lineTop: positionedRect.top,
+      focused: innerView?.hasFocus ?? false,
+      x: positionedRect.left + Math.min(24, positionedRect.width / 2),
+      y: positionedRect.top + positionedRect.height / 2
+    };
+  }, { selector: blockSelector, text: lineText });
+  await waitForFrames(page, 2);
+  await page.mouse.move(before.x, before.y);
+  await page.mouse.down();
+  await waitForFrames(page, 2);
+  const afterDown = await page.evaluate(() => ({
+    scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop,
+    activeElement: document.activeElement?.className ?? null
+  }));
+  await page.mouse.up();
+  await waitForFrames(page, 4);
+  const after = await page.evaluate(({ selector, text, property }) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(selector)!;
+    const line = Array.from(block.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent === text)!;
+    const innerView = (block as any)[property]?.innerView;
+    const selection = innerView?.state.selection.main;
+    return {
+      focused: innerView?.hasFocus ?? false,
+      selectedLine: selection ? innerView.state.doc.lineAt(selection.head).text : null,
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      lineTop: line.getBoundingClientRect().top
+    };
+  }, { selector: blockSelector, text: lineText, property: controllerProperty });
+  if (
+    !after.focused ||
+    after.selectedLine !== lineText ||
+    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
+    Math.abs(after.lineTop - before.lineTop) > 1
+  ) {
+    throw new Error(`Clicking ${blockSelector} source moved the viewport or missed the cursor: ${JSON.stringify({ before, afterDown, after })}`);
+  }
+}
+
+async function assertBlockAreaClickKeepsViewport(
+  page: Page,
+  blockSelector: string,
+  targetSelector: string,
+  verticalRatio = 0.5,
+  preserveOuterSelection = true
+): Promise<void> {
+  const before = await page.evaluate(({ blockQuery, selector, ratio }) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(blockQuery)!;
+    const viewport = editor.view.scrollDOM.getBoundingClientRect();
+    editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 120;
+    const target = document.querySelector<HTMLElement>(selector)!;
+    const targetRect = target.getBoundingClientRect();
+    const blockRect = block.getBoundingClientRect();
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      blockTop: blockRect.top,
+      selectionHead: editor.view.state.selection.main.head,
+      outerFocused: editor.view.hasFocus,
+      innerFocused: Boolean(
+        (block as any).__meoMermaidEditingController?.innerView?.hasFocus
+        || (block as any).__meoLatexMathEditingController?.innerView?.hasFocus
+      ),
+      x: targetRect.left + targetRect.width / 2,
+      y: Math.max(viewport.top + 24, Math.min(viewport.bottom - 24, targetRect.top + targetRect.height * ratio))
+    };
+  }, { blockQuery: blockSelector, selector: targetSelector, ratio: verticalRatio });
+  await waitForFrames(page, 2);
+  await page.mouse.move(before.x, before.y);
+  await page.mouse.down();
+  await waitForFrames(page, 2);
+  const afterDown = await page.evaluate(() => {
+    const editor = (window as any).__mermaidEditingEditor;
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      selectionHead: editor.view.state.selection.main.head
+    };
+  });
+  await page.mouse.up();
+  await new Promise((resolve) => setTimeout(resolve, 850));
+  await waitForFrames(page, 2);
+  const after = await page.evaluate((blockQuery) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(blockQuery)!;
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      blockTop: block.getBoundingClientRect().top,
+      selectionHead: editor.view.state.selection.main.head,
+      outerFocused: editor.view.hasFocus,
+      innerFocused: Boolean(
+        (block as any).__meoMermaidEditingController?.innerView?.hasFocus
+        || (block as any).__meoLatexMathEditingController?.innerView?.hasFocus
+      )
+    };
+  }, blockSelector);
+  if (
+    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
+    Math.abs(after.blockTop - before.blockTop) > 1 ||
+    (preserveOuterSelection && after.selectionHead !== before.selectionHead) ||
+    (preserveOuterSelection && before.innerFocused && !after.innerFocused)
+  ) {
+    throw new Error(`Clicking ${targetSelector} moved the Mermaid block: ${JSON.stringify({ before, afterDown, after })}`);
+  }
+}
+
+async function assertModeButtonKeepsViewport(
+  page: Page,
+  buttonSelector: string,
+  blockSelector: string
+): Promise<void> {
+  await page.evaluate((blockQuery) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(blockQuery)!;
+    const viewport = editor.view.scrollDOM.getBoundingClientRect();
+    editor.view.scrollDOM.scrollTop += block.getBoundingClientRect().top - viewport.top - 120;
+  }, blockSelector);
+  const readState = () => page.evaluate((buttonQuery) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const button = document.querySelector<HTMLElement>(buttonQuery)!;
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      buttonTop: button.getBoundingClientRect().top,
+      label: button.getAttribute('aria-label')
+    };
+  }, buttonSelector);
+  await waitForFrames(page, 2);
+  const before = await readState();
+  const buttonPoint = await page.$eval(buttonSelector, (button) => {
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(buttonPoint.x, buttonPoint.y);
+  await page.mouse.down();
+  await waitForFrames(page, 2);
+  const afterDown = await readState();
+  await page.mouse.up();
+  await new Promise((resolve) => setTimeout(resolve, 850));
+  await waitForFrames(page, 2);
+  const after = await readState();
+  if (
+    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
+    Math.abs(after.buttonTop - before.buttonTop) > 1 ||
+    after.label === before.label
+  ) {
+    throw new Error(`Clicking ${buttonSelector} moved the viewport or missed the mode change: ${JSON.stringify({ before, afterDown, after })}`);
+  }
+}
+
+async function assertBlockBoundaryClickKeepsViewport(page: Page, lineNumber: number): Promise<void> {
+  await page.evaluate((targetLineNumber) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const line = editor.view.state.doc.line(targetLineNumber);
+    editor.view.scrollDOM.scrollTop = Math.max(0, editor.view.lineBlockAt(line.from).top - 120);
+  }, lineNumber);
+  await waitForFrames(page, 2);
+  const before = await page.evaluate((targetLineNumber) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const line = editor.view.state.doc.line(targetLineNumber);
+    const coords = editor.view.coordsAtPos(line.from + 1)!;
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      lineTop: editor.view.coordsAtPos(line.from)?.top ?? null,
+      x: coords.left + 2,
+      y: (coords.top + coords.bottom) / 2
+    };
+  }, lineNumber);
+  await page.mouse.move(before.x, before.y);
+  await page.mouse.down();
+  await waitForFrames(page, 2);
+  const afterDown = await page.evaluate((targetLineNumber) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const line = editor.view.state.doc.line(targetLineNumber);
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      lineTop: editor.view.coordsAtPos(line.from)?.top ?? null,
+      selectedLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
+    };
+  }, lineNumber);
+  await page.mouse.up();
+  await new Promise((resolve) => setTimeout(resolve, 850));
+  await waitForFrames(page, 2);
+  const after = await page.evaluate((targetLineNumber) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const line = editor.view.state.doc.line(targetLineNumber);
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      lineTop: editor.view.coordsAtPos(line.from)?.top ?? null,
+      selectedLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
+    };
+  }, lineNumber);
+  if (
+    after.selectedLine !== lineNumber ||
+    before.lineTop === null ||
+    afterDown.lineTop === null ||
+    after.lineTop === null ||
+    Math.abs(afterDown.scrollTop - before.scrollTop) > 1 ||
+    Math.abs(afterDown.lineTop - before.lineTop) > 1 ||
+    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
+    Math.abs(after.lineTop - before.lineTop) > 1
+  ) {
+    throw new Error(`Clicking block boundary line ${lineNumber} moved the viewport: ${JSON.stringify({ before, afterDown, after })}`);
+  }
+}
+
 async function main() {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-editing-entry.ts')],
@@ -123,6 +349,67 @@ async function main() {
     }));
     if (!defaultMode.preview || defaultMode.editing || defaultMode.buttonLabel !== 'Edit Mermaid in split view') {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
+    }
+
+    const previewClickBefore = await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-block')!;
+      return {
+        selectionHead: editor.view.state.selection.main.head,
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        blockTop: block.getBoundingClientRect().top
+      };
+    });
+    const previewClickPoint = await page.$eval('.meo-mermaid-block', (block) => {
+      const rect = block.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(previewClickPoint.x, previewClickPoint.y);
+    await page.mouse.down();
+    await waitForFrames(page, 2);
+    const previewPointerDown = await page.evaluate(() => ({
+      preview: Boolean(document.querySelector('.meo-mermaid-block')),
+      editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
+      sourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .some((line) => line.textContent?.includes('node24 --> node25') && getComputedStyle(line).display !== 'none'),
+      buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
+    }));
+    await page.mouse.up();
+    await waitForFrames(page, 4);
+    const previewClickAfter = await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-block');
+      return {
+        selectionHead: editor.view.state.selection.main.head,
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        blockTop: block?.getBoundingClientRect().top ?? null,
+        preview: Boolean(block),
+        editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
+        buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
+      };
+    });
+    if (
+      previewClickAfter.selectionHead !== previewClickBefore.selectionHead ||
+      Math.abs(previewClickAfter.scrollTop - previewClickBefore.scrollTop) > 1 ||
+      previewClickAfter.blockTop === null ||
+      Math.abs(previewClickAfter.blockTop - previewClickBefore.blockTop) > 1 ||
+      !previewClickAfter.preview ||
+      previewClickAfter.editing ||
+      previewClickAfter.buttonLabel !== 'Edit Mermaid in split view'
+    ) {
+      throw new Error(`Clicking Mermaid preview changed editor state: ${JSON.stringify({
+        before: previewClickBefore,
+        pointerDown: previewPointerDown,
+        after: previewClickAfter
+      })}`);
+    }
+    if (
+      !previewPointerDown.preview ||
+      previewPointerDown.editing ||
+      previewPointerDown.sourceVisible ||
+      previewPointerDown.buttonLabel !== 'Edit Mermaid in split view'
+    ) {
+      throw new Error(`Pressing Mermaid preview temporarily revealed source: ${JSON.stringify(previewPointerDown)}`);
     }
 
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(26, 'upper'));
@@ -371,9 +658,11 @@ async function main() {
       const previous = (window as any).__mermaidEditingEditor;
       previous.destroy();
       document.getElementById('app')!.replaceChildren();
+      const prelude = Array.from({ length: 40 }, (_, index) => `prelude ${index + 1}`);
       (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
         parent: document.getElementById('app')!,
         text: [
+          ...prelude,
           '```mermaid',
           'graph TD',
           'A --> B',
@@ -388,6 +677,8 @@ async function main() {
         onApplyChanges() {}
       });
     });
+    await waitForFrames(page);
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(42, 'center'));
     await waitForFrames(page);
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
@@ -419,6 +710,13 @@ async function main() {
     if (JSON.stringify(shortSplitLayout.sourceStyle) !== JSON.stringify(shortSplitLayout.normalStyle)) {
       throw new Error(`Mermaid split source style differs from normal code: ${JSON.stringify(shortSplitLayout)}`);
     }
+    await assertBlockAreaClickKeepsViewport(
+      page,
+      '.meo-mermaid-editing-block.is-split',
+      '.meo-mermaid-source-pane',
+      0.9,
+      false
+    );
     await page.evaluate(() => {
       const editor = (window as any).__mermaidEditingEditor;
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
@@ -466,13 +764,16 @@ async function main() {
       const previous = (window as any).__mermaidEditingEditor;
       previous.destroy();
       document.getElementById('app')!.replaceChildren();
+      const prelude = Array.from({ length: 40 }, (_, index) => `prelude ${index + 1}`);
       (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
         parent: document.getElementById('app')!,
-        text: ['$$', 'x', ...new Array(30).fill(''), '$$'].join('\n'),
+        text: [...prelude, '$$', 'x', ...new Array(30).fill(''), '$$'].join('\n'),
         initialMode: 'live',
         onApplyChanges() {}
       });
     });
+    await waitForFrames(page);
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(42, 'center'));
     await waitForFrames(page);
     await page.click('.meo-latex-math-mode-btn');
     await waitForFrames(page);
@@ -507,6 +808,196 @@ async function main() {
       !latexSplitLayout.formulaInsideFrame
     ) {
       throw new Error(`LaTeX split preview did not use the available vertical space: ${JSON.stringify(latexSplitLayout)}`);
+    }
+    await assertBlockAreaClickKeepsViewport(
+      page,
+      '.meo-latex-math-editing-block.is-split',
+      '.meo-latex-math-preview-sticky'
+    );
+
+    await page.evaluate(() => {
+      const previous = (window as any).__mermaidEditingEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const prelude = Array.from({ length: 40 }, (_, index) => `prelude ${index + 1}`);
+      const mermaidLines = Array.from({ length: 48 }, (_, index) => (
+        index === 23 ? 'CLICK_MERMAID_24 --> TARGET' : `CLICK_MERMAID_${index + 1} --> NEXT_${index + 1}`
+      ));
+      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          ...prelude,
+          '```mermaid',
+          'graph TD',
+          ...mermaidLines,
+          '```',
+          '',
+          '## AFTER_MERMAID',
+          'after mermaid content'
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page);
+
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(66, 'center'));
+    await waitForFrames(page);
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+    await assertBlockAreaClickKeepsViewport(
+      page,
+      '.meo-mermaid-editing-block.is-split',
+      '.meo-mermaid-preview-sticky'
+    );
+    await assertSourceClickKeepsViewport(
+      page,
+      '.meo-mermaid-editing-block.is-split',
+      'CLICK_MERMAID_24 --> TARGET',
+      '__meoMermaidEditingController'
+    );
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
+    await assertSourceClickKeepsViewport(
+      page,
+      '.meo-mermaid-editing-block.is-source',
+      'CLICK_MERMAID_24 --> TARGET',
+      '__meoMermaidEditingController'
+    );
+
+    await page.evaluate(() => {
+      const previous = (window as any).__mermaidEditingEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const latexLines = Array.from({ length: 32 }, (_, index) => (
+        index === 17 ? 'CLICK_LATEX_18 = x^2' : `latex_${index + 1} = x_${index + 1}`
+      ));
+      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: ['$$', ...latexLines, '$$'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page);
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(20, 'center'));
+    await waitForFrames(page);
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page);
+    await assertSourceClickKeepsViewport(
+      page,
+      '.meo-latex-math-editing-block.is-split',
+      'CLICK_LATEX_18 = x^2',
+      '__meoLatexMathEditingController'
+    );
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page);
+    await assertSourceClickKeepsViewport(
+      page,
+      '.meo-latex-math-editing-block.is-source',
+      'CLICK_LATEX_18 = x^2',
+      '__meoLatexMathEditingController'
+    );
+
+    await page.evaluate(() => {
+      const previous = (window as any).__mermaidEditingEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const prelude = Array.from({ length: 146 }, (_, index) => `prelude ${index + 1}`);
+      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          ...prelude,
+          '```mermaid',
+          'flowchart LR',
+          '  A[Markdown Source] --> B{编辑模式}',
+          '  B -->|Live| C[实时编辑]',
+          '  B -->|Split| D[源码与预览]',
+          '  B -->|Preview| E[只读阅读]',
+          '  C --> F[一致的导出结果]',
+          '  D --> F',
+          '  E --> F',
+          '',
+          '  classDef source fill:#1E293B,stroke:#60A5FA,color:#F8FAFC',
+          '  classDef output fill:#052E16,stroke:#4ADE80,color:#F0FDF4',
+          '  class A source',
+          '  class F output',
+          '```',
+          '',
+          '### 6.2 布局稳定性',
+          '',
+          '$$',
+          '\\operatorname{score}',
+          '= \\alpha \\cdot \\operatorname{readability}',
+          '+ \\beta \\cdot \\operatorname{stability}',
+          '+ \\gamma \\cdot \\operatorname{consistency},',
+          '\\qquad',
+          '\\alpha + \\beta + \\gamma = 1',
+          '$$',
+          ...Array.from({ length: 100 }, (_, index) => `tail ${index + 1}`)
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      const editor = (window as any).__mermaidEditingEditor;
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(146).from } });
+    });
+    await waitForFrames(page);
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(147, 'center'));
+    await waitForFrames(page);
+    await assertBlockAreaClickKeepsViewport(
+      page,
+      '.meo-mermaid-block',
+      '.meo-mermaid-block svg'
+    );
+    await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(164).from } });
+      editor.view.scrollDOM.scrollTop = Math.max(0, editor.view.lineBlockAt(editor.view.state.doc.line(165).from).top - 120);
+    });
+    await waitForFrames(page);
+    await assertBlockAreaClickKeepsViewport(
+      page,
+      '.meo-md-math-fenced-display',
+      '.meo-md-math-fenced-display'
+    );
+
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(147, 'center'));
+    await waitForFrames(page);
+    await page.click('.meo-mermaid-mode-btn');
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(165, 'center'));
+    await waitForFrames(page);
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page);
+    await assertBlockBoundaryClickKeepsViewport(page, 147);
+    await assertBlockBoundaryClickKeepsViewport(page, 161);
+    await assertBlockBoundaryClickKeepsViewport(page, 165);
+    await assertBlockBoundaryClickKeepsViewport(page, 172);
+
+    await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(146).from } });
+    });
+    await waitForFrames(page);
+    for (let index = 0; index < 3; index += 1) {
+      await assertModeButtonKeepsViewport(
+        page,
+        '.meo-mermaid-mode-btn',
+        '.meo-mermaid-block, .meo-mermaid-editing-block'
+      );
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(164).from } });
+    });
+    await waitForFrames(page);
+    for (let index = 0; index < 3; index += 1) {
+      await assertModeButtonKeepsViewport(
+        page,
+        '.meo-latex-math-mode-btn',
+        '.meo-md-math-fenced-display, .meo-latex-math-editing-block'
+      );
     }
 
     console.log('Mermaid editing checks passed');

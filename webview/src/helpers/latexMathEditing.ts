@@ -462,6 +462,11 @@ class LatexMathEditingController {
     }
     const preview = document.createElement('div');
     preview.className = 'meo-md-math meo-md-math-display meo-md-math-fenced-display';
+    preview.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button === 0) {
+        event.preventDefault();
+      }
+    });
     const html = renderLatexMathToHtml(this.block.sourceText, 'display');
     if (html) {
       preview.innerHTML = html;

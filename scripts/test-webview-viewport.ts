@@ -1134,12 +1134,15 @@ async function main() {
           scrollTop: document.querySelector<HTMLElement>('.editor-host .cm-scroller')!.scrollTop,
           width: style.width,
           height: style.height,
-          borderRadius: style.borderRadius
+          borderRadius: style.borderRadius,
+          background: style.backgroundColor,
+          documentBackground: getComputedStyle(document.querySelector<HTMLElement>('.editor-host')!).backgroundColor
         };
       });
       if (
         !hiddenAtTop || !visibleAfterScroll || afterClick.scrollTop !== 0 || !afterClick.hidden ||
-        afterClick.width !== afterClick.height || afterClick.borderRadius !== '50%'
+        afterClick.width !== afterClick.height || afterClick.borderRadius !== '50%' ||
+        afterClick.background !== afterClick.documentBackground
       ) {
         throw new Error(`${mode} scroll-to-top button failed: ${JSON.stringify({ hiddenAtTop, visibleAfterScroll, afterClick })}`);
       }

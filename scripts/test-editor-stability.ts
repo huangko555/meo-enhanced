@@ -79,7 +79,7 @@ async function main() {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-semantic-mutedForeground:#8b949e; --meo-semantic-tableBorder:#3e444d; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
+      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-semantic-mutedForeground:#8b949e; --meo-semantic-tableBorder:#3e444d; --meo-semantic-tagForeground:#61afef; --meo-semantic-tagBackground:rgba(97,175,239,.14); --meo-semantic-tagBorder:rgba(97,175,239,.45); --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -701,12 +701,82 @@ async function main() {
       throw new Error(`Live inline styles did not compose by property: ${JSON.stringify(inlineStyleComposition)}`);
     }
 
+    // Reproduce host/document image chrome leaking onto CodeMirror's internal image buffer.
+    await page.addStyleTag({
+      content: '.cm-editor img.cm-widgetBuffer { min-width:14px; padding:0 3px; border:2px solid #4b7896; border-radius:8px; background:#243746; }'
+    });
     await page.evaluate(() => {
       const editor = (window as any).__editor;
-      editor.setText('anchor\n**粗体**\n[普通链接](https://example.com/path)\n![示例](https://example.invalid/image.png)\ntail');
+      const prelude = Array.from({ length: 2000 }, (_, index) => `prelude ${index + 1} with enough text to keep the initial syntax tree partial`);
+      editor.setText([
+        ...prelude,
+        'anchor',
+        '**粗体**',
+        '[普通链接](https://example.com/path)',
+        '- [跳转到项目概览](#2-项目概览)',
+        '- [跳转到长表格](#4-长表格与单元格内列表)',
+        '- [跳转到 Mermaid](#6-mermaid-与块级公式)',
+        '![示例](https://example.invalid/image.png)',
+        '# 2. 项目概览',
+        '# 4. 长表格与单元格内列表',
+        '# 6. Mermaid 与块级公式',
+        'tail'
+      ].join('\n'));
       editor.view.dispatch({ selection: { anchor: 0 } });
+      editor.scrollToLine(2006, 'center');
     });
     await waitForFrames(page, 3);
+    const readInternalLinkCapsules = () => page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('跳转到 Mermaid'));
+      if (!line) return [];
+      return Array.from(line.querySelectorAll<HTMLElement>('*'))
+        .filter((element) => !element.closest('.meo-md-link-open-btn'))
+        .map((element) => {
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          const backgroundVisible = style.backgroundColor !== 'transparent' &&
+            style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+          const borderVisible = style.borderStyle !== 'none' && parseFloat(style.borderWidth) > 0;
+          return {
+            classes: element.className,
+            text: element.textContent ?? '',
+            visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
+            capsule: parseFloat(style.borderRadius) > 0 && (backgroundVisible || borderVisible),
+            width: rect.width,
+            height: rect.height
+          };
+        })
+        .filter((element) => element.visible && element.capsule);
+    });
+    const foldedInternalLinkCapsules = await readInternalLinkCapsules();
+    if (foldedInternalLinkCapsules.length > 0) {
+      throw new Error(`Folded internal Markdown link rendered a capsule: ${JSON.stringify(foldedInternalLinkCapsules)}`);
+    }
+    const internalLinkPoint = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('跳转到 Mermaid'))!;
+      const label = Array.from(line.querySelectorAll<HTMLElement>('.meo-md-link'))
+        .find((candidate) => candidate.textContent?.includes('跳转到 Mermaid'))!;
+      const rect = label.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.click(internalLinkPoint.x, internalLinkPoint.y);
+    await waitForFrames(page, 3);
+    const expandedInternalLinkCapsules = await readInternalLinkCapsules();
+    const expandedInternalLinkDecorations = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('跳转到 Mermaid'))!;
+      return Array.from(line.querySelectorAll<HTMLElement>('*'))
+        .filter((element) => /(?:pill|tag|swatch|clear-btn)/.test(element.className))
+        .map((element) => ({ classes: element.className, text: element.textContent ?? '' }));
+    });
+    if (expandedInternalLinkCapsules.length > 0 || expandedInternalLinkDecorations.length > 0) {
+      throw new Error(`Expanded internal Markdown link rendered a capsule: ${JSON.stringify({
+        capsules: expandedInternalLinkCapsules,
+        decorations: expandedInternalLinkDecorations
+      })}`);
+    }
     const activateStaleTableInteraction = () => page.evaluate(() => {
       const editor = (window as any).__editor;
       const staleOwner = document.createElement('div');
@@ -758,10 +828,11 @@ async function main() {
       return {
         text: line?.textContent ?? '',
         hiddenUrlCount: line?.querySelectorAll('.meo-md-link-url-hidden').length ?? 0,
+        clearButtonCount: line?.querySelectorAll('.meo-md-link-clear-btn').length ?? 0,
         tableInteractionActive: document.querySelector('.cm-editor')?.classList.contains('meo-table-interaction-active') ?? false
       };
     });
-    if (ordinaryLinkState.hiddenUrlCount !== 0) {
+    if (ordinaryLinkState.hiddenUrlCount !== 0 || ordinaryLinkState.clearButtonCount !== 1) {
       throw new Error(`Ordinary Markdown link did not recover from stale table interaction: ${JSON.stringify(ordinaryLinkState)}`);
     }
 

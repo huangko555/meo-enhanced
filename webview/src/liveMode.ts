@@ -995,12 +995,14 @@ function addMarkdownLinkDecorations(builder, state, node, activeLines) {
     return;
   }
 
-  builder.push(
-    Decoration.widget({
-      widget: new ClearLinkUrlWidget(urlNode.from, urlNode.to),
-      side: 1
-    }).range(urlNode.to)
-  );
+  if (!href.startsWith('#')) {
+    builder.push(
+      Decoration.widget({
+        widget: new ClearLinkUrlWidget(urlNode.from, urlNode.to),
+        side: 1
+      }).range(urlNode.to)
+    );
+  }
 }
 
 function addFootnoteReferenceDecorations(builder, state, reference, activeLines): boolean {
@@ -2168,6 +2170,11 @@ class LatexMathWidget extends WidgetType {
     }
     if (this.fencedDisplay && this.mode === 'display') {
       wrapper.classList.add('meo-md-math-fenced-display');
+      wrapper.addEventListener('pointerdown', (event: PointerEvent) => {
+        if (event.button === 0) {
+          event.preventDefault();
+        }
+      });
     }
     applyLiveBlockIndent(wrapper, this.indentColumns);
     wrapper.innerHTML = this.html;

@@ -643,6 +643,11 @@ export class MermaidDiagramWidget extends WidgetType {
   toDOM(view?: EditorView) {
     const container = document.createElement('div');
     container.className = 'meo-mermaid-block';
+    container.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button === 0) {
+        event.preventDefault();
+      }
+    });
     applyLiveBlockIndent(container, this.indentColumns);
     applyMermaidThemeClass(container);
     if (this.startLine > 0) {
@@ -1296,14 +1301,14 @@ export class MermaidDiagramWidget extends WidgetType {
       container.classList.remove('meo-mermaid-dragging');
     };
 
-    container.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    container.addEventListener('pointerdown', onMouseDown);
+    document.addEventListener('pointermove', onMouseMove);
+    document.addEventListener('pointerup', onMouseUp);
 
     this.inlineCleanup = () => {
-      container.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
+      container.removeEventListener('pointerdown', onMouseDown);
+      document.removeEventListener('pointermove', onMouseMove);
+      document.removeEventListener('pointerup', onMouseUp);
     };
   }
 
@@ -1323,7 +1328,7 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   ignoreEvent() {
-    return false;
+    return true;
   }
 
   destroy() {
