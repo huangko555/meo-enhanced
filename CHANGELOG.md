@@ -3,6 +3,13 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## MEO Enhanced 0.2.0
+- Prepared the first Visual Studio Marketplace release under the independent `huangko555.meo-enhanced` extension identity.
+- Added document scroll-to-top controls for quickly returning to the beginning of long documents.
+- Stabilized Live mode layout updates and block interactions across Mermaid, LaTeX, tags, and long code blocks.
+- Preserved collapsed details state while editing source content and improved details folding stability.
+- Refreshed the README with feature screenshots, Marketplace installation instructions, and clearer upstream attribution.
+
 ## MEO Enhanced 0.1.9
 - Fixed long Mermaid node labels being clipped or overflowing their nodes by enabling reliable Chinese text wrapping and matching node height to the wrapped content.
 - Matched Mermaid label measurement to the active editor font after fonts finish loading for consistent rendering across installed and development builds.
