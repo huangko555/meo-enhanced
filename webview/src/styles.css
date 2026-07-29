@@ -852,11 +852,6 @@ body {
   opacity: 0.5;
 }
 
-.format-button.toggle-button:not(.is-active):hover {
-  color: var(--vscode-editor-foreground);
-  opacity: 1;
-}
-
 .format-button[data-action='fixedBaseline'].is-active {
   color: #fff;
   background-color: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 40%, transparent);

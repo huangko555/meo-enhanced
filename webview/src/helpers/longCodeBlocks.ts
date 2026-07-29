@@ -30,11 +30,13 @@ type LongCodeBlockRecord = LongCodeBlockDescriptor & {
 };
 
 type LongCodeBlockState = {
+  enabled: boolean;
   blocks: LongCodeBlockRecord[];
   decorations: DecorationSet;
 };
 
 export const setLongCodeBlockSearchRevealEffect = StateEffect.define<{ from: number; to: number } | null>();
+const setLongCodeBlockFoldingEnabledEffect = StateEffect.define<boolean>();
 const setLongCodeBlockPointerInteractionEffect = StateEffect.define<{ position: number }>();
 const toggleLongCodeBlockEffect = StateEffect.define<{ anchor: number; collapsed: boolean }>();
 
@@ -240,9 +242,11 @@ class LongCodeFooterWidget extends WidgetType {
 }
 
 function buildLongCodeDecorations(
-  blocks: ReadonlyArray<LongCodeBlockRecord>
+  blocks: ReadonlyArray<LongCodeBlockRecord>,
+  enabled: boolean
 ): DecorationSet {
   const ranges: Array<{ from: number; to: number; decoration: Decoration }> = [];
+  if (!enabled) return Decoration.none;
   for (const block of blocks) {
     if (!block.isLong) {
       continue;
@@ -283,6 +287,10 @@ function buildLongCodeState(
   previous: LongCodeBlockState | null = null,
   transaction: Transaction | null = null
 ): LongCodeBlockState {
+  let enabled = previous?.enabled ?? true;
+  for (const effect of transaction?.effects ?? []) {
+    if (effect.is(setLongCodeBlockFoldingEnabledEffect)) enabled = effect.value;
+  }
   const descriptors = collectLongCodeBlockDescriptors(state);
   const previousByAnchor = new Map<number, LongCodeBlockRecord>();
   for (const block of previous?.blocks ?? []) {
@@ -367,8 +375,9 @@ function buildLongCodeState(
   }
 
   return {
+    enabled,
     blocks,
-    decorations: buildLongCodeDecorations(blocks)
+    decorations: buildLongCodeDecorations(blocks, enabled)
   };
 }
 
@@ -398,7 +407,7 @@ class LongCodeFloatingButtonPlugin {
       return;
     }
     const state = this.view.state.field(longCodeBlockStateField, false);
-    if (!state) {
+    if (!state?.enabled) {
       return;
     }
     const block = findBlockContainingPosition(state.blocks, position);
@@ -449,7 +458,7 @@ class LongCodeFloatingButtonPlugin {
         const scroller = view.scrollDOM.getBoundingClientRect();
         const content = view.contentDOM.getBoundingClientRect();
         const contentCenter = content.left + content.width / 2;
-        if (!state || scroller.width <= 0 || scroller.height <= 0) {
+        if (!state?.enabled || scroller.width <= 0 || scroller.height <= 0) {
           return { visible: false, anchor: 0, left: 0, top: 0 };
         }
 
@@ -512,4 +521,8 @@ const longCodeBlockViewPlugin = ViewPlugin.fromClass(LongCodeFloatingButtonPlugi
 
 export function longCodeBlockExtensions() {
   return [longCodeBlockStateField, longCodeBlockViewPlugin];
+}
+
+export function setLongCodeBlockFoldingEnabled(view: EditorView, enabled: boolean): void {
+  view.dispatch({ effects: setLongCodeBlockFoldingEnabledEffect.of(enabled) });
 }

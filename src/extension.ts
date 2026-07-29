@@ -40,9 +40,11 @@ import {
   VIM_MODE_BEHAVIOR_SETTING_KEY,
   VIM_MODE_SETTING_KEY,
   CODE_BLOCKS_VSCODE_THEME_SETTING_KEY,
+  LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
   getUseVscodeThemeForCodeBlocks,
+  getLongCodeBlockFoldingEnabled,
   getCodeBlockVscodeTheme,
   syncEditorAssociations,
   type ExportHtmlImageMode,
@@ -636,6 +638,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${CONTENT_MAX_WIDTH_SETTING_KEY}`)) {
       this.broadcast({ type: 'contentMaxWidthChanged', enabled: getContentMaxWidthEnabled(this.context) });
+    }
+
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY}`)) {
+      this.broadcast({ type: 'longCodeBlockFoldingChanged', enabled: getLongCodeBlockFoldingEnabled() });
     }
 
     if (

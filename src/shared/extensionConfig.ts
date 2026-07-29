@@ -20,6 +20,7 @@ export const SPELL_CHECK_SETTING_KEY = 'spellCheck.enabled';
 export const VIM_MODE_BEHAVIOR_SETTING_KEY = 'vimMode.behavior';
 export const VIM_MODE_SETTING_KEY = 'vimMode.enabled';
 export const CODE_BLOCKS_VSCODE_THEME_SETTING_KEY = 'codeBlocks.useVscodeTheme';
+export const LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY = 'codeBlocks.collapseLongBlocks';
 export const REMEMBER_POSITION_LINES_SETTING_KEY = 'rememberPosition.lines';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
 export const LINE_NUMBERS_LEGACY_SETTING_KEY = 'lineNumbers.enabled';
@@ -167,6 +168,12 @@ export function getUseVscodeThemeForCodeBlocks(): boolean {
   return vscode.workspace
     .getConfiguration(EXTENSION_CONFIG_SECTION)
     .get<boolean>(CODE_BLOCKS_VSCODE_THEME_SETTING_KEY, false);
+}
+
+export function getLongCodeBlockFoldingEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration(EXTENSION_CONFIG_SECTION)
+    .get<boolean>(LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY, true);
 }
 
 export function getCodeBlockVscodeTheme(): RawVscodeTheme | null {

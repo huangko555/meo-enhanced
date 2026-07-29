@@ -86,7 +86,8 @@ export class ViewportController {
   private readonly getMode: () => 'live' | 'source';
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => this.scheduleActiveScrollFrame();
-  private readonly onInteraction = () => this.markInteraction();
+  private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
+  private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onTouchStart = (event: TouchEvent) => this.handleTouchStart(event);
   private readonly onTouchMove = (event: TouchEvent) => this.handleTouchMove(event);
   private readonly onTouchEnd = () => this.finishTouchGesture();
@@ -104,8 +105,8 @@ export class ViewportController {
       view.scrollDOM.addEventListener('touchmove', this.onTouchMove, { passive: true });
       view.scrollDOM.addEventListener('touchend', this.onTouchEnd, { passive: true });
       view.scrollDOM.addEventListener('touchcancel', this.onTouchEnd, { passive: true });
-      view.scrollDOM.addEventListener('pointerdown', this.onInteraction, { passive: true });
-      view.dom.addEventListener('keydown', this.onInteraction, true);
+      view.scrollDOM.addEventListener('pointerdown', this.onPointerDown, { capture: true, passive: true });
+      view.dom.addEventListener('keydown', this.onKeyDown, true);
       this.interactionsAttached = true;
     }
   }
@@ -170,7 +171,12 @@ export class ViewportController {
   }
 
   /** Reconciles after CodeMirror has finished its own height and scroll anchoring. */
-  reconcileAfterEditorUpdate(): void {
+  reconcileAfterEditorUpdate(mapPosition?: (position: number) => number): void {
+    const activeAnchor = this.activeLayoutAnchor;
+    if (activeAnchor) {
+      if (mapPosition) activeAnchor.position = mapPosition(activeAnchor.position);
+      this.restartLayoutStabilization();
+    }
     const activeTarget = this.activeScrollTarget;
     if (!this.isActiveScrollTargetValid(activeTarget)) return;
     if (this.writeScrollPosition(activeTarget.position)) {
@@ -298,8 +304,8 @@ export class ViewportController {
       this.view.scrollDOM.removeEventListener('touchmove', this.onTouchMove);
       this.view.scrollDOM.removeEventListener('touchend', this.onTouchEnd);
       this.view.scrollDOM.removeEventListener('touchcancel', this.onTouchEnd);
-      this.view.scrollDOM.removeEventListener('pointerdown', this.onInteraction);
-      this.view.dom.removeEventListener('keydown', this.onInteraction, true);
+      this.view.scrollDOM.removeEventListener('pointerdown', this.onPointerDown, true);
+      this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
       this.interactionsAttached = false;
     }
   }
@@ -426,6 +432,67 @@ export class ViewportController {
     this.mergeNativeScrollIntoLayoutAnchor(expected.top - current.top);
   }
 
+  private handleKeyDown(event: KeyboardEvent): void {
+    this.markInteraction();
+    if (!this.canChangeLiveLayout(event)) return;
+    this.startInteractionLayoutStabilization(
+      this.getInteractionLayoutRange(event.target, this.view.state.selection.main.head)
+    );
+  }
+
+  private handlePotentialLayoutInteraction(event: PointerEvent): void {
+    this.markInteraction();
+    if (this.getMode() !== 'live' || event.button !== 0 || event.target === this.view.scrollDOM) return;
+    const pointerPosition = this.view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
+      this.view.posAtCoords({ x: this.view.contentDOM.getBoundingClientRect().left + 1, y: event.clientY });
+    this.startInteractionLayoutStabilization(
+      this.getInteractionLayoutRange(event.target, pointerPosition ?? this.view.state.selection.main.head)
+    );
+  }
+
+  private canChangeLiveLayout(event: KeyboardEvent): boolean {
+    if (this.getMode() !== 'live') return false;
+    if (event.isComposing || event.key.length === 1) return true;
+    if (event.ctrlKey || event.metaKey) {
+      return ['v', 'x', 'z', 'y'].includes(event.key.toLowerCase());
+    }
+    return event.key === 'Backspace' || event.key === 'Delete' || event.key === 'Enter' || event.key === 'Tab';
+  }
+
+  private startInteractionLayoutStabilization(changedRange: { from: number; to: number }): void {
+    const anchor = this.captureInteractionLayoutAnchor(changedRange);
+    if (!anchor) return;
+    this.activeLayoutAnchor = {
+      ...anchor,
+      frameScheduled: false,
+      remainingFrames: MAX_SETTLE_FRAMES,
+      revision: 0,
+      stableFrames: 0
+    };
+    this.restartLayoutStabilization();
+  }
+
+  private getInteractionLayoutRange(target: EventTarget | null, fallbackPosition: number): { from: number; to: number } {
+    const renderedBlock = target instanceof Element
+      ? target.closest<HTMLElement>(
+          '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+        )
+      : null;
+    const startLine = Number(renderedBlock?.dataset.meoRenderedBlockStartLine);
+    const endLine = Number(renderedBlock?.dataset.meoRenderedBlockEndLine);
+    if (
+      Number.isInteger(startLine) && Number.isInteger(endLine) &&
+      startLine >= 1 && endLine >= startLine && endLine <= this.view.state.doc.lines
+    ) {
+      return {
+        from: this.view.state.doc.line(startLine).from,
+        to: this.view.state.doc.line(endLine).to
+      };
+    }
+    const line = this.view.state.doc.lineAt(Math.max(0, Math.min(fallbackPosition, this.view.state.doc.length)));
+    return { from: line.from, to: line.to };
+  }
+
   private handleTouchStart(event: TouchEvent): void {
     const touch = event.touches[0];
     if (this.getMode() !== 'live' || !touch) {
@@ -505,6 +572,29 @@ export class ViewportController {
       position: anchor.position,
       viewportOffset: anchor.top - scrollerRect.top
     } : null;
+  }
+
+  private captureInteractionLayoutAnchor(changedRange: { from: number; to: number }): LayoutAnchor | null {
+    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+    const candidates = Array.from(this.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
+      .map((line) => ({
+        position: this.view.posAtDOM(line),
+        top: line.getBoundingClientRect().top
+      }))
+      .filter((candidate) => (
+        (candidate.position < changedRange.from || candidate.position > changedRange.to) &&
+        candidate.top >= scrollerRect.top && candidate.top < scrollerRect.bottom
+      ));
+    if (candidates.length === 0) return null;
+
+    const readingY = scrollerRect.top + scrollerRect.height * 0.25;
+    const anchor = candidates.reduce((closest, candidate) => (
+      Math.abs(candidate.top - readingY) < Math.abs(closest.top - readingY) ? candidate : closest
+    ));
+    return {
+      position: anchor.position,
+      viewportOffset: anchor.top - scrollerRect.top
+    };
   }
 
   private restartLayoutStabilization(): void {

@@ -57,6 +57,7 @@ import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type Editor
 import { focusMermaidEditingOffset, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 import { focusLatexMathEditingOffset, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
+import { setLongCodeBlockFoldingEnabled } from './helpers/longCodeBlocks';
 import { ViewportController } from './helpers/viewportController';
 
 declare module '@codemirror/view' {
@@ -2031,7 +2032,9 @@ export function createEditor({
       diagnosticDataField,
       diagnosticField,
       EditorView.updateListener.of((update) => {
-        viewportController?.reconcileAfterEditorUpdate();
+        viewportController?.reconcileAfterEditorUpdate(
+          update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
+        );
         syncModeClasses();
         syncLineNumbersVisibility();
         syncGitGutterVisibility();
@@ -2433,6 +2436,9 @@ export function createEditor({
       }
       lineNumbersVisible = nextVisible;
       syncLineNumbersVisibility();
+    },
+    setLongCodeBlockFoldingEnabled(enabled) {
+      setLongCodeBlockFoldingEnabled(view, enabled === true);
     },
     setGitGutterVisible(visible) {
       const nextVisible = visible !== false;

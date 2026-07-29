@@ -102,6 +102,30 @@ async function main() {
       throw new Error('Collapsed block did not preserve exactly the first 10 code lines');
     }
 
+    await page.evaluate(() => {
+      (window as any).__longCodeBlocksEditor.setLongCodeBlockFoldingEnabled(false);
+    });
+    await waitForFrames(page);
+    const foldingDisabled = await page.evaluate(() => ({
+      placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+      footers: document.querySelectorAll('.meo-md-long-code-footer').length,
+      visibleText: document.querySelector('.cm-content')?.textContent ?? '',
+      floatingHidden: document.querySelector<HTMLButtonElement>('.meo-long-code-floating-action')?.hidden ?? true
+    }));
+    if (
+      foldingDisabled.placeholders !== 0 || foldingDisabled.footers !== 0 ||
+      !foldingDisabled.visibleText.includes('const line11 = 11;') || !foldingDisabled.floatingHidden
+    ) {
+      throw new Error(`Disabling long code folding did not reveal the full block: ${JSON.stringify(foldingDisabled)}`);
+    }
+    await page.evaluate(() => {
+      (window as any).__longCodeBlocksEditor.setLongCodeBlockFoldingEnabled(true);
+    });
+    await waitForFrames(page);
+    if (await page.$$eval('.meo-md-long-code-placeholder', (elements) => elements.length) !== 1) {
+      throw new Error('Re-enabling long code folding did not restore the collapsed block');
+    }
+
     const placeholderWhitespace = await page.$eval('.meo-md-long-code-placeholder', (element) => {
       const rect = element.getBoundingClientRect();
       return { x: rect.left + 12, y: rect.top + rect.height / 2 };

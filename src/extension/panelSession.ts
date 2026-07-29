@@ -7,9 +7,11 @@ import {
   GIT_CHANGES_GUTTER_SETTING_KEY,
   DIFF_BASELINE_MODE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
+  LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
   OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
+  getLongCodeBlockFoldingEnabled,
   getLineNumbersEnabled,
   getGitChangesGutterEnabled,
   getGitBlameEnabled,
@@ -78,6 +80,7 @@ type InitMessage = {
   fixedBaselineActive: boolean;
   spellCheckEnabled: boolean;
   contentMaxWidthEnabled: boolean;
+  longCodeBlockFoldingEnabled: boolean;
   vimMode: boolean;
   vimKeybindings: VimKeybinding[];
   vimLeader: string;
@@ -255,6 +258,11 @@ type SetContentMaxWidthMessage = {
   enabled: boolean;
 };
 
+type SetLongCodeBlockFoldingMessage = {
+  type: 'setLongCodeBlockFolding';
+  enabled: boolean;
+};
+
 type SetFindOptionsMessage = {
   type: 'setFindOptions';
   wholeWord?: boolean;
@@ -388,6 +396,7 @@ type WebviewMessage =
   | SetOutlinePositionMessage
   | SetOutlineWidthMessage
   | SetContentMaxWidthMessage
+  | SetLongCodeBlockFoldingMessage
   | SetFindOptionsMessage
   | ViewPositionChangedMessage
   | OpenLinkMessage
@@ -741,6 +750,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       fixedBaselineActive: fixedBaselineSelected && savedRevisionTracker.getPinnedBaseline() !== null,
       spellCheckEnabled: getSpellCheckEnabled(),
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
+      longCodeBlockFoldingEnabled: getLongCodeBlockFoldingEnabled(),
       vimMode: getVimModeEnabled(context),
       vimKeybindings: getVimKeybindings(),
       vimLeader: getVimLeaderKey(),
@@ -1323,6 +1333,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(CONTENT_MAX_WIDTH_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
+        return;
+      case 'setLongCodeBlockFolding':
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update(LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
       case 'setFindOptions': {
         const wholeWord = raw.findOptions?.wholeWord ?? raw.wholeWord;

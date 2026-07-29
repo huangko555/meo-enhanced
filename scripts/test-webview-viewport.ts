@@ -75,7 +75,7 @@ async function main() {
         <div class="editor-host"></div>
       </div>
     </div></body>`);
-    await page.addStyleTag({ content: 'html,body,#app{height:100%;margin:0} #app{display:flex;flex-direction:column}' });
+    await page.addStyleTag({ content: ':root{--vscode-toolbar-hoverBackground:rgb(30,40,50)} html,body,#app{height:100%;margin:0} #app{display:flex;flex-direction:column}' });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     const previewMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
       window.__mermaidInitializeConfigs = [];
@@ -164,6 +164,30 @@ async function main() {
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);
     }
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'gitChangesGutterChanged', enabled: false }
+    })));
+    await waitForFrames(page, 2);
+    const inactiveToggleStyle = await page.$eval('[data-action="gitChangesGutter"]', (button) => {
+      const style = getComputedStyle(button);
+      return { color: style.color, opacity: style.opacity, background: style.backgroundColor };
+    });
+    await page.hover('[data-action="gitChangesGutter"]');
+    const inactiveToggleHoverStyle = await page.$eval('[data-action="gitChangesGutter"]', (button) => {
+      const style = getComputedStyle(button);
+      return { color: style.color, opacity: style.opacity, background: style.backgroundColor };
+    });
+    if (
+      inactiveToggleHoverStyle.color !== inactiveToggleStyle.color ||
+      inactiveToggleHoverStyle.opacity !== inactiveToggleStyle.opacity ||
+      inactiveToggleHoverStyle.background === inactiveToggleStyle.background
+    ) {
+      throw new Error(`Inactive toolbar hover changed its icon instead of only its background: ${JSON.stringify({ inactiveToggleStyle, inactiveToggleHoverStyle })}`);
+    }
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'gitChangesGutterChanged', enabled: true }
+    })));
     await page.click('[aria-label="More tools"]');
     const moreToolsLayout = await page.evaluate(() => {
       const panel = document.querySelector<HTMLElement>('.more-tools-panel')!;
@@ -179,7 +203,7 @@ async function main() {
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         'Release Fixed Baseline',
         'Current Edits', 'Recent Save', 'Git HEAD',
-        'Constrain Width', 'Line Numbers', 'Line Authors', 'Spellcheck'
+        'Constrain Width', 'Line Numbers', 'Line Authors', 'Fold Long Code Blocks', 'Spellcheck'
       ]) ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||
@@ -188,6 +212,31 @@ async function main() {
     ) {
       throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
     }
+    const longCodeFoldingInitial = await page.$eval('[data-action="longCodeBlockFolding"]', (button) => ({
+      active: button.classList.contains('is-active'),
+      checked: button.getAttribute('aria-checked')
+    }));
+    if (!longCodeFoldingInitial.active || longCodeFoldingInitial.checked !== 'true') {
+      throw new Error(`Long code block folding was not enabled by default: ${JSON.stringify(longCodeFoldingInitial)}`);
+    }
+    await page.click('[data-action="longCodeBlockFolding"]');
+    await waitForFrames(page, 2);
+    const longCodeFoldingDisabled = await page.evaluate(() => {
+      const button = document.querySelector<HTMLElement>('[data-action="longCodeBlockFolding"]')!;
+      const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; enabled?: boolean }> }).__hostMessages ?? [];
+      return {
+        active: button.classList.contains('is-active'),
+        checked: button.getAttribute('aria-checked'),
+        posted: messages.some((message) => message.type === 'setLongCodeBlockFolding' && message.enabled === false)
+      };
+    });
+    if (longCodeFoldingDisabled.active || longCodeFoldingDisabled.checked !== 'false' || !longCodeFoldingDisabled.posted) {
+      throw new Error(`Long code block folding did not disable: ${JSON.stringify(longCodeFoldingDisabled)}`);
+    }
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'longCodeBlockFoldingChanged', enabled: true }
+    })));
+    await waitForFrames(page, 2);
     await page.click('[aria-label="More tools"]');
     const measureToolbarStart = () => page.evaluate(() => {
       const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;

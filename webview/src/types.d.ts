@@ -23,6 +23,7 @@ type WebviewMessage =
   | { type: 'setDiffBaselineMode'; mode: 'current-edit' | 'recent-save' | 'git-head' }
   | { type: 'setSpellCheck'; enabled: boolean }
   | { type: 'setContentMaxWidth'; enabled: boolean }
+  | { type: 'setLongCodeBlockFolding'; enabled: boolean }
   | { type: 'setOutlineVisible'; visible: boolean }
   | { type: 'setOutlinePosition'; position: 'left' | 'right' }
   | { type: 'setOutlineWidth'; width: number }
@@ -51,7 +52,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; previewAppearance: 'dark' | 'light'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; fixedBaselinePinned: boolean; fixedBaselineActive: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; previewAppearance: 'dark' | 'light'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; fixedBaselinePinned: boolean; fixedBaselineActive: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; longCodeBlockFoldingEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'previewAppearanceChanged'; appearance: 'dark' | 'light' }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'discardedChanges'; text: string; version: number; topLine: number; topLineOffset?: number }
@@ -70,6 +71,7 @@ type ExtensionMessage =
   | { type: 'fixedBaselineChanged'; pinned: boolean; active: boolean }
   | { type: 'spellCheckChanged'; enabled: boolean }
   | { type: 'contentMaxWidthChanged'; enabled: boolean }
+  | { type: 'longCodeBlockFoldingChanged'; enabled: boolean }
   | { type: 'vimModeChanged'; enabled: boolean }
   | { type: 'vimKeybindingsChanged'; keybindings: VimKeybinding[]; leaderKey: string }
   | { type: 'findOptionsChanged'; findOptions: { wholeWord: boolean; caseSensitive: boolean } }

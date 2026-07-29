@@ -162,6 +162,7 @@ let fixedBaselinePinned = false;
 let fixedBaselineActive = false;
 let spellCheckEnabled = true;
 let contentMaxWidthEnabled = false;
+let longCodeBlockFoldingEnabled = true;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
 
 const CONTENT_MAX_WIDTH_ENABLED_VALUE = '800px';
@@ -272,6 +273,14 @@ gitBlameBtn.title = 'Show Line Authors';
 gitBlameBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(gitBlameBtn, UserRound, 'Line Authors');
 
+const longCodeBlockFoldingBtn = document.createElement('button');
+longCodeBlockFoldingBtn.type = 'button';
+longCodeBlockFoldingBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+longCodeBlockFoldingBtn.dataset.action = 'longCodeBlockFolding';
+longCodeBlockFoldingBtn.title = 'Disable Long Code Block Folding';
+longCodeBlockFoldingBtn.setAttribute('role', 'menuitemcheckbox');
+appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, 'Fold Long Code Blocks');
+
 const updateLineNumbersUI = () => {
   lineNumbersBtn.classList.toggle('is-active', lineNumbersVisible);
   lineNumbersBtn.setAttribute('aria-checked', lineNumbersVisible ? 'true' : 'false');
@@ -341,6 +350,14 @@ const updateContentMaxWidthUI = () => {
   contentMaxWidthBtn.classList.toggle('is-active', contentMaxWidthEnabled);
   contentMaxWidthBtn.setAttribute('aria-checked', contentMaxWidthEnabled ? 'true' : 'false');
   contentMaxWidthBtn.title = contentMaxWidthEnabled ? 'Disable Constrained Width' : 'Constrain Content Width';
+};
+
+const updateLongCodeBlockFoldingUI = () => {
+  longCodeBlockFoldingBtn.classList.toggle('is-active', longCodeBlockFoldingEnabled);
+  longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
+  longCodeBlockFoldingBtn.title = longCodeBlockFoldingEnabled
+    ? 'Disable Long Code Block Folding'
+    : 'Enable Long Code Block Folding';
 };
 
 const syncGitDiffLineHighlights = () => {
@@ -424,6 +441,17 @@ const setContentMaxWidthEnabled = (enabled, { post = true, persist = true } = {}
   }
   if (post && changed) {
     vscode.postMessage({ type: 'setContentMaxWidth', enabled: contentMaxWidthEnabled });
+  }
+};
+
+const setLongCodeBlockFoldingEnabled = (enabled, { post = true } = {}) => {
+  const nextEnabled = enabled !== false;
+  const changed = nextEnabled !== longCodeBlockFoldingEnabled;
+  longCodeBlockFoldingEnabled = nextEnabled;
+  editor?.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
+  updateLongCodeBlockFoldingUI();
+  if (post && changed) {
+    vscode.postMessage({ type: 'setLongCodeBlockFolding', enabled: longCodeBlockFoldingEnabled });
   }
 };
 
@@ -790,6 +818,7 @@ moreToolsPanel.append(
   contentMaxWidthBtn,
   lineNumbersBtn,
   gitBlameBtn,
+  longCodeBlockFoldingBtn,
   spellCheckBtn
 );
 
@@ -1763,6 +1792,7 @@ const mountInitialEditor = async () => {
       onOpenGitRevisionForLine: openGitRevisionForLine,
       onOpenGitWorktreeForLine: openGitWorktreeForLine
     });
+    editor.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
     gitClient?.applyBaselineToEditor(editor);
     syncGitDiffLineHighlights();
     if (initialTopLine !== null) {
@@ -1858,6 +1888,9 @@ const handleInit = (message: any) => {
   lastSentTopLineOffset = null;
   if (typeof message.contentMaxWidthEnabled === 'boolean') {
     setContentMaxWidthEnabled(message.contentMaxWidthEnabled, { post: false });
+  }
+  if (typeof message.longCodeBlockFoldingEnabled === 'boolean') {
+    setLongCodeBlockFoldingEnabled(message.longCodeBlockFoldingEnabled, { post: false });
   }
   if (!editor) {
     pendingInitialText = message.text;
@@ -2259,6 +2292,11 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'longCodeBlockFoldingChanged') {
+    setLongCodeBlockFoldingEnabled(message.enabled, { post: false });
+    return;
+  }
+
   if (message.type === 'vimModeChanged') {
     setVimModeEnabled(message.enabled);
     return;
@@ -2452,6 +2490,7 @@ if (typeof state?.outlineWidth === 'number') {
 outlineController.setPosition('right');
 updateLineNumbersUI();
 updateGitChangesGutterUI();
+updateLongCodeBlockFoldingUI();
 
 liveButton.addEventListener('click', () => {
   applyMode('live', { userTriggered: true });
@@ -2648,6 +2687,9 @@ releaseFixedBaselineBtn.addEventListener('click', () => {
 });
 spellCheckBtn.addEventListener('click', toggleSpellCheck);
 gitBlameBtn.addEventListener('click', toggleGitBlame);
+longCodeBlockFoldingBtn.addEventListener('click', () => {
+  setLongCodeBlockFoldingEnabled(!longCodeBlockFoldingEnabled);
+});
 
 persistUiState();
 if (hasLocalModePreference) {
