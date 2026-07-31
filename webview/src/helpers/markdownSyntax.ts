@@ -28,6 +28,7 @@ export interface HeadingInlineSegment {
   strong: boolean;
   emphasis: boolean;
   strikethrough: boolean;
+  highlight: boolean;
 }
 
 export interface HeadingSection extends HeadingInfo {
@@ -73,7 +74,7 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
   const styleRanges: Array<{
     from: number;
     to: number;
-    style: 'strong' | 'emphasis' | 'strikethrough';
+    style: 'strong' | 'emphasis' | 'strikethrough' | 'highlight';
     nodeName: InlineStyleNodeName;
   }> = [];
 
@@ -81,9 +82,11 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
     if (node.name === 'StrongEmphasis') styleRanges.push({ from: node.from, to: node.to, style: 'strong', nodeName: node.name });
     else if (node.name === 'Emphasis') styleRanges.push({ from: node.from, to: node.to, style: 'emphasis', nodeName: node.name });
     else if (node.name === 'Strikethrough') styleRanges.push({ from: node.from, to: node.to, style: 'strikethrough', nodeName: node.name });
+    else if (node.name === 'Highlight') styleRanges.push({ from: node.from, to: node.to, style: 'highlight', nodeName: node.name });
     else if (
       node.name === 'EmphasisMark' ||
       node.name === 'StrikethroughMark' ||
+      node.name === 'HighlightMark' ||
       node.name === 'CodeMark' ||
       node.name === 'LinkMark' ||
       node.name === 'LinkLabel' ||
@@ -98,7 +101,8 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
   const fallbackStyleByNodeName = {
     StrongEmphasis: 'strong',
     Emphasis: 'emphasis',
-    Strikethrough: 'strikethrough'
+    Strikethrough: 'strikethrough',
+    Highlight: 'highlight'
   } as const;
   for (const range of collectPunctuationClosingInlineStyles(raw, headingNode.from, styleRanges)) {
     styleRanges.push({
@@ -127,7 +131,8 @@ function extractHeadingInlineSegments(state: EditorState, headingNode: any): Hea
     const styles = {
       strong: styleRanges.some((range) => range.style === 'strong' && from >= range.from && from < range.to),
       emphasis: styleRanges.some((range) => range.style === 'emphasis' && from >= range.from && from < range.to),
-      strikethrough: styleRanges.some((range) => range.style === 'strikethrough' && from >= range.from && from < range.to)
+      strikethrough: styleRanges.some((range) => range.style === 'strikethrough' && from >= range.from && from < range.to),
+      highlight: styleRanges.some((range) => range.style === 'highlight' && from >= range.from && from < range.to)
     };
     segments.push({ text: state.doc.sliceString(from, to), ...styles });
   }

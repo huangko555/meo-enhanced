@@ -8,6 +8,7 @@ import { prepareMarkdownWithFootnotes } from './footnotes';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
 import { installMathTransform } from './mathTransform';
 import { collectLatexMathRanges, renderLatexMathToHtml } from './math';
+import { installHighlightTransform } from './highlightTransform';
 import { Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 
 const POWER_QUERY_KEYWORDS =
@@ -61,6 +62,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     langPrefix: 'language-'
   });
   md.use(emoji);
+  installHighlightTransform(md);
   installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
     start: bodySourceLines?.[startIndex] ?? 0,
     end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
@@ -159,6 +161,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   const html = sanitizeHtml(rawHtml, {
     allowedTags: [
       ...sanitizeHtml.defaults.allowedTags,
+      'mark',
       'img',
       'h1',
       'h2',

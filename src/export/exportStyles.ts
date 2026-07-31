@@ -537,6 +537,13 @@ sup.footnote-ref {
 
 strong { color: var(--meo-strong); font-weight: 700; }
 em { font-style: italic; }
+mark {
+  color: inherit;
+  background-color: color-mix(in srgb, #ffd60a 34%, transparent);
+  border-radius: 0.14em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 code {
   font-family: var(--meo-font-code);
   font-weight: inherit;

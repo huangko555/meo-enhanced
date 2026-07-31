@@ -1039,6 +1039,22 @@ function findTableInlineClosingMarker(text, startIndex, marker, { singleTilde = 
 }
 
 function parseTableInlineDelimitedSpan(text, index) {
+  if (
+    text.startsWith('==', index) &&
+    text[index - 1] !== '=' &&
+    text[index + 2] !== '=' &&
+    canOpenTableInlineDelimiter(text, index, '==')
+  ) {
+    const start = index + 2;
+    const close = findTableInlineClosingMarker(text, start, '==');
+    if (close > start && text[close - 1] !== '=' && text[close + 2] !== '=') {
+      const content = text.slice(start, close);
+      if (!isTableInlineWhitespaceOnly(content)) {
+        return { kind: 'highlight', content, nextIndex: close + 2 };
+      }
+    }
+  }
+
   const strongMarker = text.startsWith('**', index)
     ? '**'
     : (text.startsWith('__', index) ? '__' : null);
@@ -1392,6 +1408,14 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         appendTableInlinePreviewNodes(el, span.content, {
           ...options,
           baseOffset: baseOffset + i + (text.startsWith('~~', i) ? 2 : 1)
+        });
+        parent.appendChild(el);
+      } else if (span.kind === 'highlight') {
+        const el = document.createElement('mark');
+        el.className = 'meo-md-highlight';
+        appendTableInlinePreviewNodes(el, span.content, {
+          ...options,
+          baseOffset: baseOffset + i + 2
         });
         parent.appendChild(el);
       }

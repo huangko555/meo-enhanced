@@ -19,6 +19,7 @@ import {
 import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl } from './helpers/images';
 import { liveHighlightStyle } from './theme';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
+import { highlightMarkdownExtension } from './helpers/highlightSyntax';
 import { collectEmojiRangesFromText } from './helpers/emoji';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { headingLevelFromName, resolvedSyntaxTree } from './helpers/markdownSyntax';
@@ -436,6 +437,7 @@ const inlineStyleDecos = {
   em: Decoration.mark({ class: 'meo-md-em' }),
   strong: Decoration.mark({ class: 'meo-md-strong' }),
   strike: Decoration.mark({ class: 'meo-md-strike' }),
+  highlight: Decoration.mark({ class: 'meo-md-highlight' }),
   inlineCode: Decoration.mark({ class: 'meo-md-inline-code' })
 };
 
@@ -460,6 +462,10 @@ function addStrongEmphasisDecorations(builder, state, node) {
 
 function addStrikethroughDecorations(builder, state, node) {
   addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.strike, ['~~', '~']);
+}
+
+function addHighlightDecorations(builder, state, node) {
+  addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.highlight, ['==']);
 }
 
 function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLines) {
@@ -1182,6 +1188,7 @@ function addPunctuationClosingInlineStyleDecorations(
   const decorationsByNodeName = {
     StrongEmphasis: { content: inlineStyleDecos.strong, inactive: strongMarkerDeco, active: activeStrongMarkerDeco },
     Strikethrough: { content: inlineStyleDecos.strike, inactive: strikeMarkerDeco, active: activeStrikeMarkerDeco },
+    Highlight: { content: inlineStyleDecos.highlight, inactive: emMarkerDeco, active: activeEmMarkerDeco },
     Emphasis: { content: inlineStyleDecos.em, inactive: emMarkerDeco, active: activeEmMarkerDeco }
   };
 
@@ -1536,7 +1543,7 @@ function buildDecorations(state) {
   const parsedInlineStyleRanges = [];
   tree.iterate({
     enter(node) {
-      if (node.name === 'StrongEmphasis' || node.name === 'Emphasis' || node.name === 'Strikethrough' || node.name === 'InlineCode') {
+      if (node.name === 'StrongEmphasis' || node.name === 'Emphasis' || node.name === 'Strikethrough' || node.name === 'Highlight' || node.name === 'InlineCode') {
         parsedInlineStyleRanges.push({ from: node.from, to: node.to, nodeName: node.name });
       }
     }
@@ -1648,6 +1655,8 @@ function buildDecorations(state) {
         addStrongEmphasisDecorations(ranges, state, node);
       } else if (node.name === 'Strikethrough') {
         addStrikethroughDecorations(ranges, state, node);
+      } else if (node.name === 'Highlight') {
+        addHighlightDecorations(ranges, state, node);
       } else if (node.name === 'InlineCode' || node.name === 'CodeText') {
         addRange(ranges, node.from, node.to, inlineStyleDecos.inlineCode);
       } else if (node.name === 'LinkLabel') {
@@ -1807,6 +1816,17 @@ function buildDecorations(state) {
           node.to,
           strikeMarkerDeco,
           activeStrikeMarkerDeco,
+          node.node.parent?.to === node.to
+        );
+      } else if (node.name === 'HighlightMark') {
+        addInlineMarkerRange(
+          ranges,
+          activeLines,
+          line.number,
+          node.from,
+          node.to,
+          emMarkerDeco,
+          activeEmMarkerDeco,
           node.node.parent?.to === node.to
         );
       } else if (node.name === 'CodeMark') {
@@ -2813,7 +2833,7 @@ export function liveModeExtensions() {
       base: markdownLanguage,
       addKeymap: false,
       codeLanguages: resolveCodeLanguage,
-      extensions: [{ remove: ['SetextHeading'] }]
+      extensions: [highlightMarkdownExtension, { remove: ['SetextHeading'] }]
     }),
     syntaxHighlighting(liveHighlightStyle),
     markdownTagField,

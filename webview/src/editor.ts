@@ -10,6 +10,7 @@ import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLive
 import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
+import { highlightMarkdownExtension, sourceHighlightField } from './helpers/highlightSyntax';
 import { sourceWikiMarkerField } from './helpers/wikiLinks';
 import { sourceFileLinkField } from './helpers/sourceRawLinks';
 import { sourceUrlBoundaryField } from './helpers/sourceUrlBoundaries';
@@ -1006,6 +1007,8 @@ export function createEditor({
       case 'lineover':
       case 'strike':
         return wrapActiveTableInputSelection(input, '~~');
+      case 'highlight':
+        return wrapActiveTableInputSelection(input, '==');
       case 'link':
         return editActiveTableInputWithSelection(input, (value, start, end) => {
           if (start !== end) {
@@ -2581,6 +2584,8 @@ export function createEditor({
         case 'lineover':
         case 'strike':
           return insertInlineFence(view, inlineSelection(), '~~');
+        case 'highlight':
+          return insertInlineFence(view, inlineSelection(), '==');
         case 'quote':
           return insertQuote(view, selection);
         case 'hr':
@@ -3339,12 +3344,13 @@ function sourceMode() {
       base: markdownLanguage,
       addKeymap: false,
       codeLanguages: resolveCodeLanguage,
-      extensions: [{ remove: ['SetextHeading'] }]
+      extensions: [highlightMarkdownExtension, { remove: ['SetextHeading'] }]
     }),
     syntaxHighlighting(sourceHighlightStyle),
     sourceCodeBlockField,
     sourceListMarkerField,
     sourceStrikeMarkerField,
+    sourceHighlightField,
     sourceWikiMarkerField,
     sourceFileLinkField,
     sourceUrlBoundaryField,

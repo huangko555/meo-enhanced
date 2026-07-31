@@ -400,6 +400,11 @@ export function createOutlineController({
         strong.appendChild(content);
         content = strong;
       }
+      if (segment.highlight) {
+        const mark = document.createElement('mark');
+        mark.appendChild(content);
+        content = mark;
+      }
       item.appendChild(content);
     }
   };

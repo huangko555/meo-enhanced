@@ -1,4 +1,4 @@
-export type InlineStyleNodeName = 'StrongEmphasis' | 'Strikethrough' | 'Emphasis';
+export type InlineStyleNodeName = 'StrongEmphasis' | 'Strikethrough' | 'Highlight' | 'Emphasis';
 
 export type ParsedInlineStyleRange = {
   from: number;
@@ -12,13 +12,14 @@ export type FallbackInlineStyleRange = {
   contentFrom: number;
   contentTo: number;
   closeFrom: number;
-  marker: '**' | '~~' | '*';
+  marker: '**' | '~~' | '==' | '*';
   nodeName: InlineStyleNodeName;
 };
 
 const fallbackStyles = [
   { marker: '**', nodeName: 'StrongEmphasis' },
   { marker: '~~', nodeName: 'Strikethrough' },
+  { marker: '==', nodeName: 'Highlight' },
   { marker: '*', nodeName: 'Emphasis' }
 ] as const;
 
