@@ -122,6 +122,12 @@ const strikeMarkerDeco = Decoration.mark({
 const activeStrikeMarkerDeco = Decoration.mark({
   class: 'meo-md-marker-active meo-md-strike-marker-active'
 });
+const highlightMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker meo-md-highlight-marker'
+});
+const activeHighlightMarkerDeco = Decoration.mark({
+  class: 'meo-md-marker-active meo-md-highlight-marker-active'
+});
 const emMarkerDeco = Decoration.mark({
   class: 'meo-md-marker meo-md-em-marker'
 });
@@ -1188,7 +1194,11 @@ function addPunctuationClosingInlineStyleDecorations(
   const decorationsByNodeName = {
     StrongEmphasis: { content: inlineStyleDecos.strong, inactive: strongMarkerDeco, active: activeStrongMarkerDeco },
     Strikethrough: { content: inlineStyleDecos.strike, inactive: strikeMarkerDeco, active: activeStrikeMarkerDeco },
-    Highlight: { content: inlineStyleDecos.highlight, inactive: emMarkerDeco, active: activeEmMarkerDeco },
+    Highlight: {
+      content: inlineStyleDecos.highlight,
+      inactive: highlightMarkerDeco,
+      active: activeHighlightMarkerDeco
+    },
     Emphasis: { content: inlineStyleDecos.em, inactive: emMarkerDeco, active: activeEmMarkerDeco }
   };
 
@@ -1825,8 +1835,8 @@ function buildDecorations(state) {
           line.number,
           node.from,
           node.to,
-          emMarkerDeco,
-          activeEmMarkerDeco,
+          highlightMarkerDeco,
+          activeHighlightMarkerDeco,
           node.node.parent?.to === node.to
         );
       } else if (node.name === 'CodeMark') {

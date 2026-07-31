@@ -1663,11 +1663,15 @@ body {
   text-decoration: line-through !important;
 }
 
-.cm-editor .meo-md-highlight {
+.cm-editor .meo-md-highlight,
+.outline-item mark {
   color: inherit;
   -webkit-text-fill-color: inherit;
   background-color: color-mix(in srgb, #ffd60a 34%, transparent);
   border-radius: 0.14em;
+}
+
+.cm-editor .meo-md-highlight {
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
@@ -3196,12 +3200,6 @@ body {
 
 .outline-item del {
   text-decoration: line-through;
-}
-
-.outline-item mark {
-  color: inherit;
-  background-color: color-mix(in srgb, #ffd60a 34%, transparent);
-  border-radius: 0.14em;
 }
 
 .outline-item.outline-level-1 {
