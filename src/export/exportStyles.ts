@@ -615,7 +615,7 @@ kbd {
   justify-content: center;
   width: 100%;
   margin: 0;
-  padding: 0.45em 0;
+  padding: 0.45em 0.6em;
   border: 0;
   border-radius: 6px;
   background: var(--meo-code-bg);
@@ -623,6 +623,18 @@ kbd {
   overflow-y: visible;
   line-height: 1;
   text-align: center;
+}
+
+.meo-export-math-fenced-display > .meo-export-math-canvas {
+  position: relative;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+}
+
+.meo-export-math-fenced-display > .meo-export-math-canvas > .katex-display {
+  width: max-content;
+  max-width: none;
 }
 
 td .meo-export-math-display,

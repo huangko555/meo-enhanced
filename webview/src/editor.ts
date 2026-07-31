@@ -1865,7 +1865,9 @@ export function createEditor({
           trackDiagnosticClick(event, view);
           trackFrontmatterBoundaryClick(event, view);
 
-          if (targetElement && targetElement.closest('.meo-mermaid-zoom-controls')) {
+          if (targetElement && targetElement.closest(
+            '.meo-mermaid-zoom-controls, .meo-latex-math-zoom-controls'
+          )) {
             event.preventDefault();
             event.stopPropagation();
             return true;

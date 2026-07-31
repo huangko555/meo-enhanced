@@ -6,6 +6,7 @@ import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockCont
 import { renderLatexMathToHtml } from './math';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
+import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 
 export type LatexMathBlockMode = 'preview' | 'split' | 'source';
 
@@ -266,6 +267,7 @@ class LatexMathEditingController {
   private innerView: EditorView;
   private previewShell: HTMLElement | null = null;
   private previewHost: HTMLElement | null = null;
+  private previewViewport: LatexMathViewportController | null = null;
   private previewTimer: number | null = null;
   private syncingFromOuter = false;
 
@@ -417,6 +419,8 @@ class LatexMathEditingController {
       }
       this.renderPreview();
     } else if (this.previewShell) {
+      this.previewViewport?.destroy();
+      this.previewViewport = null;
       this.previewShell.remove();
       this.previewShell = null;
       this.previewHost = null;
@@ -474,13 +478,19 @@ class LatexMathEditingController {
       preview.classList.add('meo-latex-math-preview-error');
       preview.textContent = this.block.sourceText;
     }
+    this.previewViewport?.destroy();
     this.previewHost.replaceChildren(preview);
+    this.previewViewport = html
+      ? attachLatexMathViewport(preview, { interactive: true })
+      : null;
   }
 
   destroy(): void {
     if (this.previewTimer !== null) {
       window.clearTimeout(this.previewTimer);
     }
+    this.previewViewport?.destroy();
+    this.previewViewport = null;
     this.innerView.destroy();
     delete this.root.__meoLatexMathEditingController;
   }

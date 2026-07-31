@@ -2,6 +2,7 @@ export type BuildExportHtmlDocumentOptions = {
   title: string;
   bodyHtml: string;
   stylesCss: string;
+  target: 'html' | 'pdf';
   hasMermaid: boolean;
   hasMath: boolean;
   mermaidRuntimeSrc?: string;
@@ -11,6 +12,7 @@ export type BuildExportHtmlDocumentOptions = {
 
 export function buildExportHtmlDocument(options: BuildExportHtmlDocumentOptions): string {
   const title = escapeHtml(options.title || 'Markdown Export');
+  const exportTarget = escapeHtmlAttr(options.target);
   const baseTag = options.baseHref ? `<base href="${escapeHtmlAttr(options.baseHref)}" />` : '';
   const katexStylesTag = options.hasMath && options.katexStylesHref
     ? `<link rel="stylesheet" href="${escapeHtmlAttr(options.katexStylesHref)}" />`
@@ -18,9 +20,12 @@ export function buildExportHtmlDocument(options: BuildExportHtmlDocumentOptions)
   const mermaidScriptTag = options.hasMermaid && options.mermaidRuntimeSrc
     ? `<script data-meo-export-mermaid-runtime src="${escapeHtmlAttr(options.mermaidRuntimeSrc)}"></script>`
     : '';
+  const mathViewportScriptTag = options.hasMath
+    ? `<script data-meo-export-math-runtime>\n${buildMathViewportRuntimeScript()}\n    </script>`
+    : '';
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-meo-export-target="${exportTarget}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -29,18 +34,106 @@ export function buildExportHtmlDocument(options: BuildExportHtmlDocumentOptions)
     ${katexStylesTag}
     <style>${options.stylesCss}</style>
   </head>
-  <body>
+  <body data-meo-export-target="${exportTarget}">
     <div class="meo-export-page">
       <main id="meo-export-root" class="meo-export-doc">
 ${options.bodyHtml}
       </main>
     </div>
     ${mermaidScriptTag}
+    ${mathViewportScriptTag}
     <script data-meo-export-runtime>
 ${buildRuntimeScript(options.hasMermaid)}
     </script>
   </body>
 </html>`;
+}
+
+function buildMathViewportRuntimeScript(): string {
+  return `
+(() => {
+  const ROOT_SELECTOR = '.meo-export-math-fenced-display';
+  const CANVAS_CLASS = 'meo-export-math-canvas';
+  const controllers = [];
+
+  const afterLayout = () => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+
+  const createController = (root) => {
+    let canvas = Array.from(root.children).find((child) => child.classList.contains(CANVAS_CLASS));
+    if (!canvas) {
+      canvas = document.createElement('div');
+      canvas.className = CANVAS_CLASS;
+      while (root.firstChild) {
+        canvas.appendChild(root.firstChild);
+      }
+      root.appendChild(canvas);
+    }
+
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      if (!root.isConnected) {
+        return;
+      }
+
+      canvas.style.zoom = '1';
+      canvas.style.fontSize = '1em';
+      const naturalWidth = canvas.getBoundingClientRect().width || canvas.scrollWidth;
+      const rootStyle = getComputedStyle(root);
+      const horizontalPadding = Number.parseFloat(rootStyle.paddingLeft) + Number.parseFloat(rootStyle.paddingRight);
+      const availableWidth = Math.max(0, root.clientWidth - horizontalPadding);
+      const fitScale = naturalWidth > 0 && availableWidth > 0
+        ? Math.min(1, availableWidth / naturalWidth)
+        : 1;
+
+      canvas.style.fontSize = fitScale + 'em';
+      const uncorrectedWidth = canvas.getBoundingClientRect().width;
+      const targetWidth = naturalWidth * fitScale;
+      const residualScale = uncorrectedWidth > 0
+        ? Math.min(1, targetWidth / uncorrectedWidth)
+        : 1;
+      canvas.style.zoom = String(residualScale);
+    };
+
+    const schedule = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+      }
+      frame = requestAnimationFrame(measure);
+    };
+
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(schedule).observe(root);
+    } else {
+      window.addEventListener('resize', schedule);
+    }
+
+    return { measure };
+  };
+
+  const initialize = () => {
+    if (controllers.length === 0) {
+      document.querySelectorAll(ROOT_SELECTOR).forEach((root) => {
+        controllers.push(createController(root));
+      });
+    }
+  };
+
+  const refit = async () => {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+    initialize();
+    controllers.forEach((controller) => controller.measure());
+    await afterLayout();
+    controllers.forEach((controller) => controller.measure());
+  };
+
+  window.__MEO_EXPORT_REFIT_MATH__ = refit;
+  window.__MEO_EXPORT_MATH_READY__ = refit();
+})();`.trim();
 }
 
 function buildRuntimeScript(hasMermaid: boolean): string {
@@ -442,6 +535,9 @@ function buildRuntimeScript(hasMermaid: boolean): string {
 
   const run = async () => {
     try {
+      if (window.__MEO_EXPORT_MATH_READY__) {
+        await window.__MEO_EXPORT_MATH_READY__;
+      }
       await renderMermaidBlocks();
       await waitForImages();
     } catch (error) {

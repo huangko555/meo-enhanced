@@ -51,6 +51,7 @@ function renderExportHtmlDocument(
     title: options.title,
     bodyHtml,
     stylesCss,
+    target: options.target,
     hasMermaid,
     hasMath,
     mermaidRuntimeSrc: options.mermaidRuntimeSrc,

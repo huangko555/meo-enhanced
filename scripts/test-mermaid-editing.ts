@@ -1000,6 +1000,157 @@ async function main() {
       );
     }
 
+    await page.setViewport({ width: 900, height: 720, deviceScaleFactor: 1 });
+    await page.evaluate(() => {
+      const previous = (window as any).__mermaidEditingEditor;
+      previous.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          '$$',
+          String.raw`\operatorname{veryLongFormulaMetric}=\frac{\alpha_1+\beta_2+\gamma_3+\delta_4}{\epsilon_5+\zeta_6}+\sum_{i=1}^{n}\left(x_i+y_i+z_i\right)+\prod_{j=1}^{m}\left(a_j+b_j+c_j\right)`,
+          '$$'
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page);
+    const collectLatexViewport = () => page.evaluate(() => {
+      const viewport = document.querySelector<HTMLElement>('.meo-md-math-fenced-display')!;
+      const canvas = viewport?.querySelector<HTMLElement>('.meo-latex-math-canvas')!;
+      const viewportRect = viewport?.getBoundingClientRect();
+      const canvasRect = canvas?.getBoundingClientRect();
+      const renderedScale = Number.parseFloat(canvas?.style.fontSize ?? '') || 1;
+      return {
+        viewportWidth: viewportRect?.width ?? 0,
+        renderedWidth: canvasRect?.width ?? 0,
+        naturalWidth: (canvasRect?.width ?? 0) / renderedScale,
+        fits: Boolean(
+          viewportRect &&
+          canvasRect &&
+          canvasRect.left >= viewportRect.left - 1 &&
+          canvasRect.right <= viewportRect.right + 1
+        ),
+        controls: viewport?.querySelectorAll('.meo-latex-math-zoom-controls button').length ?? 0,
+        presentation: canvas
+          ? `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`
+          : ''
+      };
+    });
+    const wideLatexPreview = await collectLatexViewport();
+    await page.setViewport({ width: 420, height: 720, deviceScaleFactor: 1 });
+    await waitForFrames(page);
+    const narrowLatexPreview = await collectLatexViewport();
+    if (
+      !wideLatexPreview.fits ||
+      !narrowLatexPreview.fits ||
+      narrowLatexPreview.naturalWidth <= narrowLatexPreview.viewportWidth ||
+      narrowLatexPreview.renderedWidth >= wideLatexPreview.renderedWidth - 1 ||
+      narrowLatexPreview.controls !== 0
+    ) {
+      throw new Error(`LaTeX preview did not fit dynamically without controls: ${JSON.stringify({
+        wideLatexPreview,
+        narrowLatexPreview
+      })}`);
+    }
+
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page);
+    const splitInitial = await page.evaluate(() => {
+      const viewport = document.querySelector<HTMLElement>(
+        '.meo-latex-math-editing-block.is-split .meo-latex-math-viewport.is-interactive'
+      )!;
+      viewport.scrollIntoView({ block: 'center' });
+      const canvas = viewport.querySelector<HTMLElement>('.meo-latex-math-canvas')!;
+      const viewportRect = viewport.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      return {
+        controls: viewport.querySelectorAll('.meo-latex-math-zoom-controls button').length,
+        presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
+        fits: canvasRect.left >= viewportRect.left - 1 && canvasRect.right <= viewportRect.right + 1,
+        center: {
+          x: viewportRect.left + viewportRect.width / 2,
+          y: viewportRect.top + viewportRect.height / 2
+        }
+      };
+    });
+    if (splitInitial.controls !== 3 || !splitInitial.fits) {
+      throw new Error(`LaTeX split preview did not expose a fitted interactive viewport: ${JSON.stringify(splitInitial)}`);
+    }
+
+    await page.click('.meo-latex-math-zoom-btn[aria-label="Zoom in"]');
+    await waitForFrames(page, 2);
+    const zoomedPresentation = await page.$eval(
+      '.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas',
+      (element) => {
+        const canvas = element as HTMLElement;
+        return `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`;
+      }
+    );
+    if (zoomedPresentation === splitInitial.presentation) {
+      const zoomDiagnostics = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll<HTMLElement>('.meo-latex-math-zoom-btn'));
+        return {
+          buttons: buttons.map((button) => {
+            const rect = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            return {
+              label: button.getAttribute('aria-label'),
+              rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+              hitClass: (hit as HTMLElement | null)?.className?.toString() ?? null
+            };
+          }),
+          canvases: Array.from(document.querySelectorAll<HTMLElement>('.meo-latex-math-canvas'))
+            .map((canvas) => ({ interactive: Boolean(canvas.closest('.is-interactive')), style: canvas.style.cssText }))
+        };
+      });
+      throw new Error(`LaTeX split zoom button did not change the canvas transform: ${JSON.stringify({
+        initial: splitInitial.presentation,
+        zoomedPresentation,
+        zoomDiagnostics
+      })}`);
+    }
+
+    await page.mouse.move(splitInitial.center.x, splitInitial.center.y);
+    await page.mouse.down();
+    await page.mouse.move(splitInitial.center.x + 24, splitInitial.center.y + 16, { steps: 3 });
+    await page.mouse.up();
+    await waitForFrames(page, 2);
+    const draggedPresentation = await page.$eval(
+      '.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas',
+      (element) => {
+        const canvas = element as HTMLElement;
+        return `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`;
+      }
+    );
+    if (draggedPresentation === zoomedPresentation) {
+      throw new Error('Dragging the LaTeX split preview did not pan the canvas');
+    }
+
+    await page.click('.meo-latex-math-zoom-btn[aria-label="Reset zoom"]');
+    await waitForFrames(page, 2);
+    const resetPresentation = await page.$eval(
+      '.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas',
+      (element) => {
+        const canvas = element as HTMLElement;
+        return `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`;
+      }
+    );
+    const [initialScale, initialLeft, initialTop] = splitInitial.presentation.split('|');
+    const [resetScale, resetLeft, resetTop] = resetPresentation.split('|');
+    if (
+      Math.abs(Number.parseFloat(resetScale) - Number.parseFloat(initialScale)) > 0.001 ||
+      resetLeft !== initialLeft ||
+      resetTop !== initialTop
+    ) {
+      throw new Error(`Reset did not restore the fitted LaTeX transform: ${JSON.stringify({
+        initial: splitInitial.presentation,
+        reset: resetPresentation
+      })}`);
+    }
+
     console.log('Mermaid editing checks passed');
   } finally {
     await browser.close();

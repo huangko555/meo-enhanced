@@ -5,6 +5,7 @@ import { createDocumentScrollToTopController } from './scrollToTop';
 import { createSegmentedControl } from './segmentedControl';
 import type { OutlineHeading } from './outline';
 import type { PreviewAppearance, PreviewRenderErrorMessage, PreviewRenderedMessage } from '../../../src/shared/preview';
+import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
@@ -64,6 +65,30 @@ body::-webkit-scrollbar-thumb:active {
 html::-webkit-scrollbar-corner,
 body::-webkit-scrollbar-corner {
   background: transparent !important;
+}
+`;
+
+const previewLatexMathViewportStyles = `
+.meo-export-math-fenced-display.meo-latex-math-viewport {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden !important;
+}
+
+.meo-export-math-fenced-display .meo-latex-math-canvas {
+  position: relative;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+}
+
+.meo-export-math-fenced-display .meo-latex-math-canvas > .katex-display {
+  width: max-content;
+  margin: 0;
 }
 `;
 
@@ -154,6 +179,21 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   let searchOptions = { wholeWord: false, caseSensitive: false };
   let searchMatches: HTMLElement[] = [];
   let activeSearchIndex = -1;
+  let previewMathViewports: LatexMathViewportController[] = [];
+
+  const disposePreviewMathViewports = () => {
+    for (const viewport of previewMathViewports) {
+      viewport.destroy();
+    }
+    previewMathViewports = [];
+  };
+
+  const attachPreviewMathViewports = (frameDocument: Document) => {
+    disposePreviewMathViewports();
+    previewMathViewports = Array.from(
+      frameDocument.querySelectorAll<HTMLElement>('.meo-export-math-fenced-display')
+    ).map((element) => attachLatexMathViewport(element));
+  };
 
   const clearSearchMatches = (): void => {
     const frameDocument = frame.contentDocument;
@@ -284,6 +324,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       }
       scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
+      attachPreviewMathViewports(frameDocument);
       if (restoreLine !== null) {
         restoreTopLine(restoreLine);
       }
@@ -306,8 +347,9 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
       }
     };
+    disposePreviewMathViewports();
     scrollToTopController.setScrollElement(null);
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {

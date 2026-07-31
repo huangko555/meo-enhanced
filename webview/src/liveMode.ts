@@ -76,6 +76,7 @@ import { mermaidEditingStateField } from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles } from './helpers/inlineStyleFallback';
 import { addColorSwatchDecoration, collectColorRangesFromText } from './helpers/colorSwatches';
 import { longCodeBlockExtensions } from './helpers/longCodeBlocks';
+import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
 
 export { setLongCodeBlockSearchRevealEffect } from './helpers/longCodeBlocks';
 import {
@@ -2119,6 +2120,10 @@ function getKbdWidget(keyText: string): WidgetType {
   return widget;
 }
 
+type LatexMathWidgetElement = HTMLElement & {
+  __meoLatexMathViewport?: LatexMathViewportController;
+};
+
 class LatexMathWidget extends WidgetType {
   html: string;
   mode: LatexMathMode;
@@ -2157,7 +2162,7 @@ class LatexMathWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const wrapper = document.createElement(this.mode === 'display' ? 'div' : 'span');
+    const wrapper = document.createElement(this.mode === 'display' ? 'div' : 'span') as LatexMathWidgetElement;
     wrapper.className = `meo-md-math meo-md-math-${this.mode}`;
     if (this.startLine > 0) {
       wrapper.dataset.meoRenderedBlockStartLine = String(this.startLine);
@@ -2178,11 +2183,19 @@ class LatexMathWidget extends WidgetType {
     }
     applyLiveBlockIndent(wrapper, this.indentColumns);
     wrapper.innerHTML = this.html;
+    if (this.fencedDisplay && this.mode === 'display') {
+      wrapper.__meoLatexMathViewport = attachLatexMathViewport(wrapper);
+    }
     return wrapper;
   }
 
   ignoreEvent(): boolean {
     return true;
+  }
+
+  destroy(dom: HTMLElement): void {
+    (dom as LatexMathWidgetElement).__meoLatexMathViewport?.destroy();
+    delete (dom as LatexMathWidgetElement).__meoLatexMathViewport;
   }
 }
 
