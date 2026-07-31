@@ -157,7 +157,8 @@ class LatexMathToolbarWidget extends WidgetType {
   constructor(
     readonly anchor: number,
     readonly mode: LatexMathBlockMode,
-    readonly sourceText: string
+    readonly sourceText: string,
+    readonly blockTo: number
   ) {
     super();
   }
@@ -166,12 +167,15 @@ class LatexMathToolbarWidget extends WidgetType {
     return other instanceof LatexMathToolbarWidget &&
       other.anchor === this.anchor &&
       other.mode === this.mode &&
-      other.sourceText === this.sourceText;
+      other.sourceText === this.sourceText &&
+      other.blockTo === this.blockTo;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const toolbar = document.createElement('span');
     toolbar.className = 'meo-latex-math-toolbar';
+    toolbar.dataset.meoBlockFrom = String(this.anchor);
+    toolbar.dataset.meoBlockTo = String(this.blockTo);
 
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
@@ -233,11 +237,12 @@ export function addLatexMathToolbar(
   lineEnd: number,
   anchor: number,
   mode: LatexMathBlockMode,
-  sourceText: string
+  sourceText: string,
+  blockTo: number
 ): void {
   builder.push(
     Decoration.widget({
-      widget: new LatexMathToolbarWidget(anchor, mode, sourceText),
+      widget: new LatexMathToolbarWidget(anchor, mode, sourceText, blockTo),
       side: 1
     }).range(lineEnd)
   );
@@ -344,8 +349,7 @@ class LatexMathEditingController {
 
   selectAll(): void {
     this.innerView.dispatch({
-      selection: { anchor: 0, head: this.innerView.state.doc.length },
-      scrollIntoView: true
+      selection: { anchor: 0, head: this.innerView.state.doc.length }
     });
     this.innerView.focus();
   }

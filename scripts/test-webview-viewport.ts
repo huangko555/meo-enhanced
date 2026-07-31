@@ -1286,6 +1286,17 @@ async function main() {
       });
       await waitForFrames(page, 2);
       const visibleAfterScroll = await page.$eval('.editor-host > .document-scroll-top', (button) => !(button as HTMLButtonElement).hidden);
+      const visibleGeometry = await page.$eval('.editor-host > .document-scroll-top', (button) => {
+        const icon = button.querySelector<SVGSVGElement>('svg')!;
+        const buttonRect = button.getBoundingClientRect();
+        const iconRect = icon.getBoundingClientRect();
+        return {
+          centerXDelta: iconRect.left + iconRect.width / 2 - (buttonRect.left + buttonRect.width / 2),
+          centerYDelta: iconRect.top + iconRect.height / 2 - (buttonRect.top + buttonRect.height / 2),
+          iconLeftFraction: Math.abs(iconRect.left - Math.round(iconRect.left)),
+          iconTopFraction: Math.abs(iconRect.top - Math.round(iconRect.top))
+        };
+      });
       await page.click('.editor-host > .document-scroll-top');
       const afterClick = await page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>('.editor-host > .document-scroll-top')!;
@@ -1303,9 +1314,16 @@ async function main() {
       if (
         !hiddenAtTop || !visibleAfterScroll || afterClick.scrollTop !== 0 || !afterClick.hidden ||
         afterClick.width !== afterClick.height || afterClick.borderRadius !== '50%' ||
-        afterClick.background !== afterClick.documentBackground
+        afterClick.background !== afterClick.documentBackground ||
+        Math.abs(visibleGeometry.centerXDelta) > 0.01 || Math.abs(visibleGeometry.centerYDelta + 1) > 0.01 ||
+        visibleGeometry.iconLeftFraction > 0.01 || visibleGeometry.iconTopFraction > 0.01
       ) {
-        throw new Error(`${mode} scroll-to-top button failed: ${JSON.stringify({ hiddenAtTop, visibleAfterScroll, afterClick })}`);
+        throw new Error(`${mode} scroll-to-top button failed: ${JSON.stringify({
+          hiddenAtTop,
+          visibleAfterScroll,
+          visibleGeometry,
+          afterClick
+        })}`);
       }
     };
 

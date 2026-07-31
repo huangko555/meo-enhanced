@@ -185,7 +185,11 @@ async function assertModeButtonKeepsViewport(
   }
 }
 
-async function assertBlockBoundaryClickKeepsViewport(page: Page, lineNumber: number): Promise<void> {
+async function assertDocumentLineClickKeepsViewport(
+  page: Page,
+  lineNumber: number,
+  assertLinePosition = true
+): Promise<void> {
   await page.evaluate((targetLineNumber) => {
     const editor = (window as any).__mermaidEditingEditor;
     const line = editor.view.state.doc.line(targetLineNumber);
@@ -195,12 +199,17 @@ async function assertBlockBoundaryClickKeepsViewport(page: Page, lineNumber: num
   const before = await page.evaluate((targetLineNumber) => {
     const editor = (window as any).__mermaidEditingEditor;
     const line = editor.view.state.doc.line(targetLineNumber);
-    const coords = editor.view.coordsAtPos(line.from + 1)!;
+    const coords = editor.view.coordsAtPos(Math.min(line.to, line.from + 1));
+    const lineBlock = editor.view.lineBlockAt(line.from);
+    const scroller = editor.view.scrollDOM.getBoundingClientRect();
+    const content = editor.view.contentDOM.getBoundingClientRect();
     return {
       scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: editor.view.coordsAtPos(line.from)?.top ?? null,
-      x: coords.left + 2,
-      y: (coords.top + coords.bottom) / 2
+      lineTop: coords?.top ?? scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
+      x: coords ? coords.left + 2 : content.left + 24,
+      y: coords
+        ? (coords.top + coords.bottom) / 2
+        : scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop + lineBlock.height / 2
     };
   }, lineNumber);
   await page.mouse.move(before.x, before.y);
@@ -209,9 +218,12 @@ async function assertBlockBoundaryClickKeepsViewport(page: Page, lineNumber: num
   const afterDown = await page.evaluate((targetLineNumber) => {
     const editor = (window as any).__mermaidEditingEditor;
     const line = editor.view.state.doc.line(targetLineNumber);
+    const lineBlock = editor.view.lineBlockAt(line.from);
+    const scroller = editor.view.scrollDOM.getBoundingClientRect();
     return {
       scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: editor.view.coordsAtPos(line.from)?.top ?? null,
+      lineTop: editor.view.coordsAtPos(line.from)?.top ??
+        scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
       selectedLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
     };
   }, lineNumber);
@@ -221,9 +233,12 @@ async function assertBlockBoundaryClickKeepsViewport(page: Page, lineNumber: num
   const after = await page.evaluate((targetLineNumber) => {
     const editor = (window as any).__mermaidEditingEditor;
     const line = editor.view.state.doc.line(targetLineNumber);
+    const lineBlock = editor.view.lineBlockAt(line.from);
+    const scroller = editor.view.scrollDOM.getBoundingClientRect();
     return {
       scrollTop: editor.view.scrollDOM.scrollTop,
-      lineTop: editor.view.coordsAtPos(line.from)?.top ?? null,
+      lineTop: editor.view.coordsAtPos(line.from)?.top ??
+        scroller.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
       selectedLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
     };
   }, lineNumber);
@@ -233,11 +248,11 @@ async function assertBlockBoundaryClickKeepsViewport(page: Page, lineNumber: num
     afterDown.lineTop === null ||
     after.lineTop === null ||
     Math.abs(afterDown.scrollTop - before.scrollTop) > 1 ||
-    Math.abs(afterDown.lineTop - before.lineTop) > 1 ||
+    (assertLinePosition && Math.abs(afterDown.lineTop - before.lineTop) > 1) ||
     Math.abs(after.scrollTop - before.scrollTop) > 1 ||
-    Math.abs(after.lineTop - before.lineTop) > 1
+    (assertLinePosition && Math.abs(after.lineTop - before.lineTop) > 1)
   ) {
-    throw new Error(`Clicking block boundary line ${lineNumber} moved the viewport: ${JSON.stringify({ before, afterDown, after })}`);
+    throw new Error(`Clicking document line ${lineNumber} moved the viewport: ${JSON.stringify({ before, afterDown, after })}`);
   }
 }
 
@@ -350,6 +365,13 @@ async function main() {
     if (!defaultMode.preview || defaultMode.editing || defaultMode.buttonLabel !== 'Edit Mermaid in split view') {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
     }
+    const hiddenToolbarState = await page.evaluate(() => ({
+      mermaid: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity,
+      latex: getComputedStyle(document.querySelector<HTMLElement>('.meo-latex-math-toolbar')!).opacity
+    }));
+    if (hiddenToolbarState.mermaid !== '0' || hiddenToolbarState.latex !== '0') {
+      throw new Error(`Block toolbars were visible before hover: ${JSON.stringify(hiddenToolbarState)}`);
+    }
 
     const previewClickBefore = await page.evaluate(() => {
       const editor = (window as any).__mermaidEditingEditor;
@@ -365,6 +387,25 @@ async function main() {
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     });
     await page.mouse.move(previewClickPoint.x, previewClickPoint.y);
+    await waitForFrames(page);
+    const hoveredToolbarState = await page.evaluate(() => ({
+      mermaid: {
+        hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
+        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity
+      },
+      latex: {
+        hovered: document.querySelector('.meo-latex-math-toolbar')?.classList.contains('is-block-hovered'),
+        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-latex-math-toolbar')!).opacity
+      }
+    }));
+    if (
+      !hoveredToolbarState.mermaid.hovered ||
+      hoveredToolbarState.mermaid.opacity !== '1' ||
+      hoveredToolbarState.latex.hovered ||
+      hoveredToolbarState.latex.opacity !== '0'
+    ) {
+      throw new Error(`Mermaid hover revealed the wrong toolbar: ${JSON.stringify(hoveredToolbarState)}`);
+    }
     await page.mouse.down();
     await waitForFrames(page, 2);
     const previewPointerDown = await page.evaluate(() => ({
@@ -412,6 +453,33 @@ async function main() {
       throw new Error(`Pressing Mermaid preview temporarily revealed source: ${JSON.stringify(previewPointerDown)}`);
     }
 
+    const latexHoverPoint = await page.$eval('.meo-latex-math-viewport', (block) => {
+      block.scrollIntoView({ block: 'center' });
+      const rect = block.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await waitForFrames(page);
+    await page.mouse.move(latexHoverPoint.x, latexHoverPoint.y);
+    await waitForFrames(page);
+    const latexHoveredToolbarState = await page.evaluate(() => ({
+      mermaid: {
+        hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
+        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity
+      },
+      latex: {
+        hovered: document.querySelector('.meo-latex-math-toolbar')?.classList.contains('is-block-hovered'),
+        opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-latex-math-toolbar')!).opacity
+      }
+    }));
+    if (
+      latexHoveredToolbarState.mermaid.hovered ||
+      latexHoveredToolbarState.mermaid.opacity !== '0' ||
+      !latexHoveredToolbarState.latex.hovered ||
+      latexHoveredToolbarState.latex.opacity !== '1'
+    ) {
+      throw new Error(`Formula hover revealed the wrong toolbar: ${JSON.stringify(latexHoveredToolbarState)}`);
+    }
+
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(26, 'upper'));
     await waitForFrames(page);
     const lineJumpMode = await page.evaluate(() => {
@@ -447,7 +515,55 @@ async function main() {
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(1, 'top'));
     await waitForFrames(page);
 
+    await page.evaluate(() => {
+      const editor = (window as any).__mermaidEditingEditor;
+      const samples: Array<{
+        scrollTop: number;
+        blockTop: number | null;
+        blockPresent: boolean;
+      }> = [];
+      (window as any).__mermaidSelectAllTrace = new Promise((resolve) => {
+        let remaining = 12;
+        const sample = () => {
+          const block = document.querySelector<HTMLElement>(
+            '.meo-mermaid-block, .meo-mermaid-editing-block'
+          );
+          samples.push({
+            scrollTop: editor.view.scrollDOM.scrollTop,
+            blockTop: block?.getBoundingClientRect().top ?? null,
+            blockPresent: Boolean(block)
+          });
+          remaining -= 1;
+          if (remaining <= 0) {
+            resolve(samples);
+            return;
+          }
+          requestAnimationFrame(sample);
+        };
+        sample();
+      });
+    });
     await page.click('.meo-mermaid-toolbar .meo-select-all-code-btn');
+    const selectAllTrace = await page.evaluate(async () => (
+      await (window as any).__mermaidSelectAllTrace
+    )) as Array<{ scrollTop: number; blockTop: number | null; blockPresent: boolean }>;
+    const scrollValues = selectAllTrace.map((sample) => sample.scrollTop);
+    const blockTopValues = selectAllTrace
+      .map((sample) => sample.blockTop)
+      .filter((value): value is number => value !== null);
+    const scrollSpan = Math.max(...scrollValues) - Math.min(...scrollValues);
+    const blockTopSpan = Math.max(...blockTopValues) - Math.min(...blockTopValues);
+    if (
+      selectAllTrace.some((sample) => !sample.blockPresent) ||
+      scrollSpan > 1 ||
+      blockTopSpan > 1
+    ) {
+      throw new Error(`Mermaid select all visibly shifted the editor: ${JSON.stringify({
+        scrollSpan,
+        blockTopSpan,
+        samples: selectAllTrace
+      })}`);
+    }
     await waitForFrames(page);
     const selectAllMode = await page.evaluate(() => {
       const innerView = (document.querySelector<HTMLElement>('.meo-mermaid-editing-block') as any)
@@ -507,12 +623,11 @@ async function main() {
       throw new Error(`Unexpected split mode controls or scrolling: ${JSON.stringify(splitMode)}`);
     }
     if (
-      splitMode.sourceHeight <= splitMode.previewHeight ||
       Math.abs(splitMode.sourcePaneHeight - splitMode.sourceHeight) > 1 ||
-      splitMode.previewHeight >= defaultMode.previewHeight ||
+      Math.abs(splitMode.previewHeight - splitMode.previewFrameHeight) > 2 ||
       Math.abs(splitMode.previewFrameHeight - splitMode.availablePreviewHeight) > 2
     ) {
-      throw new Error(`Split preview did not use the available vertical space: ${JSON.stringify({ defaultMode, splitMode })}`);
+      throw new Error(`Split preview viewport did not fill the available right pane: ${JSON.stringify({ defaultMode, splitMode })}`);
     }
 
     await page.evaluate(() => {
@@ -903,11 +1018,17 @@ async function main() {
       const previous = (window as any).__mermaidEditingEditor;
       previous.destroy();
       document.getElementById('app')!.replaceChildren();
-      const prelude = Array.from({ length: 146 }, (_, index) => `prelude ${index + 1}`);
+      const prelude = Array.from({ length: 140 }, (_, index) => `prelude ${index + 1}`);
       (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
         parent: document.getElementById('app')!,
         text: [
           ...prelude,
+          '## 6. Mermaid 与块级公式',
+          '',
+          '下面两块内容用于拍摄 Source、Split 和 Preview 三种模式的对比图。',
+          '',
+          '### 6.1 编辑工作流',
+          '',
           '```mermaid',
           'flowchart LR',
           '  A[Markdown Source] --> B{编辑模式}',
@@ -969,10 +1090,13 @@ async function main() {
     await waitForFrames(page);
     await page.click('.meo-latex-math-mode-btn');
     await waitForFrames(page);
-    await assertBlockBoundaryClickKeepsViewport(page, 147);
-    await assertBlockBoundaryClickKeepsViewport(page, 161);
-    await assertBlockBoundaryClickKeepsViewport(page, 165);
-    await assertBlockBoundaryClickKeepsViewport(page, 172);
+    for (const lineNumber of [141, 142, 143, 144, 145, 146, 162, 163, 164]) {
+      await assertDocumentLineClickKeepsViewport(page, lineNumber, false);
+    }
+    await assertDocumentLineClickKeepsViewport(page, 147);
+    await assertDocumentLineClickKeepsViewport(page, 161);
+    await assertDocumentLineClickKeepsViewport(page, 165);
+    await assertDocumentLineClickKeepsViewport(page, 172);
 
     await page.evaluate(() => {
       const editor = (window as any).__mermaidEditingEditor;

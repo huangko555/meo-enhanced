@@ -2401,7 +2401,7 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
         ? getLatexMathBlockMode(state, anchor, renderSpan.innerFrom, renderSpan.innerTo)
         : null;
       if (copyContent && mode) {
-        addLatexMathToolbar(builder, openingLine.to, anchor, mode.effective, copyContent);
+        addLatexMathToolbar(builder, openingLine.to, anchor, mode.effective, copyContent, mathRange.to);
       }
 
       addRange(

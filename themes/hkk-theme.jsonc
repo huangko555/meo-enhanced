@@ -39,7 +39,7 @@
     // 代码块内光标所在行背景。
     "codeBlockActiveLineBackground": "color-mix(in srgb, var(--meo-background) 88%, var(--meo-color-base03) 12%)",
     // 代码块左上角语言名字文字颜色。
-    "codeLanguageLabelForeground": "#79b8ff",
+    "codeLanguageLabelForeground": "#676f7d",
     // 代码块左上角语言名字背景。
     "codeLanguageLabelBackground": "transparent",
     // 代码块右上角 copy 文字颜色。

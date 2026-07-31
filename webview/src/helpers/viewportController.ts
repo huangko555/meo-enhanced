@@ -580,7 +580,7 @@ export class ViewportController {
     }
     return anchor ? {
       position: anchor.position,
-      viewportOffset: anchor.top - scrollerRect.top
+      viewportOffset: this.view.lineBlockAt(anchor.position).top - this.view.scrollDOM.scrollTop
     } : null;
   }
 
@@ -603,7 +603,7 @@ export class ViewportController {
     ));
     return {
       position: anchor.position,
-      viewportOffset: anchor.top - scrollerRect.top
+      viewportOffset: this.view.lineBlockAt(anchor.position).top - this.view.scrollDOM.scrollTop
     };
   }
 

@@ -301,6 +301,8 @@ export function createEditor({
   let onWindowPointerUp = null;
   let onWindowPointerCancel = null;
   let onWindowBlur = null;
+  let onBlockActionPointerMove = null;
+  let onBlockActionPointerLeave = null;
   let pendingLiveSearchRevealFrame: number | null = null;
   let pendingLiveSearchRevealToken = 0;
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
@@ -312,6 +314,7 @@ export function createEditor({
   let editableLinkHoverPointerActive = false;
   let editableLinkHoverPosition = null;
   let editableLinkHoverMode = currentMode;
+  let hoveredBlockActionToolbar: HTMLElement | null = null;
   const publishComposedDocumentChange = () => {
     if (!view || applyingExternal || applyingRenumber) {
       return;
@@ -374,6 +377,46 @@ export function createEditor({
   const targetElementFrom = (target) => (
     target instanceof Element ? target : target instanceof Node ? target.parentElement : null
   );
+  const blockActionToolbarSelector = [
+    '.meo-code-block-actions',
+    '.meo-mermaid-toolbar',
+    '.meo-latex-math-toolbar'
+  ].join(', ');
+  const setHoveredBlockActionToolbar = (toolbar: HTMLElement | null) => {
+    if (hoveredBlockActionToolbar === toolbar) {
+      return;
+    }
+    hoveredBlockActionToolbar?.classList.remove('is-block-hovered');
+    hoveredBlockActionToolbar = toolbar;
+    hoveredBlockActionToolbar?.classList.add('is-block-hovered');
+  };
+  const updateBlockActionToolbarHover = (event, editorView) => {
+    const targetElement = targetElementFrom(event.target);
+    const directToolbar = targetElement?.closest(blockActionToolbarSelector);
+    if (directToolbar instanceof HTMLElement) {
+      setHoveredBlockActionToolbar(directToolbar);
+      return;
+    }
+
+    const position = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (position === null) {
+      setHoveredBlockActionToolbar(null);
+      return;
+    }
+
+    const matchingToolbar = Array.from(
+      editorView.dom.querySelectorAll(blockActionToolbarSelector)
+    ).find((toolbar): toolbar is HTMLElement => {
+      if (!(toolbar instanceof HTMLElement)) {
+        return false;
+      }
+      const blockFrom = Number.parseInt(toolbar.dataset.meoBlockFrom ?? '', 10);
+      const blockTo = Number.parseInt(toolbar.dataset.meoBlockTo ?? '', 10);
+      return Number.isFinite(blockFrom) && Number.isFinite(blockTo) &&
+        position >= blockFrom && position <= blockTo;
+    }) ?? null;
+    setHoveredBlockActionToolbar(matchingToolbar);
+  };
   const openHref = (href, editorView) => {
     if (href.startsWith('#')) {
       const initialTargetPosition = findDocumentFragmentPosition(editorView.state, href);
@@ -2102,6 +2145,12 @@ export function createEditor({
     parent,
     scrollTo: initialScrollTo
   });
+  // CodeMirror deliberately suppresses editor handlers for some block widgets.
+  // Native listeners keep hover behavior consistent across code, Mermaid, and math blocks.
+  onBlockActionPointerMove = (event) => updateBlockActionToolbarHover(event, view);
+  onBlockActionPointerLeave = () => setHoveredBlockActionToolbar(null);
+  view.dom.addEventListener('pointermove', onBlockActionPointerMove);
+  view.dom.addEventListener('pointerleave', onBlockActionPointerLeave);
   viewportController = new ViewportController(view, {
     getMode: () => currentMode === 'live' ? 'live' : 'source'
   });
@@ -2396,6 +2445,14 @@ export function createEditor({
         });
       } finally {
         applyingExternal = false;
+      }
+      if (onBlockActionPointerMove) {
+        view.dom.removeEventListener('pointermove', onBlockActionPointerMove);
+        onBlockActionPointerMove = null;
+      }
+      if (onBlockActionPointerLeave) {
+        view.dom.removeEventListener('pointerleave', onBlockActionPointerLeave);
+        onBlockActionPointerLeave = null;
       }
       restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
       pendingExternalUndoSelectionPreserve = true;

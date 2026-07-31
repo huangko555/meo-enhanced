@@ -132,6 +132,35 @@ async function main() {
       throw new Error('Rendered Mermaid source received code line numbers');
     }
 
+    const hiddenActionOpacities = await page.$$eval('.meo-code-block-actions', (toolbars) => (
+      toolbars.map((toolbar) => getComputedStyle(toolbar).opacity)
+    ));
+    if (hiddenActionOpacities.some((opacity) => opacity !== '0')) {
+      throw new Error(`Code block actions were visible before hover: ${JSON.stringify(hiddenActionOpacities)}`);
+    }
+
+    const middleCodeLine = await page.$eval(
+      '.meo-md-code-line-numbered[data-meo-code-line-number="10"]',
+      (line) => {
+        const rect = line.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    );
+    await page.mouse.move(middleCodeLine.x, middleCodeLine.y);
+    await waitForFrames(page);
+    const hoveredActionState = await page.$$eval('.meo-code-block-actions', (toolbars) => (
+      toolbars.map((toolbar) => ({
+        hovered: toolbar.classList.contains('is-block-hovered'),
+        opacity: getComputedStyle(toolbar).opacity
+      }))
+    ));
+    if (
+      hoveredActionState.filter((state) => state.hovered && state.opacity === '1').length !== 1 ||
+      hoveredActionState.filter((state) => state.opacity === '1').length !== 1
+    ) {
+      throw new Error(`Hover did not reveal only the matching code block actions: ${JSON.stringify(hoveredActionState)}`);
+    }
+
     await page.click('.meo-code-block-actions .meo-select-all-code-btn');
     const selectedCode = await page.evaluate(() => {
       const editor = (window as any).__codeBlockLineNumbersEditor;

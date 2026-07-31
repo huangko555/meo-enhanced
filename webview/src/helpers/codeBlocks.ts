@@ -642,29 +642,42 @@ class CodeBlockActionsWidget extends WidgetType {
   codeContent: string;
   contentFrom: number;
   contentTo: number;
+  blockFrom: number;
+  blockTo: number;
 
-  constructor(codeContent: string, contentFrom: number, contentTo: number) {
+  constructor(
+    codeContent: string,
+    contentFrom: number,
+    contentTo: number,
+    blockFrom: number,
+    blockTo: number
+  ) {
     super();
     this.codeContent = codeContent;
     this.contentFrom = contentFrom;
     this.contentTo = contentTo;
+    this.blockFrom = blockFrom;
+    this.blockTo = blockTo;
   }
 
   eq(other: WidgetType): boolean {
     return other instanceof CodeBlockActionsWidget &&
       other.codeContent === this.codeContent &&
       other.contentFrom === this.contentFrom &&
-      other.contentTo === this.contentTo;
+      other.contentTo === this.contentTo &&
+      other.blockFrom === this.blockFrom &&
+      other.blockTo === this.blockTo;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const actions = document.createElement('span');
     actions.className = 'meo-code-block-actions';
+    actions.dataset.meoBlockFrom = String(this.blockFrom);
+    actions.dataset.meoBlockTo = String(this.blockTo);
     actions.append(
       createSelectAllCodeButton(() => {
         view.dispatch({
-          selection: { anchor: this.contentTo, head: this.contentFrom },
-          scrollIntoView: true
+          selection: { anchor: this.contentTo, head: this.contentFrom }
         });
         view.focus();
       }),
@@ -717,12 +730,18 @@ export function addTopLineCopyButton(
   lineEnd: number,
   codeContent: string,
   contentFrom: number,
-  contentTo: number
+  contentTo: number,
+  blockFrom: number,
+  blockTo: number
 ): void {
   if (!codeContent) {
     return;
   }
-  addTopLineWidget(builder, lineEnd, new CodeBlockActionsWidget(codeContent, contentFrom, contentTo));
+  addTopLineWidget(
+    builder,
+    lineEnd,
+    new CodeBlockActionsWidget(codeContent, contentFrom, contentTo, blockFrom, blockTo)
+  );
 }
 
 export function addTopLinePillLabel(builder: any[], lineEnd: number, labelText: string | null): void {
@@ -878,7 +897,9 @@ export function addCopyCodeButton(builder: any[], state: EditorState, from: numb
     startLine.to,
     codeContent,
     state.doc.line(startLine.number + 1).from,
-    state.doc.line(lastContentLineNumber).to
+    state.doc.line(lastContentLineNumber).to,
+    startLine.from,
+    endLine.to
   );
 }
 

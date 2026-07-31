@@ -9,8 +9,8 @@ export function createDocumentScrollToTopController() {
   button.title = 'Back to top';
   button.setAttribute('aria-label', 'Back to top');
   button.appendChild(createElement(ChevronsUp, {
-    width: 21,
-    height: 21,
+    width: 22,
+    height: 22,
     'aria-hidden': 'true'
   }));
   button.hidden = true;

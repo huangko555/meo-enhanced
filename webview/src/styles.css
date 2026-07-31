@@ -152,6 +152,7 @@ body {
 
 .document-scroll-top svg {
   pointer-events: none;
+  transform: translateY(-1px);
 }
 
 .editor-root.outline-visible
@@ -1016,6 +1017,13 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.meo-code-block-actions.is-block-hovered,
+.meo-code-block-actions:focus-within {
+  opacity: 1;
 }
 
 .meo-code-block-actions .meo-copy-code-btn {
@@ -2185,6 +2193,23 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.meo-mermaid-toolbar.is-block-hovered,
+.meo-latex-math-toolbar.is-block-hovered,
+.meo-mermaid-toolbar:focus-within,
+.meo-latex-math-toolbar:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .meo-code-block-actions,
+  .meo-mermaid-toolbar,
+  .meo-latex-math-toolbar {
+    opacity: 1;
+  }
 }
 
 .meo-mermaid-toolbar .meo-copy-code-btn,
@@ -3720,7 +3745,7 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-mermaid-preview-sticky {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   min-height: min(
     100%,
     max(
@@ -3758,6 +3783,7 @@ body.outline-resizing .preview-frame {
   align-items: center;
   justify-content: center;
   width: 100%;
+  min-height: 0;
 }
 
 .cm-editor .meo-mermaid-preview-sticky > .meo-mermaid-block .meo-mermaid-svg-wrapper {

@@ -174,6 +174,8 @@ class MermaidToolbarWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const toolbar = document.createElement('span');
     toolbar.className = 'meo-mermaid-toolbar';
+    toolbar.dataset.meoBlockFrom = String(this.anchor);
+    toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
 
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
@@ -353,8 +355,7 @@ class MermaidEditingController {
 
   selectAll(): void {
     this.innerView.dispatch({
-      selection: { anchor: 0, head: this.innerView.state.doc.length },
-      scrollIntoView: true
+      selection: { anchor: 0, head: this.innerView.state.doc.length }
     });
     this.innerView.focus();
   }

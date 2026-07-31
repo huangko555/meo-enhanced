@@ -62,6 +62,15 @@ if (!githubLight) {
   }
 }
 
+for (const theme of themePresets) {
+  if (theme.semanticColors.codeLanguageLabelForeground !== theme.semanticColors.mutedForeground) {
+    failures.push(
+      `${theme.name} code language label is not neutral: ` +
+      `${theme.semanticColors.codeLanguageLabelForeground} !== ${theme.semanticColors.mutedForeground}`
+    );
+  }
+}
+
 if (failures.length) {
   throw new Error(failures.join('\n'));
 }
