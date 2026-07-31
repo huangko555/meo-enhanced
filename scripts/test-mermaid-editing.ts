@@ -273,18 +273,23 @@ async function main() {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-code-background:#292d31; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:"Courier New"; --meo-font-source-weight:500; --meo-font-source-size:14px; --meo-semantic-mutedForeground:#8b949e; --meo-semantic-codeCopyForeground:#79b8ff; --meo-semantic-codeCopyBackground:transparent; --meo-semantic-codeCopyHoverForeground:#79b8ff; --meo-semantic-codeCopyHoverBackground:#343a40; --vscode-editor-font-family:monospace; --vscode-editor-font-size:14px; --vscode-editor-line-height:20px; }'
+      content: ':root { --meo-background:#ffffff; --meo-foreground:#24292f; --meo-code-background:#f6f8fa; --meo-surface-background:#ffffff; --meo-color-base05:#0969da; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:"Courier New"; --meo-font-source-weight:500; --meo-font-source-size:14px; --meo-semantic-mutedForeground:#57606a; --meo-semantic-codeCopyForeground:#0969da; --meo-semantic-codeCopyBackground:transparent; --meo-semantic-codeCopyHoverForeground:#0969da; --meo-semantic-codeCopyHoverBackground:#eaeef2; --vscode-editor-font-family:monospace; --vscode-editor-font-size:14px; --vscode-editor-line-height:20px; }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
     await page.evaluate(() => {
       (window as any).mermaid = {
-        initialize() {},
+        initialize(config: any) {
+          (window as any).__mermaidThemeConfig = config;
+        },
         async render(_id: string, text: string) {
           const height = text.includes('TALL_PREVIEW') ? 900 : 120;
           const width = text.includes('TALL_PREVIEW') ? 320 : 1200;
           const resolvedHeight = text.includes('TALL_PREVIEW') ? height : 400;
-          return { svg: `<svg width="${width}" height="${resolvedHeight}" viewBox="0 0 ${width} ${resolvedHeight}"><text x="10" y="30">${text.length}</text></svg>` };
+          const variables = (window as any).__mermaidThemeConfig?.themeVariables ?? {};
+          const coloredNode = '<g class="node custom"><rect data-custom-node width="160" height="80" style="fill:#1e293b;stroke:#60a5fa"></rect><foreignObject><div class="nodeLabel" style="color:#f8fafc">Custom</div></foreignObject></g>';
+          const themedNode = `<rect data-themed-node x="180" width="160" height="80" fill="${variables.primaryColor ?? '#ffffff'}" stroke="${variables.primaryBorderColor ?? '#000000'}"></rect>`;
+          return { svg: `<svg width="${width}" height="${resolvedHeight}" viewBox="0 0 ${width} ${resolvedHeight}">${coloredNode}${themedNode}<text x="10" y="30">${text.length}</text></svg>` };
         }
       };
       (window as any).__collectMermaidCodeStyle = (blockSelector: string) => {
@@ -364,6 +369,22 @@ async function main() {
     }));
     if (!defaultMode.preview || defaultMode.editing || defaultMode.buttonLabel !== 'Edit Mermaid in split view') {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
+    }
+    const customLightNodeColors = await page.evaluate(() => {
+      const shape = document.querySelector<SVGElement>('[data-custom-node]')!;
+      const label = document.querySelector<HTMLElement>('.nodeLabel')!;
+      return {
+        fill: getComputedStyle(shape).fill,
+        stroke: getComputedStyle(shape).stroke,
+        label: getComputedStyle(label).color
+      };
+    });
+    if (JSON.stringify(customLightNodeColors) !== JSON.stringify({
+      fill: 'rgb(30, 41, 59)',
+      stroke: 'rgb(96, 165, 250)',
+      label: 'rgb(248, 250, 252)'
+    })) {
+      throw new Error(`Light Mermaid discarded explicit node colors: ${JSON.stringify(customLightNodeColors)}`);
     }
     const hiddenToolbarState = await page.evaluate(() => ({
       mermaid: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity,
@@ -628,6 +649,47 @@ async function main() {
       Math.abs(splitMode.previewFrameHeight - splitMode.availablePreviewHeight) > 2
     ) {
       throw new Error(`Split preview viewport did not fill the available right pane: ${JSON.stringify({ defaultMode, splitMode })}`);
+    }
+
+    const lightSplitTheme = await page.$eval(
+      '.meo-mermaid-editing-block.is-split [data-themed-node]',
+      (node) => ({ fill: node.getAttribute('fill'), light: Boolean(node.closest('.meo-mermaid-light-theme')) })
+    );
+    await page.evaluate(() => {
+      const root = document.documentElement.style;
+      root.setProperty('--meo-code-background', '#1f2428');
+      root.setProperty('--meo-surface-background', '#2f343d');
+      root.setProperty('--meo-background', '#202223');
+      root.setProperty('--meo-foreground', '#e6edf3');
+      (window as any).MermaidEditingHarness.refreshMermaidTheme();
+      (window as any).__mermaidEditingEditor.refreshDecorations();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await waitForFrames(page, 2);
+    const darkSplitTheme = await page.$eval(
+      '.meo-mermaid-editing-block.is-split [data-themed-node]',
+      (node) => ({ fill: node.getAttribute('fill'), dark: Boolean(node.closest('.meo-mermaid-dark-theme')) })
+    );
+    if (!lightSplitTheme.light || !darkSplitTheme.dark || darkSplitTheme.fill === lightSplitTheme.fill) {
+      throw new Error(`Split Mermaid did not rerender for dark appearance: ${JSON.stringify({ lightSplitTheme, darkSplitTheme })}`);
+    }
+    await page.evaluate(() => {
+      const root = document.documentElement.style;
+      root.setProperty('--meo-code-background', '#f6f8fa');
+      root.setProperty('--meo-surface-background', '#ffffff');
+      root.setProperty('--meo-background', '#ffffff');
+      root.setProperty('--meo-foreground', '#24292f');
+      (window as any).MermaidEditingHarness.refreshMermaidTheme();
+      (window as any).__mermaidEditingEditor.refreshDecorations();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await waitForFrames(page, 2);
+    const restoredLightSplitTheme = await page.$eval(
+      '.meo-mermaid-editing-block.is-split [data-themed-node]',
+      (node) => ({ fill: node.getAttribute('fill'), light: Boolean(node.closest('.meo-mermaid-light-theme')) })
+    );
+    if (!restoredLightSplitTheme.light || restoredLightSplitTheme.fill !== lightSplitTheme.fill) {
+      throw new Error(`Split Mermaid did not rerender for light appearance: ${JSON.stringify({ lightSplitTheme, restoredLightSplitTheme })}`);
     }
 
     await page.evaluate(() => {

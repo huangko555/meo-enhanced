@@ -69,13 +69,13 @@ async function main() {
     const page = await browser.newPage();
     page.on('console', (message) => console.log(message.text()));
     await page.setViewport({ width: 900, height: 520, deviceScaleFactor: 1 });
-    await page.setContent(`<!doctype html><body><div id="app" class="editor-root">
+    await page.setContent(`<!doctype html><body class="vscode-light"><div id="app" class="editor-root">
       <div class="mode-toolbar meo-preload-toolbar" role="presentation" aria-hidden="true"></div>
       <div class="editor-wrapper meo-preload-editor-shell" role="presentation" aria-hidden="true">
         <div class="editor-host"></div>
       </div>
     </div></body>`);
-    await page.addStyleTag({ content: ':root{--vscode-toolbar-hoverBackground:rgb(30,40,50)} html,body,#app{height:100%;margin:0} #app{display:flex;flex-direction:column}' });
+    await page.addStyleTag({ content: ':root{--vscode-editor-background:#fff;--vscode-editor-foreground:#24292f;--vscode-sideBar-background:#f6f8fa;--vscode-panel-border:#d0d7de;--vscode-toolbar-hoverBackground:#eaeef2} html,body,#app{height:100%;margin:0} #app{display:flex;flex-direction:column}' });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     const previewMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
       window.__mermaidInitializeConfigs = [];
@@ -123,7 +123,7 @@ async function main() {
     const initialText = createFixture();
     await page.evaluate(({ text, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'dark',
+        type: 'init', text, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'light', editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
@@ -136,6 +136,16 @@ async function main() {
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
+    const darkEditorOnLightHost = await page.evaluate(() => ({
+      appearance: document.documentElement.dataset.editorAppearance,
+      background: getComputedStyle(document.body).backgroundColor
+    }));
+    if (
+      darkEditorOnLightHost.appearance !== 'dark' ||
+      darkEditorOnLightHost.background !== 'rgb(32, 34, 35)'
+    ) {
+      throw new Error(`Dark editor appearance followed the light VS Code host: ${JSON.stringify(darkEditorOnLightHost)}`);
+    }
     const initialPreviewPreloadRequests = await page.evaluate(() => (
       (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
     ).filter((message) => message.type === 'requestPreviewRender').length);
@@ -335,6 +345,180 @@ async function main() {
     ) {
       throw new Error(`Disabled constrained width still changed the layout: ${JSON.stringify(unconstrainedWidthState)}`);
     }
+    const darkAppearanceState = await page.evaluate(() => ({
+      heading: document.documentElement.style.getPropertyValue('--meo-semantic-headingForeground'),
+      searchBackground: document.documentElement.style.getPropertyValue('--meo-semantic-searchMatchBackground'),
+      sidebar: document.documentElement.style.getPropertyValue('--vscode-sideBar-background')
+    }));
+    await page.click('.more-tools-wrapper > .format-button');
+    await page.click('.editor-appearance-button[data-editor-appearance="light"]');
+    await waitForFrames(page, 2);
+    const lightAppearanceState = await page.evaluate(() => ({
+      appearance: document.documentElement.dataset.editorAppearance,
+      background: getComputedStyle(document.body).backgroundColor,
+      heading: document.documentElement.style.getPropertyValue('--meo-semantic-headingForeground'),
+      lineNumber: getComputedStyle(document.querySelector<HTMLElement>('.cm-lineNumbers')!).color,
+      searchBackground: document.documentElement.style.getPropertyValue('--meo-semantic-searchMatchBackground'),
+      searchForeground: document.documentElement.style.getPropertyValue('--meo-semantic-searchMatchForeground'),
+      activeSearchForeground: document.documentElement.style.getPropertyValue('--meo-semantic-searchMatchActiveForeground'),
+      gitColors: {
+        added: getComputedStyle(document.documentElement).getPropertyValue('--git-added').trim(),
+        changed: getComputedStyle(document.documentElement).getPropertyValue('--git-changed').trim(),
+        deleted: getComputedStyle(document.documentElement).getPropertyValue('--git-deleted').trim()
+      },
+      active: document.querySelector<HTMLElement>('.editor-appearance-button.is-active')?.dataset.editorAppearance,
+      labelExists: Boolean(document.querySelector('.more-tools-appearance-label')),
+      indicatorInsets: (() => {
+        const button = document.querySelector<HTMLElement>('.editor-appearance-button.is-active')!;
+        const indicator = button.querySelector<HTMLElement>('.segmented-control-button-indicator')!;
+        const buttonBounds = button.getBoundingClientRect();
+        const indicatorBounds = indicator.getBoundingClientRect();
+        return {
+          top: indicatorBounds.top - buttonBounds.top,
+          right: buttonBounds.right - indicatorBounds.right,
+          bottom: buttonBounds.bottom - indicatorBounds.bottom,
+          left: indicatorBounds.left - buttonBounds.left
+        };
+      })(),
+      messages: ((window as typeof window & {
+        __hostMessages?: Array<{ type?: string; appearance?: string }>;
+      }).__hostMessages ?? [])
+        .filter((message) => message.type === 'setEditorAppearance')
+        .map((message) => message.appearance)
+    }));
+    if (
+      lightAppearanceState.appearance !== 'light' ||
+      lightAppearanceState.background !== 'rgb(255, 255, 255)' ||
+      lightAppearanceState.heading !== '#0550ae' ||
+      lightAppearanceState.lineNumber !== 'rgb(175, 184, 193)' ||
+      lightAppearanceState.searchBackground !== darkAppearanceState.searchBackground ||
+      lightAppearanceState.searchForeground !== 'inherit' ||
+      lightAppearanceState.activeSearchForeground !== 'inherit' ||
+      JSON.stringify(lightAppearanceState.gitColors) !== JSON.stringify({
+        added: '#2da44e',
+        changed: '#0969da',
+        deleted: '#cf222e'
+      }) ||
+      lightAppearanceState.active !== 'light' ||
+      lightAppearanceState.labelExists ||
+      Object.values(lightAppearanceState.indicatorInsets).some((inset) => Math.abs(inset - 3) > 0.5) ||
+      JSON.stringify(lightAppearanceState.messages) !== JSON.stringify(['light'])
+    ) {
+      throw new Error(`Editor light appearance did not preserve established accents: ${JSON.stringify({ darkAppearanceState, lightAppearanceState })}`);
+    }
+    await page.evaluate((theme) => {
+      document.body.className = 'vscode-dark';
+      document.documentElement.style.setProperty('--vscode-editor-background', '#010203');
+      document.documentElement.style.setProperty('--vscode-sideBar-background', '#040506');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'themeChanged', theme, codeTheme: null
+      }}));
+    }, defaultThemeSettings);
+    await waitForFrames(page, 2);
+    const lightAfterHostThemeChange = await page.evaluate(() => ({
+      appearance: document.documentElement.dataset.editorAppearance,
+      background: getComputedStyle(document.body).backgroundColor,
+      sidebar: document.documentElement.style.getPropertyValue('--vscode-sideBar-background'),
+      heading: document.documentElement.style.getPropertyValue('--meo-semantic-headingForeground')
+    }));
+    if (JSON.stringify(lightAfterHostThemeChange) !== JSON.stringify({
+      appearance: 'light',
+      background: 'rgb(255, 255, 255)',
+      sidebar: '#f6f8fa',
+      heading: '#0550ae'
+    })) {
+      throw new Error(`VS Code host theme changed the manual light appearance: ${JSON.stringify(lightAfterHostThemeChange)}`);
+    }
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'fixedBaselineChanged', pinned: true, active: true
+      }}));
+    });
+    const activeBaselineColors = await page.$eval('[data-action="fixedBaseline"]', (button) => ({
+      color: getComputedStyle(button).color,
+      background: getComputedStyle(button).backgroundColor
+    }));
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'fixedBaselineChanged', pinned: true, active: false
+      }}));
+    });
+    const standbyBaselineColor = await page.$eval('[data-action="fixedBaseline"]', (button) => (
+      getComputedStyle(button, '::before').backgroundColor
+    ));
+    if (
+      JSON.stringify(activeBaselineColors) !== JSON.stringify({
+        color: 'rgb(255, 255, 255)',
+        background: 'rgb(45, 164, 78)'
+      }) ||
+      standbyBaselineColor !== 'rgb(26, 127, 55)'
+    ) {
+      throw new Error(`Editor light baseline colors were not readable: ${JSON.stringify({ activeBaselineColors, standbyBaselineColor })}`);
+    }
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'fixedBaselineChanged', pinned: false, active: false
+      }}));
+      document.querySelector<HTMLButtonElement>('[data-action="find"]')!.click();
+      const input = document.querySelector<HTMLInputElement>('.find-input')!;
+      input.value = 'stable';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForSelector('.meo-search-match');
+    const lightSearchColors = await page.$eval('.meo-search-match', (match) => ({
+      match: getComputedStyle(match).color,
+      line: getComputedStyle(match.closest('.cm-line')!).color
+    }));
+    if (lightSearchColors.match !== lightSearchColors.line) {
+      throw new Error(`Light search changed the matched text color: ${JSON.stringify(lightSearchColors)}`);
+    }
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.find-input')!;
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector<HTMLButtonElement>('[data-action="find"]')!.click();
+    });
+    await page.click('.editor-appearance-button[data-editor-appearance="dark"]');
+    await waitForFrames(page, 2);
+    const restoredDarkAppearanceState = await page.evaluate(() => ({
+      appearance: document.documentElement.dataset.editorAppearance,
+      sidebar: document.documentElement.style.getPropertyValue('--vscode-sideBar-background'),
+      active: document.querySelector<HTMLElement>('.editor-appearance-button.is-active')?.dataset.editorAppearance,
+      messages: ((window as typeof window & {
+        __hostMessages?: Array<{ type?: string; appearance?: string }>;
+      }).__hostMessages ?? [])
+        .filter((message) => message.type === 'setEditorAppearance')
+        .map((message) => message.appearance)
+    }));
+    if (
+      restoredDarkAppearanceState.appearance !== 'dark' ||
+      restoredDarkAppearanceState.sidebar !== darkAppearanceState.sidebar ||
+      restoredDarkAppearanceState.active !== 'dark' ||
+      JSON.stringify(restoredDarkAppearanceState.messages) !== JSON.stringify(['light', 'dark'])
+    ) {
+      throw new Error(`Editor dark appearance was not restored exactly: ${JSON.stringify({ darkAppearanceState, restoredDarkAppearanceState })}`);
+    }
+    await page.evaluate((theme) => {
+      document.body.className = 'vscode-light';
+      document.documentElement.style.setProperty('--vscode-editor-background', '#fafafa');
+      document.documentElement.style.setProperty('--vscode-sideBar-background', '#f0f0f0');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'themeChanged', theme, codeTheme: null
+      }}));
+    }, defaultThemeSettings);
+    await waitForFrames(page, 2);
+    const darkAfterHostThemeChange = await page.evaluate(() => ({
+      appearance: document.documentElement.dataset.editorAppearance,
+      background: getComputedStyle(document.body).backgroundColor,
+      sidebar: document.documentElement.style.getPropertyValue('--vscode-sideBar-background')
+    }));
+    if (JSON.stringify(darkAfterHostThemeChange) !== JSON.stringify({
+      appearance: 'dark',
+      background: 'rgb(32, 34, 35)',
+      sidebar: '#1f2428'
+    })) {
+      throw new Error(`VS Code host theme changed the manual dark appearance: ${JSON.stringify(darkAfterHostThemeChange)}`);
+    }
     await page.click('[data-action="save"]');
     await waitForFrames(page, 2);
     const saveMessages = await page.evaluate(() => (
@@ -385,6 +569,7 @@ async function main() {
         },
         appearanceSegmentGap: appearanceButtons[1].getBoundingClientRect().left - appearanceButtons[0].getBoundingClientRect().right,
         appearanceUsesSharedComponent: appearanceControl.classList.contains('segmented-control'),
+        activeAppearance: activeAppearanceButton.dataset.appearance,
         visible: getComputedStyle(group).display !== 'none',
         items: Array.from(group.querySelectorAll(':scope > button, :scope > .preview-appearance-control > button')).map((element) => (
           (element as HTMLElement).dataset.action ||
@@ -404,6 +589,7 @@ async function main() {
       JSON.stringify(previewToolbarLayout.activeAppearanceInsets) !== JSON.stringify({ top: 3, right: 3, bottom: 3 }) ||
       previewToolbarLayout.appearanceSegmentGap !== 0 ||
       !previewToolbarLayout.appearanceUsesSharedComponent ||
+      previewToolbarLayout.activeAppearance !== 'dark' ||
       JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
         'outline-left', 'light', 'dark', 'Export HTML', 'Export PDF'
       ]) ||
@@ -1298,6 +1484,7 @@ async function main() {
         };
       });
       await page.click('.editor-host > .document-scroll-top');
+      await page.mouse.move(0, 0);
       const afterClick = await page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>('.editor-host > .document-scroll-top')!;
         const style = getComputedStyle(button);

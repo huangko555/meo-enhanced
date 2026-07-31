@@ -39,6 +39,7 @@ type WebviewMessage =
   | { type: 'discardChanges'; topLine: number; topLineOffset?: number }
   | { type: 'exportDocument'; format: 'html' | 'pdf'; appearance: 'dark' | 'light' }
   | { type: 'setPreviewAppearance'; appearance: 'dark' | 'light' }
+  | { type: 'setEditorAppearance'; appearance: 'dark' | 'light' }
   | { type: 'exportSnapshot'; requestId: string; text: string; environment?: Record<string, unknown> }
   | { type: 'exportSnapshotError'; requestId: string; error: string; message?: string }
   | PreviewRenderRequestMessage
@@ -52,7 +53,7 @@ type VimKeybinding = {
 };
 
 type ExtensionMessage =
-  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; previewAppearance: 'dark' | 'light'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; fixedBaselinePinned: boolean; fixedBaselineActive: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; longCodeBlockFoldingEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
+  | { type: 'init'; text: string; version: number; diagnostics: EditorDiagnostic[]; theme: ThemeSettings; mode: 'live' | 'source' | 'preview'; previewAppearance: 'dark' | 'light'; editorAppearance?: 'dark' | 'light'; outlinePosition: 'left' | 'right'; outlineVisible: boolean; outlineWidth: number; lineNumbers: boolean; gitChangesGutter: boolean; gitBlameEnabled: boolean; gitDiffLineHighlights: boolean; diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head'; fixedBaselinePinned: boolean; fixedBaselineActive: boolean; spellCheckEnabled: boolean; contentMaxWidthEnabled: boolean; longCodeBlockFoldingEnabled: boolean; vimMode: boolean; vimKeybindings: VimKeybinding[]; vimLeader: string; findOptions: { wholeWord: boolean; caseSensitive: boolean }; restoreTopLine?: number; restoreTopLineOffset?: number }
   | { type: 'previewAppearanceChanged'; appearance: 'dark' | 'light' }
   | { type: 'docChanged'; text: string; version: number }
   | { type: 'discardedChanges'; text: string; version: number; topLine: number; topLineOffset?: number }

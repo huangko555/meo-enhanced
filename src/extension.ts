@@ -62,6 +62,11 @@ import {
   type PreviewAppearance,
   type PreviewRenderResult
 } from './shared/preview';
+import {
+  EDITOR_APPEARANCE_STATE_KEY,
+  normalizeEditorAppearance,
+  type EditorAppearance
+} from './shared/editorAppearance';
 import { parseThemeJsonc, serializeThemeFile } from './shared/themeJsonc';
 import { collectWebviewImageResourceRoots } from './shared/documentLinks';
 import {
@@ -681,6 +686,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       setFindOptions: (options) => this.setFindOptions(options),
       getPreviewAppearance: () => this.getPreviewAppearance(),
       setPreviewAppearance: (appearance) => this.setPreviewAppearance(appearance),
+      getEditorAppearance: () => this.getEditorAppearance(),
+      setEditorAppearance: (appearance) => this.setEditorAppearance(appearance),
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
       updateGitBlameEnabled: (enabled) => this.updateGitBlameEnabled(enabled),
       onPanelActivated: (activePanel) => {
@@ -747,6 +754,18 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       return;
     }
     await this.context.globalState.update(PREVIEW_APPEARANCE_STATE_KEY, nextAppearance);
+  }
+
+  private getEditorAppearance(): EditorAppearance {
+    return normalizeEditorAppearance(this.context.globalState.get(EDITOR_APPEARANCE_STATE_KEY));
+  }
+
+  private async setEditorAppearance(appearance: EditorAppearance): Promise<void> {
+    const nextAppearance = normalizeEditorAppearance(appearance);
+    if (this.getEditorAppearance() === nextAppearance) {
+      return;
+    }
+    await this.context.globalState.update(EDITOR_APPEARANCE_STATE_KEY, nextAppearance);
   }
 
   private async setOutlineVisible(visible: boolean): Promise<void> {

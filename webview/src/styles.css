@@ -67,7 +67,7 @@
   --git-deleted: #e05252;
 }
 
-body.vscode-dark {
+html[data-editor-appearance='dark'] body.vscode-dark {
   --meo-outline-background: color-mix(in srgb, var(--meo-code-background) 82%, black 18%);
 }
 
@@ -596,6 +596,12 @@ body {
   --segmented-control-content-gap: 5px;
 }
 
+.editor-appearance-button {
+  --segmented-control-content-gap: 5px;
+  min-width: 76px;
+  padding-inline: 12px;
+}
+
 .preview-toolbar-action {
   box-sizing: border-box;
   display: inline-flex;
@@ -640,7 +646,7 @@ body {
   width: 100%;
   height: 22px;
   padding: 0 7px 2px;
-  border: 1px solid #54595e;
+  border: 1px solid var(--meo-input-border, #54595e);
   border-radius: 8px;
   outline: none;
   color: var(--vscode-input-foreground, var(--vscode-editor-foreground));
@@ -692,7 +698,7 @@ body {
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: #fff;
+  color: var(--meo-toolbar-overflow-foreground, #fff);
   background-color: var(--vscode-sideBar-background);
   pointer-events: none;
 }
@@ -735,7 +741,7 @@ body {
   border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
   background: var(--vscode-sideBar-background);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
 }
 
 .more-tools-panel[hidden] {
@@ -764,6 +770,21 @@ body {
 .changes-baseline-option.is-active {
   background: var(--vscode-toolbar-hoverBackground);
   outline: none;
+}
+
+.more-tools-appearance-row {
+  display: flex;
+  align-items: stretch;
+  padding: 4px 8px;
+}
+
+.editor-appearance-control {
+  display: flex;
+  width: 100%;
+}
+
+.editor-appearance-control .segmented-control-button {
+  flex: 1 1 0;
 }
 
 .more-tools-option:disabled {
@@ -796,7 +817,7 @@ body {
 .more-tools-separator {
   height: 1px;
   margin: 3px 6px;
-  background-color: #474b50;
+  background-color: var(--meo-divider-color, #474b50);
 }
 
 .format-separator {
@@ -804,7 +825,7 @@ body {
   height: 18px;
   margin: 3px 4px;
   align-self: center;
-  background-color: #474b50;
+  background-color: var(--meo-divider-color, #474b50);
 }
 
 .heading-wrapper {
@@ -942,8 +963,11 @@ body {
 }
 
 .format-button[data-action='fixedBaseline'].is-active {
-  color: #fff;
-  background-color: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 40%, transparent);
+  color: var(--meo-fixed-baseline-active-foreground, #fff);
+  background-color: var(
+    --meo-fixed-baseline-active-background,
+    color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 40%, transparent)
+  );
 }
 
 .format-button[data-action='fixedBaseline'].is-standby {
@@ -956,11 +980,11 @@ body {
 .format-button[data-action='fixedBaseline'].is-standby::before {
   position: absolute;
   right: 5px;
-  bottom: 2px;
+  bottom: 3px;
   left: 5px;
-  height: 2px;
-  border-radius: 1px;
-  background-color: var(--vscode-testing-iconPassed, #73c991);
+  height: 3px;
+  border-radius: 999px;
+  background-color: var(--meo-fixed-baseline-standby, var(--vscode-testing-iconPassed, #73c991));
   content: '';
   pointer-events: none;
 }
@@ -1265,7 +1289,7 @@ body {
 .cm-lineNumbers {
   width: 100%;
   box-sizing: border-box;
-  color: var(--meo-semantic-mutedForeground, var(--vscode-editorLineNumber-foreground));
+  color: var(--meo-line-number-foreground, var(--vscode-editorLineNumber-foreground));
 }
 
 .cm-editor .cm-lineNumbers .cm-gutterElement {
@@ -2261,7 +2285,7 @@ body {
   box-sizing: content-box;
   width: calc(var(--meo-code-line-number-width) + 1.5ch);
   padding-right: 1ch;
-  color: var(--meo-semantic-mutedForeground, var(--vscode-editorLineNumber-foreground));
+  color: var(--meo-line-number-foreground, var(--vscode-editorLineNumber-foreground));
   text-align: right;
   content: attr(data-meo-code-line-number);
   pointer-events: none;
@@ -2531,33 +2555,6 @@ body {
 .cm-editor .meo-mermaid-svg-wrapper svg {
   max-width: 100%;
   height: auto;
-}
-
-.cm-editor .meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.node rect, .node polygon, .node ellipse, .node circle, .node path),
-.meo-mermaid-fullscreen.meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.node rect, .node polygon, .node ellipse, .node circle, .node path) {
-  fill: #ffffff !important;
-  stroke: #6e7781 !important;
-}
-
-.cm-editor .meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.nodeLabel, .label, .edgeLabel, .edgeLabel p),
-.meo-mermaid-fullscreen.meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.nodeLabel, .label, .edgeLabel, .edgeLabel p) {
-  color: #1f2328 !important;
-}
-
-.cm-editor .meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.edgeLabel rect, .labelBkg),
-.meo-mermaid-fullscreen.meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.edgeLabel rect, .labelBkg) {
-  fill: var(--meo-code-background) !important;
-}
-
-.cm-editor .meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.edgePaths path, .flowchart-link),
-.meo-mermaid-fullscreen.meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.edgePaths path, .flowchart-link) {
-  stroke: #6e7781 !important;
-}
-
-.cm-editor .meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.marker, marker path),
-.meo-mermaid-fullscreen.meo-mermaid-light-theme .meo-mermaid-svg-wrapper svg :where(.marker, marker path) {
-  fill: #6e7781 !important;
-  stroke: #6e7781 !important;
 }
 
 .meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg {
@@ -3690,7 +3687,7 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-md-html-table-line-number {
   position: absolute;
   right: 5px;
-  color: var(--meo-semantic-mutedForeground, var(--vscode-editorLineNumber-foreground));
+  color: var(--meo-line-number-foreground, var(--vscode-editorLineNumber-foreground));
   font: inherit;
   line-height: var(--meo-active-editor-line-height);
   white-space: nowrap;
@@ -3888,7 +3885,7 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-line-number.is-active {
-  color: var(--meo-foreground);
+  color: var(--meo-line-number-foreground, var(--vscode-editorLineNumber-foreground));
 }
 
 .cm-editor .meo-md-html-table-wrap {

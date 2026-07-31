@@ -36,6 +36,7 @@ const mermaidNormalPriorityOperations: MermaidOperationJob[] = [];
 const MERMAID_CACHE_LIMIT = 100;
 const mermaidCache = new Map<string, MermaidResult>();
 const mermaidRenderInFlight = new Map<string, Promise<MermaidResult>>();
+const mermaidThemeRefreshListeners = new Set<() => void>();
 const mermaidEstimatedHeightCache = new Map<string, number>();
 const mermaidPreviewHeightCache = new WeakMap<HTMLElement, Map<string, number>>();
 let mermaidIdCounter = 0;
@@ -491,6 +492,14 @@ export function refreshMermaidTheme(): void {
   mermaidEstimatedHeightCache.clear();
   mermaidInitialized = false;
   mermaidThemeSignature = '';
+  for (const listener of mermaidThemeRefreshListeners) {
+    listener();
+  }
+}
+
+export function subscribeToMermaidThemeRefresh(listener: () => void): () => void {
+  mermaidThemeRefreshListeners.add(listener);
+  return () => mermaidThemeRefreshListeners.delete(listener);
 }
 
 export function isDisplayMathDiagram(diagramText: string): boolean {
@@ -748,9 +757,6 @@ export class MermaidDiagramWidget extends WidgetType {
     const svgWrapper = document.createElement('div');
     svgWrapper.className = 'meo-mermaid-svg-wrapper';
     svgWrapper.innerHTML = svgContent;
-    if (container.classList.contains('meo-mermaid-light-theme')) {
-      this.applyLightThemeSvgOverrides(svgWrapper);
-    }
 
     container.appendChild(svgWrapper);
     if (this.isDisplayMath) {
@@ -762,47 +768,6 @@ export class MermaidDiagramWidget extends WidgetType {
     container.appendChild(controls);
 
     this.attachInteractions(svgWrapper, container);
-  }
-
-  applyLightThemeSvgOverrides(svgWrapper) {
-    const nodeShapes = svgWrapper.querySelectorAll(
-      '.node rect, .node polygon, .node ellipse, .node circle, .node path, .label-container'
-    );
-    for (const shape of nodeShapes) {
-      if (shape instanceof SVGElement) {
-        shape.style.setProperty('fill', '#ffffff', 'important');
-        shape.style.setProperty('stroke', '#6e7781', 'important');
-      }
-    }
-
-    const labels = svgWrapper.querySelectorAll('.nodeLabel, .label, .edgeLabel, .edgeLabel p');
-    for (const label of labels) {
-      if (label instanceof HTMLElement || label instanceof SVGElement) {
-        label.style.setProperty('color', '#1f2328', 'important');
-      }
-    }
-
-    const edgeLabels = svgWrapper.querySelectorAll('.edgeLabel rect, .labelBkg');
-    for (const edgeLabel of edgeLabels) {
-      if (edgeLabel instanceof SVGElement) {
-        edgeLabel.style.setProperty('fill', 'var(--meo-code-background)', 'important');
-      }
-    }
-
-    const edgePaths = svgWrapper.querySelectorAll('.edgePaths path, .flowchart-link');
-    for (const edgePath of edgePaths) {
-      if (edgePath instanceof SVGElement) {
-        edgePath.style.setProperty('stroke', '#6e7781', 'important');
-      }
-    }
-
-    const markers = svgWrapper.querySelectorAll('.marker, marker path');
-    for (const marker of markers) {
-      if (marker instanceof SVGElement) {
-        marker.style.setProperty('fill', '#6e7781', 'important');
-        marker.style.setProperty('stroke', '#6e7781', 'important');
-      }
-    }
   }
 
   trimDisplayMathSvg(svgWrapper) {
@@ -1049,9 +1014,6 @@ export class MermaidDiagramWidget extends WidgetType {
     const svgWrapper = document.createElement('div');
     svgWrapper.className = 'meo-mermaid-svg-wrapper';
     svgWrapper.innerHTML = this.svgContent;
-    if (fullscreenContainer.classList.contains('meo-mermaid-light-theme')) {
-      this.applyLightThemeSvgOverrides(svgWrapper);
-    }
 
     fullscreenContainer.appendChild(svgWrapper);
 

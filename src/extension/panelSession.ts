@@ -41,6 +41,7 @@ import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
 import type { ExportStyleEnvironment } from '../export/runtime';
 import type { ThemeSettings } from '../shared/themeDefaults';
 import type { PreviewAppearance, PreviewRenderRequestMessage, PreviewRenderResult } from '../shared/preview';
+import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
 import type { OutlinePosition } from '../shared/extensionConfig';
 import {
@@ -71,6 +72,7 @@ type InitMessage = {
   diagnostics: SerializedDiagnostic[];
   mode: EditorMode;
   previewAppearance: PreviewAppearance;
+  editorAppearance: EditorAppearance;
   lineNumbers: boolean;
   gitChangesGutter: boolean;
   gitBlameEnabled: boolean;
@@ -232,6 +234,11 @@ type SetOutlineVisibleMessage = {
 type SetDiffBaselineModeMessage = {
   type: 'setDiffBaselineMode';
   mode: DiffBaselineMode;
+};
+
+type SetEditorAppearanceMessage = {
+  type: 'setEditorAppearance';
+  appearance: EditorAppearance;
 };
 
 type SetFixedBaselineMessage = {
@@ -407,6 +414,7 @@ type WebviewMessage =
   | SaveDocumentMessage
   | ExportDocumentMessage
   | SetPreviewAppearanceMessage
+  | SetEditorAppearanceMessage
   | ExportSnapshotMessage
   | ExportSnapshotErrorMessage
   | PreviewRenderRequestMessage
@@ -467,6 +475,8 @@ type PanelSessionControllerParams = {
   setFindOptions: (options: FindOptions) => Promise<void>;
   getPreviewAppearance: () => PreviewAppearance;
   setPreviewAppearance: (appearance: PreviewAppearance) => Promise<void>;
+  getEditorAppearance: () => EditorAppearance;
+  setEditorAppearance: (appearance: EditorAppearance) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
   updateGitBlameEnabled: (enabled: boolean) => Promise<void>;
   onPanelActivated: (panel: vscode.WebviewPanel) => void;
@@ -508,6 +518,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     setFindOptions,
     getPreviewAppearance,
     setPreviewAppearance,
+    getEditorAppearance,
+    setEditorAppearance,
     setOutlineVisible,
     updateGitBlameEnabled,
     onPanelActivated,
@@ -740,6 +752,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: serializeDiagnostics(document),
       mode,
       previewAppearance: getPreviewAppearance(),
+      editorAppearance: getEditorAppearance(),
       lineNumbers: getLineNumbersEnabled(context),
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitBlameEnabled,
@@ -1347,6 +1360,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setPreviewAppearance':
         await setPreviewAppearance(raw.appearance);
+        return;
+      case 'setEditorAppearance':
+        await setEditorAppearance(raw.appearance);
         return;
       case 'openLink':
         await openLink(raw.href, documentUri, {

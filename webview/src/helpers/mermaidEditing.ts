@@ -2,7 +2,11 @@ import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/s
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
-import { getCachedMermaidPreviewHeight, MermaidDiagramWidget } from './mermaidDiagram';
+import {
+  getCachedMermaidPreviewHeight,
+  MermaidDiagramWidget,
+  subscribeToMermaidThemeRefresh
+} from './mermaidDiagram';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
@@ -278,6 +282,7 @@ class MermaidEditingController {
   private previewSticky: HTMLElement | null = null;
   private previewWidget: MermaidDiagramWidget | null = null;
   private previewTimer: number | null = null;
+  private unsubscribeThemeRefresh: () => void;
   private syncingFromOuter = false;
 
   constructor(
@@ -340,6 +345,11 @@ class MermaidEditingController {
       parent: this.sourceHost
     });
 
+    this.unsubscribeThemeRefresh = subscribeToMermaidThemeRefresh(() => {
+      if (this.mode === 'split') {
+        this.renderPreview();
+      }
+    });
     this.setMode(mode, true);
     this.setSearchReveal(searchReveal);
     this.root.__meoMermaidEditingController = this;
@@ -499,6 +509,7 @@ class MermaidEditingController {
   }
 
   destroy(): void {
+    this.unsubscribeThemeRefresh();
     if (this.previewTimer !== null) {
       window.clearTimeout(this.previewTimer);
       this.previewTimer = null;

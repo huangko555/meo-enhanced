@@ -5,6 +5,9 @@ import {
   type ThemeSettings,
   themeColorKeys
 } from '../../../src/shared/themeDefaults';
+import type { EditorAppearance } from '../../../src/shared/editorAppearance';
+import { lightCssVariableOverrides, resolveEditorTheme } from '../themes/editorLightTheme';
+import { darkCssVariableOverrides } from '../themes/editorDarkTheme';
 
 const vscodeEditorFontFamily = 'var(--vscode-editor-font-family)';
 const vscodeEditorFontSize = 'var(--vscode-editor-font-size, 13px)';
@@ -93,7 +96,21 @@ const normalizeThemeHeadingSize = (value: number | undefined, fallback: string, 
   return `${value}px`;
 };
 
-export const applyThemeSettings = (theme?: ThemeSettings): void => {
+const applyHostAppearance = (appearance: EditorAppearance): void => {
+  const root = document.documentElement;
+  const rootStyle = root.style;
+  root.dataset.editorAppearance = appearance;
+  rootStyle.colorScheme = appearance;
+
+  const overrides = appearance === 'light'
+    ? lightCssVariableOverrides
+    : darkCssVariableOverrides;
+  for (const [property, value] of Object.entries(overrides)) {
+    rootStyle.setProperty(property, value);
+  }
+};
+
+export const applyThemeSettings = (theme?: ThemeSettings, appearance: EditorAppearance = 'dark'): void => {
   let resolvedTheme: ThemeSettings;
   const editorFontWeight = resolveEditorFontWeight();
   try {
@@ -102,6 +119,9 @@ export const applyThemeSettings = (theme?: ThemeSettings): void => {
     console.error('[MEO webview] Failed to resolve theme payload, using defaults.', error);
     resolvedTheme = resolveTheme();
   }
+
+  applyHostAppearance(appearance);
+  resolvedTheme = resolveEditorTheme(resolvedTheme, appearance);
 
   const rootStyle = document.documentElement.style;
   const insetBackground = getInsetBackground(resolvedTheme.backgroundColor, resolvedTheme.colors.base03);

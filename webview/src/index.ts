@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, UserRound, Check, MapPin, MapPinOff, Ellipsis } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, UserRound, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -19,6 +19,8 @@ import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
+import { normalizeEditorAppearance, type EditorAppearance } from '../../src/shared/editorAppearance';
+import { resolveCodeTheme } from './themes/editorLightTheme';
 
 type MarkdownMode = 'live' | 'source' | 'preview';
 
@@ -814,6 +816,29 @@ releaseFixedBaselineSeparator.setAttribute('role', 'separator');
 const changesSeparator = document.createElement('div');
 changesSeparator.className = 'more-tools-separator';
 changesSeparator.setAttribute('role', 'separator');
+const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
+  ariaLabel: 'Editor appearance',
+  className: 'editor-appearance-control',
+  buttonClassName: 'editor-appearance-button',
+  datasetKey: 'editorAppearance',
+  role: 'group',
+  options: [
+    {
+      value: 'light',
+      label: 'Light',
+      renderLeading: () => createElement(Sun, { width: 14, height: 14, 'aria-hidden': 'true' })
+    },
+    {
+      value: 'dark',
+      label: 'Dark',
+      renderLeading: () => createElement(Moon, { width: 14, height: 14, 'aria-hidden': 'true' })
+    }
+  ]
+});
+editorAppearanceControl.setActive('dark');
+const editorAppearanceRow = document.createElement('div');
+editorAppearanceRow.className = 'more-tools-appearance-row';
+editorAppearanceRow.append(editorAppearanceControl.element);
 moreToolsPanel.append(
   releaseFixedBaselineBtn,
   releaseFixedBaselineSeparator,
@@ -823,7 +848,8 @@ moreToolsPanel.append(
   lineNumbersBtn,
   gitBlameBtn,
   longCodeBlockFoldingBtn,
-  spellCheckBtn
+  spellCheckBtn,
+  editorAppearanceRow
 );
 
 const moreToolsWrapper = document.createElement('div');
@@ -1046,6 +1072,10 @@ let inFlightBaseVersion: number | null = null;
 let saveAfterSync = false;
 let currentMode: MarkdownMode = 'live';
 let lastEditableMode: 'live' | 'source' = 'live';
+let currentEditorAppearance: EditorAppearance = 'dark';
+let currentThemeSettings: Parameters<typeof applyThemeSettings>[0];
+let currentCodeTheme: Parameters<typeof setShikiTheme>[0];
+let hasInitializedPreviewAppearance = false;
 let hasLocalModePreference = false;
 let pendingInitialText: string | null = null;
 let initialEditorMountQueued = false;
@@ -1073,6 +1103,44 @@ const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
 
 const failureNotice = createFailureNoticeManager(editorNotice);
 handleEditorNoticeDismiss = failureNotice.clearFailureNotice;
+
+const setEditorAppearance = (
+  appearance: EditorAppearance,
+  { post = false }: { post?: boolean } = {}
+): void => {
+  const nextAppearance = normalizeEditorAppearance(appearance);
+  const changed = currentEditorAppearance !== nextAppearance;
+  currentEditorAppearance = nextAppearance;
+  editorAppearanceControl.setActive(nextAppearance);
+
+  if (changed) {
+    const applyAppearance = () => {
+      applyThemeSettings(currentThemeSettings, currentEditorAppearance);
+      setShikiTheme(resolveCodeTheme(currentCodeTheme, currentEditorAppearance));
+      refreshMermaidTheme();
+      editor?.refreshDecorations();
+    };
+    if (editor) {
+      editor.preserveViewport(applyAppearance);
+    } else {
+      applyAppearance();
+    }
+  }
+
+  if (post) {
+    vscode.postMessage({ type: 'setEditorAppearance', appearance: currentEditorAppearance });
+  }
+};
+
+editorAppearanceControl.element.addEventListener('click', (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest<HTMLButtonElement>('.editor-appearance-button[data-editor-appearance]')
+    : null;
+  const appearance = button?.dataset.editorAppearance;
+  if (appearance === 'light' || appearance === 'dark') {
+    setEditorAppearance(appearance, { post: true });
+  }
+});
 
 const clearGitBlameCache = ({ hideTooltip = true } = {}) => {
   gitClient?.clearBlameCache({ hideTooltip });
@@ -1654,6 +1722,10 @@ const applyMode = (mode: MarkdownMode, { post = true, persist = true, userTrigge
   editorHost.hidden = mode === 'preview';
 
   if (mode === 'preview') {
+    if (!hasInitializedPreviewAppearance) {
+      previewController.setAppearance(currentEditorAppearance);
+      hasInitializedPreviewAppearance = true;
+    }
     if (document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
     }
@@ -1967,9 +2039,13 @@ window.addEventListener('message', (event) => {
   if (message.type === 'init') {
     acknowledgeReadyHandshake();
     withMessageErrorBoundary('init handler', () => {
-      applyThemeSettings(message.theme);
+      currentThemeSettings = message.theme as Parameters<typeof applyThemeSettings>[0];
+      currentCodeTheme = message.codeTheme;
+      currentEditorAppearance = normalizeEditorAppearance(message.editorAppearance);
+      editorAppearanceControl.setActive(currentEditorAppearance);
+      applyThemeSettings(message.theme, currentEditorAppearance);
       setShikiEnabled(message.shikiCodeBlocks === true);
-      setShikiTheme(message.codeTheme);
+      setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
       initialMountRecoveryAttempted = false;
       failureNotice.clearFailureNotice();
       gitClient?.resetForInit({ hideTooltip: false });
@@ -2008,9 +2084,11 @@ window.addEventListener('message', (event) => {
   if (message.type === 'themeChanged') {
     withMessageErrorBoundary('themeChanged handler', () => {
       const applyThemeChange = () => {
-        applyThemeSettings(message.theme);
+        currentThemeSettings = message.theme as Parameters<typeof applyThemeSettings>[0];
+        currentCodeTheme = message.codeTheme;
+        applyThemeSettings(message.theme, currentEditorAppearance);
         refreshMermaidTheme();
-        setShikiTheme(message.codeTheme);
+        setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
         editor?.refreshDecorations();
         if (currentMode === 'preview') {
           previewController.requestRender(getCurrentEditorText(), {
@@ -2026,7 +2104,8 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'shikiCodeBlocksChanged') {
     withMessageErrorBoundary('shikiCodeBlocksChanged handler', () => {
-      setShikiTheme(message.codeTheme);
+      currentCodeTheme = message.codeTheme;
+      setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
       setShikiEnabled(message.enabled === true);
     });
     return;
