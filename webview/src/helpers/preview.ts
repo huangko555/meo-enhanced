@@ -2,6 +2,7 @@ import { createElement, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { createDocumentScrollToTopController } from './scrollToTop';
+import { createSegmentedControl } from './segmentedControl';
 import type { OutlineHeading } from './outline';
 import type { PreviewAppearance, PreviewRenderErrorMessage, PreviewRenderedMessage } from '../../../src/shared/preview';
 
@@ -109,25 +110,28 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   frame.title = 'Markdown Preview';
   frame.setAttribute('sandbox', 'allow-same-origin');
 
-  const appearanceControl = document.createElement('div');
-  appearanceControl.className = 'preview-appearance-control';
-  appearanceControl.setAttribute('role', 'group');
-  appearanceControl.setAttribute('aria-label', 'Preview appearance');
-
-  const createAppearanceButton = (value: PreviewAppearance, label: string) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'preview-appearance-button segmented-control-button';
-    button.dataset.appearance = value;
-    button.append(
-      createElement(value === 'light' ? Sun : Moon, { width: 14, height: 14, 'aria-hidden': 'true' }),
-      document.createTextNode(label)
-    );
-    return button;
-  };
-  const lightAppearanceButton = createAppearanceButton('light', 'Light');
-  const darkAppearanceButton = createAppearanceButton('dark', 'Dark');
-  appearanceControl.append(lightAppearanceButton, darkAppearanceButton);
+  const appearanceSegmentedControl = createSegmentedControl<PreviewAppearance>({
+    ariaLabel: 'Preview appearance',
+    className: 'preview-appearance-control',
+    buttonClassName: 'preview-appearance-button',
+    datasetKey: 'appearance',
+    role: 'group',
+    options: [
+      {
+        value: 'light',
+        label: 'Light',
+        renderLeading: () => createElement(Sun, { width: 14, height: 14, 'aria-hidden': 'true' })
+      },
+      {
+        value: 'dark',
+        label: 'Dark',
+        renderLeading: () => createElement(Moon, { width: 14, height: 14, 'aria-hidden': 'true' })
+      }
+    ]
+  });
+  const appearanceControl = appearanceSegmentedControl.element;
+  const lightAppearanceButton = appearanceSegmentedControl.getButton('light');
+  const darkAppearanceButton = appearanceSegmentedControl.getButton('dark');
 
   const status = document.createElement('div');
   status.className = 'preview-status';
@@ -254,13 +258,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     return { found: true, current: activeSearchIndex + 1, total: searchMatches.length };
   };
 
-  const updateThemeToggle = () => {
-    for (const button of [lightAppearanceButton, darkAppearanceButton]) {
-      const active = button.dataset.appearance === appearance;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    }
-  };
+  const updateThemeToggle = () => appearanceSegmentedControl.setActive(appearance);
 
   const setStatus = (message: string | null) => {
     status.hidden = !message;

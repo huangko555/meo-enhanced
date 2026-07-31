@@ -240,11 +240,13 @@ body {
 }
 
 .mode-toolbar {
+  box-sizing: border-box;
   position: relative;
   z-index: 500;
   display: flex;
   align-items: center;
-  padding: 8px 14px 8px 10px;
+  min-height: 40px;
+  padding: 7px 14px 7px 10px;
   background-color: var(--vscode-sideBar-background);
   user-select: none;
   -webkit-user-select: none;
@@ -485,51 +487,123 @@ body {
   gap: 6px;
 }
 
-.preview-appearance-control {
+.segmented-control {
+  --segmented-control-inset: 3px;
+  --segmented-control-radius: 8px;
+  --segmented-control-indicator-radius: calc(
+    var(--segmented-control-radius) - var(--segmented-control-inset)
+  );
   box-sizing: border-box;
   position: relative;
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  gap: 0;
+  height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
-  background: transparent;
-}
-
-.preview-appearance-control::before {
-  content: '';
-  position: absolute;
-  z-index: 0;
-  inset: 1px 0;
-  border-radius: 999px;
+  border-radius: var(--segmented-control-radius);
   background: color-mix(
     in srgb,
     var(--vscode-input-background, var(--vscode-sideBar-background)) 62%,
     var(--vscode-sideBar-background)
   );
+  box-shadow: inset 0 0 0 1px color-mix(
+    in srgb,
+    var(
+      --vscode-button-secondaryBackground,
+      var(--vscode-toolbar-activeBackground, var(--vscode-panel-border, rgba(127, 127, 127, 0.32)))
+    ) 78%,
+    var(--vscode-panel-border, transparent)
+  );
+  overflow: hidden;
 }
 
-.preview-appearance-control::after {
-  content: '';
+.segmented-control-button {
+  box-sizing: border-box;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 56px;
+  height: 26px;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 0;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.12s ease;
+}
+
+.segmented-control-button-indicator {
   position: absolute;
-  z-index: 2;
-  inset: 1px 0;
-  border: 1px solid var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
-  border-radius: 999px;
+  inset: var(--segmented-control-inset);
+  z-index: 0;
+  border-radius: var(--segmented-control-indicator-radius);
+  background: transparent;
+  pointer-events: none;
+  transition: background-color 0.12s ease;
+}
+
+.segmented-control-button-content {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--segmented-control-content-gap, 0);
   pointer-events: none;
 }
 
-.preview-appearance-button,
+.segmented-control-button-label {
+  transform: translateY(-0.5px);
+}
+
+.segmented-control-button.is-active {
+  z-index: 1;
+  color: var(--vscode-button-foreground, var(--vscode-editor-foreground));
+}
+
+.segmented-control-button.is-active .segmented-control-button-indicator {
+  background: var(
+    --vscode-button-secondaryBackground,
+    var(--vscode-toolbar-activeBackground, rgba(127, 127, 127, 0.32))
+  );
+}
+
+.segmented-control-button:not(.is-active):hover {
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+}
+
+.segmented-control-button:focus-visible {
+  outline: none;
+}
+
+.segmented-control-button:focus-visible .segmented-control-button-indicator {
+  box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, currentColor);
+}
+
+.preview-appearance-button {
+  --segmented-control-content-gap: 5px;
+}
+
 .preview-toolbar-action {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 22px;
+  height: 24px;
   padding: 0 8px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 5px;
   color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
   background: transparent;
@@ -540,43 +614,14 @@ body {
   cursor: pointer;
 }
 
-.preview-appearance-button.is-active {
-  z-index: 1;
-  color: var(--vscode-button-foreground, var(--vscode-editor-foreground));
-  background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
-}
-
-.preview-appearance-button {
-  position: relative;
-  z-index: 1;
-  height: 22px;
-  min-width: 62px;
-  border-radius: 999px;
-}
-
-.preview-appearance-button + .preview-appearance-button {
-  margin-left: 0;
-}
-
-.preview-appearance-button:not(.is-active):hover {
-  color: var(--vscode-editor-foreground);
-  background: transparent;
-}
-
 .preview-toolbar-action:hover {
   color: var(--vscode-editor-foreground);
   background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.18));
 }
 
-.preview-appearance-button:focus-visible,
 .preview-toolbar-action:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, currentColor);
   outline-offset: 1px;
-}
-
-.preview-toolbar-action {
-  height: 24px;
-  border: 1px solid transparent;
 }
 
 .line-jump-control {
@@ -628,11 +673,11 @@ body {
 .toolbar-right {
   position: absolute;
   z-index: 3;
-  top: 8px;
+  top: 7px;
   right: 14px;
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  height: 26px;
   white-space: nowrap;
   background-color: var(--vscode-sideBar-background);
 }
@@ -886,8 +931,7 @@ body {
 
 .format-button:hover,
 .heading-dropdown-option:hover,
-.more-tools-wrapper > .format-button.is-active,
-.mode-button.is-active {
+.more-tools-wrapper > .format-button.is-active {
   background-color: var(--vscode-toolbar-hoverBackground);
 }
 
@@ -936,47 +980,12 @@ body {
   transition: background-color 0.12s ease;
 }
 
-.mode-group {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0;
-  background: transparent;
-}
-
-.mode-group::before,
-.mode-group::after {
-  content: '';
-  position: absolute;
-  inset: 1px 0;
-  border-radius: 999px;
-  pointer-events: none;
-}
-
-.mode-group::before {
-  z-index: 0;
-  background: color-mix(
-    in srgb,
-    var(--vscode-input-background, var(--vscode-sideBar-background)) 62%,
-    var(--vscode-sideBar-background)
-  );
-}
-
-.mode-group::after {
-  z-index: 2;
-  border: 1px solid var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
-}
-
 @media (max-width: 920px) {
   .find-panel {
     right: -10px;
   }
 }
 
-.mode-button,
 .meo-code-block-pill {
   padding: 4px 8px;
   font-size: 12px;
@@ -985,34 +994,6 @@ body {
   user-select: none;
   line-height: 1em;
   transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-}
-
-.mode-button {
-  position: relative;
-  z-index: 1;
-  height: 22px;
-  min-width: 52px;
-  padding: 0 8px;
-  border-radius: 999px;
-  cursor: pointer;
-  color: var(--vscode-descriptionForeground, var(--vscode-foreground));
-  background: transparent;
-}
-
-.segmented-control-button {
-  width: auto;
-  min-width: 52px;
-  padding-inline: 12px;
-}
-
-.mode-button.is-active {
-  color: #ffffff;
-  background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-activeBackground));
-}
-
-.mode-button:not(.is-active):hover {
-  color: var(--vscode-editor-foreground);
-  background: transparent;
 }
 
 .meo-copy-code-btn {

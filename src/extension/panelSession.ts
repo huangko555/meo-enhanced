@@ -484,8 +484,6 @@ export type PanelSession = {
   requestExportSnapshot: () => Promise<{ text: string; environment?: ExportStyleEnvironment }>;
   rejectPendingExportSnapshots: (reason: Error) => void;
   refreshGitBaseline: (options?: RefreshGitBaselineOptions) => void;
-  setDiffBaselineMode: (mode: DiffBaselineMode) => void;
-  setGitBlameEnabled: (enabled: boolean) => void;
   refreshSpellDiagnostics: () => void;
   getGitRepoRoot: () => string | null;
 };
@@ -522,6 +520,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let mode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
   let diffBaselineMode: DiffBaselineMode = getDiffBaselineMode();
   let gitBlameEnabled = getGitBlameEnabled();
+  let spellCheckEnabled = getSpellCheckEnabled();
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
@@ -748,7 +747,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diffBaselineMode,
       fixedBaselinePinned: savedRevisionTracker.getPinnedBaseline() !== null,
       fixedBaselineActive: fixedBaselineSelected && savedRevisionTracker.getPinnedBaseline() !== null,
-      spellCheckEnabled: getSpellCheckEnabled(),
+      spellCheckEnabled,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
       longCodeBlockFoldingEnabled: getLongCodeBlockFoldingEnabled(),
       vimMode: getVimModeEnabled(context),
@@ -777,7 +776,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
 
   const runSpellCheck = async (generation: number): Promise<void> => {
     try {
-      const diagnostics = await collectMeoSpellDiagnostics(document);
+      const diagnostics = await collectMeoSpellDiagnostics(document, spellCheckEnabled);
       if (disposed || generation !== spellCheckGeneration) {
         return;
       }
@@ -1190,20 +1189,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     requestExportSnapshot,
     rejectPendingExportSnapshots,
     refreshGitBaseline,
-    setDiffBaselineMode: (nextMode) => {
-      if (savedRevisionTracker.getPinnedBaseline()) {
-        return;
-      }
-      if (diffBaselineMode === nextMode) {
-        return;
-      }
-      diffBaselineMode = nextMode;
-      lastSentDiffBaselineHash = '';
-      refreshGitBaseline({ forcePost: true, forceReload: nextMode === 'git-head' });
-    },
-    setGitBlameEnabled: (enabled) => {
-      gitBlameEnabled = enabled === true;
-    },
     refreshSpellDiagnostics: () => scheduleSpellCheck(0),
     getGitRepoRoot: () => gitDocumentState.getRepoRoot()
   };
@@ -1312,9 +1297,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       case 'setSpellCheck':
+        spellCheckEnabled = raw.enabled === true;
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .update(SPELL_CHECK_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
+          .update(SPELL_CHECK_SETTING_KEY, spellCheckEnabled, vscode.ConfigurationTarget.Global);
+        scheduleSpellCheck(0);
         return;
       case 'setOutlineVisible':
         await setOutlineVisible(raw.visible);
@@ -1522,7 +1509,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       }
       case 'requestDiagnosticSuggestions': {
-        const response = await resolveDiagnosticSuggestions(document, raw);
+        const response = await resolveDiagnosticSuggestions(document, raw, spellCheckEnabled);
         await postToWebview(response);
         return;
       }
@@ -1925,7 +1912,8 @@ function serializeDiagnostics(document: vscode.TextDocument): SerializedDiagnost
 
 async function resolveDiagnosticSuggestions(
   document: vscode.TextDocument,
-  request: RequestDiagnosticSuggestionsMessage
+  request: RequestDiagnosticSuggestionsMessage,
+  spellCheckEnabled: boolean
 ): Promise<DiagnosticSuggestionsResultMessage> {
   const emptyResponse: DiagnosticSuggestionsResultMessage = {
     type: 'diagnosticSuggestionsResult',
@@ -1978,7 +1966,12 @@ async function resolveDiagnosticSuggestions(
   }
 
   if (suggestions.length === 0 && request.source === MEO_SPELL_DIAGNOSTIC_SOURCE) {
-    const spellSuggestions = await collectMeoSpellSuggestions(document, requestedRange.from, requestedRange.to);
+    const spellSuggestions = await collectMeoSpellSuggestions(
+      document,
+      requestedRange.from,
+      requestedRange.to,
+      spellCheckEnabled
+    );
     for (const suggestion of spellSuggestions) {
       if (seen.has(suggestion)) {
         continue;

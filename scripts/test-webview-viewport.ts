@@ -241,13 +241,43 @@ async function main() {
     const measureToolbarStart = () => page.evaluate(() => {
       const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
       const firstButton = document.querySelector<HTMLElement>('.format-group > .format-button')!;
+      const modeControl = document.querySelector<HTMLElement>('.mode-group')!;
+      const activeModeButton = modeControl.querySelector<HTMLElement>('.is-active')!;
+      const modeButtons = Array.from(modeControl.querySelectorAll<HTMLElement>('.segmented-control-button'));
+      const activeModeIndicator = activeModeButton.querySelector<HTMLElement>('.segmented-control-button-indicator')!;
+      const activeModeLabel = activeModeButton.querySelector<HTMLElement>('.segmented-control-button-label')!;
+      const modeControlBounds = modeControl.getBoundingClientRect();
+      const activeModeBounds = activeModeIndicator.getBoundingClientRect();
+      const activeModeLabelBounds = activeModeLabel.getBoundingClientRect();
       return {
         paddingLeft: Number.parseFloat(getComputedStyle(toolbar).paddingLeft),
         firstButtonOffset: firstButton.getBoundingClientRect().left - toolbar.getBoundingClientRect().left,
-        toolbarHeight: toolbar.getBoundingClientRect().height
+        toolbarHeight: toolbar.getBoundingClientRect().height,
+        modeControlHeight: modeControl.getBoundingClientRect().height,
+        modeControlRadius: Number.parseFloat(getComputedStyle(modeControl).borderRadius),
+        activeModeRadius: Number.parseFloat(getComputedStyle(activeModeIndicator).borderRadius),
+        activeModeLabelOffset: activeModeBounds.top + activeModeBounds.height / 2
+          - (activeModeLabelBounds.top + activeModeLabelBounds.height / 2),
+        modeButtonWidths: Object.fromEntries(modeButtons.map((button) => [
+          button.dataset.mode,
+          button.getBoundingClientRect().width
+        ])),
+        activeModeInsets: {
+          top: activeModeBounds.top - modeControlBounds.top,
+          bottom: modeControlBounds.bottom - activeModeBounds.bottom,
+          left: activeModeBounds.left - modeControlBounds.left
+        },
+        modeSegmentGap: modeButtons[1].getBoundingClientRect().left - modeButtons[0].getBoundingClientRect().right,
+        modeUsesSharedComponent: modeControl.classList.contains('segmented-control')
       };
     });
     const initialToolbarStart = await measureToolbarStart();
+    await page.hover('[data-mode="source"]');
+    const inactiveModeHoverBackground = await page.$eval<HTMLElement, string>(
+      '[data-mode="source"]',
+      (element) => getComputedStyle(element).backgroundColor
+    );
+    await page.mouse.move(0, 0);
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'lineNumbersChanged', enabled: false } }));
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'contentMaxWidthChanged', enabled: true } }));
@@ -265,6 +295,18 @@ async function main() {
     if (
       initialToolbarStart.paddingLeft !== 10 ||
       Math.abs(initialToolbarStart.firstButtonOffset - 10) > 0.5 ||
+      initialToolbarStart.toolbarHeight !== 40 ||
+      initialToolbarStart.modeControlHeight !== 26 ||
+      initialToolbarStart.modeControlRadius !== 8 ||
+      initialToolbarStart.activeModeRadius !== 5 ||
+      initialToolbarStart.activeModeLabelOffset !== 0.5 ||
+      initialToolbarStart.modeButtonWidths.live !== 56 ||
+      !(initialToolbarStart.modeButtonWidths.preview > initialToolbarStart.modeButtonWidths.source) ||
+      !(initialToolbarStart.modeButtonWidths.source > initialToolbarStart.modeButtonWidths.live) ||
+      JSON.stringify(initialToolbarStart.activeModeInsets) !== JSON.stringify({ top: 3, bottom: 3, left: 3 }) ||
+      initialToolbarStart.modeSegmentGap !== 0 ||
+      !initialToolbarStart.modeUsesSharedComponent ||
+      inactiveModeHoverBackground !== 'rgba(0, 0, 0, 0)' ||
       toggledToolbarStart.paddingLeft !== 10 ||
       Math.abs(toggledToolbarStart.firstButtonOffset - 10) > 0.5 ||
       !constrainedWidthState.active ||
@@ -324,9 +366,25 @@ async function main() {
     }
     const previewToolbarLayout = await page.evaluate(() => {
       const group = document.querySelector<HTMLElement>('.preview-format-group')!;
+      const appearanceControl = group.querySelector<HTMLElement>('.preview-appearance-control')!;
+      const activeAppearanceButton = appearanceControl.querySelector<HTMLElement>('.is-active')!;
+      const appearanceButtons = Array.from(appearanceControl.querySelectorAll<HTMLElement>('.segmented-control-button'));
+      const activeAppearanceIndicator = activeAppearanceButton.querySelector<HTMLElement>('.segmented-control-button-indicator')!;
+      const appearanceControlBounds = appearanceControl.getBoundingClientRect();
+      const activeAppearanceBounds = activeAppearanceIndicator.getBoundingClientRect();
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
         toolbarHeight: document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect().height,
+        appearanceControlHeight: appearanceControl.getBoundingClientRect().height,
+        appearanceControlRadius: Number.parseFloat(getComputedStyle(appearanceControl).borderRadius),
+        activeAppearanceRadius: Number.parseFloat(getComputedStyle(activeAppearanceIndicator).borderRadius),
+        activeAppearanceInsets: {
+          top: activeAppearanceBounds.top - appearanceControlBounds.top,
+          right: appearanceControlBounds.right - activeAppearanceBounds.right,
+          bottom: appearanceControlBounds.bottom - activeAppearanceBounds.bottom
+        },
+        appearanceSegmentGap: appearanceButtons[1].getBoundingClientRect().left - appearanceButtons[0].getBoundingClientRect().right,
+        appearanceUsesSharedComponent: appearanceControl.classList.contains('segmented-control'),
         visible: getComputedStyle(group).display !== 'none',
         items: Array.from(group.querySelectorAll(':scope > button, :scope > .preview-appearance-control > button')).map((element) => (
           (element as HTMLElement).dataset.action ||
@@ -340,6 +398,12 @@ async function main() {
     if (
       !previewToolbarLayout.visible ||
       Math.abs(previewToolbarLayout.toolbarHeight - initialToolbarStart.toolbarHeight) > 0.5 ||
+      previewToolbarLayout.appearanceControlHeight !== 26 ||
+      previewToolbarLayout.appearanceControlRadius !== 8 ||
+      previewToolbarLayout.activeAppearanceRadius !== 5 ||
+      JSON.stringify(previewToolbarLayout.activeAppearanceInsets) !== JSON.stringify({ top: 3, right: 3, bottom: 3 }) ||
+      previewToolbarLayout.appearanceSegmentGap !== 0 ||
+      !previewToolbarLayout.appearanceUsesSharedComponent ||
       JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
         'outline-left', 'light', 'dark', 'Export HTML', 'Export PDF'
       ]) ||
@@ -348,6 +412,71 @@ async function main() {
     ) {
       throw new Error(`Unexpected Preview toolbar: ${JSON.stringify({ initialToolbarStart, previewToolbarLayout })}`);
     }
+    const measureAppearanceIndicator = () => page.evaluate(() => {
+      const control = document.querySelector<HTMLElement>('.preview-appearance-control')!;
+      const activeButton = control.querySelector<HTMLElement>('.preview-appearance-button.is-active')!;
+      const indicator = activeButton.querySelector<HTMLElement>('.segmented-control-button-indicator')!;
+      const label = activeButton.querySelector<HTMLElement>('.segmented-control-button-label')!;
+      const controlBounds = control.getBoundingClientRect();
+      const indicatorBounds = indicator.getBoundingClientRect();
+      const labelBounds = label.getBoundingClientRect();
+      const appearanceButtons = Array.from(control.querySelectorAll<HTMLElement>('.preview-appearance-button'));
+      return {
+        active: activeButton.dataset.appearance,
+        top: indicatorBounds.top - controlBounds.top,
+        right: controlBounds.right - indicatorBounds.right,
+        bottom: controlBounds.bottom - indicatorBounds.bottom,
+        left: indicatorBounds.left - controlBounds.left,
+        height: indicatorBounds.height,
+        radius: getComputedStyle(indicator).borderTopLeftRadius,
+        labelOffset: indicatorBounds.top + indicatorBounds.height / 2
+          - (labelBounds.top + labelBounds.height / 2),
+        controlWidth: controlBounds.width,
+        buttonWidths: Object.fromEntries(appearanceButtons.map((button) => [
+          button.dataset.appearance,
+          button.getBoundingClientRect().width
+        ]))
+      };
+    });
+    const darkAppearanceGeometry = await measureAppearanceIndicator();
+    await page.click('.preview-appearance-button[data-appearance="light"]');
+    const lightAppearanceGeometry = await measureAppearanceIndicator();
+    await page.click('.preview-appearance-button[data-appearance="dark"]');
+    if (
+      darkAppearanceGeometry.active !== 'dark' ||
+      darkAppearanceGeometry.top !== 3 ||
+      darkAppearanceGeometry.right !== 3 ||
+      darkAppearanceGeometry.bottom !== 3 ||
+      darkAppearanceGeometry.height !== 20 ||
+      darkAppearanceGeometry.radius !== '5px' ||
+      darkAppearanceGeometry.labelOffset !== 0.5 ||
+      lightAppearanceGeometry.active !== 'light' ||
+      lightAppearanceGeometry.top !== 3 ||
+      lightAppearanceGeometry.bottom !== 3 ||
+      lightAppearanceGeometry.left !== 3 ||
+      lightAppearanceGeometry.height !== 20 ||
+      lightAppearanceGeometry.radius !== '5px' ||
+      lightAppearanceGeometry.labelOffset !== 0.5 ||
+      darkAppearanceGeometry.buttonWidths.dark === darkAppearanceGeometry.buttonWidths.light ||
+      darkAppearanceGeometry.buttonWidths.light < 56 ||
+      darkAppearanceGeometry.buttonWidths.dark < 56 ||
+      Math.abs(darkAppearanceGeometry.left - (darkAppearanceGeometry.buttonWidths.light + 3)) > 0.01 ||
+      Math.abs(lightAppearanceGeometry.right - (lightAppearanceGeometry.buttonWidths.dark + 3)) > 0.01 ||
+      Math.abs(darkAppearanceGeometry.controlWidth - (
+        darkAppearanceGeometry.buttonWidths.light + darkAppearanceGeometry.buttonWidths.dark
+      )) > 0.01
+    ) {
+      throw new Error(`Preview appearance control geometry is inconsistent: ${JSON.stringify({
+        darkAppearanceGeometry,
+        lightAppearanceGeometry
+      })}`);
+    }
+    await page.evaluate(() => {
+      const testWindow = window as typeof window & { __hostMessages?: Array<{ type?: string }> };
+      testWindow.__hostMessages = (testWindow.__hostMessages ?? []).filter(
+        (message) => message.type !== 'setPreviewAppearance'
+      );
+    });
     await page.click('.preview-toolbar-action[data-format="html"]');
     await page.click('.preview-toolbar-action[data-format="pdf"]');
     const previewExportRequests = await page.evaluate(() => (

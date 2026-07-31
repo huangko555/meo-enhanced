@@ -31,20 +31,12 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   GIT_BLAME_SETTING_KEY,
-  GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY,
-  DIFF_BASELINE_MODE_SETTING_KEY,
-  LINE_NUMBERS_LEGACY_SETTING_KEY,
-  LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY,
-  LINE_NUMBERS_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
   VIM_MODE_BEHAVIOR_SETTING_KEY,
   VIM_MODE_SETTING_KEY,
   CODE_BLOCKS_VSCODE_THEME_SETTING_KEY,
-  LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY,
-  CONTENT_MAX_WIDTH_SETTING_KEY,
   SPELL_CHECK_SETTING_KEY,
   getUseVscodeThemeForCodeBlocks,
-  getLongCodeBlockFoldingEnabled,
   getCodeBlockVscodeTheme,
   syncEditorAssociations,
   type ExportHtmlImageMode,
@@ -52,14 +44,8 @@ import {
   getExportEditorFontEnvironment,
   getExportPdfBrowserPath,
   getGitChangesGutterEnabled,
-  getGitBlameEnabled,
-  getGitDiffLineHighlightsEnabled,
-  getDiffBaselineMode,
-  getLineNumbersEnabled,
-  getOutlinePosition,
   getOutlineVisible,
   getContentMaxWidthEnabled,
-  getSpellCheckEnabled,
   getThemeSettings,
   getVimKeybindings,
   getVimLeaderKey,
@@ -495,8 +481,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   private readonly panelSessions = new Map<vscode.WebviewPanel, PanelSession>();
   private readonly spellDiagnosticCollection = vscode.languages.createDiagnosticCollection('meo-spell');
   private gitBlameSettingQueue: Promise<void> = Promise.resolve();
-  private pendingGitBlameSettingUpdates = 0;
-  private desiredGitBlameEnabled = getGitBlameEnabled();
   private lastActivePanel: vscode.WebviewPanel | null = null;
 
   constructor(
@@ -520,31 +504,13 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
-  private applyGitBlameEnabled(enabled: boolean): void {
-    this.desiredGitBlameEnabled = enabled === true;
-    this.broadcast({ type: 'gitBlameChanged', enabled: this.desiredGitBlameEnabled });
-    for (const session of this.panelSessions.values()) {
-      session.setGitBlameEnabled(this.desiredGitBlameEnabled);
-    }
-  }
-
   private updateGitBlameEnabled(enabled: boolean): Promise<void> {
     const targetEnabled = enabled === true;
-    this.applyGitBlameEnabled(targetEnabled);
-    this.pendingGitBlameSettingUpdates += 1;
     const update = this.gitBlameSettingQueue.then(() => vscode.workspace
       .getConfiguration(EXTENSION_CONFIG_SECTION)
       .update(GIT_BLAME_SETTING_KEY, targetEnabled, vscode.ConfigurationTarget.Global));
-    const trackedUpdate = update.catch((error) => {
-      if (this.desiredGitBlameEnabled === targetEnabled) {
-        this.applyGitBlameEnabled(getGitBlameEnabled());
-      }
-      throw error;
-    }).finally(() => {
-      this.pendingGitBlameSettingUpdates = Math.max(0, this.pendingGitBlameSettingUpdates - 1);
-    });
-    this.gitBlameSettingQueue = trackedUpdate.catch(() => undefined);
-    return trackedUpdate;
+    this.gitBlameSettingQueue = update.catch(() => undefined);
+    return update;
   }
 
   async exportActiveDocument(format: ExportFormat): Promise<void> {
@@ -596,52 +562,15 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
   async handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): Promise<void> {
     if (
-      event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LINE_NUMBERS_SETTING_KEY}`) ||
-      event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LINE_NUMBERS_LEGACY_SETTING_KEY}`) ||
-      event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY}`)
-    ) {
-      this.broadcast({ type: 'lineNumbersChanged', enabled: getLineNumbersEnabled(this.context) });
-    }
-
-    if (
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY}`) ||
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_CHANGES_GUTTER_LEGACY_SETTING_KEY}`)
     ) {
       const enabled = getGitChangesGutterEnabled(this.context);
-      this.broadcast({ type: 'gitChangesGutterChanged', enabled });
       for (const session of this.panelSessions.values()) {
         session.refreshGitBaseline({ forcePost: true, forceReload: true, delayMs: enabled ? 150 : 0 });
       }
-    }
-
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_BLAME_SETTING_KEY}`)) {
-      const enabled = getGitBlameEnabled();
-      const isStaleQueuedValue = this.pendingGitBlameSettingUpdates > 0 && enabled !== this.desiredGitBlameEnabled;
-      if (!isStaleQueuedValue) {
-        this.applyGitBlameEnabled(enabled);
-      }
-    }
-
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY}`)) {
-      this.broadcast({ type: 'gitDiffLineHighlightsChanged', enabled: getGitDiffLineHighlightsEnabled() });
-    }
-
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${DIFF_BASELINE_MODE_SETTING_KEY}`)) {
-      const baselineMode = getDiffBaselineMode();
-      this.broadcast({ type: 'diffBaselineModeChanged', mode: baselineMode });
-      for (const session of this.panelSessions.values()) {
-        session.setDiffBaselineMode(baselineMode);
-      }
-    }
-
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${CONTENT_MAX_WIDTH_SETTING_KEY}`)) {
-      this.broadcast({ type: 'contentMaxWidthChanged', enabled: getContentMaxWidthEnabled(this.context) });
-    }
-
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY}`)) {
-      this.broadcast({ type: 'longCodeBlockFoldingChanged', enabled: getLongCodeBlockFoldingEnabled() });
     }
 
     if (
@@ -664,10 +593,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       this.broadcast({ type: 'vimKeybindingsChanged', keybindings: getVimKeybindings(), leaderKey: getVimLeaderKey() });
     }
 
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.outline.position`)) {
-      this.broadcast({ type: 'outlinePositionChanged', position: getOutlinePosition() });
-    }
-
     if (
       event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.theme`)
     ) {
@@ -675,12 +600,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     }
 
     if (
-      event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${SPELL_CHECK_SETTING_KEY}`) ||
-      event.affectsConfiguration('cSpell')
+      event.affectsConfiguration('cSpell') &&
+      !event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${SPELL_CHECK_SETTING_KEY}`)
     ) {
-      if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${SPELL_CHECK_SETTING_KEY}`)) {
-        this.broadcast({ type: 'spellCheckChanged', enabled: getSpellCheckEnabled() });
-      }
       for (const session of this.panelSessions.values()) {
         session.refreshSpellDiagnostics();
       }
@@ -813,7 +735,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     }
 
     await this.context.globalState.update(FIND_OPTIONS_STATE_KEY, nextOptions);
-    this.broadcast({ type: 'findOptionsChanged', findOptions: nextOptions });
   }
 
   private getPreviewAppearance(): PreviewAppearance {
@@ -826,7 +747,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       return;
     }
     await this.context.globalState.update(PREVIEW_APPEARANCE_STATE_KEY, nextAppearance);
-    this.broadcast({ type: 'previewAppearanceChanged', appearance: nextAppearance });
   }
 
   private async setOutlineVisible(visible: boolean): Promise<void> {
@@ -836,7 +756,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     }
 
     await this.context.globalState.update(OUTLINE_VISIBLE_KEY, nextVisible);
-    this.broadcast({ type: 'outlineVisibilityChanged', visible: nextVisible });
   }
 
   private updateActiveEditorContext(): void {

@@ -1,4 +1,4 @@
-import { ArrowUp, createElement } from 'lucide';
+import { ChevronsUp, createElement } from 'lucide';
 
 type ScrollElement = Element & { scrollTop: number };
 
@@ -8,9 +8,9 @@ export function createDocumentScrollToTopController() {
   button.className = 'document-scroll-top';
   button.title = 'Back to top';
   button.setAttribute('aria-label', 'Back to top');
-  button.appendChild(createElement(ArrowUp, {
-    width: 18,
-    height: 18,
+  button.appendChild(createElement(ChevronsUp, {
+    width: 21,
+    height: 21,
     'aria-hidden': 'true'
   }));
   button.hidden = true;

@@ -18,6 +18,9 @@ import { reconcileExternalDocument } from './helpers/documentSync';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
+import { createSegmentedControl } from './helpers/segmentedControl';
+
+type MarkdownMode = 'live' | 'source' | 'preview';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -863,36 +866,22 @@ moreToolsPanel.addEventListener('click', (event) => {
   }
 });
 
-const modeGroup = document.createElement('div');
-modeGroup.className = 'mode-group';
-modeGroup.setAttribute('role', 'tablist');
-modeGroup.setAttribute('aria-label', 'Markdown mode');
-
-const liveButton = document.createElement('button');
-liveButton.type = 'button';
-liveButton.className = 'mode-button segmented-control-button';
-liveButton.dataset.mode = 'live';
-liveButton.textContent = 'Live';
-liveButton.setAttribute('role', 'tab');
-liveButton.title = 'Live';
-
-const sourceButton = document.createElement('button');
-sourceButton.type = 'button';
-sourceButton.className = 'mode-button segmented-control-button';
-sourceButton.dataset.mode = 'source';
-sourceButton.textContent = 'Source';
-sourceButton.setAttribute('role', 'tab');
-sourceButton.title = 'Source';
-
-const previewButton = document.createElement('button');
-previewButton.type = 'button';
-previewButton.className = 'mode-button segmented-control-button';
-previewButton.dataset.mode = 'preview';
-previewButton.textContent = 'Preview';
-previewButton.setAttribute('role', 'tab');
-previewButton.title = 'Preview';
-
-modeGroup.append(liveButton, sourceButton, previewButton);
+const modeControl = createSegmentedControl<MarkdownMode>({
+  ariaLabel: 'Markdown mode',
+  className: 'mode-group',
+  buttonClassName: 'mode-button',
+  datasetKey: 'mode',
+  role: 'tablist',
+  options: [
+    { value: 'live', label: 'Live' },
+    { value: 'source', label: 'Source' },
+    { value: 'preview', label: 'Preview' }
+  ]
+});
+const modeGroup = modeControl.element;
+const liveButton = modeControl.getButton('live');
+const sourceButton = modeControl.getButton('source');
+const previewButton = modeControl.getButton('preview');
 
 const toolbarOverflowIndicator = document.createElement('span');
 toolbarOverflowIndicator.className = 'toolbar-overflow-indicator';
@@ -1055,7 +1044,7 @@ let inFlight = false;
 let inFlightText: string | null = null;
 let inFlightBaseVersion: number | null = null;
 let saveAfterSync = false;
-let currentMode: 'live' | 'source' | 'preview' = 'live';
+let currentMode: MarkdownMode = 'live';
 let lastEditableMode: 'live' | 'source' = 'live';
 let hasLocalModePreference = false;
 let pendingInitialText: string | null = null;
@@ -1633,16 +1622,10 @@ const updateModeUI = () => {
   ]) {
     control.disabled = replaceDisabled;
   }
-  const buttons = [liveButton, sourceButton, previewButton];
-  for (const button of buttons) {
-    const selected = button.dataset.mode === currentMode;
-    button.classList.toggle('is-active', selected);
-    button.setAttribute('aria-selected', selected ? 'true' : 'false');
-    button.tabIndex = selected ? 0 : -1;
-  }
+  modeControl.setActive(currentMode);
 };
 
-const applyMode = (mode: 'live' | 'source' | 'preview', { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
+const applyMode = (mode: MarkdownMode, { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
   if (mode !== 'live' && mode !== 'source' && mode !== 'preview') {
     return false;
   }
@@ -2203,12 +2186,15 @@ window.addEventListener('message', (event) => {
         pendingDebounce = null;
       }
 
+      // Protect the reconciled local draft before rendering it. Rendering can fail for
+      // document-specific Live decorations, but the extension must still retain the
+      // user's latest text for save and dispose-time recovery.
+      syncPendingDraftState();
       if (!setEditorTextSafely(reconciled.text, 'docChanged.reconcile')) {
         return;
       }
       flushChanges();
       maybeSaveAfterSync();
-      syncPendingDraftState();
       return;
     }
 

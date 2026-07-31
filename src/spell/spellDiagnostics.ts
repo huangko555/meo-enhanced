@@ -13,7 +13,10 @@ export const MEO_SPELL_DIAGNOSTIC_SOURCE = 'MEO Spell';
 const maxSpellCheckTextLength = 1_000_000;
 const maxSpellSuggestions = 1;
 
-export function shouldRunMeoSpellCheck(document: vscode.TextDocument): boolean {
+export function shouldRunMeoSpellCheck(
+  document: vscode.TextDocument,
+  meoEnabledOverride?: boolean
+): boolean {
   if (document.uri.scheme !== 'file') {
     return false;
   }
@@ -21,9 +24,11 @@ export function shouldRunMeoSpellCheck(document: vscode.TextDocument): boolean {
     return false;
   }
 
-  const meoEnabled = vscode.workspace
-    .getConfiguration('meoEnhanced', document.uri)
-    .get<boolean>('spellCheck.enabled', true);
+  const meoEnabled = typeof meoEnabledOverride === 'boolean'
+    ? meoEnabledOverride
+    : vscode.workspace
+      .getConfiguration('meoEnhanced', document.uri)
+      .get<boolean>('spellCheck.enabled', true);
   if (!meoEnabled) {
     return false;
   }
@@ -41,8 +46,11 @@ export function hasExternalSpellDiagnostics(document: vscode.TextDocument): bool
   });
 }
 
-export async function collectMeoSpellDiagnostics(document: vscode.TextDocument): Promise<vscode.Diagnostic[]> {
-  if (!shouldRunMeoSpellCheck(document) || hasExternalSpellDiagnostics(document)) {
+export async function collectMeoSpellDiagnostics(
+  document: vscode.TextDocument,
+  meoEnabledOverride?: boolean
+): Promise<vscode.Diagnostic[]> {
+  if (!shouldRunMeoSpellCheck(document, meoEnabledOverride) || hasExternalSpellDiagnostics(document)) {
     return [];
   }
 
@@ -68,9 +76,10 @@ export async function collectMeoSpellDiagnostics(document: vscode.TextDocument):
 export async function collectMeoSpellSuggestions(
   document: vscode.TextDocument,
   normalizedFrom: number,
-  normalizedTo: number
+  normalizedTo: number,
+  meoEnabledOverride?: boolean
 ): Promise<string[]> {
-  if (!shouldRunMeoSpellCheck(document)) {
+  if (!shouldRunMeoSpellCheck(document, meoEnabledOverride)) {
     return [];
   }
 

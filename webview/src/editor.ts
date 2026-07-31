@@ -319,11 +319,14 @@ export function createEditor({
     const renumberChanges = collectOrderedListRenumberChanges(view.state);
     if (renumberChanges.length) {
       applyingRenumber = true;
-      view.dispatch({
-        changes: renumberChanges,
-        annotations: Transaction.addToHistory.of(false)
-      });
-      applyingRenumber = false;
+      try {
+        view.dispatch({
+          changes: renumberChanges,
+          annotations: Transaction.addToHistory.of(false)
+        });
+      } finally {
+        applyingRenumber = false;
+      }
     }
     onApplyChanges(view.state.doc.toString());
   };
@@ -2384,11 +2387,14 @@ export function createEditor({
       clearLivePointerSelection();
       setTableInteractionActive(false);
       applyingExternal = true;
-      view.dispatch({
-        changes: syncChange,
-        selection: { anchor: mappedAnchor, head: mappedHead }
-      });
-      applyingExternal = false;
+      try {
+        view.dispatch({
+          changes: syncChange,
+          selection: { anchor: mappedAnchor, head: mappedHead }
+        });
+      } finally {
+        applyingExternal = false;
+      }
       restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
       pendingExternalUndoSelectionPreserve = true;
       syncSelectionClass();
