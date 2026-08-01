@@ -161,7 +161,7 @@ export function createOutlineController({
   outlineHeader.className = 'outline-header';
   const outlineLabel = document.createElement('span');
   outlineLabel.className = 'outline-header-label';
-  outlineLabel.textContent = '目录';
+  outlineLabel.textContent = 'Outline';
   const collapseButton = iconButton(ChevronsUp, 'collapse-top2', '只展开前两层');
   const expandButton = iconButton(ChevronsDown, 'expand-all', '展开全部');
   const modeButton = iconButton(Pin, 'toggle-mode', '切换到固定目录');
