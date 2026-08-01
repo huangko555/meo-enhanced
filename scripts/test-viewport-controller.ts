@@ -225,6 +225,66 @@ class FakeEventTarget {
   }
 }
 
+const dragFrames: FrameRequestCallback[] = [];
+const originalDragRequestAnimationFrame = globalThis.requestAnimationFrame;
+globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+  dragFrames.push(callback);
+  return dragFrames.length;
+};
+const dragDocument = new FakeEventTarget();
+const dragDom = new FakeEventTarget();
+let dragLayoutTop = 2100;
+const dragScrollDOM = Object.assign(new FakeEventTarget(), {
+  ownerDocument: dragDocument,
+  scrollTop: 1000,
+  scrollLeft: 0,
+  scrollHeight: 5000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, height: 500 })
+});
+const dragAnchorElement = {
+  isConnected: true,
+  getBoundingClientRect: () => ({ top: dragLayoutTop - dragScrollDOM.scrollTop })
+};
+const dragView = {
+  dom: dragDom,
+  scrollDOM: dragScrollDOM,
+  contentDOM: { querySelectorAll: () => [dragAnchorElement] },
+  posAtDOM: () => 42,
+  lineBlockAt: () => ({ top: dragLayoutTop }),
+  requestMeasure: (measure?: { read: () => unknown; write: (value: unknown) => void }) => {
+    if (measure) measure.write(measure.read());
+  }
+};
+const dragController = new ViewportController(dragView as any);
+const dragRegion = {
+  element: {
+    isConnected: true,
+    getBoundingClientRect: () => ({ top: -100, bottom: 0 })
+  } as any,
+  from: 1,
+  to: 2
+};
+
+dragScrollDOM.dispatch('pointerdown', { button: 0, target: dragScrollDOM });
+dragScrollDOM.scrollTop = 2000;
+dragController.preserveLayoutChange(dragRegion, () => { dragLayoutTop += 240; });
+await flushFrames(dragFrames);
+if (dragScrollDOM.scrollTop !== 2000) {
+  throw new Error(`Scrollbar drag was pulled back to ${dragScrollDOM.scrollTop}`);
+}
+
+dragDocument.dispatch('pointerup', {});
+dragController.preserveLayoutChange(dragRegion, () => { dragLayoutTop += 100; });
+await flushFrames(dragFrames);
+if (dragScrollDOM.scrollTop !== 2100) {
+  throw new Error(`Layout preservation did not resume after scrollbar release: ${dragScrollDOM.scrollTop}`);
+}
+dragController.destroy();
+globalThis.requestAnimationFrame = originalDragRequestAnimationFrame;
+
 const originalWheelEvent = globalThis.WheelEvent;
 (globalThis as typeof globalThis & { WheelEvent: typeof WheelEvent }).WheelEvent = class {
   static readonly DOM_DELTA_PIXEL = 0;
@@ -233,7 +293,9 @@ const originalWheelEvent = globalThis.WheelEvent;
 } as typeof WheelEvent;
 
 const wheelDom = new FakeEventTarget();
+const wheelDocument = new FakeEventTarget();
 const wheelScrollDOM = Object.assign(new FakeEventTarget(), {
+  ownerDocument: wheelDocument,
   scrollTop: 1000,
   scrollLeft: 0,
   scrollHeight: 5000,

@@ -83,10 +83,12 @@ export class ViewportController {
   private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
   private anchorStabilizationGeneration: number | null = null;
   private lastTouchY: number | null = null;
+  private scrollbarDragActive = false;
   private readonly getMode: () => 'live' | 'source';
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => this.scheduleActiveScrollFrame();
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
+  private readonly onPointerUp = () => this.finishScrollbarDrag();
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onTouchStart = (event: TouchEvent) => this.handleTouchStart(event);
   private readonly onTouchMove = (event: TouchEvent) => this.handleTouchMove(event);
@@ -106,6 +108,8 @@ export class ViewportController {
       view.scrollDOM.addEventListener('touchend', this.onTouchEnd, { passive: true });
       view.scrollDOM.addEventListener('touchcancel', this.onTouchEnd, { passive: true });
       view.scrollDOM.addEventListener('pointerdown', this.onPointerDown, { capture: true, passive: true });
+      view.scrollDOM.ownerDocument.addEventListener('pointerup', this.onPointerUp, true);
+      view.scrollDOM.ownerDocument.addEventListener('pointercancel', this.onPointerUp, true);
       view.dom.addEventListener('keydown', this.onKeyDown, true);
       this.interactionsAttached = true;
     }
@@ -125,6 +129,11 @@ export class ViewportController {
   preserveLayoutChange(region: ViewportLayoutRegion, mutate: () => void): void {
     if (this.destroyed || !region.element.isConnected) {
       mutate();
+      return;
+    }
+    if (this.scrollbarDragActive) {
+      mutate();
+      this.view.requestMeasure();
       return;
     }
     this.view.requestMeasure({
@@ -309,6 +318,8 @@ export class ViewportController {
       this.view.scrollDOM.removeEventListener('touchend', this.onTouchEnd);
       this.view.scrollDOM.removeEventListener('touchcancel', this.onTouchEnd);
       this.view.scrollDOM.removeEventListener('pointerdown', this.onPointerDown, true);
+      this.view.scrollDOM.ownerDocument.removeEventListener('pointerup', this.onPointerUp, true);
+      this.view.scrollDOM.ownerDocument.removeEventListener('pointercancel', this.onPointerUp, true);
       this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
       this.interactionsAttached = false;
     }
@@ -446,7 +457,11 @@ export class ViewportController {
 
   private handlePotentialLayoutInteraction(event: PointerEvent): void {
     this.markInteraction();
-    if (this.getMode() !== 'live' || event.button !== 0 || event.target === this.view.scrollDOM) return;
+    if (event.button === 0 && event.target === this.view.scrollDOM) {
+      this.scrollbarDragActive = true;
+      return;
+    }
+    if (this.getMode() !== 'live' || event.button !== 0) return;
     if (
       event.target instanceof Element &&
       event.target.closest(
@@ -537,6 +552,12 @@ export class ViewportController {
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
     this.lastTouchY = null;
+  }
+
+  private finishScrollbarDrag(): void {
+    if (!this.scrollbarDragActive) return;
+    this.scrollbarDragActive = false;
+    this.markInteraction();
   }
 
   private readScrollPosition(): ScrollPosition {
@@ -684,6 +705,7 @@ export class ViewportController {
   }
 
   private isUserScrolling(): boolean {
-    return performance.now() - Math.max(this.lastWheelAt, this.lastTouchMoveAt) <= WHEEL_GESTURE_IDLE_MS;
+    return this.scrollbarDragActive ||
+      performance.now() - Math.max(this.lastWheelAt, this.lastTouchMoveAt) <= WHEEL_GESTURE_IDLE_MS;
   }
 }
