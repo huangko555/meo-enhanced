@@ -443,7 +443,7 @@ export const defaultThemeColors: ThemeColors = {
 };
 
 export const defaultThemeBackgroundColor = 'var(--vscode-editor-background)';
-export const defaultCodeBlockBackgroundColor = '#1d2226';
+export const defaultCodeBlockBackgroundColor = '#1b1f23';
 
 export const defaultSemanticColors: SemanticColors = {
   foreground: defaultThemeColors.base01,

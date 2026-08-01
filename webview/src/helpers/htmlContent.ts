@@ -229,7 +229,7 @@ function createHtmlModeButton(className: string, label: string, icon: typeof Cod
   button.className = className;
   button.title = label;
   button.setAttribute('aria-label', label);
-  button.appendChild(createElement(icon, { width: 15, height: 15, 'aria-hidden': 'true' }));
+  button.appendChild(createElement(icon, { width: 18, height: 18, 'aria-hidden': 'true' }));
   button.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     event.stopPropagation();

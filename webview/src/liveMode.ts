@@ -1039,7 +1039,7 @@ class DetailsSourceToggleWidget extends WidgetType {
     button.className = 'meo-md-html-mode-btn meo-md-html-source-toggle meo-md-details-source-toggle';
     button.title = 'Show HTML source';
     button.setAttribute('aria-label', 'Show HTML source');
-    button.appendChild(createElement(Code2, { width: 15, height: 15, 'aria-hidden': 'true' }));
+    button.appendChild(createElement(Code2, { width: 18, height: 18, 'aria-hidden': 'true' }));
     button.addEventListener('pointerdown', (event) => {
       event.preventDefault();
       event.stopPropagation();

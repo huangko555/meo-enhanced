@@ -62,7 +62,7 @@ async function main() {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 920, height: 1600, deviceScaleFactor: 1 });
-    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0} blockquote{background:#24292e}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
       content: ':root { --meo-background:#f7f8fa; --meo-foreground:#1f2328; --meo-border:#c8d1dc; --meo-color-base03:#c8d1dc; --meo-semantic-kbdBackground:#eef2f6; --meo-semantic-kbdBorder:#8c959f; --meo-semantic-blockquoteBorder:#8c959f; --meo-semantic-blockquoteForeground:#57606a; --meo-semantic-tableBorder:#c8d1dc; --meo-semantic-tableHeaderBackground:#e3e9f0; --meo-semantic-inlineCodeBackground:#eff1f3; --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:"Courier New"; --meo-font-source-weight:500; --meo-font-source-size:14px; --vscode-editor-font-family:monospace; --vscode-editor-font-size:14px; --vscode-editor-line-height:20px; }'
@@ -195,6 +195,7 @@ async function main() {
         detailsSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .some((line) => line.textContent?.includes('<details open>')),
         quoteBorderWidth: quote ? getComputedStyle(quote).borderLeftWidth : '',
+        quoteBackground: quote ? getComputedStyle(quote).backgroundColor : '',
         tableCellCount: table?.querySelectorAll('th, td').length ?? 0,
         tableHeaderBackground: tableHeader ? getComputedStyle(tableHeader).backgroundColor : '',
         imageControls: image?.querySelectorAll('.meo-md-image-controls button').length ?? 0,
@@ -245,6 +246,7 @@ async function main() {
       !initial.detailsRendered ||
       initial.detailsSourceVisible ||
       initial.quoteBorderWidth === '0px' ||
+      initial.quoteBackground !== 'rgba(0, 0, 0, 0)' ||
       initial.tableCellCount !== 4 ||
       initial.tableHeaderBackground !== 'rgb(227, 233, 240)' ||
       initial.imageControls < 3 ||

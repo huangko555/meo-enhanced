@@ -657,7 +657,7 @@ async function main() {
     );
     await page.evaluate(() => {
       const root = document.documentElement.style;
-      root.setProperty('--meo-code-background', '#1d2226');
+      root.setProperty('--meo-code-background', '#1b1f23');
       root.setProperty('--meo-surface-background', '#2f343d');
       root.setProperty('--meo-background', '#24292e');
       root.setProperty('--meo-foreground', '#e6edf3');

@@ -2359,6 +2359,7 @@ body {
   padding-left: 1em;
   border-left: 3px solid var(--meo-semantic-blockquoteBorder);
   color: var(--meo-semantic-blockquoteForeground);
+  background: transparent;
 }
 
 .cm-editor .meo-md-html-content details {
@@ -2459,13 +2460,14 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 20px;
+  width: calc(var(--meo-active-editor-line-height) * 1em);
+  height: calc(var(--meo-active-editor-line-height) * 1em);
   padding: 0;
   border: 1px solid var(--meo-border);
   border-radius: 6px;
   color: var(--meo-semantic-codeCopyForeground);
   background: var(--meo-background);
+  font: inherit;
   cursor: pointer;
 }
 
