@@ -191,14 +191,30 @@ async function main() {
         mode: 'current-edit',
         baseText: baselineLines.join('\n')
       });
+      editor.scrollToLine(601, 'center');
     });
     await waitForFrames(page, 4);
-    const oversizedMarkerCount = await page.$$eval(
-      '.meo-git-gutter-marker.is-added, .meo-git-gutter-marker.is-modified, .meo-git-gutter-marker.is-deleted',
-      (markers) => markers.length
-    );
-    if (oversizedMarkerCount !== 0) {
-      throw new Error(`Diff markers rendered past the 1200-line safety limit: ${oversizedMarkerCount}`);
+    const longDocumentMarkers = await page.evaluate(() => ({
+      added: document.querySelectorAll('.meo-git-gutter-marker.is-added').length,
+      modified: document.querySelectorAll('.meo-git-gutter-marker.is-modified').length,
+      deleted: document.querySelectorAll('.meo-git-gutter-marker.is-deleted').length
+    }));
+    if (JSON.stringify(longDocumentMarkers) !== JSON.stringify({ added: 0, modified: 1, deleted: 0 })) {
+      throw new Error(`Long-document changes disappeared from the gutter: ${JSON.stringify(longDocumentMarkers)}`);
+    }
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      editor.setMode('live');
+      editor.scrollToLine(601, 'center');
+    });
+    await waitForFrames(page, 8);
+    const longLiveDocumentMarkers = await page.evaluate(() => ({
+      added: document.querySelectorAll('.meo-git-gutter-marker.is-added').length,
+      modified: document.querySelectorAll('.meo-git-gutter-marker.is-modified').length,
+      deleted: document.querySelectorAll('.meo-git-gutter-marker.is-deleted').length
+    }));
+    if (JSON.stringify(longLiveDocumentMarkers) !== JSON.stringify({ added: 0, modified: 1, deleted: 0 })) {
+      throw new Error(`Long-document changes disappeared from the Live gutter: ${JSON.stringify(longLiveDocumentMarkers)}`);
     }
 
     await page.evaluate(() => {

@@ -18,8 +18,6 @@ import {
 } from './tableRowDiffProvenance';
 
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
-const MAX_DIFF_LINES = 1200;
-const MAX_DIFF_CELLS = 1_500_000;
 const MAX_DIFF_COMPUTATION_TIME_MS = 50;
 const NON_RENDERABLE_GIT_BASELINE_REASONS = new Set(['not-repo', 'ignored']);
 
@@ -373,15 +371,6 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
   }
 
   if (state.doc.length > MAX_DIFF_TEXT_CHARS || baseline.baseText.length > MAX_DIFF_TEXT_CHARS) {
-    return null;
-  }
-
-  const baselineLineCount = baseline.baseLines?.length ?? splitDiffLines(baseline.baseText).length;
-  if (
-    state.doc.lines > MAX_DIFF_LINES ||
-    baselineLineCount > MAX_DIFF_LINES ||
-    state.doc.lines * baselineLineCount > MAX_DIFF_CELLS
-  ) {
     return null;
   }
 

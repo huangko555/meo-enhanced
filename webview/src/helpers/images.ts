@@ -547,13 +547,13 @@ export class ImageWidget extends WidgetType {
 
   createImageControls(img: HTMLImageElement): HTMLElement {
     const controls = document.createElement('div');
-    controls.className = 'meo-md-image-controls';
+    controls.className = 'meo-visual-controls meo-md-image-controls';
 
     if (this.linkUrl) {
       const isDocumentFragment = this.linkUrl.startsWith('#');
       const openLink = document.createElement('button');
       openLink.type = 'button';
-      openLink.className = 'meo-md-image-control-btn';
+      openLink.className = 'meo-visual-control-btn meo-md-image-control-btn';
       openLink.title = isDocumentFragment ? 'Jump within document' : 'Open link';
       openLink.setAttribute('aria-label', openLink.title);
       openLink.appendChild(createElement(isDocumentFragment ? SquareArrowRightEnter : ExternalLink, { width: 16, height: 16 }));
@@ -567,7 +567,7 @@ export class ImageWidget extends WidgetType {
 
     const openExternally = document.createElement('button');
     openExternally.type = 'button';
-    openExternally.className = 'meo-md-image-control-btn';
+    openExternally.className = 'meo-visual-control-btn meo-md-image-control-btn';
     openExternally.title = 'Open with system app';
     openExternally.setAttribute('aria-label', 'Open with system app');
     openExternally.appendChild(createElement(AppWindow, { width: 16, height: 16 }));
@@ -579,7 +579,7 @@ export class ImageWidget extends WidgetType {
 
     const fullscreen = document.createElement('button');
     fullscreen.type = 'button';
-    fullscreen.className = 'meo-md-image-control-btn';
+    fullscreen.className = 'meo-visual-control-btn meo-md-image-control-btn';
     fullscreen.title = 'Fullscreen image';
     fullscreen.setAttribute('aria-label', 'Fullscreen image');
     fullscreen.appendChild(createElement(Maximize2, { width: 16, height: 16 }));
@@ -626,11 +626,11 @@ export class ImageWidget extends WidgetType {
     };
 
     const controls = document.createElement('div');
-    controls.className = 'meo-md-image-fullscreen-controls';
+    controls.className = 'meo-visual-controls meo-md-image-fullscreen-controls';
     const addButton = (icon: typeof ZoomIn, label: string, action: () => void) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'meo-md-image-control-btn';
+      button.className = 'meo-visual-control-btn meo-md-image-control-btn';
       button.title = label;
       button.setAttribute('aria-label', label);
       button.appendChild(createElement(icon, { width: 16, height: 16 }));

@@ -22,7 +22,7 @@ function createControlButton(
 ): HTMLButtonElement {
   const button = ownerDocument.createElement('button');
   button.type = 'button';
-  button.className = 'meo-latex-math-zoom-btn';
+  button.className = 'meo-visual-control-btn meo-latex-math-zoom-btn';
   button.appendChild(createElement(icon, { width: 16, height: 16 }));
   button.setAttribute('aria-label', label);
   button.title = label;
@@ -156,7 +156,7 @@ export function attachLatexMathViewport(
 
   if (interactive) {
     controls = ownerDocument.createElement('div');
-    controls.className = 'meo-latex-math-zoom-controls';
+    controls.className = 'meo-visual-controls meo-latex-math-zoom-controls';
     controls.append(
       createControlButton(ownerDocument, ZoomIn, 'Zoom in', () => {
         userZoom = Math.min(MAX_ZOOM, userZoom + ZOOM_STEP);

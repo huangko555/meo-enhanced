@@ -548,26 +548,28 @@ export function normalizeMermaidDiagramText(diagramText: string): string {
 export function getFencedCodeContent(state: EditorState, node: any): string {
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
+  const lastChild = node.node.lastChild;
+  const hasClosingFence = lastChild?.name === 'CodeMark' &&
+    state.doc.lineAt(lastChild.from).number === endLine.number;
+  const lastContentLine = endLine.number - (hasClosingFence ? 1 : 0);
+  const codeTextRanges: Array<{ from: number; to: number }> = [];
+
+  for (let child = node.node.firstChild; child; child = child.nextSibling) {
+    if (child.name === 'CodeText') {
+      codeTextRanges.push({ from: child.from, to: child.to });
+    }
+  }
 
   const lines: string[] = [];
-  let inContent = false;
-
-  for (let lineNum = startLine.number; lineNum <= endLine.number; lineNum += 1) {
-    const line = state.doc.line(lineNum);
-    const lineText = state.doc.sliceString(line.from, line.to);
-
-    if (!inContent) {
-      if (/^[ \t]{0,3}(?:`{3,}|~{3,})/.test(lineText)) {
-        inContent = true;
-      }
-      continue;
-    }
-
-    if (/^[ \t]{0,3}(?:`{3,}|~{3,})/.test(lineText)) {
-      break;
-    }
-
-    lines.push(lineText);
+  for (let lineNumber = startLine.number + 1; lineNumber <= lastContentLine; lineNumber += 1) {
+    const line = state.doc.line(lineNumber);
+    const parts = codeTextRanges
+      .filter((range) => range.from <= line.to && range.to >= line.from)
+      .map((range) => state.doc.sliceString(
+        Math.max(range.from, line.from),
+        Math.min(range.to, line.to)
+      ));
+    lines.push(parts.join(''));
   }
 
   return lines.join('\n');
@@ -927,30 +929,30 @@ export class MermaidDiagramWidget extends WidgetType {
 
   createZoomControls(svgContainer) {
     const controls = document.createElement('div');
-    controls.className = 'meo-mermaid-zoom-controls';
+    controls.className = 'meo-visual-controls meo-mermaid-zoom-controls';
     applyMermaidThemeClass(controls);
 
     const zoomIn = document.createElement('button');
     zoomIn.type = 'button';
-    zoomIn.className = 'meo-mermaid-zoom-btn';
+    zoomIn.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomIn.appendChild(createElement(ZoomIn, { width: 16, height: 16 }));
     zoomIn.setAttribute('aria-label', 'Zoom in');
 
     const zoomOut = document.createElement('button');
     zoomOut.type = 'button';
-    zoomOut.className = 'meo-mermaid-zoom-btn';
+    zoomOut.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomOut.appendChild(createElement(ZoomOut, { width: 16, height: 16 }));
     zoomOut.setAttribute('aria-label', 'Zoom out');
 
     const reset = document.createElement('button');
     reset.type = 'button';
-    reset.className = 'meo-mermaid-zoom-btn';
+    reset.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     reset.appendChild(createElement(RotateCcw, { width: 16, height: 16 }));
     reset.setAttribute('aria-label', 'Reset zoom');
 
     const fullscreen = document.createElement('button');
     fullscreen.type = 'button';
-    fullscreen.className = 'meo-mermaid-zoom-btn';
+    fullscreen.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     fullscreen.appendChild(createElement(Maximize2, { width: 16, height: 16 }));
     fullscreen.setAttribute('aria-label', 'Fullscreen');
 
@@ -1061,30 +1063,30 @@ export class MermaidDiagramWidget extends WidgetType {
 
   createFullscreenControls(svgContainer) {
     const controls = document.createElement('div');
-    controls.className = 'meo-mermaid-zoom-controls meo-mermaid-fullscreen-controls';
+    controls.className = 'meo-visual-controls meo-mermaid-zoom-controls meo-mermaid-fullscreen-controls';
     applyMermaidThemeClass(controls);
 
     const zoomIn = document.createElement('button');
     zoomIn.type = 'button';
-    zoomIn.className = 'meo-mermaid-zoom-btn';
+    zoomIn.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomIn.appendChild(createElement(ZoomIn, { width: 16, height: 16 }));
     zoomIn.setAttribute('aria-label', 'Zoom in');
 
     const zoomOut = document.createElement('button');
     zoomOut.type = 'button';
-    zoomOut.className = 'meo-mermaid-zoom-btn';
+    zoomOut.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomOut.appendChild(createElement(ZoomOut, { width: 16, height: 16 }));
     zoomOut.setAttribute('aria-label', 'Zoom out');
 
     const reset = document.createElement('button');
     reset.type = 'button';
-    reset.className = 'meo-mermaid-zoom-btn';
+    reset.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     reset.appendChild(createElement(RotateCcw, { width: 16, height: 16 }));
     reset.setAttribute('aria-label', 'Reset zoom');
 
     const exitBtn = document.createElement('button');
     exitBtn.type = 'button';
-    exitBtn.className = 'meo-mermaid-zoom-btn meo-mermaid-exit-btn';
+    exitBtn.className = 'meo-visual-control-btn meo-mermaid-zoom-btn meo-mermaid-exit-btn';
     exitBtn.appendChild(createElement(X, { width: 16, height: 16 }));
     exitBtn.setAttribute('aria-label', 'Exit fullscreen');
 
