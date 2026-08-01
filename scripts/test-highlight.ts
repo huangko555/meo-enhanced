@@ -84,13 +84,28 @@ try {
     (window as any).__highlightEditor = editor;
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     const menu = harness.createSelectionMenu().menu;
+    menu.querySelector<HTMLElement>('.selection-inline-suggestions')!.hidden = true;
     document.body.appendChild(menu);
+    const menuRect = menu.getBoundingClientRect();
+    const buttons = Array.from(menu.querySelectorAll<HTMLElement>('.selection-inline-button'));
+    const firstButton = buttons[0];
+    const lastButton = buttons.at(-1);
+    const firstButtonRect = firstButton?.getBoundingClientRect();
+    const lastButtonRect = lastButton?.getBoundingClientRect();
     return {
       highlightTexts: Array.from(document.querySelectorAll('.meo-md-highlight')).map((node) => node.textContent),
       emptyLineHighlighted: Array.from(document.querySelectorAll('.cm-line')).some((line) => line.textContent === '====' && line.querySelector('.meo-md-highlight')),
       tableHighlight: Array.from(document.querySelectorAll('.meo-md-highlight'))
         .find((node) => node.textContent?.includes('表格'))?.textContent ?? null,
       toolbarButton: Boolean(menu.querySelector('[data-action="highlight"]')),
+      toolbarGeometry: {
+        outerRadius: getComputedStyle(menu).borderRadius,
+        innerRadius: firstButton ? getComputedStyle(firstButton).borderRadius : null,
+        topInset: firstButtonRect ? firstButtonRect.top - menuRect.top : null,
+        bottomInset: firstButtonRect ? menuRect.bottom - firstButtonRect.bottom : null,
+        leftInset: firstButtonRect ? firstButtonRect.left - menuRect.left : null,
+        rightInset: lastButtonRect ? menuRect.right - lastButtonRect.right : null
+      },
       headingHighlight: editor.getHeadings()[0]?.inlineSegments?.some((segment: any) => segment.highlight) ?? false
     };
   }, source);
@@ -100,6 +115,19 @@ try {
   }
   if (!live.tableHighlight?.includes('表格') || !live.toolbarButton || !live.headingHighlight) {
     throw new Error(`Highlight integration is incomplete: ${JSON.stringify(live)}`);
+  }
+  const toolbarInsets = [
+    live.toolbarGeometry.topInset,
+    live.toolbarGeometry.bottomInset,
+    live.toolbarGeometry.leftInset,
+    live.toolbarGeometry.rightInset
+  ];
+  if (
+    live.toolbarGeometry.outerRadius !== '8px' ||
+    live.toolbarGeometry.innerRadius !== '5px' ||
+    toolbarInsets.some((inset) => inset === null || Math.abs(inset - 3) >= 0.01)
+  ) {
+    throw new Error(`Selection toolbar geometry is not concentric: ${JSON.stringify(live.toolbarGeometry)}`);
   }
 
   const sourceModeHighlightCount = await page.evaluate(async () => {

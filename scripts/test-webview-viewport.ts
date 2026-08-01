@@ -313,7 +313,7 @@ async function main() {
       initialToolbarStart.modeButtonWidths.live !== 56 ||
       !(initialToolbarStart.modeButtonWidths.preview > initialToolbarStart.modeButtonWidths.source) ||
       !(initialToolbarStart.modeButtonWidths.source > initialToolbarStart.modeButtonWidths.live) ||
-      JSON.stringify(initialToolbarStart.activeModeInsets) !== JSON.stringify({ top: 3, bottom: 3, left: 3 }) ||
+      JSON.stringify(initialToolbarStart.activeModeInsets) !== JSON.stringify({ top: 3, bottom: 3, left: 4 }) ||
       initialToolbarStart.modeSegmentGap !== 0 ||
       !initialToolbarStart.modeUsesSharedComponent ||
       inactiveModeHoverBackground !== 'rgba(0, 0, 0, 0)' ||

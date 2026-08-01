@@ -170,8 +170,8 @@ body {
   align-items: center;
   gap: 2px;
   max-width: min(560px, calc(100vw - 16px));
-  padding: 4px;
-  border: 1px solid var(--vscode-panel-border);
+  padding: 2px;
+  border: 1px solid var(--vscode-panel-border, var(--meo-semantic-tableBorder, transparent));
   border-radius: 8px;
   background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
   opacity: 0;
@@ -197,7 +197,7 @@ body {
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   color: var(--vscode-editor-foreground);
   background: transparent;
   cursor: pointer;
@@ -228,7 +228,7 @@ body {
   height: 24px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   color: var(--vscode-editor-foreground);
   background: transparent;
   cursor: pointer;
@@ -780,12 +780,20 @@ body {
 }
 
 .editor-appearance-control {
+  align-items: flex-start;
   display: flex;
+  height: 25px;
+  margin-bottom: 1px;
   width: 100%;
 }
 
 .editor-appearance-control .segmented-control-button {
   flex: 1 1 0;
+}
+
+.mode-group {
+  margin-inline: -1px;
+  padding-inline: 1px;
 }
 
 .more-tools-option:disabled {

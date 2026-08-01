@@ -1,128 +1,142 @@
 # MEO Enhanced
 
-更顺手地编辑、审阅和预览复杂 Markdown。
+Edit complex Markdown and see every addition, modification, and deletion as you work—all inside VS Code.
 
-A feature-rich Markdown editor for VS Code with live editing, change review, advanced tables, Mermaid, and LaTeX preview.
+在 VS Code 中编辑复杂 Markdown，并在工作过程中清楚看到每一处新增、修改与删除。
 
-MEO Enhanced 是基于 [Markdown Editor Optimized（MEO）](https://github.com/vadimmelnicuk/meo) 开发的 VS Code Markdown 编辑器，在保留实时编辑体验的基础上，重点增强了文档导航、改动审阅、复杂内容编辑以及图片与表格交互。
+<p align="center">
+  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
-[从 VS Code Marketplace 安装](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced) · [下载 VSIX](https://github.com/huangko555/meo-enhanced/releases) · [查看变更记录](CHANGELOG.md) · [主题配置](docs/theming.md)
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced">Install from VS Code Marketplace</a> ·
+  <a href="https://github.com/huangko555/meo-enhanced/releases">Download VSIX</a> ·
+  <a href="./CHANGELOG.md">Changelog</a> ·
+  <a href="./docs/theming.md">Theming guide</a>
+</p>
 
-![MEO Enhanced 编辑与预览演示](https://raw.githubusercontent.com/huangko555/meo-enhanced/main/docs/demo.gif)
+![MEO Enhanced showing the same Live document in independent Dark and Light appearances](docs/readme/editor-appearance-dark-light.png)
 
-## 核心增强
+MEO Enhanced is a Markdown editor for VS Code built around a stable Live editing workflow. It keeps source editing, rendered content, change review, advanced tables, Mermaid, LaTeX, images, and document navigation in one editor instead of splitting them across disconnected views.
 
-以下功能以本项目分叉时的上游 MEO `v0.1.26` 为基准。
+It is based on [Markdown Editor Optimized (MEO)](https://github.com/vadimmelnicuk/meo) and focuses on deeper interaction, review, and layout stability for larger or structurally complex documents.
 
-### 导航与编辑
+## Install
 
-- **行号跳转**：在工具栏输入行号并按 `Enter`，即可快速定位到目标行。
-- **返回文档顶部**：点击文档右下角的返回顶部按钮，即可快速跳转到文档开头。
-- **增强文档大纲**：以更清晰的层级展示标题，支持折叠、拖动排序和滚动同步，并可固定在编辑器左侧或右侧。
-- **放弃本次编辑**：双击工具栏中的放弃编辑按钮，即可撤销尚未保存的全部修改。
-- **长代码块折叠**：自动收起较长的代码块，减少浏览干扰；该功能默认启用，也可在工具栏中关闭。
-- **显式换行**：支持 `<br>` 、`<br />`、`<br/>`三种 Markdown 换行写法。
-- **多种阅读方式**：支持 Live、Source 和只读 Preview 模式，并在切换时尽量保持当前视口位置。
-
-### 改动审阅
-
-- **三种改动状态**：分别标记新增、修改和删除内容，并提供删除内容预览与差异概览标记。
-- **全局改动概览**：在滚动条左侧显示新增、修改和删除标记在整个文档中的分布，便于快速定位改动位置。
-- **可选对比基线**：可以与最新保存内容、最近一次保存前的版本或 Git HEAD 对比。
-- **固定基线**：可将最近的有效保存版本固定为检查点，持续观察后续修改。
-- **更稳定的差异结果**：针对重复行、表格和连续删除场景优化差异计算与显示。
-
-![新增、修改、删除状态以及改动基线设置](docs/readme/changes-overview.png)
-
-### 表格与嵌套内容
-
-- **浮动表头**：浏览长表格时自动显示吸顶表头，滚动后仍能看到各列含义。
-- **单元格内列表**：支持有序列表、无序列表及多级缩进显示。
-- **单元格内换行**：编辑表格时按 `Shift + Enter`，可在当前单元格中插入换行并继续编辑。
-- **单元格内图片**：支持在单元格内插入和显示图片，可直接从剪贴板粘贴插入。
-- **跨单元格复制**：支持选择多个单元格，并通过 `Ctrl/Cmd + C` 复制为文本。
-- **层级缩进**：表格、代码块、Mermaid 和块级公式可以正确嵌套在列表等结构中，并保持内容与操作控件对齐。
-- **增强表格交互**：改进行列编辑、拖动、选择、删除和差异显示体验。
-
-![长表格浮动表头、单元格列表与层级缩进](docs/readme/tables-and-nesting.png)
-
-### Mermaid、公式与富内容
-
-- **Mermaid 与块级公式**：支持源码、分栏和预览三种显示方式，兼顾直接编辑与渲染结果查看。
-- **Frontmatter Properties**：在 Live 和 Preview 中显示 Obsidian 风格的属性、标签及复杂 YAML 内容。
-- **颜色值预览**：识别 Markdown 中的颜色值，并直接显示对应颜色。
-- **代码块增强**：支持代码块行号，并统一代码块、Mermaid 和块级公式在编辑、预览与导出结果中的样式。
-
-![Mermaid 与块级公式的源码、分栏和预览模式](docs/readme/rich-content-modes.png)
-
-### 图片与链接
-
-- **大图预览**：双击图片即可查看大图。
-- **系统应用打开**：图片右上角提供浮动操作按钮，可使用系统默认应用打开本地图片。
-- **本地图片处理**：改进图片路径解析、尺寸保持和重新创建后的显示稳定性。
-- **链接导航**：优化普通链接、图片链接和文档片段的点击与跳转交互。
-
-### 稳定性改进
-
-针对上游扩展在中文输入、表格交互、图片显示、Mermaid 渲染以及编辑模式切换等场景中的部分稳定性问题进行了修复和加固。
-
-## 安装与使用
-
-### VS Code Marketplace
-
-1. 在 VS Code 中打开扩展面板，搜索 **MEO Enhanced - Markdown Editor**。
-2. 确认扩展标识为 `huangko555.meo-enhanced`，然后点击 **Install**。
-3. 在资源管理器中右键 `.md`、`.markdown`、`.mdx` 或 `.mdc` 文件，选择 **Open With MEO Enhanced**。
-
-也可以通过命令行安装：
+Install **MEO Enhanced - Markdown Editor** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced), or run:
 
 ```shell
 code --install-extension huangko555.meo-enhanced
 ```
 
-### 手动安装 VSIX
+Then right-click a `.md`, `.markdown`, `.mdx`, or `.mdc` file and choose **Open With MEO Enhanced**. To make it the default Markdown editor, run **MEO Enhanced: Set as Default** from the Command Palette.
 
-如果无法访问 Marketplace，可从 [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) 下载最新的 `.vsix` 文件，然后在 VS Code 中执行 **Extensions: Install from VSIX...**。
+For offline installation, download a `.vsix` package from [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) and run **Extensions: Install from VSIX...**.
 
-如需将其设为 Markdown 默认编辑器，请执行命令 **MEO Enhanced: Set as Default**。
+## Editing modes and appearance
 
-## 常用操作
+- **Live** keeps Markdown directly editable while rendering headings, tables, links, images, alerts, code blocks, Mermaid, LaTeX, and other rich content in place.
+- **Source** provides a focused Markdown source editor with syntax highlighting and the same document navigation tools.
+- **Preview** provides a read-only rendering for final review.
+- **Independent Dark and Light appearances** can be switched from the bottom of the More menu. The selected appearance applies to the current editor and becomes the default for editors opened later, without forcing already-open editors to change.
+- **Consistent first Preview render** uses the selected editor appearance instead of inheriting an unrelated VS Code host theme.
+- **Stable mode switching** preserves the reading position as closely as possible when moving between Live, Source, and Preview.
 
+## Review changes without leaving the document
 
-| 操作                   | 使用方式                                                |
-| ------------------------ | --------------------------------------------------------- |
-| 切换实时模式与源码模式 | `Alt/Option + Shift + M`                                |
-| 跳转到指定行           | 在工具栏输入行号并按`Enter`                             |
-| 返回文档顶部           | 点击右下角的返回顶部按钮                                |
-| 放弃未保存的修改       | 双击放弃编辑按钮                                        |
-| 在表格单元格中换行     | `Shift + Enter`                                         |
-| 调整大纲位置           | 将`meoEnhanced.outline.position` 设为 `left` 或 `right` |
-| 选择改动对比基线       | 配置`meoEnhanced.changes.baseline`                      |
+MEO Enhanced can show additions, modifications, and deletions directly beside the document, with an overview ruler for their distribution across the full file.
 
-## 配置与主题
+- Compare against **Current Edits**, **Recent Save**, or **Git HEAD**.
+- Pin a recently saved revision as a fixed baseline and continue reviewing later changes against it.
+- Inspect deleted content and move between change locations without opening a separate diff editor.
+- Optionally show subtle modified-line coloring and Git author information.
+- Keep change markers stable across repeated lines, tables, consecutive deletions, and long documents.
 
-MEO Enhanced 支持 VS Code 深色与浅色外观，并提供可自定义的编辑器主题。主题导入、颜色配置和 JSONC 示例见 [主题配置文档](docs/theming.md)。
+![Added, modified, and deleted lines with baseline controls and the document overview ruler](docs/readme/changes-overview.png)
 
-常用配置包括：
+## Edit real-world tables and nested content
 
-- `meoEnhanced.outline.position`：设置文档大纲显示在编辑器左侧或右侧。
-- `meoEnhanced.changes.baseline`：选择改动对比基线，可选 `current-edit`、`recent-save` 或 `git-head`。
-- `meoEnhanced.changes.enabled`：控制是否在编辑器中显示改动标记。
-- `meoEnhanced.gitBlame.enabled`：控制是否显示 Git 行作者与提交信息。
+- A sticky header keeps complete column context visible while scrolling long tables.
+- Insert, remove, reorder, and select rows or columns from the table toolbar.
+- Press `Shift + Enter` to add a line break inside the active cell.
+- Use ordered lists, unordered lists, nested indentation, images, colors, inline formatting, and keyboard tags inside cells.
+- Select multiple cells and copy them as text with `Ctrl/Cmd + C`.
+- Keep tables, code blocks, Mermaid diagrams, and block formulas aligned when nested inside lists or other structures.
 
-## 与上游的关系
+![A long table with a sticky header, nested cell lists, and indented block content](docs/readme/tables-and-nesting.png)
 
-本项目基于 [Markdown Editor Optimized](https://github.com/vadimmelnicuk/meo) 修改，并与原版使用不同的命令、配置和编辑器标识，因此可以同时安装。
+## Work with Mermaid, LaTeX, code, images, and rich Markdown
 
-README 重点介绍当前版本的主要能力；逐版本新增、优化、修复和移除内容请查看 [CHANGELOG.md](CHANGELOG.md)。
+- Mermaid diagrams and block formulas support **Source**, **Split**, and **Preview** block modes.
+- Split mode adds panning plus zoom, reset, and fit controls while keeping the source beside the rendered result.
+- Wide Mermaid diagrams and block formulas scale to the available width in Live, Preview, and export output.
+- Long fenced code blocks can collapse automatically; the behavior is enabled by default and can be disabled from More.
+- Code blocks support line numbers, syntax highlighting, copying, and consistent Live/Preview/export styling.
+- Images support clipboard insertion, stable local path handling, full-size viewing, and opening through the system application.
+- Frontmatter Properties render Obsidian-style metadata, tags, and complex YAML values.
+- Live text supports emphasis, strong text, strikethrough, `==highlight==`, inline code, `<kbd>` keys, links, colors, `<br>` line breaks, and collapsible `<details>/<summary>` content.
 
-## 致谢
+![Mermaid and block formula source, split, and preview modes](docs/readme/rich-content-modes.png)
 
-- [Markdown Editor Optimized](https://github.com/vadimmelnicuk/meo) — 原始项目
-- [VS Code](https://code.visualstudio.com/) — 扩展平台
-- [CodeMirror](https://codemirror.net/) — 编辑器核心
-- [Obsidian](https://obsidian.md/) — 交互设计参考
+## Navigate and keep your place
 
-## 许可证
+- Jump to an exact line from the toolbar.
+- Return to the top through the floating document button.
+- Use the hierarchical outline to collapse sections, reorder headings, and follow the current scroll position.
+- Place and resize the outline on either side of the editor.
+- Preserve the visible document position across editing, saving, folding, table interaction, rich block rendering, and mode changes whenever possible.
+- Double-click the discard button to abandon all unsaved edits in the current document.
+
+## Quick reference
+
+| Action | How |
+| --- | --- |
+| Switch Live and Source | `Alt/Option + Shift + M` |
+| Open Preview | Select **Preview** in the top-right mode control |
+| Switch Dark and Light | Open **More**, then use the appearance control at the bottom |
+| Jump to a line | Enter a line number in the toolbar and press `Enter` |
+| Return to the top | Click the floating button in the lower-right corner |
+| Discard unsaved edits | Double-click the discard button |
+| Add a line break in a table cell | `Shift + Enter` |
+| Choose a change baseline | Open **More**, then select Current Edits, Recent Save, or Git HEAD |
+
+## Configuration and themes
+
+The editor includes independent Dark and Light appearances plus a customizable theme system. The theme picker ships with ten presets, including One Monokai, One Dark Pro, Dracula, Gruvbox, Nord, Solarized Dark, Catppuccin Mocha, Tokyo Night, GitHub Dark, and GitHub Light.
+
+Use the Command Palette to select a preset, export it as JSON, adjust only the colors or typography you need, and import it again. Themes can control:
+
+- document and embedded-surface colors;
+- Markdown and code syntax tokens;
+- Live and Source font families, sizes, weights, and line heights;
+- heading sizes and weights;
+- HTML and PDF export styling.
+
+See the [theming guide](docs/theming.md) for the schema, fallback behavior, and complete token list.
+
+Common settings include:
+
+- `meoEnhanced.outline.position` — place the outline on the left or right.
+- `meoEnhanced.changes.baseline` — select `current-edit`, `recent-save`, or `git-head` as the comparison baseline.
+- `meoEnhanced.gitChanges.visible` — show or hide document change indicators.
+- `meoEnhanced.gitBlame.enabled` — show Git author and commit details when hovering over lines.
+- `meoEnhanced.codeBlocks.collapseLongBlocks` — enable or disable automatic folding for long fenced code blocks.
+
+## Compatibility and project scope
+
+- Requires VS Code `1.97.0` or newer.
+- Handles `.md`, `.markdown`, `.mdx`, and `.mdc` files through a custom editor.
+- Uses distinct commands, settings, and editor identifiers, so it can be installed alongside the original MEO extension.
+- The feature descriptions above use upstream MEO `v0.1.26` as the comparison point for this fork.
+- Version-by-version additions, changes, fixes, and removals are recorded in the [changelog](CHANGELOG.md).
+
+## Acknowledgements
+
+- [Markdown Editor Optimized](https://github.com/vadimmelnicuk/meo) — original project
+- [VS Code](https://code.visualstudio.com/) — extension platform
+- [CodeMirror](https://codemirror.net/) — editor core
+- [Obsidian](https://obsidian.md/) — interaction design reference
+
+## License
 
 [MIT License](LICENSE)
