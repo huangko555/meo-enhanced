@@ -24,7 +24,7 @@ async function main() {
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({ content: `
       :root {
-        --meo-background: #202223;
+        --meo-background: #24292e;
         --meo-inset-background: #2a2d2f;
         --meo-foreground: #e6edf3;
         --meo-semantic-tableBorder: #474b50;
@@ -374,7 +374,7 @@ async function main() {
       !result.activeState.hasToolbarBand ||
       result.activeState.chromeTop === null ||
       Math.abs(result.activeState.bandHeight - 24) > 1 ||
-      result.activeState.bandBackground !== 'rgb(32, 34, 35)' ||
+      result.activeState.bandBackground !== 'rgb(36, 41, 46)' ||
       Math.abs(result.activeState.toolbarTop - result.activeState.chromeTop) > 1 ||
       result.activeState.headerTop === null ||
       Math.abs(result.activeState.headerTop - result.activeState.chromeTop - 24) > 1 ||

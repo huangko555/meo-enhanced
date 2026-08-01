@@ -142,7 +142,7 @@ async function main() {
     }));
     if (
       darkEditorOnLightHost.appearance !== 'dark' ||
-      darkEditorOnLightHost.background !== 'rgb(32, 34, 35)'
+      darkEditorOnLightHost.background !== 'rgb(36, 41, 46)'
     ) {
       throw new Error(`Dark editor appearance followed the light VS Code host: ${JSON.stringify(darkEditorOnLightHost)}`);
     }
@@ -514,7 +514,7 @@ async function main() {
     }));
     if (JSON.stringify(darkAfterHostThemeChange) !== JSON.stringify({
       appearance: 'dark',
-      background: 'rgb(32, 34, 35)',
+      background: 'rgb(36, 41, 46)',
       sidebar: '#1f2428'
     })) {
       throw new Error(`VS Code host theme changed the manual dark appearance: ${JSON.stringify(darkAfterHostThemeChange)}`);

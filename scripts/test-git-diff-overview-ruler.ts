@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     await page.setViewport({ width: 900, height: 500, deviceScaleFactor: 1 });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
-    await page.addStyleTag({ content: ':root{--meo-background:#202223;--meo-foreground:#e6edf3;--meo-font-live:Arial;--meo-font-source:monospace;--meo-font-live-size:16px;--meo-font-source-size:14px;--git-added:#40a060;--git-changed:#4090d0;--git-deleted:#e05252}' });
+    await page.addStyleTag({ content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-font-live:Arial;--meo-font-source:monospace;--meo-font-live-size:16px;--meo-font-source-size:14px;--git-added:#40a060;--git-changed:#4090d0;--git-deleted:#e05252}' });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
     await page.evaluate(() => {

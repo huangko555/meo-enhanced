@@ -1,5 +1,5 @@
 export const darkCssVariableOverrides = {
-  '--vscode-editor-background': '#202223',
+  '--vscode-editor-background': '#24292e',
   '--vscode-editor-foreground': '#e6edf3',
   '--vscode-sideBar-background': '#1f2428',
   '--vscode-panel-border': '#474b50',
@@ -17,7 +17,7 @@ export const darkCssVariableOverrides = {
   '--vscode-descriptionForeground': '#8e999e',
   '--vscode-disabledForeground': '#676f7d',
   '--vscode-icon-foreground': '#c5cbd3',
-  '--vscode-textCodeBlock-background': '#1f2428',
+  '--vscode-textCodeBlock-background': '#1d2226',
   '--vscode-editor-selectionBackground': '#264f78',
   '--vscode-editorLineNumber-foreground': '#676f7d',
   '--meo-line-number-foreground': '#676f7d',

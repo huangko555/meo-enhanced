@@ -23,7 +23,7 @@ async function main() {
     await page.setContent('<!doctype html><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({ content: `
-      :root { --meo-background:#202223; --meo-foreground:#e6edf3; --meo-inset-background:#2a2d2f; }
+      :root { --meo-background:#24292e; --meo-foreground:#e6edf3; --meo-inset-background:#2a2d2f; }
       html, body, #app { height: 100%; margin: 0; }
     ` });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });

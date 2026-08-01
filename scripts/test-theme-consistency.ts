@@ -14,6 +14,11 @@ const fontSchemaProperties = themeSchema.properties.fonts.properties;
 const packageDefaultFonts = themeSchema.default.fonts;
 
 const failures: string[] = [];
+if (defaultThemeSettings.semanticColors.codeBlockBackground !== '#1d2226') {
+  failures.push(
+    `HKK block background is ${defaultThemeSettings.semanticColors.codeBlockBackground}`
+  );
+}
 for (const key of semanticColorKeys) {
   if (!(key in schemaSemanticProperties)) failures.push(`schema is missing semanticColors.${key}`);
   if (!(key in packageDefaultSemanticColors)) failures.push(`package default is missing semanticColors.${key}`);

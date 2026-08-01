@@ -657,9 +657,9 @@ async function main() {
     );
     await page.evaluate(() => {
       const root = document.documentElement.style;
-      root.setProperty('--meo-code-background', '#1f2428');
+      root.setProperty('--meo-code-background', '#1d2226');
       root.setProperty('--meo-surface-background', '#2f343d');
-      root.setProperty('--meo-background', '#202223');
+      root.setProperty('--meo-background', '#24292e');
       root.setProperty('--meo-foreground', '#e6edf3');
       (window as any).MermaidEditingHarness.refreshMermaidTheme();
       (window as any).__mermaidEditingEditor.refreshDecorations();
