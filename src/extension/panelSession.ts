@@ -32,7 +32,15 @@ import {
   type VimKeybinding,
   type DiffBaselineMode
 } from '../shared/extensionConfig';
-import { openImageExternally, openLink, resolveLocalLinkTargets, resolveWebviewImageSrc, resolveWikiLinkTargets } from '../shared/documentLinks';
+import {
+  getDocumentFragmentHref,
+  openImageExternally,
+  openLink,
+  resolveLocalLinkTargetUri,
+  resolveLocalLinkTargets,
+  resolveWebviewImageSrc,
+  resolveWikiLinkTargets
+} from '../shared/documentLinks';
 import { resolveClipboardImageSaveRoot } from '../shared/clipboardImages';
 import { GitDocumentState, hashGitBaselinePayload } from '../git/documentState';
 import { openGitRevisionForLine, openGitWorktreeForLine, resolveGitBlameForRequest } from '../git/blameActions';
@@ -234,6 +242,11 @@ type SetOutlineVisibleMessage = {
 type SetDiffBaselineModeMessage = {
   type: 'setDiffBaselineMode';
   mode: DiffBaselineMode;
+};
+
+type RevealDocumentFragmentMessage = {
+  type: 'revealDocumentFragment';
+  href: string;
 };
 
 type SetEditorAppearanceMessage = {
@@ -550,6 +563,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let diffBaselineGeneration = 0;
   let lastSentRevealSelectionKey: string | null = null;
   let pendingRevealSelection: RevealSelectionPayload | null = null;
+  let pendingRevealDocumentFragment: string | null = null;
   let hasDeliveredInitialRevealSelection = false;
   let pendingRestoreTopLine: number | null = null;
   let pendingRestoreTopLineOffset = 0;
@@ -1102,6 +1116,38 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     await postRevealSelection(pendingRevealSelection);
   };
 
+  const postRevealDocumentFragment = async (href: string): Promise<void> => {
+    if (!webviewReady) {
+      pendingRevealDocumentFragment = href;
+      return;
+    }
+    await ensureInitDelivered();
+    if (!initDelivered) {
+      pendingRevealDocumentFragment = href;
+      return;
+    }
+    const message: RevealDocumentFragmentMessage = { type: 'revealDocumentFragment', href };
+    pendingRevealDocumentFragment = (await postToWebview(message)) ? null : href;
+  };
+
+  const flushPendingRevealDocumentFragment = async (): Promise<void> => {
+    if (pendingRevealDocumentFragment !== null) {
+      await postRevealDocumentFragment(pendingRevealDocumentFragment);
+    }
+  };
+
+  const isCurrentDocumentResource = (targetUri: vscode.Uri): boolean => {
+    if (targetUri.scheme === 'file' && documentUri.scheme === 'file') {
+      const targetPath = path.normalize(targetUri.fsPath);
+      const currentPath = path.normalize(documentUri.fsPath);
+      return process.platform === 'win32'
+        ? targetPath.toLowerCase() === currentPath.toLowerCase()
+        : targetPath === currentPath;
+    }
+    return targetUri.with({ query: '', fragment: '' }).toString() ===
+      documentUri.with({ query: '', fragment: '' }).toString();
+  };
+
   const postFocusEditor = async (): Promise<void> => {
     if (!webviewReady) {
       return;
@@ -1185,6 +1231,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   } else {
     const initialOffset = parseRevealOffsetFromUriFragment(document.uri);
     pendingRevealSelection = initialOffset === null ? null : { anchor: initialOffset, head: initialOffset };
+    if (initialOffset === null && document.uri.fragment?.trim()) {
+      pendingRevealDocumentFragment = `#${document.uri.fragment.trim()}`;
+    }
   }
   const rememberedTopLine = resolveRememberedTopLineForInit();
   if (rememberedTopLine) {
@@ -1215,6 +1264,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         webviewReady = true;
         await ensureInitDelivered();
         await flushPendingRevealSelection();
+        await flushPendingRevealDocumentFragment();
         scheduleSpellCheck(0);
         refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_STARTUP_DELAY_MS });
         return;
@@ -1364,11 +1414,20 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'setEditorAppearance':
         await setEditorAppearance(raw.appearance);
         return;
-      case 'openLink':
+      case 'openLink': {
+        const fragmentHref = getDocumentFragmentHref(raw.href);
+        if (fragmentHref) {
+          const targetUri = await resolveLocalLinkTargetUri(raw.href, documentUri);
+          if (targetUri && isCurrentDocumentResource(targetUri)) {
+            await postRevealDocumentFragment(fragmentHref);
+            return;
+          }
+        }
         await openLink(raw.href, documentUri, {
           localEditor: raw.source === 'preview' ? 'default' : 'associated'
         });
         return;
+      }
       case 'openImageExternally':
         await openImageExternally(raw.url, documentUri);
         return;

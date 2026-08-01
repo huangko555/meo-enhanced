@@ -2,7 +2,7 @@ import { RangeSetBuilder, StateEffect, StateField, EditorState } from '@codemirr
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass } from '@codemirror/view';
-import { createElement, AlertCircle, Delete } from 'lucide';
+import { createElement, AlertCircle, Code2, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
   isFenceMarker,
@@ -78,6 +78,12 @@ import { collectPunctuationClosingInlineStyles } from './helpers/inlineStyleFall
 import { addColorSwatchDecoration, collectColorRangesFromText } from './helpers/colorSwatches';
 import { longCodeBlockExtensions } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
+import {
+  addHtmlContentDecorations,
+  enterHtmlSource,
+  getHtmlEditingRange,
+  htmlContentExtensions
+} from './helpers/htmlContent';
 
 export { setLongCodeBlockSearchRevealEffect } from './helpers/longCodeBlocks';
 import {
@@ -446,7 +452,6 @@ const inlineStyleDecos = {
   highlight: Decoration.mark({ class: 'meo-md-highlight' }),
   inlineCode: Decoration.mark({ class: 'meo-md-inline-code' })
 };
-
 function addDelimitedInlineStyleDecoration(builder, state, node, decoration, markers) {
   const text = state.doc.sliceString(node.from, node.to);
   const marker = markers.find((candidate) => text.startsWith(candidate) && text.endsWith(candidate));
@@ -1018,6 +1023,40 @@ function addMarkdownLinkDecorations(builder, state, node, activeLines) {
   }
 }
 
+class DetailsSourceToggleWidget extends WidgetType {
+  constructor(readonly from: number, readonly to: number) {
+    super();
+  }
+
+  eq(other: WidgetType): boolean {
+    return other instanceof DetailsSourceToggleWidget &&
+      other.from === this.from && other.to === this.to;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'meo-md-html-mode-btn meo-md-html-source-toggle meo-md-details-source-toggle';
+    button.title = 'Show HTML source';
+    button.setAttribute('aria-label', 'Show HTML source');
+    button.appendChild(createElement(Code2, { width: 15, height: 15, 'aria-hidden': 'true' }));
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      enterHtmlSource(view, { from: this.from, to: this.to });
+    });
+    return button;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
+}
+
 function addFootnoteReferenceDecorations(builder, state, reference, activeLines): boolean {
   if (!shouldRenderFootnoteReference(state, reference, activeLines)) {
     return false;
@@ -1301,42 +1340,40 @@ function rangeTouchesActiveLine(state: EditorState, from: number, to: number, ac
   return false;
 }
 
-function addDetailsBlockDecorations(builder, state, detailsBlocks, activeLines) {
+function addDetailsBlockDecorations(builder, state, detailsBlocks) {
   for (const detailsBlock of detailsBlocks) {
-    const openingActive = rangeTouchesActiveLine(state, detailsBlock.anchorFrom, detailsBlock.anchorTo, activeLines);
-    const closingActive = rangeTouchesActiveLine(state, detailsBlock.closingFrom, detailsBlock.closingTo, activeLines);
-    const editingBoundary = openingActive || closingActive;
+    addLineClass(builder, state, detailsBlock.lineFrom, detailsBlock.lineTo, lineStyleDecos.detailsSummary);
 
-    if (!editingBoundary) {
-      addLineClass(builder, state, detailsBlock.lineFrom, detailsBlock.lineTo, lineStyleDecos.detailsSummary);
-
-      if (detailsBlock.summaryFrom > detailsBlock.anchorFrom) {
-        builder.push(
-          collapsedHeadingBodyDeco.range(detailsBlock.anchorFrom, detailsBlock.summaryFrom)
-        );
-      }
-
+    if (detailsBlock.summaryFrom > detailsBlock.anchorFrom) {
       builder.push(
-        Decoration.replace({
-          widget: new DetailsSummaryWidget(
-            detailsBlock.anchorFrom,
-            detailsBlock.lineFrom,
-            detailsBlock.summaryText,
-            detailsBlock.collapsed
-          )
-        }).range(detailsBlock.summaryFrom, detailsBlock.summaryTo)
+        collapsedHeadingBodyDeco.range(detailsBlock.anchorFrom, detailsBlock.summaryFrom)
       );
-
-      if (detailsBlock.anchorTo > detailsBlock.summaryTo) {
-        builder.push(
-          collapsedHeadingBodyDeco.range(detailsBlock.summaryTo, detailsBlock.anchorTo)
-        );
-      }
     }
 
-    if (!editingBoundary) {
-      builder.push(collapsedHeadingBodyDeco.range(detailsBlock.closingFrom, detailsBlock.closingTo));
+    builder.push(
+      Decoration.replace({
+        widget: new DetailsSummaryWidget(
+          detailsBlock.anchorFrom,
+          detailsBlock.lineFrom,
+          detailsBlock.summaryText,
+          detailsBlock.collapsed
+        )
+      }).range(detailsBlock.summaryFrom, detailsBlock.summaryTo)
+    );
+    builder.push(
+      Decoration.widget({
+        widget: new DetailsSourceToggleWidget(detailsBlock.sectionFrom, detailsBlock.sectionTo),
+        side: 1
+      }).range(detailsBlock.lineFrom)
+    );
+
+    if (detailsBlock.anchorTo > detailsBlock.summaryTo) {
+      builder.push(
+        collapsedHeadingBodyDeco.range(detailsBlock.summaryTo, detailsBlock.anchorTo)
+      );
     }
+
+    builder.push(collapsedHeadingBodyDeco.range(detailsBlock.closingFrom, detailsBlock.closingTo));
 
     if (detailsBlock.collapsed && detailsBlock.bodyTo > detailsBlock.bodyFrom) {
       builder.push(collapsedHeadingBodyDeco.range(detailsBlock.bodyFrom, detailsBlock.bodyTo));
@@ -1578,6 +1615,7 @@ function buildDecorations(state) {
   }
   addForcedThematicBreakDecorations(ranges, state, activeLines, frontmatter, codeBlockLines);
   const mathRanges = collectMathRanges(state, tree, mermaidColonBlocks, renderedTableRanges, frontmatter);
+  const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines);
 
   tree.iterate({
     enter: (node) => {
@@ -1948,7 +1986,17 @@ function buildDecorations(state) {
   addEmojiDecorationsWithMath(ranges, state, mathRanges, codeBlockLines);
   addMermaidColonFenceDecorations(ranges, state, mermaidColonBlocks, activeLines);
   addFootnoteDefinitionDecorations(ranges, state, footnotes, activeLines);
-  addDetailsBlockDecorations(ranges, state, detailsBlocks, activeLines);
+  const htmlEditingRange = getHtmlEditingRange(state);
+  addDetailsBlockDecorations(
+    ranges,
+    state,
+    detailsBlocks.filter((detailsBlock) => !renderedHtmlBlocks.some((htmlBlock) => (
+      htmlBlock.from === detailsBlock.anchorFrom
+    )) && !(
+      htmlEditingRange?.from === detailsBlock.sectionFrom &&
+      htmlEditingRange.to === detailsBlock.sectionTo
+    ))
+  );
   for (const section of collapsedHeadingSections) {
     addLineClass(ranges, state, section.lineFrom, section.lineTo, collapsedHeadingLineDeco);
     addRange(ranges, section.collapseFrom, section.collapseTo, collapsedHeadingBodyDeco);
@@ -2851,6 +2899,7 @@ export function liveModeExtensions() {
     liveDocumentIdleField,
     mermaidEditingStateField,
     latexMathEditingStateField,
+    ...htmlContentExtensions(),
     liveDecorationField,
     ...longCodeBlockExtensions(),
     liveLineNumberMarkerField,

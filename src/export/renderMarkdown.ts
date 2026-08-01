@@ -10,6 +10,11 @@ import { installMathTransform } from './mathTransform';
 import { collectLatexMathRanges, renderLatexMathToHtml } from './math';
 import { installHighlightTransform } from './highlightTransform';
 import { Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
+import {
+  getSupportedHtmlAttributes,
+  isSupportedHtmlSource,
+  supportedHtmlTags
+} from '../shared/htmlPolicy';
 
 const POWER_QUERY_KEYWORDS =
   'let in each if then else try otherwise error and or not as is type meta section shared';
@@ -74,6 +79,15 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   installTaskListTransform(md);
   installKbdFallbackTransform(md);
   installAlertTransform(md);
+  installSafeHtmlTransform(
+    md,
+    options,
+    embeddedImageDataUrlCache,
+    (startIndex, endIndex) => ({
+      start: bodySourceLines?.[startIndex] ?? 0,
+      end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
+    })
+  );
   if (shouldEnableMathTransform) {
     installMathTransform(md, {
       onRenderedMath: () => {
@@ -162,6 +176,8 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     allowedTags: [
       ...sanitizeHtml.defaults.allowedTags,
       'mark',
+      'details',
+      'summary',
       'img',
       'h1',
       'h2',
@@ -191,12 +207,16 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     ],
     allowedAttributes: {
       a: ['href', 'name', 'target', 'rel', 'title'],
+      details: ['open'],
       img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
+      ol: ['start', 'reversed'],
+      li: ['value'],
       '*': ['class', 'style', 'id', 'data-source-b64', 'data-source-line', 'data-source-end-line', 'aria-hidden'],
-      th: ['colspan', 'rowspan', 'style'],
+      th: ['colspan', 'rowspan', 'scope', 'style'],
       td: ['colspan', 'rowspan', 'style'],
       code: ['class'],
-      div: ['class', 'data-source-b64'],
+      p: ['align'],
+      div: ['class', 'data-source-b64', 'align'],
       svg: [
         'xmlns',
         'width',
@@ -280,6 +300,74 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   return { html, hasMermaid, hasMath };
 }
 
+function installSafeHtmlTransform(
+  md: MarkdownIt,
+  options: RenderMarkdownOptions,
+  embeddedImageDataUrlCache: Map<string, string | null>,
+  resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number }
+): void {
+  const allowedAttributes = Object.fromEntries(
+    [...supportedHtmlTags].map((tagName) => [tagName, getSupportedHtmlAttributes(tagName)])
+  );
+  const safeHtmlSanitizerOptions: NonNullable<Parameters<typeof sanitizeHtml>[1]> = {
+    allowedTags: [...supportedHtmlTags],
+    allowedAttributes,
+    allowedSchemes: ['http', 'https', 'mailto', 'tel', 'file', 'data'],
+    allowedSchemesByTag: {
+      img: ['http', 'https', 'file', 'data']
+    },
+    allowProtocolRelative: false,
+    transformTags: {
+      img: (tagName, attribs) => ({
+        tagName,
+        attribs: {
+          ...attribs,
+          ...(attribs.src ? {
+            src: rewriteExportImageSrc(attribs.src, {
+              markdownFilePath: options.markdownFilePath,
+              outputFilePath: options.outputFilePath,
+              target: options.target,
+              htmlImageMode: options.htmlImageMode ?? 'embedded',
+              embeddedImageDataUrlCache
+            })
+          } : {})
+        }
+      })
+    }
+  };
+  const sanitizeRawSource = (source: string, tokenType: string): string => {
+    if (!isSupportedHtmlSource(source)) return escapeHtml(source);
+    if (tokenType !== 'html_inline') return sanitizeHtml(source, safeHtmlSanitizerOptions);
+
+    const trimmed = source.trim();
+    const closingTag = /^<\/\s*([a-z][a-z\d-]*)\s*>$/i.exec(trimmed);
+    if (closingTag) return `</${closingTag[1].toLowerCase()}>`;
+
+    const openingTag = /^<\s*([a-z][a-z\d-]*)\b[^>]*>$/i.exec(trimmed);
+    if (!openingTag || /<\/\s*[a-z]/i.test(trimmed)) {
+      return sanitizeHtml(source, safeHtmlSanitizerOptions);
+    }
+    const tagName = openingTag[1].toLowerCase();
+    if (tagName === 'br' || tagName === 'img' || /\/\s*>$/.test(trimmed)) {
+      return sanitizeHtml(source, safeHtmlSanitizerOptions);
+    }
+    const sanitizedPair = sanitizeHtml(`${source}</${tagName}>`, safeHtmlSanitizerOptions);
+    return new RegExp(`^<${tagName}\\b[^>]*>`, 'i').exec(sanitizedPair)?.[0] ?? escapeHtml(source);
+  };
+  const renderRawHtml = (tokens: any[], index: number): string => {
+    const htmlNode = tokens[index];
+    const source = String(htmlNode?.content ?? '');
+    if (htmlNode?.meta?.meoTrustedHtml === true) return source;
+    const rendered = sanitizeRawSource(source, String(htmlNode?.type ?? ''));
+    if (htmlNode?.type !== 'html_block' || !Array.isArray(htmlNode.map)) return rendered;
+    const sourceRange = resolveSourceRange(Number(htmlNode.map[0]), Number(htmlNode.map[1]));
+    if (sourceRange.start <= 0) return rendered;
+    return `<div class="meo-export-html-block" data-source-line="${sourceRange.start}" data-source-end-line="${Math.max(sourceRange.start, sourceRange.end)}">${rendered}</div>`;
+  };
+  md.renderer.rules.html_block = renderRawHtml;
+  md.renderer.rules.html_inline = renderRawHtml;
+}
+
 function installSourcePositionAndHeadingAnchorTransform(
   md: MarkdownIt,
   resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number }
@@ -343,6 +431,7 @@ function installTableCellListTransform(md: MarkdownIt): void {
       }
       const htmlNode = new state.Token('html_inline', '', 0);
       htmlNode.content = renderedList;
+      htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
       inlineNode.children = [htmlNode];
     }
   });
@@ -767,14 +856,17 @@ function installTaskListTransform(md: MarkdownIt): void {
       removeTaskPrefixFromInlineToken(token, match[0].length);
 
       const children = Array.isArray(token.children) ? token.children : [];
-      const checkboxToken = new state.Token('html_inline', '', 0);
-      checkboxToken.content = `<span class="meo-export-task-checkbox ${statusClass}" aria-hidden="true"></span>`;
-      const openTextToken = new state.Token('html_inline', '', 0);
-      openTextToken.content = `<span class="meo-export-task-text ${statusClass}">`;
-      const closeTextToken = new state.Token('html_inline', '', 0);
-      closeTextToken.content = '</span>';
+      const checkboxNode = new state.Token('html_inline', '', 0);
+      checkboxNode.content = `<span class="meo-export-task-checkbox ${statusClass}" aria-hidden="true"></span>`;
+      checkboxNode.meta = { ...(checkboxNode.meta ?? {}), meoTrustedHtml: true };
+      const openTextNode = new state.Token('html_inline', '', 0);
+      openTextNode.content = `<span class="meo-export-task-text ${statusClass}">`;
+      openTextNode.meta = { ...(openTextNode.meta ?? {}), meoTrustedHtml: true };
+      const closeTextNode = new state.Token('html_inline', '', 0);
+      closeTextNode.content = '</span>';
+      closeTextNode.meta = { ...(closeTextNode.meta ?? {}), meoTrustedHtml: true };
 
-      token.children = [checkboxToken, openTextToken, ...children, closeTextToken];
+      token.children = [checkboxNode, openTextNode, ...children, closeTextNode];
     }
   });
 }
@@ -956,11 +1048,12 @@ function installAlertTransform(md: MarkdownIt): void {
           continue;
         }
 
-        const htmlToken = new TokenCons('html_inline', '', 0);
-        htmlToken.content = headerHtml;
+        const htmlNode = new TokenCons('html_inline', '', 0);
+        htmlNode.content = headerHtml;
+        htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
 
         token.children = token.children ?? [];
-        token.children.unshift(htmlToken);
+        token.children.unshift(htmlNode);
 
         for (const child of token.children) {
           if (child.type === 'text') {

@@ -96,16 +96,29 @@ export async function openLocalLink(
     return false;
   }
 
+  const fragmentHref = getDocumentFragmentHref(rawHref);
+  const navigationUri = fragmentHref
+    ? targetUri.with({ fragment: safeDecodeURIComponent(fragmentHref.slice(1)) })
+    : targetUri;
+
   if (localEditor === 'default') {
-    await vscode.commands.executeCommand('vscode.openWith', targetUri, 'default', {
+    await vscode.commands.executeCommand('vscode.openWith', navigationUri, 'default', {
       preview: false
     });
   } else {
-    await vscode.commands.executeCommand('vscode.open', targetUri, {
+    await vscode.commands.executeCommand('vscode.open', navigationUri, {
       preview: false
     });
   }
   return true;
+}
+
+export function getDocumentFragmentHref(rawHref: string): string {
+  const hashIndex = rawHref.indexOf('#');
+  if (hashIndex < 0 || hashIndex === rawHref.length - 1) {
+    return '';
+  }
+  return rawHref.slice(hashIndex).trim();
 }
 
 export async function openWikiLink(rawHref: string, documentUri: vscode.Uri): Promise<boolean> {

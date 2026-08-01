@@ -60,6 +60,7 @@ type ExtensionMessage =
   | { type: 'applied'; version: number }
   | { type: 'focusEditor' }
   | { type: 'revealSelection'; anchor: number; head: number; focus?: boolean; preserveViewport?: boolean }
+  | { type: 'revealDocumentFragment'; href: string }
   | { type: 'diagnosticsChanged'; diagnostics: EditorDiagnostic[] }
   | { type: 'themeChanged'; theme: ThemeSettings }
   | { type: 'outlinePositionChanged'; position: 'left' | 'right' }

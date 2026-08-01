@@ -5,7 +5,7 @@ import { URI, Utils } from 'vscode-uri';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const openedExternal: string[] = [];
-const commands: Array<{ command: string; uri: string; editor?: string }> = [];
+const commands: Array<{ command: string; uri: string; uriString: string; editor?: string }> = [];
 const stats: string[] = [];
 
 const Uri = {
@@ -26,7 +26,7 @@ mock.module('vscode', () => ({
   extensions: { getExtension: () => undefined },
   commands: {
     executeCommand: async (command: string, uri: URI, editor?: string) => {
-      commands.push({ command, uri: uri.fsPath, editor });
+      commands.push({ command, uri: uri.fsPath, uriString: uri.toString(), editor });
     }
   },
   window: {
@@ -57,6 +57,7 @@ const hrefs = [
   'https://example.com/',
   'https://docs.example.com/issues',
   './docs/theming.md',
+  './README.md#meo-enhanced',
   'CHANGELOG.md',
   'LICENSE'
 ];
@@ -82,6 +83,11 @@ for (const result of results.slice(2)) {
   ) {
     throw new Error(`Local link did not route once to VS Code: ${JSON.stringify(result)}`);
   }
+}
+
+const anchoredResult = results.find((result) => result.href === './README.md#meo-enhanced');
+if (anchoredResult?.commands[0]?.uriString !== `${documentUri.toString()}#meo-enhanced`) {
+  throw new Error(`Relative file fragment was not preserved for navigation: ${JSON.stringify(anchoredResult)}`);
 }
 
 openedExternal.length = 0;

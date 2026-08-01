@@ -35,12 +35,11 @@ For offline installation, download a `.vsix` package from [GitHub Releases](http
 
 ## Editing modes and appearance
 
-- **Live** keeps Markdown directly editable while rendering headings, tables, links, images, alerts, code blocks, Mermaid, LaTeX, and other rich content in place.
+- **Live** keeps Markdown directly editable while rendering headings, tables, links, images, safe HTML, alerts, code blocks, Mermaid, LaTeX, and other rich content in place.
 - **Source** provides a focused Markdown source editor with syntax highlighting and the same document navigation tools.
 - **Preview** provides a read-only rendering for final review.
 - **Independent Dark and Light appearances** can be switched from the bottom of the More menu. The selected appearance applies to the current editor and becomes the default for editors opened later, without forcing already-open editors to change.
-- **Consistent first Preview render** uses the selected editor appearance instead of inheriting an unrelated VS Code host theme.
-- **Stable mode switching** preserves the reading position as closely as possible when moving between Live, Source, and Preview.
+- **Consistent rendering and mode switching** keep the selected appearance and reading position stable across Live, Source, and Preview.
 
 ## Review changes without leaving the document
 
@@ -65,7 +64,7 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 
 ![A long table with a sticky header, nested cell lists, and indented block content](docs/readme/tables-and-nesting.png)
 
-## Work with Mermaid, LaTeX, code, images, and rich Markdown
+## Work with Mermaid, LaTeX, code, images, and HTML
 
 - Mermaid diagrams and block formulas support **Source**, **Split**, and **Preview** block modes.
 - Split mode adds panning plus zoom, reset, and fit controls while keeping the source beside the rendered result.
@@ -74,16 +73,16 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 - Code blocks support line numbers, syntax highlighting, copying, and consistent Live/Preview/export styling.
 - Images support clipboard insertion, stable local path handling, full-size viewing, and opening through the system application.
 - Frontmatter Properties render Obsidian-style metadata, tags, and complex YAML values.
-- Live text supports emphasis, strong text, strikethrough, `==highlight==`, inline code, `<kbd>` keys, links, colors, `<br>` line breaks, and collapsible `<details>/<summary>` content.
+- Live text supports emphasis, strong text, strikethrough, `==highlight==`, inline code, keyboard tags, links, colors, and line breaks.
+- Safe inline and block HTML renders consistently in Live, Preview, and HTML/PDF export, including paragraphs, alignment, links, anchors, images, lists, tables, blockquotes, `<kbd>`, and `<details>/<summary>`.
+- Rendered HTML blocks can switch to editable source; dangerous attributes and protocols are filtered, while unsupported or invalid content remains visible as source with a warning.
 
 ![Mermaid and block formula source, split, and preview modes](docs/readme/rich-content-modes.png)
 
 ## Navigate and keep your place
 
-- Jump to an exact line from the toolbar.
-- Return to the top through the floating document button.
-- Use the hierarchical outline to collapse sections, reorder headings, and follow the current scroll position.
-- Place and resize the outline on either side of the editor.
+- Jump to an exact line from the toolbar or return to the top through the floating document button.
+- Use the resizable outline on either side to collapse, reorder, and follow sections.
 - Preserve the visible document position across editing, saving, folding, table interaction, rich block rendering, and mode changes whenever possible.
 - Double-click the discard button to abandon all unsaved edits in the current document.
 
@@ -92,11 +91,7 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 | Action | How |
 | --- | --- |
 | Switch Live and Source | `Alt/Option + Shift + M` |
-| Open Preview | Select **Preview** in the top-right mode control |
-| Switch Dark and Light | Open **More**, then use the appearance control at the bottom |
 | Jump to a line | Enter a line number in the toolbar and press `Enter` |
-| Return to the top | Click the floating button in the lower-right corner |
-| Discard unsaved edits | Double-click the discard button |
 | Add a line break in a table cell | `Shift + Enter` |
 | Choose a change baseline | Open **More**, then select Current Edits, Recent Save, or Git HEAD |
 
@@ -104,13 +99,7 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 
 The editor includes independent Dark and Light appearances plus a customizable theme system. The theme picker ships with ten presets, including One Monokai, One Dark Pro, Dracula, Gruvbox, Nord, Solarized Dark, Catppuccin Mocha, Tokyo Night, GitHub Dark, and GitHub Light.
 
-Use the Command Palette to select a preset, export it as JSON, adjust only the colors or typography you need, and import it again. Themes can control:
-
-- document and embedded-surface colors;
-- Markdown and code syntax tokens;
-- Live and Source font families, sizes, weights, and line heights;
-- heading sizes and weights;
-- HTML and PDF export styling.
+Use the Command Palette to select, export, edit, and import themes. Themes control document colors, Markdown and code syntax, typography, headings, and HTML/PDF export styling.
 
 See the [theming guide](docs/theming.md) for the schema, fallback behavior, and complete token list.
 

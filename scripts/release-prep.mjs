@@ -3,6 +3,8 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
+const TAG_PREFIX = "meo-enhanced-v";
+
 function runGit(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
@@ -91,7 +93,11 @@ function writePackageJson(pkg) {
 }
 
 function latestTag() {
-  return tryGit(["describe", "--tags", "--abbrev=0"]);
+  return tryGit(["describe", "--tags", "--match", `${TAG_PREFIX}*`, "--abbrev=0"]);
+}
+
+function releaseTag(version) {
+  return `${TAG_PREFIX}${version}`;
 }
 
 function commitSubjectsSince(tag) {
@@ -222,7 +228,8 @@ function prependChangelog(version, items) {
   fs.writeFileSync(changelogPath, next);
 }
 
-function ensureTagDoesNotExist(tag) {
+function ensureTagDoesNotExist(version) {
+  const tag = releaseTag(version);
   const exists = tryGit(["rev-parse", "-q", "--verify", `refs/tags/${tag}`]);
   if (exists) fail(`Tag '${tag}' already exists.`);
 }
@@ -258,9 +265,10 @@ function ensureOnlyReleaseFilesChanged() {
 }
 
 function commitAndTag(version) {
+  const tag = releaseTag(version);
   runGit(["add", "package.json", "CHANGELOG.md"]);
   runGit(["commit", "-m", `chore: update version to ${version}`]);
-  runGit(["tag", "-a", version, "-m", `v${version}`]);
+  runGit(["tag", "-a", tag, "-m", `v${version}`]);
 }
 
 function prepareRelease(versionOrBump, write) {
@@ -311,8 +319,9 @@ function finalizeRelease() {
 
   console.log(`Release finalized locally for ${pkg.version}`);
   console.log("Next steps:");
+  console.log("  bun run vscode:publish");
   console.log("  git push origin main");
-  console.log(`  git push origin ${pkg.version}`);
+  console.log(`  git push origin ${releaseTag(pkg.version)}`);
 }
 
 function main() {

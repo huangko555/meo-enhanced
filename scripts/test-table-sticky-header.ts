@@ -256,6 +256,7 @@ async function main() {
         applyInsideToolbar: applyButton.parentElement === toolbarElement,
         usesSharedSurface: toolbarElement.classList.contains('meo-visual-surface'),
         usesSharedButtons: toolbarButton.classList.contains('meo-visual-control-btn'),
+        toolbarBackground: getComputedStyle(toolbarElement).backgroundColor,
         toolbarShadow: getComputedStyle(toolbarElement).boxShadow,
         toolbarOutlineStyle: getComputedStyle(toolbarElement).outlineStyle,
         toolbarOutlineWidth: getComputedStyle(toolbarElement).outlineWidth,
@@ -400,6 +401,7 @@ async function main() {
       !result.toolbarSizeState.applyInsideToolbar ||
       !result.toolbarSizeState.usesSharedSurface ||
       !result.toolbarSizeState.usesSharedButtons ||
+      result.toolbarSizeState.toolbarBackground !== 'rgb(20, 24, 28)' ||
       result.toolbarSizeState.toolbarShadow !== 'none' ||
       result.toolbarSizeState.toolbarOutlineStyle !== 'solid' ||
       Number.parseFloat(result.toolbarSizeState.toolbarOutlineWidth) < 1 ||

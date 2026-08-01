@@ -76,15 +76,16 @@ function renderMathFromRawInlineContent(
     if (!renderedMath) {
       return { changed: false, children: [] };
     }
-    const htmlToken = new TokenCons('html_inline', '', 0);
+    const htmlNode = new TokenCons('html_inline', '', 0);
+    htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
     const fencedClass = fullMath.mode === 'display' && fullMath.fencedDisplay ? ' meo-export-math-fenced-display' : '';
-    htmlToken.content = [
+    htmlNode.content = [
       `<span class="meo-export-math meo-export-math-${fullMath.mode}${fencedClass}">`,
       renderedMath,
       '</span>'
     ].join('');
     onRenderedMath?.();
-    return { changed: true, children: [htmlToken] };
+    return { changed: true, children: [htmlNode] };
   }
 
   const output: any[] = [];
@@ -102,14 +103,15 @@ function renderMathFromRawInlineContent(
       continue;
     }
 
-    const htmlToken = new TokenCons('html_inline', '', 0);
+    const htmlNode = new TokenCons('html_inline', '', 0);
+    htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
     const fencedClass = mathRange.mode === 'display' && mathRange.fencedDisplay ? ' meo-export-math-fenced-display' : '';
-    htmlToken.content = [
+    htmlNode.content = [
       `<span class="meo-export-math meo-export-math-${mathRange.mode}${fencedClass}">`,
       renderedMath,
       '</span>'
     ].join('');
-    output.push(htmlToken);
+    output.push(htmlNode);
     onRenderedMath?.();
     cursor = mathRange.to;
   }
@@ -216,14 +218,15 @@ function renderMathChunk(
       continue;
     }
 
-    const htmlToken = new TokenCons('html_inline', '', 0);
+    const htmlNode = new TokenCons('html_inline', '', 0);
+    htmlNode.meta = { ...(htmlNode.meta ?? {}), meoTrustedHtml: true };
     const fencedClass = mathRange.mode === 'display' && mathRange.fencedDisplay ? ' meo-export-math-fenced-display' : '';
-    htmlToken.content = [
+    htmlNode.content = [
       `<span class="meo-export-math meo-export-math-${mathRange.mode}${fencedClass}">`,
       renderedMath,
       '</span>'
     ].join('');
-    output.push(htmlToken);
+    output.push(htmlNode);
     onRenderedMath?.();
     cursor = mathRange.to;
   }

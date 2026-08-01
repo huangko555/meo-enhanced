@@ -465,7 +465,7 @@ export class ViewportController {
     if (
       event.target instanceof Element &&
       event.target.closest(
-        '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-code-block-start, .meo-md-code-block-end'
+        '.meo-mermaid-editing-block, .meo-latex-math-editing-block, .meo-mermaid-toolbar, .meo-latex-math-toolbar, .meo-md-html-block, .meo-md-html-source-control, .meo-md-code-block-start, .meo-md-code-block-end'
       )
     ) return;
     const pointerPosition = this.view.posAtCoords({ x: event.clientX, y: event.clientY }) ??

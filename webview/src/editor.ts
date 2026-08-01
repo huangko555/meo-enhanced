@@ -60,6 +60,7 @@ import { focusLatexMathEditingOffset, setLatexMathBlockModeEffect, setLatexMathS
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import { setLongCodeBlockFoldingEnabled } from './helpers/longCodeBlocks';
 import { ViewportController } from './helpers/viewportController';
+import { collectRenderableHtmlBlocks, setHtmlEditingRangeEffect } from './helpers/htmlContent';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -302,6 +303,9 @@ export function createEditor({
   let onWindowPointerUp = null;
   let onWindowPointerCancel = null;
   let onWindowBlur = null;
+  let onDocumentSelectionChange = null;
+  let onHtmlContentPointerDown = null;
+  let suppressSelectionMenuForNativeHtml = false;
   let onBlockActionPointerMove = null;
   let onBlockActionPointerLeave = null;
   let pendingLiveSearchRevealFrame: number | null = null;
@@ -1189,6 +1193,11 @@ export function createEditor({
       return;
     }
 
+    if (suppressSelectionMenuForNativeHtml) {
+      onSelectionChange({ visible: false });
+      return;
+    }
+
     const activeTableInput = getActiveTableInput();
     if (activeTableInput) {
       onSelectionChange(getActiveTableSelectionState(activeTableInput) ?? { visible: false });
@@ -1516,6 +1525,9 @@ export function createEditor({
   };
 
   const selectSearchMatch = (from, to, { focusEditor = true } = {}) => {
+    const htmlBlock = currentMode === 'live'
+      ? collectRenderableHtmlBlocks(view.state).find((block) => from < block.to && to > block.from)
+      : null;
     viewportController.markInteraction();
     view.dispatch({
       selection: { anchor: from, head: to },
@@ -1524,6 +1536,7 @@ export function createEditor({
         setLongCodeBlockSearchRevealEffect.of({ from, to }),
         setMermaidSearchRevealEffect.of({ from, to }),
         setLatexMathSearchRevealEffect.of({ from, to }),
+        ...(htmlBlock ? [setHtmlEditingRangeEffect.of({ from: htmlBlock.from, to: htmlBlock.to })] : []),
         preserveLiveDecorationsForSearchEffect.of(undefined)
       ]
     });
@@ -1579,7 +1592,7 @@ export function createEditor({
     }
 
     const block = getLiveRenderedBlocks(view.state).find((candidate) => (
-      (candidate.kind === 'mermaid' || candidate.kind === 'math') &&
+      (candidate.kind === 'mermaid' || candidate.kind === 'math' || candidate.kind === 'html') &&
       lineNumber >= candidate.lineNumberHiddenFrom &&
       lineNumber <= candidate.lineNumberHiddenTo
     ));
@@ -1589,6 +1602,24 @@ export function createEditor({
 
     const openingLine = view.state.doc.line(block.startLine);
     const targetLine = view.state.doc.line(lineNumber);
+    if (block.kind === 'html') {
+      const htmlBlock = collectRenderableHtmlBlocks(view.state).find((candidate) => (
+        candidate.startLine === block.startLine && candidate.endLine === block.endLine
+      ));
+      if (!htmlBlock) return false;
+      viewportController.markInteraction();
+      view.dispatch({
+        selection: { anchor: targetLine.from },
+        effects: [
+          setHtmlEditingRangeEffect.of({ from: htmlBlock.from, to: htmlBlock.to }),
+          EditorView.scrollIntoView(targetLine.from, {
+            y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
+          })
+        ]
+      });
+      view.focus();
+      return true;
+    }
     const contentFrom = view.state.doc.line(block.startLine + 1).from;
     const offset = targetLine.from - contentFrom;
     const modeEffect = block.kind === 'mermaid'
@@ -2098,6 +2129,7 @@ export function createEditor({
         }
 
         if (update.selectionSet) {
+          suppressSelectionMenuForNativeHtml = false;
           syncSelectionClass();
           emitSelectionChange();
         } else if (update.viewportChanged) {
@@ -2191,6 +2223,31 @@ export function createEditor({
     emitSelectionChange();
   };
   view.dom.addEventListener('meo-table-selection-change', onTableSelectionChange);
+  onHtmlContentPointerDown = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest('.meo-md-html-content')) {
+      return;
+    }
+    suppressSelectionMenuForNativeHtml = true;
+    onSelectionChange?.({ visible: false });
+  };
+  view.dom.addEventListener('pointerdown', onHtmlContentPointerDown, true);
+  onDocumentSelectionChange = () => {
+    const selection = document.getSelection();
+    if (!selection || selection.isCollapsed) {
+      return;
+    }
+    const selectionNodeInsideHtml = (node) => {
+      const element = node instanceof Element ? node : node?.parentElement;
+      return Boolean(element?.closest('.meo-md-html-content'));
+    };
+    if (!selectionNodeInsideHtml(selection.anchorNode) && !selectionNodeInsideHtml(selection.focusNode)) {
+      return;
+    }
+    suppressSelectionMenuForNativeHtml = true;
+    onSelectionChange?.({ visible: false });
+  };
+  document.addEventListener('selectionchange', onDocumentSelectionChange);
   onWindowPointerUp = (event) => {
     clearLivePointerSelection();
   };
@@ -2250,6 +2307,10 @@ export function createEditor({
     getText() {
       commitActiveTableInput();
       return view.state.doc.toString();
+    },
+    revealDocumentFragment(href) {
+      const fragmentHref = href.startsWith('#') ? href : `#${href}`;
+      return openHref(fragmentHref, view);
     },
     commitTransientEdits() {
       return commitActiveTableInput();
@@ -2394,6 +2455,14 @@ export function createEditor({
       if (onTableSelectionChange) {
         view.dom.removeEventListener('meo-table-selection-change', onTableSelectionChange);
         onTableSelectionChange = null;
+      }
+      if (onHtmlContentPointerDown) {
+        view.dom.removeEventListener('pointerdown', onHtmlContentPointerDown, true);
+        onHtmlContentPointerDown = null;
+      }
+      if (onDocumentSelectionChange) {
+        document.removeEventListener('selectionchange', onDocumentSelectionChange);
+        onDocumentSelectionChange = null;
       }
       if (onWindowPointerUp) {
         window.removeEventListener('pointerup', onWindowPointerUp, true);

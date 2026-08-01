@@ -1087,6 +1087,7 @@ let pendingDiagnostics: any[] = [];
 let diagnosticSuggestionRequestCounter = 0;
 const pendingDiagnosticSuggestionRequests = new Map<string, { from: number; to: number }>();
 let pendingRevealSelection: { anchor: number; head: number; focus?: boolean } | null = null;
+let pendingRevealDocumentFragment: string | null = null;
 let pendingRestoreTopLine: number | null = null;
 let pendingRestoreTopLineOffset = 0;
 let pendingViewPositionTimer: number | null = null;
@@ -1423,6 +1424,19 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
     align: preserveViewport === true ? 'none' : 'center'
   });
   pendingRevealSelection = null;
+  scheduleViewPositionCapture();
+};
+
+const applyRevealDocumentFragmentFromHost = (href: unknown): void => {
+  if (typeof href !== 'string' || !href.startsWith('#')) {
+    return;
+  }
+  if (!editor) {
+    pendingRevealDocumentFragment = href;
+    return;
+  }
+  editor.revealDocumentFragment(href);
+  pendingRevealDocumentFragment = null;
   scheduleViewPositionCapture();
 };
 
@@ -1869,6 +1883,9 @@ const mountInitialEditor = async () => {
     if (pendingRevealSelection) {
       applyRevealSelectionFromHost(pendingRevealSelection);
     }
+    if (pendingRevealDocumentFragment) {
+      applyRevealDocumentFragmentFromHost(pendingRevealDocumentFragment);
+    }
     if (pendingEditorFocus) {
       focusEditorFromHost();
     }
@@ -2114,6 +2131,11 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'revealSelection') {
     applyRevealSelectionFromHost(message);
+    return;
+  }
+
+  if (message.type === 'revealDocumentFragment') {
+    applyRevealDocumentFragmentFromHost(message.href);
     return;
   }
 

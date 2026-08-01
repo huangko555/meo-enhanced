@@ -275,7 +275,10 @@ if (!lightPreviewStyles.includes('--meo-link: #1f2328')) {
 if (!darkPreviewStyles.includes('padding-inline-start: 1.5em')) {
   throw new Error('Preview lists must retain readable indentation in documents and table cells');
 }
-if (!darkPreviewStyles.includes('.meo-table-scroll') || darkPreviewStyles.includes('width: max-content')) {
+if (
+  !/\.meo-table-scroll\s*\{[^}]*\bwidth:\s*100%;/s.test(darkPreviewStyles) ||
+  /\.meo-table-scroll\s*\{[^}]*\bwidth:\s*max-content;/s.test(darkPreviewStyles)
+) {
   throw new Error('Preview tables must fit the reading surface without relying on horizontal scrolling');
 }
 if (!exportStyles.includes('--meo-bg: #ffffff')) {

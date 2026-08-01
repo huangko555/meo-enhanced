@@ -1,3 +1,4 @@
+
 # MEO Enhanced
 
 Edit complex Markdown and see every addition, modification, and deletion as you work—all inside VS Code.
@@ -35,12 +36,11 @@ code --install-extension huangko555.meo-enhanced
 
 ## 编辑模式与外观
 
-- **Live**：保持 Markdown 可直接编辑，同时在原位置渲染标题、表格、链接、图片、提示块、代码块、Mermaid、LaTeX 等富内容。
+- **Live**：保持 Markdown 可直接编辑，同时在原位置渲染标题、表格、链接、图片、安全 HTML、提示块、代码块、Mermaid、LaTeX 等富内容。
 - **Source**：提供专注的 Markdown 源码编辑体验，并保留语法高亮和文档导航能力。
 - **Preview**：提供适合最终检查的只读渲染结果。
 - **独立的 Dark 与 Light 外观**：可在 More 菜单底部手动切换。选择会立即应用到当前编辑器，并成为之后新打开编辑器的默认值，不会强制改变已经打开的其他编辑器。
-- **一致的首次 Preview 外观**：第一次进入 Preview 时会使用当前编辑器选择的外观，而不是继承无关的 VS Code 宿主主题。
-- **稳定的模式切换**：在 Live、Source 和 Preview 之间切换时，尽量保持当前阅读位置不变。
+- **一致的渲染与模式切换**：在 Live、Source 和 Preview 之间保持所选外观与阅读位置稳定。
 
 ## 在文档中直接审阅改动
 
@@ -65,7 +65,7 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 
 ![长表格浮动表头、单元格嵌套列表与缩进块级内容](docs/readme/tables-and-nesting.png)
 
-## 使用 Mermaid、LaTeX、代码、图片与富文本
+## 使用 Mermaid、LaTeX、代码、图片与 HTML
 
 - Mermaid 和块级公式支持 **Source**、**Split** 与 **Preview** 三种块级显示模式。
 - Split 模式支持拖动、缩放、重置和适应窗口，同时保留左侧源码和右侧渲染结果。
@@ -74,16 +74,16 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 - 代码块支持行号、语法高亮、复制，以及一致的 Live、Preview 和导出样式。
 - 图片支持剪贴板插入、稳定的本地路径处理、大图查看和通过系统应用打开。
 - Frontmatter Properties 可以显示 Obsidian 风格的属性、标签和复杂 YAML 内容。
-- Live 文本支持粗体、斜体、删除线、`==高亮==`、行内代码、`<kbd>` 键帽、链接、颜色、`<br>` 换行以及可折叠的 `<details>/<summary>` 内容。
+- Live 文本支持粗体、斜体、删除线、`==高亮==`、行内代码、键盘标签、链接、颜色和换行。
+- 安全的行内与块级 HTML 会在 Live、Preview 和 HTML/PDF 导出中一致渲染，覆盖段落、对齐、链接、锚点、图片、列表、表格、引用、`<kbd>` 和 `<details>/<summary>`。
+- HTML 渲染结果可切换为可编辑源码；危险属性和协议会被过滤，不支持或无效的内容则保留源码并显示提示。
 
 ![Mermaid 与块级公式的源码、分栏和预览模式](docs/readme/rich-content-modes.png)
 
 ## 导航并保持阅读位置
 
-- 通过工具栏跳转到准确行号。
-- 使用文档右下角的浮动按钮返回顶部。
-- 使用层级大纲折叠章节、拖动标题和同步当前滚动位置。
-- 将大纲放在编辑器左侧或右侧，并调整宽度。
+- 通过工具栏跳转到准确行号，或使用浮动按钮返回顶部。
+- 使用两侧可调整宽度的层级大纲折叠、拖动和跟随章节。
 - 编辑、保存、折叠、操作表格、渲染富内容或切换模式时，尽可能保持当前可见内容的位置不变。
 - 双击放弃按钮，可丢弃当前文档的全部未保存修改。
 
@@ -92,11 +92,7 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 | 操作 | 使用方式 |
 | --- | --- |
 | 切换 Live 与 Source | `Alt/Option + Shift + M` |
-| 打开 Preview | 在右上角模式控件中选择 **Preview** |
-| 切换 Dark 与 Light | 打开 **More**，使用底部的外观控件 |
 | 跳转到指定行 | 在工具栏输入行号并按 `Enter` |
-| 返回文档顶部 | 点击右下角的浮动按钮 |
-| 放弃未保存修改 | 双击放弃按钮 |
 | 在表格单元格中换行 | `Shift + Enter` |
 | 选择改动基线 | 打开 **More**，选择 Current Edits、Recent Save 或 Git HEAD |
 
@@ -104,13 +100,7 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 
 编辑器提供独立的 Dark 与 Light 外观，以及可自定义的主题系统。主题选择器内置十套预设：One Monokai、One Dark Pro、Dracula、Gruvbox、Nord、Solarized Dark、Catppuccin Mocha、Tokyo Night、GitHub Dark 和 GitHub Light。
 
-可以在命令面板中选择预设、导出 JSON、只修改需要的颜色或排版，再重新导入。主题能够控制：
-
-- 文档与内嵌区域配色；
-- Markdown 与代码语法颜色；
-- Live 与 Source 的字体、字号、字重和行高；
-- 各级标题字号与字重；
-- HTML 与 PDF 导出样式。
+可以在命令面板中选择、导出、修改和导入主题。主题可控制文档配色、Markdown 与代码语法、字体排版、标题以及 HTML/PDF 导出样式。
 
 完整结构、回退规则和语法颜色列表见[主题配置文档](docs/theming.md)。
 

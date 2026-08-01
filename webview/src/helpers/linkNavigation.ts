@@ -45,8 +45,28 @@ function decodeFragment(value: string): string {
 
 export function findDocumentFragmentPosition(state: EditorState, rawHref: string): number | null {
   if (!rawHref.startsWith('#')) return null;
-  const decodedTarget = decodeFragment(rawHref.slice(1)).trim().toLowerCase();
-  if (!decodedTarget) return null;
+  const decodedFragment = decodeFragment(rawHref.slice(1)).trim();
+  if (!decodedFragment) return null;
+  const tree = resolvedSyntaxTree(state);
+  let htmlTargetPosition: number | null = null;
+  tree.iterate({
+    enter(node) {
+      if (htmlTargetPosition !== null || (node.name !== 'HTMLBlock' && node.name !== 'HTMLTag')) return;
+      const source = state.doc.sliceString(node.from, node.to);
+      const attributePattern = /\b(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+      let match: RegExpExecArray | null;
+      while ((match = attributePattern.exec(source))) {
+        const value = match[1] ?? match[2] ?? match[3] ?? '';
+        if (value === decodedFragment) {
+          htmlTargetPosition = node.from;
+          return;
+        }
+      }
+    }
+  });
+  if (htmlTargetPosition !== null) return htmlTargetPosition;
+
+  const decodedTarget = decodedFragment.toLowerCase();
   const normalizedTarget = headingSlug(decodedTarget);
   const occupiedSlugs = new Set<string>();
 

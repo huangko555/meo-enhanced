@@ -62,8 +62,7 @@ async function main(): Promise<void> {
 
     const defaultCollapsedSourceState = await page.evaluate(() => {
       const editor = (window as any).__editor;
-      const anchor = editor.getText().indexOf('<details>');
-      editor.view.dispatch({ selection: { anchor: anchor + 1 } });
+      document.querySelector<HTMLButtonElement>('.meo-md-html-source-toggle')!.click();
       return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
     });
     await waitForFrames(page);
@@ -75,7 +74,7 @@ async function main(): Promise<void> {
     }));
     if (
       defaultCollapsedSourceState?.collapsed !== true ||
-      !defaultCollapsedSourceDom.sourceVisible || defaultCollapsedSourceDom.bodyVisible
+      !defaultCollapsedSourceDom.sourceVisible || !defaultCollapsedSourceDom.bodyVisible
     ) {
       throw new Error(`Default-collapsed details changed state when revealing source: ${JSON.stringify({
         defaultCollapsedSourceState,
@@ -85,31 +84,20 @@ async function main(): Promise<void> {
     await page.evaluate(() => (window as any).__editor.view.dispatch({ selection: { anchor: 0 } }));
     await waitForFrames(page);
 
-    const detailsGutterClickPoint = await page.evaluate(() => {
+    const detailsToggleClickPoint = await page.evaluate(() => {
       const editor = (window as any).__editor;
       const scroller = editor.view.scrollDOM as HTMLElement;
-      const summaryLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('Visible summary'))!;
+      const summaryLine = document.querySelector<HTMLElement>('.meo-md-html-block summary')!;
       const scrollerTop = scroller.getBoundingClientRect().top;
       scroller.scrollTop += summaryLine.getBoundingClientRect().top - scrollerTop - 8;
       const summaryRect = summaryLine.getBoundingClientRect();
-      const toggle = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-fold-toggle'))
-        .filter((element) => !element.classList.contains('meo-md-fold-toggle-spacer'))
-        .reduce((closest, element) => (
-          Math.abs(element.getBoundingClientRect().top - summaryRect.top) <
-            Math.abs(closest.getBoundingClientRect().top - summaryRect.top)
-            ? element
-            : closest
-        ));
-      const toggleRect = toggle.getBoundingClientRect();
       (window as any).__detailsAnchorFrames = [{
         rawSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .some((line) => line.textContent?.includes('<details>')),
         summaryTop: summaryLine.getBoundingClientRect().top
       }];
       const sampleAnchor = () => {
-        const currentSummary = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .find((line) => line.textContent?.includes('Visible summary'));
+        const currentSummary = document.querySelector<HTMLElement>('.meo-md-html-block summary');
         (window as any).__detailsAnchorFrames.push({
           rawSourceVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
             .some((line) => line.textContent?.includes('<details>')),
@@ -119,11 +107,11 @@ async function main(): Promise<void> {
       };
       requestAnimationFrame(sampleAnchor);
       return {
-        x: toggleRect.left + toggleRect.width / 2,
-        y: toggleRect.top + toggleRect.height / 2
+        x: summaryRect.left + Math.min(80, summaryRect.width / 2),
+        y: summaryRect.top + summaryRect.height / 2
       };
     });
-    await page.mouse.click(detailsGutterClickPoint.x, detailsGutterClickPoint.y);
+    await page.mouse.click(detailsToggleClickPoint.x, detailsToggleClickPoint.y);
     await waitForFrames(page, 16);
     const detailsAnchorFrames = await page.evaluate(() => (window as any).__detailsAnchorFrames as Array<{
       rawSourceVisible: boolean;
@@ -137,40 +125,32 @@ async function main(): Promise<void> {
         frame.rawSourceVisible
       ))
     ) {
-      throw new Error(`Details gutter toggle redrew or moved content across frames: ${JSON.stringify(detailsAnchorFrames)}`);
+      throw new Error(`Details toggle redrew or moved content across frames: ${JSON.stringify(detailsAnchorFrames)}`);
     }
     const detailsAfterExpand = await page.evaluate(() => {
       const editor = (window as any).__editor;
       return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
     });
     if (detailsAfterExpand?.collapsed !== false) {
-      throw new Error(`Details gutter click did not expand the block: ${JSON.stringify(detailsAfterExpand)}`);
+      throw new Error(`Details click did not expand the block: ${JSON.stringify(detailsAfterExpand)}`);
     }
 
     const detailsCollapseClickPoint = await page.evaluate(() => {
-      const summaryLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('Visible summary'))!;
+      const summaryLine = document.querySelector<HTMLElement>('.meo-md-html-block summary')!;
       const summaryRect = summaryLine.getBoundingClientRect();
-      const toggle = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-fold-toggle'))
-        .filter((element) => !element.classList.contains('meo-md-fold-toggle-spacer'))
-        .reduce((closest, element) => (
-          Math.abs(element.getBoundingClientRect().top - summaryRect.top) <
-            Math.abs(closest.getBoundingClientRect().top - summaryRect.top)
-            ? element
-            : closest
-        ));
-      const toggleRect = toggle.getBoundingClientRect();
       (window as any).__detailsCollapseFrames = [{ summaryTop: summaryRect.top }];
       const sampleAnchor = () => {
-        const currentSummary = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .find((line) => line.textContent?.includes('Visible summary'));
+        const currentSummary = document.querySelector<HTMLElement>('.meo-md-html-block summary');
         (window as any).__detailsCollapseFrames.push({
           summaryTop: currentSummary?.getBoundingClientRect().top ?? null
         });
         if ((window as any).__detailsCollapseFrames.length < 14) requestAnimationFrame(sampleAnchor);
       };
       requestAnimationFrame(sampleAnchor);
-      return { x: toggleRect.left + toggleRect.width / 2, y: toggleRect.top + toggleRect.height / 2 };
+      return {
+        x: summaryRect.left + Math.min(80, summaryRect.width / 2),
+        y: summaryRect.top + summaryRect.height / 2
+      };
     });
     await page.mouse.click(detailsCollapseClickPoint.x, detailsCollapseClickPoint.y);
     await waitForFrames(page, 16);
@@ -184,14 +164,14 @@ async function main(): Promise<void> {
         frame.summaryTop === null || Math.abs(frame.summaryTop - detailsCollapseSummaryBeforeTop) > 1
       ))
     ) {
-      throw new Error(`Details gutter collapse moved its summary across frames: ${JSON.stringify(detailsCollapseFrames)}`);
+      throw new Error(`Details collapse moved its summary across frames: ${JSON.stringify(detailsCollapseFrames)}`);
     }
     const detailsAfterCollapse = await page.evaluate(() => {
       const editor = (window as any).__editor;
       return (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0];
     });
     if (detailsAfterCollapse?.collapsed !== true) {
-      throw new Error(`Details gutter click did not collapse the block: ${JSON.stringify(detailsAfterCollapse)}`);
+      throw new Error(`Details click did not collapse the block: ${JSON.stringify(detailsAfterCollapse)}`);
     }
 
     await page.evaluate(() => {
@@ -210,21 +190,17 @@ async function main(): Promise<void> {
     await page.evaluate(() => {
       const editor = (window as any).__editor;
       const scroller = editor.view.scrollDOM as HTMLElement;
-      const summaryLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('Visible summary'))!;
+      const summaryLine = document.querySelector<HTMLElement>('.meo-md-html-block summary')!;
       const scrollerTop = scroller.getBoundingClientRect().top;
       scroller.scrollTop += summaryLine.getBoundingClientRect().top - scrollerTop - 8;
     });
     await waitForFrames(page);
-    const detailsSourceClickPoint = await page.evaluate(() => {
+    const detailsSourceAnchor = await page.evaluate(() => {
       const editor = (window as any).__editor;
       const anchor = editor.getText().indexOf('<details>');
-      const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('details body 1'))!;
-      const rect = bodyLine.getBoundingClientRect();
-      return { anchor, x: rect.left + Math.min(120, rect.width / 2), y: (rect.top + rect.bottom) / 2 };
+      document.querySelector<HTMLButtonElement>('.meo-md-html-source-toggle')!.click();
+      return anchor;
     });
-    await page.mouse.click(detailsSourceClickPoint.x, detailsSourceClickPoint.y);
     await waitForFrames(page);
     const sourceToggleResult = await page.evaluate((anchor) => {
       const editor = (window as any).__editor;
@@ -232,7 +208,7 @@ async function main(): Promise<void> {
         .some((line) => line.textContent?.includes('**source markers**'));
       const toggled = (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
       return { sourceVisible, toggled };
-    }, detailsSourceClickPoint.anchor);
+    }, detailsSourceAnchor);
     await waitForFrames(page);
     const detailsAfterSourceCollapse = await page.evaluate(() => {
       const editor = (window as any).__editor;
@@ -245,7 +221,7 @@ async function main(): Promise<void> {
     });
     if (
       !sourceToggleResult.sourceVisible || !sourceToggleResult.toggled ||
-      detailsAfterSourceCollapse.details?.collapsed !== true || detailsAfterSourceCollapse.bodyVisible ||
+      detailsAfterSourceCollapse.details?.collapsed !== true || !detailsAfterSourceCollapse.bodyVisible ||
       detailsAfterSourceCollapse.selectionHead !== detailsAfterSourceCollapse.details?.lineFrom
     ) {
       throw new Error(`Details source mode must allow folding without reopening: ${JSON.stringify({
@@ -257,7 +233,7 @@ async function main(): Promise<void> {
     const sourceExpandResult = await page.evaluate((anchor) => {
       const editor = (window as any).__editor;
       return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
-    }, detailsSourceClickPoint.anchor);
+    }, detailsSourceAnchor);
     await waitForFrames(page);
     const detailsAfterSourceExpand = await page.evaluate(() => {
       const editor = (window as any).__editor;
@@ -269,6 +245,10 @@ async function main(): Promise<void> {
         detailsAfterSourceExpand
       })}`);
     }
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.meo-md-html-preview-toggle')?.click();
+    });
+    await waitForFrames(page);
 
     const defaultOpenSource = [
       ...Array.from({ length: 20 }, (_, index) => `before open ${index + 1}`),
@@ -282,21 +262,15 @@ async function main(): Promise<void> {
       const editor = (window as any).__editor;
       editor.setText(text);
       editor.view.dispatch({ selection: { anchor: 0 } });
-      editor.scrollToLine(22, 'top');
+      editor.scrollToLine(20, 'top');
     }, defaultOpenSource);
     await waitForFrames(page);
-    const defaultOpenSourceClickPoint = await page.evaluate(() => {
+    const defaultOpenSourceAnchor = await page.evaluate(() => {
       const editor = (window as any).__editor;
-      const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('default open body'))!;
-      const rect = bodyLine.getBoundingClientRect();
-      return {
-        anchor: editor.getText().indexOf('<details open>'),
-        x: rect.left + Math.min(140, rect.width / 2),
-        y: (rect.top + rect.bottom) / 2
-      };
+      const button = document.querySelector<HTMLButtonElement>('.meo-md-html-source-toggle');
+      button!.click();
+      return editor.getText().indexOf('<details open>');
     });
-    await page.mouse.click(defaultOpenSourceClickPoint.x, defaultOpenSourceClickPoint.y);
     await waitForFrames(page);
     const defaultOpenBeforeToggle = await page.evaluate(() => {
       const editor = (window as any).__editor;
@@ -312,7 +286,7 @@ async function main(): Promise<void> {
     const defaultOpenCollapseResult = await page.evaluate((anchor) => {
       const editor = (window as any).__editor;
       return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
-    }, defaultOpenSourceClickPoint.anchor);
+    }, defaultOpenSourceAnchor);
     await waitForFrames(page);
     const defaultOpenAfterCollapse = await page.evaluate(() => {
       const editor = (window as any).__editor;
@@ -325,7 +299,7 @@ async function main(): Promise<void> {
     });
     if (
       !defaultOpenCollapseResult || defaultOpenAfterCollapse.details?.collapsed !== true ||
-      defaultOpenAfterCollapse.bodyVisible ||
+      !defaultOpenAfterCollapse.bodyVisible ||
       defaultOpenAfterCollapse.selectionHead !== defaultOpenAfterCollapse.details?.lineFrom
     ) {
       throw new Error(`Default-open details source mode must allow folding: ${JSON.stringify({
@@ -336,7 +310,7 @@ async function main(): Promise<void> {
     const defaultOpenExpandResult = await page.evaluate((anchor) => {
       const editor = (window as any).__editor;
       return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
-    }, defaultOpenSourceClickPoint.anchor);
+    }, defaultOpenSourceAnchor);
     await waitForFrames(page);
     const defaultOpenAfterExpand = await page.evaluate(() => {
       const editor = (window as any).__editor;
@@ -347,6 +321,121 @@ async function main(): Promise<void> {
         defaultOpenExpandResult,
         defaultOpenAfterExpand
       })}`);
+    }
+
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.meo-md-html-preview-toggle')?.click();
+    });
+    const hybridDetailsSource = [
+      ...Array.from({ length: 20 }, (_, index) => `before hybrid ${index + 1}`),
+      '<details>',
+      '<summary>Hybrid Markdown summary</summary>',
+      '',
+      'Hybrid body with **bold text**.',
+      '',
+      '- hybrid markdown list item',
+      '',
+      '</details>',
+      ...Array.from({ length: 20 }, (_, index) => `after hybrid ${index + 1}`)
+    ].join('\n');
+    await page.evaluate((text) => {
+      const editor = (window as any).__editor;
+      editor.setText(text);
+      editor.view.dispatch({ selection: { anchor: 0 } });
+      const anchor = editor.getText().indexOf('<details>');
+      editor.view.scrollDOM.scrollTop = Math.max(0, editor.view.lineBlockAt(anchor).top - 80);
+    }, hybridDetailsSource);
+    await waitForFrames(page, 8);
+    const hybridPreview = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const anchor = editor.getText().indexOf('<details>');
+      const summary = document.querySelector<HTMLElement>('.meo-md-details-summary');
+      const summaryTop = summary?.getBoundingClientRect().top ?? null;
+      const summaryLine = summary?.closest<HTMLElement>('.cm-line') ?? null;
+      const sourceToggle = document.querySelector<HTMLElement>('.meo-md-details-source-toggle');
+      const summaryLineRect = summaryLine?.getBoundingClientRect() ?? null;
+      const sourceToggleRect = sourceToggle?.getBoundingClientRect() ?? null;
+      const scrollerRect = editor.view.scrollDOM.getBoundingClientRect();
+      editor.view.dispatch({ selection: { anchor: anchor + 1 } });
+      return {
+        collapsed: (window as any).LiveLayoutStabilityHarness.getDetailsBlocks(editor.view.state)[0]?.collapsed,
+        rawOpeningVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('<details>')),
+        summaryTop,
+        sourceToggleVisible: Boolean(sourceToggle),
+        sourceToggleSameRow: Boolean(
+          summaryLineRect && sourceToggleRect &&
+          sourceToggleRect.top < summaryLineRect.bottom && sourceToggleRect.bottom > summaryLineRect.top
+        ),
+        sourceToggleOutsideContent: Boolean(
+          summaryLineRect && sourceToggleRect && sourceToggleRect.left >= summaryLineRect.right + 4
+        ),
+        sourceToggleInsideViewport: Boolean(sourceToggleRect && sourceToggleRect.right <= scrollerRect.right + 1),
+        sourceToggleTopDelta: sourceToggleRect && summaryLineRect
+          ? sourceToggleRect.top - summaryLineRect.top
+          : null,
+        bodyVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('Hybrid body'))
+      };
+    });
+    await waitForFrames(page, 4);
+    if (
+      hybridPreview.collapsed !== true || hybridPreview.rawOpeningVisible ||
+      !hybridPreview.sourceToggleVisible || !hybridPreview.sourceToggleSameRow ||
+      !hybridPreview.sourceToggleOutsideContent || !hybridPreview.sourceToggleInsideViewport ||
+      hybridPreview.sourceToggleTopDelta === null || Math.abs(hybridPreview.sourceToggleTopDelta) > 1 ||
+      hybridPreview.bodyVisible || hybridPreview.summaryTop === null
+    ) {
+      throw new Error(`Hybrid details did not use the unified preview shell: ${JSON.stringify(hybridPreview)}`);
+    }
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.meo-md-details-source-toggle')!.click();
+    });
+    await waitForFrames(page, 6);
+    const hybridSourceMode = await page.evaluate(() => {
+      const sourceRangeLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-html-source-range'));
+      return {
+        rawOpeningVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('<details>')),
+        markdownBodyVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('Hybrid body with **bold text**.')),
+        previewToggleVisible: Boolean(document.querySelector('.meo-md-html-preview-toggle')),
+        summaryWidgetVisible: Boolean(document.querySelector('.meo-md-details-summary')),
+        sourceRangeLineCount: sourceRangeLines.length,
+        sourceRangeStart: sourceRangeLines[0]?.classList.contains('meo-md-html-source-range-start') ?? false,
+        sourceRangeEnd: sourceRangeLines.at(-1)?.classList.contains('meo-md-html-source-range-end') ?? false
+      };
+    });
+    if (
+      !hybridSourceMode.rawOpeningVisible || !hybridSourceMode.markdownBodyVisible ||
+      !hybridSourceMode.previewToggleVisible || hybridSourceMode.summaryWidgetVisible ||
+      hybridSourceMode.sourceRangeLineCount !== 8 ||
+      !hybridSourceMode.sourceRangeStart || !hybridSourceMode.sourceRangeEnd
+    ) {
+      throw new Error(`Hybrid details source mode was not fully editable: ${JSON.stringify(hybridSourceMode)}`);
+    }
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.meo-md-html-preview-toggle')!.click();
+    });
+    await waitForFrames(page, 6);
+    const hybridSummaryPoint = await page.$eval('.meo-md-details-summary', (element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + Math.min(90, rect.width / 2), y: rect.top + rect.height / 2, top: rect.top };
+    });
+    await page.mouse.click(hybridSummaryPoint.x, hybridSummaryPoint.y);
+    await waitForFrames(page, 8);
+    const hybridExpanded = await page.evaluate(() => ({
+      bodyVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .some((line) => line.textContent?.includes('Hybrid body')),
+      listVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .some((line) => line.textContent?.includes('hybrid markdown list item')),
+      summaryTop: document.querySelector<HTMLElement>('.meo-md-details-summary')?.getBoundingClientRect().top ?? null
+    }));
+    if (
+      !hybridExpanded.bodyVisible || !hybridExpanded.listVisible || hybridExpanded.summaryTop === null ||
+      Math.abs(hybridExpanded.summaryTop - hybridSummaryPoint.top) > 1
+    ) {
+      throw new Error(`Hybrid details did not expand Markdown content in place: ${JSON.stringify({ hybridSummaryPoint, hybridExpanded })}`);
     }
 
     const quoteSource = [

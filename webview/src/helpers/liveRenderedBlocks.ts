@@ -5,6 +5,7 @@ import { resolvedSyntaxTree } from './markdownSyntax';
 import { getMermaidColonBlocks, rangeOverlapsMermaidColonBlock } from './mermaidColonBlocks';
 import { collectLatexMathRanges, resolveFencedDisplayMathInnerLineRange } from './math';
 import { isTableDelimiterLine, parseTableInfo } from './tables';
+import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';
 
 type LineFlagLike = {
   added?: boolean;
@@ -13,7 +14,7 @@ type LineFlagLike = {
   trailingEofProxyOnly?: boolean;
 } | undefined;
 
-export type LiveRenderedBlockKind = 'table' | 'mermaid' | 'math';
+export type LiveRenderedBlockKind = 'table' | 'mermaid' | 'math' | 'html';
 export type LiveGitChangeKind = 'added' | 'modified' | 'deleted';
 
 export interface LiveRenderedBlock {
@@ -210,6 +211,7 @@ export function getLiveRenderedBlocks(state: EditorState): LiveRenderedBlock[] {
   const parsedTableRanges: Array<{ from: number; to: number }> = [];
   const mermaidColonBlocks = getMermaidColonBlocks(state);
   const codeLikeRanges = collectCodeLikeRanges(tree, mermaidColonBlocks);
+  const htmlEditingRange = getHtmlEditingRange(state);
 
   tree.iterate({
     enter(node) {
@@ -279,6 +281,15 @@ export function getLiveRenderedBlocks(state: EditorState): LiveRenderedBlock[] {
       }
       blocks.push(block);
     }
+  }
+
+  for (const htmlBlock of collectRenderableHtmlBlocks(state)) {
+    if (htmlEditingRange?.from === htmlBlock.from) continue;
+    const block = createRenderedBlock('html', htmlBlock.startLine, htmlBlock.endLine, null);
+    if (!block) continue;
+    block.lineNumberHiddenFrom = htmlBlock.startLine + 1;
+    block.lineNumberHiddenTo = htmlBlock.endLine;
+    blocks.push(block);
   }
 
   blocks.push(...detectFallbackTableBlocks(state, tree, parsedTableRanges, mermaidColonBlocks));
