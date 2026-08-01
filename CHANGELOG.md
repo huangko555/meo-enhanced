@@ -3,6 +3,15 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.0
+- Added independent Light and Dark editor appearances with per-window switching and persisted defaults for newly opened editors.
+- Added safe inline and block HTML rendering, source editing, link navigation, and consistent Preview and export output for supported elements.
+- Added `==highlighted text==` across Live, Source, Preview, tables, and exported documents.
+- Added responsive Mermaid and block formula layouts with stable Source, Split, and Preview interactions, zoom controls, and export fitting.
+- Improved change indicators, long-document scrollbar stability, and viewport preservation around rendered blocks and code fences.
+- Refined table editing controls, sticky headers, shared floating controls, segmented controls, and scroll-to-top presentation.
+- Added bilingual English and Simplified Chinese documentation with an updated Dark and Light feature overview.
+
 ## MEO Enhanced 0.2.0
 - Prepared the first Visual Studio Marketplace release under the independent `huangko555.meo-enhanced` extension identity.
 - Added document scroll-to-top controls for quickly returning to the beginning of long documents.
