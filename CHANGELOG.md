@@ -3,6 +3,9 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.2
+- Refined HTML editing controls and block backgrounds across dark and light appearances.
+
 ## 0.3.1
 - Improved dark editor background contrast
 
