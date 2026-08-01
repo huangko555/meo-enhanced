@@ -76,6 +76,35 @@ async function main() {
       ].join('\n'));
       const longChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
       const longInitiallyHidden = !longChrome || getComputedStyle(longChrome).display === 'none';
+      const longScroller = longEditor.view.scrollDOM as HTMLElement;
+      const originalTable = document.querySelector<HTMLElement>('.meo-md-html-table')!;
+      const originalHeader = originalTable.querySelector<HTMLElement>('thead')!;
+      const originalHeaderInput = originalHeader.querySelector<HTMLTextAreaElement>('textarea')!;
+      originalHeaderInput.focus({ preventScroll: true });
+      const initialScrollerRect = longScroller.getBoundingClientRect();
+      const activeStickyTop = initialScrollerRect.top + 24;
+      longScroller.scrollTop += Math.max(1, originalHeader.getBoundingClientRect().top - activeStickyTop - 2);
+      longScroller.dispatchEvent(new Event('scroll'));
+      await waitFrames();
+      const beforeThresholdChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
+      const beforeThresholdState = {
+        stickyVisible: Boolean(beforeThresholdChrome && getComputedStyle(beforeThresholdChrome).display !== 'none'),
+        originalHeaderTop: originalHeader.getBoundingClientRect().top,
+        stickyTop: activeStickyTop
+      };
+      longScroller.scrollTop += Math.max(1, originalHeader.getBoundingClientRect().top - activeStickyTop + 1);
+      longScroller.dispatchEvent(new Event('scroll'));
+      await waitFrames();
+      const atThresholdChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
+      const atThresholdState = {
+        stickyVisible: Boolean(atThresholdChrome && getComputedStyle(atThresholdChrome).display !== 'none'),
+        originalHeaderTop: originalHeader.getBoundingClientRect().top,
+        stickyTop: activeStickyTop
+      };
+      originalHeaderInput.blur();
+      longScroller.scrollTop = 0;
+      longScroller.dispatchEvent(new Event('scroll'));
+      await waitFrames();
       await scrollPastHeader(longEditor);
       const scrollerRect = longEditor.view.scrollDOM.getBoundingClientRect();
       const visibleChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
@@ -158,7 +187,6 @@ async function main() {
       const syncedHeaderText = document.querySelector<HTMLElement>(
         '.meo-md-html-table-sticky-header th:first-child'
       )?.textContent?.trim() ?? '';
-      const longScroller = longEditor.view.scrollDOM as HTMLElement;
       longScroller.scrollTop = longScroller.scrollHeight - longScroller.clientHeight;
       longScroller.dispatchEvent(new Event('scroll'));
       await waitFrames();
@@ -215,6 +243,7 @@ async function main() {
       await waitFrames();
       const toolbarElement = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
       const toolbarButton = toolbarElement.querySelector<HTMLElement>('.meo-md-html-table-toolbar-btn')!;
+      const deleteButton = toolbarElement.querySelector<HTMLElement>('[aria-label="Delete row"]')!;
       const sortButton = toolbarElement.querySelector<HTMLButtonElement>('[aria-label^="Sort selected column"]')!;
       sortButton.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames();
@@ -223,7 +252,17 @@ async function main() {
         toolbarHeight: toolbarElement.getBoundingClientRect().height,
         buttonHeight: toolbarButton.getBoundingClientRect().height,
         applyHeight: applyButton.getBoundingClientRect().height,
-        applyVisible: getComputedStyle(applyButton).display !== 'none'
+        applyVisible: getComputedStyle(applyButton).display !== 'none',
+        applyInsideToolbar: applyButton.parentElement === toolbarElement,
+        usesSharedSurface: toolbarElement.classList.contains('meo-visual-surface'),
+        usesSharedButtons: toolbarButton.classList.contains('meo-visual-control-btn'),
+        toolbarShadow: getComputedStyle(toolbarElement).boxShadow,
+        toolbarOutlineStyle: getComputedStyle(toolbarElement).outlineStyle,
+        toolbarOutlineWidth: getComputedStyle(toolbarElement).outlineWidth,
+        deleteColor: getComputedStyle(deleteButton).color,
+        regularColor: getComputedStyle(toolbarButton).color,
+        applyBackground: getComputedStyle(applyButton, '::before').backgroundColor,
+        applyShadow: getComputedStyle(applyButton, '::before').boxShadow
       };
       toolbarEditor.destroy();
 
@@ -281,6 +320,8 @@ async function main() {
         passiveState,
         resizeState,
         activeState,
+        beforeThresholdState,
+        atThresholdState,
         inactiveState,
         syncedHeaderText,
         hiddenAtTableEnd,
@@ -293,6 +334,17 @@ async function main() {
     });
 
     const failures: string[] = [];
+    if (
+      result.beforeThresholdState.stickyVisible ||
+      result.beforeThresholdState.originalHeaderTop <= result.beforeThresholdState.stickyTop ||
+      !result.atThresholdState.stickyVisible ||
+      result.atThresholdState.originalHeaderTop > result.atThresholdState.stickyTop + 1
+    ) {
+      failures.push(`sticky header did not take over at the header top edge: ${JSON.stringify({
+        before: result.beforeThresholdState,
+        at: result.atThresholdState
+      })}`);
+    }
     if (
       !result.passiveState.initiallyHidden ||
       !result.passiveState.visible ||
@@ -345,6 +397,15 @@ async function main() {
     }
     if (
       !result.toolbarSizeState.applyVisible ||
+      !result.toolbarSizeState.applyInsideToolbar ||
+      !result.toolbarSizeState.usesSharedSurface ||
+      !result.toolbarSizeState.usesSharedButtons ||
+      result.toolbarSizeState.toolbarShadow !== 'none' ||
+      result.toolbarSizeState.toolbarOutlineStyle !== 'solid' ||
+      Number.parseFloat(result.toolbarSizeState.toolbarOutlineWidth) < 1 ||
+      result.toolbarSizeState.deleteColor === result.toolbarSizeState.regularColor ||
+      result.toolbarSizeState.applyBackground === 'rgba(0, 0, 0, 0)' ||
+      result.toolbarSizeState.applyShadow !== 'none' ||
       result.toolbarSizeState.toolbarHeight < 24 ||
       result.toolbarSizeState.buttonHeight < 20 ||
       result.toolbarSizeState.applyHeight < 22

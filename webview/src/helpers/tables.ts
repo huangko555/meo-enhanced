@@ -3514,7 +3514,7 @@ class HtmlTableWidget extends WidgetType {
     const controlsHeight = controlsVisible ? tableToolbarHeight : 0;
     const stickyHeaderTop = scrollerRect.top + controlsHeight;
     const tableNeedsStickyHeader = tableRect.height >= scrollerRect.height * minimumStickyTableViewportRatio;
-    const reachedStickyThreshold = tableHasReachedStickyThreshold(tableRect, scrollerRect);
+    const reachedStickyThreshold = headerRect.top <= stickyHeaderTop;
     const enoughContentRemains = tableRect.bottom >= stickyHeaderTop + headerRect.height + stickyHeaderSeparatorDepth;
     const visibleLeft = Math.max(tableRect.left, scrollerRect.left);
     const visibleRight = Math.min(tableRect.right, scrollerRect.right);
@@ -3770,7 +3770,7 @@ class HtmlTableWidget extends WidgetType {
     const button = document.createElement('button');
     button.type = 'button';
     button.tabIndex = -1;
-    button.className = 'meo-md-html-table-toolbar-btn';
+    button.className = 'meo-visual-control-btn meo-md-html-table-toolbar-btn';
     button.title = label;
     button.setAttribute('aria-label', label);
     button.appendChild(this.createToolbarIcon(icon));
@@ -3796,7 +3796,7 @@ class HtmlTableWidget extends WidgetType {
 
   createTableToolbar(container) {
     const toolbar = document.createElement('div');
-    toolbar.className = 'meo-md-html-table-toolbar';
+    toolbar.className = 'meo-visual-surface meo-md-html-table-toolbar';
     toolbar.setAttribute('aria-label', 'Table actions');
 
     const insertRowAbove = this.createToolbarButton('Insert row above', tableToolbarIcons.rowInsertTop, () => {
@@ -3905,6 +3905,7 @@ class HtmlTableWidget extends WidgetType {
       event.preventDefault();
       event.stopPropagation();
     });
+    toolbar.appendChild(applySortButton);
 
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
@@ -4021,7 +4022,7 @@ class HtmlTableWidget extends WidgetType {
     if (diffGutter instanceof HTMLElement) diffGutter.appendChild(diffMarkerLayer);
     this.cleanupFns.push(() => diffMarkerLayer.remove());
     wrap.append(table);
-    shell.append(toolbar, wrap, applySortButton, stickyChrome);
+    shell.append(toolbar, wrap, stickyChrome);
     this.domRefs = {
       shell,
       wrap,
