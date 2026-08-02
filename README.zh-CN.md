@@ -6,14 +6,14 @@ Edit complex Markdown and see every addition, modification, and deletion as you 
 在 VS Code 中编辑复杂 Markdown，并在工作过程中清楚看到每一处新增、修改与删除。
 
 <p align="center">
-  <a href="./README.md">English</a> · <strong>简体中文</strong>
+  <a href="https://github.com/huangko555/meo-enhanced/blob/main/README.md">English</a> · <strong>简体中文</strong>
 </p>
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced">从 VS Code Marketplace 安装</a> ·
   <a href="https://github.com/huangko555/meo-enhanced/releases">下载 VSIX</a> ·
-  <a href="./CHANGELOG.md">查看变更记录</a> ·
-  <a href="./docs/theming.md">主题配置</a>
+  <a href="https://github.com/huangko555/meo-enhanced/blob/main/CHANGELOG.md">查看变更记录</a> ·
+  <a href="https://github.com/huangko555/meo-enhanced/blob/main/docs/theming.md">主题配置</a>
 </p>
 
 ![MEO Enhanced 在同一份 Live 文档中显示独立的深色和浅色外观](docs/readme/editor-appearance-dark-light.png)
