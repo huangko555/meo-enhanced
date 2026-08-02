@@ -2,7 +2,7 @@
   "name": "meo-enhanced",
   "displayName": "MEO Enhanced - Markdown Editor",
   "description": "An enhanced Markdown editor with live editing mode for VS Code.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "huangko555",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
