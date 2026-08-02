@@ -475,6 +475,10 @@ a {
   text-underline-offset: 3px;
 }
 
+u {
+  text-decoration: underline;
+}
+
 sup.footnote-ref {
   font-size: 0.8em;
   line-height: 1;

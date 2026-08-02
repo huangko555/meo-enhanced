@@ -366,7 +366,7 @@ function addInlineHtmlDecorations(
   activeLines: ReadonlySet<number>,
   blockRanges: readonly RenderableHtmlBlock[]
 ): void {
-  const pattern = /<(strong|b|em|i|del|s|mark|code|span|sub|sup|a)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+  const pattern = /<(strong|b|em|i|del|s|mark|code|span|sub|sup|u|a)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     if (activeLines.has(lineNo)) continue;
     const line = state.doc.line(lineNo);

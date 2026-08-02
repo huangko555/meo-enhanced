@@ -98,6 +98,8 @@ try {
       tableHighlight: Array.from(document.querySelectorAll('.meo-md-highlight'))
         .find((node) => node.textContent?.includes('表格'))?.textContent ?? null,
       toolbarButton: Boolean(menu.querySelector('[data-action="highlight"]')),
+      underlineToolbarButton: Boolean(menu.querySelector('[data-action="underline"]')),
+      lastToolbarAction: lastButton?.dataset.action ?? null,
       toolbarGeometry: {
         outerRadius: getComputedStyle(menu).borderRadius,
         innerRadius: firstButton ? getComputedStyle(firstButton).borderRadius : null,
@@ -113,7 +115,13 @@ try {
   if (!live.highlightTexts.some((text) => text?.includes('高亮')) || live.emptyLineHighlighted) {
     throw new Error(`Live highlight parsing failed: ${JSON.stringify(live)}`);
   }
-  if (!live.tableHighlight?.includes('表格') || !live.toolbarButton || !live.headingHighlight) {
+  if (
+    !live.tableHighlight?.includes('表格') ||
+    !live.toolbarButton ||
+    !live.underlineToolbarButton ||
+    live.lastToolbarAction !== 'underline' ||
+    !live.headingHighlight
+  ) {
     throw new Error(`Highlight integration is incomplete: ${JSON.stringify(live)}`);
   }
   const toolbarInsets = [
@@ -147,6 +155,18 @@ try {
     return editor.getText();
   });
   if (!formattedText.includes('==格式化目标==')) throw new Error('Highlight toolbar action did not wrap the selection');
+
+  const underlinedText = await page.evaluate(() => {
+    const editor = (window as any).__highlightEditor;
+    const text = editor.getText();
+    const from = text.indexOf('格式化目标');
+    editor.view.dispatch({ selection: { anchor: from, head: from + '格式化目标'.length } });
+    editor.insertFormat('underline');
+    return editor.getText();
+  });
+  if (!underlinedText.includes('==<u>格式化目标</u>==')) {
+    throw new Error(`Underline toolbar action did not wrap the selection: ${underlinedText}`);
+  }
 
   console.log('Highlight syntax test passed');
 } finally {

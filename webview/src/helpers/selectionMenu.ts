@@ -1,4 +1,4 @@
-import { createElement, Bold, Italic, Strikethrough, Highlighter, Terminal, Link, Brackets, Keyboard } from 'lucide';
+import { createElement, Bold, Italic, Strikethrough, Highlighter, Terminal, Link, Brackets, Keyboard, Underline } from 'lucide';
 
 export interface SelectionMenuElements {
   menu: HTMLDivElement;
@@ -45,6 +45,7 @@ export const createSelectionMenu = (): SelectionMenuElements => {
   const selectionLinkBtn = createSelectionActionButton('link', 'Link', Link);
   const selectionWikiLinkBtn = createSelectionActionButton('wikiLink', 'Wiki Link', Brackets);
   const selectionKbdBtn = createSelectionActionButton('kbd', 'Kbd', Keyboard);
+  const selectionUnderlineBtn = createSelectionActionButton('underline', 'Underline', Underline);
   const suggestions = document.createElement('div');
   suggestions.className = 'selection-inline-suggestions';
   suggestions.setAttribute('role', 'group');
@@ -59,6 +60,7 @@ export const createSelectionMenu = (): SelectionMenuElements => {
     selectionLinkBtn,
     selectionWikiLinkBtn,
     selectionKbdBtn,
+    selectionUnderlineBtn,
     suggestions
   );
 

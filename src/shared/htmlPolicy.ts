@@ -28,6 +28,7 @@ export const supportedHtmlTags = new Set([
   'th',
   'thead',
   'tr',
+  'u',
   'ul'
 ]);
 

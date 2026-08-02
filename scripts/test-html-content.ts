@@ -71,7 +71,7 @@ async function main() {
 
     const source = [
       ...Array.from({ length: 20 }, (_, index) => `prelude ${index + 1}`),
-      'Inline <strong>bold</strong> and <a href="https://example.com">external</a>.',
+      'Inline <strong>bold</strong>, <u>underlined</u>, and <a href="https://example.com">external</a>.',
       '',
       '<p align="center">',
       '  <a href="#html-target">English</a> ·',
@@ -144,6 +144,7 @@ async function main() {
       const block = document.querySelector<HTMLElement>('.meo-md-html-block[data-meo-html-from]');
       const blockStyle = block ? getComputedStyle(block) : null;
       const inlineStrong = document.querySelector<HTMLElement>('.meo-md-html-strong');
+      const inlineUnderline = document.querySelector<HTMLElement>('.meo-md-html-u');
       const unsupportedLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((line) => line.textContent?.includes('Unsupported source remains visible'));
       const safeBlock = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-block'))
@@ -185,6 +186,8 @@ async function main() {
         blockWhiteSpace: blockStyle?.whiteSpace ?? '',
         blockLinkButtons: block?.querySelectorAll('.meo-md-link-open-btn').length ?? 0,
         inlineStrongText: inlineStrong?.textContent ?? '',
+        inlineUnderlineText: inlineUnderline?.textContent ?? '',
+        inlineUnderlineDecoration: inlineUnderline ? getComputedStyle(inlineUnderline).textDecorationLine : '',
         inlineLinkButtons: document.querySelectorAll('.meo-md-html-inline-link-button').length,
         unsupportedText: unsupportedLine?.textContent ?? '',
         unsupportedWarning: Boolean(unsupportedLine?.querySelector('.meo-md-html-warning')),
@@ -237,6 +240,8 @@ async function main() {
       initial.blockBorderTop !== '0px' ||
       initial.blockLinkButtons !== 2 ||
       initial.inlineStrongText !== 'bold' ||
+      initial.inlineUnderlineText !== 'underlined' ||
+      initial.inlineUnderlineDecoration !== 'underline' ||
       initial.inlineLinkButtons !== 1 ||
       !initial.unsupportedText.includes('<section>') ||
       !initial.unsupportedWarning ||

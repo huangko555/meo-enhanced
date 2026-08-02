@@ -2558,6 +2558,11 @@ body {
   text-decoration: line-through;
 }
 
+.cm-editor .meo-md-html-content u,
+.cm-editor .meo-md-html-inline u {
+  text-decoration: underline;
+}
+
 .cm-editor .meo-md-html-inline mark {
   color: inherit;
   background: color-mix(in srgb, #ffd60a 34%, transparent);

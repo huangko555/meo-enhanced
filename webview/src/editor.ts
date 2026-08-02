@@ -1004,6 +1004,8 @@ export function createEditor({
         return wrapActiveTableInputSelection(input, '`', '`', { toggle: false, selectWrapped: false });
       case 'kbd':
         return wrapActiveTableInputSelection(input, '<kbd>', '</kbd>');
+      case 'underline':
+        return wrapActiveTableInputSelection(input, '<u>', '</u>');
       case 'bold':
         return wrapActiveTableInputSelection(input, '**');
       case 'italic':
@@ -2646,6 +2648,8 @@ export function createEditor({
           return insertInlineCode(view, inlineSelection());
         case 'kbd':
           return insertKbd(view, inlineSelection());
+        case 'underline':
+          return insertUnderline(view, inlineSelection());
         case 'bold':
           return insertInlineFence(view, inlineSelection(), '**');
         case 'italic':
@@ -3282,6 +3286,10 @@ function toggleInlineWrapper(view, selection, openMarker, closeMarker = openMark
 
 function insertKbd(view, selection) {
   return toggleInlineWrapper(view, selection, '<kbd>', '</kbd>');
+}
+
+function insertUnderline(view, selection) {
+  return toggleInlineWrapper(view, selection, '<u>', '</u>');
 }
 
 function insertInlineFence(view, selection, marker) {

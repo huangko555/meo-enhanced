@@ -37,6 +37,11 @@ const transformedSources = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview-source-map.md',
   target: 'html'
 });
+const rawHtmlUnderline = renderMarkdownToHtml({
+  markdownText: 'Before <u>underlined</u> after',
+  markdownFilePath: 'C:/tmp/preview-html-underline.md',
+  target: 'html'
+});
 const nestedIndentedTable = renderMarkdownToHtml({
   markdownText: [
     '- Parent list item',
@@ -155,6 +160,9 @@ if (!transformedSources.html.includes('<h2 data-source-line="8"')) {
 if (!transformedSources.html.includes('class="meo-export-frontmatter" data-source-line="1" data-source-end-line="3"')) {
   throw new Error('Preview frontmatter must participate in viewport position mapping');
 }
+if (!rawHtmlUnderline.html.includes('<u>underlined</u>')) {
+  throw new Error(`Preview must preserve safe HTML underline tags: ${rawHtmlUnderline.html}`);
+}
 if (
   !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-header"')
   || !propertiesFrontmatter.html.includes('>Properties<')
@@ -234,6 +242,9 @@ const darkExportStyles = buildExportStyles(defaultThemeSettings, environment, 'd
 
 if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(darkPreviewStyles)) {
   throw new Error('Preview level-one and level-two headings must render the shared divider line');
+}
+if (!/u\s*\{[^}]*text-decoration:\s*underline;/s.test(darkPreviewStyles)) {
+  throw new Error('Preview and export styles must render HTML underline tags');
 }
 if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(exportStyles)) {
   throw new Error('Export headings must match the Preview divider line');
