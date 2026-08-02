@@ -3,6 +3,9 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.4
+- Fixed README navigation links
+
 ## 0.3.3
 - Added underline HTML support
 
