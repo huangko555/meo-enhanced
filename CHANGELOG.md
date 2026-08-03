@@ -3,6 +3,11 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.5
+- Added session-only Markdown table column resizing, including sticky headers.
+- Stabilized code, Mermaid, and formula block controls across hover and mode changes.
+- Refined task checkbox outlines to match the desktop note style.
+
 ## 0.3.4
 - Fixed README navigation links
 
