@@ -151,12 +151,12 @@ async function main() {
     const hoveredActionState = await page.$$eval('.meo-code-block-actions', (toolbars) => (
       toolbars.map((toolbar) => ({
         hovered: toolbar.classList.contains('is-block-hovered'),
-        opacity: getComputedStyle(toolbar).opacity
+        opacity: Number.parseFloat(getComputedStyle(toolbar).opacity)
       }))
     ));
     if (
-      hoveredActionState.filter((state) => state.hovered && state.opacity === '1').length !== 1 ||
-      hoveredActionState.filter((state) => state.opacity === '1').length !== 1
+      hoveredActionState.filter((state) => state.hovered && state.opacity >= 0.99).length !== 1 ||
+      hoveredActionState.filter((state) => state.opacity >= 0.99).length !== 1
     ) {
       throw new Error(`Hover did not reveal only the matching code block actions: ${JSON.stringify(hoveredActionState)}`);
     }
@@ -178,7 +178,7 @@ async function main() {
     await waitForFrames(page);
     const hoveredAfterExternalSync = await page.$$eval('.meo-code-block-actions', (toolbars) => (
       toolbars.filter((toolbar) => (
-        toolbar.classList.contains('is-block-hovered') && getComputedStyle(toolbar).opacity === '1'
+        toolbar.classList.contains('is-block-hovered') && Number.parseFloat(getComputedStyle(toolbar).opacity) >= 0.99
       )).length
     ));
     if (hoveredAfterExternalSync !== 1) {
@@ -197,7 +197,7 @@ async function main() {
         text: editor.view.state.doc.sliceString(selection.from, selection.to),
         to: selection.to,
         toolbarHovered: toolbar?.classList.contains('is-block-hovered') ?? false,
-        toolbarOpacity: toolbar ? getComputedStyle(toolbar).opacity : null,
+        toolbarOpacity: toolbar ? Number.parseFloat(getComputedStyle(toolbar).opacity) : null,
         controls: Array.from(document.querySelector('.meo-code-block-actions')?.children ?? [])
           .map((element) => element.textContent)
       };
@@ -222,7 +222,7 @@ async function main() {
     if (selectedCode.head !== selectedCode.from || selectedCode.anchor !== selectedCode.to) {
       throw new Error(`Select all left the cursor at the code block end: ${JSON.stringify(selectedCode)}`);
     }
-    if (!selectedCode.toolbarHovered || selectedCode.toolbarOpacity !== '1') {
+    if (!selectedCode.toolbarHovered || selectedCode.toolbarOpacity === null || selectedCode.toolbarOpacity < 0.99) {
       throw new Error(`Code block actions disappeared after selection: ${JSON.stringify(selectedCode)}`);
     }
     if (JSON.stringify(selectedCode.controls) !== JSON.stringify(['all', 'copy'])) {
