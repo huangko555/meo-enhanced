@@ -161,16 +161,43 @@ async function main() {
       throw new Error(`Hover did not reveal only the matching code block actions: ${JSON.stringify(hoveredActionState)}`);
     }
 
+    await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      editor.setText(`${editor.view.state.doc.toString()}\n`);
+    });
+    await waitForFrames(page);
+    await page.mouse.move(1, 1);
+    const syncedCodeLine = await page.$eval(
+      '.meo-md-code-line-numbered[data-meo-code-line-number="10"]',
+      (line) => {
+        const rect = line.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    );
+    await page.mouse.move(syncedCodeLine.x, syncedCodeLine.y);
+    await waitForFrames(page);
+    const hoveredAfterExternalSync = await page.$$eval('.meo-code-block-actions', (toolbars) => (
+      toolbars.filter((toolbar) => (
+        toolbar.classList.contains('is-block-hovered') && getComputedStyle(toolbar).opacity === '1'
+      )).length
+    ));
+    if (hoveredAfterExternalSync !== 1) {
+      throw new Error('External text sync disabled code block hover actions');
+    }
+
     await page.click('.meo-code-block-actions .meo-select-all-code-btn');
     const selectedCode = await page.evaluate(() => {
       const editor = (window as any).__codeBlockLineNumbersEditor;
       const selection = editor.view.state.selection.main;
+      const toolbar = document.querySelector<HTMLElement>('.meo-code-block-actions');
       return {
         anchor: selection.anchor,
         from: selection.from,
         head: selection.head,
         text: editor.view.state.doc.sliceString(selection.from, selection.to),
         to: selection.to,
+        toolbarHovered: toolbar?.classList.contains('is-block-hovered') ?? false,
+        toolbarOpacity: toolbar ? getComputedStyle(toolbar).opacity : null,
         controls: Array.from(document.querySelector('.meo-code-block-actions')?.children ?? [])
           .map((element) => element.textContent)
       };
@@ -194,6 +221,9 @@ async function main() {
     }
     if (selectedCode.head !== selectedCode.from || selectedCode.anchor !== selectedCode.to) {
       throw new Error(`Select all left the cursor at the code block end: ${JSON.stringify(selectedCode)}`);
+    }
+    if (!selectedCode.toolbarHovered || selectedCode.toolbarOpacity !== '1') {
+      throw new Error(`Code block actions disappeared after selection: ${JSON.stringify(selectedCode)}`);
     }
     if (JSON.stringify(selectedCode.controls) !== JSON.stringify(['all', 'copy'])) {
       throw new Error(`Unexpected code block action order: ${JSON.stringify(selectedCode.controls)}`);

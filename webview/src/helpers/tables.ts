@@ -76,6 +76,7 @@ interface DomRefs {
   rowInputs: HTMLTextAreaElement[][];
   allRowInputs: HTMLTextAreaElement[][];
   table: HTMLTableElement;
+  colgroup: HTMLTableColElement[];
   tbody: HTMLTableSectionElement;
   container: HTMLElement;
   shell: HTMLElement;
@@ -185,10 +186,11 @@ const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
 const tableDelimiterRegex = /^\s*\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
-const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn';
+const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
 const tableToolbarHeight = 24;
 const stickyHeaderSeparatorDepth = 3;
 const minimumStickyTableViewportRatio = 0.5;
+const minimumResizableColumnWidth = 48;
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 function tableHasReachedStickyThreshold(tableRect: DOMRect, scrollerRect: DOMRect) {
@@ -231,6 +233,56 @@ export const tableHeaderAlignmentOverrideField = StateField.define<RangeSet<Tabl
       const columns = new Set(existing?.value.columns ?? []);
       columns.add(effect.value.column);
       const nextValue = new TableHeaderAlignmentOverrideValue(columns);
+      if (existing) existing.value = nextValue;
+      else entries.push({ from: effect.value.from, to: effect.value.to, value: nextValue });
+    }
+    entries.sort((left, right) => left.from - right.from || left.to - right.to);
+    return RangeSet.of(entries.map((entry) => entry.value.range(entry.from, entry.to)), true);
+  }
+});
+
+class TableColumnWidthsValue extends RangeValue {
+  constructor(
+    readonly widths: readonly number[],
+    readonly initialTotalWidth: number
+  ) {
+    super();
+  }
+
+  eq(other: RangeValue): boolean {
+    return other instanceof TableColumnWidthsValue &&
+      other.initialTotalWidth === this.initialTotalWidth &&
+      other.widths.length === this.widths.length &&
+      other.widths.every((width, index) => width === this.widths[index]);
+  }
+}
+
+const setTableColumnWidthsEffect = StateEffect.define<{
+  from: number;
+  to: number;
+  widths: number[];
+  initialTotalWidth: number;
+}>();
+
+export const tableColumnWidthsField = StateField.define<RangeSet<TableColumnWidthsValue>>({
+  create() {
+    return RangeSet.empty;
+  },
+  update(value, transaction) {
+    const mapped = value.map(transaction.changes);
+    const effects = transaction.effects.filter((effect) => effect.is(setTableColumnWidthsEffect));
+    if (!effects.length) return mapped;
+
+    const entries: Array<{ from: number; to: number; value: TableColumnWidthsValue }> = [];
+    mapped.between(0, transaction.state.doc.length, (from, to, rangeValue) => {
+      entries.push({ from, to, value: rangeValue });
+    });
+    for (const effect of effects) {
+      const nextValue = new TableColumnWidthsValue(
+        [...effect.value.widths],
+        effect.value.initialTotalWidth
+      );
+      const existing = entries.find((entry) => entry.from === effect.value.from && entry.to === effect.value.to);
       if (existing) existing.value = nextValue;
       else entries.push({ from: effect.value.from, to: effect.value.to, value: nextValue });
     }
@@ -1874,6 +1926,7 @@ class HtmlTableWidget extends WidgetType {
   sortState: TableSortState | null;
   activeTarget: TableActionTarget;
   searchState: TableSearchState | null;
+  columnResizeCleanup: (() => void) | null;
 
   constructor(tableData: TableData) {
     super();
@@ -1891,6 +1944,7 @@ class HtmlTableWidget extends WidgetType {
     this.sortState = null;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
     this.searchState = null;
+    this.columnResizeCleanup = null;
   }
 
   eq(other: WidgetType): boolean {
@@ -3380,6 +3434,102 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
+  storedColumnWidths(view: EditorView): TableColumnWidthsValue | null {
+    const ranges = view.state.field(tableColumnWidthsField, false);
+    if (!ranges || !Number.isFinite(this.tableData.from) || !Number.isFinite(this.tableData.to)) return null;
+    let result: TableColumnWidthsValue | null = null;
+    ranges.between(this.tableData.from!, this.tableData.to!, (from, to, value) => {
+      if (from === this.tableData.from && to === this.tableData.to) result = value;
+    });
+    return result?.widths.length === this.tableData.colCount ? result : null;
+  }
+
+  applyColumnWidths(widths: readonly number[]) {
+    if (!this.domRefs || widths.length !== this.tableData.colCount) return;
+    const { table, colgroup } = this.domRefs;
+    const totalWidth = widths.reduce((total, width) => total + width, 0);
+    table.style.width = `${totalWidth}px`;
+    table.style.maxWidth = 'none';
+    table.style.tableLayout = 'fixed';
+    for (let index = 0; index < colgroup.length; index += 1) {
+      colgroup[index].style.width = `${widths[index]}px`;
+    }
+    this.pendingResizeRows = true;
+    this.scheduleLayout({ resizeRows: true });
+  }
+
+  createColumnResizeHandle(column: number): HTMLSpanElement {
+    const handle = document.createElement('span');
+    handle.className = 'meo-md-html-table-column-resize-handle';
+    handle.dataset.tableResizeColumn = String(column);
+    handle.setAttribute('aria-hidden', 'true');
+    handle.addEventListener('pointerdown', (event) => this.startColumnResize(event, column));
+    return handle;
+  }
+
+  startColumnResize(event: PointerEvent, column: number) {
+    if (event.button !== 0 || !this.domRefs || !this.view) return;
+    const { table, wrap } = this.domRefs;
+    const headerCells = Array.from(table.tHead?.rows[0]?.cells ?? []);
+    if (!headerCells[column]) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.columnResizeCleanup?.();
+
+    const stored = this.storedColumnWidths(this.view);
+    const startWidths = stored
+      ? [...stored.widths]
+      : headerCells.map((cell) => cell.getBoundingClientRect().width);
+    const initialTotalWidth = stored?.initialTotalWidth ?? table.getBoundingClientRect().width;
+    const startTotalWidth = startWidths.reduce((total, width) => total + width, 0);
+    const maximumTotalWidth = wrap.clientWidth;
+    const startColumnWidth = startWidths[column];
+    const startX = event.clientX;
+    let nextWidths = startWidths;
+
+    const removeListeners = () => {
+      window.removeEventListener('pointermove', onPointerMove, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      this.columnResizeCleanup = null;
+    };
+    const finish = (finishEvent?: PointerEvent) => {
+      if (finishEvent && finishEvent.pointerId !== event.pointerId) return;
+      removeListeners();
+      const view = this.view;
+      if (!view || !this.domRefs) return;
+      const range = this.resolveCurrentTableRange(view, this.domRefs.shell);
+      if (!range) return;
+      view.dispatch({
+        effects: setTableColumnWidthsEffect.of({
+          ...range,
+          widths: [...nextWidths],
+          initialTotalWidth
+        })
+      });
+    };
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== event.pointerId) return;
+      moveEvent.preventDefault();
+      const requestedDelta = moveEvent.clientX - startX;
+      const minimumDelta = Math.max(
+        minimumResizableColumnWidth - startColumnWidth,
+        initialTotalWidth - startTotalWidth
+      );
+      const maximumDelta = Math.max(0, maximumTotalWidth - startTotalWidth);
+      const delta = Math.min(maximumDelta, Math.max(minimumDelta, requestedDelta));
+      nextWidths = [...startWidths];
+      nextWidths[column] = startColumnWidth + delta;
+      this.applyColumnWidths(nextWidths);
+    };
+
+    this.columnResizeCleanup = removeListeners;
+    window.addEventListener('pointermove', onPointerMove, true);
+    window.addEventListener('pointerup', finish, true);
+    window.addEventListener('pointercancel', finish, true);
+  }
+
   resizeRow(row, rowInputs = null) {
     if (!row) return;
     const textareas = rowInputs ?? Array.from(row.querySelectorAll('textarea'));
@@ -3468,7 +3618,7 @@ class HtmlTableWidget extends WidgetType {
         link.removeAttribute('href');
         link.removeAttribute('tabindex');
       }
-      cell.appendChild(preview);
+      cell.append(preview, this.createColumnResizeHandle(column));
       return cell;
     });
     stickyHeaderRow.replaceChildren(...nextCells);
@@ -3910,6 +4060,10 @@ class HtmlTableWidget extends WidgetType {
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
     table.tabIndex = -1;
+    const colgroupElement = document.createElement('colgroup');
+    const colgroup = Array.from({ length: this.tableData.colCount }, () => document.createElement('col'));
+    colgroupElement.append(...colgroup);
+    table.appendChild(colgroupElement);
     const rowEntries = [];
     const headerInputs = [];
     const cellGrid = [];
@@ -3941,6 +4095,7 @@ class HtmlTableWidget extends WidgetType {
       headerInputs.push(input);
       headerCells.push(th);
       th.appendChild(content);
+      th.appendChild(this.createColumnResizeHandle(col));
 
       headerRow.appendChild(th);
     }
@@ -4027,6 +4182,7 @@ class HtmlTableWidget extends WidgetType {
       shell,
       wrap,
       table,
+      colgroup,
       tbody,
       container: shell,
       lineNumberLayer,
@@ -4049,6 +4205,8 @@ class HtmlTableWidget extends WidgetType {
       toolbarButtons
     };
     this.refreshStickyHeaderContent();
+    const storedColumnWidths = this.storedColumnWidths(view);
+    if (storedColumnWidths) this.applyColumnWidths(storedColumnWidths.widths);
     this.updateActionTargetStyles();
     this.wireTableSelection(table);
     this.pendingResizeRows = true;
@@ -4080,6 +4238,8 @@ class HtmlTableWidget extends WidgetType {
   }
 
   destroy(dom) {
+    this.columnResizeCleanup?.();
+    this.columnResizeCleanup = null;
     this.setTableInteractionActive(dom, false);
     for (const cleanup of this.cleanupFns) cleanup();
     this.cleanupFns = [];

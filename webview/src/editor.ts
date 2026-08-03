@@ -50,6 +50,7 @@ import {
   refreshTableLocalLinkIndicators,
   tableCellEditorOffsetToSourceOffset,
   tableCellSourceOffsetToEditorOffset,
+  tableColumnWidthsField,
   tableHeaderAlignmentOverrideField
 } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
@@ -308,6 +309,7 @@ export function createEditor({
   let suppressSelectionMenuForNativeHtml = false;
   let onBlockActionPointerMove = null;
   let onBlockActionPointerLeave = null;
+  let blockActionToolbarReconcileFrame: number | null = null;
   let pendingLiveSearchRevealFrame: number | null = null;
   let pendingLiveSearchRevealToken = 0;
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
@@ -320,6 +322,7 @@ export function createEditor({
   let editableLinkHoverPosition = null;
   let editableLinkHoverMode = currentMode;
   let hoveredBlockActionToolbar: HTMLElement | null = null;
+  let hoveredBlockActionRange: { from: number; to: number } | null = null;
   const publishComposedDocumentChange = () => {
     if (!view || applyingExternal || applyingRenumber) {
       return;
@@ -387,13 +390,35 @@ export function createEditor({
     '.meo-mermaid-toolbar',
     '.meo-latex-math-toolbar'
   ].join(', ');
+  const readBlockActionToolbarRange = (toolbar: HTMLElement) => {
+    const from = Number.parseInt(toolbar.dataset.meoBlockFrom ?? '', 10);
+    const to = Number.parseInt(toolbar.dataset.meoBlockTo ?? '', 10);
+    return Number.isFinite(from) && Number.isFinite(to) ? { from, to } : null;
+  };
   const setHoveredBlockActionToolbar = (toolbar: HTMLElement | null) => {
     if (hoveredBlockActionToolbar === toolbar) {
       return;
     }
     hoveredBlockActionToolbar?.classList.remove('is-block-hovered');
     hoveredBlockActionToolbar = toolbar;
+    hoveredBlockActionRange = toolbar ? readBlockActionToolbarRange(toolbar) : null;
     hoveredBlockActionToolbar?.classList.add('is-block-hovered');
+  };
+  const scheduleBlockActionToolbarReconcile = () => {
+    if (blockActionToolbarReconcileFrame !== null || !hoveredBlockActionRange) return;
+    blockActionToolbarReconcileFrame = window.requestAnimationFrame(() => {
+      blockActionToolbarReconcileFrame = null;
+      if (!hoveredBlockActionRange || hoveredBlockActionToolbar?.isConnected) return;
+      const replacement = Array.from(
+        view?.dom.querySelectorAll(blockActionToolbarSelector) ?? []
+      ).find((toolbar) => {
+        if (!(toolbar instanceof HTMLElement)) return false;
+        const range = readBlockActionToolbarRange(toolbar);
+        return range?.from === hoveredBlockActionRange?.from && range.to === hoveredBlockActionRange.to;
+      });
+      hoveredBlockActionToolbar = replacement instanceof HTMLElement ? replacement : null;
+      hoveredBlockActionToolbar?.classList.add('is-block-hovered');
+    });
   };
   const updateBlockActionToolbarHover = (event, editorView) => {
     const targetElement = targetElementFrom(event.target);
@@ -2110,12 +2135,14 @@ export function createEditor({
       }),
       ...headingCollapseSharedExtensions(),
       tableHeaderAlignmentOverrideField,
+      tableColumnWidthsField,
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
       diagnosticDataField,
       diagnosticField,
       EditorView.updateListener.of((update) => {
+        scheduleBlockActionToolbarReconcile();
         viewportController?.reconcileAfterEditorUpdate(
           update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
         );
@@ -2462,6 +2489,18 @@ export function createEditor({
         view.dom.removeEventListener('pointerdown', onHtmlContentPointerDown, true);
         onHtmlContentPointerDown = null;
       }
+      if (onBlockActionPointerMove) {
+        view.dom.removeEventListener('pointermove', onBlockActionPointerMove);
+        onBlockActionPointerMove = null;
+      }
+      if (onBlockActionPointerLeave) {
+        view.dom.removeEventListener('pointerleave', onBlockActionPointerLeave);
+        onBlockActionPointerLeave = null;
+      }
+      if (blockActionToolbarReconcileFrame !== null) {
+        window.cancelAnimationFrame(blockActionToolbarReconcileFrame);
+        blockActionToolbarReconcileFrame = null;
+      }
       if (onDocumentSelectionChange) {
         document.removeEventListener('selectionchange', onDocumentSelectionChange);
         onDocumentSelectionChange = null;
@@ -2519,14 +2558,6 @@ export function createEditor({
         });
       } finally {
         applyingExternal = false;
-      }
-      if (onBlockActionPointerMove) {
-        view.dom.removeEventListener('pointermove', onBlockActionPointerMove);
-        onBlockActionPointerMove = null;
-      }
-      if (onBlockActionPointerLeave) {
-        view.dom.removeEventListener('pointerleave', onBlockActionPointerLeave);
-        onBlockActionPointerLeave = null;
       }
       restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
       pendingExternalUndoSelectionPreserve = true;

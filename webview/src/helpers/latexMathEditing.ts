@@ -144,6 +144,22 @@ function nextLatexMathMode(mode: LatexMathBlockMode): LatexMathBlockMode {
   return 'preview';
 }
 
+const latexToolbarSourceText = Symbol('latexToolbarSourceText');
+type LatexToolbarElement = HTMLSpanElement & {
+  [latexToolbarSourceText]: string;
+};
+
+function updateLatexMathModeButton(button: HTMLButtonElement, mode: LatexMathBlockMode): void {
+  const modeConfig = mode === 'preview'
+    ? { icon: Pencil, label: 'Edit formula in split view' }
+    : mode === 'split'
+      ? { icon: Code2, label: 'Show formula source only' }
+      : { icon: Eye, label: 'Show formula preview' };
+  button.replaceChildren(createElement(modeConfig.icon, { width: 15, height: 15 }));
+  button.setAttribute('aria-label', modeConfig.label);
+  button.title = modeConfig.label;
+}
+
 function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect: StateEffect<unknown>): void {
   const controller = getViewportController(view);
   if (!controller) {
@@ -172,26 +188,22 @@ class LatexMathToolbarWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const toolbar = document.createElement('span');
+    const toolbar = document.createElement('span') as LatexToolbarElement;
     toolbar.className = 'meo-latex-math-toolbar';
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.blockTo);
+    toolbar.dataset.meoLatexMathMode = this.mode;
+    toolbar[latexToolbarSourceText] = this.sourceText;
 
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
     modeButton.className = 'meo-latex-math-mode-btn';
-    const nextMode = nextLatexMathMode(this.mode);
-    const modeConfig = this.mode === 'preview'
-      ? { icon: Pencil, label: 'Edit formula in split view' }
-      : this.mode === 'split'
-        ? { icon: Code2, label: 'Show formula source only' }
-        : { icon: Eye, label: 'Show formula preview' };
-    modeButton.appendChild(createElement(modeConfig.icon, { width: 15, height: 15 }));
-    modeButton.setAttribute('aria-label', modeConfig.label);
-    modeButton.title = modeConfig.label;
+    updateLatexMathModeButton(modeButton, this.mode);
     modeButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      const currentMode = toolbar.dataset.meoLatexMathMode as LatexMathBlockMode;
+      const nextMode = nextLatexMathMode(currentMode);
       preserveAnchorWhileDispatching(
         view,
         this.anchor,
@@ -225,6 +237,21 @@ class LatexMathToolbarWidget extends WidgetType {
 
     toolbar.append(modeButton, selectAllButton, createCopyCodeButton(this.sourceText));
     return toolbar;
+  }
+
+  updateDOM(dom: HTMLElement): boolean {
+    const toolbar = dom as LatexToolbarElement;
+    if (
+      !toolbar.classList.contains('meo-latex-math-toolbar') ||
+      toolbar[latexToolbarSourceText] !== this.sourceText ||
+      toolbar.dataset.meoBlockFrom !== String(this.anchor) ||
+      toolbar.dataset.meoBlockTo !== String(this.blockTo)
+    ) return false;
+    const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
+    if (!modeButton) return false;
+    toolbar.dataset.meoLatexMathMode = this.mode;
+    updateLatexMathModeButton(modeButton, this.mode);
+    return true;
   }
 
   ignoreEvent(): boolean {

@@ -515,8 +515,26 @@ async function main() {
     if (!lineJumpMode.source || lineJumpMode.selectedLine !== 'node24 --> node25') {
       throw new Error(`Line jump did not reveal the target Mermaid source line: ${JSON.stringify(lineJumpMode)}`);
     }
+    await page.evaluate(() => {
+      (window as any).__mermaidToolbarBeforeModeChange = document.querySelector('.meo-mermaid-toolbar');
+      (window as any).__mermaidModeButtonBeforeModeChange = document.querySelector('.meo-mermaid-mode-btn');
+    });
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
+    const mermaidToolbarAfterModeChange = await page.evaluate(() => ({
+      hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
+      opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity,
+      sameToolbar: (window as any).__mermaidToolbarBeforeModeChange === document.querySelector('.meo-mermaid-toolbar'),
+      sameButton: (window as any).__mermaidModeButtonBeforeModeChange === document.querySelector('.meo-mermaid-mode-btn')
+    }));
+    if (
+      !mermaidToolbarAfterModeChange.hovered ||
+      mermaidToolbarAfterModeChange.opacity !== '1' ||
+      !mermaidToolbarAfterModeChange.sameToolbar ||
+      !mermaidToolbarAfterModeChange.sameButton
+    ) {
+      throw new Error(`Mermaid toolbar disappeared after mode change: ${JSON.stringify(mermaidToolbarAfterModeChange)}`);
+    }
 
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(56, 'upper'));
     await waitForFrames(page);
@@ -532,7 +550,26 @@ async function main() {
     if (!latexLineJumpMode.source || latexLineJumpMode.selectedLine !== '\\frac{a}{b}') {
       throw new Error(`Line jump did not reveal the target LaTeX source line: ${JSON.stringify(latexLineJumpMode)}`);
     }
+    await page.evaluate(() => {
+      (window as any).__latexToolbarBeforeModeChange = document.querySelector('.meo-latex-math-toolbar');
+      (window as any).__latexModeButtonBeforeModeChange = document.querySelector('.meo-latex-math-mode-btn');
+    });
     await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page);
+    const latexToolbarAfterModeChange = await page.evaluate(() => ({
+      hovered: document.querySelector('.meo-latex-math-toolbar')?.classList.contains('is-block-hovered'),
+      opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-latex-math-toolbar')!).opacity,
+      sameToolbar: (window as any).__latexToolbarBeforeModeChange === document.querySelector('.meo-latex-math-toolbar'),
+      sameButton: (window as any).__latexModeButtonBeforeModeChange === document.querySelector('.meo-latex-math-mode-btn')
+    }));
+    if (
+      !latexToolbarAfterModeChange.hovered ||
+      latexToolbarAfterModeChange.opacity !== '1' ||
+      !latexToolbarAfterModeChange.sameToolbar ||
+      !latexToolbarAfterModeChange.sameButton
+    ) {
+      throw new Error(`Formula toolbar disappeared after mode change: ${JSON.stringify(latexToolbarAfterModeChange)}`);
+    }
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(1, 'top'));
     await waitForFrames(page);
 

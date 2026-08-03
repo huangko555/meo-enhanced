@@ -150,6 +150,22 @@ function nextMermaidMode(mode: MermaidBlockMode): MermaidBlockMode {
   return 'preview';
 }
 
+const mermaidToolbarCodeContent = Symbol('mermaidToolbarCodeContent');
+type MermaidToolbarElement = HTMLSpanElement & {
+  [mermaidToolbarCodeContent]: string;
+};
+
+function updateMermaidModeButton(button: HTMLButtonElement, mode: MermaidBlockMode): void {
+  const modeConfig = mode === 'preview'
+    ? { icon: Pencil, label: 'Edit Mermaid in split view' }
+    : mode === 'split'
+      ? { icon: Code2, label: 'Show Mermaid code only' }
+      : { icon: Eye, label: 'Show Mermaid preview' };
+  button.replaceChildren(createElement(modeConfig.icon, { width: 15, height: 15 }));
+  button.setAttribute('aria-label', modeConfig.label);
+  button.title = modeConfig.label;
+}
+
 function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect: StateEffect<unknown>): void {
   const controller = getViewportController(view);
   if (!controller) {
@@ -176,27 +192,23 @@ class MermaidToolbarWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const toolbar = document.createElement('span');
+    const toolbar = document.createElement('span') as MermaidToolbarElement;
     toolbar.className = 'meo-mermaid-toolbar';
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
+    toolbar.dataset.meoMermaidMode = this.mode;
+    toolbar[mermaidToolbarCodeContent] = this.codeContent;
 
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
     modeButton.className = 'meo-mermaid-mode-btn';
-    const nextMode = nextMermaidMode(this.mode);
-    const modeConfig = this.mode === 'preview'
-      ? { icon: Pencil, label: 'Edit Mermaid in split view' }
-      : this.mode === 'split'
-        ? { icon: Code2, label: 'Show Mermaid code only' }
-        : { icon: Eye, label: 'Show Mermaid preview' };
-    modeButton.appendChild(createElement(modeConfig.icon, { width: 15, height: 15 }));
-    modeButton.setAttribute('aria-label', modeConfig.label);
-    modeButton.title = modeConfig.label;
+    updateMermaidModeButton(modeButton, this.mode);
 
     const changeMode = (event: Event) => {
       event.preventDefault();
       event.stopPropagation();
+      const currentMode = toolbar.dataset.meoMermaidMode as MermaidBlockMode;
+      const nextMode = nextMermaidMode(currentMode);
       preserveAnchorWhileDispatching(
         view,
         this.anchor,
@@ -232,6 +244,21 @@ class MermaidToolbarWidget extends WidgetType {
 
     toolbar.append(modeButton, selectAllButton, copyButton);
     return toolbar;
+  }
+
+  updateDOM(dom: HTMLElement): boolean {
+    const toolbar = dom as MermaidToolbarElement;
+    if (
+      !toolbar.classList.contains('meo-mermaid-toolbar') ||
+      toolbar[mermaidToolbarCodeContent] !== this.codeContent ||
+      toolbar.dataset.meoBlockFrom !== String(this.anchor)
+    ) return false;
+    const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
+    if (!modeButton) return false;
+    toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
+    toolbar.dataset.meoMermaidMode = this.mode;
+    updateMermaidModeButton(modeButton, this.mode);
+    return true;
   }
 
   ignoreEvent(): boolean {

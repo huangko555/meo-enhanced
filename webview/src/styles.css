@@ -2698,7 +2698,7 @@ body {
   margin: 0;
   padding: 0;
   border: 1.5px solid var(--meo-semantic-taskCheckboxBorder);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--meo-semantic-taskCheckboxBackground);
   cursor: pointer;
   vertical-align: middle;
@@ -4285,6 +4285,17 @@ body.outline-resizing .preview-frame {
   text-align: inherit;
 }
 
+.cm-editor .meo-md-html-table-column-resize-handle {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: -5px;
+  bottom: 0;
+  width: 10px;
+  cursor: col-resize !important;
+  touch-action: none;
+}
+
 .cm-editor .meo-md-html-table-sticky-chrome {
   position: fixed;
   z-index: 210;
@@ -4369,6 +4380,10 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-md-html-table-sticky-chrome * {
   cursor: default !important;
+}
+
+.cm-editor .meo-md-html-table-sticky-chrome .meo-md-html-table-column-resize-handle {
+  cursor: col-resize !important;
 }
 
 .cm-editor .meo-md-html-table-sticky-toolbar-band {
