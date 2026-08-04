@@ -85,6 +85,65 @@ async function main() {
         }
       });
     };
+    const dragHandleToMinimum = async (selector: string) => {
+      const deltaX = await page.$eval(selector, (handle) => {
+        const cell = handle.closest<HTMLElement>('th')!;
+        const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+        const cellStyle = getComputedStyle(cell);
+        const previewStyle = getComputedStyle(preview);
+        const minimumWidth = parseFloat(previewStyle.fontSize)
+          + parseFloat(previewStyle.paddingLeft)
+          + parseFloat(previewStyle.paddingRight)
+          + parseFloat(cellStyle.borderLeftWidth)
+          + parseFloat(cellStyle.borderRightWidth);
+        return minimumWidth - cell.getBoundingClientRect().width;
+      });
+      await dragHandle(selector, deltaX);
+    };
+
+    const exitPoint = await page.$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
+      (handle) => {
+        const rect = handle.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    );
+    await page.mouse.move(exitPoint.x, exitPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(exitPoint.x + 30, exitPoint.y, { steps: 2 });
+    const widthBeforeDocumentExit = await page.$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)',
+      (table) => table.getBoundingClientRect().width
+    );
+    await page.$eval('.cm-editor', (editor) => {
+      editor.dispatchEvent(new PointerEvent('pointerleave', {
+        pointerId: 1,
+        pointerType: 'mouse',
+        buttons: 1
+      }));
+    });
+    await page.mouse.move(exitPoint.x + 90, exitPoint.y, { steps: 2 });
+    const widthAfterDocumentReturn = await page.$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)',
+      (table) => table.getBoundingClientRect().width
+    );
+    await page.mouse.up();
+    if (Math.abs(widthAfterDocumentReturn - widthBeforeDocumentExit) > 2) {
+      throw new Error(`Column resize remained active after leaving the document: ${JSON.stringify({ widthBeforeDocumentExit, widthAfterDocumentReturn })}`);
+    }
+    await page.evaluate(async (markdown) => {
+      (window as any).__tableResizeEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableResizeEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: markdown,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    }, text);
 
     await dragHandle(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
@@ -107,17 +166,129 @@ async function main() {
       throw new Error(`Dragging a separator did not resize only its left column: ${JSON.stringify({ initial, expanded })}`);
     }
 
+    const smoothDragPoint = await page.$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
+      (handle) => {
+        const rect = handle.getBoundingClientRect();
+        const table = handle.closest('table')!;
+        return {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          tableWidth: table.getBoundingClientRect().width
+        };
+      }
+    );
+    await page.evaluate(() => {
+      const table = document.querySelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      (window as any).__resizeRowStyleMutations = 0;
+      (window as any).__resizeRowObserver = new MutationObserver((records) => {
+        (window as any).__resizeRowStyleMutations += records.length;
+      });
+      for (const element of table.querySelectorAll('tbody textarea, tbody .meo-md-html-table-cell-content')) {
+        (window as any).__resizeRowObserver.observe(element, { attributes: true, attributeFilter: ['style'] });
+      }
+    });
+    await page.mouse.move(smoothDragPoint.x, smoothDragPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(smoothDragPoint.x + 40, smoothDragPoint.y);
+    const smoothDragImmediate = await page.$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)',
+      (table) => table.getBoundingClientRect().width
+    );
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const smoothDragSettled = await page.$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)',
+      (table) => table.getBoundingClientRect().width
+    );
+    const resizeRowStyleMutations = await page.evaluate(() => {
+      (window as any).__resizeRowObserver.disconnect();
+      return (window as any).__resizeRowStyleMutations;
+    });
+    await page.mouse.up();
+    if (
+      smoothDragImmediate < smoothDragPoint.tableWidth + 30 ||
+      Math.abs(smoothDragSettled - smoothDragImmediate) > 2 ||
+      resizeRowStyleMutations > 0
+    ) {
+      throw new Error(`Column width did not remain under the pointer during a held drag: ${JSON.stringify({
+        before: smoothDragPoint.tableWidth,
+        immediate: smoothDragImmediate,
+        settled: smoothDragSettled,
+        resizeRowStyleMutations
+      })}`);
+    }
+
     await dragHandle(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
       -200
     );
-    const clamped = await page.$eval(
-      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)',
-      (table) => table.getBoundingClientRect().width
-    );
-    if (Math.abs(clamped - initial.tableWidth) > 2) {
-      throw new Error(`Table shrank below its initial width: ${JSON.stringify({ initial: initial.tableWidth, clamped })}`);
+    const narrowed = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const firstCell = table.querySelector<HTMLElement>('thead th:first-child')!;
+      return { tableWidth: table.getBoundingClientRect().width, firstColumnWidth: firstCell.getBoundingClientRect().width };
+    });
+    if (narrowed.tableWidth >= initial.tableWidth - 2 || narrowed.firstColumnWidth >= initial.cellWidths[0] - 2) {
+      throw new Error(`Table could not shrink below its initial width: ${JSON.stringify({ initial, narrowed })}`);
     }
+
+    await page.evaluate(async (markdown) => {
+      (window as any).__tableResizeEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableResizeEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: markdown,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    }, text);
+
+    await dragHandle(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
+      200
+    );
+    await dragHandleToMinimum(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:nth-child(2) .meo-md-html-table-column-resize-handle'
+    );
+    const minimumColumn = await page.evaluate(() => {
+      const cell = document.querySelector<HTMLElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th:nth-child(2)'
+      )!;
+      const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+      const cellStyle = getComputedStyle(cell);
+      const previewStyle = getComputedStyle(preview);
+      const expectedMinimum = parseFloat(previewStyle.fontSize)
+        + parseFloat(previewStyle.paddingLeft)
+        + parseFloat(previewStyle.paddingRight)
+        + parseFloat(cellStyle.borderLeftWidth)
+        + parseFloat(cellStyle.borderRightWidth);
+      return { width: cell.getBoundingClientRect().width, expectedMinimum };
+    });
+    if (
+      minimumColumn.width >= 48 ||
+      Math.abs(minimumColumn.width - minimumColumn.expectedMinimum) > 2
+    ) {
+      throw new Error(`Column did not clamp to one Chinese character: ${JSON.stringify(minimumColumn)}`);
+    }
+    await page.evaluate(async (markdown) => {
+      (window as any).__tableResizeEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableResizeEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: markdown,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    }, text);
 
     await dragHandle(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
@@ -222,6 +393,176 @@ async function main() {
     }, text);
     if (Math.abs(resetState.width - initial.tableWidth) > 2 || resetState.inlineWidth || resetState.tableLayout !== 'auto') {
       throw new Error(`Column widths survived beyond the editor tab lifetime: ${JSON.stringify({ initial, resetState })}`);
+    }
+
+    const issueTableText = [
+      '| 类型 | 单元格内容 |',
+      '| --- | --- |',
+      '| 无序列表 | - Apple-**Banana**- Cherry123 |',
+      '| 有序列表 | 3. 第三项开始4.*下一项*5. 最后一项 ![测试图片](fixture.png) |',
+      '| 嵌套无序列表 | - 一级 A  <br>- 二级<br>       A.1<br>           - 二级 |'
+    ].join('\n');
+    await page.evaluate(async (markdown) => {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><rect width="400" height="100" fill="red"/></svg>';
+      (window as any).TableStabilityHarness.setImageSrcResolver(() => `data:image/svg+xml,${encodeURIComponent(svg)}`);
+      (window as any).__tableResizeEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableResizeEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: markdown,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    }, issueTableText);
+    const issueInitial = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const cells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        cellWidths: cells.map((cell) => cell.getBoundingClientRect().width),
+        hasImage: Boolean(document.querySelector('.meo-md-html-table tbody .meo-md-image-img'))
+      };
+    });
+    if (!issueInitial.hasImage) throw new Error('Issue fixture did not render its table image');
+
+    await dragHandleToMinimum(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle'
+    );
+    const issueMiddleDrag = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const cells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        cellWidths: cells.map((cell) => cell.getBoundingClientRect().width)
+      };
+    });
+    if (issueMiddleDrag.tableWidth >= issueInitial.tableWidth - 2 || issueMiddleDrag.cellWidths[0] >= issueInitial.cellWidths[0] - 2) {
+      throw new Error(`The middle separator could not narrow the issue table: ${JSON.stringify({ issueInitial, issueMiddleDrag })}`);
+    }
+
+    await dragHandleToMinimum(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:last-child .meo-md-html-table-column-resize-handle'
+    );
+    const issueRightDrag = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const cells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
+      const image = document.querySelector<HTMLElement>('.meo-md-html-table tbody .meo-md-image-img')!;
+      const imageCell = image.closest<HTMLElement>('td')!;
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        cellWidths: cells.map((cell) => cell.getBoundingClientRect().width),
+        imageRight: image.getBoundingClientRect().right,
+        imageCellRight: imageCell.getBoundingClientRect().right
+      };
+    });
+    if (
+      issueRightDrag.tableWidth >= issueMiddleDrag.tableWidth - 2 ||
+      issueRightDrag.cellWidths[1] >= issueMiddleDrag.cellWidths[1] - 2 ||
+      issueRightDrag.imageRight > issueRightDrag.imageCellRight + 1
+    ) {
+      throw new Error(`The right separator or image prevented narrowing: ${JSON.stringify({ issueMiddleDrag, issueRightDrag })}`);
+    }
+
+    await dragHandle(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
+      320
+    );
+    await dragHandle(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:last-child .meo-md-html-table-column-resize-handle',
+      320
+    );
+    const beforeViewportNarrowing = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const widths = Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => cell.getBoundingClientRect().width);
+      return { widths, ratio: widths[0] / widths[1] };
+    });
+    await page.setViewport({ width: 520, height: 360 });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const afterViewportNarrowing = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      const widths = Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => cell.getBoundingClientRect().width);
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        maximumWidth: wrap.clientWidth,
+        ratio: widths[0] / widths[1]
+      };
+    });
+    if (
+      afterViewportNarrowing.tableWidth > afterViewportNarrowing.maximumWidth + 2 ||
+      Math.abs(afterViewportNarrowing.ratio - beforeViewportNarrowing.ratio) > 0.03
+    ) {
+      throw new Error(`Resized columns did not scale proportionally with the viewport: ${JSON.stringify({ beforeViewportNarrowing, afterViewportNarrowing })}`);
+    }
+    await page.setViewport({ width: 960, height: 360 });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const afterViewportRestoration = await page.$$eval(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th',
+      (cells) => cells.map((cell) => cell.getBoundingClientRect().width)
+    );
+    if (afterViewportRestoration.some((width, index) => Math.abs(width - beforeViewportNarrowing.widths[index]) > 2)) {
+      throw new Error(`Column widths were not restored with the viewport: ${JSON.stringify({ beforeViewportNarrowing, afterViewportRestoration })}`);
+    }
+
+    const longTableText = [
+      '| 第一列 | 第二列 | 第三列 |',
+      '| --- | --- | --- |',
+      `| ${'很长的内容'.repeat(20)} | ${'另一段长内容'.repeat(20)} | ${'末列内容'.repeat(20)} |`
+    ].join('\n');
+    await page.evaluate(async (markdown) => {
+      (window as any).__tableResizeEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableResizeEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: markdown,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    }, longTableText);
+    const defaultMaximum = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        wrapWidth: wrap.getBoundingClientRect().width,
+        rightInset: wrap.getBoundingClientRect().right - table.getBoundingClientRect().right
+      };
+    });
+    await dragHandle(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:last-child .meo-md-html-table-column-resize-handle',
+      1000
+    );
+    await page.setViewport({ width: 520, height: 360 });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const resizedMaximum = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        wrapWidth: wrap.getBoundingClientRect().width,
+        rightInset: wrap.getBoundingClientRect().right - table.getBoundingClientRect().right
+      };
+    });
+    if (resizedMaximum.rightInset + 0.1 < defaultMaximum.rightInset) {
+      throw new Error(`Manually resized maximum clipped farther right than the default maximum: ${JSON.stringify({ defaultMaximum, resizedMaximum })}`);
     }
 
     console.log('table column resizing checks passed');

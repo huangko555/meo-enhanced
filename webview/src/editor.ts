@@ -51,7 +51,8 @@ import {
   tableCellEditorOffsetToSourceOffset,
   tableCellSourceOffsetToEditorOffset,
   tableColumnWidthsField,
-  tableHeaderAlignmentOverrideField
+  tableHeaderAlignmentOverrideField,
+  commitPendingTableEdits
 } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
@@ -593,10 +594,10 @@ export function createEditor({
     if (!view) return;
 
     if (active) {
-      const changed = !tableInteractionActive || tableInteractionOwner !== owner;
+      const wasActive = tableInteractionActive;
       tableInteractionActive = true;
       tableInteractionOwner = owner;
-      if (changed && currentMode === 'live') {
+      if (!wasActive && currentMode === 'live') {
         view.dispatch({ effects: setLiveDocumentIdleEffect.of(true) });
       }
       view.dom.classList.add('meo-table-interaction-active');
@@ -876,11 +877,7 @@ export function createEditor({
     if (!view) {
       return false;
     }
-    const detail = { committed: false };
-    document.dispatchEvent(new CustomEvent('meo-commit-table-edits', {
-      detail
-    }));
-    return detail.committed;
+    return commitPendingTableEdits(view);
   };
 
   const measureTextareaSelectionStart = (input, index) => {
@@ -2354,6 +2351,7 @@ export function createEditor({
       return true;
     },
     undo() {
+      commitActiveTableInput();
       const shouldPreserveSelection = pendingExternalUndoSelectionPreserve;
       const { anchor, head } = view.state.selection.main;
       const applied = undo(view);
@@ -2379,6 +2377,7 @@ export function createEditor({
       return true;
     },
     redo() {
+      commitActiveTableInput();
       return redo(view);
     },
     findNext(query, options: SearchOptions & { focusEditor?: boolean } = {}) {
