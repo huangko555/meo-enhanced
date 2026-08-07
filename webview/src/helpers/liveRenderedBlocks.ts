@@ -200,10 +200,13 @@ function selectionTouchesLineRange(state: EditorState, startLine: number, endLin
   return false;
 }
 
-export function getLiveRenderedBlocks(state: EditorState): LiveRenderedBlock[] {
+export function getLiveRenderedBlocks(
+  state: EditorState,
+  options: { includeSelectedMath?: boolean } = {}
+): LiveRenderedBlock[] {
   const tree = resolvedSyntaxTree(state);
   const cached = renderedBlockCache.get(state);
-  if (cached?.tree === tree) {
+  if (!options.includeSelectedMath && cached?.tree === tree) {
     return cached.blocks;
   }
 
@@ -267,7 +270,11 @@ export function getLiveRenderedBlocks(state: EditorState): LiveRenderedBlock[] {
       continue;
     }
     const hiddenRange = resolveMathHiddenLineRange(startLine, endLine);
-    if (hiddenRange && selectionTouchesLineRange(state, hiddenRange.from, hiddenRange.to)) {
+    if (
+      !options.includeSelectedMath &&
+      hiddenRange &&
+      selectionTouchesLineRange(state, hiddenRange.from, hiddenRange.to)
+    ) {
       continue;
     }
     const block = createRenderedBlock('math', startLine, endLine, null);
@@ -297,7 +304,9 @@ export function getLiveRenderedBlocks(state: EditorState): LiveRenderedBlock[] {
     left.startLine - right.startLine ||
     left.endLine - right.endLine
   ));
-  renderedBlockCache.set(state, { tree, blocks });
+  if (!options.includeSelectedMath) {
+    renderedBlockCache.set(state, { tree, blocks });
+  }
   return blocks;
 }
 

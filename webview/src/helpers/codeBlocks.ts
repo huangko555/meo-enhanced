@@ -21,6 +21,7 @@ import {
   MermaidEditingWidget
 } from './mermaidEditing';
 import { getLiveListBlockIndentColumns } from './blockIndent';
+import { getViewportController } from './viewportController';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -676,10 +677,13 @@ class CodeBlockActionsWidget extends WidgetType {
     actions.dataset.meoBlockTo = String(this.blockTo);
     actions.append(
       createSelectAllCodeButton(() => {
-        view.dispatch({
-          selection: { anchor: this.contentTo, head: this.contentFrom }
-        });
-        view.focus();
+        const focusSelection = () => {
+          view.dispatch({
+            selection: { anchor: this.contentTo, head: this.contentFrom }
+          });
+          view.focus();
+        };
+        getViewportController(view)?.preserveScrollPosition(focusSelection) ?? focusSelection();
       }),
       createCopyCodeButton(this.codeContent)
     );
@@ -834,6 +838,11 @@ export function addMermaidDiagramBlock(
 
   const anchor = startLine.from;
   const indentColumns = block.indentColumns ?? 0;
+  const rawFirstLine = state.doc.sliceString(contentStartLine.from, contentStartLine.to);
+  const diagramFirstLine = block.diagramText.split('\n')[0] ?? '';
+  const sourceLinePrefix = diagramFirstLine && rawFirstLine.endsWith(diagramFirstLine)
+    ? rawFirstLine.slice(0, rawFirstLine.length - diagramFirstLine.length)
+    : /^[ \t]*/.exec(startLine.text)?.[0] ?? '';
   const mode = getMermaidBlockMode(
     state,
     anchor,
@@ -849,6 +858,7 @@ export function addMermaidDiagramBlock(
       contentFrom: contentStartLine.from,
       contentTo: contentEndLine.to,
       diagramText: block.diagramText,
+      sourceLinePrefix,
       startLine: startLine.number,
       endLine: endLine.number,
       indentColumns

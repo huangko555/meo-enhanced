@@ -353,6 +353,61 @@ async function main() {
       throw new Error(`Table exceeded its default maximum width: ${JSON.stringify(maximum)}`);
     }
 
+    await page.setViewport({ width: 720, height: 360 });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+
+    const maxWidthRedistributionBefore = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        maximumWidth: wrap.clientWidth,
+        widths: Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => cell.getBoundingClientRect().width)
+      };
+    });
+    if (Math.abs(maxWidthRedistributionBefore.tableWidth - maxWidthRedistributionBefore.maximumWidth) > 2) {
+      throw new Error(`Maximum-width redistribution fixture did not reach the live width limit: ${JSON.stringify(maxWidthRedistributionBefore)}`);
+    }
+    const maxWidthDragPoint = await page.$eval(
+      '.meo-md-html-table-sticky-table th:first-child .meo-md-html-table-column-resize-handle',
+      (handle) => {
+        const rect = handle.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    );
+    await page.mouse.move(maxWidthDragPoint.x, maxWidthDragPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(maxWidthDragPoint.x + 40, maxWidthDragPoint.y, { steps: 4 });
+    const maxWidthRedistributionHeld = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        widths: Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => cell.getBoundingClientRect().width)
+      };
+    });
+    await page.mouse.up();
+    const rightRatioBefore = maxWidthRedistributionBefore.widths[1] / maxWidthRedistributionBefore.widths[2];
+    const rightRatioHeld = maxWidthRedistributionHeld.widths[1] / maxWidthRedistributionHeld.widths[2];
+    if (
+      Math.abs(maxWidthRedistributionHeld.tableWidth - maxWidthRedistributionBefore.tableWidth) > 2 ||
+      Math.abs(maxWidthRedistributionHeld.widths[0] - maxWidthRedistributionBefore.widths[0] - 40) > 2 ||
+      maxWidthRedistributionHeld.widths[1] >= maxWidthRedistributionBefore.widths[1] - 1 ||
+      maxWidthRedistributionHeld.widths[2] >= maxWidthRedistributionBefore.widths[2] - 1 ||
+      Math.abs(rightRatioHeld - rightRatioBefore) > 0.03
+    ) {
+      throw new Error(`Columns to the right were not proportionally compressed during a held drag at maximum width: ${JSON.stringify({ maxWidthRedistributionBefore, maxWidthRedistributionHeld })}`);
+    }
+    await page.setViewport({ width: 960, height: 360 });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+
     const beforeRebuildWidths = await page.$$eval(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th',
       (cells) => cells.map((cell) => cell.getBoundingClientRect().width)
@@ -507,11 +562,22 @@ async function main() {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
-    const afterViewportRestoration = await page.$$eval(
-      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th',
-      (cells) => cells.map((cell) => cell.getBoundingClientRect().width)
-    );
-    if (afterViewportRestoration.some((width, index) => Math.abs(width - beforeViewportNarrowing.widths[index]) > 2)) {
+    const afterViewportRestoration = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      const widths = Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => cell.getBoundingClientRect().width);
+      return {
+        widths,
+        tableWidth: table.getBoundingClientRect().width,
+        maximumWidth: wrap.clientWidth,
+        ratio: widths[0] / widths[1]
+      };
+    });
+    if (
+      afterViewportRestoration.tableWidth + 2 < beforeViewportNarrowing.widths.reduce((sum, width) => sum + width, 0) ||
+      afterViewportRestoration.tableWidth > afterViewportRestoration.maximumWidth + 2 ||
+      Math.abs(afterViewportRestoration.ratio - beforeViewportNarrowing.ratio) > 0.03
+    ) {
       throw new Error(`Column widths were not restored with the viewport: ${JSON.stringify({ beforeViewportNarrowing, afterViewportRestoration })}`);
     }
 
@@ -563,6 +629,48 @@ async function main() {
     });
     if (resizedMaximum.rightInset + 0.1 < defaultMaximum.rightInset) {
       throw new Error(`Manually resized maximum clipped farther right than the default maximum: ${JSON.stringify({ defaultMaximum, resizedMaximum })}`);
+    }
+
+    await page.evaluate(async (markdown) => {
+      (window as any).__tableResizeEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableResizeEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: markdown,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    }, longTableText);
+    await dragHandle(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) th:first-child .meo-md-html-table-column-resize-handle',
+      40
+    );
+    const elasticNarrowState = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const widths = Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => cell.getBoundingClientRect().width);
+      const total = widths.reduce((sum, width) => sum + width, 0);
+      return { tableWidth: table.getBoundingClientRect().width, ratios: widths.map((width) => width / total) };
+    });
+    await page.setViewport({ width: 960, height: 360 });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 10; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const elasticWideState = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+      const widths = Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => cell.getBoundingClientRect().width);
+      const total = widths.reduce((sum, width) => sum + width, 0);
+      return { tableWidth: table.getBoundingClientRect().width, ratios: widths.map((width) => width / total) };
+    });
+    if (
+      elasticWideState.tableWidth < defaultMaximum.tableWidth - 2 ||
+      elasticWideState.ratios.some((ratio, index) => Math.abs(ratio - elasticNarrowState.ratios[index]) > 0.03)
+    ) {
+      throw new Error(`A width-capped table did not expand proportionally toward its wider default: ${JSON.stringify({ defaultMaximum, elasticNarrowState, elasticWideState })}`);
     }
 
     console.log('table column resizing checks passed');

@@ -56,6 +56,7 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 ## Edit real-world tables and nested content
 
 - A sticky header keeps complete column context visible while scrolling long tables.
+- Drag column dividers in the regular or sticky header to freely resize table columns without changing the Markdown source.
 - Insert, remove, reorder, and select rows or columns from the table toolbar.
 - Press `Shift + Enter` to add a line break inside the active cell.
 - Use ordered lists, unordered lists, nested indentation, images, colors, inline formatting, and keyboard tags inside cells.

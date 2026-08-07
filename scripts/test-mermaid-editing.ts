@@ -1374,6 +1374,134 @@ async function main() {
       })}`);
     }
 
+    const assertHistoryFocusForRenderedBlock = async ({
+      text,
+      modeButton,
+      editingBlock,
+      controllerProperty,
+      insert
+    }: {
+      text: string;
+      modeButton: string;
+      editingBlock: string;
+      controllerProperty: '__meoMermaidEditingController' | '__meoLatexMathEditingController';
+      insert: string;
+    }) => {
+      await page.evaluate((documentText) => {
+        const previous = (window as any).__mermaidEditingEditor;
+        previous.destroy();
+        document.getElementById('app')!.replaceChildren();
+        (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+          parent: document.getElementById('app')!,
+          text: documentText,
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+      }, text);
+      await waitForFrames(page);
+
+      // preview -> split, edit source, split -> source -> preview
+      await page.click(modeButton);
+      await waitForFrames(page);
+      const positions = await page.evaluate(({ blockSelector, property, insertedText }) => {
+        const block = document.querySelector<HTMLElement>(blockSelector)!;
+        const innerView = (block as any)[property].innerView;
+        const from = innerView.state.doc.length;
+        innerView.dispatch({
+          changes: { from, insert: insertedText },
+          selection: { anchor: from + insertedText.length }
+        });
+        return { before: from, after: from + insertedText.length };
+      }, { blockSelector: editingBlock, property: controllerProperty, insertedText: insert });
+      await waitForFrames(page);
+      await page.click(modeButton);
+      await waitForFrames(page);
+      await page.click(modeButton);
+      await waitForFrames(page);
+
+      await page.evaluate(() => (window as any).__mermaidEditingEditor.undo());
+      await waitForFrames(page);
+      const previewUndo = await page.evaluate(({ blockSelector, property }) => {
+        const block = document.querySelector<HTMLElement>(blockSelector);
+        const innerView = block ? (block as any)[property]?.innerView : null;
+        return {
+          split: Boolean(block?.classList.contains('is-split')),
+          head: innerView?.state.selection.main.head ?? null,
+          focused: innerView?.hasFocus ?? false
+        };
+      }, { blockSelector: editingBlock, property: controllerProperty });
+
+      await page.evaluate(() => (window as any).__mermaidEditingEditor.redo());
+      await waitForFrames(page);
+      const splitRedo = await page.evaluate(({ blockSelector, property }) => {
+        const block = document.querySelector<HTMLElement>(blockSelector);
+        const innerView = block ? (block as any)[property]?.innerView : null;
+        return {
+          split: Boolean(block?.classList.contains('is-split')),
+          head: innerView?.state.selection.main.head ?? null,
+          focused: innerView?.hasFocus ?? false
+        };
+      }, { blockSelector: editingBlock, property: controllerProperty });
+
+      await page.click(modeButton);
+      await waitForFrames(page);
+      await page.evaluate(({ blockSelector, property, offset }) => {
+        const block = document.querySelector<HTMLElement>(blockSelector)!;
+        (block as any)[property].focusOffset(offset);
+      }, { blockSelector: editingBlock, property: controllerProperty, offset: positions.after });
+      await page.keyboard.down('Control');
+      await page.keyboard.press('z');
+      await page.keyboard.up('Control');
+      await waitForFrames(page);
+      const sourceUndo = await page.evaluate(({ blockSelector, property }) => {
+        const block = document.querySelector<HTMLElement>(blockSelector);
+        const innerView = block ? (block as any)[property]?.innerView : null;
+        return {
+          source: Boolean(block?.classList.contains('is-source')),
+          head: innerView?.state.selection.main.head ?? null,
+          focused: innerView?.hasFocus ?? false
+        };
+      }, { blockSelector: editingBlock, property: controllerProperty });
+
+      await page.keyboard.down('Control');
+      await page.keyboard.press('y');
+      await page.keyboard.up('Control');
+      await waitForFrames(page);
+      const sourceRedo = await page.evaluate(({ blockSelector, property }) => {
+        const block = document.querySelector<HTMLElement>(blockSelector);
+        const innerView = block ? (block as any)[property]?.innerView : null;
+        return {
+          source: Boolean(block?.classList.contains('is-source')),
+          head: innerView?.state.selection.main.head ?? null,
+          focused: innerView?.hasFocus ?? false
+        };
+      }, { blockSelector: editingBlock, property: controllerProperty });
+
+      if (
+        !previewUndo.split || previewUndo.head !== positions.before || !previewUndo.focused ||
+        !splitRedo.split || splitRedo.head !== positions.after || !splitRedo.focused ||
+        !sourceUndo.source || sourceUndo.head !== positions.before || !sourceUndo.focused ||
+        !sourceRedo.source || sourceRedo.head !== positions.after || !sourceRedo.focused
+      ) {
+        throw new Error(`Rendered-block history did not preserve mode and focus its changed offset: ${JSON.stringify({ positions, previewUndo, splitRedo, sourceUndo, sourceRedo })}`);
+      }
+    };
+
+    await assertHistoryFocusForRenderedBlock({
+      text: ['```mermaid', 'graph TD', 'A --> B', '```'].join('\n'),
+      modeButton: '.meo-mermaid-mode-btn',
+      editingBlock: '.meo-mermaid-editing-block',
+      controllerProperty: '__meoMermaidEditingController',
+      insert: '\nC --> D'
+    });
+    await assertHistoryFocusForRenderedBlock({
+      text: ['$$', 'x = 1', '$$'].join('\n'),
+      modeButton: '.meo-latex-math-mode-btn',
+      editingBlock: '.meo-latex-math-editing-block',
+      controllerProperty: '__meoLatexMathEditingController',
+      insert: '\ny = 2'
+    });
+
     console.log('Mermaid editing checks passed');
   } finally {
     await browser.close();

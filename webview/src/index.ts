@@ -734,6 +734,17 @@ discardBtn.title = 'Discard unsaved changes (double-click)';
 discardBtn.setAttribute('aria-label', 'Discard unsaved changes');
 discardBtn.appendChild(createElement(StickyNoteOff, { width: 18, height: 18 }));
 
+const preserveEditorFocusOnDocumentAction = (event: PointerEvent) => {
+  if (event.button === 0 && editor?.hasFocus()) {
+    // Toolbar actions must not let the browser move focus and scroll the editor
+    // before the document/save synchronization starts.
+    event.preventDefault();
+  }
+};
+
+saveBtn.addEventListener('pointerdown', preserveEditorFocusOnDocumentAction);
+discardBtn.addEventListener('pointerdown', preserveEditorFocusOnDocumentAction);
+
 formatGroup.append(
   outlineLeftBtn,
   lineJumpControl,

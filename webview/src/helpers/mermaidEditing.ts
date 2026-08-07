@@ -1,6 +1,6 @@
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
-import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/commands';
+import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
 import {
   getCachedMermaidPreviewHeight,
@@ -10,6 +10,7 @@ import {
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
+import { consumeEditorHistoryCommand } from './historyCommands';
 
 export type MermaidBlockMode = 'preview' | 'split' | 'source';
 
@@ -33,6 +34,7 @@ type MermaidEditingBlock = {
   contentFrom: number;
   contentTo: number;
   diagramText: string;
+  sourceLinePrefix: string;
   startLine: number;
   endLine: number;
   indentColumns: number;
@@ -175,6 +177,15 @@ function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect
   controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects: effect }));
 }
 
+function focusOuterWithoutMovingViewport(view: EditorView): void {
+  const controller = getViewportController(view);
+  if (controller) {
+    controller.preserveScrollPosition(() => view.focus());
+    return;
+  }
+  view.focus();
+}
+
 class MermaidToolbarWidget extends WidgetType {
   constructor(
     readonly anchor: number,
@@ -216,7 +227,7 @@ class MermaidToolbarWidget extends WidgetType {
       );
       requestAnimationFrame(() => {
         if (nextMode === 'preview') {
-          view.focus();
+          focusOuterWithoutMovingViewport(view);
           return;
         }
         const editingBlock = view.dom.querySelector<HTMLElement>(
@@ -292,8 +303,35 @@ export function focusMermaidEditingOffset(view: EditorView, anchor: number, offs
   if (!editingBlock?.__meoMermaidEditingController) {
     return false;
   }
-  editingBlock.__meoMermaidEditingController.focusOffset(offset);
+  editingBlock.__meoMermaidEditingController.focusOuterOffset(offset);
   return true;
+}
+
+function applyMermaidSourceLinePrefix(sourceText: string, prefix: string): string {
+  if (!prefix) return sourceText;
+  return sourceText.split('\n').map((line) => `${prefix}${line}`).join('\n');
+}
+
+function mermaidOuterOffsetToEditorOffset(sourceText: string, prefix: string, offset: number): number {
+  if (!prefix) return Math.max(0, Math.min(offset, sourceText.length));
+  const target = Math.max(0, offset);
+  const lines = sourceText.split('\n');
+  let outerPosition = 0;
+  let editorPosition = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const outerLineEnd = outerPosition + prefix.length + line.length;
+    if (target <= outerLineEnd) {
+      return editorPosition + Math.max(0, Math.min(line.length, target - outerPosition - prefix.length));
+    }
+    outerPosition = outerLineEnd;
+    editorPosition += line.length;
+    if (index < lines.length - 1) {
+      outerPosition += 1;
+      editorPosition += 1;
+    }
+  }
+  return sourceText.length;
 }
 
 class MermaidEditingController {
@@ -342,9 +380,9 @@ class MermaidEditingController {
           innerMermaidSearchField,
           EditorView.lineWrapping,
           keymap.of([
-            { key: 'Mod-z', run: () => undo(this.outerView) },
-            { key: 'Mod-y', run: () => redo(this.outerView) },
-            { key: 'Mod-Shift-z', run: () => redo(this.outerView) },
+            { key: 'Mod-z', run: () => consumeEditorHistoryCommand(this.outerView, 'undo') },
+            { key: 'Mod-y', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
+            { key: 'Mod-Shift-z', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
             { key: 'Tab', run: indentMore, shift: indentLess },
             ...defaultKeymap
           ]),
@@ -354,17 +392,22 @@ class MermaidEditingController {
             }
             const nextText = update.state.doc.toString();
             const { contentFrom, contentTo } = this.block;
-            if (this.outerView.state.doc.sliceString(contentFrom, contentTo) === nextText) {
+            const outerSourceText = applyMermaidSourceLinePrefix(nextText, this.block.sourceLinePrefix);
+            if (this.outerView.state.doc.sliceString(contentFrom, contentTo) === outerSourceText) {
               return;
             }
+            const userEvent = update.transactions.reduce<string | undefined>(
+              (current, transaction) => transaction.annotation(Transaction.userEvent) ?? current,
+              undefined
+            ) ?? 'input';
             this.block = {
               ...this.block,
-              contentTo: contentFrom + nextText.length,
+              contentTo: contentFrom + outerSourceText.length,
               diagramText: nextText
             };
             this.outerView.dispatch({
-              changes: { from: contentFrom, to: contentTo, insert: nextText },
-              annotations: Transaction.userEvent.of('input')
+              changes: { from: contentFrom, to: contentTo, insert: outerSourceText },
+              annotations: Transaction.userEvent.of(userEvent)
             });
           })
         ]
@@ -419,6 +462,14 @@ class MermaidEditingController {
         }
       }
     });
+  }
+
+  focusOuterOffset(offset: number): void {
+    this.focusOffset(mermaidOuterOffsetToEditorOffset(
+      this.block.diagramText,
+      this.block.sourceLinePrefix,
+      offset
+    ));
   }
 
   update(
@@ -560,6 +611,7 @@ export class MermaidEditingWidget extends WidgetType {
     return other instanceof MermaidEditingWidget &&
       other.block.anchor === this.block.anchor &&
       other.block.diagramText === this.block.diagramText &&
+      other.block.sourceLinePrefix === this.block.sourceLinePrefix &&
       other.block.indentColumns === this.block.indentColumns &&
       other.mode === this.mode &&
       other.searchReveal?.from === this.searchReveal?.from &&

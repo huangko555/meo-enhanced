@@ -1,7 +1,7 @@
 import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Transaction } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
-import { isolateHistory, undo, redo } from '@codemirror/commands';
+import { isolateHistory } from '@codemirror/commands';
 import { ImageWidget } from './images';
 import { emojiData } from './emoji';
 import { parseKbdTagAt } from './kbd';
@@ -12,6 +12,7 @@ import { normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
 import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
 import { getViewportController } from './viewportController';
+import { changedDocumentRange, runEditorHistoryCommand } from './historyCommands';
 import { createOpenLinkButton } from './linkOpenButton';
 import { collectColorRangesFromText, createColorSwatchElement } from './colorSwatches';
 import {
@@ -230,6 +231,172 @@ export function commitPendingTableEdits(view: EditorView): boolean {
   return detail.committed;
 }
 
+function stabilizeHistoryScrollTop(view: EditorView, targetTop: number) {
+  const viewportController = getViewportController(view);
+  if (viewportController) {
+    viewportController.lockScrollTop(targetTop);
+  }
+}
+
+function focusTableHistoryChange(
+  view: EditorView,
+  previousDocument: string,
+  previousScrollTop: number,
+  targetPosition?: number,
+  isCurrent: () => boolean = () => true,
+  retryFocus?: (focus: () => boolean) => void
+): boolean {
+  if (!isCurrent()) return false;
+  const changed = changedDocumentRange(previousDocument, view.state.doc.toString());
+  if (!changed) return false;
+
+  const changedLine = view.state.doc.lineAt(Math.min(changed.from, view.state.doc.length)).number;
+  const findInput = () => {
+    let closest: { input: HTMLTextAreaElement; distance: number } | null = null;
+    for (const input of view.dom.querySelectorAll<HTMLTextAreaElement>(
+      '.meo-md-html-table-wrap textarea[data-table-cell-from][data-table-cell-to]'
+    )) {
+      const sourceLine = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
+      if (sourceLine !== changedLine) continue;
+      const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
+      const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+      if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
+      const distance = changed.to < from
+        ? from - changed.to
+        : changed.from > to
+          ? changed.from - to
+          : 0;
+      if (!closest || distance < closest.distance) closest = { input, distance };
+    }
+    return closest?.input ?? null;
+  };
+
+  if (!view.state.doc.line(changedLine).text.includes('|')) return false;
+  let viewportPreservationScheduled = false;
+  const focusInput = () => {
+    if (!isCurrent()) return false;
+    const input = findInput();
+    if (!input) return false;
+    const cellFrom = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
+    const cellTo = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+    const sourceCaret = Math.min(Math.max((targetPosition ?? changed.to) - cellFrom, 0), cellTo - cellFrom);
+    const caret = tableCellSourceOffsetToEditorOffset(input.value, sourceCaret);
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(caret, caret);
+
+    const cell = input.closest<HTMLElement>(tableCellSelector);
+    if (!cell) return true;
+    const cellRect = cell.getBoundingClientRect();
+    const scrollerRect = view.scrollDOM.getBoundingClientRect();
+    const cellTop = cellRect.top - scrollerRect.top + view.scrollDOM.scrollTop;
+    const cellBottom = cellTop + cellRect.height;
+    const wasVisible = (
+      cellBottom > previousScrollTop &&
+      cellTop < previousScrollTop + view.scrollDOM.clientHeight
+    );
+    if (wasVisible) {
+      if (!viewportPreservationScheduled) {
+        viewportPreservationScheduled = true;
+        stabilizeHistoryScrollTop(view, previousScrollTop);
+      }
+      return true;
+    }
+    const isFullyVisible = (
+      cellRect.top >= scrollerRect.top &&
+      cellRect.bottom <= scrollerRect.bottom &&
+      cellRect.left >= scrollerRect.left &&
+      cellRect.right <= scrollerRect.right
+    );
+    if (!isFullyVisible) {
+      const viewportController = getViewportController(view);
+      viewportController?.revealElement(cell);
+    }
+    return true;
+  };
+  if (focusInput()) return true;
+  retryFocus?.(focusInput);
+  return false;
+}
+
+export function focusHistoryChange(
+  view: EditorView,
+  previousDocument: string,
+  previousScrollTop: number,
+  revealSelection?: (anchor: number, head: number) => void,
+  previousSelection?: {
+    lineNumber: number;
+    visibleFromLineNumber: number;
+    visibleToLineNumber: number;
+    wasVisible: boolean;
+  },
+  targetPosition?: number,
+  isCurrent: () => boolean = () => true,
+  retryFocus?: (focus: () => boolean) => void
+) {
+  if (focusTableHistoryChange(
+    view,
+    previousDocument,
+    previousScrollTop,
+    targetPosition,
+    isCurrent,
+    retryFocus
+  )) return;
+  const changed = changedDocumentRange(previousDocument, view.state.doc.toString());
+  const target = targetPosition ?? changed?.to;
+  if (typeof target === 'number' && view.state.selection.main.head !== target) {
+    view.dispatch({ selection: { anchor: target } });
+  }
+  // EditorView.focus() suppresses the DOM selection observer while restoring
+  // the state selection. Focusing contentDOM directly can replay the stale DOM
+  // caret from the previously focused embedded editor and overwrite `target`.
+  view.focus();
+  let viewportPreservationScheduled = false;
+  let tableFocused = false;
+  const revealOffscreenSelection = (block: ReturnType<EditorView['lineBlockAt']>) => {
+    if (!isCurrent() || tableFocused) return;
+    const selection = view.state.selection.main;
+    if (revealSelection) {
+      revealSelection(selection.anchor, selection.head);
+    } else {
+      view.dispatch({ effects: EditorView.scrollIntoView(selection.head, { y: 'nearest' }) });
+    }
+  };
+  const revealSelectionIfNeeded = () => {
+    if (!isCurrent() || tableFocused) return;
+    const head = view.state.selection.main.head;
+    const block = view.lineBlockAt(head);
+    const currentScrollTop = view.scrollDOM.scrollTop;
+    const coords = view.coordsAtPos(head);
+    const scrollerRect = view.scrollDOM.getBoundingClientRect();
+    const wasVisible = coords
+      ? coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom
+      : block.bottom > currentScrollTop && block.top < currentScrollTop + view.scrollDOM.clientHeight;
+    if (wasVisible) {
+      if (!viewportPreservationScheduled) {
+        viewportPreservationScheduled = true;
+        stabilizeHistoryScrollTop(view, previousScrollTop);
+      }
+      return;
+    }
+    if (!coords) {
+      revealOffscreenSelection(block);
+      return;
+    }
+    if (coords.top < scrollerRect.top || coords.bottom > scrollerRect.bottom) {
+      revealOffscreenSelection(block);
+    }
+  };
+  // Start offscreen history navigation before the next paint. Unmeasured
+  // CodeMirror regions otherwise need one frame to request layout and another
+  // to scroll, which briefly paints the old viewport on first use.
+  revealSelectionIfNeeded();
+  requestAnimationFrame(() => {
+    revealSelectionIfNeeded();
+    requestAnimationFrame(revealSelectionIfNeeded);
+  });
+
+}
+
 function tableHasReachedStickyThreshold(tableRect: DOMRect, scrollerRect: DOMRect) {
   const stickyBottom = scrollerRect.top + tableToolbarHeight;
   return tableRect.top <= stickyBottom && tableRect.bottom > stickyBottom;
@@ -281,7 +448,9 @@ export const tableHeaderAlignmentOverrideField = StateField.define<RangeSet<Tabl
 class TableColumnWidthsValue extends RangeValue {
   constructor(
     readonly widths: readonly number[],
-    readonly initialTotalWidth: number
+    readonly initialTotalWidth: number,
+    readonly elastic: boolean,
+    readonly defaultWidthWasCapped: boolean
   ) {
     super();
   }
@@ -289,6 +458,8 @@ class TableColumnWidthsValue extends RangeValue {
   eq(other: RangeValue): boolean {
     return other instanceof TableColumnWidthsValue &&
       other.initialTotalWidth === this.initialTotalWidth &&
+      other.elastic === this.elastic &&
+      other.defaultWidthWasCapped === this.defaultWidthWasCapped &&
       other.widths.length === this.widths.length &&
       other.widths.every((width, index) => width === this.widths[index]);
   }
@@ -309,6 +480,8 @@ const setTableColumnWidthsEffect = StateEffect.define<{
   to: number;
   widths: number[];
   initialTotalWidth: number;
+  elastic: boolean;
+  defaultWidthWasCapped: boolean;
 }>();
 
 export const tableColumnWidthsField = StateField.define<RangeSet<TableColumnWidthsValue>>({
@@ -327,7 +500,9 @@ export const tableColumnWidthsField = StateField.define<RangeSet<TableColumnWidt
     for (const effect of effects) {
       const nextValue = new TableColumnWidthsValue(
         [...effect.value.widths],
-        effect.value.initialTotalWidth
+        effect.value.initialTotalWidth,
+        effect.value.elastic,
+        effect.value.defaultWidthWasCapped
       );
       const existing = entries.find((entry) => entry.from === effect.value.from && entry.to === effect.value.to);
       if (existing) existing.value = nextValue;
@@ -2568,27 +2743,7 @@ class HtmlTableWidget extends WidgetType {
     const wrap = this.domRefs?.wrap ?? table;
     const view = this.getEditorView(wrap);
     if (!view) return true;
-    const activeInput = document.activeElement instanceof HTMLTextAreaElement && table.contains(document.activeElement)
-      ? document.activeElement
-      : null;
-    const focusCoords = activeInput
-      ? this.parseCellCoords(activeInput.dataset.tableRow, activeInput.dataset.tableCol)
-      : null;
-    const range = focusCoords ? this.resolveCurrentTableRange(view, wrap) : null;
-    const tableStartLine = range ? view.state.doc.lineAt(range.from).number : null;
-    const focusTarget = focusCoords
-      ? { ...focusCoords, caret: activeInput?.selectionStart ?? 0 }
-      : null;
-    const applyHistory = () => {
-      commitPendingTableEdits(view);
-      const applied = isUndoShortcut(event) ? undo(view) : redo(view);
-      if (applied && tableStartLine !== null && focusTarget) {
-        this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
-      }
-    };
-    const controller = getViewportController(view);
-    if (controller) controller.preserveScrollPosition(applyHistory);
-    else applyHistory();
+    runEditorHistoryCommand(view, isUndoShortcut(event) ? 'undo' : 'redo');
     return true;
   }
 
@@ -3541,10 +3696,25 @@ class HtmlTableWidget extends WidgetType {
       if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(sourceValue, this.searchState))) {
         refreshPreview();
       }
-      // Non-search previews stay untouched while editing so inline image DOM is not recreated.
-      this.resizeRow(rowEl, rowInputs);
-      if (rowIndex === 0) this.refreshStickyHeaderContent();
-      this.scheduleLayout();
+      // A cell can gain a visual line as soon as it crosses the column width.
+      // Keep an outside document line anchored while that row changes height;
+      // otherwise CodeMirror's widget measurement briefly exposes a jump.
+      const resizeAndSchedule = () => {
+        // Non-search previews stay untouched while editing so inline image DOM is not recreated.
+        this.resizeRow(rowEl, rowInputs);
+        if (rowIndex === 0) this.refreshStickyHeaderContent();
+        this.scheduleLayout();
+      };
+      const viewport = this.view ? getViewportController(this.view) : null;
+      if (viewport && rowEl.isConnected) {
+        viewport.preserveLayoutChange({
+          element: rowEl,
+          from: this.tableData.from,
+          to: this.tableData.to
+        }, resizeAndSchedule);
+      } else {
+        resizeAndSchedule();
+      }
       notifySelectionChange();
     });
     input.addEventListener('select', notifySelectionChange);
@@ -3638,14 +3808,33 @@ class HtmlTableWidget extends WidgetType {
     return result?.widths.length === this.tableData.colCount ? result : null;
   }
 
-  applyColumnWidths(widths: readonly number[], { deferFullLayout = false } = {}) {
-    if (!this.domRefs || widths.length !== this.tableData.colCount) return;
+  applyColumnWidths(
+    widths: readonly number[],
+    options: {
+      deferFullLayout?: boolean;
+      elastic?: boolean;
+      defaultWidthWasCapped?: boolean;
+      initialTotalWidth?: number;
+    } = {}
+  ) {
+    if (!this.domRefs || widths.length !== this.tableData.colCount) return false;
+    const {
+      deferFullLayout = false,
+      elastic = false,
+      defaultWidthWasCapped = false,
+      initialTotalWidth = 0
+    } = options;
     const { table, colgroup, wrap, shell } = this.domRefs;
     const requestedTotalWidth = widths.reduce((total, width) => total + width, 0);
     const availableWidth = Math.max(0, wrap.clientWidth - tableCollapsedOuterBorderWidth(table));
-    const scale = requestedTotalWidth > availableWidth && availableWidth > 0
-      ? availableWidth / requestedTotalWidth
-      : 1;
+    const elasticLimit = defaultWidthWasCapped
+      ? availableWidth
+      : Math.max(requestedTotalWidth, initialTotalWidth);
+    const targetTotalWidth = Math.min(
+      availableWidth || requestedTotalWidth,
+      elastic ? elasticLimit : requestedTotalWidth
+    );
+    const scale = requestedTotalWidth > 0 ? targetTotalWidth / requestedTotalWidth : 1;
     const renderedWidths = widths.map((width) => width * scale);
     const totalWidth = renderedWidths.reduce((total, width) => total + width, 0);
     shell.style.minWidth = '0';
@@ -3658,10 +3847,11 @@ class HtmlTableWidget extends WidgetType {
     }
     if (deferFullLayout) {
       this.updateStickyHeader();
-      return;
+      return availableWidth > 0 && totalWidth >= availableWidth - 1;
     }
     this.pendingResizeRows = true;
     this.scheduleLayout({ resizeRows: true });
+    return availableWidth > 0 && totalWidth >= availableWidth - 1;
   }
 
   createColumnResizeHandle(column: number): HTMLSpanElement {
@@ -3688,17 +3878,22 @@ class HtmlTableWidget extends WidgetType {
     const startWidths = headerCells.map((cell) => cell.getBoundingClientRect().width);
     const initialTotalWidth = stored?.initialTotalWidth ?? table.getBoundingClientRect().width;
     const startTotalWidth = startWidths.reduce((total, width) => total + width, 0);
-    const maximumTotalWidth = Math.max(0, wrap.clientWidth - tableCollapsedOuterBorderWidth(table));
-    const startColumnWidth = startWidths[column];
-    const headerCellStyle = getComputedStyle(headerCells[column]);
-    const preview = headerCells[column].querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
-    const previewStyle = preview ? getComputedStyle(preview) : headerCellStyle;
+    const startMaximumTotalWidth = Math.max(0, wrap.clientWidth - tableCollapsedOuterBorderWidth(table));
+    const defaultWidthWasCapped = stored?.defaultWidthWasCapped ?? (
+      initialTotalWidth >= startMaximumTotalWidth - 1
+    );
     const numericStyleValue = (value: string) => Number.parseFloat(value) || 0;
-    const minimumColumnWidth = numericStyleValue(previewStyle.fontSize)
-      + numericStyleValue(previewStyle.paddingLeft)
-      + numericStyleValue(previewStyle.paddingRight)
-      + numericStyleValue(headerCellStyle.borderLeftWidth)
-      + numericStyleValue(headerCellStyle.borderRightWidth);
+    const minimumColumnWidths = headerCells.map((cell) => {
+      const cellStyle = getComputedStyle(cell);
+      const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+      const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
+      return numericStyleValue(previewStyle.fontSize)
+        + numericStyleValue(previewStyle.paddingLeft)
+        + numericStyleValue(previewStyle.paddingRight)
+        + numericStyleValue(cellStyle.borderLeftWidth)
+        + numericStyleValue(cellStyle.borderRightWidth);
+    });
+    const minimumColumnWidth = minimumColumnWidths[column];
     const startX = event.clientX;
     const editorDom = this.view.dom;
     let nextWidths = startWidths;
@@ -3718,11 +3913,17 @@ class HtmlTableWidget extends WidgetType {
       if (!view || !this.domRefs) return;
       const range = this.resolveCurrentTableRange(view, this.domRefs.shell);
       if (!range) return;
+      const currentMaximumTotalWidth = Math.max(
+        0,
+        this.domRefs.wrap.clientWidth - tableCollapsedOuterBorderWidth(this.domRefs.table)
+      );
       view.dispatch({
         effects: setTableColumnWidthsEffect.of({
           ...range,
           widths: [...nextWidths],
-          initialTotalWidth
+          initialTotalWidth,
+          elastic: nextWidths.reduce((total, width) => total + width, 0) >= currentMaximumTotalWidth - 1,
+          defaultWidthWasCapped
         })
       });
       this.scheduleLayout({ resizeRows: true });
@@ -3735,11 +3936,44 @@ class HtmlTableWidget extends WidgetType {
       }
       moveEvent.preventDefault();
       const requestedDelta = moveEvent.clientX - startX;
-      const minimumDelta = minimumColumnWidth - startColumnWidth;
-      const maximumDelta = Math.max(0, maximumTotalWidth - startTotalWidth);
+      const maximumTotalWidth = Math.max(0, wrap.clientWidth - tableCollapsedOuterBorderWidth(table));
+      const baseScale = startTotalWidth > maximumTotalWidth && maximumTotalWidth > 0
+        ? maximumTotalWidth / startTotalWidth
+        : 1;
+      const baseWidths = startWidths.map((width) => width * baseScale);
+      const baseTotalWidth = baseWidths.reduce((total, width) => total + width, 0);
+      const baseColumnWidth = baseWidths[column];
+      const minimumDelta = minimumColumnWidth - baseColumnWidth;
+      const availableTotalGrowth = Math.max(0, maximumTotalWidth - baseTotalWidth);
+      const rightWidths = baseWidths.slice(column + 1);
+      const rightMinimumWidths = minimumColumnWidths.slice(column + 1);
+      const availableRightCompression = rightWidths.reduce((total, width, index) => (
+        total + Math.max(0, width - rightMinimumWidths[index])
+      ), 0);
+      const maximumDelta = availableTotalGrowth + availableRightCompression;
       const delta = Math.min(maximumDelta, Math.max(minimumDelta, requestedDelta));
-      nextWidths = [...startWidths];
-      nextWidths[column] = startColumnWidth + delta;
+      nextWidths = [...baseWidths];
+      nextWidths[column] = baseColumnWidth + delta;
+      const compression = Math.max(0, delta - availableTotalGrowth);
+      if (compression > 0 && rightWidths.length) {
+        const targetRightTotal = rightWidths.reduce((total, width) => total + width, 0) - compression;
+        let low = 0;
+        let high = 1;
+        for (let iteration = 0; iteration < 32; iteration += 1) {
+          const scale = (low + high) / 2;
+          const scaledTotal = rightWidths.reduce((total, width, index) => (
+            total + Math.max(rightMinimumWidths[index], width * scale)
+          ), 0);
+          if (scaledTotal > targetRightTotal) high = scale;
+          else low = scale;
+        }
+        for (let index = 0; index < rightWidths.length; index += 1) {
+          nextWidths[column + index + 1] = Math.max(
+            rightMinimumWidths[index],
+            rightWidths[index] * low
+          );
+        }
+      }
       this.applyColumnWidths(nextWidths, { deferFullLayout: true });
     };
 
@@ -4426,7 +4660,11 @@ class HtmlTableWidget extends WidgetType {
     };
     this.refreshStickyHeaderContent();
     const storedColumnWidths = this.storedColumnWidths(view);
-    if (storedColumnWidths) this.applyColumnWidths(storedColumnWidths.widths);
+    if (storedColumnWidths) this.applyColumnWidths(storedColumnWidths.widths, {
+      elastic: storedColumnWidths.elastic,
+      defaultWidthWasCapped: storedColumnWidths.defaultWidthWasCapped,
+      initialTotalWidth: storedColumnWidths.initialTotalWidth
+    });
     this.updateActionTargetStyles();
     this.wireTableSelection(table);
     this.pendingResizeRows = true;
@@ -4436,7 +4674,27 @@ class HtmlTableWidget extends WidgetType {
       const observer = new ResizeObserver(() => {
         if (this.columnResizeActive) return;
         const storedColumnWidths = this.view ? this.storedColumnWidths(this.view) : null;
-        if (storedColumnWidths) this.applyColumnWidths(storedColumnWidths.widths);
+        if (storedColumnWidths) {
+          const reachedLimit = this.applyColumnWidths(storedColumnWidths.widths, {
+            elastic: storedColumnWidths.elastic,
+            defaultWidthWasCapped: storedColumnWidths.defaultWidthWasCapped,
+            initialTotalWidth: storedColumnWidths.initialTotalWidth
+          });
+          if (reachedLimit && !storedColumnWidths.elastic && this.view && this.domRefs) {
+            const range = this.resolveCurrentTableRange(this.view, this.domRefs.shell);
+            if (range) {
+              this.view.dispatch({
+                effects: setTableColumnWidthsEffect.of({
+                  ...range,
+                  widths: [...storedColumnWidths.widths],
+                  initialTotalWidth: storedColumnWidths.initialTotalWidth,
+                  elastic: true,
+                  defaultWidthWasCapped: storedColumnWidths.defaultWidthWasCapped
+                })
+              });
+            }
+          }
+        }
         else this.scheduleLayout({ resizeRows: true });
       });
       observer.observe(wrap);

@@ -35,6 +35,16 @@ interface ScrollTarget {
   left?: number;
 }
 
+export interface ViewportHistorySnapshot {
+  scrollTop: number;
+  selection: {
+    lineNumber: number;
+    visibleFromLineNumber: number;
+    visibleToLineNumber: number;
+    wasVisible: boolean;
+  };
+}
+
 interface LayoutAnchor {
   position: number;
   viewportOffset: number;
@@ -61,6 +71,7 @@ interface ActiveScrollTarget {
   stableFrames: number;
 }
 
+
 const MAX_SETTLE_FRAMES = 8;
 const REQUIRED_STABLE_FRAMES = 2;
 const POSITION_EPSILON = 0.5;
@@ -79,17 +90,20 @@ export class ViewportController {
   private lastTouchMoveAt = Number.NEGATIVE_INFINITY;
   private lastScrollDirection: -1 | 0 | 1 = 0;
   private interactionGeneration = 0;
+  private scrollLockGeneration = 0;
   private activeScrollTarget: ActiveScrollTarget | null = null;
   private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
   private anchorStabilizationGeneration: number | null = null;
   private lastTouchY: number | null = null;
   private scrollbarDragActive = false;
+  private pendingHistoryShortcutViewport: ViewportHistorySnapshot | null = null;
   private readonly getMode: () => 'live' | 'source';
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => this.scheduleActiveScrollFrame();
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
   private readonly onPointerUp = () => this.finishScrollbarDrag();
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
+  private readonly onKeyUp = (event: KeyboardEvent) => this.handleKeyUp(event);
   private readonly onTouchStart = (event: TouchEvent) => this.handleTouchStart(event);
   private readonly onTouchMove = (event: TouchEvent) => this.handleTouchMove(event);
   private readonly onTouchEnd = () => this.finishTouchGesture();
@@ -111,12 +125,14 @@ export class ViewportController {
       view.scrollDOM.ownerDocument.addEventListener('pointerup', this.onPointerUp, true);
       view.scrollDOM.ownerDocument.addEventListener('pointercancel', this.onPointerUp, true);
       view.dom.addEventListener('keydown', this.onKeyDown, true);
+      view.dom.addEventListener('keyup', this.onKeyUp, true);
       this.interactionsAttached = true;
     }
   }
 
   markInteraction(): void {
     this.interactionGeneration += 1;
+    this.scrollLockGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
@@ -202,6 +218,39 @@ export class ViewportController {
     }, current);
     this.writeScrollPosition(target);
     this.stabilizeScrollPosition(target);
+  }
+
+  lockScrollTop(targetTop: number): void {
+    // Live decorations can finish measuring several frames after a history
+    // transaction. Hold the absolute viewport until that layout has settled;
+    // markInteraction cancels the lock as soon as the user acts again.
+    this.markInteraction();
+    const lockGeneration = ++this.scrollLockGeneration;
+    let remainingFrames = MAX_SETTLE_FRAMES;
+    const write = () => {
+      if (this.destroyed || lockGeneration !== this.scrollLockGeneration) return;
+      this.view.scrollDOM.scrollTop = Math.max(0, Math.min(
+        targetTop,
+        this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight
+      ));
+      remainingFrames -= 1;
+      if (remainingFrames > 0) requestAnimationFrame(write);
+    };
+    write();
+  }
+
+  consumeHistoryShortcutViewport(): ViewportHistorySnapshot | null {
+    const viewport = this.pendingHistoryShortcutViewport;
+    this.pendingHistoryShortcutViewport = null;
+    return viewport;
+  }
+
+  captureHistorySnapshot(): ViewportHistorySnapshot {
+    return this.consumeHistoryShortcutViewport() ?? this.captureHistoryShortcutViewport();
+  }
+
+  captureCurrentHistorySnapshot(): ViewportHistorySnapshot {
+    return this.captureHistoryShortcutViewport();
   }
 
   captureDocumentAnchor(): ViewportDocumentAnchor {
@@ -303,6 +352,30 @@ export class ViewportController {
     });
   }
 
+  /** Reveals once, then keeps the same element offset while async layout settles. */
+  revealElement(element: HTMLElement): void {
+    if (this.destroyed || !element.isConnected) return;
+    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+    const before = element.getBoundingClientRect();
+    const fullyVisible = before.top >= scrollerRect.top
+      && before.bottom <= scrollerRect.bottom
+      && before.left >= scrollerRect.left
+      && before.right <= scrollerRect.right;
+    if (fullyVisible) return;
+
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const revealed = element.getBoundingClientRect();
+    const viewportOffset = revealed.top - scrollerRect.top;
+    this.stabilize(() => {
+      if (!element.isConnected) return null;
+      const currentScroller = this.view.scrollDOM.getBoundingClientRect();
+      const current = element.getBoundingClientRect();
+      return {
+        top: this.view.scrollDOM.scrollTop + current.top - currentScroller.top - viewportOffset
+      };
+    });
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.generation += 1;
@@ -321,6 +394,7 @@ export class ViewportController {
       this.view.scrollDOM.ownerDocument.removeEventListener('pointerup', this.onPointerUp, true);
       this.view.scrollDOM.ownerDocument.removeEventListener('pointercancel', this.onPointerUp, true);
       this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
+      this.view.dom.removeEventListener('keyup', this.onKeyUp, true);
       this.interactionsAttached = false;
     }
   }
@@ -448,6 +522,18 @@ export class ViewportController {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
+    const isModifierKey = event.key === 'Control' || event.key === 'Meta';
+    const isHistoryShortcut = (
+      (event.ctrlKey || event.metaKey) &&
+      (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y')
+    );
+    if (isModifierKey) {
+      this.pendingHistoryShortcutViewport = this.captureHistoryShortcutViewport();
+    } else if (isHistoryShortcut) {
+      this.pendingHistoryShortcutViewport ??= this.captureHistoryShortcutViewport();
+    } else {
+      this.pendingHistoryShortcutViewport = null;
+    }
     this.markInteraction();
     if (!this.canChangeLiveLayout(event)) return;
     this.startInteractionLayoutStabilization(
@@ -552,6 +638,40 @@ export class ViewportController {
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
     this.lastTouchY = null;
+  }
+
+  private handleKeyUp(event: KeyboardEvent): void {
+    if (event.key === 'Control' || event.key === 'Meta') {
+      this.pendingHistoryShortcutViewport = null;
+    }
+  }
+
+  private captureHistoryShortcutViewport(): ViewportHistorySnapshot {
+    const head = this.view.state.selection.main.head;
+    const coords = this.view.coordsAtPos(head);
+    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+    const topBlock = this.view.lineBlockAtHeight(this.view.scrollDOM.scrollTop);
+    const bottomBlock = this.view.lineBlockAtHeight(
+      this.view.scrollDOM.scrollTop + this.view.scrollDOM.clientHeight
+    );
+    return {
+      scrollTop: this.view.scrollDOM.scrollTop,
+      selection: {
+        lineNumber: this.view.state.doc.lineAt(head).number,
+        visibleFromLineNumber: this.view.state.doc.lineAt(topBlock.from).number,
+        visibleToLineNumber: this.view.state.doc.lineAt(bottomBlock.to).number,
+        wasVisible: Boolean(
+          (
+            coords &&
+            coords.bottom > scrollerRect.top &&
+            coords.top < scrollerRect.bottom
+          ) || (
+            head >= this.view.viewport.from &&
+            head <= this.view.viewport.to
+          )
+        )
+      }
+    };
   }
 
   private finishScrollbarDrag(): void {

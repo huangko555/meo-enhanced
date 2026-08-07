@@ -217,6 +217,49 @@ async function main() {
       throw new Error(`Long-document changes disappeared from the Live gutter: ${JSON.stringify(longLiveDocumentMarkers)}`);
     }
 
+    // A baseline refresh is also an external decoration mutation. It must not
+    // move the reading position while the live parser and block widgets settle.
+    const beforeBaselineRefresh = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const position = editor.getTopVisiblePosition();
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        topLine: position.line,
+        topLineOffset: position.lineOffset
+      };
+    });
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const baselineLines = Array.from({ length: 1201 }, (_, index) => `baseline ${index + 1}`);
+      baselineLines[600] = 'changed 600';
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'current-edit',
+        baseText: baselineLines.join('\n')
+      });
+    });
+    await waitForFrames(page, 10);
+    const afterBaselineRefresh = await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const position = editor.getTopVisiblePosition();
+      return {
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        topLine: position.line,
+        topLineOffset: position.lineOffset
+      };
+    });
+    if (
+      beforeBaselineRefresh.topLine !== afterBaselineRefresh.topLine ||
+      Math.abs(beforeBaselineRefresh.topLineOffset - afterBaselineRefresh.topLineOffset) > 1 ||
+      Math.abs(beforeBaselineRefresh.scrollTop - afterBaselineRefresh.scrollTop) > 1
+    ) {
+      throw new Error(`Refreshing the Git baseline moved the live document viewport: ${JSON.stringify({
+        before: beforeBaselineRefresh,
+        after: afterBaselineRefresh
+      })}`);
+    }
+
     await page.evaluate(() => {
       const editor = (window as any).__editor;
       const text = '| Name |\n| --- |\n| kept one |\n| kept two |\n\nafter';

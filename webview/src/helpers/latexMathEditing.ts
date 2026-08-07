@@ -1,11 +1,12 @@
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
-import { defaultKeymap, indentLess, indentMore, redo, undo } from '@codemirror/commands';
+import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
+import { consumeEditorHistoryCommand } from './historyCommands';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 
 export type LatexMathBlockMode = 'preview' | 'split' | 'source';
@@ -123,7 +124,7 @@ export function getLatexMathBlockMode(
   anchor: number,
   contentFrom: number,
   contentTo: number
-): { effective: LatexMathBlockMode; searchReveal: LatexMathSearchReveal } {
+): { manual: LatexMathBlockMode; effective: LatexMathBlockMode; searchReveal: LatexMathSearchReveal } {
   const editingState = state.field(latexMathEditingStateField, false);
   const manual = editingState?.modes.get(anchor) ?? 'preview';
   const searchReveal = editingState?.searchReveal ?? null;
@@ -133,6 +134,7 @@ export function getLatexMathBlockMode(
     searchReveal.to > contentFrom
   );
   return {
+    manual,
     effective: manual === 'preview' && searchInside ? 'split' : manual,
     searchReveal: searchInside ? searchReveal : null
   };
@@ -167,6 +169,15 @@ function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect
     return;
   }
   controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects: effect }));
+}
+
+function focusOuterWithoutMovingViewport(view: EditorView): void {
+  const controller = getViewportController(view);
+  if (controller) {
+    controller.preserveScrollPosition(() => view.focus());
+    return;
+  }
+  view.focus();
 }
 
 class LatexMathToolbarWidget extends WidgetType {
@@ -211,7 +222,7 @@ class LatexMathToolbarWidget extends WidgetType {
       );
       requestAnimationFrame(() => {
         if (nextMode === 'preview') {
-          view.focus();
+          focusOuterWithoutMovingViewport(view);
           return;
         }
         const editingBlock = view.dom.querySelector<HTMLElement>(
@@ -334,9 +345,9 @@ class LatexMathEditingController {
           innerLatexMathSearchField,
           EditorView.lineWrapping,
           keymap.of([
-            { key: 'Mod-z', run: () => undo(this.outerView) },
-            { key: 'Mod-y', run: () => redo(this.outerView) },
-            { key: 'Mod-Shift-z', run: () => redo(this.outerView) },
+            { key: 'Mod-z', run: () => consumeEditorHistoryCommand(this.outerView, 'undo') },
+            { key: 'Mod-y', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
+            { key: 'Mod-Shift-z', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
             { key: 'Tab', run: indentMore, shift: indentLess },
             ...defaultKeymap
           ]),
@@ -349,10 +360,14 @@ class LatexMathEditingController {
             if (this.outerView.state.doc.sliceString(contentFrom, contentTo) === sourceText) {
               return;
             }
+            const userEvent = update.transactions.reduce<string | undefined>(
+              (current, transaction) => transaction.annotation(Transaction.userEvent) ?? current,
+              undefined
+            ) ?? 'input';
             this.block = { ...this.block, contentTo: contentFrom + sourceText.length, sourceText };
             this.outerView.dispatch({
               changes: { from: contentFrom, to: contentTo, insert: sourceText },
-              annotations: Transaction.userEvent.of('input')
+              annotations: Transaction.userEvent.of(userEvent)
             });
             this.schedulePreviewRender();
           })
