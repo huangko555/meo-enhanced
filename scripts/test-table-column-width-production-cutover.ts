@@ -17,7 +17,12 @@ async function waitForFrames(page: any, count = 6): Promise<void> {
   }, count);
 }
 
-async function drag(page: any, selector: string, delta: number): Promise<void> {
+async function drag(
+  page: any,
+  selector: string,
+  delta: number,
+  finish: 'up' | 'cancel' = 'up'
+): Promise<void> {
   const point = await page.$eval(selector, (handle: Element) => {
     const rect = handle.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -25,7 +30,16 @@ async function drag(page: any, selector: string, delta: number): Promise<void> {
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();
   await page.mouse.move(point.x + delta, point.y, { steps: 4 });
-  await page.mouse.up();
+  if (finish === 'up') {
+    await page.mouse.up();
+  } else {
+    await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointercancel', {
+      pointerId: 1,
+      pointerType: 'mouse',
+      buttons: 0
+    })));
+    await page.mouse.up();
+  }
   await waitForFrames(page);
 }
 
@@ -139,6 +153,46 @@ async function main(): Promise<void> {
       cell.getBoundingClientRect().width
     ));
     assert.ok(Math.abs(afterModeRoundTrip - resized.primaryWidths[0]) < 2);
+
+    const beforePointerCancel = await page.evaluate((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector)!;
+      const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      input.focus();
+      input.setSelectionRange(1, 1);
+      table.scrollIntoView({ block: 'center' });
+      return {
+        width: table.querySelector<HTMLElement>('thead th:first-child')!.getBoundingClientRect().width,
+        focused: document.activeElement === input,
+        selectionStart: input.selectionStart,
+        scrollTop: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop
+      };
+    }, tableSelector);
+    await drag(page, firstHandle, 35, 'cancel');
+    const afterPointerCancel = await page.evaluate((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector)!;
+      const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      return {
+        width: table.querySelector<HTMLElement>('thead th:first-child')!.getBoundingClientRect().width,
+        focused: document.activeElement === input,
+        selectionStart: input.selectionStart,
+        scrollTop: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop
+      };
+    }, tableSelector);
+    assert.ok(afterPointerCancel.width > beforePointerCancel.width + 25);
+    assert.equal(afterPointerCancel.focused, beforePointerCancel.focused);
+    assert.equal(afterPointerCancel.selectionStart, beforePointerCancel.selectionStart);
+    assert.ok(Math.abs(afterPointerCancel.scrollTop - beforePointerCancel.scrollTop) < 2);
+    await page.evaluate(() => {
+      const editor = (window as any).__columnWidthProduction;
+      editor.setMode('source');
+      editor.setMode('live');
+    });
+    await waitForFrames(page, 8);
+    const afterPointerCancelRebuild = await page.$eval(
+      `${tableSelector} thead th:first-child`,
+      (cell) => cell.getBoundingClientRect().width
+    );
+    assert.ok(Math.abs(afterPointerCancelRebuild - afterPointerCancel.width) < 2);
 
     await page.evaluate((text) => {
       (window as any).__columnWidthProduction.setText(`replacement\n\n${text}\n\ntail`);
