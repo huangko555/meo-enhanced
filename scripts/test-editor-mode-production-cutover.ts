@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
+const effectAdapterSource = readFileSync(
+  new URL('../webview/src/adapters/editorModeEffectAdapter.ts', import.meta.url),
+  'utf8'
+);
+const previewAdapterSource = readFileSync(
+  new URL('../webview/src/adapters/previewWebviewAdapter.ts', import.meta.url),
+  'utf8'
+);
 
 for (const legacyPattern of [
   /\blet currentMode\b/,
@@ -25,6 +33,13 @@ assert.equal(
   1
 );
 assert.equal((source.match(/editorModeRuntime = createEditorModeRuntime\(/g) ?? []).length, 1);
+assert.equal(source.includes('editorModeApplication.dispatch('), false);
+assert.equal(source.includes('editorModeEffectAdapter.execute('), false);
+assert.equal(
+  (source.match(/editor\.setMode\(mode\)/g) ?? []).length,
+  1,
+  'Editor mode application may only occur inside the injected Effect capability'
+);
 assert.equal(
   (source.match(/type: 'setMode'/g) ?? []).length,
   1,
@@ -36,5 +51,11 @@ assert.equal(
   'Host toggleMode must enter the Runtime as an Application input'
 );
 assert.equal(source.includes('editorModeRuntime.dispose()'), true);
+assert.equal(
+  /\blet\s+(?:currentMode|mode|lastEditableMode|pendingTransition|transitionSequence)\b/.test(effectAdapterSource),
+  false,
+  'Effect Adapter must not copy Application mode or transition state'
+);
+assert.equal(previewAdapterSource.includes('restoreActive'), false);
 
 console.log('Editor Mode production cutover guards passed');

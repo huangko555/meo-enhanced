@@ -70,9 +70,6 @@ adapter.setActive({ active: false, text: 'hidden again', initialAppearance: 'dar
 const beforeHiddenRefresh = calls.length;
 adapter.refreshVisible('must not render');
 assert.equal(calls.length, beforeHiddenRefresh);
-adapter.restoreActive(true);
-assert.deepEqual(calls.at(-1), { type: 'visible', visible: true });
-adapter.restoreActive(false);
 
 adapter.dispose();
 adapter.dispose();

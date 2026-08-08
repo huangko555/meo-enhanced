@@ -23,7 +23,6 @@ export type PreviewWebviewAdapter = {
     restoreLine?: number | null;
     initialAppearance: PreviewAppearance;
   }): void;
-  restoreActive(active: boolean): void;
   refreshVisible(text: string, options?: { restoreLine?: number | null }): void;
   accept(message: HostToWebviewMessage): boolean;
   getAppearance(): PreviewAppearance;
@@ -53,11 +52,6 @@ export function createPreviewWebviewAdapter(surface: PreviewSurface): PreviewWeb
         appearanceInitializedForFirstActivation = true;
       }
       surface.requestRender(input.text, { restoreLine: input.restoreLine ?? null });
-    },
-    restoreActive(nextActive) {
-      if (disposed) return;
-      active = nextActive;
-      surface.setVisible(nextActive);
     },
     refreshVisible(text, options = {}) {
       if (disposed || !active) return;
