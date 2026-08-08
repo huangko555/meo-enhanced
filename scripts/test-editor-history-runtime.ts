@@ -10,7 +10,6 @@ import { createEditorHistoryRuntime } from '../webview/src/adapters/editorHistor
 
 const events: string[] = [];
 const errors: string[] = [];
-let mode: 'live' | 'source' = 'source';
 let restoreResult: 'not-rendered' | 'restored' | 'retry' = 'not-rendered';
 let scheduledRetry: (() => void) | null = null;
 let retryCancels = 0;
@@ -22,14 +21,10 @@ let releaseNative: (() => void) | null = null;
 
 const capabilities: EditorHistoryEffectCapabilities = {
   captureContext: () => ({
-    mode,
     viewport: {
       scrollTop: 120,
       selection: { lineNumber: 12, visibleFromLineNumber: 10, visibleToLineNumber: 30, wasVisible: true }
-    },
-    interactionTarget: mode === 'live'
-      ? { kind: 'rendered-block', owner: 'generic', mode: 'split' }
-      : undefined
+    }
   }),
   commitTransientEdits: () => events.push('commit'),
   async runNativeHistory(direction) {
@@ -40,7 +35,7 @@ const capabilities: EditorHistoryEffectCapabilities = {
     return nativeResult;
   },
   attemptBoundaryRestore(request) {
-    events.push(`rendered:${request.replayId}:${request.preferredBlockMode ?? 'none'}`);
+    events.push(`boundary:${request.replayId}`);
     return restoreResult;
   },
   restoreEditorInteraction(request) {
@@ -64,7 +59,7 @@ const runtime = createEditorHistoryRuntime(application, adapter, (error) => erro
 
 assert.equal(await runtime.dispatch({ type: 'requestReplay', direction: 'undo' }), true);
 await runtime.whenIdle();
-assert.deepEqual(events, ['commit', 'native:undo', 'rendered:1:none', 'editor:1:16:120']);
+assert.deepEqual(events, ['commit', 'native:undo', 'boundary:1', 'editor:1:16:120']);
 assert.equal(runtime.getState().pendingReplay, null);
 
 events.length = 0;
@@ -75,17 +70,16 @@ assert.equal(runtime.getState().pendingReplay, null);
 
 events.length = 0;
 nativeResult = { applied: true, changedRange: { from: 16, to: 24 } };
-mode = 'live';
 restoreResult = 'restored';
 await runtime.dispatch({ type: 'requestReplay', direction: 'redo' });
 await runtime.whenIdle();
-assert.deepEqual(events, ['commit', 'native:redo', 'rendered:3:split']);
+assert.deepEqual(events, ['commit', 'native:redo', 'boundary:3']);
 assert.equal(runtime.getState().pendingReplay, null);
 
 events.length = 0;
 restoreResult = 'retry';
 await runtime.dispatch({ type: 'requestReplay', direction: 'undo' });
-assert.deepEqual(events, ['commit', 'native:undo', 'rendered:4:split', 'schedule-retry']);
+assert.deepEqual(events, ['commit', 'native:undo', 'boundary:4', 'schedule-retry']);
 assert.equal(runtime.getState().pendingReplay?.phase, 'restoring');
 restoreResult = 'restored';
 const retry = scheduledRetry;
@@ -108,7 +102,7 @@ staleRetry();
 await new Promise((resolve) => setTimeout(resolve, 0));
 await runtime.whenIdle();
 assert.equal(
-  events.filter((event) => event.startsWith('rendered:')).length,
+  events.filter((event) => event.startsWith('boundary:')).length,
   1,
   'cancelled focus retry must not restore after an external Document presentation'
 );
@@ -116,7 +110,6 @@ assert.equal(
 events.length = 0;
 restoreResult = 'not-rendered';
 releaseNative = () => undefined;
-mode = 'source';
 const rapidUndo = runtime.dispatch({ type: 'requestReplay', direction: 'undo' });
 const rapidRedo = runtime.dispatch({ type: 'requestReplay', direction: 'redo' });
 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -124,14 +117,13 @@ assert.deepEqual(events, ['commit', 'native:undo'], 'native history operations m
 const release = releaseNative;
 assert.ok(release);
 releaseNative = null;
-mode = 'live';
 restoreResult = 'restored';
 release();
 await Promise.all([rapidUndo, rapidRedo]);
 await runtime.whenIdle();
 assert.deepEqual(events, [
-  'commit', 'native:undo', 'rendered:6:none',
-  'commit', 'native:redo', 'rendered:7:split'
+  'commit', 'native:undo', 'boundary:6',
+  'commit', 'native:redo', 'boundary:7'
 ]);
 
 events.length = 0;
@@ -154,14 +146,12 @@ const restoreRequest: EditorHistoryRestoreRequest = {
   direction: 'undo',
   targetPosition: 7,
   changedRange: { from: 7, to: 7 },
-  interactionTarget: { kind: 'rendered-block', owner: 'mermaid-boundary', mode: 'source' },
-  preferredBlockMode: 'source',
   previousViewport: {
     scrollTop: 30,
     selection: { lineNumber: 3, visibleFromLineNumber: 1, visibleToLineNumber: 12, wasVisible: true }
   }
 };
-assert.equal(restoreRequest.preferredBlockMode, 'source');
+assert.equal(restoreRequest.changedRange?.from, 7);
 
 const adapterSource = readFileSync(new URL('../webview/src/adapters/editorHistoryEffectAdapter.ts', import.meta.url), 'utf8');
 assert.equal(/@codemirror|EditorView|Transaction|DocumentSession|Revision|Draft|historyDepth|historyEntries/.test(adapterSource), false);

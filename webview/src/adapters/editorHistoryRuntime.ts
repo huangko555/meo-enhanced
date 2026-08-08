@@ -1,13 +1,11 @@
 import type {
   EditorHistoryApplication,
   EditorHistoryEffect,
+  EditorHistoryEffectExecutor,
   EditorHistoryInput,
+  EditorHistoryRuntimeInput,
   EditorHistoryState
 } from '../application/editorHistory';
-import type {
-  EditorHistoryEffectAdapter,
-  EditorHistoryRuntimeInput
-} from './editorHistoryEffectAdapter';
 
 export type EditorHistoryRuntime = {
   dispatch(input: EditorHistoryRuntimeInput): Promise<boolean | null>;
@@ -19,7 +17,7 @@ export type EditorHistoryRuntime = {
 /** Serializes public inputs and native history while allowing focus retry to be cancelled. */
 export function createEditorHistoryRuntime(
   application: EditorHistoryApplication,
-  adapter: EditorHistoryEffectAdapter,
+  adapter: EditorHistoryEffectExecutor,
   reportUnexpectedError: (error: unknown) => void
 ): EditorHistoryRuntime {
   let operation = Promise.resolve();

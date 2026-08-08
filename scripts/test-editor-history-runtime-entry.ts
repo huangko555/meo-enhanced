@@ -10,11 +10,13 @@ import {
 import { createEditorHistoryRuntime } from '../webview/src/adapters/editorHistoryRuntime';
 
 type EditableMode = 'live' | 'source';
-type InteractionTarget = EditorHistoryContext['interactionTarget'];
+type BoundaryTarget =
+  | { kind: 'rendered-block'; mode: 'preview' | 'split' | 'source' }
+  | { kind: 'table-boundary' };
 
 let view: EditorView;
 let mode: EditableMode = 'source';
-let interactionTarget: InteractionTarget;
+let boundaryTarget: BoundaryTarget | undefined;
 let renderedMounted = true;
 let pendingTransientText: string | null = null;
 let lastHistoryRange: { from: number; to: number } | null = null;
@@ -54,7 +56,6 @@ const captureContext = (): EditorHistoryContext => {
   const visibleFromLine = view.state.doc.lineAt(view.viewport.from).number;
   const visibleToLine = view.state.doc.lineAt(view.viewport.to).number;
   return {
-    mode,
     viewport: {
       scrollTop: view.scrollDOM.scrollTop,
       selection: {
@@ -63,8 +64,7 @@ const captureContext = (): EditorHistoryContext => {
         visibleToLineNumber: visibleToLine,
         wasVisible: selectionLine >= visibleFromLine && selectionLine <= visibleToLine
       }
-    },
-    interactionTarget
+    }
   };
 };
 
@@ -104,7 +104,8 @@ const adapter = createEditorHistoryEffectAdapter({
     return { applied, changedRange: lastHistoryRange };
   },
   attemptBoundaryRestore(request) {
-    if (request.interactionTarget?.kind === 'table-boundary') {
+    if (mode !== 'live') return 'not-rendered';
+    if (boundaryTarget?.kind === 'table-boundary') {
       tableInput.value = view.state.doc.toString();
       tableInput.focus({ preventScroll: true });
       const offset = Math.min(request.targetPosition ?? 0, tableInput.value.length);
@@ -112,9 +113,9 @@ const adapter = createEditorHistoryEffectAdapter({
       boundaryRestores += 1;
       return 'restored';
     }
-    if (request.interactionTarget?.kind !== 'rendered-block') return 'not-rendered';
+    if (boundaryTarget?.kind !== 'rendered-block') return 'not-rendered';
     if (!renderedMounted) return 'retry';
-    setRenderedMode(request.preferredBlockMode ?? 'preview');
+    setRenderedMode(boundaryTarget.mode);
     renderedInput.value = view.state.doc.toString();
     renderedInput.focus({ preventScroll: true });
     const offset = Math.min(request.targetPosition ?? 0, renderedInput.value.length);
@@ -163,18 +164,18 @@ const focusOwner = (): 'editor' | 'rendered-block' | 'table-boundary' | 'other' 
   },
   async setMode(nextMode: EditableMode) {
     mode = nextMode;
-    interactionTarget = undefined;
+    boundaryTarget = undefined;
     await runtime.dispatch({ type: 'presentationChanged' });
     await runtime.whenIdle();
   },
   edit(insert: string, nextMode: EditableMode) {
     mode = nextMode;
-    interactionTarget = undefined;
+    boundaryTarget = undefined;
     dispatchEdit(insert);
   },
   editRendered(insert: string, blockMode: 'preview' | 'split' | 'source') {
     mode = 'live';
-    interactionTarget = { kind: 'rendered-block', owner: 'generic', mode: blockMode };
+    boundaryTarget = { kind: 'rendered-block', mode: blockMode };
     setRenderedMode(blockMode);
     dispatchEdit(insert);
   },
@@ -184,12 +185,12 @@ const focusOwner = (): 'editor' | 'rendered-block' | 'table-boundary' | 'other' 
     setRenderedMode('source');
     // Frozen characterization reproduces the observed preview replay outcome;
     // it does not claim whether capture or presentation is the Legacy cause.
-    interactionTarget = { kind: 'rendered-block', owner: 'mermaid-boundary', mode: 'preview' };
+    boundaryTarget = { kind: 'rendered-block', mode: 'preview' };
     dispatchEdit(insert);
   },
   prepareTableTransient(insert: string) {
     mode = 'live';
-    interactionTarget = { kind: 'table-boundary' };
+    boundaryTarget = { kind: 'table-boundary' };
     pendingTransientText = insert;
   },
   setRenderedMounted(mounted: boolean) {
@@ -199,7 +200,7 @@ const focusOwner = (): 'editor' | 'rendered-block' | 'table-boundary' | 'other' 
   replay,
   whenIdle: () => runtime.whenIdle(),
   async externalPresent() {
-    interactionTarget = undefined;
+    boundaryTarget = undefined;
     await runtime.dispatch({ type: 'externalDocumentPresented' });
     await runtime.whenIdle();
   },

@@ -1,5 +1,4 @@
 export type EditorHistoryDirection = 'undo' | 'redo';
-export type EditorHistoryBlockMode = 'preview' | 'split' | 'source';
 
 export type EditorHistoryViewport = {
   readonly scrollTop: number;
@@ -12,19 +11,7 @@ export type EditorHistoryViewport = {
 };
 
 export type EditorHistoryContext = {
-  readonly mode: 'live' | 'source';
   readonly viewport: EditorHistoryViewport;
-  /**
-   * A presentation hint captured before the native history command. The
-   * boundary kinds name future owners without moving their edit rules here.
-   */
-  readonly interactionTarget?:
-    | {
-        readonly kind: 'rendered-block';
-        readonly owner: 'generic' | 'mermaid-boundary' | 'latex-boundary';
-        readonly mode: EditorHistoryBlockMode;
-      }
-    | { readonly kind: 'table-boundary' };
 };
 
 export type EditorHistoryState = {
@@ -70,8 +57,6 @@ export type EditorHistoryEffect =
       readonly direction: EditorHistoryDirection;
       readonly targetPosition: number | null;
       readonly changedRange: { readonly from: number; readonly to: number } | null;
-      readonly interactionTarget: EditorHistoryContext['interactionTarget'] | null;
-      readonly preferredBlockMode: EditorHistoryBlockMode | null;
       readonly previousViewport: EditorHistoryViewport;
     }
   | { readonly type: 'disposeHistory' };
@@ -79,6 +64,24 @@ export type EditorHistoryEffect =
 export type EditorHistoryApplication = {
   getState(): EditorHistoryState;
   dispatch(input: EditorHistoryInput): readonly EditorHistoryEffect[];
+};
+
+export type EditorHistoryRuntimeInput =
+  | { readonly type: 'requestReplay'; readonly direction: EditorHistoryDirection }
+  | { readonly type: 'cancelRestore' }
+  | { readonly type: 'localDocumentEdited' }
+  | { readonly type: 'presentationChanged' }
+  | { readonly type: 'externalDocumentPresented' };
+
+export type EditorHistoryEffectExecution = {
+  readonly completion?: Promise<EditorHistoryInput | null>;
+  readonly completionMode?: 'inline' | 'deferred';
+};
+
+/** Port used by the runtime; concrete CodeMirror/DOM mechanics stay in the Adapter. */
+export type EditorHistoryEffectExecutor = {
+  prepareInput(input: EditorHistoryRuntimeInput): EditorHistoryInput;
+  execute(effect: EditorHistoryEffect): EditorHistoryEffectExecution;
 };
 
 type PendingReplay = {
@@ -151,13 +154,6 @@ export function createEditorHistoryApplication(): EditorHistoryApplication {
             ? pending.direction === 'undo' ? input.changedRange.from : input.changedRange.to
             : null,
           changedRange: input.changedRange,
-          interactionTarget: pending.context.mode === 'live'
-            ? pending.context.interactionTarget ?? null
-            : null,
-          preferredBlockMode: pending.context.mode === 'live'
-            && pending.context.interactionTarget?.kind === 'rendered-block'
-            ? pending.context.interactionTarget.mode
-            : null,
           previousViewport: pending.context.viewport
         }];
       }

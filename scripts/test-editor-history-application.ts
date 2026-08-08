@@ -9,7 +9,6 @@ import {
 const effectTypes = (effects: readonly EditorHistoryEffect[]): string[] => effects.map((effect) => effect.type);
 
 const sourceContext: EditorHistoryContext = {
-  mode: 'source',
   viewport: {
     scrollTop: 120,
     selection: { lineNumber: 12, visibleFromLineNumber: 10, visibleToLineNumber: 30, wasVisible: true }
@@ -36,8 +35,6 @@ assert.deepEqual(sourceRestore[0], {
   direction: 'undo',
   targetPosition: 16,
   changedRange: { from: 16, to: 16 },
-  interactionTarget: null,
-  preferredBlockMode: null,
   previousViewport: sourceContext.viewport
 });
 assert.equal(source.getState().pendingReplay?.phase, 'restoring');
@@ -45,12 +42,10 @@ source.dispatch({ type: 'interactionRestored', replayId: undoId });
 assert.equal(source.getState().pendingReplay, null);
 
 const liveContext: EditorHistoryContext = {
-  mode: 'live',
   viewport: {
     scrollTop: 240,
     selection: { lineNumber: 20, visibleFromLineNumber: 18, visibleToLineNumber: 38, wasVisible: true }
-  },
-  interactionTarget: { kind: 'rendered-block', owner: 'generic', mode: 'split' }
+  }
 };
 const live = createEditorHistoryApplication();
 live.dispatch({ type: 'requestReplay', direction: 'redo', context: liveContext });
@@ -67,34 +62,8 @@ assert.deepEqual(live.dispatch({
   direction: 'redo',
   targetPosition: 24,
   changedRange: { from: 16, to: 24 },
-  interactionTarget: liveContext.interactionTarget,
-  preferredBlockMode: 'split',
   previousViewport: liveContext.viewport
 }]);
-
-const boundaries: NonNullable<EditorHistoryContext['interactionTarget']>[] = [
-  { kind: 'table-boundary' },
-  { kind: 'rendered-block', owner: 'mermaid-boundary', mode: 'preview' },
-  { kind: 'rendered-block', owner: 'latex-boundary', mode: 'split' }
-];
-for (const interactionTarget of boundaries) {
-  const application = createEditorHistoryApplication();
-  application.dispatch({ type: 'requestReplay', direction: 'undo', context: { ...liveContext, interactionTarget } });
-  const replayId = application.getState().pendingReplay?.id;
-  assert.ok(replayId);
-  const effects = application.dispatch({
-    type: 'nativeHistoryCompleted', replayId, applied: true, changedRange: { from: 8, to: 10 }
-  });
-  assert.equal(effects[0]?.type, 'restoreHistoryInteraction');
-  assert.equal(
-    effects[0]?.type === 'restoreHistoryInteraction' ? effects[0].preferredBlockMode : null,
-    interactionTarget.kind === 'rendered-block' ? interactionTarget.mode : null
-  );
-  assert.deepEqual(
-    effects[0]?.type === 'restoreHistoryInteraction' ? effects[0].interactionTarget : null,
-    interactionTarget
-  );
-}
 
 const rapid = createEditorHistoryApplication();
 rapid.dispatch({ type: 'requestReplay', direction: 'undo', context: sourceContext });
@@ -116,7 +85,7 @@ modeContinuity.dispatch({ type: 'requestReplay', direction: 'undo', context: liv
 assert.deepEqual(effectTypes(modeContinuity.dispatch({ type: 'presentationChanged' })), ['cancelPendingRestore']);
 assert.equal(modeContinuity.getState().pendingReplay, null);
 const afterModeSwitch = modeContinuity.dispatch({
-  type: 'requestReplay', direction: 'redo', context: { ...sourceContext, mode: 'source' }
+  type: 'requestReplay', direction: 'redo', context: sourceContext
 });
 assert.deepEqual(effectTypes(afterModeSwitch), ['commitTransientEdits', 'runNativeHistory']);
 

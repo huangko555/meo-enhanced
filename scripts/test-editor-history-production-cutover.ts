@@ -10,6 +10,14 @@ const adapterSource = readFileSync(
   new URL('../webview/src/adapters/editorHistoryEffectAdapter.ts', import.meta.url),
   'utf8'
 );
+const applicationSource = readFileSync(
+  new URL('../webview/src/application/editorHistory.ts', import.meta.url),
+  'utf8'
+);
+const runtimeSource = readFileSync(
+  new URL('../webview/src/adapters/editorHistoryRuntime.ts', import.meta.url),
+  'utf8'
+);
 
 assert.equal(
   (editorSource.match(/createEditorHistoryApplication\(\)/g) ?? []).length,
@@ -39,8 +47,15 @@ for (const legacyPattern of [
   /\bfocusObserver\b/,
   /\bredoEntries\b/
 ]) {
-  assert.equal(legacyPattern.test(editorSource), false, `Legacy Editor History rule returned: ${legacyPattern}`);
-  assert.equal(legacyPattern.test(commandsSource), false, `Legacy Editor History helper returned: ${legacyPattern}`);
+  for (const [name, source] of [
+    ['Editor', editorSource],
+    ['commands helper', commandsSource],
+    ['Application', applicationSource],
+    ['Effect Adapter', adapterSource],
+    ['Runtime', runtimeSource]
+  ] as const) {
+    assert.equal(legacyPattern.test(source), false, `Legacy Editor History rule returned in ${name}: ${legacyPattern}`);
+  }
 }
 
 assert.match(commandsSource, /export function runEditorHistoryCommand/);
@@ -55,6 +70,37 @@ assert.match(editorSource, /editorHistoryRuntime\?\.dispatch\(\{ type: 'localDoc
 assert.match(editorSource, /editorHistoryRuntime\?\.dispose\(\)/);
 assert.equal(editorSource.includes('editorHistoryApplication.dispatch('), false);
 assert.equal(editorSource.includes('editorHistoryEffectAdapter.execute('), false);
+assert.equal(
+  /interactionTarget|preferredBlockMode/.test(applicationSource),
+  false,
+  'Application replay intent must not retain candidate-only presentation details'
+);
+assert.equal(
+  /interactionTarget|preferredBlockMode/.test(adapterSource),
+  false,
+  'Effect Adapter contract must resolve concrete boundaries after native replay'
+);
+assert.equal(
+  (editorSource.match(/let recentRenderedReplayPresentation:/g) ?? []).length,
+  1,
+  'production may keep only one bounded recent Rendered Block presentation hint'
+);
+assert.equal(
+  /recentRenderedReplayPresentation\s*:\s*(?:Array|Map|Set)|recentRenderedReplayPresentations/.test(editorSource),
+  false,
+  'the presentation hint must not grow into a history mirror'
+);
+assert.match(editorSource, /isTableHistoryRange\(view\.state, request\.changedRange\)/);
+assert.equal(
+  /changedLineIsTable|lineAt\([^\n]+\)\.text\.includes\('\|'\)/.test(editorSource),
+  false,
+  'plain text containing a pipe must not enter the table focus retry lifecycle'
+);
+assert.equal(
+  runtimeSource.includes("from './editorHistoryEffectAdapter'"),
+  false,
+  'the Runtime must depend on the Application execution Port, not a sibling concrete Adapter'
+);
 
 assert.equal(
   /\blet\s+(?:currentMode|lastEditableMode|historyEntries|redoEntries|historyDepth|pendingReplay|replaySequence)\b/.test(adapterSource),

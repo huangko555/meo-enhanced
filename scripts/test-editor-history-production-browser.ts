@@ -39,7 +39,10 @@ async function main(): Promise<void> {
           return { svg: `<svg width="320" height="120"><text>${text.length}</text></svg>` };
         }
       };
-      const text = Array.from({ length: 90 }, (_, index) => `production history line ${index + 1}`).join('\n');
+      const text = Array.from(
+        { length: 90 },
+        (_, index) => index === 44 ? 'production history plain | pipe' : `production history line ${index + 1}`
+      ).join('\n');
       (window as any).__historyProductionEditor = (window as any).MermaidEditingHarness.createEditor({
         parent: document.getElementById('app')!,
         text,
@@ -70,6 +73,29 @@ async function main(): Promise<void> {
     assert.equal(publicReplay.text.includes('PUBLIC_EDIT'), false);
     assert.equal(publicReplay.focused, true);
     assert.equal(publicReplay.head, publicReplay.text.length);
+
+    const plainPipeReplay = await page.evaluate(async () => {
+      const editor = (window as any).__historyProductionEditor;
+      const view = editor.view;
+      const line = view.state.doc.line(45);
+      view.dispatch({ changes: { from: line.to, insert: ' EDIT' }, selection: { anchor: line.to + 5 } });
+      const applied = await editor.undo();
+      return {
+        applied,
+        line: view.state.doc.line(45).text,
+        focused: view.hasFocus,
+        head: view.state.selection.main.head,
+        expectedHead: line.to
+      };
+    });
+    await waitForFrames(page, 12);
+    assert.deepEqual(plainPipeReplay, {
+      applied: true,
+      line: 'production history plain | pipe',
+      focused: true,
+      head: plainPipeReplay.expectedHead,
+      expectedHead: plainPipeReplay.expectedHead
+    });
 
     const keymapConsumed = await page.evaluate(() => {
       const editor = (window as any).__historyProductionEditor;
@@ -174,12 +200,19 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     const sourceRedo = await readBlock();
 
-    assert.deepEqual({ positions, previewUndo, splitRedo, sourceUndo, sourceRedo }, {
+    const exactLegacyFingerprint = {
+      positions,
+      previewUndo: { split: previewUndo.split, head: previewUndo.head, focused: previewUndo.focused },
+      splitRedo: { split: splitRedo.split, head: splitRedo.head, focused: splitRedo.focused },
+      sourceUndo: { source: sourceUndo.source, head: sourceUndo.head, focused: sourceUndo.focused },
+      sourceRedo: { source: sourceRedo.source, head: sourceRedo.head, focused: sourceRedo.focused }
+    };
+    assert.deepEqual(exactLegacyFingerprint, {
       positions: { before: 16, after: 24 },
-      previewUndo: { split: true, source: false, head: 16, focused: true },
-      splitRedo: { split: true, source: false, head: 24, focused: true },
-      sourceUndo: { split: true, source: false, head: 16, focused: true },
-      sourceRedo: { split: true, source: false, head: 24, focused: true }
+      previewUndo: { split: true, head: 16, focused: true },
+      splitRedo: { split: true, head: 24, focused: true },
+      sourceUndo: { source: false, head: 16, focused: true },
+      sourceRedo: { source: false, head: 24, focused: true }
     });
 
     await page.evaluate(() => (window as any).__historyProductionEditor.destroy());

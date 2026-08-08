@@ -2,6 +2,7 @@ import type {
   EditorHistoryContext,
   EditorHistoryDirection,
   EditorHistoryEffect,
+  EditorHistoryEffectExecutor,
   EditorHistoryInput
 } from '../application/editorHistory';
 
@@ -16,23 +17,6 @@ export type EditorHistoryRestoreRequest = Extract<
 >;
 
 export type EditorHistoryRestoreAttempt = 'not-rendered' | 'restored' | 'retry';
-
-export type EditorHistoryRuntimeInput =
-  | { readonly type: 'requestReplay'; readonly direction: EditorHistoryDirection }
-  | { readonly type: 'cancelRestore' }
-  | { readonly type: 'localDocumentEdited' }
-  | { readonly type: 'presentationChanged' }
-  | { readonly type: 'externalDocumentPresented' };
-
-export type EditorHistoryEffectExecution = {
-  readonly completion?: Promise<EditorHistoryInput | null>;
-  readonly completionMode?: 'inline' | 'deferred';
-};
-
-export type EditorHistoryEffectAdapter = {
-  prepareInput(input: EditorHistoryRuntimeInput): EditorHistoryInput;
-  execute(effect: EditorHistoryEffect): EditorHistoryEffectExecution;
-};
 
 export type EditorHistoryEffectCapabilities = {
   captureContext(): EditorHistoryContext;
@@ -53,7 +37,7 @@ export type EditorHistoryEffectCapabilities = {
  */
 export function createEditorHistoryEffectAdapter(
   capabilities: EditorHistoryEffectCapabilities
-): EditorHistoryEffectAdapter {
+): EditorHistoryEffectExecutor {
   let restoreGeneration = 0;
   let cancelFocusRetry: (() => void) | null = null;
   let settleRestore: ((completion: EditorHistoryInput | null) => void) | null = null;

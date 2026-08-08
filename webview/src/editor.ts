@@ -316,7 +316,7 @@ export function createEditor({
   let editorHistoryRuntime: EditorHistoryRuntime | null = null;
   let historyScrollGuard: EditorHistoryViewport | null = null;
   let pendingRenderedHistoryFocus: { replayId: number; run: () => boolean } | null = null;
-  let lastRenderedReplayPresentation: { anchor: number; mode: 'preview' | 'split' | 'source' } | null = null;
+  let recentRenderedReplayPresentation: { anchor: number; mode: 'preview' | 'split' | 'source' } | null = null;
   let onHistoryKeyDown: ((event: KeyboardEvent) => void) | null = null;
   let onHistoryBeforeInput: ((event: InputEvent) => void) | null = null;
   let onHistoryPointerDown: (() => void) | null = null;
@@ -1678,10 +1678,10 @@ export function createEditor({
     const manualMode = block.kind === 'mermaid'
       ? getMermaidBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual
       : getLatexMathBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual;
-    const desiredMode = lastRenderedReplayPresentation?.anchor === openingLine.from
-      ? lastRenderedReplayPresentation.mode
+    const desiredMode = recentRenderedReplayPresentation?.anchor === openingLine.from
+      ? recentRenderedReplayPresentation.mode
       : manualMode === 'preview' ? 'split' : manualMode;
-    lastRenderedReplayPresentation = { anchor: openingLine.from, mode: desiredMode };
+    recentRenderedReplayPresentation = { anchor: openingLine.from, mode: desiredMode };
     const modeEffect = desiredMode !== manualMode
       ? block.kind === 'mermaid'
         ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: desiredMode })
@@ -2266,7 +2266,7 @@ export function createEditor({
         if (update.docChanged) {
           clearDiagnosticSuggestionState();
           if (!applyingExternal && !applyingRenumber && !isHistoryReplayUpdate(update)) {
-            lastRenderedReplayPresentation = null;
+            recentRenderedReplayPresentation = null;
             void editorHistoryRuntime?.dispatch({ type: 'localDocumentEdited' });
           }
         }
@@ -2320,29 +2320,8 @@ export function createEditor({
   const editorHistoryApplication = createEditorHistoryApplication();
   const editorHistoryEffectAdapter = createEditorHistoryEffectAdapter({
     captureContext(): EditorHistoryContext {
-      const activeElement = document.activeElement as HTMLElement | null;
-      const activeBlock = currentMode === 'live'
-        ? activeElement?.closest<HTMLElement>('.meo-mermaid-editing-block, .meo-latex-math-editing-block')
-        : null;
-      const interactionTarget: EditorHistoryContext['interactionTarget'] = activeElement?.closest(
-        '.meo-md-html-table-wrap textarea[data-table-cell-from][data-table-cell-to]'
-      )
-        ? { kind: 'table-boundary' }
-        : activeBlock
-          ? {
-              kind: 'rendered-block',
-              owner: activeBlock.classList.contains('meo-mermaid-editing-block')
-                ? 'mermaid-boundary'
-                : 'latex-boundary',
-              mode: activeBlock.classList.contains('is-source')
-                ? 'source'
-                : activeBlock.classList.contains('is-split') ? 'split' : 'preview'
-            }
-          : undefined;
       return {
-        mode: currentMode === 'live' ? 'live' : 'source',
-        viewport: viewportController.captureHistorySnapshot(),
-        interactionTarget
+        viewport: viewportController.captureHistorySnapshot()
       };
     },
     commitTransientEdits() {
@@ -2365,12 +2344,12 @@ export function createEditor({
       }
     },
     attemptBoundaryRestore(request: EditorHistoryRestoreRequest) {
-      const changedLineIsTable = request.changedRange
-        ? view.state.doc.lineAt(Math.min(request.changedRange.from, view.state.doc.length)).text.includes('|')
+      const changedRangeIsTable = request.changedRange
+        ? isTableHistoryRange(view.state, request.changedRange)
         : false;
-      if (changedLineIsTable) {
+      if (changedRangeIsTable) {
         if (!request.changedRange) return 'not-rendered';
-        lastRenderedReplayPresentation = null;
+        recentRenderedReplayPresentation = null;
         if (focusTableHistoryChange(
           view,
           request.changedRange,
@@ -2402,7 +2381,7 @@ export function createEditor({
       return 'restored';
     },
     restoreEditorInteraction(request) {
-      lastRenderedReplayPresentation = null;
+      recentRenderedReplayPresentation = null;
       focusHistoryChange(
         view,
         request.changedRange,
@@ -2439,7 +2418,7 @@ export function createEditor({
     },
     dispose() {
       pendingRenderedHistoryFocus = null;
-      lastRenderedReplayPresentation = null;
+      recentRenderedReplayPresentation = null;
       historyScrollGuard = null;
       setEditorHistoryRunner(view, null);
       if (onHistoryKeyDown) view.dom.removeEventListener('keydown', onHistoryKeyDown, true);
@@ -2797,7 +2776,7 @@ export function createEditor({
       }
 
       void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
-      lastRenderedReplayPresentation = null;
+      recentRenderedReplayPresentation = null;
 
       const viewportAnchor = captureViewportAnchor();
       const { anchor, head } = view.state.selection.main;
@@ -2834,7 +2813,7 @@ export function createEditor({
       }
 
       void editorHistoryRuntime?.dispatch({ type: 'presentationChanged' });
-      lastRenderedReplayPresentation = null;
+      recentRenderedReplayPresentation = null;
 
       const topPosition = computeTopVisiblePosition();
       viewportController.markInteraction();
@@ -3306,6 +3285,24 @@ function isInsideTableCell(state, position) {
       return false;
     }
     node = node.parent;
+  }
+  return false;
+}
+
+function isTableHistoryRange(
+  state: EditorState,
+  range: { readonly from: number; readonly to: number }
+): boolean {
+  const positions = new Set([
+    Math.min(range.from, state.doc.length),
+    Math.min(Math.max(range.from, range.to - 1), state.doc.length)
+  ]);
+  for (const position of positions) {
+    let node = syntaxTree(state).resolveInner(position, -1);
+    while (node) {
+      if (node.name === 'Table') return true;
+      node = node.parent;
+    }
   }
   return false;
 }
