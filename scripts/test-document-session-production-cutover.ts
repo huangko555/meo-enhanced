@@ -12,6 +12,8 @@ const editorCommands = read('src/protocol/editorCommands.ts');
 const gitClient = read('webview/src/helpers/gitClient.ts');
 const packageJson = read('package.json');
 const documentSessionAdapter = read('webview/src/adapters/documentSessionWebviewAdapter.ts');
+const hostBootstrap = read('src/extension.ts');
+const pendingDraftRecovery = read('src/application/pendingDraftRecovery.ts');
 
 assert.equal(fs.existsSync(path.join(repoRoot, 'webview/src/helpers/documentSync.ts')), false);
 assert.equal(fs.existsSync(path.join(repoRoot, 'scripts/test-document-sync.ts')), false);
@@ -56,7 +58,16 @@ assert.equal(decodeWebviewToHostMessage({ type: 'saveDocument' }), null);
 assert.equal(editorCommands.includes("type: 'saveDocument'"), false);
 assert.equal(hostSession.includes("case 'saveDocument':"), false);
 assert.match(hostSession, /case 'draftChanged':/);
-assert.match(hostSession, /pendingDraftText/);
-assert.match(hostSession, /applyPendingDraftIfNeeded/);
+assert.equal(hostSession.includes('pendingDraftText'), false);
+assert.equal(hostSession.includes('applyPendingDraftIfNeeded'), false);
+assert.match(hostSession, /pendingDraftRecovery\.remember\(raw\.text\)/);
+assert.match(hostSession, /pendingDraftRecovery\.remember\(null\)/);
+assert.match(hostSession, /pendingDraftRecovery\.recover\(\)/);
+assert.equal(
+  (hostBootstrap.match(/createVscodePendingDraftRecoveryAdapter\s*\(/g) ?? []).length,
+  1,
+  'Host Bootstrap must create exactly one Pending Draft recovery Adapter per Panel Session'
+);
+assert.match(pendingDraftRecovery, /let pendingDraftText: string \| null = null/);
 
 console.log('Document Session production cutover guards passed');

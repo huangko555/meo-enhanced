@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AgentReviewHandoffController } from '../agents/reviewHandoff';
+import type { PendingDraftRecovery } from '../application/pendingDraftRecovery';
 import {
   EXTENSION_CONFIG_SECTION,
   LINE_NUMBERS_SETTING_KEY,
@@ -130,6 +131,7 @@ type PanelSessionControllerParams = {
   context: vscode.ExtensionContext;
   spellDiagnosticCollection: vscode.DiagnosticCollection;
   agentReviewHandoff: AgentReviewHandoffController;
+  pendingDraftRecovery: PendingDraftRecovery;
   onExportDocument: (session: PanelSession, format: ExportFormat, appearance: PreviewAppearance) => Promise<void>;
   renderPreview: (options: {
     markdownText: string;
@@ -176,6 +178,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     context,
     spellDiagnosticCollection,
     agentReviewHandoff,
+    pendingDraftRecovery,
     onExportDocument,
     renderPreview,
     getFindOptions,
@@ -218,7 +221,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let hasDeliveredInitialRevealSelection = false;
   let pendingRestoreTopLine: number | null = null;
   let pendingRestoreTopLineOffset = 0;
-  let pendingDraftText: string | null = null;
   let lastSavedRememberedLine: number | null = null;
   let lastSavedRememberedLineOffset = 0;
   let disposed = false;
@@ -333,31 +335,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       pendingSavedRevisionTimer = null;
       runBackground(refreshSavedRevisionNow(), 'refreshSavedRevision');
     }, Math.max(0, delayMs));
-  };
-
-  const applyPendingDraftIfNeeded = async (): Promise<boolean> => {
-    const draftText = pendingDraftText;
-    if (draftText === null) {
-      return false;
-    }
-
-    const currentText = document.getText();
-    const normalizedCurrent = currentText.replace(/\r\n/g, '\n');
-    const normalizedDraft = draftText.replace(/\r\n/g, '\n');
-    if (normalizedCurrent === normalizedDraft) {
-      pendingDraftText = null;
-      return false;
-    }
-
-    const edit = new vscode.WorkspaceEdit();
-    const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(currentText.length));
-    agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(document.uri);
-    edit.replace(document.uri, fullRange, draftText);
-    const applied = await vscode.workspace.applyEdit(edit);
-    if (applied) {
-      pendingDraftText = null;
-    }
-    return applied;
   };
 
   const clearRememberedViewPosition = async (): Promise<void> => {
@@ -1237,7 +1214,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       case 'draftChanged':
-        pendingDraftText = raw.text;
+        pendingDraftRecovery.remember(raw.text);
         return;
       case 'saveDocumentRevision':
       case 'requestDocumentRevision':
@@ -1250,7 +1227,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       case 'discardChanges':
-        pendingDraftText = null;
+        pendingDraftRecovery.remember(null);
         await enqueue(async () => {
           await vscode.commands.executeCommand('workbench.action.files.revert');
           await refreshSavedRevisionNow();
@@ -1428,7 +1405,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     runBackground(enqueue(async () => {
       try {
         // Best-effort recovery for edits that never made it through the debounce/apply round-trip.
-        await applyPendingDraftIfNeeded();
+        await pendingDraftRecovery.recover();
       } catch {
         // Ignore dispose-time recovery failures to avoid surfacing noisy teardown errors.
       }
