@@ -59,6 +59,8 @@ import { createVscodePendingDraftRecoveryAdapter } from './host/vscodePendingDra
 import { createGitBaselineRefreshTimerAdapter } from './host/gitBaselineRefreshTimerAdapter';
 import { createVscodeSavedRevisionFileAdapter } from './host/vscodeSavedRevisionFileAdapter';
 import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefreshTimerAdapter';
+import { createVscodeSpellDiagnosticsAdapter } from './host/vscodeSpellDiagnosticsAdapter';
+import { createHostDiagnosticsTimerAdapter } from './host/hostDiagnosticsTimerAdapter';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
 import {
   normalizePreviewAppearance,
@@ -678,7 +680,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       document,
       documentUri,
       context: this.context,
-      spellDiagnosticCollection: this.spellDiagnosticCollection,
+      spellDiagnostics: createVscodeSpellDiagnosticsAdapter(document, this.spellDiagnosticCollection),
+      hostDiagnosticsTimer: createHostDiagnosticsTimerAdapter(),
       agentReviewHandoff: this.agentReviewHandoff,
       pendingDraftRecovery: createVscodePendingDraftRecoveryAdapter({
         document,

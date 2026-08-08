@@ -13,6 +13,11 @@ import {
   type SavedRevisionRefreshTimer
 } from '../application/savedRevisionLifecycle';
 import {
+  createHostDiagnosticsLifecycle,
+  type HostDiagnosticsRuntime,
+  type HostDiagnosticsTimer
+} from '../application/hostDiagnosticsLifecycle';
+import {
   EXTENSION_CONFIG_SECTION,
   LINE_NUMBERS_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
@@ -81,13 +86,6 @@ import {
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
 import { decodeWebviewToHostMessage, type WebviewToHostMessage } from '../protocol/messages';
-import {
-  collectMeoSpellDiagnostics,
-  collectMeoSpellSuggestions,
-  hasExternalSpellDiagnostics,
-  MEO_SPELL_DIAGNOSTIC_SOURCE
-} from '../spell/spellDiagnostics';
-
 export type EditorMode = 'live' | 'source' | 'preview';
 export type ExportFormat = 'html' | 'pdf';
 
@@ -126,12 +124,19 @@ const EMPTY_GIT_BASELINE_PAYLOAD: GitBaselinePayload = Object.freeze({
   baseText: null
 });
 
+type PanelSpellDiagnostics = HostDiagnosticsRuntime<vscode.Diagnostic> & {
+  readCombined(): SerializedDiagnostic[];
+  isInternalSource(source: string | undefined): boolean;
+  collectSuggestions(from: number, to: number, enabled: boolean): Promise<string[]>;
+};
+
 type PanelSessionControllerParams = {
   panel: vscode.WebviewPanel;
   document: vscode.TextDocument;
   documentUri: vscode.Uri;
   context: vscode.ExtensionContext;
-  spellDiagnosticCollection: vscode.DiagnosticCollection;
+  spellDiagnostics: PanelSpellDiagnostics;
+  hostDiagnosticsTimer: HostDiagnosticsTimer;
   agentReviewHandoff: AgentReviewHandoffController;
   pendingDraftRecovery: PendingDraftRecovery;
   gitBaselineRefreshTimer: GitBaselineRefreshTimer;
@@ -182,7 +187,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     document,
     documentUri,
     context,
-    spellDiagnosticCollection,
+    spellDiagnostics,
+    hostDiagnosticsTimer,
     agentReviewHandoff,
     pendingDraftRecovery,
     gitBaselineRefreshTimer,
@@ -224,8 +230,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let lastSavedRememberedLine: number | null = null;
   let lastSavedRememberedLineOffset = 0;
   let disposed = false;
-  let spellCheckGeneration = 0;
-  let pendingSpellCheckTimer: ReturnType<typeof setTimeout> | null = null;
   const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
   const savedRevisionTracker = new SavedRevisionTracker();
@@ -352,7 +356,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       text: document.getText(),
       version: document.version,
       savedRevision,
-      diagnostics: serializeDiagnostics(document),
+      diagnostics: spellDiagnostics.readCombined(),
       mode,
       previewAppearance: getPreviewAppearance(),
       editorAppearance: getEditorAppearance(),
@@ -385,38 +389,18 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const sendDiagnosticsChanged = async (): Promise<boolean> => {
     const message: DiagnosticsChangedEvent = {
       type: 'diagnosticsChanged',
-      diagnostics: serializeDiagnostics(document)
+      diagnostics: spellDiagnostics.readCombined()
     };
     return postToWebview(message);
   };
 
-  const runSpellCheck = async (generation: number): Promise<void> => {
-    try {
-      const diagnostics = await collectMeoSpellDiagnostics(document, spellCheckEnabled);
-      if (disposed || generation !== spellCheckGeneration) {
-        return;
-      }
-      spellDiagnosticCollection.set(document.uri, diagnostics);
-    } catch (error) {
-      if (!disposed) {
-        console.error('[MEO panelSession] spellCheck', error);
-      }
-      spellDiagnosticCollection.delete(document.uri);
-    }
-  };
-
-  const scheduleSpellCheck = (delayMs = 350): void => {
-    spellCheckGeneration += 1;
-    const generation = spellCheckGeneration;
-    if (pendingSpellCheckTimer !== null) {
-      clearTimeout(pendingSpellCheckTimer);
-      pendingSpellCheckTimer = null;
-    }
-    pendingSpellCheckTimer = setTimeout(() => {
-      pendingSpellCheckTimer = null;
-      runBackground(runSpellCheck(generation), 'spellCheck');
-    }, delayMs);
-  };
+  const hostDiagnosticsLifecycle = createHostDiagnosticsLifecycle({
+    runtime: spellDiagnostics,
+    timer: hostDiagnosticsTimer,
+    readEnabled: () => spellCheckEnabled,
+    publishCombined: async () => { await sendDiagnosticsChanged(); },
+    reportFailure: (error) => reportBackgroundError('spellCheck', error)
+  });
 
   const sendDocChanged = async (): Promise<boolean> => {
     const message: DocumentChangedMessage = {
@@ -790,7 +774,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     ensureInitDelivered,
     requestExportSnapshot,
     refreshGitBaseline,
-    refreshSpellDiagnostics: () => scheduleSpellCheck(0),
+    refreshSpellDiagnostics: () => hostDiagnosticsLifecycle.requestRefresh(0),
     getGitRepoRoot: () => gitDocumentState.getRepoRoot()
   };
 
@@ -804,7 +788,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await ensureInitDelivered();
         await flushPendingRevealSelection();
         await flushPendingRevealDocumentFragment();
-        scheduleSpellCheck(0);
+        hostDiagnosticsLifecycle.requestRefresh(0);
         refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_STARTUP_DELAY_MS });
         return;
       case 'setMode':
@@ -903,7 +887,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(SPELL_CHECK_SETTING_KEY, spellCheckEnabled, vscode.ConfigurationTarget.Global);
-        scheduleSpellCheck(0);
+        hostDiagnosticsLifecycle.requestRefresh(0);
         return;
       case 'setOutlineVisible':
         await setOutlineVisible(raw.visible);
@@ -1148,7 +1132,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'requestDiagnosticSuggestions': {
         let response: DiagnosticSuggestionsResult;
         try {
-          response = await resolveDiagnosticSuggestions(document, raw, spellCheckEnabled);
+          response = await resolveDiagnosticSuggestions(document, raw, spellCheckEnabled, spellDiagnostics);
         } catch (error) {
           response = {
             type: 'diagnosticSuggestionsResult',
@@ -1188,7 +1172,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
 
-    scheduleSpellCheck();
+    hostDiagnosticsLifecycle.requestRefresh();
 
     runBackground(enqueue(async () => {
       await sendDocChanged();
@@ -1226,15 +1210,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!event.uris.some((uri) => uri.toString() === documentKey)) {
       return;
     }
-    if (hasExternalSpellDiagnostics(document)) {
-      spellCheckGeneration += 1;
-      if (pendingSpellCheckTimer !== null) {
-        clearTimeout(pendingSpellCheckTimer);
-        pendingSpellCheckTimer = null;
-      }
-      spellDiagnosticCollection.delete(document.uri);
-    }
-    runBackground(sendDiagnosticsChanged(), 'sendDiagnosticsChanged');
+    runBackground(hostDiagnosticsLifecycle.handleDiagnosticsChanged(), 'sendDiagnosticsChanged');
   });
 
   const textEditorSelectionSubscription = vscode.window.onDidChangeTextEditorSelection((event) => {
@@ -1282,14 +1258,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     disposed = true;
-    spellCheckGeneration += 1;
-    if (pendingSpellCheckTimer !== null) {
-      clearTimeout(pendingSpellCheckTimer);
-      pendingSpellCheckTimer = null;
-    }
+    hostDiagnosticsLifecycle.dispose();
     gitBaselineRefresh.dispose();
     savedRevisionLifecycle.dispose();
-    spellDiagnosticCollection.delete(document.uri);
 
     runBackground(enqueue(async () => {
       try {
@@ -1526,42 +1497,11 @@ function clampDiagnosticRange(from: number, to: number, textLength: number): { f
   return { from: clampedFrom, to: clampedTo };
 }
 
-function serializeDiagnostics(document: vscode.TextDocument): SerializedDiagnostic[] {
-  const diagnostics = vscode.languages.getDiagnostics(document.uri);
-  if (!diagnostics.length) {
-    return [];
-  }
-
-  const documentText = document.getText();
-  const normalizedTextLength = documentText.replace(/\r\n?/g, '\n').length;
-  const serialized: SerializedDiagnostic[] = [];
-
-  for (const diagnostic of diagnostics) {
-    const from = mapDocumentOffsetToNormalizedOffset(documentText, document.offsetAt(diagnostic.range.start));
-    const to = mapDocumentOffsetToNormalizedOffset(documentText, document.offsetAt(diagnostic.range.end));
-    const range = clampDiagnosticRange(from, to, normalizedTextLength);
-    if (!range) {
-      continue;
-    }
-
-    const severity = diagnostic.severity;
-    serialized.push({
-      from: range.from,
-      to: range.to,
-      severity: severity === 0 || severity === 1 || severity === 2 || severity === 3 ? severity : 0,
-      message: diagnostic.message,
-      source: diagnostic.source,
-      code: normalizeDiagnosticCode(diagnostic.code)
-    });
-  }
-
-  return serialized;
-}
-
 async function resolveDiagnosticSuggestions(
   document: vscode.TextDocument,
   request: RequestDiagnosticSuggestions,
-  spellCheckEnabled: boolean
+  spellCheckEnabled: boolean,
+  spellDiagnostics: PanelSpellDiagnostics
 ): Promise<DiagnosticSuggestionsResult> {
   const emptyResponse: DiagnosticSuggestionsResult = {
     type: 'diagnosticSuggestionsResult',
@@ -1613,9 +1553,8 @@ async function resolveDiagnosticSuggestions(
     }
   }
 
-  if (suggestions.length === 0 && request.source === MEO_SPELL_DIAGNOSTIC_SOURCE) {
-    const spellSuggestions = await collectMeoSpellSuggestions(
-      document,
+  if (suggestions.length === 0 && spellDiagnostics.isInternalSource(request.source)) {
+    const spellSuggestions = await spellDiagnostics.collectSuggestions(
       requestedRange.from,
       requestedRange.to,
       spellCheckEnabled
