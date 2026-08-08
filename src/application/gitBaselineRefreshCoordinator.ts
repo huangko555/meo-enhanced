@@ -35,6 +35,7 @@ export function createGitBaselineRefreshCoordinator(
   let pendingForcePost = false;
   let pendingForceReload = false;
   let scheduled: { cancel(): void } | null = null;
+  let waitingForRequest = false;
   let disposed = false;
 
   const run = async (): Promise<void> => {
@@ -57,6 +58,7 @@ export function createGitBaselineRefreshCoordinator(
             pending = true;
             pendingForcePost ||= nextOptions.forcePost;
             pendingForceReload ||= nextOptions.forceReload;
+            waitingForRequest = true;
             return;
           }
           if (!disposed) await dependencies.publish(nextOptions);
@@ -66,13 +68,14 @@ export function createGitBaselineRefreshCoordinator(
       }
     } finally {
       running = false;
-      if (pending && !disposed && dependencies.canRun()) void run();
+      if (pending && !waitingForRequest && !disposed && dependencies.canRun()) void run();
     }
   };
 
   return {
     request(options = {}) {
       if (disposed) return;
+      waitingForRequest = false;
       if (options.forceReload) dependencies.invalidateGitHead();
       pending = true;
       pendingForcePost ||= options.forcePost === true;
@@ -92,6 +95,7 @@ export function createGitBaselineRefreshCoordinator(
       pending = false;
       pendingForcePost = false;
       pendingForceReload = false;
+      waitingForRequest = false;
       scheduled?.cancel();
       scheduled = null;
     }

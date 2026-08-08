@@ -97,6 +97,27 @@ assert.deepEqual(published, [
   { forcePost: false, forceReload: true }
 ], 'a transient failure must not kill later refreshes');
 
+let prepareAttempts = 0;
+let prepareReady = false;
+const prepareFailureCoordinator = createGitBaselineRefreshCoordinator({
+  timer,
+  canRun: () => true,
+  invalidateGitHead: () => undefined,
+  prepare: async () => {
+    prepareAttempts += 1;
+    return prepareReady;
+  },
+  publish: async () => undefined
+});
+prepareFailureCoordinator.request({ forcePost: true });
+await drain();
+assert.equal(prepareAttempts, 1, 'a failed prepare must wait for a later request instead of spinning');
+prepareReady = true;
+prepareFailureCoordinator.request();
+await drain();
+assert.equal(prepareAttempts, 2, 'a later request must resume a refresh retained after prepare failure');
+prepareFailureCoordinator.dispose();
+
 coordinator.request({ delayMs: 30 });
 const disposeTimer = scheduled.at(-1);
 coordinator.dispose();
