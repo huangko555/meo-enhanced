@@ -1,0 +1,20 @@
+name: Architecture gate
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run architecture:check
+      - run: bun scripts/test-protocol-ready-init.ts
+      - run: bun scripts/test-protocol-stale-responses.ts
