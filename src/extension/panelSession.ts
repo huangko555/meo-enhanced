@@ -18,6 +18,10 @@ import {
   type HostDiagnosticsTimer
 } from '../application/hostDiagnosticsLifecycle';
 import {
+  createDiffBaselineSelection,
+  type DiffBaselineOutput
+} from '../application/diffBaselineSelection';
+import {
   EXTENSION_CONFIG_SECTION,
   LINE_NUMBERS_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
@@ -45,8 +49,7 @@ import {
   getVimModeEnabled,
   getUseVscodeThemeForCodeBlocks,
   getCodeBlockVscodeTheme,
-  type VimKeybinding,
-  type DiffBaselineMode
+  type VimKeybinding
 } from '../shared/extensionConfig';
 import {
   getDocumentFragmentHref,
@@ -58,7 +61,7 @@ import {
   resolveWikiLinkTargets
 } from '../shared/documentLinks';
 import { resolveClipboardImageSaveRoot } from '../shared/clipboardImages';
-import { GitDocumentState, hashGitBaselinePayload } from '../git/documentState';
+import { GitDocumentState } from '../git/documentState';
 import { openGitRevisionForLine, openGitWorktreeForLine, resolveGitBlameForRequest } from '../git/blameActions';
 import type { GitBaselinePayload } from '../git/types';
 import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
@@ -79,10 +82,7 @@ import type { PreviewRenderResponse } from '../protocol/previewRender';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
-import {
-  type GitBaselineChangedEvent,
-  type GitBlameResponse
-} from '../protocol/git';
+import type { GitBlameResponse } from '../protocol/git';
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
 import { decodeWebviewToHostMessage, type WebviewToHostMessage } from '../protocol/messages';
@@ -118,12 +118,6 @@ const REMEMBERED_EOF_BACKOFF_LINES = 10;
 const GIT_BASELINE_STARTUP_DELAY_MS = 350;
 const GIT_BASELINE_REFRESH_DELAY_MS = 150;
 const MAX_DIAGNOSTIC_SUGGESTIONS = 1;
-const EMPTY_GIT_BASELINE_PAYLOAD: GitBaselinePayload = Object.freeze({
-  available: false,
-  tracked: false,
-  baseText: null
-});
-
 type PanelSpellDiagnostics = HostDiagnosticsRuntime<vscode.Diagnostic> & {
   readCombined(): SerializedDiagnostic[];
   isInternalSource(source: string | undefined): boolean;
@@ -142,6 +136,7 @@ type PanelSessionControllerParams = {
   gitBaselineRefreshTimer: GitBaselineRefreshTimer;
   savedRevisionFile: SavedRevisionFileAdapter;
   savedRevisionRefreshTimer: SavedRevisionRefreshTimer;
+  diffBaselineOutput: DiffBaselineOutput<GitBaselinePayload>;
   saveDocument: () => Promise<boolean>;
   onExportDocument: (session: PanelSession, format: ExportFormat, appearance: PreviewAppearance) => Promise<void>;
   renderPreview: (options: {
@@ -194,6 +189,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     gitBaselineRefreshTimer,
     savedRevisionFile,
     savedRevisionRefreshTimer,
+    diffBaselineOutput,
     saveDocument,
     onExportDocument,
     renderPreview,
@@ -213,14 +209,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const documentKey = document.uri.toString();
   const persistedMode = context.globalState.get(EDITOR_MODE_STATE_KEY);
   let mode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
-  let diffBaselineMode: DiffBaselineMode = getDiffBaselineMode();
   let gitBlameEnabled = getGitBlameEnabled();
   let spellCheckEnabled = getSpellCheckEnabled();
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
-  let lastSentDiffBaselineHash = '';
-  let diffBaselineGeneration = 0;
   let lastSentRevealSelectionKey: string | null = null;
   let pendingRevealSelection: RevealSelectionPayload | null = null;
   let pendingRevealDocumentFragment: string | null = null;
@@ -233,7 +226,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
   const savedRevisionTracker = new SavedRevisionTracker();
-  let fixedBaselineSelected = false;
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     applyQueue = applyQueue.then(task, task);
     return applyQueue;
@@ -263,6 +255,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
   };
 
+  let notifySavedRevisionChanged = (): void => undefined;
   const savedRevisionLifecycle = createSavedRevisionLifecycle({
     file: savedRevisionFile,
     timer: savedRevisionRefreshTimer,
@@ -270,14 +263,14 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     saveDocument,
     onRefresh: async ({ result, recoveredFromUnavailable }) => {
       if (!result.ok) {
-        if (diffBaselineMode !== 'git-head') refreshGitBaseline({ forcePost: true });
+        notifySavedRevisionChanged();
         return;
       }
       const changed = savedRevisionTracker.getCurrentEditBaseline()
         ? savedRevisionTracker.noteDiskRevision(result.text)
         : savedRevisionTracker.initialize(result.text);
-      if ((changed || recoveredFromUnavailable) && diffBaselineMode !== 'git-head') {
-        refreshGitBaseline({ forcePost: true });
+      if (changed || recoveredFromUnavailable) {
+        notifySavedRevisionChanged();
       }
     }
   });
@@ -285,6 +278,51 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const scheduleSavedRevisionRefresh = (delayMs?: number): void => {
     savedRevisionLifecycle.scheduleRefresh(delayMs);
   };
+  let requestDiffBaselineRefresh = (_options: GitBaselineRefreshOptions): void => undefined;
+  const diffBaselineSelection = createDiffBaselineSelection<GitBaselinePayload>({
+    initialMode: getDiffBaselineMode(),
+    readEnabled: () => getGitChangesGutterEnabled(context),
+    canPublish: () => initDelivered,
+    saved: {
+      getPinned: () => savedRevisionTracker.getPinnedBaseline(),
+      pinLatest: async () => {
+        const existing = savedRevisionTracker.getPinnedBaseline();
+        if (existing) return existing;
+        await refreshSavedRevisionNow();
+        return savedRevisionLifecycle.getUnavailableReason()
+          ? null
+          : savedRevisionTracker.pinLatestSavedBaseline();
+      },
+      releasePinned: () => savedRevisionTracker.releasePinnedBaseline(),
+      resolve: async (baselineMode) => {
+        if (!savedRevisionTracker.getCurrentEditBaseline()) await refreshSavedRevisionNow();
+        const reason = savedRevisionLifecycle.getUnavailableReason();
+        if (reason) return { ok: false, reason };
+        const snapshot = savedRevisionTracker.getDiffBaseline(baselineMode);
+        return snapshot
+          ? { ok: true, text: snapshot.text }
+          : { ok: false, reason: 'no-baseline' };
+      }
+    },
+    git: {
+      resolve: async (forceReload) => {
+        const payload = await gitDocumentState.resolveBaseline({ includeText: true, force: forceReload });
+        gitDocumentState.noteBaselinePayload(payload);
+        return payload;
+      }
+    },
+    output: diffBaselineOutput,
+    persistMode: async (baselineMode) => {
+      await vscode.workspace
+        .getConfiguration(EXTENSION_CONFIG_SECTION)
+        .update(DIFF_BASELINE_MODE_SETTING_KEY, baselineMode, vscode.ConfigurationTarget.Global);
+    },
+    warnNoSavedRevision: () => {
+      void vscode.window.showWarningMessage('No saved version is available to pin as the Changes baseline.');
+    },
+    requestRefresh: (options) => requestDiffBaselineRefresh(options)
+  });
+  notifySavedRevisionChanged = () => diffBaselineSelection.savedRevisionChanged();
 
   const clearRememberedViewPosition = async (): Promise<void> => {
     const rememberedPositions = getRememberedViewPositionMap(context.workspaceState);
@@ -350,6 +388,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
 
   const sendInit = async (): Promise<boolean> => {
     const savedRevision = await readInitialSavedRevision();
+    const diffBaselineState = diffBaselineSelection.getState();
     const message: InitMessage = {
       type: 'init',
       documentId: documentKey,
@@ -364,9 +403,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitBlameEnabled,
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
-      diffBaselineMode,
-      fixedBaselinePinned: savedRevisionTracker.getPinnedBaseline() !== null,
-      fixedBaselineActive: fixedBaselineSelected && savedRevisionTracker.getPinnedBaseline() !== null,
+      diffBaselineMode: diffBaselineState.mode,
+      fixedBaselinePinned: diffBaselineState.fixedPinned,
+      fixedBaselineActive: diffBaselineState.fixedActive,
       spellCheckEnabled,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
       longCodeBlockFoldingEnabled: getLongCodeBlockFoldingEnabled(),
@@ -451,77 +490,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     const changed = savedRevisionTracker.getCurrentEditBaseline()
       ? savedRevisionTracker.noteExplicitSave(readBack.text, previousDisk)
       : savedRevisionTracker.initialize(readBack.text);
-    if (changed && diffBaselineMode !== 'git-head') {
-      refreshGitBaseline({ forcePost: true });
-    }
+    if (changed) diffBaselineSelection.savedRevisionChanged();
     return { ok: true, value: { revision: expected } };
-  };
-
-  const sendGitBaselineChanged = async (options: GitBaselineRefreshOptions = {}): Promise<boolean> => {
-    if (!initDelivered) {
-      return false;
-    }
-
-    let payload: GitBaselinePayload = EMPTY_GIT_BASELINE_PAYLOAD;
-    if (getGitChangesGutterEnabled(context)) {
-      const pinnedSnapshot = savedRevisionTracker.getPinnedBaseline();
-      if (fixedBaselineSelected && pinnedSnapshot) {
-        payload = {
-          available: true,
-          tracked: true,
-          headOid: null,
-          baseText: pinnedSnapshot.text,
-          mode: 'fixed'
-        };
-      } else if (diffBaselineMode === 'git-head') {
-        const gitPayload = await gitDocumentState.resolveBaseline({
-          includeText: true,
-          force: options.forceReload === true
-        });
-        gitDocumentState.noteBaselinePayload(gitPayload);
-        payload = { ...gitPayload, mode: 'git-head' };
-      } else {
-        if (!savedRevisionTracker.getCurrentEditBaseline()) {
-          await refreshSavedRevisionNow();
-        }
-        const snapshot = savedRevisionLifecycle.getUnavailableReason()
-          ? null
-          : savedRevisionTracker.getDiffBaseline(diffBaselineMode);
-        payload = snapshot
-          ? {
-              available: true,
-              tracked: true,
-              headOid: null,
-              baseText: snapshot.text,
-              mode: diffBaselineMode
-            }
-          : {
-              available: false,
-              tracked: false,
-              baseText: null,
-              mode: diffBaselineMode,
-              reason: savedRevisionLifecycle.getUnavailableReason() ?? 'no-baseline'
-            };
-      }
-    }
-    const payloadHash = hashGitBaselinePayload(payload);
-    if (!options.forcePost && payloadHash === lastSentDiffBaselineHash) {
-      return true;
-    }
-
-    diffBaselineGeneration += 1;
-    payload = { ...payload, generation: diffBaselineGeneration };
-
-    const message: GitBaselineChangedEvent = {
-      type: 'gitBaselineChanged',
-      version: document.version,
-      payload
-    };
-    const posted = await postToWebview(message);
-    if (posted) {
-      lastSentDiffBaselineHash = payloadHash;
-    }
-    return posted;
   };
 
   const parseRevealOffsetFromUriFragment = (uri: vscode.Uri): number | null => {
@@ -579,11 +549,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return initDelivered;
     },
     publish: async (options) => {
-      await sendGitBaselineChanged(options);
+      await diffBaselineSelection.publish(options);
     }
   });
+  requestDiffBaselineRefresh = (options) => gitBaselineRefresh.request(options);
   const refreshGitBaseline = (options: GitBaselineRefreshOptions = {}): void => {
-    gitBaselineRefresh.request(options);
+    diffBaselineSelection.requestRefresh(options);
   };
 
   const isTextEditorForDocument = (textEditor: vscode.TextEditor | undefined): textEditor is vscode.TextEditor => {
@@ -823,63 +794,16 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await updateGitBlameEnabled(gitBlameEnabled);
         return;
       case 'setDiffBaselineMode':
-        fixedBaselineSelected = false;
-        diffBaselineMode = raw.mode;
-        lastSentDiffBaselineHash = '';
-        await postToWebview({
-          type: 'fixedBaselineChanged',
-          pinned: savedRevisionTracker.getPinnedBaseline() !== null,
-          active: false
-        });
-        await vscode.workspace
-          .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .update(DIFF_BASELINE_MODE_SETTING_KEY, raw.mode, vscode.ConfigurationTarget.Global);
-        refreshGitBaseline({ forcePost: true, forceReload: raw.mode === 'git-head' });
+        await diffBaselineSelection.setMode(raw.mode);
         return;
       case 'setFixedBaseline':
         await enqueue(async () => {
-          if (raw.enabled) {
-            if (savedRevisionTracker.getPinnedBaseline()) {
-              fixedBaselineSelected = true;
-              lastSentDiffBaselineHash = '';
-              await postToWebview({ type: 'fixedBaselineChanged', pinned: true, active: true });
-              refreshGitBaseline({ forcePost: true });
-              return;
-            }
-            await refreshSavedRevisionNow();
-            const pinnedSnapshot = savedRevisionLifecycle.getUnavailableReason()
-              ? null
-              : savedRevisionTracker.pinLatestSavedBaseline();
-            if (!pinnedSnapshot) {
-              fixedBaselineSelected = false;
-              await postToWebview({ type: 'fixedBaselineChanged', pinned: false, active: false });
-              void vscode.window.showWarningMessage('No saved version is available to pin as the Changes baseline.');
-              return;
-            }
-            fixedBaselineSelected = true;
-            lastSentDiffBaselineHash = '';
-            await postToWebview({ type: 'fixedBaselineChanged', pinned: true, active: true });
-            refreshGitBaseline({ forcePost: true });
-            return;
-          }
-
-          fixedBaselineSelected = false;
-          lastSentDiffBaselineHash = '';
-          await postToWebview({
-            type: 'fixedBaselineChanged',
-            pinned: savedRevisionTracker.getPinnedBaseline() !== null,
-            active: false
-          });
-          refreshGitBaseline({ forcePost: true, forceReload: diffBaselineMode === 'git-head' });
+          await diffBaselineSelection.setFixed(raw.enabled);
         });
         return;
       case 'releaseFixedBaseline':
         await enqueue(async () => {
-          savedRevisionTracker.releasePinnedBaseline();
-          fixedBaselineSelected = false;
-          lastSentDiffBaselineHash = '';
-          await postToWebview({ type: 'fixedBaselineChanged', pinned: false, active: false });
-          refreshGitBaseline({ forcePost: true, forceReload: diffBaselineMode === 'git-head' });
+          await diffBaselineSelection.releaseFixed();
         });
         return;
       case 'setSpellCheck':
@@ -1259,6 +1183,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
     disposed = true;
     hostDiagnosticsLifecycle.dispose();
+    diffBaselineSelection.dispose();
     gitBaselineRefresh.dispose();
     savedRevisionLifecycle.dispose();
 

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { getGitBaselineMetadataForFile, hydrateGitBaselineText } from './baseline';
 import type { GitBaselinePayload } from './types';
 
@@ -6,23 +5,6 @@ type ResolveBaselineOptions = {
   includeText?: boolean;
   force?: boolean;
 };
-
-export function hashGitBaselinePayload(payload: GitBaselinePayload): string {
-  const hash = createHash('sha1');
-  hash.update(JSON.stringify({
-    available: payload.available,
-    mode: payload.mode ?? 'git-head',
-    repoRoot: payload.repoRoot ?? null,
-    headOid: payload.headOid ?? null,
-    tracked: payload.tracked,
-    gitPath: payload.gitPath ?? null,
-    reason: payload.reason ?? null,
-    maxBytesExceeded: Boolean(payload.maxBytesExceeded)
-  }));
-  hash.update('\n');
-  hash.update(payload.baseText ?? '');
-  return hash.digest('hex');
-}
 
 function canHydrateBaselineText(payload: GitBaselinePayload | null): payload is GitBaselinePayload {
   if (!payload) {

@@ -61,6 +61,7 @@ import { createVscodeSavedRevisionFileAdapter } from './host/vscodeSavedRevision
 import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefreshTimerAdapter';
 import { createVscodeSpellDiagnosticsAdapter } from './host/vscodeSpellDiagnosticsAdapter';
 import { createHostDiagnosticsTimerAdapter } from './host/hostDiagnosticsTimerAdapter';
+import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
 import {
   normalizePreviewAppearance,
@@ -690,6 +691,16 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       gitBaselineRefreshTimer: createGitBaselineRefreshTimerAdapter(),
       savedRevisionFile: createVscodeSavedRevisionFileAdapter(documentUri),
       savedRevisionRefreshTimer: createSavedRevisionRefreshTimerAdapter(),
+      diffBaselineOutput: createDiffBaselineProtocolAdapter({
+        readDocumentVersion: () => document.version,
+        post: async (message) => {
+          try {
+            return await panel.webview.postMessage(message);
+          } catch {
+            return false;
+          }
+        }
+      }),
       saveDocument: async () => document.save(),
       onExportDocument: (session, format, appearance) => this.exportSessionDocument(session, format, appearance),
       renderPreview: async (options) => {
