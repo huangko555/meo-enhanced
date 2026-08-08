@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { EditorState } from '@codemirror/state';
 import { launchTestBrowser } from './browser-test-helpers';
+import {
+  createMarkDeletedTableRowsEffect,
+  createMarkInsertedTableRowEffect,
+  getDeletedTableRows,
+  getInsertedTableRowsInRange,
+  tableRowDiffProvenanceField
+} from '../webview/src/helpers/tableRowDiffProvenance';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-provenance-characterization-'));
@@ -15,7 +23,44 @@ async function waitForFrames(page: any, count = 6): Promise<void> {
   }, count);
 }
 
+function characterizeLegacyExternalPresentation(): void {
+  const base = '| A |\n| --- |\n| one |';
+  let insertedState = EditorState.create({ doc: base, extensions: tableRowDiffProvenanceField });
+  const insertionAt = insertedState.doc.line(3).to;
+  insertedState = insertedState.update({
+    changes: { from: insertionAt, insert: '\n| new |' },
+    effects: createMarkInsertedTableRowEffect(insertedState, insertionAt, 1, 1)
+  }).state;
+  assert.equal(getInsertedTableRowsInRange(insertedState, 0, insertedState.doc.length).length, 1);
+  insertedState = insertedState.update({
+    changes: { from: 0, to: insertedState.doc.length, insert: base }
+  }).state;
+  assert.equal(
+    getInsertedTableRowsInRange(insertedState, 0, insertedState.doc.length).length,
+    0,
+    'Legacy drops an inserted hint only when external replacement fully covers the marked row'
+  );
+
+  let deletedState = EditorState.create({ doc: base, extensions: tableRowDiffProvenanceField });
+  const deletedLine = deletedState.doc.line(3);
+  deletedState = deletedState.update({
+    changes: { from: deletedLine.from - 1, to: deletedLine.to },
+    effects: createMarkDeletedTableRowsEffect(deletedState, deletedLine.from - 1, 1, [[3, 3]], true)
+  }).state;
+  assert.equal(getDeletedTableRows(deletedState).length, 1);
+  const presented = `prefix\n${deletedState.doc.toString()}`;
+  deletedState = deletedState.update({
+    changes: { from: 0, to: deletedState.doc.length, insert: presented }
+  }).state;
+  assert.equal(
+    getDeletedTableRows(deletedState).length,
+    1,
+    'Legacy maps a deleted hint through external replacement instead of invalidating its scope'
+  );
+}
+
 async function main(): Promise<void> {
+  characterizeLegacyExternalPresentation();
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-table-stability-entry.ts')],
     outdir: tempDir,
@@ -75,11 +120,7 @@ async function main(): Promise<void> {
     assert.match(refreshed, /\|\s*\|/);
     assert.equal(await addedMarkerCount(), 0);
 
-    await page.evaluate(() => {
-      const editor = (window as any).__tableProvenanceLegacyEditor;
-      editor.setText('| B |\n| --- |\n| external |');
-      editor.destroy();
-    });
+    await page.evaluate(() => (window as any).__tableProvenanceLegacyEditor.destroy());
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

@@ -176,11 +176,23 @@ const applicationSource = readFileSync(
   new URL('../webview/src/application/tableTransactionProvenance.ts', import.meta.url),
   'utf8'
 );
+const adapterSource = readFileSync(
+  new URL('../webview/src/adapters/codeMirrorTableTransactionProvenanceAdapter.ts', import.meta.url),
+  'utf8'
+);
 assert.equal(
   /from ['"]@codemirror|\b(?:StateField|StateEffect|Decoration|EditorView|HTMLElement|DocumentSession|GitBaseline)\s*[<|=]/.test(applicationSource),
   false,
   'the provenance Interface must not expose editor, DOM, Document Session, history, or baseline owners'
 );
+assert.equal(adapterSource.includes('tableRowDiffProvenance'), false, 'candidate Adapter must not depend on Legacy');
+assert.equal(/(?:historyEntries|historyDepth|documentText|diffBaseline)\s*[=:]/.test(adapterSource), false);
+for (const requiredBoundary of ['invertedEffects', 'iterChanges', 'mapPos', 'lineAt', 'dispose']) {
+  assert.equal(
+    adapterSource.includes(requiredBoundary), true,
+    `Adapter deletion would leak a required CodeMirror/lifecycle rule: ${requiredBoundary}`
+  );
+}
 for (const relativePath of [
   '../webview/src/editor.ts',
   '../webview/src/helpers/tables.ts',
@@ -189,7 +201,8 @@ for (const relativePath of [
 ]) {
   const productionSource = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
   assert.equal(
-    productionSource.includes('tableTransactionProvenance'),
+    productionSource.includes('tableTransactionProvenance')
+      || productionSource.includes('CodeMirrorTableTransactionProvenanceAdapter'),
     false,
     `candidate provenance must not be wired into production yet: ${relativePath}`
   );
