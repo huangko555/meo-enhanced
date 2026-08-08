@@ -6,6 +6,8 @@ import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-column-width-production-cutover-'));
+const threeColumns = ['| A | B | C |', '| --- | --- | --- |', '| one | two | three |'].join('\n');
+const twoColumns = ['| A | B |', '| --- | --- |', '| one | two |'].join('\n');
 
 async function waitForFrames(page: any, count = 6): Promise<void> {
   await page.evaluate(async (frameCount: number) => {
@@ -25,6 +27,13 @@ async function drag(page: any, selector: string, delta: number): Promise<void> {
   await page.mouse.move(point.x + delta, point.y, { steps: 4 });
   await page.mouse.up();
   await waitForFrames(page);
+}
+
+async function widths(page: any, selector: string): Promise<number[]> {
+  return page.$$eval(
+    `${selector} thead th`,
+    (cells) => cells.map((cell) => Math.round(cell.getBoundingClientRect().width))
+  );
 }
 
 async function main(): Promise<void> {
@@ -139,6 +148,103 @@ async function main(): Promise<void> {
       cell.getBoundingClientRect().width
     ));
     assert.ok(afterReplacement < resized.primaryWidths[0] - 20);
+
+    await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
+    await waitForFrames(page, 8);
+    await drag(page, firstHandle, 70);
+    const resizedThree = await widths(page, tableSelector);
+    await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), twoColumns);
+    await waitForFrames(page, 8);
+    const afterThreeToTwo = await widths(page, tableSelector);
+    await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
+    await waitForFrames(page, 8);
+    const afterThreeToTwoToThree = await widths(page, tableSelector);
+    assert.equal(afterThreeToTwo.length, 2);
+    assert.ok(afterThreeToTwo[0] < resizedThree[0] - 1);
+    assert.deepEqual(afterThreeToTwoToThree, resizedThree);
+
+    await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), twoColumns);
+    await waitForFrames(page, 8);
+    await drag(page, firstHandle, 55);
+    const resizedTwo = await widths(page, tableSelector);
+    await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
+    await waitForFrames(page, 8);
+    const afterTwoToThree = await widths(page, tableSelector);
+    await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), twoColumns);
+    await waitForFrames(page, 8);
+    const afterTwoToThreeToTwo = await widths(page, tableSelector);
+    assert.equal(afterTwoToThree.length, 3);
+    assert.ok(afterTwoToThree[0] < resizedTwo[0] - 20);
+    assert.deepEqual(afterTwoToThreeToTwo, resizedTwo);
+
+    await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
+    await waitForFrames(page, 8);
+    await drag(page, firstHandle, 40);
+    const beforeRowChange = await widths(page, tableSelector);
+    await page.evaluate((text) => {
+      (window as any).__columnWidthProduction.setText(`${text}\n| four | five | six |`);
+    }, threeColumns);
+    await waitForFrames(page, 8);
+    assert.deepEqual(await widths(page, tableSelector), beforeRowChange);
+
+    await page.evaluate((text) => {
+      (window as any).__columnWidthProduction.setText(
+        `completely different prefix\n\n${text}\n\ncompletely different tail`
+      );
+    }, threeColumns);
+    await waitForFrames(page, 8);
+    const beforeEdit = await widths(page, tableSelector);
+    assert.ok(beforeEdit[0] < beforeRowChange[0] - 20);
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody textarea'
+      )!;
+      input.focus();
+      input.value = `${input.value} changed`;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      (window as any).__columnWidthProduction.commitTransientEdits();
+    });
+    await waitForFrames(page, 8);
+    const afterEdit = await widths(page, tableSelector);
+    await page.evaluate(async () => { await (window as any).__columnWidthProduction.undo(); });
+    await waitForFrames(page, 8);
+    const afterUndo = await widths(page, tableSelector);
+    await page.evaluate(async () => { await (window as any).__columnWidthProduction.redo(); });
+    await waitForFrames(page, 8);
+    const afterRedo = await widths(page, tableSelector);
+    assert.notDeepEqual(afterEdit, beforeEdit);
+    assert.deepEqual(afterUndo, beforeEdit);
+    assert.deepEqual(afterRedo, afterEdit);
+
+    await page.evaluate(() => {
+      (window as any).__widthTerminalEvents = [];
+      for (const type of ['blur', 'lostpointercapture', 'pointercancel', 'pointerleave', 'pointerup']) {
+        window.addEventListener(type, () => (window as any).__widthTerminalEvents.push(type), true);
+      }
+    });
+    const blurPoint = await page.$eval(firstHandle, (handle: Element) => {
+      const rect = handle.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(blurPoint.x, blurPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(blurPoint.x + 30, blurPoint.y, { steps: 2 });
+    const otherPage = await browser.newPage();
+    await otherPage.setContent('<!doctype html><p>other</p>');
+    await otherPage.bringToFront();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await page.bringToFront();
+    await page.mouse.up();
+    await otherPage.close();
+    await waitForFrames(page, 8);
+    const terminalEvents = await page.evaluate(() => (window as any).__widthTerminalEvents);
+    const afterWindowBlur = await widths(page, tableSelector);
+    assert.ok(terminalEvents.includes('blur'));
+    assert.equal(terminalEvents.includes('lostpointercapture'), false);
+    assert.equal(terminalEvents.includes('pointercancel'), false);
+    assert.equal(terminalEvents.includes('pointerleave'), false);
+    assert.ok(terminalEvents.includes('pointerup'));
+    assert.ok(afterWindowBlur[0] > afterRedo[0] + 20);
 
     const disposePoint = await page.$eval(firstHandle, (handle: Element) => {
       const rect = handle.getBoundingClientRect();
