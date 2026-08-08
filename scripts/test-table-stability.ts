@@ -793,7 +793,7 @@ async function main() {
         'td[data-table-row="1"][data-table-col="0"] textarea'
       )!;
       pendingAppendInput.focus();
-      pendingAppendInput.value = 'new';
+      pendingAppendInput.value = 'expanded';
       pendingAppendInput.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
@@ -1411,7 +1411,7 @@ async function main() {
       failures.push(`padded empty cell edit dropped its edge spacing: ${JSON.stringify(result.paddedEmptySource)}`);
     }
     if (
-      result.pendingAppendSource !== '| A      |\n| ------ |\n| new    |\n|  |' ||
+      result.pendingAppendSource !== '| A      |\n| ------ |\n| expanded    |\n|  |' ||
       JSON.stringify(result.pendingAppendMarkers) !== JSON.stringify([
         { line: '3', added: false, modified: true },
         { line: '4', added: true, modified: false }

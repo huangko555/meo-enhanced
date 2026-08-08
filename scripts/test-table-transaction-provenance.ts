@@ -184,6 +184,10 @@ const adapterInterfaceSource = readFileSync(
   new URL('../webview/src/adapters/tableTransactionProvenance.ts', import.meta.url),
   'utf8'
 );
+const gitDiffSource = readFileSync(
+  new URL('../webview/src/helpers/gitDiffGutter.ts', import.meta.url),
+  'utf8'
+);
 assert.equal(
   /from ['"]@codemirror|\b(?:StateField|StateEffect|Decoration|EditorView|HTMLElement|DocumentSession|GitBaseline)\s*[<|=]/.test(applicationSource),
   false,
@@ -204,6 +208,7 @@ for (const requiredBoundary of ['invertedEffects', 'iterChanges', 'mapPos', 'lin
 }
 assert.equal(adapterSource.includes('StateField.define<TableTransactionProvenance>'), true);
 assert.equal(adapterSource.includes('update(update)'), false, 'provenance must advance before gutter StateFields');
+assert.equal(adapterSource.includes('let disposed ='), false, 'the pure Module must own provenance lifecycle');
 assert.equal(adapterInterfaceSource.includes('values.length > 1'), true, 'duplicate production Adapters must fail');
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 assert.equal(
@@ -212,6 +217,16 @@ assert.equal(
   'production Editor must create exactly one table provenance Adapter'
 );
 assert.equal(editorSource.includes('tableTransactionProvenanceAdapter.dispose()'), true);
+assert.equal(
+  editorSource.includes("tableTransactionProvenanceAdapter.effect({ type: 'baselineRefreshed' })"),
+  true,
+  'the Editor boundary must coordinate baseline reset with provenance invalidation'
+);
+assert.equal(
+  gitDiffSource.includes('getTableTransactionProvenance('),
+  false,
+  'the git diff gutter may only read provenance snapshots'
+);
 assert.equal(
   (editorSource.match(/tableTransactionProvenanceAdapter\.effect\(\{ type: 'externalDocumentPresented' \}\)/g) ?? []).length,
   2,

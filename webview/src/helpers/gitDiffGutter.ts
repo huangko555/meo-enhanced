@@ -11,7 +11,6 @@ import {
 } from './liveRenderedBlocks';
 import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
-  getTableTransactionProvenance,
   getTableTransactionProvenanceSnapshot
 } from '../adapters/tableTransactionProvenance';
 
@@ -751,15 +750,6 @@ export function getGitDiffOverviewSegments(state: EditorState): DiffSegment[] {
 
   flush();
   return segments;
-}
-
-export function setGitBaseline(view: EditorView, snapshot: any): void {
-  view.dispatch({
-    effects: [
-      setGitBaselineEffect.of(snapshot),
-      getTableTransactionProvenance(view.state).effect({ type: 'baselineRefreshed' })
-    ]
-  });
 }
 
 export function getDeletedGapPreview(

@@ -21,7 +21,7 @@ import {
   gitDiffGutterBaselineExtensions,
   gitDiffGutterLiveRenderExtensions,
   gitDiffGutterRenderExtensions,
-  setGitBaseline as applyGitBaseline
+  setGitBaselineEffect
 } from './helpers/gitDiffGutter';
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
 import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
@@ -3174,7 +3174,12 @@ export function createEditor({
       // tables, images, Mermaid, and math). Keep the document anchor stable while
       // the decoration transaction and its deferred measurements settle.
       viewportController.preserveDocumentAnchorWhileMutation(() => {
-        applyGitBaseline(view, snapshot);
+        view.dispatch({
+          effects: [
+            setGitBaselineEffect.of(snapshot),
+            tableTransactionProvenanceAdapter.effect({ type: 'baselineRefreshed' })
+          ]
+        });
         gitDiffContentHover?.hide();
         gitBlameHover?.hide();
         gitDiffOverviewRuler?.refresh();
