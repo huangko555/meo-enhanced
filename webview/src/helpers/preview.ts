@@ -183,6 +183,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   let searchMatches: HTMLElement[] = [];
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
+  let disposed = false;
 
   const disposePreviewMathViewports = () => {
     for (const viewport of previewMathViewports) {
@@ -309,7 +310,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   };
 
   const renderFrame = (restoreLine: number | null = null) => {
-    if (!latestPayload) {
+    if (disposed || !latestPayload) {
       return;
     }
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
@@ -321,6 +322,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
         : '';
     const styles = latestPayload.styles[appearance].replace(/<\/style/gi, '<\\/style');
     frame.onload = () => {
+      if (disposed) return;
       const frameDocument = frame.contentDocument;
       if (!frameDocument) {
         return;
@@ -356,6 +358,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   };
 
   const applyAppearanceToFrame = () => {
+    if (disposed) return;
     const frameDocument = frame.contentDocument;
     const styleElement = frameDocument?.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
     if (!latestPayload || !frameDocument || !styleElement) {
@@ -400,6 +403,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     text: string,
     { restoreLine = null, background = false }: { restoreLine?: number | null; background?: boolean } = {}
   ) => {
+    if (disposed) return;
     if (latestPayload && text === latestRenderedText && frame.contentDocument?.querySelector('.meo-export-doc')) {
       setStatus(null);
       if (restoreLine !== null) {
@@ -439,9 +443,11 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     });
   };
 
-  const acceptRenderResponse = (message: PreviewRenderResponse) => previewRenderTransport.accept(message);
+  const acceptRenderResponse = (message: PreviewRenderResponse) => (
+    disposed ? false : previewRenderTransport.accept(message)
+  );
 
-  appearanceControl.addEventListener('click', (event) => {
+  const handleAppearanceControlClick = (event: Event) => {
     const button = event.target instanceof Element
       ? event.target.closest<HTMLButtonElement>('.preview-appearance-button[data-appearance]')
       : null;
@@ -450,7 +456,8 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       return;
     }
     setAppearance(nextAppearance, { post: true });
-  });
+  };
+  appearanceControl.addEventListener('click', handleAppearanceControlClick);
   updateThemeToggle();
 
   const getFrameDocument = () => frame.contentDocument;
@@ -606,7 +613,20 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
         frame.contentWindow?.focus();
       }
     }),
-    getOutlineAdapter: () => outlineAdapter
+    getOutlineAdapter: () => outlineAdapter,
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      requestGeneration += 1;
+      hasPendingRequest = false;
+      pendingRestoreLine = null;
+      previewRenderTransport.cancelAll('Preview closed');
+      appearanceControl.removeEventListener('click', handleAppearanceControlClick);
+      frame.onload = null;
+      disposePreviewMathViewports();
+      scrollToTopController.setScrollElement(null);
+      clearSearchMatches();
+    }
   };
 }
 

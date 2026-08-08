@@ -20,6 +20,7 @@ export type PreviewRenderTransportOptions = {
 export type PreviewRenderTransport = {
   render(request: { readonly text: string; readonly environment?: PreviewStyleEnvironment }): Promise<PreviewRenderResolution>;
   accept(response: PreviewRenderResponse): boolean;
+  cancelAll(message?: string): void;
 };
 
 export function createPreviewRenderTransport(
@@ -68,6 +69,16 @@ export function createPreviewRenderTransport(
       cancelTimeout(pendingRequest.timeout);
       pendingRequest.resolve(response.result);
       return true;
+    },
+    cancelAll(message = 'Preview render canceled') {
+      for (const request of pending.values()) {
+        cancelTimeout(request.timeout);
+        request.resolve({
+          ok: false,
+          error: { code: 'operation-failed', message }
+        });
+      }
+      pending.clear();
     }
   };
 }

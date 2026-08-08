@@ -23,6 +23,7 @@ import { resolveCodeTheme } from './themes/editorLightTheme';
 import { createExportSnapshotResponder } from './adapters/exportSnapshotTransport';
 import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
+import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { InitMessage } from '../../src/protocol/readyInit';
 
@@ -1057,6 +1058,7 @@ const previewController = createPreviewController({
     }
   }
 });
+const previewAdapter = createPreviewWebviewAdapter(previewController);
 previewAppearanceSlot.replaceWith(previewController.appearanceControl);
 outlineController = createOutlineController({
   root,
@@ -1097,7 +1099,6 @@ let lastEditableMode: 'live' | 'source' = 'live';
 let currentEditorAppearance: EditorAppearance = 'dark';
 let currentThemeSettings: Parameters<typeof applyThemeSettings>[0];
 let currentCodeTheme: Parameters<typeof setShikiTheme>[0];
-let hasInitializedPreviewAppearance = false;
 let hasLocalModePreference = false;
 let pendingInitialText: string | null = null;
 let initialEditorMountQueued = false;
@@ -1589,7 +1590,7 @@ const presentDocumentText = (
     return false;
   }
   if (currentMode === 'preview') {
-    previewController.requestRender(text, {
+    previewAdapter.refreshVisible(text, {
       restoreLine: pendingRestoreTopLine ?? previewRestoreLine
     });
   } else if (pendingRestoreTopLine !== null) {
@@ -1615,7 +1616,7 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   presentText: presentDocumentText,
   restoreDiscardedView: (message) => {
     if (currentMode === 'preview') {
-      previewController.requestRender(getCurrentEditorText(), { restoreLine: message.topLine });
+      previewAdapter.refreshVisible(getCurrentEditorText(), { restoreLine: message.topLine });
     } else {
       editor?.restoreTopLine?.(
         message.topLine,
@@ -1699,21 +1700,19 @@ const applyMode = (mode: MarkdownMode, { post = true, persist = true, userTrigge
   }
   updateModeUI();
 
-  previewController.setVisible(mode === 'preview');
+  previewAdapter.setActive({
+    active: mode === 'preview',
+    text: getCurrentEditorText(),
+    restoreLine: transitionViewPosition?.topLine ?? null,
+    initialAppearance: currentEditorAppearance
+  });
   editorHost.hidden = mode === 'preview';
 
   if (mode === 'preview') {
-    if (!hasInitializedPreviewAppearance) {
-      previewController.setAppearance(currentEditorAppearance);
-      hasInitializedPreviewAppearance = true;
-    }
     if (document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
     }
     selectionMenuController.hide();
-    previewController.requestRender(getCurrentEditorText(), {
-      restoreLine: transitionViewPosition?.topLine ?? null
-    });
     syncGitDiffLineHighlights();
     if (outlineController.isVisible()) {
       outlineController.refresh();
@@ -1774,7 +1773,7 @@ const applyMode = (mode: MarkdownMode, { post = true, persist = true, userTrigge
       }
 
       currentMode = previousMode;
-      previewController.setVisible(previousMode === 'preview');
+      previewAdapter.restoreActive(previousMode === 'preview');
       editorHost.hidden = previousMode === 'preview';
       updateModeUI();
       failureNotice.updateEditorNotice();
@@ -1994,7 +1993,7 @@ const exportHandlerContext: ExportHandlerContext = {
   respondToSnapshot: createExportSnapshotResponder((message) => vscode.postMessage(message)).respond,
   getCurrentText: getCurrentEditorText,
   whenDocumentIdle: () => documentSessionAdapter.whenIdle(),
-  getPreviewAppearance: () => previewController.getAppearance()
+  getPreviewAppearance: () => previewAdapter.getAppearance()
 };
 
 const exportHandler = createExportHandler(exportHandlerContext);
@@ -2034,7 +2033,11 @@ window.addEventListener('message', (event) => {
       gitClient?.resetForInit({ hideTooltip: false });
       const nextMode = hasLocalModePreference ? currentMode : message.mode;
       documentSessionAdapter.start(message);
-      previewController.setAppearance(message.previewAppearance === 'light' ? 'light' : 'dark');
+      previewAdapter.start({
+        text: message.text,
+        appearance: message.previewAppearance === 'light' ? 'light' : 'dark',
+        active: nextMode === 'preview'
+      });
 
       handleInit(message);
       if (hasLocalModePreference) {
@@ -2050,9 +2053,6 @@ window.addEventListener('message', (event) => {
           reason: 'init'
         });
       }
-      if (nextMode !== 'preview') {
-        previewController.preload(message.text);
-      }
       failureNotice.updateEditorNotice();
     });
     return;
@@ -2067,11 +2067,7 @@ window.addEventListener('message', (event) => {
         refreshMermaidTheme();
         setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
         editor?.refreshDecorations();
-        if (currentMode === 'preview') {
-          previewController.requestRender(getCurrentEditorText(), {
-            restoreLine: previewController.getTopVisiblePosition()?.topLine ?? null
-          });
-        }
+        previewAdapter.refreshVisible(getCurrentEditorText());
       };
       if (editor) editor.preserveViewport(applyThemeChange);
       else applyThemeChange();
@@ -2112,13 +2108,7 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  if (message.type === 'previewAppearanceChanged') {
-    previewController.setAppearance(message.appearance === 'light' ? 'light' : 'dark');
-    return;
-  }
-
-  if (message.type === 'previewRenderResult') {
-    previewController.acceptRenderResponse(message);
+  if (previewAdapter.accept(message)) {
     return;
   }
 
@@ -2304,6 +2294,7 @@ window.addEventListener('beforeunload', () => {
   cancelPendingLocalLinkStatusRefresh();
   clearGitBlameCache({ hideTooltip: false });
   documentSessionAdapter.dispose();
+  previewAdapter.dispose();
 
   if (initialEditorMountFallbackTimer !== null) {
     window.clearTimeout(initialEditorMountFallbackTimer);

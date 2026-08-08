@@ -473,6 +473,17 @@ const failedPreviewTransport = createPreviewRenderTransport(() => { throw new Er
 assert.deepEqual(await failedPreviewTransport.render({ text: '# Failed' }), {
   ok: false, error: { code: 'operation-failed', message: 'transport unavailable' }
 });
+const canceledPreview = previewTransport.render({ text: '# Canceled' });
+const canceledPreviewRequestId = (postedPreviewRequest as { requestId: string }).requestId;
+previewTransport.cancelAll('Preview closed');
+assert.deepEqual(await canceledPreview, {
+  ok: false, error: { code: 'operation-failed', message: 'Preview closed' }
+});
+assert.equal(previewTransport.accept({
+  type: 'previewRenderResult', requestId: canceledPreviewRequestId, result: {
+    ok: true, value: { html: '<p>late</p>', hasMermaid: false, styles: { dark: '', light: '' } }
+  }
+}), false);
 
 assert.deepEqual(decodeExportSnapshotRequest({ type: 'requestExportSnapshot', requestId: 'export-1' }), {
   type: 'requestExportSnapshot', requestId: 'export-1'
