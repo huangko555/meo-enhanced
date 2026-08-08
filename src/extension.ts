@@ -44,6 +44,7 @@ import {
   getExportEditorFontEnvironment,
   getExportPdfBrowserPath,
   getGitChangesGutterEnabled,
+  getRememberPositionLines,
   getOutlineVisible,
   getContentMaxWidthEnabled,
   getThemeSettings,
@@ -62,6 +63,7 @@ import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefr
 import { createVscodeSpellDiagnosticsAdapter } from './host/vscodeSpellDiagnosticsAdapter';
 import { createHostDiagnosticsTimerAdapter } from './host/hostDiagnosticsTimerAdapter';
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
+import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
 import {
   normalizePreviewAppearance,
@@ -75,7 +77,11 @@ import {
   type EditorAppearance
 } from './shared/editorAppearance';
 import { parseThemeJsonc, serializeThemeFile } from './shared/themeJsonc';
-import { collectWebviewImageResourceRoots } from './shared/documentLinks';
+import {
+  collectWebviewImageResourceRoots,
+  getDocumentFragmentHref,
+  resolveLocalLinkTargetUri
+} from './shared/documentLinks';
 import {
   runWithTimedUiTimeout,
   showTimedErrorMessage,
@@ -699,6 +705,24 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
           } catch {
             return false;
           }
+        }
+      }),
+      viewNavigation: createVscodeViewNavigationAdapter({
+        document,
+        documentUri,
+        context: this.context,
+        readMinimumRememberedLines: getRememberPositionLines,
+        getDocumentFragmentHref,
+        resolveLocalLinkTarget: resolveLocalLinkTargetUri,
+        post: async (message) => {
+          try {
+            return await panel.webview.postMessage(message);
+          } catch {
+            return false;
+          }
+        },
+        reportFailure: (contextLabel, error) => {
+          console.error(`[MEO viewNavigation] ${contextLabel}`, error);
         }
       }),
       saveDocument: async () => document.save(),
