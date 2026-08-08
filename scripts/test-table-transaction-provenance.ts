@@ -180,6 +180,10 @@ const adapterSource = readFileSync(
   new URL('../webview/src/adapters/codeMirrorTableTransactionProvenanceAdapter.ts', import.meta.url),
   'utf8'
 );
+const adapterInterfaceSource = readFileSync(
+  new URL('../webview/src/adapters/tableTransactionProvenance.ts', import.meta.url),
+  'utf8'
+);
 assert.equal(
   /from ['"]@codemirror|\b(?:StateField|StateEffect|Decoration|EditorView|HTMLElement|DocumentSession|GitBaseline)\s*[<|=]/.test(applicationSource),
   false,
@@ -193,18 +197,42 @@ for (const requiredBoundary of ['invertedEffects', 'iterChanges', 'mapPos', 'lin
     `Adapter deletion would leak a required CodeMirror/lifecycle rule: ${requiredBoundary}`
   );
 }
+assert.equal(adapterSource.includes('StateField.define<TableTransactionProvenance>'), true);
+assert.equal(adapterSource.includes('update(update)'), false, 'provenance must advance before gutter StateFields');
+assert.equal(adapterInterfaceSource.includes('values.length > 1'), true, 'duplicate production Adapters must fail');
+const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
+assert.equal(
+  (editorSource.match(/createCodeMirrorTableTransactionProvenanceAdapter\(/g) ?? []).length,
+  1,
+  'production Editor must create exactly one table provenance Adapter'
+);
+assert.equal(editorSource.includes('tableTransactionProvenanceAdapter.dispose()'), true);
+assert.equal(
+  (editorSource.match(/tableTransactionProvenanceAdapter\.effect\(\{ type: 'externalDocumentPresented' \}\)/g) ?? []).length,
+  2,
+  'equal and changed external presentations must both invalidate provenance'
+);
 for (const relativePath of [
   '../webview/src/editor.ts',
   '../webview/src/helpers/tables.ts',
-  '../webview/src/helpers/tableRowDiffProvenance.ts',
   '../webview/src/helpers/gitDiffGutter.ts'
 ]) {
   const productionSource = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
   assert.equal(
-    productionSource.includes('tableTransactionProvenance')
-      || productionSource.includes('CodeMirrorTableTransactionProvenanceAdapter'),
+    productionSource.includes('tableRowDiffProvenance'),
     false,
-    `candidate provenance must not be wired into production yet: ${relativePath}`
+    `Legacy table provenance must be unreachable from production: ${relativePath}`
+  );
+}
+for (const relativePath of [
+  '../webview/src/helpers/tables.ts',
+  '../webview/src/helpers/gitDiffGutter.ts'
+]) {
+  const productionSource = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+  assert.equal(
+    productionSource.includes('../adapters/codeMirrorTableTransactionProvenanceAdapter'),
+    false,
+    `only the Editor Bootstrap may import the concrete Adapter: ${relativePath}`
   );
 }
 

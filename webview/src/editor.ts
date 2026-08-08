@@ -24,7 +24,8 @@ import {
   setGitBaseline as applyGitBaseline
 } from './helpers/gitDiffGutter';
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
-import { clearTableRowDiffProvenanceEffect } from './helpers/tableRowDiffProvenance';
+import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
+import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { createGitBlameHoverController } from './helpers/gitBlameHover';
@@ -1971,6 +1972,9 @@ export function createEditor({
     return { replaced: true, found: false, current: 0, total: remaining };
   };
 
+  const tableTransactionProvenanceAdapter = createCodeMirrorTableTransactionProvenanceAdapter(
+    createTableTransactionProvenance()
+  );
   const state = EditorState.create({
     doc: text,
     selection: { anchor: initialCursorPos },
@@ -2005,6 +2009,7 @@ export function createEditor({
       ]),
       history(),
       lineNumbers(),
+      tableTransactionProvenanceAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
       highlightActiveLineGutter(),
@@ -2765,6 +2770,7 @@ export function createEditor({
       editorHistoryRuntime?.dispose();
       editorHistoryRuntime = null;
       viewportController.destroy();
+      tableTransactionProvenanceAdapter.dispose();
       view.destroy();
     },
     setText(textValue) {
@@ -2774,7 +2780,7 @@ export function createEditor({
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
         view.dispatch({
-          effects: clearTableRowDiffProvenanceEffect.of(null),
+          effects: tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
           annotations: Transaction.addToHistory.of(false)
         });
         return;
@@ -2799,7 +2805,7 @@ export function createEditor({
         view.dispatch({
           changes: syncChange,
           selection: { anchor: mappedAnchor, head: mappedHead },
-          effects: clearTableRowDiffProvenanceEffect.of(null),
+          effects: tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
           annotations: Transaction.addToHistory.of(false)
         });
       } finally {

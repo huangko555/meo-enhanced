@@ -1,35 +1,24 @@
 import { invertedEffects } from '@codemirror/commands';
-import { StateEffect, type ChangeDesc, type Extension, type Transaction } from '@codemirror/state';
+import {
+  StateEffect,
+  StateField,
+  type ChangeDesc,
+  type Extension,
+  type Transaction
+} from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import type {
   TableProvenanceMutation,
   TableTransactionProvenance,
   TableTransactionProvenanceSnapshot
 } from '../application/tableTransactionProvenance';
+import {
+  tableTransactionProvenanceFacet,
+  type CodeMirrorTableProvenanceIntent,
+  type CodeMirrorTableTransactionProvenance
+} from './tableTransactionProvenance';
 
-export type CodeMirrorTableProvenanceIntent =
-  | { readonly type: 'insertedRow'; readonly at: number; readonly assoc: -1 | 1; readonly offset?: number }
-  | {
-      readonly type: 'deletedRows';
-      readonly at: number;
-      readonly assoc: -1 | 1;
-      readonly baselineRanges: ReadonlyArray<readonly [number, number]>;
-      readonly deletionAtEnd: boolean;
-    }
-  | {
-      readonly type: 'remapInsertedRows';
-      readonly tableFrom: number;
-      readonly rows: ReadonlyArray<{ readonly id: string; readonly oldOffset: number; readonly newOffset: number }>;
-    }
-  | { readonly type: 'baselineRefreshed' }
-  | { readonly type: 'externalDocumentPresented' };
-
-export type CodeMirrorTableTransactionProvenanceAdapter = {
-  readonly extension: Extension;
-  effect(intent: CodeMirrorTableProvenanceIntent): StateEffect<unknown>;
-  snapshot(): TableTransactionProvenanceSnapshot;
-  dispose(): void;
-};
+export type CodeMirrorTableTransactionProvenanceAdapter = CodeMirrorTableTransactionProvenance;
 
 type PositionedRowEffect = {
   readonly id: string;
@@ -236,19 +225,32 @@ export function createCodeMirrorTableTransactionProvenanceAdapter(
     provenance.accept({ type: 'dispose' });
   };
 
+  const stateField = StateField.define<TableTransactionProvenance>({
+    create: () => provenance,
+    update(owner, transaction) {
+      applyTransaction(transaction);
+      return owner;
+    }
+  });
+
   const plugin = ViewPlugin.define(() => ({
-    update(update) {
-      for (const transaction of update.transactions) applyTransaction(transaction);
-    },
     destroy() {
       dispose();
     }
   }));
 
-  return {
-    extension: [historyExtension, plugin],
+  let extension: Extension = [];
+  const adapter: CodeMirrorTableTransactionProvenanceAdapter = {
+    get extension() { return extension; },
     effect,
     snapshot: () => provenance.snapshot(),
     dispose
   };
+  extension = [
+    tableTransactionProvenanceFacet.of(adapter),
+    stateField,
+    historyExtension,
+    plugin
+  ];
+  return adapter;
 }

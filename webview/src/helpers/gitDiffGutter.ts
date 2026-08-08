@@ -11,11 +11,9 @@ import {
 } from './liveRenderedBlocks';
 import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
-  clearTableRowDiffProvenanceEffect,
-  getDeletedTableRows,
-  tableRowDiffProvenanceField,
-  tableRowDiffProvenanceHistoryExtension
-} from './tableRowDiffProvenance';
+  getTableTransactionProvenance,
+  getTableTransactionProvenanceSnapshot
+} from '../adapters/tableTransactionProvenance';
 
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
 const MAX_DIFF_COMPUTATION_TIME_MS = 50;
@@ -196,7 +194,7 @@ function reconcileSnapshotTableDeletions(
   lineFlags: (MarkerFlags | undefined)[],
   deletedRows: ReadonlyArray<{
     at: number;
-    baselineRanges: Array<[number, number]>;
+    baselineRanges: ReadonlyArray<readonly [number, number]>;
   }>
 ): void {
   const candidates = lineFlags.flatMap((flags, lineIndex) => (flags?.deletionRanges ?? []).flatMap(
@@ -421,18 +419,18 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
     }
   }
 
-  const provenance = state.field(tableRowDiffProvenanceField, false);
-  provenance?.insertedRanges.between(0, state.doc.length, (from) => {
-    const lineIndex = state.doc.lineAt(from).number - 1;
+  const provenance = getTableTransactionProvenanceSnapshot(state);
+  for (const row of provenance.insertedRows) {
+    const lineIndex = state.doc.lineAt(row.from).number - 1;
     lineFlags[lineIndex] = {
       ...(lineFlags[lineIndex] ?? emptyMarkerFlags()),
       added: true,
       modified: false,
       modifiedRanges: undefined
     };
-  });
+  }
 
-  const deletedRows = getDeletedTableRows(state);
+  const deletedRows = provenance.deletedRows;
   reconcileSnapshotTableDeletions(
     state,
     baseline.baseLines ?? splitDiffLines(baseline.baseText),
@@ -689,8 +687,6 @@ const gitDiffGutterLiveExtension = gutter({
 export function gitDiffGutterBaselineExtensions(): any[] {
   return [
     gitBaselineField,
-    tableRowDiffProvenanceField,
-    tableRowDiffProvenanceHistoryExtension,
     gitDiffLineFlagsField
   ];
 }
@@ -761,7 +757,7 @@ export function setGitBaseline(view: EditorView, snapshot: any): void {
   view.dispatch({
     effects: [
       setGitBaselineEffect.of(snapshot),
-      clearTableRowDiffProvenanceEffect.of(null)
+      getTableTransactionProvenance(view.state).effect({ type: 'baselineRefreshed' })
     ]
   });
 }

@@ -10,15 +10,18 @@ import {
 import { getLocalLinkStatus, replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
 import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlinePresentation';
 import {
-  getDeletedTableRows,
-  getInsertedTableRowsInRange
-} from '../webview/src/helpers/tableRowDiffProvenance';
+  getTableTransactionProvenanceSnapshot
+} from '../webview/src/adapters/tableTransactionProvenance';
+import { tableRowDiffProvenanceField } from '../webview/src/helpers/tableRowDiffProvenance';
 
 const getTableProvenanceSnapshot = () => {
   const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!);
+  const snapshot = getTableTransactionProvenanceSnapshot(view.state);
   return {
-    inserted: getInsertedTableRowsInRange(view.state, 0, view.state.doc.length),
-    deleted: getDeletedTableRows(view.state)
+    lifecycle: snapshot.lifecycle,
+    inserted: snapshot.insertedRows,
+    deleted: snapshot.deletedRows,
+    legacyInstalled: view.state.field(tableRowDiffProvenanceField, false) !== undefined
   };
 };
 

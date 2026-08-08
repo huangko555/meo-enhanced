@@ -26,11 +26,9 @@ import {
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
-  createMarkDeletedTableRowsEffect,
-  createMarkInsertedTableRowEffect,
-  createRemapInsertedTableRowEffects,
-  getInsertedTableRowsInRange
-} from './tableRowDiffProvenance';
+  getTableTransactionProvenance,
+  getTableTransactionProvenanceSnapshot
+} from '../adapters/tableTransactionProvenance';
 
 declare global {
   interface HTMLDivElement {
@@ -3357,7 +3355,8 @@ class HtmlTableWidget extends WidgetType {
       markdownLineOffsets.push(markdownOffset);
       markdownOffset += line.length + 1;
     }
-    const trackedRowMappings = getInsertedTableRowsInRange(view.state, range.from, range.to)
+    const trackedRowMappings = getTableTransactionProvenanceSnapshot(view.state).insertedRows
+      .filter((row) => row.from >= range.from && row.to <= range.to)
       .map((trackedRow) => {
         const sourceRowIndex = view.state.doc.lineAt(trackedRow.from).number - tableStartLine - 2;
         const nextRowIndex = effectiveSourceRowOrder.indexOf(sourceRowIndex);
@@ -3368,8 +3367,12 @@ class HtmlTableWidget extends WidgetType {
           newOffset: markdownLineOffsets[nextRowIndex + 2]
         };
       })
-      .filter((mapping): mapping is { id: number; oldOffset: number; newOffset: number } => mapping !== null);
-    const effects = createRemapInsertedTableRowEffects(view.state, range.from, trackedRowMappings);
+      .filter((mapping): mapping is { id: string; oldOffset: number; newOffset: number } => mapping !== null);
+    const effects = getTableTransactionProvenance(view.state).effect({
+      type: 'remapInsertedRows',
+      tableFrom: range.from,
+      rows: trackedRowMappings
+    });
     const applyCommit = () => view.dispatch({
       changes: { from: range.from, to: range.to, insert: markdown },
       effects
@@ -3428,15 +3431,18 @@ class HtmlTableWidget extends WidgetType {
     const tableStartLine = view.state.doc.lineAt(range.from).number;
     const blankRow = `${this.tableData.indent}| ${new Array(colCount).fill('').join(' | ')} |`;
     const changes = this.collectPendingCellSourceChanges(view);
-    let insertedRowEffect: ReturnType<typeof createMarkInsertedTableRowEffect>;
+    const provenance = getTableTransactionProvenance(view.state);
+    let insertedRowEffect: StateEffect<unknown>;
     if (insertAt < this.tableData.rows.length) {
       const line = view.state.doc.line(tableStartLine + 2 + insertAt);
       changes.push({ from: line.from, to: line.from, insert: `${blankRow}\n` });
-      insertedRowEffect = createMarkInsertedTableRowEffect(view.state, line.from, -1);
+      insertedRowEffect = provenance.effect({ type: 'insertedRow', at: line.from, assoc: -1 });
     } else {
       const previousLine = view.state.doc.line(tableStartLine + 1 + this.tableData.rows.length);
       changes.push({ from: previousLine.to, to: previousLine.to, insert: `\n${blankRow}` });
-      insertedRowEffect = createMarkInsertedTableRowEffect(view.state, previousLine.to, -1, 1);
+      insertedRowEffect = provenance.effect({
+        type: 'insertedRow', at: previousLine.to, assoc: -1, offset: 1
+      });
     }
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
     view.dispatch({ changes, effects: insertedRowEffect });
@@ -3526,13 +3532,13 @@ class HtmlTableWidget extends WidgetType {
       const anchor = deletionAtEnd
         ? Math.max(0, view.state.doc.line(fromLine).from - 1)
         : view.state.doc.line(fromLine).from;
-      return [createMarkDeletedTableRowsEffect(
-        view.state,
-        anchor,
-        deletionAtEnd ? -1 : 1,
+      return [getTableTransactionProvenance(view.state).effect({
+        type: 'deletedRows',
+        at: anchor,
+        assoc: deletionAtEnd ? -1 : 1,
         baselineRanges,
         deletionAtEnd
-      )];
+      })];
     });
     const changes: Array<{ from: number; to: number; insert?: string }> = groups.map((group) => {
       const fromLine = tableStartLine + 2 + group.from;
