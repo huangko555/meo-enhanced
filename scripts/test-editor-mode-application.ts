@@ -16,6 +16,7 @@ assert.deepEqual(hostInit.getState(), {
 });
 const hostInitEffects = hostInit.dispatch({ type: 'initialize', hostMode: 'source' });
 assert.deepEqual(effectTypes(hostInitEffects), ['scheduleEditorMount', 'commitTransientEdits', 'presentMode']);
+assert.deepEqual(hostInitEffects[0], { type: 'scheduleEditorMount', mode: 'source' });
 assert.equal(hostInit.getState().mode, 'source');
 assert.equal(hostInitEffects.some((effect) => effect.type === 'postMode'), false, 'Host Init must not echo mode');
 
@@ -27,6 +28,7 @@ assert.equal(localInit.getState().lastEditableMode, 'source');
 assert.deepEqual(effectTypes(localInitEffects), [
   'scheduleEditorMount', 'commitTransientEdits', 'presentMode', 'persistMode', 'postMode'
 ]);
+assert.deepEqual(localInitEffects[0], { type: 'scheduleEditorMount', mode: 'source' });
 
 localInit.dispatch({ type: 'editorMountStarted' });
 localInit.dispatch({ type: 'editorMountSucceeded' });

@@ -75,7 +75,7 @@ export type EditorModeEffect =
   | { readonly type: 'persistMode'; readonly mode: EditorMode; readonly lastEditableMode: EditableMode }
   | { readonly type: 'postMode'; readonly mode: EditorMode }
   | { readonly type: 'showNotice'; readonly notice: 'transient-live' | 'live-fallback' | 'editor-failure' | 'mount-retry' }
-  | { readonly type: 'scheduleEditorMount' }
+  | { readonly type: 'scheduleEditorMount'; readonly mode: EditableMode }
   | { readonly type: 'disposeMode' };
 
 export type EditorModeApplication = {
@@ -230,9 +230,10 @@ export function createEditorModeApplication(): EditorModeApplication {
         lifecycle = 'ready';
         const source: EditorModeRequestSource = hasLocalPreference ? 'init-local' : 'init-host';
         const targetMode = hasLocalPreference ? mode : input.hostMode;
+        const mountMode = targetMode === 'preview' ? lastEditableMode : targetMode;
         editorMount = 'scheduled';
         return [
-          { type: 'scheduleEditorMount' },
+          { type: 'scheduleEditorMount', mode: mountMode },
           ...requestMode(targetMode, source, null, false)
         ];
       }
@@ -329,7 +330,7 @@ export function createEditorModeApplication(): EditorModeApplication {
           editorMount = 'scheduled';
           return [
             { type: 'showNotice', notice: 'mount-retry' },
-            { type: 'scheduleEditorMount' }
+            { type: 'scheduleEditorMount', mode: 'live' }
           ];
         }
         if (mode === 'live' && !mountRecoveryAttempted && input.failure === 'live-incompatible') {
@@ -338,7 +339,7 @@ export function createEditorModeApplication(): EditorModeApplication {
           return [
             { type: 'showNotice', notice: 'live-fallback' },
             ...requestMode('source', 'render-failure', null, false),
-            { type: 'scheduleEditorMount' }
+            { type: 'scheduleEditorMount', mode: 'source' }
           ];
         }
         editorMount = 'unmounted';
