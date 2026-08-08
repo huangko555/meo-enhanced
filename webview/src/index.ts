@@ -18,13 +18,14 @@ import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
-import { normalizeEditorAppearance, type EditorAppearance } from '../../src/shared/editorAppearance';
 import { resolveCodeTheme } from './themes/editorLightTheme';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
+import { createThemeWebviewAdapter } from './adapters/themeWebviewAdapter';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
+import type { EditorAppearance } from '../../src/protocol/editorCommands';
 import type { InitMessage } from '../../src/protocol/readyInit';
 
 type MarkdownMode = 'live' | 'source' | 'preview';
@@ -1096,9 +1097,6 @@ root.replaceChildren(toolbar, editorWrapper);
 
 let currentMode: MarkdownMode = 'live';
 let lastEditableMode: 'live' | 'source' = 'live';
-let currentEditorAppearance: EditorAppearance = 'dark';
-let currentThemeSettings: Parameters<typeof applyThemeSettings>[0];
-let currentCodeTheme: Parameters<typeof setShikiTheme>[0];
 let hasLocalModePreference = false;
 let pendingInitialText: string | null = null;
 let initialEditorMountQueued = false;
@@ -1124,41 +1122,13 @@ const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
 const failureNotice = createFailureNoticeManager(editorNotice);
 handleEditorNoticeDismiss = failureNotice.clearFailureNotice;
 
-const setEditorAppearance = (
-  appearance: EditorAppearance,
-  { post = false }: { post?: boolean } = {}
-): void => {
-  const nextAppearance = normalizeEditorAppearance(appearance);
-  const changed = currentEditorAppearance !== nextAppearance;
-  currentEditorAppearance = nextAppearance;
-  editorAppearanceControl.setActive(nextAppearance);
-
-  if (changed) {
-    const applyAppearance = () => {
-      applyThemeSettings(currentThemeSettings, currentEditorAppearance);
-      setShikiTheme(resolveCodeTheme(currentCodeTheme, currentEditorAppearance));
-      refreshMermaidTheme();
-      editor?.refreshDecorations();
-    };
-    if (editor) {
-      editor.preserveViewport(applyAppearance);
-    } else {
-      applyAppearance();
-    }
-  }
-
-  if (post) {
-    vscode.postMessage({ type: 'setEditorAppearance', appearance: currentEditorAppearance });
-  }
-};
-
 editorAppearanceControl.element.addEventListener('click', (event) => {
   const button = event.target instanceof Element
     ? event.target.closest<HTMLButtonElement>('.editor-appearance-button[data-editor-appearance]')
     : null;
   const appearance = button?.dataset.editorAppearance;
   if (appearance === 'light' || appearance === 'dark') {
-    setEditorAppearance(appearance, { post: true });
+    themeAdapter.setAppearance(appearance, { post: true });
   }
 });
 
@@ -1704,7 +1674,7 @@ const applyMode = (mode: MarkdownMode, { post = true, persist = true, userTrigge
     active: mode === 'preview',
     text: getCurrentEditorText(),
     restoreLine: transitionViewPosition?.topLine ?? null,
-    initialAppearance: currentEditorAppearance
+    initialAppearance: themeAdapter.getAppearance()
   });
   editorHost.hidden = mode === 'preview';
 
@@ -1996,6 +1966,28 @@ const exportAdapter = createExportWebviewAdapter({
   getStyleEnvironment: getExportStyleEnvironment
 });
 
+const themeAdapter = createThemeWebviewAdapter({
+  setAppearanceControl: (appearance) => editorAppearanceControl.setActive(appearance),
+  applyTheme: (theme, appearance) =>
+    applyThemeSettings(theme as Parameters<typeof applyThemeSettings>[0], appearance),
+  setShikiEnabled,
+  resolveCodeTheme,
+  setShikiTheme,
+  refreshMermaidTheme,
+  applyWithEditorViewportPreserved: (action) => {
+    if (editor) editor.preserveViewport(action);
+    else action();
+  },
+  refreshEditorDecorations: () => editor?.refreshDecorations(),
+  refreshPreview: () => previewAdapter.refreshVisible(getCurrentEditorText()),
+  postEditorAppearance: (appearance) => {
+    vscode.postMessage({ type: 'setEditorAppearance', appearance });
+  },
+  reportUnexpectedError: (context, error) => {
+    console.error(`[MEO webview] ${context}`, error);
+  }
+});
+
 const withMessageErrorBoundary = (context: string, action: () => void): void => {
   try {
     action();
@@ -2019,13 +2011,12 @@ window.addEventListener('message', (event) => {
   if (message.type === 'init') {
     acknowledgeReadyHandshake();
     withMessageErrorBoundary('init handler', () => {
-      currentThemeSettings = message.theme as Parameters<typeof applyThemeSettings>[0];
-      currentCodeTheme = message.codeTheme;
-      currentEditorAppearance = normalizeEditorAppearance(message.editorAppearance);
-      editorAppearanceControl.setActive(currentEditorAppearance);
-      applyThemeSettings(currentThemeSettings, currentEditorAppearance);
-      setShikiEnabled(message.shikiCodeBlocks === true);
-      setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
+      themeAdapter.start({
+        theme: message.theme,
+        codeTheme: message.codeTheme,
+        appearance: message.editorAppearance,
+        shikiEnabled: message.shikiCodeBlocks
+      });
       initialMountRecoveryAttempted = false;
       failureNotice.clearFailureNotice();
       gitClient?.resetForInit({ hideTooltip: false });
@@ -2056,29 +2047,7 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  if (message.type === 'themeChanged') {
-    withMessageErrorBoundary('themeChanged handler', () => {
-      const applyThemeChange = () => {
-        currentThemeSettings = message.theme as Parameters<typeof applyThemeSettings>[0];
-        currentCodeTheme = message.codeTheme;
-        applyThemeSettings(currentThemeSettings, currentEditorAppearance);
-        refreshMermaidTheme();
-        setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
-        editor?.refreshDecorations();
-        previewAdapter.refreshVisible(getCurrentEditorText());
-      };
-      if (editor) editor.preserveViewport(applyThemeChange);
-      else applyThemeChange();
-    });
-    return;
-  }
-
-  if (message.type === 'shikiCodeBlocksChanged') {
-    withMessageErrorBoundary('shikiCodeBlocksChanged handler', () => {
-      currentCodeTheme = message.codeTheme;
-      setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
-      setShikiEnabled(message.enabled === true);
-    });
+  if (themeAdapter.accept(message)) {
     return;
   }
 
