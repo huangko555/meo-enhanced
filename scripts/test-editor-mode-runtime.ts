@@ -34,7 +34,7 @@ const capabilities: EditorModeEffectCapabilities = {
       await new Promise<void>((resolve) => { releaseLateApply = resolve; });
     }
   },
-  setPreviewActive: (active) => events.push(`preview:${active}`),
+  setPreviewActive: (active, restoreLine) => events.push(`preview:${active}:${restoreLine ?? 'none'}`),
   setEditorVisible: (visible) => events.push(`editor:${visible}`),
   presentModeControl: (mode) => events.push(`control:${mode}`),
   closeFind: () => events.push('close-find'),
@@ -85,7 +85,7 @@ assert.equal(events.at(-1), 'post:source');
 events.length = 0;
 await runtime.dispatch({ type: 'requestMode', mode: 'preview', source: 'user' });
 assert.equal(runtime.getState().mode, 'preview');
-assert.equal(events.includes('preview:true'), true);
+assert.equal(events.some((event) => event.startsWith('preview:true:')), true);
 assert.equal(events.includes('editor:false'), true);
 assert.equal(events.includes('search:preview'), true);
 assert.equal(events.includes('outline:preview'), true);
@@ -127,9 +127,39 @@ throwingAdapter.execute({ type: 'showNotice', notice: 'editor-failure' });
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.deepEqual(bestEffortErrors.sort(), ['persist-mode', 'post-mode', 'show-notice']);
 
+let scheduledMountRuns = 0;
+let scheduledMountCancels = 0;
+const scheduledApplication = createEditorModeApplication();
+const scheduledAdapter = createEditorModeEffectAdapter({
+  ...capabilities,
+  scheduleMount: () => {
+    return () => { scheduledMountCancels += 1; };
+  },
+  mountEditor: () => { scheduledMountRuns += 1; }
+});
+const scheduledRuntime = createEditorModeRuntime(scheduledApplication, scheduledAdapter, (error) => {
+  throw error;
+});
+const pendingInitialize = scheduledRuntime.dispatch({ type: 'initialize', hostMode: 'source' });
+await new Promise((resolve) => setTimeout(resolve, 0));
+scheduledRuntime.dispose();
+await pendingInitialize;
+await scheduledRuntime.whenIdle();
+assert.equal(scheduledMountCancels, 1, 'dispose must cancel a scheduled lazy mount');
+assert.equal(scheduledMountRuns, 0, 'cancelled lazy mount must not reach the concrete Editor factory');
+
 const adapterSource = readFileSync(new URL('../webview/src/adapters/editorModeEffectAdapter.ts', import.meta.url), 'utf8');
 assert.equal(/\b(currentMode|lastEditableMode|pendingText|documentText)\s*=/.test(adapterSource), false);
 const bootstrapSource = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
-assert.equal(bootstrapSource.includes('createEditorModeRuntime'), false, 'candidate runtime must not start in production');
+assert.equal(
+  (bootstrapSource.match(/editorModeRuntime = createEditorModeRuntime\(/g) ?? []).length,
+  1,
+  'production must create exactly one Editor Mode Runtime'
+);
+assert.equal(
+  (bootstrapSource.match(/const editorModeEffectAdapter = createEditorModeEffectAdapter\(\{/g) ?? []).length,
+  1,
+  'production must create exactly one Editor Mode Effect Adapter'
+);
 
 console.log('Editor Mode runtime and effect adapter checks passed');

@@ -12,18 +12,18 @@ export const normalizeEol = (text: string): string => text.replace(/\r\n?/g, '\n
 
 export interface ShortcutHandlerContext {
   editor: any;
-  currentMode: 'live' | 'source';
+  editableMode: 'live' | 'source';
   vimModeEnabled: boolean;
   requestSave: () => void;
   openFindPanel: (target: 'find' | 'replace') => void;
-  applyMode: (mode: 'live' | 'source', options?: { userTriggered?: boolean; reason?: string }) => boolean;
+  requestMode: (mode: 'live' | 'source') => void;
 }
 
 export const handleEditorShortcut = (
   event: KeyboardEvent,
   context: ShortcutHandlerContext
 ): boolean => {
-  const { editor, currentMode, vimModeEnabled } = context;
+  const { editor, editableMode, vimModeEnabled } = context;
   
   if (!editor || event.isComposing) {
     return false;
@@ -43,7 +43,7 @@ export const handleEditorShortcut = (
   if (isModeToggleShortcut) {
     event.preventDefault();
     event.stopPropagation();
-    context.applyMode(currentMode === 'live' ? 'source' : 'live', { userTriggered: true, reason: 'shortcut' });
+    context.requestMode(editableMode === 'live' ? 'source' : 'live');
     return true;
   }
 

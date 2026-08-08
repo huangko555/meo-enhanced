@@ -121,9 +121,11 @@ assert.deepEqual(effectTypes(mountRetry.dispatch({
   type: 'editorMountFailed', failure: 'transient-live'
 })), ['showNotice', 'scheduleEditorMount']);
 mountRetry.dispatch({ type: 'editorMountStarted' });
-assert.deepEqual(effectTypes(mountRetry.dispatch({
+const exhaustedMountEffects = mountRetry.dispatch({
   type: 'editorMountFailed', failure: 'transient-live'
-})), ['showNotice']);
+});
+assert.deepEqual(effectTypes(exhaustedMountEffects), ['showNotice']);
+assert.deepEqual(exhaustedMountEffects[0], { type: 'showNotice', notice: 'mount-failure' });
 assert.equal(mountRetry.getState().editorMount, 'unmounted', 'mount retry must be bounded');
 
 const mountFallback = createEditorModeApplication();
@@ -144,9 +146,9 @@ assert.deepEqual(disposed.dispatch({ type: 'editorMountStarted' }), []);
 
 const productionBootstrap = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
 assert.equal(
-  productionBootstrap.includes('createEditorModeApplication'),
-  false,
-  'the interface slice must not start a second production mode owner before atomic cutover'
+  (productionBootstrap.match(/const editorModeApplication = createEditorModeApplication\(\)/g) ?? []).length,
+  1,
+  'production must create exactly one Editor Mode Application owner'
 );
 
 console.log('Editor Mode application checks passed');

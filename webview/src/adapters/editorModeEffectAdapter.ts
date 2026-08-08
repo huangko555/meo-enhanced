@@ -21,9 +21,10 @@ export type EditorModeEffectAdapter = {
 
 export type EditorModeEffectCapabilities = {
   commitTransientEdits(): void;
+  scheduleMount?(run: () => void): () => void;
   mountEditor(mode: EditableMode): void | Promise<void>;
   applyEditorMode(mode: EditableMode): void | Promise<void>;
-  setPreviewActive(active: boolean): void;
+  setPreviewActive(active: boolean, restoreLine: number | null): void;
   setEditorVisible(visible: boolean): void;
   presentModeControl(mode: EditorMode): void;
   closeFind(): void;
@@ -38,7 +39,10 @@ export type EditorModeEffectCapabilities = {
   postMode(mode: EditorMode): void | Promise<void>;
   showNotice(notice: Extract<EditorModeEffect, { type: 'showNotice' }>['notice']): void | Promise<void>;
   reportError(operation: string, error: unknown): void;
-  classifyError(error: unknown, operation: 'mount' | 'apply-live' | 'apply-source'): EditorModeFailure;
+  classifyError(
+    error: unknown,
+    operation: 'mount-live' | 'mount-source' | 'apply-live' | 'apply-source'
+  ): EditorModeFailure;
   dispose(): void;
 };
 
@@ -58,22 +62,30 @@ const bestEffort = (
 export function createEditorModeEffectAdapter(
   capabilities: EditorModeEffectCapabilities
 ): EditorModeEffectAdapter {
+  let cancelScheduledMount: (() => void) | null = null;
+  let resolveScheduledMount: ((run: boolean) => void) | null = null;
+
   const applyPresentation = (presentation: EditorModePresentation): void => {
     if (presentation.closeFind) capabilities.closeFind();
-    capabilities.setPreviewActive(presentation.previewActive);
+    capabilities.setPreviewActive(
+      presentation.previewActive,
+      presentation.viewport?.topLine ?? null
+    );
     capabilities.setEditorVisible(presentation.editorVisible);
     capabilities.presentModeControl(presentation.mode);
     capabilities.setSearchOwner(presentation.searchOwner);
     capabilities.setOutlineOwner(presentation.outlineOwner);
     capabilities.setReplaceEnabled(presentation.replaceEnabled);
     if (presentation.hideSelectionMenu) capabilities.hideSelectionMenu();
-    if (presentation.viewport) capabilities.restoreViewport(presentation.viewport);
+    if (!presentation.previewActive && presentation.viewport) {
+      capabilities.restoreViewport(presentation.viewport);
+    }
     if (presentation.restoreEditorFocus) capabilities.focusEditor();
   };
 
   const rollbackPresentation = (mode: EditorMode): void => {
     const preview = mode === 'preview';
-    capabilities.setPreviewActive(preview);
+    capabilities.setPreviewActive(preview, null);
     capabilities.setEditorVisible(!preview);
     capabilities.presentModeControl(mode);
     capabilities.setSearchOwner(preview ? 'preview' : 'editor');
@@ -128,15 +140,39 @@ export function createEditorModeEffectAdapter(
         case 'scheduleEditorMount':
           return {
             immediate: { type: 'editorMountStarted' },
-            completion: Promise.resolve()
-              .then(() => capabilities.mountEditor(effect.mode))
-              .then<EditorModeInput>(() => ({ type: 'editorMountSucceeded' }))
+            completion: new Promise<boolean>((resolve) => {
+              cancelScheduledMount?.();
+              resolveScheduledMount?.(false);
+              resolveScheduledMount = resolve;
+              if (capabilities.scheduleMount) {
+                cancelScheduledMount = capabilities.scheduleMount(() => {
+                  cancelScheduledMount = null;
+                  resolveScheduledMount = null;
+                  resolve(true);
+                });
+              } else {
+                resolveScheduledMount = null;
+                resolve(true);
+              }
+            })
+              .then(async (run): Promise<EditorModeInput | null> => {
+                if (!run) return null;
+                await capabilities.mountEditor(effect.mode);
+                return { type: 'editorMountSucceeded' };
+              })
               .catch((error): EditorModeInput => ({
                 type: 'editorMountFailed',
-                failure: capabilities.classifyError(error, 'mount')
+                failure: capabilities.classifyError(
+                  error,
+                  effect.mode === 'live' ? 'mount-live' : 'mount-source'
+                )
               }))
           };
         case 'disposeMode':
+          cancelScheduledMount?.();
+          cancelScheduledMount = null;
+          resolveScheduledMount?.(false);
+          resolveScheduledMount = null;
           capabilities.dispose();
           return {};
       }

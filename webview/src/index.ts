@@ -24,11 +24,12 @@ import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTranspo
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
 import { createThemeWebviewAdapter } from './adapters/themeWebviewAdapter';
+import { createEditorModeApplication, type EditorMode } from './application/editorMode';
+import { createEditorModeEffectAdapter } from './adapters/editorModeEffectAdapter';
+import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/editorModeRuntime';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { EditorAppearance } from '../../src/protocol/editorCommands';
 import type { InitMessage } from '../../src/protocol/readyInit';
-
-type MarkdownMode = 'live' | 'source' | 'preview';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -393,7 +394,7 @@ const syncGitDiffLineHighlights = () => {
   }
   setGitDiffLineHighlightsEnabled(
     editor,
-    currentMode === 'source' && gitChangesGutterVisible && gitDiffLineHighlightsEnabled
+    getActiveEditorMode() === 'source' && gitChangesGutterVisible && gitDiffLineHighlightsEnabled
   );
 };
 
@@ -924,7 +925,7 @@ moreToolsPanel.addEventListener('click', (event) => {
   }
 });
 
-const modeControl = createSegmentedControl<MarkdownMode>({
+const modeControl = createSegmentedControl<EditorMode>({
   ariaLabel: 'Markdown mode',
   className: 'mode-group',
   buttonClassName: 'mode-button',
@@ -953,11 +954,11 @@ toolbarRight.append(rightGroup, modeGroup);
 const findPanelElements = createFindPanel(findToggleBtn);
 const findPanelController = createFindPanelController(
   findPanelElements,
-  () => currentMode === 'preview' ? previewController.getSearchAdapter() : editor,
+  () => getActiveEditorMode() === 'preview' ? previewController.getSearchAdapter() : editor,
   toolbar,
   modeGroup,
   () => {
-    if (currentMode === 'preview') {
+    if (getActiveEditorMode() === 'preview') {
       return previewController.getSelectedText();
     }
     for (const textarea of root.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table textarea')) {
@@ -1067,8 +1068,8 @@ outlineController = createOutlineController({
   outlineButton: outlineBtn,
   outlineLeftButton: outlineLeftBtn,
   additionalOutlineLeftButtons: [previewOutlineLeftBtn],
-  getEditor: () => currentMode === 'preview' ? previewController.getOutlineAdapter() : editor,
-  canReorder: () => currentMode !== 'preview',
+  getEditor: () => getActiveEditorMode() === 'preview' ? previewController.getOutlineAdapter() : editor,
+  canReorder: () => getActiveEditorMode() !== 'preview',
   onVisibilityRequest: (visible) => {
     vscode.postMessage({ type: 'setOutlineVisible', visible });
   },
@@ -1076,7 +1077,7 @@ outlineController = createOutlineController({
     vscode.postMessage({ type: 'setOutlinePosition', position });
   },
   onResizeEnd: () => {
-    if (currentMode === 'preview') {
+    if (getActiveEditorMode() === 'preview') {
       previewController.focus();
     } else {
       editor?.focus();
@@ -1095,13 +1096,14 @@ outlineController = createOutlineController({
 editorWrapper.replaceChildren(editorHost, previewController.host, outlineController.sidebar, selectionMenuElements.menu);
 root.replaceChildren(toolbar, editorWrapper);
 
-let currentMode: MarkdownMode = 'live';
-let lastEditableMode: 'live' | 'source' = 'live';
-let hasLocalModePreference = false;
+const editorModeApplication = createEditorModeApplication();
+let editorModeRuntime: EditorModeRuntime;
+const getActiveEditorMode = (): EditorMode => editorModeApplication.getState().mode;
+const getActiveEditableMode = (): 'live' | 'source' => {
+  const state = editorModeApplication.getState();
+  return state.mode === 'preview' ? state.lastEditableMode : state.mode;
+};
 let pendingInitialText: string | null = null;
-let initialEditorMountQueued = false;
-let initialMountRecoveryAttempted = false;
-let modeToggleShouldRestoreEditorFocus = false;
 let gitClient: any = null;
 let pendingEditorFocus = false;
 let pendingDiagnostics: any[] = [];
@@ -1112,8 +1114,6 @@ let pendingRestoreTopLineOffset = 0;
 let pendingViewPositionTimer: number | null = null;
 let lastSentTopLine: number | null = null;
 let lastSentTopLineOffset: number | null = null;
-let initialEditorMountInFlight = false;
-let initialEditorMountFallbackTimer: number | null = null;
 let pendingEditorSurfaceRecoveryRaf: number | null = null;
 let createEditorFactoryPromise: Promise<CreateEditorFactory> | null = null;
 const VIEW_POSITION_DEBOUNCE_MS = 250;
@@ -1220,9 +1220,12 @@ type WebviewUiState = {
   outlineWidth?: number;
 };
 
-const persistUiState = () => {
+const persistUiState = (
+  mode = getActiveEditorMode(),
+  lastEditableMode = editorModeApplication.getState().lastEditableMode
+) => {
   const state: WebviewUiState = {
-    mode: currentMode,
+    mode,
     lastEditableMode,
     contentMaxWidthEnabled,
     outlineMode: outlineUiState.mode,
@@ -1478,7 +1481,7 @@ const clearDiscardConfirmation = () => {
 };
 
 const discardUnsavedChanges = () => {
-  const position = currentMode === 'preview'
+  const position = getActiveEditorMode() === 'preview'
     ? previewController.getTopVisiblePosition()
     : getTopVisiblePosition();
   commitEditorTransientEdits();
@@ -1509,7 +1512,7 @@ const setEditorTextSafely = (text: string, context: string): boolean => {
   } catch (error) {
     logWebviewRenderError('setText', error, { context });
 
-    if (currentMode === 'live') {
+    if (getActiveEditorMode() === 'live') {
       try {
         editor.setText(text);
         failureNotice.clearFailureNotice();
@@ -1523,18 +1526,18 @@ const setEditorTextSafely = (text: string, context: string): boolean => {
       }
 
       failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
-      applyMode('source', { post: true, persist: false, reason: 'render-failure' });
-      if (!editor) {
-        return false;
-      }
-      try {
-        editor.setText(text);
-        return true;
-      } catch (retryError) {
-        logWebviewRenderError('setText.retryInSource', retryError, { context });
-        failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
-        return false;
-      }
+      void editorModeRuntime.dispatch({
+        type: 'requestMode', mode: 'source', source: 'render-failure'
+      }).then(() => {
+        if (!editor || getActiveEditorMode() !== 'source') return;
+        try {
+          editor.setText(text);
+        } catch (retryError) {
+          logWebviewRenderError('setText.retryInSource', retryError, { context });
+          failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+        }
+      });
+      return true;
     }
 
     failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
@@ -1549,17 +1552,16 @@ const presentDocumentText = (
   clearGitBlameCache();
   if (!editor) {
     pendingInitialText = text;
-    scheduleInitialEditorMount();
     return true;
   }
 
-  const previewRestoreLine = currentMode === 'preview'
+  const previewRestoreLine = getActiveEditorMode() === 'preview'
     ? previewController.getTopVisiblePosition()?.topLine ?? null
     : null;
   if (!setEditorTextSafely(text, `documentSession.${source}`)) {
     return false;
   }
-  if (currentMode === 'preview') {
+  if (getActiveEditorMode() === 'preview') {
     previewAdapter.refreshVisible(text, {
       restoreLine: pendingRestoreTopLine ?? previewRestoreLine
     });
@@ -1585,7 +1587,7 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   postMessage: (message) => vscode.postMessage(message),
   presentText: presentDocumentText,
   restoreDiscardedView: (message) => {
-    if (currentMode === 'preview') {
+    if (getActiveEditorMode() === 'preview') {
       previewAdapter.refreshVisible(getCurrentEditorText(), { restoreLine: message.topLine });
     } else {
       editor?.restoreTopLine?.(
@@ -1612,11 +1614,13 @@ saveBtn.addEventListener('click', () => {
 
 const shortcutHandlerContext: ShortcutHandlerContext = {
   get editor() { return editor; },
-  get currentMode() { return currentMode === 'preview' ? lastEditableMode : currentMode; },
+  get editableMode() { return getActiveEditableMode(); },
   get vimModeEnabled() { return vimModeEnabled; },
   requestSave,
   openFindPanel: (target) => findPanelController.open(target),
-  applyMode: (mode, options) => applyMode(mode, options)
+  requestMode: (mode) => {
+    void editorModeRuntime.dispatch({ type: 'requestMode', mode, source: 'user' });
+  }
 };
 
 const handleLocalEditorChange = (nextText: string) => {
@@ -1631,267 +1635,175 @@ const handleLocalEditorChange = (nextText: string) => {
   findPanelController.updateFindStatusSummary();
 };
 
-const updateModeUI = () => {
-  root.dataset.mode = currentMode;
-  const replaceDisabled = currentMode === 'preview';
-  for (const control of [
-    findPanelElements.replaceInput,
-    findPanelElements.replaceClearBtn,
-    findPanelElements.replaceBtn,
-    findPanelElements.replaceAllBtn
-  ]) {
-    control.disabled = replaceDisabled;
+const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
+  if (editor) return;
+  const createEditor = await loadCreateEditorFactory();
+  const initialText = pendingInitialText;
+  const initialTopLine = pendingRevealSelection === null ? pendingRestoreTopLine : null;
+  const initialTopLineOffset = pendingRevealSelection === null ? pendingRestoreTopLineOffset : 0;
+  if (editor || initialText === null) return;
+
+  editor = createEditor({
+    parent: editorHost,
+    text: initialText,
+    initialMode: mode,
+    initialTopLine,
+    initialTopLineOffset,
+    initialLineNumbers: lineNumbersVisible,
+    initialGitGutter: gitChangesGutterVisible,
+    initialGitBlame: gitBlameEnabled,
+    initialVimMode: vimModeEnabled,
+    initialVimKeybindings: vimKeybindingsState,
+    initialVimLeader: vimLeaderState,
+    initialDiagnostics: pendingDiagnostics,
+    onApplyChanges: handleLocalEditorChange,
+    onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
+    onSelectionChange: (state: any) => selectionMenuController.update(state),
+    onRequestDiagnosticSuggestions: requestDiagnosticSuggestions,
+    onViewportChange: () => scheduleViewPositionCapture(),
+    onRequestGitBlame: requestGitBlameForLine,
+    onOpenGitRevisionForLine: openGitRevisionForLine,
+    onOpenGitWorktreeForLine: openGitWorktreeForLine
+  });
+  editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
+  editor.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
+  gitClient?.applyBaselineToEditor(editor);
+  syncGitDiffLineHighlights();
+  if (initialTopLine !== null) {
+    pendingRestoreTopLine = null;
+    pendingRestoreTopLineOffset = 0;
   }
-  modeControl.setActive(currentMode);
+  editor.focus();
+  pendingInitialText = null;
+  if (mode === 'live') failureNotice.clearFailureNotice();
+  requestWikiLinkStatuses(initialText);
+  requestLocalLinkStatuses(initialText);
+  if (pendingRevealSelection) applyRevealSelectionFromHost(pendingRevealSelection);
+  if (pendingRevealDocumentFragment) applyRevealDocumentFragmentFromHost(pendingRevealDocumentFragment);
+  if (pendingEditorFocus) focusEditorFromHost();
+  if (outlineController.isVisible()) outlineController.refresh();
+  failureNotice.updateEditorNotice();
+  setWikiLinkRefreshContext({ refreshDecorations: () => editor?.refreshDecorations?.() });
+  setLocalLinkRefreshContext({ refreshDecorations: () => editor?.refreshDecorations?.() });
+  scheduleEditorSurfaceRecovery();
 };
 
-const applyMode = (mode: MarkdownMode, { post = true, persist = true, userTriggered = false, reason = 'user' } = {}): boolean => {
-  if (mode !== 'live' && mode !== 'source' && mode !== 'preview') {
-    return false;
-  }
-
-  commitEditorTransientEdits();
-  const previousMode = currentMode;
-  const transitionViewPosition = previousMode === 'preview'
-    ? previewController.getTopVisiblePosition()
-    : getTopVisiblePosition();
-  const shouldRestoreEditorFocus = modeToggleShouldRestoreEditorFocus;
-  modeToggleShouldRestoreEditorFocus = false;
-  if (previousMode !== mode) {
-    findPanelController.close();
-  }
-  currentMode = mode;
-  if (mode === 'live' || mode === 'source') {
-    lastEditableMode = mode;
-  }
-  clearGitBlameCache();
-  if (userTriggered) {
-    hasLocalModePreference = true;
-  }
-  updateModeUI();
-
-  previewAdapter.setActive({
-    active: mode === 'preview',
-    text: getCurrentEditorText(),
-    restoreLine: transitionViewPosition?.topLine ?? null,
-    initialAppearance: themeAdapter.getAppearance()
-  });
-  editorHost.hidden = mode === 'preview';
-
-  if (mode === 'preview') {
-    if (document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
+const editorModeEffectAdapter = createEditorModeEffectAdapter({
+  commitTransientEdits: commitEditorTransientEdits,
+  scheduleMount(run) {
+    let active = true;
+    let fallbackTimer: number | null = null;
+    const finish = () => {
+      if (!active) return;
+      active = false;
+      if (fallbackTimer !== null) window.clearTimeout(fallbackTimer);
+      run();
+      findPanelController.updateFindStatusSummary();
+    };
+    const frame = window.requestAnimationFrame(finish);
+    fallbackTimer = window.setTimeout(finish, INITIAL_EDITOR_MOUNT_FALLBACK_MS);
+    return () => {
+      if (!active) return;
+      active = false;
+      window.cancelAnimationFrame(frame);
+      if (fallbackTimer !== null) window.clearTimeout(fallbackTimer);
+    };
+  },
+  mountEditor: mountEditorForMode,
+  applyEditorMode(mode) {
+    if (!editor) throw new Error('Editor is not mounted');
+    editor.setMode(mode);
+    syncGitDiffLineHighlights();
+    if (outlineController.isVisible()) outlineController.refresh();
+    if (mode === 'live') failureNotice.clearFailureNotice();
+    failureNotice.updateEditorNotice();
+  },
+  setPreviewActive(active, restoreLine) {
+    clearGitBlameCache();
+    previewAdapter.setActive({
+      active,
+      text: getCurrentEditorText(),
+      restoreLine,
+      initialAppearance: themeAdapter.getAppearance()
+    });
+    if (active && document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
     }
-    selectionMenuController.hide();
     syncGitDiffLineHighlights();
-    if (outlineController.isVisible()) {
-      outlineController.refresh();
-    }
-  } else if (editor) {
-    try {
-      editor.setMode(mode);
-      if (previousMode === 'preview' && transitionViewPosition) {
-        editor.restoreTopLine?.(
-          transitionViewPosition.topLine,
-          transitionViewPosition.topLineOffset,
-          { syncCursor: false, force: true }
-        );
-      }
-      syncGitDiffLineHighlights();
-      if (outlineController.isVisible()) {
-        outlineController.refresh();
-      }
-      if (shouldRestoreEditorFocus) {
-        editor.focus();
-      }
-      if (mode === 'live') {
-        failureNotice.clearFailureNotice();
-      }
-    } catch (error) {
-      logWebviewRenderError('applyMode', error, { requestedMode: mode, reason });
-
-      if (mode === 'live') {
-        if (!shouldAutoFallbackToSourceForLiveError(error)) {
-          failureNotice.setFailureNotice('Live mode hit a transient render error. Staying in current mode; try again.', 'warning');
-          currentMode = previousMode;
-          updateModeUI();
-          failureNotice.updateEditorNotice();
-          return false;
-        }
-
-        failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
-
-        try {
-          editor.setMode('source');
-          currentMode = 'source';
-          updateModeUI();
-          if (outlineController.isVisible()) {
-            outlineController.refresh();
-          }
-          failureNotice.updateEditorNotice();
-          if (shouldRestoreEditorFocus) {
-            editor.focus();
-          }
-          if (post) {
-            vscode.postMessage({ type: 'setMode', mode: 'source' });
-          }
-          return false;
-        } catch (fallbackError) {
-          logWebviewRenderError('applyMode.fallbackSource', fallbackError, { requestedMode: mode, reason });
-          failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
-        }
-      }
-
-      currentMode = previousMode;
-      previewAdapter.restoreActive(previousMode === 'preview');
-      editorHost.hidden = previousMode === 'preview';
-      updateModeUI();
-      failureNotice.updateEditorNotice();
-      return false;
-    }
-  }
-
-  if (persist) {
-    persistUiState();
-  }
-
-  if (post) {
-    vscode.postMessage({ type: 'setMode', mode });
-  }
-
-  failureNotice.updateEditorNotice();
-  return true;
-};
-
-const mountInitialEditor = async () => {
-  if (editor || pendingInitialText === null || initialEditorMountInFlight) {
-    return;
-  }
-  initialEditorMountInFlight = true;
-  try {
-    const createEditor = await loadCreateEditorFactory();
-    const initialText = pendingInitialText;
-    const initialTopLine = pendingRevealSelection === null ? pendingRestoreTopLine : null;
-    const initialTopLineOffset = pendingRevealSelection === null ? pendingRestoreTopLineOffset : 0;
-    if (editor || initialText === null) {
-      return;
-    }
-    editor = createEditor({
-      parent: editorHost,
-      text: initialText,
-      initialMode: lastEditableMode,
-      initialTopLine,
-      initialTopLineOffset,
-      initialLineNumbers: lineNumbersVisible,
-      initialGitGutter: gitChangesGutterVisible,
-      initialGitBlame: gitBlameEnabled,
-      initialVimMode: vimModeEnabled,
-      initialVimKeybindings: vimKeybindingsState,
-      initialVimLeader: vimLeaderState,
-      initialDiagnostics: pendingDiagnostics,
-      onApplyChanges: handleLocalEditorChange,
-      onOpenLink: (href: string) => {
-        vscode.postMessage({ type: 'openLink', href });
-      },
-      onSelectionChange: (state: any) => selectionMenuController.update(state),
-      onRequestDiagnosticSuggestions: requestDiagnosticSuggestions,
-      onViewportChange: () => scheduleViewPositionCapture(),
-      onRequestGitBlame: requestGitBlameForLine,
-      onOpenGitRevisionForLine: openGitRevisionForLine,
-      onOpenGitWorktreeForLine: openGitWorktreeForLine
+  },
+  setEditorVisible(visible) {
+    editorHost.hidden = !visible;
+  },
+  presentModeControl(mode) {
+    root.dataset.mode = mode;
+    modeControl.setActive(mode);
+  },
+  closeFind: () => findPanelController.close(),
+  setSearchOwner: () => findPanelController.updateFindStatusSummary(),
+  setOutlineOwner: () => {
+    if (outlineController.isVisible()) outlineController.refresh();
+  },
+  setReplaceEnabled(enabled) {
+    for (const control of [
+      findPanelElements.replaceInput,
+      findPanelElements.replaceClearBtn,
+      findPanelElements.replaceBtn,
+      findPanelElements.replaceAllBtn
+    ]) control.disabled = !enabled;
+  },
+  hideSelectionMenu: () => selectionMenuController.hide(),
+  captureViewport() {
+    const position = editorHost.hidden
+      ? previewController.getTopVisiblePosition()
+      : getTopVisiblePosition();
+    if (!position) return null;
+    return {
+      owner: editorHost.hidden ? 'preview' : 'editor',
+      topLine: position.topLine,
+      topLineOffset: position.topLineOffset
+    };
+  },
+  restoreViewport(viewport) {
+    if (viewport.owner !== 'preview') return;
+    editor?.restoreTopLine?.(viewport.topLine, viewport.topLineOffset, {
+      syncCursor: false,
+      force: true
     });
-    editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
-    editor.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
-    gitClient?.applyBaselineToEditor(editor);
-    syncGitDiffLineHighlights();
-    if (initialTopLine !== null) {
-      pendingRestoreTopLine = null;
-      pendingRestoreTopLineOffset = 0;
-    }
-    editor.focus();
-    pendingInitialText = null;
-    initialMountRecoveryAttempted = false;
-    if (currentMode === 'live') {
-      failureNotice.clearFailureNotice();
-    }
-    requestWikiLinkStatuses(initialText);
-    requestLocalLinkStatuses(initialText);
-    if (pendingRevealSelection) {
-      applyRevealSelectionFromHost(pendingRevealSelection);
-    }
-    if (pendingRevealDocumentFragment) {
-      applyRevealDocumentFragmentFromHost(pendingRevealDocumentFragment);
-    }
-    if (pendingEditorFocus) {
-      focusEditorFromHost();
-    }
-    if (outlineController.isVisible()) {
-      outlineController.refresh();
+  },
+  focusEditor: () => editor?.focus(),
+  persistMode: (mode, lastEditableMode) => persistUiState(mode, lastEditableMode),
+  postMode: (mode) => vscode.postMessage({ type: 'setMode', mode }),
+  showNotice(notice) {
+    if (notice === 'transient-live') {
+      failureNotice.setFailureNotice('Live mode hit a transient render error. Staying in current mode; try again.', 'warning');
+    } else if (notice === 'live-fallback') {
+      failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
+    } else if (notice === 'mount-retry') {
+      failureNotice.setFailureNotice('Live mode hit a transient render error while loading. Retrying...', 'warning');
+    } else if (notice === 'mount-failure') {
+      failureNotice.setFailureNotice('Live mode hit a transient render error while loading. Try reopening or switching modes.', 'warning');
+    } else {
+      failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
     }
     failureNotice.updateEditorNotice();
-
-    setWikiLinkRefreshContext({
-      refreshDecorations: () => editor?.refreshDecorations?.()
-    });
-    setLocalLinkRefreshContext({
-      refreshDecorations: () => editor?.refreshDecorations?.()
-    });
-    scheduleEditorSurfaceRecovery();
-  } catch (error) {
-    logWebviewRenderError('mountInitialEditor', error);
-
-    if (currentMode === 'live') {
-      if (!shouldAutoFallbackToSourceForLiveError(error)) {
-        if (!initialMountRecoveryAttempted) {
-          initialMountRecoveryAttempted = true;
-          failureNotice.setFailureNotice('Live mode hit a transient render error while loading. Retrying...', 'warning');
-          scheduleInitialEditorMount();
-          return;
-        }
-        failureNotice.setFailureNotice('Live mode hit a transient render error while loading. Try reopening or switching modes.', 'warning');
-        return;
-      }
-
-      if (!initialMountRecoveryAttempted) {
-        initialMountRecoveryAttempted = true;
-        failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
-        applyMode('source', { post: true, persist: false, reason: 'render-failure' });
-        scheduleInitialEditorMount();
-        return;
-      }
-    }
-
-    failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
-  } finally {
-    initialEditorMountInFlight = false;
+  },
+  reportError: (operation, error) => logWebviewRenderError(`editorMode.${operation}`, error),
+  classifyError(error, operation) {
+    logWebviewRenderError(`editorMode.${operation}`, error);
+    if (operation === 'apply-source' || operation === 'mount-source') return 'fatal';
+    return shouldAutoFallbackToSourceForLiveError(error) ? 'live-incompatible' : 'transient-live';
+  },
+  dispose() {
+    editor?.destroy?.();
+    editor = null;
   }
-};
+});
 
-const scheduleInitialEditorMount = () => {
-  if (editor || initialEditorMountQueued) {
-    return;
-  }
-
-  const runScheduledMount = () => {
-    if (!initialEditorMountQueued) {
-      return;
-    }
-    initialEditorMountQueued = false;
-    if (initialEditorMountFallbackTimer !== null) {
-      window.clearTimeout(initialEditorMountFallbackTimer);
-      initialEditorMountFallbackTimer = null;
-    }
-    void mountInitialEditor();
-    findPanelController.updateFindStatusSummary();
-  };
-
-  initialEditorMountQueued = true;
-  window.requestAnimationFrame(runScheduledMount);
-  initialEditorMountFallbackTimer = window.setTimeout(
-    runScheduledMount,
-    INITIAL_EDITOR_MOUNT_FALLBACK_MS
-  );
-};
+editorModeRuntime = createEditorModeRuntime(
+  editorModeApplication,
+  editorModeEffectAdapter,
+  (error) => logWebviewRenderError('editorMode.runtime', error)
+);
 
 const handleInit = (message: InitMessage) => {
   pendingRestoreTopLine = normalizeLineNumber(message.restoreTopLine);
@@ -1906,7 +1818,6 @@ const handleInit = (message: InitMessage) => {
   }
   if (!editor) {
     pendingInitialText = message.text;
-    scheduleInitialEditorMount();
   } else {
     setEditorTextSafely(message.text, 'init');
   }
@@ -2017,32 +1928,18 @@ window.addEventListener('message', (event) => {
         appearance: message.editorAppearance,
         shikiEnabled: message.shikiCodeBlocks
       });
-      initialMountRecoveryAttempted = false;
       failureNotice.clearFailureNotice();
       gitClient?.resetForInit({ hideTooltip: false });
-      const nextMode = hasLocalModePreference ? currentMode : message.mode;
       documentSessionAdapter.start(message);
       previewAdapter.start({
         text: message.text,
         appearance: message.previewAppearance === 'light' ? 'light' : 'dark',
-        active: nextMode === 'preview'
+        active: false
       });
 
       handleInit(message);
-      if (hasLocalModePreference) {
-        applyMode(nextMode, {
-          post: true,
-          persist: true,
-          reason: 'init'
-        });
-      } else {
-        applyMode(nextMode, {
-          post: false,
-          persist: false,
-          reason: 'init'
-        });
-      }
-      failureNotice.updateEditorNotice();
+      void editorModeRuntime.dispatch({ type: 'initialize', hostMode: message.mode })
+        .then(() => failureNotice.updateEditorNotice());
     });
     return;
   }
@@ -2068,10 +1965,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'toggleMode') {
-    const nextMode = currentMode === 'preview'
-      ? lastEditableMode
-      : currentMode === 'live' ? 'source' : 'live';
-    applyMode(nextMode, { userTriggered: true, reason: 'command' });
+    void editorModeRuntime.dispatch({ type: 'toggleMode', source: 'host-command' });
     return;
   }
 
@@ -2260,17 +2154,13 @@ window.addEventListener('beforeunload', () => {
   documentSessionAdapter.dispose();
   previewAdapter.dispose();
   exportAdapter.dispose();
-
-  if (initialEditorMountFallbackTimer !== null) {
-    window.clearTimeout(initialEditorMountFallbackTimer);
-    initialEditorMountFallbackTimer = null;
-  }
   if (pendingEditorSurfaceRecoveryRaf !== null) {
     window.cancelAnimationFrame(pendingEditorSurfaceRecoveryRaf);
     pendingEditorSurfaceRecoveryRaf = null;
   }
   commitEditorTransientEdits();
   flushViewPositionNow();
+  editorModeRuntime.dispose();
 });
 
 window.addEventListener('resize', () => {
@@ -2281,14 +2171,15 @@ window.addEventListener('resize', () => {
 });
 
 const state = vscode.getState() as WebviewUiState | undefined;
-if (state?.lastEditableMode === 'live' || state?.lastEditableMode === 'source') {
-  lastEditableMode = state.lastEditableMode;
-}
 if (state && (state.mode === 'live' || state.mode === 'source' || state.mode === 'preview')) {
-  applyMode(state.mode, { post: false, persist: false });
-  hasLocalModePreference = true;
-} else {
-  updateModeUI();
+  const restoredEditableMode = state.lastEditableMode === 'live' || state.lastEditableMode === 'source'
+    ? state.lastEditableMode
+    : state.mode === 'preview' ? 'live' : state.mode;
+  void editorModeRuntime.dispatch({
+    type: 'restoreLocal',
+    mode: state.mode,
+    lastEditableMode: restoredEditableMode
+  });
 }
 if (typeof state?.contentMaxWidthEnabled === 'boolean') {
   setContentMaxWidthEnabled(state.contentMaxWidthEnabled, { post: false, persist: false });
@@ -2307,15 +2198,24 @@ updateGitChangesGutterUI();
 updateLongCodeBlockFoldingUI();
 
 liveButton.addEventListener('click', () => {
-  applyMode('live', { userTriggered: true });
+  void editorModeRuntime.dispatch({
+    type: 'requestMode', mode: 'live', source: 'user',
+    restoreEditorFocus: editor?.hasFocus() === true
+  });
 });
 
 sourceButton.addEventListener('click', () => {
-  applyMode('source', { userTriggered: true });
+  void editorModeRuntime.dispatch({
+    type: 'requestMode', mode: 'source', source: 'user',
+    restoreEditorFocus: editor?.hasFocus() === true
+  });
 });
 
 previewButton.addEventListener('click', () => {
-  applyMode('preview', { userTriggered: true });
+  void editorModeRuntime.dispatch({
+    type: 'requestMode', mode: 'preview', source: 'user',
+    restoreEditorFocus: editor?.hasFocus() === true
+  });
 });
 
 const preserveEditorFocusOnModePointerToggle = (event: PointerEvent) => {
@@ -2324,10 +2224,8 @@ const preserveEditorFocusOnModePointerToggle = (event: PointerEvent) => {
     return;
   }
   if (!editor || !editor.hasFocus()) {
-    modeToggleShouldRestoreEditorFocus = false;
     return;
   }
-  modeToggleShouldRestoreEditorFocus = true;
   event.preventDefault();
 };
 
@@ -2505,9 +2403,5 @@ longCodeBlockFoldingBtn.addEventListener('click', () => {
   setLongCodeBlockFoldingEnabled(!longCodeBlockFoldingEnabled);
 });
 
-persistUiState();
-if (hasLocalModePreference) {
-  vscode.postMessage({ type: 'setMode', mode: currentMode });
-}
 scheduleReadyHandshake();
 scheduleEditorBundleWarmupAfterReady();

@@ -74,7 +74,10 @@ export type EditorModeEffect =
   | { readonly type: 'applyEditorMode'; readonly transitionId: number; readonly mode: EditableMode }
   | { readonly type: 'persistMode'; readonly mode: EditorMode; readonly lastEditableMode: EditableMode }
   | { readonly type: 'postMode'; readonly mode: EditorMode }
-  | { readonly type: 'showNotice'; readonly notice: 'transient-live' | 'live-fallback' | 'editor-failure' | 'mount-retry' }
+  | {
+      readonly type: 'showNotice';
+      readonly notice: 'transient-live' | 'live-fallback' | 'editor-failure' | 'mount-retry' | 'mount-failure';
+    }
   | { readonly type: 'scheduleEditorMount'; readonly mode: EditableMode }
   | { readonly type: 'disposeMode' };
 
@@ -343,7 +346,12 @@ export function createEditorModeApplication(): EditorModeApplication {
           ];
         }
         editorMount = 'unmounted';
-        return [{ type: 'showNotice', notice: 'editor-failure' }];
+        return [{
+          type: 'showNotice',
+          notice: mode === 'live' && input.failure === 'transient-live'
+            ? 'mount-failure'
+            : 'editor-failure'
+        }];
       }
 
       case 'dispose':

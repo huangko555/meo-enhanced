@@ -62,10 +62,10 @@ const adapter = createEditorModeEffectAdapter({
     if (!editor) throw taggedError('fatal');
     editor.setMode(mode);
   },
-  setPreviewActive(active) {
+  setPreviewActive(active, restoreLine) {
     previewActive = active;
     element('preview').hidden = !active;
-    events.push(`preview:${active}`);
+    events.push(`preview:${active}:${restoreLine ?? 'none'}`);
   },
   setEditorVisible(visible) {
     element('editor').hidden = !visible;
