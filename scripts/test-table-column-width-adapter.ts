@@ -13,7 +13,7 @@ const editorSource = fs.readFileSync(editorPath, 'utf8');
 const tablesSource = fs.readFileSync(tablesPath, 'utf8');
 const entrySource = fs.readFileSync(entryPath, 'utf8');
 
-assert.match(adapterSource, /type TableColumnWidthAdapter = \{\s*accept\(/s);
+assert.match(adapterSource, /type TableColumnWidthAdapter = \{\s*refresh\(\): void/s);
 assert.match(adapterSource, /dispose\(\): void/);
 assert.equal(
   (editorSource.match(/createCodeMirrorDomTableColumnWidthAdapter\(\{/g) ?? []).length,

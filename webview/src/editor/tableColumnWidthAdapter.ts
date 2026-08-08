@@ -5,12 +5,8 @@ import {
   type TableColumnWidthPolicy
 } from './tableColumnWidthPolicy';
 
-export type TableColumnWidthAdapterInput =
-  | { readonly type: 'refresh' }
-  | { readonly type: 'externalDocumentPresented' };
-
 export type TableColumnWidthAdapter = {
-  accept(input: TableColumnWidthAdapterInput): void;
+  refresh(): void;
   dispose(): void;
 };
 
@@ -313,7 +309,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   mutationObserver.observe(options.root, { childList: true, subtree: true });
 
   const adapter: TableColumnWidthAdapter = {
-    accept(input) {
+    refresh() {
       if (disposed) return;
       refresh();
     },
