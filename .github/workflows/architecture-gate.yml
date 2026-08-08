@@ -16,5 +16,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run architecture:check
+      - run: bun scripts/test-document-session.ts
       - run: bun scripts/test-protocol-ready-init.ts
       - run: bun scripts/test-protocol-stale-responses.ts
