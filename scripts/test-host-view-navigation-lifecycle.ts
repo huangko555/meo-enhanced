@@ -235,6 +235,11 @@ assert.equal(
   1,
   'Host Bootstrap must create exactly one view navigation adapter'
 );
+assert.equal(
+  panelSessionSource.includes("from '../host/vscodeViewNavigationAdapter'"),
+  false,
+  'Panel Session must depend on the Application-owned navigation port'
+);
 assert.match(panelSessionSource, /viewNavigation\.dispose\(\)/);
 
 console.log('Host view navigation lifecycle checks passed');

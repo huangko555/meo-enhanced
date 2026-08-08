@@ -21,6 +21,7 @@ import {
   createDiffBaselineSelection,
   type DiffBaselineOutput
 } from '../application/diffBaselineSelection';
+import type { HostViewNavigationPort } from '../application/hostViewNavigationLifecycle';
 import {
   EXTENSION_CONFIG_SECTION,
   LINE_NUMBERS_SETTING_KEY,
@@ -77,7 +78,6 @@ import type { DiagnosticSuggestionsResult, RequestDiagnosticSuggestions } from '
 import type { SaveImageFromClipboardRequest, SavedImagePathResponse } from '../protocol/clipboardImageSave';
 import type { PreviewRenderResponse } from '../protocol/previewRender';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
-import type { VscodeViewNavigationAdapter } from '../host/vscodeViewNavigationAdapter';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
 import type { GitBlameResponse } from '../protocol/git';
@@ -120,7 +120,7 @@ type PanelSessionControllerParams = {
   savedRevisionFile: SavedRevisionFileAdapter;
   savedRevisionRefreshTimer: SavedRevisionRefreshTimer;
   diffBaselineOutput: DiffBaselineOutput<GitBaselinePayload>;
-  viewNavigation: VscodeViewNavigationAdapter;
+  viewNavigation: HostViewNavigationPort<vscode.TextEditor>;
   saveDocument: () => Promise<boolean>;
   onExportDocument: (session: PanelSession, format: ExportFormat, appearance: PreviewAppearance) => Promise<void>;
   renderPreview: (options: {

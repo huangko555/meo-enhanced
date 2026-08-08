@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import {
   createHostViewNavigationLifecycle,
   type HostViewNavigationLifecycle,
+  type HostViewNavigationPort,
   type RememberedViewport,
   type ViewSelection
 } from '../application/hostViewNavigationLifecycle';
@@ -10,17 +11,6 @@ import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 
 const REMEMBERED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';
 const MAX_REMEMBERED_VIEW_POSITIONS = 300;
-
-export type VscodeViewNavigationAdapter = {
-  getInitialRestore(): { readonly line: number; readonly lineOffset: number } | null;
-  ready(): Promise<void>;
-  flush(): Promise<void>;
-  rememberViewport(line: number, lineOffset?: number): Promise<void>;
-  revealSelectionForEditor(editor: vscode.TextEditor | undefined): Promise<void>;
-  revealCurrentEditorSelection(): Promise<void>;
-  revealDocumentLink(href: string): Promise<boolean>;
-  dispose(): void;
-};
 
 type VscodeViewNavigationDependencies = {
   readonly document: vscode.TextDocument;
@@ -94,7 +84,7 @@ const parseLineFragmentSelection = (document: vscode.TextDocument): ViewSelectio
 /** Adapts VS Code selection, workspace persistence and Protocol output to Host view navigation. */
 export function createVscodeViewNavigationAdapter(
   dependencies: VscodeViewNavigationDependencies
-): VscodeViewNavigationAdapter {
+): HostViewNavigationPort<vscode.TextEditor> {
   const { document, documentUri, context } = dependencies;
   const documentKey = document.uri.toString();
   const isEditorForDocument = (editor: vscode.TextEditor | undefined): editor is vscode.TextEditor =>

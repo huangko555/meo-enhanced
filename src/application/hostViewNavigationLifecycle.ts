@@ -29,6 +29,18 @@ export type HostViewNavigationLifecycle = {
   dispose(): void;
 };
 
+/** Host Session port; the concrete editor source is interpreted only by its Adapter. */
+export type HostViewNavigationPort<TEditorSource> = {
+  getInitialRestore(): { readonly line: number; readonly lineOffset: number } | null;
+  ready(): Promise<void>;
+  flush(): Promise<void>;
+  rememberViewport(line: number, lineOffset?: number): Promise<void>;
+  revealSelectionForEditor(editor: TEditorSource | undefined): Promise<void>;
+  revealCurrentEditorSelection(): Promise<void>;
+  revealDocumentLink(href: string): Promise<boolean>;
+  dispose(): void;
+};
+
 export type HostViewNavigationDependencies = {
   readonly readLineCount: () => number;
   readonly readMinimumRememberedLines: () => number;
