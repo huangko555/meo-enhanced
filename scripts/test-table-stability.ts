@@ -963,8 +963,10 @@ async function main() {
             queueMicrotask(() => harness.handleSavedImagePath({
               type: 'savedImagePath',
               requestId: message.requestId,
-              success: true,
-              path: 'images/pasted.png'
+              result: {
+                ok: true,
+                value: { path: 'images/pasted.png' }
+              }
             }));
           }
         }

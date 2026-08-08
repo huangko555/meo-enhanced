@@ -124,8 +124,9 @@ async function main() {
     await page.evaluate(({ text, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', text, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'light', editorAppearance: 'dark',
-        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
-        spellCheckEnabled: false, contentMaxWidthEnabled: false,
+        lineNumbers: true, gitChangesGutter: false, gitBlameEnabled: false, gitDiffLineHighlights: false,
+        diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
+        spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
@@ -686,7 +687,8 @@ async function main() {
     }
     await page.evaluate((requestId) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'previewRenderError', requestId, message: 'Preview test error'
+        type: 'previewRenderResult', requestId,
+        result: { ok: false, error: { code: 'operation-failed', message: 'Preview test error' } }
       }}));
     }, previewRequestId);
     const previewError = await page.$eval('.preview-status', (element) => element.textContent);
@@ -709,8 +711,9 @@ async function main() {
     }
     await page.evaluate((requestId) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'previewRendered', requestId, html: '<h1 id="stale">Stale</h1>', hasMermaid: false,
-        styles: { dark: 'body{background:red}', light: 'body{background:red}' }
+        type: 'previewRenderResult', requestId, result: { ok: true, value: {
+        html: '<h1 id="stale">Stale</h1>', hasMermaid: false,
+        styles: { dark: 'body{background:red}', light: 'body{background:red}' } } }
       }}));
     }, stalePreviewRequestId);
     await waitForFrames(page, 2);
@@ -722,14 +725,16 @@ async function main() {
     }
     await page.evaluate((requestId) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'previewRendered',
+        type: 'previewRenderResult',
         requestId,
-        html: '<h1 id="intro" data-source-line="1">Intro</h1><div id="preview-wide-math" class="meo-export-math meo-export-math-display meo-export-math-fenced-display" data-source-line="3" data-source-end-line="5"><span class="katex-display"><span class="katex" style="display:inline-block;white-space:nowrap;font-family:serif;font-size:1.21em">WIDE_FORMULA_ALPHA_BETA_GAMMA_DELTA_EPSILON_ZETA_ETA_THETA_IOTA_KAPPA_LAMBDA_MU_NU_XI_OMICRON_PI_RHO_SIGMA_TAU</span></span></div><p>Footnote reference <a id="fnref-1" href="#fn-1">1</a></p><pre id="collapsed-long-code" data-source-line="15" data-source-end-line="36" style="height:440px">Long code block</pre><pre id="short-code" data-source-line="45" data-source-end-line="56" style="height:240px">Short code block</pre><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div><ol><li id="fn-1">Footnote content <a href="#fnref-1">Back</a></li></ol>',
-        hasMermaid: true,
-        styles: {
+        result: { ok: true, value: {
+          html: '<h1 id="intro" data-source-line="1">Intro</h1><div id="preview-wide-math" class="meo-export-math meo-export-math-display meo-export-math-fenced-display" data-source-line="3" data-source-end-line="5"><span class="katex-display"><span class="katex" style="display:inline-block;white-space:nowrap;font-family:serif;font-size:1.21em">WIDE_FORMULA_ALPHA_BETA_GAMMA_DELTA_EPSILON_ZETA_ETA_THETA_IOTA_KAPPA_LAMBDA_MU_NU_XI_OMICRON_PI_RHO_SIGMA_TAU</span></span></div><p>Footnote reference <a id="fnref-1" href="#fn-1">1</a></p><pre id="collapsed-long-code" data-source-line="15" data-source-end-line="36" style="height:440px">Long code block</pre><pre id="short-code" data-source-line="45" data-source-end-line="56" style="height:240px">Short code block</pre><div style="height:600px"></div><h2 id="short-mermaid" data-source-line="78">Short Mermaid</h2><div style="height:900px"></div><pre id="anchor-133" data-source-line="133" data-source-end-line="222" style="height:900px">Code block</pre><div style="height:600px"></div><h2 id="tall-mermaid" data-source-line="231">Tall Mermaid</h2><div style="height:900px"></div><div class="meo-export-mermaid" data-source-b64="Zmxvd2NoYXJ0IExSClN0YXJ0IC0tPiBEb25l" style="display:none"></div><ol><li id="fn-1">Footnote content <a href="#fnref-1">Back</a></li></ol>',
+          hasMermaid: true,
+          styles: {
           dark: 'html,body{margin:0;background:#20252b;color:#fff}.meo-export-doc{padding:20px}',
           light: 'html,body{margin:0;background:#fff;color:#1f2328}.meo-export-doc{padding:20px}'
-        }
+          }
+        } }
       }}));
     }, previewRequestId);
     await page.waitForFunction(() => {

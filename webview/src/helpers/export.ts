@@ -1,5 +1,6 @@
 import { defaultCodeBlockBackgroundColor, themeColorKeys } from '../../../src/shared/themeDefaults';
 import type { PreviewAppearance } from '../../../src/shared/preview';
+import type { ExportSnapshotResolution } from '../../../src/protocol/exportSnapshot';
 
 export interface ExportStyleEnvironment extends Record<string, unknown> {
   editorBackgroundColor: string;
@@ -116,6 +117,7 @@ export const waitForExportSyncIdle = async (
 
 export interface ExportHandlerContext {
   vscode: any;
+  respondToSnapshot: (requestId: string, result: ExportSnapshotResolution) => void;
   getEditor: () => any;
   pendingText: string | null;
   pendingInitialText: string | null;
@@ -159,20 +161,18 @@ export const createExportHandler = (context: ExportHandlerContext) => {
         normalizeEol: context.normalizeEol
       });
 
-      const msg: WebviewMessage = {
-        type: 'exportSnapshot',
-        requestId,
-        text: getCurrentExportText(),
-        environment: getExportStyleEnvironment() as unknown as Record<string, unknown>
-      };
-      context.vscode.postMessage(msg);
+      context.respondToSnapshot(requestId, {
+        ok: true,
+        value: { text: getCurrentExportText(), environment: getExportStyleEnvironment() }
+      });
     } catch (error) {
-      const errMsg: WebviewMessage = {
-        type: 'exportSnapshotError',
-        requestId,
-        error: error instanceof Error ? error.message : 'Failed to collect export snapshot'
-      };
-      context.vscode.postMessage(errMsg);
+      context.respondToSnapshot(requestId, {
+        ok: false,
+        error: {
+          code: 'operation-failed',
+          message: error instanceof Error ? error.message : 'Failed to collect export snapshot'
+        }
+      });
     }
   };
 

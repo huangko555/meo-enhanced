@@ -4,7 +4,9 @@ import { createPreviewMermaidRenderer } from './previewMermaid';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import { createSegmentedControl } from './segmentedControl';
 import type { OutlineHeading } from './outline';
-import type { PreviewAppearance, PreviewRenderErrorMessage, PreviewRenderedMessage } from '../../../src/shared/preview';
+import type { PreviewAppearance } from '../../../src/shared/preview';
+import type { PreviewRenderResponse, PreviewRenderValue } from '../../../src/protocol/previewRender';
+import { createPreviewRenderTransport } from '../adapters/previewRenderTransport';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 
 type PreviewControllerOptions = {
@@ -168,12 +170,13 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   host.append(frame, status, scrollToTopController.button);
 
   let appearance: PreviewAppearance = 'dark';
-  let requestCounter = 0;
-  let pendingRequestId = '';
+  let requestGeneration = 0;
+  let hasPendingRequest = false;
   let pendingRestoreLine: number | null = null;
   let pendingText = '';
   let latestRenderedText = '';
-  let latestPayload: PreviewRenderedMessage | null = null;
+  let latestPayload: PreviewRenderValue | null = null;
+  const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
   const previewMermaidRenderer = createPreviewMermaidRenderer();
   let searchQuery = '';
   let searchOptions = { wholeWord: false, caseSensitive: false };
@@ -405,43 +408,38 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
       onRendered?.();
       return;
     }
-    if (pendingRequestId && text === pendingText) {
+    if (hasPendingRequest && text === pendingText) {
       if (restoreLine !== null) pendingRestoreLine = restoreLine;
       if (!background) setStatus('正在生成预览…');
       return;
     }
-    const requestId = `preview-${Date.now()}-${requestCounter += 1}`;
-    pendingRequestId = requestId;
+    const generation = requestGeneration + 1;
+    requestGeneration = generation;
+    hasPendingRequest = true;
     pendingRestoreLine = restoreLine;
     pendingText = text;
     if (!background) setStatus('正在生成预览…');
-    vscode.postMessage({
-      type: 'requestPreviewRender',
-      requestId,
+    void previewRenderTransport.render({
       text,
       environment: getExportStyleEnvironment()
+    }).then((result) => {
+      if (generation !== requestGeneration) return;
+      hasPendingRequest = false;
+      if (result.ok === false) {
+        pendingRestoreLine = null;
+        setStatus(result.error.message || 'Preview 生成失败');
+        return;
+      }
+      latestPayload = result.value;
+      latestRenderedText = pendingText;
+      setStatus(null);
+      const restoreLine = pendingRestoreLine;
+      pendingRestoreLine = null;
+      renderFrame(restoreLine);
     });
   };
 
-  const handleRendered = (message: PreviewRenderedMessage) => {
-    if (message.requestId !== pendingRequestId) {
-      return;
-    }
-    latestPayload = message;
-    latestRenderedText = pendingText;
-    pendingRequestId = '';
-    setStatus(null);
-    const restoreLine = pendingRestoreLine;
-    pendingRestoreLine = null;
-    renderFrame(restoreLine);
-  };
-
-  const handleRenderError = (message: PreviewRenderErrorMessage) => {
-    if (message.requestId === pendingRequestId) {
-      pendingRequestId = '';
-      setStatus(message.message || 'Preview 生成失败');
-    }
-  };
+  const acceptRenderResponse = (message: PreviewRenderResponse) => previewRenderTransport.accept(message);
 
   appearanceControl.addEventListener('click', (event) => {
     const button = event.target instanceof Element
@@ -584,8 +582,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
     appearanceControl,
     requestRender,
     preload: (text: string) => requestRender(text, { background: true }),
-    handleRendered,
-    handleRenderError,
+    acceptRenderResponse,
     setAppearance,
     getAppearance: () => appearance,
     setVisible: (visible: boolean) => {

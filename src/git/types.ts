@@ -1,39 +1,15 @@
-export type GitBaselinePayload = {
-  available: boolean;
-  mode?: 'current-edit' | 'recent-save' | 'git-head' | 'fixed';
-  generation?: number;
-  repoRoot?: string;
-  headOid?: string | null;
-  tracked: boolean;
-  gitPath?: string;
-  baseText?: string | null;
-  reason?: 'not-file' | 'git-unavailable' | 'not-repo' | 'ignored' | 'too-large' | 'binary' | 'error' | 'no-baseline';
-  maxBytesExceeded?: boolean;
-};
+import type {
+  GitBaselinePayload as ProtocolGitBaselinePayload,
+  GitBlameLineResult as ProtocolGitBlameLineResult
+} from '../protocol/git';
+
+export type GitBaselinePayload = ProtocolGitBaselinePayload;
 
 export type GitBaselineSnapshot = {
   payload: GitBaselinePayload;
 };
 
-export type GitBlameLineResult =
-  | {
-      kind: 'commit';
-      commit: string;
-      shortCommit: string;
-      originalLineNumber?: number;
-      gitPathAtCommit?: string;
-      author: string;
-      authorMail?: string;
-      authorTimeUnix: number;
-      summary: string;
-    }
-  | {
-      kind: 'uncommitted';
-    }
-  | {
-      kind: 'unavailable';
-      reason: 'not-repo' | 'untracked' | 'git-unavailable' | 'error';
-    };
+export type GitBlameLineResult = ProtocolGitBlameLineResult;
 
 export class GitCliFailure extends Error {
   readonly code: number | null;

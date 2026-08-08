@@ -1,4 +1,6 @@
 import { AlertCircle, createElement } from 'lucide';
+import { createLocalLinkResolutionTransport, type LocalLinkResolutionTransport } from '../adapters/localLinkResolutionTransport';
+import type { ResolvedLocalLinksResponse } from '../../../src/protocol/localLinkResolution';
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const HOSTNAME_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
@@ -6,8 +8,11 @@ const LOCAL_DOCUMENT_EXTENSION_RE = /\.(?:md|markdown|mdx|mdc)$/i;
 
 const localLinkStatusByTarget = new Map<string, boolean>();
 let vscodeApi: any = null;
-let localLinkRequestCounter = 0;
-let latestLocalLinkRequestId = '';
+let localLinkTransport: LocalLinkResolutionTransport = {
+  resolve: async () => ({ ok: false, error: { code: 'operation-failed', message: 'Local Link handling is not initialized' } }),
+  accept: () => false
+};
+let localLinkGeneration = 0;
 let pendingLocalLinkStatusRefresh: number | null = null;
 const localLinkStatusDebounceMs = 1000;
 
@@ -19,6 +24,9 @@ let refreshContext: LocalLinkRefreshContext | null = null;
 
 export const initializeLocalLinkHandling = (vscode: any): void => {
   vscodeApi = vscode;
+  localLinkTransport = createLocalLinkResolutionTransport((message) => {
+    vscodeApi?.postMessage(message);
+  });
 };
 
 export const setLocalLinkRefreshContext = (context: LocalLinkRefreshContext): void => {
@@ -43,6 +51,7 @@ export const cancelPendingLocalLinkStatusRefresh = (): void => {
 };
 
 export const requestLocalLinkStatuses = (text: string): void => {
+  const generation = ++localLinkGeneration;
   const targets = collectLocalLinkTargets(text);
   if (!targets.length) {
     replaceLocalLinkStatuses([]);
@@ -50,17 +59,19 @@ export const requestLocalLinkStatuses = (text: string): void => {
     return;
   }
 
-  const requestId = `local-link-${localLinkRequestCounter++}`;
-  latestLocalLinkRequestId = requestId;
-  vscodeApi?.postMessage({ type: 'resolveLocalLinks', requestId, targets });
+  void localLinkTransport.resolve(targets).then((result) => {
+    if (generation !== localLinkGeneration) return;
+    if (result.ok === true) {
+      replaceLocalLinkStatuses(result.value.results);
+    } else {
+      replaceLocalLinkStatuses([]);
+    }
+    refreshContext?.refreshDecorations();
+  });
 };
 
-export const handleResolvedLocalLinks = (message: { requestId: string; results?: Array<{ target: string; exists: boolean }> }): boolean => {
-  if (message.requestId !== latestLocalLinkRequestId) {
-    return false;
-  }
-  replaceLocalLinkStatuses(message.results ?? []);
-  return true;
+export const handleResolvedLocalLinks = (message: ResolvedLocalLinksResponse): boolean => {
+  return localLinkTransport.accept(message);
 };
 
 export function replaceLocalLinkStatuses(entries: Array<{ target: string; exists: boolean }>): void {

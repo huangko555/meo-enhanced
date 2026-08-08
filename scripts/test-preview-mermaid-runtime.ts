@@ -157,12 +157,10 @@ try {
   if (!previewRequestId) throw new Error('Live mode did not preload Preview');
   await page.evaluate(({ requestId, html, hasMermaid, lightStyles, darkStyles }) => {
     const controller = (window as typeof window & { __previewController?: any }).__previewController;
-    controller.handleRendered({
-      type: 'previewRendered',
+    controller.acceptRenderResponse({
+      type: 'previewRenderResult',
       requestId,
-      html,
-      hasMermaid,
-      styles: { light: lightStyles, dark: darkStyles }
+      result: { ok: true, value: { html, hasMermaid, styles: { light: lightStyles, dark: darkStyles } } }
     });
   }, { requestId: previewRequestId, html: rendered.html, hasMermaid: rendered.hasMermaid, lightStyles, darkStyles });
 

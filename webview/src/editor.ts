@@ -2928,9 +2928,13 @@ export function createEditor({
         pendingDiagnosticSuggestionRequest.requestId !== requestId ||
         pendingDiagnosticSuggestionRequest.from !== payload?.from ||
         pendingDiagnosticSuggestionRequest.to !== payload?.to ||
-        !Array.isArray(payload?.suggestions) ||
-        payload.suggestions.length === 0
+        !Array.isArray(payload?.suggestions)
       ) {
+        return;
+      }
+
+      if (payload.suggestions.length === 0) {
+        pendingDiagnosticSuggestionRequest = null;
         return;
       }
 

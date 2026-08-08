@@ -31,21 +31,3 @@ export type PreviewRenderResult = {
   hasMermaid: boolean;
   styles: PreviewStyles;
 };
-
-export type PreviewRenderRequestMessage = {
-  type: 'requestPreviewRender';
-  requestId: string;
-  text: string;
-  environment?: PreviewStyleEnvironment;
-};
-
-export type PreviewRenderedMessage = PreviewRenderResult & {
-  type: 'previewRendered';
-  requestId: string;
-};
-
-export type PreviewRenderErrorMessage = {
-  type: 'previewRenderError';
-  requestId: string;
-  message: string;
-};

@@ -1,0 +1,105 @@
+export type EditorMode = 'live' | 'source' | 'preview';
+export type EditorAppearance = 'dark' | 'light';
+export type DiffBaselineMode = 'current-edit' | 'recent-save' | 'git-head';
+export type OutlinePosition = 'left' | 'right';
+
+export type EditorCommand =
+  | { readonly type: 'setMode'; readonly mode: EditorMode }
+  | { readonly type: 'setLineNumbers'; readonly visible?: boolean; readonly enabled?: boolean }
+  | { readonly type: 'setGitChangesGutter'; readonly visible?: boolean; readonly enabled?: boolean }
+  | { readonly type: 'setGitBlame'; readonly enabled: boolean }
+  | { readonly type: 'setDiffBaselineMode'; readonly mode: DiffBaselineMode }
+  | { readonly type: 'setFixedBaseline'; readonly enabled: boolean }
+  | { readonly type: 'releaseFixedBaseline' }
+  | { readonly type: 'setSpellCheck'; readonly enabled: boolean }
+  | { readonly type: 'setOutlineVisible'; readonly visible: boolean }
+  | { readonly type: 'setOutlinePosition'; readonly position: OutlinePosition }
+  | { readonly type: 'setOutlineWidth'; readonly width: number }
+  | { readonly type: 'setContentMaxWidth'; readonly enabled: boolean }
+  | { readonly type: 'setLongCodeBlockFolding'; readonly enabled: boolean }
+  | {
+      readonly type: 'setFindOptions';
+      readonly wholeWord?: boolean;
+      readonly caseSensitive?: boolean;
+      readonly findOptions?: { readonly wholeWord?: boolean; readonly caseSensitive?: boolean };
+    }
+  | { readonly type: 'viewPositionChanged'; readonly topLine: number; readonly topLineOffset?: number }
+  | { readonly type: 'openLink'; readonly href: string; readonly source?: 'preview' }
+  | { readonly type: 'openImageExternally'; readonly url: string }
+  | { readonly type: 'saveDocument' }
+  | { readonly type: 'discardChanges'; readonly topLine: number; readonly topLineOffset?: number }
+  | { readonly type: 'exportDocument'; readonly format: 'html' | 'pdf'; readonly appearance: EditorAppearance }
+  | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
+  | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean';
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
+export function decodeEditorCommand(value: unknown): EditorCommand | null {
+  if (!isRecord(value) || typeof value.type !== 'string') return null;
+  switch (value.type) {
+    case 'setMode':
+      return value.mode === 'live' || value.mode === 'source' || value.mode === 'preview' ? value as EditorCommand : null;
+    case 'setLineNumbers':
+    case 'setGitChangesGutter':
+      return (value.visible === undefined || isBoolean(value.visible))
+        && (value.enabled === undefined || isBoolean(value.enabled))
+        && (isBoolean(value.visible) || isBoolean(value.enabled)) ? value as EditorCommand : null;
+    case 'setGitBlame':
+    case 'setFixedBaseline':
+    case 'setSpellCheck':
+    case 'setContentMaxWidth':
+    case 'setLongCodeBlockFolding':
+      return isBoolean(value.enabled) ? value as EditorCommand : null;
+    case 'setDiffBaselineMode':
+      return value.mode === 'current-edit' || value.mode === 'recent-save' || value.mode === 'git-head'
+        ? value as EditorCommand : null;
+    case 'releaseFixedBaseline':
+    case 'saveDocument':
+      return { type: value.type } as EditorCommand;
+    case 'setOutlineVisible':
+      return isBoolean(value.visible) ? value as EditorCommand : null;
+    case 'setOutlinePosition':
+      return value.position === 'left' || value.position === 'right' ? value as EditorCommand : null;
+    case 'setOutlineWidth':
+      return isFiniteNumber(value.width) && value.width > 0 ? value as EditorCommand : null;
+    case 'setFindOptions': {
+      const nested = value.findOptions;
+      if (nested !== undefined && (!isRecord(nested)
+        || (nested.wholeWord !== undefined && !isBoolean(nested.wholeWord))
+        || (nested.caseSensitive !== undefined && !isBoolean(nested.caseSensitive)))) return null;
+      return (value.wholeWord === undefined || isBoolean(value.wholeWord))
+        && (value.caseSensitive === undefined || isBoolean(value.caseSensitive)) ? value as EditorCommand : null;
+    }
+    case 'viewPositionChanged':
+    case 'discardChanges':
+      return isPositiveInteger(value.topLine)
+        && (value.topLineOffset === undefined || isFiniteNumber(value.topLineOffset)) ? value as EditorCommand : null;
+    case 'openLink':
+      return typeof value.href === 'string' && value.href.length > 0
+        && (value.source === undefined || value.source === 'preview') ? value as EditorCommand : null;
+    case 'openImageExternally':
+      return typeof value.url === 'string' && value.url.length > 0 ? value as EditorCommand : null;
+    case 'exportDocument':
+      return (value.format === 'html' || value.format === 'pdf')
+        && (value.appearance === 'dark' || value.appearance === 'light') ? value as EditorCommand : null;
+    case 'setPreviewAppearance':
+    case 'setEditorAppearance':
+      return value.appearance === 'dark' || value.appearance === 'light' ? value as EditorCommand : null;
+    default:
+      return null;
+  }
+}

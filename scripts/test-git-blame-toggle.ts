@@ -48,9 +48,10 @@ async function main(): Promise<void> {
     await page.evaluate((theme) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', text: 'first\nsecond', version: 1, diagnostics: [], mode: 'live',
+        previewAppearance: 'dark', editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: true, gitBlameEnabled: false,
         gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
-        spellCheckEnabled: false, contentMaxWidthEnabled: false,
+        spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
@@ -185,7 +186,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'gitBlameResult', requestId: message.requestId, lineNumber: message.lineNumber,
         localEditGeneration: message.localEditGeneration,
-        result: { kind: 'commit', commit: '1234567890abcdef', shortCommit: '12345678', author: 'Example Author', authorTimeUnix: 1_700_000_000, summary: 'Example commit' }
+        result: { ok: true, value: { kind: 'commit', commit: '1234567890abcdef', shortCommit: '12345678', author: 'Example Author', authorTimeUnix: 1_700_000_000, summary: 'Example commit' } }
       }}));
     }, request);
     await page.waitForFunction(() => document.querySelector('.meo-git-blame-tooltip')?.textContent?.includes('Example Author'));

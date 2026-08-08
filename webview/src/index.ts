@@ -21,6 +21,10 @@ import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
 import { normalizeEditorAppearance, type EditorAppearance } from '../../src/shared/editorAppearance';
 import { resolveCodeTheme } from './themes/editorLightTheme';
+import { createExportSnapshotResponder } from './adapters/exportSnapshotTransport';
+import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
+import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
+import type { InitMessage } from '../../src/protocol/readyInit';
 
 type MarkdownMode = 'live' | 'source' | 'preview';
 
@@ -72,10 +76,25 @@ function createCompatibleVsCodeApi(): CompatibleVsCodeWebviewApi {
   };
 }
 
+let diagnosticSuggestionsTransport: DiagnosticSuggestionsTransport = {
+  request: () => '',
+  accept: () => false,
+  cancelAll: () => undefined
+};
 const vscode = createCompatibleVsCodeApi();
 initializeImageHandling(vscode);
 initializeWikiLinkHandling(vscode);
 initializeLocalLinkHandling(vscode);
+diagnosticSuggestionsTransport = createDiagnosticSuggestionsTransport((message) => {
+  vscode.postMessage(message);
+}, (message) => {
+  const suggestions = message.result.ok === true ? message.result.value.suggestions : [];
+  editor?.showDiagnosticSuggestions?.(message.requestId, {
+    from: message.from,
+    to: message.to,
+    suggestions
+  });
+});
 
 applyThemeSettings();
 setImageSrcResolver(resolveImageSrc);
@@ -1095,8 +1114,6 @@ let modeToggleShouldRestoreEditorFocus = false;
 let gitClient: any = null;
 let pendingEditorFocus = false;
 let pendingDiagnostics: any[] = [];
-let diagnosticSuggestionRequestCounter = 0;
-const pendingDiagnosticSuggestionRequests = new Map<string, { from: number; to: number }>();
 let pendingRevealSelection: { anchor: number; head: number; focus?: boolean } | null = null;
 let pendingRevealDocumentFragment: string | null = null;
 let pendingRestoreTopLine: number | null = null;
@@ -1465,7 +1482,7 @@ const focusEditorFromHost = () => {
 const applyDiagnosticsFromHost = (diagnostics: unknown): void => {
   const nextDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];
   pendingDiagnostics = nextDiagnostics;
-  pendingDiagnosticSuggestionRequests.clear();
+  diagnosticSuggestionsTransport.cancelAll();
   selectionMenuController.hide();
   editor?.setDiagnostics?.(nextDiagnostics);
 };
@@ -1477,18 +1494,13 @@ const requestDiagnosticSuggestions = (diagnostic: {
   source?: string;
   code?: string;
 }): string => {
-  const requestId = `diagnostic-suggestions-${Date.now()}-${diagnosticSuggestionRequestCounter += 1}`;
-  pendingDiagnosticSuggestionRequests.set(requestId, { from: diagnostic.from, to: diagnostic.to });
-  vscode.postMessage({
-    type: 'requestDiagnosticSuggestions',
-    requestId,
+  return diagnosticSuggestionsTransport.request({
     from: diagnostic.from,
     to: diagnostic.to,
     message: diagnostic.message,
     source: diagnostic.source,
     code: diagnostic.code
   });
-  return requestId;
 };
 
 gitClient = createGitClient({
@@ -1968,7 +1980,7 @@ const scheduleInitialEditorMount = () => {
   );
 };
 
-const handleInit = (message: any) => {
+const handleInit = (message: InitMessage) => {
   pendingRestoreTopLine = normalizeLineNumber(message.restoreTopLine);
   pendingRestoreTopLineOffset = normalizeLineOffset(message.restoreTopLineOffset);
   lastSentTopLine = null;
@@ -2035,6 +2047,7 @@ const handleInit = (message: any) => {
 
 const exportHandlerContext: ExportHandlerContext = {
   vscode,
+  respondToSnapshot: createExportSnapshotResponder((message) => vscode.postMessage(message)).respond,
   getEditor: () => editor,
   get pendingText() { return pendingText; },
   get pendingInitialText() { return pendingInitialText; },
@@ -2058,9 +2071,14 @@ const withMessageErrorBoundary = (context: string, action: () => void): void => 
 };
 
 window.addEventListener('message', (event) => {
-  const message = event.data;
+  const rawMessage: unknown = event.data;
 
-  if (!message || typeof message !== 'object') {
+  if (!rawMessage || typeof rawMessage !== 'object') {
+    return;
+  }
+
+  const message = decodeHostToWebviewMessage(rawMessage);
+  if (!message) {
     return;
   }
 
@@ -2071,7 +2089,7 @@ window.addEventListener('message', (event) => {
       currentCodeTheme = message.codeTheme;
       currentEditorAppearance = normalizeEditorAppearance(message.editorAppearance);
       editorAppearanceControl.setActive(currentEditorAppearance);
-      applyThemeSettings(message.theme, currentEditorAppearance);
+      applyThemeSettings(currentThemeSettings, currentEditorAppearance);
       setShikiEnabled(message.shikiCodeBlocks === true);
       setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
       initialMountRecoveryAttempted = false;
@@ -2114,7 +2132,7 @@ window.addEventListener('message', (event) => {
       const applyThemeChange = () => {
         currentThemeSettings = message.theme as Parameters<typeof applyThemeSettings>[0];
         currentCodeTheme = message.codeTheme;
-        applyThemeSettings(message.theme, currentEditorAppearance);
+        applyThemeSettings(currentThemeSettings, currentEditorAppearance);
         refreshMermaidTheme();
         setShikiTheme(resolveCodeTheme(message.codeTheme, currentEditorAppearance));
         editor?.refreshDecorations();
@@ -2168,13 +2186,8 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  if (message.type === 'previewRendered') {
-    previewController.handleRendered(message);
-    return;
-  }
-
-  if (message.type === 'previewRenderError') {
-    previewController.handleRenderError(message);
+  if (message.type === 'previewRenderResult') {
+    previewController.acceptRenderResponse(message);
     return;
   }
 
@@ -2405,7 +2418,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'vimKeybindingsChanged') {
-    vimKeybindingsState = message.keybindings;
+    vimKeybindingsState = [...message.keybindings];
     vimLeaderState = message.leaderKey;
     editor?.setVimKeybindings(vimKeybindingsState, vimLeaderState);
     return;
@@ -2440,16 +2453,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'diagnosticSuggestionsResult') {
-    const request = pendingDiagnosticSuggestionRequests.get(message.requestId);
-    pendingDiagnosticSuggestionRequests.delete(message.requestId);
-    if (!request || !Array.isArray(message.suggestions) || message.suggestions.length === 0) {
-      return;
-    }
-    editor?.showDiagnosticSuggestions?.(message.requestId, {
-      from: message.from,
-      to: message.to,
-      suggestions: message.suggestions
-    });
+    diagnosticSuggestionsTransport.accept(message);
     return;
   }
 
@@ -2459,7 +2463,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'resolvedImageSrc') {
-    settleImageSrcRequest(message.requestId, message.resolvedUrl);
+    settleImageSrcRequest(message);
     return;
   }
 

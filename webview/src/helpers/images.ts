@@ -1,11 +1,29 @@
 import { EditorView, WidgetType } from '@codemirror/view';
 import { AppWindow, createElement, ExternalLink, Maximize2, RotateCcw, SquareArrowRightEnter, X, ZoomIn, ZoomOut } from 'lucide';
 import { getViewportController } from './viewportController';
+import { createImageResolutionTransport, type ImageResolutionTransport } from '../adapters/imageResolutionTransport';
+import { createClipboardImageSaveTransport, type ClipboardImageSaveTransport } from '../adapters/clipboardImageSaveTransport';
+import type { ResolvedImageSrcResponse } from '../../../src/protocol/imageResolution';
+import type { SavedImagePathResponse } from '../../../src/protocol/clipboardImageSave';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
 let imageSrcResolver: (url: string) => string | Promise<string | null | undefined> | null | undefined = (url) => url;
 let vscodeApi: any = null;
+let imageResolutionTransport: ImageResolutionTransport = {
+  resolve: async () => ({
+    ok: false,
+    error: { code: 'operation-failed', message: 'Image handling is not initialized' }
+  }),
+  accept: () => false
+};
+let clipboardImageSaveTransport: ClipboardImageSaveTransport = {
+  save: async () => ({
+    ok: false,
+    error: { code: 'operation-failed', message: 'Image handling is not initialized' }
+  }),
+  accept: () => false
+};
 
 const MAX_IMAGE_SRC_CACHE_ENTRIES = 512;
 const MAX_LOADED_IMAGE_CACHE_ENTRIES = 128;
@@ -20,8 +38,6 @@ const failedImages = new Map<string, number>();
 const queuedImageLoads: Array<() => void> = [];
 let activeImageLoads = 0;
 const pendingImageResolvers = new Map<string, ((value: string) => void)[]>();
-const imageRequestById = new Map<string, string>();
-let imageRequestCounter = 0;
 const IMAGE_DOUBLE_CLICK_WINDOW_MS = 400;
 const IMAGE_DOUBLE_CLICK_MAX_DISTANCE_PX = 8;
 type ImageDoubleClickCandidate = {
@@ -32,13 +48,6 @@ type ImageDoubleClickCandidate = {
 };
 let pendingImageDoubleClick: ImageDoubleClickCandidate | null = null;
 let imageDoubleClickListenerInitialized = false;
-
-let imageSaveRequestCounter = 0;
-const pendingImageSaveRequests = new Map<string, {
-  resolve: (value: { success: boolean; path?: string; error?: string }) => void;
-  timeout: number;
-}>();
-const IMAGE_SAVE_TIMEOUT_MS = 15_000;
 
 function touchCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V): void {
   cache.delete(key);
@@ -98,6 +107,12 @@ const imageExtensionByMime: Record<string, string> = {
 
 export function initializeImageHandling(vscode: any): void {
   vscodeApi = vscode;
+  imageResolutionTransport = createImageResolutionTransport((message) => {
+    vscodeApi?.postMessage(message);
+  });
+  clipboardImageSaveTransport = createClipboardImageSaveTransport((message) => {
+    vscodeApi?.postMessage(message);
+  });
   if (imageDoubleClickListenerInitialized) return;
   imageDoubleClickListenerInitialized = true;
   window.addEventListener('click', (event) => {
@@ -147,27 +162,22 @@ const requestImageSrcResolution = (url: string): Promise<string> => new Promise(
   }
 
   pendingImageResolvers.set(url, [resolve]);
-  const requestId = `img-${imageRequestCounter++}`;
-  imageRequestById.set(requestId, url);
-  vscodeApi?.postMessage({ type: 'resolveImageSrc', requestId, url });
+  void imageResolutionTransport.resolve(url).then((result) => {
+    const resolvedUrl = result.ok === true ? result.value.resolvedUrl : '';
+    const finalUrl = resolvedUrl || url;
+    if (resolvedUrl) {
+      setBoundedCacheEntry(imageSrcCache, url, resolvedUrl, MAX_IMAGE_SRC_CACHE_ENTRIES);
+    }
+    const waiters = pendingImageResolvers.get(url) ?? [];
+    pendingImageResolvers.delete(url);
+    for (const waiter of waiters) {
+      waiter(finalUrl);
+    }
+  });
 });
 
-export const settleImageSrcRequest = (requestId: string, resolvedUrl: string | undefined): void => {
-  const rawUrl = imageRequestById.get(requestId);
-  if (typeof rawUrl !== 'string') {
-    return;
-  }
-
-  imageRequestById.delete(requestId);
-  const finalUrl = resolvedUrl || rawUrl;
-  if (resolvedUrl) {
-    setBoundedCacheEntry(imageSrcCache, rawUrl, resolvedUrl, MAX_IMAGE_SRC_CACHE_ENTRIES);
-  }
-  const waiters = pendingImageResolvers.get(rawUrl) ?? [];
-  pendingImageResolvers.delete(rawUrl);
-  for (const resolve of waiters) {
-    resolve(finalUrl);
-  }
+export const settleImageSrcRequest = (message: ResolvedImageSrcResponse): void => {
+  imageResolutionTransport.accept(message);
 };
 
 export const resolveImageSrc = (rawUrl: string | null | undefined): string | Promise<string> => {
@@ -203,17 +213,8 @@ export const imageExtensionFromMimeType = (mimeType: string): string => (
   imageExtensionByMime[mimeType.trim().toLowerCase()] ?? fallbackImageExtensionFromMimeType(mimeType)
 );
 
-export const handleSavedImagePath = (message: { requestId: string; success?: boolean; path?: string; error?: string }): void => {
-  const pending = pendingImageSaveRequests.get(message.requestId);
-  if (pending) {
-    pendingImageSaveRequests.delete(message.requestId);
-    window.clearTimeout(pending.timeout);
-    if (message.success && message.path) {
-      pending.resolve({ success: true, path: message.path });
-    } else {
-      pending.resolve({ success: false, error: message.error ?? 'Failed to save image' });
-    }
-  }
+export const handleSavedImagePath = (message: SavedImagePathResponse): void => {
+  clipboardImageSaveTransport.accept(message);
 };
 
 export interface ImagePasteContext {
@@ -277,7 +278,6 @@ export const handleImagePaste = async (
       return true;
     }
 
-    const requestId = `img-save-${imageSaveRequestCounter++}`;
     const timestamp = Date.now();
     const dataUrlMimeType = parseDataUrlMimeType(imageData);
     const extension = (
@@ -287,25 +287,14 @@ export const handleImagePaste = async (
     );
     const fileName = `${timestamp}.${extension}`;
 
-    const promise = new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
-      const timeout = window.setTimeout(() => {
-        pendingImageSaveRequests.delete(requestId);
-        resolve({ success: false, error: 'Timed out while saving pasted image' });
-      }, IMAGE_SAVE_TIMEOUT_MS);
-      pendingImageSaveRequests.set(requestId, { resolve, timeout });
-    });
-
-    vscodeApi?.postMessage({
-      type: 'saveImageFromClipboard',
-      requestId,
+    const result = await clipboardImageSaveTransport.save({
       imageData,
       fileName
     });
 
     try {
-      const result = await promise;
-      if (result.success && result.path) {
-        const imageMarkdown = `![${fileName}](${result.path})`;
+      if (result.ok === true) {
+        const imageMarkdown = `![${fileName}](${result.value.path})`;
         if (tableInput && tableSelection && tableInput.isConnected) {
           tableInput.setRangeText(imageMarkdown, tableSelection.start, tableSelection.end, 'end');
           tableInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -322,7 +311,7 @@ export const handleImagePaste = async (
         });
         editor.focus();
       } else {
-        context.onError?.(result.error ?? 'Failed to save pasted image');
+        context.onError?.(result.error.message);
       }
     } catch (error) {
       console.error('[MEO image paste]', error);

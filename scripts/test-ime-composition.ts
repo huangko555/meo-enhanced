@@ -60,8 +60,10 @@ async function main() {
     await page.evaluate(({ text, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', text, version: 1, diagnostics: [], mode: 'live',
-        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
-        spellCheckEnabled: false, contentMaxWidthEnabled: false,
+        previewAppearance: 'dark', editorAppearance: 'dark',
+        lineNumbers: true, gitChangesGutter: false, gitBlameEnabled: false, gitDiffLineHighlights: false,
+        diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
+        spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: true, outlineWidth: 260,

@@ -49,9 +49,10 @@ async function main() {
     ].join('\n');
     await page.evaluate(({ documentText, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text: documentText, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'dark',
-        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
-        spellCheckEnabled: false, contentMaxWidthEnabled: false,
+        type: 'init', text: documentText, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'dark', editorAppearance: 'dark',
+        lineNumbers: true, gitChangesGutter: false, gitBlameEnabled: false, gitDiffLineHighlights: false,
+        diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
+        spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
@@ -87,8 +88,8 @@ async function main() {
     )).join('');
     await page.evaluate(({ requestId, html }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'previewRendered', requestId, hasMermaid: false,
-        styles: { dark: 'html,body{margin:0}', light: 'html,body{margin:0}' }, html
+        type: 'previewRenderResult', requestId, result: { ok: true, value: { hasMermaid: false,
+        styles: { dark: 'html,body{margin:0}', light: 'html,body{margin:0}' }, html } }
       }}));
     }, { requestId: previewRequestId, html: previewHtml });
     await page.waitForFunction(() => Boolean(

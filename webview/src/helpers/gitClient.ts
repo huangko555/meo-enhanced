@@ -1,19 +1,5 @@
-interface GitBlameResult {
-  kind: 'available' | 'unavailable';
-  reason?: string;
-  hash?: string;
-  author?: string;
-  date?: string;
-  message?: string;
-  lineNumber?: number;
-}
-
-interface PendingBlameRequest {
-  cacheKey: string;
-  timer: number;
-  resolve: (result: GitBlameResult) => void;
-  reject: (error: Error) => void;
-}
+import type { GitBaselineChangedEvent, GitBlameLineResult, GitBlameResponse } from '../../../src/protocol/git';
+import { createGitBlameTransport } from '../adapters/gitBlameTransport';
 
 interface GitClientOptions {
   vscode: any;
@@ -28,7 +14,7 @@ interface GitClient {
   clearBlameCache: (options?: { hideTooltip?: boolean }) => void;
   bumpLocalEditGeneration: () => void;
   resetForInit: (options?: { hideTooltip?: boolean }) => void;
-  requestBlameForLine: (options: { lineNumber: number }) => Promise<GitBlameResult>;
+  requestBlameForLine: (options: { lineNumber: number }) => Promise<GitBlameLineResult>;
   openRevisionForLine: (options: { lineNumber: number }) => void;
   openWorktreeForLine: (options: { lineNumber: number }) => void;
   applyBaselineToEditor: (editor: any) => void;
@@ -65,20 +51,18 @@ export function createGitClient({
   let gitBaselineSnapshot: any = null;
   let pendingGitBaselineBeforeEditorMount: any = null;
   let baselineGeneration = -1;
-  let gitBlameRequestCounter = 0;
   let localEditGeneration = 0;
-  const pendingGitBlameRequests = new Map<string, PendingBlameRequest>();
-  const gitBlameCache = new Map<string, GitBlameResult>();
-  const inFlightGitBlameRequests = new Map<string, Promise<GitBlameResult>>();
+  const gitBlameCache = new Map<string, GitBlameLineResult>();
+  const inFlightGitBlameRequests = new Map<string, Promise<GitBlameLineResult>>();
+  const gitBlameTransport = createGitBlameTransport(
+    (message) => vscode.postMessage(message),
+    { timeoutMs: blameTimeoutMs }
+  );
 
   const clearBlameCache = ({ hideTooltip = true }: { hideTooltip?: boolean } = {}) => {
     gitBlameCache.clear();
     inFlightGitBlameRequests.clear();
-    for (const [requestId, pending] of pendingGitBlameRequests) {
-      window.clearTimeout(pending.timer);
-      pending.reject(new Error('Blame request superseded'));
-      pendingGitBlameRequests.delete(requestId);
-    }
+    gitBlameTransport.cancelAll();
     if (hideTooltip) {
       clearTransientUi?.();
     }
@@ -94,7 +78,7 @@ export function createGitClient({
     clearBlameCache({ hideTooltip });
   };
 
-  const requestBlameForLine = ({ lineNumber }: { lineNumber: number }): Promise<GitBlameResult> => {
+  const requestBlameForLine = ({ lineNumber }: { lineNumber: number }): Promise<GitBlameLineResult> => {
     const normalizedLine = normalizeLineNumber(lineNumber);
     const cacheKey = `${localEditGeneration}:${normalizedLine}`;
     const cached = gitBlameCache.get(cacheKey);
@@ -106,43 +90,24 @@ export function createGitClient({
       return inFlight;
     }
 
-    const requestId = `blame-${gitBlameRequestCounter++}`;
     const currentText = getCurrentEditorText?.();
-    const message: any = {
-      type: 'requestGitBlame',
-      requestId,
+    const request: { lineNumber: number; localEditGeneration: number; text?: string } = {
       lineNumber: normalizedLine,
       localEditGeneration
     };
 
     if (shouldIncludeBlameSnapshotText(currentText, getSyncedText?.(), maxBlameSnapshotChars)) {
-      message.text = currentText;
+      request.text = currentText;
     }
 
-    const requestPromise = new Promise<GitBlameResult>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
+    const requestPromise = gitBlameTransport.request(request).then((resolution): GitBlameLineResult => {
+      if (resolution.ok === false) return { kind: 'unavailable', reason: 'error' };
+      gitBlameCache.set(cacheKey, resolution.value);
+      return resolution.value;
+    }).finally(() => {
+      if (inFlightGitBlameRequests.get(cacheKey) === requestPromise) {
         inFlightGitBlameRequests.delete(cacheKey);
-        pendingGitBlameRequests.delete(requestId);
-        resolve({ kind: 'unavailable', reason: 'error' });
-      }, blameTimeoutMs);
-
-      pendingGitBlameRequests.set(requestId, {
-        cacheKey,
-        timer,
-        resolve: (result) => {
-          window.clearTimeout(timer);
-          inFlightGitBlameRequests.delete(cacheKey);
-          gitBlameCache.set(cacheKey, result);
-          resolve(result);
-        },
-        reject: (error) => {
-          window.clearTimeout(timer);
-          inFlightGitBlameRequests.delete(cacheKey);
-          reject(error);
-        }
-      });
-
-      vscode.postMessage(message);
+      }
     });
 
     inFlightGitBlameRequests.set(cacheKey, requestPromise);
@@ -189,7 +154,10 @@ export function createGitClient({
     }
   };
 
-  const handleMessage = (message: any, { editor }: { editor?: any } = {}): boolean => {
+  const handleMessage = (
+    message: GitBaselineChangedEvent | GitBlameResponse,
+    { editor }: { editor?: any } = {}
+  ): boolean => {
     if (message.type === 'gitBaselineChanged') {
       const incomingGeneration = Number.isFinite(message.payload?.generation)
         ? Number(message.payload.generation)
@@ -208,12 +176,7 @@ export function createGitClient({
     }
 
     if (message.type === 'gitBlameResult') {
-      const pending = pendingGitBlameRequests.get(message.requestId);
-      if (!pending) {
-        return true;
-      }
-      pendingGitBlameRequests.delete(message.requestId);
-      pending.resolve(message.result ?? { kind: 'unavailable', reason: 'error' });
+      gitBlameTransport.accept(message);
       return true;
     }
 

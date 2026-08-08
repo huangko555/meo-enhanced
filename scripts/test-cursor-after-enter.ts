@@ -55,9 +55,10 @@ async function main(): Promise<void> {
     await syncedPage.evaluate(({ theme, text }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', text, version: 1, diagnostics: [], mode: 'live',
-        previewAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
+        previewAppearance: 'dark', editorAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
         gitBlameEnabled: false, gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
-        fixedBaselineActive: false, spellCheckEnabled: false, contentMaxWidthEnabled: false,
+        fixedBaselinePinned: false, fixedBaselineActive: false, spellCheckEnabled: false, contentMaxWidthEnabled: false,
+        longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,

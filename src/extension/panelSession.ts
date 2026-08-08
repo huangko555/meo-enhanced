@@ -44,14 +44,30 @@ import {
 import { resolveClipboardImageSaveRoot } from '../shared/clipboardImages';
 import { GitDocumentState, hashGitBaselinePayload } from '../git/documentState';
 import { openGitRevisionForLine, openGitWorktreeForLine, resolveGitBlameForRequest } from '../git/blameActions';
-import type { GitBaselinePayload, GitBlameLineResult } from '../git/types';
+import type { GitBaselinePayload } from '../git/types';
 import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
 import type { ExportStyleEnvironment } from '../export/runtime';
 import type { ThemeSettings } from '../shared/themeDefaults';
-import type { PreviewAppearance, PreviewRenderRequestMessage, PreviewRenderResult } from '../shared/preview';
+import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
 import type { OutlinePosition } from '../shared/extensionConfig';
+import type { InitMessage } from '../protocol/readyInit';
+import type { AppliedMessage, ApplyChangesMessage, DiscardedChangesMessage, DocumentChangedMessage } from '../protocol/documentSync';
+import type { ResolvedImageSrcResponse } from '../protocol/imageResolution';
+import type { ResolvedWikiLinksResponse } from '../protocol/wikiLinkResolution';
+import type { ResolvedLocalLinksResponse } from '../protocol/localLinkResolution';
+import type { DiagnosticSuggestionsResult, RequestDiagnosticSuggestions } from '../protocol/diagnosticSuggestions';
+import type { SaveImageFromClipboardRequest, SavedImagePathResponse } from '../protocol/clipboardImageSave';
+import type { PreviewRenderResponse } from '../protocol/previewRender';
+import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
+import {
+  type GitBaselineChangedEvent,
+  type GitBlameResponse
+} from '../protocol/git';
+import type { HostEditorEvent } from '../protocol/hostEditorEvents';
+import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
+import { decodeWebviewToHostMessage, type WebviewToHostMessage } from '../protocol/messages';
 import {
   collectMeoSpellDiagnostics,
   collectMeoSpellSuggestions,
@@ -73,381 +89,15 @@ type FindOptions = {
   caseSensitive: boolean;
 };
 
-type InitMessage = {
-  type: 'init';
-  text: string;
-  version: number;
-  diagnostics: SerializedDiagnostic[];
-  mode: EditorMode;
-  previewAppearance: PreviewAppearance;
-  editorAppearance: EditorAppearance;
-  lineNumbers: boolean;
-  gitChangesGutter: boolean;
-  gitBlameEnabled: boolean;
-  gitDiffLineHighlights: boolean;
-  diffBaselineMode: DiffBaselineMode;
-  fixedBaselinePinned: boolean;
-  fixedBaselineActive: boolean;
-  spellCheckEnabled: boolean;
-  contentMaxWidthEnabled: boolean;
-  longCodeBlockFoldingEnabled: boolean;
-  vimMode: boolean;
-  vimKeybindings: VimKeybinding[];
-  vimLeader: string;
-  findOptions: FindOptions;
-  outlinePosition: OutlinePosition;
-  outlineVisible: boolean;
-  outlineWidth: number;
-  theme: ThemeSettings;
-  shikiCodeBlocks: boolean;
-  codeTheme: RawVscodeTheme | null;
-  restoreTopLine?: number;
-  restoreTopLineOffset?: number;
-};
-
-type DocChangedMessage = {
-  type: 'docChanged';
-  text: string;
-  version: number;
-};
-
-type AppliedMessage = {
-  type: 'applied';
-  version: number;
-};
-
-type RevealSelectionMessage = {
-  type: 'revealSelection';
-  anchor: number;
-  head: number;
-  focus?: boolean;
-  preserveViewport?: boolean;
-};
-
-type FocusEditorMessage = {
-  type: 'focusEditor';
-};
-
 type RevealSelectionPayload = {
   anchor: number;
   head: number;
 };
 
-type ApplyChangesMessage = {
-  type: 'applyChanges';
-  baseVersion: number;
-  changes: Array<{ from: number; to: number; insert: string }>;
-};
-
-type DraftChangedMessage = {
-  type: 'draftChanged';
-  text: string | null;
-};
-
-type SetModeMessage = {
-  type: 'setMode';
-  mode: EditorMode;
-};
-
-type OpenLinkMessage = {
-  type: 'openLink';
-  href: string;
-  source?: 'preview';
-};
-
-type OpenImageExternallyMessage = {
-  type: 'openImageExternally';
-  url: string;
-};
-
-type ResolveImageSrcMessage = {
-  type: 'resolveImageSrc';
-  requestId: string;
-  url: string;
-};
-
-type ResolveWikiLinksMessage = {
-  type: 'resolveWikiLinks';
-  requestId: string;
-  targets: string[];
-};
-
-type ResolveLocalLinksMessage = {
-  type: 'resolveLocalLinks';
-  requestId: string;
-  targets: string[];
-};
-
-type SaveDocumentMessage = {
-type: 'saveDocument';
-};
-
-type DiscardChangesMessage = {
-type: 'discardChanges';
-topLine: number;
-topLineOffset?: number;
-};
-
-type ExportDocumentMessage = {
-  type: 'exportDocument';
-  format: ExportFormat;
-  appearance: PreviewAppearance;
-};
-
-type SetPreviewAppearanceMessage = {
-  type: 'setPreviewAppearance';
-  appearance: PreviewAppearance;
-};
-
-type ExportSnapshotMessage = {
-  type: 'exportSnapshot';
-  requestId: string;
-  text: string;
-  environment?: ExportStyleEnvironment;
-};
-
-type ExportSnapshotErrorMessage = {
-  type: 'exportSnapshotError';
-  requestId: string;
-  message: string;
-};
-
-type SetLineNumbersMessage = {
-  type: 'setLineNumbers';
-  visible?: boolean;
-  enabled?: boolean;
-};
-
-type SetGitChangesGutterMessage = {
-  type: 'setGitChangesGutter';
-  visible?: boolean;
-  enabled?: boolean;
-};
-
-type SetGitBlameMessage = {
-  type: 'setGitBlame';
-  enabled: boolean;
-};
-
-type SetSpellCheckMessage = {
-  type: 'setSpellCheck';
-  enabled: boolean;
-};
-
-type SetOutlineVisibleMessage = {
-  type: 'setOutlineVisible';
-  visible: boolean;
-};
-
-type SetDiffBaselineModeMessage = {
-  type: 'setDiffBaselineMode';
-  mode: DiffBaselineMode;
-};
-
-type RevealDocumentFragmentMessage = {
-  type: 'revealDocumentFragment';
-  href: string;
-};
-
-type SetEditorAppearanceMessage = {
-  type: 'setEditorAppearance';
-  appearance: EditorAppearance;
-};
-
-type SetFixedBaselineMessage = {
-  type: 'setFixedBaseline';
-  enabled: boolean;
-};
-
-type ReleaseFixedBaselineMessage = {
-  type: 'releaseFixedBaseline';
-};
-
-type SetOutlinePositionMessage = {
-  type: 'setOutlinePosition';
-  position: OutlinePosition;
-};
-
-type SetOutlineWidthMessage = {
-  type: 'setOutlineWidth';
-  width: number;
-};
-
-type SetContentMaxWidthMessage = {
-  type: 'setContentMaxWidth';
-  enabled: boolean;
-};
-
-type SetLongCodeBlockFoldingMessage = {
-  type: 'setLongCodeBlockFolding';
-  enabled: boolean;
-};
-
-type SetFindOptionsMessage = {
-  type: 'setFindOptions';
-  wholeWord?: boolean;
-  caseSensitive?: boolean;
-  findOptions?: Partial<FindOptions>;
-};
-
-type ViewPositionChangedMessage = {
-  type: 'viewPositionChanged';
-  topLine: number;
-  topLineOffset?: number;
-};
-
-type ResolvedImageSrcMessage = {
-  type: 'resolvedImageSrc';
-  requestId: string;
-  resolvedUrl: string;
-};
-
-type ResolvedWikiLinksMessage = {
-  type: 'resolvedWikiLinks';
-  requestId: string;
-  results: Array<{ target: string; exists: boolean }>;
-};
-
-type ResolvedLocalLinksMessage = {
-  type: 'resolvedLocalLinks';
-  requestId: string;
-  results: Array<{ target: string; exists: boolean }>;
-};
-
-type RequestExportSnapshotMessage = {
-  type: 'requestExportSnapshot';
-  requestId: string;
-};
-
-type RequestGitBlameMessage = {
-  type: 'requestGitBlame';
-  requestId: string;
-  lineNumber: number;
-  text?: string;
-  localEditGeneration: number;
-};
-
-type OpenGitRevisionForLineMessage = {
-  type: 'openGitRevisionForLine';
-  lineNumber: number;
-  text?: string;
-};
-
-type OpenGitWorktreeForLineMessage = {
-  type: 'openGitWorktreeForLine';
-  lineNumber: number;
-  text?: string;
-};
-
-type SaveImageFromClipboardMessage = {
-  type: 'saveImageFromClipboard';
-  requestId: string;
-  imageData: string;
-  fileName: string;
-};
-
-type RequestDiagnosticSuggestionsMessage = {
-  type: 'requestDiagnosticSuggestions';
-  requestId: string;
-  from: number;
-  to: number;
-  message: string;
-  source?: string;
-  code?: string;
-};
-
-type DiagnosticSuggestionsResultMessage = {
-  type: 'diagnosticSuggestionsResult';
-  requestId: string;
-  from: number;
-  to: number;
-  suggestions: string[];
-};
-
-type SavedImagePathMessage = {
-  type: 'savedImagePath';
-  requestId: string;
-  success: boolean;
-  path?: string;
-  error?: string;
-};
-
-type GitBaselineChangedMessage = {
-  type: 'gitBaselineChanged';
-  version: number;
-  payload: GitBaselinePayload;
-};
-
-type GitBlameResultMessage = {
-  type: 'gitBlameResult';
-  requestId: string;
-  lineNumber: number;
-  localEditGeneration: number;
-  result: GitBlameLineResult;
-};
-
-type SerializedDiagnostic = {
-  from: number;
-  to: number;
-  severity: 0 | 1 | 2 | 3;
-  message: string;
-  source?: string;
-  code?: string;
-};
-
-type DiagnosticsChangedMessage = {
-  type: 'diagnosticsChanged';
-  diagnostics: SerializedDiagnostic[];
-};
-
-type WebviewMessage =
-  | ApplyChangesMessage
-  | DraftChangedMessage
-  | DiscardChangesMessage
-  | SetModeMessage
-  | SetLineNumbersMessage
-  | SetGitChangesGutterMessage
-  | SetGitBlameMessage
-  | SetDiffBaselineModeMessage
-  | SetFixedBaselineMessage
-  | ReleaseFixedBaselineMessage
-  | SetSpellCheckMessage
-  | SetOutlineVisibleMessage
-  | SetOutlinePositionMessage
-  | SetOutlineWidthMessage
-  | SetContentMaxWidthMessage
-  | SetLongCodeBlockFoldingMessage
-  | SetFindOptionsMessage
-  | ViewPositionChangedMessage
-  | OpenLinkMessage
-  | OpenImageExternallyMessage
-  | ResolveImageSrcMessage
-  | ResolveWikiLinksMessage
-  | ResolveLocalLinksMessage
-  | SaveDocumentMessage
-  | ExportDocumentMessage
-  | SetPreviewAppearanceMessage
-  | SetEditorAppearanceMessage
-  | ExportSnapshotMessage
-  | ExportSnapshotErrorMessage
-  | PreviewRenderRequestMessage
-  | RequestGitBlameMessage
-  | OpenGitRevisionForLineMessage
-  | OpenGitWorktreeForLineMessage
-  | SaveImageFromClipboardMessage
-  | RequestDiagnosticSuggestionsMessage
-  | { type: 'ready' };
-
 type RefreshGitBaselineOptions = {
   forcePost?: boolean;
   forceReload?: boolean;
   delayMs?: number;
-};
-
-type PendingExportSnapshot = {
-  resolve: (value: { text: string; environment?: ExportStyleEnvironment }) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
 };
 
 type RememberedViewPosition = {
@@ -505,7 +155,6 @@ export type PanelSession = {
   getMode: () => EditorMode;
   ensureInitDelivered: () => Promise<void>;
   requestExportSnapshot: () => Promise<{ text: string; environment?: ExportStyleEnvironment }>;
-  rejectPendingExportSnapshots: (reason: Error) => void;
   refreshGitBaseline: (options?: RefreshGitBaselineOptions) => void;
   refreshSpellDiagnostics: () => void;
   getGitRepoRoot: () => string | null;
@@ -513,7 +162,7 @@ export type PanelSession = {
 
 export type PanelSessionController = {
   session: PanelSession;
-  handleMessage: (raw: WebviewMessage) => Promise<void>;
+  handleMessage: (raw: WebviewToHostMessage) => Promise<void>;
   dispose: () => void;
 };
 
@@ -577,8 +226,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
   const savedRevisionTracker = new SavedRevisionTracker();
   let fixedBaselineSelected = false;
-  const pendingExportSnapshots = new Map<string, PendingExportSnapshot>();
-
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     applyQueue = applyQueue.then(task, task);
     return applyQueue;
@@ -794,7 +441,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   };
 
   const sendDiagnosticsChanged = async (): Promise<boolean> => {
-    const message: DiagnosticsChangedMessage = {
+    const message: DiagnosticsChangedEvent = {
       type: 'diagnosticsChanged',
       diagnostics: serializeDiagnostics(document)
     };
@@ -830,7 +477,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   };
 
   const sendDocChanged = async (): Promise<boolean> => {
-    const message: DocChangedMessage = {
+    const message: DocumentChangedMessage = {
       type: 'docChanged',
       text: document.getText(),
       version: document.version
@@ -901,7 +548,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     diffBaselineGeneration += 1;
     payload = { ...payload, generation: diffBaselineGeneration };
 
-    const message: GitBaselineChangedMessage = {
+    const message: GitBaselineChangedEvent = {
       type: 'gitBaselineChanged',
       version: document.version,
       payload
@@ -952,56 +599,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (disposed) {
       throw new Error('The editor was closed before export completed.');
     }
-    const requestId = `export-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-    const response = new Promise<{ text: string; environment?: ExportStyleEnvironment }>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pendingExportSnapshots.delete(requestId);
-        reject(new Error('Timed out waiting for export snapshot from the editor.'));
-      }, 20000);
-
-      pendingExportSnapshots.set(requestId, { resolve, reject, timer });
-    });
-
-    const message: RequestExportSnapshotMessage = {
-      type: 'requestExportSnapshot',
-      requestId
-    };
-    const posted = await postToWebview(message);
-    if (!posted) {
-      rejectPendingExportSnapshot(requestId, new Error('The editor webview is not ready to export.'));
+    const result = await exportSnapshotTransport.request();
+    if (result.ok === false) {
+      throw new Error(result.error.message);
     }
-
-    return response;
-  };
-
-  const rejectPendingExportSnapshot = (requestId: string, error: Error): void => {
-    const pending = pendingExportSnapshots.get(requestId);
-    if (!pending) {
-      return;
-    }
-    clearTimeout(pending.timer);
-    pendingExportSnapshots.delete(requestId);
-    pending.reject(error);
-  };
-
-  const resolvePendingExportSnapshot = (
-    requestId: string,
-    value: { text: string; environment?: ExportStyleEnvironment }
-  ): void => {
-    const pending = pendingExportSnapshots.get(requestId);
-    if (!pending) {
-      return;
-    }
-    clearTimeout(pending.timer);
-    pendingExportSnapshots.delete(requestId);
-    pending.resolve(value);
-  };
-
-  const rejectPendingExportSnapshots = (error: Error): void => {
-    for (const requestId of pendingExportSnapshots.keys()) {
-      rejectPendingExportSnapshot(requestId, error);
-    }
+    return result.value;
   };
 
   const runPendingGitRefreshes = async (): Promise<void> => {
@@ -1092,7 +694,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     const preserveViewport = hasDeliveredInitialRevealSelection;
-    const message: RevealSelectionMessage = {
+    const message: HostEditorEvent = {
       type: 'revealSelection',
       anchor: selection.anchor,
       head: selection.head,
@@ -1116,6 +718,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     await postRevealSelection(pendingRevealSelection);
   };
 
+  const exportSnapshotTransport = createExportSnapshotTransport(postToWebview);
+
   const postRevealDocumentFragment = async (href: string): Promise<void> => {
     if (!webviewReady) {
       pendingRevealDocumentFragment = href;
@@ -1126,7 +730,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       pendingRevealDocumentFragment = href;
       return;
     }
-    const message: RevealDocumentFragmentMessage = { type: 'revealDocumentFragment', href };
+    const message: HostEditorEvent = { type: 'revealDocumentFragment', href };
     pendingRevealDocumentFragment = (await postToWebview(message)) ? null : href;
   };
 
@@ -1156,7 +760,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!initDelivered) {
       return;
     }
-    const message: FocusEditorMessage = { type: 'focusEditor' };
+    const message: HostEditorEvent = { type: 'focusEditor' };
     await postToWebview(message);
   };
 
@@ -1249,13 +853,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     getMode: () => mode,
     ensureInitDelivered,
     requestExportSnapshot,
-    rejectPendingExportSnapshots,
     refreshGitBaseline,
     refreshSpellDiagnostics: () => scheduleSpellCheck(0),
     getGitRepoRoot: () => gitDocumentState.getRepoRoot()
   };
 
-  const handleMessage = async (raw: WebviewMessage): Promise<void> => {
+  const handleMessage = async (raw: WebviewToHostMessage): Promise<void> => {
     if (disposed) {
       return;
     }
@@ -1432,83 +1035,125 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await openImageExternally(raw.url, documentUri);
         return;
       case 'resolveImageSrc': {
-        const response: ResolvedImageSrcMessage = {
-          type: 'resolvedImageSrc',
-          requestId: raw.requestId,
-          resolvedUrl: await resolveWebviewImageSrc(raw.url, documentUri, panel.webview)
-        };
+        let response: ResolvedImageSrcResponse;
+        try {
+          response = {
+            type: 'resolvedImageSrc',
+            requestId: raw.requestId,
+            result: {
+              ok: true,
+              value: { resolvedUrl: await resolveWebviewImageSrc(raw.url, documentUri, panel.webview) }
+            }
+          };
+        } catch (error) {
+          response = {
+            type: 'resolvedImageSrc',
+            requestId: raw.requestId,
+            result: {
+              ok: false,
+              error: {
+                code: 'operation-failed',
+                message: error instanceof Error ? error.message : 'Failed to resolve image source'
+              }
+            }
+          };
+        }
         await postToWebview(response);
         return;
       }
       case 'resolveWikiLinks': {
-        const response: ResolvedWikiLinksMessage = {
-          type: 'resolvedWikiLinks',
-          requestId: raw.requestId,
-          results: await resolveWikiLinkTargets(raw.targets, documentUri)
-        };
+        let response: ResolvedWikiLinksResponse;
+        try {
+          response = {
+            type: 'resolvedWikiLinks',
+            requestId: raw.requestId,
+            result: { ok: true, value: { results: await resolveWikiLinkTargets(raw.targets, documentUri) } }
+          };
+        } catch (error) {
+          response = {
+            type: 'resolvedWikiLinks',
+            requestId: raw.requestId,
+            result: {
+              ok: false,
+              error: { code: 'operation-failed', message: error instanceof Error ? error.message : 'Failed to resolve Wiki Links' }
+            }
+          };
+        }
         await postToWebview(response);
         return;
       }
       case 'resolveLocalLinks': {
-        const response: ResolvedLocalLinksMessage = {
-          type: 'resolvedLocalLinks',
-          requestId: raw.requestId,
-          results: await resolveLocalLinkTargets(raw.targets, documentUri)
-        };
+        let response: ResolvedLocalLinksResponse;
+        try {
+          response = {
+            type: 'resolvedLocalLinks',
+            requestId: raw.requestId,
+            result: { ok: true, value: { results: await resolveLocalLinkTargets(raw.targets, documentUri) } }
+          };
+        } catch (error) {
+          response = {
+            type: 'resolvedLocalLinks',
+            requestId: raw.requestId,
+            result: {
+              ok: false,
+              error: { code: 'operation-failed', message: error instanceof Error ? error.message : 'Failed to resolve local links' }
+            }
+          };
+        }
         await postToWebview(response);
         return;
       }
-      case 'exportSnapshot':
-        resolvePendingExportSnapshot(raw.requestId, {
-          text: raw.text,
-          environment: raw.environment
-        });
-        return;
-      case 'exportSnapshotError':
-        rejectPendingExportSnapshot(raw.requestId, new Error(raw.message || 'Failed to collect export snapshot.'));
+      case 'exportSnapshotResult':
+        exportSnapshotTransport.accept(raw);
         return;
       case 'requestPreviewRender': {
+        let response: PreviewRenderResponse;
         try {
           const rendered = await renderPreview({
             markdownText: raw.text,
             sourceDocumentPath: documentUri.fsPath,
             styleEnvironment: raw.environment
           });
-          await postToWebview({
-            type: 'previewRendered',
+          response = {
+            type: 'previewRenderResult',
             requestId: raw.requestId,
-            html: rendered.html,
-            hasMermaid: rendered.hasMermaid,
-            styles: rendered.styles
-          });
+            result: { ok: true, value: rendered }
+          };
         } catch (error) {
-          await postToWebview({
-            type: 'previewRenderError',
+          response = {
+            type: 'previewRenderResult',
             requestId: raw.requestId,
-            message: error instanceof Error ? error.message : 'Failed to render Preview'
-          });
+            result: {
+              ok: false,
+              error: {
+                code: 'operation-failed',
+                message: error instanceof Error ? error.message : 'Failed to render Preview'
+              }
+            }
+          };
         }
+        await postToWebview(response);
         return;
       }
       case 'requestGitBlame': {
         if (!gitBlameEnabled) {
-          const response: GitBlameResultMessage = {
+          const response: GitBlameResponse = {
             type: 'gitBlameResult',
             requestId: raw.requestId,
             lineNumber: raw.lineNumber,
             localEditGeneration: raw.localEditGeneration,
-            result: { kind: 'unavailable', reason: 'error' }
+            result: { ok: true, value: { kind: 'unavailable', reason: 'error' } }
           };
           await postToWebview(response);
           return;
         }
         const resolved = await resolveGitBlameForRequest(documentUri, raw, document.getText(), gitDocumentState);
-        const response: GitBlameResultMessage = {
+        const response: GitBlameResponse = {
           type: 'gitBlameResult',
           requestId: raw.requestId,
           lineNumber: raw.lineNumber,
           localEditGeneration: raw.localEditGeneration,
-          result: resolved.result
+          result: { ok: true, value: resolved.result }
         };
         await postToWebview(response);
         return;
@@ -1539,13 +1184,14 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await enqueue(async () => {
           await vscode.commands.executeCommand('workbench.action.files.revert');
           await refreshSavedRevisionNow();
-          await postToWebview({
+          const message: DiscardedChangesMessage = {
             type: 'discardedChanges',
             text: document.getText(),
             version: document.version,
             topLine: raw.topLine,
             topLineOffset: raw.topLineOffset ?? 0
-          });
+          };
+          await postToWebview(message);
         });
         return;
       case 'saveDocument':
@@ -1584,15 +1230,36 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       }
       case 'requestDiagnosticSuggestions': {
-        const response = await resolveDiagnosticSuggestions(document, raw, spellCheckEnabled);
+        let response: DiagnosticSuggestionsResult;
+        try {
+          response = await resolveDiagnosticSuggestions(document, raw, spellCheckEnabled);
+        } catch (error) {
+          response = {
+            type: 'diagnosticSuggestionsResult',
+            requestId: raw.requestId,
+            from: raw.from,
+            to: raw.to,
+            result: {
+              ok: false,
+              error: { code: 'operation-failed', message: error instanceof Error ? error.message : 'Failed to resolve diagnostic suggestions' }
+            }
+          };
+        }
         await postToWebview(response);
         return;
       }
     }
   };
 
-  const messageSubscription = panel.webview.onDidReceiveMessage((raw: WebviewMessage) => {
-    runBackground(handleMessage(raw), 'handleMessage');
+  const messageSubscription = panel.webview.onDidReceiveMessage((raw: unknown) => {
+    const message = decodeWebviewToHostMessage(raw);
+    if (!message) {
+      return;
+    }
+    runBackground(
+      handleMessage(message),
+      'handleMessage'
+    );
   });
 
   const documentChangeSubscription = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -1727,7 +1394,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       }
     }), 'disposeDraftRecovery');
 
-    rejectPendingExportSnapshots(new Error('The editor was closed before export completed.'));
+    exportSnapshotTransport.close('The editor was closed before export completed.');
     messageSubscription.dispose();
     documentChangeSubscription.dispose();
     documentSaveSubscription.dispose();
@@ -1987,15 +1654,15 @@ function serializeDiagnostics(document: vscode.TextDocument): SerializedDiagnost
 
 async function resolveDiagnosticSuggestions(
   document: vscode.TextDocument,
-  request: RequestDiagnosticSuggestionsMessage,
+  request: RequestDiagnosticSuggestions,
   spellCheckEnabled: boolean
-): Promise<DiagnosticSuggestionsResultMessage> {
-  const emptyResponse: DiagnosticSuggestionsResultMessage = {
+): Promise<DiagnosticSuggestionsResult> {
+  const emptyResponse: DiagnosticSuggestionsResult = {
     type: 'diagnosticSuggestionsResult',
     requestId: request.requestId,
     from: request.from,
     to: request.to,
-    suggestions: []
+    result: { ok: true, value: { suggestions: [] } }
   };
 
   const documentText = document.getText();
@@ -2061,13 +1728,13 @@ async function resolveDiagnosticSuggestions(
 
   return {
     ...emptyResponse,
-    suggestions
+    result: { ok: true, value: { suggestions } }
   };
 }
 
 function hasMatchingDiagnostic(
   document: vscode.TextDocument,
-  request: RequestDiagnosticSuggestionsMessage,
+  request: RequestDiagnosticSuggestions,
   requestedRange: { from: number; to: number }
 ): boolean {
   const documentText = document.getText();
@@ -2124,9 +1791,9 @@ function rangesOverlap(left: { from: number; to: number }, right: { from: number
 }
 
 async function handleSaveImageFromClipboard(
-  message: SaveImageFromClipboardMessage,
+  message: SaveImageFromClipboardRequest,
   documentUri: vscode.Uri
-): Promise<SavedImagePathMessage> {
+): Promise<SavedImagePathResponse> {
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
   const saveRoot = workspaceFolder?.uri ?? vscode.Uri.file(resolveClipboardImageSaveRoot(documentUri.fsPath));
   const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
@@ -2152,16 +1819,20 @@ async function handleSaveImageFromClipboard(
     return {
       type: 'savedImagePath',
       requestId: message.requestId,
-      success: true,
-      path: relativePath.replace(/\\/g, '/')
+      result: {
+        ok: true,
+        value: { path: relativePath.replace(/\\/g, '/') }
+      }
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to save image';
     return {
       type: 'savedImagePath',
       requestId: message.requestId,
-      success: false,
-      error: errorMessage
+      result: {
+        ok: false,
+        error: { code: 'operation-failed', message: errorMessage }
+      }
     };
   }
 }

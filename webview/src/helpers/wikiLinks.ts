@@ -1,18 +1,26 @@
 import { StateField, RangeSetBuilder, EditorState, Transaction } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
 import { resolvedSyntaxTree } from './markdownSyntax';
+import { createWikiLinkResolutionTransport, type WikiLinkResolutionTransport } from '../adapters/wikiLinkResolutionTransport';
+import type { ResolvedWikiLinksResponse } from '../../../src/protocol/wikiLinkResolution';
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const wikiLinkStatusByTarget = new Map<string, boolean>();
 
 let vscodeApi: any = null;
-let wikiLinkRequestCounter = 0;
-let latestWikiLinkRequestId = '';
+let wikiLinkTransport: WikiLinkResolutionTransport = {
+  resolve: async () => ({ ok: false, error: { code: 'operation-failed', message: 'Wiki Link handling is not initialized' } }),
+  accept: () => false
+};
+let wikiLinkGeneration = 0;
 let pendingWikiStatusRefresh: number | null = null;
 const wikiStatusDebounceMs = 1000;
 
 export const initializeWikiLinkHandling = (vscode: any): void => {
   vscodeApi = vscode;
+  wikiLinkTransport = createWikiLinkResolutionTransport((message) => {
+    vscodeApi?.postMessage(message);
+  });
 };
 
 export const isEscapedAt = (text: string, index: number): boolean => {
@@ -60,6 +68,7 @@ export const setWikiLinkRefreshContext = (context: WikiLinkRefreshContext): void
 };
 
 export const requestWikiLinkStatuses = (text: string): void => {
+  const generation = ++wikiLinkGeneration;
   const targets = collectWikiLinkTargets(text);
   if (!targets.length) {
     replaceWikiLinkStatuses([]);
@@ -67,9 +76,15 @@ export const requestWikiLinkStatuses = (text: string): void => {
     return;
   }
 
-  const requestId = `wiki-${wikiLinkRequestCounter++}`;
-  latestWikiLinkRequestId = requestId;
-  vscodeApi?.postMessage({ type: 'resolveWikiLinks', requestId, targets });
+  void wikiLinkTransport.resolve(targets).then((result) => {
+    if (generation !== wikiLinkGeneration) return;
+    if (result.ok === true) {
+      replaceWikiLinkStatuses(result.value.results);
+    } else {
+      replaceWikiLinkStatuses([]);
+    }
+    refreshContext?.refreshDecorations();
+  });
 };
 
 export const scheduleWikiLinkStatusRefresh = (text: string): void => {
@@ -89,12 +104,8 @@ export const cancelPendingWikiStatusRefresh = (): void => {
   }
 };
 
-export const handleResolvedWikiLinks = (message: { requestId: string; results?: Array<{ target: string; exists: boolean }> }): boolean => {
-  if (message.requestId !== latestWikiLinkRequestId) {
-    return false;
-  }
-  replaceWikiLinkStatuses(message.results ?? []);
-  return true;
+export const handleResolvedWikiLinks = (message: ResolvedWikiLinksResponse): boolean => {
+  return wikiLinkTransport.accept(message);
 };
 
 export const wikiLinkScheme = 'meo-wiki:';

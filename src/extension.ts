@@ -78,6 +78,7 @@ import {
   showTimedWarningMessageWithItems
 } from './shared/timedUi';
 import type { ExportStyleEnvironment } from './export/runtime';
+import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents';
 
 const VIEW_TYPE = 'meoEnhanced.editor';
 const ACTIVE_EDITOR_CONTEXT_KEY = 'meoEnhanced.activeEditor';
@@ -634,7 +635,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
     this.lastActivePanel = session.panel;
     await session.ensureInitDelivered();
-    await session.panel.webview.postMessage({ type: 'toggleMode' });
+    const message: HostConfigurationEvent = { type: 'toggleMode' };
+    await session.panel.webview.postMessage(message);
   }
 
   async resolveCustomTextEditor(
@@ -714,7 +716,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     this.updateActiveEditorContext();
   }
 
-  private broadcast(message: Record<string, unknown>): void {
+  private broadcast(message: HostConfigurationEvent): void {
     for (const panel of this.activePanels) {
       void panel.webview.postMessage(message);
     }

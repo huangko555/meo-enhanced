@@ -36,12 +36,10 @@ try {
     for (let round = 0; round < 3; round += 1) {
       controller.preload(`README links ${round}`);
       const requestId = messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId;
-      controller.handleRendered({
-        type: 'previewRendered',
+      controller.acceptRenderResponse({
+        type: 'previewRenderResult',
         requestId,
-        hasMermaid: false,
-        styles: { dark: '', light: '' },
-        html
+        result: { ok: true, value: { hasMermaid: false, styles: { dark: '', light: '' }, html } }
       });
     }
     controller.setVisible(true);
