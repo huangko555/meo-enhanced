@@ -1,6 +1,4 @@
 import { defaultCodeBlockBackgroundColor, themeColorKeys } from '../../../src/shared/themeDefaults';
-import type { PreviewAppearance } from '../../../src/shared/preview';
-import type { ExportSnapshotResolution } from '../../../src/protocol/exportSnapshot';
 
 export interface ExportStyleEnvironment extends Record<string, unknown> {
   editorBackgroundColor: string;
@@ -79,55 +77,3 @@ export const getExportStyleEnvironment = (): ExportStyleEnvironment => {
     meoThemeColors
   };
 };
-
-export interface ExportHandlerContext {
-  vscode: any;
-  respondToSnapshot: (requestId: string, result: ExportSnapshotResolution) => void;
-  getCurrentText: () => string;
-  whenDocumentIdle: () => Promise<void>;
-  getPreviewAppearance: () => PreviewAppearance;
-}
-
-export const createExportHandler = (context: ExportHandlerContext) => {
-  const getCurrentExportText = (): string => context.getCurrentText();
-
-  const handleExportSnapshotRequest = async (requestId: string): Promise<void> => {
-    try {
-      const text = getCurrentExportText();
-      await context.whenDocumentIdle();
-
-      context.respondToSnapshot(requestId, {
-        ok: true,
-        value: { text, environment: getExportStyleEnvironment() }
-      });
-    } catch (error) {
-      context.respondToSnapshot(requestId, {
-        ok: false,
-        error: {
-          code: 'operation-failed',
-          message: error instanceof Error ? error.message : 'Failed to collect export snapshot'
-        }
-      });
-    }
-  };
-
-  const requestExport = (format: 'html' | 'pdf'): void => {
-    if (format !== 'html' && format !== 'pdf') {
-      return;
-    }
-    context.vscode.postMessage({
-      type: 'exportDocument',
-      format,
-      appearance: context.getPreviewAppearance()
-    });
-  };
-
-  return {
-    handleExportSnapshotRequest,
-    requestExport,
-    getCurrentExportText,
-    getExportStyleEnvironment
-  };
-};
-
-export type ExportHandler = ReturnType<typeof createExportHandler>;

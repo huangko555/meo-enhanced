@@ -11,7 +11,7 @@ import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeE
 import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
-import { createExportHandler, type ExportHandlerContext } from './helpers/export';
+import { getExportStyleEnvironment } from './helpers/export';
 import { refreshMermaidTheme } from './helpers/mermaidDiagram';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { createEditorNoticeController } from './helpers/notices';
@@ -20,7 +20,7 @@ import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
 import { normalizeEditorAppearance, type EditorAppearance } from '../../src/shared/editorAppearance';
 import { resolveCodeTheme } from './themes/editorLightTheme';
-import { createExportSnapshotResponder } from './adapters/exportSnapshotTransport';
+import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
@@ -1988,15 +1988,13 @@ const handleInit = (message: InitMessage) => {
   findPanelController.updateFindStatusSummary();
 };
 
-const exportHandlerContext: ExportHandlerContext = {
-  vscode,
-  respondToSnapshot: createExportSnapshotResponder((message) => vscode.postMessage(message)).respond,
+const exportAdapter = createExportWebviewAdapter({
+  postMessage: (message) => vscode.postMessage(message),
   getCurrentText: getCurrentEditorText,
   whenDocumentIdle: () => documentSessionAdapter.whenIdle(),
-  getPreviewAppearance: () => previewAdapter.getAppearance()
-};
-
-const exportHandler = createExportHandler(exportHandlerContext);
+  getPreviewAppearance: () => previewAdapter.getAppearance(),
+  getStyleEnvironment: getExportStyleEnvironment
+});
 
 const withMessageErrorBoundary = (context: string, action: () => void): void => {
   try {
@@ -2236,11 +2234,8 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  if (message.type === 'requestExportSnapshot') {
-    if (typeof message.requestId !== 'string' || !message.requestId) {
-      return;
-    }
-    void exportHandler.handleExportSnapshotRequest(message.requestId);
+  if (exportAdapter.accept(message)) {
+    return;
   }
 });
 
@@ -2295,6 +2290,7 @@ window.addEventListener('beforeunload', () => {
   clearGitBlameCache({ hideTooltip: false });
   documentSessionAdapter.dispose();
   previewAdapter.dispose();
+  exportAdapter.dispose();
 
   if (initialEditorMountFallbackTimer !== null) {
     window.clearTimeout(initialEditorMountFallbackTimer);
@@ -2497,10 +2493,10 @@ linkBtn.addEventListener('click', () => handleFormatAction('link'));
 wikiLinkBtn.addEventListener('click', () => handleFormatAction('wikiLink'));
 imageBtn.addEventListener('click', () => handleFormatAction('image'));
 exportHtmlOption.addEventListener('click', () => {
-  exportHandler.requestExport('html');
+  exportAdapter.requestExport('html');
 });
 exportPdfOption.addEventListener('click', () => {
-  exportHandler.requestExport('pdf');
+  exportAdapter.requestExport('pdf');
 });
 const showOutlineAt = (position: 'left' | 'right') => {
   if (outlineController.isVisible() && outlineController.getPosition() === position) {

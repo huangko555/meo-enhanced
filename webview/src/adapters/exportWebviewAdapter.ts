@@ -1,0 +1,146 @@
+import type { EditorStyleEnvironment } from '../../../src/protocol/editorStyleEnvironment';
+import type { HostToWebviewMessage, WebviewToHostMessage } from '../../../src/protocol/messages';
+import type { PreviewAppearance } from '../../../src/protocol/previewRender';
+import type { ExportSnapshotResolution } from '../../../src/protocol/exportSnapshot';
+import { createExportSnapshotResponder } from './exportSnapshotTransport';
+
+export type ExportWebviewAdapterDependencies = {
+  readonly postMessage: (message: WebviewToHostMessage) => void;
+  readonly getCurrentText: () => string;
+  readonly whenDocumentIdle: () => Promise<void>;
+  readonly getPreviewAppearance: () => PreviewAppearance;
+  readonly getStyleEnvironment: () => EditorStyleEnvironment;
+};
+
+export type ExportWebviewAdapter = {
+  requestExport(format: 'html' | 'pdf'): void;
+  accept(message: HostToWebviewMessage): boolean;
+  dispose(): void;
+};
+
+type PendingSnapshot = {
+  readonly text: string;
+};
+
+const closedResult = (): ExportSnapshotResolution => ({
+  ok: false,
+  error: {
+    code: 'operation-failed',
+    message: 'The editor was closed before export completed.'
+  }
+});
+
+/** Owns Export command and snapshot collection ordering for one Webview lifecycle. */
+export function createExportWebviewAdapter(
+  dependencies: ExportWebviewAdapterDependencies
+): ExportWebviewAdapter {
+  const responder = createExportSnapshotResponder(dependencies.postMessage);
+  const pendingSnapshots = new Map<string, PendingSnapshot>();
+  const seenRequestIds = new Set<string>();
+  let idleBarrier: Promise<void> | null = null;
+  let disposed = false;
+
+  const settle = (requestId: string, result: ExportSnapshotResolution): void => {
+    if (!pendingSnapshots.delete(requestId)) return;
+    responder.respond(requestId, result);
+  };
+
+  const getIdleBarrier = (): Promise<void> => {
+    if (idleBarrier) return idleBarrier;
+    try {
+      idleBarrier = dependencies.whenDocumentIdle();
+    } catch (error) {
+      idleBarrier = Promise.reject(error);
+    }
+    const currentBarrier = idleBarrier;
+    void currentBarrier.then(
+      () => {
+        if (idleBarrier === currentBarrier) idleBarrier = null;
+      },
+      () => {
+        if (idleBarrier === currentBarrier) idleBarrier = null;
+      }
+    );
+    return currentBarrier;
+  };
+
+  const handleSnapshotRequest = (requestId: string): void => {
+    if (seenRequestIds.has(requestId)) return;
+    seenRequestIds.add(requestId);
+    if (disposed) {
+      responder.respond(requestId, closedResult());
+      return;
+    }
+
+    let text: string;
+    try {
+      text = dependencies.getCurrentText();
+    } catch (error) {
+      responder.respond(requestId, {
+        ok: false,
+        error: {
+          code: 'operation-failed',
+          message: error instanceof Error ? error.message : 'Failed to collect export snapshot'
+        }
+      });
+      return;
+    }
+
+    pendingSnapshots.set(requestId, { text });
+    void getIdleBarrier().then(
+      () => {
+        const pending = pendingSnapshots.get(requestId);
+        if (!pending || disposed) return;
+        try {
+          settle(requestId, {
+            ok: true,
+            value: {
+              text: pending.text,
+              environment: dependencies.getStyleEnvironment()
+            }
+          });
+        } catch (error) {
+          settle(requestId, {
+            ok: false,
+            error: {
+              code: 'operation-failed',
+              message: error instanceof Error ? error.message : 'Failed to collect export snapshot'
+            }
+          });
+        }
+      },
+      (error) => {
+        settle(requestId, {
+          ok: false,
+          error: {
+            code: 'operation-failed',
+            message: error instanceof Error ? error.message : 'Failed to collect export snapshot'
+          }
+        });
+      }
+    );
+  };
+
+  return {
+    requestExport(format) {
+      if (disposed) return;
+      dependencies.postMessage({
+        type: 'exportDocument',
+        format,
+        appearance: dependencies.getPreviewAppearance()
+      });
+    },
+    accept(message) {
+      if (message.type !== 'requestExportSnapshot') return false;
+      handleSnapshotRequest(message.requestId);
+      return true;
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const requestId of Array.from(pendingSnapshots.keys())) {
+        settle(requestId, closedResult());
+      }
+    }
+  };
+}

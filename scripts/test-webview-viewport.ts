@@ -154,6 +154,36 @@ async function main() {
     if (initialPreviewPreloadRequests !== 1) {
       throw new Error(`Live initialization must preload Preview exactly once, received ${initialPreviewPreloadRequests}`);
     }
+    await page.evaluate(() => {
+      for (const requestId of ['browser-snapshot-1', 'browser-snapshot-2']) {
+        window.dispatchEvent(new MessageEvent('message', {
+          data: { type: 'requestExportSnapshot', requestId }
+        }));
+      }
+    });
+    await page.waitForFunction(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportSnapshotResult').length === 2);
+    const snapshotResults = await page.evaluate(() => (
+      (window as typeof window & {
+        __hostMessages?: Array<{
+          type?: string;
+          requestId?: string;
+          result?: { ok?: boolean; value?: { text?: string; environment?: { editorBackgroundColor?: string } } };
+        }>;
+      }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportSnapshotResult').map((message) => ({
+      requestId: message.requestId,
+      ok: message.result?.ok,
+      hasCurrentText: message.result?.value?.text?.includes('## Tall Mermaid') === true,
+      hasStyleEnvironment: typeof message.result?.value?.environment?.editorBackgroundColor === 'string'
+    })));
+    if (JSON.stringify(snapshotResults) !== JSON.stringify([
+      { requestId: 'browser-snapshot-1', ok: true, hasCurrentText: true, hasStyleEnvironment: true },
+      { requestId: 'browser-snapshot-2', ok: true, hasCurrentText: true, hasStyleEnvironment: true }
+    ])) {
+      throw new Error(`Export snapshot lifecycle did not return independent decoded responses: ${JSON.stringify(snapshotResults)}`);
+    }
     const toolbarLayout = await page.evaluate(() => {
       const label = (element: HTMLElement): string => {
         if (element.dataset.action) return element.dataset.action;
