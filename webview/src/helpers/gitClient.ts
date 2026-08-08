@@ -4,7 +4,6 @@ import { createGitBlameTransport } from '../adapters/gitBlameTransport';
 interface GitClientOptions {
   vscode: any;
   getCurrentEditorText?: () => string | undefined;
-  getSyncedText?: () => string | undefined;
   clearTransientUi?: () => void;
   maxBlameSnapshotChars?: number;
   blameTimeoutMs?: number;
@@ -24,26 +23,20 @@ interface GitClient {
 const defaultMaxBlameSnapshotChars = 500 * 1024;
 const defaultBlameTimeoutMs = 8000;
 
-const normalizeEol = (text: string | null | undefined): string => `${text ?? ''}`.replace(/\r\n?/g, '\n');
-
 const normalizeLineNumber = (lineNumber: number): number => (
   Number.isFinite(lineNumber) ? Math.max(1, Math.floor(lineNumber)) : 1
 );
 
-function shouldIncludeBlameSnapshotText(currentText: string | undefined, syncedText: string | undefined, maxChars: number): boolean {
+function shouldIncludeBlameSnapshotText(currentText: string | undefined, maxChars: number): boolean {
   if (typeof currentText !== 'string') {
     return false;
   }
-  if (currentText.length > maxChars) {
-    return false;
-  }
-  return normalizeEol(currentText) !== normalizeEol(syncedText);
+  return currentText.length > 0 && currentText.length <= maxChars;
 }
 
 export function createGitClient({
   vscode,
   getCurrentEditorText,
-  getSyncedText,
   clearTransientUi,
   maxBlameSnapshotChars = defaultMaxBlameSnapshotChars,
   blameTimeoutMs = defaultBlameTimeoutMs
@@ -96,7 +89,7 @@ export function createGitClient({
       localEditGeneration
     };
 
-    if (shouldIncludeBlameSnapshotText(currentText, getSyncedText?.(), maxBlameSnapshotChars)) {
+    if (shouldIncludeBlameSnapshotText(currentText, maxBlameSnapshotChars)) {
       request.text = currentText;
     }
 
@@ -121,7 +114,7 @@ export function createGitClient({
       type: 'openGitRevisionForLine',
       lineNumber: normalizedLine
     };
-    if (shouldIncludeBlameSnapshotText(currentText, getSyncedText?.(), maxBlameSnapshotChars)) {
+    if (shouldIncludeBlameSnapshotText(currentText, maxBlameSnapshotChars)) {
       message.text = currentText;
     }
     vscode.postMessage(message);
@@ -134,7 +127,7 @@ export function createGitClient({
       type: 'openGitWorktreeForLine',
       lineNumber: normalizedLine
     };
-    if (shouldIncludeBlameSnapshotText(currentText, getSyncedText?.(), maxBlameSnapshotChars)) {
+    if (shouldIncludeBlameSnapshotText(currentText, maxBlameSnapshotChars)) {
       message.text = currentText;
     }
     vscode.postMessage(message);
