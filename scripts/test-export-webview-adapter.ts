@@ -49,7 +49,7 @@ assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapsho
 currentText = '# second';
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-2' }), true);
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-2' }), true);
-assert.equal(idleCalls, 1, 'concurrent snapshots should reuse one Document Session idle barrier');
+assert.equal(idleCalls, 2, 'each snapshot must capture the Document Session barrier current at its arrival');
 assert.equal(posted.length, 0);
 
 idle.resolve();
@@ -74,6 +74,29 @@ assert.deepEqual(posted.splice(0), [
   }
 ]);
 assert.equal(environmentReads, 2);
+
+const olderIdle = createDeferred();
+idle = olderIdle;
+assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-before-edit' }), true);
+const newerIdle = createDeferred();
+idle = newerIdle;
+currentText = '# after edit';
+assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-after-edit' }), true);
+olderIdle.resolve();
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(posted.at(0)?.type, 'exportSnapshotResult');
+assert.equal((posted.at(0) as { requestId?: string } | undefined)?.requestId, 'snapshot-before-edit');
+assert.equal(posted.some((message) => (
+  message.type === 'exportSnapshotResult' && message.requestId === 'snapshot-after-edit'
+)), false, 'a later snapshot must not reuse a barrier captured before a newer edit');
+newerIdle.resolve();
+await Promise.resolve();
+await Promise.resolve();
+assert.deepEqual(posted.map((message) => (
+  message.type === 'exportSnapshotResult' ? message.requestId : null
+)), ['snapshot-before-edit', 'snapshot-after-edit']);
+posted.length = 0;
 
 idle = createDeferred();
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-failed' }), true);

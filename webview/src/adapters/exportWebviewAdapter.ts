@@ -37,7 +37,6 @@ export function createExportWebviewAdapter(
   const responder = createExportSnapshotResponder(dependencies.postMessage);
   const pendingSnapshots = new Map<string, PendingSnapshot>();
   const seenRequestIds = new Set<string>();
-  let idleBarrier: Promise<void> | null = null;
   let disposed = false;
 
   const settle = (requestId: string, result: ExportSnapshotResolution): void => {
@@ -46,22 +45,11 @@ export function createExportWebviewAdapter(
   };
 
   const getIdleBarrier = (): Promise<void> => {
-    if (idleBarrier) return idleBarrier;
     try {
-      idleBarrier = dependencies.whenDocumentIdle();
+      return dependencies.whenDocumentIdle();
     } catch (error) {
-      idleBarrier = Promise.reject(error);
+      return Promise.reject(error);
     }
-    const currentBarrier = idleBarrier;
-    void currentBarrier.then(
-      () => {
-        if (idleBarrier === currentBarrier) idleBarrier = null;
-      },
-      () => {
-        if (idleBarrier === currentBarrier) idleBarrier = null;
-      }
-    );
-    return currentBarrier;
   };
 
   const handleSnapshotRequest = (requestId: string): void => {
