@@ -15,10 +15,25 @@ const entrySource = fs.readFileSync(entryPath, 'utf8');
 
 assert.match(adapterSource, /type TableColumnWidthAdapter = \{\s*accept\(/s);
 assert.match(adapterSource, /dispose\(\): void/);
-assert.equal(editorSource.includes('tableColumnWidthAdapter'), false);
+assert.equal(
+  (editorSource.match(/createCodeMirrorDomTableColumnWidthAdapter\(\{/g) ?? []).length,
+  1
+);
+assert.equal((editorSource.match(/policy: tableColumnWidthPolicy/g) ?? []).length, 1);
+assert.equal((editorSource.match(/tableColumnWidthAdapter\.extension/g) ?? []).length, 1);
+assert.equal((editorSource.match(/tableColumnWidthAdapter\.adapter\.dispose\(\)/g) ?? []).length, 1);
+assert.equal(editorSource.includes('tableColumnWidthsField'), false);
+assert.equal(tablesSource.includes('tableColumnWidthsField'), false);
+assert.equal(tablesSource.includes('setTableColumnWidthsEffect'), false);
+assert.equal(tablesSource.includes('storedColumnWidths'), false);
+assert.equal(tablesSource.includes('startColumnResize'), false);
+assert.equal(tablesSource.includes('columnResizeCleanup'), false);
+assert.equal(tablesSource.includes('_meoTableResizeObserver'), false);
+assert.equal(tablesSource.includes("table.dataset.tableColumnWidth = 'true'"), true);
+assert.equal(tablesSource.includes('meo-table-column-width-projected'), true);
 assert.equal(tablesSource.includes('tableColumnWidthAdapter'), false);
 assert.equal(entrySource.includes('../webview/src/editor.ts'), false);
 assert.equal(entrySource.includes('../webview/src/index.ts'), false);
 assert.equal(entrySource.includes('../webview/src/helpers/tables'), false);
 
-console.log('table column width adapter interface and production guard passed');
+console.log('table column width adapter interface and production cutover guard passed');

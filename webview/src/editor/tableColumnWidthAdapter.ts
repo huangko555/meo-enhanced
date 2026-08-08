@@ -37,11 +37,11 @@ type TableBinding = {
   readonly table: HTMLTableElement;
   readonly cleanup: () => void;
   project(): void;
-  reset(): void;
 };
 
 const tableSelector = 'table[data-table-column-width]';
-const handleSelector = '[data-table-column-width-handle]';
+const handleSelector = '[data-table-resize-column]';
+const projectionEventName = 'meo-table-column-width-projected';
 
 function sum(widths: readonly number[]): number {
   return widths.reduce((total, width) => total + width, 0);
@@ -50,6 +50,15 @@ function sum(widths: readonly number[]): number {
 function numberFromDataset(element: HTMLElement, key: 'tableFrom' | 'tableTo'): number | null {
   const value = Number(element.dataset[key]);
   return Number.isFinite(value) ? value : null;
+}
+
+function tableCollapsedOuterBorderWidth(table: HTMLTableElement): number {
+  if (getComputedStyle(table).borderCollapse !== 'collapse') return 0;
+  const cells = Array.from(table.tHead?.rows[0]?.cells ?? []);
+  if (!cells.length) return 0;
+  const leftBorder = Number.parseFloat(getComputedStyle(cells[0]).borderLeftWidth) || 0;
+  const rightBorder = Number.parseFloat(getComputedStyle(cells[cells.length - 1]).borderRightWidth) || 0;
+  return (leftBorder + rightBorder) / 2;
 }
 
 export function createCodeMirrorDomTableColumnWidthAdapter(
@@ -72,7 +81,21 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 
   const availableWidth = (table: HTMLTableElement): number => {
     const container = table.parentElement ?? options.root;
-    return Math.max(0, container.clientWidth);
+    return Math.max(0, container.clientWidth - tableCollapsedOuterBorderWidth(table));
+  };
+
+  const stickyTableFor = (table: HTMLTableElement): HTMLTableElement | null => (
+    table.closest('.meo-md-html-table-shell')
+      ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table') ?? null
+  );
+
+  const renderStickyColumns = (table: HTMLTableElement, widths: readonly number[]): void => {
+    const stickyTable = stickyTableFor(table);
+    if (!stickyTable) return;
+    const columns = Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'));
+    widths.forEach((width, index) => {
+      if (columns[index]) columns[index].style.width = `${width}px`;
+    });
   };
 
   const render = (table: HTMLTableElement, widths: readonly number[], totalWidth: number): void => {
@@ -84,6 +107,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     widths.forEach((width, index) => {
       if (columns[index]) columns[index].style.width = `${width}px`;
     });
+    renderStickyColumns(table, widths);
   };
 
   const reset = (table: HTMLTableElement): void => {
@@ -94,6 +118,11 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     for (const column of table.querySelectorAll<HTMLTableColElement>('colgroup > col')) {
       column.style.width = '';
     }
+    renderStickyColumns(
+      table,
+      Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+        .map((cell) => cell.getBoundingClientRect().width)
+    );
   };
 
   const project = (table: HTMLTableElement): void => {
@@ -110,6 +139,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       defaultWidthWasCapped: intent.defaultWidthWasCapped,
       availableWidth: availableWidth(table)
     });
+    if (result.reachedAvailableWidth && !intent.elastic) intent.elastic = true;
     render(table, result.widths, result.totalWidth);
   };
 
@@ -127,6 +157,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     const cleanups: Array<() => void> = [];
     let dragCleanup: (() => void) | null = null;
     let resizeFrame = 0;
+    table.dataset.tableColumnWidthOwner = 'adapter';
 
     const cancelFrame = () => {
       if (!resizeFrame) return;
@@ -138,14 +169,17 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       resizeFrame = requestAnimationFrame(() => {
         resizeFrame = 0;
         project(table);
+        table.dispatchEvent(new CustomEvent(projectionEventName));
       });
     };
 
     const start = (event: PointerEvent): void => {
       if (disposed || event.button !== 0) return;
-      const handle = event.currentTarget;
-      if (!(handle instanceof HTMLElement)) return;
-      const column = Number(handle.dataset.tableColumnWidthHandle);
+      const handle = event.target instanceof Element
+        ? event.target.closest<HTMLElement>(handleSelector)
+        : null;
+      if (!handle) return;
+      const column = Number(handle.dataset.tableResizeColumn);
       const cells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
       if (!Number.isInteger(column) || !cells[column]) return;
       event.preventDefault();
@@ -167,12 +201,13 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       });
       const startX = event.clientX;
       let nextWidths: readonly number[] = startWidths;
+      const pointerBoundary = table.closest<HTMLElement>('.cm-editor') ?? options.root;
 
       const removeDragListeners = () => {
         window.removeEventListener('pointermove', move, true);
         window.removeEventListener('pointerup', finish, true);
         window.removeEventListener('pointercancel', finish, true);
-        options.root.removeEventListener('pointerleave', finish);
+        pointerBoundary.removeEventListener('pointerleave', finish);
         dragCleanup = null;
       };
       const finish = (finishEvent?: PointerEvent) => {
@@ -186,6 +221,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           elastic: sum(nextWidths) >= maximumTotalWidth - 1,
           defaultWidthWasCapped
         });
+        table.dispatchEvent(new CustomEvent(projectionEventName));
         scheduleProjection();
       };
       const move = (moveEvent: PointerEvent) => {
@@ -210,13 +246,12 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       window.addEventListener('pointermove', move, true);
       window.addEventListener('pointerup', finish, true);
       window.addEventListener('pointercancel', finish, true);
-      options.root.addEventListener('pointerleave', finish);
+      pointerBoundary.addEventListener('pointerleave', finish);
     };
 
-    for (const handle of table.querySelectorAll<HTMLElement>(handleSelector)) {
-      handle.addEventListener('pointerdown', start);
-      cleanups.push(() => handle.removeEventListener('pointerdown', start));
-    }
+    const handleRoot = table.closest('.meo-md-html-table-shell') ?? table;
+    handleRoot.addEventListener('pointerdown', start);
+    cleanups.push(() => handleRoot.removeEventListener('pointerdown', start));
 
     if (typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(scheduleProjection);
@@ -227,11 +262,11 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     return {
       table,
       project: () => project(table),
-      reset: () => reset(table),
       cleanup() {
         dragCleanup?.();
         cancelFrame();
         for (const cleanup of cleanups) cleanup();
+        delete table.dataset.tableColumnWidthOwner;
       }
     };
   };
@@ -260,7 +295,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       if (!transaction.docChanged) continue;
       for (const intent of intents) {
         intent.from = transaction.changes.mapPos(intent.from, 1);
-        intent.to = transaction.changes.mapPos(intent.to, -1);
+        intent.to = transaction.changes.mapPos(intent.to, 1);
       }
       for (let index = intents.length - 1; index >= 0; index -= 1) {
         if (intents[index].from >= intents[index].to) intents.splice(index, 1);

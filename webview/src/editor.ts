@@ -26,6 +26,8 @@ import {
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
 import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
 import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
+import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
+import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { createGitBlameHoverController } from './helpers/gitBlameHover';
@@ -52,7 +54,6 @@ import {
   refreshTableLocalLinkIndicators,
   tableCellEditorOffsetToSourceOffset,
   tableCellSourceOffsetToEditorOffset,
-  tableColumnWidthsField,
   tableHeaderAlignmentOverrideField,
   commitPendingTableEdits,
   focusHistoryChange,
@@ -1975,6 +1976,10 @@ export function createEditor({
   const tableTransactionProvenanceAdapter = createCodeMirrorTableTransactionProvenanceAdapter(
     createTableTransactionProvenance()
   );
+  const tableColumnWidthAdapter = createCodeMirrorDomTableColumnWidthAdapter({
+    root: parent,
+    policy: tableColumnWidthPolicy
+  });
   const state = EditorState.create({
     doc: text,
     selection: { anchor: initialCursorPos },
@@ -2234,7 +2239,7 @@ export function createEditor({
       }),
       ...headingCollapseSharedExtensions(),
       tableHeaderAlignmentOverrideField,
-      tableColumnWidthsField,
+      tableColumnWidthAdapter.extension,
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
@@ -2314,6 +2319,7 @@ export function createEditor({
     parent,
     scrollTo: initialScrollTo
   });
+  tableColumnWidthAdapter.adapter.accept({ type: 'refresh' });
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
   // Native listeners keep hover behavior consistent across code, Mermaid, and math blocks.
   onBlockActionPointerMove = (event) => updateBlockActionToolbarHover(event, view);
@@ -2771,6 +2777,7 @@ export function createEditor({
       editorHistoryRuntime = null;
       viewportController.destroy();
       tableTransactionProvenanceAdapter.dispose();
+      tableColumnWidthAdapter.adapter.dispose();
       view.destroy();
     },
     setText(textValue) {
@@ -2783,6 +2790,7 @@ export function createEditor({
           effects: tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
           annotations: Transaction.addToHistory.of(false)
         });
+        tableColumnWidthAdapter.adapter.accept({ type: 'externalDocumentPresented' });
         return;
       }
 
@@ -2811,6 +2819,7 @@ export function createEditor({
       } finally {
         applyingExternal = false;
       }
+      tableColumnWidthAdapter.adapter.accept({ type: 'externalDocumentPresented' });
       restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
       syncSelectionClass();
       emitSelectionChange();

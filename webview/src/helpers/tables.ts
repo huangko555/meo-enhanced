@@ -30,12 +30,6 @@ import {
   getTableTransactionProvenanceSnapshot
 } from '../adapters/tableTransactionProvenance';
 
-declare global {
-  interface HTMLDivElement {
-    _meoTableResizeObserver?: ResizeObserver;
-  }
-}
-
 interface TableData {
   rows: string[][];
   alignments: string[];
@@ -75,7 +69,6 @@ interface DomRefs {
   rowInputs: HTMLTextAreaElement[][];
   allRowInputs: HTMLTextAreaElement[][];
   table: HTMLTableElement;
-  colgroup: HTMLTableColElement[];
   tbody: HTMLTableSectionElement;
   container: HTMLElement;
   shell: HTMLElement;
@@ -92,7 +85,6 @@ interface DomRefs {
   stickyChrome: HTMLDivElement;
   stickyHeaderViewport: HTMLDivElement;
   stickyTable: HTMLTableElement;
-  stickyColgroup: HTMLTableColElement[];
   stickyHeaderRow: HTMLTableRowElement;
   toolbarButtons: {
     insertRowAbove: HTMLButtonElement;
@@ -429,73 +421,6 @@ export const tableHeaderAlignmentOverrideField = StateField.define<RangeSet<Tabl
   }
 });
 
-class TableColumnWidthsValue extends RangeValue {
-  constructor(
-    readonly widths: readonly number[],
-    readonly initialTotalWidth: number,
-    readonly elastic: boolean,
-    readonly defaultWidthWasCapped: boolean
-  ) {
-    super();
-  }
-
-  eq(other: RangeValue): boolean {
-    return other instanceof TableColumnWidthsValue &&
-      other.initialTotalWidth === this.initialTotalWidth &&
-      other.elastic === this.elastic &&
-      other.defaultWidthWasCapped === this.defaultWidthWasCapped &&
-      other.widths.length === this.widths.length &&
-      other.widths.every((width, index) => width === this.widths[index]);
-  }
-}
-
-function tableCollapsedOuterBorderWidth(table: HTMLTableElement): number {
-  if (getComputedStyle(table).borderCollapse !== 'collapse') return 0;
-  const cells = Array.from(table.tHead?.rows[0]?.cells ?? []);
-  if (!cells.length) return 0;
-  const leftBorder = Number.parseFloat(getComputedStyle(cells[0]).borderLeftWidth) || 0;
-  const rightBorder = Number.parseFloat(getComputedStyle(cells[cells.length - 1]).borderRightWidth) || 0;
-  // Collapsed outer borders extend half of their width beyond the table grid on each side.
-  return (leftBorder + rightBorder) / 2;
-}
-
-const setTableColumnWidthsEffect = StateEffect.define<{
-  from: number;
-  to: number;
-  widths: number[];
-  initialTotalWidth: number;
-  elastic: boolean;
-  defaultWidthWasCapped: boolean;
-}>();
-
-export const tableColumnWidthsField = StateField.define<RangeSet<TableColumnWidthsValue>>({
-  create() {
-    return RangeSet.empty;
-  },
-  update(value, transaction) {
-    const mapped = value.map(transaction.changes);
-    const effects = transaction.effects.filter((effect) => effect.is(setTableColumnWidthsEffect));
-    if (!effects.length) return mapped;
-
-    const entries: Array<{ from: number; to: number; value: TableColumnWidthsValue }> = [];
-    mapped.between(0, transaction.state.doc.length, (from, to, rangeValue) => {
-      entries.push({ from, to, value: rangeValue });
-    });
-    for (const effect of effects) {
-      const nextValue = new TableColumnWidthsValue(
-        [...effect.value.widths],
-        effect.value.initialTotalWidth,
-        effect.value.elastic,
-        effect.value.defaultWidthWasCapped
-      );
-      const existing = entries.find((entry) => entry.from === effect.value.from && entry.to === effect.value.to);
-      if (existing) existing.value = nextValue;
-      else entries.push({ from: effect.value.from, to: effect.value.to, value: nextValue });
-    }
-    entries.sort((left, right) => left.from - right.from || left.to - right.to);
-    return RangeSet.of(entries.map((entry) => entry.value.range(entry.from, entry.to)), true);
-  }
-});
 // Icons are inline SVG path data from Tabler Icons (MIT), vendored to avoid a
 // broad icon dependency for this table-only toolbar.
 const tableToolbarIcons: Record<string, TableToolbarIcon> = {
@@ -2133,8 +2058,6 @@ class HtmlTableWidget extends WidgetType {
   sortState: TableSortState | null;
   activeTarget: TableActionTarget;
   searchState: TableSearchState | null;
-  columnResizeCleanup: (() => void) | null;
-  columnResizeActive: boolean;
 
   constructor(tableData: TableData) {
     super();
@@ -2153,8 +2076,6 @@ class HtmlTableWidget extends WidgetType {
     this.sortState = null;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
     this.searchState = null;
-    this.columnResizeCleanup = null;
-    this.columnResizeActive = false;
   }
 
   eq(other: WidgetType): boolean {
@@ -3790,190 +3711,12 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  storedColumnWidths(view: EditorView): TableColumnWidthsValue | null {
-    const ranges = view.state.field(tableColumnWidthsField, false);
-    if (!ranges || !Number.isFinite(this.tableData.from) || !Number.isFinite(this.tableData.to)) return null;
-    let result: TableColumnWidthsValue | null = null;
-    ranges.between(this.tableData.from!, this.tableData.to!, (from, to, value) => {
-      if (from === this.tableData.from && to === this.tableData.to) result = value;
-    });
-    return result?.widths.length === this.tableData.colCount ? result : null;
-  }
-
-  applyColumnWidths(
-    widths: readonly number[],
-    options: {
-      deferFullLayout?: boolean;
-      elastic?: boolean;
-      defaultWidthWasCapped?: boolean;
-      initialTotalWidth?: number;
-    } = {}
-  ) {
-    if (!this.domRefs || widths.length !== this.tableData.colCount) return false;
-    const {
-      deferFullLayout = false,
-      elastic = false,
-      defaultWidthWasCapped = false,
-      initialTotalWidth = 0
-    } = options;
-    const { table, colgroup, wrap, shell } = this.domRefs;
-    const requestedTotalWidth = widths.reduce((total, width) => total + width, 0);
-    const availableWidth = Math.max(0, wrap.clientWidth - tableCollapsedOuterBorderWidth(table));
-    const elasticLimit = defaultWidthWasCapped
-      ? availableWidth
-      : Math.max(requestedTotalWidth, initialTotalWidth);
-    const targetTotalWidth = Math.min(
-      availableWidth || requestedTotalWidth,
-      elastic ? elasticLimit : requestedTotalWidth
-    );
-    const scale = requestedTotalWidth > 0 ? targetTotalWidth / requestedTotalWidth : 1;
-    const renderedWidths = widths.map((width) => width * scale);
-    const totalWidth = renderedWidths.reduce((total, width) => total + width, 0);
-    shell.style.minWidth = '0';
-    table.style.width = `${totalWidth}px`;
-    table.style.maxWidth = 'none';
-    table.style.minWidth = '0';
-    table.style.tableLayout = 'fixed';
-    for (let index = 0; index < colgroup.length; index += 1) {
-      colgroup[index].style.width = `${renderedWidths[index]}px`;
-    }
-    if (deferFullLayout) {
-      this.updateStickyHeader();
-      return availableWidth > 0 && totalWidth >= availableWidth - 1;
-    }
-    this.pendingResizeRows = true;
-    this.scheduleLayout({ resizeRows: true });
-    return availableWidth > 0 && totalWidth >= availableWidth - 1;
-  }
-
   createColumnResizeHandle(column: number): HTMLSpanElement {
     const handle = document.createElement('span');
     handle.className = 'meo-md-html-table-column-resize-handle';
     handle.dataset.tableResizeColumn = String(column);
     handle.setAttribute('aria-hidden', 'true');
-    handle.addEventListener('pointerdown', (event) => this.startColumnResize(event, column));
     return handle;
-  }
-
-  startColumnResize(event: PointerEvent, column: number) {
-    if (event.button !== 0 || !this.domRefs || !this.view) return;
-    const { table, wrap } = this.domRefs;
-    const headerCells = Array.from(table.tHead?.rows[0]?.cells ?? []);
-    if (!headerCells[column]) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    this.columnResizeCleanup?.();
-    this.columnResizeActive = true;
-
-    const stored = this.storedColumnWidths(this.view);
-    const startWidths = headerCells.map((cell) => cell.getBoundingClientRect().width);
-    const initialTotalWidth = stored?.initialTotalWidth ?? table.getBoundingClientRect().width;
-    const startTotalWidth = startWidths.reduce((total, width) => total + width, 0);
-    const startMaximumTotalWidth = Math.max(0, wrap.clientWidth - tableCollapsedOuterBorderWidth(table));
-    const defaultWidthWasCapped = stored?.defaultWidthWasCapped ?? (
-      initialTotalWidth >= startMaximumTotalWidth - 1
-    );
-    const numericStyleValue = (value: string) => Number.parseFloat(value) || 0;
-    const minimumColumnWidths = headerCells.map((cell) => {
-      const cellStyle = getComputedStyle(cell);
-      const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
-      const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
-      return numericStyleValue(previewStyle.fontSize)
-        + numericStyleValue(previewStyle.paddingLeft)
-        + numericStyleValue(previewStyle.paddingRight)
-        + numericStyleValue(cellStyle.borderLeftWidth)
-        + numericStyleValue(cellStyle.borderRightWidth);
-    });
-    const minimumColumnWidth = minimumColumnWidths[column];
-    const startX = event.clientX;
-    const editorDom = this.view.dom;
-    let nextWidths = startWidths;
-
-    const removeListeners = () => {
-      window.removeEventListener('pointermove', onPointerMove, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
-      editorDom.removeEventListener('pointerleave', finish);
-      this.columnResizeCleanup = null;
-      this.columnResizeActive = false;
-    };
-    const finish = (finishEvent?: PointerEvent) => {
-      if (finishEvent && finishEvent.pointerId !== event.pointerId) return;
-      removeListeners();
-      const view = this.view;
-      if (!view || !this.domRefs) return;
-      const range = this.resolveCurrentTableRange(view, this.domRefs.shell);
-      if (!range) return;
-      const currentMaximumTotalWidth = Math.max(
-        0,
-        this.domRefs.wrap.clientWidth - tableCollapsedOuterBorderWidth(this.domRefs.table)
-      );
-      view.dispatch({
-        effects: setTableColumnWidthsEffect.of({
-          ...range,
-          widths: [...nextWidths],
-          initialTotalWidth,
-          elastic: nextWidths.reduce((total, width) => total + width, 0) >= currentMaximumTotalWidth - 1,
-          defaultWidthWasCapped
-        })
-      });
-      this.scheduleLayout({ resizeRows: true });
-    };
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId !== event.pointerId) return;
-      if (moveEvent.pointerType === 'mouse' && (moveEvent.buttons & 1) === 0) {
-        finish(moveEvent);
-        return;
-      }
-      moveEvent.preventDefault();
-      const requestedDelta = moveEvent.clientX - startX;
-      const maximumTotalWidth = Math.max(0, wrap.clientWidth - tableCollapsedOuterBorderWidth(table));
-      const baseScale = startTotalWidth > maximumTotalWidth && maximumTotalWidth > 0
-        ? maximumTotalWidth / startTotalWidth
-        : 1;
-      const baseWidths = startWidths.map((width) => width * baseScale);
-      const baseTotalWidth = baseWidths.reduce((total, width) => total + width, 0);
-      const baseColumnWidth = baseWidths[column];
-      const minimumDelta = minimumColumnWidth - baseColumnWidth;
-      const availableTotalGrowth = Math.max(0, maximumTotalWidth - baseTotalWidth);
-      const rightWidths = baseWidths.slice(column + 1);
-      const rightMinimumWidths = minimumColumnWidths.slice(column + 1);
-      const availableRightCompression = rightWidths.reduce((total, width, index) => (
-        total + Math.max(0, width - rightMinimumWidths[index])
-      ), 0);
-      const maximumDelta = availableTotalGrowth + availableRightCompression;
-      const delta = Math.min(maximumDelta, Math.max(minimumDelta, requestedDelta));
-      nextWidths = [...baseWidths];
-      nextWidths[column] = baseColumnWidth + delta;
-      const compression = Math.max(0, delta - availableTotalGrowth);
-      if (compression > 0 && rightWidths.length) {
-        const targetRightTotal = rightWidths.reduce((total, width) => total + width, 0) - compression;
-        let low = 0;
-        let high = 1;
-        for (let iteration = 0; iteration < 32; iteration += 1) {
-          const scale = (low + high) / 2;
-          const scaledTotal = rightWidths.reduce((total, width, index) => (
-            total + Math.max(rightMinimumWidths[index], width * scale)
-          ), 0);
-          if (scaledTotal > targetRightTotal) high = scale;
-          else low = scale;
-        }
-        for (let index = 0; index < rightWidths.length; index += 1) {
-          nextWidths[column + index + 1] = Math.max(
-            rightMinimumWidths[index],
-            rightWidths[index] * low
-          );
-        }
-      }
-      this.applyColumnWidths(nextWidths, { deferFullLayout: true });
-    };
-
-    this.columnResizeCleanup = removeListeners;
-    window.addEventListener('pointermove', onPointerMove, true);
-    window.addEventListener('pointerup', finish, true);
-    window.addEventListener('pointercancel', finish, true);
-    editorDom.addEventListener('pointerleave', finish);
   }
 
   resizeRow(row, rowInputs = null) {
@@ -4088,8 +3831,7 @@ class HtmlTableWidget extends WidgetType {
       tbody,
       stickyChrome,
       stickyHeaderViewport,
-      stickyTable,
-      stickyColgroup
+      stickyTable
     } = this.domRefs;
     const headerRow = table.tHead?.rows[0];
     const bodyRows = tbody.rows;
@@ -4131,11 +3873,6 @@ class HtmlTableWidget extends WidgetType {
     stickyTable.style.width = `${tableRect.width}px`;
     stickyTable.style.transform = `translateX(${tableRect.left - visibleLeft}px)`;
 
-    const sourceCells = Array.from(headerRow.cells);
-    for (let index = 0; index < stickyColgroup.length; index += 1) {
-      const width = sourceCells[index]?.getBoundingClientRect().width ?? 0;
-      stickyColgroup[index].style.width = `${width}px`;
-    }
   }
 
   updateStickyControls() {
@@ -4506,6 +4243,11 @@ class HtmlTableWidget extends WidgetType {
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
     table.tabIndex = -1;
+    table.dataset.tableColumnWidth = 'true';
+    if (Number.isFinite(this.tableData.from) && Number.isFinite(this.tableData.to)) {
+      table.dataset.tableFrom = String(this.tableData.from);
+      table.dataset.tableTo = String(this.tableData.to);
+    }
     const colgroupElement = document.createElement('colgroup');
     const colgroup = Array.from({ length: this.tableData.colCount }, () => document.createElement('col'));
     colgroupElement.append(...colgroup);
@@ -4628,7 +4370,6 @@ class HtmlTableWidget extends WidgetType {
       shell,
       wrap,
       table,
-      colgroup,
       tbody,
       container: shell,
       lineNumberLayer,
@@ -4646,52 +4387,23 @@ class HtmlTableWidget extends WidgetType {
       stickyChrome,
       stickyHeaderViewport,
       stickyTable,
-      stickyColgroup,
       stickyHeaderRow,
       toolbarButtons
     };
     this.refreshStickyHeaderContent();
-    const storedColumnWidths = this.storedColumnWidths(view);
-    if (storedColumnWidths) this.applyColumnWidths(storedColumnWidths.widths, {
-      elastic: storedColumnWidths.elastic,
-      defaultWidthWasCapped: storedColumnWidths.defaultWidthWasCapped,
-      initialTotalWidth: storedColumnWidths.initialTotalWidth
+    const onColumnWidthProjected = () => {
+      this.pendingResizeRows = true;
+      this.scheduleLayout({ resizeRows: true });
+    };
+    table.addEventListener('meo-table-column-width-projected', onColumnWidthProjected);
+    this.cleanupFns.push(() => {
+      table.removeEventListener('meo-table-column-width-projected', onColumnWidthProjected);
     });
     this.updateActionTargetStyles();
     this.wireTableSelection(table);
     this.pendingResizeRows = true;
     this.scheduleLayout({ resizeRows: true });
 
-    if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(() => {
-        if (this.columnResizeActive) return;
-        const storedColumnWidths = this.view ? this.storedColumnWidths(this.view) : null;
-        if (storedColumnWidths) {
-          const reachedLimit = this.applyColumnWidths(storedColumnWidths.widths, {
-            elastic: storedColumnWidths.elastic,
-            defaultWidthWasCapped: storedColumnWidths.defaultWidthWasCapped,
-            initialTotalWidth: storedColumnWidths.initialTotalWidth
-          });
-          if (reachedLimit && !storedColumnWidths.elastic && this.view && this.domRefs) {
-            const range = this.resolveCurrentTableRange(this.view, this.domRefs.shell);
-            if (range) {
-              this.view.dispatch({
-                effects: setTableColumnWidthsEffect.of({
-                  ...range,
-                  widths: [...storedColumnWidths.widths],
-                  initialTotalWidth: storedColumnWidths.initialTotalWidth,
-                  elastic: true,
-                  defaultWidthWasCapped: storedColumnWidths.defaultWidthWasCapped
-                })
-              });
-            }
-          }
-        }
-        else this.scheduleLayout({ resizeRows: true });
-      });
-      observer.observe(wrap);
-      wrap._meoTableResizeObserver = observer;
-    }
     const onEditorScroll = () => this.scheduleLayout();
     const onSearchStateChange = (event) => {
       const detail = event instanceof CustomEvent ? event.detail : null;
@@ -4711,13 +4423,9 @@ class HtmlTableWidget extends WidgetType {
   }
 
   destroy(dom) {
-    this.columnResizeCleanup?.();
-    this.columnResizeCleanup = null;
-    this.columnResizeActive = false;
     this.setTableInteractionActive(dom, false);
     for (const cleanup of this.cleanupFns) cleanup();
     this.cleanupFns = [];
-    dom?._meoTableResizeObserver?.disconnect();
     if (this.layoutFrame) {
       cancelAnimationFrame(this.layoutFrame);
       this.layoutFrame = 0;

@@ -93,16 +93,17 @@ for (const requiredRule of [
     `deleting the policy would leak a width constraint back into callers: ${requiredRule}`
   );
 }
-for (const relativePath of [
-  '../webview/src/editor.ts',
-  '../webview/src/helpers/tables.ts'
-]) {
-  const productionSource = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
-  assert.equal(
-    productionSource.includes('tableColumnWidthPolicy'),
-    false,
-    `the candidate width policy must not be wired to production yet: ${relativePath}`
-  );
-}
+const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
+const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
+assert.equal(
+  (editorSource.match(/policy: tableColumnWidthPolicy/g) ?? []).length,
+  1,
+  'production must inject exactly one table column width policy'
+);
+assert.equal(
+  tablesSource.includes('tableColumnWidthPolicy'),
+  false,
+  'the table widget must not own or call the width policy directly'
+);
 
 console.log('table column width policy contracts passed');

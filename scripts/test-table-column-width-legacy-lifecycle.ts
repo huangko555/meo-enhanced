@@ -172,4 +172,4 @@ async function main(): Promise<void> {
 }
 
 await main();
-console.log('table column width Legacy lifecycle characterization passed');
+console.log('table column width lifecycle characterization passed');

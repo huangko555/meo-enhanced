@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       .table-column-width-candidate-root { width: 360px; }
       [data-table-column-width] { border-collapse: collapse; table-layout: fixed; width: 300px; }
       [data-table-column-width] th { box-sizing: border-box; padding: 0; border: 0; min-width: 0; }
-      [data-table-column-width-handle] { display: block; width: 8px; height: 18px; float: right; }
+      [data-table-resize-column] { display: block; width: 8px; height: 18px; float: right; }
     </style><div id="app"></div>`);
     await page.addScriptTag({ path: path.join(tempDir, 'candidate.js') });
 
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
           const cell = document.createElement('th');
           cell.textContent = String(index);
           const handle = document.createElement('span');
-          handle.dataset.tableColumnWidthHandle = String(index);
+          handle.dataset.tableResizeColumn = String(index);
           cell.append(handle);
           row.append(cell);
         }
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     });
     await waitForFrames(page, 6);
 
-    const handle = '[data-table-column-width="first"] [data-table-column-width-handle="0"]';
+    const handle = '[data-table-column-width="first"] [data-table-resize-column="0"]';
     const widths = async (id: string) => page.$$eval(
       `[data-table-column-width="${id}"] th`,
       (cells) => cells.map((cell) => Math.round(cell.getBoundingClientRect().width))
