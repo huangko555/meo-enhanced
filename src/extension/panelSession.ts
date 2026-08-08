@@ -8,6 +8,11 @@ import {
   type GitBaselineRefreshTimer
 } from '../application/gitBaselineRefreshCoordinator';
 import {
+  createSavedRevisionLifecycle,
+  type SavedRevisionFileAdapter,
+  type SavedRevisionRefreshTimer
+} from '../application/savedRevisionLifecycle';
+import {
   EXTENSION_CONFIG_SECTION,
   LINE_NUMBERS_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
@@ -114,8 +119,6 @@ const REMEMBERED_EOF_NEAR_THRESHOLD_LINES = 10;
 const REMEMBERED_EOF_BACKOFF_LINES = 10;
 const GIT_BASELINE_STARTUP_DELAY_MS = 350;
 const GIT_BASELINE_REFRESH_DELAY_MS = 150;
-const SAVED_REVISION_REFRESH_DELAY_MS = 150;
-const SAVED_REVISION_MAX_BYTES = 1024 * 1024;
 const MAX_DIAGNOSTIC_SUGGESTIONS = 1;
 const EMPTY_GIT_BASELINE_PAYLOAD: GitBaselinePayload = Object.freeze({
   available: false,
@@ -132,6 +135,9 @@ type PanelSessionControllerParams = {
   agentReviewHandoff: AgentReviewHandoffController;
   pendingDraftRecovery: PendingDraftRecovery;
   gitBaselineRefreshTimer: GitBaselineRefreshTimer;
+  savedRevisionFile: SavedRevisionFileAdapter;
+  savedRevisionRefreshTimer: SavedRevisionRefreshTimer;
+  saveDocument: () => Promise<boolean>;
   onExportDocument: (session: PanelSession, format: ExportFormat, appearance: PreviewAppearance) => Promise<void>;
   renderPreview: (options: {
     markdownText: string;
@@ -180,6 +186,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     agentReviewHandoff,
     pendingDraftRecovery,
     gitBaselineRefreshTimer,
+    savedRevisionFile,
+    savedRevisionRefreshTimer,
+    saveDocument,
     onExportDocument,
     renderPreview,
     getFindOptions,
@@ -204,11 +213,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
-  let pendingSavedRevisionTimer: ReturnType<typeof setTimeout> | null = null;
-  let savedRevisionReadPromise: Promise<void> | null = null;
-  let savedRevisionRefreshPending = false;
-  let savedRevisionInitialized = false;
-  let savedRevisionUnavailableReason: GitBaselinePayload['reason'] | null = null;
   let lastSentDiffBaselineHash = '';
   let diffBaselineGeneration = 0;
   let lastSentRevealSelectionKey: string | null = null;
@@ -255,82 +259,27 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
   };
 
-  const readSavedDiskText = async (): Promise<string | null> => {
-    if (documentUri.scheme !== 'file') {
-      savedRevisionUnavailableReason = 'not-file';
-      return null;
-    }
-    try {
-      const bytes = await vscode.workspace.fs.readFile(documentUri);
-      if (bytes.byteLength > SAVED_REVISION_MAX_BYTES) {
-        savedRevisionUnavailableReason = 'too-large';
-        return null;
-      }
-      if (bytes.includes(0)) {
-        savedRevisionUnavailableReason = 'binary';
-        return null;
-      }
-      savedRevisionUnavailableReason = null;
-      const text = Buffer.from(bytes).toString('utf8');
-      return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-    } catch {
-      savedRevisionUnavailableReason = 'error';
-      return null;
-    }
-  };
-
-  const refreshSavedRevisionNow = async (): Promise<void> => {
-    if (disposed) {
-      return;
-    }
-    if (savedRevisionReadPromise) {
-      savedRevisionRefreshPending = true;
-      return savedRevisionReadPromise;
-    }
-    savedRevisionRefreshPending = false;
-    const promise = (async () => {
-      const wasUnavailable = savedRevisionUnavailableReason !== null;
-      const text = await readSavedDiskText();
-      if (disposed) {
+  const savedRevisionLifecycle = createSavedRevisionLifecycle({
+    file: savedRevisionFile,
+    timer: savedRevisionRefreshTimer,
+    readDocumentRevision: () => ({ version: document.version, text: document.getText() }),
+    saveDocument,
+    onRefresh: async ({ result, recoveredFromUnavailable }) => {
+      if (!result.ok) {
+        if (diffBaselineMode !== 'git-head') refreshGitBaseline({ forcePost: true });
         return;
       }
-      if (text === null) {
-        if (diffBaselineMode !== 'git-head') {
-          refreshGitBaseline({ forcePost: true });
-        }
-        return;
-      }
-      const changed = savedRevisionInitialized
-        ? savedRevisionTracker.noteDiskRevision(text)
-        : savedRevisionTracker.initialize(text);
-      savedRevisionInitialized = true;
-      if ((changed || wasUnavailable) && diffBaselineMode !== 'git-head') {
+      const changed = savedRevisionTracker.getCurrentEditBaseline()
+        ? savedRevisionTracker.noteDiskRevision(result.text)
+        : savedRevisionTracker.initialize(result.text);
+      if ((changed || recoveredFromUnavailable) && diffBaselineMode !== 'git-head') {
         refreshGitBaseline({ forcePost: true });
       }
-    })().finally(() => {
-      if (savedRevisionReadPromise === promise) {
-        savedRevisionReadPromise = null;
-      }
-      if (savedRevisionRefreshPending && !disposed) {
-        savedRevisionRefreshPending = false;
-        scheduleSavedRevisionRefresh(0);
-      }
-    });
-    savedRevisionReadPromise = promise;
-    return promise;
-  };
-
-  const scheduleSavedRevisionRefresh = (delayMs = SAVED_REVISION_REFRESH_DELAY_MS): void => {
-    if (disposed) {
-      return;
     }
-    if (pendingSavedRevisionTimer !== null) {
-      clearTimeout(pendingSavedRevisionTimer);
-    }
-    pendingSavedRevisionTimer = setTimeout(() => {
-      pendingSavedRevisionTimer = null;
-      runBackground(refreshSavedRevisionNow(), 'refreshSavedRevision');
-    }, Math.max(0, delayMs));
+  });
+  const refreshSavedRevisionNow = (): Promise<void> => savedRevisionLifecycle.refreshNow();
+  const scheduleSavedRevisionRefresh = (delayMs?: number): void => {
+    savedRevisionLifecycle.scheduleRefresh(delayMs);
   };
 
   const clearRememberedViewPosition = async (): Promise<void> => {
@@ -381,11 +330,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   };
 
   const readInitialSavedRevision = async (): Promise<SavedRevisionDto | null> => {
-    if (!savedRevisionInitialized) {
-      const text = await readSavedDiskText();
-      if (text === null) return null;
-      savedRevisionTracker.initialize(text);
-      savedRevisionInitialized = true;
+    if (!savedRevisionTracker.getCurrentEditBaseline()) {
+      const initial = await savedRevisionLifecycle.readInitial();
+      if (initial === null) return null;
+      savedRevisionTracker.initialize(initial.text);
+      return initial;
     }
     const snapshot = savedRevisionTracker.getCurrentEditBaseline();
     if (snapshot === null) return null;
@@ -494,7 +443,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const saveExactDocumentRevision = async (
     expected: DocumentRevisionDto
   ): Promise<DocumentRevisionResolution> => {
-    if (!savedRevisionInitialized) {
+    if (!savedRevisionTracker.getCurrentEditBaseline()) {
       await refreshSavedRevisionNow();
     }
     const current = readCurrentDocumentRevision();
@@ -505,21 +454,19 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       };
     }
     const previousDisk = savedRevisionTracker.getCurrentEditBaseline();
-    const saved = await document.save();
-    if (!saved) {
+    const readBack = await savedRevisionLifecycle.saveAndReadBack(expected.text);
+    if (!readBack.ok && readBack.reason === 'save-rejected') {
       return { ok: false, error: { code: 'operation-failed', message: 'VS Code rejected the document save' } };
     }
-    const savedText = await readSavedDiskText();
-    if (savedText === null) {
+    if (!readBack.ok && readBack.reason === 'read-failed') {
       return { ok: false, error: { code: 'operation-failed', message: 'Saved document could not be read back' } };
     }
-    if (savedText.replace(/\r\n/g, '\n') !== expected.text) {
+    if (!readBack.ok) {
       return { ok: false, error: { code: 'operation-failed', message: 'Saved text differs from the requested Revision' } };
     }
-    const changed = savedRevisionInitialized
-      ? savedRevisionTracker.noteExplicitSave(savedText, previousDisk)
-      : savedRevisionTracker.initialize(savedText);
-    savedRevisionInitialized = true;
+    const changed = savedRevisionTracker.getCurrentEditBaseline()
+      ? savedRevisionTracker.noteExplicitSave(readBack.text, previousDisk)
+      : savedRevisionTracker.initialize(readBack.text);
     if (changed && diffBaselineMode !== 'git-head') {
       refreshGitBaseline({ forcePost: true });
     }
@@ -550,10 +497,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         gitDocumentState.noteBaselinePayload(gitPayload);
         payload = { ...gitPayload, mode: 'git-head' };
       } else {
-        if (!savedRevisionInitialized) {
+        if (!savedRevisionTracker.getCurrentEditBaseline()) {
           await refreshSavedRevisionNow();
         }
-        const snapshot = savedRevisionUnavailableReason
+        const snapshot = savedRevisionLifecycle.getUnavailableReason()
           ? null
           : savedRevisionTracker.getDiffBaseline(diffBaselineMode);
         payload = snapshot
@@ -569,7 +516,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
               tracked: false,
               baseText: null,
               mode: diffBaselineMode,
-              reason: savedRevisionUnavailableReason ?? 'no-baseline'
+              reason: savedRevisionLifecycle.getUnavailableReason() ?? 'no-baseline'
             };
       }
     }
@@ -916,7 +863,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
               return;
             }
             await refreshSavedRevisionNow();
-            const pinnedSnapshot = savedRevisionUnavailableReason
+            const pinnedSnapshot = savedRevisionLifecycle.getUnavailableReason()
               ? null
               : savedRevisionTracker.pinLatestSavedBaseline();
             if (!pinnedSnapshot) {
@@ -1272,10 +1219,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     scheduleSavedRevisionRefresh();
   });
   const savedFileDeleteSubscription = savedFileWatcher?.onDidDelete(() => {
-    savedRevisionUnavailableReason = 'error';
-    if (diffBaselineMode !== 'git-head') {
-      refreshGitBaseline({ forcePost: true });
-    }
+    runBackground(savedRevisionLifecycle.markUnavailable('error'), 'markSavedRevisionUnavailable');
   });
 
   const diagnosticsSubscription = vscode.languages.onDidChangeDiagnostics((event) => {
@@ -1344,11 +1288,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       pendingSpellCheckTimer = null;
     }
     gitBaselineRefresh.dispose();
-    if (pendingSavedRevisionTimer !== null) {
-      clearTimeout(pendingSavedRevisionTimer);
-      pendingSavedRevisionTimer = null;
-    }
-    savedRevisionRefreshPending = false;
+    savedRevisionLifecycle.dispose();
     spellDiagnosticCollection.delete(document.uri);
 
     runBackground(enqueue(async () => {
