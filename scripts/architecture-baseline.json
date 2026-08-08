@@ -1,0 +1,20 @@
+{
+  "targetRoots": [
+    "src/foundation",
+    "src/domain",
+    "src/application",
+    "src/protocol",
+    "src/host",
+    "webview/src/application",
+    "webview/src/adapters",
+    "webview/src/bootstrap",
+    "webview/src/editor"
+  ],
+  "knownLegacyTestFailures": [
+    {
+      "id": "LEG-TEST-001",
+      "test": "scripts/test-mermaid-editing.ts",
+      "fingerprint": "Rendered-block history did not preserve mode and focus its changed offset"
+    }
+  ]
+}

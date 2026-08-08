@@ -1365,6 +1365,8 @@
     "build:extension:main:debug": "bun build src/extension.ts --target=node --format=cjs --minify --outfile=dist/extension.js -e vscode --sourcemap=inline",
     "build:extension:export-runtime": "bun build src/export/runtime.ts --target=node --format=cjs --minify --outfile=dist/export-runtime.js",
     "build:extension:puppeteer-runtime": "bun build src/export/puppeteerRuntime.ts --target=node --format=cjs --minify --outfile=dist/puppeteer-runtime.js",
+    "architecture:check": "bun scripts/check-architecture.ts",
+    "architecture:check:staged": "bun scripts/check-architecture.ts --staged",
     "release:prep": "bun scripts/release-prep.mjs",
     "release:finalize": "bun scripts/release-prep.mjs finalize",
     "vscode:prepublish": "bun run build",
