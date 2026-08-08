@@ -1,7 +1,9 @@
 .vscode/**
 .vscode-test/**
+.github/**
 out/**
 output/**
+tmp/**
 node_modules/**
 bun.lock
 tsconfig.json
@@ -20,6 +22,7 @@ releases/**
 tests/**
 docs/**
 assets/**
+.local/**
 .claude/
 .agents/
 AGENTS.md

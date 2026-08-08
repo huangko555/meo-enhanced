@@ -10,6 +10,12 @@ bun.lockb
 releases/
 tests/
 assets/
+/tmp/
+/docs/research/
+
+# Local-only workspace material; never commit.
+/.local/
+
 .claude/
 AGENTS.md
 features.md
