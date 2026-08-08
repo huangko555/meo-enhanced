@@ -18,5 +18,6 @@ jobs:
       - run: bun run architecture:check
       - run: bun scripts/test-document-session.ts
       - run: bun scripts/test-document-session-application.ts
+      - run: bun scripts/test-document-session-protocol.ts
       - run: bun scripts/test-protocol-ready-init.ts
       - run: bun scripts/test-protocol-stale-responses.ts

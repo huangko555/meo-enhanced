@@ -4,7 +4,7 @@ import { createDocumentSessionCoordinator } from '../src/application/documentSes
 const createCoordinator = () => createDocumentSessionCoordinator({
   documentId: 'file:///notes.md',
   revision: { number: 3, text: 'one\ntwo' },
-  savedRevision: { number: 2, text: 'one' }
+  savedRevision: { revisionNumber: 2, text: 'one' }
 });
 
 const initialized = createCoordinator();
@@ -120,7 +120,17 @@ assert.deepEqual(immediateSave.handle({
   text: 'unrelated revision'
 }), []);
 assert.deepEqual(immediateSave.handle({ type: 'saveRequested' }), []);
-assert.deepEqual(immediateSave.handle({ type: 'hostSaveFailed' }), []);
+assert.deepEqual(immediateSave.handle({
+  type: 'hostSaveFailed',
+  version: 4,
+  text: 'unrelated revision'
+}), []);
+assert.deepEqual(immediateSave.handle({ type: 'saveRequested' }), []);
+assert.deepEqual(immediateSave.handle({
+  type: 'hostSaveFailed',
+  version: 3,
+  text: 'one\ntwo'
+}), []);
 assert.deepEqual(immediateSave.handle({ type: 'saveRequested' }), [
   { type: 'saveDocument', revision: { number: 3, text: 'one\ntwo' } }
 ]);

@@ -14,10 +14,17 @@ export type ReadyMessage = {
   readonly type: 'ready';
 };
 
+export type SavedRevisionDto = {
+  readonly version: number | null;
+  readonly text: string;
+};
+
 export type InitMessage = {
   readonly type: 'init';
+  readonly documentId: string;
   readonly text: string;
   readonly version: number;
+  readonly savedRevision: SavedRevisionDto | null;
   readonly diagnostics: readonly SerializedDiagnostic[];
   readonly mode: EditorMode;
   readonly previewAppearance: PreviewAppearance;
@@ -73,10 +80,13 @@ export function decodeReadyMessage(value: unknown): ReadyMessage | null {
 export function decodeInitMessage(value: unknown): InitMessage | null {
   if (!isRecord(value)
     || value.type !== 'init'
+    || typeof value.documentId !== 'string'
+    || value.documentId.length === 0
     || typeof value.text !== 'string'
     || typeof value.version !== 'number'
     || !Number.isInteger(value.version)
     || value.version < 0
+    || !isSavedRevision(value.savedRevision, value.version, value.text)
     || !isEditorMode(value.mode)
     || !isPreviewAppearance(value.previewAppearance)
     || !isPreviewAppearance(value.editorAppearance)
@@ -117,4 +127,15 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     return null;
   }
   return value as InitMessage;
+}
+
+function isSavedRevision(value: unknown, currentVersion: number, currentText: string): value is SavedRevisionDto | null {
+  if (value === null) return true;
+  if (!isRecord(value) || typeof value.text !== 'string') return false;
+  if (value.version === null) return true;
+  return typeof value.version === 'number'
+    && Number.isInteger(value.version)
+    && value.version >= 0
+    && value.version <= currentVersion
+    && (value.version !== currentVersion || value.text === currentText);
 }

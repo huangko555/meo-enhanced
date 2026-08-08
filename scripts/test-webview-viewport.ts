@@ -123,7 +123,8 @@ async function main() {
     const initialText = createFixture();
     await page.evaluate(({ text, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'light', editorAppearance: 'dark',
+        type: 'init', documentId: 'file:///viewport.md', text, version: 1,
+        savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitBlameEnabled: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,

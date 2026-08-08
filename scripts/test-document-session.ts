@@ -7,7 +7,16 @@ import {
 const initial = createDocumentSession({
   documentId: 'file:///notes.md',
   revision: { number: 3, text: 'accepted' },
-  savedRevision: { number: 2, text: 'saved' }
+  savedRevision: { revisionNumber: 2, text: 'saved' }
+});
+const unassociatedSavedRevision = createDocumentSession({
+  documentId: 'file:///dirty.md',
+  revision: { number: 3, text: 'dirty' },
+  savedRevision: { revisionNumber: null, text: 'saved disk' }
+});
+assert.deepEqual(unassociatedSavedRevision.savedRevision, {
+  revisionNumber: null,
+  text: 'saved disk'
 });
 const drafted = transitionDocumentSession(initial, { type: 'draftChanged', text: 'draft' });
 assert.deepEqual(drafted.state.draft, { baseRevision: 3, text: 'draft' });
@@ -68,7 +77,7 @@ assert.deepEqual(externalWithoutDraft.effects, [
 const rebaseBase = createDocumentSession({
   documentId: 'file:///rebase.md',
   revision: { number: 1, text: 'one\ntwo' },
-  savedRevision: { number: 1, text: 'one\ntwo' }
+  savedRevision: { revisionNumber: 1, text: 'one\ntwo' }
 });
 const disjointDraft = transitionDocumentSession(rebaseBase, {
   type: 'draftChanged',
@@ -141,7 +150,7 @@ const saveCompleted = transitionDocumentSession(saveReady.state, {
   revision: { number: 4, text: 'draft' }
 });
 assert.equal(saveCompleted.state.savePhase, 'idle');
-assert.deepEqual(saveCompleted.state.savedRevision, { number: 4, text: 'draft' });
+assert.deepEqual(saveCompleted.state.savedRevision, { revisionNumber: 4, text: 'draft' });
 assert.deepEqual(saveCompleted.effects, []);
 
 const immediateSave = transitionDocumentSession(initial, { type: 'saveRequested' });
@@ -158,7 +167,15 @@ const unrelatedSaveCompletion = transitionDocumentSession(immediateSave.state, {
 });
 assert.equal(unrelatedSaveCompletion.state, immediateSave.state);
 assert.deepEqual(unrelatedSaveCompletion.effects, []);
-const saveFailed = transitionDocumentSession(immediateSave.state, { type: 'saveFailed' });
+const unrelatedSaveFailure = transitionDocumentSession(immediateSave.state, {
+  type: 'saveFailed',
+  revision: { number: 4, text: 'unaccepted' }
+});
+assert.equal(unrelatedSaveFailure.state, immediateSave.state);
+const saveFailed = transitionDocumentSession(immediateSave.state, {
+  type: 'saveFailed',
+  revision: { number: 3, text: 'accepted' }
+});
 assert.equal(saveFailed.state.savePhase, 'idle');
 assert.deepEqual(saveFailed.state.savedRevision, initial.savedRevision);
 
@@ -178,7 +195,7 @@ const discarded = transitionDocumentSession(editedAgain.state, {
   revision: { number: 4, text: 'saved disk' }
 });
 assert.deepEqual(discarded.state.revision, { number: 4, text: 'saved disk' });
-assert.deepEqual(discarded.state.savedRevision, { number: 4, text: 'saved disk' });
+assert.deepEqual(discarded.state.savedRevision, { revisionNumber: 4, text: 'saved disk' });
 assert.equal(discarded.state.draft, null);
 assert.equal(discarded.state.pendingChange, null);
 assert.equal(discarded.state.savePhase, 'idle');

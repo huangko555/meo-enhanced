@@ -2,6 +2,7 @@ import { decodeSaveImageFromClipboardRequest, decodeSavedImagePathResponse, type
 import { decodeDiagnosticSuggestionsRequest, decodeDiagnosticSuggestionsResult, type DiagnosticSuggestionsResult, type RequestDiagnosticSuggestions } from './diagnosticSuggestions';
 import { decodeDiagnosticsChangedEvent, type DiagnosticsChangedEvent } from './diagnostics';
 import { decodeDocumentSyncCommand, decodeDocumentSyncMessage, type DocumentSyncCommand, type DocumentSyncMessage } from './documentSync';
+import { decodeDocumentRevisionRequest, decodeDocumentRevisionResponse, decodeSaveDocumentRevisionRequest, decodeSaveDocumentRevisionResponse, type DocumentRevisionRequest, type DocumentRevisionResponse, type SaveDocumentRevisionRequest, type SaveDocumentRevisionResponse } from './documentSession';
 import { decodeEditorCommand, type EditorCommand } from './editorCommands';
 import { decodeExportSnapshotRequest, decodeExportSnapshotResponse, type ExportSnapshotRequest, type ExportSnapshotResponse } from './exportSnapshot';
 import { decodeGitBaselineChangedEvent, decodeGitBlameRequest, decodeGitBlameResponse, decodeGitNavigationCommand, type GitBaselineChangedEvent, type GitBlameRequest, type GitBlameResponse, type GitNavigationCommand } from './git';
@@ -16,6 +17,8 @@ import { decodeResolveWikiLinksRequest, decodeResolvedWikiLinksResponse, type Re
 export type WebviewToHostMessage =
   | ReadyMessage
   | DocumentSyncCommand
+  | SaveDocumentRevisionRequest
+  | DocumentRevisionRequest
   | EditorCommand
   | ResolveImageSrcRequest
   | ResolveWikiLinksRequest
@@ -30,6 +33,8 @@ export type WebviewToHostMessage =
 export type HostToWebviewMessage =
   | InitMessage
   | DocumentSyncMessage
+  | SaveDocumentRevisionResponse
+  | DocumentRevisionResponse
   | HostEditorEvent
   | HostConfigurationEvent
   | DiagnosticsChangedEvent
@@ -46,6 +51,8 @@ export type HostToWebviewMessage =
 export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage | null {
   return decodeReadyMessage(value)
     ?? decodeDocumentSyncCommand(value)
+    ?? decodeSaveDocumentRevisionRequest(value)
+    ?? decodeDocumentRevisionRequest(value)
     ?? decodeEditorCommand(value)
     ?? decodeResolveImageSrcRequest(value)
     ?? decodeResolveWikiLinksRequest(value)
@@ -61,6 +68,8 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
 export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage | null {
   return decodeInitMessage(value)
     ?? decodeDocumentSyncMessage(value)
+    ?? decodeSaveDocumentRevisionResponse(value)
+    ?? decodeDocumentRevisionResponse(value)
     ?? decodeHostEditorEvent(value)
     ?? decodeHostConfigurationEvent(value)
     ?? decodeDiagnosticsChangedEvent(value)

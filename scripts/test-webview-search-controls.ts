@@ -49,7 +49,8 @@ async function main() {
     ].join('\n');
     await page.evaluate(({ documentText, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text: documentText, version: 1, diagnostics: [], mode: 'live', previewAppearance: 'dark', editorAppearance: 'dark',
+        type: 'init', documentId: 'file:///search.md', text: documentText, version: 1,
+        savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live', previewAppearance: 'dark', editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitBlameEnabled: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,

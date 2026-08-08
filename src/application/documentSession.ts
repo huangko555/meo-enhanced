@@ -4,7 +4,8 @@ import {
   type DocumentSessionEffect,
   type DocumentSessionEvent,
   type DocumentSessionState,
-  type Revision
+  type Revision,
+  type SavedRevision
 } from '../domain/documentSession';
 
 export type DocumentSessionInput =
@@ -14,7 +15,13 @@ export type DocumentSessionInput =
   | { readonly type: 'hostRevisionChanged'; readonly version: number; readonly text: string }
   | { readonly type: 'saveRequested' }
   | { readonly type: 'hostSaveSucceeded'; readonly version: number; readonly text: string }
-  | { readonly type: 'hostSaveFailed' }
+  | {
+      readonly type: 'hostSaveFailed';
+      readonly version: number;
+      readonly text: string;
+      readonly message?: string;
+    }
+  | { readonly type: 'hostRevisionRequestFailed'; readonly message: string }
   | { readonly type: 'hostDiscardSucceeded'; readonly version: number; readonly text: string };
 
 export type ApplicationTextChange = {
@@ -49,7 +56,7 @@ export type DocumentSessionCoordinator = {
 export function createDocumentSessionCoordinator(input: {
   readonly documentId: string;
   readonly revision: Revision;
-  readonly savedRevision: Revision | null;
+  readonly savedRevision: SavedRevision | null;
 }): DocumentSessionCoordinator {
   let state = createDocumentSession(input);
 
@@ -101,7 +108,13 @@ function mapInput(
     };
   }
   if (input.type === 'hostSaveFailed') {
-    return { type: 'saveFailed' };
+    return {
+      type: 'saveFailed',
+      revision: { number: input.version, text: input.text }
+    };
+  }
+  if (input.type === 'hostRevisionRequestFailed') {
+    return null;
   }
   return {
     type: 'discardCompleted',

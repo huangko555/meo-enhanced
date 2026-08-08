@@ -23,6 +23,7 @@ import { normalizeEditorAppearance, type EditorAppearance } from '../../src/shar
 import { resolveCodeTheme } from './themes/editorLightTheme';
 import { createExportSnapshotResponder } from './adapters/exportSnapshotTransport';
 import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
+import { createDocumentSessionTransport } from './adapters/documentSessionTransport';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { InitMessage } from '../../src/protocol/readyInit';
 
@@ -82,6 +83,9 @@ let diagnosticSuggestionsTransport: DiagnosticSuggestionsTransport = {
   cancelAll: () => undefined
 };
 const vscode = createCompatibleVsCodeApi();
+const documentSessionTransport = createDocumentSessionTransport((message) => {
+  vscode.postMessage(message);
+});
 initializeImageHandling(vscode);
 initializeWikiLinkHandling(vscode);
 initializeLocalLinkHandling(vscode);
@@ -2191,6 +2195,11 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'saveDocumentRevisionResult' || message.type === 'documentRevisionResult') {
+    documentSessionTransport.accept(message);
+    return;
+  }
+
   if (message.type === 'discardedChanges') {
     if (pendingDebounce !== null) {
       window.clearTimeout(pendingDebounce);
@@ -2548,6 +2557,7 @@ window.addEventListener('beforeunload', () => {
   cancelPendingWikiStatusRefresh();
   cancelPendingLocalLinkStatusRefresh();
   clearGitBlameCache({ hideTooltip: false });
+  documentSessionTransport.cancelAll('Document Session closed');
 
   if (initialEditorMountFallbackTimer !== null) {
     window.clearTimeout(initialEditorMountFallbackTimer);

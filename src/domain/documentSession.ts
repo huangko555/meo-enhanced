@@ -13,10 +13,15 @@ export type Change = {
   readonly text: string;
 };
 
+export type SavedRevision = {
+  readonly revisionNumber: number | null;
+  readonly text: string;
+};
+
 export type DocumentSessionState = {
   readonly documentId: string;
   readonly revision: Revision;
-  readonly savedRevision: Revision | null;
+  readonly savedRevision: SavedRevision | null;
   readonly draft: Draft | null;
   readonly pendingChange: Change | null;
   readonly savePhase: 'idle' | 'awaiting-change' | 'saving';
@@ -29,7 +34,7 @@ export type DocumentSessionEvent =
   | { readonly type: 'revisionReceived'; readonly revision: Revision }
   | { readonly type: 'saveRequested' }
   | { readonly type: 'saveCompleted'; readonly revision: Revision }
-  | { readonly type: 'saveFailed' }
+  | { readonly type: 'saveFailed'; readonly revision: Revision }
   | { readonly type: 'discardCompleted'; readonly revision: Revision };
 
 export type DocumentSessionEffect =
@@ -48,7 +53,7 @@ export type DocumentSessionTransition = {
 export function createDocumentSession(input: {
   readonly documentId: string;
   readonly revision: Revision;
-  readonly savedRevision: Revision | null;
+  readonly savedRevision: SavedRevision | null;
 }): DocumentSessionState {
   return {
     documentId: input.documentId,
@@ -181,10 +186,11 @@ export function transitionDocumentSession(
       || event.revision.text !== state.savingRevision.text) {
       return { state, effects: [] };
     }
-    const savedRevision = state.savedRevision !== null
-      && state.savedRevision.number > event.revision.number
+    const previousSavedNumber = state.savedRevision?.revisionNumber;
+    const savedRevision = typeof previousSavedNumber === 'number'
+      && previousSavedNumber > event.revision.number
       ? state.savedRevision
-      : event.revision;
+      : { revisionNumber: event.revision.number, text: event.revision.text };
     return {
       state: { ...state, savedRevision, savePhase: 'idle', savingRevision: null },
       effects: []
@@ -192,7 +198,10 @@ export function transitionDocumentSession(
   }
 
   if (event.type === 'saveFailed') {
-    return state.savePhase === 'idle'
+    return state.savePhase !== 'saving'
+      || state.savingRevision === null
+      || event.revision.number !== state.savingRevision.number
+      || event.revision.text !== state.savingRevision.text
       ? { state, effects: [] }
       : { state: { ...state, savePhase: 'idle', savingRevision: null }, effects: [] };
   }
@@ -207,7 +216,7 @@ export function transitionDocumentSession(
       state: {
         ...state,
         revision: event.revision,
-        savedRevision: event.revision,
+        savedRevision: { revisionNumber: event.revision.number, text: event.revision.text },
         draft: null,
         pendingChange: null,
         savePhase: 'idle',

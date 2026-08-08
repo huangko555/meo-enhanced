@@ -52,7 +52,7 @@ import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
 import type { OutlinePosition } from '../shared/extensionConfig';
-import type { InitMessage } from '../protocol/readyInit';
+import type { InitMessage, SavedRevisionDto } from '../protocol/readyInit';
 import type { AppliedMessage, ApplyChangesMessage, DiscardedChangesMessage, DocumentChangedMessage } from '../protocol/documentSync';
 import type { ResolvedImageSrcResponse } from '../protocol/imageResolution';
 import type { ResolvedWikiLinksResponse } from '../protocol/wikiLinkResolution';
@@ -61,6 +61,8 @@ import type { DiagnosticSuggestionsResult, RequestDiagnosticSuggestions } from '
 import type { SaveImageFromClipboardRequest, SavedImagePathResponse } from '../protocol/clipboardImageSave';
 import type { PreviewRenderResponse } from '../protocol/previewRender';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
+import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
+import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
 import {
   type GitBaselineChangedEvent,
   type GitBlameResponse
@@ -405,11 +407,29 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     lastSavedRememberedLineOffset = normalizedOffset;
   };
 
+  const readInitialSavedRevision = async (): Promise<SavedRevisionDto | null> => {
+    if (!savedRevisionInitialized) {
+      const text = await readSavedDiskText();
+      if (text === null) return null;
+      savedRevisionTracker.initialize(text);
+      savedRevisionInitialized = true;
+    }
+    const snapshot = savedRevisionTracker.getCurrentEditBaseline();
+    if (snapshot === null) return null;
+    return {
+      version: snapshot.text === document.getText() ? document.version : null,
+      text: snapshot.text
+    };
+  };
+
   const sendInit = async (): Promise<boolean> => {
+    const savedRevision = await readInitialSavedRevision();
     const message: InitMessage = {
       type: 'init',
+      documentId: documentKey,
       text: document.getText(),
       version: document.version,
+      savedRevision,
       diagnostics: serializeDiagnostics(document),
       mode,
       previewAppearance: getPreviewAppearance(),
@@ -491,6 +511,46 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       version
     };
     return postToWebview(message);
+  };
+
+  const readCurrentDocumentRevision = (): DocumentRevisionDto => ({
+    version: document.version,
+    text: document.getText().replace(/\r\n/g, '\n')
+  });
+
+  const saveExactDocumentRevision = async (
+    expected: DocumentRevisionDto
+  ): Promise<DocumentRevisionResolution> => {
+    if (!savedRevisionInitialized) {
+      await refreshSavedRevisionNow();
+    }
+    const current = readCurrentDocumentRevision();
+    if (current.version !== expected.version || current.text !== expected.text) {
+      return {
+        ok: false,
+        error: { code: 'operation-failed', message: 'Document Revision changed before save' }
+      };
+    }
+    const previousDisk = savedRevisionTracker.getCurrentEditBaseline();
+    const saved = await document.save();
+    if (!saved) {
+      return { ok: false, error: { code: 'operation-failed', message: 'VS Code rejected the document save' } };
+    }
+    const savedText = await readSavedDiskText();
+    if (savedText === null) {
+      return { ok: false, error: { code: 'operation-failed', message: 'Saved document could not be read back' } };
+    }
+    if (savedText.replace(/\r\n/g, '\n') !== expected.text) {
+      return { ok: false, error: { code: 'operation-failed', message: 'Saved text differs from the requested Revision' } };
+    }
+    const changed = savedRevisionInitialized
+      ? savedRevisionTracker.noteExplicitSave(savedText, previousDisk)
+      : savedRevisionTracker.initialize(savedText);
+    savedRevisionInitialized = true;
+    if (changed && diffBaselineMode !== 'git-head') {
+      refreshGitBaseline({ forcePost: true });
+    }
+    return { ok: true, value: { revision: expected } };
   };
 
   const sendGitBaselineChanged = async (options: RefreshGitBaselineOptions = {}): Promise<boolean> => {
@@ -1178,6 +1238,16 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'draftChanged':
         pendingDraftText = raw.text;
+        return;
+      case 'saveDocumentRevision':
+      case 'requestDocumentRevision':
+        await enqueue(async () => {
+          const response = await respondToDocumentSessionRequest(raw, {
+            readRevision: readCurrentDocumentRevision,
+            saveRevision: saveExactDocumentRevision
+          });
+          await postToWebview(response);
+        });
         return;
       case 'discardChanges':
         pendingDraftText = null;

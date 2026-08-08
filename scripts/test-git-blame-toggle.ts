@@ -47,7 +47,8 @@ async function main(): Promise<void> {
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await page.evaluate((theme) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text: 'first\nsecond', version: 1, diagnostics: [], mode: 'live',
+        type: 'init', documentId: 'file:///blame.md', text: 'first\nsecond', version: 1,
+        savedRevision: { version: 1, text: 'first\nsecond' }, diagnostics: [], mode: 'live',
         previewAppearance: 'dark', editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: true, gitBlameEnabled: false,
         gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,

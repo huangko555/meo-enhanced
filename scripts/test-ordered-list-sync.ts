@@ -52,7 +52,8 @@ async function main(): Promise<void> {
     await page.addScriptTag({ path: path.join(tempDir, 'webview.js') });
     await page.evaluate((theme) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', text: '', version: 1, diagnostics: [], mode: 'live',
+        type: 'init', documentId: 'file:///ordered.md', text: '', version: 1,
+        savedRevision: { version: 1, text: '' }, diagnostics: [], mode: 'live',
         previewAppearance: 'dark', editorAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
         gitBlameEnabled: false, gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false, spellCheckEnabled: false,

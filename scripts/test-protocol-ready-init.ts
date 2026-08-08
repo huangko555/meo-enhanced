@@ -23,6 +23,7 @@ import { decodeHostEditorEvent } from '../src/protocol/hostEditorEvents';
 import { decodeHostConfigurationEvent } from '../src/protocol/hostConfigurationEvents';
 import { decodeDiagnosticsChangedEvent } from '../src/protocol/diagnostics';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
+import { createDocumentSessionCoordinatorFromInit } from '../webview/src/adapters/documentSessionTransport';
 
 const theme = {
   id: 'dark',
@@ -44,8 +45,10 @@ const theme = {
 const codeTheme = { name: 'VS Dark', type: 'dark' as const, colors: {}, tokenColors: [] };
 const completeInit = {
   type: 'init' as const,
+  documentId: 'file:///notes.md',
   text: '# title',
   version: 3,
+  savedRevision: { version: null, text: '# saved title' },
   diagnostics: [],
   mode: 'live' as const,
   previewAppearance: 'dark' as const,
@@ -78,11 +81,21 @@ assert.deepEqual(decodeReadyMessage({ type: 'ready', version: 1 }), { type: 'rea
 
 const init = decodeInitMessage(completeInit);
 assert.equal(init?.version, 3);
+if (init === null) throw new Error('Expected decoded init');
+const initializedSession = createDocumentSessionCoordinatorFromInit(init);
+assert.deepEqual(initializedSession.handle({
+  type: 'hostRevisionChanged', version: 3, text: '# title'
+}), []);
 assert.equal(decodeInitMessage({ ...completeInit, version: -1 }), null);
+assert.equal(decodeInitMessage({ ...completeInit, savedRevision: undefined }), null);
+assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: -1, text: '# saved' } }), null);
+assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: 4, text: '# future' } }), null);
+assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: 3, text: '# contradiction' } }), null);
+assert.notEqual(decodeInitMessage({ ...completeInit, savedRevision: null }), null);
 assert.equal(decodeInitMessage({ ...completeInit, mode: 'bad' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewAppearance: 'broken' }), null);
 for (const requiredKey of [
-  'diagnostics', 'previewAppearance', 'editorAppearance', 'lineNumbers', 'gitChangesGutter',
+  'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'lineNumbers', 'gitChangesGutter',
   'gitBlameEnabled', 'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'spellCheckEnabled', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
   'vimMode', 'vimKeybindings', 'vimLeader', 'findOptions', 'outlinePosition', 'outlineVisible',
