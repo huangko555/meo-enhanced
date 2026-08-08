@@ -20,10 +20,6 @@ export interface ExportStyleEnvironment extends Record<string, unknown> {
   meoThemeColors: Record<string, string>;
 }
 
-export const delay = (ms: number): Promise<void> => new Promise((resolve) => {
-  window.setTimeout(resolve, ms);
-});
-
 export const getExportStyleEnvironment = (): ExportStyleEnvironment => {
   const rootStyles = getComputedStyle(document.documentElement);
   const bodyStyles = getComputedStyle(document.body);
@@ -84,86 +80,25 @@ export const getExportStyleEnvironment = (): ExportStyleEnvironment => {
   };
 };
 
-export interface ExportSyncContext {
-  inFlight: boolean;
-  pendingText: string | null;
-  syncedText: string;
-  flushChanges: () => void;
-  normalizeEol: (text: string) => string;
-}
-
-export const waitForExportSyncIdle = async (
-  context: ExportSyncContext,
-  timeoutMs = 15000
-): Promise<void> => {
-  const startedAt = Date.now();
-
-  while (true) {
-    if (!context.inFlight && context.pendingText !== null && context.normalizeEol(context.pendingText) !== context.syncedText) {
-      context.flushChanges();
-    }
-
-    if (!context.inFlight && (context.pendingText === null || context.normalizeEol(context.pendingText) === context.syncedText)) {
-      return;
-    }
-
-    if (Date.now() - startedAt >= timeoutMs) {
-      throw new Error('Timed out waiting for editor sync before export');
-    }
-
-    await delay(25);
-  }
-};
-
 export interface ExportHandlerContext {
   vscode: any;
   respondToSnapshot: (requestId: string, result: ExportSnapshotResolution) => void;
-  getEditor: () => any;
-  pendingText: string | null;
-  pendingInitialText: string | null;
-  syncedText: string;
-  pendingDebounce: number | null;
-  inFlight: boolean;
-  flushChanges: () => void;
-  normalizeEol: (text: string) => string;
-  setPendingDebounce: (value: number | null) => void;
+  getCurrentText: () => string;
+  whenDocumentIdle: () => Promise<void>;
   getPreviewAppearance: () => PreviewAppearance;
 }
 
 export const createExportHandler = (context: ExportHandlerContext) => {
-  const getCurrentExportText = (): string => {
-    const editor = context.getEditor();
-    if (editor) {
-      return editor.getText();
-    }
-    if (typeof context.pendingText === 'string') {
-      return context.pendingText;
-    }
-    if (typeof context.pendingInitialText === 'string') {
-      return context.pendingInitialText;
-    }
-    return context.syncedText;
-  };
+  const getCurrentExportText = (): string => context.getCurrentText();
 
   const handleExportSnapshotRequest = async (requestId: string): Promise<void> => {
     try {
-      if (context.pendingDebounce !== null) {
-        window.clearTimeout(context.pendingDebounce);
-        context.setPendingDebounce(null);
-      }
-
-      context.flushChanges();
-      await waitForExportSyncIdle({
-        inFlight: context.inFlight,
-        pendingText: context.pendingText,
-        syncedText: context.syncedText,
-        flushChanges: context.flushChanges,
-        normalizeEol: context.normalizeEol
-      });
+      const text = getCurrentExportText();
+      await context.whenDocumentIdle();
 
       context.respondToSnapshot(requestId, {
         ok: true,
-        value: { text: getCurrentExportText(), environment: getExportStyleEnvironment() }
+        value: { text, environment: getExportStyleEnvironment() }
       });
     } catch (error) {
       context.respondToSnapshot(requestId, {

@@ -524,10 +524,17 @@ async function main() {
     await page.click('[data-action="save"]');
     await waitForFrames(page, 2);
     const saveMessages = await page.evaluate(() => (
-      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
-    ).filter((message) => message.type === 'saveDocument').length);
-    if (saveMessages !== 1) {
-      throw new Error(`Toolbar save did not request a save: ${saveMessages}`);
+      (window as typeof window & {
+        __hostMessages?: Array<{ type?: string; requestId?: string; revision?: { version?: number; text?: string } }>;
+      }).__hostMessages ?? []
+    ).filter((message) => message.type === 'saveDocumentRevision'));
+    if (
+      saveMessages.length !== 1
+      || typeof saveMessages[0]?.requestId !== 'string'
+      || saveMessages[0]?.revision?.version !== 1
+      || typeof saveMessages[0]?.revision?.text !== 'string'
+    ) {
+      throw new Error(`Toolbar save did not request an exact Revision save: ${JSON.stringify(saveMessages)}`);
     }
     for (const mode of ['source', 'live'] as const) {
       await page.click(`[data-mode="${mode}"]`);

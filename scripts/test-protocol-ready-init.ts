@@ -648,7 +648,6 @@ for (const command of [
   { type: 'viewPositionChanged', topLine: 3, topLineOffset: 0.5 },
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
-  { type: 'saveDocument' },
   { type: 'discardChanges', topLine: 1 },
   { type: 'exportDocument', format: 'pdf', appearance: 'dark' },
   { type: 'setPreviewAppearance', appearance: 'light' },
@@ -657,6 +656,7 @@ for (const command of [
   assert.notEqual(decodeEditorCommand(command), null, `Editor command was rejected: ${command.type}`);
 }
 assert.equal(decodeEditorCommand({ type: 'setMode', mode: 'unknown' }), null);
+assert.equal(decodeEditorCommand({ type: 'saveDocument' }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 0 }), null);
 assert.equal(decodeEditorCommand({ type: 'setOutlineWidth', width: Number.NaN }), null);
 for (const event of [

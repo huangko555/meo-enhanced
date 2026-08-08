@@ -26,7 +26,6 @@ export type EditorCommand =
   | { readonly type: 'viewPositionChanged'; readonly topLine: number; readonly topLineOffset?: number }
   | { readonly type: 'openLink'; readonly href: string; readonly source?: 'preview' }
   | { readonly type: 'openImageExternally'; readonly url: string }
-  | { readonly type: 'saveDocument' }
   | { readonly type: 'discardChanges'; readonly topLine: number; readonly topLineOffset?: number }
   | { readonly type: 'exportDocument'; readonly format: 'html' | 'pdf'; readonly appearance: EditorAppearance }
   | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
@@ -68,7 +67,6 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
       return value.mode === 'current-edit' || value.mode === 'recent-save' || value.mode === 'git-head'
         ? value as EditorCommand : null;
     case 'releaseFixedBaseline':
-    case 'saveDocument':
       return { type: value.type } as EditorCommand;
     case 'setOutlineVisible':
       return isBoolean(value.visible) ? value as EditorCommand : null;

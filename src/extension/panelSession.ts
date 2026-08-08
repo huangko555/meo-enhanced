@@ -1264,36 +1264,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           await postToWebview(message);
         });
         return;
-      case 'saveDocument':
-        await enqueue(async () => {
-          const appliedDraft = await applyPendingDraftIfNeeded();
-          if (appliedDraft) {
-            await sendDocChanged();
-          } else if (pendingDraftText !== null) {
-            await sendDocChanged();
-            return;
-          }
-          if (!savedRevisionInitialized) {
-            await refreshSavedRevisionNow();
-          }
-          const previousDisk = savedRevisionTracker.getCurrentEditBaseline();
-          const saved = await document.save();
-          if (!saved) {
-            return;
-          }
-          const savedText = await readSavedDiskText();
-          if (savedText === null) {
-            return;
-          }
-          const changed = savedRevisionInitialized
-            ? savedRevisionTracker.noteExplicitSave(savedText, previousDisk)
-            : savedRevisionTracker.initialize(savedText);
-          savedRevisionInitialized = true;
-          if (changed && diffBaselineMode !== 'git-head') {
-            refreshGitBaseline({ forcePost: true });
-          }
-        });
-        return;
       case 'saveImageFromClipboard': {
         const response = await handleSaveImageFromClipboard(raw, documentUri);
         await postToWebview(response);

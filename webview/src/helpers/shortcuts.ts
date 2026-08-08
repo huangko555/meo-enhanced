@@ -14,19 +14,16 @@ export interface ShortcutHandlerContext {
   editor: any;
   currentMode: 'live' | 'source';
   vimModeEnabled: boolean;
-  pendingText: string | null;
-  syncedText: string;
   requestSave: () => void;
   openFindPanel: (target: 'find' | 'replace') => void;
   applyMode: (mode: 'live' | 'source', options?: { userTriggered?: boolean; reason?: string }) => boolean;
-  flushPendingChangesNow: () => void;
 }
 
 export const handleEditorShortcut = (
   event: KeyboardEvent,
   context: ShortcutHandlerContext
 ): boolean => {
-  const { editor, currentMode, vimModeEnabled, pendingText, syncedText } = context;
+  const { editor, currentMode, vimModeEnabled } = context;
   
   if (!editor || event.isComposing) {
     return false;
@@ -129,21 +126,6 @@ export const handleEditorShortcut = (
     event.stopPropagation();
     editor.redo();
     return true;
-  }
-
-  const key = typeof event.key === 'string' ? event.key : '';
-  const isBareModifier =
-    key === 'Meta' ||
-    key === 'Control' ||
-    key === 'Shift' ||
-    key === 'Alt';
-  const isClipboardShortcut =
-    !event.altKey &&
-    (isShortcutKey(event, 'c', 'KeyC') ||
-      isShortcutKey(event, 'x', 'KeyX') ||
-      isShortcutKey(event, 'v', 'KeyV'));
-  if (!isBareModifier && !isClipboardShortcut && pendingText !== null && normalizeEol(pendingText) !== syncedText) {
-    context.flushPendingChangesNow();
   }
 
   return false;

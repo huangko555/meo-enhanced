@@ -141,6 +141,10 @@ async function main() {
       const recoveredAfterTimeout = !button.classList.contains('is-discard-armed');
       button.click();
       button.click();
+      for (let attempt = 0; attempt < 20
+        && !messages.some((message) => message.type === 'discardChanges'); attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 10));
+      }
       const discard = messages.find((message) => message.type === 'discardChanges');
       return {
         exists: true,

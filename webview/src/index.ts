@@ -8,13 +8,12 @@ import { setGitDiffLineHighlightsEnabled } from './helpers/gitDiffLineHighlights
 import { applyThemeSettings } from './helpers/theme';
 import { setShikiTheme, setShikiEnabled } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type FailureNoticeManager } from './helpers/errors';
-import { isPrimaryModifier, isShortcutKey, normalizeEol, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
+import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import { createExportHandler, type ExportHandlerContext } from './helpers/export';
 import { refreshMermaidTheme } from './helpers/mermaidDiagram';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
-import { reconcileExternalDocument } from './helpers/documentSync';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
@@ -24,6 +23,7 @@ import { resolveCodeTheme } from './themes/editorLightTheme';
 import { createExportSnapshotResponder } from './adapters/exportSnapshotTransport';
 import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
 import { createDocumentSessionTransport } from './adapters/documentSessionTransport';
+import { createDocumentSessionRuntime } from './adapters/documentSessionRuntime';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { InitMessage } from '../../src/protocol/readyInit';
 
@@ -1096,14 +1096,6 @@ outlineController = createOutlineController({
 editorWrapper.replaceChildren(editorHost, previewController.host, outlineController.sidebar, selectionMenuElements.menu);
 root.replaceChildren(toolbar, editorWrapper);
 
-let documentVersion = 0;
-let pendingDebounce: number | null = null;
-let pendingText: string | null = null;
-let syncedText = '';
-let inFlight = false;
-let inFlightText: string | null = null;
-let inFlightBaseVersion: number | null = null;
-let saveAfterSync = false;
 let currentMode: MarkdownMode = 'live';
 let lastEditableMode: 'live' | 'source' = 'live';
 let currentEditorAppearance: EditorAppearance = 'dark';
@@ -1125,8 +1117,6 @@ let pendingRestoreTopLineOffset = 0;
 let pendingViewPositionTimer: number | null = null;
 let lastSentTopLine: number | null = null;
 let lastSentTopLineOffset: number | null = null;
-let lastSentDraftText: string | null = null;
-let hasSentDraftText = false;
 let initialEditorMountInFlight = false;
 let initialEditorMountFallbackTimer: number | null = null;
 let pendingEditorSurfaceRecoveryRaf: number | null = null;
@@ -1285,33 +1275,14 @@ const getCurrentEditorText = () => {
   if (editor) {
     return editor.getText();
   }
-  if (typeof pendingText === 'string') {
-    return pendingText;
-  }
   if (typeof pendingInitialText === 'string') {
     return pendingInitialText;
   }
-  return syncedText;
+  return '';
 };
 
 const commitEditorTransientEdits = () => {
   editor?.commitTransientEdits?.();
-};
-
-const syncPendingDraftState = () => {
-  const draftText = pendingText ?? inFlightText;
-  const nextDraftText =
-    draftText === null || (!inFlight && normalizeEol(draftText) === syncedText)
-      ? null
-      : draftText;
-
-  if (hasSentDraftText && nextDraftText === lastSentDraftText) {
-    return;
-  }
-
-  hasSentDraftText = true;
-  lastSentDraftText = nextDraftText;
-  vscode.postMessage({ type: 'draftChanged', text: nextDraftText });
 };
 
 const normalizeLineNumber = (value: unknown): number | null => {
@@ -1510,7 +1481,6 @@ const requestDiagnosticSuggestions = (diagnostic: {
 gitClient = createGitClient({
   vscode,
   getCurrentEditorText: () => getCurrentEditorText(),
-  getSyncedText: () => syncedText,
   clearTransientUi: () => editor?.clearGitUiTransientState?.()
 });
 
@@ -1529,78 +1499,6 @@ const openGitWorktreeForLine = ({ lineNumber }: { lineNumber: number }) => {
   gitClient?.openWorktreeForLine({ lineNumber });
 };
 
-const flushChanges = () => {
-  commitEditorTransientEdits();
-  if (!editor || inFlight || pendingText === null || normalizeEol(pendingText) === syncedText) {
-    return;
-  }
-
-  const nextText = pendingText;
-  const message: WebviewMessage = {
-    type: 'applyChanges',
-    baseVersion: documentVersion,
-    changes: [
-      {
-        from: 0,
-        to: syncedText.length,
-        insert: nextText
-      }
-    ]
-  };
-
-  inFlight = true;
-  inFlightText = nextText;
-  inFlightBaseVersion = documentVersion;
-  syncPendingDraftState();
-  vscode.postMessage(message);
-};
-
-const flushPendingChangesNow = () => {
-  commitEditorTransientEdits();
-  if (pendingDebounce !== null) {
-    window.clearTimeout(pendingDebounce);
-    pendingDebounce = null;
-  }
-
-  flushChanges();
-};
-
-const maybeSaveAfterSync = () => {
-  if (!saveAfterSync) {
-    return;
-  }
-
-  if (inFlight) {
-    return;
-  }
-
-  if (pendingText !== null && normalizeEol(pendingText) !== syncedText) {
-    flushChanges();
-    return;
-  }
-
-  saveAfterSync = false;
-  vscode.postMessage({ type: 'saveDocument' });
-};
-
-const requestSave = async () => {
-  commitEditorTransientEdits();
-  saveAfterSync = true;
-  flushPendingChangesNow();
-
-  let retries = 0;
-  while (inFlight && retries < 50) {
-    await new Promise(resolve => window.setTimeout(resolve, 20));
-    retries++;
-  }
-
-  maybeSaveAfterSync();
-};
-
-saveBtn.addEventListener('click', () => {
-  void requestSave();
-});
-
 const discardConfirmationWindowMs = 500;
 let discardConfirmationTimer: number | null = null;
 
@@ -1612,19 +1510,12 @@ const clearDiscardConfirmation = () => {
   discardBtn.classList.remove('is-discard-armed');
 };
 
-const discardUnsavedChanges = () => {
+const discardUnsavedChanges = async () => {
   const position = currentMode === 'preview'
     ? previewController.getTopVisiblePosition()
     : getTopVisiblePosition();
-  if (pendingDebounce !== null) {
-    window.clearTimeout(pendingDebounce);
-    pendingDebounce = null;
-  }
-  pendingText = null;
-  inFlight = false;
-  inFlightText = null;
-  saveAfterSync = false;
-  syncPendingDraftState();
+  commitEditorTransientEdits();
+  await documentSessionRuntime.whenIdle();
   vscode.postMessage({
     type: 'discardChanges',
     topLine: position?.topLine ?? 1,
@@ -1635,7 +1526,7 @@ const discardUnsavedChanges = () => {
 discardBtn.addEventListener('click', () => {
   if (discardConfirmationTimer !== null) {
     clearDiscardConfirmation();
-    discardUnsavedChanges();
+    void discardUnsavedChanges();
     return;
   }
   discardBtn.classList.add('is-discard-armed');
@@ -1686,31 +1577,74 @@ const setEditorTextSafely = (text: string, context: string): boolean => {
   }
 };
 
+const presentDocumentText = (
+  text: string,
+  source: 'revision' | 'rebased-draft'
+): boolean => {
+  clearGitBlameCache();
+  if (!editor) {
+    pendingInitialText = text;
+    scheduleInitialEditorMount();
+    return true;
+  }
+
+  const previewRestoreLine = currentMode === 'preview'
+    ? previewController.getTopVisiblePosition()?.topLine ?? null
+    : null;
+  if (!setEditorTextSafely(text, `documentSession.${source}`)) {
+    return false;
+  }
+  if (currentMode === 'preview') {
+    previewController.requestRender(text, {
+      restoreLine: pendingRestoreTopLine ?? previewRestoreLine
+    });
+  } else if (pendingRestoreTopLine !== null) {
+    editor.restoreTopLine?.(
+      pendingRestoreTopLine,
+      pendingRestoreTopLineOffset,
+      { syncCursor: false }
+    );
+  }
+  pendingRestoreTopLine = null;
+  pendingRestoreTopLineOffset = 0;
+  if (outlineController.isVisible()) {
+    outlineController.refresh();
+  }
+  scheduleWikiLinkStatusRefresh(text);
+  scheduleLocalLinkStatusRefresh(text);
+  findPanelController.updateFindStatusSummary();
+  return true;
+};
+
+const documentSessionRuntime = createDocumentSessionRuntime({
+  postMessage: (message) => vscode.postMessage(message),
+  presentText: presentDocumentText,
+  executeRemote: (action) => documentSessionTransport.execute(action),
+  showFailureNotice: (message) => failureNotice.setFailureNotice(message, 'warning')
+});
+
+const requestSave = async () => {
+  commitEditorTransientEdits();
+  await documentSessionRuntime.handle({ type: 'saveRequested' });
+};
+
+saveBtn.addEventListener('click', () => {
+  void requestSave();
+});
+
 const shortcutHandlerContext: ShortcutHandlerContext = {
   get editor() { return editor; },
   get currentMode() { return currentMode === 'preview' ? lastEditableMode : currentMode; },
   get vimModeEnabled() { return vimModeEnabled; },
-  get pendingText() { return pendingText; },
-  get syncedText() { return syncedText; },
   requestSave,
   openFindPanel: (target) => findPanelController.open(target),
-  applyMode: (mode, options) => applyMode(mode, options),
-  flushPendingChangesNow
+  applyMode: (mode, options) => applyMode(mode, options)
 };
 
-const queueChanges = (nextText: string) => {
+const handleLocalEditorChange = (nextText: string) => {
   bumpLocalEditGeneration();
-  pendingText = nextText;
-  syncPendingDraftState();
-
-  if (pendingDebounce !== null) {
-    window.clearTimeout(pendingDebounce);
-  }
-
-  pendingDebounce = window.setTimeout(() => {
-    pendingDebounce = null;
-    flushChanges();
-  }, 100);
+  void documentSessionRuntime.handle({ type: 'localDraftChanged', text: nextText });
+  void documentSessionRuntime.handle({ type: 'submitPendingDraft' });
 
   if (outlineController.isVisible()) {
     outlineController.refresh();
@@ -1880,7 +1814,7 @@ const mountInitialEditor = async () => {
       initialVimKeybindings: vimKeybindingsState,
       initialVimLeader: vimLeaderState,
       initialDiagnostics: pendingDiagnostics,
-      onApplyChanges: queueChanges,
+      onApplyChanges: handleLocalEditorChange,
       onOpenLink: (href: string) => {
         vscode.postMessage({ type: 'openLink', href });
       },
@@ -2052,15 +1986,8 @@ const handleInit = (message: InitMessage) => {
 const exportHandlerContext: ExportHandlerContext = {
   vscode,
   respondToSnapshot: createExportSnapshotResponder((message) => vscode.postMessage(message)).respond,
-  getEditor: () => editor,
-  get pendingText() { return pendingText; },
-  get pendingInitialText() { return pendingInitialText; },
-  get syncedText() { return syncedText; },
-  get pendingDebounce() { return pendingDebounce; },
-  get inFlight() { return inFlight; },
-  flushChanges,
-  normalizeEol,
-  setPendingDebounce: (value) => { pendingDebounce = value; },
+  getCurrentText: getCurrentEditorText,
+  whenDocumentIdle: () => documentSessionRuntime.whenIdle(),
   getPreviewAppearance: () => previewController.getAppearance()
 };
 
@@ -2100,13 +2027,7 @@ window.addEventListener('message', (event) => {
       failureNotice.clearFailureNotice();
       gitClient?.resetForInit({ hideTooltip: false });
       const nextMode = hasLocalModePreference ? currentMode : message.mode;
-      documentVersion = message.version;
-      syncedText = normalizeEol(message.text);
-      pendingText = null;
-      inFlight = false;
-      inFlightText = null;
-      saveAfterSync = false;
-      syncPendingDraftState();
+      void documentSessionRuntime.initialize(message);
       previewController.setAppearance(message.previewAppearance === 'light' ? 'light' : 'dark');
 
       handleInit(message);
@@ -2201,177 +2122,35 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'discardedChanges') {
-    if (pendingDebounce !== null) {
-      window.clearTimeout(pendingDebounce);
-      pendingDebounce = null;
-    }
-    documentVersion = message.version;
-    syncedText = normalizeEol(message.text);
-    pendingText = null;
-    inFlight = false;
-    inFlightText = null;
-    saveAfterSync = false;
-    syncPendingDraftState();
-    if (!setEditorTextSafely(message.text, 'discardedChanges')) {
-      return;
-    }
-    if (currentMode === 'preview') {
-      previewController.requestRender(message.text, { restoreLine: message.topLine });
-    } else {
-      editor?.restoreTopLine?.(message.topLine, message.topLineOffset ?? 0, { syncCursor: false });
-    }
-    outlineController.refresh();
-    scheduleWikiLinkStatusRefresh(message.text);
-    scheduleLocalLinkStatusRefresh(message.text);
-    findPanelController.updateFindStatusSummary();
+    void documentSessionRuntime.handle({
+      type: 'hostDiscardSucceeded',
+      version: message.version,
+      text: message.text
+    }).then(() => {
+      if (currentMode === 'preview') {
+        previewController.requestRender(getCurrentEditorText(), { restoreLine: message.topLine });
+      } else {
+        editor?.restoreTopLine?.(
+          message.topLine,
+          message.topLineOffset ?? 0,
+          { syncCursor: false }
+        );
+      }
+    });
     return;
   }
 
-  if (message.type === 'docChanged' && currentMode === 'preview') {
-    const incomingText = normalizeEol(message.text);
-    const currentText = normalizeEol(getCurrentEditorText());
-    if (incomingText !== currentText) {
-      const restoreLine = previewController.getTopVisiblePosition()?.topLine ?? null;
-      window.setTimeout(() => previewController.requestRender(getCurrentEditorText(), { restoreLine }), 0);
-    }
-  }
-
-  if (message.type === 'docChanged' && !editor && pendingInitialText !== null) {
-    clearGitBlameCache({ hideTooltip: false });
-    documentVersion = message.version;
-    syncedText = normalizeEol(message.text);
-    pendingInitialText = message.text;
-    return;
-  }
-
-  if (message.type === 'docChanged' && editor) {
-    clearGitBlameCache();
-    const incomingText = normalizeEol(message.text);
-    const currentText = normalizeEol(editor.getText());
-    const pendingNormalized = pendingText === null ? null : normalizeEol(pendingText);
-    const inFlightNormalized = inFlightText === null ? null : normalizeEol(inFlightText);
-    const localDraftText = pendingText ?? inFlightText;
-    const localDraftNormalized = localDraftText === null ? null : normalizeEol(localDraftText);
-
-    documentVersion = Math.max(documentVersion, message.version);
-
-    // VS Code can deliver the previous edit's docChanged after its applied
-    // acknowledgement. The current request was already based on that version,
-    // so this message only confirms its base and must not replace newer input.
-    if (
-      inFlight
-      && inFlightBaseVersion !== null
-      && message.version <= inFlightBaseVersion
-      && incomingText !== inFlightNormalized
-    ) {
-      syncedText = incomingText;
-      syncPendingDraftState();
-      return;
-    }
-
-    if (incomingText === currentText) {
-      syncedText = currentText;
-
-      if (pendingNormalized === incomingText) {
-        pendingText = null;
-      }
-
-      if (inFlight && inFlightNormalized === incomingText) {
-        inFlight = false;
-        inFlightText = null;
-      }
-
-      flushChanges();
-      maybeSaveAfterSync();
-      syncPendingDraftState();
-      return;
-    }
-
-    if (inFlight && inFlightNormalized === incomingText) {
-      syncedText = incomingText;
-      inFlight = false;
-      inFlightText = null;
-      flushChanges();
-      maybeSaveAfterSync();
-      syncPendingDraftState();
-      return;
-    }
-
-    if (pendingNormalized === incomingText) {
-      syncedText = incomingText;
-      pendingText = null;
-      inFlight = false;
-      inFlightText = null;
-      flushChanges();
-      maybeSaveAfterSync();
-      syncPendingDraftState();
-      return;
-    }
-
-    if (localDraftText !== null && localDraftNormalized !== incomingText) {
-      const reconciled = reconcileExternalDocument(syncedText, localDraftNormalized, incomingText);
-      syncedText = incomingText;
-      pendingText = reconciled.pendingText;
-      inFlight = false;
-      inFlightText = null;
-
-      if (pendingDebounce !== null) {
-        window.clearTimeout(pendingDebounce);
-        pendingDebounce = null;
-      }
-
-      // Protect the reconciled local draft before rendering it. Rendering can fail for
-      // document-specific Live decorations, but the extension must still retain the
-      // user's latest text for save and dispose-time recovery.
-      syncPendingDraftState();
-      if (!setEditorTextSafely(reconciled.text, 'docChanged.reconcile')) {
-        return;
-      }
-      flushChanges();
-      maybeSaveAfterSync();
-      return;
-    }
-
-    syncedText = incomingText;
-    pendingText = null;
-    inFlight = false;
-    inFlightText = null;
-    saveAfterSync = false;
-
-    if (pendingDebounce !== null) {
-      window.clearTimeout(pendingDebounce);
-      pendingDebounce = null;
-    }
-
-    syncPendingDraftState();
-    if (!setEditorTextSafely(message.text, 'docChanged')) {
-      return;
-    }
-    if (outlineController.isVisible()) {
-      outlineController.refresh();
-    }
-    scheduleWikiLinkStatusRefresh(message.text);
-    scheduleLocalLinkStatusRefresh(message.text);
-    findPanelController.updateFindStatusSummary();
+  if (message.type === 'docChanged') {
+    void documentSessionRuntime.handle({
+      type: 'hostRevisionChanged',
+      version: message.version,
+      text: message.text
+    });
     return;
   }
 
   if (message.type === 'applied') {
-    documentVersion = Math.max(documentVersion, message.version);
-    if (inFlight && inFlightBaseVersion !== null && message.version <= inFlightBaseVersion) {
-      return;
-    }
-    if (inFlightText !== null) {
-      syncedText = normalizeEol(inFlightText);
-    }
-    if (pendingText !== null && normalizeEol(pendingText) === syncedText) {
-      pendingText = null;
-    }
-    inFlight = false;
-    inFlightText = null;
-    flushChanges();
-    maybeSaveAfterSync();
-    syncPendingDraftState();
+    void documentSessionRuntime.handle({ type: 'hostChangeApplied', version: message.version });
     return;
   }
 
@@ -2526,7 +2305,7 @@ window.addEventListener('paste', async (event) => {
 });
 
 window.addEventListener('blur', () => {
-  flushPendingChangesNow();
+  commitEditorTransientEdits();
   flushViewPositionNow();
 });
 
@@ -2536,7 +2315,8 @@ window.addEventListener('visibilitychange', () => {
       window.cancelAnimationFrame(pendingEditorSurfaceRecoveryRaf);
       pendingEditorSurfaceRecoveryRaf = null;
     }
-    forceFlushChanges();
+    commitEditorTransientEdits();
+    flushViewPositionNow();
     return;
   }
   scheduleEditorSurfaceRecovery();
@@ -2545,12 +2325,6 @@ window.addEventListener('visibilitychange', () => {
 window.addEventListener('focus', () => {
   scheduleEditorSurfaceRecovery();
 });
-
-const forceFlushChanges = () => {
-  commitEditorTransientEdits();
-  flushChanges();
-  flushViewPositionNow();
-};
 
 window.addEventListener('beforeunload', () => {
   clearReadyRetryTimers();
@@ -2567,12 +2341,8 @@ window.addEventListener('beforeunload', () => {
     window.cancelAnimationFrame(pendingEditorSurfaceRecoveryRaf);
     pendingEditorSurfaceRecoveryRaf = null;
   }
-  if (pendingDebounce !== null) {
-    window.clearTimeout(pendingDebounce);
-    pendingDebounce = null;
-  }
-
-  forceFlushChanges();
+  commitEditorTransientEdits();
+  flushViewPositionNow();
 });
 
 window.addEventListener('resize', () => {
