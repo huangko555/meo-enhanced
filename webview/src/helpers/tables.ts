@@ -238,17 +238,14 @@ function stabilizeHistoryScrollTop(view: EditorView, targetTop: number) {
   }
 }
 
-function focusTableHistoryChange(
+export function focusTableHistoryChange(
   view: EditorView,
-  previousDocument: string,
+  changed: { from: number; to: number },
   previousScrollTop: number,
   targetPosition?: number,
-  isCurrent: () => boolean = () => true,
-  retryFocus?: (focus: () => boolean) => void
+  isCurrent: () => boolean = () => true
 ): boolean {
   if (!isCurrent()) return false;
-  const changed = changedDocumentRange(previousDocument, view.state.doc.toString());
-  if (!changed) return false;
 
   const changedLine = view.state.doc.lineAt(Math.min(changed.from, view.state.doc.length)).number;
   const findInput = () => {
@@ -314,13 +311,12 @@ function focusTableHistoryChange(
     return true;
   };
   if (focusInput()) return true;
-  retryFocus?.(focusInput);
   return false;
 }
 
 export function focusHistoryChange(
   view: EditorView,
-  previousDocument: string,
+  changed: { from: number; to: number } | null,
   previousScrollTop: number,
   revealSelection?: (anchor: number, head: number) => void,
   previousSelection?: {
@@ -330,18 +326,8 @@ export function focusHistoryChange(
     wasVisible: boolean;
   },
   targetPosition?: number,
-  isCurrent: () => boolean = () => true,
-  retryFocus?: (focus: () => boolean) => void
+  isCurrent: () => boolean = () => true
 ) {
-  if (focusTableHistoryChange(
-    view,
-    previousDocument,
-    previousScrollTop,
-    targetPosition,
-    isCurrent,
-    retryFocus
-  )) return;
-  const changed = changedDocumentRange(previousDocument, view.state.doc.toString());
   const target = targetPosition ?? changed?.to;
   if (typeof target === 'number' && view.state.selection.main.head !== target) {
     view.dispatch({ selection: { anchor: target } });

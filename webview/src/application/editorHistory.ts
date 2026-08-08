@@ -50,6 +50,7 @@ export type EditorHistoryInput =
     }
   | { readonly type: 'interactionRestored'; readonly replayId: number }
   | { readonly type: 'cancelRestore' }
+  | { readonly type: 'localDocumentEdited' }
   | { readonly type: 'presentationChanged' }
   | { readonly type: 'externalDocumentPresented' }
   | { readonly type: 'dispose' };
@@ -68,6 +69,7 @@ export type EditorHistoryEffect =
       readonly replayId: number;
       readonly direction: EditorHistoryDirection;
       readonly targetPosition: number | null;
+      readonly changedRange: { readonly from: number; readonly to: number } | null;
       readonly interactionTarget: EditorHistoryContext['interactionTarget'] | null;
       readonly preferredBlockMode: EditorHistoryBlockMode | null;
       readonly previousViewport: EditorHistoryViewport;
@@ -148,6 +150,7 @@ export function createEditorHistoryApplication(): EditorHistoryApplication {
           targetPosition: input.changedRange
             ? pending.direction === 'undo' ? input.changedRange.from : input.changedRange.to
             : null,
+          changedRange: input.changedRange,
           interactionTarget: pending.context.mode === 'live'
             ? pending.context.interactionTarget ?? null
             : null,
@@ -165,6 +168,7 @@ export function createEditorHistoryApplication(): EditorHistoryApplication {
         return [];
 
       case 'cancelRestore':
+      case 'localDocumentEdited':
       case 'presentationChanged':
       case 'externalDocumentPresented':
         return invalidatePendingReplay();

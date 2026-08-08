@@ -1,6 +1,6 @@
-import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec } from '@codemirror/state';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec, type Text } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentMore, indentLess } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { vim, Vim } from '@replit/codemirror-vim';
@@ -53,7 +53,8 @@ import {
   tableColumnWidthsField,
   tableHeaderAlignmentOverrideField,
   commitPendingTableEdits,
-  focusHistoryChange
+  focusHistoryChange,
+  focusTableHistoryChange
 } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
@@ -64,7 +65,10 @@ import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import { setLongCodeBlockFoldingEnabled } from './helpers/longCodeBlocks';
 import { ViewportController } from './helpers/viewportController';
 import { collectRenderableHtmlBlocks, setHtmlEditingRangeEffect } from './helpers/htmlContent';
-import { HistoryCoordinator, type HistoryFocusIntent, changedDocumentRange } from './helpers/historyCommands';
+import { setEditorHistoryRunner, type EditorHistoryDirection } from './helpers/historyCommands';
+import { createEditorHistoryApplication, type EditorHistoryContext, type EditorHistoryViewport } from './application/editorHistory';
+import { createEditorHistoryEffectAdapter, type EditorHistoryRestoreRequest } from './adapters/editorHistoryEffectAdapter';
+import { createEditorHistoryRuntime, type EditorHistoryRuntime } from './adapters/editorHistoryRuntime';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -309,7 +313,14 @@ export function createEditor({
   let suppressSelectionMenuForNativeHtml = false;
   let onBlockActionPointerMove = null;
   let onBlockActionPointerLeave = null;
-  let historyCoordinator: HistoryCoordinator | null = null;
+  let editorHistoryRuntime: EditorHistoryRuntime | null = null;
+  let historyScrollGuard: EditorHistoryViewport | null = null;
+  let pendingRenderedHistoryFocus: { replayId: number; run: () => boolean } | null = null;
+  let lastRenderedReplayPresentation: { anchor: number; mode: 'preview' | 'split' | 'source' } | null = null;
+  let onHistoryKeyDown: ((event: KeyboardEvent) => void) | null = null;
+  let onHistoryBeforeInput: ((event: InputEvent) => void) | null = null;
+  let onHistoryPointerDown: (() => void) | null = null;
+  let onHistoryBlur: ((event: FocusEvent) => void) | null = null;
   let blockActionToolbarReconcileFrame: number | null = null;
   let pendingLiveSearchRevealFrame: number | null = null;
   let pendingLiveSearchRevealGeneration = 0;
@@ -880,12 +891,17 @@ export function createEditor({
     return commitPendingTableEdits(view);
   };
 
+  const requestEditorHistoryReplay = async (direction: EditorHistoryDirection): Promise<boolean> => {
+    const result = await editorHistoryRuntime?.dispatch({ type: 'requestReplay', direction });
+    return result === true;
+  };
+
   const editorHistoryKeymap = historyKeymap.map((binding) => ({
     ...binding,
     run: () => {
       const key = binding.key?.toLowerCase() ?? '';
       const direction = key.includes('y') || key.includes('shift-z') ? 'redo' : 'undo';
-      historyCoordinator?.run(direction);
+      void requestEditorHistoryReplay(direction);
       return true;
     }
   }));
@@ -1620,13 +1636,23 @@ export function createEditor({
     return coords.top >= viewport.top && coords.bottom <= viewport.bottom;
   };
 
-  const revealRenderedHistoryPosition = (
-    position: number,
-    intent: HistoryFocusIntent,
-    preferredMode?: 'preview' | 'split' | 'source'
-  ): boolean => {
+  const suppressHistoryAutoScrollAt = (position: number): boolean => {
+    if (!historyScrollGuard) return false;
+    const coords = view.coordsAtPos(position);
+    const viewport = view.scrollDOM.getBoundingClientRect();
+    if (coords) {
+      return coords.top >= viewport.top && coords.bottom <= viewport.bottom;
+    }
+    const block = view.lineBlockAt(position);
+    return block.bottom > view.scrollDOM.scrollTop
+      && block.top < view.scrollDOM.scrollTop + view.scrollDOM.clientHeight;
+  };
+
+  const prepareRenderedHistoryPosition = (
+    position: number
+  ): (() => boolean) | null => {
     if (currentMode !== 'live') {
-      return false;
+      return null;
     }
 
     const targetPosition = Math.max(0, Math.min(position, view.state.doc.length));
@@ -1641,7 +1667,7 @@ export function createEditor({
       )
     ));
     if (!block || block.startLine >= view.state.doc.lines) {
-      return false;
+      return null;
     }
 
     const openingLine = view.state.doc.line(block.startLine);
@@ -1652,7 +1678,10 @@ export function createEditor({
     const manualMode = block.kind === 'mermaid'
       ? getMermaidBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual
       : getLatexMathBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual;
-    const desiredMode = preferredMode ?? (manualMode === 'preview' ? 'split' : manualMode);
+    const desiredMode = lastRenderedReplayPresentation?.anchor === openingLine.from
+      ? lastRenderedReplayPresentation.mode
+      : manualMode === 'preview' ? 'split' : manualMode;
+    lastRenderedReplayPresentation = { anchor: openingLine.from, mode: desiredMode };
     const modeEffect = desiredMode !== manualMode
       ? block.kind === 'mermaid'
         ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: desiredMode })
@@ -1672,11 +1701,9 @@ export function createEditor({
     // Keep the outer editor focused until the target controller mounts. The
     // coordinator owns cancellation when a newer command or user action wins.
     view.focus();
-    const focusSource = () => block.kind === 'mermaid'
+    return () => block.kind === 'mermaid'
       ? focusMermaidEditingOffset(view, openingLine.from, offset)
       : focusLatexMathEditingOffset(view, openingLine.from, offset);
-    intent.retry(focusSource);
-    return true;
   };
 
   const revealRenderedSourceLine = (lineNumber) => {
@@ -2208,7 +2235,8 @@ export function createEditor({
       diagnosticDataField,
       diagnosticField,
       EditorView.scrollHandler.of((editorView, range) => {
-        return historyCoordinator?.shouldSuppressScroll(range.head) ?? false;
+        void editorView;
+        return suppressHistoryAutoScrollAt(range.head);
       }),
       EditorView.updateListener.of((update) => {
         scheduleBlockActionToolbarReconcile();
@@ -2237,7 +2265,10 @@ export function createEditor({
 
         if (update.docChanged) {
           clearDiagnosticSuggestionState();
-          historyCoordinator?.recordUserEdit(update);
+          if (!applyingExternal && !applyingRenumber && !isHistoryReplayUpdate(update)) {
+            lastRenderedReplayPresentation = null;
+            void editorHistoryRuntime?.dispatch({ type: 'localDocumentEdited' });
+          }
         }
 
         if (!update.docChanged || applyingExternal || applyingRenumber) {
@@ -2286,40 +2317,181 @@ export function createEditor({
   viewportController = new ViewportController(view, {
     getMode: () => currentMode === 'live' ? 'live' : 'source'
   });
-  historyCoordinator = new HistoryCoordinator(view, viewportController, {
-    commitPendingEdits: () => { commitActiveTableInput(); },
-    getMode: () => currentMode === 'live' ? 'live' : 'source',
-    captureBlockModeAt: (position) => {
-      if (currentMode !== 'live') return undefined;
-      const activeBlock = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(
-        '.meo-mermaid-editing-block, .meo-latex-math-editing-block'
-      );
-      if (activeBlock) {
-        if (activeBlock.classList.contains('is-source')) return 'source';
-        if (activeBlock.classList.contains('is-split')) return 'split';
-        return 'preview';
-      }
-      void position;
-      return undefined;
+  const editorHistoryApplication = createEditorHistoryApplication();
+  const editorHistoryEffectAdapter = createEditorHistoryEffectAdapter({
+    captureContext(): EditorHistoryContext {
+      const activeElement = document.activeElement as HTMLElement | null;
+      const activeBlock = currentMode === 'live'
+        ? activeElement?.closest<HTMLElement>('.meo-mermaid-editing-block, .meo-latex-math-editing-block')
+        : null;
+      const interactionTarget: EditorHistoryContext['interactionTarget'] = activeElement?.closest(
+        '.meo-md-html-table-wrap textarea[data-table-cell-from][data-table-cell-to]'
+      )
+        ? { kind: 'table-boundary' }
+        : activeBlock
+          ? {
+              kind: 'rendered-block',
+              owner: activeBlock.classList.contains('meo-mermaid-editing-block')
+                ? 'mermaid-boundary'
+                : 'latex-boundary',
+              mode: activeBlock.classList.contains('is-source')
+                ? 'source'
+                : activeBlock.classList.contains('is-split') ? 'split' : 'preview'
+            }
+          : undefined;
+      return {
+        mode: currentMode === 'live' ? 'live' : 'source',
+        viewport: viewportController.captureHistorySnapshot(),
+        interactionTarget
+      };
     },
-    restoreFocus: (context, intent) => {
-      const rendered = context.targetPosition !== null
-        ? revealRenderedHistoryPosition(context.targetPosition, intent, context.preferredBlockMode)
+    commitTransientEdits() {
+      commitActiveTableInput();
+    },
+    runNativeHistory(direction) {
+      const guard = viewportController.captureHistorySnapshot();
+      historyScrollGuard = guard;
+      const beforeDocument = view.state.doc;
+      try {
+        const applied = direction === 'undo' ? undo(view) : redo(view);
+        return {
+          applied,
+          changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null
+        };
+      } finally {
+        queueMicrotask(() => {
+          if (historyScrollGuard === guard) historyScrollGuard = null;
+        });
+      }
+    },
+    attemptBoundaryRestore(request: EditorHistoryRestoreRequest) {
+      const changedLineIsTable = request.changedRange
+        ? view.state.doc.lineAt(Math.min(request.changedRange.from, view.state.doc.length)).text.includes('|')
         : false;
-      if (!rendered) {
+      if (changedLineIsTable) {
+        if (!request.changedRange) return 'not-rendered';
+        lastRenderedReplayPresentation = null;
+        if (focusTableHistoryChange(
+          view,
+          request.changedRange,
+          request.previousViewport.scrollTop,
+          request.targetPosition ?? undefined
+        )) return 'restored';
         focusHistoryChange(
           view,
-          context.previousDocument,
-          context.previousViewport.scrollTop,
+          request.changedRange,
+          request.previousViewport.scrollTop,
           (anchor, head) => applyRevealSelection(anchor, head, { focusEditor: true, align: 'nearest' }),
-          context.previousViewport.selection,
-          context.targetPosition ?? undefined,
-          intent.isCurrent,
-          intent.retry
+          request.previousViewport.selection,
+          request.targetPosition ?? undefined
         );
+        return 'retry';
       }
+      if (request.targetPosition === null) {
+        return 'not-rendered';
+      }
+      if (pendingRenderedHistoryFocus?.replayId !== request.replayId) {
+        const run = prepareRenderedHistoryPosition(
+          request.targetPosition
+        );
+        if (!run) return 'not-rendered';
+        pendingRenderedHistoryFocus = { replayId: request.replayId, run };
+      }
+      if (!pendingRenderedHistoryFocus.run()) return 'retry';
+      pendingRenderedHistoryFocus = null;
+      return 'restored';
+    },
+    restoreEditorInteraction(request) {
+      lastRenderedReplayPresentation = null;
+      focusHistoryChange(
+        view,
+        request.changedRange,
+        request.previousViewport.scrollTop,
+        (anchor, head) => applyRevealSelection(anchor, head, { focusEditor: true, align: 'nearest' }),
+        request.previousViewport.selection,
+        request.targetPosition ?? undefined
+      );
+    },
+    scheduleFocusRetry(run) {
+      let cancelled = false;
+      let frame: number | null = null;
+      const observer = new MutationObserver(() => trigger());
+      const cleanup = () => {
+        if (cancelled) return;
+        cancelled = true;
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        observer.disconnect();
+        pendingRenderedHistoryFocus = null;
+      };
+      const trigger = () => {
+        if (cancelled) return;
+        cleanup();
+        run();
+      };
+      observer.observe(view.dom, { childList: true, subtree: true });
+      view.requestMeasure({ read: () => null, write: trigger });
+      frame = requestAnimationFrame(trigger);
+      return cleanup;
+    },
+    reportError(operation, error) {
+      console.error(`Editor history ${operation} failed`, error);
+    },
+    dispose() {
+      pendingRenderedHistoryFocus = null;
+      lastRenderedReplayPresentation = null;
+      historyScrollGuard = null;
+      setEditorHistoryRunner(view, null);
+      if (onHistoryKeyDown) view.dom.removeEventListener('keydown', onHistoryKeyDown, true);
+      if (onHistoryBeforeInput) view.dom.removeEventListener('beforeinput', onHistoryBeforeInput, true);
+      if (onHistoryPointerDown) view.dom.removeEventListener('pointerdown', onHistoryPointerDown, true);
+      if (onHistoryBlur) view.dom.removeEventListener('blur', onHistoryBlur, true);
+      onHistoryKeyDown = null;
+      onHistoryBeforeInput = null;
+      onHistoryPointerDown = null;
+      onHistoryBlur = null;
     }
   });
+  editorHistoryRuntime = createEditorHistoryRuntime(
+    editorHistoryApplication,
+    editorHistoryEffectAdapter,
+    (error) => console.error('Editor history Runtime failed', error)
+  );
+  setEditorHistoryRunner(view, (direction) => requestEditorHistoryReplay(direction));
+  onHistoryKeyDown = (event) => {
+    const key = event.key.toLowerCase();
+    const isHistory = (event.ctrlKey || event.metaKey) && (key === 'z' || key === 'y');
+    const isModifier = key === 'control' || key === 'shift' || key === 'alt' || key === 'meta' || key === 'altgraph';
+    if (isHistory) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('.meo-mermaid-toolbar, .meo-latex-math-toolbar')) {
+        event.preventDefault();
+        event.stopPropagation();
+        void requestEditorHistoryReplay(key === 'z' && !event.shiftKey ? 'undo' : 'redo');
+      }
+      return;
+    }
+    if (!isModifier) void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
+  };
+  onHistoryBeforeInput = (event) => {
+    if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') {
+      void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
+    }
+  };
+  onHistoryPointerDown = () => { void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' }); };
+  onHistoryBlur = (event) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && view.dom.contains(next)) return;
+    queueMicrotask(() => {
+      if (!view.dom.contains(view.dom.ownerDocument.activeElement)) {
+        void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
+      }
+    });
+  };
+  view.dom.addEventListener('keydown', onHistoryKeyDown, true);
+  view.dom.addEventListener('beforeinput', onHistoryBeforeInput, true);
+  view.dom.addEventListener('pointerdown', onHistoryPointerDown, true);
+  view.dom.addEventListener('blur', onHistoryBlur, true);
   if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
@@ -2456,13 +2628,13 @@ export function createEditor({
       return true;
     },
     undo() {
-      return historyCoordinator?.run('undo') ?? false;
+      return requestEditorHistoryReplay('undo');
     },
     redo() {
-      return historyCoordinator?.run('redo') ?? false;
+      return requestEditorHistoryReplay('redo');
     },
     getHistoryDepth() {
-      return historyCoordinator?.getHistoryDepth() ?? { undo: 0, redo: 0 };
+      return { undo: undoDepth(view.state), redo: redoDepth(view.state) };
     },
     findNext(query, options: SearchOptions & { focusEditor?: boolean } = {}) {
       return findMatch(query, false, options);
@@ -2610,8 +2782,8 @@ export function createEditor({
         pendingLiveSearchRevealFrame = null;
       }
       setEditableLinkHoverCursor(view, false);
-      historyCoordinator?.destroy();
-      historyCoordinator = null;
+      editorHistoryRuntime?.dispose();
+      editorHistoryRuntime = null;
       viewportController.destroy();
       view.destroy();
     },
@@ -2623,6 +2795,9 @@ export function createEditor({
       if (!syncChange) {
         return;
       }
+
+      void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
+      lastRenderedReplayPresentation = null;
 
       const viewportAnchor = captureViewportAnchor();
       const { anchor, head } = view.state.selection.main;
@@ -2657,6 +2832,9 @@ export function createEditor({
       if (nextMode === currentMode) {
         return;
       }
+
+      void editorHistoryRuntime?.dispatch({ type: 'presentationChanged' });
+      lastRenderedReplayPresentation = null;
 
       const topPosition = computeTopVisiblePosition();
       viewportController.markInteraction();
@@ -3412,6 +3590,28 @@ function toggleInlineWrapper(view, selection, openMarker, closeMarker = openMark
 function insertKbd(view, selection) {
   return toggleInlineWrapper(view, selection, '<kbd>', '</kbd>');
 }
+
+const changedCodeMirrorDocumentRange = (before: Text, after: Text): { from: number; to: number } | null => {
+  const sharedLength = Math.min(before.length, after.length);
+  let prefixLow = 0;
+  let prefixHigh = sharedLength;
+  while (prefixLow < prefixHigh) {
+    const middle = Math.ceil((prefixLow + prefixHigh) / 2);
+    if (before.slice(0, middle).eq(after.slice(0, middle))) prefixLow = middle;
+    else prefixHigh = middle - 1;
+  }
+  const from = prefixLow;
+  if (from === before.length && from === after.length) return null;
+
+  let suffixLow = 0;
+  let suffixHigh = sharedLength - from;
+  while (suffixLow < suffixHigh) {
+    const middle = Math.ceil((suffixLow + suffixHigh) / 2);
+    if (before.slice(before.length - middle).eq(after.slice(after.length - middle))) suffixLow = middle;
+    else suffixHigh = middle - 1;
+  }
+  return { from, to: after.length - suffixLow };
+};
 
 function insertUnderline(view, selection) {
   return toggleInlineWrapper(view, selection, '<u>', '</u>');

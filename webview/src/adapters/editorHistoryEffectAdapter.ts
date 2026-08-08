@@ -20,6 +20,7 @@ export type EditorHistoryRestoreAttempt = 'not-rendered' | 'restored' | 'retry';
 export type EditorHistoryRuntimeInput =
   | { readonly type: 'requestReplay'; readonly direction: EditorHistoryDirection }
   | { readonly type: 'cancelRestore' }
+  | { readonly type: 'localDocumentEdited' }
   | { readonly type: 'presentationChanged' }
   | { readonly type: 'externalDocumentPresented' };
 
@@ -83,11 +84,6 @@ export function createEditorHistoryEffectAdapter(
       const attempt = (): void => {
         if (generation !== restoreGeneration || settleRestore !== resolve) return;
         try {
-          if (!request.interactionTarget) {
-            capabilities.restoreEditorInteraction(request);
-            finish({ type: 'interactionRestored', replayId: request.replayId });
-            return;
-          }
           const result = capabilities.attemptBoundaryRestore(request);
           if (result === 'restored') {
             finish({ type: 'interactionRestored', replayId: request.replayId });

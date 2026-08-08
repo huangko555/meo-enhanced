@@ -64,7 +64,7 @@ const runtime = createEditorHistoryRuntime(application, adapter, (error) => erro
 
 assert.equal(await runtime.dispatch({ type: 'requestReplay', direction: 'undo' }), true);
 await runtime.whenIdle();
-assert.deepEqual(events, ['commit', 'native:undo', 'editor:1:16:120']);
+assert.deepEqual(events, ['commit', 'native:undo', 'rendered:1:none', 'editor:1:16:120']);
 assert.equal(runtime.getState().pendingReplay, null);
 
 events.length = 0;
@@ -130,7 +130,7 @@ release();
 await Promise.all([rapidUndo, rapidRedo]);
 await runtime.whenIdle();
 assert.deepEqual(events, [
-  'commit', 'native:undo', 'editor:6:16:120',
+  'commit', 'native:undo', 'rendered:6:none',
   'commit', 'native:redo', 'rendered:7:split'
 ]);
 
@@ -153,6 +153,7 @@ const restoreRequest: EditorHistoryRestoreRequest = {
   replayId: 99,
   direction: 'undo',
   targetPosition: 7,
+  changedRange: { from: 7, to: 7 },
   interactionTarget: { kind: 'rendered-block', owner: 'mermaid-boundary', mode: 'source' },
   preferredBlockMode: 'source',
   previousViewport: {
@@ -169,6 +170,6 @@ assert.equal(/@codemirror|EditorView|Transaction|DocumentSession|Revision|Draft|
 const productionIndex = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
 const productionEditor = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 assert.equal(productionIndex.includes('createEditorHistoryRuntime'), false, 'candidate Runtime must not enter Bootstrap');
-assert.equal(productionEditor.includes('createEditorHistoryRuntime'), false, 'candidate Runtime must not enter Editor production');
+assert.equal(productionEditor.includes('createEditorHistoryRuntime'), true, 'production Editor must wire History Runtime');
 
 console.log('Editor history runtime and effect adapter checks passed');

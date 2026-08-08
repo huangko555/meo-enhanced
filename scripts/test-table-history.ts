@@ -133,8 +133,8 @@ async function main() {
       return { scrollTop: scroller.scrollTop, tableTop: table.getBoundingClientRect().top };
     });
 
-    const firstUndoImmediate = await page.evaluate(() => {
-      const applied = (window as any).__tableHistoryEditor.undo();
+    const firstUndoImmediate = await page.evaluate(async () => {
+      const applied = await (window as any).__tableHistoryEditor.undo();
       const inputs = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
       return {
         applied,
@@ -165,8 +165,8 @@ async function main() {
       throw new Error(`First undo did not keep the changed cell stable in the same frame: ${JSON.stringify({ firstUndoImmediate, afterFirstUndo })}`);
     }
 
-    const secondUndoImmediate = await page.evaluate(() => {
-      const applied = (window as any).__tableHistoryEditor.undo();
+    const secondUndoImmediate = await page.evaluate(async () => {
+      const applied = await (window as any).__tableHistoryEditor.undo();
       const inputs = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
       return {
         applied,
@@ -191,8 +191,8 @@ async function main() {
       throw new Error(`Second undo did not keep the preceding cell stable in the same frame: ${JSON.stringify({ secondUndoImmediate, afterSecondUndo })}`);
     }
 
-    const firstRedoImmediate = await page.evaluate(() => {
-      const applied = (window as any).__tableHistoryEditor.redo();
+    const firstRedoImmediate = await page.evaluate(async () => {
+      const applied = await (window as any).__tableHistoryEditor.redo();
       const inputs = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
       return {
         applied,
@@ -238,9 +238,9 @@ async function main() {
     const immediateInputBaseline = await page.evaluate(() => ({
       scrollTop: ((window as any).__tableHistoryEditor.view.scrollDOM as HTMLElement).scrollTop
     }));
-    const immediateInputSetup = await page.evaluate(() => {
+    const immediateInputSetup = await page.evaluate(async () => {
       const editor = (window as any).__tableHistoryEditor;
-      const applied = editor.undo();
+      const applied = await editor.undo();
       const inputs = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
       const input = inputs[0];
       input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
@@ -535,7 +535,7 @@ async function main() {
         ctrlKey: true,
         key: 'z'
       }));
-      const applied = editor.undo();
+      const applied = await editor.undo();
       return {
         applied,
         scrollTop: scroller.scrollTop,

@@ -35,6 +35,7 @@ assert.deepEqual(sourceRestore[0], {
   replayId: undoId,
   direction: 'undo',
   targetPosition: 16,
+  changedRange: { from: 16, to: 16 },
   interactionTarget: null,
   preferredBlockMode: null,
   previousViewport: sourceContext.viewport
@@ -65,6 +66,7 @@ assert.deepEqual(live.dispatch({
   replayId: redoId,
   direction: 'redo',
   targetPosition: 24,
+  changedRange: { from: 16, to: 24 },
   interactionTarget: liveContext.interactionTarget,
   preferredBlockMode: 'split',
   previousViewport: liveContext.viewport
@@ -131,6 +133,11 @@ assert.deepEqual(
   'external Document presentation must not become or clear the native UI history stack'
 );
 
+const localEdit = createEditorHistoryApplication();
+localEdit.dispatch({ type: 'requestReplay', direction: 'undo', context: liveContext });
+assert.deepEqual(effectTypes(localEdit.dispatch({ type: 'localDocumentEdited' })), ['cancelPendingRestore']);
+assert.equal(localEdit.getState().pendingReplay, null);
+
 const disposed = createEditorHistoryApplication();
 disposed.dispatch({ type: 'requestReplay', direction: 'undo', context: sourceContext });
 assert.deepEqual(effectTypes(disposed.dispatch({ type: 'dispose' })), ['cancelPendingRestore', 'disposeHistory']);
@@ -140,6 +147,6 @@ assert.deepEqual(disposed.dispatch({ type: 'requestReplay', direction: 'redo', c
 const productionIndex = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
 const productionEditor = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 assert.equal(productionIndex.includes('createEditorHistoryApplication'), false, 'candidate slices must not wire Bootstrap');
-assert.equal(productionEditor.includes('createEditorHistoryApplication'), false, 'candidate slices must not wire Editor');
+assert.equal(productionEditor.includes('createEditorHistoryApplication'), true, 'production Editor must wire History Application');
 
 console.log('Editor history application checks passed');
