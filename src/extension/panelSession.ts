@@ -3,6 +3,11 @@ import * as vscode from 'vscode';
 import type { AgentReviewHandoffController } from '../agents/reviewHandoff';
 import type { PendingDraftRecovery } from '../application/pendingDraftRecovery';
 import {
+  createGitBaselineRefreshCoordinator,
+  type GitBaselineRefreshOptions,
+  type GitBaselineRefreshTimer
+} from '../application/gitBaselineRefreshCoordinator';
+import {
   EXTENSION_CONFIG_SECTION,
   LINE_NUMBERS_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
@@ -97,12 +102,6 @@ type RevealSelectionPayload = {
   head: number;
 };
 
-type RefreshGitBaselineOptions = {
-  forcePost?: boolean;
-  forceReload?: boolean;
-  delayMs?: number;
-};
-
 type RememberedViewPosition = {
   line: number;
   lineOffset: number;
@@ -132,6 +131,7 @@ type PanelSessionControllerParams = {
   spellDiagnosticCollection: vscode.DiagnosticCollection;
   agentReviewHandoff: AgentReviewHandoffController;
   pendingDraftRecovery: PendingDraftRecovery;
+  gitBaselineRefreshTimer: GitBaselineRefreshTimer;
   onExportDocument: (session: PanelSession, format: ExportFormat, appearance: PreviewAppearance) => Promise<void>;
   renderPreview: (options: {
     markdownText: string;
@@ -159,7 +159,7 @@ export type PanelSession = {
   getMode: () => EditorMode;
   ensureInitDelivered: () => Promise<void>;
   requestExportSnapshot: () => Promise<{ text: string; environment?: ExportStyleEnvironment }>;
-  refreshGitBaseline: (options?: RefreshGitBaselineOptions) => void;
+  refreshGitBaseline: (options?: GitBaselineRefreshOptions) => void;
   refreshSpellDiagnostics: () => void;
   getGitRepoRoot: () => string | null;
 };
@@ -179,6 +179,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     spellDiagnosticCollection,
     agentReviewHandoff,
     pendingDraftRecovery,
+    gitBaselineRefreshTimer,
     onExportDocument,
     renderPreview,
     getFindOptions,
@@ -203,11 +204,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
-  let gitRefreshRunning = false;
-  let gitRefreshPending = false;
-  let gitRefreshPendingForcePost = false;
-  let gitRefreshPendingForceReload = false;
-  let pendingGitRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSavedRevisionTimer: ReturnType<typeof setTimeout> | null = null;
   let savedRevisionReadPromise: Promise<void> | null = null;
   let savedRevisionRefreshPending = false;
@@ -530,7 +526,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     return { ok: true, value: { revision: expected } };
   };
 
-  const sendGitBaselineChanged = async (options: RefreshGitBaselineOptions = {}): Promise<boolean> => {
+  const sendGitBaselineChanged = async (options: GitBaselineRefreshOptions = {}): Promise<boolean> => {
     if (!initDelivered) {
       return false;
     }
@@ -643,64 +639,20 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     return result.value;
   };
 
-  const runPendingGitRefreshes = async (): Promise<void> => {
-    if (pendingGitRefreshTimer !== null) {
-      clearTimeout(pendingGitRefreshTimer);
-      pendingGitRefreshTimer = null;
+  const gitBaselineRefresh = createGitBaselineRefreshCoordinator({
+    timer: gitBaselineRefreshTimer,
+    canRun: () => webviewReady,
+    invalidateGitHead: () => gitDocumentState.invalidate(),
+    prepare: async () => {
+      await ensureInitDelivered();
+      return initDelivered;
+    },
+    publish: async (options) => {
+      await sendGitBaselineChanged(options);
     }
-    if (gitRefreshRunning || !webviewReady) {
-      return;
-    }
-    gitRefreshRunning = true;
-    try {
-      while (gitRefreshPending) {
-        const nextOptions: RefreshGitBaselineOptions = {
-          forcePost: gitRefreshPendingForcePost,
-          forceReload: gitRefreshPendingForceReload
-        };
-        gitRefreshPending = false;
-        gitRefreshPendingForcePost = false;
-        gitRefreshPendingForceReload = false;
-        try {
-          await ensureInitDelivered();
-          if (!initDelivered) {
-            gitRefreshPending = true;
-            gitRefreshPendingForcePost = gitRefreshPendingForcePost || nextOptions.forcePost === true;
-            gitRefreshPendingForceReload = gitRefreshPendingForceReload || nextOptions.forceReload === true;
-            return;
-          }
-          await sendGitBaselineChanged(nextOptions);
-        } catch {
-          // Keep refresh coalescing alive across transient git/webview failures.
-        }
-      }
-    } finally {
-      gitRefreshRunning = false;
-      if (gitRefreshPending) {
-        runBackground(runPendingGitRefreshes(), 'runPendingGitRefreshes.retry');
-      }
-    }
-  };
-
-  const refreshGitBaseline = (options: RefreshGitBaselineOptions = {}): void => {
-    if (options.forceReload) {
-      gitDocumentState.invalidate();
-    }
-    gitRefreshPending = true;
-    gitRefreshPendingForcePost = gitRefreshPendingForcePost || options.forcePost === true;
-    gitRefreshPendingForceReload = gitRefreshPendingForceReload || options.forceReload === true;
-    const delayMs = Math.max(0, options.delayMs ?? 0);
-    if (delayMs > 0 && !gitRefreshRunning) {
-      if (pendingGitRefreshTimer !== null) {
-        clearTimeout(pendingGitRefreshTimer);
-      }
-      pendingGitRefreshTimer = setTimeout(() => {
-        pendingGitRefreshTimer = null;
-        runBackground(runPendingGitRefreshes(), 'runPendingGitRefreshes.delayed');
-      }, delayMs);
-      return;
-    }
-    runBackground(runPendingGitRefreshes(), 'runPendingGitRefreshes');
+  });
+  const refreshGitBaseline = (options: GitBaselineRefreshOptions = {}): void => {
+    gitBaselineRefresh.request(options);
   };
 
   const isTextEditorForDocument = (textEditor: vscode.TextEditor | undefined): textEditor is vscode.TextEditor => {
@@ -1391,10 +1343,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       clearTimeout(pendingSpellCheckTimer);
       pendingSpellCheckTimer = null;
     }
-    if (pendingGitRefreshTimer !== null) {
-      clearTimeout(pendingGitRefreshTimer);
-      pendingGitRefreshTimer = null;
-    }
+    gitBaselineRefresh.dispose();
     if (pendingSavedRevisionTimer !== null) {
       clearTimeout(pendingSavedRevisionTimer);
       pendingSavedRevisionTimer = null;

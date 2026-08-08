@@ -56,6 +56,7 @@ import {
 } from './shared/extensionConfig';
 import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
 import { createVscodePendingDraftRecoveryAdapter } from './host/vscodePendingDraftRecoveryAdapter';
+import { createGitBaselineRefreshTimerAdapter } from './host/gitBaselineRefreshTimerAdapter';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
 import {
   normalizePreviewAppearance,
@@ -681,6 +682,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         document,
         noteOwnedFileChange: (uri) => this.agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(uri)
       }),
+      gitBaselineRefreshTimer: createGitBaselineRefreshTimerAdapter(),
       onExportDocument: (session, format, appearance) => this.exportSessionDocument(session, format, appearance),
       renderPreview: async (options) => {
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
