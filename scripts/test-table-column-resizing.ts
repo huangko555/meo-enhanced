@@ -229,10 +229,24 @@ async function main() {
     const narrowed = await page.evaluate(() => {
       const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
       const firstCell = table.querySelector<HTMLElement>('thead th:first-child')!;
-      return { tableWidth: table.getBoundingClientRect().width, firstColumnWidth: firstCell.getBoundingClientRect().width };
+      const preview = firstCell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+      const cellStyle = getComputedStyle(firstCell);
+      const previewStyle = getComputedStyle(preview);
+      return {
+        tableWidth: table.getBoundingClientRect().width,
+        firstColumnWidth: firstCell.getBoundingClientRect().width,
+        minimumColumnWidth: parseFloat(previewStyle.fontSize)
+          + parseFloat(previewStyle.paddingLeft)
+          + parseFloat(previewStyle.paddingRight)
+          + parseFloat(cellStyle.borderLeftWidth)
+          + parseFloat(cellStyle.borderRightWidth)
+      };
     });
     if (narrowed.tableWidth >= initial.tableWidth - 2 || narrowed.firstColumnWidth >= initial.cellWidths[0] - 2) {
       throw new Error(`Table could not shrink below its initial width: ${JSON.stringify({ initial, narrowed })}`);
+    }
+    if (narrowed.firstColumnWidth < narrowed.minimumColumnWidth - 1) {
+      throw new Error(`Column width crossed its content minimum: ${JSON.stringify(narrowed)}`);
     }
 
     await page.evaluate(async (markdown) => {

@@ -194,10 +194,15 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         initialTotalWidth >= startMaximumTotalWidth - 1
       );
       const minimumWidths = cells.map((cell) => {
-        const style = getComputedStyle(cell);
+        const cellStyle = getComputedStyle(cell);
+        const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+        const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
         const numeric = (value: string) => Number.parseFloat(value) || 0;
-        return numeric(style.fontSize) + numeric(style.paddingLeft) + numeric(style.paddingRight)
-          + numeric(style.borderLeftWidth) + numeric(style.borderRightWidth);
+        return numeric(previewStyle.fontSize)
+          + numeric(previewStyle.paddingLeft)
+          + numeric(previewStyle.paddingRight)
+          + numeric(cellStyle.borderLeftWidth)
+          + numeric(cellStyle.borderRightWidth);
       });
       const startX = event.clientX;
       let nextWidths: readonly number[] = startWidths;
