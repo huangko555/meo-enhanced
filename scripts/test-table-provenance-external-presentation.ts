@@ -61,7 +61,6 @@ async function main(): Promise<void> {
       deletedMarkers: document.querySelectorAll('.meo-md-html-table-diff-marker.is-deleted').length
     }));
     assert.equal(before.provenance.lifecycle, 'active');
-    assert.equal(before.provenance.legacyInstalled, false);
     assert.equal(before.provenance.inserted.length, 1);
     assert.equal(before.provenance.deleted.length, 1);
     assert.equal(before.insertedMarkers, 1);

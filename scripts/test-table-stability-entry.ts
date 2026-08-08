@@ -12,7 +12,6 @@ import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlineP
 import {
   getTableTransactionProvenanceSnapshot
 } from '../webview/src/adapters/tableTransactionProvenance';
-import { tableRowDiffProvenanceField } from '../webview/src/helpers/tableRowDiffProvenance';
 
 const getTableProvenanceSnapshot = () => {
   const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!);
@@ -20,8 +19,7 @@ const getTableProvenanceSnapshot = () => {
   return {
     lifecycle: snapshot.lifecycle,
     inserted: snapshot.insertedRows,
-    deleted: snapshot.deletedRows,
-    legacyInstalled: view.state.field(tableRowDiffProvenanceField, false) !== undefined
+    deleted: snapshot.deletedRows
   };
 };
 

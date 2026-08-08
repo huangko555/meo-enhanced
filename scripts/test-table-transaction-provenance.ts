@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createTableTransactionProvenance } from '../webview/src/application/tableTransactionProvenance';
 
 const provenance = createTableTransactionProvenance();
@@ -190,6 +190,11 @@ assert.equal(
   'the provenance Interface must not expose editor, DOM, Document Session, history, or baseline owners'
 );
 assert.equal(adapterSource.includes('tableRowDiffProvenance'), false, 'candidate Adapter must not depend on Legacy');
+assert.equal(
+  existsSync(new URL('../webview/src/helpers/tableRowDiffProvenance.ts', import.meta.url)),
+  false,
+  'the replaced Legacy StateField must not remain in the repository'
+);
 assert.equal(/(?:historyEntries|historyDepth|documentText|diffBaseline)\s*[=:]/.test(adapterSource), false);
 for (const requiredBoundary of ['invertedEffects', 'iterChanges', 'mapPos', 'lineAt', 'dispose']) {
   assert.equal(
