@@ -10,7 +10,10 @@ const effectTypes = (effects: readonly EditorHistoryEffect[]): string[] => effec
 
 const sourceContext: EditorHistoryContext = {
   mode: 'source',
-  viewport: { topLine: 12, topLineOffset: 0.25 }
+  viewport: {
+    scrollTop: 120,
+    selection: { lineNumber: 12, visibleFromLineNumber: 10, visibleToLineNumber: 30, wasVisible: true }
+  }
 };
 
 const source = createEditorHistoryApplication();
@@ -32,6 +35,7 @@ assert.deepEqual(sourceRestore[0], {
   replayId: undoId,
   direction: 'undo',
   targetPosition: 16,
+  interactionTarget: null,
   preferredBlockMode: null,
   previousViewport: sourceContext.viewport
 });
@@ -41,7 +45,10 @@ assert.equal(source.getState().pendingReplay, null);
 
 const liveContext: EditorHistoryContext = {
   mode: 'live',
-  viewport: { topLine: 20, topLineOffset: 0 },
+  viewport: {
+    scrollTop: 240,
+    selection: { lineNumber: 20, visibleFromLineNumber: 18, visibleToLineNumber: 38, wasVisible: true }
+  },
   interactionTarget: { kind: 'rendered-block', owner: 'generic', mode: 'split' }
 };
 const live = createEditorHistoryApplication();
@@ -58,6 +65,7 @@ assert.deepEqual(live.dispatch({
   replayId: redoId,
   direction: 'redo',
   targetPosition: 24,
+  interactionTarget: liveContext.interactionTarget,
   preferredBlockMode: 'split',
   previousViewport: liveContext.viewport
 }]);
@@ -79,6 +87,10 @@ for (const interactionTarget of boundaries) {
   assert.equal(
     effects[0]?.type === 'restoreHistoryInteraction' ? effects[0].preferredBlockMode : null,
     interactionTarget.kind === 'rendered-block' ? interactionTarget.mode : null
+  );
+  assert.deepEqual(
+    effects[0]?.type === 'restoreHistoryInteraction' ? effects[0].interactionTarget : null,
+    interactionTarget
   );
 }
 
@@ -127,7 +139,7 @@ assert.deepEqual(disposed.dispatch({ type: 'requestReplay', direction: 'redo', c
 
 const productionIndex = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
 const productionEditor = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
-assert.equal(productionIndex.includes('createEditorHistoryApplication'), false, 'first slice must not wire Bootstrap');
-assert.equal(productionEditor.includes('createEditorHistoryApplication'), false, 'first slice must not wire Editor');
+assert.equal(productionIndex.includes('createEditorHistoryApplication'), false, 'candidate slices must not wire Bootstrap');
+assert.equal(productionEditor.includes('createEditorHistoryApplication'), false, 'candidate slices must not wire Editor');
 
 console.log('Editor history application checks passed');

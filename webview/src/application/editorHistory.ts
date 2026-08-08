@@ -2,8 +2,13 @@ export type EditorHistoryDirection = 'undo' | 'redo';
 export type EditorHistoryBlockMode = 'preview' | 'split' | 'source';
 
 export type EditorHistoryViewport = {
-  readonly topLine: number;
-  readonly topLineOffset: number;
+  readonly scrollTop: number;
+  readonly selection: {
+    readonly lineNumber: number;
+    readonly visibleFromLineNumber: number;
+    readonly visibleToLineNumber: number;
+    readonly wasVisible: boolean;
+  };
 };
 
 export type EditorHistoryContext = {
@@ -63,6 +68,7 @@ export type EditorHistoryEffect =
       readonly replayId: number;
       readonly direction: EditorHistoryDirection;
       readonly targetPosition: number | null;
+      readonly interactionTarget: EditorHistoryContext['interactionTarget'] | null;
       readonly preferredBlockMode: EditorHistoryBlockMode | null;
       readonly previousViewport: EditorHistoryViewport;
     }
@@ -141,6 +147,9 @@ export function createEditorHistoryApplication(): EditorHistoryApplication {
           direction: pending.direction,
           targetPosition: input.changedRange
             ? pending.direction === 'undo' ? input.changedRange.from : input.changedRange.to
+            : null,
+          interactionTarget: pending.context.mode === 'live'
+            ? pending.context.interactionTarget ?? null
             : null,
           preferredBlockMode: pending.context.mode === 'live'
             && pending.context.interactionTarget?.kind === 'rendered-block'
