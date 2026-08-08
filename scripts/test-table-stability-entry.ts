@@ -1,5 +1,6 @@
 import { createEditor } from '../webview/src/editor';
 import { Transaction } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import {
   handleImagePaste,
   handleSavedImagePath,
@@ -8,6 +9,18 @@ import {
 } from '../webview/src/helpers/images';
 import { getLocalLinkStatus, replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
 import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlinePresentation';
+import {
+  getDeletedTableRows,
+  getInsertedTableRowsInRange
+} from '../webview/src/helpers/tableRowDiffProvenance';
+
+const getTableProvenanceSnapshot = () => {
+  const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!);
+  return {
+    inserted: getInsertedTableRowsInRange(view.state, 0, view.state.doc.length),
+    deleted: getDeletedTableRows(view.state)
+  };
+};
 
 (globalThis as typeof globalThis & {
   TableStabilityHarness?: {
@@ -20,6 +33,7 @@ import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlineP
     getLocalLinkStatus: typeof getLocalLinkStatus;
     resolveInlineSourceOffsetAtPoint: typeof resolveInlineSourceOffsetAtPoint;
     addToHistoryAnnotation: (value: boolean) => ReturnType<typeof Transaction.addToHistory.of>;
+    getTableProvenanceSnapshot: typeof getTableProvenanceSnapshot;
   };
 }).TableStabilityHarness = {
   createEditor,
@@ -30,5 +44,6 @@ import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlineP
   replaceLocalLinkStatuses,
   getLocalLinkStatus,
   resolveInlineSourceOffsetAtPoint,
-  addToHistoryAnnotation: (value: boolean) => Transaction.addToHistory.of(value)
+  addToHistoryAnnotation: (value: boolean) => Transaction.addToHistory.of(value),
+  getTableProvenanceSnapshot
 };

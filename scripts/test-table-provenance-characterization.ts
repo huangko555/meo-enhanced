@@ -7,6 +7,7 @@ import { launchTestBrowser } from './browser-test-helpers';
 import {
   createMarkDeletedTableRowsEffect,
   createMarkInsertedTableRowEffect,
+  clearTableRowDiffProvenanceEffect,
   getDeletedTableRows,
   getInsertedTableRowsInRange,
   tableRowDiffProvenanceField
@@ -50,12 +51,13 @@ function characterizeLegacyExternalPresentation(): void {
   assert.equal(getDeletedTableRows(deletedState).length, 1);
   const presented = `prefix\n${deletedState.doc.toString()}`;
   deletedState = deletedState.update({
-    changes: { from: 0, to: deletedState.doc.length, insert: presented }
+    changes: { from: 0, to: deletedState.doc.length, insert: presented },
+    effects: clearTableRowDiffProvenanceEffect.of(null)
   }).state;
   assert.equal(
     getDeletedTableRows(deletedState).length,
-    1,
-    'Legacy maps a deleted hint through external replacement instead of invalidating its scope'
+    0,
+    'external presentation explicitly invalidates the Legacy provenance scope'
   );
 }
 
