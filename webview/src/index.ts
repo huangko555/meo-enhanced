@@ -22,8 +22,7 @@ import { normalizeEditorAppearance, type EditorAppearance } from '../../src/shar
 import { resolveCodeTheme } from './themes/editorLightTheme';
 import { createExportSnapshotResponder } from './adapters/exportSnapshotTransport';
 import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
-import { createDocumentSessionTransport } from './adapters/documentSessionTransport';
-import { createDocumentSessionRuntime } from './adapters/documentSessionRuntime';
+import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { InitMessage } from '../../src/protocol/readyInit';
 
@@ -83,9 +82,6 @@ let diagnosticSuggestionsTransport: DiagnosticSuggestionsTransport = {
   cancelAll: () => undefined
 };
 const vscode = createCompatibleVsCodeApi();
-const documentSessionTransport = createDocumentSessionTransport((message) => {
-  vscode.postMessage(message);
-});
 initializeImageHandling(vscode);
 initializeWikiLinkHandling(vscode);
 initializeLocalLinkHandling(vscode);
@@ -1510,14 +1506,12 @@ const clearDiscardConfirmation = () => {
   discardBtn.classList.remove('is-discard-armed');
 };
 
-const discardUnsavedChanges = async () => {
+const discardUnsavedChanges = () => {
   const position = currentMode === 'preview'
     ? previewController.getTopVisiblePosition()
     : getTopVisiblePosition();
   commitEditorTransientEdits();
-  await documentSessionRuntime.whenIdle();
-  vscode.postMessage({
-    type: 'discardChanges',
+  documentSessionAdapter.requestDiscard({
     topLine: position?.topLine ?? 1,
     topLineOffset: position?.topLineOffset ?? 0
   });
@@ -1526,7 +1520,7 @@ const discardUnsavedChanges = async () => {
 discardBtn.addEventListener('click', () => {
   if (discardConfirmationTimer !== null) {
     clearDiscardConfirmation();
-    void discardUnsavedChanges();
+    discardUnsavedChanges();
     return;
   }
   discardBtn.classList.add('is-discard-armed');
@@ -1616,16 +1610,29 @@ const presentDocumentText = (
   return true;
 };
 
-const documentSessionRuntime = createDocumentSessionRuntime({
+const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   postMessage: (message) => vscode.postMessage(message),
   presentText: presentDocumentText,
-  executeRemote: (action) => documentSessionTransport.execute(action),
-  showFailureNotice: (message) => failureNotice.setFailureNotice(message, 'warning')
+  restoreDiscardedView: (message) => {
+    if (currentMode === 'preview') {
+      previewController.requestRender(getCurrentEditorText(), { restoreLine: message.topLine });
+    } else {
+      editor?.restoreTopLine?.(
+        message.topLine,
+        message.topLineOffset,
+        { syncCursor: false }
+      );
+    }
+  },
+  showFailureNotice: (message) => failureNotice.setFailureNotice(message, 'warning'),
+  reportUnexpectedError: (context, error) => {
+    console.error(`[MEO webview] Document Session ${context}`, error);
+  }
 });
 
-const requestSave = async () => {
+const requestSave = () => {
   commitEditorTransientEdits();
-  await documentSessionRuntime.handle({ type: 'saveRequested' });
+  documentSessionAdapter.requestSave();
 };
 
 saveBtn.addEventListener('click', () => {
@@ -1643,8 +1650,7 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
 
 const handleLocalEditorChange = (nextText: string) => {
   bumpLocalEditGeneration();
-  void documentSessionRuntime.handle({ type: 'localDraftChanged', text: nextText });
-  void documentSessionRuntime.handle({ type: 'submitPendingDraft' });
+  documentSessionAdapter.localDraftChanged(nextText);
 
   if (outlineController.isVisible()) {
     outlineController.refresh();
@@ -1987,7 +1993,7 @@ const exportHandlerContext: ExportHandlerContext = {
   vscode,
   respondToSnapshot: createExportSnapshotResponder((message) => vscode.postMessage(message)).respond,
   getCurrentText: getCurrentEditorText,
-  whenDocumentIdle: () => documentSessionRuntime.whenIdle(),
+  whenDocumentIdle: () => documentSessionAdapter.whenIdle(),
   getPreviewAppearance: () => previewController.getAppearance()
 };
 
@@ -2027,7 +2033,7 @@ window.addEventListener('message', (event) => {
       failureNotice.clearFailureNotice();
       gitClient?.resetForInit({ hideTooltip: false });
       const nextMode = hasLocalModePreference ? currentMode : message.mode;
-      void documentSessionRuntime.initialize(message);
+      documentSessionAdapter.start(message);
       previewController.setAppearance(message.previewAppearance === 'light' ? 'light' : 'dark');
 
       handleInit(message);
@@ -2116,41 +2122,7 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  if (message.type === 'saveDocumentRevisionResult' || message.type === 'documentRevisionResult') {
-    documentSessionTransport.accept(message);
-    return;
-  }
-
-  if (message.type === 'discardedChanges') {
-    void documentSessionRuntime.handle({
-      type: 'hostDiscardSucceeded',
-      version: message.version,
-      text: message.text
-    }).then(() => {
-      if (currentMode === 'preview') {
-        previewController.requestRender(getCurrentEditorText(), { restoreLine: message.topLine });
-      } else {
-        editor?.restoreTopLine?.(
-          message.topLine,
-          message.topLineOffset ?? 0,
-          { syncCursor: false }
-        );
-      }
-    });
-    return;
-  }
-
-  if (message.type === 'docChanged') {
-    void documentSessionRuntime.handle({
-      type: 'hostRevisionChanged',
-      version: message.version,
-      text: message.text
-    });
-    return;
-  }
-
-  if (message.type === 'applied') {
-    void documentSessionRuntime.handle({ type: 'hostChangeApplied', version: message.version });
+  if (documentSessionAdapter.accept(message)) {
     return;
   }
 
@@ -2331,7 +2303,7 @@ window.addEventListener('beforeunload', () => {
   cancelPendingWikiStatusRefresh();
   cancelPendingLocalLinkStatusRefresh();
   clearGitBlameCache({ hideTooltip: false });
-  documentSessionTransport.cancelAll('Document Session closed');
+  documentSessionAdapter.dispose();
 
   if (initialEditorMountFallbackTimer !== null) {
     window.clearTimeout(initialEditorMountFallbackTimer);

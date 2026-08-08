@@ -11,6 +11,7 @@ const hostSession = read('src/extension/panelSession.ts');
 const editorCommands = read('src/protocol/editorCommands.ts');
 const gitClient = read('webview/src/helpers/gitClient.ts');
 const packageJson = read('package.json');
+const documentSessionAdapter = read('webview/src/adapters/documentSessionWebviewAdapter.ts');
 
 assert.equal(fs.existsSync(path.join(repoRoot, 'webview/src/helpers/documentSync.ts')), false);
 assert.equal(fs.existsSync(path.join(repoRoot, 'scripts/test-document-sync.ts')), false);
@@ -18,11 +19,20 @@ assert.equal(packageJson.includes('scripts/test-document-sync.ts'), false);
 assert.equal(gitClient.includes('getSyncedText'), false);
 
 assert.equal(
-  (webviewBootstrap.match(/createDocumentSessionRuntime\s*\(/g) ?? []).length,
+  (webviewBootstrap.match(/createDocumentSessionWebviewAdapter\s*\(/g) ?? []).length,
   1,
-  'production Bootstrap must create exactly one Document Session runtime'
+  'production Bootstrap must create exactly one Document Session Webview Adapter'
 );
-assert.match(webviewBootstrap, /documentSessionRuntime\.initialize\s*\(message\)/);
+assert.match(webviewBootstrap, /documentSessionAdapter\.start\s*\(message\)/);
+assert.match(webviewBootstrap, /documentSessionAdapter\.accept\s*\(message\)/);
+assert.match(webviewBootstrap, /documentSessionAdapter\.dispose\s*\(\s*\)/);
+assert.equal(webviewBootstrap.includes('createDocumentSessionRuntime'), false);
+assert.equal(webviewBootstrap.includes('createDocumentSessionTransport'), false);
+assert.equal(webviewBootstrap.includes("type: 'hostRevisionChanged'"), false);
+assert.equal(webviewBootstrap.includes("type: 'hostChangeApplied'"), false);
+assert.equal(webviewBootstrap.includes("type: 'hostDiscardSucceeded'"), false);
+assert.match(documentSessionAdapter, /createDocumentSessionRuntime/);
+assert.match(documentSessionAdapter, /createDocumentSessionTransport/);
 
 for (const legacyIdentifier of [
   'pendingText',
