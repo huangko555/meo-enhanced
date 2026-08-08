@@ -302,6 +302,7 @@ assert.equal(
 
 const panelSessionSource = readFileSync(new URL('../src/extension/panelSession.ts', import.meta.url), 'utf8');
 const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
+const gitTypesSource = readFileSync(new URL('../src/git/types.ts', import.meta.url), 'utf8');
 for (const legacyPattern of [
   /let diffBaselineMode/,
   /let fixedBaselineSelected/,
@@ -321,6 +322,11 @@ assert.equal(
   extensionSource.match(/createDiffBaselineProtocolAdapter\(/g)?.length,
   1,
   'Host Bootstrap must create exactly one baseline Protocol output adapter'
+);
+assert.equal(
+  gitTypesSource.includes('GitBaselinePayload as ProtocolGitBaselinePayload'),
+  false,
+  'the Git baseline model must not alias the Protocol DTO'
 );
 assert.match(panelSessionSource, /diffBaselineSelection\.dispose\(\)/);
 
