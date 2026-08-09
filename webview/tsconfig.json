@@ -6,6 +6,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": false,
     "noImplicitAny": false,
+    "strictFunctionTypes": true,
     "useUnknownInCatchVariables": true,
     "allowJs": true,
     "checkJs": false,

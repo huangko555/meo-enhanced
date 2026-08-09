@@ -1,5 +1,5 @@
 import { RangeSetBuilder, StateEffect, StateField, Transaction, EditorState } from '@codemirror/state';
-import { EditorView, GutterMarker, gutter } from '@codemirror/view';
+import { EditorView, GutterMarker, gutter, type BlockInfo } from '@codemirror/view';
 import { createElement, ChevronDown } from 'lucide';
 import { extractDetailsBlocks, extractHeadingSections, HeadingSection, DetailsBlockInfo } from './markdownSyntax';
 import { getViewportController } from './viewportController';
@@ -420,7 +420,7 @@ const liveHeadingFoldGutterExtension = gutter({
     return view.state.field(liveHeadingFoldGutterField);
   },
   domEventHandlers: {
-    mousedown(view: EditorView, line: any, event: MouseEvent) {
+    mousedown(view: EditorView, line: BlockInfo, event: Event) {
       const target = event.target instanceof Element ? event.target : null;
       if (!target?.closest('.meo-md-fold-toggle')) {
         return false;

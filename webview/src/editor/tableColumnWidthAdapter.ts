@@ -250,7 +250,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       pointerBoundary.addEventListener('pointerleave', finish);
     };
 
-    const handleRoot = table.closest('.meo-md-html-table-shell') ?? table;
+    const handleRoot = table.closest<HTMLElement>('.meo-md-html-table-shell') ?? table;
     handleRoot.addEventListener('pointerdown', start);
     cleanups.push(() => handleRoot.removeEventListener('pointerdown', start));
 
