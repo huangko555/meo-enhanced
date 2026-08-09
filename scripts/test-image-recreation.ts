@@ -71,7 +71,11 @@ class FakeElement {
 (globalThis as any).window = globalThis;
 (globalThis as any).Image = FakeElement;
 
-const { ImageWidget } = await import('../webview/src/helpers/images');
+const {
+  ImageWidget,
+  resolveConfiguredImageSrc,
+  setImageSrcResolver
+} = await import('../webview/src/helpers/images');
 const {
   createImagePresentationFactory,
   createImagePresentationResourcePool,
@@ -85,6 +89,12 @@ const factory = createImagePresentationFactory({
   resources,
   resourceContextKey: 'test-document'
 });
+
+setImageSrcResolver(async () => undefined);
+if (await resolveConfiguredImageSrc('/missing-image.png') !== null) {
+  throw new Error('Async image resolver absence was not normalized to null');
+}
+setImageSrcResolver((url: string) => url);
 
 const flushImageLoad = async () => {
   for (let index = 0; index < 50; index += 1) {

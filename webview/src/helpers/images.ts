@@ -123,8 +123,8 @@ export const resolveImageSrc = (rawUrl: string | null | undefined): string | Pro
 };
 
 export const resolveConfiguredImageSrc = async (rawUrl: string): Promise<string | null> => {
-  const resolved = imageSrcResolver(rawUrl);
-  return await Promise.resolve(resolved || null);
+  const resolved = await imageSrcResolver(rawUrl);
+  return resolved || null;
 };
 
 export const parseDataUrlMimeType = (dataUrl: string): string => {
