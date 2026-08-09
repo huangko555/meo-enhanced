@@ -78,7 +78,7 @@ const factory = createImagePresentationFactory({
 });
 
 const flushImageLoad = async () => {
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 50; index += 1) {
     await Promise.resolve();
   }
 };

@@ -71,6 +71,10 @@ export function createImagePresentationResourcePool(
   const loadInFlight = new Map<string, Promise<HTMLImageElement | null>>();
   const failedAt = new Map<string, number>();
   const queue: QueuedLoad[] = [];
+  let settleDisposed!: () => void;
+  const disposedResult = new Promise<null>((resolve) => {
+    settleDisposed = () => resolve(null);
+  });
   let activeLoads = 0;
   let disposed = false;
 
@@ -110,7 +114,8 @@ export function createImagePresentationResourcePool(
     }
     const pending = resolutionInFlight.get(key);
     if (pending) return pending;
-    const resolution = options.resolveSource(contextKey, rawSrc)
+    const sourceResolution = options.resolveSource(contextKey, rawSrc).catch(() => null);
+    const resolution = Promise.race([sourceResolution, disposedResult])
       .then((resolved) => {
         if (disposed) return null;
         if (resolved) {
@@ -122,7 +127,7 @@ export function createImagePresentationResourcePool(
           );
         }
         return resolved || null;
-      }, () => null)
+      })
       .finally(() => resolutionInFlight.delete(key));
     resolutionInFlight.set(key, resolution);
     return resolution;
@@ -143,7 +148,8 @@ export function createImagePresentationResourcePool(
     }
     const pending = loadInFlight.get(key);
     if (pending) return pending;
-    const loading = schedule(() => options.loadImage(resolvedSrc))
+    const browserLoad = schedule(() => options.loadImage(resolvedSrc));
+    const loading = Promise.race([browserLoad, disposedResult])
       .then((image) => {
         if (disposed) return null;
         if (image) {
@@ -187,6 +193,7 @@ export function createImagePresentationResourcePool(
     dispose() {
       if (disposed) return;
       disposed = true;
+      settleDisposed();
       while (queue.length) queue.shift()?.cancel();
       resolutionInFlight.clear();
       loadInFlight.clear();

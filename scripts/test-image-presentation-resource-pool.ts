@@ -73,4 +73,26 @@ pool.dispose();
 assert.equal(await pool.resolve('document-a', './after-dispose.png'), null);
 assert.equal(await pool.load('document-a', 'resolved:after-dispose'), null);
 
+let releasePendingResolution!: (value: string) => void;
+let releasePendingLoad!: (value: HTMLImageElement | null) => void;
+const disposablePool = createImagePresentationResourcePool({
+  maxConcurrentLoads: 1,
+  resolveSource: () => new Promise<string>((resolve) => {
+    releasePendingResolution = resolve;
+  }),
+  loadImage: () => new Promise<HTMLImageElement | null>((resolve) => {
+    releasePendingLoad = resolve;
+  })
+});
+const pendingResolution = disposablePool.resolve('document', 'pending-resolution');
+const pendingLoad = disposablePool.load('document', 'pending-load');
+const queuedLoad = disposablePool.load('document', 'queued-load');
+disposablePool.dispose();
+assert.equal(await pendingResolution, null, 'dispose must settle active resolution waiters');
+assert.equal(await pendingLoad, null, 'dispose must settle active load waiters');
+assert.equal(await queuedLoad, null, 'dispose must settle queued load waiters');
+releasePendingResolution('late-resolution');
+releasePendingLoad(null);
+await flushPromises();
+
 console.log('image presentation resource pool contracts passed');

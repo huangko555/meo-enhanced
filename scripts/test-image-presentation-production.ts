@@ -10,11 +10,24 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-image-presentation-pr
 async function main(): Promise<void> {
   const editorSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'editor.ts'), 'utf8');
   const imageSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'helpers', 'images.ts'), 'utf8');
+  const tableSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'helpers', 'tables.ts'), 'utf8');
   assert.equal((editorSource.match(/createImagePresentationResourcePool\(/g) ?? []).length, 1);
   assert.equal((editorSource.match(/createImagePresentationFactory\(/g) ?? []).length, 1);
   assert.equal(editorSource.includes('imagePresentationFactoryFacet.of(imagePresentationFactory)'), true);
   assert.equal(editorSource.includes('imagePresentationFactory.externalDocumentPresented()'), true);
   assert.equal(editorSource.includes('imagePresentationResourcePool.dispose()'), true);
+  const viewDisposeAt = editorSource.indexOf('view.destroy();');
+  const factoryDisposeAt = editorSource.indexOf('imagePresentationFactory.dispose();');
+  const poolDisposeAt = editorSource.indexOf('imagePresentationResourcePool.dispose();');
+  assert.ok(
+    viewDisposeAt >= 0 && viewDisposeAt < factoryDisposeAt && factoryDisposeAt < poolDisposeAt,
+    'Editor dispose must destroy Widgets, close the factory handles, then dispose the shared Pool'
+  );
+  assert.equal(
+    tableSource.includes('disposeImagePresentations(previewEl)'),
+    true,
+    'nested table images must dispose their presentation handles before DOM replacement'
+  );
   assert.equal(imageSource.includes("from '../adapters/imagePresentationRuntime'"), false);
   assert.equal(imageSource.includes("from '../editor/imagePresentationAdapter'"), false);
   for (const legacyOwner of [
