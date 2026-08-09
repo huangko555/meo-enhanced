@@ -24,6 +24,34 @@
       "allowedImporters": ["webview/src/index.ts"]
     }
   ],
+  "bootstrapLifecycleContracts": [
+    {
+      "file": "webview/src/index.ts",
+      "constructors": [
+        {
+          "module": "webview/src/editor/mermaidDiagramRenderPool.ts",
+          "export": "createMermaidDiagramRenderPool"
+        },
+        {
+          "module": "webview/src/editor/mermaidDiagramPresentation.ts",
+          "export": "createMermaidDiagramPresentationFactory"
+        }
+      ],
+      "disposeOrder": [
+        "createMermaidDiagramPresentationFactory",
+        "createMermaidDiagramRenderPool"
+      ]
+    }
+  ],
+  "resourceOwnerFreeModules": [
+    {
+      "module": "webview/src/helpers/mermaidDiagram.ts",
+      "allowedTopLevelCollections": [
+        "DISPLAY_MATH_TRIM_RETRY_DELAYS_MS",
+        "DISPLAY_MATH_LABEL_SELECTORS"
+      ]
+    }
+  ],
   "knownLegacyTestFailures": [
     {
       "id": "LEG-TEST-001",

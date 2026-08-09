@@ -20,6 +20,15 @@ const configText = staged
 const config = JSON.parse(configText) as {
   targetRoots: string[];
   bootstrapOnlyModules?: Array<{ module: string; allowedImporters: string[] }>;
+  bootstrapLifecycleContracts?: Array<{
+    file: string;
+    constructors: Array<{ module: string; export: string }>;
+    disposeOrder: string[];
+  }>;
+  resourceOwnerFreeModules?: Array<{
+    module: string;
+    allowedTopLevelCollections: string[];
+  }>;
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
 };
 
@@ -57,8 +66,7 @@ function resolveImport(from: string, specifier: string, files: Set<string>): str
 }
 
 function importsFor(source: Source): string[] {
-  const scriptKind = extname(source.path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
-  const file = ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, true, scriptKind);
+  const file = sourceFileFor(source);
   const imports: string[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
@@ -71,6 +79,11 @@ function importsFor(source: Source): string[] {
   };
   visit(file);
   return imports;
+}
+
+function sourceFileFor(source: Source): ts.SourceFile {
+  const scriptKind = extname(source.path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  return ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, true, scriptKind);
 }
 
 function targetLayer(path: string): string | null {
@@ -168,6 +181,91 @@ for (const edge of edges) {
   const toLayer = targetLayer(edge.to);
   if (fromLayer && toLayer && fromLayer !== toLayer && !allowedTargetLayers(fromLayer).has(toLayer)) {
     failures.push(`ARCH002 依赖方向违规: ${fromLayer} -> ${toLayer} (${edge.from} -> ${edge.to})`);
+  }
+}
+
+for (const contract of config.bootstrapLifecycleContracts ?? []) {
+  const source = sources.find((candidate) => candidate.path === contract.file);
+  if (!source) {
+    failures.push(`ARCH008 Bootstrap 生命周期文件不存在: ${contract.file}`);
+    continue;
+  }
+  const file = sourceFileFor(source);
+  const localNames = new Map<string, string>();
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const resolved = resolveImport(source.path, statement.moduleSpecifier.text, fileSet);
+    if (!resolved) continue;
+    for (const constructor of contract.constructors.filter((item) => item.module === resolved)) {
+      const imports = statement.importClause?.namedBindings;
+      if (!imports || !ts.isNamedImports(imports)) continue;
+      const binding = imports.elements.find((element) =>
+        (element.propertyName?.text ?? element.name.text) === constructor.export
+      );
+      if (binding) localNames.set(constructor.export, binding.name.text);
+    }
+  }
+  const owners = new Map<string, string>();
+  const creationCounts = new Map<string, number>();
+  const disposePositions = new Map<string, number>();
+  const visitLifecycle = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      for (const [exportName, localName] of localNames) {
+        if (node.expression.text !== localName) continue;
+        creationCounts.set(exportName, (creationCounts.get(exportName) ?? 0) + 1);
+        if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+          owners.set(exportName, node.parent.name.text);
+        }
+      }
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'dispose' && ts.isIdentifier(node.expression.expression)) {
+      for (const [exportName, owner] of owners) {
+        if (node.expression.expression.text === owner) disposePositions.set(exportName, node.getStart(file));
+      }
+    }
+    ts.forEachChild(node, visitLifecycle);
+  };
+  visitLifecycle(file);
+  for (const constructor of contract.constructors) {
+    if (creationCounts.get(constructor.export) !== 1 || !owners.has(constructor.export)) {
+      failures.push(`ARCH008 Bootstrap 必须恰好创建一个 ${constructor.export}: ${contract.file}`);
+    }
+    if (!disposePositions.has(constructor.export)) {
+      failures.push(`ARCH008 Bootstrap 必须销毁 ${constructor.export} 的实例: ${contract.file}`);
+    }
+  }
+  for (let index = 1; index < contract.disposeOrder.length; index += 1) {
+    const previous = disposePositions.get(contract.disposeOrder[index - 1]);
+    const current = disposePositions.get(contract.disposeOrder[index]);
+    if (previous !== undefined && current !== undefined && previous >= current) {
+      failures.push(`ARCH008 Bootstrap 销毁顺序违规: ${contract.disposeOrder.join(' -> ')} (${contract.file})`);
+      break;
+    }
+  }
+}
+
+for (const contract of config.resourceOwnerFreeModules ?? []) {
+  const source = sources.find((candidate) => candidate.path === contract.module);
+  if (!source) continue;
+  const allowed = new Set(contract.allowedTopLevelCollections);
+  const file = sourceFileFor(source);
+  for (const statement of file.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    const mutableDeclaration = (statement.declarationList.flags & ts.NodeFlags.Const) === 0;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name)) continue;
+      const name = declaration.name.text;
+      const initializer = declaration.initializer;
+      const collection = Boolean(initializer && (
+        ts.isArrayLiteralExpression(initializer)
+        || (ts.isNewExpression(initializer) && ts.isIdentifier(initializer.expression)
+          && ['Map', 'Set', 'WeakMap', 'WeakSet'].includes(initializer.expression.text))
+      ));
+      if (mutableDeclaration || (collection && !allowed.has(name))) {
+        failures.push(`ARCH009 资源无状态模块禁止顶层可变状态: ${contract.module} (${name})`);
+      }
+    }
   }
 }
 

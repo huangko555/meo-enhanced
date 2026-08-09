@@ -2,14 +2,52 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import ts from 'typescript';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-mermaid-presentation-candidate-'));
 
+function collectLocalModules(entry: string): Set<string> {
+  const seen = new Set<string>();
+  const visit = (file: string): void => {
+    const absolute = path.resolve(file);
+    if (seen.has(absolute)) return;
+    seen.add(absolute);
+    const source = ts.createSourceFile(
+      absolute,
+      fs.readFileSync(absolute, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      absolute.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+    );
+    for (const statement of source.statements) {
+      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      const specifier = statement.moduleSpecifier.text;
+      if (!specifier.startsWith('.')) continue;
+      const base = path.resolve(path.dirname(absolute), specifier);
+      const target = [`${base}.ts`, `${base}.tsx`, path.join(base, 'index.ts')]
+        .find((candidate) => fs.existsSync(candidate));
+      if (target) visit(target);
+    }
+  };
+  visit(entry);
+  return new Set([...seen].map((file) => path.relative(repoRoot, file).replaceAll('\\', '/')));
+}
+
 async function main(): Promise<void> {
+  const candidateEntry = path.join(repoRoot, 'scripts', 'test-mermaid-diagram-presentation-candidate-entry.ts');
+  const candidateModules = collectLocalModules(candidateEntry);
+  for (const forbiddenModule of [
+    'webview/src/editor.ts',
+    'webview/src/helpers/mermaidDiagram.ts',
+    'webview/src/helpers/mermaidEditing.ts',
+    'webview/src/application/editorHistory.ts'
+  ]) {
+    assert.equal(candidateModules.has(forbiddenModule), false, `${forbiddenModule} must stay outside the candidate seam`);
+  }
   const build = await Bun.build({
-    entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-diagram-presentation-candidate-entry.ts')],
+    entrypoints: [candidateEntry],
     outdir: tempDir,
     target: 'browser',
     format: 'iife',
