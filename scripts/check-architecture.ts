@@ -250,7 +250,11 @@ for (const contract of config.sharedModuleContracts ?? []) {
             if (ts.isReturnStatement(node.parent)) {
               requiredCallReturnedDirectly = true;
             } else if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
-              requiredResultNames.add(node.parent.name.text);
+              const declarationList = node.parent.parent;
+              if (ts.isVariableDeclarationList(declarationList)
+                && (declarationList.flags & ts.NodeFlags.Const) !== 0) {
+                requiredResultNames.add(node.parent.name.text);
+              }
             }
           } else containsUnauthorizedCall = true;
         } else if (ts.isPropertyAccessExpression(node.expression)
@@ -280,10 +284,9 @@ for (const contract of config.sharedModuleContracts ?? []) {
       while (ts.isParenthesizedExpression(current)) current = current.expression;
       return current;
     };
-    const isDerivedReturn = (statement: ts.ReturnStatement): boolean => {
+    const returnDerivesSharedResult = (statement: ts.ReturnStatement): boolean => {
       if (!statement.expression) return false;
       const expression = unwrap(statement.expression);
-      if (delegate.allowNullReturn && expression.kind === ts.SyntaxKind.NullKeyword) return true;
       if (ts.isIdentifier(expression) && requiredResultNames.has(expression.text)) return true;
       if (ts.isCallExpression(expression)) {
         if (ts.isIdentifier(expression.expression) && expression.expression.text === requiredLocalName) {
@@ -297,6 +300,12 @@ for (const contract of config.sharedModuleContracts ?? []) {
         }
       }
       return false;
+    };
+    const isAllowedReturn = (statement: ts.ReturnStatement): boolean => {
+      if (!statement.expression) return false;
+      const expression = unwrap(statement.expression);
+      return returnDerivesSharedResult(statement)
+        || Boolean(delegate.allowNullReturn && expression.kind === ts.SyntaxKind.NullKeyword);
     };
     const ownedReturns: ts.ReturnStatement[] = [];
     const collectReturns = (node: ts.Node): void => {
@@ -314,7 +323,10 @@ for (const contract of config.sharedModuleContracts ?? []) {
     if (!requiredCallReturnedDirectly && requiredResultNames.size === 0) {
       failures.push(`ARCH011 共享模块委托结果不得丢弃: ${delegate.file} (${delegate.function})`);
     }
-    if (!ownedReturns.length || ownedReturns.some((statement) => !isDerivedReturn(statement))) {
+    if (!ownedReturns.some(returnDerivesSharedResult)) {
+      failures.push(`ARCH011 共享模块委托结果必须存在有效返回路径: ${delegate.file} (${delegate.function})`);
+    }
+    if (!ownedReturns.length || ownedReturns.some((statement) => !isAllowedReturn(statement))) {
       failures.push(`ARCH011 共享模块委托结果必须决定返回值: ${delegate.file} (${delegate.function})`);
     }
     if (containsUnauthorizedCall || readsParameterByIndex || containsDelimiterLiteral

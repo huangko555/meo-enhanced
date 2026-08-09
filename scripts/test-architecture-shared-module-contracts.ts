@@ -107,6 +107,26 @@ try {
 
   write('webview/src/helpers/math.ts', [
     "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string) { return scanLatexMath(text); }',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); return null; }',
+    ''
+  ].join('\n'));
+  const boundThenDiscarded = runCheck();
+  assert.equal(boundThenDiscarded.ok, false, 'bound shared point result must reach a non-null return path');
+  assert.match(boundThenDiscarded.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string) { let ranges = scanLatexMath(text); ranges = []; return ranges; }',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
+    ''
+  ].join('\n'));
+  const reboundCollection = runCheck();
+  assert.equal(reboundCollection.ok, false, 'reassigned shared collection result must be rejected');
+  assert.match(reboundCollection.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
     'export function collect(text: string) {',
     '  const renamedDuplicateScanner = () => { for (let i = 0; i < text.length; i += 1) void text[i]; };',
     '  renamedDuplicateScanner();',
