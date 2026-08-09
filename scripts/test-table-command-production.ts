@@ -12,14 +12,25 @@ const tablesSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'help
 assert.equal((editorSource.match(/createTableCommandApplication\(/g) ?? []).length, 1);
 assert.equal((editorSource.match(/createTableCommandRuntime\(/g) ?? []).length, 1);
 assert.equal((editorSource.match(/createCodeMirrorTableCommandEffectAdapter\(/g) ?? []).length, 1);
+assert.equal((editorSource.match(/createTableCommandTargetRegistry\(/g) ?? []).length, 1);
 assert.equal(tablesSource.includes('createTableCommandApplication'), false);
 assert.equal(tablesSource.includes('createTableCommandRuntime'), false);
 assert.equal(tablesSource.includes('createCodeMirrorTableCommandEffectAdapter'), false);
+assert.equal(tablesSource.includes('createTableCommandTargetRegistry'), false);
 for (const legacy of [
   'commitMatrix(',
   'markHeaderAlignmentOverride(',
   'view.dispatch({ changes, effects: insertedRowEffect })',
-  'view.dispatch({ changes, effects: deletionEffects })'
+  'view.dispatch({ changes, effects: deletionEffects })',
+  'insertRowAboveTarget(',
+  'insertRowBelowTarget(',
+  'deleteTargetRow(',
+  'insertColumnLeftTarget(',
+  'insertColumnRightTarget(',
+  'deleteTargetColumn(',
+  'sortByColumn(',
+  'setColumnAlignment(',
+  'applyCurrentSort('
 ]) {
   assert.equal(tablesSource.includes(legacy), false, `Legacy table command path returned: ${legacy}`);
 }
@@ -174,4 +185,3 @@ try {
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
-

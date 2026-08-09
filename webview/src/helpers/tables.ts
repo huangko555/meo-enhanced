@@ -2401,42 +2401,42 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  insertRowAboveTarget(container) {
+  requestInsertRowAbove(container) {
     void container;
     this.requestTableCommand('insert-row-above', this.tableData.colCount > 0);
   }
 
-  insertRowBelowTarget(container) {
+  requestInsertRowBelow(container) {
     void container;
     this.requestTableCommand('insert-row-below', this.tableData.colCount > 0);
   }
 
-  deleteTargetRow(container) {
+  requestDeleteRow(container) {
     void container;
     this.requestTableCommand('delete-row', this.activeBodyRowIndex() !== null && this.tableData.rows.length > 1);
   }
 
-  insertColumnLeftTarget(container) {
+  requestInsertColumnLeft(container) {
     void container;
     this.requestTableCommand('insert-column-left', this.activeColumnIndex() !== null);
   }
 
-  insertColumnRightTarget(container) {
+  requestInsertColumnRight(container) {
     void container;
     this.requestTableCommand('insert-column-right', this.activeColumnIndex() !== null);
   }
 
-  deleteTargetColumn(container) {
+  requestDeleteColumn(container) {
     void container;
     this.requestTableCommand('delete-column', this.activeColumnIndex() !== null && this.tableData.colCount > 1);
   }
 
-  sortByColumn(container, column) {
+  requestSortPreview(container, column) {
     void container;
     this.requestTableCommand('preview-sort', this.tableData.rows.length > 1 && column !== null);
   }
 
-  setColumnAlignment(container, alignment) {
+  requestColumnAlignment(container, alignment) {
     void container;
     const command = alignment === 'center' ? 'align-center' : alignment === 'right' ? 'align-right' : 'align-left';
     this.requestTableCommand(command, this.activeColumnIndex() !== null);
@@ -2454,7 +2454,7 @@ class HtmlTableWidget extends WidgetType {
     return columns;
   }
 
-  applyCurrentSort(container) {
+  requestApplySort(container) {
     void container;
     this.requestTableCommand('apply-sort', Boolean(this.sortState));
   }
@@ -4240,35 +4240,35 @@ class HtmlTableWidget extends WidgetType {
     toolbar.setAttribute('aria-label', 'Table actions');
 
     const insertRowAbove = this.createToolbarButton('Insert row above', tableToolbarIcons.rowInsertTop, () => {
-      this.insertRowAboveTarget(container);
+      this.requestInsertRowAbove(container);
     });
     const insertRowBelow = this.createToolbarButton('Insert row below', tableToolbarIcons.rowInsertBottom, () => {
-      this.insertRowBelowTarget(container);
+      this.requestInsertRowBelow(container);
     });
     const deleteRow = this.createToolbarButton('Delete row', tableToolbarIcons.rowRemove, () => {
-      this.deleteTargetRow(container);
+      this.requestDeleteRow(container);
     });
     const insertColumnLeft = this.createToolbarButton('Insert column left', tableToolbarIcons.columnInsertLeft, () => {
-      this.insertColumnLeftTarget(container);
+      this.requestInsertColumnLeft(container);
     });
     const insertColumnRight = this.createToolbarButton('Insert column right', tableToolbarIcons.columnInsertRight, () => {
-      this.insertColumnRightTarget(container);
+      this.requestInsertColumnRight(container);
     });
     const deleteColumn = this.createToolbarButton('Delete column', tableToolbarIcons.columnRemove, () => {
-      this.deleteTargetColumn(container);
+      this.requestDeleteColumn(container);
     });
     const sortColumn = this.createToolbarButton('Sort selected column', tableToolbarIcons.sortNeutral, () => {
       const column = this.activeColumnIndex();
-      if (column !== null) this.sortByColumn(container, column);
+      if (column !== null) this.requestSortPreview(container, column);
     });
     const alignColumnLeft = this.createToolbarButton('Align selected column left', tableToolbarIcons.alignLeft, () => {
-      this.setColumnAlignment(container, 'left');
+      this.requestColumnAlignment(container, 'left');
     });
     const alignColumnCenter = this.createToolbarButton('Align selected column center', tableToolbarIcons.alignCenter, () => {
-      this.setColumnAlignment(container, 'center');
+      this.requestColumnAlignment(container, 'center');
     });
     const alignColumnRight = this.createToolbarButton('Align selected column right', tableToolbarIcons.alignRight, () => {
-      this.setColumnAlignment(container, 'right');
+      this.requestColumnAlignment(container, 'right');
     });
     const rowSeparator = this.createToolbarSeparator();
     const columnSeparator = this.createToolbarSeparator();
@@ -4339,7 +4339,7 @@ class HtmlTableWidget extends WidgetType {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      this.applyCurrentSort(wrap);
+      this.requestApplySort(wrap);
     });
     applySortButton.addEventListener('click', (event) => {
       event.preventDefault();
