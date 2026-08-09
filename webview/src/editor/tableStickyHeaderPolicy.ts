@@ -1,16 +1,21 @@
-export type TableStickyHeaderGeometry = {
+export type TableStickyHeaderViewportGeometry = {
   readonly top: number;
   readonly left: number;
   readonly right: number;
   readonly height: number;
 };
 
+export type TableStickyHeaderTableGeometry = {
+  readonly left: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly height: number;
+  readonly width: number;
+};
+
 export type TableStickyHeaderLayoutInput = {
-  readonly scroller: TableStickyHeaderGeometry;
-  readonly table: TableStickyHeaderGeometry & {
-    readonly bottom: number;
-    readonly width: number;
-  };
+  readonly scroller: TableStickyHeaderViewportGeometry;
+  readonly table: TableStickyHeaderTableGeometry;
   readonly header: {
     readonly top: number;
     readonly height: number;

@@ -2127,7 +2127,6 @@ class HtmlTableWidget extends WidgetType {
   resolveStickyHeaderElements(): TableStickyHeaderElements | null {
     if (!this.domRefs || !this.view) return null;
     const {
-      shell,
       table,
       stickyChrome,
       stickyHeaderViewport,
@@ -2135,7 +2134,6 @@ class HtmlTableWidget extends WidgetType {
       stickyHeaderRow
     } = this.domRefs;
     return {
-      shell,
       scroller: this.view.scrollDOM,
       table,
       stickyChrome,
@@ -2485,7 +2483,7 @@ class HtmlTableWidget extends WidgetType {
     for (const element of Array.from(headerCell.querySelectorAll('.meo-md-html-table-cell-content, .meo-md-html-table-cell-preview, textarea')) as HTMLElement[]) {
       element.style.textAlign = alignment;
     }
-    this.stickyHeaderAdapter.refreshContent();
+    this.stickyHeaderAdapter.update();
     this.scheduleLayout();
   }
 
@@ -3697,7 +3695,7 @@ class HtmlTableWidget extends WidgetType {
       const resizeAndSchedule = () => {
         // Non-search previews stay untouched while editing so inline image DOM is not recreated.
         this.resizeRow(rowEl, rowInputs);
-        if (rowIndex === 0) this.stickyHeaderAdapter.refreshContent();
+        if (rowIndex === 0) this.stickyHeaderAdapter.update();
         this.scheduleLayout();
       };
       const viewport = this.view ? getViewportController(this.view) : null;
@@ -3985,7 +3983,7 @@ class HtmlTableWidget extends WidgetType {
         this.refreshCellPreviewFromInput(inputs[col]);
       }
     }
-    this.stickyHeaderAdapter.refreshContent();
+    this.stickyHeaderAdapter.update();
     this.scheduleLayout({ resizeRows: true });
   }
 
@@ -4009,7 +4007,7 @@ class HtmlTableWidget extends WidgetType {
       }
     }
     if (refreshedHeader) {
-      this.stickyHeaderAdapter.refreshContent();
+      this.stickyHeaderAdapter.update();
       this.scheduleLayout();
     }
   }
@@ -4416,6 +4414,7 @@ class HtmlTableWidget extends WidgetType {
 
   destroy(dom) {
     this.setTableInteractionActive(dom, false);
+    this.stickyHeaderAdapter.unmount();
     this.stickyHeaderAdapter.dispose();
     for (const cleanup of this.cleanupFns) cleanup();
     this.cleanupFns = [];

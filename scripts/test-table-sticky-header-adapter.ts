@@ -15,8 +15,9 @@ void schedulerShape;
 
 const adapterShape: TableStickyHeaderAdapter = {
   mount() {},
+  update() {},
   invalidate() {},
-  refreshContent() {},
+  unmount() {},
   dispose() {}
 };
 void adapterShape;
@@ -36,6 +37,8 @@ assert.equal(tablesSource.includes('codeMirrorDomTableStickyHeaderAdapter'), fal
 assert.equal(tablesSource.includes('tableStickyHeaderPolicy'), false);
 assert.equal(tablesSource.includes('TableStickyHeaderAdapterFactory'), true);
 assert.equal(tablesSource.includes('this.stickyHeaderAdapter.mount()'), true);
+assert.equal(tablesSource.includes('this.stickyHeaderAdapter.update()'), true);
+assert.equal(tablesSource.includes('this.stickyHeaderAdapter.unmount()'), true);
 assert.equal(tablesSource.includes('this.stickyHeaderAdapter.dispose()'), true);
 assert.equal((tablesSource.match(/this\.layoutFrame = requestAnimationFrame/g) ?? []).length, 1);
 assert.equal((tablesSource.match(/cancelAnimationFrame\(this\.layoutFrame\)/g) ?? []).length, 1);

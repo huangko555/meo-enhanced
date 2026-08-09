@@ -60,7 +60,6 @@ async function main(): Promise<void> {
             height: scrollerRect.height
           },
           table: {
-            top: tableRect.top,
             left: tableRect.left,
             right: tableRect.right,
             bottom: tableRect.bottom,

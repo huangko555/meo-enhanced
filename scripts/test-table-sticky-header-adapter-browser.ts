@@ -168,6 +168,7 @@ async function main(): Promise<void> {
       };
 
       elements(1).table.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Updated header';
+      adapter1.update();
       await new Promise((resolve) => setTimeout(resolve, 0));
       scheduler.flush();
       const updatedHeader = elements(1).stickyHeaderRow.textContent;
@@ -195,7 +196,7 @@ async function main(): Promise<void> {
       const hiddenWithOuterMode = !elements(1).stickyChrome.classList.contains('is-visible');
       elements(1).shell.style.display = '';
       const styleBeforeDispose = elements(1).stickyTable.style.width;
-      adapter1.dispose();
+      adapter1.unmount();
       elements(1).table.style.width = '440px';
       elements(1).scroller.dispatchEvent(new Event('scroll'));
       window.dispatchEvent(new Event('resize'));
@@ -204,6 +205,7 @@ async function main(): Promise<void> {
       const hiddenAfterDispose = !elements(1).stickyChrome.classList.contains('is-visible');
 
       other.request();
+      adapter1.dispose();
       scheduler.flush();
       const otherSurvivedDispose = otherLayoutRuns === 2;
       const registrationsAfterFirstDispose = scheduler.records.size;

@@ -331,6 +331,12 @@ async function main() {
         start: projectionInput.selectionStart,
         end: projectionInput.selectionEnd
       };
+      app.style.width = '260px';
+      window.dispatchEvent(new Event('resize'));
+      await waitFrames();
+      multiScroller.scrollLeft = 40;
+      multiScroller.dispatchEvent(new Event('scroll'));
+      await waitFrames();
       const viewportBeforeProjection = {
         top: multiScroller.scrollTop,
         left: multiScroller.scrollLeft
@@ -344,6 +350,7 @@ async function main() {
           projectionInput.selectionEnd === selectionBeforeProjection.end,
         viewportPreserved: multiScroller.scrollTop === viewportBeforeProjection.top &&
           multiScroller.scrollLeft === viewportBeforeProjection.left,
+        horizontalViewportExercised: viewportBeforeProjection.left > 0,
         toolbarUsable: !document.querySelector<HTMLButtonElement>(
           '.meo-md-html-table-toolbar-btn'
         )!.disabled
@@ -375,12 +382,17 @@ async function main() {
       const ownersAfterRedo = productionOwners();
 
       const lateScroller = multiEditor.view.scrollDOM as HTMLElement;
+      const lateStickyNodes = Array.from(document.querySelectorAll<HTMLElement>(
+        '.meo-md-html-table-sticky-chrome'
+      ));
       multiEditor.destroy();
       let lateDomWrites = 0;
       const lateWriteObserver = new MutationObserver((records) => {
         lateDomWrites += records.length;
       });
-      lateWriteObserver.observe(app, { attributes: true, childList: true, subtree: true });
+      for (const node of lateStickyNodes) {
+        lateWriteObserver.observe(node, { attributes: true, childList: true, subtree: true });
+      }
       lateScroller.dispatchEvent(new Event('scroll'));
       window.dispatchEvent(new Event('resize'));
       await waitFrames();
@@ -515,6 +527,7 @@ async function main() {
       !result.lifecycleState.projectionState.markdownUnchanged ||
       !result.lifecycleState.projectionState.focusAndSelectionPreserved ||
       !result.lifecycleState.projectionState.viewportPreserved ||
+      !result.lifecycleState.projectionState.horizontalViewportExercised ||
       !result.lifecycleState.projectionState.toolbarUsable ||
       result.lifecycleState.lateDomWrites !== 0
     ) {

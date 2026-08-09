@@ -4,7 +4,7 @@ import { tableStickyHeaderPolicy } from '../webview/src/editor/tableStickyHeader
 
 const common = {
   scroller: { top: 10, left: 20, right: 420, height: 300 },
-  table: { top: -40, left: -30, right: 530, bottom: 600, height: 640, width: 560 },
+  table: { left: -30, right: 530, bottom: 600, height: 640, width: 560 },
   header: { top: 0, height: 32 },
   controlsHeight: 0
 } as const;

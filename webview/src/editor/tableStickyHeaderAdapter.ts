@@ -10,7 +10,6 @@ export type TableWidgetLayoutScheduler = {
 };
 
 export type TableStickyHeaderElements = {
-  readonly shell: HTMLElement;
   readonly scroller: HTMLElement;
   readonly table: HTMLTableElement;
   readonly stickyChrome: HTMLElement;
@@ -29,8 +28,9 @@ export type TableStickyHeaderAdapterOptions = {
 /** Editor-internal lifecycle seam. DOM and scheduling details stay in the concrete adapter. */
 export type TableStickyHeaderAdapter = {
   mount(): void;
+  update(): void;
   invalidate(): void;
-  refreshContent(): void;
+  unmount(): void;
   dispose(): void;
 };
 

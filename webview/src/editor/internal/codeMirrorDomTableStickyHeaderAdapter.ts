@@ -82,7 +82,6 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
           height: scrollerRect.height
         },
         table: {
-          top: tableRect.top,
           left: tableRect.left,
           right: tableRect.right,
           bottom: tableRect.bottom,
@@ -171,8 +170,9 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
 
   return {
     mount,
+    update: refreshContent,
     invalidate,
-    refreshContent,
+    unmount,
     dispose() {
       if (disposed) return;
       unmount();
