@@ -1,33 +1,15 @@
-import type { TransactionSpec } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
 import type {
-  TableCommand,
   TableCommandEffect,
   TableCommandEffectExecutor,
   TableCommandInput
 } from '../../application/tableCommand';
+import type {
+  TableCommandEditorTarget,
+  TableCommandTransactionPlan
+} from '../tableCommandAdapter';
 
 type ExecuteCommandEffect = Extract<TableCommandEffect, { readonly type: 'executeCommand' }>;
 type RestoreInteractionEffect = Extract<TableCommandEffect, { readonly type: 'restoreInteraction' }>;
-
-export type TableCommandTransactionPlan = {
-  readonly transaction: TransactionSpec | null;
-  readonly outcome: 'changed' | 'no-op';
-};
-
-export type TableCommandEditorTarget = {
-  readonly view: EditorView;
-  buildPendingEditTransaction(): TransactionSpec | null;
-  buildAtomicCommandTransaction(request: {
-    readonly command: Exclude<TableCommand, 'preview-sort'>;
-    readonly target: ExecuteCommandEffect['target'];
-  }): TableCommandTransactionPlan;
-  presentCommand(request: {
-    readonly command: Extract<TableCommand, 'preview-sort'>;
-    readonly target: ExecuteCommandEffect['target'];
-  }): 'presented' | 'no-op';
-  restoreInteraction(request: RestoreInteractionEffect): void;
-};
 
 export type CodeMirrorTableCommandEffectAdapterOptions = {
   resolveTarget(tableId: string): TableCommandEditorTarget | null;
@@ -47,6 +29,11 @@ export function createCodeMirrorTableCommandEffectAdapter(
   options: CodeMirrorTableCommandEffectAdapterOptions
 ): CodeMirrorTableCommandEffectAdapter {
   let disposed = false;
+  const pendingRestores = new Map<number, () => void>();
+  const immediate = (completion: TableCommandInput | null) => ({
+    immediateCompletion: completion,
+    completion: Promise.resolve(completion)
+  });
 
   const complete = (
     effect: ExecuteCommandEffect
@@ -71,61 +58,55 @@ export function createCodeMirrorTableCommandEffectAdapter(
       throw new Error(`preview-sort must execute after pending edits are flushed`);
     }
     const plan = target.buildAtomicCommandTransaction({ command: effect.command, target: effect.target });
-    if (plan.transaction) target.view.dispatch(plan.transaction);
+    if (plan.restoreInteraction) pendingRestores.set(effect.commandId, plan.restoreInteraction);
+    if (plan.transaction) {
+      const dispatch = () => target.view.dispatch(plan.transaction!);
+      if (plan.preserveViewport) target.preserveViewport(dispatch);
+      else dispatch();
+      plan.afterDispatch?.();
+    }
     return { type: 'commandCompleted', commandId: effect.commandId, outcome: plan.outcome };
   };
 
   return {
     execute(effect) {
-      if (disposed) return { completion: Promise.resolve(null) };
+      if (disposed) return immediate(null);
 
       switch (effect.type) {
         case 'flushPendingEdits':
-          return {
-            completion: Promise.resolve().then<TableCommandInput>(() => {
-              if (disposed) return { type: 'commandFailed', commandId: effect.commandId };
-              try {
-                const target = options.resolveTarget(effect.tableId);
-                const transaction = target?.buildPendingEditTransaction() ?? null;
-                if (transaction) target?.view.dispatch(transaction);
-                return { type: 'pendingEditsFlushed', commandId: effect.commandId };
-              } catch (error) {
-                options.reportError(error);
-                return { type: 'commandFailed', commandId: effect.commandId };
-              }
-            })
-          };
+          try {
+            const target = options.resolveTarget(effect.tableId);
+            const transactions = target?.buildPendingEditTransactions() ?? [];
+            if (transactions.length) target?.view.dispatch(transactions);
+            return immediate({ type: 'pendingEditsFlushed', commandId: effect.commandId });
+          } catch (error) {
+            options.reportError(error);
+            return immediate({ type: 'commandFailed', commandId: effect.commandId });
+          }
 
         case 'executeCommand':
-          return {
-            completion: Promise.resolve().then<TableCommandInput>(() => {
-              if (disposed) return { type: 'commandFailed', commandId: effect.commandId };
-              try {
-                return complete(effect);
-              } catch (error) {
-                options.reportError(error);
-                return { type: 'commandFailed', commandId: effect.commandId };
-              }
-            })
-          };
+          try {
+            return immediate(complete(effect));
+          } catch (error) {
+            options.reportError(error);
+            return immediate({ type: 'commandFailed', commandId: effect.commandId });
+          }
 
         case 'restoreInteraction':
-          return {
-            completion: Promise.resolve().then(() => {
-              if (disposed) return null;
-              try {
-                options.resolveTarget(effect.target.tableId)?.restoreInteraction(effect);
-              } catch (error) {
-                options.reportError(error);
-              }
-              return null;
-            })
-          };
+          try {
+            const restore = pendingRestores.get(effect.commandId);
+            pendingRestores.delete(effect.commandId);
+            restore?.();
+          } catch (error) {
+            options.reportError(error);
+          }
+          return immediate(null);
       }
     },
     dispose() {
       if (disposed) return;
       disposed = true;
+      pendingRestores.clear();
       options.dispose();
     }
   };

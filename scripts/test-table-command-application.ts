@@ -103,8 +103,9 @@ assert.deepEqual(disposed.dispatch({ type: 'request', command: 'insert-column-le
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 const bootstrapSource = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
 const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
-for (const source of [editorSource, bootstrapSource, tablesSource]) {
-  assert.equal(source.includes('createTableCommandApplication'), false, 'candidate must remain disconnected from production');
+assert.equal((editorSource.match(/createTableCommandApplication\(/g) ?? []).length, 1, 'production creates one Application');
+for (const source of [bootstrapSource, tablesSource]) {
+  assert.equal(source.includes('createTableCommandApplication'), false, 'only Editor Bootstrap creates Application');
 }
 
 console.log('table command application contracts passed');

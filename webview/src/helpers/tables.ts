@@ -36,6 +36,14 @@ import {
   type TableStickyHeaderElements,
   type TableWidgetLayoutScheduler
 } from '../editor/tableStickyHeaderAdapter';
+import {
+  tableCommandEnvironmentFacet,
+  type TableCommandEditorTarget,
+  type TableCommandEnvironment,
+  type TableCommandTargetRegistration,
+  type TableCommandTransactionPlan
+} from '../editor/tableCommandAdapter';
+import type { TableCommand } from '../application/tableCommand';
 
 interface TableData {
   rows: string[][];
@@ -2067,8 +2075,15 @@ class HtmlTableWidget extends WidgetType {
   stickyHeaderAdapter: TableStickyHeaderAdapter;
   layoutTasks: Set<() => void>;
   layoutScheduler: TableWidgetLayoutScheduler;
+  tableCommandEnvironment: TableCommandEnvironment;
+  tableCommandTargetId: string;
+  tableCommandTargetRegistration: TableCommandTargetRegistration | null;
 
-  constructor(tableData: TableData, stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory) {
+  constructor(
+    tableData: TableData,
+    stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory,
+    tableCommandEnvironment: TableCommandEnvironment
+  ) {
     super();
     this.tableData = tableData;
     this.view = null;
@@ -2085,6 +2100,9 @@ class HtmlTableWidget extends WidgetType {
     this.sortState = null;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
     this.searchState = null;
+    this.tableCommandEnvironment = tableCommandEnvironment;
+    this.tableCommandTargetId = '';
+    this.tableCommandTargetRegistration = null;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -2370,92 +2388,58 @@ class HtmlTableWidget extends WidgetType {
     this.syncTableLineNumbers();
   }
 
+  requestTableCommand(command: TableCommand, enabled = true) {
+    void this.tableCommandEnvironment.dispatch({
+      type: 'request',
+      command,
+      target: {
+        tableId: this.tableCommandTargetId,
+        row: this.activeTarget.row,
+        column: this.activeTarget.col
+      },
+      enabled
+    });
+  }
+
   insertRowAboveTarget(container) {
-    const rowIndex = this.activeBodyRowIndex();
-    if (rowIndex === null) {
-      this.addRowAfter(container, -1);
-      return;
-    }
-    this.addRowBefore(container, rowIndex);
+    void container;
+    this.requestTableCommand('insert-row-above', this.tableData.colCount > 0);
   }
 
   insertRowBelowTarget(container) {
-    const rowIndex = this.activeBodyRowIndex();
-    this.addRowAfter(container, rowIndex ?? -1);
+    void container;
+    this.requestTableCommand('insert-row-below', this.tableData.colCount > 0);
   }
 
   deleteTargetRow(container) {
-    const selectedRange = this.selectionRange;
-    if (!selectedRange || this.selectedCellCount() <= 1) {
-      const rowIndex = this.activeBodyRowIndex();
-      if (rowIndex !== null) this.removeRowsAt(container, [rowIndex]);
-      return;
-    }
-
-    const visualRows = [];
-    for (let row = Math.max(1, selectedRange.fromRow); row <= selectedRange.toRow; row += 1) {
-      const visualIndex = row - 1;
-      const sourceIndex = this.sortState?.order?.[visualIndex] ?? visualIndex;
-      if (sourceIndex >= 0 && sourceIndex < this.tableData.rows.length) visualRows.push(sourceIndex);
-    }
-    this.removeRowsAt(container, visualRows);
+    void container;
+    this.requestTableCommand('delete-row', this.activeBodyRowIndex() !== null && this.tableData.rows.length > 1);
   }
 
   insertColumnLeftTarget(container) {
-    const colIndex = this.activeColumnIndex();
-    if (colIndex === null) return;
-    this.addColumnBefore(container, colIndex);
+    void container;
+    this.requestTableCommand('insert-column-left', this.activeColumnIndex() !== null);
   }
 
   insertColumnRightTarget(container) {
-    const colIndex = this.activeColumnIndex();
-    if (colIndex === null) return;
-    this.addColumnAfter(container, colIndex);
+    void container;
+    this.requestTableCommand('insert-column-right', this.activeColumnIndex() !== null);
   }
 
   deleteTargetColumn(container) {
-    const selectedRange = this.selectionRange;
-    if (!selectedRange || this.selectedCellCount() <= 1) {
-      const colIndex = this.activeColumnIndex();
-      if (colIndex !== null) this.removeColumnsAt(container, [colIndex]);
-      return;
-    }
-
-    const columns = [];
-    for (let col = selectedRange.fromCol; col <= selectedRange.toCol; col += 1) {
-      if (col >= 0 && col < this.tableData.colCount) columns.push(col);
-    }
-    this.removeColumnsAt(container, columns);
+    void container;
+    this.requestTableCommand('delete-column', this.activeColumnIndex() !== null && this.tableData.colCount > 1);
   }
 
   sortByColumn(container, column) {
-    if (!this.domRefs || this.tableData.rows.length <= 1) return;
-    if (this.hasPendingCellEdits) {
-      const view = this.getEditorView(container);
-      if (view) commitPendingTableEdits(view);
-      if (!this.domRefs) return;
-    }
-    const direction: TableSortDirection = this.sortState?.column === column && this.sortState.direction === 'desc'
-      ? 'asc'
-      : 'desc';
-    const order = this.sortedRowOrder(column, direction);
-    this.sortState = { column, direction, order };
-    this.setVisualRowOrder(order);
-    this.updateSortControls();
-    this.setTableInteractionActive(container, true);
+    void container;
+    this.requestTableCommand('preview-sort', this.tableData.rows.length > 1 && column !== null);
   }
 
   setColumnAlignment(container, alignment) {
-    const column = this.activeColumnIndex();
-    if (column === null) return;
-    this.markHeaderAlignmentOverride(container, column, alignment);
-    this.clearVisualSort();
-    const matrix = this.readCellMatrix();
-    if (!matrix.headerCells.length) return;
-    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length).map((value) => value ?? null);
-    alignments[column] = alignment;
-    matrix.alignments = alignments;
-    this.commitMatrix(matrix, container, { row: this.activeTarget.row, col: column });
+    void container;
+    const command = alignment === 'center' ? 'align-center' : alignment === 'right' ? 'align-right' : 'align-left';
+    this.requestTableCommand(command, this.activeColumnIndex() !== null);
   }
 
   headerAlignmentOverrideColumns(view: EditorView) {
@@ -2470,31 +2454,9 @@ class HtmlTableWidget extends WidgetType {
     return columns;
   }
 
-  markHeaderAlignmentOverride(container, column, alignment) {
-    const view = this.getEditorView(container);
-    if (!view) return;
-    const range = this.resolveCurrentTableRange(view, container);
-    if (!range) return;
-    view.dispatch({ effects: setTableHeaderAlignmentOverrideEffect.of({ ...range, column }) });
-
-    const headerCell = this.domRefs?.cellGrid[0]?.[column];
-    if (!headerCell) return;
-    headerCell.style.textAlign = alignment;
-    for (const element of Array.from(headerCell.querySelectorAll('.meo-md-html-table-cell-content, .meo-md-html-table-cell-preview, textarea')) as HTMLElement[]) {
-      element.style.textAlign = alignment;
-    }
-    this.stickyHeaderAdapter.update();
-    this.scheduleLayout();
-  }
-
   applyCurrentSort(container) {
-    if (!this.sortState) return;
-    this.commitMatrix(this.readCellMatrix(), container, null, {
-      preserveScrollPosition: true,
-      sourceRowOrder: this.sortState.order
-    });
-    this.sortState = null;
-    this.updateSortControls();
+    void container;
+    this.requestTableCommand('apply-sort', Boolean(this.sortState));
   }
 
   parseCellCoords(rowText, colText) {
@@ -3153,6 +3115,136 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
+  buildPendingEditTransactions(): readonly Transaction[] {
+    const pending = this.takePendingTransactionBuilders(this.domRefs?.wrap);
+    if (!pending) return [];
+    let state = pending.view.state;
+    const transactions: Transaction[] = [];
+    for (const builder of pending.builders.sort((left, right) => left.sequence - right.sequence)) {
+      const transaction = builder.build(state);
+      if (!transaction) continue;
+      transactions.push(transaction);
+      state = transaction.state;
+    }
+    return transactions;
+  }
+
+  preserveTableCommandViewport(run: () => void) {
+    const controller = this.view ? getViewportController(this.view) : null;
+    if (controller) controller.preserveScrollPosition(run);
+    else run();
+  }
+
+  presentTableCommand(command: Extract<TableCommand, 'preview-sort'>): 'presented' | 'no-op' {
+    if (command !== 'preview-sort' || !this.domRefs || this.tableData.rows.length <= 1) return 'no-op';
+    const column = this.activeColumnIndex();
+    if (column === null) return 'no-op';
+    const direction: TableSortDirection = this.sortState?.column === column && this.sortState.direction === 'desc'
+      ? 'asc'
+      : 'desc';
+    const order = this.sortedRowOrder(column, direction);
+    this.sortState = { column, direction, order };
+    this.setVisualRowOrder(order);
+    this.updateSortControls();
+    this.setTableInteractionActive(this.domRefs.wrap, true);
+    return 'presented';
+  }
+
+  buildAlignmentTransaction(alignment: 'left' | 'center' | 'right'): TableCommandTransactionPlan {
+    const dom = this.domRefs?.wrap;
+    const view = this.view;
+    const column = this.activeColumnIndex();
+    if (!dom || !view || column === null) return { transaction: null, outcome: 'no-op' };
+    if (!this.resolveCurrentTableRange(view, dom)) return { transaction: null, outcome: 'no-op' };
+    this.clearVisualSort();
+    const matrix = this.readCellMatrix();
+    if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
+    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length).map((value) => value ?? null);
+    alignments[column] = alignment;
+    matrix.alignments = alignments;
+    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: column }, {
+      alignmentOverrideColumn: column
+    });
+  }
+
+  buildTableCommandTransaction(command: Exclude<TableCommand, 'preview-sort'>): TableCommandTransactionPlan {
+    const dom = this.domRefs?.wrap;
+    if (!dom) return { transaction: null, outcome: 'no-op' };
+
+    switch (command) {
+      case 'insert-row-above': {
+        const rowIndex = this.activeBodyRowIndex();
+        return rowIndex === null
+          ? this.buildAddRowAfter(dom, -1)
+          : this.buildAddRowBefore(dom, rowIndex);
+      }
+      case 'insert-row-below':
+        return this.buildAddRowAfter(dom, this.activeBodyRowIndex() ?? -1);
+      case 'delete-row': {
+        const selectedRange = this.selectionRange;
+        if (!selectedRange || this.selectedCellCount() <= 1) {
+          const rowIndex = this.activeBodyRowIndex();
+          return rowIndex === null
+            ? { transaction: null, outcome: 'no-op' }
+            : this.buildRemoveRowsAt(dom, [rowIndex]);
+        }
+        const visualRows: number[] = [];
+        for (let row = Math.max(1, selectedRange.fromRow); row <= selectedRange.toRow; row += 1) {
+          const visualIndex = row - 1;
+          const sourceIndex = this.sortState?.order?.[visualIndex] ?? visualIndex;
+          if (sourceIndex >= 0 && sourceIndex < this.tableData.rows.length) visualRows.push(sourceIndex);
+        }
+        return this.buildRemoveRowsAt(dom, visualRows);
+      }
+      case 'insert-column-left': {
+        const column = this.activeColumnIndex();
+        return column === null
+          ? { transaction: null, outcome: 'no-op' }
+          : this.buildAddColumnBefore(dom, column);
+      }
+      case 'insert-column-right': {
+        const column = this.activeColumnIndex();
+        return column === null
+          ? { transaction: null, outcome: 'no-op' }
+          : this.buildAddColumnAfter(dom, column);
+      }
+      case 'delete-column': {
+        const selectedRange = this.selectionRange;
+        if (!selectedRange || this.selectedCellCount() <= 1) {
+          const column = this.activeColumnIndex();
+          return column === null
+            ? { transaction: null, outcome: 'no-op' }
+            : this.buildRemoveColumnsAt(dom, [column]);
+        }
+        const columns: number[] = [];
+        for (let column = selectedRange.fromCol; column <= selectedRange.toCol; column += 1) {
+          if (column >= 0 && column < this.tableData.colCount) columns.push(column);
+        }
+        return this.buildRemoveColumnsAt(dom, columns);
+      }
+      case 'align-left':
+        return this.buildAlignmentTransaction('left');
+      case 'align-center':
+        return this.buildAlignmentTransaction('center');
+      case 'align-right':
+        return this.buildAlignmentTransaction('right');
+      case 'apply-sort': {
+        if (!this.sortState) return { transaction: null, outcome: 'no-op' };
+        const plan = this.buildMatrixTransaction(this.readCellMatrix(), dom, null, {
+          preserveScrollPosition: true,
+          sourceRowOrder: this.sortState.order
+        });
+        return {
+          ...plan,
+          afterDispatch: () => {
+            this.sortState = null;
+            this.updateSortControls();
+          }
+        };
+      }
+    }
+  }
+
   recordPendingCellEdit(row: number, col: number, value: string) {
     const last = this.pendingCellEdits[this.pendingCellEdits.length - 1];
     if (last?.row === row && last.col === col) last.value = value;
@@ -3318,31 +3410,58 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  commitMatrix(
+  buildMatrixTransaction(
     matrix,
     dom,
     focusTarget: PendingCellFocus | null = null,
     {
       preserveScrollPosition = false,
-      sourceRowOrder = null
-    }: { preserveScrollPosition?: boolean; sourceRowOrder?: number[] | null } = {}
-  ) {
+      sourceRowOrder = null,
+      extraEffects = [],
+      alignmentOverrideColumn = null
+    }: {
+      preserveScrollPosition?: boolean;
+      sourceRowOrder?: number[] | null;
+      extraEffects?: readonly StateEffect<unknown>[];
+      alignmentOverrideColumn?: number | null;
+    } = {}
+  ): TableCommandTransactionPlan {
     const view = this.getEditorView(dom);
-    if (!view) return;
+    if (!view) return { transaction: null, outcome: 'no-op' };
 
     const { headerCells, rows, alignments = this.tableData.alignments } = matrix;
-    if (!headerCells.length) return;
+    if (!headerCells.length) return { transaction: null, outcome: 'no-op' };
     const range = this.resolveCurrentTableRange(view, dom);
-    if (!range) return;
+    if (!range) return { transaction: null, outcome: 'no-op' };
     const tableStartLine = view.state.doc.lineAt(range.from).number;
     const markdown = serializeTableMarkdown(this.tableData.indent, headerCells, alignments, rows);
     const current = view.state.doc.sliceString(range.from, range.to);
+    const commandEffects = alignmentOverrideColumn === null
+      ? [...extraEffects]
+      : [
+          ...extraEffects,
+          setTableHeaderAlignmentOverrideEffect.of({
+            from: range.from,
+            to: range.from + markdown.length,
+            column: alignmentOverrideColumn
+          })
+        ];
     if (current === markdown) {
       this.hasPendingCellEdits = false;
-      if (focusTarget) {
-        this.focusCellInputAt(focusTarget.row, focusTarget.col, 0);
+      if (commandEffects.length) {
+        return {
+          transaction: { effects: commandEffects },
+          outcome: 'changed',
+          restoreInteraction: focusTarget
+            ? () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+            : undefined
+        };
       }
-      return;
+      if (focusTarget) this.focusCellInputAt(focusTarget.row, focusTarget.col, 0);
+      return {
+        transaction: null,
+        outcome: 'no-op'
+      };
     }
 
     const effectiveSourceRowOrder = sourceRowOrder ?? (
@@ -3369,35 +3488,37 @@ class HtmlTableWidget extends WidgetType {
         };
       })
       .filter((mapping): mapping is { id: string; oldOffset: number; newOffset: number } => mapping !== null);
-    const effects = getTableTransactionProvenance(view.state).effect({
+    const provenanceEffect = getTableTransactionProvenance(view.state).effect({
       type: 'remapInsertedRows',
       tableFrom: range.from,
       rows: trackedRowMappings
     });
-    const applyCommit = () => view.dispatch({
-      changes: { from: range.from, to: range.to, insert: markdown },
-      effects
-    });
-    const controller = preserveScrollPosition ? getViewportController(view) : null;
-    if (controller) controller.preserveScrollPosition(applyCommit);
-    else applyCommit();
     this.hasPendingCellEdits = false;
-    if (focusTarget) {
-      this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
-    }
+    return {
+      transaction: {
+        changes: { from: range.from, to: range.to, insert: markdown },
+        effects: [provenanceEffect, ...commandEffects]
+      },
+      outcome: 'changed',
+      preserveViewport: preserveScrollPosition,
+      restoreInteraction: focusTarget
+        ? () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+        : undefined
+    };
   }
 
-  addRowAfter(dom, rowIndex) {
+  buildAddRowAfter(dom, rowIndex): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
-    if (!matrix.headerCells.length) return;
+    if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(rowIndex + 1, 0), matrix.rows.length);
-    if (this.insertSourceRowAt(dom, insertAt, matrix.headerCells.length)) return;
+    const sourcePlan = this.buildInsertSourceRowTransaction(dom, insertAt, matrix.headerCells.length);
+    if (sourcePlan) return sourcePlan;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
     const sourceRowOrder = matrix.rows.map((_row, index) => (
       index < insertAt ? index : index === insertAt ? -1 : index - 1
     ));
-    this.commitMatrix(
+    return this.buildMatrixTransaction(
       matrix,
       dom,
       { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 },
@@ -3405,17 +3526,18 @@ class HtmlTableWidget extends WidgetType {
     );
   }
 
-  addRowBefore(dom, rowIndex) {
+  buildAddRowBefore(dom, rowIndex): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
-    if (!matrix.headerCells.length) return;
+    if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(rowIndex, 0), matrix.rows.length);
-    if (this.insertSourceRowAt(dom, insertAt, matrix.headerCells.length)) return;
+    const sourcePlan = this.buildInsertSourceRowTransaction(dom, insertAt, matrix.headerCells.length);
+    if (sourcePlan) return sourcePlan;
     matrix.rows.splice(insertAt, 0, new Array(matrix.headerCells.length).fill(''));
     const sourceRowOrder = matrix.rows.map((_row, index) => (
       index < insertAt ? index : index === insertAt ? -1 : index - 1
     ));
-    this.commitMatrix(
+    return this.buildMatrixTransaction(
       matrix,
       dom,
       { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 },
@@ -3423,11 +3545,15 @@ class HtmlTableWidget extends WidgetType {
     );
   }
 
-  insertSourceRowAt(dom, insertAt: number, colCount: number) {
+  buildInsertSourceRowTransaction(
+    dom,
+    insertAt: number,
+    colCount: number
+  ): TableCommandTransactionPlan | null {
     const view = this.getEditorView(dom);
-    if (!view || colCount <= 0) return false;
+    if (!view || colCount <= 0) return null;
     const range = this.resolveCurrentTableRange(view, dom);
-    if (!range) return false;
+    if (!range) return null;
 
     const tableStartLine = view.state.doc.lineAt(range.from).number;
     const blankRow = `${this.tableData.indent}| ${new Array(colCount).fill('').join(' | ')} |`;
@@ -3446,37 +3572,31 @@ class HtmlTableWidget extends WidgetType {
       });
     }
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
-    view.dispatch({ changes, effects: insertedRowEffect });
     this.hasPendingCellEdits = false;
-    this.scheduleFocusCellAfterCommit(
-      view,
-      tableStartLine,
-      { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 }
-    );
-    return true;
+    const focusTarget = { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 };
+    return {
+      transaction: { changes, effects: insertedRowEffect },
+      outcome: 'changed',
+      restoreInteraction: () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+    };
   }
 
-  removeRowAt(dom, rowIndex) {
-    this.removeRowsAt(dom, [rowIndex]);
-  }
-
-  removeRowsAt(dom, rowIndexes: number[]) {
+  buildRemoveRowsAt(dom, rowIndexes: number[]): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(rowIndexes)].sort((left, right) => right - left);
-    if (!uniqueIndexes.length) return;
+    if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.rows.length);
-    if (!validIndexes.length) return;
+    if (!validIndexes.length) return { transaction: null, outcome: 'no-op' };
     const firstRemoved = Math.min(...validIndexes);
     if (validIndexes.length < matrix.rows.length) {
       const focusRow = Math.min(firstRemoved, matrix.rows.length - validIndexes.length - 1) + 1;
-      if (this.removeSourceRowsAt(
+      const sourcePlan = this.buildRemoveSourceRowsTransaction(
         dom,
         validIndexes,
         { row: focusRow, col: this.activeColumnIndex() ?? 0 }
-      )) {
-        return;
-      }
+      );
+      if (sourcePlan) return sourcePlan;
     }
     for (const index of validIndexes) matrix.rows.splice(index, 1);
     if (matrix.rows.length === 0) {
@@ -3486,7 +3606,7 @@ class HtmlTableWidget extends WidgetType {
     const sourceRowOrder = this.tableData.rows
       .map((_row, index) => index)
       .filter((index) => !validIndexes.includes(index));
-    this.commitMatrix(
+    return this.buildMatrixTransaction(
       matrix,
       dom,
       { row: focusRow, col: this.activeColumnIndex() ?? 0 },
@@ -3494,15 +3614,15 @@ class HtmlTableWidget extends WidgetType {
     );
   }
 
-  removeSourceRowsAt(
+  buildRemoveSourceRowsTransaction(
     dom,
     rowIndexes: number[],
     focusTarget: PendingCellFocus
-  ) {
+  ): TableCommandTransactionPlan | null {
     const view = this.getEditorView(dom);
-    if (!view) return false;
+    if (!view) return null;
     const range = this.resolveCurrentTableRange(view, dom);
-    if (!range) return false;
+    if (!range) return null;
 
     const tableStartLine = view.state.doc.lineAt(range.from).number;
     const sortedIndexes = [...rowIndexes].sort((left, right) => left - right);
@@ -3555,16 +3675,18 @@ class HtmlTableWidget extends WidgetType {
     });
     changes.push(...this.collectPendingCellSourceChanges(view, removedIndexes));
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
-    view.dispatch({ changes, effects: deletionEffects });
     this.hasPendingCellEdits = false;
-    this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
-    return true;
+    return {
+      transaction: { changes, effects: deletionEffects },
+      outcome: 'changed',
+      restoreInteraction: () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+    };
   }
 
-  addColumnAfter(dom, colIndex) {
+  buildAddColumnAfter(dom, colIndex): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
-    if (!matrix.headerCells.length) return;
+    if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(colIndex + 1, 0), matrix.headerCells.length);
     matrix.headerCells.splice(insertAt, 0, '');
     matrix.rows = matrix.rows.map((row) => {
@@ -3575,13 +3697,13 @@ class HtmlTableWidget extends WidgetType {
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1).map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
-    this.commitMatrix(matrix, dom, { row: this.activeTarget.row, col: insertAt });
+    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: insertAt });
   }
 
-  addColumnBefore(dom, colIndex) {
+  buildAddColumnBefore(dom, colIndex): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
-    if (!matrix.headerCells.length) return;
+    if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(colIndex, 0), matrix.headerCells.length);
     matrix.headerCells.splice(insertAt, 0, '');
     matrix.rows = matrix.rows.map((row) => {
@@ -3592,20 +3714,16 @@ class HtmlTableWidget extends WidgetType {
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1).map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
-    this.commitMatrix(matrix, dom, { row: this.activeTarget.row, col: insertAt });
+    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: insertAt });
   }
 
-  removeColumnAt(dom, colIndex) {
-    this.removeColumnsAt(dom, [colIndex]);
-  }
-
-  removeColumnsAt(dom, columnIndexes: number[]) {
+  buildRemoveColumnsAt(dom, columnIndexes: number[]): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(columnIndexes)].sort((left, right) => right - left);
-    if (!uniqueIndexes.length) return;
+    if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.headerCells.length);
-    if (!validIndexes.length) return;
+    if (!validIndexes.length) return { transaction: null, outcome: 'no-op' };
     const firstRemoved = Math.min(...validIndexes);
     for (const index of validIndexes) matrix.headerCells.splice(index, 1);
     matrix.rows = matrix.rows.map((row) => {
@@ -3622,7 +3740,7 @@ class HtmlTableWidget extends WidgetType {
     }
     matrix.alignments = alignments;
     const focusCol = Math.min(firstRemoved, matrix.headerCells.length - 1);
-    this.commitMatrix(matrix, dom, { row: this.activeTarget.row, col: focusCol });
+    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: focusCol });
   }
 
   cellDiagnostics(rowIndex, colIndex): TableCellDiagnostics[] {
@@ -3739,7 +3857,7 @@ class HtmlTableWidget extends WidgetType {
             this.focusCellInputAt(rowIndex + 1, colIndex, 0);
           } else {
             this.setActionTarget({ row: rowIndex, col: colIndex });
-            this.addRowAfter(container, rowIndex - 1);
+            this.requestTableCommand('insert-row-below', true);
           }
         }
         return;
@@ -4379,6 +4497,19 @@ class HtmlTableWidget extends WidgetType {
       stickyHeaderRow,
       toolbarButtons
     };
+    const tableCommandTarget: TableCommandEditorTarget = {
+      view,
+      identityKey: JSON.stringify({ indent: this.tableData.indent, header: this.tableData.headerCells }),
+      from: this.tableData.from ?? 0,
+      to: this.tableData.to ?? 0,
+      isConnected: () => Boolean(this.domRefs?.shell.isConnected),
+      buildPendingEditTransactions: () => this.buildPendingEditTransactions(),
+      buildAtomicCommandTransaction: ({ command }) => this.buildTableCommandTransaction(command),
+      presentCommand: ({ command }) => this.presentTableCommand(command),
+      preserveViewport: (run) => this.preserveTableCommandViewport(run)
+    };
+    this.tableCommandTargetRegistration = this.tableCommandEnvironment.registerTarget(tableCommandTarget);
+    this.tableCommandTargetId = this.tableCommandTargetRegistration.id;
     this.stickyHeaderAdapter.mount();
     const onColumnWidthProjected = () => {
       this.pendingResizeRows = true;
@@ -4414,6 +4545,8 @@ class HtmlTableWidget extends WidgetType {
 
   destroy(dom) {
     this.setTableInteractionActive(dom, false);
+    this.tableCommandTargetRegistration?.dispose();
+    this.tableCommandTargetRegistration = null;
     this.stickyHeaderAdapter.unmount();
     this.stickyHeaderAdapter.dispose();
     for (const cleanup of this.cleanupFns) cleanup();
@@ -4483,6 +4616,7 @@ export function addTableDecorations(builder, state, tableNode, diagnostics: Edit
     builder,
     data,
     state.facet(tableStickyHeaderAdapterFactoryFacet),
+    state.facet(tableCommandEnvironmentFacet),
     diagnostics,
     diffLineFlags
   );
@@ -4494,6 +4628,7 @@ export function addTableDecorationsForLineRange(builder, state, startLineNo, end
     builder,
     data,
     state.facet(tableStickyHeaderAdapterFactoryFacet),
+    state.facet(tableCommandEnvironmentFacet),
     diagnostics,
     diffLineFlags
   );
@@ -4601,6 +4736,7 @@ function addTableWidgetDecoration(
   builder,
   data,
   stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory | null,
+  tableCommandEnvironment: TableCommandEnvironment | null,
   diagnostics: EditorDiagnostic[] = [],
   diffLineFlags = null
 ) {
@@ -4608,6 +4744,9 @@ function addTableWidgetDecoration(
   if (colCount === 0 || !headerLine) return;
   if (!stickyHeaderAdapterFactory) {
     throw new Error('Table Sticky Header Adapter factory is not configured');
+  }
+  if (!tableCommandEnvironment) {
+    throw new Error('Table Command environment is not configured');
   }
 
   const indent = /^(\s*)/.exec(headerLine.text)?.[1] ?? '';
@@ -4643,7 +4782,8 @@ function addTableWidgetDecoration(
           sourceRanges: collectTableSourceRanges(data),
           diffFlagsByLine
         },
-        stickyHeaderAdapterFactory
+        stickyHeaderAdapterFactory,
+        tableCommandEnvironment
       )
     }).range(from, to)
   );

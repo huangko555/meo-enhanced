@@ -34,6 +34,14 @@ import {
   tableStickyHeaderAdapterFactoryFacet,
   type TableStickyHeaderAdapterFactory
 } from './editor/tableStickyHeaderAdapter';
+import { createTableCommandApplication } from './application/tableCommand';
+import { createTableCommandRuntime } from './adapters/tableCommandRuntime';
+import { createCodeMirrorTableCommandEffectAdapter } from './editor/internal/codeMirrorTableCommandEffectAdapter';
+import {
+  tableCommandEnvironmentFacet,
+  type TableCommandEditorTarget,
+  type TableCommandEnvironment
+} from './editor/tableCommandAdapter';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { createGitBlameHoverController } from './helpers/gitBlameHover';
@@ -1994,6 +2002,65 @@ export function createEditor({
       });
     }
   };
+  const tableCommandTargets = new Map<string, {
+    target: TableCommandEditorTarget | null;
+    identityKey: string;
+    from: number;
+    to: number;
+    generation: number;
+  }>();
+  let tableCommandTargetSequence = 0;
+  const tableCommandApplication = createTableCommandApplication();
+  const tableCommandEffectAdapter = createCodeMirrorTableCommandEffectAdapter({
+    resolveTarget(tableId) {
+      return tableCommandTargets.get(tableId)?.target ?? null;
+    },
+    reportError(error) {
+      console.error('Table command effect failed', error);
+    },
+    dispose() {
+      tableCommandTargets.clear();
+    }
+  });
+  const tableCommandRuntime = createTableCommandRuntime(
+    tableCommandApplication,
+    tableCommandEffectAdapter,
+    (error) => console.error('Table command Runtime failed', error)
+  );
+  const tableCommandEnvironment: TableCommandEnvironment = {
+    dispatch(input) {
+      return tableCommandRuntime.dispatch(input);
+    },
+    registerTarget(target) {
+      const reusable = [...tableCommandTargets.entries()]
+        .filter(([, record]) => (
+          record.identityKey === target.identityKey &&
+          (!record.target || !record.target.isConnected())
+        ))
+        .sort((left, right) => (
+          Math.abs(left[1].from - target.from) - Math.abs(right[1].from - target.from)
+        ))[0];
+      const id = reusable?.[0] ?? `table-command-target-${++tableCommandTargetSequence}`;
+      const generation = (reusable?.[1].generation ?? 0) + 1;
+      tableCommandTargets.set(id, {
+        target,
+        identityKey: target.identityKey,
+        from: target.from,
+        to: target.to,
+        generation
+      });
+      let active = true;
+      return {
+        id,
+        dispose() {
+          if (!active) return;
+          active = false;
+          const record = tableCommandTargets.get(id);
+          if (record?.generation === generation && record.target === target) record.target = null;
+        }
+      };
+    }
+  };
   const state = EditorState.create({
     doc: text,
     selection: { anchor: initialCursorPos },
@@ -2255,6 +2322,7 @@ export function createEditor({
       tableHeaderAlignmentOverrideField,
       tableColumnWidthAdapter.extension,
       tableStickyHeaderAdapterFactoryFacet.of(tableStickyHeaderAdapterFactory),
+      tableCommandEnvironmentFacet.of(tableCommandEnvironment),
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
@@ -2790,6 +2858,7 @@ export function createEditor({
       setEditableLinkHoverCursor(view, false);
       editorHistoryRuntime?.dispose();
       editorHistoryRuntime = null;
+      tableCommandRuntime.dispose();
       viewportController.destroy();
       tableTransactionProvenanceAdapter.dispose();
       tableColumnWidthAdapter.adapter.dispose();

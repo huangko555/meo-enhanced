@@ -22,6 +22,7 @@ export function createTableCommandRuntime(
   reportUnexpectedError: (error: unknown) => void
 ): TableCommandRuntime {
   let operation = Promise.resolve();
+  let pendingOperations = 0;
   let disposed = false;
   let generation = 0;
 
@@ -65,7 +66,10 @@ export function createTableCommandRuntime(
     currentGeneration: number
   ): Promise<TableCommandRuntimeOutcome | null> => {
     try {
-      const completion = await executor.execute(effect).completion;
+      const execution = executor.execute(effect);
+      const completion = Object.prototype.hasOwnProperty.call(execution, 'immediateCompletion')
+        ? execution.immediateCompletion ?? null
+        : await execution.completion;
       if (!completion || disposed || currentGeneration !== generation) return null;
       return processInput(completion, currentGeneration);
     } catch (error) {
@@ -79,8 +83,19 @@ export function createTableCommandRuntime(
   const enqueue = (input: TableCommandInput): Promise<TableCommandRuntimeOutcome | null> => {
     if (disposed) return Promise.resolve(null);
     const currentGeneration = generation;
-    const result = operation.then(() => processInput(input, currentGeneration));
-    operation = result.then(() => undefined).catch(reportUnexpectedError);
+    const result = pendingOperations === 0
+      ? processInput(input, currentGeneration)
+      : operation.then(() => processInput(input, currentGeneration));
+    pendingOperations += 1;
+    operation = result.then(
+      () => {
+        pendingOperations -= 1;
+      },
+      (error) => {
+        pendingOperations -= 1;
+        reportUnexpectedError(error);
+      }
+    );
     return result;
   };
 

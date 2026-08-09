@@ -6,9 +6,9 @@ import { createTableTransactionProvenance } from '../webview/src/application/tab
 import { createTableCommandRuntime } from '../webview/src/adapters/tableCommandRuntime';
 import { createCodeMirrorTableTransactionProvenanceAdapter } from '../webview/src/adapters/codeMirrorTableTransactionProvenanceAdapter';
 import {
-  createCodeMirrorTableCommandEffectAdapter,
-  type TableCommandEditorTarget
+  createCodeMirrorTableCommandEffectAdapter
 } from '../webview/src/editor/internal/codeMirrorTableCommandEffectAdapter';
+import type { TableCommandEditorTarget } from '../webview/src/editor/tableCommandAdapter';
 
 type Matrix = { header: string[]; alignments: Array<'left' | 'center' | 'right' | null>; rows: string[][] };
 type LocatedTable = Matrix & { from: number; to: number; index: number };
@@ -158,12 +158,16 @@ const targetFor = (tableId: string): TableCommandEditorTarget | null => {
   if (!current) return null;
   return {
     view,
-    buildPendingEditTransaction() {
+    identityKey: tableId,
+    from: current.from,
+    to: current.to,
+    isConnected: () => true,
+    buildPendingEditTransactions() {
       const table = tableFor(tableId);
-      if (!table || !(pending.get(tableId)?.size)) return null;
+      if (!table || !(pending.get(tableId)?.size)) return [];
       const matrix = applyPending(tableId, table);
       pending.delete(tableId);
-      return replaceTable(table, matrix);
+      return [view.state.update(replaceTable(table, matrix))];
     },
     buildAtomicCommandTransaction(request) {
       const table = tableFor(tableId);
@@ -219,9 +223,18 @@ const targetFor = (tableId: string): TableCommandEditorTarget | null => {
       previewOrders.delete(tableId);
       previewDirections.delete(tableId);
       const transaction = replaceTable(table, matrix, effects);
+      const restoreInteraction = () => {
+        restoreCount += 1;
+        const shell = uiHost.querySelector<HTMLElement>(`[data-table-id="${tableId}"]`);
+        const cells = shell?.querySelectorAll<HTMLElement>('td') ?? [];
+        const columnCount = tableFor(tableId)?.header.length ?? 1;
+        const index = Math.max(0, Math.min(cells.length - 1,
+          Math.max(0, (request.target.row ?? 1) - 1) * columnCount + Math.max(0, request.target.column ?? 0)));
+        cells[index]?.focus({ preventScroll: true });
+      };
       return serialize(matrix) === view.state.doc.sliceString(table.from, table.to)
         ? { transaction: null, outcome: 'no-op' }
-        : { transaction, outcome: 'changed' };
+        : { transaction, outcome: 'changed', restoreInteraction };
     },
     presentCommand(request) {
       const table = tableFor(tableId);
@@ -237,15 +250,7 @@ const targetFor = (tableId: string): TableCommandEditorTarget | null => {
       render();
       return 'presented';
     },
-    restoreInteraction(request) {
-      restoreCount += 1;
-      const shell = uiHost.querySelector<HTMLElement>(`[data-table-id="${tableId}"]`);
-      const cells = shell?.querySelectorAll<HTMLElement>('td') ?? [];
-      const columnCount = tableFor(tableId)?.header.length ?? 1;
-      const index = Math.max(0, Math.min(cells.length - 1,
-        Math.max(0, (request.target.row ?? 1) - 1) * columnCount + Math.max(0, request.target.column ?? 0)));
-      cells[index]?.focus({ preventScroll: true });
-    }
+    preserveViewport(run) { run(); }
   };
 };
 

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import type { TransactionSpec } from '@codemirror/state';
+import type { Transaction, TransactionSpec } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
-  createCodeMirrorTableCommandEffectAdapter,
-  type TableCommandEditorTarget
+  createCodeMirrorTableCommandEffectAdapter
 } from '../webview/src/editor/internal/codeMirrorTableCommandEffectAdapter';
+import type { TableCommandEditorTarget } from '../webview/src/editor/tableCommandAdapter';
 
 const dispatched: TransactionSpec[] = [];
 const restored: string[] = [];
@@ -22,9 +22,13 @@ const view = {
 
 const target: TableCommandEditorTarget = {
   view,
-  buildPendingEditTransaction() {
+  identityKey: 'table-1',
+  from: 0,
+  to: 5,
+  isConnected: () => true,
+  buildPendingEditTransactions() {
     pendingBuilds += 1;
-    return { changes: { from: 0, to: 0, insert: 'pending ' } };
+    return [{ changes: { from: 0, to: 0, insert: 'pending ' } } as unknown as Transaction];
   },
   buildAtomicCommandTransaction(request) {
     atomicBuilds += 1;
@@ -35,7 +39,8 @@ const target: TableCommandEditorTarget = {
         changes: { from: 0, to: 5, insert: '| A |\n| --- |\n| edited |\n|  |' },
         effects: []
       },
-      outcome: 'changed'
+      outcome: 'changed',
+      restoreInteraction: () => restored.push('changed')
     };
   },
   presentCommand(request) {
@@ -43,9 +48,7 @@ const target: TableCommandEditorTarget = {
     assert.equal(request.command, 'preview-sort');
     return 'presented';
   },
-  restoreInteraction(request) {
-    restored.push(request.outcome);
-  }
+  preserveViewport(run) { run(); }
 };
 
 const adapter = createCodeMirrorTableCommandEffectAdapter({
@@ -112,13 +115,13 @@ assert.equal(await adapter.execute({
 }).completion, null);
 assert.equal(dispatched.length, 2);
 
-for (const path of [
-  '../webview/src/editor.ts', '../webview/src/index.ts', '../webview/src/helpers/tables.ts'
-]) {
-  const source = readFileSync(new URL(path, import.meta.url), 'utf8');
-  assert.equal(source.includes('createTableCommandApplication'), false);
-  assert.equal(source.includes('createTableCommandRuntime'), false);
-  assert.equal(source.includes('createCodeMirrorTableCommandEffectAdapter'), false);
-}
+const productionSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
+assert.equal((productionSource.match(/createTableCommandApplication\(/g) ?? []).length, 1);
+assert.equal((productionSource.match(/createTableCommandRuntime\(/g) ?? []).length, 1);
+assert.equal((productionSource.match(/createCodeMirrorTableCommandEffectAdapter\(/g) ?? []).length, 1);
+const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
+assert.equal(tablesSource.includes('createTableCommandApplication'), false);
+assert.equal(tablesSource.includes('createTableCommandRuntime'), false);
+assert.equal(tablesSource.includes('createCodeMirrorTableCommandEffectAdapter'), false);
 
 console.log('table command effect adapter contracts passed');

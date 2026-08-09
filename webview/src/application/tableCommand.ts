@@ -60,6 +60,7 @@ export type TableCommandApplication = {
 };
 
 export type TableCommandEffectExecution = {
+  readonly immediateCompletion?: TableCommandInput | null;
   readonly completion?: Promise<TableCommandInput | null>;
 };
 
