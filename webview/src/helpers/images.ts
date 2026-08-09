@@ -317,10 +317,6 @@ export class ImageWidget extends WidgetType {
   toDOM(view?: EditorView): HTMLElement {
     const container = document.createElement('div');
     container.className = 'meo-md-image';
-    container.addEventListener(IMAGE_PRESENTATION_DISPOSE_EVENT, () => {
-      this.presentationHandle?.dispose();
-      this.presentationHandle = null;
-    }, { once: true });
 
     if (this.linkUrl) {
       container.classList.add('meo-md-image-linked');
@@ -336,7 +332,7 @@ export class ImageWidget extends WidgetType {
     }
 
     this.presentationHandle?.dispose();
-    this.presentationHandle = this.presentationFactory.create({
+    const presentationHandle = this.presentationFactory.create({
       showFallback: () => this.renderFallback(container),
       showImage: (loadedImage) => {
         const image = this.createDisplayImage(loadedImage);
@@ -345,7 +341,12 @@ export class ImageWidget extends WidgetType {
       },
       preserveLayoutChange: (apply) => this.preserveImageLayoutChange(container, view, apply)
     });
-    this.presentationHandle.present(this.fallbackText(), this.url);
+    this.presentationHandle = presentationHandle;
+    container.addEventListener(IMAGE_PRESENTATION_DISPOSE_EVENT, () => {
+      presentationHandle.dispose();
+      if (this.presentationHandle === presentationHandle) this.presentationHandle = null;
+    }, { once: true });
+    presentationHandle.present(this.fallbackText(), this.url);
     return container;
   }
 

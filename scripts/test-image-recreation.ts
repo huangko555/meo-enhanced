@@ -14,6 +14,7 @@ class FakeElement {
   isConnected = false;
   naturalWidth = 0;
   tagName: string;
+  listeners = new Map<string, Array<() => void>>();
 
   constructor(tagName = 'img') {
     this.tagName = tagName.toUpperCase();
@@ -39,7 +40,15 @@ class FakeElement {
     return clone;
   }
 
-  addEventListener() {}
+  addEventListener(type: string, listener: () => void) {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+  dispatchEvent(event: Event) {
+    for (const listener of this.listeners.get(event.type) ?? []) listener();
+    return true;
+  }
   append(...children: FakeElement[]) {
     this.children.push(...children);
   }
@@ -110,6 +119,29 @@ const preloadedContainer = preloadedWidget.toDOM() as any;
 const preloadedImage = preloadedContainer.children.find((child: FakeElement) => child.tagName === 'IMG');
 if (!preloadedImage?.complete) {
   throw new Error('Offscreen image was not preloaded before rendering');
+}
+
+const lifecycleHandles: Array<{ disposed: boolean }> = [];
+const lifecycleFactory = {
+  preload: async () => undefined,
+  create() {
+    const state = { disposed: false };
+    lifecycleHandles.push(state);
+    return {
+      present() {},
+      externalDocumentPresented() {},
+      dispose() { state.disposed = true; }
+    };
+  },
+  externalDocumentPresented() {},
+  dispose() {}
+};
+const reusedWidget = new ImageWidget('/reused.png', 'reused', '', null, lifecycleFactory);
+const oldContainer = reusedWidget.toDOM() as any;
+reusedWidget.toDOM();
+oldContainer.dispatchEvent(new Event('meo-dispose-image-presentation'));
+if (!lifecycleHandles[0]?.disposed || lifecycleHandles[1]?.disposed) {
+  throw new Error('Disposing an old image DOM did not preserve the replacement handle');
 }
 
 factory.dispose();

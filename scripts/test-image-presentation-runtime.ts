@@ -42,15 +42,15 @@ assert.ok(firstId);
 assert.deepEqual(executed.map((effect) => effect.type), ['showFallback', 'resolveSource']);
 
 let firstIdle = false;
-void runtime.whenIdle().then(() => { firstIdle = true; });
+void runtime.whenCurrentPresentationSettles().then(() => { firstIdle = true; });
 await Promise.resolve();
 assert.equal(firstIdle, false, 'resolving presentation must not be idle');
 
 runtime.dispatch({ type: 'present', sourceKey: 'b', rawSrc: './b.png' });
 const secondId = application.getState().presentationId;
 assert.ok(secondId && secondId !== firstId);
-assert.deepEqual(executed.slice(-3).map((effect) => effect.type), [
-  'cancelPresentation', 'showFallback', 'resolveSource'
+assert.deepEqual(executed.slice(-2).map((effect) => effect.type), [
+  'showFallback', 'resolveSource'
 ]);
 
 deferred.find((item) => item.effect.presentationId === firstId)?.resolve({
@@ -76,7 +76,7 @@ const secondLoad = deferred.find((item) => (
 ));
 assert.ok(secondLoad, 'current resolve completion did not start image load');
 secondLoad.resolve({ type: 'imageLoaded', presentationId: secondId });
-await runtime.whenIdle();
+await runtime.whenCurrentPresentationSettles();
 assert.equal(application.getState().phase, 'ready');
 assert.equal(firstIdle, true, 'old idle waiter should resolve when the replacement becomes idle');
 
@@ -84,7 +84,7 @@ runtime.dispatch({ type: 'present', sourceKey: 'external', rawSrc: './external.p
 const externalId = application.getState().presentationId;
 assert.ok(externalId);
 runtime.dispatch({ type: 'externalDocumentPresented' });
-await runtime.whenIdle();
+await runtime.whenCurrentPresentationSettles();
 deferred.find((item) => item.effect.presentationId === externalId)?.resolve({
   type: 'sourceFailed', presentationId: externalId
 });
@@ -100,7 +100,7 @@ assert.equal(application.getState().phase, 'disposed');
 deferred.find((item) => item.effect.presentationId === disposeId)?.resolve({
   type: 'sourceFailed', presentationId: disposeId
 });
-await runtime.whenIdle();
+await runtime.whenCurrentPresentationSettles();
 assert.equal(application.getState().phase, 'disposed');
 
 console.log('image presentation runtime contracts passed');

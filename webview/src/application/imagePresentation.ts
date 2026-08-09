@@ -41,8 +41,7 @@ export type ImagePresentationEffect =
       readonly type: 'showFallback';
       readonly presentationId: number;
       readonly sourceKey: string;
-    }
-  | { readonly type: 'cancelPresentation'; readonly presentationId: number };
+    };
 
 export type ImagePresentationApplication = {
   getState(): ImagePresentationState;
@@ -78,12 +77,6 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
     presentationId === candidateId && phase === expectedPhase
   );
 
-  const cancelCurrent = (): readonly ImagePresentationEffect[] => (
-    presentationId === null
-      ? []
-      : [{ type: 'cancelPresentation', presentationId }]
-  );
-
   const clear = (nextPhase: ImagePresentationPhase): void => {
     phase = nextPhase;
     presentationId = null;
@@ -96,7 +89,7 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
 
     switch (input.type) {
       case 'present': {
-        const effects = [...cancelCurrent()];
+        const effects: ImagePresentationEffect[] = [];
         presentationId = ++sequence;
         sourceKey = input.sourceKey;
         resolvedSrc = null;
@@ -132,14 +125,12 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
         phase = 'fallback';
         return [{ type: 'showFallback', presentationId: input.presentationId, sourceKey }];
       case 'externalDocumentPresented': {
-        const effects = cancelCurrent();
         clear('idle');
-        return effects;
+        return [];
       }
       case 'dispose': {
-        const effects = cancelCurrent();
         clear('disposed');
-        return effects;
+        return [];
       }
     }
   };

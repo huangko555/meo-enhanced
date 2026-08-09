@@ -9,7 +9,7 @@ import {
 type CandidateInstance = {
   present(sourceKey: string, rawSrc: string): void;
   externalDocumentPresented(): void;
-  whenIdle(): Promise<void>;
+  whenCurrentPresentationSettles(): Promise<void>;
   state(): ReturnType<ReturnType<typeof createImagePresentationApplication>['getState']>;
   dispose(): void;
 };
@@ -105,7 +105,7 @@ type CandidateHarness = {
             externalDocumentPresented() {
               runtime.dispatch({ type: 'externalDocumentPresented' });
             },
-            whenIdle: () => runtime.whenIdle(),
+            whenCurrentPresentationSettles: () => runtime.whenCurrentPresentationSettles(),
             state: () => application.getState(),
             dispose() {
               if (disposed) return;

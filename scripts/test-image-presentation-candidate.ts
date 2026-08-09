@@ -54,7 +54,10 @@ async function main(): Promise<void> {
       const second = environment.create(document.getElementById('two'), 'document-a', 'second');
       first.present('![shared](shared.png)', 'shared.png');
       second.present('![shared](shared.png)', 'shared.png');
-      await Promise.all([first.whenIdle(), second.whenIdle()]);
+      await Promise.all([
+        first.whenCurrentPresentationSettles(),
+        second.whenCurrentPresentationSettles()
+      ]);
       const shared = {
         first: document.querySelector('#one img')?.getAttribute('src') ?? '',
         second: document.querySelector('#two img')?.getAttribute('src') ?? '',
@@ -66,7 +69,7 @@ async function main(): Promise<void> {
       const oldId = replacement.state().presentationId;
       replacement.present('![new](new.png)', 'new.png');
       const newId = replacement.state().presentationId;
-      await replacement.whenIdle();
+      await replacement.whenCurrentPresentationSettles();
       const beforeOldCompletion = {
         phase: replacement.state().phase,
         src: document.querySelector('#replace img')?.getAttribute('src') ?? ''
@@ -82,9 +85,9 @@ async function main(): Promise<void> {
 
       const failure = environment.create(document.getElementById('failure'), 'document-a', 'failure');
       failure.present('![missing](missing.png)', 'missing.png');
-      await failure.whenIdle();
+      await failure.whenCurrentPresentationSettles();
       failure.present('![broken](broken-load.png)', 'broken-load.png');
-      await failure.whenIdle();
+      await failure.whenCurrentPresentationSettles();
 
       const otherContext = environment.create(
         document.getElementById('other-context'),
@@ -92,7 +95,7 @@ async function main(): Promise<void> {
         'other context'
       );
       otherContext.present('![shared](shared.png)', 'shared.png');
-      await otherContext.whenIdle();
+      await otherContext.whenCurrentPresentationSettles();
 
       const focus = document.getElementById('focus') as HTMLInputElement;
       focus.focus();
@@ -100,7 +103,7 @@ async function main(): Promise<void> {
       const activeBefore = document.activeElement?.id;
       const scrollBefore = document.scrollingElement?.scrollTop ?? 0;
       replacement.present('![viewport](viewport.png)', 'viewport.png');
-      await replacement.whenIdle();
+      await replacement.whenCurrentPresentationSettles();
       const activeAfter = document.activeElement?.id;
       const scrollAfter = document.scrollingElement?.scrollTop ?? 0;
       const selectionNode = document.getElementById('selection')?.firstChild;
@@ -115,7 +118,7 @@ async function main(): Promise<void> {
       const sameSourceIdBefore = replacement.state().presentationId;
       replacement.present('![viewport](viewport.png)', 'viewport.png');
       const sameSourceIdAfter = replacement.state().presentationId;
-      await replacement.whenIdle();
+      await replacement.whenCurrentPresentationSettles();
       const sameSourceCountsAfter = environment.counts();
       const selectionAfter = document.getSelection()?.toString() ?? '';
 
@@ -124,7 +127,7 @@ async function main(): Promise<void> {
       const externalId = external.state().presentationId;
       external.externalDocumentPresented();
       pending.get('slow-external.png')?.forEach((resolve: (value: string) => void) => resolve(svg('external', '#66a')));
-      await external.whenIdle();
+      await external.whenCurrentPresentationSettles();
 
       const sharedSlowRootA = document.createElement('div');
       const sharedSlowRootB = document.createElement('div');
@@ -135,7 +138,7 @@ async function main(): Promise<void> {
       sharedSlowB.present('![slow](slow-shared.png)', 'slow-shared.png');
       sharedSlowA.dispose();
       pending.get('slow-shared.png')?.forEach((resolve: (value: string) => void) => resolve(svg('shared', '#886')));
-      await sharedSlowB.whenIdle();
+      await sharedSlowB.whenCurrentPresentationSettles();
       const survivingShared = sharedSlowRootB.querySelector('img')?.getAttribute('src') ?? '';
 
       const rebuiltRoot = document.createElement('div');
@@ -143,7 +146,7 @@ async function main(): Promise<void> {
       document.body.appendChild(rebuiltRoot);
       const rebuilt = environment.create(rebuiltRoot, 'document-a', 'rebuilt');
       rebuilt.present('![shared](shared.png)', 'shared.png');
-      await rebuilt.whenIdle();
+      await rebuilt.whenCurrentPresentationSettles();
       rebuiltRoot.hidden = false;
       const rebuiltShared = rebuiltRoot.querySelector('img')?.getAttribute('src') ?? '';
 

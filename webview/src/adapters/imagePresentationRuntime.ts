@@ -7,7 +7,7 @@ import type {
 
 export type ImagePresentationRuntime = {
   dispatch(input: ImagePresentationInput): void;
-  whenIdle(): Promise<void>;
+  whenCurrentPresentationSettles(): Promise<void>;
   dispose(): void;
 };
 
@@ -96,7 +96,7 @@ export function createImagePresentationRuntime(
     dispatch(input) {
       dispatchInternal(input);
     },
-    whenIdle() {
+    whenCurrentPresentationSettles() {
       if (isIdle()) return Promise.resolve();
       return new Promise<void>((resolve) => idleWaiters.add(resolve));
     },

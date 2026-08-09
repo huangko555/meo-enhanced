@@ -52,7 +52,7 @@ assert.ok(oldId);
 const replacementEffects = replaced.dispatch({ type: 'present', sourceKey: 'new', rawSrc: './new.png' });
 const newId = replaced.getState().presentationId;
 assert.ok(newId && newId !== oldId);
-assert.deepEqual(types(replacementEffects), ['cancelPresentation', 'showFallback', 'resolveSource']);
+assert.deepEqual(types(replacementEffects), ['showFallback', 'resolveSource']);
 assert.deepEqual(replaced.dispatch({ type: 'sourceResolved', presentationId: oldId, resolvedSrc: 'resolved:old' }), []);
 replaced.dispatch({ type: 'sourceResolved', presentationId: newId, resolvedSrc: 'resolved:new' });
 assert.deepEqual(replaced.dispatch({ type: 'imageLoaded', presentationId: oldId }), []);
@@ -62,7 +62,7 @@ const invalidated = createImagePresentationApplication();
 invalidated.dispatch({ type: 'present', sourceKey: 'external', rawSrc: './external.png' });
 const invalidatedId = invalidated.getState().presentationId;
 assert.ok(invalidatedId);
-assert.deepEqual(types(invalidated.dispatch({ type: 'externalDocumentPresented' })), ['cancelPresentation']);
+assert.deepEqual(types(invalidated.dispatch({ type: 'externalDocumentPresented' })), []);
 assert.deepEqual(invalidated.getState(), { phase: 'idle', presentationId: null, sourceKey: null });
 assert.deepEqual(invalidated.dispatch({
   type: 'sourceResolved', presentationId: invalidatedId, resolvedSrc: 'resolved:external'
@@ -72,7 +72,7 @@ const disposed = createImagePresentationApplication();
 disposed.dispatch({ type: 'present', sourceKey: 'disposed', rawSrc: './disposed.png' });
 const disposedId = disposed.getState().presentationId;
 assert.ok(disposedId);
-assert.deepEqual(types(disposed.dispatch({ type: 'dispose' })), ['cancelPresentation']);
+assert.deepEqual(types(disposed.dispatch({ type: 'dispose' })), []);
 assert.deepEqual(disposed.getState(), { phase: 'disposed', presentationId: null, sourceKey: null });
 assert.deepEqual(disposed.dispatch({ type: 'imageLoaded', presentationId: disposedId }), []);
 assert.deepEqual(disposed.dispatch({ type: 'present', sourceKey: 'late', rawSrc: './late.png' }), []);

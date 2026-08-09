@@ -4603,6 +4603,7 @@ class HtmlTableWidget extends WidgetType {
 
   destroy(dom) {
     this.setTableInteractionActive(dom, false);
+    disposeImagePresentations(dom);
     this.tableCommandTargetRegistration?.dispose();
     this.tableCommandTargetRegistration = null;
     this.stickyHeaderAdapter.unmount();

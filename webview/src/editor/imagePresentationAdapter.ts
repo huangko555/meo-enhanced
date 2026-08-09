@@ -16,6 +16,8 @@ const DEFAULT_RESOLUTION_CACHE_LIMIT = 512;
 const DEFAULT_LOADED_CACHE_LIMIT = 128;
 const DEFAULT_FAILURE_CACHE_LIMIT = 256;
 const DEFAULT_MAX_CONCURRENT_LOADS = 6;
+const DEFAULT_MAX_PENDING_RESOLUTIONS = 512;
+const DEFAULT_MAX_QUEUED_LOADS = 512;
 const DEFAULT_FAILURE_RETRY_MS = 30_000;
 
 export type ImagePresentationResourcePool = {
@@ -31,6 +33,8 @@ export type ImagePresentationResourcePoolOptions = {
   readonly loadImage: (resolvedSrc: string) => Promise<HTMLImageElement | null>;
   readonly now?: () => number;
   readonly maxConcurrentLoads?: number;
+  readonly maxPendingResolutions?: number;
+  readonly maxQueuedLoads?: number;
   readonly failureRetryMs?: number;
   readonly resolutionCacheLimit?: number;
   readonly loadedCacheLimit?: number;
@@ -64,6 +68,8 @@ export function createImagePresentationResourcePool(
 ): ImagePresentationResourcePool {
   const now = options.now ?? Date.now;
   const maxConcurrentLoads = options.maxConcurrentLoads ?? DEFAULT_MAX_CONCURRENT_LOADS;
+  const maxPendingResolutions = options.maxPendingResolutions ?? DEFAULT_MAX_PENDING_RESOLUTIONS;
+  const maxQueuedLoads = options.maxQueuedLoads ?? DEFAULT_MAX_QUEUED_LOADS;
   const failureRetryMs = options.failureRetryMs ?? DEFAULT_FAILURE_RETRY_MS;
   const resolvedCache = new Map<string, string>();
   const resolutionInFlight = new Map<string, Promise<string | null>>();
@@ -114,6 +120,7 @@ export function createImagePresentationResourcePool(
     }
     const pending = resolutionInFlight.get(key);
     if (pending) return pending;
+    if (resolutionInFlight.size >= maxPendingResolutions) return Promise.resolve(null);
     const sourceResolution = options.resolveSource(contextKey, rawSrc).catch(() => null);
     const resolution = Promise.race([sourceResolution, disposedResult])
       .then((resolved) => {
@@ -148,6 +155,7 @@ export function createImagePresentationResourcePool(
     }
     const pending = loadInFlight.get(key);
     if (pending) return pending;
+    if (loadInFlight.size >= maxConcurrentLoads + maxQueuedLoads) return Promise.resolve(null);
     const browserLoad = schedule(() => options.loadImage(resolvedSrc));
     const loading = Promise.race([browserLoad, disposedResult])
       .then((image) => {
@@ -214,15 +222,10 @@ export type CodeMirrorDomImagePresentationAdapterOptions = {
 export function createCodeMirrorDomImagePresentationAdapter(
   options: CodeMirrorDomImagePresentationAdapterOptions
 ): ImagePresentationEffectExecutor {
-  let cancelledThrough = 0;
   let disposed = false;
 
-  const accepts = (presentationId: number): boolean => !disposed && presentationId > cancelledThrough;
-  const completion = (
-    presentationId: number,
-    work: Promise<ImagePresentationInput | null>
-  ): ImagePresentationEffectExecution => ({
-    completion: work.then((input) => accepts(presentationId) ? input : null)
+  const completion = (work: Promise<ImagePresentationInput | null>): ImagePresentationEffectExecution => ({
+    completion: work.then((input) => disposed ? null : input)
   });
 
   const showImage = (resolvedSrc: string): void => {
@@ -254,7 +257,6 @@ export function createCodeMirrorDomImagePresentationAdapter(
             };
           }
           return completion(
-            effect.presentationId,
             options.resources.resolve(options.resourceContextKey, effect.rawSrc).then((resolvedSrc) => (
               resolvedSrc
                 ? { type: 'sourceResolved', presentationId: effect.presentationId, resolvedSrc }
@@ -272,7 +274,6 @@ export function createCodeMirrorDomImagePresentationAdapter(
             };
           }
           return completion(
-            effect.presentationId,
             options.resources.load(options.resourceContextKey, effect.resolvedSrc).then((image) => (
               image
                 ? { type: 'imageLoaded', presentationId: effect.presentationId }
@@ -280,13 +281,10 @@ export function createCodeMirrorDomImagePresentationAdapter(
             ))
           );
         case 'showFallback':
-          if (accepts(effect.presentationId)) options.view.showFallback(effect.sourceKey);
+          options.view.showFallback(effect.sourceKey);
           return {};
         case 'showImage':
-          if (accepts(effect.presentationId)) showImage(effect.resolvedSrc);
-          return {};
-        case 'cancelPresentation':
-          cancelledThrough = Math.max(cancelledThrough, effect.presentationId);
+          showImage(effect.resolvedSrc);
           return {};
       }
     },
@@ -324,9 +322,6 @@ export function createImagePresentationFactory(
       },
       externalDocumentPresented() {
         if (active) runtime.dispatch({ type: 'externalDocumentPresented' });
-      },
-      whenIdle() {
-        return runtime.whenIdle();
       },
       dispose() {
         if (!active) return;

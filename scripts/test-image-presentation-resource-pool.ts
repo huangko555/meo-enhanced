@@ -95,4 +95,39 @@ releasePendingResolution('late-resolution');
 releasePendingLoad(null);
 await flushPromises();
 
+let releaseBoundedResolution!: (value: string) => void;
+const boundedLoadReleases: Array<() => void> = [];
+const boundedPool = createImagePresentationResourcePool({
+  maxPendingResolutions: 1,
+  maxConcurrentLoads: 1,
+  maxQueuedLoads: 1,
+  resolveSource: () => new Promise<string>((resolve) => {
+    releaseBoundedResolution = resolve;
+  }),
+  loadImage: async (resolvedSrc) => {
+    await new Promise<void>((resolve) => boundedLoadReleases.push(resolve));
+    return { src: resolvedSrc } as HTMLImageElement;
+  }
+});
+const boundedResolution = boundedPool.resolve('document', 'first');
+assert.equal(
+  await boundedPool.resolve('document', 'overflow'),
+  null,
+  'resolution in-flight capacity must reject unique overflow deterministically'
+);
+releaseBoundedResolution('resolved:first');
+await boundedResolution;
+const boundedLoadA = boundedPool.load('document', 'a');
+const boundedLoadB = boundedPool.load('document', 'b');
+assert.equal(
+  await boundedPool.load('document', 'overflow'),
+  null,
+  'load queue capacity must reject unique overflow deterministically'
+);
+boundedLoadReleases.shift()?.();
+await flushPromises();
+boundedLoadReleases.shift()?.();
+await Promise.all([boundedLoadA, boundedLoadB]);
+boundedPool.dispose();
+
 console.log('image presentation resource pool contracts passed');

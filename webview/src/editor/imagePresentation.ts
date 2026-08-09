@@ -7,7 +7,6 @@ export type ImagePresentationView = {
 export type ImagePresentationHandle = {
   present(sourceKey: string, rawSrc: string): void;
   externalDocumentPresented(): void;
-  whenIdle(): Promise<void>;
   dispose(): void;
 };
 
