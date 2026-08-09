@@ -10,6 +10,7 @@ const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
 };
 const expectedRoots = [
   'src/helpers/images.ts',
+  'src/helpers/htmlContent.ts',
   'src/themes/editorLightTheme.ts'
 ];
 

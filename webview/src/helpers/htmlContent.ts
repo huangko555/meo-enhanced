@@ -1,5 +1,6 @@
 import { StateEffect, StateField, type EditorState } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, keymap } from '@codemirror/view';
+import type { SyntaxNodeRef } from '@lezer/common';
 import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
 import {
   getHtmlRootTagName,
@@ -81,13 +82,13 @@ export function getHtmlEditingRange(state: EditorState): HtmlEditingRange | null
 export function collectRenderableHtmlBlocks(state: EditorState): RenderableHtmlBlock[] {
   const tree = resolvedSyntaxTree(state);
   const cached = renderableHtmlBlockCache.get(state);
-  if (cached?.tree === tree) return cached.blocks;
+  if (cached && cached.tree === tree) return cached.blocks;
   const blocks: RenderableHtmlBlock[] = [];
   const detailsByAnchor = new Map(
     getDetailsBlocks(state).map((block) => [block.anchorFrom, block] as const)
   );
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name !== 'HTMLBlock') return;
       const parsedSource = state.doc.sliceString(node.from, node.to);
       const rootTagName = getHtmlRootTagName(parsedSource);
@@ -426,7 +427,7 @@ export function addHtmlContentDecorations(
     addSourceRange(editingRange, true);
   }
   resolvedSyntaxTree(state).iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name !== 'HTMLBlock') return;
       const source = state.doc.sliceString(node.from, node.to);
       if (isSupportedHtmlSource(source)) return;
