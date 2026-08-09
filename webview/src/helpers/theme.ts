@@ -85,7 +85,7 @@ const getInsetBackground = (backgroundColor: string, base03: string): string => 
   return `color-mix(in srgb, ${backgroundColor} 80%, ${base03} 20%)`;
 };
 
-const normalizeThemeHeadingSize = (value: number | undefined, fallback: string, unit: 'px' | 'em' = 'px'): string => {
+const normalizeThemeHeadingSize = (value: number | null | undefined, fallback: string, unit: 'px' | 'em' = 'px'): string => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return fallback;
   }

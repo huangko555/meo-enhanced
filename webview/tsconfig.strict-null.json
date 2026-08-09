@@ -8,6 +8,7 @@
     "src/helpers/images.ts",
     "src/helpers/htmlContent.ts",
     "src/helpers/tags.ts",
+    "src/helpers/theme.ts",
     "src/themes/editorLightTheme.ts"
   ],
   "include": []
