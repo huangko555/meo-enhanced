@@ -26,7 +26,11 @@ const config = JSON.parse(configText) as {
     disposeOrder: string[];
   }>;
   resourceOwnerFreeModules?: string[];
-  candidateOnlyModules?: string[];
+  sharedModuleContracts?: Array<{
+    module: string;
+    exactImporters: string[];
+    forbiddenTopLevelDeclarations: Array<{ file: string; names: string[] }>;
+  }>;
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
 };
 
@@ -166,9 +170,6 @@ for (const file of files) visit(file);
 for (const cycle of cycles) failures.push(`ARCH001 循环依赖: ${cycle}`);
 
 for (const edge of edges) {
-  if (config.candidateOnlyModules?.includes(edge.to)) {
-    failures.push(`ARCH010 候选模块尚未允许生产接线: ${edge.from} -> ${edge.to}`);
-  }
   const bootstrapRule = config.bootstrapOnlyModules?.find((rule) => rule.module === edge.to);
   if (bootstrapRule && !bootstrapRule.allowedImporters.includes(edge.from)) {
     failures.push(`ARCH007 具体实现只能由 Bootstrap 导入: ${edge.from} -> ${edge.to}`);
@@ -182,6 +183,39 @@ for (const edge of edges) {
   const toLayer = targetLayer(edge.to);
   if (fromLayer && toLayer && fromLayer !== toLayer && !allowedTargetLayers(fromLayer).has(toLayer)) {
     failures.push(`ARCH002 依赖方向违规: ${fromLayer} -> ${toLayer} (${edge.from} -> ${edge.to})`);
+  }
+}
+
+for (const contract of config.sharedModuleContracts ?? []) {
+  const actualImporters = new Set(edges.filter((edge) => edge.to === contract.module).map((edge) => edge.from));
+  const expectedImporters = new Set(contract.exactImporters);
+  for (const importer of expectedImporters) {
+    if (!actualImporters.has(importer)) {
+      failures.push(`ARCH010 共享模块缺少生产调用方: ${importer} -> ${contract.module}`);
+    }
+  }
+  for (const importer of actualImporters) {
+    if (!expectedImporters.has(importer)) {
+      failures.push(`ARCH010 共享模块出现未授权调用方: ${importer} -> ${contract.module}`);
+    }
+  }
+  for (const forbidden of contract.forbiddenTopLevelDeclarations) {
+    const source = sources.find((candidate) => candidate.path === forbidden.file);
+    if (!source) continue;
+    const file = sourceFileFor(source);
+    const declarations = new Set<string>();
+    for (const statement of file.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name) declarations.add(statement.name.text);
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) declarations.add(declaration.name.text);
+      }
+    }
+    for (const name of forbidden.names) {
+      if (declarations.has(name)) {
+        failures.push(`ARCH011 共享规则不得在调用方重复实现: ${forbidden.file} (${name})`);
+      }
+    }
   }
 }
 

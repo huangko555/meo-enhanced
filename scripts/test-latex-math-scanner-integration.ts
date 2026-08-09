@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import {
+  collectLatexMathRanges as collectWebviewLatexMathRanges,
+  parseLatexMathAt
+} from '../webview/src/helpers/math';
+import { collectLatexMathRanges as collectExportLatexMathRanges } from '../src/export/math';
+
+assert.deepEqual(
+  collectWebviewLatexMathRanges('`$code$` and $x$', {
+    baseOffset: 40,
+    excludedRanges: [{ from: 0, to: 8 }]
+  }),
+  [{ from: 53, to: 56, mode: 'inline', content: 'x', raw: '$x$' }]
+);
+
+assert.deepEqual(parseLatexMathAt('prefix $x^2$', 7), {
+  from: 7,
+  to: 12,
+  mode: 'inline',
+  content: 'x^2',
+  raw: '$x^2$'
+});
+assert.deepEqual(parseLatexMathAt('$$x$$', 1), {
+  from: 1,
+  to: 4,
+  mode: 'inline',
+  content: 'x',
+  raw: '$x$'
+});
+assert.equal(parseLatexMathAt('prefix $$\nx\n$$', 7), null);
+assert.equal(parseLatexMathAt('$x$', 0, { allowInline: false }), null);
+assert.equal(parseLatexMathAt('$$x$$', 0, { allowDisplay: false }), null);
+
+assert.deepEqual(collectExportLatexMathRanges('before $$x^2$$ after'), [{
+  from: 7,
+  to: 14,
+  mode: 'display',
+  content: 'x^2',
+  raw: '$$x^2$$',
+  fencedDisplay: false
+}]);
+
+console.log('LaTeX math scanner caller integration checks passed');

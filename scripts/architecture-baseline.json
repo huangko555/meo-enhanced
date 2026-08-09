@@ -44,7 +44,40 @@
     }
   ],
   "resourceOwnerFreeModules": ["webview/src/helpers/mermaidDiagram.ts"],
-  "candidateOnlyModules": ["src/shared/latexMathScanner.ts"],
+  "sharedModuleContracts": [
+    {
+      "module": "src/shared/latexMathScanner.ts",
+      "exactImporters": ["webview/src/helpers/math.ts", "src/export/math.ts"],
+      "forbiddenTopLevelDeclarations": [
+        {
+          "file": "webview/src/helpers/math.ts",
+          "names": [
+            "isEscaped",
+            "isWhitespace",
+            "lineStartAt",
+            "lineEndAt",
+            "hasOwnLineDisplayFences",
+            "shouldRejectInlineMathCandidate",
+            "findInlineMathClose",
+            "findDisplayMathClose"
+          ]
+        },
+        {
+          "file": "src/export/math.ts",
+          "names": [
+            "isEscaped",
+            "isWhitespace",
+            "lineStartAt",
+            "lineEndAt",
+            "hasOwnLineDisplayFences",
+            "shouldRejectInlineMathCandidate",
+            "findInlineMathClose",
+            "findDisplayMathClose"
+          ]
+        }
+      ]
+    }
+  ],
   "knownLegacyTestFailures": [
     {
       "id": "LEG-TEST-001",
