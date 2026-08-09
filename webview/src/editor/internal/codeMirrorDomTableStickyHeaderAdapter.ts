@@ -1,31 +1,16 @@
 import type {
-  TableWidgetLayoutScheduler,
+  TableStickyHeaderAdapterOptions,
+  TableStickyHeaderElements,
   TableStickyHeaderAdapter
 } from '../tableStickyHeaderAdapter';
 import type { TableStickyHeaderPolicy } from '../tableStickyHeaderPolicy';
 
-type StickyHeaderElements = {
-  readonly shell: HTMLElement;
-  readonly scroller: HTMLElement;
-  readonly table: HTMLTableElement;
-  readonly stickyChrome: HTMLElement;
-  readonly stickyHeaderViewport: HTMLElement;
-  readonly stickyTable: HTMLTableElement;
-  readonly stickyHeaderRow: HTMLTableRowElement;
-};
-
-export type CodeMirrorDomTableStickyHeaderAdapterOptions = {
+export type CodeMirrorDomTableStickyHeaderAdapterOptions = TableStickyHeaderAdapterOptions & {
   readonly policy: TableStickyHeaderPolicy;
-  readonly scheduler: TableWidgetLayoutScheduler;
-  readonly resolveElements: () => StickyHeaderElements | null;
-  readonly controlsVisible: () => boolean;
 };
-
-const widthProjectionEvent = 'meo-table-column-width-projected';
 
 function makeStickyContentPassive(root: HTMLElement): void {
   root.setAttribute('aria-hidden', 'true');
-  root.style.pointerEvents = 'none';
   for (const interactive of Array.from(root.querySelectorAll(
     'button, textarea, input, select, [contenteditable="true"]'
   ))) {
@@ -37,7 +22,7 @@ function makeStickyContentPassive(root: HTMLElement): void {
   }
 }
 
-function hide(elements: StickyHeaderElements): void {
+function hide(elements: TableStickyHeaderElements): void {
   elements.stickyChrome.classList.remove('is-visible', 'has-sticky-controls');
   for (const property of ['top', 'left', 'width', 'height']) {
     elements.stickyChrome.style.removeProperty(property);
@@ -45,7 +30,7 @@ function hide(elements: StickyHeaderElements): void {
 }
 
 function applyLayout(
-  elements: StickyHeaderElements,
+  elements: TableStickyHeaderElements,
   layout: ReturnType<TableStickyHeaderPolicy['layout']>
 ): void {
   if (!layout.visible) {
@@ -72,10 +57,10 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
   let refreshing = false;
   let generation = 0;
   let cleanup: (() => void)[] = [];
-  let mountedElements: StickyHeaderElements | null = null;
+  let mountedElements: TableStickyHeaderElements | null = null;
 
   const registration = options.scheduler.register(() => {
-    if (disposed || !mounted || !dirty || refreshing) return;
+    if (disposed || !mounted || refreshing) return;
     dirty = false;
     refreshing = true;
     try {
@@ -124,8 +109,8 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     const elements = mountedElements;
     const sourceCells = Array.from(elements?.table.tHead?.rows[0]?.cells ?? []);
     if (!elements) return;
-    const nextCells = sourceCells.map((sourceCell) => {
-      const cell = sourceCell.cloneNode(true) as HTMLTableCellElement;
+    const nextCells = sourceCells.map((_sourceCell, column) => {
+      const cell = options.renderHeaderCell(column);
       makeStickyContentPassive(cell);
       return cell;
     });
@@ -142,7 +127,10 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     for (const dispose of cleanup.splice(0)) dispose();
     const elements = mountedElements;
     mountedElements = null;
-    if (elements) hide(elements);
+    if (elements) {
+      delete elements.stickyChrome.dataset.tableStickyHeaderOwner;
+      hide(elements);
+    }
   };
 
   const mount = (): void => {
@@ -162,29 +150,22 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       refreshContent();
     };
 
-    elements.scroller.addEventListener('scroll', requestIfActive, { passive: true });
     window.addEventListener('resize', requestIfActive);
-    elements.table.addEventListener(widthProjectionEvent, requestIfActive);
-    cleanup.push(() => elements.scroller.removeEventListener('scroll', requestIfActive));
     cleanup.push(() => window.removeEventListener('resize', requestIfActive));
-    cleanup.push(() => elements.table.removeEventListener(widthProjectionEvent, requestIfActive));
 
     const resizeObserver = new ResizeObserver(requestIfActive);
     resizeObserver.observe(elements.scroller);
-    resizeObserver.observe(elements.table);
-    const header = elements.table.tHead?.rows[0];
-    if (header) resizeObserver.observe(header);
     cleanup.push(() => resizeObserver.disconnect());
 
     const mutationObserver = new MutationObserver(refreshIfActive);
     mutationObserver.observe(elements.table, {
-      attributes: true,
       childList: true,
       characterData: true,
       subtree: true
     });
     cleanup.push(() => mutationObserver.disconnect());
 
+    elements.stickyChrome.dataset.tableStickyHeaderOwner = 'adapter';
     refreshContent();
   };
 

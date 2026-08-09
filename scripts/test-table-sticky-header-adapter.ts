@@ -43,9 +43,22 @@ for (const requiredDepth of [
 
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
-for (const source of [editorSource, tablesSource]) {
-  assert.equal(source.includes('codeMirrorDomTableStickyHeaderAdapter'), false);
-  assert.equal(source.includes('TableStickyHeaderAdapter'), false);
+assert.equal(editorSource.includes('codeMirrorDomTableStickyHeaderAdapter'), true);
+assert.equal(editorSource.includes('tableStickyHeaderAdapterFactoryFacet.of'), true);
+assert.equal(tablesSource.includes('codeMirrorDomTableStickyHeaderAdapter'), false);
+assert.equal(tablesSource.includes('tableStickyHeaderPolicy'), false);
+assert.equal(tablesSource.includes('TableStickyHeaderAdapterFactory'), true);
+assert.equal(tablesSource.includes('this.stickyHeaderAdapter.mount()'), true);
+assert.equal(tablesSource.includes('this.stickyHeaderAdapter.dispose()'), true);
+assert.equal((tablesSource.match(/this\.layoutFrame = requestAnimationFrame/g) ?? []).length, 1);
+assert.equal((tablesSource.match(/cancelAnimationFrame\(this\.layoutFrame\)/g) ?? []).length, 1);
+assert.equal((editorSource.match(/createCodeMirrorDomTableStickyHeaderAdapter\(/g) ?? []).length, 1);
+for (const removedLegacyRule of [
+  'refreshStickyHeaderContent',
+  'hideStickyHeader',
+  'updateStickyHeader()'
+]) {
+  assert.equal(tablesSource.includes(removedLegacyRule), false, `Legacy Sticky rule returned: ${removedLegacyRule}`);
 }
 
 console.log('table sticky header adapter contracts passed');

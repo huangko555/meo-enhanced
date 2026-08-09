@@ -28,6 +28,12 @@ import { createTableTransactionProvenance } from './application/tableTransaction
 import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
 import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
 import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
+import { createCodeMirrorDomTableStickyHeaderAdapter } from './editor/internal/codeMirrorDomTableStickyHeaderAdapter';
+import { tableStickyHeaderPolicy } from './editor/tableStickyHeaderPolicy';
+import {
+  tableStickyHeaderAdapterFactoryFacet,
+  type TableStickyHeaderAdapterFactory
+} from './editor/tableStickyHeaderAdapter';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { createGitBlameHoverController } from './helpers/gitBlameHover';
@@ -1980,6 +1986,14 @@ export function createEditor({
     root: parent,
     policy: tableColumnWidthPolicy
   });
+  const tableStickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory = {
+    create(options) {
+      return createCodeMirrorDomTableStickyHeaderAdapter({
+        ...options,
+        policy: tableStickyHeaderPolicy
+      });
+    }
+  };
   const state = EditorState.create({
     doc: text,
     selection: { anchor: initialCursorPos },
@@ -2240,6 +2254,7 @@ export function createEditor({
       ...headingCollapseSharedExtensions(),
       tableHeaderAlignmentOverrideField,
       tableColumnWidthAdapter.extension,
+      tableStickyHeaderAdapterFactoryFacet.of(tableStickyHeaderAdapterFactory),
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),

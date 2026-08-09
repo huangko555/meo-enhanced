@@ -111,13 +111,19 @@ async function main(): Promise<void> {
         policy: policyWithReentry,
         scheduler,
         resolveElements: () => elements(1),
-        controlsVisible: () => elements(1).shell.classList.contains('controls-visible')
+        controlsVisible: () => elements(1).shell.classList.contains('controls-visible'),
+        renderHeaderCell: (column: number) => (
+          elements(1).table.tHead!.rows[0].cells[column].cloneNode(true) as HTMLTableCellElement
+        )
       });
       const adapter2 = candidate.createAdapter({
         policy: candidate.policy,
         scheduler,
         resolveElements: () => elements(2),
-        controlsVisible: () => false
+        controlsVisible: () => false,
+        renderHeaderCell: (column: number) => (
+          elements(2).table.tHead!.rows[0].cells[column].cloneNode(true) as HTMLTableCellElement
+        )
       });
 
       const sourceText = elements(1).table.textContent;
@@ -134,7 +140,6 @@ async function main(): Promise<void> {
       const initiallyHidden = !elements(1).stickyChrome.classList.contains('is-visible');
       const passive = {
         ariaHidden: elements(1).stickyHeaderViewport.getAttribute('aria-hidden'),
-        pointerEvents: elements(1).stickyHeaderViewport.style.pointerEvents,
         inputs: elements(1).stickyHeaderRow.querySelectorAll('input,button,textarea,select').length,
         href: elements(1).stickyHeaderRow.querySelector('a')?.getAttribute('href') ?? null,
         toolbarButtons: elements(1).stickyChrome.querySelectorAll('.sticky-toolbar-button').length
@@ -169,6 +174,7 @@ async function main(): Promise<void> {
 
       elements(1).table.style.width = '480px';
       elements(1).table.dispatchEvent(new Event('meo-table-column-width-projected'));
+      adapter1.invalidate();
       scheduler.flush();
       const projectedWidth = elements(1).stickyTable.style.width;
       const focusAndSelectionPreserved = (
@@ -247,7 +253,7 @@ async function main(): Promise<void> {
     assert.equal(result.reentryPending, 1, 'invalidation during refresh must schedule the next shared tick');
     assert.equal(result.initiallyHidden, true);
     assert.deepEqual(result.passive, {
-      ariaHidden: 'true', pointerEvents: 'none', inputs: 0, href: null, toolbarButtons: 1
+      ariaHidden: 'true', inputs: 0, href: null, toolbarButtons: 1
     });
     assert.equal(result.stormFrames, 1, 'multiple adapters and event storms share one scheduled tick');
     assert.equal(result.stormTasks, 2);

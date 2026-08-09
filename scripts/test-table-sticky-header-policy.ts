@@ -82,7 +82,7 @@ for (const requiredRule of [
 
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
-assert.equal(editorSource.includes('tableStickyHeaderPolicy'), false);
+assert.equal(editorSource.includes('tableStickyHeaderPolicy'), true);
 assert.equal(tablesSource.includes('tableStickyHeaderPolicy'), false);
 
 console.log('table sticky header policy contracts passed');

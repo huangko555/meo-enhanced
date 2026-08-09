@@ -29,6 +29,13 @@ import {
   getTableTransactionProvenance,
   getTableTransactionProvenanceSnapshot
 } from '../adapters/tableTransactionProvenance';
+import {
+  tableStickyHeaderAdapterFactoryFacet,
+  type TableStickyHeaderAdapter,
+  type TableStickyHeaderAdapterFactory,
+  type TableStickyHeaderElements,
+  type TableWidgetLayoutScheduler
+} from '../editor/tableStickyHeaderAdapter';
 
 interface TableData {
   rows: string[][];
@@ -197,8 +204,6 @@ const tableDelimiterRegex = /^\s*\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
 const tableToolbarHeight = 24;
-const stickyHeaderSeparatorDepth = 3;
-const minimumStickyTableViewportRatio = 0.5;
 const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 let nextTableCellEditSequence = 0;
 
@@ -2058,8 +2063,12 @@ class HtmlTableWidget extends WidgetType {
   sortState: TableSortState | null;
   activeTarget: TableActionTarget;
   searchState: TableSearchState | null;
+  stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory;
+  stickyHeaderAdapter: TableStickyHeaderAdapter;
+  layoutTasks: Set<() => void>;
+  layoutScheduler: TableWidgetLayoutScheduler;
 
-  constructor(tableData: TableData) {
+  constructor(tableData: TableData, stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory) {
     super();
     this.tableData = tableData;
     this.view = null;
@@ -2076,6 +2085,30 @@ class HtmlTableWidget extends WidgetType {
     this.sortState = null;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
     this.searchState = null;
+    this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
+    this.layoutTasks = new Set();
+    this.layoutScheduler = {
+      register: (task) => {
+        let active = true;
+        this.layoutTasks.add(task);
+        return {
+          request: () => {
+            if (active) this.scheduleLayout();
+          },
+          dispose: () => {
+            if (!active) return;
+            active = false;
+            this.layoutTasks.delete(task);
+          }
+        };
+      }
+    };
+    this.stickyHeaderAdapter = stickyHeaderAdapterFactory.create({
+      scheduler: this.layoutScheduler,
+      resolveElements: () => this.resolveStickyHeaderElements(),
+      controlsVisible: () => this.stickyControlsVisible(),
+      renderHeaderCell: (column) => this.renderStickyHeaderCell(column)
+    });
   }
 
   eq(other: WidgetType): boolean {
@@ -2087,7 +2120,55 @@ class HtmlTableWidget extends WidgetType {
       other.tableData.to === this.tableData.to &&
       other.tableData.startLine === this.tableData.startLine &&
       other.tableData.endLine === this.tableData.endLine
+      && other.stickyHeaderAdapterFactory === this.stickyHeaderAdapterFactory
     );
+  }
+
+  resolveStickyHeaderElements(): TableStickyHeaderElements | null {
+    if (!this.domRefs || !this.view) return null;
+    const {
+      shell,
+      table,
+      stickyChrome,
+      stickyHeaderViewport,
+      stickyTable,
+      stickyHeaderRow
+    } = this.domRefs;
+    return {
+      shell,
+      scroller: this.view.scrollDOM,
+      table,
+      stickyChrome,
+      stickyHeaderViewport,
+      stickyTable,
+      stickyHeaderRow
+    };
+  }
+
+  stickyControlsVisible(): boolean {
+    const shell = this.domRefs?.shell;
+    if (!shell || !shell.classList.contains('is-controls-sticky')) return false;
+    return shell.matches(':focus-within') ||
+      shell.classList.contains('is-interacting') ||
+      shell.classList.contains('has-active-sort');
+  }
+
+  renderStickyHeaderCell(column: number): HTMLTableCellElement {
+    const cell = document.createElement('th');
+    const sourceCell = this.domRefs?.table.tHead?.rows[0]?.cells[column];
+    const headerInput = this.domRefs?.headerInputs[column];
+    cell.style.textAlign = sourceCell?.style.textAlign ?? '';
+    const preview = document.createElement('div');
+    preview.className = 'meo-md-html-table-cell-preview';
+    renderTableCellInlinePreview(
+      preview,
+      tableCellEditorValueToSource(headerInput?.value ?? ''),
+      this.cellDiagnostics(0, column),
+      this.searchState,
+      this.cellSourceRange(0, column)
+    );
+    cell.append(preview, this.createColumnResizeHandle(column));
+    return cell;
   }
 
   getEditorView(dom?: HTMLElement): EditorView | null {
@@ -2403,7 +2484,7 @@ class HtmlTableWidget extends WidgetType {
     for (const element of Array.from(headerCell.querySelectorAll('.meo-md-html-table-cell-content, .meo-md-html-table-cell-preview, textarea')) as HTMLElement[]) {
       element.style.textAlign = alignment;
     }
-    this.refreshStickyHeaderContent();
+    this.stickyHeaderAdapter.refreshContent();
     this.scheduleLayout();
   }
 
@@ -2588,7 +2669,7 @@ class HtmlTableWidget extends WidgetType {
       shell.classList.remove('has-active-sort', 'is-interacting');
     }
     this.updateStickyControls();
-    this.updateStickyHeader();
+    this.stickyHeaderAdapter.invalidate();
     this.clearSelection();
   }
 
@@ -2598,7 +2679,7 @@ class HtmlTableWidget extends WidgetType {
       shell.classList.toggle('is-interacting', active);
     }
     this.updateStickyControls();
-    this.updateStickyHeader();
+    this.stickyHeaderAdapter.invalidate();
     const view = this.getEditorView(container);
     if (!view) return;
     view.dom.dispatchEvent(new CustomEvent('meo-table-interaction', { detail: { active, owner: shell } }));
@@ -3615,7 +3696,7 @@ class HtmlTableWidget extends WidgetType {
       const resizeAndSchedule = () => {
         // Non-search previews stay untouched while editing so inline image DOM is not recreated.
         this.resizeRow(rowEl, rowInputs);
-        if (rowIndex === 0) this.refreshStickyHeaderContent();
+        if (rowIndex === 0) this.stickyHeaderAdapter.refreshContent();
         this.scheduleLayout();
       };
       const viewport = this.view ? getViewportController(this.view) : null;
@@ -3784,97 +3865,6 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
-  refreshStickyHeaderContent() {
-    if (!this.domRefs) return;
-    const { table, headerInputs, stickyHeaderRow } = this.domRefs;
-    const sourceCells = Array.from(table.tHead?.rows[0]?.cells ?? []);
-    const nextCells = sourceCells.map((sourceCell, column) => {
-      const cell = document.createElement('th');
-      cell.style.textAlign = sourceCell.style.textAlign;
-      const preview = document.createElement('div');
-      preview.className = 'meo-md-html-table-cell-preview';
-      renderTableCellInlinePreview(
-        preview,
-        tableCellEditorValueToSource(headerInputs[column]?.value ?? ''),
-        this.cellDiagnostics(0, column),
-        this.searchState,
-        this.cellSourceRange(0, column)
-      );
-      for (const interactive of Array.from(preview.querySelectorAll('button, textarea, input, select'))) {
-        interactive.remove();
-      }
-      for (const link of Array.from(preview.querySelectorAll('a[href]'))) {
-        link.removeAttribute('href');
-        link.removeAttribute('tabindex');
-      }
-      cell.append(preview, this.createColumnResizeHandle(column));
-      return cell;
-    });
-    stickyHeaderRow.replaceChildren(...nextCells);
-  }
-
-  hideStickyHeader() {
-    if (!this.domRefs) return;
-    const { stickyChrome } = this.domRefs;
-    stickyChrome.classList.remove('is-visible', 'has-sticky-controls');
-    stickyChrome.style.removeProperty('top');
-    stickyChrome.style.removeProperty('left');
-    stickyChrome.style.removeProperty('width');
-    stickyChrome.style.removeProperty('height');
-  }
-
-  updateStickyHeader() {
-    if (!this.domRefs || !this.view) return;
-    const {
-      shell,
-      table,
-      tbody,
-      stickyChrome,
-      stickyHeaderViewport,
-      stickyTable
-    } = this.domRefs;
-    const headerRow = table.tHead?.rows[0];
-    const bodyRows = tbody.rows;
-    if (!headerRow || bodyRows.length === 0) {
-      this.hideStickyHeader();
-      return;
-    }
-
-    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-    const tableRect = table.getBoundingClientRect();
-    const headerRect = headerRow.getBoundingClientRect();
-    const controlsSticky = shell.classList.contains('is-controls-sticky');
-    const controlsVisible = controlsSticky && (
-      shell.matches(':focus-within') ||
-      shell.classList.contains('is-interacting') ||
-      shell.classList.contains('has-active-sort')
-    );
-    const controlsHeight = controlsVisible ? tableToolbarHeight : 0;
-    const stickyHeaderTop = scrollerRect.top + controlsHeight;
-    const tableNeedsStickyHeader = tableRect.height >= scrollerRect.height * minimumStickyTableViewportRatio;
-    const reachedStickyThreshold = headerRect.top <= stickyHeaderTop;
-    const enoughContentRemains = tableRect.bottom >= stickyHeaderTop + headerRect.height + stickyHeaderSeparatorDepth;
-    const visibleLeft = Math.max(tableRect.left, scrollerRect.left);
-    const visibleRight = Math.min(tableRect.right, scrollerRect.right);
-    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
-
-    if (!tableNeedsStickyHeader || !reachedStickyThreshold || !enoughContentRemains || visibleWidth <= 0) {
-      this.hideStickyHeader();
-      return;
-    }
-
-    stickyChrome.classList.add('is-visible');
-    stickyChrome.classList.toggle('has-sticky-controls', controlsVisible);
-    stickyChrome.style.top = `${Math.round(scrollerRect.top)}px`;
-    stickyChrome.style.left = `${Math.round(visibleLeft)}px`;
-    stickyChrome.style.width = `${Math.round(visibleWidth)}px`;
-    stickyChrome.style.height = `${Math.ceil(controlsHeight + headerRect.height + stickyHeaderSeparatorDepth)}px`;
-    stickyHeaderViewport.style.height = `${Math.ceil(headerRect.height)}px`;
-    stickyTable.style.width = `${tableRect.width}px`;
-    stickyTable.style.transform = `translateX(${tableRect.left - visibleLeft}px)`;
-
-  }
-
   updateStickyControls() {
     if (!this.domRefs || !this.view) return;
     const { shell, table } = this.domRefs;
@@ -3908,7 +3898,7 @@ class HtmlTableWidget extends WidgetType {
     this.syncTableLineNumbers();
     this.syncTableDiffMarkers();
     this.updateStickyControls();
-    this.updateStickyHeader();
+    for (const task of Array.from(this.layoutTasks)) task();
   }
 
   syncTableDiffMarkers() {
@@ -3994,7 +3984,7 @@ class HtmlTableWidget extends WidgetType {
         this.refreshCellPreviewFromInput(inputs[col]);
       }
     }
-    this.refreshStickyHeaderContent();
+    this.stickyHeaderAdapter.refreshContent();
     this.scheduleLayout({ resizeRows: true });
   }
 
@@ -4018,7 +4008,7 @@ class HtmlTableWidget extends WidgetType {
       }
     }
     if (refreshedHeader) {
-      this.refreshStickyHeaderContent();
+      this.stickyHeaderAdapter.refreshContent();
       this.scheduleLayout();
     }
   }
@@ -4390,9 +4380,10 @@ class HtmlTableWidget extends WidgetType {
       stickyHeaderRow,
       toolbarButtons
     };
-    this.refreshStickyHeaderContent();
+    this.stickyHeaderAdapter.mount();
     const onColumnWidthProjected = () => {
       this.pendingResizeRows = true;
+      this.stickyHeaderAdapter.invalidate();
       this.scheduleLayout({ resizeRows: true });
     };
     table.addEventListener('meo-table-column-width-projected', onColumnWidthProjected);
@@ -4404,7 +4395,7 @@ class HtmlTableWidget extends WidgetType {
     this.pendingResizeRows = true;
     this.scheduleLayout({ resizeRows: true });
 
-    const onEditorScroll = () => this.scheduleLayout();
+    const onEditorScroll = () => this.stickyHeaderAdapter.invalidate();
     const onSearchStateChange = (event) => {
       const detail = event instanceof CustomEvent ? event.detail : null;
       this.setSearchState(detail && typeof detail === 'object' ? detail : null);
@@ -4424,12 +4415,14 @@ class HtmlTableWidget extends WidgetType {
 
   destroy(dom) {
     this.setTableInteractionActive(dom, false);
+    this.stickyHeaderAdapter.dispose();
     for (const cleanup of this.cleanupFns) cleanup();
     this.cleanupFns = [];
     if (this.layoutFrame) {
       cancelAnimationFrame(this.layoutFrame);
       this.layoutFrame = 0;
     }
+    this.layoutTasks.clear();
     this.domRefs = null;
     this.view = null;
     this.selectionAnchor = null;
@@ -4486,12 +4479,24 @@ export function parseTableInfo(state, tableNode) {
 
 export function addTableDecorations(builder, state, tableNode, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
   const data = buildTableData(state, tableNode);
-  addTableWidgetDecoration(builder, data, diagnostics, diffLineFlags);
+  addTableWidgetDecoration(
+    builder,
+    data,
+    state.facet(tableStickyHeaderAdapterFactoryFacet),
+    diagnostics,
+    diffLineFlags
+  );
 }
 
 export function addTableDecorationsForLineRange(builder, state, startLineNo, endLineNo, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
   const data = buildTableDataForLineRange(state, startLineNo, endLineNo);
-  addTableWidgetDecoration(builder, data, diagnostics, diffLineFlags);
+  addTableWidgetDecoration(
+    builder,
+    data,
+    state.facet(tableStickyHeaderAdapterFactoryFacet),
+    diagnostics,
+    diffLineFlags
+  );
 }
 
 function collectCellDiagnostics(
@@ -4592,9 +4597,18 @@ function collectTableDiffFlags(data, diffLineFlags): Record<number, TableDiffFla
   return result;
 }
 
-function addTableWidgetDecoration(builder, data, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
+function addTableWidgetDecoration(
+  builder,
+  data,
+  stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory | null,
+  diagnostics: EditorDiagnostic[] = [],
+  diffLineFlags = null
+) {
   const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
   if (colCount === 0 || !headerLine) return;
+  if (!stickyHeaderAdapterFactory) {
+    throw new Error('Table Sticky Header Adapter factory is not configured');
+  }
 
   const indent = /^(\s*)/.exec(headerLine.text)?.[1] ?? '';
   const normalizedAlignments = normalizeRow(alignments, colCount).map((value) => value ?? null);
@@ -4628,7 +4642,8 @@ function addTableWidgetDecoration(builder, data, diagnostics: EditorDiagnostic[]
           diagnostics: collectTableDiagnostics(data, diagnostics),
           sourceRanges: collectTableSourceRanges(data),
           diffFlagsByLine
-        }
+        },
+        stickyHeaderAdapterFactory
       )
     }).range(from, to)
   );
