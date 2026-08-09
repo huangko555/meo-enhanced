@@ -6,35 +6,16 @@ export type DiagnosticSuggestion = {
   readonly code?: string;
 };
 
-export type DiagnosticSuggestionAnchor = {
-  readonly x: number;
-  readonly y: number;
-  readonly bottomY: number;
-};
-
-export type DiagnosticSuggestionState = {
-  readonly lifecycle: 'active' | 'disposed';
-  readonly diagnostics: readonly string[];
-  readonly lastClickKey: string | null;
-  readonly pending: {
-    readonly correlationId: number;
-    readonly diagnosticKey: string;
-  } | null;
-  readonly presentedDiagnosticKey: string | null;
-};
-
 export type DiagnosticSuggestionInput =
   | { readonly type: 'diagnosticsChanged'; readonly diagnostics: readonly DiagnosticSuggestion[] }
   | {
       readonly type: 'diagnosticClicked';
       readonly diagnostic: DiagnosticSuggestion;
-      readonly anchor: DiagnosticSuggestionAnchor;
       readonly nativeSecondClick: boolean;
     }
   | {
       readonly type: 'suggestionsRequested';
       readonly diagnostic: DiagnosticSuggestion;
-      readonly anchor: DiagnosticSuggestionAnchor;
     }
   | {
       readonly type: 'suggestionsResolved';
@@ -54,18 +35,17 @@ export type DiagnosticSuggestionEffect =
       readonly type: 'requestSuggestions';
       readonly correlationId: number;
       readonly diagnostic: DiagnosticSuggestion;
-      readonly anchor: DiagnosticSuggestionAnchor;
     }
   | {
       readonly type: 'presentSuggestions';
+      readonly correlationId: number;
       readonly from: number;
       readonly to: number;
-      readonly anchor: DiagnosticSuggestionAnchor;
       readonly suggestions: readonly { readonly from: number; readonly to: number; readonly text: string }[];
     };
 
 export type DiagnosticSuggestionApplication = {
-  getState(): DiagnosticSuggestionState;
+  isIdle(): boolean;
   resolveDiagnostic(
     position: number,
     selectedRange: { readonly from: number; readonly to: number } | null
@@ -83,13 +63,13 @@ export type DiagnosticSuggestionEffectExecutor = {
   dispose(): void;
 };
 
-const diagnosticKey = (diagnostic: DiagnosticSuggestion): string => [
-  diagnostic.from,
-  diagnostic.to,
-  diagnostic.message,
-  diagnostic.source ?? '',
-  diagnostic.code ?? ''
-].join('\u001f');
+const sameDiagnostic = (left: DiagnosticSuggestion, right: DiagnosticSuggestion): boolean => (
+  left.from === right.from
+  && left.to === right.to
+  && left.message === right.message
+  && left.source === right.source
+  && left.code === right.code
+);
 
 /**
  * Owns suggestion interaction intent and correlation only. Diagnostic
@@ -97,53 +77,38 @@ const diagnosticKey = (diagnostic: DiagnosticSuggestion): string => [
  * concrete adapters.
  */
 export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApplication {
-  let lifecycle: DiagnosticSuggestionState['lifecycle'] = 'active';
+  let disposed = false;
   let diagnostics: readonly DiagnosticSuggestion[] = [];
-  let lastClickKey: string | null = null;
+  let lastClick: DiagnosticSuggestion | null = null;
   let requestSequence = 0;
-  let presentedDiagnosticKey: string | null = null;
+  let presentedDiagnostic: DiagnosticSuggestion | null = null;
   let pending: {
     readonly correlationId: number;
-    readonly diagnosticKey: string;
-    readonly anchor: DiagnosticSuggestionAnchor;
+    readonly diagnostic: DiagnosticSuggestion;
   } | null = null;
 
-  const getState = (): DiagnosticSuggestionState => ({
-    lifecycle,
-    diagnostics: diagnostics.map(diagnosticKey),
-    lastClickKey,
-    pending: pending ? {
-      correlationId: pending.correlationId,
-      diagnosticKey: pending.diagnosticKey
-    } : null,
-    presentedDiagnosticKey
-  });
-
   const invalidate = (): readonly DiagnosticSuggestionEffect[] => {
-    lastClickKey = null;
+    lastClick = null;
     pending = null;
-    presentedDiagnosticKey = null;
+    presentedDiagnostic = null;
     return [{ type: 'cancelRequest' }, { type: 'hideSuggestions' }];
   };
 
-  const request = (
-    diagnostic: DiagnosticSuggestion,
-    anchor: DiagnosticSuggestionAnchor
-  ): readonly DiagnosticSuggestionEffect[] => {
-    const key = diagnosticKey(diagnostic);
-    if (!diagnostics.some((current) => diagnosticKey(current) === key)) return [];
-    if (pending?.diagnosticKey === key || presentedDiagnosticKey === key) return [];
+  const request = (diagnostic: DiagnosticSuggestion): readonly DiagnosticSuggestionEffect[] => {
+    if (!diagnostics.some((current) => sameDiagnostic(current, diagnostic))) return [];
+    if (pending && sameDiagnostic(pending.diagnostic, diagnostic)) return [];
+    if (presentedDiagnostic && sameDiagnostic(presentedDiagnostic, diagnostic)) return [];
 
     const effects: DiagnosticSuggestionEffect[] = [];
     if (pending) effects.push({ type: 'cancelRequest' });
     const correlationId = ++requestSequence;
-    pending = { correlationId, diagnosticKey: key, anchor };
-    effects.push({ type: 'requestSuggestions', correlationId, diagnostic, anchor });
+    pending = { correlationId, diagnostic };
+    effects.push({ type: 'requestSuggestions', correlationId, diagnostic });
     return effects;
   };
 
   const dispatch = (input: DiagnosticSuggestionInput): readonly DiagnosticSuggestionEffect[] => {
-    if (lifecycle === 'disposed') return [];
+    if (disposed) return [];
 
     switch (input.type) {
       case 'diagnosticsChanged':
@@ -151,33 +116,31 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
         return invalidate();
 
       case 'diagnosticClicked': {
-        const key = diagnosticKey(input.diagnostic);
-        if (!diagnostics.some((diagnostic) => diagnosticKey(diagnostic) === key)) return [];
-        const isSecondClick = input.nativeSecondClick || lastClickKey === key;
-        lastClickKey = key;
-        return isSecondClick ? request(input.diagnostic, input.anchor) : [];
+        if (!diagnostics.some((diagnostic) => sameDiagnostic(diagnostic, input.diagnostic))) return [];
+        const isSecondClick = input.nativeSecondClick
+          || (lastClick !== null && sameDiagnostic(lastClick, input.diagnostic));
+        lastClick = input.diagnostic;
+        return isSecondClick ? request(input.diagnostic) : [];
       }
 
       case 'suggestionsRequested':
-        return request(input.diagnostic, input.anchor);
+        return request(input.diagnostic);
 
       case 'suggestionsResolved': {
-        const key = diagnosticKey(input.diagnostic);
         if (
           pending?.correlationId !== input.correlationId
-          || pending.diagnosticKey !== key
-          || !diagnostics.some((diagnostic) => diagnosticKey(diagnostic) === key)
+          || !sameDiagnostic(pending.diagnostic, input.diagnostic)
+          || !diagnostics.some((diagnostic) => sameDiagnostic(diagnostic, input.diagnostic))
         ) return [];
 
-        const anchor = pending.anchor;
         pending = null;
         if (input.suggestions.length === 0) return [];
-        presentedDiagnosticKey = key;
+        presentedDiagnostic = input.diagnostic;
         return [{
           type: 'presentSuggestions',
+          correlationId: input.correlationId,
           from: input.diagnostic.from,
           to: input.diagnostic.to,
-          anchor,
           suggestions: input.suggestions.map((text) => ({
             from: input.diagnostic.from,
             to: input.diagnostic.to,
@@ -195,7 +158,7 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
         return invalidate();
 
       case 'dispose': {
-        lifecycle = 'disposed';
+        disposed = true;
         diagnostics = [];
         return invalidate();
       }
@@ -221,5 +184,5 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
     return best;
   };
 
-  return { getState, resolveDiagnostic, dispatch };
+  return { isIdle: () => disposed || pending === null, resolveDiagnostic, dispatch };
 }

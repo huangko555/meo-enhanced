@@ -7,8 +7,12 @@ import {
 const posted: unknown[] = [];
 const presented: unknown[] = [];
 let hidden = 0;
+let anchorTop = 20;
 const adapter = createCodeMirrorDiagnosticSuggestionAdapter({
-  view: {} as never,
+  view: {
+    coordsAtPos: () => ({ left: 10, right: 11, top: anchorTop, bottom: anchorTop + 10 }),
+    coordsForChar: () => null
+  } as never,
   resolveDiagnostic: () => null,
   postMessage(message) { posted.push(message); },
   presentSuggestions(effect) { presented.push(effect); },
@@ -19,8 +23,7 @@ const diagnostic = { from: 1, to: 4, message: 'Unknown word', source: 'spell' } 
 const execution = adapter.execute({
   type: 'requestSuggestions',
   correlationId: 7,
-  diagnostic,
-  anchor: { x: 10, y: 20, bottomY: 30 }
+  diagnostic
 });
 assert.equal(posted.length, 1);
 const request = posted[0] as { requestId: string };
@@ -39,18 +42,22 @@ assert.deepEqual(await execution.completion, {
 });
 assert.equal(adapter.accept(response), false, 'duplicate Transport completion must be rejected');
 
+anchorTop = 40;
 adapter.execute({
-  type: 'presentSuggestions', from: 1, to: 4,
-  anchor: { x: 10, y: 20, bottomY: 30 },
+  type: 'presentSuggestions', correlationId: 7, from: 1, to: 4,
   suggestions: [{ from: 1, to: 4, text: 'Known word' }]
 });
+assert.deepEqual(
+  (presented[0] as any).anchor,
+  { x: 10, y: 40, bottomY: 50 },
+  'presentation must resolve current coordinates instead of retaining request-time pixels'
+);
 adapter.execute({ type: 'hideSuggestions' });
 assert.equal(presented.length, 1);
 assert.equal(hidden, 1);
 
 const failed = adapter.execute({
-  type: 'requestSuggestions', correlationId: 8, diagnostic,
-  anchor: { x: 10, y: 20, bottomY: 30 }
+  type: 'requestSuggestions', correlationId: 8, diagnostic
 });
 const failedRequest = posted.at(-1) as { requestId: string };
 assert.equal(adapter.accept({
@@ -61,8 +68,7 @@ assert.equal(adapter.accept({
 assert.deepEqual(await failed.completion, { type: 'suggestionsFailed', correlationId: 8 });
 
 const cancelled = adapter.execute({
-  type: 'requestSuggestions', correlationId: 9, diagnostic,
-  anchor: { x: 10, y: 20, bottomY: 30 }
+  type: 'requestSuggestions', correlationId: 9, diagnostic
 });
 const cancelledRequest = posted.at(-1) as { requestId: string };
 adapter.execute({ type: 'cancelRequest' });
@@ -74,7 +80,7 @@ assert.equal(adapter.accept(response), false);
 
 let timeoutCallback: (() => void) | null = null;
 const timeoutAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
-  view: {} as never,
+  view: { coordsAtPos: () => null, coordsForChar: () => null } as never,
   resolveDiagnostic: () => null,
   postMessage() {},
   presentSuggestions() {},
@@ -86,8 +92,7 @@ const timeoutAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
   }
 });
 const timedOut = timeoutAdapter.execute({
-  type: 'requestSuggestions', correlationId: 10, diagnostic,
-  anchor: { x: 10, y: 20, bottomY: 30 }
+  type: 'requestSuggestions', correlationId: 10, diagnostic
 });
 assert.ok(timeoutCallback);
 (timeoutCallback as () => void)();
@@ -95,15 +100,14 @@ assert.deepEqual(await timedOut.completion, { type: 'suggestionsFailed', correla
 timeoutAdapter.dispose();
 
 const throwingAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
-  view: {} as never,
+  view: { coordsAtPos: () => null, coordsForChar: () => null } as never,
   resolveDiagnostic: () => null,
   postMessage() { throw new Error('post failed'); },
   presentSuggestions() {},
   hideSuggestions() {}
 });
 const thrown = throwingAdapter.execute({
-  type: 'requestSuggestions', correlationId: 11, diagnostic,
-  anchor: { x: 10, y: 20, bottomY: 30 }
+  type: 'requestSuggestions', correlationId: 11, diagnostic
 });
 assert.deepEqual(await thrown.completion, { type: 'suggestionsFailed', correlationId: 11 });
 throwingAdapter.dispose();

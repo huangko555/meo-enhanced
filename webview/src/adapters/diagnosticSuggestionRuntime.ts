@@ -21,11 +21,10 @@ export function createDiagnosticSuggestionRuntime(
   options: DiagnosticSuggestionRuntimeOptions
 ): DiagnosticSuggestionRuntime {
   const { application, executor } = options;
-  const pendingByCorrelation = new Map<number, number>();
   const idleWaiters = new Set<() => void>();
   let disposed = false;
 
-  const isIdle = (): boolean => disposed || application.getState().pending === null;
+  const isIdle = (): boolean => disposed || application.isIdle();
 
   const notifyIdle = (): void => {
     if (!isIdle()) return;
@@ -45,10 +44,7 @@ export function createDiagnosticSuggestionRuntime(
     notifyIdle();
   };
 
-  const complete = (correlationId: number, input: DiagnosticSuggestionInput | null): void => {
-    const remaining = (pendingByCorrelation.get(correlationId) ?? 1) - 1;
-    if (remaining > 0) pendingByCorrelation.set(correlationId, remaining);
-    else pendingByCorrelation.delete(correlationId);
+  const complete = (input: DiagnosticSuggestionInput | null): void => {
     if (!disposed && input) dispatchInternal(input);
     notifyIdle();
   };
@@ -70,13 +66,9 @@ export function createDiagnosticSuggestionRuntime(
         continue;
       }
 
-      pendingByCorrelation.set(
-        effect.correlationId,
-        (pendingByCorrelation.get(effect.correlationId) ?? 0) + 1
-      );
       void execution.completion.then(
-        (input) => complete(effect.correlationId, input),
-        () => complete(effect.correlationId, failureFor(effect))
+        (input) => complete(input),
+        () => complete(failureFor(effect))
       );
     }
   }
@@ -91,7 +83,6 @@ export function createDiagnosticSuggestionRuntime(
       if (disposed) return;
       dispatchInternal({ type: 'dispose' });
       disposed = true;
-      pendingByCorrelation.clear();
       executor.dispose();
       notifyIdle();
     }

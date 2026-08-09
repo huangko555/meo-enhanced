@@ -37,5 +37,10 @@ assert.equal(
   false,
   'Webview Bootstrap must not retain a second request/response owner'
 );
+assert.equal(
+  indexSource.includes('editor?.diagnosticSuggestionPresentationChanged?.()'),
+  true,
+  'Preview activation must invalidate suggestions through the Editor Runtime input'
+);
 
 console.log('Diagnostic suggestion production boundary checks passed');

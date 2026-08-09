@@ -992,15 +992,17 @@ export function createEditor({
       to: selection.to
     });
     if (diagnostic) {
-      diagnosticSuggestionRuntime.dispatch({
-        type: 'suggestionsRequested',
+      diagnosticSuggestionRuntime.dispatch(diagnosticSuggestionAdapter.inputFromSelectionRequest(
         diagnostic,
-        anchor: {
-          x: selection.anchorX,
-          y: selection.anchorY,
-          bottomY: selection.anchorBottomY
+        () => {
+          const current = getTableInputDocumentSelection(input);
+          return current ? {
+            x: current.anchorX,
+            y: current.anchorY,
+            bottomY: current.anchorBottomY
+          } : null;
         }
-      });
+      ));
     }
     return {
       visible: true,

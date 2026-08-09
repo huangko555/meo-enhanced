@@ -10,7 +10,6 @@ import { createDiagnosticSuggestionRuntime } from '../webview/src/adapters/diagn
 
 const firstDiagnostic = { from: 2, to: 6, message: 'First unknown word', source: 'spell' } as const;
 const secondDiagnostic = { from: 10, to: 15, message: 'Second unknown word', source: 'spell' } as const;
-const anchor = { x: 40, y: 20, bottomY: 34 } as const;
 
 const executed: DiagnosticSuggestionEffect[] = [];
 const pending = new Map<number, (input: DiagnosticSuggestionInput | null) => void>();
@@ -36,7 +35,7 @@ const runtime = createDiagnosticSuggestionRuntime({ application, executor });
 runtime.dispatch({ type: 'diagnosticsChanged', diagnostics: [firstDiagnostic, secondDiagnostic] });
 assert.deepEqual(executed.slice(0, 2).map((effect) => effect.type), ['cancelRequest', 'hideSuggestions']);
 
-runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchor });
+runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic });
 const firstRequest = executed.at(-1);
 assert.ok(firstRequest?.type === 'requestSuggestions');
 let idle = false;
@@ -44,7 +43,7 @@ void runtime.whenIdle().then(() => { idle = true; });
 await Promise.resolve();
 assert.equal(idle, false, 'whenIdle must wait for the current suggestion request');
 
-runtime.dispatch({ type: 'suggestionsRequested', diagnostic: secondDiagnostic, anchor });
+runtime.dispatch({ type: 'suggestionsRequested', diagnostic: secondDiagnostic });
 const secondRequest = executed.at(-1);
 assert.ok(secondRequest?.type === 'requestSuggestions');
 assert.notEqual(secondRequest.correlationId, firstRequest.correlationId);
@@ -62,7 +61,7 @@ assert.equal(executed.at(-1)?.type, 'presentSuggestions');
 assert.equal(idle, true);
 
 runtime.dispatch({ type: 'diagnosticsChanged', diagnostics: [firstDiagnostic] });
-runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchor });
+runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic });
 const externalRequest = executed.at(-1);
 assert.ok(externalRequest?.type === 'requestSuggestions');
 runtime.dispatch({ type: 'externalDocumentPresented' });
@@ -100,9 +99,9 @@ const rejectingRuntime = createDiagnosticSuggestionRuntime({
   executor: rejectingExecutor
 });
 rejectingRuntime.dispatch({ type: 'diagnosticsChanged', diagnostics: [firstDiagnostic] });
-rejectingRuntime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchor });
+rejectingRuntime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic });
 await rejectingRuntime.whenIdle();
-assert.equal(rejectingApplication.getState().pending, null, 'rejected execution must restore idle state');
+assert.equal(rejectingApplication.isIdle(), true, 'rejected execution must restore idle state');
 rejectingRuntime.dispose();
 
 console.log('Diagnostic suggestion runtime checks passed');

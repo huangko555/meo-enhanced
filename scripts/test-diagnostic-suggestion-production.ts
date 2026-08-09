@@ -52,7 +52,8 @@ async function main(): Promise<void> {
     const secondClick = await page.evaluate(() => ({
       requests: (window as any).__diagnosticHarness.requests,
       selection: (window as any).__diagnosticHarness.editor.view.state.selection.main.toJSON(),
-      scrollTop: (window as any).__diagnosticHarness.editor.view.scrollDOM.scrollTop
+      scrollTop: (window as any).__diagnosticHarness.editor.view.scrollDOM.scrollTop,
+      focused: (window as any).__diagnosticHarness.editor.view.hasFocus
     }));
     if (secondClick.requests.length !== 1 || typeof secondClick.requests[0].requestId !== 'string') {
       throw new Error(`second diagnostic click did not start exactly one request: ${JSON.stringify(secondClick)}`);
@@ -73,14 +74,16 @@ async function main(): Promise<void> {
       return {
         updates: harness.selectionStates.slice(before),
         selection: harness.editor.view.state.selection.main.toJSON(),
-        scrollTop: harness.editor.view.scrollDOM.scrollTop
+        scrollTop: harness.editor.view.scrollDOM.scrollTop,
+        focused: harness.editor.view.hasFocus
       };
     });
     const suggestionUpdate = (ready.updates as any[]).find((state) => state?.diagnosticSuggestions);
     if (suggestionUpdate?.diagnosticSuggestions?.map((item: any) => item.text).join('|') !== 'misspelled|misapplied') {
       throw new Error(`suggestion result was not presented: ${JSON.stringify(ready)}`);
     }
-    if (JSON.stringify(ready.selection) !== JSON.stringify(secondClick.selection) || ready.scrollTop !== secondClick.scrollTop) {
+    if (JSON.stringify(ready.selection) !== JSON.stringify(secondClick.selection)
+      || ready.scrollTop !== secondClick.scrollTop || ready.focused !== secondClick.focused) {
       throw new Error(`suggestion presentation changed selection or viewport: ${JSON.stringify({ secondClick, ready })}`);
     }
 
@@ -90,28 +93,65 @@ async function main(): Promise<void> {
       throw new Error(`presented diagnostic started a duplicate request: ${requestsAfterPresentedRepeat}`);
     }
 
-    const invalidated = await page.evaluate(() => {
+    const replacementPending = await page.evaluate(() => {
       const harness = (window as any).__diagnosticHarness;
       harness.editor.setDiagnostics([{
         from: 0, to: 9, severity: 1, message: 'Replacement diagnostic', source: 'spell'
       }]);
+      return harness.requests.length;
+    });
+    await page.click('.meo-diagnostic', { button: 'right' });
+    const invalidated = await page.evaluate(() => {
+      const harness = (window as any).__diagnosticHarness;
+      const stale = harness.requests.at(-1);
+      harness.editor.setDiagnostics([{
+        from: 0, to: 9, severity: 1, message: 'Current diagnostic', source: 'spell'
+      }]);
       const before = harness.selectionStates.length;
-      harness.editor.acceptDiagnosticSuggestionsResult({
+      const accepted = harness.editor.acceptDiagnosticSuggestionsResult({
         type: 'diagnosticSuggestionsResult',
-        requestId: harness.requests[0].requestId,
+        requestId: stale.requestId,
         from: 0,
         to: 9,
         result: { ok: true, value: { suggestions: ['stale result'] } }
       });
-      return harness.selectionStates.slice(before);
+      return { accepted, updates: harness.selectionStates.slice(before) };
     });
-    if ((invalidated as any[]).some((state) => state?.diagnosticSuggestions)) {
+    if (replacementPending !== 1 || invalidated.accepted
+      || (invalidated.updates as any[]).some((state) => state?.diagnosticSuggestions)) {
       throw new Error(`diagnostics replacement accepted a stale result: ${JSON.stringify(invalidated)}`);
     }
 
     await page.click('.meo-diagnostic', { button: 'right' });
+    const replacementReady = await page.evaluate(async () => {
+      const harness = (window as any).__diagnosticHarness;
+      const current = harness.requests.at(-1);
+      const stale = harness.requests.at(-2);
+      const before = harness.selectionStates.length;
+      const accepted = harness.editor.acceptDiagnosticSuggestionsResult({
+        type: 'diagnosticSuggestionsResult', requestId: current.requestId, from: 0, to: 9,
+        result: { ok: true, value: { suggestions: ['current result'] } }
+      });
+      const staleAccepted = harness.editor.acceptDiagnosticSuggestionsResult({
+        type: 'diagnosticSuggestionsResult', requestId: stale.requestId, from: 0, to: 9,
+        result: { ok: true, value: { suggestions: ['late stale result'] } }
+      });
+      await Promise.resolve();
+      return { accepted, staleAccepted, updates: harness.selectionStates.slice(before) };
+    });
+    if (!replacementReady.accepted || replacementReady.staleAccepted
+      || !(replacementReady.updates as any[]).some((state) => (
+        state?.diagnosticSuggestions?.[0]?.text === 'current result'
+      ))) {
+      throw new Error(`replacement response ordering was incorrect: ${JSON.stringify(replacementReady)}`);
+    }
+
+    await page.evaluate(() => (window as any).__diagnosticHarness.editor.setDiagnostics([{
+      from: 0, to: 9, severity: 1, message: 'Failure diagnostic', source: 'spell'
+    }]));
+    await page.click('.meo-diagnostic', { button: 'right' });
     const directRequest = await page.evaluate(() => (window as any).__diagnosticHarness.requests.at(-1));
-    if (typeof directRequest?.requestId !== 'string' || directRequest.requestId === secondClick.requests[0].requestId) {
+    if (typeof directRequest?.requestId !== 'string') {
       throw new Error(`context menu did not request suggestions directly: ${JSON.stringify(directRequest)}`);
     }
 
@@ -210,6 +250,24 @@ async function main(): Promise<void> {
       throw new Error(`mode change accepted a stale result: ${JSON.stringify(modeInvalidation)}`);
     }
 
+    await page.evaluate(() => (window as any).__diagnosticHarness.editor.setMode('source'));
+    await page.click('.meo-diagnostic', { button: 'right' });
+    const previewInvalidation = await page.evaluate(async () => {
+      const harness = (window as any).__diagnosticHarness;
+      const request = harness.requests.at(-1);
+      harness.editor.diagnosticSuggestionPresentationChanged();
+      const accepted = harness.editor.acceptDiagnosticSuggestionsResult({
+        type: 'diagnosticSuggestionsResult', requestId: request.requestId, from: 0, to: 9,
+        result: { ok: true, value: { suggestions: ['late preview result'] } }
+      });
+      await Promise.resolve();
+      return { accepted, states: harness.selectionStates.slice(-3) };
+    });
+    if (previewInvalidation.accepted
+      || (previewInvalidation.states as any[]).some((state) => state?.diagnosticSuggestions)) {
+      throw new Error(`Preview presentation accepted a stale result: ${JSON.stringify(previewInvalidation)}`);
+    }
+
     await page.evaluate(() => {
       const original = window.setTimeout.bind(window);
       (window as any).__diagnosticOriginalSetTimeout = window.setTimeout;
@@ -277,6 +335,94 @@ async function main(): Promise<void> {
     });
     if (postFailure.suggestions !== 0 || postFailure.markerCount !== 1) {
       throw new Error(`post failure changed production diagnostics: ${JSON.stringify(postFailure)}`);
+    }
+
+    await page.evaluate(() => {
+      const parent = document.createElement('div');
+      parent.id = 'table-diagnostic-app';
+      parent.style.height = '240px';
+      document.body.appendChild(parent);
+      const menuElements = (window as any).EditorStabilityHarness.createSelectionMenu();
+      document.body.appendChild(menuElements.menu);
+      const requests: any[] = [];
+      let editor: any;
+      const menu = (window as any).EditorStabilityHarness.createSelectionMenuController(
+        menuElements,
+        () => editor
+      );
+      menuElements.menu.addEventListener('click', (event: MouseEvent) => {
+        const button = (event.target as Element).closest('.selection-inline-suggestion') as HTMLElement | null;
+        if (button) menu.handleSuggestion(Number(button.dataset.suggestionIndex));
+      });
+      editor = (window as any).EditorStabilityHarness.createEditor({
+        parent,
+        text: '| bad |\n| --- |\n| value |',
+        initialMode: 'live',
+        initialDiagnostics: [{
+          from: 2, to: 5, severity: 1, message: 'Unknown table word', source: 'spell'
+        }],
+        onApplyChanges() {},
+        onSelectionChange(state: unknown) { menu.update(state as any); },
+        postDiagnosticSuggestionsMessage(message: any) { requests.push(message); }
+      });
+      (window as any).__tableDiagnosticHarness = { editor, requests, menu };
+    });
+    await page.waitForSelector('#table-diagnostic-app textarea[data-table-cell-from="2"]');
+    const tableBefore = await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '#table-diagnostic-app textarea[data-table-cell-from="2"]'
+      )!;
+      input.focus();
+      input.setSelectionRange(0, 3);
+      input.dispatchEvent(new Event('select', { bubbles: true }));
+      const editor = (window as any).__tableDiagnosticHarness.editor;
+      return {
+        focused: document.activeElement === input,
+        selection: [input.selectionStart, input.selectionEnd],
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        markers: document.querySelectorAll('#table-diagnostic-app .meo-diagnostic').length
+      };
+    });
+    const tableRequest = await page.evaluate(() => (window as any).__tableDiagnosticHarness.requests.at(-1));
+    if (!tableRequest?.requestId) throw new Error('table contenteditable selection did not request suggestions');
+    const tableReady = await page.evaluate(async () => {
+      const harness = (window as any).__tableDiagnosticHarness;
+      harness.editor.acceptDiagnosticSuggestionsResult({
+        type: 'diagnosticSuggestionsResult', requestId: harness.requests.at(-1).requestId,
+        from: 2, to: 5,
+        result: { ok: true, value: { suggestions: ['good'] } }
+      });
+      await Promise.resolve();
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '#table-diagnostic-app textarea[data-table-cell-from="2"]'
+      )!;
+      return {
+        focused: document.activeElement === input,
+        selection: [input.selectionStart, input.selectionEnd],
+        scrollTop: harness.editor.view.scrollDOM.scrollTop,
+        markers: document.querySelectorAll('#table-diagnostic-app .meo-diagnostic').length,
+        suggestion: document.querySelector<HTMLButtonElement>('.selection-inline-suggestion')?.textContent
+      };
+    });
+    if (JSON.stringify(tableReady) !== JSON.stringify({ ...tableBefore, suggestion: 'good' })) {
+      throw new Error(`table suggestion presentation changed interaction facts: ${JSON.stringify({ tableBefore, tableReady })}`);
+    }
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>('.selection-inline-suggestion')?.click());
+    const tableApplied = await page.evaluate(async () => {
+      const harness = (window as any).__tableDiagnosticHarness;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const result = {
+        text: harness.editor.getText(),
+        inputValue: document.querySelector<HTMLTextAreaElement>(
+          '#table-diagnostic-app textarea[data-table-cell-from="2"]'
+        )?.value,
+        menuVisible: harness.menu.elements.menu.classList.contains('is-visible')
+      };
+      harness.editor.destroy();
+      return result;
+    });
+    if (tableApplied.inputValue !== 'good' || tableApplied.menuVisible) {
+      throw new Error(`selection menu command did not apply the table suggestion: ${JSON.stringify(tableApplied)}`);
     }
     console.log('Diagnostic suggestion production checks passed');
   } finally {
