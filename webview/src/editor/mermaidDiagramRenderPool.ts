@@ -1,8 +1,9 @@
-import type {
-  MermaidDiagramRenderRequest,
-  MermaidDiagramRenderResources,
-  MermaidDiagramRenderResult,
-  MermaidRenderPriority
+import {
+  MermaidDiagramResourceUnavailableError,
+  type MermaidDiagramRenderRequest,
+  type MermaidDiagramRenderResources,
+  type MermaidDiagramRenderResult,
+  type MermaidRenderPriority
 } from '../application/mermaidDiagramRenderResources';
 
 export type MermaidDiagramRenderPoolOptions = {
@@ -20,8 +21,6 @@ type OperationJob<T = unknown> = {
   readonly reject: (reason: unknown) => void;
   readonly external: boolean;
 };
-
-class MermaidRenderAdmissionError extends Error {}
 
 const DEFAULT_CACHE_LIMIT = 100;
 const DEFAULT_MAX_QUEUED_OPERATIONS = 512;
@@ -84,9 +83,9 @@ export function createMermaidDiagramRenderPool(
     priority: MermaidRenderPriority,
     external: boolean
   ): Promise<T> => {
-    if (disposed) return Promise.reject(new MermaidRenderAdmissionError('Mermaid render Pool is disposed'));
+    if (disposed) return Promise.reject(new MermaidDiagramResourceUnavailableError('Mermaid render Pool is disposed'));
     if (highPriority.length + normalPriority.length >= maxQueuedOperations) {
-      return Promise.reject(new MermaidRenderAdmissionError('Mermaid render queue capacity exceeded'));
+      return Promise.reject(new MermaidDiagramResourceUnavailableError('Mermaid render queue capacity exceeded'));
     }
     return new Promise<T>((resolve, reject) => {
       const job: OperationJob<T> = { operation, resolve, reject, external };
@@ -122,7 +121,7 @@ export function createMermaidDiagramRenderPool(
             ok: false,
             error: error instanceof Error ? error.message : String(error)
           } as MermaidDiagramRenderResult,
-          cacheable: !(error instanceof MermaidRenderAdmissionError)
+          cacheable: !(error instanceof MermaidDiagramResourceUnavailableError)
         })
       )
       .then(({ result, cacheable }) => {
@@ -158,7 +157,9 @@ export function createMermaidDiagramRenderPool(
       const queuedOperation = enqueue(operation, priority, true);
       return Promise.race([
         queuedOperation,
-        disposedSignal.then(() => Promise.reject<never>(new Error('Mermaid render Pool is disposed')))
+        disposedSignal.then(() => Promise.reject<never>(
+          new MermaidDiagramResourceUnavailableError('Mermaid render Pool is disposed')
+        ))
       ]);
     },
     refreshTheme() {
@@ -189,7 +190,7 @@ export function createMermaidDiagramRenderPool(
       disposed = true;
       signalDisposed?.();
       signalDisposed = null;
-      const error = new Error('Mermaid render Pool is disposed');
+      const error = new MermaidDiagramResourceUnavailableError('Mermaid render Pool is disposed');
       for (const job of [...highPriority, ...normalPriority]) job.reject(error);
       highPriority.length = 0;
       normalPriority.length = 0;

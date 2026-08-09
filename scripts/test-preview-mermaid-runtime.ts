@@ -6,7 +6,10 @@ import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
 import { defaultThemeSettings } from '../src/shared/themeDefaults';
 import { createPreviewMermaidRenderer } from '../webview/src/helpers/previewMermaid';
-import type { MermaidDiagramRenderResources } from '../webview/src/application/mermaidDiagramRenderResources';
+import {
+  MermaidDiagramResourceUnavailableError,
+  type MermaidDiagramRenderResources
+} from '../webview/src/application/mermaidDiagramRenderResources';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runtime-'));
@@ -37,9 +40,20 @@ if (previewResourceRequests !== 3) {
 releaseFirstPreview();
 await Promise.all(previewRequests);
 const rejectedPreviewRenderer = createPreviewMermaidRenderer({
-  runExclusive: () => Promise.reject(new Error('Mermaid render queue capacity exceeded'))
+  runExclusive: () => Promise.reject(
+    new MermaidDiagramResourceUnavailableError('Mermaid render queue capacity exceeded')
+  )
 } as MermaidDiagramRenderResources);
 await rejectedPreviewRenderer.render(emptyFrame, 'dark');
+const reportedPreviewErrors: unknown[] = [];
+const failedPreviewRenderer = createPreviewMermaidRenderer({
+  runExclusive: () => Promise.reject(new Error('runtime failed'))
+} as MermaidDiagramRenderResources, (error) => reportedPreviewErrors.push(error));
+await failedPreviewRenderer.render(emptyFrame, 'dark');
+if (!(reportedPreviewErrors[0] instanceof Error)
+  || reportedPreviewErrors[0].message !== 'runtime failed') {
+  throw new Error('Unexpected Preview Mermaid failures must be reported');
+}
 const browser = await launchTestBrowser();
 
 try {

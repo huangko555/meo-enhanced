@@ -1,6 +1,7 @@
 import { createElement, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
+import { logWebviewRenderError } from './errors';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import { createSegmentedControl } from './segmentedControl';
 import type { OutlineHeading } from './outline';
@@ -184,7 +185,10 @@ export function createPreviewController({
   let latestRenderedText = '';
   let latestPayload: PreviewRenderValue | null = null;
   const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
-  const previewMermaidRenderer = createPreviewMermaidRenderer(mermaidRenderResources);
+  const previewMermaidRenderer = createPreviewMermaidRenderer(
+    mermaidRenderResources,
+    (error) => logWebviewRenderError('preview.mermaid', error)
+  );
   let searchQuery = '';
   let searchOptions = { wholeWord: false, caseSensitive: false };
   let searchMatches: HTMLElement[] = [];

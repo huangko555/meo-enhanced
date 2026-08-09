@@ -1,5 +1,8 @@
 export type MermaidRenderPriority = 'normal' | 'high';
 
+/** Expected resource admission/disposal failure that callers may recover from silently. */
+export class MermaidDiagramResourceUnavailableError extends Error {}
+
 export type MermaidDiagramRenderRequest = {
   readonly rawSource: string;
   readonly normalizedSource: string;

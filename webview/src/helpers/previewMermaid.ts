@@ -1,5 +1,8 @@
 import type { PreviewAppearance } from '../../../src/shared/preview';
-import type { MermaidDiagramRenderResources } from '../application/mermaidDiagramRenderResources';
+import {
+  MermaidDiagramResourceUnavailableError,
+  type MermaidDiagramRenderResources
+} from '../application/mermaidDiagramRenderResources';
 import {
   loadMermaidRuntime,
   isDisplayMathDiagram,
@@ -18,7 +21,10 @@ type PreviewMermaidPalette = {
   line: string;
 };
 
-export function createPreviewMermaidRenderer(resources: MermaidDiagramRenderResources) {
+export function createPreviewMermaidRenderer(
+  resources: MermaidDiagramRenderResources,
+  reportError: (error: unknown) => void = () => undefined
+) {
   const render = (
     frameDocument: Document,
     appearance: PreviewAppearance,
@@ -30,7 +36,9 @@ export function createPreviewMermaidRenderer(resources: MermaidDiagramRenderReso
       } finally {
         await restoreMermaidEditorTheme();
       }
-    }, 'high').catch(() => undefined);
+    }, 'high').catch((error) => {
+      if (!(error instanceof MermaidDiagramResourceUnavailableError)) reportError(error);
+    });
   };
 
   return { render };
