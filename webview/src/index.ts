@@ -29,7 +29,6 @@ import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
 import { resolveCodeTheme } from './themes/editorLightTheme';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
-import { createDiagnosticSuggestionsTransport, type DiagnosticSuggestionsTransport } from './adapters/diagnosticSuggestionsTransport';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
 import { createThemeWebviewAdapter } from './adapters/themeWebviewAdapter';
@@ -88,25 +87,10 @@ function createCompatibleVsCodeApi(): CompatibleVsCodeWebviewApi {
   };
 }
 
-let diagnosticSuggestionsTransport: DiagnosticSuggestionsTransport = {
-  request: () => '',
-  accept: () => false,
-  cancelAll: () => undefined
-};
 const vscode = createCompatibleVsCodeApi();
 initializeImageHandling(vscode);
 initializeWikiLinkHandling(vscode);
 initializeLocalLinkHandling(vscode);
-diagnosticSuggestionsTransport = createDiagnosticSuggestionsTransport((message) => {
-  vscode.postMessage(message);
-}, (message) => {
-  const suggestions = message.result.ok === true ? message.result.value.suggestions : [];
-  editor?.showDiagnosticSuggestions?.(message.requestId, {
-    from: message.from,
-    to: message.to,
-    suggestions
-  });
-});
 
 applyThemeSettings();
 setImageSrcResolver(resolveImageSrc);
@@ -1463,25 +1447,7 @@ const focusEditorFromHost = () => {
 const applyDiagnosticsFromHost = (diagnostics: unknown): void => {
   const nextDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];
   pendingDiagnostics = nextDiagnostics;
-  diagnosticSuggestionsTransport.cancelAll();
-  selectionMenuController.hide();
   editor?.setDiagnostics?.(nextDiagnostics);
-};
-
-const requestDiagnosticSuggestions = (diagnostic: {
-  from: number;
-  to: number;
-  message: string;
-  source?: string;
-  code?: string;
-}): string => {
-  return diagnosticSuggestionsTransport.request({
-    from: diagnostic.from,
-    to: diagnostic.to,
-    message: diagnostic.message,
-    source: diagnostic.source,
-    code: diagnostic.code
-  });
 };
 
 gitClient = createGitClient({
@@ -1695,7 +1661,7 @@ const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onSelectionChange: (state: any) => selectionMenuController.update(state),
-    onRequestDiagnosticSuggestions: requestDiagnosticSuggestions,
+    postDiagnosticSuggestionsMessage: (message) => vscode.postMessage(message),
     onViewportChange: () => scheduleViewPositionCapture(),
     onRequestGitBlame: requestGitBlameForLine,
     onOpenGitRevisionForLine: openGitRevisionForLine,
@@ -1756,6 +1722,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     failureNotice.updateEditorNotice();
   },
   setPreviewActive(active, restoreLine) {
+    if (active) editor?.diagnosticSuggestionPresentationChanged?.();
     clearGitBlameCache();
     previewAdapter.setActive({
       active,
@@ -2101,7 +2068,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'diagnosticSuggestionsResult') {
-    diagnosticSuggestionsTransport.accept(message);
+    editor?.acceptDiagnosticSuggestionsResult?.(message);
     return;
   }
 

@@ -76,6 +76,13 @@ import {
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
+import { createDiagnosticSuggestionApplication } from './application/diagnosticSuggestion';
+import { createDiagnosticSuggestionRuntime } from './adapters/diagnosticSuggestionRuntime';
+import { createCodeMirrorDiagnosticSuggestionAdapter } from './editor/diagnosticSuggestionAdapter';
+import type {
+  DiagnosticSuggestionsResult,
+  RequestDiagnosticSuggestions
+} from '../../src/protocol/diagnosticSuggestions';
 import { focusMermaidEditingOffset, getMermaidBlockMode, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 import { focusLatexMathEditingOffset, getLatexMathBlockMode, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
@@ -228,7 +235,9 @@ export function createEditor({
   onApplyChanges,
   onOpenLink,
   onSelectionChange,
-  onRequestDiagnosticSuggestions,
+  postDiagnosticSuggestionsMessage = (_message: RequestDiagnosticSuggestions): void => {
+    throw new Error('Diagnostic suggestions transport is unavailable');
+  },
   onViewportChange,
   onRequestGitBlame,
   onOpenGitRevisionForLine,
@@ -263,16 +272,6 @@ export function createEditor({
   let vimLeader = initialVimLeader;
   let appliedVimKeybindings: Array<{ before: string; mode: string }> = [];
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
-  let lastDiagnosticClick: { key: string; from: number; to: number } | null = null;
-  let pendingDiagnosticSuggestionRequest: {
-    requestId: string;
-    key: string;
-    from: number;
-    to: number;
-    anchorX: number;
-    anchorY: number;
-    anchorBottomY: number;
-  } | null = null;
 
   const expandVimLeader = (keys: string, leaderKey: string) => keys.replace(/<leader>/gi, leaderKey || '\\');
   const clearVimKeybindings = () => {
@@ -988,9 +987,20 @@ export function createEditor({
   const getActiveTableSelectionState = (input) => {
     const selection = getTableInputDocumentSelection(input);
     if (!selection) return null;
-    const diagnostic = diagnosticForRange(selection.from, selection.to);
+    const diagnostic = diagnosticSuggestionApplication.resolveDiagnostic(selection.from, {
+      from: selection.from,
+      to: selection.to
+    });
     if (diagnostic) {
-      requestDiagnosticSuggestionsFor(diagnostic, selection);
+      diagnosticSuggestionRuntime.dispatch({
+        type: 'suggestionsRequested',
+        diagnostic,
+        anchor: {
+          x: selection.anchorX,
+          y: selection.anchorY,
+          bottomY: selection.anchorBottomY
+        }
+      });
     }
     return {
       visible: true,
@@ -1342,155 +1352,14 @@ export function createEditor({
     });
   };
 
-  const diagnosticKey = (diagnostic: EditorDiagnostic): string => [
-    diagnostic.from,
-    diagnostic.to,
-    diagnostic.message,
-    diagnostic.source ?? '',
-    diagnostic.code ?? ''
-  ].join('\u001f');
-
-  const clearDiagnosticSuggestionState = (): void => {
-    lastDiagnosticClick = null;
-    pendingDiagnosticSuggestionRequest = null;
-  };
-
-  const diagnosticAtPosition = (pos: number): EditorDiagnostic | null => {
-    if (!Array.isArray(currentDiagnostics) || currentDiagnostics.length === 0) {
-      return null;
-    }
-
-    let best: EditorDiagnostic | null = null;
-    for (const diagnostic of currentDiagnostics) {
-      if (pos < diagnostic.from || pos > diagnostic.to) {
-        continue;
-      }
-      if (!best || diagnostic.to - diagnostic.from < best.to - best.from) {
-        best = diagnostic;
-      }
-    }
-    return best;
-  };
-
-  function diagnosticForRange(from: number, to: number): EditorDiagnostic | null {
-    return currentDiagnostics.find((diagnostic) => diagnostic.from === from && diagnostic.to === to) ?? null;
-  }
-
-  const selectedDiagnosticRange = (): EditorDiagnostic | null => {
-    if (!view || currentDiagnostics.length === 0) {
-      return null;
-    }
-
-    const selection = view.state.selection.main;
-    if (selection.empty) {
-      return null;
-    }
-
-    const from = Math.min(selection.from, selection.to);
-    const to = Math.max(selection.from, selection.to);
-    return diagnosticForRange(from, to);
-  };
-
-  const diagnosticFromPointer = (event: MouseEvent | PointerEvent, editorView: EditorView): EditorDiagnostic | null => {
-    const pos = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
-    if (pos === null) {
-      return null;
-    }
-
-    const selectedDiagnostic = selectedDiagnosticRange();
-    if (selectedDiagnostic && pos >= selectedDiagnostic.from && pos <= selectedDiagnostic.to) {
-      return selectedDiagnostic;
-    }
-
-    return diagnosticAtPosition(pos);
-  };
-
-  const diagnosticMenuAnchor = (
-    diagnostic: EditorDiagnostic
-  ): { anchorX: number; anchorY: number; anchorBottomY: number } | null => {
-    const fromCoords = view.coordsAtPos(diagnostic.from);
-    if (!fromCoords) {
-      return null;
-    }
-    const charCoords = view.coordsForChar(diagnostic.from);
-    return {
-      anchorX: charCoords?.left ?? fromCoords.left,
-      anchorY: charCoords ? Math.min(fromCoords.top, charCoords.top) : fromCoords.top,
-      anchorBottomY: charCoords ? Math.max(fromCoords.bottom, charCoords.bottom) : fromCoords.bottom
-    };
-  };
-
-  const requestDiagnosticSuggestionsFor = (
-    diagnostic: EditorDiagnostic,
-    anchor: { anchorX: number; anchorY: number; anchorBottomY?: number } | null = diagnosticMenuAnchor(diagnostic)
+  const dispatchDiagnosticSuggestionPointer = (
+    kind: 'click' | 'request',
+    event: MouseEvent | PointerEvent
   ): boolean => {
-    if (!anchor || typeof onRequestDiagnosticSuggestions !== 'function') {
-      pendingDiagnosticSuggestionRequest = null;
-      return false;
-    }
-
-    const key = diagnosticKey(diagnostic);
-    if (
-      pendingDiagnosticSuggestionRequest?.key === key &&
-      pendingDiagnosticSuggestionRequest.from === diagnostic.from &&
-      pendingDiagnosticSuggestionRequest.to === diagnostic.to
-    ) {
-      return true;
-    }
-
-    const requestId = onRequestDiagnosticSuggestions(diagnostic);
-    if (typeof requestId !== 'string' || !requestId) {
-      pendingDiagnosticSuggestionRequest = null;
-      return false;
-    }
-
-    pendingDiagnosticSuggestionRequest = {
-      requestId,
-      key,
-      from: diagnostic.from,
-      to: diagnostic.to,
-      anchorX: anchor.anchorX,
-      anchorY: anchor.anchorY,
-      anchorBottomY: anchor.anchorBottomY ?? anchor.anchorY
-    };
+    const input = diagnosticSuggestionAdapter.inputFromPointer(kind, event);
+    if (!input) return false;
+    diagnosticSuggestionRuntime.dispatch(input);
     return true;
-  };
-
-  const trackDiagnosticClick = (event: PointerEvent, editorView: EditorView): void => {
-    const targetElement = targetElementFrom(event.target);
-    const diagnostic = diagnosticFromPointer(event, editorView);
-    if (!diagnostic || (!targetElement?.closest('.meo-diagnostic') && diagnostic !== selectedDiagnosticRange())) {
-      clearDiagnosticSuggestionState();
-      return;
-    }
-
-    const key = diagnosticKey(diagnostic);
-    const isSecondClick =
-      lastDiagnosticClick?.key === key &&
-      lastDiagnosticClick.from === diagnostic.from &&
-      lastDiagnosticClick.to === diagnostic.to;
-    const isNativeSecondClick = event.detail >= 2 && diagnostic === selectedDiagnosticRange();
-    lastDiagnosticClick = { key, from: diagnostic.from, to: diagnostic.to };
-
-    if ((!isSecondClick && !isNativeSecondClick) || typeof onRequestDiagnosticSuggestions !== 'function') {
-      pendingDiagnosticSuggestionRequest = null;
-      return;
-    }
-
-    requestDiagnosticSuggestionsFor(diagnostic);
-  };
-
-  const requestDiagnosticSuggestionsFromPointer = (
-    event: MouseEvent | PointerEvent,
-    editorView: EditorView
-  ): boolean => {
-    const targetElement = targetElementFrom(event.target);
-    const diagnostic = diagnosticFromPointer(event, editorView);
-    if (!diagnostic || (!targetElement?.closest('.meo-diagnostic') && diagnostic !== selectedDiagnosticRange())) {
-      return false;
-    }
-
-    return requestDiagnosticSuggestionsFor(diagnostic);
   };
 
   const isHistoryReplayUpdate = (update: ViewUpdate): boolean => {
@@ -2133,7 +2002,7 @@ export function createEditor({
           const target = event.target;
           const targetElement = targetElementFrom(target);
           if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
-            clearDiagnosticSuggestionState();
+            diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
             return false;
           }
 
@@ -2141,7 +2010,9 @@ export function createEditor({
             setTableInteractionActive(false);
           }
 
-          trackDiagnosticClick(event, view);
+          if (!dispatchDiagnosticSuggestionPointer('click', event)) {
+            diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
+          }
           trackFrontmatterBoundaryClick(event, view);
 
           if (targetElement && targetElement.closest(
@@ -2194,7 +2065,7 @@ export function createEditor({
           return false;
         },
         contextmenu(event, view) {
-          if (!requestDiagnosticSuggestionsFromPointer(event, view)) {
+          if (!dispatchDiagnosticSuggestionPointer('request', event)) {
             return false;
           }
           return false;
@@ -2351,8 +2222,10 @@ export function createEditor({
           onViewportChange?.();
         }
 
+        if (update.docChanged && !applyingExternal) {
+          diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
+        }
         if (update.docChanged) {
-          clearDiagnosticSuggestionState();
           if (!applyingExternal && !applyingRenumber && !isHistoryReplayUpdate(update)) {
             recentRenderedReplayPresentation = null;
             void editorHistoryRuntime?.dispatch({ type: 'localDocumentEdited' });
@@ -2395,6 +2268,35 @@ export function createEditor({
     state,
     parent,
     scrollTo: initialScrollTo
+  });
+  const diagnosticSuggestionApplication = createDiagnosticSuggestionApplication();
+  const diagnosticSuggestionAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
+    view,
+    resolveDiagnostic: (position, selectedRange) => (
+      diagnosticSuggestionApplication.resolveDiagnostic(position, selectedRange)
+    ),
+    postMessage: postDiagnosticSuggestionsMessage,
+    presentSuggestions(effect) {
+      onSelectionChange?.({
+        visible: true,
+        align: 'start',
+        anchorX: effect.anchor.x,
+        anchorY: effect.anchor.y,
+        anchorBottomY: effect.anchor.bottomY,
+        diagnosticSuggestions: [...effect.suggestions]
+      });
+    },
+    hideSuggestions() {
+      onSelectionChange?.({ visible: false });
+    }
+  });
+  const diagnosticSuggestionRuntime = createDiagnosticSuggestionRuntime({
+    application: diagnosticSuggestionApplication,
+    executor: diagnosticSuggestionAdapter
+  });
+  diagnosticSuggestionRuntime.dispatch({
+    type: 'diagnosticsChanged',
+    diagnostics: currentDiagnostics
   });
   tableColumnWidthAdapter.adapter.refresh();
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
@@ -2850,6 +2752,7 @@ export function createEditor({
         pendingLiveSearchRevealFrame = null;
       }
       setEditableLinkHoverCursor(view, false);
+      diagnosticSuggestionRuntime.dispose();
       editorHistoryRuntime?.dispose();
       editorHistoryRuntime = null;
       tableCommandRuntime.dispose();
@@ -2862,7 +2765,7 @@ export function createEditor({
     },
     setText(textValue) {
       gitBlameHover?.hide();
-      clearDiagnosticSuggestionState();
+      diagnosticSuggestionRuntime.dispatch({ type: 'externalDocumentPresented' });
       tableCommandRuntime.externalDocumentPresented();
       imagePresentationFactory.externalDocumentPresented();
       const currentText = view.state.doc.toString();
@@ -2909,7 +2812,7 @@ export function createEditor({
     },
     setMode(mode) {
       gitBlameHover?.hide();
-      clearDiagnosticSuggestionState();
+      diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
       commitActiveTableInput();
       const nextMode = mode === 'live' ? 'live' : 'source';
       if (nextMode === currentMode) {
@@ -3180,49 +3083,17 @@ export function createEditor({
     },
     setDiagnostics(diagnostics: EditorDiagnostic[]) {
       currentDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];
-      clearDiagnosticSuggestionState();
+      diagnosticSuggestionRuntime.dispatch({
+        type: 'diagnosticsChanged',
+        diagnostics: currentDiagnostics
+      });
       view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
     },
-    showDiagnosticSuggestions(requestId, payload) {
-      if (
-        !pendingDiagnosticSuggestionRequest ||
-        pendingDiagnosticSuggestionRequest.requestId !== requestId ||
-        pendingDiagnosticSuggestionRequest.from !== payload?.from ||
-        pendingDiagnosticSuggestionRequest.to !== payload?.to ||
-        !Array.isArray(payload?.suggestions)
-      ) {
-        return;
-      }
-
-      if (payload.suggestions.length === 0) {
-        pendingDiagnosticSuggestionRequest = null;
-        return;
-      }
-
-      const diagnostic = currentDiagnostics.find((item) => (
-        item.from === payload.from &&
-        item.to === payload.to &&
-        diagnosticKey(item) === pendingDiagnosticSuggestionRequest?.key
-      ));
-      if (!diagnostic) {
-        pendingDiagnosticSuggestionRequest = null;
-        return;
-      }
-
-      onSelectionChange?.({
-        visible: true,
-        from: payload.from,
-        to: payload.to,
-        align: 'start',
-        anchorX: pendingDiagnosticSuggestionRequest.anchorX,
-        anchorY: pendingDiagnosticSuggestionRequest.anchorY,
-        anchorBottomY: pendingDiagnosticSuggestionRequest.anchorBottomY,
-        diagnosticSuggestions: payload.suggestions.map((text) => ({
-          from: payload.from,
-          to: payload.to,
-          text
-        }))
-      });
+    acceptDiagnosticSuggestionsResult(response: DiagnosticSuggestionsResult) {
+      return diagnosticSuggestionAdapter.accept(response);
+    },
+    diagnosticSuggestionPresentationChanged() {
+      diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
     },
     applyDiagnosticSuggestion(from: number, to: number, insert: string) {
       const activeTableInput = getActiveTableInput();
@@ -3235,7 +3106,7 @@ export function createEditor({
       ) {
         const localFrom = tableCellSourceOffsetToEditorOffset(activeTableInput.value, from - tableSourceRange.from);
         const localTo = tableCellSourceOffsetToEditorOffset(activeTableInput.value, to - tableSourceRange.from);
-        clearDiagnosticSuggestionState();
+        diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
         updateActiveTableInput(
           activeTableInput,
           activeTableInput.value.slice(0, localFrom) + insert + activeTableInput.value.slice(localTo),
@@ -3247,7 +3118,6 @@ export function createEditor({
       const docLength = view.state.doc.length;
       const safeFrom = Math.max(0, Math.min(Math.floor(from), docLength));
       const safeTo = Math.max(safeFrom, Math.min(Math.floor(to), docLength));
-      clearDiagnosticSuggestionState();
       view.dispatch({
         changes: { from: safeFrom, to: safeTo, insert },
         selection: { anchor: safeFrom + insert.length }

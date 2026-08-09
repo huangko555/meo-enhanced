@@ -160,7 +160,7 @@ const candidate = {
       onApplyChanges: enqueueLocalText,
       onOpenLink: () => undefined,
       onSelectionChange: () => undefined,
-      onRequestDiagnosticSuggestions: () => '',
+      postDiagnosticSuggestionsMessage: () => undefined,
       onViewportChange: () => undefined,
       onRequestGitBlame: () => Promise.resolve({ kind: 'unavailable', reason: 'error' }),
       onOpenGitRevisionForLine: () => undefined,
