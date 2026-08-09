@@ -4,6 +4,9 @@
     "strictNullChecks": true,
     "noImplicitAny": true
   },
-  "files": ["src/helpers/images.ts"],
+  "files": [
+    "src/helpers/images.ts",
+    "src/themes/editorLightTheme.ts"
+  ],
   "include": []
 }

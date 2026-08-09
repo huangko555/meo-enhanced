@@ -4,12 +4,14 @@ import { themePresets, type ThemeSettings } from '../../../src/shared/themeDefau
 import type { EditorAppearance } from '../../../src/shared/editorAppearance';
 import type { RawVscodeTheme } from '../helpers/shikiHighlighter';
 
-const githubLightEditorTheme = themePresets.find((theme) => theme.id === 'github-light');
+const githubLightEditorTheme = (() => {
+  const theme = themePresets.find((preset) => preset.id === 'github-light');
+  if (!theme) {
+    throw new Error('GitHub Light editor theme is unavailable.');
+  }
+  return theme;
+})();
 const lightAccentBlue = '#0550ae';
-
-if (!githubLightEditorTheme) {
-  throw new Error('GitHub Light editor theme is unavailable.');
-}
 
 export const lightCssVariableOverrides = {
   '--vscode-editor-background': '#ffffff',
