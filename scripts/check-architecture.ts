@@ -256,7 +256,13 @@ for (const module of config.resourceOwnerFreeModules ?? []) {
     && (ts.isArrayLiteralExpression(node.arguments[0]) || ts.isObjectLiteralExpression(node.arguments[0]))
   );
   const containsMutableResource = (node: ts.Node): boolean => {
-    if (isFrozenLiteral(node)) return false;
+    if (isFrozenLiteral(node)) {
+      let nestedMutable = false;
+      ts.forEachChild(node.arguments[0], (child) => {
+        if (!nestedMutable && containsMutableResource(child)) nestedMutable = true;
+      });
+      return nestedMutable;
+    }
     if (ts.isArrayLiteralExpression(node) || ts.isObjectLiteralExpression(node) || ts.isNewExpression(node)) {
       return true;
     }
