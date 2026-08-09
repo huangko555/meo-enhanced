@@ -49,6 +49,17 @@ export type ImagePresentationApplication = {
   dispatch(input: ImagePresentationInput): readonly ImagePresentationEffect[];
 };
 
+export type ImagePresentationEffectExecution = {
+  readonly immediateCompletion?: ImagePresentationInput | null;
+  readonly completion?: Promise<ImagePresentationInput | null>;
+};
+
+/** Application-owned port implemented by deterministic and Editor adapters. */
+export type ImagePresentationEffectExecutor = {
+  execute(effect: ImagePresentationEffect): ImagePresentationEffectExecution;
+  dispose(): void;
+};
+
 /**
  * Owns correlation and failure ordering for one rendered image presentation.
  * Resolution, browser loading, DOM projection and viewport preservation remain
@@ -90,6 +101,11 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
         sourceKey = input.sourceKey;
         resolvedSrc = null;
         phase = 'resolving';
+        effects.push({
+          type: 'showFallback',
+          presentationId,
+          sourceKey: input.sourceKey
+        });
         effects.push({
           type: 'resolveSource',
           presentationId,

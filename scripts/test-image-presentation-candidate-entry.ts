@@ -1,61 +1,122 @@
+import { createImagePresentationApplication } from '../webview/src/application/imagePresentation';
+import { createImagePresentationRuntime } from '../webview/src/adapters/imagePresentationRuntime';
 import {
-  createImagePresentationApplication,
-  type ImagePresentationApplication,
-  type ImagePresentationEffect,
-  type ImagePresentationInput
-} from '../webview/src/application/imagePresentation';
+  createCodeMirrorDomImagePresentationAdapter,
+  createImagePresentationResourcePool,
+  loadBrowserImage
+} from '../webview/src/editor/imagePresentationAdapter';
 
-type CandidateHarness = {
-  create(root: HTMLElement): {
-    dispatch(input: ImagePresentationInput): readonly ImagePresentationEffect[];
-    state(): ReturnType<ImagePresentationApplication['getState']>;
-    snapshot(): { className: string; text: string; src: string | null };
-  };
-  counts(): { applications: number; legacyWidgets: number };
+type CandidateInstance = {
+  present(sourceKey: string, rawSrc: string): void;
+  externalDocumentPresented(): void;
+  whenIdle(): Promise<void>;
+  state(): ReturnType<ReturnType<typeof createImagePresentationApplication>['getState']>;
+  dispose(): void;
 };
 
-let applications = 0;
+type CandidateEnvironment = {
+  create(root: HTMLElement, contextKey: string, altText: string): CandidateInstance;
+  counts(): {
+    applications: number;
+    runtimes: number;
+    adapters: number;
+    resourcePools: number;
+    resolveCalls: number;
+    loadCalls: number;
+    preservedReplacements: number;
+    legacyWidgets: number;
+  };
+  dispose(): void;
+};
 
-const applyEffects = (root: HTMLElement, effects: readonly ImagePresentationEffect[]): void => {
-  for (const effect of effects) {
-    if (effect.type === 'showFallback') {
-      root.className = 'candidate-image fallback';
-      root.textContent = effect.sourceKey;
-      continue;
-    }
-    if (effect.type === 'showImage') {
-      const image = document.createElement('img');
-      image.alt = 'candidate image';
-      image.src = effect.resolvedSrc;
-      root.className = 'candidate-image ready';
-      root.replaceChildren(image);
-      continue;
-    }
-    if (effect.type === 'cancelPresentation') {
-      root.replaceChildren();
-      root.className = 'candidate-image cancelled';
-    }
-  }
+type CandidateHarness = {
+  createEnvironment(
+    resolveSource: (contextKey: string, rawSrc: string) => Promise<string | null>
+  ): CandidateEnvironment;
 };
 
 (globalThis as typeof globalThis & { ImagePresentationCandidate?: CandidateHarness })
   .ImagePresentationCandidate = {
-    create(root) {
-      applications += 1;
-      const application = createImagePresentationApplication();
-      return {
-        dispatch(input) {
-          const effects = application.dispatch(input);
-          applyEffects(root, effects);
-          return effects;
+    createEnvironment(resolveSource) {
+      let applications = 0;
+      let runtimes = 0;
+      let adapters = 0;
+      let resolveCalls = 0;
+      let loadCalls = 0;
+      let preservedReplacements = 0;
+      const instances = new Set<CandidateInstance>();
+      const resources = createImagePresentationResourcePool({
+        async resolveSource(contextKey, rawSrc) {
+          resolveCalls += 1;
+          return resolveSource(contextKey, rawSrc);
         },
-        state: () => application.getState(),
-        snapshot: () => ({
-          className: root.className,
-          text: root.textContent ?? '',
-          src: root.querySelector('img')?.getAttribute('src') ?? null
-        })
+        async loadImage(resolvedSrc) {
+          loadCalls += 1;
+          return loadBrowserImage(resolvedSrc);
+        }
+      });
+
+      return {
+        create(root, contextKey, altText) {
+          applications += 1;
+          adapters += 1;
+          runtimes += 1;
+          const application = createImagePresentationApplication();
+          const adapter = createCodeMirrorDomImagePresentationAdapter({
+            resources,
+            resourceContextKey: contextKey,
+            root,
+            altText,
+            preserveLayoutChange(apply) {
+              preservedReplacements += 1;
+              const active = root.ownerDocument.activeElement;
+              const selection = root.ownerDocument.getSelection()?.toString() ?? '';
+              const scrollTop = root.ownerDocument.scrollingElement?.scrollTop ?? 0;
+              apply();
+              if (active instanceof HTMLElement && active.isConnected) active.focus({ preventScroll: true });
+              if (root.ownerDocument.scrollingElement) {
+                root.ownerDocument.scrollingElement.scrollTop = scrollTop;
+              }
+              if (selection && root.ownerDocument.getSelection()?.toString() !== selection) {
+                throw new Error('image replacement changed the document selection');
+              }
+            }
+          });
+          const runtime = createImagePresentationRuntime({ application, executor: adapter });
+          let disposed = false;
+          const instance: CandidateInstance = {
+            present(sourceKey, rawSrc) {
+              runtime.dispatch({ type: 'present', sourceKey, rawSrc });
+            },
+            externalDocumentPresented() {
+              runtime.dispatch({ type: 'externalDocumentPresented' });
+            },
+            whenIdle: () => runtime.whenIdle(),
+            state: () => application.getState(),
+            dispose() {
+              if (disposed) return;
+              disposed = true;
+              runtime.dispose();
+              instances.delete(instance);
+            }
+          };
+          instances.add(instance);
+          return instance;
+        },
+        counts: () => ({
+          applications,
+          runtimes,
+          adapters,
+          resourcePools: 1,
+          resolveCalls,
+          loadCalls,
+          preservedReplacements,
+          legacyWidgets: 0
+        }),
+        dispose() {
+          for (const instance of [...instances]) instance.dispose();
+          resources.dispose();
+        }
       };
-    },
-    counts: () => ({ applications, legacyWidgets: 0 })
+    }
   };

@@ -10,13 +10,20 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-image-presentation-ca
 async function main(): Promise<void> {
   const productionSources = [
     fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'editor.ts'), 'utf8'),
+    fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'index.ts'), 'utf8'),
     fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'helpers', 'images.ts'), 'utf8')
   ].join('\n');
-  assert.equal(
-    productionSources.includes("application/imagePresentation"),
-    false,
-    'candidate image presentation application must remain disconnected from production'
-  );
+  for (const candidateName of [
+    'imagePresentationRuntime',
+    'imagePresentationAdapter',
+    'application/imagePresentation'
+  ]) {
+    assert.equal(
+      productionSources.includes(candidateName),
+      false,
+      `${candidateName} must remain disconnected from production`
+    );
+  }
 
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-image-presentation-candidate-entry.ts')],
@@ -30,72 +37,204 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
-    await page.setContent('<!doctype html><div id="image"></div>');
+    await page.setContent(`<!doctype html><style>.meo-md-image{display:block;height:40px}.meo-md-image img{width:80px;height:40px}</style>
+      <input id="focus" value="keep focus"><span id="selection">keep selection</span>
+      <div id="one" class="meo-md-image"></div>
+      <div id="two" class="meo-md-image"></div>
+      <div id="replace" class="meo-md-image"></div>
+      <div id="failure" class="meo-md-image"></div>
+      <div id="other-context" class="meo-md-image"></div>
+      <div style="height:2000px"></div>`);
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
       const harness = (window as any).ImagePresentationCandidate;
-      const candidate = harness.create(document.getElementById('image'));
-
-      candidate.dispatch({ type: 'present', sourceKey: 'old', rawSrc: './old.png' });
-      const oldId = candidate.state().presentationId;
-      candidate.dispatch({ type: 'present', sourceKey: 'new', rawSrc: './new.png' });
-      const newId = candidate.state().presentationId;
-      const staleResolve = candidate.dispatch({
-        type: 'sourceResolved', presentationId: oldId, resolvedSrc: 'data:image/svg+xml,old'
+      const svg = (label: string, color: string) => (
+        `data:image/svg+xml,${encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="${color}"/><text x="4" y="24">${label}</text></svg>`
+        )}`
+      );
+      const pending = new Map<string, Array<(value: string | null) => void>>();
+      const environment = harness.createEnvironment(async (contextKey: string, rawSrc: string) => {
+        if (rawSrc.includes('missing')) return null;
+        if (rawSrc.includes('broken-load')) return 'invalid-image://broken';
+        if (rawSrc.includes('slow')) {
+          return new Promise<string | null>((resolve) => {
+            const waiters = pending.get(rawSrc) ?? [];
+            waiters.push(resolve);
+            pending.set(rawSrc, waiters);
+          });
+        }
+        return svg(`${contextKey}:${rawSrc}`, '#6a8');
       });
-      candidate.dispatch({
-        type: 'sourceResolved', presentationId: newId, resolvedSrc: 'data:image/svg+xml,new'
-      });
-      const staleLoad = candidate.dispatch({ type: 'imageLoaded', presentationId: oldId });
-      candidate.dispatch({ type: 'imageLoaded', presentationId: newId });
-      const ready = candidate.snapshot();
 
-      candidate.dispatch({ type: 'present', sourceKey: 'missing', rawSrc: './missing.png' });
-      const missingId = candidate.state().presentationId;
-      candidate.dispatch({ type: 'sourceFailed', presentationId: missingId });
-      const fallback = candidate.snapshot();
-
-      candidate.dispatch({ type: 'present', sourceKey: 'external', rawSrc: './external.png' });
-      const externalId = candidate.state().presentationId;
-      candidate.dispatch({ type: 'externalDocumentPresented' });
-      const externalLate = candidate.dispatch({ type: 'imageLoaded', presentationId: externalId });
-
-      candidate.dispatch({ type: 'present', sourceKey: 'dispose', rawSrc: './dispose.png' });
-      const disposeId = candidate.state().presentationId;
-      candidate.dispatch({ type: 'dispose' });
-      const disposedLate = candidate.dispatch({ type: 'imageLoaded', presentationId: disposeId });
-
-      return {
-        counts: harness.counts(),
-        staleResolve: staleResolve.length,
-        staleLoad: staleLoad.length,
-        ready,
-        fallback,
-        externalLate: externalLate.length,
-        disposedLate: disposedLate.length,
-        disposedState: candidate.state(),
-        legacyDom: document.querySelectorAll('.meo-md-image').length
+      const first = environment.create(document.getElementById('one'), 'document-a', 'first');
+      const second = environment.create(document.getElementById('two'), 'document-a', 'second');
+      first.present('![shared](shared.png)', 'shared.png');
+      second.present('![shared](shared.png)', 'shared.png');
+      await Promise.all([first.whenIdle(), second.whenIdle()]);
+      const shared = {
+        first: document.querySelector('#one img')?.getAttribute('src') ?? '',
+        second: document.querySelector('#two img')?.getAttribute('src') ?? '',
+        counts: environment.counts()
       };
+
+      const replacement = environment.create(document.getElementById('replace'), 'document-a', 'replacement');
+      replacement.present('![old](slow-old.png)', 'slow-old.png');
+      const oldId = replacement.state().presentationId;
+      replacement.present('![new](new.png)', 'new.png');
+      const newId = replacement.state().presentationId;
+      await replacement.whenIdle();
+      const beforeOldCompletion = {
+        phase: replacement.state().phase,
+        src: document.querySelector('#replace img')?.getAttribute('src') ?? ''
+      };
+      pending.get('slow-old.png')?.forEach((resolve: (value: string) => void) => resolve(svg('old', '#a66')));
+      await Promise.resolve();
+      await Promise.resolve();
+      const afterOldCompletion = {
+        phase: replacement.state().phase,
+        id: replacement.state().presentationId,
+        src: document.querySelector('#replace img')?.getAttribute('src') ?? ''
+      };
+
+      const failure = environment.create(document.getElementById('failure'), 'document-a', 'failure');
+      failure.present('![missing](missing.png)', 'missing.png');
+      await failure.whenIdle();
+      failure.present('![broken](broken-load.png)', 'broken-load.png');
+      await failure.whenIdle();
+
+      const otherContext = environment.create(
+        document.getElementById('other-context'),
+        'document-b',
+        'other context'
+      );
+      otherContext.present('![shared](shared.png)', 'shared.png');
+      await otherContext.whenIdle();
+
+      const focus = document.getElementById('focus') as HTMLInputElement;
+      focus.focus();
+      window.scrollTo(0, 180);
+      const activeBefore = document.activeElement?.id;
+      const scrollBefore = document.scrollingElement?.scrollTop ?? 0;
+      replacement.present('![viewport](viewport.png)', 'viewport.png');
+      await replacement.whenIdle();
+      const activeAfter = document.activeElement?.id;
+      const scrollAfter = document.scrollingElement?.scrollTop ?? 0;
+      const selectionNode = document.getElementById('selection')?.firstChild;
+      if (!selectionNode) throw new Error('selection fixture missing');
+      const range = document.createRange();
+      range.selectNodeContents(selectionNode);
+      const documentSelection = document.getSelection();
+      documentSelection?.removeAllRanges();
+      documentSelection?.addRange(range);
+      const selectionBefore = documentSelection?.toString() ?? '';
+      const sameSourceCountsBefore = environment.counts();
+      const sameSourceIdBefore = replacement.state().presentationId;
+      replacement.present('![viewport](viewport.png)', 'viewport.png');
+      const sameSourceIdAfter = replacement.state().presentationId;
+      await replacement.whenIdle();
+      const sameSourceCountsAfter = environment.counts();
+      const selectionAfter = document.getSelection()?.toString() ?? '';
+
+      const external = environment.create(document.createElement('div'), 'document-a', 'external');
+      external.present('![external](slow-external.png)', 'slow-external.png');
+      const externalId = external.state().presentationId;
+      external.externalDocumentPresented();
+      pending.get('slow-external.png')?.forEach((resolve: (value: string) => void) => resolve(svg('external', '#66a')));
+      await external.whenIdle();
+
+      const sharedSlowRootA = document.createElement('div');
+      const sharedSlowRootB = document.createElement('div');
+      document.body.append(sharedSlowRootA, sharedSlowRootB);
+      const sharedSlowA = environment.create(sharedSlowRootA, 'document-a', 'slow-a');
+      const sharedSlowB = environment.create(sharedSlowRootB, 'document-a', 'slow-b');
+      sharedSlowA.present('![slow](slow-shared.png)', 'slow-shared.png');
+      sharedSlowB.present('![slow](slow-shared.png)', 'slow-shared.png');
+      sharedSlowA.dispose();
+      pending.get('slow-shared.png')?.forEach((resolve: (value: string) => void) => resolve(svg('shared', '#886')));
+      await sharedSlowB.whenIdle();
+      const survivingShared = sharedSlowRootB.querySelector('img')?.getAttribute('src') ?? '';
+
+      const rebuiltRoot = document.createElement('div');
+      rebuiltRoot.hidden = true;
+      document.body.appendChild(rebuiltRoot);
+      const rebuilt = environment.create(rebuiltRoot, 'document-a', 'rebuilt');
+      rebuilt.present('![shared](shared.png)', 'shared.png');
+      await rebuilt.whenIdle();
+      rebuiltRoot.hidden = false;
+      const rebuiltShared = rebuiltRoot.querySelector('img')?.getAttribute('src') ?? '';
+
+      const counts = environment.counts();
+      const output = {
+        shared,
+        oldId,
+        newId,
+        beforeOldCompletion,
+        afterOldCompletion,
+        failure: {
+          phase: failure.state().phase,
+          text: document.getElementById('failure')?.textContent ?? ''
+        },
+        otherContext: document.querySelector('#other-context img')?.getAttribute('src') ?? '',
+        activeBefore,
+        activeAfter,
+        scrollBefore,
+        scrollAfter,
+        selectionBefore,
+        selectionAfter,
+        sameSource: {
+          idBefore: sameSourceIdBefore,
+          idAfter: sameSourceIdAfter,
+          resolveDelta: sameSourceCountsAfter.resolveCalls - sameSourceCountsBefore.resolveCalls,
+          loadDelta: sameSourceCountsAfter.loadCalls - sameSourceCountsBefore.loadCalls
+        },
+        external: { id: externalId, state: external.state() },
+        survivingShared,
+        rebuiltShared,
+        counts,
+        legacyDom: document.querySelectorAll('.meo-mermaid-block, .meo-latex-math-block').length
+      };
+      environment.dispose();
+      return output;
     });
 
-    assert.deepEqual(result.counts, { applications: 1, legacyWidgets: 0 });
+    assert.equal(result.shared.first, result.shared.second);
+    assert.equal(result.shared.counts.resolveCalls, 1, 'same source/context did not share resolution');
+    assert.equal(result.shared.counts.loadCalls, 1, 'same source/context did not share browser load');
+    assert.notEqual(result.oldId, result.newId);
+    assert.equal(result.beforeOldCompletion.phase, 'ready');
+    assert.equal(result.afterOldCompletion.phase, 'ready');
+    assert.equal(result.afterOldCompletion.id, result.newId);
+    assert.equal(result.afterOldCompletion.src, result.beforeOldCompletion.src);
+    assert.deepEqual(result.failure, { phase: 'fallback', text: '![broken](broken-load.png)' });
+    assert.notEqual(result.otherContext, '');
+    assert.equal(result.activeBefore, 'focus');
+    assert.equal(result.activeAfter, 'focus');
+    assert.equal(result.scrollAfter, result.scrollBefore);
+    assert.equal(result.selectionBefore, 'keep selection');
+    assert.equal(result.selectionAfter, result.selectionBefore);
+    assert.notEqual(result.sameSource.idBefore, result.sameSource.idAfter);
+    assert.deepEqual(
+      { resolveDelta: result.sameSource.resolveDelta, loadDelta: result.sameSource.loadDelta },
+      { resolveDelta: 0, loadDelta: 0 },
+      'same-source restart should advance presentation without repeating shared resource work'
+    );
+    assert.deepEqual(result.external.state, { phase: 'idle', presentationId: null, sourceKey: null });
+    assert.notEqual(result.survivingShared, '', 'disposing one subscriber cancelled the shared resource');
+    assert.notEqual(result.rebuiltShared, '', 'hidden Widget rebuild did not restore the cached image');
+    assert.deepEqual(
+      {
+        applications: result.counts.applications,
+        runtimes: result.counts.runtimes,
+        adapters: result.counts.adapters,
+        resourcePools: result.counts.resourcePools,
+        legacyWidgets: result.counts.legacyWidgets
+      },
+      { applications: 9, runtimes: 9, adapters: 9, resourcePools: 1, legacyWidgets: 0 }
+    );
+    assert.ok(result.counts.preservedReplacements >= 6);
     assert.equal(result.legacyDom, 0);
-    assert.equal(result.staleResolve, 0);
-    assert.equal(result.staleLoad, 0);
-    assert.deepEqual(result.ready, {
-      className: 'candidate-image ready',
-      text: '',
-      src: 'data:image/svg+xml,new'
-    });
-    assert.deepEqual(result.fallback, {
-      className: 'candidate-image fallback',
-      text: 'missing',
-      src: null
-    });
-    assert.equal(result.externalLate, 0);
-    assert.equal(result.disposedLate, 0);
-    assert.deepEqual(result.disposedState, { phase: 'disposed', presentationId: null, sourceKey: null });
-    console.log('image presentation candidate Chromium checks passed');
+    console.log('image presentation Adapter/Runtime Chromium candidate passed');
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

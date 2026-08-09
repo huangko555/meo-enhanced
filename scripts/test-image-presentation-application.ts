@@ -8,7 +8,7 @@ const types = (effects: readonly ImagePresentationEffect[]) => effects.map((effe
 
 const successful = createImagePresentationApplication();
 const requested = successful.dispatch({ type: 'present', sourceKey: 'image-a', rawSrc: './a.png' });
-assert.deepEqual(types(requested), ['resolveSource']);
+assert.deepEqual(types(requested), ['showFallback', 'resolveSource']);
 const firstId = successful.getState().presentationId;
 assert.ok(firstId);
 assert.deepEqual(
@@ -52,7 +52,7 @@ assert.ok(oldId);
 const replacementEffects = replaced.dispatch({ type: 'present', sourceKey: 'new', rawSrc: './new.png' });
 const newId = replaced.getState().presentationId;
 assert.ok(newId && newId !== oldId);
-assert.deepEqual(types(replacementEffects), ['cancelPresentation', 'resolveSource']);
+assert.deepEqual(types(replacementEffects), ['cancelPresentation', 'showFallback', 'resolveSource']);
 assert.deepEqual(replaced.dispatch({ type: 'sourceResolved', presentationId: oldId, resolvedSrc: 'resolved:old' }), []);
 replaced.dispatch({ type: 'sourceResolved', presentationId: newId, resolvedSrc: 'resolved:new' });
 assert.deepEqual(replaced.dispatch({ type: 'imageLoaded', presentationId: oldId }), []);
