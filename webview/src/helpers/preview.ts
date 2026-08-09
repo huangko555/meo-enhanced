@@ -517,7 +517,7 @@ export function createPreviewController({
     return { start, end: Number.isFinite(parsedEnd) ? Math.max(start, parsedEnd) : start };
   };
   const findSourceElement = (line: number): { element: HTMLElement; start: number; end: number } | null => {
-    let candidate: HTMLElement | null = null;
+    let candidate: { element: HTMLElement; start: number; end: number } | null = null;
     for (const element of getSourceElements()) {
       const range = getSourceRange(element);
       if (!range) {
@@ -527,20 +527,14 @@ export function createPreviewController({
         return { element, ...range };
       }
       if (range.start > line) {
-        const candidateRange = candidate ? getSourceRange(candidate) : null;
-        const fallback = candidateRange && line - candidateRange.end <= range.start - line
-          ? candidate
-          : element;
-        const fallbackRange = getSourceRange(fallback)!;
-        return { element: fallback, ...fallbackRange };
+        if (candidate && line - candidate.end <= range.start - line) {
+          return candidate;
+        }
+        return { element, ...range };
       }
-      candidate = element;
+      candidate = { element, ...range };
     }
-    if (!candidate) {
-      return null;
-    }
-    const range = getSourceRange(candidate)!;
-    return { element: candidate, ...range };
+    return candidate;
   };
   const restoreTopLine = (line: number): void => {
     const source = findSourceElement(line);

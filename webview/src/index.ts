@@ -391,7 +391,10 @@ const syncGitDiffLineHighlights = () => {
   );
 };
 
-const setLineNumbersVisible = (visible, { post = true } = {}) => {
+type PostUpdateOptions = { post?: boolean };
+type PersistedPostUpdateOptions = PostUpdateOptions & { persist?: boolean };
+
+const setLineNumbersVisible = (visible: boolean, { post = true }: PostUpdateOptions = {}) => {
   const nextVisible = visible !== false;
   const changed = nextVisible !== lineNumbersVisible;
   if (changed) {
@@ -404,7 +407,7 @@ const setLineNumbersVisible = (visible, { post = true } = {}) => {
   }
 };
 
-const setGitChangesGutterVisible = (visible, { post = true } = {}) => {
+const setGitChangesGutterVisible = (visible: boolean, { post = true }: PostUpdateOptions = {}) => {
   const nextVisible = visible !== false;
   const changed = nextVisible !== gitChangesGutterVisible;
   if (changed) {
@@ -418,7 +421,7 @@ const setGitChangesGutterVisible = (visible, { post = true } = {}) => {
   }
 };
 
-const setSpellCheckEnabled = (enabled, { post = true } = {}) => {
+const setSpellCheckEnabled = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
   const nextEnabled = enabled !== false;
   const changed = nextEnabled !== spellCheckEnabled;
   if (changed) {
@@ -430,7 +433,7 @@ const setSpellCheckEnabled = (enabled, { post = true } = {}) => {
   }
 };
 
-const setGitBlameEnabled = (enabled, { post = true } = {}) => {
+const setGitBlameEnabled = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
   const nextEnabled = enabled === true;
   const changed = nextEnabled !== gitBlameEnabled;
   gitBlameEnabled = nextEnabled;
@@ -444,7 +447,10 @@ const setGitBlameEnabled = (enabled, { post = true } = {}) => {
   }
 };
 
-const setContentMaxWidthEnabled = (enabled, { post = true, persist = true } = {}) => {
+const setContentMaxWidthEnabled = (
+  enabled: boolean,
+  { post = true, persist = true }: PersistedPostUpdateOptions = {}
+) => {
   const nextEnabled = enabled === true;
   const changed = nextEnabled !== contentMaxWidthEnabled;
   if (changed) {
@@ -465,7 +471,7 @@ const setContentMaxWidthEnabled = (enabled, { post = true, persist = true } = {}
   }
 };
 
-const setLongCodeBlockFoldingEnabled = (enabled, { post = true } = {}) => {
+const setLongCodeBlockFoldingEnabled = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
   const nextEnabled = enabled !== false;
   const changed = nextEnabled !== longCodeBlockFoldingEnabled;
   longCodeBlockFoldingEnabled = nextEnabled;
@@ -476,7 +482,7 @@ const setLongCodeBlockFoldingEnabled = (enabled, { post = true } = {}) => {
   }
 };
 
-const setOutlineVisible = (visible, { post = true } = {}) => {
+const setOutlineVisible = (visible: boolean, { post = true }: PostUpdateOptions = {}) => {
   const nextVisible = visible === true;
   const changed = nextVisible !== outlineController.isVisible();
   outlineController.setVisible(nextVisible);
@@ -485,7 +491,7 @@ const setOutlineVisible = (visible, { post = true } = {}) => {
   }
 };
 
-const setVimModeEnabled = (enabled) => {
+const setVimModeEnabled = (enabled: boolean) => {
   const nextEnabled = enabled === true;
   if (nextEnabled === vimModeEnabled) {
     return;

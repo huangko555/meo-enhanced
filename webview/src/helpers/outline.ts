@@ -1,4 +1,4 @@
-import { createElement, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, PanelLeft, PanelRight, Pin, PinOff, X } from 'lucide';
+import { createElement, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, PanelLeft, PanelRight, Pin, PinOff, X, type IconNode } from 'lucide';
 import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from '../../../src/shared/outlineWidth';
 import type { HeadingInlineSegment } from './markdownSyntax';
 
@@ -128,7 +128,7 @@ export function findVisibleHeadingIndexes(
   });
 }
 
-function iconButton(icon, action: string, title: string): HTMLButtonElement {
+function iconButton(icon: IconNode, action: string, title: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'outline-header-button';
