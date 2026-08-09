@@ -174,6 +174,7 @@ async function withPreparedExportPage<T>(
   const tempHtmlPath = path.join(tempDir, 'render.html');
 
   let browser: any = null;
+  let operationFailed = false;
   try {
     await fs.writeFile(tempHtmlPath, options.htmlDocument, 'utf8');
     const puppeteer = await loadBundledPuppeteerRuntime(options.puppeteerRuntimeModulePath);
@@ -213,6 +214,10 @@ async function withPreparedExportPage<T>(
     await page.waitForFunction(() => (window as any).__MEO_EXPORT_READY__ === true, {
       timeout: timeoutMs
     });
+    const renderError = await page.evaluate(() => (window as any).__MEO_EXPORT_ERROR__);
+    if (renderError) {
+      throw new Error(`Export render failed: ${String(renderError)}`);
+    }
     await page.evaluate(async () => {
       const refitMath = (window as any).__MEO_EXPORT_REFIT_MATH__;
       if (typeof refitMath === 'function') {
@@ -224,11 +229,18 @@ async function withPreparedExportPage<T>(
     }
 
     return await action(page);
+  } catch (error) {
+    operationFailed = true;
+    throw error;
   } finally {
+    const cleanupErrors: unknown[] = [];
     if (browser) {
-      await browser.close().catch(() => undefined);
+      await browser.close().catch((error: unknown) => cleanupErrors.push(error));
     }
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    await fs.rm(tempDir, { recursive: true, force: true }).catch((error) => cleanupErrors.push(error));
+    if (!operationFailed && cleanupErrors.length > 0) {
+      throw cleanupErrors[0];
+    }
   }
 }
 
