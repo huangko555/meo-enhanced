@@ -68,16 +68,18 @@ async function main(): Promise<void> {
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
     const result = await page.evaluate(async () => {
-      const calls: string[] = [];
+      const calls: Array<{ source: string; identity: string }> = [];
       let active = 0;
       let maxActive = 0;
       let themeInitializations = 0;
+      let activeIdentity = '';
       (window as any).mermaid = {
-        initialize() {
+        initialize(config: unknown) {
           themeInitializations += 1;
+          activeIdentity = JSON.stringify(config);
         },
         async render(_id: string, source: string) {
-          calls.push(source);
+          calls.push({ source, identity: activeIdentity });
           active += 1;
           maxActive = Math.max(maxActive, active);
           try {
@@ -121,9 +123,22 @@ async function main(): Promise<void> {
       await settle(20);
       const shared = {
         renderCalls: calls.length,
-        sources: [...calls],
+        calls: [...calls],
         diagrams: document.querySelectorAll('.meo-mermaid-svg-wrapper').length,
         maxActive
+      };
+
+      const beforeRawIsolationCalls = calls.length;
+      editor.setText([
+        '```mermaid', '$$', 'a+b', '$$', '```', '',
+        '```mermaid', '$$', ' a+b ', '$$', '```'
+      ].join('\n'));
+      await settle();
+      const rawIsolationCalls = calls.slice(beforeRawIsolationCalls);
+      const rawIsolation = {
+        renderCalls: rawIsolationCalls.length,
+        normalizedSources: rawIsolationCalls.map((call) => call.source),
+        identities: rawIsolationCalls.map((call) => call.identity)
       };
 
       presentText('```mermaid\nINVALID\n```');
@@ -195,6 +210,7 @@ async function main(): Promise<void> {
       await settle(30);
       return {
         shared,
+        rawIsolation,
         invalid,
         recovered,
         cachedError,
@@ -209,11 +225,14 @@ async function main(): Promise<void> {
     });
 
     assert.deepEqual(result.shared, {
-      renderCalls: 2,
-      sources: ['graph TD\nA-->B', 'graph TD\nA-->B'],
+      renderCalls: 1,
+      calls: [{ source: 'graph TD\nA-->B', identity: result.shared.calls[0]?.identity }],
       diagrams: 2,
       maxActive: 1
     });
+    assert.equal(result.rawIsolation.renderCalls, 2);
+    assert.equal(result.rawIsolation.normalizedSources[0], result.rawIsolation.normalizedSources[1]);
+    assert.equal(result.rawIsolation.identities[0], result.rawIsolation.identities[1]);
     assert.equal(result.invalid.errors, 1);
     assert.equal(result.invalid.fallback, 'INVALID');
     assert.equal(result.recovered.marker, 'recovered', JSON.stringify(result.recovered));

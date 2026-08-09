@@ -222,11 +222,9 @@ function isMermaidDarkTheme(background: string): boolean {
 }
 
 function getMermaidThemeConfig() {
+  const rootStyles = getComputedStyle(document.documentElement);
   const bodyStyles = getComputedStyle(document.body);
-  const editor = document.querySelector<HTMLElement>('.cm-editor');
-  const fontFamily = editor
-    ? getComputedStyle(editor).fontFamily
-    : bodyStyles.fontFamily;
+  const fontFamily = rootStyles.getPropertyValue('--meo-font-live').trim() || bodyStyles.fontFamily;
   const background = getThemeCssColor('--meo-code-background', bodyStyles.backgroundColor || '#ffffff');
   const darkMode = isMermaidDarkTheme(background);
   const nodeBackground = darkMode
