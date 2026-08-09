@@ -15,6 +15,7 @@ assets/
 
 # Local-only workspace material; never commit.
 /.local/
+/.codegraph/
 
 .claude/
 AGENTS.md
