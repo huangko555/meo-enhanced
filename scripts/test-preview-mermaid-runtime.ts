@@ -5,9 +5,37 @@ import { launchTestBrowser } from './browser-test-helpers';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
 import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { createPreviewMermaidRenderer } from '../webview/src/helpers/previewMermaid';
+import type { MermaidDiagramRenderResources } from '../webview/src/application/mermaidDiagramRenderResources';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runtime-'));
+
+let releaseFirstPreview!: () => void;
+const firstPreviewGate = new Promise<void>((resolve) => { releaseFirstPreview = resolve; });
+let previewResourceRequests = 0;
+const previewResources = {
+  runExclusive: async () => {
+    previewResourceRequests += 1;
+    if (previewResourceRequests === 1) await firstPreviewGate;
+  }
+} as MermaidDiagramRenderResources;
+const previewRenderer = createPreviewMermaidRenderer(previewResources);
+const emptyFrame = {
+  defaultView: null,
+  querySelectorAll: () => []
+} as unknown as Document;
+const previewRequests = [
+  previewRenderer.render(emptyFrame, 'dark'),
+  previewRenderer.render(emptyFrame, 'dark'),
+  previewRenderer.render(emptyFrame, 'dark')
+];
+if (previewResourceRequests !== 3) {
+  releaseFirstPreview();
+  throw new Error('Preview Mermaid requests must enter the shared Pool without a shadow queue');
+}
+releaseFirstPreview();
+await Promise.all(previewRequests);
 const browser = await launchTestBrowser();
 
 try {

@@ -19,23 +19,18 @@ type PreviewMermaidPalette = {
 };
 
 export function createPreviewMermaidRenderer(resources: MermaidDiagramRenderResources) {
-  let renderQueue: Promise<void> = Promise.resolve();
-
   const render = (
     frameDocument: Document,
     appearance: PreviewAppearance,
     onDiagramRendered?: () => void
   ): Promise<void> => {
-    renderQueue = renderQueue
-      .catch(() => undefined)
-      .then(() => resources.runExclusive(async () => {
-        try {
-          await renderMermaidBlocks(frameDocument, appearance, onDiagramRendered);
-        } finally {
-          await restoreMermaidEditorTheme();
-        }
-      }, 'high'));
-    return renderQueue;
+    return resources.runExclusive(async () => {
+      try {
+        await renderMermaidBlocks(frameDocument, appearance, onDiagramRendered);
+      } finally {
+        await restoreMermaidEditorTheme();
+      }
+    }, 'high');
   };
 
   return { render };

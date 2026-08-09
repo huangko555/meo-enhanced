@@ -21,6 +21,8 @@ type OperationJob<T = unknown> = {
   readonly external: boolean;
 };
 
+class MermaidRenderAdmissionError extends Error {}
+
 const DEFAULT_CACHE_LIMIT = 100;
 const DEFAULT_MAX_QUEUED_OPERATIONS = 512;
 const DEFAULT_MAX_THEME_LISTENERS = 512;
@@ -82,9 +84,9 @@ export function createMermaidDiagramRenderPool(
     priority: MermaidRenderPriority,
     external: boolean
   ): Promise<T> => {
-    if (disposed) return Promise.reject(new Error('Mermaid render Pool is disposed'));
+    if (disposed) return Promise.reject(new MermaidRenderAdmissionError('Mermaid render Pool is disposed'));
     if (highPriority.length + normalPriority.length >= maxQueuedOperations) {
-      return Promise.reject(new Error('Mermaid render queue capacity exceeded'));
+      return Promise.reject(new MermaidRenderAdmissionError('Mermaid render queue capacity exceeded'));
     }
     return new Promise<T>((resolve, reject) => {
       const job: OperationJob<T> = { operation, resolve, reject, external };
@@ -114,14 +116,19 @@ export function createMermaidDiagramRenderPool(
       return options.render(`mermaid-${++renderSequence}`, request.normalizedSource);
     }, request.priority ?? 'normal', false)
       .then(
-        (svg): MermaidDiagramRenderResult => ({ ok: true, svg }),
-        (error): MermaidDiagramRenderResult => ({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
+        (svg) => ({ result: { ok: true, svg } as MermaidDiagramRenderResult, cacheable: true }),
+        (error) => ({
+          result: {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error)
+          } as MermaidDiagramRenderResult,
+          cacheable: !(error instanceof MermaidRenderAdmissionError)
         })
       )
-      .then((result) => {
-        if (!disposed && generation === resourceGeneration) remember(cache, key, result, cacheLimit);
+      .then(({ result, cacheable }) => {
+        if (cacheable && !disposed && generation === resourceGeneration) {
+          remember(cache, key, result, cacheLimit);
+        }
         return result;
       });
     let operation!: Promise<MermaidDiagramRenderResult>;

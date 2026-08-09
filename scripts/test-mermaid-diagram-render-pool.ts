@@ -98,9 +98,13 @@ errorPool.dispose();
 
 let releaseCapacity!: () => void;
 const capacityGate = new Promise<void>((resolve) => { releaseCapacity = resolve; });
+let capacityRenderCount = 0;
 const capacityPool = createMermaidDiagramRenderPool({
   initialize() {},
-  async render() { return '<svg></svg>'; },
+  async render() {
+    capacityRenderCount += 1;
+    return '<svg></svg>';
+  },
   maxQueuedOperations: 1
 });
 const capacityActive = capacityPool.runExclusive(() => capacityGate);
@@ -109,8 +113,20 @@ await assert.rejects(
   capacityPool.runExclusive(async () => undefined),
   /queue capacity exceeded/
 );
+const capacityRequest = {
+  rawSource: 'retry-after-capacity',
+  normalizedSource: 'retry-after-capacity',
+  themeKey: 'light',
+  configKey: 'default'
+} as const;
+assert.deepEqual(await capacityPool.render(capacityRequest), {
+  ok: false,
+  error: 'Mermaid render queue capacity exceeded'
+});
 releaseCapacity();
 await Promise.all([capacityActive, capacityQueued]);
+assert.deepEqual(await capacityPool.render(capacityRequest), { ok: true, svg: '<svg></svg>' });
+assert.equal(capacityRenderCount, 1, 'capacity admission failure must not enter the result cache');
 capacityPool.dispose();
 
 let releaseOldTheme!: () => void;
