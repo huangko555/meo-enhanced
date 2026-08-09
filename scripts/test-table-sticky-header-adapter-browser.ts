@@ -211,14 +211,14 @@ async function main(): Promise<void> {
       scheduler.flush();
       const headerAfterRebuiltMutation = elements(1).stickyHeaderRow.textContent;
 
-      const styleBeforeDispose = elements(1).stickyTable.style.width;
+      const styleBeforeUnmount = elements(1).stickyTable.style.width;
       adapter1.unmount();
       elements(1).table.style.width = '440px';
       elements(1).scroller.dispatchEvent(new Event('scroll'));
       window.dispatchEvent(new Event('resize'));
       scheduler.flush();
-      const styleAfterDispose = elements(1).stickyTable.style.width;
-      const hiddenAfterDispose = !elements(1).stickyChrome.classList.contains('is-visible');
+      const styleAfterUnmount = elements(1).stickyTable.style.width;
+      const hiddenAfterUnmount = !elements(1).stickyChrome.classList.contains('is-visible');
 
       other.request();
       adapter1.dispose();
@@ -248,9 +248,9 @@ async function main(): Promise<void> {
         visibleAfterRebuild,
         headerAfterDetachedMutation,
         headerAfterRebuiltMutation,
-        styleBeforeDispose,
-        styleAfterDispose,
-        hiddenAfterDispose,
+        styleBeforeUnmount,
+        styleAfterUnmount,
+        hiddenAfterUnmount,
         otherSurvivedDispose,
         registrationsAfterFirstDispose,
         sourceUnchanged: elements(1).table.textContent?.replace('Rebuilt header', 'Header 1') === sourceText,
@@ -280,8 +280,8 @@ async function main(): Promise<void> {
     assert.equal(result.visibleAfterRebuild, true);
     assert.doesNotMatch(result.headerAfterDetachedMutation ?? '', /Detached header/);
     assert.match(result.headerAfterRebuiltMutation ?? '', /Rebuilt header/);
-    assert.equal(result.styleAfterDispose, result.styleBeforeDispose);
-    assert.equal(result.hiddenAfterDispose, true);
+    assert.equal(result.styleAfterUnmount, result.styleBeforeUnmount);
+    assert.equal(result.hiddenAfterUnmount, true);
     assert.equal(result.otherSurvivedDispose, true);
     assert.equal(result.registrationsAfterFirstDispose, 2, 'disposing sticky removes only its own registration');
     assert.equal(result.sourceUnchanged, true);
