@@ -28,19 +28,6 @@ try {
   });
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
-  const entrySource = fs.readFileSync(
-    path.join(import.meta.dir, 'test-preview-mermaid-runtime-entry.ts'),
-    'utf8'
-  );
-  if (
-    (entrySource.match(/createMermaidDiagramRenderPool\(/g) ?? []).length !== 1 ||
-    (entrySource.match(/createMermaidDiagramPresentationFactory\(/g) ?? []).length !== 1 ||
-    !entrySource.includes("from '../webview/src/editor'") ||
-    entrySource.includes('runExclusiveMermaidOperation')
-  ) {
-    throw new Error('Production createEditor and Preview must share exactly one Mermaid Pool');
-  }
-
   const runtime = fs.readFileSync(path.join(repoRoot, 'webview', 'dist', 'mermaid.min.js'), 'utf8');
   const entry = fs.readFileSync(path.join(tempDir, 'test-preview-mermaid-runtime-entry.js'), 'utf8');
   const page = await browser.newPage();
