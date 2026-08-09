@@ -28,19 +28,19 @@ const MERMAID_LABEL_WRAP_THEME_CSS =
 const MERMAID_DIAGRAM_START_RE =
   /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph|quadrantChart|requirementDiagram|c4Context|xychart(?:-beta)?|sankey-beta|block-beta|packet-beta|radar-beta)\b/i;
 const MERMAID_DISPLAY_MATH_RE = /^\$\$[\s\S]*\$\$$/;
-const DISPLAY_MATH_VIEWBOX_PADDING = {
+const DISPLAY_MATH_VIEWBOX_PADDING = Object.freeze({
   left: 22,
   top: 20,
   right: 12,
   bottom: 12
-} as const;
-const DISPLAY_MATH_TRIM_RETRY_DELAYS_MS = [80, 220];
-const DISPLAY_MATH_LABEL_SELECTORS = [
+});
+const DISPLAY_MATH_TRIM_RETRY_DELAYS_MS = Object.freeze([80, 220]);
+const DISPLAY_MATH_LABEL_SELECTORS = Object.freeze([
   '.nodeLabel .katex-mathml math',
   '.nodeLabel .katex-html',
   '.nodeLabel .katex-display',
   '.nodeLabel'
-];
+]);
 const DISPLAY_MATH_LABEL_SELECTOR = DISPLAY_MATH_LABEL_SELECTORS.join(', ');
 const MERMAID_DISPLAY_MATH_THEME_CSS =
   '.nodeLabel > div{line-height:1 !important;margin:0 !important;padding:0 !important;}' +

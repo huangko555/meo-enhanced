@@ -21,9 +21,19 @@ function collectLocalModules(entry: string): Set<string> {
       true,
       absolute.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
     );
-    for (const statement of source.statements) {
-      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-      const specifier = statement.moduleSpecifier.text;
+    const specifiers: string[] = [];
+    const collectSpecifiers = (node: ts.Node): void => {
+      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+        && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        specifiers.push(node.moduleSpecifier.text);
+      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+        && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
+        specifiers.push(node.arguments[0].text);
+      }
+      ts.forEachChild(node, collectSpecifiers);
+    };
+    collectSpecifiers(source);
+    for (const specifier of specifiers) {
       if (!specifier.startsWith('.')) continue;
       const base = path.resolve(path.dirname(absolute), specifier);
       const target = [`${base}.ts`, `${base}.tsx`, path.join(base, 'index.ts')]

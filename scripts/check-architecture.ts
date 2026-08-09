@@ -25,10 +25,7 @@ const config = JSON.parse(configText) as {
     constructors: Array<{ module: string; export: string }>;
     disposeOrder: string[];
   }>;
-  resourceOwnerFreeModules?: Array<{
-    module: string;
-    allowedTopLevelCollections: string[];
-  }>;
+  resourceOwnerFreeModules?: string[];
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
 };
 
@@ -245,11 +242,34 @@ for (const contract of config.bootstrapLifecycleContracts ?? []) {
   }
 }
 
-for (const contract of config.resourceOwnerFreeModules ?? []) {
-  const source = sources.find((candidate) => candidate.path === contract.module);
+for (const module of config.resourceOwnerFreeModules ?? []) {
+  const source = sources.find((candidate) => candidate.path === module);
   if (!source) continue;
-  const allowed = new Set(contract.allowedTopLevelCollections);
   const file = sourceFileFor(source);
+  const isFrozenLiteral = (node: ts.Node): boolean => (
+    ts.isCallExpression(node)
+    && ts.isPropertyAccessExpression(node.expression)
+    && ts.isIdentifier(node.expression.expression)
+    && node.expression.expression.text === 'Object'
+    && node.expression.name.text === 'freeze'
+    && node.arguments.length === 1
+    && (ts.isArrayLiteralExpression(node.arguments[0]) || ts.isObjectLiteralExpression(node.arguments[0]))
+  );
+  const containsMutableResource = (node: ts.Node): boolean => {
+    if (isFrozenLiteral(node)) return false;
+    if (ts.isArrayLiteralExpression(node) || ts.isObjectLiteralExpression(node) || ts.isNewExpression(node)) {
+      return true;
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
+      && /^(?:create|make|open).*(?:pool|queue|cache|resource|registry)$/i.test(node.expression.text)) {
+      return true;
+    }
+    let mutable = false;
+    ts.forEachChild(node, (child) => {
+      if (!mutable && containsMutableResource(child)) mutable = true;
+    });
+    return mutable;
+  };
   for (const statement of file.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     const mutableDeclaration = (statement.declarationList.flags & ts.NodeFlags.Const) === 0;
@@ -257,13 +277,8 @@ for (const contract of config.resourceOwnerFreeModules ?? []) {
       if (!ts.isIdentifier(declaration.name)) continue;
       const name = declaration.name.text;
       const initializer = declaration.initializer;
-      const collection = Boolean(initializer && (
-        ts.isArrayLiteralExpression(initializer)
-        || (ts.isNewExpression(initializer) && ts.isIdentifier(initializer.expression)
-          && ['Map', 'Set', 'WeakMap', 'WeakSet'].includes(initializer.expression.text))
-      ));
-      if (mutableDeclaration || (collection && !allowed.has(name))) {
-        failures.push(`ARCH009 资源无状态模块禁止顶层可变状态: ${contract.module} (${name})`);
+      if (mutableDeclaration || Boolean(initializer && containsMutableResource(initializer))) {
+        failures.push(`ARCH009 资源无状态模块禁止顶层可变状态: ${module} (${name})`);
       }
     }
   }

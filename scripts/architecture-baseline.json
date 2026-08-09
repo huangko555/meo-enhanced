@@ -43,15 +43,7 @@
       ]
     }
   ],
-  "resourceOwnerFreeModules": [
-    {
-      "module": "webview/src/helpers/mermaidDiagram.ts",
-      "allowedTopLevelCollections": [
-        "DISPLAY_MATH_TRIM_RETRY_DELAYS_MS",
-        "DISPLAY_MATH_LABEL_SELECTORS"
-      ]
-    }
-  ],
+  "resourceOwnerFreeModules": ["webview/src/helpers/mermaidDiagram.ts"],
   "knownLegacyTestFailures": [
     {
       "id": "LEG-TEST-001",
