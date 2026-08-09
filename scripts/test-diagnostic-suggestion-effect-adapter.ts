@@ -23,6 +23,7 @@ const diagnostic = { from: 1, to: 4, message: 'Unknown word', source: 'spell' } 
 const execution = adapter.execute({
   type: 'requestSuggestions',
   correlationId: 7,
+  anchorId: 1,
   diagnostic
 });
 assert.equal(posted.length, 1);
@@ -44,7 +45,7 @@ assert.equal(adapter.accept(response), false, 'duplicate Transport completion mu
 
 anchorTop = 40;
 adapter.execute({
-  type: 'presentSuggestions', correlationId: 7, from: 1, to: 4,
+  type: 'presentSuggestions', correlationId: 7, anchorId: 1, diagnostic, from: 1, to: 4,
   suggestions: [{ from: 1, to: 4, text: 'Known word' }]
 });
 assert.deepEqual(
@@ -57,7 +58,7 @@ assert.equal(presented.length, 1);
 assert.equal(hidden, 1);
 
 const failed = adapter.execute({
-  type: 'requestSuggestions', correlationId: 8, diagnostic
+  type: 'requestSuggestions', correlationId: 8, anchorId: 2, diagnostic
 });
 const failedRequest = posted.at(-1) as { requestId: string };
 assert.equal(adapter.accept({
@@ -68,12 +69,45 @@ assert.equal(adapter.accept({
 assert.deepEqual(await failed.completion, { type: 'suggestionsFailed', correlationId: 8 });
 
 const cancelled = adapter.execute({
-  type: 'requestSuggestions', correlationId: 9, diagnostic
+  type: 'requestSuggestions', correlationId: 9, anchorId: 3, diagnostic
 });
 const cancelledRequest = posted.at(-1) as { requestId: string };
 adapter.execute({ type: 'cancelRequest' });
 assert.equal(await cancelled.completion, null);
 assert.equal(adapter.accept({ ...response, requestId: cancelledRequest.requestId }), false);
+
+const replacementDiagnostic = { ...diagnostic, from: 6, to: 9, message: 'Replacement' } as const;
+const tableA = adapter.inputFromSelectionRequest(diagnostic, () => ({ x: 10, y: 10, bottomY: 20 }));
+assert.equal(tableA.type, 'suggestionsRequested');
+const tableAExecution = adapter.execute({
+  type: 'requestSuggestions', correlationId: 12, anchorId: tableA.anchorId, diagnostic
+});
+const tableB = adapter.inputFromSelectionRequest(replacementDiagnostic, () => ({ x: 20, y: 30, bottomY: 40 }));
+assert.equal(tableB.type, 'suggestionsRequested');
+adapter.execute({ type: 'cancelRequest' });
+const tableBExecution = adapter.execute({
+  type: 'requestSuggestions', correlationId: 13, anchorId: tableB.anchorId, diagnostic: replacementDiagnostic
+});
+const tableBRequest = posted.at(-1) as { requestId: string };
+adapter.accept({
+  type: 'diagnosticSuggestionsResult', requestId: tableBRequest.requestId,
+  from: 6, to: 9, result: { ok: true, value: { suggestions: ['Current'] } }
+});
+assert.equal(await tableAExecution.completion, null);
+assert.deepEqual(await tableBExecution.completion, {
+  type: 'suggestionsResolved', correlationId: 13,
+  diagnostic: replacementDiagnostic, suggestions: ['Current']
+});
+await adapter.execute({
+  type: 'presentSuggestions', correlationId: 13, anchorId: tableB.anchorId,
+  diagnostic: replacementDiagnostic, from: 6, to: 9,
+  suggestions: [{ from: 6, to: 9, text: 'Current' }]
+}).completion;
+assert.deepEqual(
+  (presented.at(-1) as any).anchor,
+  { x: 20, y: 30, bottomY: 40 },
+  'replacing a table request must preserve the new request-scoped anchor resolver'
+);
 
 adapter.dispose();
 assert.equal(adapter.accept(response), false);
@@ -92,11 +126,15 @@ const timeoutAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
   }
 });
 const timedOut = timeoutAdapter.execute({
-  type: 'requestSuggestions', correlationId: 10, diagnostic
+  type: 'requestSuggestions', correlationId: 10, anchorId: 4, diagnostic
 });
 assert.ok(timeoutCallback);
 (timeoutCallback as () => void)();
 assert.deepEqual(await timedOut.completion, { type: 'suggestionsFailed', correlationId: 10 });
+assert.deepEqual(await timeoutAdapter.execute({
+  type: 'presentSuggestions', correlationId: 14, anchorId: 404, diagnostic,
+  from: 1, to: 4, suggestions: [{ from: 1, to: 4, text: 'Retry' }]
+}).completion, { type: 'suggestionsPresentationFailed', correlationId: 14 });
 timeoutAdapter.dispose();
 
 const throwingAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
@@ -107,7 +145,7 @@ const throwingAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
   hideSuggestions() {}
 });
 const thrown = throwingAdapter.execute({
-  type: 'requestSuggestions', correlationId: 11, diagnostic
+  type: 'requestSuggestions', correlationId: 11, anchorId: 5, diagnostic
 });
 assert.deepEqual(await thrown.completion, { type: 'suggestionsFailed', correlationId: 11 });
 throwingAdapter.dispose();

@@ -22,6 +22,13 @@ const executor: DiagnosticSuggestionEffectExecutor = {
       pending.clear();
       return {};
     }
+    if (effect.type === 'presentSuggestions') {
+      return { completion: Promise.resolve({
+        type: 'suggestionsPresented',
+        correlationId: effect.correlationId,
+        diagnostic: effect.diagnostic
+      }) };
+    }
     if (effect.type !== 'requestSuggestions') return {};
     return {
       completion: new Promise((resolve) => pending.set(effect.correlationId, resolve))
@@ -35,7 +42,7 @@ const runtime = createDiagnosticSuggestionRuntime({ application, executor });
 runtime.dispatch({ type: 'diagnosticsChanged', diagnostics: [firstDiagnostic, secondDiagnostic] });
 assert.deepEqual(executed.slice(0, 2).map((effect) => effect.type), ['cancelRequest', 'hideSuggestions']);
 
-runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic });
+runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchorId: 1 });
 const firstRequest = executed.at(-1);
 assert.ok(firstRequest?.type === 'requestSuggestions');
 let idle = false;
@@ -43,7 +50,7 @@ void runtime.whenIdle().then(() => { idle = true; });
 await Promise.resolve();
 assert.equal(idle, false, 'whenIdle must wait for the current suggestion request');
 
-runtime.dispatch({ type: 'suggestionsRequested', diagnostic: secondDiagnostic });
+runtime.dispatch({ type: 'suggestionsRequested', diagnostic: secondDiagnostic, anchorId: 2 });
 const secondRequest = executed.at(-1);
 assert.ok(secondRequest?.type === 'requestSuggestions');
 assert.notEqual(secondRequest.correlationId, firstRequest.correlationId);
@@ -61,7 +68,7 @@ assert.equal(executed.at(-1)?.type, 'presentSuggestions');
 assert.equal(idle, true);
 
 runtime.dispatch({ type: 'diagnosticsChanged', diagnostics: [firstDiagnostic] });
-runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic });
+runtime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchorId: 3 });
 const externalRequest = executed.at(-1);
 assert.ok(externalRequest?.type === 'requestSuggestions');
 runtime.dispatch({ type: 'externalDocumentPresented' });
@@ -99,7 +106,7 @@ const rejectingRuntime = createDiagnosticSuggestionRuntime({
   executor: rejectingExecutor
 });
 rejectingRuntime.dispatch({ type: 'diagnosticsChanged', diagnostics: [firstDiagnostic] });
-rejectingRuntime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic });
+rejectingRuntime.dispatch({ type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchorId: 4 });
 await rejectingRuntime.whenIdle();
 assert.equal(rejectingApplication.isIdle(), true, 'rejected execution must restore idle state');
 rejectingRuntime.dispose();

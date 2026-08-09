@@ -32,7 +32,7 @@ export type CodeMirrorDiagnosticSuggestionAdapter = DiagnosticSuggestionEffectEx
   inputFromSelectionRequest(
     diagnostic: DiagnosticSuggestion,
     resolveAnchor: () => DiagnosticSuggestionAnchor | null
-  ): DiagnosticSuggestionInput;
+  ): Extract<DiagnosticSuggestionInput, { readonly type: 'suggestionsRequested' }>;
   accept(response: DiagnosticSuggestionsResult): boolean;
 };
 
@@ -53,6 +53,7 @@ export type CodeMirrorDiagnosticSuggestionAdapterOptions = {
 type ActiveRequest = {
   requestId: string | null;
   readonly correlationId: number;
+  readonly anchorId: number;
   readonly diagnostic: DiagnosticSuggestion;
   readonly resolveAnchor: () => DiagnosticSuggestionAnchor | null;
   readonly settle: (input: DiagnosticSuggestionInput | null) => void;
@@ -64,10 +65,11 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
 ): CodeMirrorDiagnosticSuggestionAdapter {
   let activeRequest: ActiveRequest | null = null;
   let nextAnchor: {
-    readonly diagnostic: DiagnosticSuggestion;
+    readonly anchorId: number;
     readonly resolve: () => DiagnosticSuggestionAnchor | null;
   } | null = null;
   const resolvedAnchors = new Map<number, () => DiagnosticSuggestionAnchor | null>();
+  let anchorSequence = 0;
   let disposed = false;
 
   const settleActive = (input: DiagnosticSuggestionInput | null): void => {
@@ -86,7 +88,7 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
         settleActive({ type: 'suggestionsFailed', correlationId: active.correlationId });
         return;
       }
-      resolvedAnchors.set(active.correlationId, active.resolveAnchor);
+      resolvedAnchors.set(active.anchorId, active.resolveAnchor);
       settleActive({
         type: 'suggestionsResolved',
         correlationId: active.correlationId,
@@ -100,7 +102,6 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
   const cancelActive = (): void => {
     transport.cancelAll();
     settleActive(null);
-    nextAnchor = null;
     resolvedAnchors.clear();
   };
 
@@ -126,18 +127,28 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
         return {};
       case 'presentSuggestions':
         {
-          const resolveAnchor = resolvedAnchors.get(effect.correlationId);
-          resolvedAnchors.delete(effect.correlationId);
+          const resolveAnchor = resolvedAnchors.get(effect.anchorId);
+          resolvedAnchors.delete(effect.anchorId);
           const anchor = resolveAnchor?.() ?? anchorFromView({
             from: effect.from,
             to: effect.to,
             message: ''
           });
-          if (anchor) options.presentSuggestions({ ...effect, anchor });
+          if (anchor) {
+            options.presentSuggestions({ ...effect, anchor });
+            return { completion: Promise.resolve({
+              type: 'suggestionsPresented',
+              correlationId: effect.correlationId,
+              diagnostic: effect.diagnostic
+            }) };
+          }
+          return { completion: Promise.resolve({
+            type: 'suggestionsPresentationFailed',
+            correlationId: effect.correlationId
+          }) };
         }
-        return {};
       case 'requestSuggestions': {
-        const resolveAnchor = nextAnchor?.diagnostic === effect.diagnostic
+        const resolveAnchor = nextAnchor?.anchorId === effect.anchorId
           ? nextAnchor.resolve
           : () => anchorFromView(effect.diagnostic);
         cancelActive();
@@ -149,6 +160,7 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
         const active: ActiveRequest = {
           requestId: null,
           correlationId: effect.correlationId,
+          anchorId: effect.anchorId,
           diagnostic: effect.diagnostic,
           resolveAnchor,
           settle
@@ -185,11 +197,13 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
     const selectedDiagnostic = selectedRange?.from === diagnostic.from && selectedRange.to === diagnostic.to;
     if (!target?.closest('.meo-diagnostic') && !selectedDiagnostic) return null;
 
-    nextAnchor = { diagnostic, resolve: () => anchorFromView(diagnostic) };
-    if (kind === 'request') return { type: 'suggestionsRequested', diagnostic };
+    const anchorId = ++anchorSequence;
+    nextAnchor = { anchorId, resolve: () => anchorFromView(diagnostic) };
+    if (kind === 'request') return { type: 'suggestionsRequested', diagnostic, anchorId };
     return {
       type: 'diagnosticClicked',
       diagnostic,
+      anchorId,
       nativeSecondClick: event.detail >= 2 && selectedDiagnostic
     };
   };
@@ -198,8 +212,9 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
     execute,
     inputFromPointer,
     inputFromSelectionRequest(diagnostic, resolveAnchor) {
-      nextAnchor = { diagnostic, resolve: resolveAnchor };
-      return { type: 'suggestionsRequested', diagnostic };
+      const anchorId = ++anchorSequence;
+      nextAnchor = { anchorId, resolve: resolveAnchor };
+      return { type: 'suggestionsRequested', diagnostic, anchorId };
     },
     accept(response) {
       return !disposed && transport.accept(response);
@@ -208,6 +223,7 @@ export function createCodeMirrorDiagnosticSuggestionAdapter(
       if (disposed) return;
       disposed = true;
       cancelActive();
+      nextAnchor = null;
     }
   };
 }

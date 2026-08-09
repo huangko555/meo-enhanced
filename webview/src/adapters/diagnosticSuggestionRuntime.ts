@@ -32,11 +32,15 @@ export function createDiagnosticSuggestionRuntime(
     idleWaiters.clear();
   };
 
-  const failureFor = (effect: DiagnosticSuggestionEffect): DiagnosticSuggestionInput | null => (
-    effect.type === 'requestSuggestions'
-      ? { type: 'suggestionsFailed', correlationId: effect.correlationId }
-      : null
-  );
+  const failureFor = (effect: DiagnosticSuggestionEffect): DiagnosticSuggestionInput | null => {
+    if (effect.type === 'requestSuggestions') {
+      return { type: 'suggestionsFailed', correlationId: effect.correlationId };
+    }
+    if (effect.type === 'presentSuggestions') {
+      return { type: 'suggestionsPresentationFailed', correlationId: effect.correlationId };
+    }
+    return null;
+  };
 
   const dispatchInternal = (input: DiagnosticSuggestionInput): void => {
     if (disposed && input.type !== 'dispose') return;
@@ -60,11 +64,11 @@ export function createDiagnosticSuggestionRuntime(
         continue;
       }
 
-      if (effect.type !== 'requestSuggestions') continue;
-      if (!execution.completion) {
+      if (!execution.completion && effect.type === 'requestSuggestions') {
         dispatchInternal({ type: 'suggestionsFailed', correlationId: effect.correlationId });
         continue;
       }
+      if (!execution.completion) continue;
 
       void execution.completion.then(
         (input) => complete(input),

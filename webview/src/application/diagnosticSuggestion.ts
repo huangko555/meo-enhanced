@@ -11,11 +11,13 @@ export type DiagnosticSuggestionInput =
   | {
       readonly type: 'diagnosticClicked';
       readonly diagnostic: DiagnosticSuggestion;
+      readonly anchorId: number;
       readonly nativeSecondClick: boolean;
     }
   | {
       readonly type: 'suggestionsRequested';
       readonly diagnostic: DiagnosticSuggestion;
+      readonly anchorId: number;
     }
   | {
       readonly type: 'suggestionsResolved';
@@ -24,6 +26,12 @@ export type DiagnosticSuggestionInput =
       readonly suggestions: readonly string[];
     }
   | { readonly type: 'suggestionsFailed'; readonly correlationId: number }
+  | {
+      readonly type: 'suggestionsPresented';
+      readonly correlationId: number;
+      readonly diagnostic: DiagnosticSuggestion;
+    }
+  | { readonly type: 'suggestionsPresentationFailed'; readonly correlationId: number }
   | { readonly type: 'presentationChanged' }
   | { readonly type: 'externalDocumentPresented' }
   | { readonly type: 'dispose' };
@@ -35,10 +43,13 @@ export type DiagnosticSuggestionEffect =
       readonly type: 'requestSuggestions';
       readonly correlationId: number;
       readonly diagnostic: DiagnosticSuggestion;
+      readonly anchorId: number;
     }
   | {
       readonly type: 'presentSuggestions';
       readonly correlationId: number;
+      readonly anchorId: number;
+      readonly diagnostic: DiagnosticSuggestion;
       readonly from: number;
       readonly to: number;
       readonly suggestions: readonly { readonly from: number; readonly to: number; readonly text: string }[];
@@ -85,25 +96,32 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
   let pending: {
     readonly correlationId: number;
     readonly diagnostic: DiagnosticSuggestion;
+    readonly anchorId: number;
+  } | null = null;
+  let presenting: {
+    readonly correlationId: number;
+    readonly diagnostic: DiagnosticSuggestion;
   } | null = null;
 
   const invalidate = (): readonly DiagnosticSuggestionEffect[] => {
     lastClick = null;
     pending = null;
+    presenting = null;
     presentedDiagnostic = null;
     return [{ type: 'cancelRequest' }, { type: 'hideSuggestions' }];
   };
 
-  const request = (diagnostic: DiagnosticSuggestion): readonly DiagnosticSuggestionEffect[] => {
+  const request = (diagnostic: DiagnosticSuggestion, anchorId: number): readonly DiagnosticSuggestionEffect[] => {
     if (!diagnostics.some((current) => sameDiagnostic(current, diagnostic))) return [];
     if (pending && sameDiagnostic(pending.diagnostic, diagnostic)) return [];
+    if (presenting && sameDiagnostic(presenting.diagnostic, diagnostic)) return [];
     if (presentedDiagnostic && sameDiagnostic(presentedDiagnostic, diagnostic)) return [];
 
     const effects: DiagnosticSuggestionEffect[] = [];
     if (pending) effects.push({ type: 'cancelRequest' });
     const correlationId = ++requestSequence;
-    pending = { correlationId, diagnostic };
-    effects.push({ type: 'requestSuggestions', correlationId, diagnostic });
+    pending = { correlationId, diagnostic, anchorId };
+    effects.push({ type: 'requestSuggestions', correlationId, diagnostic, anchorId });
     return effects;
   };
 
@@ -120,11 +138,11 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
         const isSecondClick = input.nativeSecondClick
           || (lastClick !== null && sameDiagnostic(lastClick, input.diagnostic));
         lastClick = input.diagnostic;
-        return isSecondClick ? request(input.diagnostic) : [];
+        return isSecondClick ? request(input.diagnostic, input.anchorId) : [];
       }
 
       case 'suggestionsRequested':
-        return request(input.diagnostic);
+        return request(input.diagnostic, input.anchorId);
 
       case 'suggestionsResolved': {
         if (
@@ -133,12 +151,15 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
           || !diagnostics.some((diagnostic) => sameDiagnostic(diagnostic, input.diagnostic))
         ) return [];
 
+        const anchorId = pending.anchorId;
         pending = null;
         if (input.suggestions.length === 0) return [];
-        presentedDiagnostic = input.diagnostic;
+        presenting = { correlationId: input.correlationId, diagnostic: input.diagnostic };
         return [{
           type: 'presentSuggestions',
           correlationId: input.correlationId,
+          anchorId,
+          diagnostic: input.diagnostic,
           from: input.diagnostic.from,
           to: input.diagnostic.to,
           suggestions: input.suggestions.map((text) => ({
@@ -151,6 +172,17 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
 
       case 'suggestionsFailed':
         if (pending?.correlationId === input.correlationId) pending = null;
+        return [];
+
+      case 'suggestionsPresented':
+        if (presenting?.correlationId !== input.correlationId
+          || !sameDiagnostic(presenting.diagnostic, input.diagnostic)) return [];
+        presenting = null;
+        presentedDiagnostic = input.diagnostic;
+        return [];
+
+      case 'suggestionsPresentationFailed':
+        if (presenting?.correlationId === input.correlationId) presenting = null;
         return [];
 
       case 'presentationChanged':
@@ -184,5 +216,5 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
     return best;
   };
 
-  return { isIdle: () => disposed || pending === null, resolveDiagnostic, dispatch };
+  return { isIdle: () => disposed || (pending === null && presenting === null), resolveDiagnostic, dispatch };
 }

@@ -343,6 +343,7 @@ async function main(): Promise<void> {
       parent.style.height = '240px';
       document.body.appendChild(parent);
       const menuElements = (window as any).EditorStabilityHarness.createSelectionMenu();
+      menuElements.menu.id = 'table-diagnostic-menu';
       document.body.appendChild(menuElements.menu);
       const requests: any[] = [];
       let editor: any;
@@ -401,13 +402,15 @@ async function main(): Promise<void> {
         selection: [input.selectionStart, input.selectionEnd],
         scrollTop: harness.editor.view.scrollDOM.scrollTop,
         markers: document.querySelectorAll('#table-diagnostic-app .meo-diagnostic').length,
-        suggestion: document.querySelector<HTMLButtonElement>('.selection-inline-suggestion')?.textContent
+        suggestion: document.querySelector<HTMLButtonElement>('#table-diagnostic-menu .selection-inline-suggestion')?.textContent
       };
     });
     if (JSON.stringify(tableReady) !== JSON.stringify({ ...tableBefore, suggestion: 'good' })) {
       throw new Error(`table suggestion presentation changed interaction facts: ${JSON.stringify({ tableBefore, tableReady })}`);
     }
-    await page.evaluate(() => document.querySelector<HTMLButtonElement>('.selection-inline-suggestion')?.click());
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(
+      '#table-diagnostic-menu .selection-inline-suggestion'
+    )?.click());
     const tableApplied = await page.evaluate(async () => {
       const harness = (window as any).__tableDiagnosticHarness;
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
