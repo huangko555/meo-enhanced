@@ -66,7 +66,21 @@ export type DiagnosticSuggestionEffect =
 
 export type DiagnosticSuggestionApplication = {
   getState(): DiagnosticSuggestionState;
+  resolveDiagnostic(
+    position: number,
+    selectedRange: { readonly from: number; readonly to: number } | null
+  ): DiagnosticSuggestion | null;
   dispatch(input: DiagnosticSuggestionInput): readonly DiagnosticSuggestionEffect[];
+};
+
+export type DiagnosticSuggestionEffectExecution = {
+  readonly completion?: Promise<DiagnosticSuggestionInput | null>;
+};
+
+/** Application-owned Port implemented by the concrete Editor/Webview Adapter. */
+export type DiagnosticSuggestionEffectExecutor = {
+  execute(effect: DiagnosticSuggestionEffect): DiagnosticSuggestionEffectExecution;
+  dispose(): void;
 };
 
 const diagnosticKey = (diagnostic: DiagnosticSuggestion): string => [
@@ -188,5 +202,24 @@ export function createDiagnosticSuggestionApplication(): DiagnosticSuggestionApp
     }
   };
 
-  return { getState, dispatch };
+  const resolveDiagnostic = (
+    position: number,
+    selectedRange: { readonly from: number; readonly to: number } | null
+  ): DiagnosticSuggestion | null => {
+    if (selectedRange && selectedRange.from !== selectedRange.to) {
+      const selected = diagnostics.find((diagnostic) => (
+        diagnostic.from === selectedRange.from && diagnostic.to === selectedRange.to
+      ));
+      if (selected && position >= selected.from && position <= selected.to) return selected;
+    }
+
+    let best: DiagnosticSuggestion | null = null;
+    for (const diagnostic of diagnostics) {
+      if (position < diagnostic.from || position > diagnostic.to) continue;
+      if (!best || diagnostic.to - diagnostic.from < best.to - best.from) best = diagnostic;
+    }
+    return best;
+  };
+
+  return { getState, resolveDiagnostic, dispatch };
 }

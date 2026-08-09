@@ -140,4 +140,16 @@ assert.deepEqual(identity.dispatch({
   type: 'suggestionsRequested', diagnostic: replacement, anchor
 }), [], 'a diagnostic outside the current collection cannot start a request');
 
+const outer = { from: 0, to: 12, message: 'Outer diagnostic' } as const;
+const inner = { from: 3, to: 7, message: 'Inner diagnostic' } as const;
+const targeting = createDiagnosticSuggestionApplication();
+targeting.dispatch({ type: 'diagnosticsChanged', diagnostics: [outer, inner] });
+assert.deepEqual(targeting.resolveDiagnostic(4, null), inner, 'the narrowest diagnostic owns an overlapping point');
+assert.deepEqual(
+  targeting.resolveDiagnostic(4, { from: 0, to: 12 }),
+  outer,
+  'an exact selected diagnostic takes precedence while the pointer remains inside it'
+);
+assert.equal(targeting.resolveDiagnostic(20, null), null);
+
 console.log('Diagnostic suggestion application checks passed');
