@@ -2507,14 +2507,17 @@ export function createEditor({
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
   onTableInteraction = (event) => {
-    const detail = event instanceof CustomEvent ? event.detail : null;
-    const active = Boolean(detail?.active);
-    const owner = detail?.owner instanceof HTMLElement ? detail.owner : null;
+    const detail: unknown = event instanceof CustomEvent ? event.detail : null;
+    const active = Boolean(detail && typeof detail === 'object' && 'active' in detail && detail.active);
+    const owner = detail && typeof detail === 'object' && 'owner' in detail && detail.owner instanceof HTMLElement
+      ? detail.owner
+      : null;
     setTableInteractionActive(active, owner);
   };
   view.dom.addEventListener('meo-table-interaction', onTableInteraction);
   onWidgetOpenLink = (event) => {
-    const href = event instanceof CustomEvent ? event.detail?.href : null;
+    const detail: unknown = event instanceof CustomEvent ? event.detail : null;
+    const href = detail && typeof detail === 'object' && 'href' in detail ? detail.href : null;
     if (typeof href !== 'string' || !href) {
       return;
     }
@@ -2522,8 +2525,9 @@ export function createEditor({
   };
   view.dom.addEventListener('meo-open-link', onWidgetOpenLink);
   onWidgetActivateImage = (event) => {
-    const from = event instanceof CustomEvent ? event.detail?.from : null;
-    if (!Number.isInteger(from)) {
+    const detail: unknown = event instanceof CustomEvent ? event.detail : null;
+    const from = detail && typeof detail === 'object' && 'from' in detail ? detail.from : null;
+    if (typeof from !== 'number' || !Number.isInteger(from)) {
       return;
     }
     if (tableInteractionActive) {

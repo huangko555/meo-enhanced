@@ -188,6 +188,17 @@ interface PendingTableCommitDetail {
   transactionBuilders: PendingTableTransactionBuilder[];
 }
 
+function isPendingTableCommitDetail(value: unknown): value is PendingTableCommitDetail {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    'committed' in value &&
+    typeof value.committed === 'boolean' &&
+    'transactionBuilders' in value &&
+    Array.isArray(value.transactionBuilders)
+  );
+}
+
 type TableSortDirection = 'asc' | 'desc';
 
 interface TableSortState {
@@ -249,6 +260,18 @@ export function commitPendingTableEdits(view: EditorView): boolean {
   }
   if (transactions.length) view.dispatch(transactions);
   return detail.committed;
+}
+
+function isTableSearchState(value: unknown): value is TableSearchState {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    'text' in value && typeof value.text === 'string' &&
+    'wholeWord' in value && typeof value.wholeWord === 'boolean' &&
+    'caseSensitive' in value && typeof value.caseSensitive === 'boolean' &&
+    'selectionFrom' in value && typeof value.selectionFrom === 'number' &&
+    'selectionTo' in value && typeof value.selectionTo === 'number'
+  );
 }
 
 interface TablePointerCaret {
@@ -3152,13 +3175,13 @@ class HtmlTableWidget extends WidgetType {
     document.addEventListener('pointercancel', onDocumentPointerEnd, true);
     const onCommitTableEdits = (event: Event) => {
       const hadPendingEdits = this.hasPendingCellEdits;
-      if (event instanceof CustomEvent && event.detail && typeof event.detail === 'object') {
+      const detail: unknown = event instanceof CustomEvent ? event.detail : null;
+      if (isPendingTableCommitDetail(detail)) {
         const pending = this.takePendingTransactionBuilders(getWrap());
         if (pending) {
-          if (!Array.isArray(event.detail.transactionBuilders)) event.detail.transactionBuilders = [];
-          event.detail.transactionBuilders.push(...pending.builders);
+          detail.transactionBuilders.push(...pending.builders);
         }
-        event.detail.committed = Boolean(event.detail.committed || hadPendingEdits);
+        detail.committed = Boolean(detail.committed || hadPendingEdits);
       }
     };
     document.addEventListener('meo-commit-table-edits', onCommitTableEdits);
@@ -4650,8 +4673,8 @@ class HtmlTableWidget extends WidgetType {
 
     const onEditorScroll = () => this.stickyHeaderAdapter.invalidate();
     const onSearchStateChange = (event: Event) => {
-      const detail = event instanceof CustomEvent ? event.detail : null;
-      this.setSearchState(detail && typeof detail === 'object' ? detail : null);
+      const detail: unknown = event instanceof CustomEvent ? event.detail : null;
+      this.setSearchState(isTableSearchState(detail) ? detail : null);
     };
     view.scrollDOM.addEventListener('scroll', onEditorScroll);
     view.dom.addEventListener(tableSearchStateEventName, onSearchStateChange);

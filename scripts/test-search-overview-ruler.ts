@@ -39,11 +39,15 @@ async function main() {
         `| ${index + 1} | ${index === 7 ? 'overview-needle' : `row ${index + 1}`} |`
       ));
       const after = Array.from({ length: 36 }, (_, index) => `after ${index + 1}`);
+      const selectionStates: Array<{ visible?: boolean }> = [];
       const editor = (window as any).TableStabilityHarness.createEditor({
         parent: document.getElementById('app')!,
         text: [...before, '', '| A | B |', '| --- | --- |', ...rows, '', ...after].join('\n'),
         initialMode: 'live',
-        onApplyChanges() {}
+        onApplyChanges() {},
+        onSelectionChange(state: { visible?: boolean }) {
+          selectionStates.push(state);
+        }
       });
       await waitFrames();
 
@@ -54,6 +58,8 @@ async function main() {
       window.dispatchEvent(new Event('resize'));
       await waitFrames();
       editor.setSearchQuery('overview-needle');
+      await waitFrames();
+      editor.findNext('overview-needle', { focusEditor: false });
       await waitFrames();
 
       const matchedRow = tableRows[7];
@@ -70,7 +76,9 @@ async function main() {
         actualTop,
         delta: Math.abs(expectedTop - actualTop),
         scrollHeight: scroller.scrollHeight,
-        trackHeight: ruler.clientHeight
+        trackHeight: ruler.clientHeight,
+        hasSearchSelection: editor.view.dom.classList.contains('has-search-selection'),
+        selectionMenuVisible: selectionStates.at(-1)?.visible ?? null
       };
       editor.destroy();
       return state;
@@ -78,6 +86,9 @@ async function main() {
 
     if (result.delta > 2) {
       throw new Error(`Search overview marker did not follow rendered row geometry: ${JSON.stringify(result)}`);
+    }
+    if (!result.hasSearchSelection || result.selectionMenuVisible !== false) {
+      throw new Error(`Active search selection was not classified without opening the selection menu: ${JSON.stringify(result)}`);
     }
     console.log('search overview ruler checks passed');
   } finally {
