@@ -38,6 +38,7 @@ const executor: TableCommandEffectExecutor = {
     }
     return {};
   },
+  invalidate() {},
   dispose() {}
 };
 
@@ -73,6 +74,7 @@ const staleExecutor: TableCommandEffectExecutor = {
       })
     };
   },
+  invalidate() {},
   dispose() {}
 };
 const staleRuntime = createTableCommandRuntime(createTableCommandApplication(), staleExecutor, () => {});
@@ -94,6 +96,7 @@ const disposableExecutor: TableCommandEffectExecutor = {
     if (effect.type === 'restoreInteraction') disposeEffects += 1;
     return {};
   },
+  invalidate() {},
   dispose() { executorDisposals += 1; }
 };
 const disposableRuntime = createTableCommandRuntime(
@@ -109,5 +112,46 @@ assert.equal(await pending, null);
 await disposableRuntime.whenIdle();
 assert.equal(disposeEffects, 0, 'late completion must not restore disposed interaction');
 assert.equal(executorDisposals, 1);
+
+let settleInvalidated: ((input: TableCommandInput) => void) | null = null;
+let invalidateCalls = 0;
+let delayFirst = true;
+const invalidationExecutor: TableCommandEffectExecutor = {
+  execute(effect) {
+    if (effect.type === 'executeCommand' && delayFirst) {
+      delayFirst = false;
+      return { completion: new Promise<TableCommandInput>((resolve) => { settleInvalidated = resolve; }) };
+    }
+    if (effect.type === 'executeCommand') {
+      return {
+        immediateCompletion: {
+          type: 'commandCompleted', commandId: effect.commandId, outcome: 'changed'
+        }
+      };
+    }
+    return { immediateCompletion: null };
+  },
+  invalidate() { invalidateCalls += 1; },
+  dispose() {}
+};
+const invalidationRuntime = createTableCommandRuntime(
+  createTableCommandApplication(), invalidationExecutor, () => {}
+);
+const invalidatedFirst = invalidationRuntime.dispatch({
+  type: 'request', command: 'insert-row-below', target, enabled: true
+});
+const invalidatedQueued = invalidationRuntime.dispatch({
+  type: 'request', command: 'delete-column', target, enabled: true
+});
+invalidationRuntime.invalidate();
+assert.equal(invalidateCalls, 1);
+assert.deepEqual(invalidationRuntime.getState(), { phase: 'idle', activeCommandId: null });
+assert.equal(await invalidationRuntime.dispatch({
+  type: 'request', command: 'insert-column-left', target, enabled: true
+}), 'changed', 'a new document scope must not wait for the invalidated queue');
+settleInvalidated?.({ type: 'commandCompleted', commandId: 1, outcome: 'changed' });
+assert.equal(await invalidatedFirst, null);
+assert.equal(await invalidatedQueued, null);
+await invalidationRuntime.whenIdle();
 
 console.log('table command runtime contracts passed');

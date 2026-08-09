@@ -103,6 +103,10 @@ export function createCodeMirrorTableCommandEffectAdapter(
           return immediate(null);
       }
     },
+    invalidate() {
+      if (disposed) return;
+      pendingRestores.clear();
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

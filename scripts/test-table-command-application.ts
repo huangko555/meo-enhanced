@@ -100,6 +100,15 @@ assert.equal(disposed.getState().phase, 'disposed');
 assert.deepEqual(disposed.dispatch({ type: 'commandCompleted', commandId: disposedId, outcome: 'changed' }), []);
 assert.deepEqual(disposed.dispatch({ type: 'request', command: 'insert-column-left', target, enabled: true }), []);
 
+const invalidated = createTableCommandApplication();
+invalidated.dispatch({ type: 'request', command: 'delete-row', target, enabled: true });
+assert.equal(invalidated.getState().phase, 'executing');
+assert.deepEqual(invalidated.dispatch({ type: 'invalidate' }), []);
+assert.deepEqual(invalidated.getState(), { phase: 'idle', activeCommandId: null });
+assert.equal(invalidated.dispatch({
+  type: 'request', command: 'insert-column-right', target, enabled: true
+})[0]?.type, 'executeCommand');
+
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 const bootstrapSource = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
 const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');

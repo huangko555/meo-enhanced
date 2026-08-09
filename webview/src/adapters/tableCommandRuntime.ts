@@ -12,6 +12,7 @@ export type TableCommandRuntime = {
   dispatch(input: TableCommandInput): Promise<TableCommandRuntimeOutcome | null>;
   whenIdle(): Promise<void>;
   getState(): TableCommandState;
+  invalidate(): void;
   dispose(): void;
 };
 
@@ -21,8 +22,8 @@ export function createTableCommandRuntime(
   executor: TableCommandEffectExecutor,
   reportUnexpectedError: (error: unknown) => void
 ): TableCommandRuntime {
-  let operation = Promise.resolve();
-  let pendingOperations = 0;
+  type QueueState = { operation: Promise<unknown>; pendingOperations: number };
+  let queue: QueueState = { operation: Promise.resolve(), pendingOperations: 0 };
   let disposed = false;
   let generation = 0;
 
@@ -83,16 +84,17 @@ export function createTableCommandRuntime(
   const enqueue = (input: TableCommandInput): Promise<TableCommandRuntimeOutcome | null> => {
     if (disposed) return Promise.resolve(null);
     const currentGeneration = generation;
-    const result = pendingOperations === 0
+    const currentQueue = queue;
+    const result = currentQueue.pendingOperations === 0
       ? processInput(input, currentGeneration)
-      : operation.then(() => processInput(input, currentGeneration));
-    pendingOperations += 1;
-    operation = result.then(
+      : currentQueue.operation.then(() => processInput(input, currentGeneration));
+    currentQueue.pendingOperations += 1;
+    currentQueue.operation = result.then(
       () => {
-        pendingOperations -= 1;
+        currentQueue.pendingOperations -= 1;
       },
       (error) => {
-        pendingOperations -= 1;
+        currentQueue.pendingOperations -= 1;
         reportUnexpectedError(error);
       }
     );
@@ -102,16 +104,28 @@ export function createTableCommandRuntime(
   return {
     dispatch: enqueue,
     async whenIdle() {
-      let current = operation;
+      const currentQueue = queue;
+      let current = currentQueue.operation;
       await current;
       await Promise.resolve();
-      while (current !== operation) {
-        current = operation;
+      while (currentQueue === queue && current !== currentQueue.operation) {
+        current = currentQueue.operation;
         await current;
         await Promise.resolve();
       }
     },
     getState: application.getState,
+    invalidate() {
+      if (disposed) return;
+      generation += 1;
+      queue = { operation: Promise.resolve(), pendingOperations: 0 };
+      application.dispatch({ type: 'invalidate' });
+      try {
+        executor.invalidate();
+      } catch (error) {
+        reportUnexpectedError(error);
+      }
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

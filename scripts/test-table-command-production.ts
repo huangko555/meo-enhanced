@@ -138,6 +138,34 @@ async function main() {
       const detachedButton = shells[0].querySelector<HTMLButtonElement>('button[title="Insert row below"]')!;
       editor.destroy();
       const detachedConsumed = !pointer(detachedButton);
+      app.replaceChildren();
+
+      const raceEditor = harness.createEditor({
+        parent: app,
+        text: ['| A | B |', '| --- | --- |', '| one | 1 |', '| two | 2 |'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await waitFrames();
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      const inputsAfterInsert = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
+      inputsAfterInsert.find((input) => input.value === 'two')!.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0, bubbles: true, cancelable: true
+      }));
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!);
+      inputsAfterInsert.find((input) => input.value === 'one')!.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0, bubbles: true, cancelable: true
+      }));
+      await waitFrames();
+      const afterQueuedCoordinateChange = raceEditor.view.state.doc.toString();
+
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!);
+      const externalText = ['| A | B |', '| --- | --- |', '| external | stable |'].join('\n');
+      raceEditor.setText(externalText);
+      await waitFrames();
+      const afterExternalPresentation = raceEditor.view.state.doc.toString();
+      raceEditor.destroy();
       return {
         original,
         consumed,
@@ -154,7 +182,10 @@ async function main() {
         toolbarCount,
         resizeHandleCount,
         stickyCount,
-        detachedConsumed
+        detachedConsumed,
+        afterQueuedCoordinateChange,
+        externalText,
+        afterExternalPresentation
       };
     });
 
@@ -174,6 +205,17 @@ async function main() {
     assert.ok(result.resizeHandleCount >= 4, 'Column Width controls must remain available');
     assert.equal(result.stickyCount, 2, 'Sticky Header lifecycle must remain mounted per table');
     assert.equal(result.detachedConsumed, true, 'detached Toolbar keeps browser-default suppression without reviving Runtime');
+    assert.match(result.afterQueuedCoordinateChange, /\| one\s+\| 1\s+\|/);
+    assert.doesNotMatch(
+      result.afterQueuedCoordinateChange,
+      /\| two\s+\| 2\s+\|/,
+      'queued commands must use the row captured by their request, not the later active cell'
+    );
+    assert.equal(
+      result.afterExternalPresentation,
+      result.externalText,
+      'external presentation must invalidate queued commands from the previous document scope'
+    );
   } finally {
     await browser.close();
   }

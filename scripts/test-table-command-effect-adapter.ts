@@ -93,6 +93,17 @@ await adapter.execute({
 }).completion;
 assert.deepEqual(restored, ['changed']);
 
+await adapter.execute({
+  type: 'executeCommand', commandId: 6, command: 'insert-row-below',
+  target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'atomic'
+}).completion;
+adapter.invalidate();
+await adapter.execute({
+  type: 'restoreInteraction', commandId: 6,
+  target: { tableId: 'table-1', row: 1, column: 0 }, outcome: 'changed'
+}).completion;
+assert.deepEqual(restored, ['changed'], 'document invalidation must clear stale interaction restore');
+
 const failing = createCodeMirrorTableCommandEffectAdapter({
   resolveTarget() {
     return { ...target, buildAtomicCommandTransaction() { throw new Error('expected failure'); } };
@@ -113,7 +124,7 @@ assert.equal(await adapter.execute({
   type: 'executeCommand', commandId: 5, command: 'apply-sort',
   target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'atomic'
 }).completion, null);
-assert.equal(dispatched.length, 2);
+assert.equal(dispatched.length, 3);
 
 const productionSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 assert.equal((productionSource.match(/createTableCommandApplication\(/g) ?? []).length, 1);

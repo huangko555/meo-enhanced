@@ -288,6 +288,7 @@ const initialize = (text: string): void => {
 };
 
 const externalPresent = (text: string): void => {
+  runtime.invalidate();
   pending.clear();
   previewOrders.clear();
   previewDirections.clear();

@@ -43,7 +43,7 @@ import {
   type TableCommandTargetRegistration,
   type TableCommandTransactionPlan
 } from '../editor/tableCommandAdapter';
-import type { TableCommand } from '../application/tableCommand';
+import type { TableCommand, TableCommandTarget } from '../application/tableCommand';
 
 interface TableData {
   rows: string[][];
@@ -2339,9 +2339,13 @@ class HtmlTableWidget extends WidgetType {
   }
 
   activeBodyRowIndex() {
+    return this.bodyRowIndexFor(this.activeTarget.row);
+  }
+
+  bodyRowIndexFor(row: number | null) {
     if (this.tableData.rows.length === 0) return null;
-    if (this.activeTarget.row <= 0) return null;
-    const visualIndex = this.activeTarget.row - 1;
+    if (row === null || row <= 0) return null;
+    const visualIndex = row - 1;
     if (this.sortState?.order) {
       const sourceIndex = this.sortState.order[visualIndex];
       return Number.isInteger(sourceIndex) ? sourceIndex : null;
@@ -2350,9 +2354,13 @@ class HtmlTableWidget extends WidgetType {
   }
 
   activeColumnIndex() {
+    return this.columnIndexFor(this.activeTarget.col);
+  }
+
+  columnIndexFor(column: number | null) {
     const colCount = this.tableData.colCount;
-    if (colCount <= 0) return null;
-    return Math.min(Math.max(this.activeTarget.col, 0), colCount - 1);
+    if (colCount <= 0 || column === null) return null;
+    return Math.min(Math.max(column, 0), colCount - 1);
   }
 
   updateToolbarState() {
@@ -2395,7 +2403,13 @@ class HtmlTableWidget extends WidgetType {
       target: {
         tableId: this.tableCommandTargetId,
         row: this.activeTarget.row,
-        column: this.activeTarget.col
+        column: this.activeTarget.col,
+        selection: this.selectionRange ? {
+          fromRow: this.selectionRange.fromRow,
+          toRow: this.selectionRange.toRow,
+          fromColumn: this.selectionRange.fromCol,
+          toColumn: this.selectionRange.toCol
+        } : null
       },
       enabled
     });
@@ -3135,9 +3149,12 @@ class HtmlTableWidget extends WidgetType {
     else run();
   }
 
-  presentTableCommand(command: Extract<TableCommand, 'preview-sort'>): 'presented' | 'no-op' {
+  presentTableCommand(
+    command: Extract<TableCommand, 'preview-sort'>,
+    target: TableCommandTarget
+  ): 'presented' | 'no-op' {
     if (command !== 'preview-sort' || !this.domRefs || this.tableData.rows.length <= 1) return 'no-op';
-    const column = this.activeColumnIndex();
+    const column = this.columnIndexFor(target.column);
     if (column === null) return 'no-op';
     const direction: TableSortDirection = this.sortState?.column === column && this.sortState.direction === 'desc'
       ? 'asc'
@@ -3150,10 +3167,13 @@ class HtmlTableWidget extends WidgetType {
     return 'presented';
   }
 
-  buildAlignmentTransaction(alignment: 'left' | 'center' | 'right'): TableCommandTransactionPlan {
+  buildAlignmentTransaction(
+    alignment: 'left' | 'center' | 'right',
+    target: TableCommandTarget
+  ): TableCommandTransactionPlan {
     const dom = this.domRefs?.wrap;
     const view = this.view;
-    const column = this.activeColumnIndex();
+    const column = this.columnIndexFor(target.column);
     if (!dom || !view || column === null) return { transaction: null, outcome: 'no-op' };
     if (!this.resolveCurrentTableRange(view, dom)) return { transaction: null, outcome: 'no-op' };
     this.clearVisualSort();
@@ -3162,72 +3182,74 @@ class HtmlTableWidget extends WidgetType {
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length).map((value) => value ?? null);
     alignments[column] = alignment;
     matrix.alignments = alignments;
-    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: column }, {
+    return this.buildMatrixTransaction(matrix, dom, { row: target.row ?? 0, col: column }, {
       alignmentOverrideColumn: column
     });
   }
 
-  buildTableCommandTransaction(command: Exclude<TableCommand, 'preview-sort'>): TableCommandTransactionPlan {
+  buildTableCommandTransaction(
+    command: Exclude<TableCommand, 'preview-sort'>,
+    target: TableCommandTarget
+  ): TableCommandTransactionPlan {
     const dom = this.domRefs?.wrap;
     if (!dom) return { transaction: null, outcome: 'no-op' };
+    const bodyRow = this.bodyRowIndexFor(target.row);
+    const column = this.columnIndexFor(target.column);
+    const selection = target.selection;
+    const selectionCount = selection
+      ? (selection.toRow - selection.fromRow + 1) * (selection.toColumn - selection.fromColumn + 1)
+      : 0;
 
     switch (command) {
       case 'insert-row-above': {
-        const rowIndex = this.activeBodyRowIndex();
-        return rowIndex === null
-          ? this.buildAddRowAfter(dom, -1)
-          : this.buildAddRowBefore(dom, rowIndex);
+        return bodyRow === null
+          ? this.buildAddRowAfter(dom, -1, column ?? 0)
+          : this.buildAddRowBefore(dom, bodyRow, column ?? 0);
       }
       case 'insert-row-below':
-        return this.buildAddRowAfter(dom, this.activeBodyRowIndex() ?? -1);
+        return this.buildAddRowAfter(dom, bodyRow ?? -1, column ?? 0);
       case 'delete-row': {
-        const selectedRange = this.selectionRange;
-        if (!selectedRange || this.selectedCellCount() <= 1) {
-          const rowIndex = this.activeBodyRowIndex();
-          return rowIndex === null
+        if (!selection || selectionCount <= 1) {
+          return bodyRow === null
             ? { transaction: null, outcome: 'no-op' }
-            : this.buildRemoveRowsAt(dom, [rowIndex]);
+            : this.buildRemoveRowsAt(dom, [bodyRow], column ?? 0);
         }
         const visualRows: number[] = [];
-        for (let row = Math.max(1, selectedRange.fromRow); row <= selectedRange.toRow; row += 1) {
+        for (let row = Math.max(1, selection.fromRow); row <= selection.toRow; row += 1) {
           const visualIndex = row - 1;
           const sourceIndex = this.sortState?.order?.[visualIndex] ?? visualIndex;
           if (sourceIndex >= 0 && sourceIndex < this.tableData.rows.length) visualRows.push(sourceIndex);
         }
-        return this.buildRemoveRowsAt(dom, visualRows);
+        return this.buildRemoveRowsAt(dom, visualRows, column ?? 0);
       }
       case 'insert-column-left': {
-        const column = this.activeColumnIndex();
         return column === null
           ? { transaction: null, outcome: 'no-op' }
-          : this.buildAddColumnBefore(dom, column);
+          : this.buildAddColumnBefore(dom, column, target.row ?? 0);
       }
       case 'insert-column-right': {
-        const column = this.activeColumnIndex();
         return column === null
           ? { transaction: null, outcome: 'no-op' }
-          : this.buildAddColumnAfter(dom, column);
+          : this.buildAddColumnAfter(dom, column, target.row ?? 0);
       }
       case 'delete-column': {
-        const selectedRange = this.selectionRange;
-        if (!selectedRange || this.selectedCellCount() <= 1) {
-          const column = this.activeColumnIndex();
+        if (!selection || selectionCount <= 1) {
           return column === null
             ? { transaction: null, outcome: 'no-op' }
-            : this.buildRemoveColumnsAt(dom, [column]);
+            : this.buildRemoveColumnsAt(dom, [column], target.row ?? 0);
         }
         const columns: number[] = [];
-        for (let column = selectedRange.fromCol; column <= selectedRange.toCol; column += 1) {
-          if (column >= 0 && column < this.tableData.colCount) columns.push(column);
+        for (let selectedColumn = selection.fromColumn; selectedColumn <= selection.toColumn; selectedColumn += 1) {
+          if (selectedColumn >= 0 && selectedColumn < this.tableData.colCount) columns.push(selectedColumn);
         }
-        return this.buildRemoveColumnsAt(dom, columns);
+        return this.buildRemoveColumnsAt(dom, columns, target.row ?? 0);
       }
       case 'align-left':
-        return this.buildAlignmentTransaction('left');
+        return this.buildAlignmentTransaction('left', target);
       case 'align-center':
-        return this.buildAlignmentTransaction('center');
+        return this.buildAlignmentTransaction('center', target);
       case 'align-right':
-        return this.buildAlignmentTransaction('right');
+        return this.buildAlignmentTransaction('right', target);
       case 'apply-sort': {
         if (!this.sortState) return { transaction: null, outcome: 'no-op' };
         const plan = this.buildMatrixTransaction(this.readCellMatrix(), dom, null, {
@@ -3507,7 +3529,7 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  buildAddRowAfter(dom, rowIndex): TableCommandTransactionPlan {
+  buildAddRowAfter(dom, rowIndex, focusColumn: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3521,12 +3543,12 @@ class HtmlTableWidget extends WidgetType {
     return this.buildMatrixTransaction(
       matrix,
       dom,
-      { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 },
+      { row: insertAt + 1, col: focusColumn },
       { sourceRowOrder }
     );
   }
 
-  buildAddRowBefore(dom, rowIndex): TableCommandTransactionPlan {
+  buildAddRowBefore(dom, rowIndex, focusColumn: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3540,7 +3562,7 @@ class HtmlTableWidget extends WidgetType {
     return this.buildMatrixTransaction(
       matrix,
       dom,
-      { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 },
+      { row: insertAt + 1, col: focusColumn },
       { sourceRowOrder }
     );
   }
@@ -3581,7 +3603,7 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  buildRemoveRowsAt(dom, rowIndexes: number[]): TableCommandTransactionPlan {
+  buildRemoveRowsAt(dom, rowIndexes: number[], focusColumn: number): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(rowIndexes)].sort((left, right) => right - left);
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     this.clearVisualSort();
@@ -3594,7 +3616,7 @@ class HtmlTableWidget extends WidgetType {
       const sourcePlan = this.buildRemoveSourceRowsTransaction(
         dom,
         validIndexes,
-        { row: focusRow, col: this.activeColumnIndex() ?? 0 }
+        { row: focusRow, col: focusColumn }
       );
       if (sourcePlan) return sourcePlan;
     }
@@ -3609,7 +3631,7 @@ class HtmlTableWidget extends WidgetType {
     return this.buildMatrixTransaction(
       matrix,
       dom,
-      { row: focusRow, col: this.activeColumnIndex() ?? 0 },
+      { row: focusRow, col: focusColumn },
       { sourceRowOrder }
     );
   }
@@ -3683,7 +3705,7 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  buildAddColumnAfter(dom, colIndex): TableCommandTransactionPlan {
+  buildAddColumnAfter(dom, colIndex, focusRow: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3697,10 +3719,10 @@ class HtmlTableWidget extends WidgetType {
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1).map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
-    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: insertAt });
+    return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: insertAt });
   }
 
-  buildAddColumnBefore(dom, colIndex): TableCommandTransactionPlan {
+  buildAddColumnBefore(dom, colIndex, focusRow: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3714,10 +3736,10 @@ class HtmlTableWidget extends WidgetType {
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1).map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
-    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: insertAt });
+    return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: insertAt });
   }
 
-  buildRemoveColumnsAt(dom, columnIndexes: number[]): TableCommandTransactionPlan {
+  buildRemoveColumnsAt(dom, columnIndexes: number[], focusRow: number): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(columnIndexes)].sort((left, right) => right - left);
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     this.clearVisualSort();
@@ -3740,7 +3762,7 @@ class HtmlTableWidget extends WidgetType {
     }
     matrix.alignments = alignments;
     const focusCol = Math.min(firstRemoved, matrix.headerCells.length - 1);
-    return this.buildMatrixTransaction(matrix, dom, { row: this.activeTarget.row, col: focusCol });
+    return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: focusCol });
   }
 
   cellDiagnostics(rowIndex, colIndex): TableCellDiagnostics[] {
@@ -4504,8 +4526,8 @@ class HtmlTableWidget extends WidgetType {
       to: this.tableData.to ?? 0,
       isConnected: () => Boolean(this.domRefs?.shell.isConnected),
       buildPendingEditTransactions: () => this.buildPendingEditTransactions(),
-      buildAtomicCommandTransaction: ({ command }) => this.buildTableCommandTransaction(command),
-      presentCommand: ({ command }) => this.presentTableCommand(command),
+      buildAtomicCommandTransaction: ({ command, target }) => this.buildTableCommandTransaction(command, target),
+      presentCommand: ({ command, target }) => this.presentTableCommand(command, target),
       preserveViewport: (run) => this.preserveTableCommandViewport(run)
     };
     this.tableCommandTargetRegistration = this.tableCommandEnvironment.registerTarget(tableCommandTarget);

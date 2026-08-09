@@ -15,6 +15,12 @@ export type TableCommandTarget = {
   readonly tableId: string;
   readonly row: number | null;
   readonly column: number | null;
+  readonly selection?: {
+    readonly fromRow: number;
+    readonly toRow: number;
+    readonly fromColumn: number;
+    readonly toColumn: number;
+  } | null;
 };
 
 export type TableCommandState = {
@@ -36,6 +42,7 @@ export type TableCommandInput =
       readonly outcome: 'changed' | 'presented' | 'no-op';
     }
   | { readonly type: 'commandFailed'; readonly commandId: number }
+  | { readonly type: 'invalidate' }
   | { readonly type: 'dispose' };
 
 export type TableCommandEffect =
@@ -67,6 +74,7 @@ export type TableCommandEffectExecution = {
 /** Application-owned port implemented by deterministic and Editor adapters. */
 export type TableCommandEffectExecutor = {
   execute(effect: TableCommandEffect): TableCommandEffectExecution;
+  invalidate(): void;
   dispose(): void;
 };
 
@@ -148,6 +156,10 @@ export function createTableCommandApplication(): TableCommandApplication {
         return finish(input.commandId, input.outcome);
       case 'commandFailed':
         return finish(input.commandId, 'failed');
+      case 'invalidate':
+        active = null;
+        phase = 'idle';
+        return [];
       case 'dispose':
         active = null;
         phase = 'disposed';
