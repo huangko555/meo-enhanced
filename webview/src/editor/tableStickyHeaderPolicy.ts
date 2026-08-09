@@ -15,7 +15,7 @@ export type TableStickyHeaderLayoutInput = {
     readonly top: number;
     readonly height: number;
   };
-  readonly controlsVisible: boolean;
+  readonly controlsHeight: number;
 };
 
 export type TableStickyHeaderLayout =
@@ -44,12 +44,11 @@ export type TableStickyHeaderPolicy = {
 };
 
 const minimumTableViewportRatio = 0.5;
-const toolbarHeight = 24;
 const separatorDepth = 3;
 
 export const tableStickyHeaderPolicy: TableStickyHeaderPolicy = {
   layout(input) {
-    const controlsHeight = input.controlsVisible ? toolbarHeight : 0;
+    const controlsHeight = Math.max(0, input.controlsHeight);
     const stickyHeaderTop = input.scroller.top + controlsHeight;
     if (input.table.height < input.scroller.height * minimumTableViewportRatio) {
       return { visible: false, reason: 'table-too-short' };

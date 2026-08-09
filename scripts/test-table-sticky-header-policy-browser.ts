@@ -48,7 +48,7 @@ async function main(): Promise<void> {
       const scroller = document.getElementById('scroller')!;
       const table = document.querySelector<HTMLTableElement>('table')!;
       const header = table.tHead!;
-      const input = (controlsVisible: boolean) => {
+      const input = (controlsHeight: number) => {
         const scrollerRect = scroller.getBoundingClientRect();
         const tableRect = table.getBoundingClientRect();
         const headerRect = header.getBoundingClientRect();
@@ -68,17 +68,17 @@ async function main(): Promise<void> {
             width: tableRect.width
           },
           header: { top: headerRect.top, height: headerRect.height },
-          controlsVisible
+          controlsHeight
         };
       };
 
-      const beforeThreshold = candidate.policy.layout(input(false));
+      const beforeThreshold = candidate.policy.layout(input(0));
       scroller.scrollTop = 80;
       scroller.scrollLeft = 50;
-      const visible = candidate.policy.layout(input(false));
-      const withControls = candidate.policy.layout(input(true));
+      const visible = candidate.policy.layout(input(0));
+      const withControls = candidate.policy.layout(input(31));
       scroller.scrollTop = 420;
-      const afterTable = candidate.policy.layout(input(false));
+      const afterTable = candidate.policy.layout(input(0));
       return {
         instances: candidate.instances,
         beforeThreshold,
@@ -99,8 +99,8 @@ async function main(): Promise<void> {
     }
     assert.equal(result.withControls.visible, true);
     if (result.withControls.visible && result.visible.visible) {
-      assert.equal(result.withControls.controlsHeight, 24);
-      assert.equal(result.withControls.height - result.visible.height, 24);
+      assert.equal(result.withControls.controlsHeight, 31);
+      assert.equal(result.withControls.height - result.visible.height, 31);
     }
     assert.deepEqual(result.afterTable, { visible: false, reason: 'insufficient-content' });
   } finally {

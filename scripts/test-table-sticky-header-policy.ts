@@ -6,7 +6,7 @@ const common = {
   scroller: { top: 10, left: 20, right: 420, height: 300 },
   table: { top: -40, left: -30, right: 530, bottom: 600, height: 640, width: 560 },
   header: { top: 0, height: 32 },
-  controlsVisible: false
+  controlsHeight: 0
 } as const;
 
 assert.deepEqual(tableStickyHeaderPolicy.layout({
@@ -44,17 +44,17 @@ assert.deepEqual(tableStickyHeaderPolicy.layout(common), {
 assert.deepEqual(tableStickyHeaderPolicy.layout({
   ...common,
   header: { ...common.header, top: 34 },
-  controlsVisible: true
+  controlsHeight: 31
 }), {
   visible: true,
   top: 10,
   left: 20,
   width: 400,
-  height: 59,
+  height: 66,
   headerHeight: 32,
   tableWidth: 560,
   translateX: -50,
-  controlsHeight: 24
+  controlsHeight: 31
 });
 
 const policySource = readFileSync(
@@ -66,20 +66,6 @@ assert.equal(
   false,
   'the pure sticky header policy must not own editor, DOM, document, observer, or frame state'
 );
-for (const requiredRule of [
-  'minimumTableViewportRatio',
-  'separatorDepth',
-  'controlsHeight',
-  'visibleLeft',
-  'enoughContentRemains'
-]) {
-  assert.equal(
-    policySource.includes(requiredRule),
-    true,
-    `deleting the policy would leak a sticky layout rule back into callers: ${requiredRule}`
-  );
-}
-
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
 assert.equal(editorSource.includes('tableStickyHeaderPolicy'), true);

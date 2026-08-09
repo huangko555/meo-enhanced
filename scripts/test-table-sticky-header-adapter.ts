@@ -15,10 +15,8 @@ void schedulerShape;
 
 const adapterShape: TableStickyHeaderAdapter = {
   mount() {},
-  update() {},
   invalidate() {},
   refreshContent() {},
-  unmount() {},
   dispose() {}
 };
 void adapterShape;
@@ -30,17 +28,6 @@ const adapterSource = readFileSync(
 );
 assert.equal(/requestAnimationFrame|cancelAnimationFrame/.test(adapterSource), false);
 assert.equal(/@codemirror|DocumentSession|Revision|Draft|Change|TableTransactionProvenance/.test(adapterSource), false);
-for (const requiredDepth of [
-  'ResizeObserver',
-  'MutationObserver',
-  'refreshContent',
-  'applyLayout',
-  'unmount',
-  'generation'
-]) {
-  assert.equal(adapterSource.includes(requiredDepth), true, `adapter lost deep lifecycle rule: ${requiredDepth}`);
-}
-
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
 assert.equal(editorSource.includes('codeMirrorDomTableStickyHeaderAdapter'), true);

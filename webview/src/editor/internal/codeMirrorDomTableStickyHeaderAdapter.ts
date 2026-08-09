@@ -90,7 +90,7 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
           width: tableRect.width
         },
         header: { top: headerRect.top, height: headerRect.height },
-        controlsVisible: options.controlsVisible()
+        controlsHeight: options.controlsHeight()
       }));
     } finally {
       refreshing = false;
@@ -171,13 +171,8 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
 
   return {
     mount,
-    update() {
-      if (disposed) return;
-      mount();
-    },
     invalidate,
     refreshContent,
-    unmount,
     dispose() {
       if (disposed) return;
       unmount();

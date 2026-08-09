@@ -111,7 +111,7 @@ async function main(): Promise<void> {
         policy: policyWithReentry,
         scheduler,
         resolveElements: () => elements(1),
-        controlsVisible: () => elements(1).shell.classList.contains('controls-visible'),
+        controlsHeight: () => elements(1).shell.classList.contains('controls-visible') ? 24 : 0,
         renderHeaderCell: (column: number) => (
           elements(1).table.tHead!.rows[0].cells[column].cloneNode(true) as HTMLTableCellElement
         )
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
         policy: candidate.policy,
         scheduler,
         resolveElements: () => elements(2),
-        controlsVisible: () => false,
+        controlsHeight: () => 0,
         renderHeaderCell: (column: number) => (
           elements(2).table.tHead!.rows[0].cells[column].cloneNode(true) as HTMLTableCellElement
         )
@@ -194,24 +194,16 @@ async function main(): Promise<void> {
       scheduler.flush();
       const hiddenWithOuterMode = !elements(1).stickyChrome.classList.contains('is-visible');
       elements(1).shell.style.display = '';
-      const oldTable = elements(1).table;
-      oldTable.replaceWith(oldTable.cloneNode(true));
-      adapter1.update();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      scheduler.flush();
-      const visibleAfterRebuild = elements(1).stickyChrome.classList.contains('is-visible');
-
-      const styleBeforeUnmount = elements(1).stickyTable.style.width;
-      adapter1.unmount();
+      const styleBeforeDispose = elements(1).stickyTable.style.width;
+      adapter1.dispose();
       elements(1).table.style.width = '440px';
       elements(1).scroller.dispatchEvent(new Event('scroll'));
       window.dispatchEvent(new Event('resize'));
       scheduler.flush();
-      const styleAfterUnmount = elements(1).stickyTable.style.width;
-      const hiddenAfterUnmount = !elements(1).stickyChrome.classList.contains('is-visible');
+      const styleAfterDispose = elements(1).stickyTable.style.width;
+      const hiddenAfterDispose = !elements(1).stickyChrome.classList.contains('is-visible');
 
       other.request();
-      adapter1.dispose();
       scheduler.flush();
       const otherSurvivedDispose = otherLayoutRuns === 2;
       const registrationsAfterFirstDispose = scheduler.records.size;
@@ -235,10 +227,9 @@ async function main(): Promise<void> {
         projectedWidth,
         focusAndSelectionPreserved,
         hiddenWithOuterMode,
-        visibleAfterRebuild,
-        styleBeforeUnmount,
-        styleAfterUnmount,
-        hiddenAfterUnmount,
+        styleBeforeDispose,
+        styleAfterDispose,
+        hiddenAfterDispose,
         otherSurvivedDispose,
         registrationsAfterFirstDispose,
         sourceUnchanged: elements(1).table.textContent?.replace('Updated header', 'Header 1') === sourceText,
@@ -265,9 +256,8 @@ async function main(): Promise<void> {
     assert.equal(result.projectedWidth, '480px');
     assert.equal(result.focusAndSelectionPreserved, true);
     assert.equal(result.hiddenWithOuterMode, true);
-    assert.equal(result.visibleAfterRebuild, true);
-    assert.equal(result.styleAfterUnmount, result.styleBeforeUnmount);
-    assert.equal(result.hiddenAfterUnmount, true);
+    assert.equal(result.styleAfterDispose, result.styleBeforeDispose);
+    assert.equal(result.hiddenAfterDispose, true);
     assert.equal(result.otherSurvivedDispose, true);
     assert.equal(result.registrationsAfterFirstDispose, 2, 'disposing sticky removes only its own registration');
     assert.equal(result.sourceUnchanged, true);

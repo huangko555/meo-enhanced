@@ -321,6 +321,33 @@ async function main() {
         toolbars: document.querySelectorAll('.meo-md-html-table-toolbar').length
       });
       const ownersBeforeLifecycle = productionOwners();
+      const textBeforeProjection = multiEditor.getText();
+      const projectionInput = document.querySelector<HTMLTextAreaElement>(
+        '.meo-md-html-table-shell tbody textarea'
+      )!;
+      projectionInput.focus({ preventScroll: true });
+      projectionInput.setSelectionRange(0, Math.min(1, projectionInput.value.length));
+      const selectionBeforeProjection = {
+        start: projectionInput.selectionStart,
+        end: projectionInput.selectionEnd
+      };
+      const viewportBeforeProjection = {
+        top: multiScroller.scrollTop,
+        left: multiScroller.scrollLeft
+      };
+      window.dispatchEvent(new Event('resize'));
+      await waitFrames();
+      const projectionState = {
+        markdownUnchanged: multiEditor.getText() === textBeforeProjection,
+        focusAndSelectionPreserved: document.activeElement === projectionInput &&
+          projectionInput.selectionStart === selectionBeforeProjection.start &&
+          projectionInput.selectionEnd === selectionBeforeProjection.end,
+        viewportPreserved: multiScroller.scrollTop === viewportBeforeProjection.top &&
+          multiScroller.scrollLeft === viewportBeforeProjection.left,
+        toolbarUsable: !document.querySelector<HTMLButtonElement>(
+          '.meo-md-html-table-toolbar-btn'
+        )!.disabled
+      };
 
       multiEditor.setMode('source');
       await waitFrames();
@@ -349,9 +376,15 @@ async function main() {
 
       const lateScroller = multiEditor.view.scrollDOM as HTMLElement;
       multiEditor.destroy();
+      let lateDomWrites = 0;
+      const lateWriteObserver = new MutationObserver((records) => {
+        lateDomWrites += records.length;
+      });
+      lateWriteObserver.observe(app, { attributes: true, childList: true, subtree: true });
       lateScroller.dispatchEvent(new Event('scroll'));
       window.dispatchEvent(new Event('resize'));
       await waitFrames();
+      lateWriteObserver.disconnect();
       const ownersAfterDestroy = productionOwners();
 
       const lifecycleState = {
@@ -361,7 +394,9 @@ async function main() {
         ownersAfterExternalPresentation,
         ownersAfterUndo,
         ownersAfterRedo,
-        ownersAfterDestroy
+        ownersAfterDestroy,
+        projectionState,
+        lateDomWrites
       };
 
       return {
@@ -476,7 +511,12 @@ async function main() {
       JSON.stringify(result.lifecycleState.ownersAfterExternalPresentation) !== JSON.stringify(expectedTwoTableOwners) ||
       JSON.stringify(result.lifecycleState.ownersAfterUndo) !== JSON.stringify(expectedTwoTableOwners) ||
       JSON.stringify(result.lifecycleState.ownersAfterRedo) !== JSON.stringify(expectedTwoTableOwners) ||
-      JSON.stringify(result.lifecycleState.ownersAfterDestroy) !== JSON.stringify({ shells: 0, adapters: 0, toolbars: 0 })
+      JSON.stringify(result.lifecycleState.ownersAfterDestroy) !== JSON.stringify({ shells: 0, adapters: 0, toolbars: 0 }) ||
+      !result.lifecycleState.projectionState.markdownUnchanged ||
+      !result.lifecycleState.projectionState.focusAndSelectionPreserved ||
+      !result.lifecycleState.projectionState.viewportPreserved ||
+      !result.lifecycleState.projectionState.toolbarUsable ||
+      result.lifecycleState.lateDomWrites !== 0
     ) {
       failures.push(`production Sticky ownership lifecycle was incorrect: ${JSON.stringify(result.lifecycleState)}`);
     }

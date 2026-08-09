@@ -2106,7 +2106,7 @@ class HtmlTableWidget extends WidgetType {
     this.stickyHeaderAdapter = stickyHeaderAdapterFactory.create({
       scheduler: this.layoutScheduler,
       resolveElements: () => this.resolveStickyHeaderElements(),
-      controlsVisible: () => this.stickyControlsVisible(),
+      controlsHeight: () => this.stickyControlsHeight(),
       renderHeaderCell: (column) => this.renderStickyHeaderCell(column)
     });
   }
@@ -2145,12 +2145,13 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  stickyControlsVisible(): boolean {
+  stickyControlsHeight(): number {
     const shell = this.domRefs?.shell;
-    if (!shell || !shell.classList.contains('is-controls-sticky')) return false;
-    return shell.matches(':focus-within') ||
+    if (!shell || !shell.classList.contains('is-controls-sticky')) return 0;
+    const visible = shell.matches(':focus-within') ||
       shell.classList.contains('is-interacting') ||
       shell.classList.contains('has-active-sort');
+    return visible ? tableToolbarHeight : 0;
   }
 
   renderStickyHeaderCell(column: number): HTMLTableCellElement {
