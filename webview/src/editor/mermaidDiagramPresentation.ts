@@ -1,6 +1,7 @@
 import { Facet, type EditorState } from '@codemirror/state';
 import type {
   MermaidDiagramRenderRequest,
+  MermaidDiagramRenderResources,
   MermaidDiagramRenderResult
 } from '../application/mermaidDiagramRenderResources';
 
@@ -29,6 +30,59 @@ export type MermaidDiagramPresentationFactory = {
   externalDocumentPresented(): void;
   dispose(): void;
 };
+
+export type MermaidDiagramPresentationFactoryOptions = {
+  readonly resources: MermaidDiagramRenderResources;
+  readonly createHandle: (
+    view: MermaidDiagramPresentationView
+  ) => MermaidDiagramPresentationHandle;
+};
+
+/** Owns Widget handle registration while Bootstrap owns concrete assembly. */
+export function createMermaidDiagramPresentationFactory(
+  options: MermaidDiagramPresentationFactoryOptions
+): MermaidDiagramPresentationFactory {
+  const handles = new Set<MermaidDiagramPresentationHandle>();
+  let disposed = false;
+
+  return {
+    create(view) {
+      if (disposed) throw new Error('Mermaid diagram presentation factory is disposed');
+      const delegate = options.createHandle(view);
+      let active = true;
+      const handle: MermaidDiagramPresentationHandle = {
+        present(source, themeKey, configKey) {
+          if (active) delegate.present(source, themeKey, configKey);
+        },
+        externalDocumentPresented() {
+          if (active) delegate.externalDocumentPresented();
+        },
+        whenIdle: () => active ? delegate.whenIdle() : Promise.resolve(),
+        dispose() {
+          if (!active) return;
+          active = false;
+          handles.delete(handle);
+          delegate.dispose();
+        }
+      };
+      handles.add(handle);
+      return handle;
+    },
+    getCached: (request) => options.resources.getCached(request),
+    getHeight: (key) => options.resources.getHeight(key),
+    rememberHeight: (key, height) => options.resources.rememberHeight(key, height),
+    subscribeThemeRefresh: (listener) => options.resources.subscribeThemeRefresh(listener),
+    externalDocumentPresented() {
+      for (const handle of [...handles]) handle.externalDocumentPresented();
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const handle of [...handles]) handle.dispose();
+      handles.clear();
+    }
+  };
+}
 
 export const mermaidDiagramPresentationFactoryFacet = Facet.define<
   MermaidDiagramPresentationFactory,

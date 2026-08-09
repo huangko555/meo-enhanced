@@ -10,6 +10,20 @@
     "webview/src/bootstrap",
     "webview/src/editor"
   ],
+  "bootstrapOnlyModules": [
+    {
+      "module": "webview/src/adapters/mermaidDiagramPresentationRuntime.ts",
+      "allowedImporters": ["webview/src/index.ts"]
+    },
+    {
+      "module": "webview/src/editor/mermaidDiagramPresentationAdapter.ts",
+      "allowedImporters": ["webview/src/index.ts"]
+    },
+    {
+      "module": "webview/src/editor/mermaidDiagramRenderPool.ts",
+      "allowedImporters": ["webview/src/index.ts"]
+    }
+  ],
   "knownLegacyTestFailures": [
     {
       "id": "LEG-TEST-001",

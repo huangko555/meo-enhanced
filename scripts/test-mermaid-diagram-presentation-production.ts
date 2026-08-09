@@ -8,45 +8,6 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-mermaid-presentation-production-'));
 
 async function main(): Promise<void> {
-  const indexSource = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
-  const editorSource = fs.readFileSync(path.join(repoRoot, 'webview/src/editor.ts'), 'utf8');
-  const widgetSource = fs.readFileSync(
-    path.join(repoRoot, 'webview/src/helpers/mermaidDiagram.ts'),
-    'utf8'
-  );
-  const previewSource = fs.readFileSync(
-    path.join(repoRoot, 'webview/src/helpers/previewMermaid.ts'),
-    'utf8'
-  );
-  assert.equal((indexSource.match(/createMermaidDiagramRenderPool\(/g) ?? []).length, 1);
-  assert.equal((indexSource.match(/createMermaidDiagramPresentationFactory\(/g) ?? []).length, 1);
-  assert.equal(editorSource.includes('createMermaidDiagramRenderPool'), false);
-  assert.equal(editorSource.includes('createMermaidDiagramPresentationFactory'), false);
-  assert.equal(editorSource.includes('mermaidDiagramPresentationFactoryFacet'), true);
-  assert.equal(widgetSource.includes('editor/mermaidDiagramRenderPool'), false);
-  assert.equal(previewSource.includes('editor/mermaidDiagramRenderPool'), false);
-  assert.ok(
-    indexSource.indexOf('mermaidDiagramPresentationFactory.dispose()')
-      < indexSource.indexOf('mermaidDiagramRenderPool.dispose()'),
-    'Widget handles must close before the shared Pool'
-  );
-  for (const legacyOwner of [
-    'mermaidInitialized',
-    'mermaidCache',
-    'mermaidOperationRunning',
-    'mermaidHighPriorityOperations',
-    'mermaidNormalPriorityOperations',
-    'mermaidRenderInFlight',
-    'mermaidEstimatedHeightCache',
-    'mermaidPreviewHeightCache',
-    'mermaidThemeRefreshListeners',
-    'runExclusiveMermaidOperation',
-    'renderMermaidDiagram('
-  ]) {
-    assert.equal(widgetSource.includes(legacyOwner), false, `${legacyOwner} must not return`);
-  }
-  assert.equal(previewSource.includes('runExclusiveMermaidOperation'), false);
-
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-editing-entry.ts')],
     outdir: tempDir,

@@ -1,16 +1,10 @@
 import {
-  createMermaidDiagramPresentationApplication,
   type MermaidDiagramPresentationEffect,
   type MermaidDiagramPresentationEffectExecution,
   type MermaidDiagramPresentationEffectExecutor
 } from '../application/mermaidDiagramPresentation';
 import type { MermaidDiagramRenderResources } from '../application/mermaidDiagramRenderResources';
-import { createMermaidDiagramPresentationRuntime } from '../adapters/mermaidDiagramPresentationRuntime';
-import type {
-  MermaidDiagramPresentationFactory,
-  MermaidDiagramPresentationHandle,
-  MermaidDiagramPresentationView
-} from './mermaidDiagramPresentation';
+import type { MermaidDiagramPresentationView } from './mermaidDiagramPresentation';
 
 export type MermaidDiagramPresentationAdapterOptions = {
   readonly view: MermaidDiagramPresentationView;
@@ -95,65 +89,6 @@ export function createMermaidDiagramPresentationEffectAdapter(
     execute,
     dispose() {
       disposed = true;
-    }
-  };
-}
-
-export type MermaidDiagramPresentationFactoryOptions = {
-  readonly resources: MermaidDiagramRenderResources;
-  readonly normalizeSource: (source: string) => string;
-};
-
-/** Creates exactly one Application/Runtime/Adapter tuple for each Mermaid Widget. */
-export function createMermaidDiagramPresentationFactory(
-  options: MermaidDiagramPresentationFactoryOptions
-): MermaidDiagramPresentationFactory {
-  const handles = new Set<MermaidDiagramPresentationHandle>();
-  let disposed = false;
-
-  const create = (view: MermaidDiagramPresentationView): MermaidDiagramPresentationHandle => {
-    if (disposed) throw new Error('Mermaid diagram presentation factory is disposed');
-    const application = createMermaidDiagramPresentationApplication();
-    const executor = createMermaidDiagramPresentationEffectAdapter({
-      view,
-      resources: options.resources,
-      normalizeSource: options.normalizeSource
-    });
-    const runtime = createMermaidDiagramPresentationRuntime({ application, executor });
-    let active = true;
-    const handle: MermaidDiagramPresentationHandle = {
-      present(source, themeKey, configKey) {
-        if (active) runtime.dispatch({ type: 'present', source, themeKey, configKey });
-      },
-      externalDocumentPresented() {
-        if (active) runtime.dispatch({ type: 'externalDocumentPresented' });
-      },
-      whenIdle: () => runtime.whenCurrentPresentationSettles(),
-      dispose() {
-        if (!active) return;
-        active = false;
-        handles.delete(handle);
-        runtime.dispose();
-      }
-    };
-    handles.add(handle);
-    return handle;
-  };
-
-  return {
-    create,
-    getCached: (request) => options.resources.getCached(request),
-    getHeight: (key) => options.resources.getHeight(key),
-    rememberHeight: (key, height) => options.resources.rememberHeight(key, height),
-    subscribeThemeRefresh: (listener) => options.resources.subscribeThemeRefresh(listener),
-    externalDocumentPresented() {
-      for (const handle of [...handles]) handle.externalDocumentPresented();
-    },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      for (const handle of [...handles]) handle.dispose();
-      handles.clear();
     }
   };
 }

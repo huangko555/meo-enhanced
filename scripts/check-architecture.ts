@@ -19,6 +19,7 @@ const configText = staged
   : readFileSync(configPath, 'utf8');
 const config = JSON.parse(configText) as {
   targetRoots: string[];
+  bootstrapOnlyModules?: Array<{ module: string; allowedImporters: string[] }>;
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
 };
 
@@ -154,6 +155,10 @@ for (const file of files) visit(file);
 for (const cycle of cycles) failures.push(`ARCH001 循环依赖: ${cycle}`);
 
 for (const edge of edges) {
+  const bootstrapRule = config.bootstrapOnlyModules?.find((rule) => rule.module === edge.to);
+  if (bootstrapRule && !bootstrapRule.allowedImporters.includes(edge.from)) {
+    failures.push(`ARCH007 具体实现只能由 Bootstrap 导入: ${edge.from} -> ${edge.to}`);
+  }
   if (!isTarget(edge.from)) continue;
   const layer = targetLayer(edge.from);
   if (!layer) continue;

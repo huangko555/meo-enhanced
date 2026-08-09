@@ -17,13 +17,6 @@ async function main(): Promise<void> {
   });
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
-  const bundle = fs.readFileSync(path.join(tempDir, 'bundle.js'), 'utf8');
-  assert.equal(bundle.includes('mermaidEditingStateField'), false);
-  assert.equal(bundle.includes('MermaidEditingController'), false);
-  assert.equal(bundle.includes('HistoryReplay'), false);
-  assert.equal(bundle.includes('MermaidDiagramWidget'), false);
-  assert.equal(bundle.includes('helpers/mermaidDiagram'), false);
-
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();

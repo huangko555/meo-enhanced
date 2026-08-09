@@ -18,7 +18,10 @@ import {
   renderMermaidRuntime
 } from './helpers/mermaidDiagram';
 import { createMermaidDiagramRenderPool } from './editor/mermaidDiagramRenderPool';
-import { createMermaidDiagramPresentationFactory } from './editor/mermaidDiagramPresentationAdapter';
+import { createMermaidDiagramPresentationApplication } from './application/mermaidDiagramPresentation';
+import { createMermaidDiagramPresentationRuntime } from './adapters/mermaidDiagramPresentationRuntime';
+import { createMermaidDiagramPresentationEffectAdapter } from './editor/mermaidDiagramPresentationAdapter';
+import { createMermaidDiagramPresentationFactory } from './editor/mermaidDiagramPresentation';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
@@ -1063,7 +1066,25 @@ const mermaidDiagramRenderPool = createMermaidDiagramRenderPool({
 });
 const mermaidDiagramPresentationFactory = createMermaidDiagramPresentationFactory({
   resources: mermaidDiagramRenderPool,
-  normalizeSource: normalizeMermaidDiagramText
+  createHandle(view) {
+    const application = createMermaidDiagramPresentationApplication();
+    const executor = createMermaidDiagramPresentationEffectAdapter({
+      view,
+      resources: mermaidDiagramRenderPool,
+      normalizeSource: normalizeMermaidDiagramText
+    });
+    const runtime = createMermaidDiagramPresentationRuntime({ application, executor });
+    return {
+      present(source, themeKey, configKey) {
+        runtime.dispatch({ type: 'present', source, themeKey, configKey });
+      },
+      externalDocumentPresented() {
+        runtime.dispatch({ type: 'externalDocumentPresented' });
+      },
+      whenIdle: () => runtime.whenCurrentPresentationSettles(),
+      dispose: () => runtime.dispose()
+    };
+  }
 });
 const previewController = createPreviewController({
   vscode,
