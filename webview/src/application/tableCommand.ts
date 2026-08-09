@@ -59,6 +59,16 @@ export type TableCommandApplication = {
   dispatch(input: TableCommandInput): readonly TableCommandEffect[];
 };
 
+export type TableCommandEffectExecution = {
+  readonly completion?: Promise<TableCommandInput | null>;
+};
+
+/** Application-owned port implemented by deterministic and Editor adapters. */
+export type TableCommandEffectExecutor = {
+  execute(effect: TableCommandEffect): TableCommandEffectExecution;
+  dispose(): void;
+};
+
 type ActiveCommand = {
   readonly id: number;
   readonly command: TableCommand;
