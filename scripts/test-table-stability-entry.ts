@@ -1,4 +1,4 @@
-import { createEditor } from '../webview/src/editor';
+import { createEditor } from './test-editor-factory';
 import { Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import {

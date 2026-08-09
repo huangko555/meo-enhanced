@@ -3,7 +3,7 @@ import {
   createDocumentSessionCoordinatorFromInit,
   createDocumentSessionTransport
 } from '../webview/src/adapters/documentSessionTransport';
-import { createEditor } from '../webview/src/editor';
+import { createEditor } from './test-editor-factory';
 import { respondToDocumentSessionRequest } from '../src/host/documentSessionRequestHandler';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import type { DocumentSessionInput } from '../src/application/documentSession';

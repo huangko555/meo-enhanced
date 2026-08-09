@@ -43,13 +43,36 @@ function createEnvironment() {
     const application = createMermaidDiagramPresentationApplication();
     applicationCount += 1;
     const adapter = createMermaidDiagramPresentationEffectAdapter({
-      body,
-      pool,
+      view: {
+        showPending() {
+          const pending = document.createElement('div');
+          pending.className = 'meo-mermaid-loading';
+          pending.textContent = 'Loading...';
+          body.replaceChildren(pending);
+        },
+        showDiagram(svg) {
+          const diagram = document.createElement('div');
+          diagram.className = 'meo-mermaid-svg-wrapper';
+          diagram.innerHTML = svg;
+          body.replaceChildren(diagram);
+        },
+        showError(source, error) {
+          const fallback = document.createElement('pre');
+          fallback.className = 'meo-mermaid-fallback';
+          fallback.textContent = source;
+          const badge = document.createElement('div');
+          badge.className = 'meo-mermaid-error-badge';
+          badge.textContent = error;
+          body.replaceChildren(fallback, badge);
+        },
+        clearPresentation: () => body.replaceChildren(),
+        preserveLayoutChange(apply) {
+          events.push('preserve-layout');
+          apply();
+        }
+      },
+      resources: pool,
       normalizeSource: (source) => source.trim(),
-      preserveLayoutChange(apply) {
-        events.push('preserve-layout');
-        apply();
-      }
     });
     adapterCount += 1;
     const runtime = createMermaidDiagramPresentationRuntime({ application, executor: adapter });

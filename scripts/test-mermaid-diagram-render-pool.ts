@@ -80,11 +80,14 @@ const invalidRequest = {
 assert.deepEqual(await errorPool.render(invalidRequest), { ok: false, error: 'parse error' });
 assert.deepEqual(await errorPool.render(invalidRequest), { ok: false, error: 'parse error' });
 assert.equal(errorRenderCount, 1, 'error results remain cached until theme refresh');
-errorPool.rememberHeight('diagram-a', 120);
-assert.equal(errorPool.getHeight('diagram-a'), 120);
+errorPool.rememberHeight('estimated:diagram-a', 120);
+errorPool.rememberHeight('preview:diagram-a', 140);
+assert.equal(errorPool.getHeight('estimated:diagram-a'), 120);
+assert.equal(errorPool.getHeight('preview:diagram-a'), 140);
 errorPool.refreshTheme();
 assert.equal(themeRefreshCount, 1);
-assert.equal(errorPool.getHeight('diagram-a'), null);
+assert.equal(errorPool.getHeight('estimated:diagram-a'), 120);
+assert.equal(errorPool.getHeight('preview:diagram-a'), 140);
 assert.deepEqual(await errorPool.render(invalidRequest), { ok: false, error: 'parse error' });
 assert.equal(errorRenderCount, 2);
 assert.deepEqual(errorInitializations, ['light:default', 'light:default']);

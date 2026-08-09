@@ -8,27 +8,44 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-mermaid-presentation-production-'));
 
 async function main(): Promise<void> {
-  const candidateImports = [
-    'application/mermaidDiagramPresentation',
-    'adapters/mermaidDiagramPresentationRuntime',
-    'editor/mermaidDiagramPresentationAdapter',
-    'editor/mermaidDiagramRenderPool'
-  ];
-  for (const relativePath of [
-    'webview/src/editor.ts',
-    'webview/src/index.ts',
-    'webview/src/helpers/mermaidDiagram.ts',
-    'webview/src/helpers/mermaidEditing.ts'
+  const indexSource = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
+  const editorSource = fs.readFileSync(path.join(repoRoot, 'webview/src/editor.ts'), 'utf8');
+  const widgetSource = fs.readFileSync(
+    path.join(repoRoot, 'webview/src/helpers/mermaidDiagram.ts'),
+    'utf8'
+  );
+  const previewSource = fs.readFileSync(
+    path.join(repoRoot, 'webview/src/helpers/previewMermaid.ts'),
+    'utf8'
+  );
+  assert.equal((indexSource.match(/createMermaidDiagramRenderPool\(/g) ?? []).length, 1);
+  assert.equal((indexSource.match(/createMermaidDiagramPresentationFactory\(/g) ?? []).length, 1);
+  assert.equal(editorSource.includes('createMermaidDiagramRenderPool'), false);
+  assert.equal(editorSource.includes('createMermaidDiagramPresentationFactory'), false);
+  assert.equal(editorSource.includes('mermaidDiagramPresentationFactoryFacet'), true);
+  assert.equal(widgetSource.includes('editor/mermaidDiagramRenderPool'), false);
+  assert.equal(previewSource.includes('editor/mermaidDiagramRenderPool'), false);
+  assert.ok(
+    indexSource.indexOf('mermaidDiagramPresentationFactory.dispose()')
+      < indexSource.indexOf('mermaidDiagramRenderPool.dispose()'),
+    'Widget handles must close before the shared Pool'
+  );
+  for (const legacyOwner of [
+    'mermaidInitialized',
+    'mermaidCache',
+    'mermaidOperationRunning',
+    'mermaidHighPriorityOperations',
+    'mermaidNormalPriorityOperations',
+    'mermaidRenderInFlight',
+    'mermaidEstimatedHeightCache',
+    'mermaidPreviewHeightCache',
+    'mermaidThemeRefreshListeners',
+    'runExclusiveMermaidOperation',
+    'renderMermaidDiagram('
   ]) {
-    const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
-    for (const candidateImport of candidateImports) {
-      assert.equal(
-        source.includes(candidateImport),
-        false,
-        `${relativePath} must not create or import ${candidateImport}`
-      );
-    }
+    assert.equal(widgetSource.includes(legacyOwner), false, `${legacyOwner} must not return`);
   }
+  assert.equal(previewSource.includes('runExclusiveMermaidOperation'), false);
 
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-editing-entry.ts')],
@@ -81,9 +98,10 @@ async function main(): Promise<void> {
       };
 
       const harness = (window as any).MermaidEditingHarness;
+      const initialText = '```mermaid\ngraph TD\nA-->B\n```\n\n```mermaid\ngraph TD\nA-->B\n```';
       const editor = harness.createEditor({
         parent: document.getElementById('app')!,
-        text: '```mermaid\ngraph TD\nA-->B\n```\n\n```mermaid\ngraph TD\nA-->B\n```',
+        text: initialText,
         initialMode: 'live',
         onApplyChanges() {}
       });
@@ -99,6 +117,8 @@ async function main(): Promise<void> {
       };
 
       await settle();
+      editor.setText(initialText);
+      await settle(20);
       const shared = {
         renderCalls: calls.length,
         sources: [...calls],

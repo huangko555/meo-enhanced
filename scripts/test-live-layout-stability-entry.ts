@@ -1,4 +1,4 @@
-import { createEditor } from '../webview/src/editor';
+import { createEditor } from './test-editor-factory';
 import { getDetailsBlocks, toggleCollapsibleSection } from '../webview/src/helpers/headingCollapse';
 
 (globalThis as typeof globalThis & {

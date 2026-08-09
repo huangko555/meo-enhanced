@@ -93,6 +93,10 @@ import {
   loadBrowserImage
 } from './editor/imagePresentationAdapter';
 import { imagePresentationFactoryFacet } from './editor/imagePresentation';
+import {
+  mermaidDiagramPresentationFactoryFacet,
+  type MermaidDiagramPresentationFactory
+} from './editor/mermaidDiagramPresentation';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -238,11 +242,15 @@ export function createEditor({
   initialVimMode = false,
   initialVimKeybindings = [],
   initialVimLeader = '\\',
-  initialDiagnostics = []
+  initialDiagnostics = [],
+  mermaidDiagramPresentationFactory
 }) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
   (EditorView as any).EDIT_CONTEXT = false;
+  if (!mermaidDiagramPresentationFactory) {
+    throw new Error('Mermaid diagram presentation factory is required');
+  }
 
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
@@ -2306,6 +2314,9 @@ export function createEditor({
       tableStickyHeaderAdapterFactoryFacet.of(tableStickyHeaderAdapterFactory),
       tableCommandEnvironmentFacet.of(tableCommandEnvironment),
       imagePresentationFactoryFacet.of(imagePresentationFactory),
+      mermaidDiagramPresentationFactoryFacet.of(
+        mermaidDiagramPresentationFactory as MermaidDiagramPresentationFactory
+      ),
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
@@ -2865,6 +2876,7 @@ export function createEditor({
         return;
       }
 
+      mermaidDiagramPresentationFactory.externalDocumentPresented();
       void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
       recentRenderedReplayPresentation = null;
 

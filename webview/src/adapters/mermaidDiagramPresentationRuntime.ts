@@ -76,6 +76,10 @@ export function createMermaidDiagramPresentationRuntime(
         if (failure) dispatchInternal(failure);
         continue;
       }
+      if (execution.immediate) {
+        dispatchInternal(execution.immediate);
+        continue;
+      }
       if (!execution.completion) continue;
       pendingByPresentation.set(
         effect.presentationId,

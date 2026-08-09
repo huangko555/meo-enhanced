@@ -1,4 +1,4 @@
-import { createEditor } from '../webview/src/editor';
+import { createEditor } from './test-editor-factory';
 import { createSelectionMenu } from '../webview/src/helpers/selectionMenu';
 
 (globalThis as typeof globalThis & {

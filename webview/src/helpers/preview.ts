@@ -8,11 +8,13 @@ import type { PreviewAppearance } from '../../../src/shared/preview';
 import type { PreviewRenderResponse, PreviewRenderValue } from '../../../src/protocol/previewRender';
 import { createPreviewRenderTransport } from '../adapters/previewRenderTransport';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
+import type { MermaidDiagramRenderResources } from '../application/mermaidDiagramRenderResources';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
   onRendered?: () => void;
   onFindRequested?: () => void;
+  mermaidRenderResources: MermaidDiagramRenderResources;
 };
 
 const previewScrollbarStyles = `
@@ -127,7 +129,12 @@ function collectPreviewKatexStyles(katexHref: string): string {
   }
 }
 
-export function createPreviewController({ vscode, onRendered, onFindRequested }: PreviewControllerOptions) {
+export function createPreviewController({
+  vscode,
+  onRendered,
+  onFindRequested,
+  mermaidRenderResources
+}: PreviewControllerOptions) {
   const host = document.createElement('div');
   host.className = 'preview-host';
   host.hidden = true;
@@ -177,7 +184,7 @@ export function createPreviewController({ vscode, onRendered, onFindRequested }:
   let latestRenderedText = '';
   let latestPayload: PreviewRenderValue | null = null;
   const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
-  const previewMermaidRenderer = createPreviewMermaidRenderer();
+  const previewMermaidRenderer = createPreviewMermaidRenderer(mermaidRenderResources);
   let searchQuery = '';
   let searchOptions = { wholeWord: false, caseSensitive: false };
   let searchMatches: HTMLElement[] = [];

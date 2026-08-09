@@ -49,6 +49,7 @@ export type MermaidDiagramPresentationApplication = {
 };
 
 export type MermaidDiagramPresentationEffectExecution = {
+  readonly immediate?: MermaidDiagramPresentationInput | null;
   readonly completion?: Promise<MermaidDiagramPresentationInput | null>;
 };
 

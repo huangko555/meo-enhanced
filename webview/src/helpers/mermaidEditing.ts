@@ -4,9 +4,12 @@ import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
 import {
   getCachedMermaidPreviewHeight,
-  MermaidDiagramWidget,
-  subscribeToMermaidThemeRefresh
+  MermaidDiagramWidget
 } from './mermaidDiagram';
+import {
+  getMermaidDiagramPresentationFactory,
+  type MermaidDiagramPresentationFactory
+} from '../editor/mermaidDiagramPresentation';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
@@ -348,6 +351,7 @@ class MermaidEditingController {
   private previewWidget: MermaidDiagramWidget | null = null;
   private previewTimer: number | null = null;
   private unsubscribeThemeRefresh: () => void;
+  private presentationFactory: MermaidDiagramPresentationFactory;
   private syncingFromOuter = false;
 
   constructor(
@@ -358,6 +362,7 @@ class MermaidEditingController {
   ) {
     this.outerView = outerView;
     this.block = block;
+    this.presentationFactory = getMermaidDiagramPresentationFactory(outerView.state);
     this.mode = mode;
     this.root = document.createElement('div') as MermaidEditingBlockElement;
     this.root.className = 'meo-mermaid-editing-block';
@@ -415,7 +420,7 @@ class MermaidEditingController {
       parent: this.sourceHost
     });
 
-    this.unsubscribeThemeRefresh = subscribeToMermaidThemeRefresh(() => {
+    this.unsubscribeThemeRefresh = this.presentationFactory.subscribeThemeRefresh(() => {
       if (this.mode === 'split') {
         this.renderPreview();
       }
@@ -508,6 +513,7 @@ class MermaidEditingController {
     this.root.classList.toggle('is-source', mode === 'source');
     if (mode === 'split') {
       const preferredHeight = getCachedMermaidPreviewHeight(
+        this.presentationFactory,
         this.outerView,
         this.block.diagramText,
         this.block.startLine
@@ -575,7 +581,10 @@ class MermaidEditingController {
       this.block.diagramText,
       this.block.startLine,
       this.block.endLine,
-      { cachePreviewHeight: false }
+      {
+        presentationFactory: this.presentationFactory,
+        cachePreviewHeight: false
+      }
     );
     this.previewSticky.replaceChildren(this.previewWidget.toDOM());
   }

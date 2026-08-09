@@ -1,10 +1,10 @@
 import type { PreviewAppearance } from '../../../src/shared/preview';
+import type { MermaidDiagramRenderResources } from '../application/mermaidDiagramRenderResources';
 import {
   loadMermaidRuntime,
   isDisplayMathDiagram,
   normalizeMermaidDiagramText,
-  restoreMermaidEditorTheme,
-  runExclusiveMermaidOperation
+  restoreMermaidEditorTheme
 } from './mermaidDiagram';
 
 const PREVIEW_MERMAID_CACHE_LIMIT = 100;
@@ -18,7 +18,7 @@ type PreviewMermaidPalette = {
   line: string;
 };
 
-export function createPreviewMermaidRenderer() {
+export function createPreviewMermaidRenderer(resources: MermaidDiagramRenderResources) {
   let renderQueue: Promise<void> = Promise.resolve();
 
   const render = (
@@ -28,7 +28,7 @@ export function createPreviewMermaidRenderer() {
   ): Promise<void> => {
     renderQueue = renderQueue
       .catch(() => undefined)
-      .then(() => runExclusiveMermaidOperation(async () => {
+      .then(() => resources.runExclusive(async () => {
         try {
           await renderMermaidBlocks(frameDocument, appearance, onDiagramRendered);
         } finally {

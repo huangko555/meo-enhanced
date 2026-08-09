@@ -1,13 +1,20 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import puppeteer from 'puppeteer-core';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
-const editorBundle = fs.readdirSync(path.join(repoRoot, 'webview', 'dist'))
-  .find((name) => /^editor-.*\.js$/.test(name));
-if (!editorBundle) throw new Error('Built editor bundle was not found.');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-frontmatter-editor-'));
+const build = await Bun.build({
+  entrypoints: [path.join(repoRoot, 'scripts', 'test-editor-factory.ts')],
+  outdir: tempDir,
+  target: 'browser',
+  format: 'esm',
+  naming: 'editor.js'
+});
+if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
 const browserCandidates = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -32,9 +39,14 @@ const server = http.createServer((request, response) => {
       html,body,#app{height:100%;margin:0} #app{width:780px}
       :root{--meo-background:#20252b;--meo-foreground:#e6edf3;--meo-semantic-markdownSyntax:#7d8998;--meo-semantic-mutedForeground:#7d8998;--meo-semantic-tableBorder:#3e444d;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:28px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px}
     </style></head><body><div id="app"></div><script type="module">
-      const { createEditor } = await import('/webview/dist/${editorBundle}');
+      const { createEditor } = await import('/test-editor.js');
       window.createEditor = createEditor;
     </script></body></html>`);
+    return;
+  }
+  if (pathname === '/test-editor.js') {
+    response.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+    fs.createReadStream(path.join(tempDir, 'editor.js')).pipe(response);
     return;
   }
   const relativePath = pathname.replace(/^\/+/, '');
@@ -222,4 +234,5 @@ try {
 } finally {
   await browser.close();
   await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(tempDir, { recursive: true, force: true });
 }

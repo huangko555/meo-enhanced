@@ -22,6 +22,7 @@ import {
 } from './mermaidEditing';
 import { getLiveListBlockIndentColumns } from './blockIndent';
 import { getViewportController } from './viewportController';
+import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -852,7 +853,10 @@ export function addMermaidDiagramBlock(
   addMermaidToolbar(builder, startLine.to, anchor, mode.effective, block.fullBlockText);
 
   const widget = mode.effective === 'preview'
-    ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number, { indentColumns })
+    ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number, {
+        presentationFactory: getMermaidDiagramPresentationFactory(state),
+        indentColumns
+      })
     : new MermaidEditingWidget({
       anchor,
       contentFrom: contentStartLine.from,

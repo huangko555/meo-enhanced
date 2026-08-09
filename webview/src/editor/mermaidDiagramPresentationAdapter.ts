@@ -1,55 +1,35 @@
-import type {
-  MermaidDiagramPresentationEffect,
-  MermaidDiagramPresentationEffectExecution,
-  MermaidDiagramPresentationEffectExecutor
+import {
+  createMermaidDiagramPresentationApplication,
+  type MermaidDiagramPresentationEffect,
+  type MermaidDiagramPresentationEffectExecution,
+  type MermaidDiagramPresentationEffectExecutor
 } from '../application/mermaidDiagramPresentation';
-import type { MermaidDiagramRenderPool } from './mermaidDiagramRenderPool';
+import type { MermaidDiagramRenderResources } from '../application/mermaidDiagramRenderResources';
+import { createMermaidDiagramPresentationRuntime } from '../adapters/mermaidDiagramPresentationRuntime';
+import type {
+  MermaidDiagramPresentationFactory,
+  MermaidDiagramPresentationHandle,
+  MermaidDiagramPresentationView
+} from './mermaidDiagramPresentation';
 
 export type MermaidDiagramPresentationAdapterOptions = {
-  readonly body: HTMLElement;
-  readonly pool: MermaidDiagramRenderPool;
+  readonly view: MermaidDiagramPresentationView;
+  readonly resources: MermaidDiagramRenderResources;
   readonly normalizeSource: (source: string) => string;
-  readonly preserveLayoutChange: (apply: () => void) => void;
 };
 
 /** Projects one Widget presentation while the Application owns correlation and phase. */
 export function createMermaidDiagramPresentationEffectAdapter(
   options: MermaidDiagramPresentationAdapterOptions
 ): MermaidDiagramPresentationEffectExecutor {
-  const { body, pool, normalizeSource, preserveLayoutChange } = options;
+  const { view, resources, normalizeSource } = options;
   let disposed = false;
 
-  const replace = (...nodes: Node[]): void => {
+  const project = (apply: () => void): void => {
     if (disposed) return;
-    preserveLayoutChange(() => {
-      if (!disposed) body.replaceChildren(...nodes);
+    view.preserveLayoutChange(() => {
+      if (!disposed) apply();
     });
-  };
-
-  const showPending = (): void => {
-    const pending = body.ownerDocument.createElement('div');
-    pending.className = 'meo-mermaid-loading';
-    pending.textContent = 'Loading...';
-    replace(pending);
-  };
-
-  const showDiagram = (svg: string): void => {
-    const wrapper = body.ownerDocument.createElement('div');
-    wrapper.className = 'meo-mermaid-svg-wrapper';
-    wrapper.innerHTML = svg;
-    replace(wrapper);
-  };
-
-  const showError = (source: string, error: string): void => {
-    const fallback = body.ownerDocument.createElement('pre');
-    fallback.className = 'meo-mermaid-fallback';
-    const code = body.ownerDocument.createElement('code');
-    code.textContent = source;
-    fallback.appendChild(code);
-    const badge = body.ownerDocument.createElement('div');
-    badge.className = 'meo-mermaid-error-badge';
-    badge.textContent = `Mermaid error: ${error}`;
-    replace(fallback, badge);
   };
 
   const execute = (
@@ -58,16 +38,33 @@ export function createMermaidDiagramPresentationEffectAdapter(
     if (disposed) return {};
     switch (effect.type) {
       case 'showPending':
-        showPending();
+        project(() => view.showPending());
         return {};
       case 'renderDiagram':
+        const request = {
+          rawSource: effect.source,
+          normalizedSource: normalizeSource(effect.source),
+          themeKey: effect.themeKey,
+          configKey: effect.configKey
+        };
+        const cached = resources.getCached(request);
+        if (cached) {
+          return {
+            immediate: 'error' in cached
+              ? {
+                  type: 'renderFailed',
+                  presentationId: effect.presentationId,
+                  error: cached.error
+                }
+              : {
+                  type: 'renderSucceeded',
+                  presentationId: effect.presentationId,
+                  svg: cached.svg
+                }
+          };
+        }
         return {
-          completion: pool.render({
-            rawSource: effect.source,
-            normalizedSource: normalizeSource(effect.source),
-            themeKey: effect.themeKey,
-            configKey: effect.configKey
-          }).then((result) => {
+          completion: resources.render(request).then((result) => {
             if (!('error' in result)) {
               return {
                 type: 'renderSucceeded' as const,
@@ -83,13 +80,13 @@ export function createMermaidDiagramPresentationEffectAdapter(
           })
         };
       case 'showDiagram':
-        showDiagram(effect.svg);
+        project(() => view.showDiagram(effect.svg));
         return {};
       case 'clearPresentation':
-        replace();
+        project(() => view.clearPresentation());
         return {};
       case 'showError':
-        showError(effect.source, effect.error);
+        project(() => view.showError(effect.source, effect.error));
         return {};
     }
   };
@@ -98,6 +95,65 @@ export function createMermaidDiagramPresentationEffectAdapter(
     execute,
     dispose() {
       disposed = true;
+    }
+  };
+}
+
+export type MermaidDiagramPresentationFactoryOptions = {
+  readonly resources: MermaidDiagramRenderResources;
+  readonly normalizeSource: (source: string) => string;
+};
+
+/** Creates exactly one Application/Runtime/Adapter tuple for each Mermaid Widget. */
+export function createMermaidDiagramPresentationFactory(
+  options: MermaidDiagramPresentationFactoryOptions
+): MermaidDiagramPresentationFactory {
+  const handles = new Set<MermaidDiagramPresentationHandle>();
+  let disposed = false;
+
+  const create = (view: MermaidDiagramPresentationView): MermaidDiagramPresentationHandle => {
+    if (disposed) throw new Error('Mermaid diagram presentation factory is disposed');
+    const application = createMermaidDiagramPresentationApplication();
+    const executor = createMermaidDiagramPresentationEffectAdapter({
+      view,
+      resources: options.resources,
+      normalizeSource: options.normalizeSource
+    });
+    const runtime = createMermaidDiagramPresentationRuntime({ application, executor });
+    let active = true;
+    const handle: MermaidDiagramPresentationHandle = {
+      present(source, themeKey, configKey) {
+        if (active) runtime.dispatch({ type: 'present', source, themeKey, configKey });
+      },
+      externalDocumentPresented() {
+        if (active) runtime.dispatch({ type: 'externalDocumentPresented' });
+      },
+      whenIdle: () => runtime.whenCurrentPresentationSettles(),
+      dispose() {
+        if (!active) return;
+        active = false;
+        handles.delete(handle);
+        runtime.dispose();
+      }
+    };
+    handles.add(handle);
+    return handle;
+  };
+
+  return {
+    create,
+    getCached: (request) => options.resources.getCached(request),
+    getHeight: (key) => options.resources.getHeight(key),
+    rememberHeight: (key, height) => options.resources.rememberHeight(key, height),
+    subscribeThemeRefresh: (listener) => options.resources.subscribeThemeRefresh(listener),
+    externalDocumentPresented() {
+      for (const handle of [...handles]) handle.externalDocumentPresented();
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const handle of [...handles]) handle.dispose();
+      handles.clear();
     }
   };
 }

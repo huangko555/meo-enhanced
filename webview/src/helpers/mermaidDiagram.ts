@@ -3,6 +3,11 @@ import { createElement, ZoomIn, ZoomOut, RotateCcw, Maximize2, X } from 'lucide'
 import type { EditorState } from '@codemirror/state';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
+import type { MermaidDiagramRenderRequest } from '../application/mermaidDiagramRenderResources';
+import type {
+  MermaidDiagramPresentationFactory,
+  MermaidDiagramPresentationHandle
+} from '../editor/mermaidDiagramPresentation';
 
 declare global {
   interface Window {
@@ -16,30 +21,7 @@ interface MermaidRuntime {
   render(id: string, text: string): Promise<{ svg: string }>;
 }
 
-interface MermaidResult {
-  svg?: string;
-  error?: string;
-}
-
-let mermaidInitialized = false;
-let mermaidThemeSignature = '';
-type MermaidOperationPriority = 'normal' | 'high';
-type MermaidOperationJob = {
-  operation: () => Promise<unknown>;
-  resolve: (value: unknown) => void;
-  reject: (reason: unknown) => void;
-};
-
-let mermaidOperationRunning = false;
-const mermaidHighPriorityOperations: MermaidOperationJob[] = [];
-const mermaidNormalPriorityOperations: MermaidOperationJob[] = [];
-const MERMAID_CACHE_LIMIT = 100;
-const mermaidCache = new Map<string, MermaidResult>();
-const mermaidRenderInFlight = new Map<string, Promise<MermaidResult>>();
-const mermaidThemeRefreshListeners = new Set<() => void>();
-const mermaidEstimatedHeightCache = new Map<string, number>();
-const mermaidPreviewHeightCache = new WeakMap<HTMLElement, Map<string, number>>();
-let mermaidIdCounter = 0;
+export const MERMAID_EDITOR_CONFIG_KEY = 'editor-v1';
 const MERMAID_MATH_CLASS = 'meoMath';
 const MERMAID_LABEL_WRAP_THEME_CSS =
   '.nodeLabel p{white-space:normal!important;overflow-wrap:anywhere!important;word-break:break-word!important;}';
@@ -71,7 +53,7 @@ function mermaidLayoutSignature(content: HTMLElement): string {
   return `${content.clientWidth}|${style.fontSize}|${style.lineHeight}|${globalThis.devicePixelRatio ?? 1}`;
 }
 
-function mermaidPreviewHeightCacheKey(
+function mermaidPreviewHeightKey(
   diagramText: string,
   themeSignature: string,
   startLine: number,
@@ -81,17 +63,18 @@ function mermaidPreviewHeightCacheKey(
 }
 
 export function getCachedMermaidPreviewHeight(
+  factory: MermaidDiagramPresentationFactory,
   view: EditorView,
   diagramText: string,
   startLine: number
 ): number | null {
-  const key = mermaidPreviewHeightCacheKey(
+  const key = mermaidPreviewHeightKey(
     diagramText,
     getMermaidThemeConfig().signature,
     startLine,
     mermaidLayoutSignature(view.contentDOM)
   );
-  return mermaidPreviewHeightCache.get(view.dom)?.get(key) ?? null;
+  return factory.getHeight(`preview:${key}`);
 }
 
 function resolveCssColor(value: string, fallback: string, property: 'color' | 'backgroundColor' = 'backgroundColor'): string {
@@ -334,67 +317,49 @@ export function loadMermaidRuntime() {
   return Promise.reject(new Error('Preloaded Mermaid runtime unavailable'));
 }
 
-async function initMermaid() {
-  const runtime = await loadMermaidRuntime();
-  const { signature, config } = getMermaidThemeConfig();
-  if (mermaidInitialized && mermaidThemeSignature === signature) {
-    return runtime;
-  }
-
-  runtime.initialize(config);
-  mermaidThemeSignature = signature;
-  mermaidInitialized = true;
-  return runtime;
+export function getMermaidEditorPresentationIdentity(): {
+  readonly themeKey: string;
+  readonly configKey: string;
+} {
+  return {
+    themeKey: getMermaidThemeConfig().signature,
+    configKey: MERMAID_EDITOR_CONFIG_KEY
+  };
 }
 
-function getCachedMermaidResult(cacheKey: string): MermaidResult | null {
-  const cached = mermaidCache.get(cacheKey);
-  if (!cached) {
-    return null;
-  }
-  mermaidCache.delete(cacheKey);
-  mermaidCache.set(cacheKey, cached);
-  return cached;
+export async function initializeMermaidEditorRuntime(
+  _themeKey: string,
+  configKey: string
+): Promise<void> {
+  const runtime = await loadMermaidRuntime();
+  const { config } = getMermaidThemeConfig();
+  if (configKey !== MERMAID_EDITOR_CONFIG_KEY) throw new Error('Unsupported Mermaid editor config');
+  runtime.initialize(config);
+}
+
+export async function renderMermaidRuntime(renderId: string, source: string): Promise<string> {
+  await document.fonts?.ready;
+  const runtime = await loadMermaidRuntime();
+  const result = await runtime.render(renderId, source);
+  return result.svg;
 }
 
 export async function restoreMermaidEditorTheme(): Promise<void> {
   const runtime = await loadMermaidRuntime();
-  const { signature, config } = getMermaidThemeConfig();
+  const { config } = getMermaidThemeConfig();
   runtime.initialize(config);
-  mermaidThemeSignature = signature;
-  mermaidInitialized = true;
 }
 
-function runNextMermaidOperation(): void {
-  if (mermaidOperationRunning) return;
-  const job = mermaidHighPriorityOperations.shift() ?? mermaidNormalPriorityOperations.shift();
-  if (!job) return;
-  mermaidOperationRunning = true;
-  void job.operation()
-    .then(job.resolve, job.reject)
-    .finally(() => {
-      mermaidOperationRunning = false;
-      runNextMermaidOperation();
-    });
-}
-
-export function runExclusiveMermaidOperation<T>(
-  operation: () => Promise<T>,
-  priority: MermaidOperationPriority = 'normal'
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const job: MermaidOperationJob = {
-      operation,
-      resolve: (value) => resolve(value as T),
-      reject
-    };
-    (priority === 'high' ? mermaidHighPriorityOperations : mermaidNormalPriorityOperations).push(job);
-    runNextMermaidOperation();
-  });
-}
-
-function mermaidResultCacheKey(diagramText: string, themeSignature = getMermaidThemeConfig().signature): string {
-  return `${themeSignature}\n${diagramText}`;
+function mermaidRenderRequest(
+  diagramText: string,
+  themeSignature: string
+): MermaidDiagramRenderRequest {
+  return {
+    rawSource: diagramText,
+    normalizedSource: normalizeMermaidDiagramText(diagramText),
+    themeKey: themeSignature,
+    configKey: MERMAID_EDITOR_CONFIG_KEY
+  };
 }
 
 function currentMermaidContentWidth(element?: HTMLElement): number {
@@ -406,16 +371,7 @@ function currentMermaidContentWidth(element?: HTMLElement): number {
 }
 
 function mermaidEstimatedHeightKey(resultCacheKey: string, contentWidth: number): string {
-  return `${resultCacheKey}\nwidth:${Math.max(0, Math.round(contentWidth))}`;
-}
-
-function cacheMermaidEstimatedHeight(cacheKey: string, height: number): void {
-  mermaidEstimatedHeightCache.delete(cacheKey);
-  mermaidEstimatedHeightCache.set(cacheKey, height);
-  if (mermaidEstimatedHeightCache.size > MERMAID_CACHE_LIMIT) {
-    const oldestKey = mermaidEstimatedHeightCache.keys().next().value;
-    if (oldestKey) mermaidEstimatedHeightCache.delete(oldestKey);
-  }
+  return `estimated:${resultCacheKey}\nwidth:${Math.max(0, Math.round(contentWidth))}`;
 }
 
 function estimateCachedMermaidHeight(svgContent: string | undefined, contentWidth: number): number {
@@ -430,76 +386,6 @@ function estimateCachedMermaidHeight(svgContent: string | undefined, contentWidt
   const availableWidth = Math.max(0, contentWidth - 24);
   const scale = availableWidth > 0 ? Math.min(1, availableWidth / intrinsicWidth) : 1;
   return intrinsicHeight * scale + 24;
-}
-
-function cacheMermaidResult(cacheKey: string, result: MermaidResult): void {
-  if (mermaidCache.has(cacheKey)) {
-    mermaidCache.delete(cacheKey);
-  }
-  mermaidCache.set(cacheKey, result);
-
-  if (mermaidCache.size <= MERMAID_CACHE_LIMIT) {
-    return;
-  }
-
-  const oldestKey = mermaidCache.keys().next().value;
-  if (oldestKey !== undefined) {
-    mermaidCache.delete(oldestKey);
-  }
-}
-
-async function renderMermaidDiagram(diagramText: string): Promise<MermaidResult> {
-  const normalizedDiagramText = normalizeMermaidDiagramText(diagramText);
-  const { signature } = getMermaidThemeConfig();
-  const cacheKey = mermaidResultCacheKey(diagramText, signature);
-  const cached = getCachedMermaidResult(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const inFlight = mermaidRenderInFlight.get(cacheKey);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const id = `mermaid-${++mermaidIdCounter}`;
-  const renderPromise: Promise<MermaidResult> = runExclusiveMermaidOperation(async () => {
-    await document.fonts?.ready;
-    const runtime = await initMermaid();
-    return runtime.render(id, normalizedDiagramText);
-  })
-    .then(({ svg }) => {
-      const result: MermaidResult = { svg };
-      cacheMermaidResult(cacheKey, result);
-      return result;
-    })
-    .catch((err) => {
-      const result: MermaidResult = { error: err.message || String(err) };
-      cacheMermaidResult(cacheKey, result);
-      return result;
-    })
-    .finally(() => {
-      mermaidRenderInFlight.delete(cacheKey);
-    });
-
-  mermaidRenderInFlight.set(cacheKey, renderPromise);
-  return renderPromise;
-}
-
-export function refreshMermaidTheme(): void {
-  mermaidCache.clear();
-  mermaidRenderInFlight.clear();
-  mermaidEstimatedHeightCache.clear();
-  mermaidInitialized = false;
-  mermaidThemeSignature = '';
-  for (const listener of mermaidThemeRefreshListeners) {
-    listener();
-  }
-}
-
-export function subscribeToMermaidThemeRefresh(listener: () => void): () => void {
-  mermaidThemeRefreshListeners.add(listener);
-  return () => mermaidThemeRefreshListeners.delete(listener);
 }
 
 export function isDisplayMathDiagram(diagramText: string): boolean {
@@ -599,12 +485,18 @@ export class MermaidDiagramWidget extends WidgetType {
   previewResizeObserver: ResizeObserver | null;
   measuredHeight: number;
   indentColumns: number;
+  presentationFactory: MermaidDiagramPresentationFactory;
+  presentationHandle: MermaidDiagramPresentationHandle | null;
 
   constructor(
     diagramText: string,
     startLine: number = 0,
     endLine: number = 0,
-    options: { cachePreviewHeight?: boolean; indentColumns?: number } = {}
+    options: {
+      presentationFactory: MermaidDiagramPresentationFactory;
+      cachePreviewHeight?: boolean;
+      indentColumns?: number;
+    }
   ) {
     super();
     this.diagramText = diagramText;
@@ -625,15 +517,18 @@ export class MermaidDiagramWidget extends WidgetType {
     this.fullscreenSvgWrapper = null;
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
-    this.themeSignature = getMermaidThemeConfig().signature;
+    this.themeSignature = getMermaidEditorPresentationIdentity().themeKey;
+    this.presentationFactory = options.presentationFactory;
+    this.presentationHandle = null;
     this.cachePreviewHeight = options.cachePreviewHeight ?? true;
     this.indentColumns = options.indentColumns ?? 0;
     this.previewResizeObserver = null;
-    const resultCacheKey = mermaidResultCacheKey(this.diagramText, this.themeSignature);
+    const request = mermaidRenderRequest(this.diagramText, this.themeSignature);
+    const cached = this.presentationFactory.getCached(request);
     const contentWidth = currentMermaidContentWidth();
-    this.measuredHeight = mermaidEstimatedHeightCache.get(
-      mermaidEstimatedHeightKey(resultCacheKey, contentWidth)
-    ) ?? estimateCachedMermaidHeight(mermaidCache.get(resultCacheKey)?.svg, contentWidth);
+    this.measuredHeight = this.presentationFactory.getHeight(
+      mermaidEstimatedHeightKey(JSON.stringify(request), contentWidth)
+    ) ?? estimateCachedMermaidHeight(cached && 'svg' in cached ? cached.svg : undefined, contentWidth);
   }
 
   get estimatedHeight(): number {
@@ -654,6 +549,9 @@ export class MermaidDiagramWidget extends WidgetType {
   toDOM(view?: EditorView) {
     const container = document.createElement('div');
     container.className = 'meo-mermaid-block';
+    if (this.measuredHeight > 0) {
+      container.style.minHeight = `${this.measuredHeight}px`;
+    }
     container.addEventListener('pointerdown', (event: PointerEvent) => {
       if (event.button === 0) {
         event.preventDefault();
@@ -676,81 +574,80 @@ export class MermaidDiagramWidget extends WidgetType {
         const height = container.getBoundingClientRect().height;
         if (height > 0 && container.querySelector('.meo-mermaid-svg-wrapper')) {
           const content = container.closest<HTMLElement>('.cm-content') ?? view.contentDOM;
-          const cacheKey = mermaidPreviewHeightCacheKey(
+          const cacheKey = mermaidPreviewHeightKey(
             this.diagramText,
             this.themeSignature,
             this.startLine,
             mermaidLayoutSignature(content)
           );
           this.measuredHeight = height;
-          cacheMermaidEstimatedHeight(
+          this.presentationFactory.rememberHeight(
             mermaidEstimatedHeightKey(
-              mermaidResultCacheKey(this.diagramText, this.themeSignature),
+              JSON.stringify(mermaidRenderRequest(this.diagramText, this.themeSignature)),
               currentMermaidContentWidth(container)
             ),
             height
           );
-          let viewCache = mermaidPreviewHeightCache.get(view.dom);
-          if (!viewCache) {
-            viewCache = new Map();
-            mermaidPreviewHeightCache.set(view.dom, viewCache);
-          }
-          viewCache.delete(cacheKey);
-          viewCache.set(cacheKey, height);
-          if (viewCache.size > MERMAID_CACHE_LIMIT) {
-            const oldestKey = viewCache.keys().next().value;
-            if (oldestKey) {
-              viewCache.delete(oldestKey);
-            }
-          }
+          this.presentationFactory.rememberHeight(`preview:${cacheKey}`, height);
         }
       });
       this.previewResizeObserver.observe(container);
     }
 
-    const cached = getCachedMermaidResult(mermaidResultCacheKey(this.diagramText, this.themeSignature));
-    if (cached) {
-      if (cached.error) {
-        this.renderError(container, cached.error);
-      } else {
-        this.renderSvg(container, cached.svg);
+    this.presentationHandle = this.presentationFactory.create({
+      showPending: () => {
+        const loading = document.createElement('div');
+        loading.className = 'meo-mermaid-loading';
+        loading.textContent = 'Loading...';
+        container.replaceChildren(loading);
+      },
+      showDiagram: (svg) => {
+        const estimatedHeight = estimateCachedMermaidHeight(svg, currentMermaidContentWidth(container));
+        if (estimatedHeight > 0) {
+          this.measuredHeight = estimatedHeight;
+          this.presentationFactory.rememberHeight(
+            mermaidEstimatedHeightKey(
+              JSON.stringify(mermaidRenderRequest(this.diagramText, this.themeSignature)),
+              currentMermaidContentWidth(container)
+            ),
+            estimatedHeight
+          );
+        }
+        container.style.removeProperty('min-height');
+        container.replaceChildren();
+        this.renderSvg(container, svg);
+      },
+      showError: (_source, error) => {
+        container.style.removeProperty('min-height');
+        container.replaceChildren();
+        this.renderError(container, error);
+      },
+      clearPresentation: () => {
+        container.style.removeProperty('min-height');
+        container.replaceChildren();
+      },
+      preserveLayoutChange: (apply) => {
+        if (!view || !container.isConnected) {
+          apply();
+          return;
+        }
+        const controller = getViewportController(view);
+        if (!controller || this.startLine <= 0 || this.endLine <= 0) {
+          apply();
+          view.requestMeasure();
+          return;
+        }
+        const startLine = view.state.doc.line(Math.min(this.startLine, view.state.doc.lines));
+        const endLine = view.state.doc.line(Math.min(this.endLine, view.state.doc.lines));
+        controller.preserveLayoutChange({
+          element: container,
+          from: startLine.from,
+          to: endLine.to
+        }, apply);
       }
-      return container;
-    }
-
-    const loading = document.createElement('div');
-    loading.className = 'meo-mermaid-loading';
-    loading.textContent = 'Loading...';
-    container.appendChild(loading);
-
-    (async () => {
-      const result = await renderMermaidDiagram(this.diagramText);
-      if (!container.contains(loading)) {
-        return;
-      }
-      const showResult = () => {
-        container.removeChild(loading);
-        if (result.error) this.renderError(container, result.error);
-        else this.renderSvg(container, result.svg);
-      };
-      if (!view || !container.isConnected) {
-        showResult();
-        return;
-      }
-      const controller = getViewportController(view);
-      if (!controller || this.startLine <= 0 || this.endLine <= 0) {
-        showResult();
-        view.requestMeasure();
-        return;
-      }
-      const startLine = view.state.doc.line(Math.min(this.startLine, view.state.doc.lines));
-      const endLine = view.state.doc.line(Math.min(this.endLine, view.state.doc.lines));
-      controller.preserveLayoutChange({
-        element: container,
-        from: startLine.from,
-        to: endLine.to
-      }, showResult);
-    })();
+    });
+    const identity = getMermaidEditorPresentationIdentity();
+    this.presentationHandle.present(this.diagramText, identity.themeKey, identity.configKey);
 
     return container;
   }
@@ -1296,6 +1193,8 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   destroy() {
+    this.presentationHandle?.dispose();
+    this.presentationHandle = null;
     this.previewResizeObserver?.disconnect();
     this.previewResizeObserver = null;
     if (this.inlineCleanup) {

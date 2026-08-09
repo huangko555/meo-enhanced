@@ -4,7 +4,7 @@ import {
   type EditorModeFailure
 } from '../webview/src/adapters/editorModeEffectAdapter';
 import { createEditorModeRuntime } from '../webview/src/adapters/editorModeRuntime';
-import { createEditor } from '../webview/src/editor';
+import { createEditor } from './test-editor-factory';
 
 type Editor = ReturnType<typeof createEditor>;
 type TaggedError = Error & { failure: EditorModeFailure };

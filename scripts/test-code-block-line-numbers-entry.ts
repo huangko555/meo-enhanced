@@ -1,4 +1,4 @@
-import { createEditor } from '../webview/src/editor';
+import { createEditor } from './test-editor-factory';
 
 (globalThis as typeof globalThis & {
   CodeBlockLineNumbersHarness?: { createEditor: typeof createEditor };

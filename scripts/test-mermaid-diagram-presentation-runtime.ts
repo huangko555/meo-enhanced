@@ -27,6 +27,15 @@ const executor: MermaidDiagramPresentationEffectExecutor = {
   execute(effect) {
     effects.push(effect);
     if (effect.type !== 'renderDiagram') return {};
+    if (effect.source === 'cached') {
+      return {
+        immediate: {
+          type: 'renderSucceeded',
+          presentationId: effect.presentationId,
+          svg: '<svg data-value="cached"></svg>'
+        }
+      };
+    }
     const completion = deferred();
     renders.set(effect.presentationId, completion);
     return { completion: completion.promise };
@@ -66,6 +75,13 @@ assert.equal(
 );
 assert.equal(
   effects.some((effect) => effect.type === 'showDiagram' && effect.svg.includes('new')),
+  true
+);
+
+runtime.dispatch({ type: 'present', source: 'cached', themeKey: 'dark', configKey: 'strict' });
+assert.equal(application.getState().phase, 'ready', 'cached completion must settle synchronously');
+assert.equal(
+  effects.some((effect) => effect.type === 'showDiagram' && effect.svg.includes('cached')),
   true
 );
 

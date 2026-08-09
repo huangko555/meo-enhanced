@@ -1,26 +1,9 @@
-export type MermaidRenderPriority = 'normal' | 'high';
-
-export type MermaidDiagramRenderRequest = {
-  readonly rawSource: string;
-  readonly normalizedSource: string;
-  readonly themeKey: string;
-  readonly configKey: string;
-  readonly priority?: MermaidRenderPriority;
-};
-
-export type MermaidDiagramRenderResult =
-  | { readonly ok: true; readonly svg: string }
-  | { readonly ok: false; readonly error: string };
-
-export type MermaidDiagramRenderPool = {
-  render(request: MermaidDiagramRenderRequest): Promise<MermaidDiagramRenderResult>;
-  runExclusive<T>(operation: () => Promise<T>, priority?: MermaidRenderPriority): Promise<T>;
-  refreshTheme(): void;
-  subscribeThemeRefresh(listener: () => void): () => void;
-  getHeight(key: string): number | null;
-  rememberHeight(key: string, height: number): void;
-  dispose(): void;
-};
+import type {
+  MermaidDiagramRenderRequest,
+  MermaidDiagramRenderResources,
+  MermaidDiagramRenderResult,
+  MermaidRenderPriority
+} from '../application/mermaidDiagramRenderResources';
 
 export type MermaidDiagramRenderPoolOptions = {
   readonly initialize: (themeKey: string, configKey: string) => Promise<void> | void;
@@ -51,7 +34,7 @@ const cacheKeyFor = (request: MermaidDiagramRenderRequest): string => JSON.strin
 /** Owns the single Webview-wide Mermaid renderer queue and resource caches. */
 export function createMermaidDiagramRenderPool(
   options: MermaidDiagramRenderPoolOptions
-): MermaidDiagramRenderPool {
+): MermaidDiagramRenderResources {
   const cacheLimit = options.cacheLimit ?? DEFAULT_CACHE_LIMIT;
   const heightCacheLimit = options.heightCacheLimit ?? DEFAULT_CACHE_LIMIT;
   const maxQueuedOperations = options.maxQueuedOperations ?? DEFAULT_MAX_QUEUED_OPERATIONS;
@@ -157,6 +140,13 @@ export function createMermaidDiagramRenderPool(
 
   return {
     render,
+    getCached(request) {
+      if (disposed) return null;
+      const key = cacheKeyFor(request);
+      const cached = cache.get(key) ?? null;
+      if (cached) remember(cache, key, cached, cacheLimit);
+      return cached;
+    },
     runExclusive(operation, priority = 'normal') {
       const queuedOperation = enqueue(operation, priority, true);
       return Promise.race([
@@ -168,7 +158,6 @@ export function createMermaidDiagramRenderPool(
       if (disposed) return;
       cache.clear();
       inFlight.clear();
-      heightCache.clear();
       resourceGeneration += 1;
       initializedIdentity = null;
       for (const listener of themeListeners) listener();

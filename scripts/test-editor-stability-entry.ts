@@ -1,4 +1,4 @@
-import { createEditor } from '../webview/src/editor';
+import { createEditor } from './test-editor-factory';
 import { createOutlineController } from '../webview/src/helpers/outline';
 
 (globalThis as typeof globalThis & {

@@ -12,7 +12,13 @@ import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHa
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
 import { getExportStyleEnvironment } from './helpers/export';
-import { refreshMermaidTheme } from './helpers/mermaidDiagram';
+import {
+  initializeMermaidEditorRuntime,
+  normalizeMermaidDiagramText,
+  renderMermaidRuntime
+} from './helpers/mermaidDiagram';
+import { createMermaidDiagramRenderPool } from './editor/mermaidDiagramRenderPool';
+import { createMermaidDiagramPresentationFactory } from './editor/mermaidDiagramPresentationAdapter';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
@@ -1051,8 +1057,17 @@ editorHost.appendChild(editorScrollToTopController.button);
 
 let editor: any = null;
 let outlineController: ReturnType<typeof createOutlineController>;
+const mermaidDiagramRenderPool = createMermaidDiagramRenderPool({
+  initialize: initializeMermaidEditorRuntime,
+  render: renderMermaidRuntime
+});
+const mermaidDiagramPresentationFactory = createMermaidDiagramPresentationFactory({
+  resources: mermaidDiagramRenderPool,
+  normalizeSource: normalizeMermaidDiagramText
+});
 const previewController = createPreviewController({
   vscode,
+  mermaidRenderResources: mermaidDiagramRenderPool,
   onFindRequested: () => findPanelController.open('find'),
   onRendered: () => {
     if (outlineController?.isVisible()) {
@@ -1663,7 +1678,8 @@ const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
     onViewportChange: () => scheduleViewPositionCapture(),
     onRequestGitBlame: requestGitBlameForLine,
     onOpenGitRevisionForLine: openGitRevisionForLine,
-    onOpenGitWorktreeForLine: openGitWorktreeForLine
+    onOpenGitWorktreeForLine: openGitWorktreeForLine,
+    mermaidDiagramPresentationFactory
   });
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
   editor.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
@@ -1884,7 +1900,7 @@ const themeAdapter = createThemeWebviewAdapter({
   setShikiEnabled,
   resolveCodeTheme,
   setShikiTheme,
-  refreshMermaidTheme,
+  refreshMermaidTheme: () => mermaidDiagramRenderPool.refreshTheme(),
   applyWithEditorViewportPreserved: (action) => {
     if (editor) editor.preserveViewport(action);
     else action();
@@ -2161,6 +2177,8 @@ window.addEventListener('beforeunload', () => {
   commitEditorTransientEdits();
   flushViewPositionNow();
   editorModeRuntime.dispose();
+  mermaidDiagramPresentationFactory.dispose();
+  mermaidDiagramRenderPool.dispose();
 });
 
 window.addEventListener('resize', () => {
