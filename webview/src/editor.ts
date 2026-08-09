@@ -2770,6 +2770,8 @@ export function createEditor({
       diagnosticSuggestionRuntime.dispatch({ type: 'externalDocumentPresented' });
       tableCommandRuntime.externalDocumentPresented();
       imagePresentationFactory.externalDocumentPresented();
+      void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
+      recentRenderedReplayPresentation = null;
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
@@ -2782,8 +2784,6 @@ export function createEditor({
       }
 
       mermaidDiagramPresentationFactory.externalDocumentPresented();
-      void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
-      recentRenderedReplayPresentation = null;
 
       const viewportAnchor = captureViewportAnchor();
       const { anchor, head } = view.state.selection.main;

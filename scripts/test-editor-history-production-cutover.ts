@@ -68,6 +68,17 @@ assert.match(editorSource, /editorHistoryRuntime\?\.dispatch\(\{ type: 'external
 assert.match(editorSource, /editorHistoryRuntime\?\.dispatch\(\{ type: 'presentationChanged' \}\)/);
 assert.match(editorSource, /editorHistoryRuntime\?\.dispatch\(\{ type: 'localDocumentEdited' \}\)/);
 assert.match(editorSource, /editorHistoryRuntime\?\.dispose\(\)/);
+const setTextStart = editorSource.indexOf('setText(textValue)');
+const equalTextReturn = editorSource.indexOf('if (!syncChange)', setTextStart);
+const externalHistoryInvalidation = editorSource.indexOf(
+  "editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' })",
+  setTextStart
+);
+assert.ok(setTextStart >= 0 && equalTextReturn >= 0 && externalHistoryInvalidation >= 0);
+assert.ok(
+  externalHistoryInvalidation < equalTextReturn,
+  'equal-text external presentation must invalidate pending history restore before returning'
+);
 assert.equal(editorSource.includes('editorHistoryApplication.dispatch('), false);
 assert.equal(editorSource.includes('editorHistoryEffectAdapter.execute('), false);
 assert.equal(
