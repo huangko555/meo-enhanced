@@ -1,5 +1,12 @@
-import { StateField, RangeSetBuilder, EditorState, Transaction } from '@codemirror/state';
-import { Decoration, WidgetType, EditorView } from '@codemirror/view';
+import {
+  StateField,
+  RangeSetBuilder,
+  EditorState,
+  Transaction,
+  type Line,
+  type Range
+} from '@codemirror/state';
+import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemirror/view';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
 
 interface ListMarkerData {
@@ -12,7 +19,7 @@ interface ListMarkerData {
   contentOffsetColumns: number;
   markerText: string;
   classes: string;
-  orderedNumber: string;
+  orderedNumber: string | undefined;
   isTask: boolean;
   taskHiddenPrefixColumns: number;
   taskBracketStart?: number;
@@ -20,10 +27,35 @@ interface ListMarkerData {
 }
 
 type TaskStatus = 'todo' | 'inprogress' | 'done' | 'dropped';
+type OrderedDisplayIndex = string | number | null;
 
 interface ListIndentStyle {
   columns: number;
   insert: string;
+}
+
+interface ParsedListMarkerParts {
+  leadingWhitespace: string;
+  bullet: string | undefined;
+  orderedNumber: string | undefined;
+  orderedSuffix: string | undefined;
+  hasTask: boolean;
+}
+
+interface ListMarkerDecorationOptions {
+  useSourceStyleLiteral?: boolean;
+}
+
+interface ListTextChange {
+  from: number;
+  to?: number;
+  insert: string;
+}
+
+interface ListTextDeletion {
+  from: number;
+  to: number;
+  insert: '';
 }
 
 const sourceListMarkerDeco = Decoration.mark({ class: 'meo-md-list-prefix' });
@@ -67,8 +99,8 @@ const taskStatusClassByStatus: Record<TaskStatus, string> = {
   dropped: 'is-dropped'
 };
 
-function forEachSelectionLine(state, callback) {
-  const seen = new Set();
+function forEachSelectionLine(state: EditorState, callback: (line: Line) => void): void {
+  const seen = new Set<number>();
   for (const range of state.selection.ranges) {
     const fromLine = state.doc.lineAt(range.from).number;
     const toPos = Math.max(range.from, range.to - (range.empty ? 0 : 1));
@@ -83,16 +115,19 @@ function forEachSelectionLine(state, callback) {
   }
 }
 
-function lineIsInFrontmatterContent(frontmatter, line) {
+function lineIsInFrontmatterContent(
+  frontmatter: ReturnType<typeof parseFrontmatter>,
+  line: Line
+): boolean {
   return isInsideFrontmatterContent(frontmatter, line.from);
 }
 
-function isListLine(lineText) {
+function isListLine(lineText: string): boolean {
   return listItemRegex.test(lineText);
 }
 
-function inferListIndentStyle(listLineTexts) {
-  const spaceIndents = [];
+function inferListIndentStyle(listLineTexts: readonly string[]): ListIndentStyle {
+  const spaceIndents: number[] = [];
   for (const lineText of listLineTexts) {
     const match = listItemRegex.exec(lineText);
     if (!match || !match[1]) {
@@ -117,13 +152,13 @@ function inferListIndentStyle(listLineTexts) {
   return isFourSpaceList ? listIndentStyle.fourSpaces : defaultListIndentStyle;
 }
 
-export function detectListIndentStylesByLine(state) {
-  const stylesByLine = new Map();
+export function detectListIndentStylesByLine(state: EditorState): Map<number, ListIndentStyle> {
+  const stylesByLine = new Map<number, ListIndentStyle>();
   let lineNo = 1;
 
   while (lineNo <= state.doc.lines) {
     const startLineNo = lineNo;
-    const listLineTexts = [];
+    const listLineTexts: string[] = [];
 
     while (lineNo <= state.doc.lines) {
       const line = state.doc.line(lineNo);
@@ -149,7 +184,10 @@ export function detectListIndentStylesByLine(state) {
   return stylesByLine;
 }
 
-function lineIndentStyle(lineNumber, stylesByLine) {
+function lineIndentStyle(
+  lineNumber: number,
+  stylesByLine: ReadonlyMap<number, ListIndentStyle> | null | undefined
+): ListIndentStyle {
   return stylesByLine?.get(lineNumber) ?? defaultListIndentStyle;
 }
 
@@ -176,7 +214,10 @@ export function nextOrderedSequenceNumber(
   return { expected: next, isAnchor: false };
 }
 
-function indentationColumns(leadingWhitespace, style = defaultListIndentStyle) {
+function indentationColumns(
+  leadingWhitespace: string,
+  style: ListIndentStyle = defaultListIndentStyle
+): number {
   let columns = 0;
   for (let index = 0; index < leadingWhitespace.length; index += 1) {
     columns += leadingWhitespace[index] === '\t' ? style.columns : 1;
@@ -184,7 +225,10 @@ function indentationColumns(leadingWhitespace, style = defaultListIndentStyle) {
   return columns;
 }
 
-function listIndentDeleteLength(leadingWhitespace, style = defaultListIndentStyle) {
+function listIndentDeleteLength(
+  leadingWhitespace: string,
+  style: ListIndentStyle = defaultListIndentStyle
+): number {
   if (!leadingWhitespace) {
     return 0;
   }
@@ -193,10 +237,10 @@ function listIndentDeleteLength(leadingWhitespace, style = defaultListIndentStyl
     : Math.min(style.columns, leadingWhitespace.match(/^ +/)?.[0]?.length ?? 0);
 }
 
-export function indentListByTwoSpaces(view) {
+export function indentListByTwoSpaces(view: EditorView): boolean {
   const { state } = view;
   const stylesByLine = detectListIndentStylesByLine(state);
-  const changes = [];
+  const changes: ListTextChange[] = [];
 
   forEachSelectionLine(state, (line) => {
     const lineText = state.doc.sliceString(line.from, line.to);
@@ -215,10 +259,10 @@ export function indentListByTwoSpaces(view) {
   return true;
 }
 
-export function outdentListByTwoSpaces(view) {
+export function outdentListByTwoSpaces(view: EditorView): boolean {
   const { state } = view;
   const stylesByLine = detectListIndentStylesByLine(state);
-  const changes = [];
+  const changes: ListTextChange[] = [];
 
   forEachSelectionLine(state, (line) => {
     const lineText = state.doc.sliceString(line.from, line.to);
@@ -245,13 +289,18 @@ export function outdentListByTwoSpaces(view) {
   return true;
 }
 
-function collectNestedListHoistChanges(state, parentLine, parentMarker, stylesByLine) {
+function collectNestedListHoistChanges(
+  state: EditorState,
+  parentLine: Line,
+  parentMarker: ListMarkerData,
+  stylesByLine: ReadonlyMap<number, ListIndentStyle>
+): ListTextDeletion[] {
   if (parentLine.number >= state.doc.lines) {
     return [];
   }
 
   const parentIndentColumns = parentMarker.indentColumns ?? 0;
-  const changes = [];
+  const changes: ListTextDeletion[] = [];
   let foundNestedDescendants = false;
 
   for (let lineNo = parentLine.number + 1; lineNo <= state.doc.lines; lineNo += 1) {
@@ -291,7 +340,7 @@ function collectNestedListHoistChanges(state, parentLine, parentMarker, stylesBy
   return changes;
 }
 
-function parseListMarkerParts(lineText) {
+function parseListMarkerParts(lineText: string): ParsedListMarkerParts | null {
   const match = listMarkerRegex.exec(lineText);
   if (!match) {
     return null;
@@ -314,7 +363,10 @@ function taskStatusCssClass(status: TaskStatus): string {
   return taskStatusClassByStatus[status];
 }
 
-function buildListMarkerText(parts, orderedNumber = parts?.orderedNumber) {
+function buildListMarkerText(
+  parts: ParsedListMarkerParts | null,
+  orderedNumber: string | undefined = parts?.orderedNumber
+): string | null {
   if (!parts) {
     return null;
   }
@@ -334,7 +386,11 @@ function buildListMarkerText(parts, orderedNumber = parts?.orderedNumber) {
     : `${parts.leadingWhitespace}${orderedNumber}${parts.orderedSuffix} `;
 }
 
-export function listMarkerData(lineText: string, orderedDisplayIndex: string | null = null, style: ListIndentStyle = defaultListIndentStyle): ListMarkerData | null {
+export function listMarkerData(
+  lineText: string,
+  orderedDisplayIndex: OrderedDisplayIndex = null,
+  style: ListIndentStyle = defaultListIndentStyle
+): ListMarkerData | null {
   const match = listMarkerRegex.exec(lineText);
   if (!match) {
     return null;
@@ -467,13 +523,13 @@ class CheckboxWidget extends WidgetType {
 }
 
 export function addListMarkerDecoration(
-  builder,
-  state,
-  from,
-  orderedDisplayIndex = null,
-  style = defaultListIndentStyle,
-  options = null
-) {
+  builder: Array<Range<Decoration>>,
+  state: EditorState,
+  from: number,
+  orderedDisplayIndex: OrderedDisplayIndex = null,
+  style: ListIndentStyle = defaultListIndentStyle,
+  options: ListMarkerDecorationOptions | null = null
+): void {
   const line = state.doc.lineAt(from);
   const lineText = state.doc.sliceString(line.from, line.to);
   const marker = listMarkerData(lineText, orderedDisplayIndex, style);
@@ -520,7 +576,7 @@ export function addListMarkerDecoration(
 
 }
 
-export function continuedListMarker(lineText) {
+export function continuedListMarker(lineText: string): string | null {
   const parts = parseListMarkerParts(lineText);
   if (!parts) {
     return null;
@@ -546,11 +602,11 @@ export function continuedListMarker(lineText) {
   return buildListMarkerText(parts, String(nextNumber));
 }
 
-function sameLevelListMarker(lineText) {
+function sameLevelListMarker(lineText: string): string | null {
   return buildListMarkerText(parseListMarkerParts(lineText));
 }
 
-export function handleEnterContinueList(view) {
+export function handleEnterContinueList(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -577,7 +633,7 @@ export function handleEnterContinueList(view) {
   return true;
 }
 
-export function handleEnterOnEmptyListItem(view) {
+export function handleEnterOnEmptyListItem(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -608,7 +664,7 @@ export function handleEnterOnEmptyListItem(view) {
   return true;
 }
 
-export function handleBackspaceAtListContentStart(view) {
+export function handleBackspaceAtListContentStart(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -671,7 +727,7 @@ export function handleBackspaceAtListContentStart(view) {
   return true;
 }
 
-function collapsedSingleCursorListContext(state) {
+function collapsedSingleCursorListContext(state: EditorState) {
   if (state.selection.ranges.length !== 1) {
     return null;
   }
@@ -701,7 +757,7 @@ function collapsedSingleCursorListContext(state) {
   };
 }
 
-export function handleArrowLeftAtListContentStart(view) {
+export function handleArrowLeftAtListContentStart(view: EditorView): boolean {
   const context = collapsedSingleCursorListContext(view.state);
   if (!context || context.selection.head !== context.contentStart) {
     return false;
@@ -711,7 +767,7 @@ export function handleArrowLeftAtListContentStart(view) {
   return true;
 }
 
-export function handleArrowRightAtListLineStart(view) {
+export function handleArrowRightAtListLineStart(view: EditorView): boolean {
   const context = collapsedSingleCursorListContext(view.state);
   if (!context || context.selection.head !== context.line.from) {
     return false;
@@ -721,7 +777,7 @@ export function handleArrowRightAtListLineStart(view) {
   return true;
 }
 
-export function handleEnterAtListContentStart(view) {
+export function handleEnterAtListContentStart(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -759,7 +815,7 @@ export function handleEnterAtListContentStart(view) {
   return true;
 }
 
-export function handleEnterBeforeNestedList(view) {
+export function handleEnterBeforeNestedList(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -793,8 +849,8 @@ export function handleEnterBeforeNestedList(view) {
   return true;
 }
 
-export function collectOrderedListRenumberChanges(state) {
-  const changes = [];
+export function collectOrderedListRenumberChanges(state: EditorState): ListTextChange[] {
+  const changes: ListTextChange[] = [];
   const stylesByLine = detectListIndentStylesByLine(state);
   const orderedCountsByLevel: Array<number | null> = [];
 
@@ -815,7 +871,7 @@ export function collectOrderedListRenumberChanges(state) {
       level,
       marker.orderedNumber
     );
-    if (expected === null || isAnchor) {
+    if (expected === null || isAnchor || marker.orderedNumber === undefined) {
       continue;
     }
     const expectedText = String(expected);
@@ -832,9 +888,9 @@ export function collectOrderedListRenumberChanges(state) {
   return changes;
 }
 
-function computeSourceListMarkers(state) {
+function computeSourceListMarkers(state: EditorState): DecorationSet {
   const stylesByLine = detectListIndentStylesByLine(state);
-  const ranges = new RangeSetBuilder();
+  const ranges = new RangeSetBuilder<Decoration>();
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     const line = state.doc.line(lineNo);
     const lineText = state.doc.sliceString(line.from, line.to);
@@ -859,7 +915,7 @@ function computeSourceListMarkers(state) {
   return ranges.finish();
 }
 
-export const sourceListMarkerField = StateField.define<any>({
+export const sourceListMarkerField = StateField.define<DecorationSet>({
   create(state: EditorState) {
     try {
       return computeSourceListMarkers(state);
@@ -867,7 +923,7 @@ export const sourceListMarkerField = StateField.define<any>({
       return Decoration.none;
     }
   },
-  update(markers: any, transaction: Transaction) {
+  update(markers: DecorationSet, transaction: Transaction) {
     if (!transaction.docChanged) {
       return markers;
     }
@@ -877,5 +933,5 @@ export const sourceListMarkerField = StateField.define<any>({
       return markers;
     }
   },
-  provide: (field: any) => EditorView.decorations.from(field)
+  provide: (field) => EditorView.decorations.from(field)
 });

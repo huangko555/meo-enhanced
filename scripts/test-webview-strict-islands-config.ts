@@ -12,6 +12,7 @@ const expectedRoots = [
   'src/helpers/images.ts',
   'src/helpers/htmlContent.ts',
   'src/helpers/highlightSyntax.ts',
+  'src/helpers/listMarkers.ts',
   'src/helpers/tags.ts',
   'src/helpers/theme.ts',
   'src/themes/editorLightTheme.ts'

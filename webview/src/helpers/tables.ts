@@ -846,7 +846,12 @@ function renumberTableCellOrderedLists(input: HTMLTextAreaElement) {
         marker.indentLevel,
         marker.orderedNumber
       );
-      if (expected !== null && !isAnchor && marker.orderedNumber !== String(expected)) {
+      if (
+        expected !== null
+        && !isAnchor
+        && marker.orderedNumber !== undefined
+        && marker.orderedNumber !== String(expected)
+      ) {
         const from = lineStart + marker.leadingWhitespace.length;
         changes.push({ from, to: from + marker.orderedNumber.length, insert: String(expected) });
       }
