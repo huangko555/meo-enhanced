@@ -1,5 +1,6 @@
 import { RangeSetBuilder, StateField, type EditorState } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import type { SyntaxNodeRef } from '@lezer/common';
 import { tags } from '@lezer/highlight';
 import type { DelimiterType, MarkdownConfig } from '@lezer/markdown';
 import { resolvedSyntaxTree } from './markdownSyntax';
@@ -51,7 +52,7 @@ const sourceHighlightDecoration = Decoration.mark({ class: 'meo-md-highlight' })
 function buildSourceHighlightDecorations(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   resolvedSyntaxTree(state).iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name !== 'Highlight' || node.to - node.from <= 4) return;
       builder.add(node.from + 2, node.to - 2, sourceHighlightDecoration);
     }
