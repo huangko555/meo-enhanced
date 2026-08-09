@@ -111,4 +111,33 @@ await rejectingRuntime.whenIdle();
 assert.equal(rejectingApplication.isIdle(), true, 'rejected execution must restore idle state');
 rejectingRuntime.dispose();
 
+const missingPresentationApplication = createDiagnosticSuggestionApplication();
+let missingPresentationRequests = 0;
+const missingPresentationRuntime = createDiagnosticSuggestionRuntime({
+  application: missingPresentationApplication,
+  executor: {
+    execute(effect) {
+      if (effect.type === 'requestSuggestions') {
+        missingPresentationRequests += 1;
+        return { completion: Promise.resolve({
+          type: 'suggestionsResolved', correlationId: effect.correlationId,
+          diagnostic: effect.diagnostic, suggestions: ['retryable']
+        }) };
+      }
+      return {};
+    },
+    dispose() {}
+  }
+});
+missingPresentationRuntime.dispatch({ type: 'diagnosticsChanged', diagnostics: [firstDiagnostic] });
+missingPresentationRuntime.dispatch({
+  type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchorId: 5
+});
+await missingPresentationRuntime.whenIdle();
+missingPresentationRuntime.dispatch({
+  type: 'suggestionsRequested', diagnostic: firstDiagnostic, anchorId: 6
+});
+assert.equal(missingPresentationRequests, 2, 'missing presentation completion must fail closed and remain retryable');
+missingPresentationRuntime.dispose();
+
 console.log('Diagnostic suggestion runtime checks passed');

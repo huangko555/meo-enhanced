@@ -64,11 +64,11 @@ export function createDiagnosticSuggestionRuntime(
         continue;
       }
 
-      if (!execution.completion && effect.type === 'requestSuggestions') {
-        dispatchInternal({ type: 'suggestionsFailed', correlationId: effect.correlationId });
+      if (!execution.completion) {
+        const failure = failureFor(effect);
+        if (failure) dispatchInternal(failure);
         continue;
       }
-      if (!execution.completion) continue;
 
       void execution.completion.then(
         (input) => complete(input),
