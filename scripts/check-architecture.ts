@@ -319,9 +319,23 @@ for (const contract of config.sharedModuleContracts ?? []) {
     };
     collectReturns(functionDeclaration.body);
     const declarationCounts = new Map<string, number>();
+    const recordBindingName = (name: ts.BindingName): void => {
+      if (ts.isIdentifier(name)) {
+        if (requiredResultNames.has(name.text)) {
+          declarationCounts.set(name.text, (declarationCounts.get(name.text) ?? 0) + 1);
+        }
+        return;
+      }
+      for (const element of name.elements) {
+        if (ts.isBindingElement(element)) recordBindingName(element.name);
+      }
+    };
     const collectDeclarations = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
-        && requiredResultNames.has(node.name.text)) {
+      if (ts.isVariableDeclaration(node) || ts.isParameter(node)) {
+        recordBindingName(node.name);
+      } else if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)
+        || ts.isClassDeclaration(node) || ts.isClassExpression(node) || ts.isEnumDeclaration(node))
+        && node.name && requiredResultNames.has(node.name.text)) {
         declarationCounts.set(node.name.text, (declarationCounts.get(node.name.text) ?? 0) + 1);
       }
       ts.forEachChild(node, collectDeclarations);

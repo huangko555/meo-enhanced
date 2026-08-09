@@ -141,6 +141,34 @@ try {
 
   write('webview/src/helpers/math.ts', [
     "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string, baseOffset: number) {',
+    '  const ranges = scanLatexMath(text);',
+    '  if (baseOffset === 0) { const { ranges } = { ranges: [] as unknown[] }; return ranges; }',
+    '  if (baseOffset === 1) { const [ranges] = [[] as unknown[]]; return ranges; }',
+    '  return ranges;',
+    '}',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
+    ''
+  ].join('\n'));
+  const destructuredShadow = runCheck();
+  assert.equal(destructuredShadow.ok, false, 'destructured shared result shadow must be rejected');
+  assert.match(destructuredShadow.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string) {',
+    '  const ranges = scanLatexMath(text);',
+    '  try { throw []; } catch (ranges) { return ranges; }',
+    '}',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
+    ''
+  ].join('\n'));
+  const catchShadow = runCheck();
+  assert.equal(catchShadow.ok, false, 'catch binding shared result shadow must be rejected');
+  assert.match(catchShadow.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
     'export function collect(text: string) {',
     '  const renamedDuplicateScanner = () => { for (let i = 0; i < text.length; i += 1) void text[i]; };',
     '  renamedDuplicateScanner();',
