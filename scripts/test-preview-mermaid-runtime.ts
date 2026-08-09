@@ -36,6 +36,10 @@ if (previewResourceRequests !== 3) {
 }
 releaseFirstPreview();
 await Promise.all(previewRequests);
+const rejectedPreviewRenderer = createPreviewMermaidRenderer({
+  runExclusive: () => Promise.reject(new Error('Mermaid render queue capacity exceeded'))
+} as MermaidDiagramRenderResources);
+await rejectedPreviewRenderer.render(emptyFrame, 'dark');
 const browser = await launchTestBrowser();
 
 try {

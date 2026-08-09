@@ -30,7 +30,7 @@ export function createPreviewMermaidRenderer(resources: MermaidDiagramRenderReso
       } finally {
         await restoreMermaidEditorTheme();
       }
-    }, 'high');
+    }, 'high').catch(() => undefined);
   };
 
   return { render };
