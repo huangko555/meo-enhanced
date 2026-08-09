@@ -52,7 +52,8 @@
         {
           "file": "webview/src/helpers/math.ts",
           "function": "parseLatexMathAt",
-          "requiredCall": "scanLatexMathAt"
+          "requiredCall": "scanLatexMathAt",
+          "allowNullReturn": true
         },
         {
           "file": "webview/src/helpers/math.ts",

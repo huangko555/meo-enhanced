@@ -38,15 +38,21 @@ try {
       exactImporters: ['webview/src/helpers/math.ts', 'src/export/math.ts'],
       delegates: [
         { file: 'webview/src/helpers/math.ts', function: 'collect', requiredCall: 'scanLatexMath' },
+        { file: 'webview/src/helpers/math.ts', function: 'find', requiredCall: 'scanLatexMathAt', allowNullReturn: true },
         { file: 'src/export/math.ts', function: 'collect', requiredCall: 'scanLatexMath' }
       ]
     }],
     knownLegacyTestFailures: []
   }, null, 2));
-  write('src/shared/latexMathScanner.ts', 'export const scanLatexMath = (_text: string) => [];\n');
+  write('src/shared/latexMathScanner.ts', [
+    'export const scanLatexMath = (_text: string) => [];',
+    'export const scanLatexMathAt = (_text: string, _index: number) => null;',
+    ''
+  ].join('\n'));
   write('webview/src/helpers/math.ts', [
-    "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
     'export function collect(text: string) { return scanLatexMath(text); }',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
     'export function renderRows(rows: string[]) { for (const row of rows) void row; }',
     ''
   ].join('\n'));
@@ -80,12 +86,33 @@ try {
   rmSync(join(fixtureRoot, 'src', 'unexpected.ts'));
 
   write('webview/src/helpers/math.ts', [
-    "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string) { scanLatexMath(text); return []; }',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
+    ''
+  ].join('\n'));
+  const discardedCollection = runCheck();
+  assert.equal(discardedCollection.ok, false, 'discarded shared collection result must be rejected');
+  assert.match(discardedCollection.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string) { return scanLatexMath(text); }',
+    'export function find(text: string, index: number) { void scanLatexMathAt(text, index); return null; }',
+    ''
+  ].join('\n'));
+  const discardedPointResult = runCheck();
+  assert.equal(discardedPointResult.ok, false, 'discarded shared point result must be rejected');
+  assert.match(discardedPointResult.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
     'export function collect(text: string) {',
     '  const renamedDuplicateScanner = () => { for (let i = 0; i < text.length; i += 1) void text[i]; };',
     '  renamedDuplicateScanner();',
     '  return scanLatexMath(text);',
     '}',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
     ''
   ].join('\n'));
   const renamedDuplicate = runCheck();
@@ -93,12 +120,13 @@ try {
   assert.match(renamedDuplicate.output, /ARCH011/);
 
   write('webview/src/helpers/math.ts', [
-    "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
     'export function collect(text: string) {',
     '  const ignored = scanLatexMath(text);',
     "  const duplicate = (cursor: number): number => text.indexOf('$', cursor) < 0 ? cursor : duplicate(cursor + 1);",
     '  return duplicate(0) < 0 ? ignored : ignored;',
     '}',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
     ''
   ].join('\n'));
   const deadDelegate = runCheck();
@@ -106,8 +134,9 @@ try {
   assert.match(deadDelegate.output, /ARCH011/);
 
   write('webview/src/helpers/math.ts', [
-    "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
     'export function collect(text: string) { return /\\$/.test(text) ? scanLatexMath(text) : []; }',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
     ''
   ].join('\n'));
   const regexDuplicate = runCheck();

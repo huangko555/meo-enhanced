@@ -34,6 +34,7 @@ const config = JSON.parse(configText) as {
       function: string;
       requiredCall: string;
       allowedMethodCalls?: string[];
+      allowNullReturn?: boolean;
     }>;
   }>;
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
@@ -234,6 +235,8 @@ for (const contract of config.sharedModuleContracts ?? []) {
       .filter((parameter) => ts.isIdentifier(parameter.name))
       .map((parameter) => (parameter.name as ts.Identifier).text));
     let requiredCallCount = 0;
+    let requiredCallReturnedDirectly = false;
+    const requiredResultNames = new Set<string>();
     let containsUnauthorizedCall = false;
     let readsParameterByIndex = false;
     let containsDelimiterLiteral = false;
@@ -242,8 +245,14 @@ for (const contract of config.sharedModuleContracts ?? []) {
     const visitCaller = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
         if (ts.isIdentifier(node.expression)) {
-          if (node.expression.text === requiredLocalName) requiredCallCount += 1;
-          else containsUnauthorizedCall = true;
+          if (node.expression.text === requiredLocalName) {
+            requiredCallCount += 1;
+            if (ts.isReturnStatement(node.parent)) {
+              requiredCallReturnedDirectly = true;
+            } else if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+              requiredResultNames.add(node.parent.name.text);
+            }
+          } else containsUnauthorizedCall = true;
         } else if (ts.isPropertyAccessExpression(node.expression)
           && !allowedMethods.has(node.expression.name.text)) {
           containsUnauthorizedCall = true;
@@ -266,8 +275,47 @@ for (const contract of config.sharedModuleContracts ?? []) {
       ts.forEachChild(node, visitCaller);
     };
     visitCaller(functionDeclaration.body);
+    const unwrap = (expression: ts.Expression): ts.Expression => {
+      let current = expression;
+      while (ts.isParenthesizedExpression(current)) current = current.expression;
+      return current;
+    };
+    const isDerivedReturn = (statement: ts.ReturnStatement): boolean => {
+      if (!statement.expression) return false;
+      const expression = unwrap(statement.expression);
+      if (delegate.allowNullReturn && expression.kind === ts.SyntaxKind.NullKeyword) return true;
+      if (ts.isIdentifier(expression) && requiredResultNames.has(expression.text)) return true;
+      if (ts.isCallExpression(expression)) {
+        if (ts.isIdentifier(expression.expression) && expression.expression.text === requiredLocalName) {
+          return requiredCallReturnedDirectly;
+        }
+        if (ts.isPropertyAccessExpression(expression.expression)
+          && ts.isIdentifier(expression.expression.expression)
+          && requiredResultNames.has(expression.expression.expression.text)
+          && allowedMethods.has(expression.expression.name.text)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const ownedReturns: ts.ReturnStatement[] = [];
+    const collectReturns = (node: ts.Node): void => {
+      if (ts.isReturnStatement(node)) {
+        let owner: ts.Node | undefined = node.parent;
+        while (owner && owner !== functionDeclaration && !ts.isFunctionLike(owner)) owner = owner.parent;
+        if (owner === functionDeclaration) ownedReturns.push(node);
+      }
+      ts.forEachChild(node, collectReturns);
+    };
+    collectReturns(functionDeclaration.body);
     if (!requiredLocalName || requiredCallCount !== 1) {
       failures.push(`ARCH011 共享模块调用方必须恰好委托一次 ${delegate.requiredCall}: ${delegate.file} (${delegate.function})`);
+    }
+    if (!requiredCallReturnedDirectly && requiredResultNames.size === 0) {
+      failures.push(`ARCH011 共享模块委托结果不得丢弃: ${delegate.file} (${delegate.function})`);
+    }
+    if (!ownedReturns.length || ownedReturns.some((statement) => !isDerivedReturn(statement))) {
+      failures.push(`ARCH011 共享模块委托结果必须决定返回值: ${delegate.file} (${delegate.function})`);
     }
     if (containsUnauthorizedCall || readsParameterByIndex || containsDelimiterLiteral
       || containsIteration || containsRegex) {
