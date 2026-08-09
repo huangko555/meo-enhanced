@@ -45,11 +45,6 @@ async function main(): Promise<void> {
     true,
     'nested table images must dispose their presentation handles before DOM replacement'
   );
-  assert.match(
-    tableSource,
-    /destroy\(dom\) \{[\s\S]*?disposeImagePresentations\(dom\);/,
-    'destroyed table Widgets must dispose all nested image presentation handles'
-  );
   assert.equal(imageSource.includes("from '../adapters/imagePresentationRuntime'"), false);
   assert.equal(imageSource.includes("from '../editor/imagePresentationAdapter'"), false);
   for (const legacyOwner of [

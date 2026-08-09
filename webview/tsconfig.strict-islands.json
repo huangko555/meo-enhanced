@@ -7,6 +7,7 @@
   "files": [
     "src/helpers/images.ts",
     "src/helpers/htmlContent.ts",
+    "src/helpers/gitDiffGutter.ts",
     "src/helpers/highlightSyntax.ts",
     "src/helpers/listMarkers.ts",
     "src/helpers/mermaidDiagram.ts",

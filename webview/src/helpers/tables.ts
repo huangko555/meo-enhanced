@@ -1,6 +1,7 @@
-import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Transaction } from '@codemirror/state';
+import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Range, type SelectionRange as CodeMirrorSelectionRange, type Transaction } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
+import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
 import { isolateHistory } from '@codemirror/commands';
 import { disposeImagePresentations, ImageWidget } from './images';
 import {
@@ -26,7 +27,9 @@ import {
 import {
   appendInlineMappedText,
   resolveInlineCaretAtPoint,
-  setInlineSourceRange
+  setInlineSourceRange,
+  type InlineCaretResolution,
+  type InlineDomCaret
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
@@ -51,7 +54,7 @@ import type { TableCommand, TableCommandTarget } from '../application/tableComma
 
 interface TableData {
   rows: string[][];
-  alignments: string[];
+  alignments: TableAlignment[];
   colCount: number;
   startLine?: number;
   endLine?: number;
@@ -134,7 +137,17 @@ interface SelectionRange {
 interface CellMatrix {
   headerCells: string[];
   rows: string[][];
-  alignments?: string[];
+  alignments?: TableAlignment[];
+}
+
+interface WidgetTableData extends TableData {
+  from: number;
+  to: number;
+  startLine: number;
+  endLine: number;
+  indent: string;
+  signature: string;
+  headerCells: string[];
 }
 
 interface TableRange {
@@ -236,6 +249,46 @@ export function commitPendingTableEdits(view: EditorView): boolean {
   }
   if (transactions.length) view.dispatch(transactions);
   return detail.committed;
+}
+
+interface TablePointerCaret {
+  domCaret: InlineDomCaret | null;
+  editorOffset: number | null;
+}
+
+type TableAlignment = '' | 'left' | 'center' | 'right' | null;
+
+interface ParsedTableCellSegment {
+  from: number;
+  to: number;
+  cellIndex: number;
+  empty: boolean;
+}
+
+interface ParsedTableRowCells {
+  cells: string[];
+  pipes: number[];
+  segments: ParsedTableCellSegment[];
+}
+
+interface ParsedTableLine extends ParsedTableRowCells {
+  lineNo: number;
+  from: number;
+  to: number;
+  text: string;
+}
+
+interface BuiltTableData {
+  from: number;
+  to: number;
+  lines: ParsedTableLine[];
+  delimiterIdx: number;
+  headerLine: ParsedTableLine | null;
+  dataLines: ParsedTableLine[];
+  alignments: TableAlignment[];
+  colCount: number;
+  startLine: number;
+  endLine: number;
 }
 
 function stabilizeHistoryScrollTop(view: EditorView, targetTop: number) {
@@ -537,28 +590,28 @@ const tableToolbarIcons: Record<string, TableToolbarIcon> = {
   }
 };
 
-function isTableControlTarget(target) {
-  return target instanceof Element && target.closest(tableControlSelector);
+function isTableControlTarget(target: EventTarget | null): boolean {
+  return Boolean(target instanceof Element && target.closest(tableControlSelector));
 }
 
-function isSelectionMenuTarget(target) {
-  return target instanceof Element && target.closest('.selection-inline-menu');
+function isSelectionMenuTarget(target: EventTarget | null): boolean {
+  return Boolean(target instanceof Element && target.closest('.selection-inline-menu'));
 }
 
-function targetElementFrom(target) {
+function targetElementFrom(target: EventTarget | null): Element | null {
   return target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
 }
 
-function isPrimaryModifier(event) {
+function isPrimaryModifier(event: Pick<KeyboardEvent, 'altKey' | 'metaKey' | 'ctrlKey'>): boolean {
   if (event.altKey) return false;
   return event.metaKey || event.ctrlKey;
 }
 
-function isModifierLinkActivationEvent(event) {
+function isModifierLinkActivationEvent(event: PointerEvent): boolean {
   return Boolean(getModifierLinkActivationHref(event));
 }
 
-function getModifierLinkActivationHref(event) {
+function getModifierLinkActivationHref(event: PointerEvent): string {
   if (!isPrimaryModifierPointerClick(event)) return '';
   const target = targetElementFrom(event.target);
   if (!target) return '';
@@ -568,11 +621,11 @@ function getModifierLinkActivationHref(event) {
   return href || '';
 }
 
-function isUndoShortcut(event) {
+function isUndoShortcut(event: KeyboardEvent): boolean {
   return event.key.toLowerCase() === 'z' && !event.shiftKey;
 }
 
-function isRedoShortcut(event) {
+function isRedoShortcut(event: KeyboardEvent): boolean {
   const key = event.key.toLowerCase();
   return (key === 'z' && event.shiftKey) || key === 'y';
 }
@@ -595,11 +648,11 @@ const tableDiagnosticSeverityClasses = [
   'meo-diagnostic-hint'
 ];
 
-function isTableInlineWhitespaceOnly(text) {
+function isTableInlineWhitespaceOnly(text: string): boolean {
   return /^\s+$/.test(text);
 }
 
-function isTableInlineEscaped(text, index) {
+function isTableInlineEscaped(text: string, index: number): boolean {
   let slashCount = 0;
   for (let i = index - 1; i >= 0 && text[i] === '\\'; i -= 1) {
     slashCount += 1;
@@ -607,11 +660,11 @@ function isTableInlineEscaped(text, index) {
   return (slashCount % 2) === 1;
 }
 
-function isTableInlineAsciiAlnum(char) {
+function isTableInlineAsciiAlnum(char: string): boolean {
   return Boolean(char) && /[A-Za-z0-9]/.test(char);
 }
 
-function canOpenTableInlineDelimiter(text, index, marker) {
+function canOpenTableInlineDelimiter(text: string, index: number, marker: string): boolean {
   if (isTableInlineEscaped(text, index)) return false;
   const markerLen = marker.length;
   const next = text[index + markerLen] ?? '';
@@ -620,7 +673,7 @@ function canOpenTableInlineDelimiter(text, index, marker) {
   return true;
 }
 
-function canCloseTableInlineDelimiter(text, index, marker) {
+function canCloseTableInlineDelimiter(text: string, index: number, marker: string): boolean {
   if (isTableInlineEscaped(text, index)) return false;
   const previous = text[index - 1] ?? '';
   if (!previous || /\s/.test(previous)) return false;
@@ -628,15 +681,15 @@ function canCloseTableInlineDelimiter(text, index, marker) {
   return true;
 }
 
-function isTableInlineUrlLike(text) {
+function isTableInlineUrlLike(text: string): boolean {
   return tableInlineRawUrlRe.test(text) || tableInlineSchemeRe.test(text);
 }
 
-function tableInlineHrefFromRawUrl(text) {
+function tableInlineHrefFromRawUrl(text: string): string {
   return normalizeSourceHref(text);
 }
 
-function tableInlineHrefFromWikiTarget(target) {
+function tableInlineHrefFromWikiTarget(target: string | null | undefined): string {
   const trimmed = (target ?? '').trim();
   if (!trimmed) return '';
   if (tableInlineSchemeRe.test(trimmed)) return trimmed;
@@ -1042,7 +1095,7 @@ function appendDiagnosticText(
   }
 }
 
-function decodeTableInlineEscapes(text) {
+function decodeTableInlineEscapes(text: string): string {
   let result = '';
   for (let i = 0; i < text.length; i += 1) {
     if (text[i] === '\\' && i + 1 < text.length && tableInlineEscapableChars.has(text[i + 1])) {
@@ -1055,7 +1108,7 @@ function decodeTableInlineEscapes(text) {
   return result;
 }
 
-function findTableInlineMatchingBackticks(text, index, tickCount) {
+function findTableInlineMatchingBackticks(text: string, index: number, tickCount: number): number {
   const marker = '`'.repeat(tickCount);
   for (let i = index; i <= text.length - tickCount; i += 1) {
     if (text.startsWith(marker, i)) return i;
@@ -1063,7 +1116,7 @@ function findTableInlineMatchingBackticks(text, index, tickCount) {
   return -1;
 }
 
-function parseTableInlineCodeSpan(text, index) {
+function parseTableInlineCodeSpan(text: string, index: number) {
   if (text[index] !== '`') return null;
   let tickCount = 1;
   while (text[index + tickCount] === '`') tickCount += 1;
@@ -1076,7 +1129,7 @@ function parseTableInlineCodeSpan(text, index) {
   };
 }
 
-function consumeTableInlineAngleSection(text, index) {
+function consumeTableInlineAngleSection(text: string, index: number) {
   if (text[index] !== '<' || isTableInlineEscaped(text, index)) return null;
   const close = text.indexOf('>', index + 1);
   if (close < 0) return null;
@@ -1086,7 +1139,7 @@ function consumeTableInlineAngleSection(text, index) {
   };
 }
 
-function consumeTableInlineBracketContent(text, index) {
+function consumeTableInlineBracketContent(text: string, index: number) {
   if (text[index] !== '[' || isTableInlineEscaped(text, index)) return null;
   let depth = 1;
   for (let i = index + 1; i < text.length;) {
@@ -1120,7 +1173,7 @@ function consumeTableInlineBracketContent(text, index) {
   return null;
 }
 
-function consumeTableInlineParenContent(text, index) {
+function consumeTableInlineParenContent(text: string, index: number) {
   if (text[index] !== '(' || isTableInlineEscaped(text, index)) return null;
   let depth = 1;
   for (let i = index + 1; i < text.length;) {
@@ -1159,7 +1212,7 @@ function consumeTableInlineParenContent(text, index) {
   return null;
 }
 
-function parseTableInlineMarkdownLink(text, index, { image = false } = {}) {
+function parseTableInlineMarkdownLink(text: string, index: number, { image = false }: { image?: boolean } = {}) {
   const start = image ? index + 1 : index;
   if (image) {
     if (!(text[index] === '!' && text[index + 1] === '[') || isTableInlineEscaped(text, index)) return null;
@@ -1186,7 +1239,7 @@ function parseTableInlineMarkdownLink(text, index, { image = false } = {}) {
   };
 }
 
-function parseTableInlineWikiLink(text, index) {
+function parseTableInlineWikiLink(text: string, index: number) {
   if (!text.startsWith('[[', index) || isTableInlineEscaped(text, index)) return null;
   for (let i = index + 2; i < text.length - 1; i += 1) {
     if (text[i] === '\\') {
@@ -1212,7 +1265,7 @@ function parseTableInlineWikiLink(text, index) {
   return null;
 }
 
-function findTableInlineClosingMarker(text, startIndex, marker, { singleTilde = false } = {}) {
+function findTableInlineClosingMarker(text: string, startIndex: number, marker: string, { singleTilde = false }: { singleTilde?: boolean } = {}) {
   const markerLen = marker.length;
   for (let i = startIndex; i <= text.length - markerLen; i += 1) {
     if (!text.startsWith(marker, i)) continue;
@@ -1243,7 +1296,7 @@ function findTableInlineClosingMarker(text, startIndex, marker, { singleTilde = 
   return -1;
 }
 
-function parseTableInlineDelimitedSpan(text, index) {
+function parseTableInlineDelimitedSpan(text: string, index: number) {
   if (
     text.startsWith('==', index) &&
     text[index - 1] !== '=' &&
@@ -1311,7 +1364,7 @@ function parseTableInlineDelimitedSpan(text, index) {
   return null;
 }
 
-function trimTableInlineRawUrl(raw, precedingChar) {
+function trimTableInlineRawUrl(raw: string, precedingChar: string): string {
   let end = raw.length;
   while (end > 0 && /[.,!?;:]/.test(raw[end - 1])) end -= 1;
   while (end > 0 && raw[end - 1] === ')') {
@@ -1342,7 +1395,7 @@ function trimTableInlineRawUrl(raw, precedingChar) {
   return trimmed;
 }
 
-function parseTableInlineAutolink(text, index) {
+function parseTableInlineAutolink(text: string, index: number) {
   const angle = consumeTableInlineAngleSection(text, index);
   if (!angle) return null;
   const inner = angle.content.trim();
@@ -1355,7 +1408,7 @@ function parseTableInlineAutolink(text, index) {
   return { label: inner, href, nextIndex: angle.nextIndex };
 }
 
-function parseTableInlineRawUrl(text, index) {
+function parseTableInlineRawUrl(text: string, index: number) {
   if (isTableInlineEscaped(text, index)) return null;
   if (index > 0 && /[A-Za-z0-9]/.test(text[index - 1])) return null;
   const match = tableInlineRawUrlRe.exec(text.slice(index));
@@ -1369,7 +1422,7 @@ function parseTableInlineRawUrl(text, index) {
   };
 }
 
-function parseTableInlineEmojiShortcode(text, index) {
+function parseTableInlineEmojiShortcode(text: string, index: number) {
   if (text[index] !== ':' || isTableInlineEscaped(text, index)) return null;
   const match = tableInlineEmojiShortcodeRe.exec(text.slice(index));
   if (!match) return null;
@@ -1381,7 +1434,7 @@ function parseTableInlineEmojiShortcode(text, index) {
   };
 }
 
-function appendTableInlinePreviewLink(parent, label, href, options: {
+function appendTableInlinePreviewLink(parent: HTMLElement, label: string, href: string, options: {
   baseOffset?: number;
   diagnostics?: TableCellDiagnostics[];
   searchState?: TableSearchState | null;
@@ -1415,9 +1468,9 @@ export function refreshTableLocalLinkIndicators(root: ParentNode): void {
 }
 
 function appendTableInlinePreviewImage(
-  parent,
-  altText,
-  url,
+  parent: HTMLElement,
+  altText: string,
+  url: string,
   sourceRange: TableCellRange,
   presentationFactory: ImagePresentationFactory
 ) {
@@ -1814,8 +1867,8 @@ function appendTableCellRenderedPreview(
 }
 
 function renderTableCellInlinePreview(
-  previewEl,
-  value,
+  previewEl: HTMLElement,
+  value: string,
   diagnostics: TableCellDiagnostics[] = [],
   searchState: TableSearchState | null = null,
   sourceRange: TableCellRange | null,
@@ -1842,7 +1895,7 @@ function renderTableCellInlinePreview(
   );
 }
 
-function consumeTableInlineProtectedSpan(text, index, endIndex) {
+function consumeTableInlineProtectedSpan(text: string, index: number, endIndex: number): number | null {
   const code = parseTableInlineCodeSpan(text, index);
   if (code && code.nextIndex <= endIndex) return code.nextIndex;
 
@@ -1865,8 +1918,8 @@ function consumeTableInlineProtectedSpan(text, index, endIndex) {
   return null;
 }
 
-function findTableRowSeparatorPipes(text, startIndex, endIndex) {
-  const pipes = [];
+function findTableRowSeparatorPipes(text: string, startIndex: number, endIndex: number): number[] {
+  const pipes: number[] = [];
   for (let i = startIndex; i < endIndex;) {
     const protectedNext = consumeTableInlineProtectedSpan(text, i, endIndex);
     if (protectedNext && protectedNext > i) {
@@ -1881,7 +1934,7 @@ function findTableRowSeparatorPipes(text, startIndex, endIndex) {
   return pipes;
 }
 
-function parseTableRowCells(lineText, lineFrom = 0) {
+function parseTableRowCells(lineText: string, lineFrom = 0): ParsedTableRowCells {
   const leadingWhitespaceLen = /^(\s*)/.exec(lineText)?.[1].length ?? 0;
   let contentStart = leadingWhitespaceLen;
   let contentEnd = lineText.length;
@@ -1896,7 +1949,7 @@ function parseTableRowCells(lineText, lineFrom = 0) {
   const allSeparatorPipes = findTableRowSeparatorPipes(lineText, 0, lineText.length);
   const innerPipes = allSeparatorPipes.filter((index) => index >= innerStart && index < innerEnd);
 
-  const cells = [];
+  const cells: string[] = [];
   if (innerStart < innerEnd || innerPipes.length > 0) {
     let cursor = innerStart;
     for (const pipeIndex of innerPipes) {
@@ -1906,7 +1959,7 @@ function parseTableRowCells(lineText, lineFrom = 0) {
     cells.push(lineText.slice(cursor, innerEnd).trim());
   }
 
-  const segments = [];
+  const segments: ParsedTableCellSegment[] = [];
   let segmentStart = innerStart;
   for (let i = 0; i <= innerPipes.length; i += 1) {
     const rawFrom = segmentStart;
@@ -1932,14 +1985,16 @@ function parseTableRowCells(lineText, lineFrom = 0) {
   };
 }
 
-function normalizeRow(cells, colCount) {
+function normalizeRow<T>(cells: readonly T[], colCount: number, fill: T): T[] {
   const result = cells.slice(0, colCount);
-  while (result.length < colCount) result.push('');
+  while (result.length < colCount) result.push(fill);
   return result;
 }
 
-function isValidTableRange(from, to, docLength) {
+function isValidTableRange(from: number | undefined, to: number | undefined, docLength: number): boolean {
   return (
+    typeof from === 'number' &&
+    typeof to === 'number' &&
     Number.isInteger(from) &&
     Number.isInteger(to) &&
     from >= 0 &&
@@ -1948,8 +2003,8 @@ function isValidTableRange(from, to, docLength) {
   );
 }
 
-function parseDelimiterAlignments(lineText) {
-  const alignments = [];
+function parseDelimiterAlignments(lineText: string): TableAlignment[] {
+  const alignments: TableAlignment[] = [];
   const parts = lineText.split('|').filter((part) => part.trim());
   for (const part of parts) {
     const value = part.trim();
@@ -1960,24 +2015,24 @@ function parseDelimiterAlignments(lineText) {
   return alignments;
 }
 
-function delimiterCellForAlignment(alignment) {
+function delimiterCellForAlignment(alignment: string | null | undefined): string {
   if (alignment === 'left') return ':---';
   if (alignment === 'right') return '---:';
   if (alignment === 'center') return ':---:';
   return '---';
 }
 
-function serializeTableMarkdown(indent, headerCells, alignments, rows) {
+function serializeTableMarkdown(indent: string, headerCells: string[], alignments: TableAlignment[], rows: string[][]): string {
   const colCount = headerCells.length;
-  const normalizedAlignments = normalizeRow(alignments, colCount).map((value) => value ?? null);
-  const normalizedRows = rows.map((row) => normalizeRow(row, colCount));
+  const normalizedAlignments = normalizeRow(alignments, colCount, '').map((value) => value ?? null);
+  const normalizedRows = rows.map((row) => normalizeRow(row, colCount, ''));
   const header = `| ${headerCells.join(' | ')} |`;
   const delimiter = `| ${normalizedAlignments.map(delimiterCellForAlignment).join(' | ')} |`;
   const dataRows = normalizedRows.map((row) => `| ${row.join(' | ')} |`);
   return [header, delimiter, ...dataRows].map((line) => `${indent}${line}`).join('\n');
 }
 
-function parseTableSortNumber(value) {
+function parseTableSortNumber(value: string): number | null {
   const normalized = value.replace(/,/g, '').replace(/%$/, '').trim();
   if (!/^[+-]?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
     return null;
@@ -1986,7 +2041,7 @@ function parseTableSortNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parseTableSortDate(value) {
+function parseTableSortDate(value: string): number | null {
   const normalized = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(normalized)) {
     return null;
@@ -1995,7 +2050,7 @@ function parseTableSortDate(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function compareTableSortValues(leftValue, rightValue, direction: TableSortDirection) {
+function compareTableSortValues(leftValue: string | undefined, rightValue: string | undefined, direction: TableSortDirection): number {
   const left = `${leftValue ?? ''}`.trim();
   const right = `${rightValue ?? ''}`.trim();
   const leftEmpty = left.length === 0;
@@ -2022,25 +2077,25 @@ function compareTableSortValues(leftValue, rightValue, direction: TableSortDirec
   return direction === 'desc' ? -comparison : comparison;
 }
 
-function parseTableLine(lineNo, from, to, text) {
+function parseTableLine(lineNo: number, from: number, to: number, text: string): ParsedTableLine {
   const { cells, pipes, segments } = parseTableRowCells(text, from);
   return { lineNo, from, to, text, cells, pipes, segments };
 }
 
-function isTableContentLine(lineText) {
+function isTableContentLine(lineText: string): boolean {
   return lineText.includes('|');
 }
 
-function buildTableData(state, tableNode) {
+function buildTableData(state: EditorState, tableNode: Pick<SyntaxNodeRef, 'from' | 'to'>): BuiltTableData {
   const startLine = state.doc.lineAt(tableNode.from);
   const endLine = state.doc.lineAt(Math.max(tableNode.to - 1, tableNode.from));
   return buildTableDataForLineRange(state, startLine.number, endLine.number);
 }
 
-function buildTableDataForLineRange(state, startLineNo, endLineNo) {
+function buildTableDataForLineRange(state: EditorState, startLineNo: number, endLineNo: number): BuiltTableData {
   const startLine = state.doc.line(startLineNo);
   const endLine = state.doc.line(endLineNo);
-  const lines = [];
+  const lines: ParsedTableLine[] = [];
   let delimiterIdx = -1;
 
   for (let lineNo = startLine.number; lineNo <= endLine.number; lineNo++) {
@@ -2090,7 +2145,7 @@ function buildTableDataForLineRange(state, startLineNo, endLineNo) {
 }
 
 class HtmlTableWidget extends WidgetType {
-  tableData: TableData;
+  tableData: WidgetTableData;
   view: EditorView | null;
   layoutFrame: number;
   pendingResizeRows: boolean;
@@ -2114,7 +2169,7 @@ class HtmlTableWidget extends WidgetType {
   tableCommandTargetRegistration: TableCommandTargetRegistration | null;
 
   constructor(
-    tableData: TableData,
+    tableData: WidgetTableData,
     stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory,
     tableCommandEnvironment: TableCommandEnvironment
   ) {
@@ -2238,7 +2293,7 @@ class HtmlTableWidget extends WidgetType {
     }
 
     if (pos >= 0) {
-      let node = syntaxTree(view.state).resolveInner(pos, 1);
+      let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, 1);
       while (node) {
         if (node.name === 'Table') {
           if (this.tableData) {
@@ -2265,22 +2320,24 @@ class HtmlTableWidget extends WidgetType {
     const { headerInputs, rowInputs } = this.domRefs;
     const headerCells = normalizeRow(
       headerInputs.map((input) => tableCellEditorValueToSource(input.value).trim()),
-      this.tableData.colCount
+      this.tableData.colCount,
+      ''
     );
 
     const rows = rowInputs.map((inputs) => normalizeRow(
       inputs.map((input) => tableCellEditorValueToSource(input.value).trim()),
-      this.tableData.colCount
+      this.tableData.colCount,
+      ''
     ));
 
     return { headerCells, rows, alignments: this.tableData.alignments };
   }
 
-  sourceRowOrder() {
+  sourceRowOrder(): number[] {
     return this.tableData.rows.map((_row, index) => index);
   }
 
-  sortedRowOrder(column, direction: TableSortDirection) {
+  sortedRowOrder(column: number, direction: TableSortDirection): number[] {
     return this.sourceRowOrder().sort((leftIndex, rightIndex) => {
       const leftRow = this.tableData.rows[leftIndex] ?? [];
       const rightRow = this.tableData.rows[rightIndex] ?? [];
@@ -2289,7 +2346,7 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  updateBodyRowDatasets(rowInputs, cellGrid) {
+  updateBodyRowDatasets(rowInputs: HTMLTextAreaElement[][], cellGrid: HTMLTableCellElement[][]) {
     for (let row = 0; row < rowInputs.length; row += 1) {
       const tableRow = row + 1;
       for (let col = 0; col < rowInputs[row].length; col += 1) {
@@ -2303,7 +2360,7 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
-  setVisualRowOrder(order) {
+  setVisualRowOrder(order: number[]) {
     if (!this.domRefs) return;
     const {
       tbody,
@@ -2340,12 +2397,13 @@ class HtmlTableWidget extends WidgetType {
     if (!this.domRefs) return;
     const { shell, sortButton, applySortButton } = this.domRefs;
     const activeColumn = this.activeColumnIndex();
-    const active = activeColumn !== null && this.sortState?.column === activeColumn;
+    const sortState = this.sortState;
+    const active = activeColumn !== null && sortState?.column === activeColumn;
     sortButton.classList.toggle('is-active', active);
-    sortButton.dataset.sortDirection = active ? this.sortState.direction : '';
-    this.setSortButtonIcon(sortButton, active ? this.sortState.direction : null);
+    sortButton.dataset.sortDirection = active ? sortState.direction : '';
+    this.setSortButtonIcon(sortButton, active ? sortState.direction : null);
     sortButton.title = active
-      ? `Sorted ${this.sortState.direction === 'desc' ? 'descending' : 'ascending'}; click to toggle`
+      ? `Sorted ${sortState.direction === 'desc' ? 'descending' : 'ascending'}; click to toggle`
       : 'Sort selected column descending';
     sortButton.setAttribute('aria-label', sortButton.title);
     sortButton.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -2373,7 +2431,7 @@ class HtmlTableWidget extends WidgetType {
     this.updateSortControls();
   }
 
-  activeBodyRowIndex() {
+  activeBodyRowIndex(): number | null {
     return this.bodyRowIndexFor(this.activeTarget.row);
   }
 
@@ -2388,7 +2446,7 @@ class HtmlTableWidget extends WidgetType {
     return visualIndex >= 0 && visualIndex < this.tableData.rows.length ? visualIndex : null;
   }
 
-  activeColumnIndex() {
+  activeColumnIndex(): number | null {
     return this.columnIndexFor(this.activeTarget.col);
   }
 
@@ -2423,7 +2481,7 @@ class HtmlTableWidget extends WidgetType {
     this.updateSortControls();
   }
 
-  setActionTarget(target) {
+  setActionTarget(target: TableActionTarget) {
     const row = Math.min(Math.max(target.row ?? 0, 0), this.tableData.rows.length);
     const col = Math.min(Math.max(target.col ?? 0, 0), Math.max(0, this.tableData.colCount - 1));
     this.activeTarget = { row, col };
@@ -2450,83 +2508,83 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  requestInsertRowAbove(container) {
+  requestInsertRowAbove(container: HTMLElement) {
     void container;
     this.requestTableCommand('insert-row-above', this.tableData.colCount > 0);
   }
 
-  requestInsertRowBelow(container) {
+  requestInsertRowBelow(container: HTMLElement) {
     void container;
     this.requestTableCommand('insert-row-below', this.tableData.colCount > 0);
   }
 
-  requestDeleteRow(container) {
+  requestDeleteRow(container: HTMLElement) {
     void container;
     this.requestTableCommand('delete-row', this.activeBodyRowIndex() !== null && this.tableData.rows.length > 1);
   }
 
-  requestInsertColumnLeft(container) {
+  requestInsertColumnLeft(container: HTMLElement) {
     void container;
     this.requestTableCommand('insert-column-left', this.activeColumnIndex() !== null);
   }
 
-  requestInsertColumnRight(container) {
+  requestInsertColumnRight(container: HTMLElement) {
     void container;
     this.requestTableCommand('insert-column-right', this.activeColumnIndex() !== null);
   }
 
-  requestDeleteColumn(container) {
+  requestDeleteColumn(container: HTMLElement) {
     void container;
     this.requestTableCommand('delete-column', this.activeColumnIndex() !== null && this.tableData.colCount > 1);
   }
 
-  requestSortPreview(container, column) {
+  requestSortPreview(container: HTMLElement, column: number | null) {
     void container;
     this.requestTableCommand('preview-sort', this.tableData.rows.length > 1 && column !== null);
   }
 
-  requestColumnAlignment(container, alignment) {
+  requestColumnAlignment(container: HTMLElement, alignment: Exclude<TableAlignment, null>) {
     void container;
     const command = alignment === 'center' ? 'align-center' : alignment === 'right' ? 'align-right' : 'align-left';
     this.requestTableCommand(command, this.activeColumnIndex() !== null);
   }
 
-  headerAlignmentOverrideColumns(view: EditorView) {
+  headerAlignmentOverrideColumns(view: EditorView): ReadonlySet<number> | null {
     const from = this.tableData.from;
     const to = this.tableData.to;
     if (!Number.isInteger(from) || !Number.isInteger(to)) return null;
     const overrides = view.state.field(tableHeaderAlignmentOverrideField, false);
-    let columns: ReadonlySet<number> | null = null;
-    overrides?.between(from as number, to as number, (rangeFrom, rangeTo, value) => {
-      if (rangeFrom === from && rangeTo === to) columns = value.columns;
+    const matches: ReadonlySet<number>[] = [];
+    overrides?.between(from, to, (rangeFrom, rangeTo, value) => {
+      if (rangeFrom === from && rangeTo === to) matches.push(value.columns);
     });
-    return columns;
+    return matches[0] ?? null;
   }
 
-  requestApplySort(container) {
+  requestApplySort(container: HTMLElement) {
     void container;
     this.requestTableCommand('apply-sort', Boolean(this.sortState));
   }
 
-  parseCellCoords(rowText, colText) {
+  parseCellCoords(rowText: string | undefined, colText: string | undefined): CellCoords | null {
     const row = Number.parseInt(rowText ?? '', 10);
     const col = Number.parseInt(colText ?? '', 10);
     if (Number.isNaN(row) || Number.isNaN(col)) return null;
     return { row, col };
   }
 
-  findCellElement(node) {
+  findCellElement(node: EventTarget | null): HTMLTableCellElement | null {
     if (!this.domRefs || !(node instanceof Element)) return null;
     const cell = node.closest(tableCellSelector);
     if (!cell || !this.domRefs.table.contains(cell)) return null;
-    return cell;
+    return cell instanceof HTMLTableCellElement ? cell : null;
   }
 
-  coordsFromCell(cell) {
+  coordsFromCell(cell: HTMLTableCellElement): CellCoords | null {
     return this.parseCellCoords(cell.dataset.tableRow, cell.dataset.tableCol);
   }
 
-  focusTableInput(input, caret = null, { scrollCellIntoView = true } = {}) {
+  focusTableInput(input: HTMLTextAreaElement, caret: number | null = null, { scrollCellIntoView = true }: { scrollCellIntoView?: boolean } = {}) {
     if (!(input instanceof HTMLTextAreaElement)) return false;
     this.setCellEditingState(input, true);
     input.focus({ preventScroll: true });
@@ -2542,8 +2600,9 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  focusCellInput(cell, { updateSelection = false, caret = null } = {}) {
-    const input = cell.querySelector('textarea');
+  focusCellInput(cell: HTMLTableCellElement, { updateSelection = false, caret = null }: { updateSelection?: boolean; caret?: number | null } = {}) {
+    const input = cell.querySelector<HTMLTextAreaElement>('textarea');
+    if (!input) return false;
     if (!this.focusTableInput(input, caret)) return false;
     if (!updateSelection) return true;
     const coords = this.coordsFromCell(cell);
@@ -2553,7 +2612,7 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  pointerCaretForCell(cell, clientX, clientY, { nearestFallback = true } = {}) {
+  pointerCaretForCell(cell: HTMLTableCellElement, clientX: number, clientY: number, { nearestFallback = true }: { nearestFallback?: boolean } = {}): TablePointerCaret {
     const input = cell.querySelector('textarea');
     const preview = cell.querySelector('.meo-md-html-table-cell-preview');
     if (!(input instanceof HTMLTextAreaElement) || !(preview instanceof HTMLElement)) {
@@ -2562,7 +2621,7 @@ class HtmlTableWidget extends WidgetType {
 
     const previousInputPointerEvents = input.style.pointerEvents;
     const previousPreviewVisibility = preview.style.visibility;
-    let resolution = { domCaret: null, sourceOffset: null };
+    let resolution: InlineCaretResolution = { domCaret: null, sourceOffset: null };
     try {
       input.style.pointerEvents = 'none';
       preview.style.visibility = 'visible';
@@ -2579,12 +2638,12 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  focusCellInputAt(row, col, caret = null) {
+  focusCellInputAt(row: number, col: number, caret: number | null = null) {
     const input = this.domRefs?.allRowInputs?.[row]?.[col];
-    return this.focusTableInput(input, caret);
+    return input ? this.focusTableInput(input, caret) : false;
   }
 
-  moveVerticalOutOfTable(container, direction, preferredColumn = 0) {
+  moveVerticalOutOfTable(container: HTMLElement, direction: 'up' | 'down', preferredColumn = 0) {
     const view = this.getEditorView(container);
     if (!view) return false;
 
@@ -2612,7 +2671,7 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  normalizeSelectionRange(a, b) {
+  normalizeSelectionRange(a: CellCoords, b: CellCoords): SelectionRange {
     return {
       fromRow: Math.min(a.row, b.row),
       toRow: Math.max(a.row, b.row),
@@ -2621,12 +2680,12 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  isCellSelected(row, col, range) {
+  isCellSelected(row: number, col: number, range: SelectionRange | null): boolean {
     if (!range) return false;
     return row >= range.fromRow && row <= range.toRow && col >= range.fromCol && col <= range.toCol;
   }
 
-  applySelection(range) {
+  applySelection(range: SelectionRange | null) {
     if (!this.domRefs) return;
     this.selectionRange = range;
     const showSelectionStyle = Boolean(
@@ -2639,10 +2698,10 @@ class HtmlTableWidget extends WidgetType {
         const cell = cells[col];
         const selected = this.isCellSelected(row, col, range);
         const styledSelected = selected && showSelectionStyle;
-        const isTopEdge = styledSelected && row === range.fromRow;
-        const isRightEdge = styledSelected && col === range.toCol;
-        const isBottomEdge = styledSelected && row === range.toRow;
-        const isLeftEdge = styledSelected && col === range.fromCol;
+        const isTopEdge = styledSelected && range !== null && row === range.fromRow;
+        const isRightEdge = styledSelected && range !== null && col === range.toCol;
+        const isBottomEdge = styledSelected && range !== null && row === range.toRow;
+        const isLeftEdge = styledSelected && range !== null && col === range.fromCol;
         cell.classList.toggle('meo-md-html-table-cell-selected', styledSelected);
         cell.classList.toggle('meo-md-html-table-cell-selected-top', isTopEdge);
         cell.classList.toggle('meo-md-html-table-cell-selected-right', isRightEdge);
@@ -2652,7 +2711,7 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
-  setSingleCellSelection(coords) {
+  setSingleCellSelection(coords: CellCoords) {
     this.selectionAnchor = coords;
     this.setActionTarget(coords);
     this.applySelection(this.normalizeSelectionRange(coords, coords));
@@ -2664,7 +2723,7 @@ class HtmlTableWidget extends WidgetType {
     this.syncTableLineNumbers();
   }
 
-  exitTableInteraction(container) {
+  exitTableInteraction(container: HTMLElement) {
     const shell = container?.closest?.('.meo-md-html-table-shell');
     if (shell instanceof HTMLElement) {
       shell.classList.remove('has-active-sort');
@@ -2673,7 +2732,7 @@ class HtmlTableWidget extends WidgetType {
     this.clearSelection();
   }
 
-  transferTableInteraction(container) {
+  transferTableInteraction(container: HTMLElement) {
     const shell = container?.closest?.('.meo-md-html-table-shell');
     if (shell instanceof HTMLElement) {
       shell.classList.remove('has-active-sort', 'is-interacting');
@@ -2683,7 +2742,7 @@ class HtmlTableWidget extends WidgetType {
     this.clearSelection();
   }
 
-  setTableInteractionActive(container, active) {
+  setTableInteractionActive(container: HTMLElement, active: boolean) {
     const shell = container?.closest?.('.meo-md-html-table-shell');
     if (shell instanceof HTMLElement) {
       shell.classList.toggle('is-interacting', active);
@@ -2695,13 +2754,13 @@ class HtmlTableWidget extends WidgetType {
     view.dom.dispatchEvent(new CustomEvent('meo-table-interaction', { detail: { active, owner: shell } }));
   }
 
-  emitTableSelectionChange(container) {
+  emitTableSelectionChange(container: HTMLElement) {
     const view = this.getEditorView(container);
     if (!view) return;
     view.dom.dispatchEvent(new CustomEvent('meo-table-selection-change'));
   }
 
-  hasFocusedTableInput(container) {
+  hasFocusedTableInput(container: HTMLElement): boolean {
     const view = this.getEditorView(container);
     if (!view) return false;
     const active = document.activeElement;
@@ -2730,7 +2789,7 @@ class HtmlTableWidget extends WidgetType {
     return lines.join('\n');
   }
 
-  handleHistoryShortcut(event, table) {
+  handleHistoryShortcut(event: KeyboardEvent, table: HTMLTableElement) {
     if (!isPrimaryModifier(event) || (!isUndoShortcut(event) && !isRedoShortcut(event))) {
       return false;
     }
@@ -2743,7 +2802,7 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  wireTableSelection(table) {
+  wireTableSelection(table: HTMLTableElement) {
     const getWrap = () => this.domRefs?.wrap ?? table;
     const getContainer = () => this.domRefs?.container ?? getWrap();
     let pendingOutsidePointerId: number | null = null;
@@ -2788,7 +2847,7 @@ class HtmlTableWidget extends WidgetType {
       this.exitTableInteraction(wrap);
     };
 
-    const onPointerDown = (event) => {
+    const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
       const modifierHref = getModifierLinkActivationHref(event);
       if (modifierHref) {
@@ -2843,7 +2902,7 @@ class HtmlTableWidget extends WidgetType {
       }
     };
 
-    const onPointerMove = (event) => {
+    const onPointerMove = (event: PointerEvent) => {
       if (!this.isDraggingSelection || this.selectionPointerId !== event.pointerId) return;
       const el = document.elementFromPoint(event.clientX, event.clientY);
       const cell = this.findCellElement(el);
@@ -2888,7 +2947,7 @@ class HtmlTableWidget extends WidgetType {
       table.focus({ preventScroll: true });
     };
 
-    const endPointerSelection = (event) => {
+    const endPointerSelection = (event: PointerEvent) => {
       if (this.selectionPointerId !== event.pointerId) return;
       const pendingInput = textSelectionInput;
       const anchorCaret = textSelectionAnchorCaret;
@@ -2937,7 +2996,7 @@ class HtmlTableWidget extends WidgetType {
       if (event.type !== 'pointerup') {
         document.getSelection()?.removeAllRanges();
       }
-      if (shouldEnterTextEditing) {
+      if (shouldEnterTextEditing && pendingInput && anchorCaret !== null && currentCaret !== null) {
         event.preventDefault();
         document.getSelection()?.removeAllRanges();
         this.focusTableInput(pendingInput, anchorCaret, { scrollCellIntoView: false });
@@ -2950,7 +3009,7 @@ class HtmlTableWidget extends WidgetType {
       }
     };
 
-    const onCopy = (event) => {
+    const onCopy = (event: ClipboardEvent) => {
       if (this.selectedCellCount() <= 1) return;
       const text = this.selectedTextAsTsv();
       if (!text) return;
@@ -2965,7 +3024,7 @@ class HtmlTableWidget extends WidgetType {
       event.preventDefault();
     };
 
-    const onKeyDown = (event) => {
+    const onKeyDown = (event: KeyboardEvent) => {
       if (this.handleHistoryShortcut(event, table)) {
         return;
       }
@@ -2987,7 +3046,7 @@ class HtmlTableWidget extends WidgetType {
       this.scheduleLayout({ resizeRows: true });
     };
 
-    const onFocusOut = (event) => {
+    const onFocusOut = (event: FocusEvent) => {
       const nextTarget = event.relatedTarget;
       const wrap = this.domRefs?.wrap ?? table;
       const container = this.domRefs?.container ?? wrap;
@@ -3008,7 +3067,7 @@ class HtmlTableWidget extends WidgetType {
       this.exitTableInteraction(wrap);
     };
 
-    const onDocumentPointerDown = (event) => {
+    const onDocumentPointerDown = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
       const wrap = getWrap();
       const container = getContainer();
@@ -3091,7 +3150,7 @@ class HtmlTableWidget extends WidgetType {
     document.addEventListener('pointermove', onDocumentPointerMove, true);
     document.addEventListener('pointerup', onDocumentPointerEnd, true);
     document.addEventListener('pointercancel', onDocumentPointerEnd, true);
-    const onCommitTableEdits = (event) => {
+    const onCommitTableEdits = (event: Event) => {
       const hadPendingEdits = this.hasPendingCellEdits;
       if (event instanceof CustomEvent && event.detail && typeof event.detail === 'object') {
         const pending = this.takePendingTransactionBuilders(getWrap());
@@ -3127,7 +3186,7 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
-  takePendingTransactionBuilders(dom): {
+  takePendingTransactionBuilders(dom: HTMLElement | undefined): {
     view: EditorView;
     builders: PendingTableTransactionBuilder[];
   } | null {
@@ -3214,7 +3273,7 @@ class HtmlTableWidget extends WidgetType {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
-    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length).map((value) => value ?? null);
+    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length, '').map((value) => value ?? null);
     alignments[column] = alignment;
     matrix.alignments = alignments;
     return this.buildMatrixTransaction(matrix, dom, { row: target.row ?? 0, col: column }, {
@@ -3468,8 +3527,8 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildMatrixTransaction(
-    matrix,
-    dom,
+    matrix: CellMatrix,
+    dom: HTMLElement,
     focusTarget: PendingCellFocus | null = null,
     {
       preserveScrollPosition = false,
@@ -3564,7 +3623,7 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  buildAddRowAfter(dom, rowIndex, focusColumn: number): TableCommandTransactionPlan {
+  buildAddRowAfter(dom: HTMLElement, rowIndex: number, focusColumn: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3583,7 +3642,7 @@ class HtmlTableWidget extends WidgetType {
     );
   }
 
-  buildAddRowBefore(dom, rowIndex, focusColumn: number): TableCommandTransactionPlan {
+  buildAddRowBefore(dom: HTMLElement, rowIndex: number, focusColumn: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3603,7 +3662,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildInsertSourceRowTransaction(
-    dom,
+    dom: HTMLElement,
     insertAt: number,
     colCount: number
   ): TableCommandTransactionPlan | null {
@@ -3638,7 +3697,7 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  buildRemoveRowsAt(dom, rowIndexes: number[], focusColumn: number): TableCommandTransactionPlan {
+  buildRemoveRowsAt(dom: HTMLElement, rowIndexes: number[], focusColumn: number): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(rowIndexes)].sort((left, right) => right - left);
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     this.clearVisualSort();
@@ -3672,7 +3731,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildRemoveSourceRowsTransaction(
-    dom,
+    dom: HTMLElement,
     rowIndexes: number[],
     focusTarget: PendingCellFocus
   ): TableCommandTransactionPlan | null {
@@ -3740,7 +3799,7 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  buildAddColumnAfter(dom, colIndex, focusRow: number): TableCommandTransactionPlan {
+  buildAddColumnAfter(dom: HTMLElement, colIndex: number, focusRow: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3751,13 +3810,13 @@ class HtmlTableWidget extends WidgetType {
       next.splice(insertAt, 0, '');
       return next;
     });
-    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1).map((value) => value ?? null);
+    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1, '').map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
     return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: insertAt });
   }
 
-  buildAddColumnBefore(dom, colIndex, focusRow: number): TableCommandTransactionPlan {
+  buildAddColumnBefore(dom: HTMLElement, colIndex: number, focusRow: number): TableCommandTransactionPlan {
     this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
@@ -3768,13 +3827,13 @@ class HtmlTableWidget extends WidgetType {
       next.splice(insertAt, 0, '');
       return next;
     });
-    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1).map((value) => value ?? null);
+    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length - 1, '').map((value) => value ?? null);
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
     return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: insertAt });
   }
 
-  buildRemoveColumnsAt(dom, columnIndexes: number[], focusRow: number): TableCommandTransactionPlan {
+  buildRemoveColumnsAt(dom: HTMLElement, columnIndexes: number[], focusRow: number): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(columnIndexes)].sort((left, right) => right - left);
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     this.clearVisualSort();
@@ -3788,7 +3847,7 @@ class HtmlTableWidget extends WidgetType {
       for (const index of validIndexes) next.splice(index, 1);
       return next;
     });
-    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length + validIndexes.length).map((value) => value ?? null);
+    const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length + validIndexes.length, '').map((value) => value ?? null);
     for (const index of validIndexes) alignments.splice(index, 1);
     if (matrix.headerCells.length === 0) {
       matrix.headerCells.push('');
@@ -3800,11 +3859,11 @@ class HtmlTableWidget extends WidgetType {
     return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: focusCol });
   }
 
-  cellDiagnostics(rowIndex, colIndex): TableCellDiagnostics[] {
+  cellDiagnostics(rowIndex: number, colIndex: number): TableCellDiagnostics[] {
     return this.tableData.diagnostics?.[rowIndex]?.[colIndex] ?? [];
   }
 
-  wireInput(input, rowEl, rowInputs, container, rowIndex, colIndex, preview) {
+  wireInput(input: HTMLTextAreaElement, rowEl: HTMLTableRowElement, rowInputs: HTMLTextAreaElement[], container: HTMLElement, rowIndex: number, colIndex: number, preview: HTMLElement) {
     let compositionActive = false;
     let compositionEndedAt = Number.NEGATIVE_INFINITY;
     const refreshPreview = () => {
@@ -3832,7 +3891,7 @@ class HtmlTableWidget extends WidgetType {
         isLastLine: nextNl < 0
       };
     };
-    const onArrowVertical = (event, direction) => {
+    const onArrowVertical = (event: KeyboardEvent, direction: 'up' | 'down') => {
       if (event.defaultPrevented) return false;
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
       if (direction !== 'up' && direction !== 'down') return false;
@@ -3957,7 +4016,7 @@ class HtmlTableWidget extends WidgetType {
         ? nextTarget.closest('.meo-md-html-table-shell')
         : null;
       if (nextTableShell) {
-        if (!container.contains(nextTarget)) {
+        if (nextTarget instanceof Node && !container.contains(nextTarget)) {
           this.transferTableInteraction(container);
         }
         return;
@@ -3974,7 +4033,7 @@ class HtmlTableWidget extends WidgetType {
     return handle;
   }
 
-  resizeRow(row, rowInputs = null) {
+  resizeRow(row: HTMLTableRowElement, rowInputs: HTMLTextAreaElement[] | null = null) {
     if (!row) return;
     const textareas = rowInputs ?? Array.from(row.querySelectorAll('textarea'));
     const contents = Array.from(row.querySelectorAll('.meo-md-html-table-cell-content')) as HTMLElement[];
@@ -4123,8 +4182,8 @@ class HtmlTableWidget extends WidgetType {
   }
 
   renderCellPreview(
-    preview,
-    value,
+    preview: HTMLElement,
+    value: string,
     diagnostics: TableCellDiagnostics[] = [],
     sourceRange: TableCellRange | null = null
   ) {
@@ -4139,9 +4198,10 @@ class HtmlTableWidget extends WidgetType {
     );
   }
 
-  refreshCellPreviewFromInput(input) {
+  refreshCellPreviewFromInput(input: HTMLTextAreaElement) {
     if (!(input instanceof HTMLTextAreaElement)) return;
-    const preview = input.parentElement?.querySelector('.meo-md-html-table-cell-preview');
+    const preview = input.parentElement?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+    if (!preview) return;
     const coords = this.parseCellCoords(input.dataset.tableRow, input.dataset.tableCol);
     this.renderCellPreview(
       preview,
@@ -4151,7 +4211,7 @@ class HtmlTableWidget extends WidgetType {
     );
   }
 
-  setCellEditingState(input, isEditing) {
+  setCellEditingState(input: HTMLTextAreaElement, isEditing: boolean) {
     const content = input?.parentElement;
     if (!(content instanceof HTMLElement)) return;
     content.classList.toggle('is-editing', isEditing);
@@ -4205,7 +4265,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   createCellPreview(
-    value,
+    value: string,
     diagnostics: TableCellDiagnostics[] = [],
     sourceRange: TableCellRange | null = null
   ) {
@@ -4216,11 +4276,11 @@ class HtmlTableWidget extends WidgetType {
     return preview;
   }
 
-  cellSourceRange(rowIndex, colIndex): TableCellRange | null {
+  cellSourceRange(rowIndex: number, colIndex: number): TableCellRange | null {
     return this.tableData.sourceRanges?.[rowIndex]?.[colIndex] ?? null;
   }
 
-  createCellInput(value, rowIndex, colIndex) {
+  createCellInput(value: string, rowIndex: number, colIndex: number) {
     const input = document.createElement('textarea');
     input.rows = 1;
     input.spellcheck = true;
@@ -4235,7 +4295,7 @@ class HtmlTableWidget extends WidgetType {
     return input;
   }
 
-  createCellEditor(value, rowEl, rowInputs, container, rowIndex, colIndex, alignment = 'left') {
+  createCellEditor(value: string, rowEl: HTMLTableRowElement, rowInputs: HTMLTextAreaElement[], container: HTMLElement, rowIndex: number, colIndex: number, alignment: Exclude<TableAlignment, null> = 'left') {
     const content = document.createElement('div');
     content.className = 'meo-md-html-table-cell-content';
     const preview = this.createCellPreview(value, this.cellDiagnostics(rowIndex, colIndex), this.cellSourceRange(rowIndex, colIndex));
@@ -4270,7 +4330,7 @@ class HtmlTableWidget extends WidgetType {
     return svg;
   }
 
-  createToolbarButton(label, icon: TableToolbarIcon, onClick) {
+  createToolbarButton(label: string, icon: TableToolbarIcon, onClick: () => void) {
     const button = document.createElement('button');
     button.type = 'button';
     button.tabIndex = -1;
@@ -4298,7 +4358,7 @@ class HtmlTableWidget extends WidgetType {
     return separator;
   }
 
-  createTableToolbar(container) {
+  createTableToolbar(container: HTMLElement) {
     const toolbar = document.createElement('div');
     toolbar.className = 'meo-visual-surface meo-md-html-table-toolbar';
     toolbar.setAttribute('aria-label', 'Table actions');
@@ -4423,16 +4483,16 @@ class HtmlTableWidget extends WidgetType {
     const colgroup = Array.from({ length: this.tableData.colCount }, () => document.createElement('col'));
     colgroupElement.append(...colgroup);
     table.appendChild(colgroupElement);
-    const rowEntries = [];
-    const headerInputs = [];
-    const cellGrid = [];
-    const allRowInputs = [];
+    const rowEntries: RowEntry[] = [];
+    const headerInputs: HTMLTextAreaElement[] = [];
+    const cellGrid: HTMLTableCellElement[][] = [];
+    const allRowInputs: HTMLTextAreaElement[][] = [];
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
     headerRow.dataset.sourceLineNumber = String(this.tableData.startLine ?? '');
     rowEntries.push({ row: headerRow, inputs: headerInputs });
-    const headerCells = [];
+    const headerCells: HTMLTableCellElement[] = [];
     const headerAlignmentOverrides = this.headerAlignmentOverrideColumns(view);
     for (let col = 0; col < this.tableData.colCount; col++) {
       const th = document.createElement('th');
@@ -4464,15 +4524,15 @@ class HtmlTableWidget extends WidgetType {
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    const bodyRowInputs = [];
-    const sourceBodyRows = [];
-    const sourceBodyCellGrid = [];
+    const bodyRowInputs: HTMLTextAreaElement[][] = [];
+    const sourceBodyRows: HTMLTableRowElement[] = [];
+    const sourceBodyCellGrid: HTMLTableCellElement[][] = [];
     for (let rowIdx = 0; rowIdx < this.tableData.rows.length; rowIdx++) {
       const tr = document.createElement('tr');
       tr.dataset.sourceLineNumber = String((this.tableData.startLine ?? 0) + rowIdx + 2);
-      const inputs = [];
+      const inputs: HTMLTextAreaElement[] = [];
       rowEntries.push({ row: tr, inputs });
-      const bodyCells = [];
+      const bodyCells: HTMLTableCellElement[] = [];
       const tableRowIndex = rowIdx + 1;
       for (let col = 0; col < this.tableData.colCount; col++) {
         const td = document.createElement('td');
@@ -4589,7 +4649,7 @@ class HtmlTableWidget extends WidgetType {
     this.scheduleLayout({ resizeRows: true });
 
     const onEditorScroll = () => this.stickyHeaderAdapter.invalidate();
-    const onSearchStateChange = (event) => {
+    const onSearchStateChange = (event: Event) => {
       const detail = event instanceof CustomEvent ? event.detail : null;
       this.setSearchState(detail && typeof detail === 'object' ? detail : null);
     };
@@ -4606,7 +4666,7 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  destroy(dom) {
+  destroy(dom: HTMLElement) {
     this.setTableInteractionActive(dom, false);
     disposeImagePresentations(dom);
     this.tableCommandTargetRegistration?.dispose();
@@ -4632,21 +4692,21 @@ class HtmlTableWidget extends WidgetType {
   }
 }
 
-export function isTableDelimiterLine(lineText) {
+export function isTableDelimiterLine(lineText: string): boolean {
   return tableDelimiterRegex.test(lineText);
 }
 
-export function parseTableInfo(state, tableNode) {
+export function parseTableInfo(state: EditorState, tableNode: Pick<SyntaxNodeRef, 'from' | 'to'>) {
   const data = buildTableData(state, tableNode);
   const { from, to, lines, delimiterIdx, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
 
-  const parseRow = (line) => ({
+  const parseRow = (line: ParsedTableLine) => ({
     from: line.from,
     to: line.to,
     lineNo: line.lineNo,
     lineFrom: line.from,
     lineTo: line.to,
-    cells: line.cells.map((content, index) => ({
+    cells: line.cells.map((content: string, index: number) => ({
       from: line.segments[index]?.from ?? line.from,
       to: line.segments[index]?.to ?? line.from,
       content
@@ -4674,7 +4734,13 @@ export function parseTableInfo(state, tableNode) {
   };
 }
 
-export function addTableDecorations(builder, state, tableNode, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
+export function addTableDecorations(
+  builder: Range<Decoration>[],
+  state: EditorState,
+  tableNode: Pick<SyntaxNodeRef, 'from' | 'to'>,
+  diagnostics: EditorDiagnostic[] = [],
+  diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
+) {
   const data = buildTableData(state, tableNode);
   addTableWidgetDecoration(
     builder,
@@ -4686,7 +4752,14 @@ export function addTableDecorations(builder, state, tableNode, diagnostics: Edit
   );
 }
 
-export function addTableDecorationsForLineRange(builder, state, startLineNo, endLineNo, diagnostics: EditorDiagnostic[] = [], diffLineFlags = null) {
+export function addTableDecorationsForLineRange(
+  builder: Range<Decoration>[],
+  state: EditorState,
+  startLineNo: number,
+  endLineNo: number,
+  diagnostics: EditorDiagnostic[] = [],
+  diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
+) {
   const data = buildTableDataForLineRange(state, startLineNo, endLineNo);
   addTableWidgetDecoration(
     builder,
@@ -4718,14 +4791,14 @@ function collectCellDiagnostics(
     .filter((diagnostic) => diagnostic.to > diagnostic.from);
 }
 
-function collectTableDiagnostics(data, diagnostics: EditorDiagnostic[]): TableCellDiagnostics[][][] {
-  const rows = [];
+function collectTableDiagnostics(data: BuiltTableData, diagnostics: EditorDiagnostic[]): TableCellDiagnostics[][][] {
+  const rows: TableCellDiagnostics[][][] = [];
   const { headerLine, dataLines, colCount } = data;
   if (!headerLine || colCount <= 0) {
     return rows;
   }
 
-  const collectRow = (line) => Array.from({ length: colCount }, (_value, index) => (
+  const collectRow = (line: ParsedTableLine) => Array.from({ length: colCount }, (_value, index) => (
     collectCellDiagnostics(diagnostics, line.segments[index])
   ));
 
@@ -4736,14 +4809,14 @@ function collectTableDiagnostics(data, diagnostics: EditorDiagnostic[]): TableCe
   return rows;
 }
 
-function collectTableSourceRanges(data): TableCellRange[][] {
-  const rows = [];
+function collectTableSourceRanges(data: BuiltTableData): TableCellRange[][] {
+  const rows: TableCellRange[][] = [];
   const { headerLine, dataLines, colCount } = data;
   if (!headerLine || colCount <= 0) {
     return rows;
   }
 
-  const collectRow = (line) => Array.from({ length: colCount }, (_value, index) => {
+  const collectRow = (line: ParsedTableLine) => Array.from({ length: colCount }, (_value, index) => {
     const segment = line.segments[index];
     return segment ? { from: segment.from, to: segment.to } : { from: line.from, to: line.from };
   });
@@ -4770,10 +4843,13 @@ function mergeTableDiffRanges(
   });
 }
 
-function collectTableDiffFlags(data, diffLineFlags): Record<number, TableDiffFlags> {
+function collectTableDiffFlags(
+  data: BuiltTableData,
+  diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined
+): Record<number, TableDiffFlags> {
   if (!Array.isArray(diffLineFlags)) return {};
   const result: Record<number, TableDiffFlags> = {};
-  const visibleLines = [data.headerLine, ...data.dataLines].filter(Boolean);
+  const visibleLines = [data.headerLine, ...data.dataLines].filter((line): line is ParsedTableLine => line !== null);
   for (const line of visibleLines) {
     const flags = diffLineFlags[line.lineNo - 1];
     if (flags) result[line.lineNo] = { ...flags };
@@ -4797,12 +4873,12 @@ function collectTableDiffFlags(data, diffLineFlags): Record<number, TableDiffFla
 }
 
 function addTableWidgetDecoration(
-  builder,
-  data,
+  builder: Range<Decoration>[],
+  data: BuiltTableData,
   stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory | null,
   tableCommandEnvironment: TableCommandEnvironment | null,
   diagnostics: EditorDiagnostic[] = [],
-  diffLineFlags = null
+  diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
 ) {
   const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
   if (colCount === 0 || !headerLine) return;
@@ -4814,9 +4890,9 @@ function addTableWidgetDecoration(
   }
 
   const indent = /^(\s*)/.exec(headerLine.text)?.[1] ?? '';
-  const normalizedAlignments = normalizeRow(alignments, colCount).map((value) => value ?? null);
-  const headerCells = normalizeRow(headerLine.cells, colCount);
-  const rows = dataLines.map((line) => normalizeRow(line.cells, colCount));
+  const normalizedAlignments = normalizeRow(alignments, colCount, '').map((value) => value ?? null);
+  const headerCells = normalizeRow(headerLine.cells, colCount, '');
+  const rows = dataLines.map((line) => normalizeRow(line.cells, colCount, ''));
   const diffFlagsByLine = collectTableDiffFlags(data, diffLineFlags);
   const signature = JSON.stringify({
     colCount,
@@ -4853,14 +4929,14 @@ function addTableWidgetDecoration(
   );
 }
 
-function buildSourceTableHeaderDecorations(state) {
-  const ranges = [];
+function buildSourceTableHeaderDecorations(state: EditorState): DecorationSet {
+  const ranges: Range<Decoration>[] = [];
   const tree = syntaxTree(state);
-  const parsedTableRanges = [];
-  const decoratedHeaderLines = new Set();
+  const parsedTableRanges: TableRange[] = [];
+  const decoratedHeaderLines = new Set<number>();
 
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name !== 'Table') return;
 
       const data = buildTableData(state, node);
@@ -4893,19 +4969,19 @@ function buildSourceTableHeaderDecorations(state) {
   return Decoration.set(ranges, true);
 }
 
-function addSourceHeaderLineDecorations(ranges, line) {
+function addSourceHeaderLineDecorations(ranges: Range<Decoration>[], line: ParsedTableLine) {
   ranges.push(sourceTableHeaderLineDeco.range(line.from));
   for (const seg of line.segments) {
     ranges.push(sourceTableHeaderCellDeco.range(seg.from, seg.to));
   }
 }
 
-function overlapsParsedTableRange(from, to, ranges) {
+function overlapsParsedTableRange(from: number, to: number, ranges: readonly TableRange[]): boolean {
   return ranges.some((range) => from < range.to && to > range.from);
 }
 
-function isPositionInsideCodeBlock(tree, pos) {
-  let node = tree.resolveInner(pos, 1);
+function isPositionInsideCodeBlock(tree: Tree, pos: number): boolean {
+  let node: SyntaxNode | null = tree.resolveInner(pos, 1);
   while (node) {
     if (node.name === 'FencedCode' || node.name === 'CodeBlock') return true;
     node = node.parent;
@@ -4913,7 +4989,7 @@ function isPositionInsideCodeBlock(tree, pos) {
   return false;
 }
 
-export const sourceTableHeaderLineField = StateField.define({
+export const sourceTableHeaderLineField = StateField.define<DecorationSet>({
   create(state) {
     try {
       return buildSourceTableHeaderDecorations(state);
@@ -4934,7 +5010,7 @@ export const sourceTableHeaderLineField = StateField.define({
   provide: (field) => EditorView.decorations.from(field)
 });
 
-export function insertTable(view, selection, cols = 3, rows = 2) {
+export function insertTable(view: EditorView, selection: CodeMirrorSelectionRange, cols = 3, rows = 2) {
   const line = view.state.doc.lineAt(selection.from);
   const lineText = view.state.doc.sliceString(line.from, line.to);
   const leadingWhitespace = /^(\s*)/.exec(lineText)?.[1] ?? '';

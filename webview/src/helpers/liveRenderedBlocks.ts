@@ -1,4 +1,5 @@
 import { EditorState } from '@codemirror/state';
+import type { SyntaxNodeRef } from '@lezer/common';
 import { getFencedCodeInfo } from './codeBlocks';
 import { isThematicBreakLine } from './frontmatter';
 import { resolvedSyntaxTree } from './markdownSyntax';
@@ -150,7 +151,7 @@ function collectCodeLikeRanges(
   const ranges: Array<{ from: number; to: number }> = [];
 
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') {
         return;
       }
@@ -206,7 +207,7 @@ export function getLiveRenderedBlocks(
 ): LiveRenderedBlock[] {
   const tree = resolvedSyntaxTree(state);
   const cached = renderedBlockCache.get(state);
-  if (!options.includeSelectedMath && cached?.tree === tree) {
+  if (!options.includeSelectedMath && cached && cached.tree === tree) {
     return cached.blocks;
   }
 
@@ -217,7 +218,7 @@ export function getLiveRenderedBlocks(
   const htmlEditingRange = getHtmlEditingRange(state);
 
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name === 'Table') {
         const tableInfo = parseTableInfo(state, node);
         parsedTableRanges.push({ from: tableInfo.from, to: tableInfo.to });

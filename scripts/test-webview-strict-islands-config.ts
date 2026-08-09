@@ -11,6 +11,7 @@ const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
 const expectedRoots = [
   'src/helpers/images.ts',
   'src/helpers/htmlContent.ts',
+  'src/helpers/gitDiffGutter.ts',
   'src/helpers/highlightSyntax.ts',
   'src/helpers/listMarkers.ts',
   'src/helpers/mermaidDiagram.ts',

@@ -311,7 +311,7 @@ function coalesceTrailingEofVisualLineFlag(doc: any, lineFlags: (MarkerFlags | u
   return lineFlags;
 }
 
-function canRenderGitDiffBaseline(snapshot: BaselineSnapshot | null): boolean {
+function canRenderGitDiffBaseline(snapshot: BaselineSnapshot | null): snapshot is BaselineSnapshot {
   if (!snapshot?.available) {
     return false;
   }
@@ -664,7 +664,7 @@ const gitDiffGutterExtension = gutter({
   markers(view: EditorView) {
     return (
       view.state.field(gitDiffGutterField, false) ??
-      buildGitGutterMarkersFromLineFlags(view.state, view.state.field(gitDiffLineFlagsField, false))
+      buildGitGutterMarkersFromLineFlags(view.state, view.state.field(gitDiffLineFlagsField, false) ?? null)
     );
   }
 });
@@ -676,10 +676,10 @@ const gitDiffGutterLiveExtension = gutter({
     return spacerMarker;
   },
   markers(view: EditorView) {
-    return buildLiveGitGutterMarkersFromLineFlags(view.state, view.state.field(gitDiffLineFlagsField, false));
+    return buildLiveGitGutterMarkersFromLineFlags(view.state, view.state.field(gitDiffLineFlagsField, false) ?? null);
   },
   widgetMarker(view: EditorView, _widget: any, block: any) {
-    return liveCollapsedBlockMarkerAtPos(view.state, view.state.field(gitDiffLineFlagsField, false), block.from);
+    return liveCollapsedBlockMarkerAtPos(view.state, view.state.field(gitDiffLineFlagsField, false) ?? null, block.from);
   }
 });
 

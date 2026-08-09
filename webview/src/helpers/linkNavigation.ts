@@ -1,5 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import type { SyntaxNodeRef } from '@lezer/common';
 import { extractHeadings, resolvedSyntaxTree } from './markdownSyntax';
 import { isWikiLinkNode, parseWikiLinkData } from './wikiLinks';
 import { findRawSourceUrlMatches, linkSchemeRe, normalizeSourceHref } from './rawUrls';
@@ -50,7 +51,7 @@ export function findDocumentFragmentPosition(state: EditorState, rawHref: string
   const tree = resolvedSyntaxTree(state);
   let htmlTargetPosition: number | null = null;
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (htmlTargetPosition !== null || (node.name !== 'HTMLBlock' && node.name !== 'HTMLTag')) return;
       const source = state.doc.sliceString(node.from, node.to);
       const attributePattern = /\b(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
