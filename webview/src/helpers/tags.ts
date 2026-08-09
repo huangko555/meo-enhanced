@@ -1,6 +1,7 @@
 import { RangeSetBuilder, StateField } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import type { SyntaxNode } from '@lezer/common';
 import { collectColorRangesFromText } from './colorSwatches';
 
 const markdownTagDeco = Decoration.mark({ class: 'meo-md-tag' });
@@ -18,7 +19,7 @@ const blockedTagAncestorNames = new Set([
 ]);
 
 function hasBlockedTagAncestor(state: any, position: number): boolean {
-  let node = syntaxTree(state).resolveInner(position, 1);
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, 1);
   while (node) {
     if (blockedTagAncestorNames.has(node.name)) {
       return true;
