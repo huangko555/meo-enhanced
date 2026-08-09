@@ -48,18 +48,22 @@
     {
       "module": "src/shared/latexMathScanner.ts",
       "exactImporters": ["webview/src/helpers/math.ts", "src/export/math.ts"],
-      "thinCallers": [
+      "delegates": [
         {
           "file": "webview/src/helpers/math.ts",
-          "requiredCalls": ["scanLatexMath", "scanLatexMathAt"],
-          "forbidIterations": true,
-          "forbidRegex": true
+          "function": "parseLatexMathAt",
+          "requiredCall": "scanLatexMathAt"
+        },
+        {
+          "file": "webview/src/helpers/math.ts",
+          "function": "collectLatexMathRanges",
+          "requiredCall": "scanLatexMath",
+          "allowedMethodCalls": ["map"]
         },
         {
           "file": "src/export/math.ts",
-          "requiredCalls": ["scanLatexMath"],
-          "forbidIterations": true,
-          "forbidRegex": true
+          "function": "collectLatexMathRanges",
+          "requiredCall": "scanLatexMath"
         }
       ]
     }

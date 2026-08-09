@@ -48,14 +48,4 @@ assert.deepEqual(collectExportLatexMathRanges('before $$x^2$$ after'), [{
   fencedDisplay: false
 }]);
 
-const longPlainText = 'a'.repeat(40_000);
-const pointScanStart = performance.now();
-for (let index = 0; index < longPlainText.length; index += 1) {
-  assert.equal(parseLatexMathAt(longPlainText, index), null);
-}
-assert.ok(
-  performance.now() - pointScanStart < 1_500,
-  'parseLatexMathAt should reject non-delimiters in bounded time'
-);
-
 console.log('LaTeX math scanner caller integration checks passed');

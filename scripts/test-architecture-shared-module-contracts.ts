@@ -36,9 +36,9 @@ try {
     sharedModuleContracts: [{
       module: 'src/shared/latexMathScanner.ts',
       exactImporters: ['webview/src/helpers/math.ts', 'src/export/math.ts'],
-      thinCallers: [
-        { file: 'webview/src/helpers/math.ts', requiredCalls: ['scanLatexMath'], forbidIterations: true, forbidRegex: true },
-        { file: 'src/export/math.ts', requiredCalls: ['scanLatexMath'], forbidIterations: true, forbidRegex: true }
+      delegates: [
+        { file: 'webview/src/helpers/math.ts', function: 'collect', requiredCall: 'scanLatexMath' },
+        { file: 'src/export/math.ts', function: 'collect', requiredCall: 'scanLatexMath' }
       ]
     }],
     knownLegacyTestFailures: []
@@ -46,25 +46,26 @@ try {
   write('src/shared/latexMathScanner.ts', 'export const scanLatexMath = (_text: string) => [];\n');
   write('webview/src/helpers/math.ts', [
     "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
-    'export const collect = (text: string) => scanLatexMath(text);',
+    'export function collect(text: string) { return scanLatexMath(text); }',
+    'export function renderRows(rows: string[]) { for (const row of rows) void row; }',
     ''
   ].join('\n'));
   write('src/export/math.ts', [
     "import { scanLatexMath } from '../shared/latexMathScanner';",
-    'export const collect = (text: string) => scanLatexMath(text);',
+    'export function collect(text: string) { return scanLatexMath(text); }',
     ''
   ].join('\n'));
 
   const valid = runCheck();
   assert.equal(valid.ok, true, `valid thin callers should pass: ${valid.output}`);
 
-  write('src/export/math.ts', 'export const collect = (_text: string) => [];\n');
+  write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();
   assert.equal(missingImporter.ok, false, 'missing required importer must be rejected');
   assert.match(missingImporter.output, /ARCH010/);
   write('src/export/math.ts', [
     "import { scanLatexMath } from '../shared/latexMathScanner';",
-    'export const collect = (text: string) => scanLatexMath(text);',
+    'export function collect(text: string) { return scanLatexMath(text); }',
     ''
   ].join('\n'));
 
@@ -80,11 +81,11 @@ try {
 
   write('webview/src/helpers/math.ts', [
     "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
-    'export const collect = (text: string) => {',
+    'export function collect(text: string) {',
     '  const renamedDuplicateScanner = () => { for (let i = 0; i < text.length; i += 1) void text[i]; };',
     '  renamedDuplicateScanner();',
     '  return scanLatexMath(text);',
-    '};',
+    '}',
     ''
   ].join('\n'));
   const renamedDuplicate = runCheck();
@@ -93,7 +94,20 @@ try {
 
   write('webview/src/helpers/math.ts', [
     "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
-    'export const collect = (text: string) => /\\$/.test(text) ? scanLatexMath(text) : [];',
+    'export function collect(text: string) {',
+    '  const ignored = scanLatexMath(text);',
+    "  const duplicate = (cursor: number): number => text.indexOf('$', cursor) < 0 ? cursor : duplicate(cursor + 1);",
+    '  return duplicate(0) < 0 ? ignored : ignored;',
+    '}',
+    ''
+  ].join('\n'));
+  const deadDelegate = runCheck();
+  assert.equal(deadDelegate.ok, false, 'dead delegation plus recursive scanner must be rejected');
+  assert.match(deadDelegate.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string) { return /\\$/.test(text) ? scanLatexMath(text) : []; }',
     ''
   ].join('\n'));
   const regexDuplicate = runCheck();

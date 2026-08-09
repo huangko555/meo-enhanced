@@ -29,11 +29,11 @@ const config = JSON.parse(configText) as {
   sharedModuleContracts?: Array<{
     module: string;
     exactImporters: string[];
-    thinCallers: Array<{
+    delegates: Array<{
       file: string;
-      requiredCalls: string[];
-      forbidIterations?: boolean;
-      forbidRegex?: boolean;
+      function: string;
+      requiredCall: string;
+      allowedMethodCalls?: string[];
     }>;
   }>;
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
@@ -204,10 +204,10 @@ for (const contract of config.sharedModuleContracts ?? []) {
       failures.push(`ARCH010 共享模块出现未授权调用方: ${importer} -> ${contract.module}`);
     }
   }
-  for (const caller of contract.thinCallers) {
-    const source = sources.find((candidate) => candidate.path === caller.file);
+  for (const delegate of contract.delegates) {
+    const source = sources.find((candidate) => candidate.path === delegate.file);
     if (!source) {
-      failures.push(`ARCH011 共享模块调用方不存在: ${caller.file}`);
+      failures.push(`ARCH011 共享模块调用方不存在: ${delegate.file}`);
       continue;
     }
     const file = sourceFileFor(source);
@@ -221,12 +221,33 @@ for (const contract of config.sharedModuleContracts ?? []) {
         importedCalls.set(binding.propertyName?.text ?? binding.name.text, binding.name.text);
       }
     }
-    const calledNames = new Set<string>();
+    const functionDeclaration = file.statements.find((statement): statement is ts.FunctionDeclaration => (
+      ts.isFunctionDeclaration(statement) && statement.name?.text === delegate.function
+    ));
+    if (!functionDeclaration?.body) {
+      failures.push(`ARCH011 共享模块委托函数不存在: ${delegate.file} (${delegate.function})`);
+      continue;
+    }
+    const requiredLocalName = importedCalls.get(delegate.requiredCall);
+    const allowedMethods = new Set(delegate.allowedMethodCalls ?? []);
+    const parameterNames = new Set(functionDeclaration.parameters
+      .filter((parameter) => ts.isIdentifier(parameter.name))
+      .map((parameter) => (parameter.name as ts.Identifier).text));
+    let requiredCallCount = 0;
+    let containsUnauthorizedCall = false;
+    let readsParameterByIndex = false;
+    let containsDelimiterLiteral = false;
     let containsIteration = false;
     let containsRegex = false;
     const visitCaller = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-        calledNames.add(node.expression.text);
+      if (ts.isCallExpression(node)) {
+        if (ts.isIdentifier(node.expression)) {
+          if (node.expression.text === requiredLocalName) requiredCallCount += 1;
+          else containsUnauthorizedCall = true;
+        } else if (ts.isPropertyAccessExpression(node.expression)
+          && !allowedMethods.has(node.expression.name.text)) {
+          containsUnauthorizedCall = true;
+        }
       }
       if (ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)
         || ts.isWhileStatement(node) || ts.isDoStatement(node)) {
@@ -235,20 +256,22 @@ for (const contract of config.sharedModuleContracts ?? []) {
       if (ts.isRegularExpressionLiteral(node)) {
         containsRegex = true;
       }
+      if (ts.isElementAccessExpression(node) && ts.isIdentifier(node.expression)
+        && parameterNames.has(node.expression.text)) {
+        readsParameterByIndex = true;
+      }
+      if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text.includes('$')) {
+        containsDelimiterLiteral = true;
+      }
       ts.forEachChild(node, visitCaller);
     };
-    visitCaller(file);
-    for (const requiredCall of caller.requiredCalls) {
-      const localName = importedCalls.get(requiredCall);
-      if (!localName || !calledNames.has(localName)) {
-        failures.push(`ARCH011 共享模块调用方必须委托 ${requiredCall}: ${caller.file}`);
-      }
+    visitCaller(functionDeclaration.body);
+    if (!requiredLocalName || requiredCallCount !== 1) {
+      failures.push(`ARCH011 共享模块调用方必须恰好委托一次 ${delegate.requiredCall}: ${delegate.file} (${delegate.function})`);
     }
-    if (caller.forbidIterations && containsIteration) {
-      failures.push(`ARCH011 共享模块薄调用方禁止自行迭代扫描: ${caller.file}`);
-    }
-    if (caller.forbidRegex && containsRegex) {
-      failures.push(`ARCH011 共享模块薄调用方禁止自行解析正则: ${caller.file}`);
+    if (containsUnauthorizedCall || readsParameterByIndex || containsDelimiterLiteral
+      || containsIteration || containsRegex) {
+      failures.push(`ARCH011 共享模块委托函数包含调用方扫描规则: ${delegate.file} (${delegate.function})`);
     }
   }
 }
