@@ -7,6 +7,7 @@ import {
   renderMermaidRuntime
 } from '../webview/src/helpers/mermaidDiagram';
 import { createMermaidDiagramRenderPool } from '../webview/src/editor/mermaidDiagramRenderPool';
+import type { MermaidDiagramRenderResources } from '../webview/src/application/mermaidDiagramRenderResources';
 import { createMermaidDiagramPresentationApplication } from '../webview/src/application/mermaidDiagramPresentation';
 import { createMermaidDiagramPresentationRuntime } from '../webview/src/adapters/mermaidDiagramPresentationRuntime';
 import { createMermaidDiagramPresentationEffectAdapter } from '../webview/src/editor/mermaidDiagramPresentationAdapter';

@@ -179,7 +179,9 @@ export function createPreviewController({
 
   let appearance: PreviewAppearance = 'dark';
   let requestGeneration = 0;
-  let presentationGeneration = 0;
+  let frameGeneration = 0;
+  let mermaidPresentationGeneration = 0;
+  let activeFrameDocument: Document | null = null;
   let hasPendingRequest = false;
   let pendingRestoreLine: number | null = null;
   let pendingText = '';
@@ -325,8 +327,10 @@ export function createPreviewController({
     if (disposed || !latestPayload) {
       return;
     }
-    const generation = presentationGeneration + 1;
-    presentationGeneration = generation;
+    const loadGeneration = frameGeneration + 1;
+    frameGeneration = loadGeneration;
+    mermaidPresentationGeneration += 1;
+    activeFrameDocument = null;
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
     const katexInlineStyles = collectPreviewKatexStyles(katexHref).replace(/<\/style/gi, '<\\/style');
     const katexStylesTag = katexInlineStyles
@@ -336,11 +340,22 @@ export function createPreviewController({
         : '';
     const styles = latestPayload.styles[appearance].replace(/<\/style/gi, '<\\/style');
     frame.onload = () => {
-      if (disposed || generation !== presentationGeneration) return;
+      if (disposed || loadGeneration !== frameGeneration) return;
       const frameDocument = frame.contentDocument;
       if (!frameDocument) {
         return;
       }
+      activeFrameDocument = frameDocument;
+      const styleElement = frameDocument.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
+      if (styleElement && latestPayload) styleElement.textContent = latestPayload.styles[appearance];
+      const presentationGeneration = mermaidPresentationGeneration + 1;
+      mermaidPresentationGeneration = presentationGeneration;
+      const isCurrent = () => (
+        !disposed &&
+        loadGeneration === frameGeneration &&
+        presentationGeneration === mermaidPresentationGeneration &&
+        frame.contentDocument === frameDocument
+      );
       scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
       attachPreviewMathViewports(frameDocument);
@@ -354,8 +369,7 @@ export function createPreviewController({
       const keepPosition = () => {
         if (
           disposed ||
-          generation !== presentationGeneration ||
-          frame.contentDocument !== frameDocument
+          !isCurrent()
         ) return;
         if (restoreLine !== null) {
           restoreTopLine(restoreLine);
@@ -368,7 +382,7 @@ export function createPreviewController({
       };
       finishRender();
       if (latestPayload?.hasMermaid) {
-        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
+        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
       }
     };
     disposePreviewMathViewports();
@@ -378,20 +392,24 @@ export function createPreviewController({
 
   const applyAppearanceToFrame = () => {
     if (disposed) return;
-    const frameDocument = frame.contentDocument;
+    const frameDocument = activeFrameDocument;
     const styleElement = frameDocument?.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
     if (!latestPayload || !frameDocument || !styleElement) {
       return;
     }
-    const generation = presentationGeneration + 1;
-    presentationGeneration = generation;
+    const presentationGeneration = mermaidPresentationGeneration + 1;
+    mermaidPresentationGeneration = presentationGeneration;
+    const isCurrent = () => (
+      !disposed &&
+      presentationGeneration === mermaidPresentationGeneration &&
+      activeFrameDocument === frameDocument &&
+      frame.contentDocument === frameDocument
+    );
     const scrollTop = Number(frameDocument.scrollingElement?.scrollTop ?? 0);
     styleElement.textContent = latestPayload.styles[appearance];
     const keepPosition = () => {
       if (
-        disposed ||
-        generation !== presentationGeneration ||
-        frame.contentDocument !== frameDocument
+        !isCurrent()
       ) return;
       if (frameDocument.scrollingElement) {
         frameDocument.scrollingElement.scrollTop = scrollTop;
@@ -403,7 +421,7 @@ export function createPreviewController({
     };
     finish();
     if (latestPayload.hasMermaid) {
-      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition).finally(keepPosition);
+      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
     }
   };
 
@@ -644,7 +662,9 @@ export function createPreviewController({
       if (disposed) return;
       disposed = true;
       requestGeneration += 1;
-      presentationGeneration += 1;
+      frameGeneration += 1;
+      mermaidPresentationGeneration += 1;
+      activeFrameDocument = null;
       hasPendingRequest = false;
       pendingRestoreLine = null;
       previewRenderTransport.cancelAll('Preview closed');

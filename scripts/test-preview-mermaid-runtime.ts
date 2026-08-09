@@ -416,6 +416,79 @@ try {
   if (Math.abs(latestScrollTop - 300) > 2) {
     throw new Error(`Stale Preview Mermaid completion changed the latest viewport: ${latestScrollTop}`);
   }
+  const appearanceDuringLoad = await page.evaluate(({ text, html, lightStyles, darkStyles }) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const testWindow = window as typeof window & {
+      __previewMessages?: Array<{ type?: string; requestId?: string }>;
+      __previewMermaidRequests?: number;
+    };
+    const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+    const mermaidRequestsBefore = testWindow.__previewMermaidRequests ?? 0;
+    frame.addEventListener('load', () => controller.setAppearance('dark'), { capture: true, once: true });
+    controller.requestRender(text);
+    const requestId = testWindow.__previewMessages
+      ?.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    controller.acceptRenderResponse({
+      type: 'previewRenderResult',
+      requestId,
+      result: { ok: true, value: { html, hasMermaid: true, styles: { light: lightStyles, dark: darkStyles } } }
+    });
+    return { requestId, mermaidRequestsBefore };
+  }, {
+    text: `${markdownText}\n<!-- appearance-during-load -->`,
+    html: rendered.html,
+    lightStyles,
+    darkStyles
+  });
+  if (!appearanceDuringLoad.requestId) throw new Error('Appearance-during-load request was not created');
+  await page.waitForFunction((requestsBefore) => (
+    (window as typeof window & { __previewMermaidRequests?: number }).__previewMermaidRequests ?? 0
+  ) > requestsBefore, { timeout: 2000 }, appearanceDuringLoad.mermaidRequestsBefore);
+  await page.waitForFunction(() => Boolean(
+    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+      ?.querySelector('.meo-export-mermaid.is-rendered svg')
+  ));
+  const disposingPreview = await page.evaluate(({ text, html, lightStyles, darkStyles }) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const testWindow = window as typeof window & {
+      __previewMessages?: Array<{ type?: string; requestId?: string }>;
+      __previewMermaidRequests?: number;
+      __queueSlowLiveOperations?: (count: number, delayMs: number) => void;
+    };
+    const mermaidRequestsBefore = testWindow.__previewMermaidRequests ?? 0;
+    testWindow.__queueSlowLiveOperations?.(1, 400);
+    controller.requestRender(text, { restoreLine: 1 });
+    const requestId = testWindow.__previewMessages
+      ?.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    controller.acceptRenderResponse({
+      type: 'previewRenderResult',
+      requestId,
+      result: { ok: true, value: { html, hasMermaid: true, styles: { light: lightStyles, dark: darkStyles } } }
+    });
+    return { requestId, mermaidRequestsBefore };
+  }, {
+    text: `${markdownText}\n<!-- disposed-mermaid-frame -->`,
+    html: rendered.html,
+    lightStyles,
+    darkStyles
+  });
+  if (!disposingPreview.requestId) throw new Error('Disposed Mermaid frame request was not created');
+  await page.waitForFunction((requestsBefore) => (
+    (window as typeof window & { __previewMermaidRequests?: number }).__previewMermaidRequests ?? 0
+  ) > requestsBefore, {}, disposingPreview.mermaidRequestsBefore);
+  const disposedViewport = await page.evaluate(async () => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    if (!frameDocument?.scrollingElement) return -1;
+    frameDocument.scrollingElement.scrollTop = 300;
+    controller.dispose();
+    const afterDispose = frameDocument.scrollingElement.scrollTop;
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+    return { afterDispose, afterCompletion: frameDocument.scrollingElement.scrollTop };
+  });
+  if (Math.abs(disposedViewport.afterCompletion - disposedViewport.afterDispose) > 2) {
+    throw new Error(`Disposed Preview Mermaid completion changed the viewport: ${JSON.stringify(disposedViewport)}`);
+  }
   console.log('Preview Mermaid runtime test passed');
 } finally {
   await browser.close();

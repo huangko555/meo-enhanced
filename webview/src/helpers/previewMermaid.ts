@@ -28,11 +28,13 @@ export function createPreviewMermaidRenderer(
   const render = (
     frameDocument: Document,
     appearance: PreviewAppearance,
-    onDiagramRendered?: () => void
+    onDiagramRendered?: () => void,
+    isCurrent: () => boolean = () => true
   ): Promise<void> => {
     return resources.runExclusive(async () => {
+      if (!isCurrent()) return;
       try {
-        await renderMermaidBlocks(frameDocument, appearance, onDiagramRendered);
+        await renderMermaidBlocks(frameDocument, appearance, onDiagramRendered, isCurrent);
       } finally {
         await restoreMermaidEditorTheme();
       }
@@ -47,8 +49,10 @@ export function createPreviewMermaidRenderer(
 async function renderMermaidBlocks(
   frameDocument: Document,
   appearance: PreviewAppearance,
-  onDiagramRendered?: () => void
+  onDiagramRendered: (() => void) | undefined,
+  isCurrent: () => boolean
 ): Promise<void> {
+  if (!isCurrent()) return;
   const viewportCenter = (frameDocument.defaultView?.innerHeight ?? 0) / 2;
   const blocks = Array.from(frameDocument.querySelectorAll<HTMLElement>('.meo-export-mermaid[data-source-b64]'))
     .map((block, documentIndex) => ({ block, documentIndex }))
@@ -59,6 +63,7 @@ async function renderMermaidBlocks(
   if (blocks.length === 0) return;
 
   const mermaid = await loadMermaidRuntime();
+  if (!isCurrent()) return;
   const palette = readPreviewMermaidPalette(frameDocument, appearance);
   mermaid.initialize({
     startOnLoad: false,
@@ -91,6 +96,7 @@ async function renderMermaidBlocks(
 
   let renderIndex = 0;
   for (const { block, documentIndex } of blocks) {
+    if (!isCurrent()) return;
     const source = decodeBase64Utf8(block.dataset.sourceB64 ?? '');
     if (!source) continue;
 
@@ -111,6 +117,7 @@ async function renderMermaidBlocks(
       const result = cachedSvg
         ? { svg: cachedSvg }
         : await mermaid.render(`meo-preview-mermaid-${Date.now()}-${renderIndex += 1}`, normalizedSource);
+      if (!isCurrent()) return;
       const svg = typeof result === 'string' ? result : result?.svg;
       if (!svg) continue;
 
@@ -121,7 +128,7 @@ async function renderMermaidBlocks(
       block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
       onDiagramRendered?.();
     } catch {
-      block.classList.add('is-error');
+      if (isCurrent()) block.classList.add('is-error');
     }
   }
 }
