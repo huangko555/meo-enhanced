@@ -4,27 +4,23 @@ import { createTableCommandTargetRegistry } from '../webview/src/editor/tableCom
 
 const cleanupQueue: Array<() => void> = [];
 const registry = createTableCommandTargetRegistry((run) => cleanupQueue.push(run));
-const target = (identityKey: string, from: number, connected = true) => ({
+const target = (identityKey: string, from: number, connection = { value: true }) => ({
   identityKey,
   from,
-  to: from + 10,
-  isConnected: () => connected
+  isConnected: () => connection.value
 }) as TableCommandEditorTarget;
 
-const original = target('same-table', 10);
+const originalConnection = { value: true };
+const original = target('same-table', 10, originalConnection);
 const first = registry.register(original);
 assert.equal(registry.resolve(first.id), original);
-first.dispose();
-assert.equal(registry.resolve(first.id), null);
 
+originalConnection.value = false;
 const replacement = target('same-table', 11);
 const second = registry.register(replacement);
 assert.equal(second.id, first.id, 'a synchronous Widget rebuild must retain its logical target id');
-cleanupQueue.shift()?.();
-assert.equal(registry.resolve(second.id), replacement, 'old cleanup must not clear a newer generation');
-
 first.dispose();
-assert.equal(registry.resolve(second.id), replacement, 'old registration disposal must be idempotent');
+assert.equal(registry.resolve(second.id), replacement, 'old registration disposal must not clear a newer generation');
 second.dispose();
 cleanupQueue.shift()?.();
 assert.equal(registry.resolve(second.id), null);

@@ -4523,7 +4523,6 @@ class HtmlTableWidget extends WidgetType {
       view,
       identityKey: JSON.stringify({ indent: this.tableData.indent, header: this.tableData.headerCells }),
       from: this.tableData.from ?? 0,
-      to: this.tableData.to ?? 0,
       isConnected: () => Boolean(this.domRefs?.shell.isConnected),
       buildPendingEditTransactions: () => this.buildPendingEditTransactions(),
       buildAtomicCommandTransaction: ({ command, target }) => this.buildTableCommandTransaction(command, target),

@@ -160,7 +160,6 @@ const targetFor = (tableId: string): TableCommandEditorTarget | null => {
     view,
     identityKey: tableId,
     from: current.from,
-    to: current.to,
     isConnected: () => true,
     buildPendingEditTransactions() {
       const table = tableFor(tableId);

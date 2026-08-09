@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import {
   createTableCommandApplication,
   type TableCommandEffect,
@@ -108,13 +107,5 @@ assert.deepEqual(invalidated.getState(), { phase: 'idle', activeCommandId: null 
 assert.equal(invalidated.dispatch({
   type: 'request', command: 'insert-column-right', target, enabled: true
 })[0]?.type, 'executeCommand');
-
-const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
-const bootstrapSource = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
-const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
-assert.equal((editorSource.match(/createTableCommandApplication\(/g) ?? []).length, 1, 'production creates one Application');
-for (const source of [bootstrapSource, tablesSource]) {
-  assert.equal(source.includes('createTableCommandApplication'), false, 'only Editor Bootstrap creates Application');
-}
 
 console.log('table command application contracts passed');

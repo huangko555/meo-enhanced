@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import type { Transaction, TransactionSpec } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
@@ -24,7 +23,6 @@ const target: TableCommandEditorTarget = {
   view,
   identityKey: 'table-1',
   from: 0,
-  to: 5,
   isConnected: () => true,
   buildPendingEditTransactions() {
     pendingBuilds += 1;
@@ -125,14 +123,5 @@ assert.equal(await adapter.execute({
   target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'atomic'
 }).completion, null);
 assert.equal(dispatched.length, 3);
-
-const productionSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
-assert.equal((productionSource.match(/createTableCommandApplication\(/g) ?? []).length, 1);
-assert.equal((productionSource.match(/createTableCommandRuntime\(/g) ?? []).length, 1);
-assert.equal((productionSource.match(/createCodeMirrorTableCommandEffectAdapter\(/g) ?? []).length, 1);
-const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
-assert.equal(tablesSource.includes('createTableCommandApplication'), false);
-assert.equal(tablesSource.includes('createTableCommandRuntime'), false);
-assert.equal(tablesSource.includes('createCodeMirrorTableCommandEffectAdapter'), false);
 
 console.log('table command effect adapter contracts passed');

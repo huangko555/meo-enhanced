@@ -22,7 +22,6 @@ export type TableCommandEditorTarget = {
   readonly view: EditorView;
   readonly identityKey: string;
   readonly from: number;
-  readonly to: number;
   isConnected(): boolean;
   buildPendingEditTransactions(): readonly Transaction[];
   buildAtomicCommandTransaction(request: {
