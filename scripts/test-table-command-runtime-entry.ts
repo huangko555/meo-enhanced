@@ -144,7 +144,7 @@ const render = (): void => {
           (command === 'apply-sort' && !previewOrders.has(tableId))
         ));
         void runtime.dispatch({
-          type: 'request', command, target: { tableId, row: 1, column: 0 }, enabled
+          type: 'request', command, target: { tableId, row: 1, column: 0, selection: null }, enabled
         });
       });
       shell.append(button);
