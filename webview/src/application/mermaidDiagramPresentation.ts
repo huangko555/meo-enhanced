@@ -35,11 +35,29 @@ export type MermaidDiagramPresentationEffect =
       readonly configKey: string;
     }
   | { readonly type: 'showDiagram'; readonly presentationId: number; readonly svg: string }
-  | { readonly type: 'showError'; readonly presentationId: number; readonly error: string };
+  | { readonly type: 'clearPresentation'; readonly presentationId: number }
+  | {
+      readonly type: 'showError';
+      readonly presentationId: number;
+      readonly source: string;
+      readonly error: string;
+    };
 
 export type MermaidDiagramPresentationApplication = {
   getState(): MermaidDiagramPresentationState;
   dispatch(input: MermaidDiagramPresentationInput): readonly MermaidDiagramPresentationEffect[];
+};
+
+export type MermaidDiagramPresentationEffectExecution = {
+  readonly completion?: Promise<MermaidDiagramPresentationInput | null>;
+};
+
+/** Application-owned seam implemented by deterministic and Editor adapters. */
+export type MermaidDiagramPresentationEffectExecutor = {
+  execute(
+    effect: MermaidDiagramPresentationEffect
+  ): MermaidDiagramPresentationEffectExecution;
+  dispose(): void;
 };
 
 /** Owns correlation for one diagram presentation; rendering and DOM remain Adapter effects. */
@@ -94,12 +112,19 @@ export function createMermaidDiagramPresentationApplication(): MermaidDiagramPre
         phase = 'ready';
         return [{ type: 'showDiagram', presentationId: input.presentationId, svg: input.svg }];
       case 'renderFailed':
-        if (phase !== 'pending' || input.presentationId !== presentationId) return [];
+        if (phase !== 'pending' || input.presentationId !== presentationId || source === null) return [];
         phase = 'error';
-        return [{ type: 'showError', presentationId: input.presentationId, error: input.error }];
+        return [{
+          type: 'showError',
+          presentationId: input.presentationId,
+          source,
+          error: input.error
+        }];
       case 'externalDocumentPresented':
+        if (presentationId === null) return [];
+        const invalidatedPresentationId = presentationId;
         clear('idle');
-        return [];
+        return [{ type: 'clearPresentation', presentationId: invalidatedPresentationId }];
       case 'dispose':
         clear('disposed');
         return [];

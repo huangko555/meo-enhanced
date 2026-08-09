@@ -43,7 +43,12 @@ const failedId = failedThenRecovered.getState().presentationId;
 assert.ok(failedId);
 assert.deepEqual(failedThenRecovered.dispatch({
   type: 'renderFailed', presentationId: failedId, error: 'parse error'
-}), [{ type: 'showError', presentationId: failedId, error: 'parse error' }]);
+}), [{
+  type: 'showError',
+  presentationId: failedId,
+  source: 'invalid',
+  error: 'parse error'
+}]);
 assert.equal(failedThenRecovered.getState().phase, 'error');
 const recoveryEffects = failedThenRecovered.dispatch({
   type: 'present', source: 'graph TD\nA-->B', themeKey: 'light', configKey: 'default'
@@ -68,7 +73,9 @@ const invalidated = createMermaidDiagramPresentationApplication();
 invalidated.dispatch({ type: 'present', source: 'external', themeKey: 'light', configKey: 'default' });
 const invalidatedId = invalidated.getState().presentationId;
 assert.ok(invalidatedId);
-assert.deepEqual(invalidated.dispatch({ type: 'externalDocumentPresented' }), []);
+assert.deepEqual(effectTypes(invalidated.dispatch({ type: 'externalDocumentPresented' })), [
+  'clearPresentation'
+]);
 assert.deepEqual(invalidated.getState(), {
   phase: 'idle', presentationId: null, source: null, themeKey: null, configKey: null
 });

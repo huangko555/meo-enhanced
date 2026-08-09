@@ -8,7 +8,12 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-mermaid-presentation-production-'));
 
 async function main(): Promise<void> {
-  const applicationImport = 'application/mermaidDiagramPresentation';
+  const candidateImports = [
+    'application/mermaidDiagramPresentation',
+    'adapters/mermaidDiagramPresentationRuntime',
+    'editor/mermaidDiagramPresentationAdapter',
+    'editor/mermaidDiagramRenderPool'
+  ];
   for (const relativePath of [
     'webview/src/editor.ts',
     'webview/src/index.ts',
@@ -16,11 +21,13 @@ async function main(): Promise<void> {
     'webview/src/helpers/mermaidEditing.ts'
   ]) {
     const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
-    assert.equal(
-      source.includes(applicationImport),
-      false,
-      `${relativePath} must not create or import the Mermaid presentation candidate`
-    );
+    for (const candidateImport of candidateImports) {
+      assert.equal(
+        source.includes(candidateImport),
+        false,
+        `${relativePath} must not create or import ${candidateImport}`
+      );
+    }
   }
 
   const build = await Bun.build({
