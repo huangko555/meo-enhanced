@@ -26,6 +26,7 @@ const config = JSON.parse(configText) as {
     disposeOrder: string[];
   }>;
   resourceOwnerFreeModules?: string[];
+  candidateOnlyModules?: string[];
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
 };
 
@@ -165,6 +166,9 @@ for (const file of files) visit(file);
 for (const cycle of cycles) failures.push(`ARCH001 循环依赖: ${cycle}`);
 
 for (const edge of edges) {
+  if (config.candidateOnlyModules?.includes(edge.to)) {
+    failures.push(`ARCH010 候选模块尚未允许生产接线: ${edge.from} -> ${edge.to}`);
+  }
   const bootstrapRule = config.bootstrapOnlyModules?.find((rule) => rule.module === edge.to);
   if (bootstrapRule && !bootstrapRule.allowedImporters.includes(edge.from)) {
     failures.push(`ARCH007 具体实现只能由 Bootstrap 导入: ${edge.from} -> ${edge.to}`);

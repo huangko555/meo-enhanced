@@ -44,6 +44,7 @@
     }
   ],
   "resourceOwnerFreeModules": ["webview/src/helpers/mermaidDiagram.ts"],
+  "candidateOnlyModules": ["src/shared/latexMathScanner.ts"],
   "knownLegacyTestFailures": [
     {
       "id": "LEG-TEST-001",
