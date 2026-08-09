@@ -16,10 +16,5 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run architecture:check
-      - run: bun scripts/test-document-session.ts
-      - run: bun scripts/test-document-session-application.ts
-      - run: bun scripts/test-document-session-protocol.ts
-      - run: bun scripts/test-document-session-actions.ts
-      - run: bun scripts/test-document-session-production-cutover.ts
-      - run: bun scripts/test-protocol-ready-init.ts
-      - run: bun scripts/test-protocol-stale-responses.ts
+      - run: bun run test:unit
+      - run: bun run build
