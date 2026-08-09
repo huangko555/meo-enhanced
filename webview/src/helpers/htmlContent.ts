@@ -15,6 +15,7 @@ import { createOpenLinkButton } from './linkOpenButton';
 import { resolvedSyntaxTree } from './markdownSyntax';
 import { getViewportController } from './viewportController';
 import { ImageWidget } from './images';
+import { getImagePresentationFactory } from '../editor/imagePresentation';
 import { getDetailsBlocks, toggleCollapsibleSection } from './headingCollapse';
 
 export interface RenderableHtmlBlock {
@@ -167,7 +168,8 @@ function enhanceImages(root: ParentNode, view: EditorView, sourceFrom: number): 
       rawSrc,
       image.getAttribute('alt') ?? '',
       isSafeHtmlUrl(linkUrl, 'href') ? linkUrl : '',
-      sourceFrom
+      sourceFrom,
+      getImagePresentationFactory(view.state)
     );
     const container = widget.toDOM(view);
     container.classList.add('meo-md-html-image');

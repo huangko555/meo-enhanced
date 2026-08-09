@@ -8,6 +8,30 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-image-presentation-production-'));
 
 async function main(): Promise<void> {
+  const editorSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'editor.ts'), 'utf8');
+  const imageSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'helpers', 'images.ts'), 'utf8');
+  assert.equal((editorSource.match(/createImagePresentationResourcePool\(/g) ?? []).length, 1);
+  assert.equal((editorSource.match(/createImagePresentationFactory\(/g) ?? []).length, 1);
+  assert.equal(editorSource.includes('imagePresentationFactoryFacet.of(imagePresentationFactory)'), true);
+  assert.equal(editorSource.includes('imagePresentationFactory.externalDocumentPresented()'), true);
+  assert.equal(editorSource.includes('imagePresentationResourcePool.dispose()'), true);
+  assert.equal(imageSource.includes("from '../adapters/imagePresentationRuntime'"), false);
+  assert.equal(imageSource.includes("from '../editor/imagePresentationAdapter'"), false);
+  for (const legacyOwner of [
+    'preloadImage',
+    'setImageSource',
+    'showLoadedImage',
+    'pendingImageResolvers',
+    'pendingImageLoads',
+    'activeImageLoads',
+    'queuedImageLoads',
+    'imageSrcCache',
+    'loadedImages',
+    'failedImages'
+  ]) {
+    assert.equal(imageSource.includes(legacyOwner), false, `${legacyOwner} must not return to production`);
+  }
+
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-table-stability-entry.ts')],
     outdir: tempDir,
@@ -33,7 +57,9 @@ async function main(): Promise<void> {
         )}`
       );
       const pending = new Map<string, (value: string) => void>();
+      const resolutions = new Map<string, number>();
       harness.setImageSrcResolver((url: string) => {
+        resolutions.set(url, (resolutions.get(url) ?? 0) + 1);
         if (url.includes('missing')) return '';
         if (url.includes('late')) {
           return new Promise<string>((resolve) => pending.set(url, resolve));
@@ -55,7 +81,7 @@ async function main(): Promise<void> {
       await settle();
       const initialFallbacks = document.querySelectorAll('.meo-md-image-fallback').length;
 
-      editor.setText('before\n![new](new.png)\n![missing](missing.png)\nafter');
+      editor.setText('before\n![new](new.png) ![new again](new.png)\n![missing](missing.png)\nafter');
       pending.get('late-old.png')?.(svg('late-old', '#a66'));
       await settle();
       const afterExternal = {
@@ -63,8 +89,13 @@ async function main(): Promise<void> {
         images: Array.from(document.querySelectorAll<HTMLImageElement>('.meo-md-image-img'))
           .map((image) => image.getAttribute('src') ?? ''),
         fallbacks: Array.from(document.querySelectorAll<HTMLElement>('.meo-md-image-fallback'))
-          .map((node) => node.textContent ?? '')
+          .map((node) => node.textContent ?? ''),
+        controls: document.querySelectorAll('.meo-md-image-controls').length,
+        sharedResolutionCount: resolutions.get('new.png') ?? 0
       };
+
+      editor.setText(editor.getText());
+      await settle();
 
       editor.setMode('source');
       const sourceVisibleImages = document.querySelectorAll('.meo-md-image-img').length;
@@ -93,14 +124,16 @@ async function main(): Promise<void> {
     });
 
     assert.equal(result.initialFallbacks, 1, 'unresolved image should expose the Markdown fallback');
-    assert.equal(result.afterExternal.text, 'before\n![new](new.png)\n![missing](missing.png)\nafter');
-    assert.equal(result.afterExternal.images.length, 1, 'external presentation should expose only the new image');
+    assert.equal(result.afterExternal.text, 'before\n![new](new.png) ![new again](new.png)\n![missing](missing.png)\nafter');
+    assert.equal(result.afterExternal.images.length, 2, 'external presentation should expose only the new images');
     assert.equal(result.afterExternal.images.some((src) => src.includes('late-old')), false);
     assert.deepEqual(result.afterExternal.fallbacks, ['![missing](missing.png)']);
+    assert.equal(result.afterExternal.controls, 2, 'each loaded image should retain its Widget-owned controls');
+    assert.equal(result.afterExternal.sharedResolutionCount, 1, 'same-source widgets should share resource resolution');
     assert.equal(result.sourceVisibleImages, 0, 'Source mode should not expose rendered image widgets');
     assert.deepEqual(result.afterModeRoundTrip, {
-      text: 'before\n![new](new.png)\n![missing](missing.png)\nafter',
-      imageCount: 1,
+      text: 'before\n![new](new.png) ![new again](new.png)\n![missing](missing.png)\nafter',
+      imageCount: 2,
       fallbackCount: 1
     });
     assert.equal(result.editorDomAfterDestroy, 0);

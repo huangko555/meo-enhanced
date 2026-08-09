@@ -4,6 +4,13 @@ import type {
   ImagePresentationEffectExecutor,
   ImagePresentationInput
 } from '../application/imagePresentation';
+import { createImagePresentationApplication } from '../application/imagePresentation';
+import { createImagePresentationRuntime } from '../adapters/imagePresentationRuntime';
+import type {
+  ImagePresentationFactory,
+  ImagePresentationHandle,
+  ImagePresentationView
+} from './imagePresentation';
 
 const DEFAULT_RESOLUTION_CACHE_LIMIT = 512;
 const DEFAULT_LOADED_CACHE_LIMIT = 128;
@@ -13,6 +20,7 @@ const DEFAULT_FAILURE_RETRY_MS = 30_000;
 
 export type ImagePresentationResourcePool = {
   resolve(contextKey: string, rawSrc: string): Promise<string | null>;
+  getResolved(contextKey: string, rawSrc: string): string | null;
   load(contextKey: string, resolvedSrc: string): Promise<HTMLImageElement | null>;
   getLoaded(contextKey: string, resolvedSrc: string): HTMLImageElement | null;
   dispose(): void;
@@ -163,6 +171,12 @@ export function createImagePresentationResourcePool(
 
   return {
     resolve,
+    getResolved(contextKey, rawSrc) {
+      const key = cacheKey(contextKey, rawSrc);
+      const resolved = resolvedCache.get(key) ?? null;
+      if (resolved) touch(resolvedCache, key, resolved);
+      return resolved;
+    },
     load,
     getLoaded(contextKey, resolvedSrc) {
       const key = cacheKey(contextKey, resolvedSrc);
@@ -186,9 +200,7 @@ export function createImagePresentationResourcePool(
 export type CodeMirrorDomImagePresentationAdapterOptions = {
   readonly resources: ImagePresentationResourcePool;
   readonly resourceContextKey: string;
-  readonly root: HTMLElement;
-  readonly altText: string;
-  readonly preserveLayoutChange: (apply: () => void) => void;
+  readonly view: ImagePresentationView;
 };
 
 /** Concrete Editor adapter for resource work and fallback/image DOM projection. */
@@ -206,25 +218,13 @@ export function createCodeMirrorDomImagePresentationAdapter(
     completion: work.then((input) => accepts(presentationId) ? input : null)
   });
 
-  const showFallback = (sourceKey: string): void => {
-    const fallback = options.root.ownerDocument.createElement('code');
-    fallback.className = 'meo-md-image-fallback-text';
-    fallback.textContent = sourceKey;
-    options.root.classList.add('meo-md-image-fallback');
-    options.root.replaceChildren(fallback);
-  };
-
   const showImage = (resolvedSrc: string): void => {
     const loaded = options.resources.getLoaded(options.resourceContextKey, resolvedSrc);
     if (!loaded) return;
     const image = loaded.cloneNode(false) as HTMLImageElement;
-    image.className = 'meo-md-image-img';
-    image.alt = options.altText;
-    image.loading = 'eager';
-    options.preserveLayoutChange(() => {
+    options.view.preserveLayoutChange(() => {
       if (disposed) return;
-      options.root.classList.remove('meo-md-image-fallback');
-      options.root.replaceChildren(image);
+      options.view.showImage(image);
     });
   };
 
@@ -232,7 +232,20 @@ export function createCodeMirrorDomImagePresentationAdapter(
     execute(effect: ImagePresentationEffect): ImagePresentationEffectExecution {
       if (disposed) return {};
       switch (effect.type) {
-        case 'resolveSource':
+        case 'resolveSource': {
+          const resolvedSrc = options.resources.getResolved(
+            options.resourceContextKey,
+            effect.rawSrc
+          );
+          if (resolvedSrc) {
+            return {
+              immediateCompletion: {
+                type: 'sourceResolved',
+                presentationId: effect.presentationId,
+                resolvedSrc
+              }
+            };
+          }
           return completion(
             effect.presentationId,
             options.resources.resolve(options.resourceContextKey, effect.rawSrc).then((resolvedSrc) => (
@@ -241,7 +254,16 @@ export function createCodeMirrorDomImagePresentationAdapter(
                 : { type: 'sourceFailed', presentationId: effect.presentationId }
             ))
           );
+        }
         case 'loadImage':
+          if (options.resources.getLoaded(options.resourceContextKey, effect.resolvedSrc)) {
+            return {
+              immediateCompletion: {
+                type: 'imageLoaded',
+                presentationId: effect.presentationId
+              }
+            };
+          }
           return completion(
             effect.presentationId,
             options.resources.load(options.resourceContextKey, effect.resolvedSrc).then((image) => (
@@ -251,7 +273,7 @@ export function createCodeMirrorDomImagePresentationAdapter(
             ))
           );
         case 'showFallback':
-          if (accepts(effect.presentationId)) showFallback(effect.sourceKey);
+          if (accepts(effect.presentationId)) options.view.showFallback(effect.sourceKey);
           return {};
         case 'showImage':
           if (accepts(effect.presentationId)) showImage(effect.resolvedSrc);
@@ -263,6 +285,70 @@ export function createCodeMirrorDomImagePresentationAdapter(
     },
     dispose() {
       disposed = true;
+    }
+  };
+}
+
+export type ImagePresentationFactoryOptions = {
+  readonly resources: ImagePresentationResourcePool;
+  readonly resourceContextKey: string;
+};
+
+/** Creates one correlated presentation lifecycle per image widget. */
+export function createImagePresentationFactory(
+  options: ImagePresentationFactoryOptions
+): ImagePresentationFactory {
+  const handles = new Set<ImagePresentationHandle>();
+  let disposed = false;
+
+  const create = (view: ImagePresentationView): ImagePresentationHandle => {
+    if (disposed) throw new Error('Image presentation factory is disposed');
+    const application = createImagePresentationApplication();
+    const executor = createCodeMirrorDomImagePresentationAdapter({
+      resources: options.resources,
+      resourceContextKey: options.resourceContextKey,
+      view
+    });
+    const runtime = createImagePresentationRuntime({ application, executor });
+    let active = true;
+    const handle: ImagePresentationHandle = {
+      present(sourceKey, rawSrc) {
+        if (active) runtime.dispatch({ type: 'present', sourceKey, rawSrc });
+      },
+      externalDocumentPresented() {
+        if (active) runtime.dispatch({ type: 'externalDocumentPresented' });
+      },
+      whenIdle() {
+        return runtime.whenIdle();
+      },
+      dispose() {
+        if (!active) return;
+        active = false;
+        handles.delete(handle);
+        runtime.dispose();
+      }
+    };
+    handles.add(handle);
+    return handle;
+  };
+
+  return {
+    async preload(rawSrc) {
+      if (disposed) return;
+      const resolved = await options.resources.resolve(options.resourceContextKey, rawSrc);
+      if (!resolved || disposed) return;
+      await options.resources.load(options.resourceContextKey, resolved);
+    },
+    create,
+    externalDocumentPresented() {
+      if (disposed) return;
+      for (const handle of handles) handle.externalDocumentPresented();
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const handle of [...handles]) handle.dispose();
+      handles.clear();
     }
   };
 }

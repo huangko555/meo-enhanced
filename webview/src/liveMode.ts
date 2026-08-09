@@ -17,6 +17,7 @@ import {
   addCopyCodeButton
 } from './helpers/codeBlocks';
 import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl } from './helpers/images';
+import { getImagePresentationFactory } from './editor/imagePresentation';
 import { liveHighlightStyle } from './theme';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
@@ -1770,7 +1771,13 @@ function buildDecorations(state) {
             if (!linkSelection) {
               ranges.push(
                 Decoration.replace({
-                  widget: new ImageWidget(emptyImageUrl, '', '', node.from),
+                  widget: new ImageWidget(
+                    emptyImageUrl,
+                    '',
+                    '',
+                    node.from,
+                    getImagePresentationFactory(state)
+                  ),
                   inclusive: false
                 }).range(node.from, node.to)
               );
@@ -1813,7 +1820,13 @@ function buildDecorations(state) {
         if (url) {
           ranges.push(
             Decoration.replace({
-              widget: new ImageWidget(url, altText, linkUrl, node.from),
+              widget: new ImageWidget(
+                url,
+                altText,
+                linkUrl,
+                node.from,
+                getImagePresentationFactory(state)
+              ),
               inclusive: false
             }).range(node.from, node.to)
           );
@@ -1948,8 +1961,14 @@ function buildDecorations(state) {
 
   for (const { line, items } of activeImageGroups.values()) {
     const widget = items.length === 1
-      ? new ImageWidget(items[0].url, items[0].altText, items[0].linkUrl, items[0].sourceFrom)
-      : new ImageGroupWidget(items);
+      ? new ImageWidget(
+        items[0].url,
+        items[0].altText,
+        items[0].linkUrl,
+        items[0].sourceFrom,
+        getImagePresentationFactory(state)
+      )
+      : new ImageGroupWidget(items, getImagePresentationFactory(state));
     ranges.push(
       Decoration.widget({ widget, side: 1, block: true }).range(line.to)
     );

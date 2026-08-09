@@ -86,6 +86,13 @@ import { setEditorHistoryRunner, type EditorHistoryDirection } from './helpers/h
 import { createEditorHistoryApplication, type EditorHistoryContext, type EditorHistoryViewport } from './application/editorHistory';
 import { createEditorHistoryEffectAdapter, type EditorHistoryRestoreRequest } from './adapters/editorHistoryEffectAdapter';
 import { createEditorHistoryRuntime, type EditorHistoryRuntime } from './adapters/editorHistoryRuntime';
+import { resolveConfiguredImageSrc } from './helpers/images';
+import {
+  createImagePresentationFactory,
+  createImagePresentationResourcePool,
+  loadBrowserImage
+} from './editor/imagePresentationAdapter';
+import { imagePresentationFactoryFacet } from './editor/imagePresentation';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -2028,6 +2035,14 @@ export function createEditor({
       return tableCommandTargetRegistry.register(target);
     }
   };
+  const imagePresentationResourcePool = createImagePresentationResourcePool({
+    resolveSource: (_contextKey, rawSrc) => resolveConfiguredImageSrc(rawSrc),
+    loadImage: loadBrowserImage
+  });
+  const imagePresentationFactory = createImagePresentationFactory({
+    resources: imagePresentationResourcePool,
+    resourceContextKey: 'editor-document'
+  });
   const state = EditorState.create({
     doc: text,
     selection: { anchor: initialCursorPos },
@@ -2290,6 +2305,7 @@ export function createEditor({
       tableColumnWidthAdapter.extension,
       tableStickyHeaderAdapterFactoryFacet.of(tableStickyHeaderAdapterFactory),
       tableCommandEnvironmentFacet.of(tableCommandEnvironment),
+      imagePresentationFactoryFacet.of(imagePresentationFactory),
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
@@ -2830,11 +2846,14 @@ export function createEditor({
       tableTransactionProvenanceAdapter.dispose();
       tableColumnWidthAdapter.adapter.dispose();
       view.destroy();
+      imagePresentationFactory.dispose();
+      imagePresentationResourcePool.dispose();
     },
     setText(textValue) {
       gitBlameHover?.hide();
       clearDiagnosticSuggestionState();
       tableCommandRuntime.externalDocumentPresented();
+      imagePresentationFactory.externalDocumentPresented();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {

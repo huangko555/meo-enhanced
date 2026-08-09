@@ -2,7 +2,11 @@ import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Transa
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import { isolateHistory } from '@codemirror/commands';
-import { ImageWidget } from './images';
+import { disposeImagePresentations, ImageWidget } from './images';
+import {
+  getImagePresentationFactory,
+  type ImagePresentationFactory
+} from '../editor/imagePresentation';
 import { emojiData } from './emoji';
 import { parseKbdTagAt } from './kbd';
 import { createLatexMathElement, parseLatexMathAt } from './math';
@@ -1377,7 +1381,8 @@ function appendTableInlinePreviewLink(parent, label, href, options: {
   diagnostics?: TableCellDiagnostics[];
   searchState?: TableSearchState | null;
   sourceRange?: TableCellRange | null;
-} = {}) {
+  presentationFactory: ImagePresentationFactory;
+}) {
   const el = document.createElement('span');
   el.className = 'meo-md-link';
   if (href) el.setAttribute('data-meo-link-href', href);
@@ -1404,14 +1409,20 @@ export function refreshTableLocalLinkIndicators(root: ParentNode): void {
   }
 }
 
-function appendTableInlinePreviewImage(parent, altText, url, sourceRange: TableCellRange) {
+function appendTableInlinePreviewImage(
+  parent,
+  altText,
+  url,
+  sourceRange: TableCellRange,
+  presentationFactory: ImagePresentationFactory
+) {
   if (!url) {
     appendInlineMappedText(parent, `![${altText}]()`, sourceRange);
     return;
   }
   // Table cells own pointer selection so image clicks enter the cell editor on
   // pointerup instead of being consumed by the standalone image interaction.
-  const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), '', null, {
+  const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), '', null, presentationFactory, {
     pointerInteractionOwner: 'parent'
   }).toDOM();
   if (dom instanceof HTMLElement) {
@@ -1427,7 +1438,8 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   disableLinkParsers?: boolean;
   searchState?: TableSearchState | null;
   sourceRange?: TableCellRange | null;
-} = {}) {
+  presentationFactory: ImagePresentationFactory;
+}) {
   const { baseOffset = 0, diagnostics = [], disableLinkParsers = false, searchState = null, sourceRange = null } = options;
   const colorRangesByStart = new Map(collectColorRangesFromText(text).map((range) => [range.from, range]));
   let buffer = '';
@@ -1531,7 +1543,8 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         parent,
         image.label,
         decodeTableInlineEscapes(image.url),
-        { from: baseOffset + i, to: baseOffset + image.nextIndex }
+        { from: baseOffset + i, to: baseOffset + image.nextIndex },
+        options.presentationFactory
       );
       i = image.nextIndex;
       continue;
@@ -1714,11 +1727,18 @@ function appendTableCellRenderedPreview(
   text: string,
   diagnostics: TableCellDiagnostics[],
   searchState: TableSearchState | null,
-  sourceRange: TableCellRange | null
+  sourceRange: TableCellRange | null,
+  presentationFactory: ImagePresentationFactory
 ) {
   const listStack: Array<{ indentColumns: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null }> = [];
   const appendInline = (parent: HTMLElement, content: string, baseOffset: number) => {
-    appendTableInlinePreviewNodes(parent, content, { baseOffset, diagnostics, searchState, sourceRange });
+    appendTableInlinePreviewNodes(parent, content, {
+      baseOffset,
+      diagnostics,
+      searchState,
+      sourceRange,
+      presentationFactory
+    });
   };
 
   for (const line of splitTableCellLogicalLines(text)) {
@@ -1793,9 +1813,11 @@ function renderTableCellInlinePreview(
   value,
   diagnostics: TableCellDiagnostics[] = [],
   searchState: TableSearchState | null = null,
-  sourceRange: TableCellRange | null = null
+  sourceRange: TableCellRange | null,
+  presentationFactory: ImagePresentationFactory
 ) {
   if (!(previewEl instanceof HTMLElement)) return;
+  disposeImagePresentations(previewEl);
   previewEl.replaceChildren();
   const text = value ?? '';
   const isSearchExpanded = shouldExpandTableCellForSearch(text, searchState);
@@ -1805,7 +1827,14 @@ function renderTableCellInlinePreview(
     appendTableCellSourcePreview(previewEl, text, diagnostics, searchState, sourceRange);
     return;
   }
-  appendTableCellRenderedPreview(previewEl, text, diagnostics, searchState, sourceRange);
+  appendTableCellRenderedPreview(
+    previewEl,
+    text,
+    diagnostics,
+    searchState,
+    sourceRange,
+    presentationFactory
+  );
 }
 
 function consumeTableInlineProtectedSpan(text, index, endIndex) {
@@ -2182,7 +2211,8 @@ class HtmlTableWidget extends WidgetType {
       tableCellEditorValueToSource(headerInput?.value ?? ''),
       this.cellDiagnostics(0, column),
       this.searchState,
-      this.cellSourceRange(0, column)
+      this.cellSourceRange(0, column),
+      getImagePresentationFactory(this.view!.state)
     );
     cell.append(preview, this.createColumnResizeHandle(column));
     return cell;
@@ -4094,7 +4124,14 @@ class HtmlTableWidget extends WidgetType {
     sourceRange: TableCellRange | null = null
   ) {
     if (!(preview instanceof HTMLElement)) return;
-    renderTableCellInlinePreview(preview, value ?? '', diagnostics, this.searchState, sourceRange);
+    renderTableCellInlinePreview(
+      preview,
+      value ?? '',
+      diagnostics,
+      this.searchState,
+      sourceRange,
+      getImagePresentationFactory(this.view!.state)
+    );
   }
 
   refreshCellPreviewFromInput(input) {

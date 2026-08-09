@@ -65,20 +65,34 @@ type CandidateHarness = {
           const adapter = createCodeMirrorDomImagePresentationAdapter({
             resources,
             resourceContextKey: contextKey,
-            root,
-            altText,
-            preserveLayoutChange(apply) {
-              preservedReplacements += 1;
-              const active = root.ownerDocument.activeElement;
-              const selection = root.ownerDocument.getSelection()?.toString() ?? '';
-              const scrollTop = root.ownerDocument.scrollingElement?.scrollTop ?? 0;
-              apply();
-              if (active instanceof HTMLElement && active.isConnected) active.focus({ preventScroll: true });
-              if (root.ownerDocument.scrollingElement) {
-                root.ownerDocument.scrollingElement.scrollTop = scrollTop;
-              }
-              if (selection && root.ownerDocument.getSelection()?.toString() !== selection) {
-                throw new Error('image replacement changed the document selection');
+            view: {
+              showFallback(sourceKey) {
+                const fallback = root.ownerDocument.createElement('code');
+                fallback.className = 'meo-md-image-fallback-text';
+                fallback.textContent = sourceKey;
+                root.classList.add('meo-md-image-fallback');
+                root.replaceChildren(fallback);
+              },
+              showImage(loaded) {
+                const image = loaded.cloneNode(false) as HTMLImageElement;
+                image.className = 'meo-md-image-img';
+                image.alt = altText;
+                root.classList.remove('meo-md-image-fallback');
+                root.replaceChildren(image);
+              },
+              preserveLayoutChange(apply) {
+                preservedReplacements += 1;
+                const active = root.ownerDocument.activeElement;
+                const selection = root.ownerDocument.getSelection()?.toString() ?? '';
+                const scrollTop = root.ownerDocument.scrollingElement?.scrollTop ?? 0;
+                apply();
+                if (active instanceof HTMLElement && active.isConnected) active.focus({ preventScroll: true });
+                if (root.ownerDocument.scrollingElement) {
+                  root.ownerDocument.scrollingElement.scrollTop = scrollTop;
+                }
+                if (selection && root.ownerDocument.getSelection()?.toString() !== selection) {
+                  throw new Error('image replacement changed the document selection');
+                }
               }
             }
           });

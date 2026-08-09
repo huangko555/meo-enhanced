@@ -5,6 +5,10 @@ import { createImageResolutionTransport, type ImageResolutionTransport } from '.
 import { createClipboardImageSaveTransport, type ClipboardImageSaveTransport } from '../adapters/clipboardImageSaveTransport';
 import type { ResolvedImageSrcResponse } from '../../../src/protocol/imageResolution';
 import type { SavedImagePathResponse } from '../../../src/protocol/clipboardImageSave';
+import type {
+  ImagePresentationFactory,
+  ImagePresentationHandle
+} from '../editor/imagePresentation';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
@@ -25,21 +29,9 @@ let clipboardImageSaveTransport: ClipboardImageSaveTransport = {
   accept: () => false
 };
 
-const MAX_IMAGE_SRC_CACHE_ENTRIES = 512;
-const MAX_LOADED_IMAGE_CACHE_ENTRIES = 128;
-const MAX_FAILED_IMAGE_CACHE_ENTRIES = 256;
-const MAX_CONCURRENT_IMAGE_LOADS = 6;
-const IMAGE_FAILURE_RETRY_MS = 30_000;
-
-const imageSrcCache = new Map<string, string>();
-const loadedImages = new Map<string, HTMLImageElement>();
-const pendingImageLoads = new Map<string, Promise<HTMLImageElement | null>>();
-const failedImages = new Map<string, number>();
-const queuedImageLoads: Array<() => void> = [];
-let activeImageLoads = 0;
-const pendingImageResolvers = new Map<string, ((value: string) => void)[]>();
 const IMAGE_DOUBLE_CLICK_WINDOW_MS = 400;
 const IMAGE_DOUBLE_CLICK_MAX_DISTANCE_PX = 8;
+const IMAGE_PRESENTATION_DISPOSE_EVENT = 'meo-dispose-image-presentation';
 type ImageDoubleClickCandidate = {
   x: number;
   y: number;
@@ -48,48 +40,6 @@ type ImageDoubleClickCandidate = {
 };
 let pendingImageDoubleClick: ImageDoubleClickCandidate | null = null;
 let imageDoubleClickListenerInitialized = false;
-
-function touchCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V): void {
-  cache.delete(key);
-  cache.set(key, value);
-}
-
-function setBoundedCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V, limit: number): void {
-  touchCacheEntry(cache, key, value);
-  while (cache.size > limit) {
-    const oldestKey = cache.keys().next().value as K | undefined;
-    if (oldestKey === undefined) break;
-    cache.delete(oldestKey);
-  }
-}
-
-function getLoadedImage(url: string): HTMLImageElement | undefined {
-  const image = loadedImages.get(url);
-  if (image) touchCacheEntry(loadedImages, url, image);
-  return image;
-}
-
-function hasRecentImageFailure(url: string): boolean {
-  const failedAt = failedImages.get(url);
-  if (failedAt === undefined) return false;
-  if (Date.now() - failedAt < IMAGE_FAILURE_RETRY_MS) return true;
-  failedImages.delete(url);
-  return false;
-}
-
-function scheduleImageLoad<T>(load: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const run = () => {
-      activeImageLoads += 1;
-      load().then(resolve, reject).finally(() => {
-        activeImageLoads -= 1;
-        queuedImageLoads.shift()?.();
-      });
-    };
-    if (activeImageLoads < MAX_CONCURRENT_IMAGE_LOADS) run();
-    else queuedImageLoads.push(run);
-  });
-}
 
 const imageExtensionByMime: Record<string, string> = {
   'image/avif': 'avif',
@@ -154,27 +104,11 @@ const openImageExternally = (url: string): void => {
 
 const isImmediateImageSrc = (url: string): boolean => /^(?:https?:|data:|blob:|vscode-webview:|vscode-webview-resource:|vscode-resource:)/i.test(url);
 
-const requestImageSrcResolution = (url: string): Promise<string> => new Promise((resolve) => {
-  const waiting = pendingImageResolvers.get(url);
-  if (waiting) {
-    waiting.push(resolve);
-    return;
-  }
-
-  pendingImageResolvers.set(url, [resolve]);
-  void imageResolutionTransport.resolve(url).then((result) => {
-    const resolvedUrl = result.ok === true ? result.value.resolvedUrl : '';
-    const finalUrl = resolvedUrl || url;
-    if (resolvedUrl) {
-      setBoundedCacheEntry(imageSrcCache, url, resolvedUrl, MAX_IMAGE_SRC_CACHE_ENTRIES);
-    }
-    const waiters = pendingImageResolvers.get(url) ?? [];
-    pendingImageResolvers.delete(url);
-    for (const waiter of waiters) {
-      waiter(finalUrl);
-    }
-  });
-});
+const requestImageSrcResolution = async (url: string): Promise<string> => {
+  const result = await imageResolutionTransport.resolve(url);
+  const resolvedUrl = result.ok === true ? result.value.resolvedUrl : '';
+  return resolvedUrl || url;
+};
 
 export const settleImageSrcRequest = (message: ResolvedImageSrcResponse): void => {
   imageResolutionTransport.accept(message);
@@ -185,12 +119,12 @@ export const resolveImageSrc = (rawUrl: string | null | undefined): string | Pro
   if (!url || isImmediateImageSrc(url)) {
     return url;
   }
-  const cached = imageSrcCache.get(url);
-  if (typeof cached === 'string') {
-    touchCacheEntry(imageSrcCache, url, cached);
-    return cached;
-  }
   return requestImageSrcResolution(url);
+};
+
+export const resolveConfiguredImageSrc = async (rawUrl: string): Promise<string | null> => {
+  const resolved = imageSrcResolver(rawUrl);
+  return await Promise.resolve(resolved || null);
 };
 
 export const parseDataUrlMimeType = (dataUrl: string): string => {
@@ -344,12 +278,14 @@ export class ImageWidget extends WidgetType {
   fullscreenOverlay: HTMLElement | null;
   fullscreenCleanup: (() => void) | null;
   exitFullscreenHandler: ((event: KeyboardEvent) => void) | null;
+  presentationHandle: ImagePresentationHandle | null;
 
   constructor(
     url: string | null | undefined,
     altText: string | null | undefined,
     linkUrl: string | null | undefined,
     sourceFrom: number | null = null,
+    readonly presentationFactory: ImagePresentationFactory,
     options: { pointerInteractionOwner?: 'widget' | 'parent' } = {}
   ) {
     super();
@@ -361,8 +297,9 @@ export class ImageWidget extends WidgetType {
     this.fullscreenOverlay = null;
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
+    this.presentationHandle = null;
     if (this.url) {
-      void this.preloadImage();
+      void this.presentationFactory.preload(this.url);
     }
   }
 
@@ -380,6 +317,10 @@ export class ImageWidget extends WidgetType {
   toDOM(view?: EditorView): HTMLElement {
     const container = document.createElement('div');
     container.className = 'meo-md-image';
+    container.addEventListener(IMAGE_PRESENTATION_DISPOSE_EVENT, () => {
+      this.presentationHandle?.dispose();
+      this.presentationHandle = null;
+    }, { once: true });
 
     if (this.linkUrl) {
       container.classList.add('meo-md-image-linked');
@@ -394,31 +335,18 @@ export class ImageWidget extends WidgetType {
       this.attachImagePointerInteractions(container);
     }
 
-    const cachedImage = getLoadedImage(this.url);
-    if (cachedImage) {
-      const img = this.createDisplayImage(cachedImage);
-      container.append(img, this.createImageControls(img));
-      return container;
-    }
-
-    this.renderFallback(container);
-    if (!hasRecentImageFailure(this.url)) {
-      void this.preloadImage().then((image) => {
-        if (image) {
-          this.showLoadedImage(container, this.createDisplayImage(image), view);
-        }
-      });
-    }
+    this.presentationHandle?.dispose();
+    this.presentationHandle = this.presentationFactory.create({
+      showFallback: () => this.renderFallback(container),
+      showImage: (loadedImage) => {
+        const image = this.createDisplayImage(loadedImage);
+        container.classList.remove('meo-md-image-fallback');
+        container.replaceChildren(image, this.createImageControls(image));
+      },
+      preserveLayoutChange: (apply) => this.preserveImageLayoutChange(container, view, apply)
+    });
+    this.presentationHandle.present(this.fallbackText(), this.url);
     return container;
-  }
-
-  createLoadedImage(src: string): HTMLImageElement {
-    const img = document.createElement('img');
-    img.className = 'meo-md-image-img';
-    img.alt = this.altText;
-    img.loading = 'eager';
-    img.src = src;
-    return img;
   }
 
   createDisplayImage(cachedImage: HTMLImageElement): HTMLImageElement {
@@ -470,54 +398,9 @@ export class ImageWidget extends WidgetType {
     }));
   }
 
-  preloadImage(): Promise<HTMLImageElement | null> {
-    const cachedImage = getLoadedImage(this.url);
-    if (cachedImage) return Promise.resolve(cachedImage);
-
-    const pendingLoad = pendingImageLoads.get(this.url);
-    if (pendingLoad) return pendingLoad;
-
-    const load = scheduleImageLoad(() => new Promise<HTMLImageElement | null>((resolve) => {
-      this.setImageSource((src) => {
-        const img = this.createLoadedImage(src);
-        let settled = false;
-        const succeed = () => {
-          if (settled) return;
-          settled = true;
-          setBoundedCacheEntry(loadedImages, this.url, img, MAX_LOADED_IMAGE_CACHE_ENTRIES);
-          failedImages.delete(this.url);
-          resolve(img);
-        };
-        const fail = () => {
-          if (settled) return;
-          settled = true;
-          setBoundedCacheEntry(failedImages, this.url, Date.now(), MAX_FAILED_IMAGE_CACHE_ENTRIES);
-          resolve(null);
-        };
-
-        img.addEventListener('load', succeed, { once: true });
-        img.addEventListener('error', fail, { once: true });
-        if (img.complete && img.naturalWidth > 0) {
-          succeed();
-        }
-      }, () => {
-        setBoundedCacheEntry(failedImages, this.url, Date.now(), MAX_FAILED_IMAGE_CACHE_ENTRIES);
-        resolve(null);
-      });
-    })).finally(() => {
-      pendingImageLoads.delete(this.url);
-    });
-    pendingImageLoads.set(this.url, load);
-    return load;
-  }
-
-  showLoadedImage(container: HTMLElement, img: HTMLImageElement, view?: EditorView): void {
-    const show = () => {
-      container.classList.remove('meo-md-image-fallback');
-      container.replaceChildren(img, this.createImageControls(img));
-    };
+  preserveImageLayoutChange(container: HTMLElement, view: EditorView | undefined, apply: () => void): void {
     if (!view || !container.isConnected) {
-      show();
+      apply();
       return;
     }
 
@@ -527,11 +410,15 @@ export class ImageWidget extends WidgetType {
         element: container,
         from: this.sourceFrom,
         to: this.sourceFrom
-      }, show);
+      }, apply);
       return;
     }
-    show();
+    apply();
     view.requestMeasure();
+  }
+
+  fallbackText(): string {
+    return `![${this.altText}](${this.url})`;
   }
 
   createImageControls(img: HTMLImageElement): HTMLElement {
@@ -731,27 +618,6 @@ export class ImageWidget extends WidgetType {
     container.replaceChildren(fallback);
   }
 
-  setImageSource(onSrc: (src: string) => void, onFail: () => void): void {
-    const resolved = imageSrcResolver(this.url);
-    if (isPromiseLike(resolved)) {
-      resolved.then((value) => {
-        if (!value) {
-          onFail();
-          return;
-        }
-        onSrc(value);
-      }).catch(onFail);
-      return;
-    }
-
-    if (!resolved) {
-      onFail();
-      return;
-    }
-
-    onSrc(resolved);
-  }
-
   ignoreEvent(event: Event): boolean {
     if (event.type.startsWith('pointer') || event.type.startsWith('mouse')) {
       return false;
@@ -760,7 +626,16 @@ export class ImageWidget extends WidgetType {
   }
 
   destroy(): void {
+    this.presentationHandle?.dispose();
+    this.presentationHandle = null;
     this.closeFullscreen();
+  }
+}
+
+/** Disposes nested image projections before an owning widget replaces their DOM. */
+export function disposeImagePresentations(root: ParentNode): void {
+  for (const image of root.querySelectorAll<HTMLElement>('.meo-md-image')) {
+    image.dispatchEvent(new Event(IMAGE_PRESENTATION_DISPOSE_EVENT));
   }
 }
 
@@ -775,14 +650,15 @@ export class ImageGroupWidget extends WidgetType {
   readonly items: readonly ImageGroupItem[];
   private readonly widgets: ImageWidget[];
 
-  constructor(items: readonly ImageGroupItem[]) {
+  constructor(items: readonly ImageGroupItem[], presentationFactory: ImagePresentationFactory) {
     super();
     this.items = items.map((item) => ({ ...item }));
     this.widgets = this.items.map((item) => new ImageWidget(
       item.url,
       item.altText,
       item.linkUrl,
-      item.sourceFrom
+      item.sourceFrom,
+      presentationFactory
     ));
   }
 
@@ -819,10 +695,6 @@ export class ImageGroupWidget extends WidgetType {
   destroy(): void {
     for (const widget of this.widgets) widget.destroy();
   }
-}
-
-function isPromiseLike(value: unknown): value is Promise<unknown> {
-  return Boolean(value) && typeof (value as any).then === 'function';
 }
 
 function findChildNode(node: any, name: string): any {

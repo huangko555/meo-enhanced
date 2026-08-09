@@ -8,23 +8,6 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-image-presentation-candidate-'));
 
 async function main(): Promise<void> {
-  const productionSources = [
-    fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'editor.ts'), 'utf8'),
-    fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'index.ts'), 'utf8'),
-    fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'helpers', 'images.ts'), 'utf8')
-  ].join('\n');
-  for (const candidateName of [
-    'imagePresentationRuntime',
-    'imagePresentationAdapter',
-    'application/imagePresentation'
-  ]) {
-    assert.equal(
-      productionSources.includes(candidateName),
-      false,
-      `${candidateName} must remain disconnected from production`
-    );
-  }
-
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-image-presentation-candidate-entry.ts')],
     outdir: tempDir,

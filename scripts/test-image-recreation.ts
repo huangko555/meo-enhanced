@@ -15,7 +15,7 @@ class FakeElement {
   naturalWidth = 0;
   tagName: string;
 
-  constructor(tagName: string) {
+  constructor(tagName = 'img') {
     this.tagName = tagName.toUpperCase();
   }
 
@@ -60,9 +60,22 @@ class FakeElement {
 };
 (globalThis as any).navigator = { userAgent: 'test-image-recreation' };
 (globalThis as any).window = globalThis;
+(globalThis as any).Image = FakeElement;
 
-const { ImageWidget, setImageSrcResolver } = await import('../webview/src/helpers/images');
-setImageSrcResolver((url) => url);
+const { ImageWidget } = await import('../webview/src/helpers/images');
+const {
+  createImagePresentationFactory,
+  createImagePresentationResourcePool,
+  loadBrowserImage
+} = await import('../webview/src/editor/imagePresentationAdapter');
+const resources = createImagePresentationResourcePool({
+  resolveSource: async (_context, url) => url,
+  loadImage: loadBrowserImage
+});
+const factory = createImagePresentationFactory({
+  resources,
+  resourceContextKey: 'test-document'
+});
 
 const flushImageLoad = async () => {
   for (let index = 0; index < 10; index += 1) {
@@ -70,7 +83,7 @@ const flushImageLoad = async () => {
   }
 };
 
-const firstContainer = new ImageWidget('/large-image.png', 'large image', '').toDOM() as any;
+const firstContainer = new ImageWidget('/large-image.png', 'large image', '', null, factory).toDOM() as any;
 await flushImageLoad();
 const firstImage = firstContainer.children.find((child: FakeElement) => child.tagName === 'IMG');
 if (!firstImage?.complete) {
@@ -79,7 +92,7 @@ if (!firstImage?.complete) {
 
 firstContainer.isConnected = false;
 firstImage.isConnected = false;
-const secondContainer = new ImageWidget('/large-image.png', 'large image', '').toDOM() as any;
+const secondContainer = new ImageWidget('/large-image.png', 'large image', '', null, factory).toDOM() as any;
 const secondImage = secondContainer.children.find((child: FakeElement) => child.tagName === 'IMG');
 if (!secondImage) {
   throw new Error('Cached image was not rendered');
@@ -91,12 +104,15 @@ if (!secondImage.complete) {
   throw new Error('Cached image was recreated in an incomplete state');
 }
 
-const preloadedWidget = new ImageWidget('/preloaded-image.png', 'preloaded image', '');
+const preloadedWidget = new ImageWidget('/preloaded-image.png', 'preloaded image', '', null, factory);
 await flushImageLoad();
 const preloadedContainer = preloadedWidget.toDOM() as any;
 const preloadedImage = preloadedContainer.children.find((child: FakeElement) => child.tagName === 'IMG');
 if (!preloadedImage?.complete) {
   throw new Error('Offscreen image was not preloaded before rendering');
 }
+
+factory.dispose();
+resources.dispose();
 
 console.log('image preload and recreation checks passed');
