@@ -315,7 +315,54 @@ async function main() {
         const chrome = shell.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
         return Boolean(chrome && getComputedStyle(chrome).display !== 'none');
       });
+      const productionOwners = () => ({
+        shells: document.querySelectorAll('.meo-md-html-table-shell').length,
+        adapters: document.querySelectorAll('[data-table-sticky-header-owner="adapter"]').length,
+        toolbars: document.querySelectorAll('.meo-md-html-table-toolbar').length
+      });
+      const ownersBeforeLifecycle = productionOwners();
+
+      multiEditor.setMode('source');
+      await waitFrames();
+      const ownersInSource = productionOwners();
+      multiEditor.setMode('live');
+      await waitFrames();
+      const ownersAfterModeRestore = productionOwners();
+
+      multiEditor.setText(multiEditor.getText());
+      multiEditor.setText(`prefix\n\n${multiEditor.getText()}`);
+      await waitFrames();
+      const ownersAfterExternalPresentation = productionOwners();
+
+      const lifecycleInput = document.querySelector<HTMLTextAreaElement>('.meo-md-html-table-shell tbody textarea')!;
+      lifecycleInput.focus({ preventScroll: true });
+      lifecycleInput.value = `${lifecycleInput.value} changed`;
+      lifecycleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      multiEditor.commitTransientEdits();
+      await waitFrames();
+      await multiEditor.undo();
+      await waitFrames();
+      const ownersAfterUndo = productionOwners();
+      await multiEditor.redo();
+      await waitFrames();
+      const ownersAfterRedo = productionOwners();
+
+      const lateScroller = multiEditor.view.scrollDOM as HTMLElement;
       multiEditor.destroy();
+      lateScroller.dispatchEvent(new Event('scroll'));
+      window.dispatchEvent(new Event('resize'));
+      await waitFrames();
+      const ownersAfterDestroy = productionOwners();
+
+      const lifecycleState = {
+        ownersBeforeLifecycle,
+        ownersInSource,
+        ownersAfterModeRestore,
+        ownersAfterExternalPresentation,
+        ownersAfterUndo,
+        ownersAfterRedo,
+        ownersAfterDestroy
+      };
 
       return {
         passiveState,
@@ -330,7 +377,8 @@ async function main() {
         tallTailState,
         toolbarSizeState,
         fittingState,
-        multiState
+        multiState,
+        lifecycleState
       };
     });
 
@@ -420,8 +468,20 @@ async function main() {
     if (JSON.stringify(result.multiState) !== JSON.stringify([false, true])) {
       failures.push(`multiple table sticky headers were not isolated: ${JSON.stringify(result.multiState)}`);
     }
+    const expectedTwoTableOwners = { shells: 2, adapters: 2, toolbars: 2 };
+    if (
+      JSON.stringify(result.lifecycleState.ownersBeforeLifecycle) !== JSON.stringify(expectedTwoTableOwners) ||
+      JSON.stringify(result.lifecycleState.ownersInSource) !== JSON.stringify({ shells: 0, adapters: 0, toolbars: 0 }) ||
+      JSON.stringify(result.lifecycleState.ownersAfterModeRestore) !== JSON.stringify(expectedTwoTableOwners) ||
+      JSON.stringify(result.lifecycleState.ownersAfterExternalPresentation) !== JSON.stringify(expectedTwoTableOwners) ||
+      JSON.stringify(result.lifecycleState.ownersAfterUndo) !== JSON.stringify(expectedTwoTableOwners) ||
+      JSON.stringify(result.lifecycleState.ownersAfterRedo) !== JSON.stringify(expectedTwoTableOwners) ||
+      JSON.stringify(result.lifecycleState.ownersAfterDestroy) !== JSON.stringify({ shells: 0, adapters: 0, toolbars: 0 })
+    ) {
+      failures.push(`production Sticky ownership lifecycle was incorrect: ${JSON.stringify(result.lifecycleState)}`);
+    }
     if (failures.length) throw new Error(failures.join('\n'));
-    console.log('table sticky header checks passed');
+    console.log('table sticky header production checks passed');
   } finally {
     await browser.close();
   }
