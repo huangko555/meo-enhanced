@@ -179,6 +179,7 @@ export function createPreviewController({
 
   let appearance: PreviewAppearance = 'dark';
   let requestGeneration = 0;
+  let presentationGeneration = 0;
   let hasPendingRequest = false;
   let pendingRestoreLine: number | null = null;
   let pendingText = '';
@@ -324,6 +325,8 @@ export function createPreviewController({
     if (disposed || !latestPayload) {
       return;
     }
+    const generation = presentationGeneration + 1;
+    presentationGeneration = generation;
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
     const katexInlineStyles = collectPreviewKatexStyles(katexHref).replace(/<\/style/gi, '<\\/style');
     const katexStylesTag = katexInlineStyles
@@ -333,7 +336,7 @@ export function createPreviewController({
         : '';
     const styles = latestPayload.styles[appearance].replace(/<\/style/gi, '<\\/style');
     frame.onload = () => {
-      if (disposed) return;
+      if (disposed || generation !== presentationGeneration) return;
       const frameDocument = frame.contentDocument;
       if (!frameDocument) {
         return;
@@ -349,6 +352,11 @@ export function createPreviewController({
       bindPreviewFindShortcut(frameDocument, onFindRequested);
       refreshSearchMatches();
       const keepPosition = () => {
+        if (
+          disposed ||
+          generation !== presentationGeneration ||
+          frame.contentDocument !== frameDocument
+        ) return;
         if (restoreLine !== null) {
           restoreTopLine(restoreLine);
         }
@@ -375,9 +383,16 @@ export function createPreviewController({
     if (!latestPayload || !frameDocument || !styleElement) {
       return;
     }
+    const generation = presentationGeneration + 1;
+    presentationGeneration = generation;
     const scrollTop = Number(frameDocument.scrollingElement?.scrollTop ?? 0);
     styleElement.textContent = latestPayload.styles[appearance];
     const keepPosition = () => {
+      if (
+        disposed ||
+        generation !== presentationGeneration ||
+        frame.contentDocument !== frameDocument
+      ) return;
       if (frameDocument.scrollingElement) {
         frameDocument.scrollingElement.scrollTop = scrollTop;
       }
@@ -629,6 +644,7 @@ export function createPreviewController({
       if (disposed) return;
       disposed = true;
       requestGeneration += 1;
+      presentationGeneration += 1;
       hasPendingRequest = false;
       pendingRestoreLine = null;
       previewRenderTransport.cancelAll('Preview closed');

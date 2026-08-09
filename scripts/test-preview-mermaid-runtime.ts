@@ -355,6 +355,67 @@ try {
   ) {
     throw new Error(`Light Preview Mermaid palette mismatch: ${JSON.stringify(lightPalette)}`);
   }
+  const stalePreview = await page.evaluate(({ oldText, html, lightStyles, darkStyles }) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const messages = (window as typeof window & {
+      __previewMessages?: Array<{ type?: string; requestId?: string }>;
+      __queueSlowLiveOperations?: (count: number, delayMs: number) => void;
+    });
+    const mermaidRequestsBefore = (messages as typeof messages & { __previewMermaidRequests?: number })
+      .__previewMermaidRequests ?? 0;
+    messages.__queueSlowLiveOperations?.(1, 400);
+    controller.requestRender(oldText, { restoreLine: 1 });
+    const requestId = messages.__previewMessages
+      ?.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    controller.acceptRenderResponse({
+      type: 'previewRenderResult',
+      requestId,
+      result: { ok: true, value: { html, hasMermaid: true, styles: { light: lightStyles, dark: darkStyles } } }
+    });
+    return { requestId, mermaidRequestsBefore };
+  }, { oldText: `${markdownText}\n<!-- stale-mermaid-frame -->`, html: rendered.html, lightStyles, darkStyles });
+  if (!stalePreview.requestId) throw new Error('Stale Mermaid frame request was not created');
+  await page.waitForFunction((requestsBefore) => (
+    (window as typeof window & { __previewMermaidRequests?: number }).__previewMermaidRequests ?? 0
+  ) > requestsBefore, {}, stalePreview.mermaidRequestsBefore);
+  const replacementText = 'replacement without Mermaid';
+  const latestRequestId = await page.evaluate(({ text, lightStyles, darkStyles }) => {
+    const controller = (window as typeof window & { __previewController?: any }).__previewController;
+    const messages = (window as typeof window & { __previewMessages?: Array<{ type?: string; requestId?: string }> })
+      .__previewMessages ?? [];
+    controller.requestRender(text);
+    const requestId = messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? '';
+    controller.acceptRenderResponse({
+      type: 'previewRenderResult',
+      requestId,
+      result: {
+        ok: true,
+        value: {
+          html: `<div data-latest-preview data-source-line="1" data-source-end-line="120">${'<p>latest frame</p>'.repeat(120)}</div>`,
+          hasMermaid: false,
+          styles: { light: lightStyles, dark: darkStyles }
+        }
+      }
+    });
+    return requestId;
+  }, { text: replacementText, lightStyles, darkStyles });
+  if (!latestRequestId || latestRequestId === stalePreview.requestId) {
+    throw new Error('Latest Preview request did not supersede the stale Mermaid frame');
+  }
+  await page.waitForFunction(() => Boolean(
+    document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+      ?.querySelector('[data-latest-preview]')
+  ));
+  const latestScrollTop = await page.evaluate(async () => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    if (!frameDocument?.scrollingElement) return -1;
+    frameDocument.scrollingElement.scrollTop = 300;
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+    return frameDocument.scrollingElement.scrollTop;
+  });
+  if (Math.abs(latestScrollTop - 300) > 2) {
+    throw new Error(`Stale Preview Mermaid completion changed the latest viewport: ${latestScrollTop}`);
+  }
   console.log('Preview Mermaid runtime test passed');
 } finally {
   await browser.close();

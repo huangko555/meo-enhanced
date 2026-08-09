@@ -39,10 +39,18 @@ const mermaidPresentationFactory = createMermaidDiagramPresentationFactory({
   }
 });
 
+const previewMermaidResources = {
+  runExclusive<T>(operation: () => Promise<T>, priority?: 'high' | 'normal') {
+    const testWindow = window as typeof window & { __previewMermaidRequests?: number };
+    testWindow.__previewMermaidRequests = (testWindow.__previewMermaidRequests ?? 0) + 1;
+    return mermaidResources.runExclusive(operation, priority);
+  }
+} as MermaidDiagramRenderResources;
+
 const previewMessages: unknown[] = [];
 const controller = createPreviewController({
   vscode: { postMessage(message) { previewMessages.push(message); } },
-  mermaidRenderResources: mermaidResources,
+  mermaidRenderResources: previewMermaidResources,
   onRendered: () => {
     (window as typeof window & { __previewRenderedAt?: number }).__previewRenderedAt = performance.now();
   }
