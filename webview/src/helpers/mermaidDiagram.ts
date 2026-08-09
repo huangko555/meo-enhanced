@@ -1,6 +1,8 @@
 import { WidgetType, type EditorView } from '@codemirror/view';
 import { createElement, ZoomIn, ZoomOut, RotateCcw, Maximize2, X } from 'lucide';
 import type { EditorState } from '@codemirror/state';
+import type { SyntaxNodeRef } from '@lezer/common';
+import type { MermaidConfig } from 'mermaid';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import type { MermaidDiagramRenderRequest } from '../application/mermaidDiagramRenderResources';
@@ -16,10 +18,21 @@ declare global {
   var mermaid: MermaidRuntime | undefined;
 }
 
+type MermaidRuntimeConfig = MermaidConfig & {
+  forceLegacyMathML?: boolean;
+};
+
 interface MermaidRuntime {
-  initialize(config: any): void;
+  initialize(config: MermaidRuntimeConfig): void;
   render(id: string, text: string): Promise<{ svg: string }>;
 }
+
+type MermaidSvgBox = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
 
 export const MERMAID_EDITOR_CONFIG_KEY = 'editor-v1';
 const MERMAID_MATH_CLASS = 'meoMath';
@@ -221,7 +234,7 @@ function isMermaidDarkTheme(background: string): boolean {
   return isProbablyDarkColor(background);
 }
 
-function getMermaidThemeConfig() {
+function getMermaidThemeConfig(): { signature: string; config: MermaidRuntimeConfig } {
   const rootStyles = getComputedStyle(document.documentElement);
   const bodyStyles = getComputedStyle(document.body);
   const fontFamily = rootStyles.getPropertyValue('--meo-font-live').trim() || bodyStyles.fontFamily;
@@ -390,7 +403,7 @@ export function isDisplayMathDiagram(diagramText: string): boolean {
   return MERMAID_DISPLAY_MATH_RE.test(diagramText.trim());
 }
 
-function compactDisplayMath(diagramText) {
+function compactDisplayMath(diagramText: string): string {
   const inner = diagramText.trim().slice(2, -2).trim();
   const singleLine = inner
     .split(/\r?\n/)
@@ -400,7 +413,7 @@ function compactDisplayMath(diagramText) {
   return `$$${singleLine}$$`;
 }
 
-function escapeForMermaidLabel(text) {
+function escapeForMermaidLabel(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
@@ -429,7 +442,7 @@ export function normalizeMermaidDiagramText(diagramText: string): string {
   ].join('\n');
 }
 
-export function getFencedCodeContent(state: EditorState, node: any): string {
+export function getFencedCodeContent(state: EditorState, node: SyntaxNodeRef): string {
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
   const lastChild = node.node.lastChild;
@@ -650,7 +663,7 @@ export class MermaidDiagramWidget extends WidgetType {
     return container;
   }
 
-  renderSvg(container, svgContent) {
+  renderSvg(container: HTMLElement, svgContent: string): void {
     const svgWrapper = document.createElement('div');
     svgWrapper.className = 'meo-mermaid-svg-wrapper';
     svgWrapper.innerHTML = svgContent;
@@ -667,8 +680,8 @@ export class MermaidDiagramWidget extends WidgetType {
     this.attachInteractions(svgWrapper, container);
   }
 
-  trimDisplayMathSvg(svgWrapper) {
-    let originalViewBox = null;
+  trimDisplayMathSvg(svgWrapper: HTMLElement): void {
+    let originalViewBox: MermaidSvgBox | null = null;
 
     const applyTrim = () => {
       const svg = svgWrapper.querySelector('svg');
@@ -711,7 +724,7 @@ export class MermaidDiagramWidget extends WidgetType {
     }
   }
 
-  getDisplayMathContentBox(svg) {
+  getDisplayMathContentBox(svg: SVGSVGElement): MermaidSvgBox | null {
     const screenCtm = svg.getScreenCTM();
     if (!screenCtm) {
       return null;
@@ -724,8 +737,8 @@ export class MermaidDiagramWidget extends WidgetType {
       return null;
     }
 
-    const labelNodes = svg.querySelectorAll(DISPLAY_MATH_LABEL_SELECTOR);
-    const points = [];
+    const labelNodes = svg.querySelectorAll<Element>(DISPLAY_MATH_LABEL_SELECTOR);
+    const points: DOMPoint[] = [];
     for (const node of labelNodes) {
       if (!(node instanceof Element)) {
         continue;
@@ -760,7 +773,12 @@ export class MermaidDiagramWidget extends WidgetType {
     };
   }
 
-  transformClientPointToSvg(svg, inverseCtm, x, y) {
+  transformClientPointToSvg(
+    svg: SVGSVGElement,
+    inverseCtm: DOMMatrix,
+    x: number,
+    y: number
+  ): DOMPoint {
     if (typeof DOMPoint === 'function') {
       return new DOMPoint(x, y).matrixTransform(inverseCtm);
     }
@@ -770,19 +788,19 @@ export class MermaidDiagramWidget extends WidgetType {
     return point.matrixTransform(inverseCtm);
   }
 
-  getSvgContentBox(svg) {
+  getSvgContentBox(svg: SVGSVGElement): DOMRect | null {
     if (typeof svg.getBBox !== 'function') {
       return null;
     }
     try {
-      const contentNode = svg.querySelector('.nodes') ?? svg;
+      const contentNode = svg.querySelector<SVGGraphicsElement>('.nodes') ?? svg;
       return contentNode.getBBox();
     } catch {
       return null;
     }
   }
 
-  getSvgViewBox(svg) {
+  getSvgViewBox(svg: SVGSVGElement): MermaidSvgBox | null {
     const rawViewBox = svg.getAttribute('viewBox');
     if (rawViewBox) {
       const parts = rawViewBox
@@ -814,7 +832,7 @@ export class MermaidDiagramWidget extends WidgetType {
     return null;
   }
 
-  parseSvgLength(value) {
+  parseSvgLength(value: string | null): number | null {
     if (typeof value !== 'string' || !value.trim()) {
       return null;
     }
@@ -822,7 +840,7 @@ export class MermaidDiagramWidget extends WidgetType {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  createZoomControls(svgContainer) {
+  createZoomControls(svgContainer: HTMLElement): HTMLElement {
     const controls = document.createElement('div');
     controls.className = 'meo-visual-controls meo-mermaid-zoom-controls';
     applyMermaidThemeClass(controls);
@@ -886,7 +904,7 @@ export class MermaidDiagramWidget extends WidgetType {
     return controls;
   }
 
-  toggleFullscreen(svgContainer) {
+  toggleFullscreen(svgContainer: HTMLElement): void {
     if (this.isFullscreen) {
       this.exitFullscreen();
     } else {
@@ -894,12 +912,13 @@ export class MermaidDiagramWidget extends WidgetType {
     }
   }
 
-  enterFullscreen(svgContainer) {
+  enterFullscreen(svgContainer: HTMLElement): void {
     if (this.isFullscreen) {
       return;
     }
     this.isFullscreen = true;
-    this.svgContent = svgContainer.innerHTML;
+    const svgContent = svgContainer.innerHTML;
+    this.svgContent = svgContent;
 
     const overlay = document.createElement('div');
     overlay.className = 'meo-mermaid-fullscreen-scrim';
@@ -910,7 +929,7 @@ export class MermaidDiagramWidget extends WidgetType {
 
     const svgWrapper = document.createElement('div');
     svgWrapper.className = 'meo-mermaid-svg-wrapper';
-    svgWrapper.innerHTML = this.svgContent;
+    svgWrapper.innerHTML = svgContent;
 
     fullscreenContainer.appendChild(svgWrapper);
 
@@ -956,7 +975,7 @@ export class MermaidDiagramWidget extends WidgetType {
     document.addEventListener('keydown', this.exitFullscreenHandler);
   }
 
-  createFullscreenControls(svgContainer) {
+  createFullscreenControls(svgContainer: HTMLElement): HTMLElement {
     const controls = document.createElement('div');
     controls.className = 'meo-visual-controls meo-mermaid-zoom-controls meo-mermaid-fullscreen-controls';
     applyMermaidThemeClass(controls);
@@ -1025,14 +1044,15 @@ export class MermaidDiagramWidget extends WidgetType {
     return controls;
   }
 
-  attachFullscreenInteractions(svgWrapper, container) {
+  attachFullscreenInteractions(svgWrapper: HTMLElement, container: HTMLElement): void {
     let isDragging = false;
     let lastMouseX = 0;
     let lastMouseY = 0;
 
-    container.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.meo-mermaid-zoom-controls')) return;
-      if (e.target.closest('.meo-mermaid-zoom-btn')) return;
+    container.addEventListener('mousedown', (e: MouseEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest('.meo-mermaid-zoom-controls')) return;
+      if (target?.closest('.meo-mermaid-zoom-btn')) return;
       if (e.button !== 0) return;
 
       container.style.cursor = 'grabbing';
@@ -1041,7 +1061,7 @@ export class MermaidDiagramWidget extends WidgetType {
       lastMouseY = e.clientY;
     });
 
-    const onMouseMove = (e) => {
+    const onMouseMove = (e: MouseEvent) => {
       if (!isDragging) {
         return;
       }
@@ -1060,7 +1080,7 @@ export class MermaidDiagramWidget extends WidgetType {
       container.style.cursor = 'grab';
     };
 
-    const onWheel = (e) => {
+    const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? -0.25 : 0.25;
       this.zoom = Math.max(0.25, Math.min(4, this.zoom + delta));
@@ -1079,7 +1099,7 @@ export class MermaidDiagramWidget extends WidgetType {
     };
   }
 
-  exitFullscreen() {
+  exitFullscreen(): void {
     if (!this.isFullscreen) {
       return;
     }
@@ -1102,10 +1122,19 @@ export class MermaidDiagramWidget extends WidgetType {
     }
   }
 
-  setZoom(svgContainer, newZoom, centerX = null, centerY = null) {
+  setZoom(
+    svgContainer: HTMLElement,
+    newZoom: number,
+    centerX: number | null = null,
+    centerY: number | null = null
+  ): void {
     if (centerX !== null && centerY !== null) {
       const rect = svgContainer.getBoundingClientRect();
-      const containerRect = svgContainer.parentElement.getBoundingClientRect();
+      const parent = svgContainer.parentElement;
+      if (!parent) {
+        throw new Error('Mermaid zoom target must be mounted');
+      }
+      const containerRect = parent.getBoundingClientRect();
 
       const pointX = centerX - (rect.left - containerRect.left);
       const pointY = centerY - (rect.top - containerRect.top);
@@ -1119,19 +1148,20 @@ export class MermaidDiagramWidget extends WidgetType {
     this.applyTransform(svgContainer);
   }
 
-  applyTransform(svgContainer) {
+  applyTransform(svgContainer: HTMLElement): void {
     svgContainer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
   }
 
-  attachInteractions(svgWrapper, container) {
+  attachInteractions(svgWrapper: HTMLElement, container: HTMLElement): void {
     if (this.inlineCleanup) {
       this.inlineCleanup();
       this.inlineCleanup = null;
     }
 
-    const onMouseDown = (e) => {
-      if (e.target.closest('.meo-mermaid-zoom-controls')) return;
-      if (e.target.closest('.meo-mermaid-zoom-btn')) return;
+    const onMouseDown = (e: PointerEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest('.meo-mermaid-zoom-controls')) return;
+      if (target?.closest('.meo-mermaid-zoom-btn')) return;
       if (e.button !== 0) return;
 
       container.style.cursor = 'grabbing';
@@ -1141,7 +1171,7 @@ export class MermaidDiagramWidget extends WidgetType {
       this.lastMouseY = e.clientY;
     };
 
-    const onMouseMove = (e) => {
+    const onMouseMove = (e: PointerEvent) => {
       if (!this.isDragging) {
         return;
       }
@@ -1171,7 +1201,7 @@ export class MermaidDiagramWidget extends WidgetType {
     };
   }
 
-  renderError(container, errorMsg) {
+  renderError(container: HTMLElement, errorMsg: string): void {
     const fallback = document.createElement('pre');
     fallback.className = 'meo-mermaid-fallback';
     const code = document.createElement('code');
