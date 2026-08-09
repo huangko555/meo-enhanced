@@ -51,14 +51,14 @@ try {
   ].join('\n'));
   write('webview/src/helpers/math.ts', [
     "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
-    'export function collect(text: string) { return scanLatexMath(text); }',
+    'export function collect(text: string) { return (scanLatexMath(text)); }',
     'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
     'export function renderRows(rows: string[]) { for (const row of rows) void row; }',
     ''
   ].join('\n'));
   write('src/export/math.ts', [
     "import { scanLatexMath } from '../shared/latexMathScanner';",
-    'export function collect(text: string) { return scanLatexMath(text); }',
+    'export function collect(text: string) { return scanLatexMath(text) as unknown[]; }',
     ''
   ].join('\n'));
 
@@ -124,6 +124,20 @@ try {
   const reboundCollection = runCheck();
   assert.equal(reboundCollection.ok, false, 'reassigned shared collection result must be rejected');
   assert.match(reboundCollection.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string, baseOffset: number) {',
+    '  const ranges = scanLatexMath(text);',
+    '  if (baseOffset === 0) { const ranges: unknown[] = []; return ranges; }',
+    '  return ranges;',
+    '}',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
+    ''
+  ].join('\n'));
+  const shadowedCollection = runCheck();
+  assert.equal(shadowedCollection.ok, false, 'shadowed shared result binding must be rejected');
+  assert.match(shadowedCollection.output, /ARCH011/);
 
   write('webview/src/helpers/math.ts', [
     "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",

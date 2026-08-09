@@ -235,7 +235,6 @@ for (const contract of config.sharedModuleContracts ?? []) {
       .filter((parameter) => ts.isIdentifier(parameter.name))
       .map((parameter) => (parameter.name as ts.Identifier).text));
     let requiredCallCount = 0;
-    let requiredCallReturnedDirectly = false;
     const requiredResultNames = new Set<string>();
     let containsUnauthorizedCall = false;
     let readsParameterByIndex = false;
@@ -247,9 +246,7 @@ for (const contract of config.sharedModuleContracts ?? []) {
         if (ts.isIdentifier(node.expression)) {
           if (node.expression.text === requiredLocalName) {
             requiredCallCount += 1;
-            if (ts.isReturnStatement(node.parent)) {
-              requiredCallReturnedDirectly = true;
-            } else if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+            if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
               const declarationList = node.parent.parent;
               if (ts.isVariableDeclarationList(declarationList)
                 && (declarationList.flags & ts.NodeFlags.Const) !== 0) {
@@ -281,7 +278,11 @@ for (const contract of config.sharedModuleContracts ?? []) {
     visitCaller(functionDeclaration.body);
     const unwrap = (expression: ts.Expression): ts.Expression => {
       let current = expression;
-      while (ts.isParenthesizedExpression(current)) current = current.expression;
+      while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)
+        || ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current)
+        || ts.isNonNullExpression(current)) {
+        current = current.expression;
+      }
       return current;
     };
     const returnDerivesSharedResult = (statement: ts.ReturnStatement): boolean => {
@@ -290,7 +291,7 @@ for (const contract of config.sharedModuleContracts ?? []) {
       if (ts.isIdentifier(expression) && requiredResultNames.has(expression.text)) return true;
       if (ts.isCallExpression(expression)) {
         if (ts.isIdentifier(expression.expression) && expression.expression.text === requiredLocalName) {
-          return requiredCallReturnedDirectly;
+          return true;
         }
         if (ts.isPropertyAccessExpression(expression.expression)
           && ts.isIdentifier(expression.expression.expression)
@@ -317,11 +318,20 @@ for (const contract of config.sharedModuleContracts ?? []) {
       ts.forEachChild(node, collectReturns);
     };
     collectReturns(functionDeclaration.body);
+    const declarationCounts = new Map<string, number>();
+    const collectDeclarations = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
+        && requiredResultNames.has(node.name.text)) {
+        declarationCounts.set(node.name.text, (declarationCounts.get(node.name.text) ?? 0) + 1);
+      }
+      ts.forEachChild(node, collectDeclarations);
+    };
+    collectDeclarations(functionDeclaration.body);
     if (!requiredLocalName || requiredCallCount !== 1) {
       failures.push(`ARCH011 共享模块调用方必须恰好委托一次 ${delegate.requiredCall}: ${delegate.file} (${delegate.function})`);
     }
-    if (!requiredCallReturnedDirectly && requiredResultNames.size === 0) {
-      failures.push(`ARCH011 共享模块委托结果不得丢弃: ${delegate.file} (${delegate.function})`);
+    if (Array.from(requiredResultNames).some((name) => declarationCounts.get(name) !== 1)) {
+      failures.push(`ARCH011 共享模块委托结果变量不得遮蔽: ${delegate.file} (${delegate.function})`);
     }
     if (!ownedReturns.some(returnDerivesSharedResult)) {
       failures.push(`ARCH011 共享模块委托结果必须存在有效返回路径: ${delegate.file} (${delegate.function})`);
