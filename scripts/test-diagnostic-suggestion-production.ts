@@ -411,9 +411,16 @@ async function main(): Promise<void> {
     await page.evaluate(() => document.querySelector<HTMLButtonElement>(
       '#table-diagnostic-menu .selection-inline-suggestion'
     )?.click());
+    await page.waitForFunction(() => {
+      const harness = (window as any).__tableDiagnosticHarness;
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '#table-diagnostic-app textarea[data-table-cell-from="2"]'
+      );
+      return input?.value === 'good'
+        && !harness.menu.elements.menu.classList.contains('is-visible');
+    });
     const tableApplied = await page.evaluate(async () => {
       const harness = (window as any).__tableDiagnosticHarness;
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       const result = {
         text: harness.editor.getText(),
         inputValue: document.querySelector<HTMLTextAreaElement>(
