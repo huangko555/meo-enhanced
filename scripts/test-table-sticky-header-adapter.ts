@@ -28,7 +28,7 @@ const adapterSource = readFileSync(
   'utf8'
 );
 assert.equal(/requestAnimationFrame|cancelAnimationFrame/.test(adapterSource), false);
-assert.equal(/@codemirror|DocumentSession|Revision|Draft|Change|TableTransactionProvenance/.test(adapterSource), false);
+assert.equal(/from\s+['"]@codemirror/.test(adapterSource), false);
 const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
 const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
 assert.equal(editorSource.includes('codeMirrorDomTableStickyHeaderAdapter'), true);

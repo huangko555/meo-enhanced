@@ -195,6 +195,22 @@ async function main(): Promise<void> {
       scheduler.flush();
       const hiddenWithOuterMode = !elements(1).stickyChrome.classList.contains('is-visible');
       elements(1).shell.style.display = '';
+
+      const detachedTable = elements(1).table;
+      const rebuiltTable = detachedTable.cloneNode(true) as HTMLTableElement;
+      detachedTable.replaceWith(rebuiltTable);
+      adapter1.update();
+      scheduler.flush();
+      const visibleAfterRebuild = elements(1).stickyChrome.classList.contains('is-visible');
+      detachedTable.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Detached header';
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      scheduler.flush();
+      const headerAfterDetachedMutation = elements(1).stickyHeaderRow.textContent;
+      rebuiltTable.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Rebuilt header';
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      scheduler.flush();
+      const headerAfterRebuiltMutation = elements(1).stickyHeaderRow.textContent;
+
       const styleBeforeDispose = elements(1).stickyTable.style.width;
       adapter1.unmount();
       elements(1).table.style.width = '440px';
@@ -229,12 +245,15 @@ async function main(): Promise<void> {
         projectedWidth,
         focusAndSelectionPreserved,
         hiddenWithOuterMode,
+        visibleAfterRebuild,
+        headerAfterDetachedMutation,
+        headerAfterRebuiltMutation,
         styleBeforeDispose,
         styleAfterDispose,
         hiddenAfterDispose,
         otherSurvivedDispose,
         registrationsAfterFirstDispose,
-        sourceUnchanged: elements(1).table.textContent?.replace('Updated header', 'Header 1') === sourceText,
+        sourceUnchanged: elements(1).table.textContent?.replace('Rebuilt header', 'Header 1') === sourceText,
         scrollUnchangedByProjection: elements(1).scroller.scrollTop === 90 && initialScroll === 0,
         internalRafCalls: 0
       };
@@ -258,6 +277,9 @@ async function main(): Promise<void> {
     assert.equal(result.projectedWidth, '480px');
     assert.equal(result.focusAndSelectionPreserved, true);
     assert.equal(result.hiddenWithOuterMode, true);
+    assert.equal(result.visibleAfterRebuild, true);
+    assert.doesNotMatch(result.headerAfterDetachedMutation ?? '', /Detached header/);
+    assert.match(result.headerAfterRebuiltMutation ?? '', /Rebuilt header/);
     assert.equal(result.styleAfterDispose, result.styleBeforeDispose);
     assert.equal(result.hiddenAfterDispose, true);
     assert.equal(result.otherSurvivedDispose, true);

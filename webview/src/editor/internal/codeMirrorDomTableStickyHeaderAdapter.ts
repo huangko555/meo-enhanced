@@ -168,9 +168,31 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     refreshContent();
   };
 
+  const update = (): void => {
+    if (disposed) return;
+    const nextElements = options.resolveElements();
+    if (!nextElements) {
+      unmount();
+      return;
+    }
+    const currentElements = mountedElements;
+    const elementsChanged = !currentElements ||
+      currentElements.scroller !== nextElements.scroller ||
+      currentElements.table !== nextElements.table ||
+      currentElements.stickyChrome !== nextElements.stickyChrome ||
+      currentElements.stickyHeaderViewport !== nextElements.stickyHeaderViewport ||
+      currentElements.stickyTable !== nextElements.stickyTable ||
+      currentElements.stickyHeaderRow !== nextElements.stickyHeaderRow;
+    if (elementsChanged) {
+      mount();
+      return;
+    }
+    refreshContent();
+  };
+
   return {
     mount,
-    update: refreshContent,
+    update,
     invalidate,
     unmount,
     dispose() {
