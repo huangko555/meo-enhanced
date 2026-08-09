@@ -4,7 +4,7 @@ import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-diagnostic-suggestion-characterization-'));
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-diagnostic-suggestion-production-'));
 
 async function main(): Promise<void> {
   const build = await Bun.build({
@@ -278,7 +278,7 @@ async function main(): Promise<void> {
     if (postFailure.suggestions !== 0 || postFailure.markerCount !== 1) {
       throw new Error(`post failure changed production diagnostics: ${JSON.stringify(postFailure)}`);
     }
-    console.log('Diagnostic suggestion production characterization checks passed');
+    console.log('Diagnostic suggestion production checks passed');
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
