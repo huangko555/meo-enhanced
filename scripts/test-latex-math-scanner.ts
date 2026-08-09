@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { scanLatexMath } from '../src/shared/latexMathScanner';
+import { scanLatexMath, scanLatexMathAt } from '../src/shared/latexMathScanner';
 
 assert.deepEqual(scanLatexMath('before $x^2$ after'), [
   {
@@ -60,5 +60,22 @@ assert.deepEqual(
     raw: '$a xx$code$yy + b$'
   }]
 );
+
+assert.deepEqual(scanLatexMathAt('$$x$$', 1), {
+  from: 1,
+  to: 4,
+  mode: 'inline',
+  content: 'x',
+  raw: '$x$'
+});
+assert.deepEqual(scanLatexMathAt('prefix\n$$\nx\n$$', 7), {
+  from: 7,
+  to: 14,
+  mode: 'display',
+  content: 'x',
+  raw: '$$\nx\n$$',
+  fencedDisplay: true
+});
+assert.equal(scanLatexMathAt('prefix $$\nx\n$$', 7), null);
 
 console.log('Shared LaTeX math scanner checks passed');

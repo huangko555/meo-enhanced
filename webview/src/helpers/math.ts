@@ -1,5 +1,6 @@
 import {
   scanLatexMath,
+  scanLatexMathAt,
   type LatexMathMode,
   type LatexMathRange
 } from '../../../src/shared/latexMathScanner';
@@ -50,9 +51,7 @@ export function parseLatexMathAt(
   if (!text || index < 0 || index >= text.length) {
     return null;
   }
-  const range = scanLatexMath(text, {
-    excludedRanges: index > 0 ? [{ from: 0, to: index }] : []
-  }).find((candidate) => candidate.from === index) ?? null;
+  const range = scanLatexMathAt(text, index);
   if (!range) {
     return null;
   }

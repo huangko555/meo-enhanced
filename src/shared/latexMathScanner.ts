@@ -137,6 +137,95 @@ function findDisplayMathClose(text: string, start: number, excludedRanges: Reado
   return -1;
 }
 
+type LatexMathCandidate = {
+  range: LatexMathRange | null;
+  nextOpen: number;
+};
+
+function scanLatexMathCandidateAt(
+  text: string,
+  open: number,
+  excludedRanges: ReadonlyArray<SourceRange>
+): LatexMathCandidate {
+  const excluded = excludedRangeAt(excludedRanges, open);
+  if (excluded) {
+    return { range: null, nextOpen: excluded.to };
+  }
+  if (text[open] !== '$' || isEscaped(text, open)) {
+    return { range: null, nextOpen: open + 1 };
+  }
+  if (text[open + 1] === '$') {
+    const close = findDisplayMathClose(text, open + 2, excludedRanges);
+    if (close <= open + 2) {
+      return { range: null, nextOpen: open + 2 };
+    }
+    const rawContent = text.slice(open + 2, close);
+    const content = rawContent.trim();
+    if (!content) {
+      return { range: null, nextOpen: close + 2 };
+    }
+    const openLineStart = text.lastIndexOf('\n', Math.max(0, open - 1)) + 1;
+    const openLineEnd = text.indexOf('\n', open + 2);
+    const closeLineStart = text.lastIndexOf('\n', Math.max(0, close - 1)) + 1;
+    const closeLineEnd = text.indexOf('\n', close + 2);
+    const fencedDisplay = !text.slice(openLineStart, open).trim()
+      && !text.slice(open + 2, openLineEnd < 0 ? text.length : openLineEnd).trim()
+      && !text.slice(closeLineStart, close).trim()
+      && !text.slice(close + 2, closeLineEnd < 0 ? text.length : closeLineEnd).trim();
+    if ((rawContent.includes('\n') || rawContent.includes('\r')) && !fencedDisplay) {
+      return { range: null, nextOpen: close + 2 };
+    }
+    return {
+      range: {
+        from: open,
+        to: close + 2,
+        mode: 'display',
+        content,
+        raw: text.slice(open, close + 2),
+        fencedDisplay
+      },
+      nextOpen: close + 2
+    };
+  }
+  if (!text[open + 1] || isWhitespace(text[open + 1])) {
+    return { range: null, nextOpen: open + 1 };
+  }
+  const close = findInlineMathClose(text, open + 1, excludedRanges);
+  if (close <= open + 1 || isWhitespace(text[close - 1])) {
+    return { range: null, nextOpen: open + 1 };
+  }
+  const content = text.slice(open + 1, close);
+  if (shouldRejectInlineMathCandidate(content)) {
+    return { range: null, nextOpen: open + 1 };
+  }
+  return {
+    range: {
+      from: open,
+      to: close + 1,
+      mode: 'inline',
+      content,
+      raw: text.slice(open, close + 1)
+    },
+    nextOpen: close + 1
+  };
+}
+
+/** Returns the LaTeX range that starts exactly at `index`, if any. */
+export function scanLatexMathAt(
+  text: string,
+  index: number,
+  options: LatexMathScanOptions = {}
+): LatexMathRange | null {
+  if (!text || index < 0 || index >= text.length) {
+    return null;
+  }
+  return scanLatexMathCandidateAt(
+    text,
+    index,
+    normalizeExcludedRanges(options.excludedRanges ?? [])
+  ).range;
+}
+
 /**
  * Scans LaTeX ranges in source order. Returned positions are relative to `text`;
  * malformed or non-math dollar-delimited prose is left unrecognized.
@@ -145,72 +234,11 @@ export function scanLatexMath(text: string, options: LatexMathScanOptions = {}):
   const excludedRanges = normalizeExcludedRanges(options.excludedRanges ?? []);
   const ranges: LatexMathRange[] = [];
   for (let open = 0; open < text.length;) {
-    const excluded = excludedRangeAt(excludedRanges, open);
-    if (excluded) {
-      open = excluded.to;
-      continue;
+    const candidate = scanLatexMathCandidateAt(text, open, excludedRanges);
+    if (candidate.range) {
+      ranges.push(candidate.range);
     }
-    if (text[open] !== '$' || isEscaped(text, open)) {
-      open += 1;
-      continue;
-    }
-    if (text[open + 1] === '$') {
-      const close = findDisplayMathClose(text, open + 2, excludedRanges);
-      if (close <= open + 2) {
-        open += 2;
-        continue;
-      }
-      const rawContent = text.slice(open + 2, close);
-      const content = rawContent.trim();
-      if (!content) {
-        open = close + 2;
-        continue;
-      }
-      const openLineStart = text.lastIndexOf('\n', Math.max(0, open - 1)) + 1;
-      const openLineEnd = text.indexOf('\n', open + 2);
-      const closeLineStart = text.lastIndexOf('\n', Math.max(0, close - 1)) + 1;
-      const closeLineEnd = text.indexOf('\n', close + 2);
-      const fencedDisplay = !text.slice(openLineStart, open).trim()
-        && !text.slice(open + 2, openLineEnd < 0 ? text.length : openLineEnd).trim()
-        && !text.slice(closeLineStart, close).trim()
-        && !text.slice(close + 2, closeLineEnd < 0 ? text.length : closeLineEnd).trim();
-      if ((rawContent.includes('\n') || rawContent.includes('\r')) && !fencedDisplay) {
-        open = close + 2;
-        continue;
-      }
-      ranges.push({
-        from: open,
-        to: close + 2,
-        mode: 'display',
-        content,
-        raw: text.slice(open, close + 2),
-        fencedDisplay
-      });
-      open = close + 2;
-      continue;
-    }
-    if (!text[open + 1] || isWhitespace(text[open + 1])) {
-      open += 1;
-      continue;
-    }
-    const close = findInlineMathClose(text, open + 1, excludedRanges);
-    if (close <= open + 1 || isWhitespace(text[close - 1])) {
-      open += 1;
-      continue;
-    }
-    const content = text.slice(open + 1, close);
-    if (shouldRejectInlineMathCandidate(content)) {
-      open += 1;
-      continue;
-    }
-    ranges.push({
-      from: open,
-      to: close + 1,
-      mode: 'inline',
-      content,
-      raw: text.slice(open, close + 1)
-    });
-    open = close + 1;
+    open = candidate.nextOpen;
   }
   return ranges;
 }

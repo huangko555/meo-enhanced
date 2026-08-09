@@ -29,7 +29,12 @@ const config = JSON.parse(configText) as {
   sharedModuleContracts?: Array<{
     module: string;
     exactImporters: string[];
-    forbiddenTopLevelDeclarations: Array<{ file: string; names: string[] }>;
+    thinCallers: Array<{
+      file: string;
+      requiredCalls: string[];
+      forbidIterations?: boolean;
+      forbidRegex?: boolean;
+    }>;
   }>;
   knownLegacyTestFailures: { id: string; test: string; fingerprint: string }[];
 };
@@ -199,22 +204,51 @@ for (const contract of config.sharedModuleContracts ?? []) {
       failures.push(`ARCH010 共享模块出现未授权调用方: ${importer} -> ${contract.module}`);
     }
   }
-  for (const forbidden of contract.forbiddenTopLevelDeclarations) {
-    const source = sources.find((candidate) => candidate.path === forbidden.file);
-    if (!source) continue;
+  for (const caller of contract.thinCallers) {
+    const source = sources.find((candidate) => candidate.path === caller.file);
+    if (!source) {
+      failures.push(`ARCH011 共享模块调用方不存在: ${caller.file}`);
+      continue;
+    }
     const file = sourceFileFor(source);
-    const declarations = new Set<string>();
+    const importedCalls = new Map<string, string>();
     for (const statement of file.statements) {
-      if (ts.isFunctionDeclaration(statement) && statement.name) declarations.add(statement.name.text);
-      if (!ts.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name)) declarations.add(declaration.name.text);
+      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      if (resolveImport(source.path, statement.moduleSpecifier.text, fileSet) !== contract.module) continue;
+      const bindings = statement.importClause?.namedBindings;
+      if (!bindings || !ts.isNamedImports(bindings)) continue;
+      for (const binding of bindings.elements) {
+        importedCalls.set(binding.propertyName?.text ?? binding.name.text, binding.name.text);
       }
     }
-    for (const name of forbidden.names) {
-      if (declarations.has(name)) {
-        failures.push(`ARCH011 共享规则不得在调用方重复实现: ${forbidden.file} (${name})`);
+    const calledNames = new Set<string>();
+    let containsIteration = false;
+    let containsRegex = false;
+    const visitCaller = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        calledNames.add(node.expression.text);
       }
+      if (ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)
+        || ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+        containsIteration = true;
+      }
+      if (ts.isRegularExpressionLiteral(node)) {
+        containsRegex = true;
+      }
+      ts.forEachChild(node, visitCaller);
+    };
+    visitCaller(file);
+    for (const requiredCall of caller.requiredCalls) {
+      const localName = importedCalls.get(requiredCall);
+      if (!localName || !calledNames.has(localName)) {
+        failures.push(`ARCH011 共享模块调用方必须委托 ${requiredCall}: ${caller.file}`);
+      }
+    }
+    if (caller.forbidIterations && containsIteration) {
+      failures.push(`ARCH011 共享模块薄调用方禁止自行迭代扫描: ${caller.file}`);
+    }
+    if (caller.forbidRegex && containsRegex) {
+      failures.push(`ARCH011 共享模块薄调用方禁止自行解析正则: ${caller.file}`);
     }
   }
 }
