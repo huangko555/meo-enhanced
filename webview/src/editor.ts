@@ -1,5 +1,6 @@
-import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec, type Text } from '@codemirror/state';
+import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type ChangeSpec, type EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
@@ -44,7 +45,7 @@ import {
 import { createTableCommandTargetRegistry } from './editor/tableCommandTargetRegistry';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
-import { createGitBlameHoverController } from './helpers/gitBlameHover';
+import { createGitBlameHoverController, type GitBlameHoverController } from './helpers/gitBlameHover';
 import { createGitDiffContentHoverController } from './helpers/gitDeletionHover';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
 import { resolvedSyntaxTree, extractHeadings, extractHeadingSections } from './helpers/markdownSyntax';
@@ -83,6 +84,9 @@ import type {
   DiagnosticSuggestionsResult,
   RequestDiagnosticSuggestions
 } from '../../src/protocol/diagnosticSuggestions';
+import type { GitBaselinePayload, GitBlameLineResult } from '../../src/protocol/git';
+import type { VimKeybindingDto } from '../../src/protocol/hostConfigurationEvents';
+import type { SelectionMenuState } from './helpers/selectionMenu';
 import { focusMermaidEditingOffset, getMermaidBlockMode, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 import { focusLatexMathEditingOffset, getLatexMathBlockMode, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
@@ -145,6 +149,43 @@ type MarkerReplacementContext = {
   oldMarkerLen: number;
   isExistingTask: boolean;
 };
+
+type EditableEditorMode = 'source' | 'live';
+
+type CreateEditorOptions = {
+  parent: HTMLElement;
+  text: string;
+  onApplyChanges: (text: string) => void;
+  onOpenLink?: (href: string) => void;
+  onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
+  postDiagnosticSuggestionsMessage?: (message: RequestDiagnosticSuggestions) => void;
+  onViewportChange?: () => void;
+  onRequestGitBlame?: (request: { lineNumber: number }) => Promise<GitBlameLineResult>;
+  onOpenGitRevisionForLine?: (request: { lineNumber: number }) => void | Promise<void>;
+  onOpenGitWorktreeForLine?: (request: { lineNumber: number }) => void | Promise<void>;
+  initialMode?: EditableEditorMode;
+  initialTopLine?: number | null;
+  initialTopLineOffset?: number;
+  initialLineNumbers?: boolean;
+  initialGitGutter?: boolean;
+  initialGitBlame?: boolean;
+  initialVimMode?: boolean;
+  initialVimKeybindings?: readonly VimKeybindingDto[];
+  initialVimLeader?: string;
+  initialDiagnostics?: readonly EditorDiagnostic[];
+  mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
+};
+
+type PointerClickState = { pointerId: number };
+type InlineCodeClickState = PointerClickState & { inInlineCode: boolean };
+type FrontmatterBoundaryClickState = PointerClickState & { cursorEnd: number };
+type PointerPosition = { x: number; y: number };
+type TableTextTransform = (value: string, start: number, end: number) => boolean;
+type TableFormatAction = 'inlineCode' | 'kbd' | 'underline' | 'bold' | 'italic' | 'lineover' | 'strike' | 'highlight' | 'link' | 'wikiLink';
+type SyncChange = { from: number; to: number; insert: string };
+type RevealOptions = { focusEditor?: boolean; align?: 'center' | 'upper' | 'top' | 'nearest' | 'none' };
+type EditorFormatAction = TableFormatAction | 'heading' | 'bulletList' | 'numberedList' | 'task' | 'codeBlock' | 'quote' | 'hr' | 'table' | 'image';
+type EditorFormatLevel = number | { cols: number; rows: number };
 
 const setSearchQueryEffect = StateEffect.define<SearchQueryState>();
 const refreshDecorationsEffect = StateEffect.define();
@@ -253,10 +294,11 @@ export function createEditor({
   initialVimLeader = '\\',
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory
-}) {
+}: CreateEditorOptions) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
-  (EditorView as any).EDIT_CONTEXT = false;
+  const editorViewConstructor: typeof EditorView & { EDIT_CONTEXT?: boolean } = EditorView;
+  editorViewConstructor.EDIT_CONTEXT = false;
   if (!mermaidDiagramPresentationFactory) {
     throw new Error('Mermaid diagram presentation factory is required');
   }
@@ -268,7 +310,7 @@ export function createEditor({
   let lineNumbersVisible = initialLineNumbers !== false;
   let gitGutterVisible = initialGitGutter !== false;
   let vimModeEnabled = initialVimMode === true;
-  let vimKeybindings = initialVimKeybindings;
+  let vimKeybindings = [...initialVimKeybindings];
   let vimLeader = initialVimLeader;
   let appliedVimKeybindings: Array<{ before: string; mode: string }> = [];
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
@@ -317,33 +359,33 @@ export function createEditor({
   let imeCompositionActive = false;
   let imeCompositionChanged = false;
   let imeCompositionFlushTimer: number | null = null;
-  let capturedPointerId = null;
-  let liveSelectionPointerId = null;
+  let capturedPointerId: number | null = null;
+  let liveSelectionPointerId: number | null = null;
   let liveSelectionGeneration = 0;
-  let inlineCodeClick = null;
-  let checkboxClick = null;
-  let frontmatterBoundaryClick = null;
-  let view = null;
-  let currentMode = startMode;
+  let inlineCodeClick: InlineCodeClickState | null = null;
+  let checkboxClick: PointerClickState | null = null;
+  let frontmatterBoundaryClick: FrontmatterBoundaryClickState | null = null;
+  let view: EditorView;
+  let currentMode: EditableEditorMode = startMode;
   let applyingRenumber = false;
   let lastSearchStateSignature = '';
   let tableInteractionActive = false;
   let tableInteractionOwner: HTMLElement | null = null;
   let tableInteractionClassFrame = 0;
-  let onTableInteraction = null;
-  let onWidgetOpenLink = null;
-  let onWidgetActivateImage = null;
-  let onTableSelectionChange = null;
-  let onScroll = null;
+  let onTableInteraction: EventListener | null = null;
+  let onWidgetOpenLink: EventListener | null = null;
+  let onWidgetActivateImage: EventListener | null = null;
+  let onTableSelectionChange: EventListener | null = null;
+  let onScroll: (() => void) | null = null;
   let viewportController: ViewportController;
-  let onWindowPointerUp = null;
-  let onWindowPointerCancel = null;
-  let onWindowBlur = null;
-  let onDocumentSelectionChange = null;
-  let onHtmlContentPointerDown = null;
+  let onWindowPointerUp: ((event: PointerEvent) => void) | null = null;
+  let onWindowPointerCancel: ((event: PointerEvent) => void) | null = null;
+  let onWindowBlur: (() => void) | null = null;
+  let onDocumentSelectionChange: (() => void) | null = null;
+  let onHtmlContentPointerDown: ((event: PointerEvent) => void) | null = null;
   let suppressSelectionMenuForNativeHtml = false;
-  let onBlockActionPointerMove = null;
-  let onBlockActionPointerLeave = null;
+  let onBlockActionPointerMove: ((event: PointerEvent) => void) | null = null;
+  let onBlockActionPointerLeave: (() => void) | null = null;
   let editorHistoryRuntime: EditorHistoryRuntime | null = null;
   let historyScrollGuard: EditorHistoryViewport | null = null;
   let pendingRenderedHistoryFocus: { replayId: number; run: () => boolean } | null = null;
@@ -357,12 +399,12 @@ export function createEditor({
   let pendingLiveSearchRevealGeneration = 0;
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
   let pendingLiveSearchDecorationRefreshGeneration = 0;
-  let gitBlameHover = null;
-  let gitDiffContentHover = null;
-  let gitDiffOverviewRuler = null;
-  let searchOverviewRuler = null;
+  let gitBlameHover: GitBlameHoverController | null = null;
+  let gitDiffContentHover: ReturnType<typeof createGitDiffContentHoverController> | null = null;
+  let gitDiffOverviewRuler: ReturnType<typeof createGitDiffOverviewRulerController> | null = null;
+  let searchOverviewRuler: ReturnType<typeof createSearchOverviewRulerController> | null = null;
   let editableLinkHoverPointerActive = false;
-  let editableLinkHoverPosition = null;
+  let editableLinkHoverPosition: PointerPosition | null = null;
   let editableLinkHoverMode = currentMode;
   let hoveredBlockActionToolbar: HTMLElement | null = null;
   let hoveredBlockActionRange: { from: number; to: number } | null = null;
@@ -398,7 +440,7 @@ export function createEditor({
     }, 20);
   };
   const vimExtensionsForState = () => (vimModeEnabled ? vim() : []);
-  const getLineStartOffset = (docText, targetLineNumber) => {
+  const getLineStartOffset = (docText: string, targetLineNumber: number) => {
     const targetLine = Math.max(1, Math.floor(targetLineNumber));
     if (targetLine === 1) {
       return 0;
@@ -425,7 +467,7 @@ export function createEditor({
     const firstLineEnd = text.indexOf('\n');
     return firstLineEnd === -1 ? text.length : firstLineEnd;
   })();
-  const targetElementFrom = (target) => (
+  const targetElementFrom = (target: EventTarget | null) => (
     target instanceof Element ? target : target instanceof Node ? target.parentElement : null
   );
   const blockActionToolbarSelector = [
@@ -452,18 +494,19 @@ export function createEditor({
     blockActionToolbarReconcileFrame = window.requestAnimationFrame(() => {
       blockActionToolbarReconcileFrame = null;
       if (!hoveredBlockActionRange || hoveredBlockActionToolbar?.isConnected) return;
+      const expectedRange = hoveredBlockActionRange;
       const replacement = Array.from(
-        view?.dom.querySelectorAll(blockActionToolbarSelector) ?? []
+        view.dom.querySelectorAll(blockActionToolbarSelector)
       ).find((toolbar) => {
         if (!(toolbar instanceof HTMLElement)) return false;
         const range = readBlockActionToolbarRange(toolbar);
-        return range?.from === hoveredBlockActionRange?.from && range.to === hoveredBlockActionRange.to;
+        return range?.from === expectedRange.from && range.to === expectedRange.to;
       });
       hoveredBlockActionToolbar = replacement instanceof HTMLElement ? replacement : null;
       hoveredBlockActionToolbar?.classList.add('is-block-hovered');
     });
   };
-  const updateBlockActionToolbarHover = (event, editorView) => {
+  const updateBlockActionToolbarHover = (event: PointerEvent, editorView: EditorView) => {
     const targetElement = targetElementFrom(event.target);
     const directToolbar = targetElement?.closest(blockActionToolbarSelector);
     if (directToolbar instanceof HTMLElement) {
@@ -490,7 +533,7 @@ export function createEditor({
     }) ?? null;
     setHoveredBlockActionToolbar(matchingToolbar);
   };
-  const openHref = (href, editorView) => {
+  const openHref = (href: string, editorView: EditorView) => {
     if (href.startsWith('#')) {
       const initialTargetPosition = findDocumentFragmentPosition(editorView.state, href);
       if (initialTargetPosition !== null) {
@@ -510,7 +553,7 @@ export function createEditor({
     onOpenLink?.(href);
     return true;
   };
-  const openLinkIfModifierClick = (event, editorView) => {
+  const openLinkIfModifierClick = (event: PointerEvent, editorView: EditorView) => {
     if (!isPrimaryModifierPointerClick(event)) {
       return false;
     }
@@ -522,7 +565,7 @@ export function createEditor({
     event.stopPropagation();
     return openHref(href, editorView);
   };
-  const setEditableLinkHoverCursor = (editorView, active) => {
+  const setEditableLinkHoverCursor = (editorView: EditorView, active: boolean) => {
     if (editableLinkHoverPointerActive === active) {
       return;
     }
@@ -532,13 +575,13 @@ export function createEditor({
     editorView.contentDOM.style.cursor = cursor;
     editorView.dom.classList.toggle('meo-link-modifier-hover', active);
   };
-  const isEditableLinkTarget = (target, editorView) => {
+  const isEditableLinkTarget = (target: EventTarget | null, editorView: EditorView) => {
     if (!(target instanceof Node)) return false;
     if (currentMode === 'source') return editorView.contentDOM.contains(target);
     const targetElement = targetElementFrom(target);
     return currentMode === 'live' && Boolean(targetElement?.closest('.cm-activeLine'));
   };
-  const updateEditableLinkHoverCursor = (event, editorView) => {
+  const updateEditableLinkHoverCursor = (event: PointerEvent, editorView: EditorView) => {
     const target = event.target;
     if (!isEditableLinkTarget(target, editorView)) {
       editableLinkHoverPosition = null;
@@ -551,7 +594,7 @@ export function createEditor({
       : '';
     setEditableLinkHoverCursor(editorView, Boolean(href));
   };
-  const updateEditableLinkHoverCursorForModifier = (event, editorView) => {
+  const updateEditableLinkHoverCursorForModifier = (event: KeyboardEvent, editorView: EditorView) => {
     if (!editableLinkHoverPosition) {
       setEditableLinkHoverCursor(editorView, false);
       return;
@@ -575,11 +618,11 @@ export function createEditor({
       : '';
     setEditableLinkHoverCursor(editorView, Boolean(href));
   };
-  const isLiveMode = (editorView) => editorView.dom.classList.contains('meo-mode-live');
-  const isPlainPrimaryPointerEvent = (event) => (
+  const isLiveMode = (editorView: EditorView) => editorView.dom.classList.contains('meo-mode-live');
+  const isPlainPrimaryPointerEvent = (event: PointerEvent) => (
     event.button === 0 && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey
   );
-  const frontmatterBoundaryCursorEnd = (state, pos) => {
+  const frontmatterBoundaryCursorEnd = (state: EditorState, pos: number) => {
     const frontmatter = parseFrontmatter(state);
     if (!frontmatter) {
       return null;
@@ -594,7 +637,7 @@ export function createEditor({
     const markerStart = lineText.indexOf('---');
     return markerStart >= 0 ? line.from + markerStart + 3 : null;
   };
-  const emptyBlockquoteLineCursorEnd = (state, pos) => {
+  const emptyBlockquoteLineCursorEnd = (state: EditorState, pos: number) => {
     const line = state.doc.lineAt(pos);
     const lineText = state.doc.sliceString(line.from, line.to);
     const quoteMatch = /^[ \t]{0,3}(?:>[ \t]?)+$/.exec(lineText);
@@ -613,7 +656,7 @@ export function createEditor({
 
     return null;
   };
-  const trackFrontmatterBoundaryClick = (event, editorView) => {
+  const trackFrontmatterBoundaryClick = (event: PointerEvent, editorView: EditorView) => {
     frontmatterBoundaryClick = null;
     if (!isLiveMode(editorView) || !isPlainPrimaryPointerEvent(event)) {
       return;
@@ -632,7 +675,7 @@ export function createEditor({
     };
   };
 
-  const setTableInteractionActive = (active, owner: HTMLElement | null = null) => {
+  const setTableInteractionActive = (active: boolean, owner: HTMLElement | null = null) => {
     if (!view) return;
 
     if (active) {
@@ -672,7 +715,7 @@ export function createEditor({
   };
   const tableEntryCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
   const tableEntryProbeOffsetsY = [1, 4, 8, 12, 18];
-  const focusTableEntryInput = (input) => {
+  const focusTableEntryInput = (input: Element | null) => {
     if (!(input instanceof HTMLTextAreaElement)) {
       return false;
     }
@@ -682,7 +725,7 @@ export function createEditor({
     input.closest(tableEntryCellSelector)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     return true;
   };
-  const findTableEntryInput = (wrap, hit, direction) => {
+  const findTableEntryInput = (wrap: HTMLElement, hit: Element, direction: 'up' | 'down') => {
     const cell = hit.closest(tableEntryCellSelector);
     if (cell instanceof HTMLElement && wrap.contains(cell)) {
       const cellInput = cell.querySelector('textarea');
@@ -701,7 +744,7 @@ export function createEditor({
     return last instanceof HTMLTextAreaElement ? last : null;
   };
 
-  const tryEnterAdjacentTable = (editorView, direction) => {
+  const tryEnterAdjacentTable = (editorView: EditorView, direction: 'up' | 'down') => {
     if ((direction !== 'down' && direction !== 'up') || currentMode !== 'live' || tableInteractionActive) {
       return false;
     }
@@ -721,7 +764,7 @@ export function createEditor({
       return false;
     }
 
-    const clampX = (x) => Math.min(Math.max(x, contentRect.left + 1), contentRect.right - 1);
+    const clampX = (x: number) => Math.min(Math.max(x, contentRect.left + 1), contentRect.right - 1);
     const probeXs = [
       clampX(caretRect.left + 1),
       clampX(contentRect.left + Math.min(24, Math.max(8, contentRect.width * 0.05)))
@@ -794,7 +837,7 @@ export function createEditor({
     gitDiffOverviewRuler?.refresh();
   };
 
-  const releasePointerCaptureIfHeld = (pointerId) => {
+  const releasePointerCaptureIfHeld = (pointerId: number | null) => {
     if (!view || pointerId === null) {
       return;
     }
@@ -817,7 +860,7 @@ export function createEditor({
     }
   };
 
-  const finishLivePointerSelection = (pointerId, defer = false) => {
+  const finishLivePointerSelection = (pointerId: number, defer = false) => {
     if (liveSelectionPointerId === pointerId) {
       if (defer) {
         const generation = liveSelectionGeneration;
@@ -937,7 +980,7 @@ export function createEditor({
     }
   }));
 
-  const measureTextareaSelectionStart = (input, index) => {
+  const measureTextareaSelectionStart = (input: HTMLTextAreaElement, index: number) => {
     const doc = input.ownerDocument;
     const mirror = doc.createElement('div');
     const marker = doc.createElement('span');
@@ -984,7 +1027,7 @@ export function createEditor({
     return coords;
   };
 
-  const getActiveTableSelectionState = (input) => {
+  const getActiveTableSelectionState = (input: HTMLTextAreaElement): (SelectionMenuState & { from: number; to: number }) | null => {
     const selection = getTableInputDocumentSelection(input);
     if (!selection) return null;
     const diagnostic = diagnosticSuggestionApplication.resolveDiagnostic(selection.from, {
@@ -1008,14 +1051,14 @@ export function createEditor({
       visible: true,
       from: selection.from,
       to: selection.to,
-      align: diagnostic ? 'start' : undefined,
+      align: diagnostic ? 'start' as const : undefined,
       anchorX: selection.anchorX,
       anchorY: selection.anchorY,
       anchorBottomY: selection.anchorBottomY
     };
   };
 
-  const updateActiveTableInput = (input, nextValue, anchor, head = anchor) => {
+  const updateActiveTableInput = (input: HTMLTextAreaElement, nextValue: string, anchor: number, head = anchor) => {
     input.value = nextValue;
     input.focus({ preventScroll: true });
     input.setSelectionRange(
@@ -1028,7 +1071,7 @@ export function createEditor({
     return true;
   };
 
-  const editActiveTableInputWithSelection = (input, transform) => {
+  const editActiveTableInputWithSelection = (input: HTMLTextAreaElement, transform: TableTextTransform) => {
     const rawStart = input.selectionStart ?? 0;
     const rawEnd = input.selectionEnd ?? rawStart;
     const start = Math.min(rawStart, rawEnd);
@@ -1036,7 +1079,7 @@ export function createEditor({
     return transform(input.value, start, end);
   };
 
-  const trimTrailingNewlines = (value, start, end) => {
+  const trimTrailingNewlines = (value: string, start: number, end: number) => {
     let nextEnd = end;
     while (nextEnd > start && value.slice(nextEnd - 1, nextEnd) === '\n') {
       nextEnd -= 1;
@@ -1045,10 +1088,10 @@ export function createEditor({
   };
 
   const wrapActiveTableInputSelection = (
-    input,
-    openMarker,
+    input: HTMLTextAreaElement,
+    openMarker: string,
     closeMarker = openMarker,
-    { toggle = true, selectWrapped = true } = {}
+    { toggle = true, selectWrapped = true }: { toggle?: boolean; selectWrapped?: boolean } = {}
   ) => {
     return editActiveTableInputWithSelection(input, (value, start, end) => {
       if (start === end) {
@@ -1090,7 +1133,7 @@ export function createEditor({
     });
   };
 
-  const insertFormatInActiveTableInput = (input, action) => {
+  const insertFormatInActiveTableInput = (input: HTMLTextAreaElement, action: EditorFormatAction) => {
     switch (action) {
       case 'inlineCode':
         return wrapActiveTableInputSelection(input, '`', '`', { toggle: false, selectWrapped: false });
@@ -1166,7 +1209,7 @@ export function createEditor({
     const lineText = state.doc.sliceString(line.from, line.to);
     const existingMarker = existingListMarkerRegex.exec(lineText);
     const existingHeading = existingHeadingMarkerRegex.exec(lineText);
-    const leadingWhitespace = existingMarker?.[1] ?? existingHeading?.[1] ?? /^(\s*)/.exec(lineText)[1];
+    const leadingWhitespace = existingMarker?.[1] ?? existingHeading?.[1] ?? /^(\s*)/.exec(lineText)?.[1] ?? '';
 
     const contentStart = line.from + leadingWhitespace.length;
     let oldMarkerLen = 0;
@@ -1218,8 +1261,8 @@ export function createEditor({
     );
   };
 
-  const isSearchMatchSelection = (from, to) => {
-    if (!view || from >= to) {
+  const isSearchMatchSelection = (from: number, to: number) => {
+    if (from >= to) {
       return false;
     }
 
@@ -1228,13 +1271,9 @@ export function createEditor({
       return false;
     }
 
-    let isMatchSelection = false;
-    view.state.field(searchMatchField).between(from, to, (matchFrom, matchTo) => {
-      if (matchFrom === from && matchTo === to) {
-        isMatchSelection = true;
-      }
-    });
-    return isMatchSelection;
+    return view.state.field(searchMatchField).matches.some((match) => (
+      match.start === from && match.end === to
+    ));
   };
 
   const resolveNativeSelectionAnchor = (): { anchorX: number; anchorY: number; anchorBottomY: number } | null => {
@@ -1374,8 +1413,8 @@ export function createEditor({
     });
   };
 
-  const inlineCodeCaretPosition = (state, position) => {
-    let node = syntaxTree(state).resolveInner(position, -1);
+  const inlineCodeCaretPosition = (state: EditorState, position: number) => {
+    let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, -1);
     while (node && node.name !== 'InlineCode' && node.name !== 'CodeText') {
       node = node.parent;
     }
@@ -1477,7 +1516,7 @@ export function createEditor({
     });
   };
 
-  const selectSearchMatch = (from, to, { focusEditor = true } = {}) => {
+  const selectSearchMatch = (from: number, to: number, { focusEditor = true }: { focusEditor?: boolean } = {}) => {
     const htmlBlock = currentMode === 'live'
       ? collectRenderableHtmlBlocks(view.state).find((block) => from < block.to && to > block.from)
       : null;
@@ -1500,7 +1539,7 @@ export function createEditor({
     }
   };
 
-  const applyRevealSelection = (anchor, head = anchor, { focusEditor = true, align = 'center' } = {}) => {
+  const applyRevealSelection = (anchor: number, head = anchor, { focusEditor = true, align = 'center' }: RevealOptions = {}) => {
     const max = view.state.doc.length;
     const nextAnchor = Math.max(0, Math.min(anchor, max));
     const nextHead = Math.max(0, Math.min(head, max));
@@ -1530,7 +1569,7 @@ export function createEditor({
     }
   };
 
-  const isPositionVisible = (position) => {
+  const isPositionVisible = (position: number) => {
     const coords = view.coordsAtPos(position);
     if (!coords) {
       return false;
@@ -1609,7 +1648,7 @@ export function createEditor({
       : focusLatexMathEditingOffset(view, openingLine.from, offset);
   };
 
-  const revealRenderedSourceLine = (lineNumber) => {
+  const revealRenderedSourceLine = (lineNumber: number) => {
     if (currentMode !== 'live') {
       return false;
     }
@@ -1754,7 +1793,7 @@ export function createEditor({
     viewportController.restoreDocumentAnchor({ position, lineOffset });
   };
 
-  const restoreTopVisibleLine = (lineNumber, lineOffset = 0, { syncCursor = true, force = false } = {}) => {
+  const restoreTopVisibleLine = (lineNumber: number, lineOffset = 0, { syncCursor = true, force = false }: { syncCursor?: boolean; force?: boolean } = {}) => {
     viewportController.restoreTopVisibleLine(
       lineNumber,
       lineOffset,
@@ -1796,7 +1835,7 @@ export function createEditor({
   };
 
   const findMatch = (
-    query,
+    query: string,
     backward = false,
     { focusEditor = true, ...searchOptions }: SearchOptions & { focusEditor?: boolean } = {}
   ) => {
@@ -1846,7 +1885,7 @@ export function createEditor({
     };
   };
 
-  const replaceCurrentMatch = (query, replacement, options: SearchOptions = {}) => {
+  const replaceCurrentMatch = (query: string, replacement: string, options: SearchOptions = {}) => {
     if (!query) {
       return { replaced: false, found: false, current: 0, total: 0 };
     }
@@ -2039,10 +2078,10 @@ export function createEditor({
 
           inlineCodeClick = {
             pointerId: event.pointerId,
-            inInlineCode:
+            inInlineCode: Boolean(
               currentMode === 'live' &&
-              targetElement &&
-              targetElement.closest('.meo-md-inline-code') !== null
+              targetElement?.closest('.meo-md-inline-code')
+            )
           };
 
           if (currentMode === 'live') {
@@ -2468,13 +2507,14 @@ export function createEditor({
     restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
   }
   onTableInteraction = (event) => {
-    const active = Boolean(event?.detail?.active);
-    const owner = event?.detail?.owner instanceof HTMLElement ? event.detail.owner : null;
+    const detail = event instanceof CustomEvent ? event.detail : null;
+    const active = Boolean(detail?.active);
+    const owner = detail?.owner instanceof HTMLElement ? detail.owner : null;
     setTableInteractionActive(active, owner);
   };
   view.dom.addEventListener('meo-table-interaction', onTableInteraction);
   onWidgetOpenLink = (event) => {
-    const href = event?.detail?.href;
+    const href = event instanceof CustomEvent ? event.detail?.href : null;
     if (typeof href !== 'string' || !href) {
       return;
     }
@@ -2482,7 +2522,7 @@ export function createEditor({
   };
   view.dom.addEventListener('meo-open-link', onWidgetOpenLink);
   onWidgetActivateImage = (event) => {
-    const from = event?.detail?.from;
+    const from = event instanceof CustomEvent ? event.detail?.from : null;
     if (!Number.isInteger(from)) {
       return;
     }
@@ -2512,7 +2552,7 @@ export function createEditor({
     if (!selection || selection.isCollapsed) {
       return;
     }
-    const selectionNodeInsideHtml = (node) => {
+    const selectionNodeInsideHtml = (node: Node | null) => {
       const element = node instanceof Element ? node : node?.parentElement;
       return Boolean(element?.closest('.meo-md-html-content'));
     };
@@ -2583,7 +2623,7 @@ export function createEditor({
       commitActiveTableInput();
       return view.state.doc.toString();
     },
-    revealDocumentFragment(href) {
+    revealDocumentFragment(href: string) {
       const fragmentHref = href.startsWith('#') ? href : `#${href}`;
       return openHref(fragmentHref, view);
     },
@@ -2608,16 +2648,16 @@ export function createEditor({
     getHistoryDepth() {
       return { undo: undoDepth(view.state), redo: redoDepth(view.state) };
     },
-    findNext(query, options: SearchOptions & { focusEditor?: boolean } = {}) {
+    findNext(query: string, options: SearchOptions & { focusEditor?: boolean } = {}) {
       return findMatch(query, false, options);
     },
-    findPrevious(query, options: SearchOptions & { focusEditor?: boolean } = {}) {
+    findPrevious(query: string, options: SearchOptions & { focusEditor?: boolean } = {}) {
       return findMatch(query, true, options);
     },
-    replaceCurrent(query, replacement, options: SearchOptions = {}) {
+    replaceCurrent(query: string, replacement: string, options: SearchOptions = {}) {
       return replaceCurrentMatch(query, replacement, options);
     },
-    replaceAll(query, replacement, options: SearchOptions = {}) {
+    replaceAll(query: string, replacement: string, options: SearchOptions = {}) {
       if (!query) {
         return { replaced: 0, total: 0 };
       }
@@ -2636,13 +2676,13 @@ export function createEditor({
       });
       return { replaced, total: getSearchMatches(query, options).length };
     },
-    countMatches(query, options: SearchOptions = {}) {
+    countMatches(query: string, options: SearchOptions = {}) {
       if (!query) {
         return 0;
       }
       return getSearchMatches(query, options).length;
     },
-    setSearchQuery(query, options: SearchOptions = {}) {
+    setSearchQuery(query: string, options: SearchOptions = {}) {
       const nextQuery = createSearchQueryState(query, options);
       const currentQuery = view.state.field(searchQueryField);
       if (
@@ -2765,7 +2805,7 @@ export function createEditor({
       imagePresentationFactory.dispose();
       imagePresentationResourcePool.dispose();
     },
-    setText(textValue) {
+    setText(textValue: string) {
       gitBlameHover?.hide();
       diagnosticSuggestionRuntime.dispatch({ type: 'externalDocumentPresented' });
       tableCommandRuntime.externalDocumentPresented();
@@ -2812,7 +2852,7 @@ export function createEditor({
       syncSelectionClass();
       emitSelectionChange();
     },
-    setMode(mode) {
+    setMode(mode: EditableEditorMode) {
       gitBlameHover?.hide();
       diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
       commitActiveTableInput();
@@ -2850,7 +2890,7 @@ export function createEditor({
 
       restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false, force: true });
     },
-    setLineNumbers(visible) {
+    setLineNumbers(visible: boolean) {
       const nextVisible = visible !== false;
       if (nextVisible === lineNumbersVisible) {
         return;
@@ -2858,10 +2898,10 @@ export function createEditor({
       lineNumbersVisible = nextVisible;
       syncLineNumbersVisibility();
     },
-    setLongCodeBlockFoldingEnabled(enabled) {
+    setLongCodeBlockFoldingEnabled(enabled: boolean) {
       setLongCodeBlockFoldingEnabled(view, enabled === true);
     },
-    setGitGutterVisible(visible) {
+    setGitGutterVisible(visible: boolean) {
       const nextVisible = visible !== false;
       if (nextVisible === gitGutterVisible) {
         return;
@@ -2869,7 +2909,7 @@ export function createEditor({
       gitGutterVisible = nextVisible;
       syncGitGutterVisibility();
     },
-    setVimMode(enabled) {
+    setVimMode(enabled: boolean) {
       const nextEnabled = enabled === true;
       if (nextEnabled === vimModeEnabled) {
         return;
@@ -2884,14 +2924,14 @@ export function createEditor({
         effects: vimCompartment.reconfigure(vimExtensionsForState())
       });
     },
-    setVimKeybindings(bindings: Array<{ before: string; after: string; mode: string; recursive: boolean }>, leaderKey: string) {
-      vimKeybindings = bindings;
+    setVimKeybindings(bindings: readonly VimKeybindingDto[], leaderKey: string) {
+      vimKeybindings = [...bindings];
       vimLeader = leaderKey;
       if (vimModeEnabled) {
         applyVimKeybindings(vimKeybindings, vimLeader);
       }
     },
-    insertFormat(action, level) {
+    insertFormat(action: EditorFormatAction, level?: EditorFormatLevel) {
       const activeTableInput = getActiveTableInput();
       if (activeTableInput) {
         return insertFormatInActiveTableInput(activeTableInput, action);
@@ -2913,7 +2953,7 @@ export function createEditor({
       let insert = '';
       switch (action) {
         case 'heading':
-          insert = `${'#'.repeat(level ?? 1)} `;
+          insert = `${'#'.repeat(typeof level === 'number' ? level : 1)} `;
           break;
         case 'bulletList':
           insert = '- ';
@@ -2946,7 +2986,12 @@ export function createEditor({
         case 'hr':
           return insertHr(view, selection);
         case 'table':
-          return insertTable(view, selection, level?.cols, level?.rows);
+          return insertTable(
+            view,
+            selection,
+            typeof level === 'object' ? level.cols : undefined,
+            typeof level === 'object' ? level.rows : undefined
+          );
         case 'link':
           return insertLink(view, inlineSelection());
         case 'wikiLink':
@@ -2997,7 +3042,7 @@ export function createEditor({
     getScrollElement() {
       return view.scrollDOM;
     },
-    moveHeadingSection(sourceHeadingFrom, targetHeadingFrom, placement) {
+    moveHeadingSection(sourceHeadingFrom: number, targetHeadingFrom: number, placement: 'before' | 'after') {
       if (placement !== 'before' && placement !== 'after') {
         return false;
       }
@@ -3041,7 +3086,7 @@ export function createEditor({
       });
       return true;
     },
-    scrollToLine(lineNumber, align = 'center') {
+    scrollToLine(lineNumber: number, align: RevealOptions['align'] = 'center') {
       const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
       if (align === 'upper' && revealRenderedTableLine(line.number)) {
         return;
@@ -3057,7 +3102,7 @@ export function createEditor({
         restoreTopVisibleLine(line.number, 0, { syncCursor: false });
       }
     },
-    restoreTopLine(lineNumber, lineOffset, { syncCursor = true, force = false } = {}) {
+    restoreTopLine(lineNumber: number, lineOffset: number, { syncCursor = true, force = false }: { syncCursor?: boolean; force?: boolean } = {}) {
       restoreTopVisibleLine(lineNumber, lineOffset, { syncCursor, force });
     },
     getTopVisiblePosition() {
@@ -3070,7 +3115,7 @@ export function createEditor({
     getTopVisibleLine() {
       return computeTopVisiblePosition().lineNumber;
     },
-    revealSelection(anchor, head, options) {
+    revealSelection(anchor: number, head: number, options?: RevealOptions) {
       applyRevealSelection(anchor, head, options);
     },
     refreshSelectionOverlay() {
@@ -3133,7 +3178,7 @@ export function createEditor({
       }
       emitSelectionChange();
     },
-    setGitBaseline(snapshot) {
+    setGitBaseline(snapshot: GitBaselinePayload) {
       // Baseline decorations can change rendered line heights (especially around
       // tables, images, Mermaid, and math). Keep the document anchor stable while
       // the decoration transaction and its deferred measurements settle.
@@ -3149,7 +3194,7 @@ export function createEditor({
         gitDiffOverviewRuler?.refresh();
       });
     },
-    setGitBlameEnabled(enabled) {
+    setGitBlameEnabled(enabled: boolean) {
       gitBlameHover?.setEnabled(enabled === true);
     },
     clearGitUiTransientState() {
@@ -3158,7 +3203,7 @@ export function createEditor({
   };
 }
 
-function insertTableCellLineBreak(view) {
+function insertTableCellLineBreak(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!isInsideTableCell(state, selection.from) || !isInsideTableCell(state, selection.to)) {
@@ -3173,7 +3218,7 @@ function insertTableCellLineBreak(view) {
   return true;
 }
 
-function handleEnterContinueQuotedCodeBlock(view) {
+function handleEnterContinueQuotedCodeBlock(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -3194,7 +3239,7 @@ function handleEnterContinueQuotedCodeBlock(view) {
   return true;
 }
 
-function getQuotedCodeBlockLinePrefix(state, position) {
+function getQuotedCodeBlockLinePrefix(state: EditorState, position: number): string | null {
   const line = state.doc.lineAt(position);
   const lineText = state.doc.sliceString(line.from, line.to);
   const match = blockquoteLinePrefixRegex.exec(lineText);
@@ -3205,8 +3250,8 @@ function getQuotedCodeBlockLinePrefix(state, position) {
   return isInsideQuotedCodeBlock(state, position) ? match[0] : null;
 }
 
-function isInsideQuotedCodeBlock(state, position) {
-  let node = syntaxTree(state).resolveInner(position, -1);
+function isInsideQuotedCodeBlock(state: EditorState, position: number): boolean {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, -1);
   let insideCodeBlock = false;
   let insideBlockquote = false;
 
@@ -3225,7 +3270,7 @@ function isInsideQuotedCodeBlock(state, position) {
   return false;
 }
 
-function deleteTableCellLineBreakBackward(view) {
+function deleteTableCellLineBreakBackward(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -3252,12 +3297,12 @@ function deleteTableCellLineBreakBackward(view) {
   return true;
 }
 
-function deleteBackwardSmart(view) {
+function deleteBackwardSmart(view: EditorView): boolean {
   return handleBackspaceAtListContentStart(view) || deleteTableCellLineBreakBackward(view);
 }
 
-function isInsideTableCell(state, position) {
-  let node = syntaxTree(state).resolveInner(position, -1);
+function isInsideTableCell(state: EditorState, position: number): boolean {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, -1);
   while (node) {
     if (node.name === 'TableCell') {
       return true;
@@ -3279,7 +3324,7 @@ function isTableHistoryRange(
     Math.min(Math.max(range.from, range.to - 1), state.doc.length)
   ]);
   for (const position of positions) {
-    let node = syntaxTree(state).resolveInner(position, -1);
+    let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, -1);
     while (node) {
       if (node.name === 'Table') return true;
       node = node.parent;
@@ -3288,7 +3333,7 @@ function isTableHistoryRange(
   return false;
 }
 
-function findSyncChange(previousText, nextText) {
+function findSyncChange(previousText: string, nextText: string): SyncChange | null {
   if (previousText === nextText) {
     return null;
   }
@@ -3318,7 +3363,7 @@ function findSyncChange(previousText, nextText) {
 }
 
 // Map a position through a single replace change so external syncs keep the cursor nearby.
-function mapPositionThroughChange(position, change) {
+function mapPositionThroughChange(position: number, change: SyncChange): number {
   const insertLength = change.insert.length;
   const deletedLength = change.to - change.from;
   const delta = insertLength - deletedLength;
@@ -3334,7 +3379,7 @@ function mapPositionThroughChange(position, change) {
   return change.from + insertLength;
 }
 
-function mapPositionThroughTextChange(position, previousText, nextText, change) {
+function mapPositionThroughTextChange(position: number, previousText: string, nextText: string, change: SyncChange): number {
   if (position <= change.from || position >= change.to) {
     return mapPositionThroughChange(position, change);
   }
@@ -3492,7 +3537,7 @@ function normalizeLiveInlineSelectionForListContent(
   return { from, to, anchor: to, head: from, empty: false };
 }
 
-function insertInlineCode(view, selection) {
+function insertInlineCode(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -3517,7 +3562,12 @@ function insertInlineCode(view, selection) {
   });
 }
 
-function toggleInlineWrapper(view, selection, openMarker, closeMarker = openMarker) {
+function toggleInlineWrapper(
+  view: EditorView,
+  selection: InlineSelectionRange | SelectionRange,
+  openMarker: string,
+  closeMarker = openMarker
+): void {
   const { state } = view;
 
   if (selection.empty) {
@@ -3565,7 +3615,7 @@ function toggleInlineWrapper(view, selection, openMarker, closeMarker = openMark
   });
 }
 
-function insertKbd(view, selection) {
+function insertKbd(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   return toggleInlineWrapper(view, selection, '<kbd>', '</kbd>');
 }
 
@@ -3591,15 +3641,15 @@ const changedCodeMirrorDocumentRange = (before: Text, after: Text): { from: numb
   return { from, to: after.length - suffixLow };
 };
 
-function insertUnderline(view, selection) {
+function insertUnderline(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   return toggleInlineWrapper(view, selection, '<u>', '</u>');
 }
 
-function insertInlineFence(view, selection, marker) {
+function insertInlineFence(view: EditorView, selection: InlineSelectionRange | SelectionRange, marker: string): void {
   return toggleInlineWrapper(view, selection, marker);
 }
 
-function insertQuote(view, selection) {
+function insertQuote(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   const { state } = view;
   const line = state.doc.lineAt(selection.from);
   const lineText = state.doc.sliceString(line.from, line.to);
@@ -3609,7 +3659,7 @@ function insertQuote(view, selection) {
     return;
   }
 
-  const leadingWhitespace = /^(\s*)/.exec(lineText)[1];
+  const leadingWhitespace = /^(\s*)/.exec(lineText)?.[1] ?? '';
   const insert = '> ';
   const contentStart = line.from + leadingWhitespace.length;
   const cursorOffset = selection.from - contentStart;
@@ -3620,7 +3670,7 @@ function insertQuote(view, selection) {
   });
 }
 
-function insertHr(view, selection) {
+function insertHr(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   const { state } = view;
   const line = state.doc.lineAt(selection.from);
   const lineText = state.doc.sliceString(line.from, line.to);
@@ -3643,7 +3693,7 @@ function insertHr(view, selection) {
   }
 }
 
-function insertLink(view, selection) {
+function insertLink(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -3668,7 +3718,7 @@ function insertLink(view, selection) {
   });
 }
 
-function insertImage(view, selection) {
+function insertImage(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -3693,7 +3743,7 @@ function insertImage(view, selection) {
   });
 }
 
-function insertWikiLink(view, selection) {
+function insertWikiLink(view: EditorView, selection: InlineSelectionRange | SelectionRange): void {
   const { state } = view;
 
   if (!selection.empty) {
@@ -3718,7 +3768,7 @@ function insertWikiLink(view, selection) {
   });
 }
 
-function sourceMode() {
+function sourceMode(): Extension[] {
   return [
     markdown({
       base: markdownLanguage,
@@ -3758,8 +3808,8 @@ const blockedInlineSelectionAncestors = new Set([
 
 const latexSelectionBlockCache = new WeakMap<object, Array<{ from: number; to: number }>>();
 
-function hasBlockedInlineAncestor(state, position) {
-  let node = syntaxTree(state).resolveInner(position, 1);
+function hasBlockedInlineAncestor(state: EditorState, position: number): boolean {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, 1);
   while (node) {
     if (blockedInlineSelectionAncestors.has(node.name)) {
       return true;
@@ -3769,7 +3819,7 @@ function hasBlockedInlineAncestor(state, position) {
   return false;
 }
 
-function getLatexSelectionBlockRanges(state) {
+function getLatexSelectionBlockRanges(state: EditorState): Array<{ from: number; to: number }> {
   const docKey = state.doc as unknown as object;
   const cached = latexSelectionBlockCache.get(docKey);
   if (cached) {
@@ -3787,7 +3837,7 @@ function getLatexSelectionBlockRanges(state) {
   return ranges;
 }
 
-function overlapsLatexMathSelection(state, from, to) {
+function overlapsLatexMathSelection(state: EditorState, from: number, to: number): boolean {
   if (to <= from) {
     return false;
   }
@@ -3800,7 +3850,7 @@ function overlapsLatexMathSelection(state, from, to) {
   return false;
 }
 
-function isRegularInlineSelection(state, from, to) {
+function isRegularInlineSelection(state: EditorState, from: number, to: number): boolean {
   if (to <= from) {
     return false;
   }

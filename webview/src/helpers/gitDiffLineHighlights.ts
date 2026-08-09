@@ -6,7 +6,9 @@ const setGitDiffHighlightsEnabled = StateEffect.define<boolean>();
 
 let gitDiffHighlightsEnabled = false;
 
-function hasRenderableGitDiffLines(lineFlags: unknown): boolean {
+type HighlightLineFlags = Array<{ added?: boolean; modified?: boolean } | undefined>;
+
+function hasRenderableGitDiffLines(lineFlags: unknown): lineFlags is HighlightLineFlags {
   if (!Array.isArray(lineFlags)) {
     return false;
   }

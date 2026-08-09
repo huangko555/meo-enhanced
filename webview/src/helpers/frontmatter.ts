@@ -9,7 +9,7 @@ import {
 const thematicBreakRe = /^[ \t]{0,3}(?:([-*_])(?:[ \t]*\1){2,})[ \t]*$/;
 const frontmatterCache = new WeakMap<object, FrontmatterInfo | null>();
 
-interface FrontmatterInfo {
+export interface FrontmatterInfo {
   openingFrom: number;
   openingTo: number;
   contentFrom: number;

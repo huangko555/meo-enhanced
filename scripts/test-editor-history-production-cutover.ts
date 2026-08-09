@@ -68,7 +68,7 @@ assert.match(editorSource, /editorHistoryRuntime\?\.dispatch\(\{ type: 'external
 assert.match(editorSource, /editorHistoryRuntime\?\.dispatch\(\{ type: 'presentationChanged' \}\)/);
 assert.match(editorSource, /editorHistoryRuntime\?\.dispatch\(\{ type: 'localDocumentEdited' \}\)/);
 assert.match(editorSource, /editorHistoryRuntime\?\.dispose\(\)/);
-const setTextStart = editorSource.indexOf('setText(textValue)');
+const setTextStart = editorSource.search(/\bsetText\s*\(/);
 const equalTextReturn = editorSource.indexOf('if (!syncChange)', setTextStart);
 const externalHistoryInvalidation = editorSource.indexOf(
   "editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' })",

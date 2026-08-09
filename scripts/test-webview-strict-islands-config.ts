@@ -9,6 +9,7 @@ const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
   include?: unknown;
 };
 const expectedRoots = [
+  'src/editor.ts',
   'src/helpers/images.ts',
   'src/helpers/htmlContent.ts',
   'src/helpers/gitDiffGutter.ts',

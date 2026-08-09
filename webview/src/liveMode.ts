@@ -1,7 +1,8 @@
-import { RangeSetBuilder, StateEffect, StateField, EditorState } from '@codemirror/state';
+import { RangeSetBuilder, StateEffect, StateField, EditorState, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
-import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass } from '@codemirror/view';
+import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass, type DecorationSet } from '@codemirror/view';
+import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
 import { createElement, AlertCircle, Code2, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
@@ -16,7 +17,7 @@ import {
   addMermaidDiagramBlock,
   addCopyCodeButton
 } from './helpers/codeBlocks';
-import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl } from './helpers/images';
+import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl, type ImageGroupItem } from './helpers/images';
 import { getImagePresentationFactory } from './editor/imagePresentation';
 import { liveHighlightStyle } from './theme';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
@@ -44,7 +45,8 @@ import {
   parseSimpleYamlFlowArrayValue,
   isInsideFrontmatter,
   isInsideFrontmatterContent,
-  isThematicBreakLine
+  isThematicBreakLine,
+  type FrontmatterInfo
 } from './helpers/frontmatter';
 import { isWikiLinkNode, parseWikiLinkData, getWikiLinkStatus } from './helpers/wikiLinks';
 import {
@@ -54,12 +56,13 @@ import {
 import { mergeConflictSourceExtensions, parseMergeConflicts } from './helpers/mergeConflicts';
 import {
   AlertType,
+  type AlertBlock,
   AlertIconWidget,
   detectAlertInBlockquote
 } from './helpers/alerts';
-import { parseFootnotes, footnoteReferenceKey } from './helpers/footnotes';
+import { parseFootnotes, footnoteReferenceKey, type FootnoteReference, type ParsedFootnotes } from './helpers/footnotes';
 import { getLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRenderedBlocks';
-import { getMermaidColonBlocks, rangeOverlapsMermaidColonBlock } from './helpers/mermaidColonBlocks';
+import { getMermaidColonBlocks, rangeOverlapsMermaidColonBlock, type MermaidColonBlock } from './helpers/mermaidColonBlocks';
 import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls';
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
 import { createOpenLinkButton } from './helpers/linkOpenButton';
@@ -71,11 +74,11 @@ import {
   type LatexMathRange,
   type LatexMathMode
 } from './helpers/math';
-import { diagnosticDataField } from './helpers/diagnostics';
+import { diagnosticDataField, type EditorDiagnostic } from './helpers/diagnostics';
 import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import { mermaidEditingStateField } from './helpers/mermaidEditing';
-import { collectPunctuationClosingInlineStyles } from './helpers/inlineStyleFallback';
+import { collectPunctuationClosingInlineStyles, type ParsedInlineStyleRange } from './helpers/inlineStyleFallback';
 import { addColorSwatchDecoration, collectColorRangesFromText } from './helpers/colorSwatches';
 import { longCodeBlockExtensions } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
@@ -176,6 +179,10 @@ const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
 })();
 const isTableContentLine = (lineText: string): boolean => lineText.includes('|');
 
+type DecorationCollector = Array<Range<Decoration>>;
+type SourceRange = { from: number; to: number };
+type ActiveImageGroup = { line: ReturnType<EditorState['doc']['line']>; items: ImageGroupItem[] };
+
 type LivePointerSelectionState = {
   active: boolean;
   preservedLine: number | null;
@@ -267,7 +274,7 @@ const rawFileUrlBlockedAncestorNames = new Set([
   'Table'
 ]);
 
-function addFrontmatterValueUrlDecorations(builder, valueFrom: number, valueText: string) {
+function addFrontmatterValueUrlDecorations(builder: DecorationCollector, valueFrom: number, valueText: string): void {
   for (const match of findRawSourceUrlMatches(valueText)) {
     const urlFrom = valueFrom + match.index;
     const rawUrl = valueText.slice(match.index, match.index + match.length);
@@ -275,10 +282,10 @@ function addFrontmatterValueUrlDecorations(builder, valueFrom: number, valueText
   }
 }
 
-const listLineDecoCache = new Map();
-const listIndentWidgetCache = new Map();
+const listLineDecoCache = new Map<string, Decoration>();
+const listIndentWidgetCache = new Map<number, ListIndentWidget>();
 const blockIndentLineDecoCache = new Map<number, ReturnType<typeof Decoration.line>>();
-const frontmatterArrayPillWidgetCache = new Map();
+const frontmatterArrayPillWidgetCache = new Map<string, FrontmatterArrayPillsWidget>();
 const htmlBreakTagRegex = /^<br\s*\/?>$/i;
 
 class HtmlBreakWidget extends WidgetType {
@@ -299,7 +306,13 @@ class HtmlBreakWidget extends WidgetType {
 
 const htmlBreakWidget = new HtmlBreakWidget();
 
-function addHtmlBreakDecoration(builder, state, node, activeLines, frontmatter): void {
+function addHtmlBreakDecoration(
+  builder: DecorationCollector,
+  state: EditorState,
+  node: SyntaxNodeRef,
+  activeLines: Set<number>,
+  frontmatter: FrontmatterInfo | null
+): void {
   if (isInsideFrontmatter(frontmatter, node.from)) {
     return;
   }
@@ -328,7 +341,7 @@ function addHtmlBreakDecoration(builder, state, node, activeLines, frontmatter):
   );
 }
 
-function isMergeConflictMarkerLine(state, pos) {
+function isMergeConflictMarkerLine(state: EditorState, pos: number): boolean {
   const line = state.doc.lineAt(pos);
   const lineText = state.doc.sliceString(line.from, line.to).trimStart();
   return mergeConflictMarkerPrefixes.some((prefix) => lineText.startsWith(prefix));
@@ -354,7 +367,7 @@ class ListIndentWidget extends WidgetType {
   }
 }
 
-function listIndentWidget(indentColumns) {
+function listIndentWidget(indentColumns: number): ListIndentWidget {
   const normalized = Math.max(0, Math.round(indentColumns));
   let widget = listIndentWidgetCache.get(normalized);
   if (widget) {
@@ -407,14 +420,14 @@ class FootnoteReferenceSeparatorWidget extends WidgetType {
 const footnoteReferenceSeparatorWidget = new FootnoteReferenceSeparatorWidget();
 
 function listLineDeco(
-  contentOffsetColumns,
-  indentColumns,
+  contentOffsetColumns: number,
+  indentColumns: number,
   guideStepColumns = 2,
   selected = false,
   isTask = false,
   taskHiddenPrefixColumns = 0,
   isOrdered = false
-) {
+): Decoration {
   const offset = Math.max(0, contentOffsetColumns);
   const indent = Math.max(0, indentColumns);
   const guideStep = Math.max(2, guideStepColumns);
@@ -453,7 +466,13 @@ const inlineStyleDecos = {
   highlight: Decoration.mark({ class: 'meo-md-highlight' }),
   inlineCode: Decoration.mark({ class: 'meo-md-inline-code' })
 };
-function addDelimitedInlineStyleDecoration(builder, state, node, decoration, markers) {
+function addDelimitedInlineStyleDecoration(
+  builder: DecorationCollector,
+  state: EditorState,
+  node: SyntaxNodeRef,
+  decoration: Decoration,
+  markers: readonly string[]
+): void {
   const text = state.doc.sliceString(node.from, node.to);
   const marker = markers.find((candidate) => text.startsWith(candidate) && text.endsWith(candidate));
   if (!marker) {
@@ -464,23 +483,28 @@ function addDelimitedInlineStyleDecoration(builder, state, node, decoration, mar
   addRange(builder, node.from + marker.length, node.to - marker.length, decoration);
 }
 
-function addEmphasisDecorations(builder, state, node) {
+function addEmphasisDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef): void {
   addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.em, ['*', '_']);
 }
 
-function addStrongEmphasisDecorations(builder, state, node) {
+function addStrongEmphasisDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef): void {
   addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.strong, ['**', '__']);
 }
 
-function addStrikethroughDecorations(builder, state, node) {
+function addStrikethroughDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef): void {
   addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.strike, ['~~', '~']);
 }
 
-function addHighlightDecorations(builder, state, node) {
+function addHighlightDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef): void {
   addDelimitedInlineStyleDecoration(builder, state, node, inlineStyleDecos.highlight, ['==']);
 }
 
-function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLines) {
+function addFrontmatterBoundaryDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  frontmatter: FrontmatterInfo,
+  activeLines: Set<number>
+): void {
   if (frontmatter.contentTo > frontmatter.contentFrom) {
     addLineClass(builder, state, frontmatter.contentFrom, frontmatter.contentTo, lineStyleDecos.frontmatterContent);
     const propertyLineDeco = lineStyleDecos.frontmatterProperty;
@@ -563,7 +587,13 @@ function addFrontmatterBoundaryDecorations(builder, state, frontmatter, activeLi
   }
 }
 
-function addThematicBreakDecorations(builder, state, from, to, activeLines) {
+function addThematicBreakDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  from: number,
+  to: number,
+  activeLines: Set<number>
+): void {
   addLineClass(builder, state, from, to, lineStyleDecos.hr);
   const lineNo = state.doc.lineAt(from).number;
   if (activeLines.has(lineNo)) {
@@ -574,7 +604,13 @@ function addThematicBreakDecorations(builder, state, from, to, activeLines) {
   }
 }
 
-function addForcedThematicBreakDecorations(builder, state, activeLines, frontmatter, codeBlockLines = null) {
+function addForcedThematicBreakDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  activeLines: Set<number>,
+  frontmatter: FrontmatterInfo | null,
+  codeBlockLines: Set<number> | null = null
+): void {
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     const line = state.doc.line(lineNo);
     if (
@@ -588,12 +624,18 @@ function addForcedThematicBreakDecorations(builder, state, activeLines, frontmat
   }
 }
 
-function getNodeHref(state, node) {
+function getNodeHref(state: EditorState, node: SyntaxNode): string {
   const href = state.doc.sliceString(node.from, node.to).trim();
   return normalizeSourceHref(href);
 }
 
-function addLinkMark(builder, from, to, href, openButtonPos = null) {
+function addLinkMark(
+  builder: DecorationCollector,
+  from: number,
+  to: number,
+  href: string,
+  openButtonPos: number | null = null
+): void {
   if (!href) {
     return;
   }
@@ -606,7 +648,7 @@ function addLinkMark(builder, from, to, href, openButtonPos = null) {
       attributes: { 'data-meo-link-href': href }
     })
   );
-  if (Number.isFinite(openButtonPos)) {
+  if (openButtonPos !== null && Number.isFinite(openButtonPos)) {
     builder.push(
       Decoration.widget({
         widget: new OpenLinkWidget(href),
@@ -616,7 +658,14 @@ function addLinkMark(builder, from, to, href, openButtonPos = null) {
   }
 }
 
-function addTrimmedUrlLinkMark(builder, from, to, rawUrl, href, showOpenButton = false) {
+function addTrimmedUrlLinkMark(
+  builder: DecorationCollector,
+  from: number,
+  to: number,
+  rawUrl: string,
+  href: string,
+  showOpenButton = false
+): void {
   if (!href) {
     return;
   }
@@ -630,12 +679,12 @@ function addTrimmedUrlLinkMark(builder, from, to, rawUrl, href, showOpenButton =
   addLinkMark(builder, range.from, range.to, href, showOpenButton ? range.to : null);
 }
 
-function findChildNode(node, name) {
-  const syntaxNode = node?.node ?? node;
+function findChildNode(node: SyntaxNode | SyntaxNodeRef | null, name: string): SyntaxNode | null {
+  const syntaxNode = node?.node ?? null;
   if (!syntaxNode?.firstChild) {
     return null;
   }
-  for (let child = syntaxNode.firstChild; child; child = child.nextSibling) {
+  for (let child: SyntaxNode | null = syntaxNode.firstChild; child; child = child.nextSibling) {
     if (child.name === name) {
       return child;
     }
@@ -711,7 +760,7 @@ class OpenLinkWidget extends WidgetType {
 }
 
 class MissingWikiLinkWidget extends WidgetType {
-  eq(other) {
+  eq(other: WidgetType): boolean {
     return other instanceof MissingWikiLinkWidget;
   }
 
@@ -730,7 +779,7 @@ class MissingWikiLinkWidget extends WidgetType {
 }
 
 class MissingLocalLinkWidget extends WidgetType {
-  eq(other) {
+  eq(other: WidgetType): boolean {
     return other instanceof MissingLocalLinkWidget;
   }
 
@@ -799,14 +848,14 @@ function blockIndentLineDeco(indentColumns: number) {
   return decoration;
 }
 
-function addBlockIndentLines(builder, state, from, to, indentColumns: number) {
+function addBlockIndentLines(builder: DecorationCollector, state: EditorState, from: number, to: number, indentColumns: number): void {
   if (indentColumns <= 0) {
     return;
   }
   addLineClass(builder, state, from, to, blockIndentLineDeco(indentColumns));
 }
 
-function frontmatterArrayPillsWidget(itemLabels) {
+function frontmatterArrayPillsWidget(itemLabels: string[]): FrontmatterArrayPillsWidget {
   const cacheKey = JSON.stringify(itemLabels);
   let widget = frontmatterArrayPillWidgetCache.get(cacheKey);
   if (widget) {
@@ -973,7 +1022,7 @@ class FootnoteBacklinkWidget extends WidgetType {
   }
 }
 
-function addMarkdownLinkDecorations(builder, state, node, activeLines) {
+function addMarkdownLinkDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef, activeLines: Set<number>): void {
   const urlNode = findChildNode(node, 'URL');
   if (!urlNode) {
     return;
@@ -1058,7 +1107,7 @@ class DetailsSourceToggleWidget extends WidgetType {
   }
 }
 
-function addFootnoteReferenceDecorations(builder, state, reference, activeLines): boolean {
+function addFootnoteReferenceDecorations(builder: DecorationCollector, state: EditorState, reference: FootnoteReference, activeLines: Set<number>): boolean {
   if (!shouldRenderFootnoteReference(state, reference, activeLines)) {
     return false;
   }
@@ -1073,14 +1122,14 @@ function addFootnoteReferenceDecorations(builder, state, reference, activeLines)
   return true;
 }
 
-function shouldRenderFootnoteReference(state, reference, activeLines): boolean {
+function shouldRenderFootnoteReference(state: EditorState, reference: FootnoteReference, activeLines: Set<number>): boolean {
   const line = state.doc.lineAt(reference.from);
   const editingReference = activeLines.has(line.number) || overlapsSelection(state, reference.from, reference.to);
   return !editingReference && Boolean(reference.number) && Boolean(reference.definition);
 }
 
 function addInlineFootnoteMarkerSyntaxDecorations(
-  builder,
+  builder: DecorationCollector,
   containerFrom: number,
   markerRanges: Array<{ label: string; fromOffset: number; toOffset: number }>
 ) {
@@ -1097,7 +1146,7 @@ function addInlineFootnoteMarkerSyntaxDecorations(
   }
 }
 
-function getEmptyImageLinkUrl(state, node) {
+function getEmptyImageLinkUrl(state: EditorState, node: SyntaxNodeRef): string {
   const urlNode = findChildNode(node, 'URL');
   if (!urlNode) {
     return '';
@@ -1119,7 +1168,7 @@ function getEmptyImageLinkUrl(state, node) {
   return isImageUrl(url) ? url : '';
 }
 
-function addAutolinkDecorations(builder, state, node, activeLines) {
+function addAutolinkDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef, activeLines: Set<number>): void {
   const urlNode = findChildNode(node, 'URL');
   if (!urlNode) {
     return;
@@ -1130,7 +1179,7 @@ function addAutolinkDecorations(builder, state, node, activeLines) {
   addTrimmedUrlLinkMark(builder, urlNode.from, urlNode.to, rawUrl, href, !isActiveLine);
 }
 
-function addWikiLinkDecorations(builder, state, node, activeLines) {
+function addWikiLinkDecorations(builder: DecorationCollector, state: EditorState, node: SyntaxNodeRef, activeLines: Set<number>): boolean {
   const wikiLink = parseWikiLinkData(state, node);
   if (!wikiLink) {
     return false;
@@ -1174,18 +1223,18 @@ function addWikiLinkDecorations(builder, state, node, activeLines) {
   return true;
 }
 
-function addRange(builder, from, to, deco) {
+function addRange(builder: DecorationCollector, from: number, to: number, deco: Decoration): void {
   if (to <= from) {
     return;
   }
   builder.push(deco.range(from, to));
 }
 
-function addLineAwareRange(builder, activeLines, lineNo, from, to, inactiveDeco, activeDeco) {
+function addLineAwareRange(builder: DecorationCollector, activeLines: Set<number>, lineNo: number, from: number, to: number, inactiveDeco: Decoration, activeDeco: Decoration): void {
   addRange(builder, from, to, activeLines.has(lineNo) ? activeDeco : inactiveDeco);
 }
 
-function addInlineMarkerRange(builder, activeLines, lineNo, from, to, inactiveDeco, activeDeco, closing = false) {
+function addInlineMarkerRange(builder: DecorationCollector, activeLines: Set<number>, lineNo: number, from: number, to: number, inactiveDeco: Decoration, activeDeco: Decoration, closing = false): void {
   const active = activeLines.has(lineNo);
   addRange(builder, from, to, active ? activeDeco : inactiveDeco);
   if (active && closing) {
@@ -1193,7 +1242,7 @@ function addInlineMarkerRange(builder, activeLines, lineNo, from, to, inactiveDe
   }
 }
 
-function addSingleTildeStrikeDecorations(builder, state, activeLines, existingStrikeRanges, codeBlockLines = null) {
+function addSingleTildeStrikeDecorations(builder: DecorationCollector, state: EditorState, activeLines: Set<number>, existingStrikeRanges: SourceRange[], codeBlockLines: Set<number> | null = null): void {
   const pairs = collectSingleTildeStrikePairs(state, existingStrikeRanges);
   for (const pair of pairs) {
     if (codeBlockLines?.has(pair.lineNo)) {
@@ -1223,14 +1272,14 @@ function addSingleTildeStrikeDecorations(builder, state, activeLines, existingSt
 }
 
 function addPunctuationClosingInlineStyleDecorations(
-  builder,
-  state,
-  activeLines,
-  parsedStyleRanges,
-  codeBlockLines = null,
-  blockedRanges = [],
-  frontmatter = null
-) {
+  builder: DecorationCollector,
+  state: EditorState,
+  activeLines: Set<number>,
+  parsedStyleRanges: ReadonlyArray<ParsedInlineStyleRange>,
+  codeBlockLines: Set<number> | null = null,
+  blockedRanges: ReadonlyArray<SourceRange> = [],
+  frontmatter: FrontmatterInfo | null = null
+): void {
   const decorationsByNodeName = {
     StrongEmphasis: { content: inlineStyleDecos.strong, inactive: strongMarkerDeco, active: activeStrongMarkerDeco },
     Strikethrough: { content: inlineStyleDecos.strike, inactive: strikeMarkerDeco, active: activeStrikeMarkerDeco },
@@ -1317,7 +1366,7 @@ function collectIndentSelectedLines(state: EditorState): Set<number> {
   return lines;
 }
 
-function addLineClass(builder, state, from, to, deco) {
+function addLineClass(builder: DecorationCollector, state: EditorState, from: number, to: number, deco: Decoration): void {
   const startLine = state.doc.lineAt(from).number;
   const endLine = state.doc.lineAt(Math.max(from, to - 1)).number;
   for (let lineNo = startLine; lineNo <= endLine; lineNo += 1) {
@@ -1341,7 +1390,7 @@ function rangeTouchesActiveLine(state: EditorState, from: number, to: number, ac
   return false;
 }
 
-function addDetailsBlockDecorations(builder, state, detailsBlocks) {
+function addDetailsBlockDecorations(builder: DecorationCollector, state: EditorState, detailsBlocks: ReturnType<typeof getDetailsBlocks>): void {
   for (const detailsBlock of detailsBlocks) {
     addLineClass(builder, state, detailsBlock.lineFrom, detailsBlock.lineTo, lineStyleDecos.detailsSummary);
 
@@ -1382,7 +1431,7 @@ function addDetailsBlockDecorations(builder, state, detailsBlocks) {
   }
 }
 
-function addFootnoteDefinitionDecorations(builder, state, footnotes, activeLines) {
+function addFootnoteDefinitionDecorations(builder: DecorationCollector, state: EditorState, footnotes: ParsedFootnotes, activeLines: Set<number>): void {
   for (const definition of footnotes.definitions) {
     if (!definition.isPrimary) {
       continue;
@@ -1391,9 +1440,7 @@ function addFootnoteDefinitionDecorations(builder, state, footnotes, activeLines
     const showRawSyntax =
       rangeTouchesActiveLine(state, definition.lineFrom, definition.lineTo, activeLines) ||
       overlapsSelection(state, definition.lineFrom, definition.lineTo);
-    const hasResolvedTarget = definition.number !== null && definition.firstReferenceFrom !== null;
-
-    if (showRawSyntax || !hasResolvedTarget) {
+    if (showRawSyntax || definition.number === null || definition.firstReferenceFrom === null) {
       addRange(builder, definition.markerFrom, definition.markerFrom + 2, footnoteMarkerDeco);
       addRange(builder, definition.markerFrom + 2, definition.colonFrom - 1, footnoteLiteralDeco);
       addRange(builder, definition.colonFrom - 1, definition.colonFrom, footnoteMarkerDeco);
@@ -1432,7 +1479,7 @@ function addFootnoteDefinitionDecorations(builder, state, footnotes, activeLines
   }
 }
 
-function addAtxHeadingPrefixMarkers(builder, state, from, activeLines) {
+function addAtxHeadingPrefixMarkers(builder: DecorationCollector, state: EditorState, from: number, activeLines: Set<number>): void {
   const line = state.doc.lineAt(from);
   const text = state.doc.sliceString(line.from, line.to);
   const match = /^(#{1,6}[ \t]+)/.exec(text);
@@ -1448,20 +1495,20 @@ function addAtxHeadingPrefixMarkers(builder, state, from, activeLines) {
   addRange(builder, line.from, prefixTo, markerDeco);
 }
 
-function isFootnoteDefinitionMarker(footnotes, from, to) {
+function isFootnoteDefinitionMarker(footnotes: ParsedFootnotes, from: number, to: number): boolean {
   return footnotes.definitions.some(
     (definition) => from >= definition.markerFrom && to <= definition.colonTo
   );
 }
 
-function isFootnoteDefinitionContent(footnotes, from, to) {
+function isFootnoteDefinitionContent(footnotes: ParsedFootnotes, from: number, to: number): boolean {
   return footnotes.definitions.some(
     (definition) => from >= definition.contentFrom && to <= definition.contentTo
   );
 }
 
-export function collectInlineMarkdownSyntaxRanges(text) {
-  const ranges = [];
+export function collectInlineMarkdownSyntaxRanges(text: string): SourceRange[] {
+  const ranges: SourceRange[] = [];
   const patterns = [
     /\*\*|__|~~|`+/g,
     /(?<!\\)[*_]/g
@@ -1482,7 +1529,7 @@ export function collectInlineMarkdownSyntaxRanges(text) {
   }
 
   ranges.sort((a, b) => a.from - b.from || b.to - a.to);
-  const merged = [];
+  const merged: SourceRange[] = [];
   for (const range of ranges) {
     const previous = merged[merged.length - 1];
     if (previous && range.from <= previous.to) {
@@ -1494,7 +1541,7 @@ export function collectInlineMarkdownSyntaxRanges(text) {
   return merged;
 }
 
-function addAtxHeadingContentColor(builder, state, from, to) {
+function addAtxHeadingContentColor(builder: DecorationCollector, state: EditorState, from: number, to: number): void {
   const line = state.doc.lineAt(from);
   const text = state.doc.sliceString(line.from, line.to);
   const match = /^(#{1,6}[ \t]+)/.exec(text);
@@ -1518,7 +1565,13 @@ function addAtxHeadingContentColor(builder, state, from, to) {
   }
 }
 
-function addListLineDecorations(builder, state, indentSelectedLines, frontmatter = null, codeBlockLines = null) {
+function addListLineDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  indentSelectedLines: Set<number>,
+  frontmatter: FrontmatterInfo | null = null,
+  codeBlockLines: Set<number> | null = null
+): void {
   const stylesByLine = detectListIndentStylesByLine(state);
   const orderedCountsByLevel: Array<number | null> = [];
 
@@ -1577,8 +1630,8 @@ function addListLineDecorations(builder, state, indentSelectedLines, frontmatter
   }
 }
 
-function buildDecorations(state) {
-  const ranges = [];
+function buildDecorations(state: EditorState): DecorationSet {
+  const ranges: DecorationCollector = [];
   const diagnostics = state.field(diagnosticDataField, false) ?? [];
   const activeLines = collectActiveLines(state);
   const indentSelectedLines = collectIndentSelectedLines(state);
@@ -1588,9 +1641,9 @@ function buildDecorations(state) {
   const collapsedHeadingSections = getCollapsedHeadingSections(state);
   const detailsBlocks = getDetailsBlocks(state);
   const strikeRanges = collectStrikethroughRanges(tree);
-  const parsedInlineStyleRanges = [];
+  const parsedInlineStyleRanges: ParsedInlineStyleRange[] = [];
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name === 'StrongEmphasis' || node.name === 'Emphasis' || node.name === 'Strikethrough' || node.name === 'Highlight' || node.name === 'InlineCode') {
         parsedInlineStyleRanges.push({ from: node.from, to: node.to, nodeName: node.name });
       }
@@ -1601,11 +1654,11 @@ function buildDecorations(state) {
     state,
     getLiveRenderedBlocks(state)
   );
-  const activeImageGroups = new Map();
-  const parsedTableRanges = [];
+  const activeImageGroups = new Map<number, ActiveImageGroup>();
+  const parsedTableRanges: SourceRange[] = [];
   let tableDepth = 0;
 
-  let frontmatter = null;
+  let frontmatter: FrontmatterInfo | null = null;
   try {
     frontmatter = parseFrontmatter(state);
     if (frontmatter) {
@@ -1619,7 +1672,7 @@ function buildDecorations(state) {
   const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines);
 
   tree.iterate({
-    enter: (node) => {
+    enter: (node: SyntaxNodeRef) => {
       if (hasCodeBlockAncestor(node)) {
         if (node.name === 'QuoteMark') {
           const line = state.doc.lineAt(node.from);
@@ -1648,7 +1701,15 @@ function buildDecorations(state) {
         if (tableDepth === 0 && !isInsideFrontmatter(frontmatter, node.from)) {
           addAtxHeadingPrefixMarkers(ranges, state, node.from, activeLines);
           addAtxHeadingContentColor(ranges, state, node.from, node.to);
-          addLineClass(ranges, state, node.from, node.to, lineStyleDecos[`h${headingLevel}`]);
+          const headingDecoration = [
+            lineStyleDecos.h1,
+            lineStyleDecos.h2,
+            lineStyleDecos.h3,
+            lineStyleDecos.h4,
+            lineStyleDecos.h5,
+            lineStyleDecos.h6
+          ][headingLevel - 1];
+          addLineClass(ranges, state, node.from, node.to, headingDecoration);
         }
       }
 
@@ -1731,7 +1792,7 @@ function buildDecorations(state) {
           const resolvedReferenceKeys = new Set(
             (footnoteReferences ?? []).map((reference) => footnoteReferenceKey(reference.from, reference.to))
           );
-          const renderedFootnoteReferences = [];
+          const renderedFootnoteReferences: FootnoteReference[] = [];
           for (const footnoteReference of footnoteReferences ?? []) {
             if (addFootnoteReferenceDecorations(ranges, state, footnoteReference, activeLines)) {
               renderedFootnoteReferences.push(footnoteReference);
@@ -1793,7 +1854,7 @@ function buildDecorations(state) {
         if (parentName === 'LinkReference' && isFootnoteDefinitionContent(footnotes, node.from, node.to)) {
           addRange(ranges, node.from, node.to, footnoteDefinitionContentDeco);
         } else if (parentName !== 'Link' && parentName !== 'Autolink') {
-          const href = getNodeHref(state, node);
+          const href = getNodeHref(state, node.node);
           const rawUrl = state.doc.sliceString(node.from, node.to);
           if (isInsideFrontmatterContent(frontmatter, node.from)) {
             return;
@@ -1914,12 +1975,16 @@ function buildDecorations(state) {
         // For image links, check if the image node overlaps with selection to show markers
         let useActiveDeco = activeLines.has(line.number);
         if (parentName === 'Image') {
-          const { url } = getImageData(state, node.node.parent);
+          const imageNode = node.node.parent;
+          if (!imageNode) {
+            return;
+          }
+          const { url } = getImageData(state, imageNode);
           if (!url) {
             return;
           }
           // Also show active markers if the image is selected
-          if (!useActiveDeco && overlapsSelection(state, node.node.parent.from, node.node.parent.to)) {
+          if (!useActiveDeco && overlapsSelection(state, imageNode.from, imageNode.to)) {
             useActiveDeco = true;
           }
         } else if (parentName === 'Link') {
@@ -1952,7 +2017,7 @@ function buildDecorations(state) {
         addRange(ranges, node.from, node.to, markerDeco);
       }
     },
-    leave: (node) => {
+    leave: (node: SyntaxNodeRef) => {
       if (node.name === 'Table') {
         tableDepth -= 1;
       }
@@ -2025,7 +2090,7 @@ function buildDecorations(state) {
   return filterDecorationsOutsideMergeConflicts(state, result);
 }
 
-function hasCodeBlockAncestor(node) {
+function hasCodeBlockAncestor(node: SyntaxNodeRef): boolean {
   let parent = node.node.parent;
   while (parent) {
     if (parent.name === 'FencedCode' || parent.name === 'CodeBlock') {
@@ -2036,7 +2101,13 @@ function hasCodeBlockAncestor(node) {
   return false;
 }
 
-function addAlertBlockDecorations(builder, state, node, alertBlock, activeLines) {
+function addAlertBlockDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  node: SyntaxNodeRef,
+  alertBlock: AlertBlock,
+  activeLines: Set<number>
+): void {
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(node.to);
   const lineDeco = alertLineDecos[alertBlock.type];
@@ -2060,7 +2131,12 @@ function addAlertBlockDecorations(builder, state, node, alertBlock, activeLines)
   }
 }
 
-function safeBuildDecorations(state, fallback, context, extra = {}) {
+function safeBuildDecorations(
+  state: EditorState,
+  fallback: DecorationSet,
+  context: 'create' | 'update',
+  extra: { docChanged?: boolean; selection?: EditorSelection } = {}
+): DecorationSet {
   try {
     return buildDecorations(state);
   } catch (error) {
@@ -2074,14 +2150,14 @@ function safeBuildDecorations(state, fallback, context, extra = {}) {
   }
 }
 
-function mergeConflictRanges(state) {
+function mergeConflictRanges(state: EditorState): SourceRange[] {
   return parseMergeConflicts(state).map((conflict) => ({
     from: conflict.blockFrom,
     to: conflict.blockTo
   }));
 }
 
-function pointInsideRanges(pos, ranges) {
+function pointInsideRanges(pos: number, ranges: ReadonlyArray<SourceRange>): boolean {
   for (const range of ranges) {
     if (pos >= range.from && pos < range.to) {
       return true;
@@ -2090,7 +2166,7 @@ function pointInsideRanges(pos, ranges) {
   return false;
 }
 
-function rangeOverlapsRanges(from, to, ranges) {
+function rangeOverlapsRanges(from: number, to: number, ranges: ReadonlyArray<SourceRange>): boolean {
   for (const range of ranges) {
     if (rangesOverlap(from, to, range.from, range.to)) {
       return true;
@@ -2099,14 +2175,14 @@ function rangeOverlapsRanges(from, to, ranges) {
   return false;
 }
 
-function filterDecorationsOutsideMergeConflicts(state, decorations) {
+function filterDecorationsOutsideMergeConflicts(state: EditorState, decorations: DecorationSet): DecorationSet {
   const conflicts = mergeConflictRanges(state);
   if (!conflicts.length || isEmptyDecorationSet(decorations)) {
     return decorations;
   }
 
-  const filtered = [];
-  decorations.between(0, state.doc.length, (from, to, value) => {
+  const filtered: DecorationCollector = [];
+  decorations.between(0, state.doc.length, (from: number, to: number, value: Decoration) => {
     const overlaps = to > from
       ? rangeOverlapsRanges(from, to, conflicts)
       : pointInsideRanges(from, conflicts);
@@ -2118,10 +2194,10 @@ function filterDecorationsOutsideMergeConflicts(state, decorations) {
   return Decoration.set(filtered, true);
 }
 
-function collectCodeBlockLines(state, tree, mermaidColonBlocks) {
-  const lines = new Set();
+function collectCodeBlockLines(state: EditorState, tree: Tree, mermaidColonBlocks: readonly MermaidColonBlock[]): Set<number> {
+  const lines = new Set<number>();
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') {
         return;
       }
@@ -2144,7 +2220,12 @@ function collectCodeBlockLines(state, tree, mermaidColonBlocks) {
   return lines;
 }
 
-function addMermaidColonFenceDecorations(builder, state, mermaidColonBlocks, activeLines) {
+function addMermaidColonFenceDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  mermaidColonBlocks: readonly MermaidColonBlock[],
+  activeLines: Set<number>
+): void {
   for (const block of mermaidColonBlocks) {
     const startLine = state.doc.line(block.startLine);
     const endLine = state.doc.line(block.endLine);
@@ -2328,7 +2409,7 @@ function getMathWidget(
 }
 
 function collectRenderedTableRanges(
-  state,
+  state: EditorState,
   blocks: ReadonlyArray<LiveRenderedBlock>
 ): Array<{ from: number; to: number }> {
   const ranges: Array<{ from: number; to: number }> = [];
@@ -2367,10 +2448,10 @@ function mergeSimpleRanges(ranges: Array<{ from: number; to: number }>): Array<{
   return merged;
 }
 
-function collectInlineCodeRanges(tree): Array<{ from: number; to: number }> {
+function collectInlineCodeRanges(tree: Tree): SourceRange[] {
   const ranges: Array<{ from: number; to: number }> = [];
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name === 'InlineCode' || node.name === 'CodeText') {
         ranges.push({ from: node.from, to: node.to });
       }
@@ -2380,14 +2461,14 @@ function collectInlineCodeRanges(tree): Array<{ from: number; to: number }> {
 }
 
 function collectCodeBlockRanges(
-  state,
-  tree,
-  mermaidColonBlocks
-): Array<{ from: number; to: number }> {
+  state: EditorState,
+  tree: Tree,
+  mermaidColonBlocks: readonly MermaidColonBlock[]
+): SourceRange[] {
   const ranges: Array<{ from: number; to: number }> = [];
 
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') {
         return;
       }
@@ -2407,11 +2488,11 @@ function collectCodeBlockRanges(
 }
 
 function collectMathRanges(
-  state,
-  tree,
-  mermaidColonBlocks,
-  renderedTableRanges,
-  frontmatter = null
+  state: EditorState,
+  tree: Tree,
+  mermaidColonBlocks: readonly MermaidColonBlock[],
+  renderedTableRanges: ReadonlyArray<SourceRange>,
+  frontmatter: FrontmatterInfo | null = null
 ): LatexMathRange[] {
   const excludedRanges = [
     ...collectInlineCodeRanges(tree),
@@ -2434,7 +2515,7 @@ function collectMathRanges(
 }
 
 function resolveFencedMathRenderSpan(
-  state,
+  state: EditorState,
   startLineNo: number,
   endLineNo: number
 ): { innerFrom: number; innerTo: number } | null {
@@ -2458,7 +2539,12 @@ function resolveFencedMathRenderSpan(
   };
 }
 
-function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathRange>, activeLines) {
+function addMathDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  mathRanges: ReadonlyArray<LatexMathRange>,
+  activeLines: Set<number>
+): void {
   for (const mathRange of mathRanges) {
     if (mathRange.to <= mathRange.from) {
       continue;
@@ -2563,14 +2649,14 @@ function addMathDecorations(builder, state, mathRanges: ReadonlyArray<LatexMathR
 }
 
 function addKbdTagDecorations(
-  builder,
-  state,
-  activeLines,
-  renderedTableRanges,
-  mathRanges = [],
-  frontmatter = null,
-  codeBlockLines = null
-) {
+  builder: DecorationCollector,
+  state: EditorState,
+  activeLines: Set<number>,
+  renderedTableRanges: ReadonlyArray<SourceRange>,
+  mathRanges: ReadonlyArray<LatexMathRange> = [],
+  frontmatter: FrontmatterInfo | null = null,
+  codeBlockLines: Set<number> | null = null
+): void {
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     if (activeLines.has(lineNo) || codeBlockLines?.has(lineNo)) {
       continue;
@@ -2636,11 +2722,11 @@ function getEmojiWidget(emoji: string): WidgetType {
 }
 
 function addEmojiDecorationsWithMath(
-  builder,
-  state,
-  mathRanges,
-  codeBlockLines = null
-) {
+  builder: DecorationCollector,
+  state: EditorState,
+  mathRanges: ReadonlyArray<LatexMathRange>,
+  codeBlockLines: Set<number> | null = null
+): void {
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     if (codeBlockLines?.has(lineNo)) {
       continue;
@@ -2682,10 +2768,10 @@ const colorExcludedSyntaxNodes = new Set([
   'HTMLBlock'
 ]);
 
-function collectColorExcludedRanges(tree): Array<{ from: number; to: number }> {
+function collectColorExcludedRanges(tree: Tree): SourceRange[] {
   const ranges: Array<{ from: number; to: number }> = [];
   tree.iterate({
-    enter(node) {
+    enter(node: SyntaxNodeRef) {
       if (colorExcludedSyntaxNodes.has(node.name)) {
         ranges.push({ from: node.from, to: node.to });
         return false;
@@ -2696,12 +2782,12 @@ function collectColorExcludedRanges(tree): Array<{ from: number; to: number }> {
 }
 
 function addColorSwatchDecorations(
-  ranges,
-  state,
-  tree,
-  activeLines,
-  excludedRanges
-) {
+  ranges: DecorationCollector,
+  state: EditorState,
+  tree: Tree,
+  activeLines: Set<number>,
+  excludedRanges: ReadonlyArray<SourceRange>
+): void {
   const colorRanges = collectColorRangesFromText(state.doc.toString());
   const syntaxExcludedRanges = [
     ...collectColorExcludedRanges(tree),
@@ -2720,11 +2806,11 @@ function addColorSwatchDecorations(
   }
 }
 
-const liveDecorationField = StateField.define({
-  create(state) {
+const liveDecorationField = StateField.define<DecorationSet>({
+  create(state: EditorState): DecorationSet {
     return safeBuildDecorations(state, Decoration.none, 'create');
   },
-  update(decorations, transaction) {
+  update(decorations: DecorationSet, transaction: Transaction): DecorationSet {
     // Search highlights are maintained independently. Preserving the existing
     // live decorations prevents a transient parse result from exposing source.
     if (
@@ -2750,9 +2836,9 @@ const liveDecorationField = StateField.define({
   provide: (field) => EditorView.decorations.from(field)
 });
 
-function buildLiveLineNumberMarkers(state) {
-  const builder = new RangeSetBuilder();
-  const conflictLineNumbers = new Set();
+function buildLiveLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> {
+  const builder = new RangeSetBuilder<GutterMarker>();
+  const conflictLineNumbers = new Set<number>();
   for (const conflict of parseMergeConflicts(state)) {
     for (let lineNo = conflict.startLineNo; lineNo <= conflict.endLineNo; lineNo += 1) {
       conflictLineNumbers.add(lineNo);
@@ -2773,8 +2859,8 @@ function buildLiveLineNumberMarkers(state) {
   return builder.finish();
 }
 
-function detectTableBlocks(state) {
-  const blocks = [];
+function detectTableBlocks(state: EditorState): Array<{ startLineNo: number; endLineNo: number }> {
+  const blocks: Array<{ startLineNo: number; endLineNo: number }> = [];
   for (let lineNo = 2; lineNo <= state.doc.lines; lineNo += 1) {
     const delimiterLine = state.doc.line(lineNo);
     const delimiterText = state.doc.sliceString(delimiterLine.from, delimiterLine.to);
@@ -2803,7 +2889,14 @@ function detectTableBlocks(state) {
   return blocks;
 }
 
-function addFallbackTableDecorations(builder, state, tree, parsedTableRanges, mermaidColonBlocks, diagnostics = []) {
+function addFallbackTableDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  tree: Tree,
+  parsedTableRanges: ReadonlyArray<SourceRange>,
+  mermaidColonBlocks: readonly MermaidColonBlock[],
+  diagnostics: EditorDiagnostic[] = []
+): void {
   const tableBlocks = detectTableBlocks(state);
   for (const block of tableBlocks) {
     const from = state.doc.line(block.startLineNo).from;
@@ -2824,10 +2917,10 @@ function addFallbackTableDecorations(builder, state, tree, parsedTableRanges, me
   }
 }
 
-function hasBlockedRawFileUrlAncestor(tree, from, to) {
+function hasBlockedRawFileUrlAncestor(tree: Tree, from: number, to: number): boolean {
   const positions = [from, Math.max(from, to - 1)];
   for (const position of positions) {
-    let node = tree.resolveInner(position, 1);
+    let node: SyntaxNode | null = tree.resolveInner(position, 1);
     while (node) {
       if (rawFileUrlBlockedAncestorNames.has(node.name)) {
         return true;
@@ -2838,7 +2931,13 @@ function hasBlockedRawFileUrlAncestor(tree, from, to) {
   return false;
 }
 
-function addRawFileUrlDecorations(builder, state, tree, activeLines, frontmatter = null) {
+function addRawFileUrlDecorations(
+  builder: DecorationCollector,
+  state: EditorState,
+  tree: Tree,
+  activeLines: Set<number>,
+  frontmatter: FrontmatterInfo | null = null
+): void {
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     const line = state.doc.line(lineNo);
     if (line.text.indexOf(fileSchemePrefix) === -1) {
@@ -2866,11 +2965,11 @@ function addRawFileUrlDecorations(builder, state, tree, activeLines, frontmatter
   }
 }
 
-function rangesOverlap(fromA, toA, fromB, toB) {
+function rangesOverlap(fromA: number, toA: number, fromB: number, toB: number): boolean {
   return fromA < toB && toA > fromB;
 }
 
-function overlapsSelection(state, from, to) {
+function overlapsSelection(state: EditorState, from: number, to: number): boolean {
   if (state.field(livePointerSelectionActiveField).active || state.field(liveDocumentIdleField)) {
     return false;
   }
@@ -2878,12 +2977,12 @@ function overlapsSelection(state, from, to) {
   return state.selection.ranges.some((range) => rangesOverlap(from, to, range.from, range.to));
 }
 
-function overlapsParsedTableRange(from, to, ranges) {
+function overlapsParsedTableRange(from: number, to: number, ranges: ReadonlyArray<SourceRange>): boolean {
   return ranges.some((range) => rangesOverlap(from, to, range.from, range.to));
 }
 
-function isInsideCodeBlock(tree, pos) {
-  let node = tree.resolveInner(pos, 1);
+function isInsideCodeBlock(tree: Tree, pos: number): boolean {
+  let node: SyntaxNode | null = tree.resolveInner(pos, 1);
   while (node) {
     if (node.name === 'FencedCode' || node.name === 'CodeBlock') return true;
     node = node.parent;
@@ -2891,11 +2990,11 @@ function isInsideCodeBlock(tree, pos) {
   return false;
 }
 
-const liveLineNumberMarkerField = StateField.define({
-  create(state) {
+const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
+  create(state: EditorState): RangeSet<GutterMarker> {
     return buildLiveLineNumberMarkers(state);
   },
-  update(markers, transaction) {
+  update(markers: RangeSet<GutterMarker>, transaction: Transaction): RangeSet<GutterMarker> {
     if (!transaction.docChanged && transaction.startState.selection.eq(transaction.state.selection)) {
       return markers;
     }
@@ -2904,7 +3003,7 @@ const liveLineNumberMarkerField = StateField.define({
   provide: (field) => gutterLineClass.from(field)
 });
 
-export function liveModeExtensions() {
+export function liveModeExtensions(): Extension[] {
   return [
     markdown({
       base: markdownLanguage,
@@ -2928,7 +3027,7 @@ export function liveModeExtensions() {
   ];
 }
 
-function isEmptyDecorationSet(set) {
+function isEmptyDecorationSet(set: DecorationSet): boolean {
   const cursor = set.iter();
   return cursor.value === null;
 }

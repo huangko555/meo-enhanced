@@ -5,6 +5,7 @@
     "noImplicitAny": true
   },
   "files": [
+    "src/editor.ts",
     "src/helpers/images.ts",
     "src/helpers/htmlContent.ts",
     "src/helpers/gitDiffGutter.ts",

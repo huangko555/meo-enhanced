@@ -1,6 +1,48 @@
+import type { Text } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
+import type { GitBlameLineResult } from '../../../src/protocol/git';
 import { gitDiffLineFlagsField } from './gitDiffGutter';
 import { findDeletionMarkerForMouseEvent, findModifiedMarkerForMouseEvent } from './gitDeletionHover';
-import { getLiveGitCollapsedBlockAtLine, getLiveRenderedBlockAtLine } from './liveRenderedBlocks';
+import { getLiveGitCollapsedBlockAtLine, getLiveRenderedBlockAtLine, type LiveCollapsedGitBlock, type LiveGitChangeKind } from './liveRenderedBlocks';
+
+type EditorMode = 'source' | 'live' | 'preview';
+type LineRange = { startLine: number; endLine: number };
+type ChangeKind = 'added' | 'modified';
+type HoverKind = LiveGitChangeKind | 'empty';
+type RectLike = Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>;
+type TooltipUi = { root: HTMLDivElement; title: HTMLDivElement; meta: HTMLDivElement };
+type LineFlag = { added?: boolean; modified?: boolean; trailingEofProxyOnly?: boolean };
+type GutterBandLayout = {
+  gutter: HTMLElement;
+  gutterRect: DOMRect;
+  contentRect: DOMRect;
+  bandLeft: number;
+  bandRight: number;
+  bandTop: number;
+  bandBottom: number;
+  docTop: number;
+  docBottom: number;
+};
+type LineHit = {
+  lineNumber: number | null;
+  requestLineNumber: number | null;
+  proxiedFromTrailingEof: boolean;
+  effectiveChangeKind: LiveGitChangeKind | null;
+  collapsedBlock?: LiveCollapsedGitBlock | null;
+};
+type GitBlameHoverControllerOptions = {
+  view: EditorView;
+  getMode: () => EditorMode;
+  enabled?: boolean;
+  requestBlame: (request: { lineNumber: number }) => Promise<GitBlameLineResult>;
+  openRevisionForLine?: (request: { lineNumber: number }) => void | Promise<void>;
+  openWorktreeForLine?: (request: { lineNumber: number }) => void | Promise<void>;
+};
+export type GitBlameHoverController = {
+  hide(): void;
+  setEnabled(enabled: boolean): void;
+  destroy(): void;
+};
 
 const hoverDelayMs = 0;
 const defaultGutterHoverHitLeftPx = 0;
@@ -8,16 +50,20 @@ const defaultGutterHoverHitWidthPx = 10;
 const gutterClickDragThresholdPx = 4;
 const gutterClickDragThresholdSquared = gutterClickDragThresholdPx * gutterClickDragThresholdPx;
 
-function clamp(value, min, max) {
+function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function parseCssPixelValue(value, fallback) {
+function isFiniteNumber(value: number | undefined): value is number {
+  return Number.isFinite(value);
+}
+
+function parseCssPixelValue(value: string | null | undefined, fallback: number): number {
   const parsed = Number.parseFloat(value ?? '');
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function getGutterHoverBounds(gutter, gutterRect) {
+function getGutterHoverBounds(gutter: HTMLElement, gutterRect: DOMRect): { left: number; right: number } {
   const marker = gutter.querySelector('.meo-git-gutter-marker');
   const markerBeforeStyle = marker instanceof HTMLElement ? window.getComputedStyle(marker, '::before') : null;
   const hitLeftOffset = parseCssPixelValue(
@@ -35,7 +81,7 @@ function getGutterHoverBounds(gutter, gutterRect) {
   };
 }
 
-function formatAbsoluteDate(unixSeconds) {
+function formatAbsoluteDate(unixSeconds: number): string {
   if (!Number.isFinite(unixSeconds) || unixSeconds <= 0) {
     return '';
   }
@@ -52,7 +98,7 @@ function formatAbsoluteDate(unixSeconds) {
   }
 }
 
-function buildTooltipDom() {
+function buildTooltipDom(): TooltipUi {
   const root = document.createElement('div');
   root.className = 'meo-git-blame-tooltip';
   root.hidden = true;
@@ -68,14 +114,14 @@ function buildTooltipDom() {
   return { root, title, meta };
 }
 
-function buildGutterHoverOverlayDom() {
+function buildGutterHoverOverlayDom(): HTMLDivElement {
   const root = document.createElement('div');
   root.className = 'meo-git-hover-overlay';
   root.hidden = true;
   return root;
 }
 
-function renderBlameResult(ui, result) {
+function renderBlameResult(ui: TooltipUi, result: GitBlameLineResult): void {
   if (!result || typeof result !== 'object') {
     ui.title.textContent = 'Blame unavailable';
     ui.meta.textContent = '';
@@ -106,25 +152,22 @@ function renderBlameResult(ui, result) {
   ui.meta.textContent = result.reason ? `${result.reason}` : '';
 }
 
-function shouldShowBlameTooltip(result) {
-  if (!result || typeof result !== 'object') {
-    return false;
-  }
+function shouldShowBlameTooltip(result: GitBlameLineResult): boolean {
   return result.kind === 'commit' || result.kind === 'uncommitted';
 }
 
-function isSupportedMode(mode) {
+function isSupportedMode(mode: EditorMode | undefined): mode is 'source' | 'live' {
   return mode === 'source' || mode === 'live';
 }
 
-function getRenderedBlockTarget(target) {
+function getRenderedBlockTarget(target: EventTarget | null): Element | null {
   if (!(target instanceof Element)) {
     return null;
   }
   return target.closest('[data-meo-rendered-block-kind][data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]');
 }
 
-function getRenderedBlockRangeFromElement(block) {
+function getRenderedBlockRangeFromElement(block: Element | null): LineRange | null {
   if (!(block instanceof HTMLElement)) {
     return null;
   }
@@ -136,11 +179,11 @@ function getRenderedBlockRangeFromElement(block) {
   return { startLine, endLine };
 }
 
-function getRenderedBlockLineRange(target) {
+function getRenderedBlockLineRange(target: EventTarget | null): LineRange | null {
   return getRenderedBlockRangeFromElement(getRenderedBlockTarget(target));
 }
 
-function getRenderedBlockLineRangeAtClientY(view, clientY) {
+function getRenderedBlockLineRangeAtClientY(view: EditorView, clientY: number): LineRange | null {
   for (const node of view.dom.querySelectorAll('[data-meo-rendered-block-kind][data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]')) {
     const range = getRenderedBlockRangeFromElement(node);
     if (!range) continue;
@@ -183,7 +226,11 @@ function getRenderedBlockLineRangeAtClientY(view, clientY) {
   return null;
 }
 
-function getRenderedBlockElement(view, lineRange, target = null) {
+function getRenderedBlockElement(
+  view: EditorView,
+  lineRange: LineRange | null,
+  target: EventTarget | null = null
+): HTMLElement | null {
   const targetBlock = getRenderedBlockTarget(target);
   const targetRange = getRenderedBlockRangeFromElement(targetBlock);
   if (
@@ -212,7 +259,7 @@ function getRenderedBlockElement(view, lineRange, target = null) {
   return block instanceof HTMLElement ? block : null;
 }
 
-function getLiveBlockLineRangeFromMarker(marker) {
+function getLiveBlockLineRangeFromMarker(marker: Element | null): LineRange | null {
   if (!(marker instanceof HTMLElement)) {
     return null;
   }
@@ -224,7 +271,7 @@ function getLiveBlockLineRangeFromMarker(marker) {
   return { startLine, endLine };
 }
 
-function positionTooltip(ui, anchorRect) {
+function positionTooltip(ui: TooltipUi, anchorRect: RectLike): void {
   const tooltip = ui.root;
   tooltip.style.left = '0px';
   tooltip.style.top = '0px';
@@ -243,7 +290,7 @@ function positionTooltip(ui, anchorRect) {
   tooltip.style.top = `${Math.round(top)}px`;
 }
 
-function isTrailingEofVisualLine(doc, lineNumber) {
+function isTrailingEofVisualLine(doc: Text, lineNumber: number): boolean {
   if (!doc || doc.length <= 0 || doc.lines <= 1 || lineNumber !== doc.lines) {
     return false;
   }
@@ -251,7 +298,7 @@ function isTrailingEofVisualLine(doc, lineNumber) {
   return lastLine.from === lastLine.to;
 }
 
-function getMarkerChangeKind(marker) {
+function getMarkerChangeKind(marker: Element | null): ChangeKind | null {
   if (!(marker instanceof HTMLElement)) {
     return null;
   }
@@ -264,11 +311,11 @@ function getMarkerChangeKind(marker) {
   return null;
 }
 
-function isChangedMarker(marker) {
+function isChangedMarker(marker: Element | null): boolean {
   return getMarkerChangeKind(marker) !== null;
 }
 
-function getLineFlagChangeKind(lineFlags, lineNumber) {
+function getLineFlagChangeKind(lineFlags: readonly (LineFlag | undefined)[] | null | undefined, lineNumber: number): ChangeKind | null {
   if (!Array.isArray(lineFlags) || !Number.isInteger(lineNumber) || lineNumber < 1) {
     return null;
   }
@@ -285,7 +332,11 @@ function getLineFlagChangeKind(lineFlags, lineNumber) {
   return null;
 }
 
-function getLineRangeChangeKind(lineFlags, startLine, endLine) {
+function getLineRangeChangeKind(
+  lineFlags: readonly (LineFlag | undefined)[] | null | undefined,
+  startLine: number,
+  endLine: number
+): ChangeKind | null {
   if (
     !Array.isArray(lineFlags) ||
     !Number.isInteger(startLine) ||
@@ -310,7 +361,12 @@ function getLineRangeChangeKind(lineFlags, startLine, endLine) {
   return hasAdded ? 'added' : null;
 }
 
-function normalizeTrailingEofVisualLineHit(doc, lineNumber, gutterRowElement, markerElement = null) {
+function normalizeTrailingEofVisualLineHit(
+  doc: Text,
+  lineNumber: number,
+  gutterRowElement: HTMLElement | null,
+  markerElement: Element | null = null
+): LineHit {
   const rowMarker = gutterRowElement?.querySelector?.('.meo-git-gutter-marker') ?? null;
   const hitMarker = markerElement instanceof HTMLElement ? markerElement : null;
   if (!isTrailingEofVisualLine(doc, lineNumber)) {
@@ -359,39 +415,39 @@ export function createGitBlameHoverController({
   requestBlame,
   openRevisionForLine,
   openWorktreeForLine
-}) {
+}: GitBlameHoverControllerOptions): GitBlameHoverController {
   const ui = buildTooltipDom();
   const hoverOverlay = buildGutterHoverOverlayDom();
   document.body.appendChild(ui.root);
   document.body.appendChild(hoverOverlay);
 
-  let hoverTimer = null;
+  let hoverTimer: number | null = null;
   let blameEnabled = enabled === true;
   let activeLineNumber = 0;
   let hoverToken = 0;
   let destroyed = false;
-  let lastAnchorRect = null;
-  let activeMarkerElements = [];
-  let activeGutterRowElement = null;
-  let activeGutterRowHoverKind = null;
-  let activeRenderedBlockRange = null;
+  let lastAnchorRect: RectLike | null = null;
+  let activeMarkerElements: HTMLElement[] = [];
+  let activeGutterRowElement: HTMLElement | null = null;
+  let activeGutterRowHoverKind: HoverKind | null = null;
+  let activeRenderedBlockRange: LineRange | null = null;
   let pendingBlameLineNumber = 0;
   let pointerDownInBand = false;
   let pointerDownWasLeftButton = false;
   let pointerDownClientX = 0;
   let pointerDownClientY = 0;
 
-  const pointerMoveDistanceSquaredFromDown = (event) => {
+  const pointerMoveDistanceSquaredFromDown = (event: MouseEvent): number => {
     const deltaX = event.clientX - pointerDownClientX;
     const deltaY = event.clientY - pointerDownClientY;
     return (deltaX * deltaX) + (deltaY * deltaY);
   };
 
-  const hasPointerMovedPastDragThreshold = (event) => (
+  const hasPointerMovedPastDragThreshold = (event: MouseEvent): boolean => (
     pointerMoveDistanceSquaredFromDown(event) > gutterClickDragThresholdSquared
   );
 
-  const getGutterBandLayout = () => {
+  const getGutterBandLayout = (): GutterBandLayout | null => {
     const gutter = view.dom.querySelector('.cm-gutter.meo-git-gutter');
     if (!(gutter instanceof HTMLElement)) {
       return null;
@@ -416,7 +472,7 @@ export function createGitBlameHoverController({
     };
   };
 
-  const isWithinBand = (layout, clientX, clientY) => (
+  const isWithinBand = (layout: GutterBandLayout, clientX: number, clientY: number): boolean => (
     clientX >= layout.bandLeft &&
     clientX < layout.bandRight &&
     clientY >= layout.bandTop &&
@@ -425,9 +481,9 @@ export function createGitBlameHoverController({
     clientY <= layout.docBottom
   );
 
-  const gutterProbeXs = (layout, clientX) => {
-    const probeXs = [];
-    const pushProbeX = (value) => {
+  const gutterProbeXs = (layout: GutterBandLayout, clientX: number): number[] => {
+    const probeXs: number[] = [];
+    const pushProbeX = (value: number): void => {
       if (!Number.isFinite(value)) {
         return;
       }
@@ -450,7 +506,7 @@ export function createGitBlameHoverController({
     return probeXs;
   };
 
-  const getMarkerAtY = (layout, clientX, clientY) => {
+  const getMarkerAtY = (layout: GutterBandLayout, clientX: number, clientY: number): HTMLElement | null => {
     for (const sampleX of gutterProbeXs(layout, clientX)) {
       const stack = typeof document.elementsFromPoint === 'function'
         ? document.elementsFromPoint(sampleX, clientY)
@@ -468,7 +524,7 @@ export function createGitBlameHoverController({
     return null;
   };
 
-  const getGutterRowAtY = (layout, clientX, clientY) => {
+  const getGutterRowAtY = (layout: GutterBandLayout, clientX: number, clientY: number): HTMLElement | null => {
     for (const sampleX of gutterProbeXs(layout, clientX)) {
       const stack = typeof document.elementsFromPoint === 'function'
         ? document.elementsFromPoint(sampleX, clientY)
@@ -489,7 +545,7 @@ export function createGitBlameHoverController({
     return null;
   };
 
-  const getRawLineNumberAtGutterRow = (gutterRowElement) => {
+  const getRawLineNumberAtGutterRow = (gutterRowElement: HTMLElement | null): number | null => {
     if (!(gutterRowElement instanceof HTMLElement)) {
       return null;
     }
@@ -513,13 +569,13 @@ export function createGitBlameHoverController({
     return pos === null ? null : view.state.doc.lineAt(pos).number;
   };
 
-  const setBandCursor = (active) => {
+  const setBandCursor = (active: boolean): void => {
     const cursor = active ? 'pointer' : '';
     view.dom.style.cursor = cursor;
     view.scrollDOM.style.cursor = cursor;
   };
 
-  const sameElements = (left, right) => {
+  const sameElements = (left: readonly HTMLElement[], right: readonly HTMLElement[]): boolean => {
     if (left.length !== right.length) {
       return false;
     }
@@ -531,9 +587,9 @@ export function createGitBlameHoverController({
     return true;
   };
 
-  const sameLineRange = (left, right) => (
+  const sameLineRange = (left: LineRange | null, right: LineRange | null): boolean => (
     left === right ||
-    (
+    Boolean(
       left &&
       right &&
       left.startLine === right.startLine &&
@@ -541,7 +597,10 @@ export function createGitBlameHoverController({
     )
   );
 
-  const getChangedMarkerForRow = (gutterRowElement, markerElement = null) => {
+  const getChangedMarkerForRow = (
+    gutterRowElement: HTMLElement | null,
+    markerElement: Element | null = null
+  ): HTMLElement | null => {
     const rowMarker = gutterRowElement?.querySelector?.('.meo-git-gutter-marker') ?? null;
     const marker = markerElement instanceof Element ? markerElement.closest('.meo-git-gutter-marker') : null;
     let changedMarker = isChangedMarker(rowMarker)
@@ -563,13 +622,13 @@ export function createGitBlameHoverController({
     return changedMarker instanceof HTMLElement ? changedMarker : null;
   };
 
-  const getGutterRowsInLineRange = (startLine, endLine) => {
+  const getGutterRowsInLineRange = (startLine: number, endLine: number): HTMLElement[] => {
     const gutter = view.dom.querySelector('.cm-gutter.meo-git-gutter');
     if (!(gutter instanceof HTMLElement)) {
       return [];
     }
 
-    const rows = [];
+    const rows: HTMLElement[] = [];
     for (const row of gutter.querySelectorAll('.cm-gutterElement')) {
       if (!(row instanceof HTMLElement)) {
         continue;
@@ -586,14 +645,14 @@ export function createGitBlameHoverController({
     return rows;
   };
 
-  const getMarkersForLiveBlockRange = (startLine, endLine) => {
+  const getMarkersForLiveBlockRange = (startLine: number, endLine: number): HTMLElement[] => {
     const gutter = view.dom.querySelector('.cm-gutter.meo-git-gutter');
     if (!(gutter instanceof HTMLElement)) {
       return [];
     }
 
-    const markers = [];
-    const seen = new Set();
+    const markers: HTMLElement[] = [];
+    const seen = new Set<HTMLElement>();
     const selector = `.meo-git-gutter-marker[data-meo-live-block-start-line="${startLine}"][data-meo-live-block-end-line="${endLine}"]`;
     for (const node of gutter.querySelectorAll(selector)) {
       if (!(node instanceof HTMLElement) || seen.has(node)) {
@@ -605,7 +664,7 @@ export function createGitBlameHoverController({
     return markers;
   };
 
-  const clearMarkerHover = () => {
+  const clearMarkerHover = (): void => {
     if (activeMarkerElements.length) {
       for (const marker of activeMarkerElements) {
         marker.classList.remove('is-hit-hover');
@@ -620,7 +679,7 @@ export function createGitBlameHoverController({
     setBandCursor(false);
   };
 
-  const syncHoverOverlay = (anchorRect = null) => {
+  const syncHoverOverlay = (anchorRect: RectLike | null = null): void => {
     const kind = activeGutterRowHoverKind;
     if (
       !kind ||
@@ -656,14 +715,19 @@ export function createGitBlameHoverController({
     hoverOverlay.hidden = false;
   };
 
-  const updateMarkerHoverForY = (layout, x, y, renderedBlockRange = null) => {
+  const updateMarkerHoverForY = (
+    layout: GutterBandLayout,
+    x: number,
+    y: number,
+    renderedBlockRange: LineRange | null = null
+  ): void => {
     const hit = getMarkerAtY(layout, x, y);
     const gutterRowElement = getGutterRowAtY(layout, x, y);
     activeGutterRowElement = gutterRowElement;
 
-    let nextMarkers = [];
-    let nextGutterRowHoverKind = null;
-    let nextRenderedBlockRange = null;
+    let nextMarkers: HTMLElement[] = [];
+    let nextGutterRowHoverKind: HoverKind | null = null;
+    let nextRenderedBlockRange: LineRange | null = null;
     const changedMarker = getChangedMarkerForRow(gutterRowElement, hit);
     if (changedMarker) {
       nextMarkers = [changedMarker];
@@ -691,7 +755,7 @@ export function createGitBlameHoverController({
             ? getMarkersForLiveBlockRange(markerBlockRange.startLine, markerBlockRange.endLine)
             : getMarkersForLiveBlockRange(block.startLine, block.endLine);
           if (!blockMarkers.length) {
-            const seen = new Set();
+            const seen = new Set<HTMLElement>();
             for (const row of getGutterRowsInLineRange(block.startLine, block.endLine)) {
               const rowMarker = getChangedMarkerForRow(row);
               if (rowMarker && !seen.has(rowMarker)) {
@@ -767,7 +831,7 @@ export function createGitBlameHoverController({
     clearMarkerHover();
   };
 
-  const remapLiveHit = (hit) => {
+  const remapLiveHit = (hit: LineHit): LineHit => {
     if (!hit || hit.lineNumber === null || hit.proxiedFromTrailingEof || getMode?.() !== 'live') {
       return hit;
     }
@@ -808,7 +872,12 @@ export function createGitBlameHoverController({
     };
   };
 
-  const lineNumberAtClientY = (layout, clientY, gutterRowElement = null, markerElement = null) => {
+  const lineNumberAtClientY = (
+    layout: GutterBandLayout,
+    clientY: number,
+    gutterRowElement: HTMLElement | null = null,
+    markerElement: Element | null = null
+  ): LineHit => {
     const viewAny = /** @type {any} */ (view);
     if (typeof viewAny.lineBlockAtHeight === 'function') {
       const rowRect = gutterRowElement instanceof HTMLElement ? gutterRowElement.getBoundingClientRect() : null;
@@ -840,13 +909,13 @@ export function createGitBlameHoverController({
   };
 
   const getLineAnchorRect = (
-    lineNumber,
-    layout,
-    gutterRowElement,
-    clientY,
-    lineRange = null,
-    { target = null, collapseTall = true } = {}
-  ) => {
+    lineNumber: number,
+    layout: GutterBandLayout,
+    gutterRowElement: HTMLElement | null,
+    clientY: number,
+    lineRange: LineRange | null = null,
+    { target = null, collapseTall = true }: { target?: EventTarget | null; collapseTall?: boolean } = {}
+  ): RectLike => {
     if (
       lineRange &&
       Number.isInteger(lineRange.startLine) &&
@@ -930,13 +999,13 @@ export function createGitBlameHoverController({
       endCoords?.top,
       rowRect?.top,
       clientY
-    ].filter(Number.isFinite);
+    ].filter(isFiniteNumber);
     const bottomCandidates = [
       startCoords?.bottom,
       endCoords?.bottom,
       rowRect?.bottom,
       clientY
-    ].filter(Number.isFinite);
+    ].filter(isFiniteNumber);
 
     const top = topCandidates.length ? Math.min(...topCandidates) : clientY;
     const bottom = bottomCandidates.length ? Math.max(...bottomCandidates) : clientY;
@@ -950,10 +1019,14 @@ export function createGitBlameHoverController({
   };
 
   const triggerHover = (
-    lineNumber,
-    anchorRect,
-    { proxiedFromTrailingEof = false, effectiveChangeKind = null, requestLineNumber = lineNumber } = {}
-  ) => {
+    lineNumber: number,
+    anchorRect: RectLike,
+    {
+      proxiedFromTrailingEof = false,
+      effectiveChangeKind = null,
+      requestLineNumber = lineNumber
+    }: { proxiedFromTrailingEof?: boolean; effectiveChangeKind?: LiveGitChangeKind | null; requestLineNumber?: number } = {}
+  ): void => {
     if (destroyed || !blameEnabled || !isSupportedMode(getMode?.()) || lineNumber < 1) {
       hide();
       return;
@@ -983,7 +1056,7 @@ export function createGitBlameHoverController({
 
       // Avoid showing a transient loading tooltip to reduce hover flicker.
 
-      let result = null;
+      let result: GitBlameLineResult;
       pendingBlameLineNumber = lineNumber;
       try {
         result = await requestBlame?.({
@@ -1013,7 +1086,7 @@ export function createGitBlameHoverController({
     }, hoverDelayMs);
   };
 
-  const onMouseMove = (event) => {
+  const onMouseMove = (event: MouseEvent): void => {
     if (destroyed || !blameEnabled) {
       return;
     }
@@ -1089,7 +1162,9 @@ export function createGitBlameHoverController({
     }
     const lineNumber = hit.lineNumber;
     const requestLineNumber = (
-      Number.isFinite(hit.requestLineNumber) ? hit.requestLineNumber : lineNumber
+      hit.requestLineNumber !== null && Number.isFinite(hit.requestLineNumber)
+        ? hit.requestLineNumber
+        : lineNumber
     );
     const effectiveChangeKind = (
       hit.effectiveChangeKind ??
@@ -1143,7 +1218,7 @@ export function createGitBlameHoverController({
     triggerHover(lineNumber, anchorRect, { proxiedFromTrailingEof, effectiveChangeKind, requestLineNumber });
   };
 
-  const onMouseLeave = (event) => {
+  const onMouseLeave = (event: MouseEvent): void => {
     const nextTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
     if (nextTarget && ui.root.contains(nextTarget)) {
       return;
@@ -1151,8 +1226,8 @@ export function createGitBlameHoverController({
     hide();
   };
 
-  const onScroll = () => hide();
-  const onPointerDown = (event) => {
+  const onScroll = (): void => hide();
+  const onPointerDown = (event: MouseEvent): void => {
     hide();
     pointerDownWasLeftButton = event.button === 0;
     pointerDownClientX = event.clientX;
@@ -1177,7 +1252,7 @@ export function createGitBlameHoverController({
     pointerDownInBand = isWithinBand(layout, event.clientX, event.clientY);
   };
   const pointerDownCapture = true;
-  const onClick = (event) => {
+  const onClick = (event: MouseEvent): void => {
     if (destroyed || !blameEnabled || !isSupportedMode(getMode?.()) || view.dom.classList.contains('meo-git-gutter-hidden')) {
       return;
     }
@@ -1212,7 +1287,9 @@ export function createGitBlameHoverController({
       return;
     }
     const requestLineNumber = (
-      Number.isFinite(hit.requestLineNumber) ? hit.requestLineNumber : lineNumber
+      hit.requestLineNumber !== null && Number.isFinite(hit.requestLineNumber)
+        ? hit.requestLineNumber
+        : lineNumber
     );
     const effectiveChangeKind = (
       hit.effectiveChangeKind ??
