@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 
     const rapid = await page.evaluate(async () => {
       const candidate = (window as any).__tableCommandCandidate;
-      const target = { tableId: 'table-1', row: 1, column: 0 };
+      const target = { tableId: 'table-1', row: 1, column: 0, selection: null };
       const first = candidate.dispatch({ type: 'request', command: 'insert-row-above', target, enabled: true });
       const second = candidate.dispatch({ type: 'request', command: 'align-right', target, enabled: true });
       return Promise.all([first, second]);

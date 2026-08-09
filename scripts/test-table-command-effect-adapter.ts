@@ -31,7 +31,7 @@ const target: TableCommandEditorTarget = {
   buildAtomicCommandTransaction(request) {
     atomicBuilds += 1;
     assert.equal(request.command, 'insert-row-below');
-    assert.deepEqual(request.target, { tableId: 'table-1', row: 1, column: 0 });
+    assert.deepEqual(request.target, { tableId: 'table-1', row: 1, column: 0, selection: null });
     return {
       transaction: {
         changes: { from: 0, to: 5, insert: '| A |\n| --- |\n| edited |\n|  |' },
@@ -59,7 +59,7 @@ const adapter = createCodeMirrorTableCommandEffectAdapter({
 
 const atomic = await adapter.execute({
   type: 'executeCommand', commandId: 1, command: 'insert-row-below',
-  target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
 }).completion;
 assert.deepEqual(atomic, { type: 'commandCompleted', commandId: 1, outcome: 'changed' });
 assert.equal(atomicBuilds, 1);
@@ -74,7 +74,7 @@ assert.equal(pendingBuilds, 1);
 assert.equal(dispatched.length, 2);
 const presented = await adapter.execute({
   type: 'executeCommand', commandId: 2, command: 'preview-sort',
-  target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'flushed'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'flushed'
 }).completion;
 assert.deepEqual(presented, { type: 'commandCompleted', commandId: 2, outcome: 'presented' });
 assert.equal(visualCommands, 1);
@@ -82,23 +82,23 @@ assert.equal(dispatched.length, 2, 'visual sort preview must not create document
 
 assert.deepEqual(await adapter.execute({
   type: 'executeCommand', commandId: 3, command: 'delete-row',
-  target: { tableId: 'missing', row: 1, column: 0 }, pendingEdits: 'atomic'
+  target: { tableId: 'missing', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
 }).completion, { type: 'commandCompleted', commandId: 3, outcome: 'no-op' });
 
 await adapter.execute({
   type: 'restoreInteraction', commandId: 1,
-  target: { tableId: 'table-1', row: 1, column: 0 }, outcome: 'changed'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, outcome: 'changed'
 }).completion;
 assert.deepEqual(restored, ['changed']);
 
 await adapter.execute({
   type: 'executeCommand', commandId: 6, command: 'insert-row-below',
-  target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
 }).completion;
-adapter.invalidate();
+adapter.externalDocumentPresented();
 await adapter.execute({
   type: 'restoreInteraction', commandId: 6,
-  target: { tableId: 'table-1', row: 1, column: 0 }, outcome: 'changed'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, outcome: 'changed'
 }).completion;
 assert.deepEqual(restored, ['changed'], 'document invalidation must clear stale interaction restore');
 
@@ -111,7 +111,7 @@ const failing = createCodeMirrorTableCommandEffectAdapter({
 });
 assert.deepEqual(await failing.execute({
   type: 'executeCommand', commandId: 4, command: 'delete-column',
-  target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
 }).completion, { type: 'commandFailed', commandId: 4 });
 assert.equal(errors.length, 1);
 
@@ -120,7 +120,7 @@ adapter.dispose();
 assert.equal(disposed, 1);
 assert.equal(await adapter.execute({
   type: 'executeCommand', commandId: 5, command: 'apply-sort',
-  target: { tableId: 'table-1', row: 1, column: 0 }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
 }).completion, null);
 assert.equal(dispatched.length, 3);
 

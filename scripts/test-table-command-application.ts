@@ -5,7 +5,7 @@ import {
   type TableCommandTarget
 } from '../webview/src/application/tableCommand';
 
-const target: TableCommandTarget = { tableId: 'table-1', row: 1, column: 0 };
+const target: TableCommandTarget = { tableId: 'table-1', row: 1, column: 0, selection: null };
 const types = (effects: readonly TableCommandEffect[]) => effects.map((effect) => effect.type);
 
 const structural = createTableCommandApplication();
@@ -102,7 +102,7 @@ assert.deepEqual(disposed.dispatch({ type: 'request', command: 'insert-column-le
 const invalidated = createTableCommandApplication();
 invalidated.dispatch({ type: 'request', command: 'delete-row', target, enabled: true });
 assert.equal(invalidated.getState().phase, 'executing');
-assert.deepEqual(invalidated.dispatch({ type: 'invalidate' }), []);
+assert.deepEqual(invalidated.dispatch({ type: 'externalDocumentPresented' }), []);
 assert.deepEqual(invalidated.getState(), { phase: 'idle', activeCommandId: null });
 assert.equal(invalidated.dispatch({
   type: 'request', command: 'insert-column-right', target, enabled: true

@@ -103,7 +103,7 @@ export function createCodeMirrorTableCommandEffectAdapter(
           return immediate(null);
       }
     },
-    invalidate() {
+    externalDocumentPresented() {
       if (disposed) return;
       pendingRestores.clear();
     },

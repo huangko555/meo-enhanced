@@ -7,7 +7,7 @@ import {
 } from '../webview/src/application/tableCommand';
 import { createTableCommandRuntime } from '../webview/src/adapters/tableCommandRuntime';
 
-const target = { tableId: 'table-1', row: 1, column: 0 } as const;
+const target = { tableId: 'table-1', row: 1, column: 0, selection: null } as const;
 const executionOrder: string[] = [];
 let settleFirst: ((input: TableCommandInput) => void) | null = null;
 
@@ -38,7 +38,7 @@ const executor: TableCommandEffectExecutor = {
     }
     return {};
   },
-  invalidate() {},
+  externalDocumentPresented() {},
   dispose() {}
 };
 
@@ -74,7 +74,7 @@ const staleExecutor: TableCommandEffectExecutor = {
       })
     };
   },
-  invalidate() {},
+  externalDocumentPresented() {},
   dispose() {}
 };
 const staleRuntime = createTableCommandRuntime(createTableCommandApplication(), staleExecutor, () => {});
@@ -96,7 +96,7 @@ const disposableExecutor: TableCommandEffectExecutor = {
     if (effect.type === 'restoreInteraction') disposeEffects += 1;
     return {};
   },
-  invalidate() {},
+  externalDocumentPresented() {},
   dispose() { executorDisposals += 1; }
 };
 const disposableRuntime = createTableCommandRuntime(
@@ -131,7 +131,7 @@ const invalidationExecutor: TableCommandEffectExecutor = {
     }
     return { immediateCompletion: null };
   },
-  invalidate() { invalidateCalls += 1; },
+  externalDocumentPresented() { invalidateCalls += 1; },
   dispose() {}
 };
 const invalidationRuntime = createTableCommandRuntime(
@@ -143,7 +143,7 @@ const invalidatedFirst = invalidationRuntime.dispatch({
 const invalidatedQueued = invalidationRuntime.dispatch({
   type: 'request', command: 'delete-column', target, enabled: true
 });
-invalidationRuntime.invalidate();
+invalidationRuntime.externalDocumentPresented();
 assert.equal(invalidateCalls, 1);
 assert.deepEqual(invalidationRuntime.getState(), { phase: 'idle', activeCommandId: null });
 assert.equal(await invalidationRuntime.dispatch({

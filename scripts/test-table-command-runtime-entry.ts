@@ -287,7 +287,7 @@ const initialize = (text: string): void => {
 };
 
 const externalPresent = (text: string): void => {
-  runtime.invalidate();
+  runtime.externalDocumentPresented();
   pending.clear();
   previewOrders.clear();
   previewDirections.clear();

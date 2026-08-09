@@ -12,7 +12,7 @@ export type TableCommandRuntime = {
   dispatch(input: TableCommandInput): Promise<TableCommandRuntimeOutcome | null>;
   whenIdle(): Promise<void>;
   getState(): TableCommandState;
-  invalidate(): void;
+  externalDocumentPresented(): void;
   dispose(): void;
 };
 
@@ -115,13 +115,13 @@ export function createTableCommandRuntime(
       }
     },
     getState: application.getState,
-    invalidate() {
+    externalDocumentPresented() {
       if (disposed) return;
       generation += 1;
       queue = { operation: Promise.resolve(), pendingOperations: 0 };
-      application.dispatch({ type: 'invalidate' });
+      application.dispatch({ type: 'externalDocumentPresented' });
       try {
-        executor.invalidate();
+        executor.externalDocumentPresented();
       } catch (error) {
         reportUnexpectedError(error);
       }

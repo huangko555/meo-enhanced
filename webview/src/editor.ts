@@ -2834,7 +2834,7 @@ export function createEditor({
     setText(textValue) {
       gitBlameHover?.hide();
       clearDiagnosticSuggestionState();
-      tableCommandRuntime.invalidate();
+      tableCommandRuntime.externalDocumentPresented();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
