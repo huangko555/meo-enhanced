@@ -5,7 +5,7 @@ Edit complex Markdown and see every addition, modification, and deletion as you 
 在 VS Code 中编辑复杂 Markdown，并在工作过程中清楚看到每一处新增、修改与删除。
 
 <p align="center">
-  <strong>English</strong> · <a href="https://github.com/huangko555/meo-enhanced/blob/main/README.zh-CN.md">简体中文</a>
+  <strong>English</strong> · <a href="https://github.com/huangko555/meo-enhanced/blob/main/README.zh-CN.md">简体中文</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 <p align="center">
