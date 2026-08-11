@@ -25,12 +25,16 @@ const requiredCommands = [
   'bun run typecheck',
   'bun run architecture:check',
   'bun run test:unit',
-  'bun run build'
+  'bun run build',
+  'bun run package:check'
 ];
 for (const command of requiredCommands) {
   if (runCommands.filter((candidate) => candidate === command).length !== 1) {
     throw new Error(`Architecture gate must run exactly one ${command}`);
   }
+}
+if (runCommands.indexOf('bun run package:check') <= runCommands.indexOf('bun run build')) {
+  throw new Error('Architecture gate must validate VSIX contents after building runtime artifacts');
 }
 
 const consolidatedUnitContracts = [
