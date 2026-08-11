@@ -850,7 +850,7 @@ export function addMermaidDiagramBlock(
     contentStartLine.from,
     contentEndLine.to
   );
-  addMermaidToolbar(builder, startLine.to, anchor, mode.effective, block.fullBlockText);
+  addMermaidToolbar(builder, startLine.to, anchor, startLine.number, mode.effective, block.fullBlockText);
 
   const widget = mode.effective === 'preview'
     ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number, {

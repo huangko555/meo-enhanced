@@ -79,7 +79,11 @@ async function scrollToLineContaining(
     if (!scroller || !target) return false;
     const targetViewport = scroller.getBoundingClientRect();
     const rect = target.getBoundingClientRect();
-    return rect.bottom > targetViewport.top && rect.top < targetViewport.bottom;
+    const visible = rect.bottom > targetViewport.top && rect.top < targetViewport.bottom;
+    if (!visible && targetRenderedKind) {
+      editor.scrollToLine(targetLineNumber, 'center');
+    }
+    return visible;
   }, {}, {
     lineNeedle: needle,
     expectedTableCell: tableCell,
@@ -739,6 +743,53 @@ async function main() {
       Math.abs(typingEnd.lineTop - typingStart.lineTop) > 2
     ) {
       throw new Error(`Typing after held-Control history lost focus or scrolled: ${JSON.stringify({ typingStart, typingEnd })}`);
+    }
+
+    const semanticLines = await page.evaluate(() => {
+      const editor = (window as any).__historyMatrixEditor;
+      const lines = editor.getText().split('\n');
+      const mermaidLine = lines.findIndex((line: string) => line.startsWith('```mermaid')) + 1;
+      const formulaLine = lines.findIndex((line: string) => line.trim() === '$$') + 1;
+      editor.revealSelection(0, 1, { focusEditor: true, align: 'upper' });
+      return { mermaidLine, formulaLine };
+    });
+    await page.keyboard.press('Enter');
+    const revealAndOpenSemanticBlock = async (kind: 'Mermaid' | 'Formula', lineNumber: number) => {
+      await page.evaluate((line) => (window as any).__historyMatrixEditor.scrollToLine(line, 'center'), lineNumber);
+      const groupLabel = `${kind} block controls at line ${lineNumber}`;
+      const regionLabel = `${kind} editor at line ${lineNumber}`;
+      await page.waitForFunction((label) => Boolean(
+        document.querySelector(`[role="group"][aria-label="${label}"]`)
+      ), {}, groupLabel);
+      await page.evaluate(({ groupLabel, regionLabel }) => {
+        if (document.querySelector(`[role="region"][aria-label="${regionLabel}"]`)) return;
+        const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${groupLabel}"]`)
+          ?.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn, .meo-latex-math-mode-btn');
+        if (!button) throw new Error(`Missing semantic mode control: ${groupLabel}`);
+        button.click();
+      }, { groupLabel, regionLabel });
+      await page.waitForFunction((label) => Boolean(
+        document.querySelector(`[role="region"][aria-label="${label}"]`)
+      ), {}, regionLabel);
+    };
+    await revealAndOpenSemanticBlock('Mermaid', semanticLines.mermaidLine + 1);
+    await revealAndOpenSemanticBlock('Formula', semanticLines.formulaLine + 1);
+    await page.evaluate(async () => {
+      const applied = await (window as any).__historyMatrixEditor.undo();
+      if (!applied) throw new Error('Equal-length line shift undo was not applied');
+    });
+    for (const [kind, lineNumber] of [
+      ['Mermaid', semanticLines.mermaidLine],
+      ['Formula', semanticLines.formulaLine]
+    ] as const) {
+      await page.evaluate((line) => (window as any).__historyMatrixEditor.scrollToLine(line, 'center'), lineNumber);
+      await page.waitForFunction(({ groupLabel, regionLabel }) => Boolean(
+        document.querySelector(`[role="group"][aria-label="${groupLabel}"]`)
+        && document.querySelector(`[role="region"][aria-label="${regionLabel}"]`)
+      ), {}, {
+        groupLabel: `${kind} block controls at line ${lineNumber}`,
+        regionLabel: `${kind} editor at line ${lineNumber}`
+      });
     }
 
     console.log(`history matrix checks passed (${targets.length} undo + ${targets.length} redo steps + held-Control mixed stress)`);

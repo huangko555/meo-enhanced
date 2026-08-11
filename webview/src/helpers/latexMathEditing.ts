@@ -28,6 +28,7 @@ type LatexMathEditingState = {
 
 type LatexMathEditingBlock = {
   anchor: number;
+  lineNumber: number;
   contentFrom: number;
   contentTo: number;
   sourceText: string;
@@ -183,6 +184,7 @@ function focusOuterWithoutMovingViewport(view: EditorView): void {
 class LatexMathToolbarWidget extends WidgetType {
   constructor(
     readonly anchor: number,
+    readonly lineNumber: number,
     readonly mode: LatexMathBlockMode,
     readonly sourceText: string,
     readonly blockTo: number
@@ -193,6 +195,7 @@ class LatexMathToolbarWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return other instanceof LatexMathToolbarWidget &&
       other.anchor === this.anchor &&
+      other.lineNumber === this.lineNumber &&
       other.mode === this.mode &&
       other.sourceText === this.sourceText &&
       other.blockTo === this.blockTo;
@@ -202,7 +205,7 @@ class LatexMathToolbarWidget extends WidgetType {
     const toolbar = document.createElement('span') as LatexToolbarElement;
     toolbar.className = 'meo-latex-math-toolbar';
     toolbar.setAttribute('role', 'group');
-    toolbar.setAttribute('aria-label', `Formula block controls at line ${view.state.doc.lineAt(this.anchor).number}`);
+    toolbar.setAttribute('aria-label', `Formula block controls at line ${this.lineNumber}`);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.blockTo);
     toolbar.dataset.meoLatexMathMode = this.mode;
@@ -276,13 +279,14 @@ export function addLatexMathToolbar(
   builder: any[],
   lineEnd: number,
   anchor: number,
+  lineNumber: number,
   mode: LatexMathBlockMode,
   sourceText: string,
   blockTo: number
 ): void {
   builder.push(
     Decoration.widget({
-      widget: new LatexMathToolbarWidget(anchor, mode, sourceText, blockTo),
+      widget: new LatexMathToolbarWidget(anchor, lineNumber, mode, sourceText, blockTo),
       side: 1
     }).range(lineEnd)
   );
@@ -328,7 +332,7 @@ class LatexMathEditingController {
     this.root = document.createElement('div') as LatexMathEditingBlockElement;
     this.root.className = 'meo-latex-math-editing-block';
     this.root.setAttribute('role', 'region');
-    this.root.setAttribute('aria-label', `Formula editor at line ${outerView.state.doc.lineAt(block.anchor).number}`);
+    this.root.setAttribute('aria-label', `Formula editor at line ${block.lineNumber}`);
     this.root.dataset.meoLatexMathAnchor = String(block.anchor);
 
     const sourcePane = document.createElement('div');
@@ -558,6 +562,7 @@ export class LatexMathEditingWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return other instanceof LatexMathEditingWidget &&
       other.block.anchor === this.block.anchor &&
+      other.block.lineNumber === this.block.lineNumber &&
       other.block.sourceText === this.block.sourceText &&
       other.block.indentColumns === this.block.indentColumns &&
       other.mode === this.mode &&
@@ -575,6 +580,7 @@ export class LatexMathEditingWidget extends WidgetType {
     const controller = (dom as LatexMathEditingBlockElement).__meoLatexMathEditingController;
     const updated = controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
     if (updated) {
+      dom.setAttribute('aria-label', `Formula editor at line ${this.block.lineNumber}`);
       applyLiveBlockIndent(dom, this.block.indentColumns);
     }
     return updated;

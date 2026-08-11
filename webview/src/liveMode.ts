@@ -2584,7 +2584,7 @@ function addMathDecorations(
         ? getLatexMathBlockMode(state, anchor, renderSpan.innerFrom, renderSpan.innerTo)
         : null;
       if (copyContent && mode) {
-        addLatexMathToolbar(builder, openingLine.to, anchor, mode.effective, copyContent, mathRange.to);
+        addLatexMathToolbar(builder, openingLine.to, anchor, openingLine.number, mode.effective, copyContent, mathRange.to);
       }
 
       addRange(
@@ -2619,6 +2619,7 @@ function addMathDecorations(
             ? getMathWidget(html!, mathRange.mode, true, startLineNo, endLineNo, indentColumns)
             : new LatexMathEditingWidget({
               anchor,
+              lineNumber: openingLine.number,
               contentFrom: renderSpan.innerFrom,
               contentTo: renderSpan.innerTo,
               sourceText: copyContent,

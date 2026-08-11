@@ -192,6 +192,7 @@ function focusOuterWithoutMovingViewport(view: EditorView): void {
 class MermaidToolbarWidget extends WidgetType {
   constructor(
     readonly anchor: number,
+    readonly lineNumber: number,
     readonly mode: MermaidBlockMode,
     readonly codeContent: string
   ) {
@@ -201,6 +202,7 @@ class MermaidToolbarWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return other instanceof MermaidToolbarWidget &&
       other.anchor === this.anchor &&
+      other.lineNumber === this.lineNumber &&
       other.mode === this.mode &&
       other.codeContent === this.codeContent;
   }
@@ -209,7 +211,7 @@ class MermaidToolbarWidget extends WidgetType {
     const toolbar = document.createElement('span') as MermaidToolbarElement;
     toolbar.className = 'meo-mermaid-toolbar';
     toolbar.setAttribute('role', 'group');
-    toolbar.setAttribute('aria-label', `Mermaid block controls at line ${view.state.doc.lineAt(this.anchor).number}`);
+    toolbar.setAttribute('aria-label', `Mermaid block controls at line ${this.lineNumber}`);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
     toolbar.dataset.meoMermaidMode = this.mode;
@@ -286,12 +288,13 @@ export function addMermaidToolbar(
   builder: any[],
   lineEnd: number,
   anchor: number,
+  lineNumber: number,
   mode: MermaidBlockMode,
   codeContent: string
 ): void {
   builder.push(
     Decoration.widget({
-      widget: new MermaidToolbarWidget(anchor, mode, codeContent),
+      widget: new MermaidToolbarWidget(anchor, lineNumber, mode, codeContent),
       side: 1
     }).range(lineEnd)
   );
@@ -369,7 +372,7 @@ class MermaidEditingController {
     this.root = document.createElement('div') as MermaidEditingBlockElement;
     this.root.className = 'meo-mermaid-editing-block';
     this.root.setAttribute('role', 'region');
-    this.root.setAttribute('aria-label', `Mermaid editor at line ${outerView.state.doc.lineAt(block.anchor).number}`);
+    this.root.setAttribute('aria-label', `Mermaid editor at line ${block.startLine}`);
     this.root.dataset.meoMermaidAnchor = String(block.anchor);
     this.sourcePane = document.createElement('div');
     this.sourcePane.className = 'meo-mermaid-source-pane';
@@ -623,6 +626,7 @@ export class MermaidEditingWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return other instanceof MermaidEditingWidget &&
       other.block.anchor === this.block.anchor &&
+      other.block.startLine === this.block.startLine &&
       other.block.diagramText === this.block.diagramText &&
       other.block.sourceLinePrefix === this.block.sourceLinePrefix &&
       other.block.indentColumns === this.block.indentColumns &&
@@ -641,6 +645,7 @@ export class MermaidEditingWidget extends WidgetType {
     const controller = (dom as MermaidEditingBlockElement).__meoMermaidEditingController;
     const updated = controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
     if (updated) {
+      dom.setAttribute('aria-label', `Mermaid editor at line ${this.block.startLine}`);
       applyLiveBlockIndent(dom, this.block.indentColumns);
     }
     return updated;
