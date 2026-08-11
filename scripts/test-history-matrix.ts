@@ -13,80 +13,92 @@ type HistoryTarget =
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-history-matrix-'));
 
-async function waitForFrames(page: any, count = 6) {
-  await page.evaluate(async (frameCount: number) => {
-    for (let index = 0; index < frameCount; index += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-  }, count);
-}
-
 async function pressHistoryShortcut(page: any, key: 'z' | 'y') {
   await page.keyboard.down('Control');
   await page.keyboard.press(key);
   await page.keyboard.up('Control');
-  await waitForFrames(page);
 }
 
 async function documentText(page: any): Promise<string> {
-  return page.evaluate(() => (window as any).__historyMatrixEditor.view.state.doc.toString());
+  return page.evaluate(() => (window as any).__historyMatrixEditor.getText());
 }
 
-async function scrollToLineContaining(page: any, needle: string, occurrence: NeedleOccurrence = 'first') {
+async function waitForDocumentText(page: any, expected: string) {
+  await page.waitForFunction((text) => (
+    (window as any).__historyMatrixEditor.getText() === text
+  ), {}, expected);
+}
+
+async function scrollToLineContaining(
+  page: any,
+  needle: string,
+  occurrence: NeedleOccurrence = 'first',
+  tableCellOverride: string | null = null
+) {
+  const tableCell = tableCellOverride
+    ?? (needle.trim().startsWith('|') ? needle.split('|')[1]?.trim() ?? null : null);
   await page.evaluate(({ lineNeedle, targetOccurrence }) => {
     const editor = (window as any).__historyMatrixEditor;
-    let targetLine = 0;
-    for (let lineNumber = 1; lineNumber <= editor.view.state.doc.lines; lineNumber += 1) {
-      if (editor.view.state.doc.line(lineNumber).text.includes(lineNeedle)) {
-        targetLine = lineNumber;
-        if (targetOccurrence === 'first') break;
-      }
-    }
-    if (targetLine) {
-      editor.scrollToLine(targetLine, 'center');
-      return;
-    }
-    throw new Error(`Missing line: ${lineNeedle}`);
+    const lines = editor.getText().split('\n');
+    const index = targetOccurrence === 'first'
+      ? lines.findIndex((line: string) => line.includes(lineNeedle))
+      : lines.findLastIndex((line: string) => line.includes(lineNeedle));
+    if (index < 0) throw new Error(`Missing line: ${lineNeedle}`);
+    editor.scrollToLine(index + 1, 'center');
   }, { lineNeedle: needle, targetOccurrence: occurrence });
-  await waitForFrames(page, 16);
-  await page.evaluate(({ lineNeedle, targetOccurrence }) => {
+  await page.waitForFunction(({ lineNeedle, expectedTableCell, targetOccurrence }) => {
     const editor = (window as any).__historyMatrixEditor;
-    const view = editor.view;
-    let targetLine = 0;
-    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-      if (!view.state.doc.line(lineNumber).text.includes(lineNeedle)) continue;
-      targetLine = lineNumber;
-      if (targetOccurrence === 'first') break;
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent?.includes(lineNeedle));
+    const table = expectedTableCell
+      ? Array.from(document.querySelectorAll<HTMLTextAreaElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea'
+        )).find((candidate) => candidate.value === expectedTableCell)?.closest<HTMLElement>('.meo-md-html-table') ?? null
+      : null;
+    const lines = editor.getText().split('\n');
+    const targetLineIndex = targetOccurrence === 'first'
+      ? lines.findIndex((candidate: string) => candidate.includes(lineNeedle))
+      : lines.findLastIndex((candidate: string) => candidate.includes(lineNeedle));
+    let block: HTMLElement | null = null;
+    for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
+      if (!lines[lineIndex].startsWith('```mermaid') && lines[lineIndex].trim() !== '$$') continue;
+      const openingFrom = lines.slice(0, lineIndex)
+        .reduce((offset: number, candidate: string) => offset + candidate.length + 1, 0);
+      block = document.querySelector<HTMLElement>(`[data-meo-block-from="${openingFrom}"]`);
+      break;
     }
-    if (targetLine < view.state.doc.lineAt(view.viewport.from).number || targetLine > view.state.doc.lineAt(view.viewport.to).number) {
-      const line = view.state.doc.line(targetLine);
-      const block = view.lineBlockAt(line.from);
-      view.scrollDOM.scrollTop = Math.max(0, block.top - 80);
-    }
-  }, { lineNeedle: needle, targetOccurrence: occurrence });
-  await waitForFrames(page, 8);
+    const target = expectedTableCell ? table : block ?? line;
+    if (!scroller || !target) return false;
+    const viewport = scroller.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
+    return rect.bottom > viewport.top && rect.top < viewport.bottom;
+  }, {}, { lineNeedle: needle, expectedTableCell: tableCell, targetOccurrence: occurrence });
 }
 
 async function editOuterLine(page: any, needle: string, marker: string) {
   await scrollToLineContaining(page, needle);
   await page.evaluate((lineNeedle) => {
-    const editor = (window as any).__historyMatrixEditor;
-    const view = editor.view;
-    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-      const line = view.state.doc.line(lineNumber);
-      if (line.text.includes(lineNeedle)) {
-        view.dispatch({ selection: { anchor: line.to } });
-        view.focus();
-        return;
-      }
-    }
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent?.includes(lineNeedle));
+    const content = line?.closest<HTMLElement>('.cm-content');
+    if (!line || !content) throw new Error(`Missing visible line: ${lineNeedle}`);
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    content.focus();
   }, needle);
   await page.keyboard.type(marker);
-  await waitForFrames(page);
+  await page.waitForFunction((expected) => (
+    (window as any).__historyMatrixEditor.getText().includes(expected)
+  ), {}, marker);
 }
 
 async function editTableCell(page: any, tableLine: string, before: string, after: string) {
-  await scrollToLineContaining(page, tableLine);
+  await scrollToLineContaining(page, tableLine, 'first', before);
   await page.evaluate((currentValue) => {
     const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea'
@@ -97,7 +109,9 @@ async function editTableCell(page: any, tableLine: string, before: string, after
   }, before);
   await page.keyboard.type(after);
   await page.evaluate(() => (window as any).__historyMatrixEditor.commitTransientEdits());
-  await waitForFrames(page);
+  await page.waitForFunction((expected) => (
+    (window as any).__historyMatrixEditor.getText().includes(expected)
+  ), {}, after);
 }
 
 async function editRenderedBlock(
@@ -110,38 +124,27 @@ async function editRenderedBlock(
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
-  const controllerProperty = kind === 'mermaid'
-    ? '__meoMermaidEditingController'
-    : '__meoLatexMathEditingController';
   const clickTargetModeButton = async () => {
     await page.evaluate(({ blockKind, needle, selector, targetOccurrence }) => {
       const editor = (window as any).__historyMatrixEditor;
-      const view = editor.view;
-      let targetLineNumber = 0;
-      for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-        if (view.state.doc.line(lineNumber).text.includes(needle)) {
-          targetLineNumber = lineNumber;
-          if (targetOccurrence === 'first') break;
-        }
-      }
-      for (let lineNumber = targetLineNumber; lineNumber >= 1; lineNumber -= 1) {
-        const line = view.state.doc.line(lineNumber);
+      const lines = editor.getText().split('\n');
+      const targetLineIndex = targetOccurrence === 'first'
+        ? lines.findIndex((line: string) => line.includes(needle))
+        : lines.findLastIndex((line: string) => line.includes(needle));
+      for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
         const isOpening = blockKind === 'mermaid'
-          ? line.text.startsWith('```mermaid')
-          : line.text.trim() === '$$';
+          ? lines[lineIndex].startsWith('```mermaid')
+          : lines[lineIndex].trim() === '$$';
         if (!isOpening) continue;
+        const openingFrom = lines.slice(0, lineIndex).reduce((offset: number, line: string) => offset + line.length + 1, 0);
         const button = Array.from(document.querySelectorAll<HTMLButtonElement>(selector)).find((candidate) => (
-          candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(line.from)
+          candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(openingFrom)
         ));
         if (!button) {
           throw new Error(`Missing ${blockKind} mode button for ${needle}: ${JSON.stringify({
-            targetLineNumber,
-            openingLineNumber: lineNumber,
-            openingFrom: line.from,
-            viewport: {
-              from: view.state.doc.lineAt(view.viewport.from).number,
-              to: view.state.doc.lineAt(view.viewport.to).number
-            },
+            targetLineIndex,
+            openingLineIndex: lineIndex,
+            openingFrom,
             buttons: Array.from(document.querySelectorAll<HTMLElement>(selector)).map((candidate) => ({
               from: candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom ?? null
             }))
@@ -152,45 +155,49 @@ async function editRenderedBlock(
       }
       throw new Error(`Missing ${blockKind} opening line for ${needle}`);
     }, { blockKind: kind, needle: lineNeedle, selector: modeButton, targetOccurrence: occurrence });
-    await waitForFrames(page);
   };
   await scrollToLineContaining(page, lineNeedle, occurrence);
   await clickTargetModeButton();
   if (finalMode === 'source') {
     await clickTargetModeButton();
   }
-  await page.evaluate(({ blockKind, needle, selector, property, targetOccurrence }) => {
+  await page.evaluate(({ blockKind, needle, selector, targetOccurrence }) => {
     const editor = (window as any).__historyMatrixEditor;
-    const view = editor.view;
-    let targetLineNumber = 0;
-    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-      if (view.state.doc.line(lineNumber).text.includes(needle)) {
-        targetLineNumber = lineNumber;
-        if (targetOccurrence === 'first') break;
-      }
-    }
+    const lines = editor.getText().split('\n');
+    const targetLineIndex = targetOccurrence === 'first'
+      ? lines.findIndex((line: string) => line.includes(needle))
+      : lines.findLastIndex((line: string) => line.includes(needle));
     let anchor = -1;
-    for (let lineNumber = targetLineNumber; lineNumber >= 1; lineNumber -= 1) {
-      const line = view.state.doc.line(lineNumber);
-      if (blockKind === 'mermaid' ? line.text.startsWith('```mermaid') : line.text.trim() === '$$') {
-        anchor = line.from;
+    for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
+      if (blockKind === 'mermaid' ? lines[lineIndex].startsWith('```mermaid') : lines[lineIndex].trim() === '$$') {
+        anchor = lines.slice(0, lineIndex).reduce((offset: number, line: string) => offset + line.length + 1, 0);
         break;
       }
     }
     const dataAttribute = blockKind === 'mermaid' ? 'data-meo-mermaid-anchor' : 'data-meo-latex-math-anchor';
-    const block = document.querySelector<HTMLElement>(`${selector}[${dataAttribute}="${anchor}"]`)! as any;
+    const block = document.querySelector<HTMLElement>(`${selector}[${dataAttribute}="${anchor}"]`);
     if (!block) throw new Error(`Missing ${blockKind} editing block for ${needle}`);
-    const innerView = block[property].innerView;
-    block[property].focusOffset(innerView.state.doc.length);
+    const content = block.querySelector<HTMLElement>('.cm-content');
+    if (!content) throw new Error(`Missing ${blockKind} source editor for ${needle}`);
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    content.focus();
   }, {
     blockKind: kind,
     needle: lineNeedle,
     selector: blockSelector,
-    property: controllerProperty,
     targetOccurrence: occurrence
   });
   await page.keyboard.type(marker);
-  await waitForFrames(page);
+  await page.waitForFunction(({ selector, expected }) => {
+    const active = document.activeElement;
+    const block = active instanceof HTMLElement ? active.closest<HTMLElement>(selector) : null;
+    return Boolean(block && (window as any).__historyMatrixEditor.getText().includes(expected));
+  }, {}, { selector: blockSelector, expected: marker });
   if (finalMode === 'preview') {
     await clickTargetModeButton();
     await clickTargetModeButton();
@@ -199,20 +206,16 @@ async function editRenderedBlock(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const actualMode = await page.evaluate(({ blockKind, needle, selector, targetOccurrence }) => {
       const editor = (window as any).__historyMatrixEditor;
-      const view = editor.view;
-      let targetLineNumber = 0;
-      for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-        if (view.state.doc.line(lineNumber).text.includes(needle)) {
-          targetLineNumber = lineNumber;
-          if (targetOccurrence === 'first') break;
-        }
-      }
-      for (let lineNumber = targetLineNumber; lineNumber >= 1; lineNumber -= 1) {
-        const line = view.state.doc.line(lineNumber);
-        const opening = blockKind === 'mermaid' ? line.text.startsWith('```mermaid') : line.text.trim() === '$$';
+      const lines = editor.getText().split('\n');
+      const targetLineIndex = targetOccurrence === 'first'
+        ? lines.findIndex((line: string) => line.includes(needle))
+        : lines.findLastIndex((line: string) => line.includes(needle));
+      for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
+        const opening = blockKind === 'mermaid' ? lines[lineIndex].startsWith('```mermaid') : lines[lineIndex].trim() === '$$';
         if (!opening) continue;
+        const openingFrom = lines.slice(0, lineIndex).reduce((offset: number, line: string) => offset + line.length + 1, 0);
         const button = Array.from(document.querySelectorAll<HTMLButtonElement>(selector)).find((candidate) => (
-          candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(line.from)
+          candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(openingFrom)
         ));
         const block = button?.closest<HTMLElement>('[data-meo-block-from]');
         if (!block) return null;
@@ -232,101 +235,63 @@ async function assertHistoryTarget(
   step: number
 ) {
   if (target.kind === 'outer') {
-    const state = await page.evaluate((needle) => {
-      const editor = (window as any).__historyMatrixEditor;
-      const view = editor.view;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      const coords = view.coordsAtPos(head);
-      const viewport = view.scrollDOM.getBoundingClientRect();
-      return {
-        focused: view.hasFocus,
-        head,
-        selectedLine: line.text,
-        visible: Boolean(coords && coords.bottom > viewport.top && coords.top < viewport.bottom),
-        matches: line.text.includes(needle)
-      };
-    }, target.lineNeedle);
-    if (!state.focused || !state.visible || !state.matches) {
-      throw new Error(`${direction} step ${step} missed outer target: ${JSON.stringify({ target, state })}`);
-    }
+    await page.waitForFunction((needle) => {
+      const content = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller .cm-content');
+      const selection = window.getSelection();
+      const focusNode = selection?.focusNode ?? null;
+      const focusElement = focusNode instanceof Element ? focusNode : focusNode?.parentElement ?? null;
+      const line = focusElement?.closest<HTMLElement>('.cm-line');
+      if (!content || !line || !content.contains(document.activeElement)) return false;
+      const viewport = content.closest<HTMLElement>('.cm-scroller')!.getBoundingClientRect();
+      const rect = line.getBoundingClientRect();
+      return line.textContent?.includes(needle)
+        && rect.bottom > viewport.top
+        && rect.top < viewport.bottom;
+    }, {}, target.lineNeedle).catch((error: unknown) => {
+      throw new Error(`${direction} step ${step} missed outer target: ${JSON.stringify(target)}`, { cause: error });
+    });
     return;
   }
 
   if (target.kind === 'table') {
     const expectedValue = direction === 'undo' ? target.undoValue : target.redoValue;
-    const state = await page.evaluate(() => {
-      const editor = (window as any).__historyMatrixEditor;
+    await page.waitForFunction((expected) => {
       const input = document.activeElement instanceof HTMLTextAreaElement ? document.activeElement : null;
       const rect = input?.getBoundingClientRect();
-      const viewport = editor.view.scrollDOM.getBoundingClientRect();
-      return {
-        focused: Boolean(input),
-        value: input?.value ?? null,
-        visible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom)
-      };
+      const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
+      return input?.value === expected
+        && Boolean(rect && viewport && rect.bottom > viewport.top && rect.top < viewport.bottom);
+    }, {}, expectedValue).catch((error: unknown) => {
+      throw new Error(`${direction} step ${step} missed table target: ${JSON.stringify(target)}`, { cause: error });
     });
-    if (!state.focused || !state.visible || state.value !== expectedValue) {
-      throw new Error(`${direction} step ${step} missed table target: ${JSON.stringify({ target, state })}`);
-    }
     return;
   }
 
-  const state = await page.evaluate(({ kind, marker }) => {
-    const selector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
-    const property = kind === 'mermaid'
-      ? '__meoMermaidEditingController'
-      : '__meoLatexMathEditingController';
-    const editor = (window as any).__historyMatrixEditor;
-    const blocks = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    const focusedBlock = blocks.find((block) => (block as any)[property]?.innerView?.hasFocus) ?? null;
-    const innerView = focusedBlock ? (focusedBlock as any)[property].innerView : null;
-    const rect = focusedBlock?.getBoundingClientRect();
-    const viewport = editor.view.scrollDOM.getBoundingClientRect();
-    const outerHead = editor.view.state.selection.main.head;
-    const outerLine = editor.view.state.doc.lineAt(outerHead);
-    return {
-      focused: Boolean(innerView?.hasFocus),
-      source: innerView?.state.doc.toString() ?? null,
-      mode: focusedBlock?.classList.contains('is-source')
-        ? 'source'
-        : focusedBlock?.classList.contains('is-split')
-          ? 'split'
-          : null,
-      visible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom),
-      containsMarker: Boolean(innerView?.state.doc.toString().includes(marker)),
-      outerSelection: { head: outerHead, lineNumber: outerLine.number, text: outerLine.text },
-      outerViewport: {
-        fromLine: editor.view.state.doc.lineAt(editor.view.viewport.from).number,
-        toLine: editor.view.state.doc.lineAt(editor.view.viewport.to).number,
-        scrollTop: editor.view.scrollDOM.scrollTop
-      },
-      blocks: blocks.map((block) => {
-        const blockRect = block.getBoundingClientRect();
-        return {
-          anchor: block.dataset.meoMermaidAnchor ?? block.dataset.meoLatexMathAnchor ?? null,
-          mode: block.classList.contains('is-source') ? 'source' : block.classList.contains('is-split') ? 'split' : null,
-          controller: Boolean((block as any)[property]),
-          focused: Boolean((block as any)[property]?.innerView?.hasFocus),
-          top: blockRect.top,
-          bottom: blockRect.bottom
-        };
-      }),
-      activeElement: {
-        tag: document.activeElement?.tagName ?? null,
-        className: (document.activeElement as HTMLElement | null)?.className?.toString() ?? null
-      }
-    };
-  }, { kind: target.kind, marker: target.marker });
   const markerExpected = direction === 'redo';
-  if (
-    !state.focused ||
-    !state.visible ||
-    state.mode !== target.mode ||
-    state.containsMarker !== markerExpected
-  ) {
-    throw new Error(`${direction} step ${step} missed rendered-block target: ${JSON.stringify({ target, state })}`);
-  }
+  await page.waitForFunction(({ kind, marker, mode, expected }) => {
+    const selector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
+    const active = document.activeElement;
+    const block = active instanceof HTMLElement ? active.closest<HTMLElement>(selector) : null;
+    const content = block?.querySelector<HTMLElement>('.cm-content');
+    const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+    if (!block || !content || !scroller) return false;
+    const rect = block.getBoundingClientRect();
+    const viewport = scroller.getBoundingClientRect();
+    const actualMode = block.classList.contains('is-source')
+      ? 'source'
+      : block.classList.contains('is-split') ? 'split' : null;
+    return actualMode === mode
+      && content.textContent?.includes(marker) === expected
+      && rect.bottom > viewport.top
+      && rect.top < viewport.bottom;
+  }, {}, {
+    kind: target.kind,
+    marker: target.marker,
+    mode: target.mode,
+    expected: markerExpected
+  }).catch((error: unknown) => {
+    throw new Error(`${direction} step ${step} missed rendered-block target: ${JSON.stringify(target)}`, { cause: error });
+  });
 }
 
 async function main() {
@@ -490,11 +455,15 @@ async function main() {
         onApplyChanges() {}
       });
     }, realFixtureText);
-    await waitForFrames(page);
+    await page.waitForFunction(() => Boolean(
+      (window as any).__historyMatrixEditor?.getText()
+      && document.querySelector('.cm-editor > .cm-scroller')
+      && document.querySelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')
+    ));
 
     const externalSyncDepth = await page.evaluate(() => {
       const editor = (window as any).__historyMatrixEditor;
-      const text = editor.view.state.doc.toString();
+      const text = editor.getText();
       const before = editor.getHistoryDepth();
       editor.setText(`${text}\nEXTERNAL_SYNC_PROBE`);
       editor.setText(text);
@@ -640,19 +609,13 @@ async function main() {
 
     for (let index = targets.length - 1; index >= 0; index -= 1) {
       await pressHistoryShortcut(page, 'z');
-      const actual = await documentText(page);
-      if (actual !== versions[index]) {
-        throw new Error(`undo step ${targets.length - index} restored the wrong document: ${JSON.stringify({ target: targets[index], expected: versions[index], actual })}`);
-      }
+      await waitForDocumentText(page, versions[index]);
       await assertHistoryTarget(page, targets[index], 'undo', targets.length - index);
     }
 
     for (let index = 0; index < targets.length; index += 1) {
       await pressHistoryShortcut(page, 'y');
-      const actual = await documentText(page);
-      if (actual !== versions[index + 1]) {
-        throw new Error(`redo step ${index + 1} restored the wrong document: ${JSON.stringify({ target: targets[index], expected: versions[index + 1], actual })}`);
-      }
+      await waitForDocumentText(page, versions[index + 1]);
       await assertHistoryTarget(page, targets[index], 'redo', index + 1);
     }
 
@@ -661,34 +624,27 @@ async function main() {
     try {
       for (let count = 1; count <= heldUndoCountToFirstTable; count += 1) {
         await page.keyboard.down('z');
-        const actual = await documentText(page);
         const expected = versions[targets.length - count];
-        if (actual !== expected) {
-          throw new Error(`held-Control mixed undo stalled at key ${count}`);
-        }
+        await waitForDocumentText(page, expected);
       }
       await page.keyboard.up('z');
     } finally {
       await page.keyboard.up('Control');
     }
-    await waitForFrames(page, 12);
     await assertHistoryTarget(page, targets[2], 'undo', heldUndoCountToFirstTable);
 
     await page.keyboard.down('Control');
     try {
       for (let count = 1; count <= heldUndoCountToFirstTable; count += 1) {
         await page.keyboard.down('y');
-        const actual = await documentText(page);
         const expected = versions[2 + count];
-        if (actual !== expected) {
-          throw new Error(`held-Control mixed redo stalled at key ${count}`);
-        }
+        await waitForDocumentText(page, expected);
       }
       await page.keyboard.up('y');
     } finally {
       await page.keyboard.up('Control');
     }
-    await waitForFrames(page, 12);
+    await waitForDocumentText(page, versions[targets.length]);
 
     await page.keyboard.down('Control');
     try {
@@ -698,42 +654,54 @@ async function main() {
     } finally {
       await page.keyboard.up('Control');
     }
+    await waitForDocumentText(page, versions[0]);
+    await scrollToLineContaining(page, fixture.typingNeedle);
     const typingStart = await page.evaluate((typingNeedle) => {
-      const editor = (window as any).__historyMatrixEditor;
-      const view = editor.view;
-      const viewport = view.scrollDOM.getBoundingClientRect();
-      const fromLine = view.state.doc.lineAt(view.viewport.from).number;
-      const toLine = view.state.doc.lineAt(view.viewport.to).number;
-      for (let lineNumber = fromLine; lineNumber <= toLine; lineNumber += 1) {
-        const line = view.state.doc.line(lineNumber);
-        if (!line.text.includes(typingNeedle)) continue;
-        const coords = view.coordsAtPos(line.to);
-        if (!coords || coords.top < viewport.top || coords.bottom > viewport.bottom) continue;
-        view.dispatch({ selection: { anchor: line.to } });
-        view.focus();
-        return { scrollTop: view.scrollDOM.scrollTop, lineNumber };
-      }
-      throw new Error('Missing visible post-history typing line');
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes(typingNeedle));
+      const content = line?.closest<HTMLElement>('.cm-content');
+      const scroller = content?.closest<HTMLElement>('.cm-scroller');
+      if (!line || !content || !scroller) throw new Error('Missing visible post-history typing line');
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      content.focus();
+      return { scrollTop: scroller.scrollTop, lineTop: line.getBoundingClientRect().top };
     }, fixture.typingNeedle);
     await page.keyboard.type(' TYPE_AFTER_HELD_HISTORY');
-    await waitForFrames(page, 20);
-    const typingEnd = await page.evaluate(() => {
+    await page.waitForFunction(() => (
+      (window as any).__historyMatrixEditor.getText().includes('TYPE_AFTER_HELD_HISTORY')
+    ));
+    const typingEnd = await page.evaluate((typingNeedle) => {
       const editor = (window as any).__historyMatrixEditor;
-      const view = editor.view;
-      const head = view.state.selection.main.head;
+      const content = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller .cm-content');
+      const scroller = content?.closest<HTMLElement>('.cm-scroller');
+      const selection = window.getSelection();
+      const focusNode = selection?.focusNode ?? null;
+      const focusElement = focusNode instanceof Element ? focusNode : focusNode?.parentElement ?? null;
+      const line = focusElement?.closest<HTMLElement>('.cm-line');
       return {
-        scrollTop: view.scrollDOM.scrollTop,
-        focused: view.hasFocus,
-        lineNumber: view.state.doc.lineAt(head).number,
-        line: view.state.doc.lineAt(head).text,
+        scrollTop: scroller?.scrollTop ?? null,
+        focused: Boolean(content?.contains(document.activeElement)),
+        lineTop: line?.getBoundingClientRect().top ?? null,
+        line: line?.textContent ?? null,
+        textContainsMarker: editor.getText().includes('TYPE_AFTER_HELD_HISTORY'),
+        lineContainsNeedle: line?.textContent?.includes(typingNeedle) ?? false,
         activeTag: document.activeElement?.tagName ?? null
       };
-    });
+    }, fixture.typingNeedle);
     if (
       !typingEnd.focused ||
-      typingEnd.lineNumber !== typingStart.lineNumber ||
-      !typingEnd.line.includes('TYPE_AFTER_HELD_HISTORY') ||
-      Math.abs(typingEnd.scrollTop - typingStart.scrollTop) > 2
+      !typingEnd.textContainsMarker ||
+      !typingEnd.lineContainsNeedle ||
+      !typingEnd.line?.includes('TYPE_AFTER_HELD_HISTORY') ||
+      typingEnd.scrollTop === null ||
+      typingEnd.lineTop === null ||
+      Math.abs(typingEnd.scrollTop - typingStart.scrollTop) > 2 ||
+      Math.abs(typingEnd.lineTop - typingStart.lineTop) > 2
     ) {
       throw new Error(`Typing after held-Control history lost focus or scrolled: ${JSON.stringify({ typingStart, typingEnd })}`);
     }
