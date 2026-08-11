@@ -234,6 +234,9 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         window.removeEventListener('pointercancel', finish, true);
         pointerBoundary.removeEventListener('pointerleave', finish);
         pointerBoundary.removeEventListener('lostpointercapture', finish);
+        if (pointerBoundary.hasPointerCapture?.(event.pointerId)) {
+          pointerBoundary.releasePointerCapture(event.pointerId);
+        }
         refreshDragPreview = null;
         dragCleanup = null;
       };
@@ -269,6 +272,11 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       window.addEventListener('pointercancel', finish, true);
       pointerBoundary.addEventListener('pointerleave', finish);
       pointerBoundary.addEventListener('lostpointercapture', finish);
+      try {
+        pointerBoundary.setPointerCapture(event.pointerId);
+      } catch {
+        // Keep pointerup/cancel/leave fallbacks for hosts that reject capture.
+      }
     };
 
     const handleRoot = table.closest<HTMLElement>('.meo-md-html-table-shell') ?? table;

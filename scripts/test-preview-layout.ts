@@ -53,6 +53,7 @@ try {
       wrapperWidth: wrappers[0]?.clientWidth ?? 0,
       wrapperScrollWidth: wrappers[0]?.scrollWidth ?? 0,
       tableWidth: wideTable?.getBoundingClientRect().width ?? 0,
+      resizeHandleCount: document.querySelectorAll('.meo-md-html-table-column-resize-handle').length,
       columnWidths: wideTable
         ? Array.from(wideTable.rows[0]?.cells ?? []).map((cell) => cell.getBoundingClientRect().width)
         : [],
@@ -72,6 +73,7 @@ try {
     layout.wrapperWidth <= 0 ||
     layout.wrapperScrollWidth > layout.wrapperWidth + 1 ||
     layout.tableWidth > layout.wrapperWidth + 1 ||
+    layout.resizeHandleCount !== 0 ||
     !layout.listCellFound ||
     layout.listPadding < 24 ||
     layout.cellPadding < 12 ||
