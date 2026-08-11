@@ -550,8 +550,30 @@ async function main() {
     ) {
       throw new Error(`Pending table edit leaked during structural command: ${JSON.stringify(afterPendingInsert)}`);
     }
+    const waitForPendingStructureState = async (expected: {
+      readonly text: string;
+      readonly rowCount: number;
+      readonly focused: boolean;
+    }) => page.waitForFunction(({ text, rowCount, focused }) => {
+      const editor = (window as any).__historyMatrixEditor;
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+      const active = document.activeElement;
+      return editor.getText() === text
+        && table?.querySelectorAll('tbody tr').length === rowCount
+        && (!focused || (active instanceof HTMLTextAreaElement && table.contains(active)));
+    }, {}, expected);
+    await page.evaluate(async () => {
+      const applied = await (window as any).__historyMatrixEditor.undo();
+      if (!applied) throw new Error('Pending table structure undo was not applied');
+    });
+    await waitForPendingStructureState({ text: pendingTableBaseline, rowCount: 1, focused: true });
+    await page.evaluate(async () => {
+      const applied = await (window as any).__historyMatrixEditor.redo();
+      if (!applied) throw new Error('Pending table structure redo was not applied');
+    });
+    await waitForPendingStructureState({ text: afterPendingInsert.text, rowCount: 2, focused: true });
     await page.evaluate((text) => (window as any).__historyMatrixEditor.setText(text), pendingTableBaseline);
-    await waitForFrames(page);
+    await waitForPendingStructureState({ text: pendingTableBaseline, rowCount: 1, focused: false });
 
     const versions = [await documentText(page)];
     const targets: HistoryTarget[] = [];
