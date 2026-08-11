@@ -368,6 +368,8 @@ class MermaidEditingController {
     this.mode = mode;
     this.root = document.createElement('div') as MermaidEditingBlockElement;
     this.root.className = 'meo-mermaid-editing-block';
+    this.root.setAttribute('role', 'region');
+    this.root.setAttribute('aria-label', `Mermaid editor at line ${outerView.state.doc.lineAt(block.anchor).number}`);
     this.root.dataset.meoMermaidAnchor = String(block.anchor);
     this.sourcePane = document.createElement('div');
     this.sourcePane.className = 'meo-mermaid-source-pane';

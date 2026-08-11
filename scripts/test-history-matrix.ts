@@ -85,6 +85,12 @@ async function scrollToLineContaining(
     expectedTableCell: tableCell,
     targetRenderedKind: renderedKind,
     targetLineNumber: location.controlLineNumber
+  }).catch(async (error: unknown) => {
+    const labels = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('[role="group"][aria-label]')).map((element) => ({
+      label: element.getAttribute('aria-label'),
+      rect: element.getBoundingClientRect().toJSON()
+    })));
+    throw new Error(`Missing visible semantic target: ${JSON.stringify({ needle, renderedKind, location, labels })}`, { cause: error });
   });
   return location.controlLineNumber;
 }
@@ -138,6 +144,9 @@ async function editRenderedBlock(
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
   let targetLineNumber = 0;
+  const editorRegionLabel = () => kind === 'mermaid'
+    ? `Mermaid editor at line ${targetLineNumber}`
+    : `Formula editor at line ${targetLineNumber}`;
   const clickTargetModeButton = async () => {
     const previousLabel = await page.evaluate(({ blockKind, needle, selector, lineNumber }) => {
       const toolbarLabel = blockKind === 'mermaid'
@@ -150,7 +159,8 @@ async function editRenderedBlock(
       button.click();
       return label;
     }, { blockKind: kind, needle: lineNeedle, selector: modeButton, lineNumber: targetLineNumber });
-    await page.waitForFunction(({ blockKind, selector, previous, blockSelector, needle, lineNumber }) => {
+    targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
+    await page.waitForFunction(({ blockKind, selector, previous, regionLabel, needle, lineNumber }) => {
       const toolbarLabel = blockKind === 'mermaid'
         ? `Mermaid block controls at line ${lineNumber}`
         : `Formula block controls at line ${lineNumber}`;
@@ -159,14 +169,13 @@ async function editRenderedBlock(
       if (/show .* preview/i.test(previous ?? '')) {
         return Boolean(button && /edit .* split view/i.test(button.getAttribute('aria-label') ?? ''));
       }
-      return Array.from(document.querySelectorAll<HTMLElement>(blockSelector)).some((block) => (
-        block.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(needle)
-      ));
+      return Boolean(document.querySelector<HTMLElement>(`[role="region"][aria-label="${regionLabel}"]`)
+        ?.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(needle));
     }, {}, {
       blockKind: kind,
       selector: modeButton,
       previous: previousLabel,
-      blockSelector,
+      regionLabel: editorRegionLabel(),
       needle: lineNeedle,
       lineNumber: targetLineNumber
     });
@@ -176,32 +185,30 @@ async function editRenderedBlock(
   if (finalMode === 'source') {
     await clickTargetModeButton();
   }
-  await page.waitForFunction((selector) => {
+  await page.waitForFunction(({ selector, regionLabel }) => {
     const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
-    return Boolean(viewport && Array.from(document.querySelectorAll<HTMLElement>(selector)).some((candidate) => {
-      const rect = candidate.getBoundingClientRect();
-      return rect.bottom > viewport.top && rect.top < viewport.bottom;
-    }));
-  }, {}, blockSelector).catch(async (error: unknown) => {
+    const block = document.querySelector<HTMLElement>(`${selector}[role="region"][aria-label="${regionLabel}"]`);
+    const rect = block?.getBoundingClientRect();
+    return Boolean(viewport && rect && rect.bottom > viewport.top && rect.top < viewport.bottom);
+  }, {}, { selector: blockSelector, regionLabel: editorRegionLabel() }).catch(async (error: unknown) => {
     const state = await page.evaluate(({ buttonSelector, blockSelector }) => ({
       viewport: document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect().toJSON(),
       buttons: Array.from(document.querySelectorAll<HTMLButtonElement>(buttonSelector)).map((button) => ({
         label: button.getAttribute('aria-label'),
+        groupLabel: button.closest('[role="group"]')?.getAttribute('aria-label'),
         rect: button.getBoundingClientRect().toJSON(),
         lineText: button.closest('.cm-line')?.textContent
       })),
       blocks: Array.from(document.querySelectorAll<HTMLElement>(blockSelector)).map((block) => ({
+        label: block.getAttribute('aria-label'),
         rect: block.getBoundingClientRect().toJSON(),
         text: block.textContent
       }))
     }), { buttonSelector: modeButton, blockSelector });
     throw new Error(`Rendered block did not enter editing mode: ${JSON.stringify({ kind, lineNeedle, state })}`, { cause: error });
   });
-  await page.evaluate(({ blockKind, needle, selector, targetOccurrence }) => {
-    const semanticNeedle = needle.match(/[A-Za-z_][A-Za-z0-9_]*/g)
-      ?.sort((left: string, right: string) => right.length - left.length)[0] ?? needle;
-    const block = Array.from(document.querySelectorAll<HTMLElement>(selector))
-      .find((candidate) => candidate.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(semanticNeedle)) ?? null;
+  await page.evaluate(({ blockKind, needle, selector, regionLabel }) => {
+    const block = document.querySelector<HTMLElement>(`${selector}[role="region"][aria-label="${regionLabel}"]`);
     if (!block) throw new Error(`Missing ${blockKind} editing block for ${needle}`);
     const content = block.querySelector<HTMLElement>('.cm-content');
     if (!content) throw new Error(`Missing ${blockKind} source editor for ${needle}`);
@@ -216,7 +223,7 @@ async function editRenderedBlock(
     blockKind: kind,
     needle: lineNeedle,
     selector: blockSelector,
-    targetOccurrence: occurrence
+    regionLabel: editorRegionLabel()
   });
   await page.keyboard.type(marker);
   await page.waitForFunction(({ selector, expected }) => {
@@ -385,7 +392,7 @@ async function main() {
         table2ThirdAfter: 'left text_EDIT',
         extraOuter1: 'EXTRA_OUTER_ONE',
         extraOuter2: 'EXTRA_OUTER_TWO',
-        extraMermaid1: 'ME_EXTRA_A --> ME_EXTRA_B',
+        extraMermaid1: 'MP_A --> MP_B',
         extraMermaid2: 'ME_EXTRA_C --> ME_EXTRA_D',
         extraMath1: 'mathExtra = 1',
         extraMath2: 'mathExtraTwo = 1',
@@ -445,7 +452,7 @@ async function main() {
         '```',
         '```mermaid',
         'graph TD',
-        'ME_EXTRA_A --> ME_EXTRA_B',
+        'MP_A --> MP_B',
         '```',
         '```mermaid',
         'graph TD',
@@ -626,7 +633,7 @@ async function main() {
     await record({ kind: 'outer', lineNeedle: fixture.extraOuter1 });
     await editOuterLine(page, fixture.extraOuter2, ' EXTRA_TWO_EDIT');
     await record({ kind: 'outer', lineNeedle: fixture.extraOuter2 });
-    await editRenderedBlock(page, 'mermaid', fixture.extraMermaid1, ' M_EXTRA_ONE', 'source');
+    await editRenderedBlock(page, 'mermaid', fixture.extraMermaid1, ' M_EXTRA_ONE', 'source', 'last');
     await record({ kind: 'mermaid', marker: 'M_EXTRA_ONE', mode: 'source' });
     await editRenderedBlock(page, 'mermaid', fixture.extraMermaid2, ' M_EXTRA_TWO', 'split');
     await record({ kind: 'mermaid', marker: 'M_EXTRA_TWO', mode: 'split' });

@@ -327,6 +327,8 @@ class LatexMathEditingController {
     this.mode = mode;
     this.root = document.createElement('div') as LatexMathEditingBlockElement;
     this.root.className = 'meo-latex-math-editing-block';
+    this.root.setAttribute('role', 'region');
+    this.root.setAttribute('aria-label', `Formula editor at line ${outerView.state.doc.lineAt(block.anchor).number}`);
     this.root.dataset.meoLatexMathAnchor = String(block.anchor);
 
     const sourcePane = document.createElement('div');
