@@ -148,6 +148,7 @@ export function createEditorModeApplication(): EditorModeApplication {
   let mountRecoveryAttempted = false;
   let transitionSequence = 0;
   let pendingTransition: PendingTransition | null = null;
+  let restoreFocusOnPreviewExit = false;
 
   const getState = (): EditorModeState => ({
     lifecycle,
@@ -183,6 +184,12 @@ export function createEditorModeApplication(): EditorModeApplication {
   ): EditorModeEffect[] => {
     const previousMode = mode;
     const policy = requestPolicy(source);
+    if (targetMode === 'preview' && previousMode !== 'preview') {
+      restoreFocusOnPreviewExit = restoreEditorFocus;
+    }
+    const effectiveRestoreEditorFocus = targetMode !== 'preview' && previousMode === 'preview'
+      ? restoreEditorFocus || restoreFocusOnPreviewExit
+      : restoreEditorFocus;
     pendingTransition = null;
     mode = targetMode;
     if (targetMode !== 'preview') lastEditableMode = targetMode;
@@ -192,11 +199,12 @@ export function createEditorModeApplication(): EditorModeApplication {
       { type: 'commitTransientEdits' },
       {
         type: 'presentMode',
-        presentation: presentationFor(targetMode, previousMode, viewport, restoreEditorFocus)
+        presentation: presentationFor(targetMode, previousMode, viewport, effectiveRestoreEditorFocus)
       }
     ];
 
     if (targetMode === 'preview' || editorMount !== 'mounted') {
+      if (targetMode !== 'preview') restoreFocusOnPreviewExit = false;
       effects.push(...finalize(targetMode, policy));
       return effects;
     }
@@ -208,7 +216,7 @@ export function createEditorModeApplication(): EditorModeApplication {
       requestedMode: targetMode,
       source,
       viewport,
-      restoreEditorFocus,
+      restoreEditorFocus: effectiveRestoreEditorFocus,
       persist: policy.persist,
       post: policy.post,
       fallbackToSource: false
@@ -267,6 +275,7 @@ export function createEditorModeApplication(): EditorModeApplication {
         const pending = pendingTransition;
         if (!pending || pending.id !== input.transitionId) return [];
         pendingTransition = null;
+        restoreFocusOnPreviewExit = false;
         if (pending.fallbackToSource) {
           mode = 'source';
           return [
@@ -358,6 +367,7 @@ export function createEditorModeApplication(): EditorModeApplication {
         lifecycle = 'disposed';
         editorMount = 'unmounted';
         pendingTransition = null;
+        restoreFocusOnPreviewExit = false;
         return [{ type: 'disposeMode' }];
     }
   };

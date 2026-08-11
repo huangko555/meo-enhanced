@@ -1177,6 +1177,40 @@ async function main() {
     if (!previewExitVisibleLine) {
       throw new Error('Leaving Preview did not preserve the visible document position');
     }
+    const backwardSelectionText = 'stable line 120';
+    await page.evaluate(({ text, selectedText }) => {
+      const head = text.indexOf(selectedText);
+      if (head < 0) throw new Error(`Missing selection fixture: ${selectedText}`);
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection',
+        anchor: head + selectedText.length,
+        head,
+        focus: true
+      }}));
+    }, { text: initialText, selectedText: backwardSelectionText });
+    const editableSelectionMatches = (selectedText: string) => {
+      const selection = window.getSelection();
+      if (!selection || selection.toString() !== selectedText || !selection.anchorNode || !selection.focusNode) {
+        return false;
+      }
+      const content = document.querySelector<HTMLElement>('.editor-host .cm-content');
+      const active = document.activeElement;
+      if (!content || !(active instanceof HTMLElement) || !content.contains(active)) return false;
+      const anchorRange = document.createRange();
+      anchorRange.setStart(selection.anchorNode, selection.anchorOffset);
+      anchorRange.collapse(true);
+      const focusRange = document.createRange();
+      focusRange.setStart(selection.focusNode, selection.focusOffset);
+      focusRange.collapse(true);
+      return anchorRange.compareBoundaryPoints(Range.START_TO_START, focusRange) > 0;
+    };
+    await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
+    await page.click('[data-mode="source"]');
+    await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
+    await page.click('[data-mode="preview"]');
+    await page.waitForSelector('.preview-host:not([hidden]) .preview-frame');
+    await page.click('[data-mode="source"]');
+    await page.waitForFunction(editableSelectionMatches, {}, backwardSelectionText);
     await page.evaluate((text) => {
       const selection = text.indexOf('## Short Mermaid');
       window.dispatchEvent(new MessageEvent('message', { data: {

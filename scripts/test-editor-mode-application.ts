@@ -59,7 +59,9 @@ assert.deepEqual(effectTypes(localInit.dispatch({ type: 'editorModeApplied', tra
 ]);
 assert.equal(localInit.getState().lastEditableMode, 'live');
 
-const previewEffects = localInit.dispatch({ type: 'requestMode', mode: 'preview', source: 'user', viewport });
+const previewEffects = localInit.dispatch({
+  type: 'requestMode', mode: 'preview', source: 'user', viewport, restoreEditorFocus: true
+});
 assert.deepEqual(effectTypes(previewEffects), ['commitTransientEdits', 'presentMode', 'persistMode', 'postMode']);
 const previewPresentation = previewEffects.find((effect) => effect.type === 'presentMode');
 assert.equal(previewPresentation?.type === 'presentMode' && previewPresentation.presentation.searchOwner, 'preview');
@@ -67,6 +69,15 @@ assert.equal(previewPresentation?.type === 'presentMode' && previewPresentation.
 assert.equal(previewPresentation?.type === 'presentMode' && previewPresentation.presentation.hideSelectionMenu, true);
 assert.equal(previewPresentation?.type === 'presentMode' && previewPresentation.presentation.replaceEnabled, false);
 assert.equal(localInit.getState().lastEditableMode, 'live', 'Preview must retain the latest editable mode');
+const returnFromPreview = localInit.dispatch({
+  type: 'requestMode', mode: 'source', source: 'user', viewport, restoreEditorFocus: false
+});
+const returnPresentation = returnFromPreview.find((effect) => effect.type === 'presentMode');
+assert.equal(
+  returnPresentation?.type === 'presentMode' && returnPresentation.presentation.restoreEditorFocus,
+  true,
+  'Preview exit must restore the focus intent captured before Preview blurred the editor'
+);
 
 const fallback = createEditorModeApplication();
 fallback.dispatch({ type: 'initialize', hostMode: 'source' });
