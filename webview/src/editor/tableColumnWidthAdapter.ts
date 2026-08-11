@@ -38,6 +38,7 @@ type TableBinding = {
 const tableSelector = 'table[data-table-column-width]';
 const handleSelector = '[data-table-resize-column]';
 const projectionEventName = 'meo-table-column-width-projected';
+const resizingClassName = 'meo-table-column-resizing';
 
 function sum(widths: readonly number[]): number {
   return widths.reduce((total, width) => total + width, 0);
@@ -226,6 +227,11 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           defaultWidthWasCapped
         });
         render(table, result.widths, result.totalWidth);
+        table.dispatchEvent(
+          new CustomEvent(projectionEventName, {
+            detail: { resizeRows: false },
+          }),
+        );
       };
 
       const removeDragListeners = () => {
@@ -234,6 +240,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         window.removeEventListener('pointercancel', finish, true);
         pointerBoundary.removeEventListener('pointerleave', finish);
         pointerBoundary.removeEventListener('lostpointercapture', finish);
+        pointerBoundary.classList.remove(resizingClassName);
         if (pointerBoundary.hasPointerCapture?.(event.pointerId)) {
           pointerBoundary.releasePointerCapture(event.pointerId);
         }
@@ -267,6 +274,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 
       refreshDragPreview = renderDragPreview;
       dragCleanup = removeDragListeners;
+      pointerBoundary.classList.add(resizingClassName);
       window.addEventListener('pointermove', move, true);
       window.addEventListener('pointerup', finish, true);
       window.addEventListener('pointercancel', finish, true);

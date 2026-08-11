@@ -101,17 +101,30 @@ async function dragWithPresentationSamples(
   page: any,
   selector: string,
   delta: number
-): Promise<Array<{ readonly primaryWidths: number[]; readonly stickyWidths: number[] }>> {
+): Promise<Array<{
+  readonly primaryWidths: number[];
+  readonly stickyWidths: number[];
+  readonly primaryTableWidth: number;
+  readonly stickyTableWidth: number;
+  readonly cursor: string;
+}>> {
   const point = await page.$eval(selector, (handle: Element) => {
     const rect = handle.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
-  const samples: Array<{ readonly primaryWidths: number[]; readonly stickyWidths: number[] }> = [];
+  const samples: Array<{
+    readonly primaryWidths: number[];
+    readonly stickyWidths: number[];
+    readonly primaryTableWidth: number;
+    readonly stickyTableWidth: number;
+    readonly cursor: string;
+  }> = [];
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();
   const tableSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table)';
   for (const progress of [0.2, 0.4, 0.6, 0.8, 1]) {
-    await page.mouse.move(point.x + delta * progress, point.y);
+    const pointerY = point.y + 24;
+    await page.mouse.move(point.x + delta * progress, pointerY);
     if (progress === 0.4) {
       await page.evaluate((handleSelector) => {
         const handle = document.querySelector<HTMLElement>(handleSelector);
@@ -121,7 +134,12 @@ async function dragWithPresentationSamples(
         container.style.width = `${Math.max(180, container.clientWidth - 24)}px`;
       }, selector);
     }
-    samples.push(await tablePresentationWidths(page, `${tableSelector}:first-of-type`));
+    const presentation = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    const cursor = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return target ? getComputedStyle(target).cursor : '';
+    }, { x: point.x + delta * progress, y: pointerY });
+    samples.push({ ...presentation, cursor });
   }
   await page.mouse.up();
   await waitForTableLayout(page, tableSelector);
@@ -131,15 +149,24 @@ async function dragWithPresentationSamples(
 async function tablePresentationWidths(
   page: any,
   selector: string
-): Promise<{ readonly primaryWidths: number[]; readonly stickyWidths: number[] }> {
-  return page.$eval(selector, (table: HTMLTableElement) => ({
-    primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
-      .map((cell) => cell.getBoundingClientRect().width),
-    stickyWidths: Array.from(
-      table.closest('.meo-md-html-table-shell')!
-        .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table thead th')
-    ).map((cell) => cell.getBoundingClientRect().width)
-  }));
+): Promise<{
+  readonly primaryWidths: number[];
+  readonly stickyWidths: number[];
+  readonly primaryTableWidth: number;
+  readonly stickyTableWidth: number;
+}> {
+  return page.$eval(selector, (table: HTMLTableElement) => {
+    const stickyTable = table.closest('.meo-md-html-table-shell')!
+      .querySelector<HTMLElement>('.meo-md-html-table-sticky-table')!;
+    return {
+      primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+        .map((cell) => cell.getBoundingClientRect().width),
+      stickyWidths: Array.from(stickyTable.querySelectorAll<HTMLElement>('thead th'))
+        .map((cell) => cell.getBoundingClientRect().width),
+      primaryTableWidth: table.getBoundingClientRect().width,
+      stickyTableWidth: stickyTable.getBoundingClientRect().width
+    };
+  });
 }
 
 async function dragPath(page: any, selector: string, deltas: readonly number[]): Promise<number[]> {
@@ -250,6 +277,15 @@ async function main(): Promise<void> {
         dragSamples[index].stickyWidths.map(Math.round),
         dragSamples[index].primaryWidths.map(Math.round),
         `sticky projection diverged during drag sample ${index}: ${JSON.stringify(dragSamples[index])}`
+      );
+      assert.ok(
+        Math.abs(dragSamples[index].stickyTableWidth - dragSamples[index].primaryTableWidth) < 1,
+        `sticky table width diverged during drag sample ${index}: ${JSON.stringify(dragSamples[index])}`
+      );
+      assert.equal(
+        dragSamples[index].cursor,
+        'col-resize',
+        `column-resize cursor was lost during drag sample ${index}: ${JSON.stringify(dragSamples[index])}`
       );
     }
     const resizedPresentation = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);

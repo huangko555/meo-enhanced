@@ -698,9 +698,17 @@ async function main() {
       editDiffInput.focus();
       editDiffInput.value = 'new';
       editDiffInput.dispatchEvent(new Event('input', { bubbles: true }));
-      (document.getElementById('outside') as HTMLButtonElement).focus();
+      document.querySelector<HTMLTextAreaElement>(
+        'td[data-table-row="2"][data-table-col="0"] textarea'
+      )!.focus();
       await waitFrames(5);
       const editDiffSource = editDiffEditor.view.state.doc.toString();
+      const editDiffActiveCell = document.activeElement instanceof HTMLTextAreaElement
+        ? {
+            row: document.activeElement.dataset.tableRow,
+            col: document.activeElement.dataset.tableCol
+          }
+        : null;
       const editDiffMarkers = Array.from(
         document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker')
       ).map((marker) => ({
@@ -1115,6 +1123,7 @@ async function main() {
         sortedNoncontiguousDeleteSource,
         pendingEditDeleteSource,
         editDiffSource,
+        editDiffActiveCell,
         editDiffMarkers,
         insertDiffSource,
         insertDiffMarkers,
@@ -1388,9 +1397,10 @@ async function main() {
     }
     if (
       result.editDiffSource !== '| A      |\n| ------ |\n| new    |\n| keep   |' ||
-      JSON.stringify(result.editDiffMarkers) !== JSON.stringify([{ line: '3', modified: true }])
+      JSON.stringify(result.editDiffMarkers) !== JSON.stringify([{ line: '3', modified: true }]) ||
+      JSON.stringify(result.editDiffActiveCell) !== JSON.stringify({ row: '2', col: '0' })
     ) {
-      failures.push(`single-cell edit produced a table-wide diff: ${JSON.stringify({ source: result.editDiffSource, markers: result.editDiffMarkers })}`);
+      failures.push(`switching cells did not commit and retain the incoming cell: ${JSON.stringify({ source: result.editDiffSource, markers: result.editDiffMarkers, activeCell: result.editDiffActiveCell })}`);
     }
     if (
       result.insertDiffSource !== '| A      |\n| ------ |\n| one    |\n|  |\n| two    |' ||

@@ -108,6 +108,43 @@ async function main() {
       };
     });
 
+    const imageHistory = await page.evaluate(async () => {
+      const editor = (window as any).__imageLayoutEditor;
+      const view = editor.view;
+      const line = view.state.doc.line(2);
+      const marker = ' IMAGE_HISTORY_TARGET';
+      view.dispatch({
+        changes: { from: line.to, insert: marker },
+        selection: { anchor: line.to + marker.length }
+      });
+      view.focus();
+      const states: Array<{
+        direction: 'undo' | 'redo';
+        markerPresent: boolean;
+        lineNumber: number;
+        targetVisible: boolean;
+        scrollTop: number;
+      }> = [];
+      for (const direction of ['undo', 'redo'] as const) {
+        const applied = direction === 'undo' ? await editor.undo() : await editor.redo();
+        if (!applied) throw new Error(`${direction} beside an image was not applied`);
+        for (let frame = 0; frame < 10; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const head = view.state.selection.main.head;
+        const coords = view.coordsAtPos(head);
+        const viewport = view.scrollDOM.getBoundingClientRect();
+        states.push({
+          direction,
+          markerPresent: view.state.doc.toString().includes(marker),
+          lineNumber: view.state.doc.lineAt(head).number,
+          targetVisible: Boolean(coords && coords.top >= viewport.top && coords.bottom <= viewport.bottom),
+          scrollTop: view.scrollDOM.scrollTop
+        });
+      }
+      return states;
+    });
+
     const failures: string[] = [];
     if (initial.imageCount !== 2 || initial.fallbackCount !== 1) {
       failures.push(`fixture rendered ${initial.imageCount} images and ${initial.fallbackCount} fallbacks`);
@@ -122,6 +159,13 @@ async function main() {
         + `selection stayed on line ${afterClick.selectedLine}; source=${JSON.stringify(expanded.sourceRect)}, `
         + `after=${JSON.stringify(expanded.afterRect)}, rects=${JSON.stringify(expanded.widgetRects)}`
       );
+    }
+    if (imageHistory.some((state) => (
+      state.markerPresent !== (state.direction === 'redo') ||
+      state.lineNumber !== 2 ||
+      !state.targetVisible
+    ))) {
+      failures.push(`history did not use a visible source boundary beside an atomic image: ${JSON.stringify(imageHistory)}`);
     }
     if (failures.length) throw new Error(failures.join('\n'));
     console.log('image layout checks passed');

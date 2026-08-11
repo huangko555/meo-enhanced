@@ -4296,6 +4296,11 @@ body.outline-resizing .preview-frame {
   touch-action: none;
 }
 
+.cm-editor.meo-table-column-resizing,
+.cm-editor.meo-table-column-resizing * {
+  cursor: col-resize !important;
+}
+
 .cm-editor .meo-md-html-table-sticky-chrome {
   position: fixed;
   z-index: 210;

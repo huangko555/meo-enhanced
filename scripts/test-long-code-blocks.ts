@@ -215,6 +215,57 @@ async function main() {
       throw new Error(`Clicking visible code did not expand the block: ${JSON.stringify(clickExpanded)}`);
     }
 
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const view = editor.view;
+      for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
+        const line = view.state.doc.line(lineNumber);
+        if (!line.text.includes('const line15 = 15;')) continue;
+        view.dispatch({
+          changes: { from: line.to, insert: ' HISTORY_TARGET' },
+          selection: { anchor: line.to + ' HISTORY_TARGET'.length }
+        });
+        return;
+      }
+      throw new Error('Missing long-code history target');
+    });
+    await waitForFrames(page);
+    await page.click('.meo-md-long-code-footer .meo-long-code-action');
+    await waitForFrames(page);
+    for (const direction of ['undo', 'redo'] as const) {
+      await page.evaluate(async (historyDirection) => {
+        const editor = (window as any).__longCodeBlocksEditor;
+        const applied = historyDirection === 'undo' ? await editor.undo() : await editor.redo();
+        if (!applied) throw new Error(`${historyDirection} was not applied`);
+      }, direction);
+      await waitForFrames(page, 10);
+      const historyState = await page.evaluate((historyDirection) => {
+        const editor = (window as any).__longCodeBlocksEditor;
+        const view = editor.view;
+        const head = view.state.selection.main.head;
+        const selectedLine = view.state.doc.lineAt(head);
+        const coords = view.coordsAtPos(head);
+        const viewport = view.scrollDOM.getBoundingClientRect();
+        return {
+          direction: historyDirection,
+          markerPresent: view.state.doc.toString().includes('HISTORY_TARGET'),
+          selectedLine: selectedLine.text,
+          targetVisible: Boolean(coords && coords.top >= viewport.top && coords.bottom <= viewport.bottom),
+          placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length
+        };
+      }, direction);
+      if (
+        historyState.markerPresent !== (direction === 'redo') ||
+        !historyState.selectedLine.includes('const line15 = 15;') ||
+        !historyState.targetVisible ||
+        historyState.placeholders !== 0
+      ) {
+        throw new Error(`History did not reveal its target inside a folded code block: ${JSON.stringify(historyState)}`);
+      }
+    }
+    await page.click('.meo-md-long-code-footer .meo-long-code-action');
+    await waitForFrames(page);
+
     const searchBlock = (name: string) => [
       '```js',
       ...Array.from({ length: 24 }, (_, index) => (

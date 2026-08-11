@@ -523,6 +523,122 @@ async function main(): Promise<void> {
       throw new Error(`Editing a table did not grow downward in place: ${JSON.stringify({ tableBefore, tableAfter })}`);
     }
 
+    const wrappingTableInput = await page.$(
+      '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea'
+    );
+    if (!wrappingTableInput) throw new Error('Could not locate the table wrap threshold input');
+    await wrappingTableInput.click();
+    await wrappingTableInput.press('End');
+    await waitForFrames(page, 3);
+    await page.evaluate(() => {
+      const editor = (window as any).__editor;
+      const scroller = editor.view.scrollDOM as HTMLElement;
+      const currentElements = () => {
+        const shell = document.querySelector<HTMLElement>('.meo-md-html-table-shell')!;
+        const row = shell.querySelector<HTMLElement>('tbody tr:nth-child(2)')!;
+        const input = row.querySelector<HTMLTextAreaElement>('td:nth-child(2) textarea')!;
+        return { shell, row, input };
+      };
+      const { shell, row } = currentElements();
+      const scrollerRect = scroller.getBoundingClientRect();
+      scroller.scrollTop += row.getBoundingClientRect().bottom - scrollerRect.bottom + 12;
+      (window as any).__tableWrapFrames = [];
+      const capture = (stage: string) => {
+        const { shell, row, input } = currentElements();
+        (window as any).__tableWrapFrames.push({
+          stage,
+          scrollTop: scroller.scrollTop,
+          shellTop: shell.getBoundingClientRect().top,
+          rowHeight: row.getBoundingClientRect().height,
+          inputScrollTop: input.scrollTop
+        });
+      };
+      document.addEventListener('input', (event) => {
+        if (!(event.target instanceof HTMLTextAreaElement) || !event.target.closest('.meo-md-html-table-shell')) return;
+        capture('input');
+        queueMicrotask(() => capture('microtask'));
+      }, true);
+      let remaining = 300;
+      const sample = () => {
+        capture('frame');
+        remaining -= 1;
+        if (remaining > 0) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    const initialWrapRowHeight = await page.$eval(
+      '.meo-md-html-table-shell tbody tr:nth-child(2)',
+      (row) => row.getBoundingClientRect().height
+    );
+    let crossedWrapThreshold = false;
+    for (let index = 0; index < 120; index += 1) {
+      await page.type(
+        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+        'w',
+        { delay: 12 }
+      );
+      await waitForFrames(page, 1);
+      const rowHeight = await page.$eval(
+        '.meo-md-html-table-shell tbody tr:nth-child(2)',
+        (row) => row.getBoundingClientRect().height
+      );
+      if (rowHeight > initialWrapRowHeight + 1) {
+        crossedWrapThreshold = true;
+        break;
+      }
+    }
+    await waitForFrames(page, 12);
+    const tableWrapFrames = await page.evaluate(() => (
+      (window as any).__tableWrapFrames as Array<{
+        stage: string;
+        scrollTop: number;
+        shellTop: number;
+        rowHeight: number | null;
+        inputScrollTop: number;
+      }>
+    ));
+    const wrapHeights = tableWrapFrames
+      .map((frame) => frame.rowHeight)
+      .filter((height): height is number => height !== null);
+    const wrapScrollTops = tableWrapFrames.map((frame) => frame.scrollTop);
+    const wrapShellTops = tableWrapFrames.map((frame) => frame.shellTop);
+    if (!crossedWrapThreshold || Math.max(...wrapHeights) <= Math.min(...wrapHeights) + 1) {
+      const inputGeometry = await page.$eval(
+        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+        (input: HTMLTextAreaElement) => ({
+          valueLength: input.value.length,
+          scrollHeight: input.scrollHeight,
+          clientHeight: input.clientHeight,
+          clientWidth: input.clientWidth
+        })
+      );
+      throw new Error(`Table wrap fixture did not grow a row: ${JSON.stringify({ inputGeometry, tableWrapFrames })}`);
+    }
+    const scrollDirections = wrapScrollTops.slice(1)
+      .map((top, index) => top - wrapScrollTops[index])
+      .filter((delta) => Math.abs(delta) > 1)
+      .map((delta) => Math.sign(delta));
+    const shellDirections = wrapShellTops.slice(1)
+      .map((top, index) => top - wrapShellTops[index])
+      .filter((delta) => Math.abs(delta) > 1)
+      .map((delta) => Math.sign(delta));
+    const caretVisible = await page.$eval(
+      '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2)',
+      (cell) => {
+        const scroller = cell.closest('.cm-scroller')!.getBoundingClientRect();
+        const rect = cell.getBoundingClientRect();
+        return rect.bottom > scroller.top && rect.top < scroller.bottom;
+      }
+    );
+    if (
+      scrollDirections.some((direction, index) => index > 0 && direction !== scrollDirections[index - 1]) ||
+      shellDirections.some((direction, index) => index > 0 && direction !== shellDirections[index - 1]) ||
+      tableWrapFrames.some((frame) => frame.inputScrollTop > 1) ||
+      !caretVisible
+    ) {
+      throw new Error(`Wrapping a focused table cell moved the viewport between frames: ${JSON.stringify(tableWrapFrames)}`);
+    }
+
     console.log('live layout stability browser tests passed');
   } finally {
     await browser.close();

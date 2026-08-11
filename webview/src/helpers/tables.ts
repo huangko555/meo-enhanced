@@ -437,16 +437,29 @@ export function focusHistoryChange(
     const currentScrollTop = view.scrollDOM.scrollTop;
     const coords = view.coordsAtPos(head);
     const scrollerRect = view.scrollDOM.getBoundingClientRect();
-    const wasVisible = coords
+    const isVisibleNow = coords
       ? coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom
       : block.bottom > currentScrollTop && block.top < currentScrollTop + view.scrollDOM.clientHeight;
-    if (wasVisible) {
+    const targetLine = view.state.doc.lineAt(head).number;
+    const wasVisibleBeforeReplay = Boolean(
+      previousSelection?.wasVisible &&
+      targetLine >= previousSelection.visibleFromLineNumber &&
+      targetLine <= previousSelection.visibleToLineNumber
+    ) || (
+      block.top >= previousScrollTop &&
+      block.bottom <= previousScrollTop + view.scrollDOM.clientHeight
+    );
+    if (wasVisibleBeforeReplay) {
       if (!viewportPreservationScheduled) {
         viewportPreservationScheduled = true;
         stabilizeHistoryScrollTop(view, previousScrollTop);
       }
       return;
     }
+    // CodeMirror may already have revealed an offscreen history target while
+    // applying the transaction. In that case any second scroll only creates a
+    // visible bounce, so keep the current nearest position.
+    if (isVisibleNow) return;
     if (!coords) {
       revealOffscreenSelection(block);
       return;
@@ -2180,6 +2193,7 @@ class HtmlTableWidget extends WidgetType {
   isDraggingSelection: boolean;
   hasPendingCellEdits: boolean;
   pendingCellEdits: PendingCellEdit[];
+  pendingCellSwitchCommit: boolean;
   sortState: TableSortState | null;
   activeTarget: TableActionTarget;
   searchState: TableSearchState | null;
@@ -2209,6 +2223,7 @@ class HtmlTableWidget extends WidgetType {
     this.isDraggingSelection = false;
     this.hasPendingCellEdits = false;
     this.pendingCellEdits = [];
+    this.pendingCellSwitchCommit = false;
     this.sortState = null;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
     this.searchState = null;
@@ -3946,25 +3961,18 @@ class HtmlTableWidget extends WidgetType {
       if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(sourceValue, this.searchState))) {
         refreshPreview();
       }
-      // A cell can gain a visual line as soon as it crosses the column width.
-      // Keep an outside document line anchored while that row changes height;
-      // otherwise CodeMirror's widget measurement briefly exposes a jump.
+      // Grow the focused row in the input event's task. Deferring this mutation to
+      // CodeMirror's next measure lets the textarea scroll its caret for one paint,
+      // then snap back after the row catches up.
       const resizeAndSchedule = () => {
         // Non-search previews stay untouched while editing so inline image DOM is not recreated.
         this.resizeRow(rowEl, rowInputs);
         if (rowIndex === 0) this.stickyHeaderAdapter.update();
         this.scheduleLayout();
       };
+      resizeAndSchedule();
       const viewport = this.view ? getViewportController(this.view) : null;
-      if (viewport && rowEl.isConnected) {
-        viewport.preserveLayoutChange({
-          element: rowEl,
-          from: this.tableData.from,
-          to: this.tableData.to
-        }, resizeAndSchedule);
-      } else {
-        resizeAndSchedule();
-      }
+      if (viewport && document.activeElement === input) viewport.revealElement(rowEl);
       notifySelectionChange();
     });
     input.addEventListener('select', notifySelectionChange);
@@ -4024,6 +4032,31 @@ class HtmlTableWidget extends WidgetType {
       if (direction) onArrowVertical(event, direction);
     });
     input.addEventListener('focus', () => {
+      const lastPendingEdit = this.pendingCellEdits[this.pendingCellEdits.length - 1];
+      if (
+        lastPendingEdit &&
+        (lastPendingEdit.row !== rowIndex || lastPendingEdit.col !== colIndex) &&
+        !this.pendingCellSwitchCommit
+      ) {
+        this.pendingCellSwitchCommit = true;
+        queueMicrotask(() => {
+          this.pendingCellSwitchCommit = false;
+          const view = this.view;
+          const wrap = this.domRefs?.wrap;
+          const activeInput = document.activeElement;
+          if (!view || !wrap || !(activeInput instanceof HTMLTextAreaElement) || !wrap.contains(activeInput)) return;
+          const activeCell = activeInput.closest<HTMLTableCellElement>(tableCellSelector);
+          const focusTarget = activeCell ? this.coordsFromCell(activeCell) : null;
+          if (!focusTarget || !this.hasPendingCellEdits) return;
+          const tableStartLine = view.state.doc.lineAt(
+            Math.max(0, Math.min(this.tableData.from, view.state.doc.length))
+          ).number;
+          const caret = activeInput.selectionStart ?? 0;
+          if (commitPendingTableEdits(view)) {
+            this.scheduleFocusCellAfterCommit(view, tableStartLine, { ...focusTarget, caret });
+          }
+        });
+      }
       this.clearVisualSort();
       this.setCellEditingState(input, true);
       this.setTableInteractionActive(container, true);
@@ -4067,14 +4100,16 @@ class HtmlTableWidget extends WidgetType {
       const textarea = textareas[index];
       const content = contents[index];
       const preview = content?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
-      textarea.style.height = 'auto';
-      if (content) content.style.minHeight = '';
+      // A zero-height probe forces Chromium to measure the newly wrapped value
+      // now instead of reporting the previous painted height for one frame.
+      textarea.style.height = '0px';
       maxHeight = Math.max(maxHeight, textarea.scrollHeight, preview?.scrollHeight ?? 0);
     }
 
     for (const content of contents) {
       content.style.minHeight = `${maxHeight}px`;
     }
+    for (const textarea of textareas) textarea.style.height = 'auto';
   }
 
   resizeAllRows() {
@@ -4657,10 +4692,13 @@ class HtmlTableWidget extends WidgetType {
     this.tableCommandTargetRegistration = this.tableCommandEnvironment.registerTarget(tableCommandTarget);
     this.tableCommandTargetId = this.tableCommandTargetRegistration.id;
     this.stickyHeaderAdapter.mount();
-    const onColumnWidthProjected = () => {
-      this.pendingResizeRows = true;
+    const onColumnWidthProjected = (event: Event) => {
+      const resizeRows = !(
+        event instanceof CustomEvent &&
+        event.detail?.resizeRows === false
+      );
       this.stickyHeaderAdapter.invalidate();
-      this.scheduleLayout({ resizeRows: true });
+      this.scheduleLayout({ resizeRows });
     };
     table.addEventListener('meo-table-column-width-projected', onColumnWidthProjected);
     this.cleanupFns.push(() => {
@@ -4711,6 +4749,7 @@ class HtmlTableWidget extends WidgetType {
     this.isDraggingSelection = false;
     this.hasPendingCellEdits = false;
     this.pendingCellEdits = [];
+    this.pendingCellSwitchCommit = false;
     this.sortState = null;
   }
 }
