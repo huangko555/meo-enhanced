@@ -33,11 +33,12 @@ async function scrollToLineContaining(
   page: any,
   needle: string,
   occurrence: NeedleOccurrence = 'first',
-  tableCellOverride: string | null = null
+  tableCellOverride: string | null = null,
+  renderedKind: 'mermaid' | 'math' | null = null
 ) {
   const tableCell = tableCellOverride
     ?? (needle.trim().startsWith('|') ? needle.split('|')[1]?.trim() ?? null : null);
-  await page.evaluate(({ lineNeedle, targetOccurrence }) => {
+  const location = await page.evaluate(({ lineNeedle, targetOccurrence, targetRenderedKind }) => {
     const editor = (window as any).__historyMatrixEditor;
     const lines = editor.getText().split('\n');
     const index = targetOccurrence === 'first'
@@ -45,8 +46,20 @@ async function scrollToLineContaining(
       : lines.findLastIndex((line: string) => line.includes(lineNeedle));
     if (index < 0) throw new Error(`Missing line: ${lineNeedle}`);
     editor.scrollToLine(index + 1, 'center');
-  }, { lineNeedle: needle, targetOccurrence: occurrence });
-  await page.waitForFunction(({ lineNeedle, expectedTableCell, targetOccurrence }) => {
+    let controlLineNumber = index + 1;
+    if (targetRenderedKind) {
+      for (let openingIndex = index; openingIndex >= 0; openingIndex -= 1) {
+        const isOpening = targetRenderedKind === 'mermaid'
+          ? lines[openingIndex].startsWith('```mermaid')
+          : lines[openingIndex].trim() === '$$';
+        if (!isOpening) continue;
+        controlLineNumber = openingIndex + 1;
+        break;
+      }
+    }
+    return { lineNumber: index + 1, controlLineNumber };
+  }, { lineNeedle: needle, targetOccurrence: occurrence, targetRenderedKind: renderedKind });
+  await page.waitForFunction(({ lineNeedle, expectedTableCell, targetRenderedKind, targetLineNumber }) => {
     const editor = (window as any).__historyMatrixEditor;
     const scroller = document.querySelector<HTMLElement>('.cm-scroller');
     const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -56,24 +69,24 @@ async function scrollToLineContaining(
           '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea'
         )).find((candidate) => candidate.value === expectedTableCell)?.closest<HTMLElement>('.meo-md-html-table') ?? null
       : null;
-    const lines = editor.getText().split('\n');
-    const targetLineIndex = targetOccurrence === 'first'
-      ? lines.findIndex((candidate: string) => candidate.includes(lineNeedle))
-      : lines.findLastIndex((candidate: string) => candidate.includes(lineNeedle));
-    let block: HTMLElement | null = null;
-    for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
-      if (!lines[lineIndex].startsWith('```mermaid') && lines[lineIndex].trim() !== '$$') continue;
-      const openingFrom = lines.slice(0, lineIndex)
-        .reduce((offset: number, candidate: string) => offset + candidate.length + 1, 0);
-      block = document.querySelector<HTMLElement>(`[data-meo-block-from="${openingFrom}"]`);
-      break;
-    }
+    const blockLabel = targetRenderedKind === 'mermaid'
+      ? `Mermaid block controls at line ${targetLineNumber}`
+      : `Formula block controls at line ${targetLineNumber}`;
+    const block = targetRenderedKind
+      ? document.querySelector<HTMLElement>(`[role="group"][aria-label="${blockLabel}"]`)
+      : null;
     const target = expectedTableCell ? table : block ?? line;
     if (!scroller || !target) return false;
-    const viewport = scroller.getBoundingClientRect();
+    const targetViewport = scroller.getBoundingClientRect();
     const rect = target.getBoundingClientRect();
-    return rect.bottom > viewport.top && rect.top < viewport.bottom;
-  }, {}, { lineNeedle: needle, expectedTableCell: tableCell, targetOccurrence: occurrence });
+    return rect.bottom > targetViewport.top && rect.top < targetViewport.bottom;
+  }, {}, {
+    lineNeedle: needle,
+    expectedTableCell: tableCell,
+    targetRenderedKind: renderedKind,
+    targetLineNumber: location.controlLineNumber
+  });
+  return location.controlLineNumber;
 }
 
 async function editOuterLine(page: any, needle: string, marker: string) {
@@ -124,58 +137,71 @@ async function editRenderedBlock(
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
+  let targetLineNumber = 0;
   const clickTargetModeButton = async () => {
-    await page.evaluate(({ blockKind, needle, selector, targetOccurrence }) => {
-      const editor = (window as any).__historyMatrixEditor;
-      const lines = editor.getText().split('\n');
-      const targetLineIndex = targetOccurrence === 'first'
-        ? lines.findIndex((line: string) => line.includes(needle))
-        : lines.findLastIndex((line: string) => line.includes(needle));
-      for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
-        const isOpening = blockKind === 'mermaid'
-          ? lines[lineIndex].startsWith('```mermaid')
-          : lines[lineIndex].trim() === '$$';
-        if (!isOpening) continue;
-        const openingFrom = lines.slice(0, lineIndex).reduce((offset: number, line: string) => offset + line.length + 1, 0);
-        const button = Array.from(document.querySelectorAll<HTMLButtonElement>(selector)).find((candidate) => (
-          candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(openingFrom)
-        ));
-        if (!button) {
-          throw new Error(`Missing ${blockKind} mode button for ${needle}: ${JSON.stringify({
-            targetLineIndex,
-            openingLineIndex: lineIndex,
-            openingFrom,
-            buttons: Array.from(document.querySelectorAll<HTMLElement>(selector)).map((candidate) => ({
-              from: candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom ?? null
-            }))
-          })}`);
-        }
-        button.click();
-        return;
+    const previousLabel = await page.evaluate(({ blockKind, needle, selector, lineNumber }) => {
+      const toolbarLabel = blockKind === 'mermaid'
+        ? `Mermaid block controls at line ${lineNumber}`
+        : `Formula block controls at line ${lineNumber}`;
+      const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${toolbarLabel}"]`)
+        ?.querySelector<HTMLButtonElement>(selector) ?? null;
+      if (!button) throw new Error(`Missing ${blockKind} mode button for ${needle}`);
+      const label = button.getAttribute('aria-label');
+      button.click();
+      return label;
+    }, { blockKind: kind, needle: lineNeedle, selector: modeButton, lineNumber: targetLineNumber });
+    await page.waitForFunction(({ blockKind, selector, previous, blockSelector, needle, lineNumber }) => {
+      const toolbarLabel = blockKind === 'mermaid'
+        ? `Mermaid block controls at line ${lineNumber}`
+        : `Formula block controls at line ${lineNumber}`;
+      const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${toolbarLabel}"]`)
+        ?.querySelector<HTMLButtonElement>(selector) ?? null;
+      if (/show .* preview/i.test(previous ?? '')) {
+        return Boolean(button && /edit .* split view/i.test(button.getAttribute('aria-label') ?? ''));
       }
-      throw new Error(`Missing ${blockKind} opening line for ${needle}`);
-    }, { blockKind: kind, needle: lineNeedle, selector: modeButton, targetOccurrence: occurrence });
+      return Array.from(document.querySelectorAll<HTMLElement>(blockSelector)).some((block) => (
+        block.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(needle)
+      ));
+    }, {}, {
+      blockKind: kind,
+      selector: modeButton,
+      previous: previousLabel,
+      blockSelector,
+      needle: lineNeedle,
+      lineNumber: targetLineNumber
+    });
   };
-  await scrollToLineContaining(page, lineNeedle, occurrence);
+  targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
   await clickTargetModeButton();
   if (finalMode === 'source') {
     await clickTargetModeButton();
   }
+  await page.waitForFunction((selector) => {
+    const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
+    return Boolean(viewport && Array.from(document.querySelectorAll<HTMLElement>(selector)).some((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.bottom > viewport.top && rect.top < viewport.bottom;
+    }));
+  }, {}, blockSelector).catch(async (error: unknown) => {
+    const state = await page.evaluate(({ buttonSelector, blockSelector }) => ({
+      viewport: document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect().toJSON(),
+      buttons: Array.from(document.querySelectorAll<HTMLButtonElement>(buttonSelector)).map((button) => ({
+        label: button.getAttribute('aria-label'),
+        rect: button.getBoundingClientRect().toJSON(),
+        lineText: button.closest('.cm-line')?.textContent
+      })),
+      blocks: Array.from(document.querySelectorAll<HTMLElement>(blockSelector)).map((block) => ({
+        rect: block.getBoundingClientRect().toJSON(),
+        text: block.textContent
+      }))
+    }), { buttonSelector: modeButton, blockSelector });
+    throw new Error(`Rendered block did not enter editing mode: ${JSON.stringify({ kind, lineNeedle, state })}`, { cause: error });
+  });
   await page.evaluate(({ blockKind, needle, selector, targetOccurrence }) => {
-    const editor = (window as any).__historyMatrixEditor;
-    const lines = editor.getText().split('\n');
-    const targetLineIndex = targetOccurrence === 'first'
-      ? lines.findIndex((line: string) => line.includes(needle))
-      : lines.findLastIndex((line: string) => line.includes(needle));
-    let anchor = -1;
-    for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
-      if (blockKind === 'mermaid' ? lines[lineIndex].startsWith('```mermaid') : lines[lineIndex].trim() === '$$') {
-        anchor = lines.slice(0, lineIndex).reduce((offset: number, line: string) => offset + line.length + 1, 0);
-        break;
-      }
-    }
-    const dataAttribute = blockKind === 'mermaid' ? 'data-meo-mermaid-anchor' : 'data-meo-latex-math-anchor';
-    const block = document.querySelector<HTMLElement>(`${selector}[${dataAttribute}="${anchor}"]`);
+    const semanticNeedle = needle.match(/[A-Za-z_][A-Za-z0-9_]*/g)
+      ?.sort((left: string, right: string) => right.length - left.length)[0] ?? needle;
+    const block = Array.from(document.querySelectorAll<HTMLElement>(selector))
+      .find((candidate) => candidate.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(semanticNeedle)) ?? null;
     if (!block) throw new Error(`Missing ${blockKind} editing block for ${needle}`);
     const content = block.querySelector<HTMLElement>('.cm-content');
     if (!content) throw new Error(`Missing ${blockKind} source editor for ${needle}`);
@@ -204,25 +230,18 @@ async function editRenderedBlock(
   }
   const desiredMode = finalMode === 'preview' ? 'split' : finalMode;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const actualMode = await page.evaluate(({ blockKind, needle, selector, targetOccurrence }) => {
-      const editor = (window as any).__historyMatrixEditor;
-      const lines = editor.getText().split('\n');
-      const targetLineIndex = targetOccurrence === 'first'
-        ? lines.findIndex((line: string) => line.includes(needle))
-        : lines.findLastIndex((line: string) => line.includes(needle));
-      for (let lineIndex = targetLineIndex; lineIndex >= 0; lineIndex -= 1) {
-        const opening = blockKind === 'mermaid' ? lines[lineIndex].startsWith('```mermaid') : lines[lineIndex].trim() === '$$';
-        if (!opening) continue;
-        const openingFrom = lines.slice(0, lineIndex).reduce((offset: number, line: string) => offset + line.length + 1, 0);
-        const button = Array.from(document.querySelectorAll<HTMLButtonElement>(selector)).find((candidate) => (
-          candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(openingFrom)
-        ));
-        const block = button?.closest<HTMLElement>('[data-meo-block-from]');
-        if (!block) return null;
-        return block.classList.contains('is-source') ? 'source' : block.classList.contains('is-split') ? 'split' : 'preview';
-      }
-      return null;
-    }, { blockKind: kind, needle: lineNeedle, selector: modeButton, targetOccurrence: occurrence });
+    const actualMode = await page.evaluate(({ blockKind, selector, lineNumber }) => {
+      const toolbarLabel = blockKind === 'mermaid'
+        ? `Mermaid block controls at line ${lineNumber}`
+        : `Formula block controls at line ${lineNumber}`;
+      const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${toolbarLabel}"]`)
+        ?.querySelector<HTMLButtonElement>(selector) ?? null;
+      const label = button?.getAttribute('aria-label') ?? '';
+      if (!label) return null;
+      if (/preview/i.test(label)) return 'source';
+      if (/source only|code only/i.test(label)) return 'split';
+      return 'preview';
+    }, { blockKind: kind, selector: modeButton, lineNumber: targetLineNumber });
     if (actualMode === desiredMode) break;
     await clickTargetModeButton();
   }
@@ -289,8 +308,17 @@ async function assertHistoryTarget(
     marker: target.marker,
     mode: target.mode,
     expected: markerExpected
-  }).catch((error: unknown) => {
-    throw new Error(`${direction} step ${step} missed rendered-block target: ${JSON.stringify(target)}`, { cause: error });
+  }).catch(async (error: unknown) => {
+    const state = await page.evaluate(({ kind, marker }) => {
+      const selector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
+      return Array.from(document.querySelectorAll<HTMLElement>(selector)).map((block) => ({
+        active: block.contains(document.activeElement),
+        mode: block.classList.contains('is-source') ? 'source' : block.classList.contains('is-split') ? 'split' : 'preview',
+        containsMarker: block.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(marker) ?? false,
+        rect: block.getBoundingClientRect().toJSON()
+      }));
+    }, { kind: target.kind, marker: target.marker });
+    throw new Error(`${direction} step ${step} missed rendered-block target: ${JSON.stringify({ target, state })}`, { cause: error });
   });
 }
 

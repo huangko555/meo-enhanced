@@ -208,6 +208,8 @@ class MermaidToolbarWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const toolbar = document.createElement('span') as MermaidToolbarElement;
     toolbar.className = 'meo-mermaid-toolbar';
+    toolbar.setAttribute('role', 'group');
+    toolbar.setAttribute('aria-label', `Mermaid block controls at line ${view.state.doc.lineAt(this.anchor).number}`);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
     toolbar.dataset.meoMermaidMode = this.mode;

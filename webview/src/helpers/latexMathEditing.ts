@@ -201,6 +201,8 @@ class LatexMathToolbarWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const toolbar = document.createElement('span') as LatexToolbarElement;
     toolbar.className = 'meo-latex-math-toolbar';
+    toolbar.setAttribute('role', 'group');
+    toolbar.setAttribute('aria-label', `Formula block controls at line ${view.state.doc.lineAt(this.anchor).number}`);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.blockTo);
     toolbar.dataset.meoLatexMathMode = this.mode;
