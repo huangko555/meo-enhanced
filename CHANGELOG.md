@@ -3,6 +3,11 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.7
+- Reworked editor state and lifecycle boundaries for more reliable mode changes, history, tables, rendered content, diagnostics, preview, and export.
+- Fixed Mermaid source mode being lost after undo and redo.
+- Strengthened TypeScript, architecture, CI, and VSIX content validation.
+
 ## 0.3.6
 - Fixed table editing and column resizing
 
