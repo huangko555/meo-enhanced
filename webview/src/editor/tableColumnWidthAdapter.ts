@@ -152,6 +152,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   const bind = (table: HTMLTableElement): TableBinding => {
     const cleanups: Array<() => void> = [];
     let dragCleanup: (() => void) | null = null;
+    let refreshDragPreview: (() => void) | null = null;
     let resizeFrame = 0;
     table.dataset.tableColumnWidthOwner = 'adapter';
 
@@ -164,7 +165,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       if (disposed || resizeFrame) return;
       resizeFrame = requestAnimationFrame(() => {
         resizeFrame = 0;
-        project(table);
+        if (refreshDragPreview) refreshDragPreview();
+        else project(table);
         table.dispatchEvent(new CustomEvent(projectionEventName));
       });
     };
@@ -202,13 +204,36 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       });
       const startX = event.clientX;
       let nextWidths: readonly number[] = startWidths;
+      let latestClientX = startX;
       const pointerBoundary = table.closest<HTMLElement>('.cm-editor') ?? options.root;
+
+      const renderDragPreview = (): void => {
+        const maximumTotalWidth = availableWidth(table);
+        const result = policy.resize({
+          widths: startWidths,
+          minimumWidths,
+          column,
+          requestedDelta: latestClientX - startX,
+          maximumTotalWidth
+        });
+        nextWidths = result.widths;
+        // Keep the live drag intent available to a replacement widget. A DOM rebuild
+        // may otherwise project the last committed width over the active pointer preview.
+        storeIntent(table, {
+          widths: [...result.widths],
+          initialTotalWidth,
+          elastic: sum(result.widths) >= maximumTotalWidth - 1,
+          defaultWidthWasCapped
+        });
+        render(table, result.widths, result.totalWidth);
+      };
 
       const removeDragListeners = () => {
         window.removeEventListener('pointermove', move, true);
         window.removeEventListener('pointerup', finish, true);
         window.removeEventListener('pointercancel', finish, true);
         pointerBoundary.removeEventListener('pointerleave', finish);
+        refreshDragPreview = null;
         dragCleanup = null;
       };
       const finish = (finishEvent?: PointerEvent) => {
@@ -232,17 +257,11 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           return;
         }
         moveEvent.preventDefault();
-        const result = policy.resize({
-          widths: startWidths,
-          minimumWidths,
-          column,
-          requestedDelta: moveEvent.clientX - startX,
-          maximumTotalWidth: availableWidth(table)
-        });
-        nextWidths = result.widths;
-        render(table, result.widths, result.totalWidth);
+        latestClientX = moveEvent.clientX;
+        renderDragPreview();
       };
 
+      refreshDragPreview = renderDragPreview;
       dragCleanup = removeDragListeners;
       window.addEventListener('pointermove', move, true);
       window.addEventListener('pointerup', finish, true);

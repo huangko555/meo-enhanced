@@ -43,6 +43,48 @@ async function drag(
   await waitForFrames(page);
 }
 
+async function dragWithPresentationSamples(
+  page: any,
+  selector: string,
+  delta: number
+): Promise<Array<{ readonly primaryWidths: number[]; readonly stickyWidths: number[] }>> {
+  const point = await page.$eval(selector, (handle: Element) => {
+    const rect = handle.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  const samples: Array<{ readonly primaryWidths: number[]; readonly stickyWidths: number[] }> = [];
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  for (const progress of [0.2, 0.4, 0.6, 0.8, 1]) {
+    await page.mouse.move(point.x + delta * progress, point.y);
+    if (progress === 0.4) {
+      await page.evaluate((handleSelector) => {
+        const handle = document.querySelector<HTMLElement>(handleSelector);
+        const table = handle?.closest<HTMLTableElement>('table');
+        const container = table?.parentElement as HTMLElement | null;
+        if (!container) throw new Error('Missing table container during column-width drag');
+        container.style.width = `${Math.max(180, container.clientWidth - 24)}px`;
+      }, selector);
+    }
+    samples.push(await page.evaluate(async (handleSelector) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const handle = document.querySelector<HTMLElement>(handleSelector);
+      const table = handle?.closest<HTMLTableElement>('table');
+      if (!table) throw new Error('Missing table during column-width drag');
+      const primaryWidths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+        .map((cell) => cell.getBoundingClientRect().width);
+      const stickyWidths = Array.from(
+        table.closest('.meo-md-html-table-shell')!
+          .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table col')
+      ).map((column) => Number.parseFloat(column.style.width));
+      return { primaryWidths, stickyWidths };
+    }, selector));
+  }
+  await page.mouse.up();
+  await waitForFrames(page);
+  return samples;
+}
+
 async function widths(page: any, selector: string): Promise<number[]> {
   return page.$$eval(
     `${selector} thead th`,
@@ -101,7 +143,18 @@ async function main(): Promise<void> {
     }, tableSelector);
     assert.deepEqual(initial.owners, ['adapter', 'adapter']);
 
-    await drag(page, firstHandle, 70);
+    const dragSamples = await dragWithPresentationSamples(page, firstHandle, 70);
+    for (let index = 1; index < dragSamples.length; index += 1) {
+      assert.ok(
+        dragSamples[index].primaryWidths[0] > dragSamples[index - 1].primaryWidths[0] + 5,
+        `column-width drag regressed between samples ${index - 1} and ${index}: ${JSON.stringify(dragSamples)}`
+      );
+      assert.deepEqual(
+        dragSamples[index].stickyWidths.map(Math.round),
+        dragSamples[index].primaryWidths.map(Math.round),
+        `sticky projection diverged during drag sample ${index}: ${JSON.stringify(dragSamples[index])}`
+      );
+    }
     const resized = await page.evaluate((selector) => {
       const tables = Array.from(document.querySelectorAll<HTMLTableElement>(selector));
       const first = tables[0];
