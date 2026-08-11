@@ -9,19 +9,56 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-column-width-pr
 const threeColumns = ['| A | B | C |', '| --- | --- | --- |', '| one | two | three |'].join('\n');
 const twoColumns = ['| A | B |', '| --- | --- |', '| one | two |'].join('\n');
 
-async function waitForFrames(page: any, count = 6): Promise<void> {
-  await page.evaluate(async (frameCount: number) => {
-    for (let index = 0; index < frameCount; index += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-  }, count);
+async function waitForTableLayout(
+  page: any,
+  selector: string,
+  expectedTables?: number,
+  expectedColumns?: number
+): Promise<void> {
+  await page.waitForFunction(
+    ({ tableSelector, tableCount, columnCount }) => {
+      const tables = Array.from(document.querySelectorAll<HTMLTableElement>(tableSelector));
+      if (tableCount !== undefined && tables.length !== tableCount) return false;
+      return tables.length > 0 && tables.every((table) => {
+        const cells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
+        if (columnCount !== undefined && cells.length !== columnCount) return false;
+        return cells.every((cell) => {
+          const rect = cell.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
+      });
+    },
+    { polling: 'mutation', timeout: 5000 },
+    { tableSelector: selector, tableCount: expectedTables, columnCount: expectedColumns }
+  );
+}
+
+async function waitForTableWidth(
+  page: any,
+  selector: string,
+  predicate: 'above' | 'below' | 'near',
+  value: number,
+  tolerance = 2
+): Promise<void> {
+  await page.waitForFunction(
+    ({ tableSelector, comparison, target, epsilon }) => {
+      const cell = document.querySelector<HTMLElement>(`${tableSelector} thead th:first-child`);
+      if (!cell) return false;
+      const width = cell.getBoundingClientRect().width;
+      if (comparison === 'above') return width > target;
+      if (comparison === 'below') return width < target;
+      return Math.abs(width - target) < epsilon;
+    },
+    { polling: 'mutation', timeout: 5000 },
+    { tableSelector: selector, comparison: predicate, target: value, epsilon: tolerance }
+  );
 }
 
 async function drag(
   page: any,
   selector: string,
   delta: number,
-  finish: 'up' | 'cancel' = 'up'
+  finish: 'up' | 'cancel' | 'leave' | 'lostpointercapture' = 'up'
 ): Promise<void> {
   const point = await page.$eval(selector, (handle: Element) => {
     const rect = handle.getBoundingClientRect();
@@ -32,15 +69,30 @@ async function drag(
   await page.mouse.move(point.x + delta, point.y, { steps: 4 });
   if (finish === 'up') {
     await page.mouse.up();
-  } else {
+  } else if (finish === 'cancel') {
     await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointercancel', {
       pointerId: 1,
       pointerType: 'mouse',
       buttons: 0
     })));
     await page.mouse.up();
+  } else {
+    await page.$eval(selector, (handle: Element, terminal: string) => {
+      const target = terminal === 'leave' ? handle.closest('.cm-editor') ?? handle : handle;
+      target.dispatchEvent(new PointerEvent(terminal === 'leave' ? 'pointerleave' : 'lostpointercapture', {
+        pointerId: 1,
+        pointerType: 'mouse',
+        buttons: 0,
+        bubbles: true
+      }));
+    }, finish);
+    await page.mouse.up();
   }
-  await waitForFrames(page);
+  await page.waitForFunction(
+    (handleSelector) => document.querySelector(handleSelector) !== null,
+    { polling: 'mutation', timeout: 5000 },
+    selector
+  );
 }
 
 async function dragWithPresentationSamples(
@@ -55,6 +107,7 @@ async function dragWithPresentationSamples(
   const samples: Array<{ readonly primaryWidths: number[]; readonly stickyWidths: number[] }> = [];
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();
+  const tableSelector = selector.split(' th:first-child ')[0];
   for (const progress of [0.2, 0.4, 0.6, 0.8, 1]) {
     await page.mouse.move(point.x + delta * progress, point.y);
     if (progress === 0.4) {
@@ -67,7 +120,6 @@ async function dragWithPresentationSamples(
       }, selector);
     }
     samples.push(await page.evaluate(async (handleSelector) => {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const handle = document.querySelector<HTMLElement>(handleSelector);
       const table = handle?.closest<HTMLTableElement>('table');
       if (!table) throw new Error('Missing table during column-width drag');
@@ -75,13 +127,16 @@ async function dragWithPresentationSamples(
         .map((cell) => cell.getBoundingClientRect().width);
       const stickyWidths = Array.from(
         table.closest('.meo-md-html-table-shell')!
-          .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table col')
-      ).map((column) => Number.parseFloat(column.style.width));
+          .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table colgroup > col')
+      ).map((column) => {
+        const visibleWidth = column.getBoundingClientRect().width;
+        return visibleWidth || Number.parseFloat(getComputedStyle(column).width) || 0;
+      });
       return { primaryWidths, stickyWidths };
     }, selector));
   }
   await page.mouse.up();
-  await waitForFrames(page);
+  await waitForTableLayout(page, selector);
   return samples;
 }
 
@@ -125,10 +180,9 @@ async function main(): Promise<void> {
         parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
       });
     }, markdown);
-    await waitForFrames(page, 10);
-
     const tableSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table)';
     const firstHandle = `${tableSelector}:first-of-type th:first-child .meo-md-html-table-column-resize-handle`;
+    await waitForTableLayout(page, tableSelector, 2, 3);
     const initial = await page.evaluate((selector) => {
       const tables = Array.from(document.querySelectorAll<HTMLTableElement>(selector));
       const outside = document.getElementById('outside') as HTMLButtonElement;
@@ -163,8 +217,11 @@ async function main(): Promise<void> {
         .map((cell) => cell.getBoundingClientRect().width);
       const stickyWidths = Array.from(
         first.closest('.meo-md-html-table-shell')!
-          .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table col')
-      ).map((column) => Number.parseFloat(column.style.width));
+          .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table colgroup > col')
+      ).map((column) => {
+        const visibleWidth = column.getBoundingClientRect().width;
+        return visibleWidth || Number.parseFloat(getComputedStyle(column).width) || 0;
+      });
       return {
         primaryWidths,
         stickyWidths,
@@ -190,7 +247,7 @@ async function main(): Promise<void> {
       editor.setText(editor.getText());
       editor.setText(`prefix\n\n${editor.getText()}`);
     });
-    await waitForFrames(page, 10);
+    await waitForTableWidth(page, tableSelector, 'near', resized.primaryWidths[0]);
     const afterPrefix = await page.$eval(`${tableSelector} thead th:first-child`, (cell) => (
       cell.getBoundingClientRect().width
     ));
@@ -201,7 +258,7 @@ async function main(): Promise<void> {
       editor.setMode('source');
       editor.setMode('live');
     });
-    await waitForFrames(page, 10);
+    await waitForTableWidth(page, tableSelector, 'near', resized.primaryWidths[0]);
     const afterModeRoundTrip = await page.$eval(`${tableSelector} thead th:first-child`, (cell) => (
       cell.getBoundingClientRect().width
     ));
@@ -240,58 +297,68 @@ async function main(): Promise<void> {
       editor.setMode('source');
       editor.setMode('live');
     });
-    await waitForFrames(page, 8);
+    await waitForTableWidth(page, tableSelector, 'near', afterPointerCancel.width);
     const afterPointerCancelRebuild = await page.$eval(
       `${tableSelector} thead th:first-child`,
       (cell) => cell.getBoundingClientRect().width
     );
     assert.ok(Math.abs(afterPointerCancelRebuild - afterPointerCancel.width) < 2);
 
+    const beforeLostPointerCapture = await widths(page, tableSelector);
+    await drag(page, firstHandle, 28, 'lostpointercapture');
+    const afterLostPointerCapture = await widths(page, tableSelector);
+    assert.ok(afterLostPointerCapture[0] > beforeLostPointerCapture[0] + 20);
+
+    const beforePointerLeave = await widths(page, tableSelector);
+    await drag(page, firstHandle, 26, 'leave');
+    const afterPointerLeave = await widths(page, tableSelector);
+    assert.ok(afterPointerLeave[0] > beforePointerLeave[0] + 18);
+
     await page.evaluate((text) => {
       (window as any).__columnWidthProduction.setText(`replacement\n\n${text}\n\ntail`);
     }, markdown);
-    await waitForFrames(page, 10);
+    await waitForTableWidth(page, tableSelector, 'below', resized.primaryWidths[0] - 20);
     const afterReplacement = await page.$eval(`${tableSelector} thead th:first-child`, (cell) => (
       cell.getBoundingClientRect().width
     ));
     assert.ok(afterReplacement < resized.primaryWidths[0] - 20);
 
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     await drag(page, firstHandle, 70);
     const resizedThree = await widths(page, tableSelector);
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), twoColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 2);
     const afterThreeToTwo = await widths(page, tableSelector);
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     const afterThreeToTwoToThree = await widths(page, tableSelector);
     assert.equal(afterThreeToTwo.length, 2);
     assert.ok(afterThreeToTwo[0] < resizedThree[0] - 1);
     assert.deepEqual(afterThreeToTwoToThree, resizedThree);
 
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), twoColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 2);
     await drag(page, firstHandle, 55);
     const resizedTwo = await widths(page, tableSelector);
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     const afterTwoToThree = await widths(page, tableSelector);
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), twoColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 2);
     const afterTwoToThreeToTwo = await widths(page, tableSelector);
     assert.equal(afterTwoToThree.length, 3);
     assert.ok(afterTwoToThree[0] < resizedTwo[0] - 20);
     assert.deepEqual(afterTwoToThreeToTwo, resizedTwo);
 
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     await drag(page, firstHandle, 40);
     const beforeRowChange = await widths(page, tableSelector);
     await page.evaluate((text) => {
       (window as any).__columnWidthProduction.setText(`${text}\n| four | five | six |`);
     }, threeColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     assert.deepEqual(await widths(page, tableSelector), beforeRowChange);
 
     await page.evaluate((text) => {
@@ -299,7 +366,7 @@ async function main(): Promise<void> {
         `completely different prefix\n\n${text}\n\ncompletely different tail`
       );
     }, threeColumns);
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     const beforeEdit = await widths(page, tableSelector);
     assert.ok(beforeEdit[0] < beforeRowChange[0] - 20);
     await page.evaluate(() => {
@@ -311,13 +378,13 @@ async function main(): Promise<void> {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       (window as any).__columnWidthProduction.commitTransientEdits();
     });
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     const afterEdit = await widths(page, tableSelector);
     await page.evaluate(async () => { await (window as any).__columnWidthProduction.undo(); });
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     const afterUndo = await widths(page, tableSelector);
     await page.evaluate(async () => { await (window as any).__columnWidthProduction.redo(); });
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     const afterRedo = await widths(page, tableSelector);
     assert.notDeepEqual(afterEdit, beforeEdit);
     assert.deepEqual(afterUndo, beforeEdit);
@@ -339,11 +406,12 @@ async function main(): Promise<void> {
     const otherPage = await browser.newPage();
     await otherPage.setContent('<!doctype html><p>other</p>');
     await otherPage.bringToFront();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await page.waitForFunction(() => document.hidden, { timeout: 5000 });
     await page.bringToFront();
+    await page.waitForFunction(() => !document.hidden, { timeout: 5000 });
     await page.mouse.up();
     await otherPage.close();
-    await waitForFrames(page, 8);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     const terminalEvents = await page.evaluate(() => (window as any).__widthTerminalEvents);
     const afterWindowBlur = await widths(page, tableSelector);
     assert.ok(terminalEvents.includes('blur'));
