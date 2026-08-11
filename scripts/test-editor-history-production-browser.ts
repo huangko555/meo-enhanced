@@ -154,13 +154,19 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
-    const positions = await page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')! as any;
-      const innerView = block.__meoMermaidEditingController.innerView;
-      const before = innerView.state.doc.length;
-      innerView.dispatch({ changes: { from: before, insert: '\nC --> D' }, selection: { anchor: before + 8 } });
-      return { before, after: before + 8 };
-    });
+    const sourceContentSelector = '.meo-mermaid-source-editor .cm-content';
+    await page.click(sourceContentSelector);
+    await page.keyboard.down('Control');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Control');
+    const before = await page.$eval(sourceContentSelector, (content) => (
+      Array.from(content.querySelectorAll<HTMLElement>('.cm-line'))
+        .map((line) => line.textContent ?? '')
+        .join('\n').length
+    ));
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('C --> D');
+    const positions = { before, after: before + 8 };
     await waitForFrames(page);
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page, 2);
@@ -169,12 +175,27 @@ async function main(): Promise<void> {
 
     const readBlock = () => page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
+      const content = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor .cm-content');
+      const selection = window.getSelection();
+      const focusNode = selection?.focusNode ?? null;
+      const focusElement = focusNode instanceof Element ? focusNode : focusNode?.parentElement ?? null;
+      const focusLine = focusElement?.closest<HTMLElement>('.cm-line') ?? null;
+      const lines = content ? Array.from(content.querySelectorAll<HTMLElement>('.cm-line')) : [];
+      const focusLineIndex = focusLine ? lines.indexOf(focusLine) : -1;
+      let head: number | null = null;
+      if (selection && focusNode && focusLine && content?.contains(focusNode) && focusLineIndex >= 0) {
+        const range = document.createRange();
+        range.selectNodeContents(focusLine);
+        range.setEnd(focusNode, selection.focusOffset);
+        head = lines.slice(0, focusLineIndex)
+          .reduce((offset, line) => offset + (line.textContent?.length ?? 0) + 1, 0)
+          + range.toString().length;
+      }
       return {
         split: Boolean(block?.classList.contains('is-split')),
         source: Boolean(block?.classList.contains('is-source')),
-        head: innerView?.state.selection.main.head ?? null,
-        focused: innerView?.hasFocus ?? false
+        head,
+        focused: Boolean(content && document.activeElement === content)
       };
     });
     await page.evaluate(() => (window as any).__historyProductionEditor.undo());
@@ -185,10 +206,8 @@ async function main(): Promise<void> {
     const splitRedo = await readBlock();
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
-    await page.evaluate((offset) => {
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')! as any;
-      block.__meoMermaidEditingController.focusOffset(offset);
-    }, positions.after);
+    await page.click(`${sourceContentSelector} .cm-line:last-child`);
+    await page.keyboard.press('End');
     await page.keyboard.down('Control');
     await page.keyboard.press('z');
     await page.keyboard.up('Control');
