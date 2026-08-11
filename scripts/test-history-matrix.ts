@@ -508,6 +508,51 @@ async function main() {
       throw new Error(`Expected a clean history after external sync probe: ${JSON.stringify(externalSyncDepth)}`);
     }
 
+    const pendingTableBaseline = await page.evaluate(() => (window as any).__historyMatrixEditor.getText());
+    await scrollToLineContaining(page, fixture.table1Line);
+    await page.evaluate((before) => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+      const input = table?.querySelector<HTMLTextAreaElement>('tbody textarea');
+      if (!input) throw new Error('Missing first-table pending edit target');
+      if (input.value !== before) throw new Error(`Unexpected first-table value: ${input.value}`);
+      input.focus();
+      input.value = `${before}_PENDING`;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, fixture.table1FirstBefore);
+    const commandConsumed = await page.evaluate(() => {
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+      const command = table?.closest<HTMLElement>('.meo-md-html-table-shell')
+        ?.querySelector<HTMLButtonElement>('button[title="Insert row below"]');
+      if (!command) throw new Error('Missing Insert row below control');
+      return !command.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        bubbles: true,
+        cancelable: true
+      }));
+    });
+    if (!commandConsumed) throw new Error('Insert row below command was not consumed');
+    await page.waitForFunction(() => document.querySelectorAll<HTMLElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
+    )[0]?.querySelectorAll('tbody tr').length === 2);
+    const afterPendingInsert = await page.evaluate(({ pending }) => {
+      const editor = (window as any).__historyMatrixEditor;
+      const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+      return {
+        rowCount: table?.querySelectorAll('tbody tr').length ?? 0,
+        text: editor.getText(),
+        pending
+      };
+    }, { pending: `${fixture.table1FirstBefore}_PENDING` });
+    if (
+      afterPendingInsert.rowCount !== 2
+      || !afterPendingInsert.text.includes(afterPendingInsert.pending)
+      || !afterPendingInsert.text.includes(fixture.table2FirstBefore)
+    ) {
+      throw new Error(`Pending table edit leaked during structural command: ${JSON.stringify(afterPendingInsert)}`);
+    }
+    await page.evaluate((text) => (window as any).__historyMatrixEditor.setText(text), pendingTableBaseline);
+    await waitForFrames(page);
+
     const versions = [await documentText(page)];
     const targets: HistoryTarget[] = [];
     const record = async (target: HistoryTarget) => {

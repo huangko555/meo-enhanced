@@ -56,4 +56,9 @@ for (const contract of consolidatedUnitContracts) {
   }
 }
 
+const testBrowser = packageJson.scripts?.['test:browser'] ?? '';
+if (!testBrowser.includes('bun scripts/test-history-matrix.ts')) {
+  throw new Error('test:browser must include the production mixed history matrix');
+}
+
 console.log('CI architecture gate contract passed');
