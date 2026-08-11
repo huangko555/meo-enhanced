@@ -39,7 +39,11 @@ bun run typecheck
 bun run architecture:check
 bun run test:unit
 bun run build
+bun run package:check
 ```
+
+`package:check` runs after the build and verifies the local VSIX file listing;
+it does not publish or upload an extension.
 
 Run the full suite for broad runtime changes, production ownership cutovers,
 and feature or project milestones:

@@ -6,6 +6,7 @@ const readRepoFile = (path: string): string =>
   readFileSync(resolve(repoRoot, path), 'utf8');
 
 const guide = readRepoFile('CONTRIBUTING.md');
+const architectureWorkflow = readRepoFile('.github/workflows/architecture-gate.yml');
 const packageJson = JSON.parse(readRepoFile('package.json')) as {
   engines?: { vscode?: string };
   scripts?: Record<string, string>;
@@ -33,6 +34,12 @@ const documentedScripts = [
 for (const script of new Set(documentedScripts)) {
   if (!(script in scripts)) {
     throw new Error(`CONTRIBUTING.md references missing package script ${script}`);
+  }
+}
+for (const match of architectureWorkflow.matchAll(/\brun:\s*bun run ([a-z0-9:-]+)\b/g)) {
+  const script = match[1];
+  if (!guide.includes(`bun run ${script}`)) {
+    throw new Error(`CONTRIBUTING.md must document CI script ${script}`);
   }
 }
 
