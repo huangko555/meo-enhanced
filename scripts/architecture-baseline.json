@@ -69,11 +69,5 @@
       ]
     }
   ],
-  "knownLegacyTestFailures": [
-    {
-      "id": "LEG-TEST-001",
-      "test": "scripts/test-mermaid-editing.ts",
-      "fingerprint": "Rendered-block history did not preserve mode and focus its changed offset"
-    }
-  ]
+  "knownLegacyTestFailures": []
 }

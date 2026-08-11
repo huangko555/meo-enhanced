@@ -44,16 +44,14 @@ if (!vscodeRange || !guide.includes(`VS Code \`${vscodeRange}\``)) {
   throw new Error('CONTRIBUTING.md must match the declared VS Code engine range');
 }
 
-const frozenFailure = architectureBaseline.knownLegacyTestFailures?.find(
-  ({ id }) => id === 'LEG-TEST-001'
-);
-if (
-  !frozenFailure ||
-  !guide.includes(frozenFailure.id) ||
-  !guide.includes(frozenFailure.test) ||
-  !guide.includes(frozenFailure.fingerprint)
-) {
-  throw new Error('CONTRIBUTING.md must identify the exact frozen legacy failure');
+if ((architectureBaseline.knownLegacyTestFailures?.length ?? 0) !== 0) {
+  throw new Error('The public contribution contract requires an empty Legacy failure baseline');
+}
+if (!guide.includes('expected to finish with exit code 0')) {
+  throw new Error('CONTRIBUTING.md must state that the full suite is expected to pass');
+}
+if (/LEG-TEST-\d+/.test(guide)) {
+  throw new Error('CONTRIBUTING.md must not publish a cleared Legacy failure baseline');
 }
 
 const forbiddenPrivatePaths = [

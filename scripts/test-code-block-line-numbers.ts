@@ -147,7 +147,15 @@ async function main() {
       }
     );
     await page.mouse.move(middleCodeLine.x, middleCodeLine.y);
-    await waitForFrames(page);
+    await page.waitForFunction(() => {
+      const states = Array.from(document.querySelectorAll<HTMLElement>('.meo-code-block-actions'))
+        .map((toolbar) => ({
+          hovered: toolbar.classList.contains('is-block-hovered'),
+          opacity: Number.parseFloat(getComputedStyle(toolbar).opacity)
+        }));
+      return states.filter((state) => state.hovered && state.opacity >= 0.99).length === 1
+        && states.filter((state) => state.opacity >= 0.99).length === 1;
+    });
     const hoveredActionState = await page.$$eval('.meo-code-block-actions', (toolbars) => (
       toolbars.map((toolbar) => ({
         hovered: toolbar.classList.contains('is-block-hovered'),

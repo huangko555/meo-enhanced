@@ -23,7 +23,6 @@ let lastHistoryRange: { from: number; to: number } | null = null;
 let runtimeStarts = 0;
 let boundaryRestores = 0;
 let disposes = 0;
-let knownSourceProbe = false;
 const nativeReplays: Array<'undo' | 'redo'> = [];
 const errors: string[] = [];
 
@@ -179,15 +178,6 @@ const focusOwner = (): 'editor' | 'rendered-block' | 'table-boundary' | 'other' 
     setRenderedMode(blockMode);
     dispatchEdit(insert);
   },
-  editKnownSourceLimit(insert: string) {
-    mode = 'live';
-    knownSourceProbe = true;
-    setRenderedMode('source');
-    // Frozen characterization reproduces the observed preview replay outcome;
-    // it does not claim whether capture or presentation is the Legacy cause.
-    boundaryTarget = { kind: 'rendered-block', mode: 'preview' };
-    dispatchEdit(insert);
-  },
   prepareTableTransient(insert: string) {
     mode = 'live';
     boundaryTarget = { kind: 'table-boundary' };
@@ -228,7 +218,6 @@ const focusOwner = (): 'editor' | 'rendered-block' | 'table-boundary' | 'other' 
       selectionVisible: Boolean(coords && coords.bottom > viewport.top && coords.top < viewport.bottom),
       renderedMode: renderedInput.dataset.mode ?? null,
       boundaryRestores,
-      knownSourcePreserved: knownSourceProbe && renderedInput.dataset.mode === 'source',
       disposes,
       errors: [...errors]
     };

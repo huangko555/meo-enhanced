@@ -137,7 +137,7 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.undo()), false);
 
-    const frozenFingerprint = await page.evaluate(async () => {
+    const renderedHistoryEditorReady = await page.evaluate(async () => {
       const previous = (window as any).__historyProductionEditor;
       previous.destroy();
       document.getElementById('app')!.replaceChildren();
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
       (window as any).__historyProductionEditor = editor;
       return true;
     });
-    assert.equal(frozenFingerprint, true);
+    assert.equal(renderedHistoryEditorReady, true);
     await waitForFrames(page);
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
@@ -200,19 +200,19 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     const sourceRedo = await readBlock();
 
-    const exactLegacyFingerprint = {
+    const renderedHistoryPresentation = {
       positions,
       previewUndo: { split: previewUndo.split, head: previewUndo.head, focused: previewUndo.focused },
       splitRedo: { split: splitRedo.split, head: splitRedo.head, focused: splitRedo.focused },
       sourceUndo: { source: sourceUndo.source, head: sourceUndo.head, focused: sourceUndo.focused },
       sourceRedo: { source: sourceRedo.source, head: sourceRedo.head, focused: sourceRedo.focused }
     };
-    assert.deepEqual(exactLegacyFingerprint, {
+    assert.deepEqual(renderedHistoryPresentation, {
       positions: { before: 16, after: 24 },
       previewUndo: { split: true, head: 16, focused: true },
       splitRedo: { split: true, head: 24, focused: true },
-      sourceUndo: { source: false, head: 16, focused: true },
-      sourceRedo: { source: false, head: 24, focused: true }
+      sourceUndo: { source: true, head: 16, focused: true },
+      sourceRedo: { source: true, head: 24, focused: true }
     });
 
     await page.evaluate(() => (window as any).__historyProductionEditor.destroy());
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 
-  console.log('Editor History production Chromium trace passed with frozen LEG-TEST-001 fingerprint');
+  console.log('Editor History production Chromium trace passed');
 }
 
 await main();

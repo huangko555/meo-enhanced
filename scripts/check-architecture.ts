@@ -502,10 +502,14 @@ for (const source of sources) {
   }
 }
 
+if (config.knownLegacyTestFailures.length > 0) {
+  failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
+}
+
 console.log(`Architecture check (${staged ? 'staged index' : 'working tree'}): ${files.length} source files, ${edges.length} static imports`);
 console.log(`Legacy test baseline: ${config.knownLegacyTestFailures.map((item) => item.id).join(', ') || 'none'}`);
 if (failures.length) {
   console.error(failures.map((failure) => `FAIL ${failure}`).join('\n'));
   process.exit(1);
 }
-console.log('Architecture checks passed; existing Legacy baseline was not expanded.');
+console.log('Architecture checks passed; Legacy test baseline is empty.');

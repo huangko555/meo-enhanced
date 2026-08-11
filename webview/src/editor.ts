@@ -1623,7 +1623,6 @@ export function createEditor({
     const desiredMode = recentRenderedReplayPresentation?.anchor === openingLine.from
       ? recentRenderedReplayPresentation.mode
       : manualMode === 'preview' ? 'split' : manualMode;
-    recentRenderedReplayPresentation = { anchor: openingLine.from, mode: desiredMode };
     const modeEffect = desiredMode !== manualMode
       ? block.kind === 'mermaid'
         ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: desiredMode })
@@ -1640,6 +1639,10 @@ export function createEditor({
         })
       ]
     });
+    // Mode effects dispatched by this replay synchronously invalidate the
+    // previous hint. Record the accepted presentation only after dispatch so
+    // a later replay can reuse it, while a user-initiated mode effect wins.
+    recentRenderedReplayPresentation = { anchor: openingLine.from, mode: desiredMode };
     // Keep the outer editor focused until the target controller mounts. The
     // coordinator owns cancellation when a newer command or user action wins.
     view.focus();
@@ -2250,6 +2253,14 @@ export function createEditor({
         const searchQueryChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => effect.is(setSearchQueryEffect))
         ));
+        const renderedPresentationChanged = update.transactions.some((transaction) => (
+          transaction.effects.some((effect) => (
+            effect.is(setMermaidBlockModeEffect) || effect.is(setLatexMathBlockModeEffect)
+          ))
+        ));
+        if (renderedPresentationChanged) {
+          recentRenderedReplayPresentation = null;
+        }
         if (update.docChanged || update.selectionSet || searchQueryChanged) {
           searchOverviewRuler?.refresh({ positionsChanged: update.docChanged || searchQueryChanged });
         }

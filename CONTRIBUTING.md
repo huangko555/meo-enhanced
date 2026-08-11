@@ -51,20 +51,11 @@ bun run test
 Use `bun run test`, not `bun test`; the latter invokes Bun's built-in test
 discovery and is not this repository's test pipeline.
 
-### Frozen legacy failure
+### Full-suite expectation
 
-The full suite currently has one exact frozen failure, `LEG-TEST-001`, in
-`scripts/test-mermaid-editing.ts`. Its fingerprint is:
-
-```text
-Rendered-block history did not preserve mode and focus its changed offset
-```
-
-The test pipeline stops with a non-zero exit when it reaches this known failure,
-so a full run must be evaluated against that exact ID, test, and fingerprint;
-it must not be reported as fully green. Do not skip, rename, soften, or broaden
-the baseline. Any different failure or fingerprint is a regression and must be
-investigated.
+The full suite is expected to finish with exit code 0. The repository has no
+known-failure baseline. Do not skip, rename, or soften a failing test to obtain a
+green run; investigate and fix the underlying regression instead.
 
 ## Architecture boundaries
 
@@ -98,4 +89,3 @@ behavior still requires source inspection and observable contracts.
   intentionally public.
 - Review the staged diff before committing and keep generated or unrelated files
   out of the change.
-

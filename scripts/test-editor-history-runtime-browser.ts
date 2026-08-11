@@ -115,14 +115,6 @@ async function main(): Promise<void> {
     assert.equal(snapshot.state.pendingReplay, null);
     assert.equal(snapshot.boundaryRestores, restoresBeforeInvalidation, 'external presentation must cancel stale focus retry');
 
-    await page.evaluate(() => (window as any).__editorHistoryCandidate.editKnownSourceLimit(' SOURCE_LIMIT'));
-    await page.evaluate(() => (window as any).__editorHistoryCandidate.replay('undo'));
-    snapshot = await page.evaluate(() => (window as any).__editorHistoryCandidate.snapshot());
-    assert.equal(snapshot.knownSourcePreserved, false, 'candidate must retain the frozen source block-mode limitation');
-    assert.equal(snapshot.renderedMode, 'preview');
-    assert.equal(snapshot.focusOwner, 'rendered-block');
-    assert.equal(snapshot.focusedHead, snapshot.text.length);
-
     const boundary = await page.evaluate(() => (window as any).__editorHistoryCandidate.exhaustHistory());
     assert.equal(boundary.applied, false);
     assert.equal(boundary.state.pendingReplay, null);

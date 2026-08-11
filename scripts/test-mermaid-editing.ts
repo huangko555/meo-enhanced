@@ -408,7 +408,14 @@ async function main() {
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     });
     await page.mouse.move(previewClickPoint.x, previewClickPoint.y);
-    await waitForFrames(page);
+    await page.waitForFunction(() => {
+      const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
+      const latex = document.querySelector<HTMLElement>('.meo-latex-math-toolbar');
+      return mermaid?.classList.contains('is-block-hovered')
+        && getComputedStyle(mermaid).opacity === '1'
+        && !latex?.classList.contains('is-block-hovered')
+        && getComputedStyle(latex!).opacity === '0';
+    });
     const hoveredToolbarState = await page.evaluate(() => ({
       mermaid: {
         hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
@@ -481,7 +488,14 @@ async function main() {
     });
     await waitForFrames(page);
     await page.mouse.move(latexHoverPoint.x, latexHoverPoint.y);
-    await waitForFrames(page);
+    await page.waitForFunction(() => {
+      const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
+      const latex = document.querySelector<HTMLElement>('.meo-latex-math-toolbar');
+      return !mermaid?.classList.contains('is-block-hovered')
+        && getComputedStyle(mermaid!).opacity === '0'
+        && latex?.classList.contains('is-block-hovered')
+        && getComputedStyle(latex).opacity === '1';
+    });
     const latexHoveredToolbarState = await page.evaluate(() => ({
       mermaid: {
         hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
@@ -520,7 +534,11 @@ async function main() {
       (window as any).__mermaidModeButtonBeforeModeChange = document.querySelector('.meo-mermaid-mode-btn');
     });
     await page.click('.meo-mermaid-mode-btn');
-    await waitForFrames(page);
+    await page.waitForFunction(() => {
+      const toolbar = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
+      return toolbar?.classList.contains('is-block-hovered')
+        && getComputedStyle(toolbar).opacity === '1';
+    });
     const mermaidToolbarAfterModeChange = await page.evaluate(() => ({
       hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
       opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity,
@@ -555,7 +573,11 @@ async function main() {
       (window as any).__latexModeButtonBeforeModeChange = document.querySelector('.meo-latex-math-mode-btn');
     });
     await page.click('.meo-latex-math-mode-btn');
-    await waitForFrames(page);
+    await page.waitForFunction(() => {
+      const toolbar = document.querySelector<HTMLElement>('.meo-latex-math-toolbar');
+      return toolbar?.classList.contains('is-block-hovered')
+        && getComputedStyle(toolbar).opacity === '1';
+    });
     const latexToolbarAfterModeChange = await page.evaluate(() => ({
       hovered: document.querySelector('.meo-latex-math-toolbar')?.classList.contains('is-block-hovered'),
       opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-latex-math-toolbar')!).opacity,
