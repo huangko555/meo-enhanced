@@ -1310,23 +1310,32 @@ async function main() {
     if (!sourceLiveVisibleLine) {
       throw new Error('Source to Live lost the visible document position');
     }
-    await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
-      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 }));
-      scroller.scrollTop = scroller.scrollHeight * (230 / 280);
-    });
-    await waitForFrames(page, 4);
-    await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
-      const tallHeading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+    await page.evaluate((text) => {
+      const selection = text.indexOf('## Tall Mermaid');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor: selection, head: selection, focus: false
+      }}));
+    }, initialText);
+    await page.waitForFunction(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller');
+      const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((line) => line.textContent === '## Tall Mermaid');
-      if (tallHeading) {
-        scroller.scrollTop += tallHeading.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-      }
+      if (!scroller || !heading) return false;
+      const viewport = scroller.getBoundingClientRect();
+      const rect = heading.getBoundingClientRect();
+      return rect.bottom > viewport.top && rect.top < viewport.bottom;
     });
-    await waitForFrames(page, 2);
     await page.click('[data-mode="source"]');
-    await waitForFrames(page, 8);
+    await page.waitForFunction(() => {
+      if (document.querySelector('.editor-root')?.getAttribute('data-mode') !== 'source') return false;
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller');
+      const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === '## Tall Mermaid');
+      if (!scroller || !heading) return false;
+      const viewport = scroller.getBoundingClientRect();
+      const rect = heading.getBoundingClientRect();
+      return rect.bottom > viewport.top && rect.top < viewport.bottom;
+    });
     const liveSourceViewport = await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const viewport = scroller.getBoundingClientRect();
