@@ -10,10 +10,6 @@ const repoRoot = resolve(import.meta.dir, '..');
 const staged = process.argv.includes('--staged');
 const configPath = join(repoRoot, 'scripts', 'architecture-baseline.json');
 
-function runGit(args: string[]): string {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
-}
-
 function indexPaths(): string[] {
   const output = execFileSync('git', ['ls-files', '--cached', '-z'], { cwd: repoRoot });
   return output.toString('utf8').split('\0').filter(Boolean).map((path) => path.replaceAll('\\', '/'));
