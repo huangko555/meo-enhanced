@@ -547,8 +547,10 @@ const removedTableSortingTokens = [
   /\b(?:sort|order|reorder)(?:ing|ed)?[-_. ]+(?:table|columns?|rows?)\b/i,
   /\b(?:table|column|row)(?:Sort|Order|Reorder)[A-Za-z0-9_]*/,
   /\b(?:sort|order|reorder)(?:Table|Column|Row)[A-Za-z0-9_]*/,
-  /\b(?:table|columns?|rows?)\b.{0,48}\b(?:sort|reorder)(?:ing|ed)?\b/i,
-  /\b(?:sort|reorder)(?:ing|ed)?\b.{0,48}\b(?:table|columns?|rows?)\b/i
+  /\b(?:table|columns?|rows?)\b.{0,48}\b(?:sort|order|reorder)(?:ing|ed)?\b/i,
+  /\b(?:sort|order|reorder)(?:ing|ed)?\b.{0,48}\b(?:table|columns?|rows?)\b/i,
+  /\b(?:table|column|row)[A-Za-z0-9_.-]{0,48}(?:Order|Ordering)[A-Za-z0-9_]*/,
+  /\b[A-Za-z0-9_.-]*(?:Order|Ordering)[A-Za-z0-9_.-]{0,48}(?:Table|Column|Row)[A-Za-z0-9_]*/
 ];
 const removedTableSortingImplementationTokens = [
   /\bsourceBodyRows\b/,

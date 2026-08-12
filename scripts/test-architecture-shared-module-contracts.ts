@@ -71,6 +71,20 @@ try {
   assert.match(tableSortingAlias.output, /ARCH013/);
   rmSync(join(fixtureRoot, 'README.md'));
 
+  write('package.json', JSON.stringify({ contributes: { configuration: { properties: {
+    'meo.table.enableOrdering': { type: 'boolean' }
+  } } } }));
+  const tableOrderingSetting = runCheck();
+  assert.equal(tableOrderingSetting.ok, false, 'dotted/camel table ordering setting aliases must be rejected');
+  assert.match(tableOrderingSetting.output, /ARCH013/);
+  rmSync(join(fixtureRoot, 'package.json'));
+
+  write('README.md', 'Order the rows by name.\n');
+  const tableOrderingSentence = runCheck();
+  assert.equal(tableOrderingSentence.ok, false, 'non-adjacent natural-language table ordering must be rejected');
+  assert.match(tableOrderingSentence.output, /ARCH013/);
+  rmSync(join(fixtureRoot, 'README.md'));
+
   write('webview/src/helpers/retainedTableBehavior.ts', [
     'export const sortChanges = (rows: number[]) => rows.sort((left, right) => left - right);',
     'export const orderedList = true;',
