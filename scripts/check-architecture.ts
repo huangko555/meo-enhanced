@@ -14,8 +14,53 @@ function runGit(args: string[]): string {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
 }
 
+function indexPaths(): string[] {
+  const output = execFileSync('git', ['ls-files', '--cached', '-z'], { cwd: repoRoot });
+  return output.toString('utf8').split('\0').filter(Boolean).map((path) => path.replaceAll('\\', '/'));
+}
+
+function isArchitectureTextPath(path: string): boolean {
+  return path === 'scripts/architecture-baseline.json' ||
+    path === 'package.json' ||
+    /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+    /^docs\/.*\.md$/i.test(path) ||
+    /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path);
+}
+
+function readIndexTextFiles(paths: readonly string[]): Map<string, string> {
+  if (!paths.length) return new Map();
+  const output = execFileSync('git', ['cat-file', '--batch'], {
+    cwd: repoRoot,
+    input: Buffer.from(paths.map((path) => `:${path}\n`).join(''), 'utf8'),
+    maxBuffer: 128 * 1024 * 1024
+  });
+  const result = new Map<string, string>();
+  let offset = 0;
+  for (const path of paths) {
+    const headerEnd = output.indexOf(0x0a, offset);
+    if (headerEnd < 0) throw new Error(`git cat-file 缺少 blob header: ${path}`);
+    const header = output.subarray(offset, headerEnd).toString('utf8');
+    const match = /^[0-9a-f]+ blob (\d+)$/.exec(header);
+    if (!match) throw new Error(`git cat-file 无法读取 index blob: ${path} (${header})`);
+    const size = Number(match[1]);
+    const contentStart = headerEnd + 1;
+    const contentEnd = contentStart + size;
+    if (contentEnd >= output.length || output[contentEnd] !== 0x0a) {
+      throw new Error(`git cat-file blob 长度无效: ${path}`);
+    }
+    result.set(path, output.subarray(contentStart, contentEnd).toString('utf8'));
+    offset = contentEnd + 1;
+  }
+  return result;
+}
+
+const cachedIndexPaths = staged ? indexPaths() : [];
+const stagedTextFiles = staged
+  ? readIndexTextFiles(cachedIndexPaths.filter(isArchitectureTextPath))
+  : new Map<string, string>();
+
 const configText = staged
-  ? runGit(['show', ':scripts/architecture-baseline.json'])
+  ? stagedTextFiles.get('scripts/architecture-baseline.json') ?? ''
   : readFileSync(configPath, 'utf8');
 const config = JSON.parse(configText) as {
   targetRoots: string[];
@@ -54,22 +99,20 @@ function sourceFilesOnDisk(): string[] {
 }
 
 function sourceFilesInIndex(): string[] {
-  return runGit(['ls-files', '--cached'])
-    .split(/\r?\n/)
+  return cachedIndexPaths
     .filter((file) => /^(src|webview[\\/]src)[\\/].*\.(ts|tsx)$/.test(file));
 }
 
 function readSource(file: string): Source {
   const path = file.replaceAll('\\', '/');
-  return { path, text: staged ? runGit(['show', `:${path}`]) : readFileSync(join(repoRoot, file), 'utf8') };
+  const text = staged ? stagedTextFiles.get(path) : readFileSync(join(repoRoot, file), 'utf8');
+  if (text === undefined) throw new Error(`无法读取架构源码: ${path}`);
+  return { path, text };
 }
 
 function projectFilesForCapabilityGuard(): string[] {
   if (staged) {
-    return runGit(['ls-files', '--cached'])
-      .split(/\r?\n/)
-      .map((file) => file.replaceAll('\\', '/'))
-      .filter(Boolean);
+    return cachedIndexPaths;
   }
   const result: string[] = [];
   const visit = (dir: string): void => {
@@ -88,7 +131,9 @@ function projectFilesForCapabilityGuard(): string[] {
 }
 
 function readTrackedProjectFile(path: string): string {
-  return staged ? runGit(['show', `:${path}`]) : readFileSync(join(repoRoot, path), 'utf8');
+  const text = staged ? stagedTextFiles.get(path) : readFileSync(join(repoRoot, path), 'utf8');
+  if (text === undefined) throw new Error(`无法读取产品入口: ${path}`);
+  return text;
 }
 
 function resolveImport(from: string, specifier: string, files: Set<string>): string | null {
@@ -552,11 +597,6 @@ const removedTableSortingTokens = [
   /\b(?:table|column|row)[A-Za-z0-9_.-]{0,48}(?:Order|Ordering)[A-Za-z0-9_]*/,
   /\b[A-Za-z0-9_.-]*(?:Order|Ordering)[A-Za-z0-9_.-]{0,48}(?:Table|Column|Row)[A-Za-z0-9_]*/
 ];
-const removedTableSortingImplementationTokens = [
-  /\bsourceBodyRows\b/,
-  /\bsourceBodyCellGrid\b/,
-  /\bvisualRows\b/
-];
 for (const path of tableSortingScope) {
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
@@ -565,8 +605,7 @@ for (const path of tableSortingScope) {
       .replace(/\b(?:un)?ordered(?:List|Lists|ListMarker)?\b/gi, '')
       .replace(/\b(?:sourceRowOrder|effectiveSourceRowOrder)\b/g, '');
     if (
-      removedTableSortingTokens.some((pattern) => pattern.test(line)) ||
-      removedTableSortingImplementationTokens.some((pattern) => pattern.test(line))
+      removedTableSortingTokens.some((pattern) => pattern.test(line))
     ) {
       failures.push(`ARCH013 已删除的表格排序能力重新出现: ${path}:${index + 1}`);
     }

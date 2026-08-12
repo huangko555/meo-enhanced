@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dir, '..');
@@ -31,6 +31,9 @@ const runCheck = (): { ok: boolean; output: string } => {
 try {
   mkdirSync(join(fixtureRoot, 'scripts'), { recursive: true });
   cpSync(join(repoRoot, 'scripts', 'check-architecture.ts'), join(fixtureRoot, 'scripts', 'check-architecture.ts'));
+  const architectureSource = readFileSync(join(fixtureRoot, 'scripts', 'check-architecture.ts'), 'utf8');
+  assert.match(architectureSource, /cat-file', '--batch/);
+  assert.doesNotMatch(architectureSource, /runGit\(\['show'/, 'staged reads must not spawn Git once per file');
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: [],
     sharedModuleContracts: [{
@@ -94,6 +97,43 @@ try {
   const retainedOrdering = runCheck();
   assert.equal(retainedOrdering.ok, true, `ordinary sorting and retained ordering terms must pass: ${retainedOrdering.output}`);
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedTableBehavior.ts'));
+
+  const stagedRoot = join(fixtureRoot, 'staged-index');
+  mkdirSync(join(stagedRoot, 'scripts'), { recursive: true });
+  cpSync(join(repoRoot, 'scripts', 'check-architecture.ts'), join(stagedRoot, 'scripts', 'check-architecture.ts'));
+  writeFileSync(join(stagedRoot, 'scripts', 'architecture-baseline.json'), JSON.stringify({
+    targetRoots: [], knownLegacyTestFailures: []
+  }));
+  writeFileSync(join(stagedRoot, 'README.md'), 'Order the rows by name.\n');
+  mkdirSync(join(stagedRoot, 'docs'), { recursive: true });
+  writeFileSync(join(stagedRoot, 'docs', '表 格.md'), 'Unicode path without a removed capability.\n');
+  writeFileSync(join(stagedRoot, 'docs', 'deleted.md'), 'This file will be deleted from the index.\n');
+  writeFileSync(join(stagedRoot, 'ignored-binary.bin'), Buffer.from([0, 255, 1, 254]));
+  execFileSync('git', ['init', '--quiet'], { cwd: stagedRoot });
+  execFileSync('git', ['add', '--', '.'], { cwd: stagedRoot });
+  rmSync(join(stagedRoot, 'docs', 'deleted.md'));
+  execFileSync('git', ['add', '--update'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'No table capability here.\n');
+  const stagedAlias = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedAlias.ok, false, 'staged ARCH013 must read the alias from the index');
+  assert.match(stagedAlias.output, /ARCH013/);
+
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'Order the rows by name.\n');
+  const unstagedAlias = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(unstagedAlias, /Architecture checks passed/);
 
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();
