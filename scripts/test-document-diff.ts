@@ -1,7 +1,4 @@
-import {
-  buildCurrentToBaselineLineMapFromLines,
-  compareDocuments
-} from '../src/shared/gitDiffCore';
+import { compareDocuments } from '../src/shared/gitDiffCore';
 
 function assertEqual(actual: unknown, expected: unknown, label: string): void {
   const actualJson = JSON.stringify(actual);
@@ -173,12 +170,5 @@ assertEqual(wholeDocumentDeletion.lineChanges, [{
   baselineToLine: 2
 }], 'clearing a document keeps its only editor line as modified');
 assertEqual(wholeDocumentDeletion.deletedGaps, [], 'clearing a document is represented by one complete modified hunk');
-
-const timeoutBaseLines = Array.from({ length: 1200 }, (_, index) => `original ${index}`);
-const timeoutCurrentLines = Array.from({ length: 1200 }, (_, index) => `modified ${index}`);
-const timedOutLineMap = buildCurrentToBaselineLineMapFromLines(timeoutBaseLines, timeoutCurrentLines, {
-  maxComputationTimeMs: 1
-});
-assertEqual(timedOutLineMap, null, 'a timed-out line map is discarded instead of caching approximate blame identities');
 
 console.log('document diff checks passed');

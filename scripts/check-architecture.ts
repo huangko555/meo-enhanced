@@ -618,11 +618,15 @@ const gitBlameScope = projectFilesForCapabilityGuard().filter((path) => (
 ));
 const removedGitBlameTokens = [
   /git[-_. ]?blame/i,
-  /\bblame(?:Actions?|Cache|Changed|Enabled|Hover|Info|Request|Resolution|Response|Result|Transport)\b/i,
+  /\bgit(?:[-_. ]?annotat(?:e|ion)|.{0,48}\bline[-_. ]?annotat(?:e|ion))\b/i,
+  /\bline[-_. ]?annotat(?:e|ion)\b.{0,48}\bgit\b/i,
   /\b(?:request|show|toggle|enable|disable|cache)[A-Za-z0-9_. -]{0,32}line[-_. ]?authors?\b/i,
   /\bgit[A-Za-z0-9_. -]{0,32}line[-_. ]?authors?\b/i,
   /\bline[-_. ]?authors?[A-Za-z0-9_. -]{0,32}(?:git|commits?|revisions?)\b/i,
   /\brequestLineAuthor[A-Za-z0-9_]*/,
+  /\b(?:request|show|get|load|fetch)(?:Git)?CommitInfoForLine[A-Za-z0-9_]*/,
+  /\b(?:show|request|open|toggle|enable|disable)LineHistory[A-Za-z0-9_]*/,
+  /\b(?:open|show|navigate(?:To)?|reveal|jumpTo)(?:Git)?(?:Commit|Revision|History)ForLine[A-Za-z0-9_]*/,
   /\bopenGit(?:Revision|Worktree)ForLine\b/
 ];
 for (const path of gitBlameScope) {

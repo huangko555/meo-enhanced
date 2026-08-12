@@ -154,35 +154,6 @@ function buildDocumentDiffFromChanges(
   return result;
 }
 
-export function buildCurrentToBaselineLineMapFromLines(
-  baseLines: string[],
-  currentLines: string[],
-  options: DiffComputeOptions = {}
-): Int32Array | null {
-  if (baseLines.length === 0 || currentLines.length === 0) {
-    return new Int32Array(currentLines.length + 1);
-  }
-  try {
-    const diff = computeLineDiff(baseLines, currentLines, options);
-    if (diff.hitTimeout) {
-      return null;
-    }
-    return buildDocumentDiffFromChanges(baseLines, currentLines, diff.changes, diff.hitTimeout)
-      .currentToBaselineLine;
-  } catch {
-    return null;
-  }
-}
-
-export function buildCurrentToBaselineLineMap(
-  baseText: string,
-  currentText: string,
-  options: DiffComputeOptions = {}
-): Int32Array | null {
-  const { baseLines, currentLines } = splitComparableDocumentLines(baseText, currentText);
-  return buildCurrentToBaselineLineMapFromLines(baseLines, currentLines, options);
-}
-
 export function compareDocuments(
   baseText: string,
   currentText: string,

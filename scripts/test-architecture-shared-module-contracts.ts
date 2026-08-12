@@ -122,15 +122,62 @@ try {
   assert.match(gitBlameProtocolAliases.output, /ARCH014/);
   rmSync(join(fixtureRoot, 'src', 'protocol', 'removedGitCapability.ts'));
 
+  write('README.md', 'Enable Git annotate and line annotation to show who owns each line.\n');
+  const gitAnnotateDocs = runCheck();
+  assert.equal(gitAnnotateDocs.ok, false, 'Git annotate and line-annotation aliases must be rejected');
+  assert.match(gitAnnotateDocs.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'README.md'));
+
+  write('README.md', 'Show line annotation from Git beside each source line.\n');
+  const lineAnnotationDocs = runCheck();
+  assert.equal(lineAnnotationDocs.ok, false, 'line-annotation Git aliases must be rejected');
+  assert.match(lineAnnotationDocs.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'README.md'));
+
+  write('package.json', JSON.stringify({ contributes: { configuration: { properties: {
+    'meoEnhanced.requestCommitInfoForLine': { type: 'boolean' }
+  } } } }));
+  const commitInfoForLineSetting = runCheck();
+  assert.equal(commitInfoForLineSetting.ok, false, 'per-line commit-info API and setting aliases must be rejected');
+  assert.match(commitInfoForLineSetting.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'package.json'));
+
+  write('webview/src/adapters/removedLineHistory.ts', [
+    "export type LineHistoryCommand = { type: 'showLineHistory'; lineNumber: number };",
+    ''
+  ].join('\n'));
+  const showLineHistoryProtocol = runCheck();
+  assert.equal(showLineHistoryProtocol.ok, false, 'show-line-history Protocol aliases must be rejected');
+  assert.match(showLineHistoryProtocol.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'webview', 'src', 'adapters', 'removedLineHistory.ts'));
+
+  write('webview/src/adapters/removedCommitNavigation.ts', [
+    "export const command = { type: 'navigateToCommitForLine', lineNumber: 4 };",
+    ''
+  ].join('\n'));
+  const commitNavigationForLine = runCheck();
+  assert.equal(commitNavigationForLine.ok, false, 'per-line commit navigation aliases must be rejected');
+  assert.match(commitNavigationForLine.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'webview', 'src', 'adapters', 'removedCommitNavigation.ts'));
+
   write('webview/src/helpers/retainedGitDiff.ts', [
     "export const gitChangesGutter = 'source-live';",
     "export const diffBaselineMode = 'git-head';",
-    "export const openDocumentLink = (href: string) => href;",
+    "export const blameCache = new Map<string, string>();",
+    "export const blameHover = { hidden: true };",
+    "export const gitRepository = { root: '/repo' };",
+    "export const runGitCli = (args: string[]) => args;",
+    "export const openDocumentLink = (href: string) => href.startsWith('#') ? href : `#${href}`;",
     ''
   ].join('\n'));
   const retainedGitDiff = runCheck();
-  assert.equal(retainedGitDiff.ok, true, `Git diff and ordinary document navigation must pass: ${retainedGitDiff.output}`);
+  assert.equal(retainedGitDiff.ok, true, `private names and retained Git/document capabilities must pass: ${retainedGitDiff.output}`);
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedGitDiff.ts'));
+
+  write('CHANGELOG.md', '- Removed the historical Git Blame command.\n');
+  const changelogHistory = runCheck();
+  assert.equal(changelogHistory.ok, true, `CHANGELOG history must remain allowed: ${changelogHistory.output}`);
+  rmSync(join(fixtureRoot, 'CHANGELOG.md'));
 
   const stagedRoot = join(fixtureRoot, 'staged-index');
   mkdirSync(join(stagedRoot, 'scripts'), { recursive: true });
