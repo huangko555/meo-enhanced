@@ -1,7 +1,3 @@
-import { decodeRequestResult, type RequestResult } from './requestResult';
-
-export const GIT_BLAME_TIMEOUT_MS = 8_000;
-
 export type GitBaselinePayload = {
   readonly available: boolean;
   readonly mode?: 'current-edit' | 'recent-save' | 'git-head' | 'fixed';
@@ -21,113 +17,12 @@ export type GitBaselineChangedEvent = {
   readonly payload: GitBaselinePayload;
 };
 
-export type GitBlameLineResult =
-  | {
-      readonly kind: 'commit';
-      readonly commit: string;
-      readonly shortCommit: string;
-      readonly originalLineNumber?: number;
-      readonly gitPathAtCommit?: string;
-      readonly author: string;
-      readonly authorMail?: string;
-      readonly authorTimeUnix: number;
-      readonly summary: string;
-    }
-  | { readonly kind: 'uncommitted' }
-  | {
-      readonly kind: 'unavailable';
-      readonly reason: 'not-repo' | 'untracked' | 'git-unavailable' | 'error';
-    };
-
-export type GitBlameRequest = {
-  readonly type: 'requestGitBlame';
-  readonly requestId: string;
-  readonly lineNumber: number;
-  readonly text?: string;
-  readonly localEditGeneration: number;
-};
-
-export type GitNavigationCommand =
-  | { readonly type: 'openGitRevisionForLine'; readonly lineNumber: number; readonly text?: string }
-  | { readonly type: 'openGitWorktreeForLine'; readonly lineNumber: number; readonly text?: string };
-
-export type GitBlameResolution = RequestResult<GitBlameLineResult>;
-
-export type GitBlameResponse = {
-  readonly type: 'gitBlameResult';
-  readonly requestId: string;
-  readonly lineNumber: number;
-  readonly localEditGeneration: number;
-  readonly result: GitBlameResolution;
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
-}
-
-function isPositiveInteger(value: unknown): value is number {
-  return isNonNegativeInteger(value) && value >= 1;
-}
-
-function decodeGitBlameLineResult(value: unknown): GitBlameLineResult | null {
-  if (!isRecord(value)) return null;
-  if (value.kind === 'uncommitted') return { kind: 'uncommitted' };
-  if (value.kind === 'unavailable'
-    && (value.reason === 'not-repo' || value.reason === 'untracked'
-      || value.reason === 'git-unavailable' || value.reason === 'error')) {
-    return { kind: 'unavailable', reason: value.reason };
-  }
-  if (value.kind !== 'commit'
-    || !isNonEmptyString(value.commit)
-    || !isNonEmptyString(value.shortCommit)
-    || !isNonEmptyString(value.author)
-    || typeof value.authorTimeUnix !== 'number'
-    || !Number.isFinite(value.authorTimeUnix)
-    || typeof value.summary !== 'string'
-    || (value.originalLineNumber !== undefined && !isPositiveInteger(value.originalLineNumber))
-    || (value.gitPathAtCommit !== undefined && typeof value.gitPathAtCommit !== 'string')
-    || (value.authorMail !== undefined && typeof value.authorMail !== 'string')) return null;
-  return value as GitBlameLineResult;
-}
-
-export function decodeGitBlameRequest(value: unknown): GitBlameRequest | null {
-  if (!isRecord(value)
-    || value.type !== 'requestGitBlame'
-    || !isNonEmptyString(value.requestId)
-    || !isPositiveInteger(value.lineNumber)
-    || !isNonNegativeInteger(value.localEditGeneration)
-    || (value.text !== undefined && typeof value.text !== 'string')) return null;
-  return value as GitBlameRequest;
-}
-
-export function decodeGitNavigationCommand(value: unknown): GitNavigationCommand | null {
-  if (!isRecord(value)
-    || (value.type !== 'openGitRevisionForLine' && value.type !== 'openGitWorktreeForLine')
-    || !isPositiveInteger(value.lineNumber)
-    || (value.text !== undefined && typeof value.text !== 'string')) return null;
-  return value as GitNavigationCommand;
-}
-
-export function decodeGitBlameResponse(value: unknown): GitBlameResponse | null {
-  const result = isRecord(value) ? decodeRequestResult(value.result, decodeGitBlameLineResult) : null;
-  if (!isRecord(value)
-    || value.type !== 'gitBlameResult'
-    || !isNonEmptyString(value.requestId)
-    || !isPositiveInteger(value.lineNumber)
-    || !isNonNegativeInteger(value.localEditGeneration)
-    || result === null) return null;
-  return {
-    type: 'gitBlameResult', requestId: value.requestId, lineNumber: value.lineNumber,
-    localEditGeneration: value.localEditGeneration, result
-  };
 }
 
 export function decodeGitBaselineChangedEvent(value: unknown): GitBaselineChangedEvent | null {

@@ -3705,26 +3705,6 @@ body.outline-resizing .preview-frame {
   background: var(--meo-semantic-searchMatchActiveBackground);
 }
 
-.meo-git-blame-tooltip {
-  position: fixed;
-  z-index: 30;
-  min-width: 220px;
-  max-width: min(420px, calc(100vw - 16px));
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #1f1f1f));
-  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-}
-
-.meo-git-blame-tooltip:not([hidden]) {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
 .meo-git-hover-overlay {
   position: fixed;
   z-index: 29;
@@ -3746,26 +3726,6 @@ body.outline-resizing .preview-frame {
 
 .meo-git-hover-overlay.is-modified {
   background: var(--git-changed);
-}
-
-.meo-git-blame-title {
-  font-size: 12px;
-  line-height: 1.35;
-  font-weight: 600;
-  margin-bottom: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.meo-git-blame-meta {
-  font-size: 11px;
-  line-height: 1.35;
-  color: var(--vscode-descriptionForeground, var(--vscode-editorLineNumber-foreground));
-}
-
-.meo-git-blame-meta:empty {
-  display: none;
 }
 
 .meo-deletion-tooltip,
@@ -3817,10 +3777,6 @@ body.outline-resizing .preview-frame {
 .meo-deletion-tooltip-more:empty,
 .meo-modified-tooltip-more:empty {
   display: none;
-}
-
-.meo-git-blame-meta:not(:empty) {
-  margin-top: 2px;
 }
 
 .cm-editor .meo-merge-line {

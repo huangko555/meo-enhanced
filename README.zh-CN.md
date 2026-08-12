@@ -49,7 +49,7 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 - 可与 **Current Edits**、**Recent Save** 或 **Git HEAD** 对比。
 - 可将最近保存版本固定为基线，持续观察之后的改动。
 - 无需打开独立 Diff 编辑器，即可预览删除内容并在改动位置之间移动。
-- 可选显示修改行底色和 Git 行作者信息。
+- 可选显示修改行底色。
 - 针对重复行、表格、连续删除和长文档优化改动标记稳定性。
 
 ![新增、修改和删除状态、基线控件与文档概览标记](docs/readme/changes-overview.png)
@@ -110,7 +110,6 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 - `meoEnhanced.outline.position`：将大纲放在左侧或右侧。
 - `meoEnhanced.changes.baseline`：选择 `current-edit`、`recent-save` 或 `git-head` 作为对比基线。
 - `meoEnhanced.gitChanges.visible`：显示或隐藏文档改动标记。
-- `meoEnhanced.gitBlame.enabled`：悬停在行号附近时显示 Git 作者和提交信息。
 - `meoEnhanced.codeBlocks.collapseLongBlocks`：启用或关闭过长代码块自动折叠。
 
 ## 兼容性与项目范围

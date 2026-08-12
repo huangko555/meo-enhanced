@@ -48,9 +48,6 @@ const adapter = createEditorModeEffectAdapter({
       onSelectionChange: () => undefined,
       postDiagnosticSuggestionsMessage: () => undefined,
       onViewportChange: () => undefined,
-      onRequestGitBlame: () => Promise.resolve({ kind: 'unavailable', reason: 'error' }),
-      onOpenGitRevisionForLine: () => undefined,
-      onOpenGitWorktreeForLine: () => undefined
     });
   },
   applyEditorMode(mode) {

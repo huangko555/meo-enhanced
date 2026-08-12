@@ -5,7 +5,7 @@ import { decodeDocumentSyncCommand, decodeDocumentSyncMessage, type DocumentSync
 import { decodeDocumentRevisionRequest, decodeDocumentRevisionResponse, decodeSaveDocumentRevisionRequest, decodeSaveDocumentRevisionResponse, type DocumentRevisionRequest, type DocumentRevisionResponse, type SaveDocumentRevisionRequest, type SaveDocumentRevisionResponse } from './documentSession';
 import { decodeEditorCommand, type EditorCommand } from './editorCommands';
 import { decodeExportSnapshotRequest, decodeExportSnapshotResponse, type ExportSnapshotRequest, type ExportSnapshotResponse } from './exportSnapshot';
-import { decodeGitBaselineChangedEvent, decodeGitBlameRequest, decodeGitBlameResponse, decodeGitNavigationCommand, type GitBaselineChangedEvent, type GitBlameRequest, type GitBlameResponse, type GitNavigationCommand } from './git';
+import { decodeGitBaselineChangedEvent, type GitBaselineChangedEvent } from './git';
 import { decodeHostConfigurationEvent, type HostConfigurationEvent } from './hostConfigurationEvents';
 import { decodeHostEditorEvent, type HostEditorEvent } from './hostEditorEvents';
 import { decodeResolveImageSrcRequest, decodeResolvedImageSrcResponse, type ResolveImageSrcRequest, type ResolvedImageSrcResponse } from './imageResolution';
@@ -26,9 +26,7 @@ export type WebviewToHostMessage =
   | RequestDiagnosticSuggestions
   | SaveImageFromClipboardRequest
   | PreviewRenderRequest
-  | ExportSnapshotResponse
-  | GitBlameRequest
-  | GitNavigationCommand;
+  | ExportSnapshotResponse;
 
 export type HostToWebviewMessage =
   | InitMessage
@@ -45,7 +43,6 @@ export type HostToWebviewMessage =
   | SavedImagePathResponse
   | PreviewRenderResponse
   | ExportSnapshotRequest
-  | GitBlameResponse
   | GitBaselineChangedEvent;
 
 export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage | null {
@@ -60,9 +57,7 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
     ?? decodeDiagnosticSuggestionsRequest(value)
     ?? decodeSaveImageFromClipboardRequest(value)
     ?? decodePreviewRenderRequest(value)
-    ?? decodeExportSnapshotResponse(value)
-    ?? decodeGitBlameRequest(value)
-    ?? decodeGitNavigationCommand(value);
+    ?? decodeExportSnapshotResponse(value);
 }
 
 export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage | null {
@@ -80,6 +75,5 @@ export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage
     ?? decodeSavedImagePathResponse(value)
     ?? decodePreviewRenderResponse(value)
     ?? decodeExportSnapshotRequest(value)
-    ?? decodeGitBlameResponse(value)
     ?? decodeGitBaselineChangedEvent(value);
 }

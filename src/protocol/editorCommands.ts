@@ -7,7 +7,6 @@ export type EditorCommand =
   | { readonly type: 'setMode'; readonly mode: EditorMode }
   | { readonly type: 'setLineNumbers'; readonly visible?: boolean; readonly enabled?: boolean }
   | { readonly type: 'setGitChangesGutter'; readonly visible?: boolean; readonly enabled?: boolean }
-  | { readonly type: 'setGitBlame'; readonly enabled: boolean }
   | { readonly type: 'setDiffBaselineMode'; readonly mode: DiffBaselineMode }
   | { readonly type: 'setFixedBaseline'; readonly enabled: boolean }
   | { readonly type: 'releaseFixedBaseline' }
@@ -57,7 +56,6 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
       return (value.visible === undefined || isBoolean(value.visible))
         && (value.enabled === undefined || isBoolean(value.enabled))
         && (isBoolean(value.visible) || isBoolean(value.enabled)) ? value as EditorCommand : null;
-    case 'setGitBlame':
     case 'setFixedBaseline':
     case 'setSpellCheck':
     case 'setContentMaxWidth':

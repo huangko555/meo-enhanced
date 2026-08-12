@@ -30,7 +30,6 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY,
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
-  GIT_BLAME_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
   VIM_MODE_BEHAVIOR_SETTING_KEY,
   VIM_MODE_SETTING_KEY,
@@ -499,7 +498,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   private readonly activePanels = new Set<vscode.WebviewPanel>();
   private readonly panelSessions = new Map<vscode.WebviewPanel, PanelSession>();
   private readonly spellDiagnosticCollection = vscode.languages.createDiagnosticCollection('meo-spell');
-  private gitBlameSettingQueue: Promise<void> = Promise.resolve();
   private lastActivePanel: vscode.WebviewPanel | null = null;
 
   constructor(
@@ -521,15 +519,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     if (watcher) {
       this.context.subscriptions.push(watcher);
     }
-  }
-
-  private updateGitBlameEnabled(enabled: boolean): Promise<void> {
-    const targetEnabled = enabled === true;
-    const update = this.gitBlameSettingQueue.then(() => vscode.workspace
-      .getConfiguration(EXTENSION_CONFIG_SECTION)
-      .update(GIT_BLAME_SETTING_KEY, targetEnabled, vscode.ConfigurationTarget.Global));
-    this.gitBlameSettingQueue = update.catch(() => undefined);
-    return update;
   }
 
   async exportActiveDocument(format: ExportFormat): Promise<void> {
@@ -741,7 +730,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       getEditorAppearance: () => this.getEditorAppearance(),
       setEditorAppearance: (appearance) => this.setEditorAppearance(appearance),
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
-      updateGitBlameEnabled: (enabled) => this.updateGitBlameEnabled(enabled),
       onPanelActivated: (activePanel) => {
         this.lastActivePanel = activePanel;
       },

@@ -37,7 +37,6 @@ async function main(): Promise<void> {
         editorAppearance: 'dark',
         lineNumbers: true,
         gitChangesGutter: false,
-        gitBlameEnabled: false,
         gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false,

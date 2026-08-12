@@ -1,7 +1,3 @@
-import type {
-  GitBlameLineResult as ProtocolGitBlameLineResult
-} from '../protocol/git';
-
 /** Git-side baseline model. Protocol-only mode and generation fields are added by the output Adapter. */
 export type GitBaselinePayload = {
   readonly available: boolean;
@@ -17,8 +13,6 @@ export type GitBaselinePayload = {
 export type GitBaselineSnapshot = {
   payload: GitBaselinePayload;
 };
-
-export type GitBlameLineResult = ProtocolGitBlameLineResult;
 
 export class GitCliFailure extends Error {
   readonly code: number | null;

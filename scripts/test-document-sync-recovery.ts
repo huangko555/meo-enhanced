@@ -40,7 +40,7 @@ async function main(): Promise<void> {
         type: 'init', documentId: 'file:///recovery.md', text: '1. alpha', version: 1,
         savedRevision: { version: 1, text: '1. alpha' }, diagnostics: [], mode: 'live',
         previewAppearance: 'dark', editorAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
-        gitBlameEnabled: false, gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
+        gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false, spellCheckEnabled: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',

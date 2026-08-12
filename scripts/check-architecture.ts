@@ -608,6 +608,32 @@ for (const path of tableSortingScope) {
   }
 }
 
+// Product deletion guard: Git Blame and its line-author/navigation aliases must stay absent.
+// Git diff, Git HEAD baselines and ordinary document-link navigation remain supported.
+const gitBlameScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedGitBlameTokens = [
+  /git[-_. ]?blame/i,
+  /\bblame(?:Actions?|Cache|Changed|Enabled|Hover|Info|Request|Resolution|Response|Result|Transport)\b/i,
+  /\b(?:request|show|toggle|enable|disable|cache)[A-Za-z0-9_. -]{0,32}line[-_. ]?authors?\b/i,
+  /\bgit[A-Za-z0-9_. -]{0,32}line[-_. ]?authors?\b/i,
+  /\bline[-_. ]?authors?[A-Za-z0-9_. -]{0,32}(?:git|commits?|revisions?)\b/i,
+  /\brequestLineAuthor[A-Za-z0-9_]*/,
+  /\bopenGit(?:Revision|Worktree)ForLine\b/
+];
+for (const path of gitBlameScope) {
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (removedGitBlameTokens.some((pattern) => pattern.test(lines[index]))) {
+      failures.push(`ARCH014 已删除的 Git Blame 能力重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }

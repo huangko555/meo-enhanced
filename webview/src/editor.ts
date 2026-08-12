@@ -45,7 +45,6 @@ import {
 import { createTableCommandTargetRegistry } from './editor/tableCommandTargetRegistry';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
-import { createGitBlameHoverController, type GitBlameHoverController } from './helpers/gitBlameHover';
 import { createGitDiffContentHoverController } from './helpers/gitDeletionHover';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
 import { resolvedSyntaxTree, extractHeadings, extractHeadingSections } from './helpers/markdownSyntax';
@@ -84,7 +83,7 @@ import type {
   DiagnosticSuggestionsResult,
   RequestDiagnosticSuggestions
 } from '../../src/protocol/diagnosticSuggestions';
-import type { GitBaselinePayload, GitBlameLineResult } from '../../src/protocol/git';
+import type { GitBaselinePayload } from '../../src/protocol/git';
 import type { VimKeybindingDto } from '../../src/protocol/hostConfigurationEvents';
 import type { SelectionMenuState } from './helpers/selectionMenu';
 import { focusMermaidEditingOffset, getMermaidBlockMode, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
@@ -160,15 +159,11 @@ type CreateEditorOptions = {
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
   postDiagnosticSuggestionsMessage?: (message: RequestDiagnosticSuggestions) => void;
   onViewportChange?: () => void;
-  onRequestGitBlame?: (request: { lineNumber: number }) => Promise<GitBlameLineResult>;
-  onOpenGitRevisionForLine?: (request: { lineNumber: number }) => void | Promise<void>;
-  onOpenGitWorktreeForLine?: (request: { lineNumber: number }) => void | Promise<void>;
   initialMode?: EditableEditorMode;
   initialTopLine?: number | null;
   initialTopLineOffset?: number;
   initialLineNumbers?: boolean;
   initialGitGutter?: boolean;
-  initialGitBlame?: boolean;
   initialVimMode?: boolean;
   initialVimKeybindings?: readonly VimKeybindingDto[];
   initialVimLeader?: string;
@@ -280,15 +275,11 @@ export function createEditor({
     throw new Error('Diagnostic suggestions transport is unavailable');
   },
   onViewportChange,
-  onRequestGitBlame,
-  onOpenGitRevisionForLine,
-  onOpenGitWorktreeForLine,
   initialMode = 'source',
   initialTopLine = null,
   initialTopLineOffset = 0,
   initialLineNumbers = true,
   initialGitGutter = true,
-  initialGitBlame = false,
   initialVimMode = false,
   initialVimKeybindings = [],
   initialVimLeader = '\\',
@@ -399,7 +390,6 @@ export function createEditor({
   let pendingLiveSearchRevealGeneration = 0;
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
   let pendingLiveSearchDecorationRefreshGeneration = 0;
-  let gitBlameHover: GitBlameHoverController | null = null;
   let gitDiffContentHover: ReturnType<typeof createGitDiffContentHoverController> | null = null;
   let gitDiffOverviewRuler: ReturnType<typeof createGitDiffOverviewRulerController> | null = null;
   let searchOverviewRuler: ReturnType<typeof createSearchOverviewRulerController> | null = null;
@@ -831,9 +821,6 @@ export function createEditor({
     }
     const shouldShowGitGutter = gitGutterVisible;
     view.dom.classList.toggle('meo-git-gutter-hidden', !shouldShowGitGutter);
-    if (!shouldShowGitGutter) {
-      gitBlameHover?.hide();
-    }
     gitDiffOverviewRuler?.refresh();
   };
 
@@ -2288,8 +2275,6 @@ export function createEditor({
           return;
         }
 
-        gitBlameHover?.hide();
-
         if (imeCompositionActive) {
           imeCompositionChanged = true;
           return;
@@ -2590,21 +2575,10 @@ export function createEditor({
   window.addEventListener('blur', onWindowBlur);
   onScroll = () => {
     emitSelectionChange();
-    gitBlameHover?.hide();
     gitDiffOverviewRuler?.refresh();
     onViewportChange?.();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
-  if (typeof onRequestGitBlame === 'function') {
-    gitBlameHover = createGitBlameHoverController({
-      view,
-      getMode: () => currentMode,
-      enabled: initialGitBlame === true,
-      requestBlame: onRequestGitBlame,
-      openRevisionForLine: onOpenGitRevisionForLine,
-      openWorktreeForLine: onOpenGitWorktreeForLine
-    });
-  }
   gitDiffContentHover = createGitDiffContentHoverController(view);
   gitDiffOverviewRuler = createGitDiffOverviewRulerController({
     view,
@@ -2731,8 +2705,6 @@ export function createEditor({
     },
     destroy() {
       view.dom.classList.remove('meo-live-pointer-selecting');
-      gitBlameHover?.destroy();
-      gitBlameHover = null;
       gitDiffContentHover?.destroy();
       gitDiffContentHover = null;
       gitDiffOverviewRuler?.destroy();
@@ -2821,7 +2793,6 @@ export function createEditor({
       imagePresentationResourcePool.dispose();
     },
     setText(textValue: string) {
-      gitBlameHover?.hide();
       diagnosticSuggestionRuntime.dispatch({ type: 'externalDocumentPresented' });
       tableCommandRuntime.externalDocumentPresented();
       imagePresentationFactory.externalDocumentPresented();
@@ -2868,7 +2839,6 @@ export function createEditor({
       emitSelectionChange();
     },
     setMode(mode: EditableEditorMode) {
-      gitBlameHover?.hide();
       diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
       commitActiveTableInput();
       const nextMode = mode === 'live' ? 'live' : 'source';
@@ -3205,15 +3175,8 @@ export function createEditor({
           ]
         });
         gitDiffContentHover?.hide();
-        gitBlameHover?.hide();
         gitDiffOverviewRuler?.refresh();
       });
-    },
-    setGitBlameEnabled(enabled: boolean) {
-      gitBlameHover?.setEnabled(enabled === true);
-    },
-    clearGitUiTransientState() {
-      gitBlameHover?.hide();
     }
   };
 }

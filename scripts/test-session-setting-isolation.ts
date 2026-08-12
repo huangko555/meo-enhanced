@@ -14,7 +14,6 @@ const configurationHandler = extensionSource.slice(configurationHandlerStart, co
 const sessionSettingBroadcasts = [
   'lineNumbersChanged',
   'gitChangesGutterChanged',
-  'gitBlameChanged',
   'gitDiffLineHighlightsChanged',
   'diffBaselineModeChanged',
   'contentMaxWidthChanged',

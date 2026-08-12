@@ -16,8 +16,7 @@ import { createPreviewRenderTransport } from '../webview/src/adapters/previewRen
 import { decodeExportSnapshotRequest, decodeExportSnapshotResponse } from '../src/protocol/exportSnapshot';
 import { createExportSnapshotTransport } from '../src/host/exportSnapshotTransport';
 import { createExportSnapshotResponder } from '../webview/src/adapters/exportSnapshotTransport';
-import { decodeGitBaselineChangedEvent, decodeGitBlameRequest, decodeGitBlameResponse, decodeGitNavigationCommand } from '../src/protocol/git';
-import { createGitBlameTransport } from '../webview/src/adapters/gitBlameTransport';
+import { decodeGitBaselineChangedEvent } from '../src/protocol/git';
 import { decodeEditorCommand } from '../src/protocol/editorCommands';
 import { decodeHostEditorEvent } from '../src/protocol/hostEditorEvents';
 import { decodeHostConfigurationEvent } from '../src/protocol/hostConfigurationEvents';
@@ -55,7 +54,6 @@ const completeInit = {
   editorAppearance: 'dark' as const,
   lineNumbers: true,
   gitChangesGutter: true,
-  gitBlameEnabled: false,
   gitDiffLineHighlights: true,
   diffBaselineMode: 'git-head' as const,
   fixedBaselinePinned: false,
@@ -96,7 +94,7 @@ assert.equal(decodeInitMessage({ ...completeInit, mode: 'bad' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewAppearance: 'broken' }), null);
 for (const requiredKey of [
   'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'lineNumbers', 'gitChangesGutter',
-  'gitBlameEnabled', 'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
+  'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'spellCheckEnabled', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
   'vimMode', 'vimKeybindings', 'vimLeader', 'findOptions', 'outlinePosition', 'outlineVisible',
   'outlineWidth', 'theme', 'shikiCodeBlocks', 'codeTheme'
@@ -568,30 +566,6 @@ assert.deepEqual(postedExportResponse, {
   type: 'exportSnapshotResult', requestId: 'export-response-1',
   result: { ok: true, value: { text: '# Response' } }
 });
-assert.deepEqual(decodeGitBlameRequest({
-  type: 'requestGitBlame', requestId: 'blame-1', lineNumber: 2, localEditGeneration: 3, text: 'draft'
-}), {
-  type: 'requestGitBlame', requestId: 'blame-1', lineNumber: 2, localEditGeneration: 3, text: 'draft'
-});
-assert.equal(decodeGitBlameRequest({
-  type: 'requestGitBlame', requestId: 'blame-1', lineNumber: 0, localEditGeneration: 3
-}), null);
-const gitCommit = {
-  kind: 'commit' as const,
-  commit: '1234567890abcdef', shortCommit: '12345678', author: 'Example Author',
-  authorTimeUnix: 1_700_000_000, summary: 'Example commit'
-};
-assert.deepEqual(decodeGitBlameResponse({
-  type: 'gitBlameResult', requestId: 'blame-1', lineNumber: 2, localEditGeneration: 3,
-  result: { ok: true, value: gitCommit }
-}), {
-  type: 'gitBlameResult', requestId: 'blame-1', lineNumber: 2, localEditGeneration: 3,
-  result: { ok: true, value: gitCommit }
-});
-assert.equal(decodeGitBlameResponse({
-  type: 'gitBlameResult', requestId: 'blame-1', lineNumber: 2, localEditGeneration: 3,
-  result: { ok: true, value: { ...gitCommit, authorTimeUnix: 'today' } }
-}), null);
 assert.deepEqual(decodeGitBaselineChangedEvent({
   type: 'gitBaselineChanged', version: 4,
   payload: { available: true, tracked: true, generation: 2, mode: 'git-head', baseText: '# Base' }
@@ -602,50 +576,10 @@ assert.deepEqual(decodeGitBaselineChangedEvent({
 assert.equal(decodeGitBaselineChangedEvent({
   type: 'gitBaselineChanged', version: 4, payload: { available: true, tracked: true, mode: 'unknown' }
 }), null);
-let postedBlameRequest: unknown;
-let scheduledBlameTimeout: (() => void) | null = null;
-let canceledBlameTimeouts = 0;
-const blameTransport = createGitBlameTransport((message) => { postedBlameRequest = message; }, {
-  scheduleTimeout(callback) {
-    scheduledBlameTimeout = callback;
-    return 'blame-timeout';
-  },
-  cancelTimeout(timeout) {
-    assert.equal(timeout, 'blame-timeout');
-    canceledBlameTimeouts += 1;
-  }
-});
-const blamedLine = blameTransport.request({ lineNumber: 2, localEditGeneration: 3 });
-assert.deepEqual(postedBlameRequest, {
-  type: 'requestGitBlame', requestId: 'blame-0', lineNumber: 2, localEditGeneration: 3
-});
-assert.equal(blameTransport.accept({
-  type: 'gitBlameResult', requestId: 'blame-0', lineNumber: 2, localEditGeneration: 3,
-  result: { ok: true, value: gitCommit }
-}), true);
-assert.deepEqual(await blamedLine, { ok: true, value: gitCommit });
-assert.equal(canceledBlameTimeouts, 1);
-const timedOutBlame = blameTransport.request({ lineNumber: 3, localEditGeneration: 3 });
-const triggerBlameTimeout = scheduledBlameTimeout as (() => void) | null;
-assert.notEqual(triggerBlameTimeout, null);
-triggerBlameTimeout?.();
-assert.deepEqual(await timedOutBlame, {
-  ok: false, error: { code: 'timeout', message: 'Timed out while resolving Git blame' }
-});
-assert.equal(blameTransport.accept({
-  type: 'gitBlameResult', requestId: 'blame-1', lineNumber: 3, localEditGeneration: 3,
-  result: { ok: true, value: { kind: 'uncommitted' } }
-}), false);
-const canceledBlame = blameTransport.request({ lineNumber: 4, localEditGeneration: 3 });
-blameTransport.cancelAll();
-assert.deepEqual(await canceledBlame, {
-  ok: false, error: { code: 'operation-failed', message: 'Git blame request superseded' }
-});
 for (const command of [
   { type: 'setMode', mode: 'preview' },
   { type: 'setLineNumbers', visible: true },
   { type: 'setGitChangesGutter', enabled: false },
-  { type: 'setGitBlame', enabled: true },
   { type: 'setDiffBaselineMode', mode: 'git-head' },
   { type: 'setFixedBaseline', enabled: true },
   { type: 'releaseFixedBaseline' },
@@ -679,7 +613,6 @@ for (const event of [
   { type: 'outlineVisibilityChanged', visible: true },
   { type: 'lineNumbersChanged', enabled: true },
   { type: 'gitChangesGutterChanged', enabled: false },
-  { type: 'gitBlameChanged', enabled: true },
   { type: 'gitDiffLineHighlightsChanged', enabled: true },
   { type: 'diffBaselineModeChanged', mode: 'recent-save' },
   { type: 'fixedBaselineChanged', pinned: true, active: false },
@@ -692,13 +625,6 @@ for (const event of [
 }
 assert.equal(decodeHostEditorEvent({ type: 'revealSelection', anchor: -1, head: 0 }), null);
 assert.equal(decodeHostEditorEvent({ type: 'fixedBaselineChanged', pinned: true, active: 'yes' }), null);
-assert.deepEqual(decodeGitNavigationCommand({
-  type: 'openGitRevisionForLine', lineNumber: 4, text: 'draft'
-}), { type: 'openGitRevisionForLine', lineNumber: 4, text: 'draft' });
-assert.deepEqual(decodeGitNavigationCommand({
-  type: 'openGitWorktreeForLine', lineNumber: 4
-}), { type: 'openGitWorktreeForLine', lineNumber: 4 });
-assert.equal(decodeGitNavigationCommand({ type: 'openGitRevisionForLine', lineNumber: 0 }), null);
 const themeEvent = {
   type: 'themeChanged',
   theme,

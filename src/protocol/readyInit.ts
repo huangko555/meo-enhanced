@@ -31,7 +31,6 @@ export type InitMessage = {
   readonly editorAppearance: PreviewAppearance;
   readonly lineNumbers: boolean;
   readonly gitChangesGutter: boolean;
-  readonly gitBlameEnabled: boolean;
   readonly gitDiffLineHighlights: boolean;
   readonly diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head';
   readonly fixedBaselinePinned: boolean;
@@ -94,7 +93,6 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || decodeDiagnosticsChangedEvent({ type: 'diagnosticsChanged', diagnostics: value.diagnostics }) === null
     || typeof value.lineNumbers !== 'boolean'
     || typeof value.gitChangesGutter !== 'boolean'
-    || typeof value.gitBlameEnabled !== 'boolean'
     || typeof value.gitDiffLineHighlights !== 'boolean'
     || (value.diffBaselineMode !== 'current-edit'
       && value.diffBaselineMode !== 'recent-save'

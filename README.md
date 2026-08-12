@@ -109,7 +109,6 @@ Common settings include:
 - `meoEnhanced.outline.position` — place the outline on the left or right.
 - `meoEnhanced.changes.baseline` — select `current-edit`, `recent-save`, or `git-head` as the comparison baseline.
 - `meoEnhanced.gitChanges.visible` — show or hide document change indicators.
-- `meoEnhanced.gitBlame.enabled` — show Git author and commit details when hovering over lines.
 - `meoEnhanced.codeBlocks.collapseLongBlocks` — enable or disable automatic folding for long fenced code blocks.
 
 ## Compatibility and project scope

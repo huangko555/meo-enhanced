@@ -9,7 +9,6 @@ export type HostEditorEvent =
   | { readonly type: 'outlineVisibilityChanged'; readonly visible: boolean }
   | { readonly type: 'lineNumbersChanged'; readonly enabled: boolean }
   | { readonly type: 'gitChangesGutterChanged'; readonly enabled: boolean }
-  | { readonly type: 'gitBlameChanged'; readonly enabled: boolean }
   | { readonly type: 'gitDiffLineHighlightsChanged'; readonly enabled: boolean }
   | { readonly type: 'diffBaselineModeChanged'; readonly mode: DiffBaselineMode }
   | { readonly type: 'fixedBaselineChanged'; readonly pinned: boolean; readonly active: boolean }
@@ -46,7 +45,6 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
       return typeof value.visible === 'boolean' ? value as HostEditorEvent : null;
     case 'lineNumbersChanged':
     case 'gitChangesGutterChanged':
-    case 'gitBlameChanged':
     case 'gitDiffLineHighlightsChanged':
     case 'spellCheckChanged':
     case 'contentMaxWidthChanged':

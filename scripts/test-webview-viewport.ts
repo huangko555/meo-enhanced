@@ -125,7 +125,7 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///viewport.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', editorAppearance: 'dark',
-        lineNumbers: true, gitChangesGutter: false, gitBlameEnabled: false, gitDiffLineHighlights: false,
+        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
@@ -245,7 +245,7 @@ async function main() {
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         'Release Fixed Baseline',
         'Current Edits', 'Recent Save', 'Git HEAD',
-        'Constrain Width', 'Line Numbers', 'Line Authors', 'Fold Long Code Blocks', 'Spellcheck'
+        'Constrain Width', 'Line Numbers', 'Fold Long Code Blocks', 'Spellcheck'
       ]) ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||

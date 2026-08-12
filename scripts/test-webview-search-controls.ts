@@ -51,7 +51,7 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///search.md', text: documentText, version: 1,
         savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live', previewAppearance: 'dark', editorAppearance: 'dark',
-        lineNumbers: true, gitChangesGutter: false, gitBlameEnabled: false, gitDiffLineHighlights: false,
+        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',

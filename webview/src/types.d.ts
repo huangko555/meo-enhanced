@@ -38,9 +38,3 @@ interface GitDiffLine {
   content: string;
 }
 
-interface GitBlameInfo {
-  hash: string;
-  author: string;
-  date: string;
-  message: string;
-}

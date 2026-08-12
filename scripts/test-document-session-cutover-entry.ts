@@ -162,9 +162,6 @@ const candidate = {
       onSelectionChange: () => undefined,
       postDiagnosticSuggestionsMessage: () => undefined,
       onViewportChange: () => undefined,
-      onRequestGitBlame: () => Promise.resolve({ kind: 'unavailable', reason: 'error' }),
-      onOpenGitRevisionForLine: () => undefined,
-      onOpenGitWorktreeForLine: () => undefined
     });
   },
   async whenIdle() {

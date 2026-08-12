@@ -98,6 +98,40 @@ try {
   assert.equal(retainedOrdering.ok, true, `ordinary sorting and retained ordering terms must pass: ${retainedOrdering.output}`);
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedTableBehavior.ts'));
 
+  write('README.md', 'Show Git line authors and open the matching revision.\n');
+  const gitLineAuthorDocs = runCheck();
+  assert.equal(gitLineAuthorDocs.ok, false, 'Git Blame aliases in public docs must be rejected');
+  assert.match(gitLineAuthorDocs.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'README.md'));
+
+  write('package.json', JSON.stringify({ contributes: { configuration: { properties: {
+    'meoEnhanced.gitLineAuthors.enabled': { type: 'boolean' }
+  } } } }));
+  const gitLineAuthorSetting = runCheck();
+  assert.equal(gitLineAuthorSetting.ok, false, 'Git line-author setting aliases must be rejected');
+  assert.match(gitLineAuthorSetting.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'package.json'));
+
+  write('src/protocol/removedGitCapability.ts', [
+    "export type GitRequest = { type: 'requestLineAuthor'; lineNumber: number };",
+    "export type GitNavigation = { type: 'openGitRevisionForLine'; lineNumber: number };",
+    ''
+  ].join('\n'));
+  const gitBlameProtocolAliases = runCheck();
+  assert.equal(gitBlameProtocolAliases.ok, false, 'Git Blame request and navigation aliases must be rejected');
+  assert.match(gitBlameProtocolAliases.output, /ARCH014/);
+  rmSync(join(fixtureRoot, 'src', 'protocol', 'removedGitCapability.ts'));
+
+  write('webview/src/helpers/retainedGitDiff.ts', [
+    "export const gitChangesGutter = 'source-live';",
+    "export const diffBaselineMode = 'git-head';",
+    "export const openDocumentLink = (href: string) => href;",
+    ''
+  ].join('\n'));
+  const retainedGitDiff = runCheck();
+  assert.equal(retainedGitDiff.ok, true, `Git diff and ordinary document navigation must pass: ${retainedGitDiff.output}`);
+  rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedGitDiff.ts'));
+
   const stagedRoot = join(fixtureRoot, 'staged-index');
   mkdirSync(join(stagedRoot, 'scripts'), { recursive: true });
   cpSync(join(repoRoot, 'scripts', 'check-architecture.ts'), join(stagedRoot, 'scripts', 'check-architecture.ts'));

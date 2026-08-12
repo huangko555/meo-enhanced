@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, UserRound, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -176,7 +176,6 @@ let vimLeaderState = '\\';
 
 let lineNumbersVisible = true;
 let gitChangesGutterVisible = true;
-let gitBlameEnabled = false;
 let gitDiffLineHighlightsEnabled = true;
 let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
 let fixedBaselinePinned = false;
@@ -286,14 +285,6 @@ spellCheckBtn.title = 'Disable Spellcheck';
 spellCheckBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(spellCheckBtn, SpellCheck2, 'Spellcheck');
 
-const gitBlameBtn = document.createElement('button');
-gitBlameBtn.type = 'button';
-gitBlameBtn.className = 'more-tools-option more-tools-toggle-option';
-gitBlameBtn.dataset.action = 'gitBlame';
-gitBlameBtn.title = 'Show Line Authors';
-gitBlameBtn.setAttribute('role', 'menuitemcheckbox');
-appendMoreToolsOptionContent(gitBlameBtn, UserRound, 'Line Authors');
-
 const longCodeBlockFoldingBtn = document.createElement('button');
 longCodeBlockFoldingBtn.type = 'button';
 longCodeBlockFoldingBtn.className = 'more-tools-option more-tools-toggle-option is-active';
@@ -358,13 +349,6 @@ const updateSpellCheckUI = () => {
   spellCheckBtn.classList.toggle('is-active', spellCheckEnabled);
   spellCheckBtn.setAttribute('aria-checked', spellCheckEnabled ? 'true' : 'false');
   spellCheckBtn.title = spellCheckEnabled ? 'Disable Spellcheck' : 'Enable Spellcheck';
-};
-
-const updateGitBlameUI = () => {
-  gitBlameBtn.classList.toggle('is-active', gitBlameEnabled);
-  gitBlameBtn.setAttribute('aria-checked', gitBlameEnabled ? 'true' : 'false');
-  gitBlameBtn.title = gitBlameEnabled ? 'Hide Line Authors' : 'Show Line Authors';
-  gitBlameBtn.setAttribute('aria-label', gitBlameBtn.title);
 };
 
 const updateContentMaxWidthUI = () => {
@@ -433,20 +417,6 @@ const setSpellCheckEnabled = (enabled: boolean, { post = true }: PostUpdateOptio
   }
 };
 
-const setGitBlameEnabled = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
-  const nextEnabled = enabled === true;
-  const changed = nextEnabled !== gitBlameEnabled;
-  gitBlameEnabled = nextEnabled;
-  editor?.setGitBlameEnabled(gitBlameEnabled);
-  if (!gitBlameEnabled) {
-    clearGitBlameCache();
-  }
-  updateGitBlameUI();
-  if (post && changed) {
-    vscode.postMessage({ type: 'setGitBlame', enabled: gitBlameEnabled });
-  }
-};
-
 const setContentMaxWidthEnabled = (
   enabled: boolean,
   { post = true, persist = true }: PersistedPostUpdateOptions = {}
@@ -510,10 +480,6 @@ const toggleGitChangesGutter = () => {
 
 const toggleSpellCheck = () => {
   setSpellCheckEnabled(!spellCheckEnabled);
-};
-
-const toggleGitBlame = () => {
-  setGitBlameEnabled(!gitBlameEnabled);
 };
 
 const separator = document.createElement('div');
@@ -878,7 +844,6 @@ moreToolsPanel.append(
   changesSeparator,
   contentMaxWidthBtn,
   lineNumbersBtn,
-  gitBlameBtn,
   longCodeBlockFoldingBtn,
   spellCheckBtn,
   editorAppearanceRow
@@ -1157,14 +1122,6 @@ editorAppearanceControl.element.addEventListener('click', (event) => {
     themeAdapter.setAppearance(appearance, { post: true });
   }
 });
-
-const clearGitBlameCache = ({ hideTooltip = true } = {}) => {
-  gitClient?.clearBlameCache({ hideTooltip });
-};
-
-const bumpLocalEditGeneration = () => {
-  gitClient?.bumpLocalEditGeneration();
-};
 
 const loadCreateEditorFactory = async (): Promise<CreateEditorFactory> => {
   if (!createEditorFactoryPromise) {
@@ -1456,26 +1413,7 @@ const applyDiagnosticsFromHost = (diagnostics: unknown): void => {
   editor?.setDiagnostics?.(nextDiagnostics);
 };
 
-gitClient = createGitClient({
-  vscode,
-  getCurrentEditorText: () => getCurrentEditorText(),
-  clearTransientUi: () => editor?.clearGitUiTransientState?.()
-});
-
-const requestGitBlameForLine = ({ lineNumber }: { lineNumber: number }) => {
-  if (!gitBlameEnabled || !gitClient) {
-    return Promise.resolve({ kind: 'unavailable', reason: 'error' });
-  }
-  return gitClient.requestBlameForLine({ lineNumber });
-};
-
-const openGitRevisionForLine = ({ lineNumber }: { lineNumber: number }) => {
-  gitClient?.openRevisionForLine({ lineNumber });
-};
-
-const openGitWorktreeForLine = ({ lineNumber }: { lineNumber: number }) => {
-  gitClient?.openWorktreeForLine({ lineNumber });
-};
+gitClient = createGitClient();
 
 const discardConfirmationWindowMs = 500;
 let discardConfirmationTimer: number | null = null;
@@ -1557,7 +1495,6 @@ const presentDocumentText = (
   text: string,
   source: 'revision' | 'rebased-draft'
 ): boolean => {
-  clearGitBlameCache();
   if (!editor) {
     pendingInitialText = text;
     return true;
@@ -1632,7 +1569,6 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
 };
 
 const handleLocalEditorChange = (nextText: string) => {
-  bumpLocalEditGeneration();
   documentSessionAdapter.localDraftChanged(nextText);
 
   if (outlineController.isVisible()) {
@@ -1659,7 +1595,6 @@ const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
     initialTopLineOffset,
     initialLineNumbers: lineNumbersVisible,
     initialGitGutter: gitChangesGutterVisible,
-    initialGitBlame: gitBlameEnabled,
     initialVimMode: vimModeEnabled,
     initialVimKeybindings: vimKeybindingsState,
     initialVimLeader: vimLeaderState,
@@ -1669,9 +1604,6 @@ const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
     onSelectionChange: (state: any) => selectionMenuController.update(state),
     postDiagnosticSuggestionsMessage: (message) => vscode.postMessage(message),
     onViewportChange: () => scheduleViewPositionCapture(),
-    onRequestGitBlame: requestGitBlameForLine,
-    onOpenGitRevisionForLine: openGitRevisionForLine,
-    onOpenGitWorktreeForLine: openGitWorktreeForLine,
     mermaidDiagramPresentationFactory
   });
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
@@ -1729,7 +1661,6 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   },
   setPreviewActive(active, restoreLine) {
     if (active) editor?.diagnosticSuggestionPresentationChanged?.();
-    clearGitBlameCache();
     previewAdapter.setActive({
       active,
       text: getCurrentEditorText(),
@@ -1837,9 +1768,6 @@ const handleInit = (message: InitMessage) => {
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
   }
-  if (typeof message.gitBlameEnabled === 'boolean') {
-    setGitBlameEnabled(message.gitBlameEnabled, { post: false });
-  }
   if (message.diffBaselineMode === 'current-edit' || message.diffBaselineMode === 'recent-save' || message.diffBaselineMode === 'git-head') {
     setDiffBaselineMode(message.diffBaselineMode, { post: false });
   }
@@ -1939,7 +1867,6 @@ window.addEventListener('message', (event) => {
         shikiEnabled: message.shikiCodeBlocks
       });
       failureNotice.clearFailureNotice();
-      gitClient?.resetForInit({ hideTooltip: false });
       documentSessionAdapter.start(message);
       previewAdapter.start({
         text: message.text,
@@ -1994,11 +1921,6 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'gitChangesGutterChanged') {
     setGitChangesGutterVisible(message.enabled, { post: false });
-    return;
-  }
-
-  if (message.type === 'gitBlameChanged') {
-    setGitBlameEnabled(message.enabled, { post: false });
     return;
   }
 
@@ -2059,11 +1981,6 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'gitBaselineChanged') {
-    gitClient?.handleMessage(message, { editor });
-    return;
-  }
-
-  if (message.type === 'gitBlameResult') {
     gitClient?.handleMessage(message, { editor });
     return;
   }
@@ -2160,7 +2077,6 @@ window.addEventListener('beforeunload', () => {
   clearReadyRetryTimers();
   cancelPendingWikiStatusRefresh();
   cancelPendingLocalLinkStatusRefresh();
-  clearGitBlameCache({ hideTooltip: false });
   documentSessionAdapter.dispose();
   previewAdapter.dispose();
   exportAdapter.dispose();
@@ -2410,7 +2326,6 @@ releaseFixedBaselineBtn.addEventListener('click', () => {
   setMoreToolsVisible(false);
 });
 spellCheckBtn.addEventListener('click', toggleSpellCheck);
-gitBlameBtn.addEventListener('click', toggleGitBlame);
 longCodeBlockFoldingBtn.addEventListener('click', () => {
   setLongCodeBlockFoldingEnabled(!longCodeBlockFoldingEnabled);
 });
