@@ -196,6 +196,21 @@ try {
       label: 'Git line-revision API',
       path: 'src/host/gitLineRevision.ts',
       contents: 'export const openGitLineRevision = () => undefined;\n'
+    },
+    {
+      label: 'Git author-for-line API',
+      path: 'src/host/gitAuthorForLine.ts',
+      contents: 'export const getGitAuthorForLine = () => null;\n'
+    },
+    {
+      label: 'author-for-Git-line API',
+      path: 'src/host/authorForGitLine.ts',
+      contents: 'export const getAuthorForGitLine = () => null;\n'
+    },
+    {
+      label: 'Git-author-for-line identifier',
+      path: 'webview/src/adapters/gitAuthorForLine.ts',
+      contents: 'export const gitAuthorForLine = true;\n'
     }
   ];
   const missedNormalizedGitLineCapabilities: string[] = [];
@@ -207,11 +222,39 @@ try {
     }
     rmSync(join(fixtureRoot, ...fixture.path.split('/')));
   }
-  assert.deepEqual(
-    missedNormalizedGitLineCapabilities,
-    [],
-    'camelCase, plural and reordered Git line-capability aliases must all be rejected'
-  );
+  const allowedDistantGitAnnotateFixtures = [
+    {
+      label: 'source annotate helper with Git diff',
+      path: 'webview/src/helpers/annotateDocument.ts',
+      contents: 'export const annotateDocumentWithGitDiff = true;\n'
+    },
+    {
+      label: 'package annotate test script running Git diff',
+      path: 'package.json',
+      contents: JSON.stringify({ scripts: { 'test:annotateDocument': 'git diff --check' } }, null, 2)
+    },
+    {
+      label: 'README annotation sentence about Git diff',
+      path: 'README.md',
+      contents: 'Annotate the rendered document using retained Git diff metadata.\n'
+    }
+  ];
+  const rejectedAllowedDistantGitAnnotateFixtures: string[] = [];
+  for (const fixture of allowedDistantGitAnnotateFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (!outcome.ok) {
+      rejectedAllowedDistantGitAnnotateFixtures.push(`${fixture.label}: ${outcome.output}`);
+    }
+    rmSync(join(fixtureRoot, fixture.path));
+  }
+  assert.deepEqual({
+    missedGitLineCapabilities: missedNormalizedGitLineCapabilities,
+    rejectedAllowedDistantGitAnnotateFixtures
+  }, {
+    missedGitLineCapabilities: [],
+    rejectedAllowedDistantGitAnnotateFixtures: []
+  }, 'Git line aliases must be rejected without rejecting distant annotate/Git diff text');
 
   write('webview/src/helpers/retainedGitDiff.ts', [
     "export const gitChangesGutter = 'source-live';",
@@ -224,6 +267,7 @@ try {
     "export const commitInfo = { oid: 'abc' };",
     "export const documentHistory: string[] = [];",
     "export const retainedDiff = { modifiedLineColoring: true, gitAuthorInfo: true };",
+    "export const retainedDescription = 'Optionally show subtle modified-line coloring and Git author information.';",
     "export const openDocumentLink = (href: string) => href.startsWith('#') ? href : `#${href}`;",
     ''
   ].join('\n'));

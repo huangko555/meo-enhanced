@@ -627,7 +627,21 @@ const normalizeCapabilityWords = (text: string): string[] => text
 const hasRemovedGitLineCapability = (text: string): boolean => {
   const words = normalizeCapabilityWords(text);
   if (!words.includes('git')) return false;
-  if (words.includes('annotate')) return true;
+  if (words.some((word, index) => word === 'git' && words[index + 1] === 'annotate')) return true;
+  const hasGitLineAuthorCapability = text.split(/[,:;={}()[\]'"`]/).some((segment) => {
+    const segmentWords = normalizeCapabilityWords(segment);
+    return segmentWords.some((_, start) => {
+      const window = segmentWords.slice(start, start + 5);
+      const wordSet = new Set(window);
+      const hasCapabilityLine = window.some((word, index) => (
+        word === 'line' && window[index + 1] !== 'coloring'
+      ));
+      return wordSet.has('git')
+        && hasCapabilityLine
+        && (wordSet.has('author') || wordSet.has('authors'));
+    });
+  });
+  if (hasGitLineAuthorCapability) return true;
   for (let start = 0; start < words.length; start += 1) {
     const window = words.slice(start, start + 5);
     const wordSet = new Set(window);
@@ -635,9 +649,6 @@ const hasRemovedGitLineCapability = (text: string): boolean => {
     if (wordSet.has('annotation') || wordSet.has('annotations') || wordSet.has('history')) {
       return true;
     }
-    if (window.some((word, index) => (
-      word === 'line' && (window[index + 1] === 'author' || window[index + 1] === 'authors')
-    ))) return true;
     if (wordSet.has('commit') && wordSet.has('info')) return true;
     const navigation = ['open', 'show', 'navigate', 'navigation', 'reveal', 'jump']
       .some((word) => wordSet.has(word));
