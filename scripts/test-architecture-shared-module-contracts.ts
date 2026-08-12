@@ -65,6 +65,22 @@ try {
   const valid = runCheck();
   assert.equal(valid.ok, true, `valid thin callers should pass: ${valid.output}`);
 
+  write('README.md', 'The table toolbar can order columns.\n');
+  const tableSortingAlias = runCheck();
+  assert.equal(tableSortingAlias.ok, false, 'table sorting aliases in public docs must be rejected');
+  assert.match(tableSortingAlias.output, /ARCH013/);
+  rmSync(join(fixtureRoot, 'README.md'));
+
+  write('webview/src/helpers/retainedTableBehavior.ts', [
+    'export const sortChanges = (rows: number[]) => rows.sort((left, right) => left - right);',
+    'export const orderedList = true;',
+    'export const sourceRowOrder = [0, 1];',
+    ''
+  ].join('\n'));
+  const retainedOrdering = runCheck();
+  assert.equal(retainedOrdering.ok, true, `ordinary sorting and retained ordering terms must pass: ${retainedOrdering.output}`);
+  rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedTableBehavior.ts'));
+
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();
   assert.equal(missingImporter.ok, false, 'missing required importer must be rejected');

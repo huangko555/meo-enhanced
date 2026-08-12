@@ -9,13 +9,6 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-command-product
 
 const editorSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'editor.ts'), 'utf8');
 const tablesSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'helpers', 'tables.ts'), 'utf8');
-const tableCommandSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'application', 'tableCommand.ts'), 'utf8');
-const tableCommandAdapterSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'editor', 'tableCommandAdapter.ts'), 'utf8');
-const tableCommandEffectAdapterSource = fs.readFileSync(
-  path.join(repoRoot, 'webview', 'src', 'editor', 'internal', 'codeMirrorTableCommandEffectAdapter.ts'),
-  'utf8'
-);
-const tableStylesSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'styles.css'), 'utf8');
 assert.equal((editorSource.match(/createTableCommandApplication\(/g) ?? []).length, 1);
 assert.equal((editorSource.match(/createTableCommandRuntime\(/g) ?? []).length, 1);
 assert.equal((editorSource.match(/createCodeMirrorTableCommandEffectAdapter\(/g) ?? []).length, 1);
@@ -41,22 +34,6 @@ for (const legacy of [
 ]) {
   assert.equal(tablesSource.includes(legacy), false, `Legacy table command path returned: ${legacy}`);
 }
-for (const [sourceName, source] of [
-  ['tables', tablesSource],
-  ['Table Command Application', tableCommandSource],
-  ['Table Command Adapter', tableCommandAdapterSource],
-  ['Table Command Effect Adapter', tableCommandEffectAdapterSource],
-  ['table styles', tableStylesSource]
-] as const) {
-  for (const removedSortEntry of ['preview-sort', 'apply-sort', 'TableSortState', 'meo-md-html-apply-sort-btn']) {
-    assert.equal(
-      source.includes(removedSortEntry),
-      false,
-      `Removed table sorting entry returned in ${sourceName}: ${removedSortEntry}`
-    );
-  }
-}
-
 async function main() {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-table-stability-entry.ts')],
@@ -125,12 +102,20 @@ async function main() {
       await waitFrames();
       const afterAtomicRedo = editor.view.state.doc.toString();
 
-      const sortButtonCount = document.querySelectorAll(
-        '.meo-md-html-table-shell button[title^="Sort selected column"]'
-      ).length;
-      const applySortButtonCount = document.querySelectorAll('.meo-md-html-apply-sort-btn').length;
-
       const shells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-shell'));
+      const toolbarButtons = Array.from(
+        shells[0].querySelectorAll<HTMLButtonElement>('.meo-md-html-table-toolbar-btn')
+      );
+      const toolbarActions = toolbarButtons.map((button) => button.getAttribute('aria-label'));
+      const sortingCapabilityCount = toolbarButtons.filter((button) => (
+        /\b(?:sort|order|reorder)(?:ing|ed)?\b/i.test([
+          button.getAttribute('aria-label'),
+          button.title,
+          button.textContent,
+          button.dataset.action,
+          button.dataset.command
+        ].filter(Boolean).join(' '))
+      )).length;
       const secondInput = shells[1]?.querySelector<HTMLTextAreaElement>('tbody textarea');
       secondInput?.focus();
       pointer(shells[0].querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
@@ -179,8 +164,8 @@ async function main() {
         afterAtomicUndo,
         redoApplied,
         afterAtomicRedo,
-        sortButtonCount,
-        applySortButtonCount,
+        toolbarActions,
+        sortingCapabilityCount,
         afterRapidMultiTable,
         toolbarCount,
         resizeHandleCount,
@@ -199,8 +184,18 @@ async function main() {
     assert.equal(result.afterAtomicUndo, result.original, 'pending edit and row insertion must undo together');
     assert.equal(result.redoApplied, true);
     assert.equal(result.afterAtomicRedo, result.afterAtomicInsert);
-    assert.equal(result.sortButtonCount, 0, 'Table sorting must not have a Toolbar entry');
-    assert.equal(result.applySortButtonCount, 0, 'Table sorting must not have an Apply entry');
+    assert.deepEqual(result.toolbarActions, [
+      'Insert row above',
+      'Insert row below',
+      'Delete row',
+      'Insert column left',
+      'Insert column right',
+      'Delete column',
+      'Align selected column left',
+      'Align selected column center',
+      'Align selected column right'
+    ], 'the real Table Toolbar must expose every retained structure/alignment command exactly once');
+    assert.equal(result.sortingCapabilityCount, 0, 'Table sorting must not have any Toolbar capability');
     assert.match(result.afterRapidMultiTable, /\| C\s+\| D\s+\|\n\| ---:\s+\| ---\s+\|/);
     assert.equal(result.toolbarCount, 2);
     assert.ok(result.resizeHandleCount >= 4, 'Column Width controls must remain available');

@@ -1,9 +1,22 @@
 import assert from 'node:assert/strict';
 import {
   createTableCommandApplication,
+  tableCommands,
   type TableCommandEffect,
   type TableCommandTarget
 } from '../webview/src/application/tableCommand';
+
+assert.deepEqual(tableCommands, [
+  'insert-row-above',
+  'insert-row-below',
+  'delete-row',
+  'insert-column-left',
+  'insert-column-right',
+  'delete-column',
+  'align-left',
+  'align-center',
+  'align-right'
+], 'the public Table Command boundary must expose only retained product commands');
 
 const target: TableCommandTarget = { tableId: 'table-1', row: 1, column: 0, selection: null };
 const types = (effects: readonly TableCommandEffect[]) => effects.map((effect) => effect.type);
@@ -16,7 +29,12 @@ const structuralRequest = structural.dispatch({
   enabled: true
 });
 assert.deepEqual(types(structuralRequest), ['executeCommand']);
-assert.equal(structuralRequest[0]?.type === 'executeCommand' && structuralRequest[0].pendingEdits, 'atomic');
+assert.deepEqual(structuralRequest[0], {
+  type: 'executeCommand',
+  commandId: 1,
+  command: 'insert-row-below',
+  target
+});
 const structuralId = structural.getState().activeCommandId;
 assert.ok(structuralId);
 assert.deepEqual(

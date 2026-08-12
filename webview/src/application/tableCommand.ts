@@ -1,13 +1,16 @@
-export type TableCommand =
-  | 'insert-row-above'
-  | 'insert-row-below'
-  | 'delete-row'
-  | 'insert-column-left'
-  | 'insert-column-right'
-  | 'delete-column'
-  | 'align-left'
-  | 'align-center'
-  | 'align-right';
+export const tableCommands = [
+  'insert-row-above',
+  'insert-row-below',
+  'delete-row',
+  'insert-column-left',
+  'insert-column-right',
+  'delete-column',
+  'align-left',
+  'align-center',
+  'align-right'
+] as const;
+
+export type TableCommand = typeof tableCommands[number];
 
 export type TableCommandSelection = {
   readonly fromRow: number;
@@ -50,7 +53,6 @@ export type TableCommandEffect =
       readonly commandId: number;
       readonly command: TableCommand;
       readonly target: TableCommandTarget;
-      readonly pendingEdits: 'atomic';
     }
   | {
       readonly type: 'restoreInteraction';
@@ -131,8 +133,7 @@ export function createTableCommandApplication(): TableCommandApplication {
           type: 'executeCommand',
           commandId: id,
           command: input.command,
-          target: input.target,
-          pendingEdits: 'atomic'
+          target: input.target
         }];
       }
       case 'commandCompleted':

@@ -48,7 +48,7 @@ const adapter = createCodeMirrorTableCommandEffectAdapter({
 
 const atomic = await adapter.execute({
   type: 'executeCommand', commandId: 1, command: 'insert-row-below',
-  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }
 }).completion;
 assert.deepEqual(atomic, { type: 'commandCompleted', commandId: 1, outcome: 'changed' });
 assert.equal(atomicBuilds, 1);
@@ -56,7 +56,7 @@ assert.equal(dispatched.length, 1, 'pending edits and structure must share one t
 
 assert.deepEqual(await adapter.execute({
   type: 'executeCommand', commandId: 3, command: 'delete-row',
-  target: { tableId: 'missing', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
+  target: { tableId: 'missing', row: 1, column: 0, selection: null }
 }).completion, { type: 'commandCompleted', commandId: 3, outcome: 'no-op' });
 
 await adapter.execute({
@@ -67,7 +67,7 @@ assert.deepEqual(restored, ['changed']);
 
 await adapter.execute({
   type: 'executeCommand', commandId: 6, command: 'insert-row-below',
-  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }
 }).completion;
 adapter.externalDocumentPresented();
 await adapter.execute({
@@ -85,7 +85,7 @@ const failing = createCodeMirrorTableCommandEffectAdapter({
 });
 assert.deepEqual(await failing.execute({
   type: 'executeCommand', commandId: 4, command: 'delete-column',
-  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }
 }).completion, { type: 'commandFailed', commandId: 4 });
 assert.equal(errors.length, 1);
 
@@ -94,7 +94,7 @@ adapter.dispose();
 assert.equal(disposed, 1);
 assert.equal(await adapter.execute({
   type: 'executeCommand', commandId: 5, command: 'align-right',
-  target: { tableId: 'table-1', row: 1, column: 0, selection: null }, pendingEdits: 'atomic'
+  target: { tableId: 'table-1', row: 1, column: 0, selection: null }
 }).completion, null);
 assert.equal(dispatched.length, 2);
 

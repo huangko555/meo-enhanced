@@ -1,7 +1,7 @@
 import { history, isolateHistory, redo, undo } from '@codemirror/commands';
 import { EditorState, Transaction, type TransactionSpec } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { createTableCommandApplication, type TableCommand } from '../webview/src/application/tableCommand';
+import { createTableCommandApplication, tableCommands } from '../webview/src/application/tableCommand';
 import { createTableTransactionProvenance } from '../webview/src/application/tableTransactionProvenance';
 import { createTableCommandRuntime } from '../webview/src/adapters/tableCommandRuntime';
 import { createCodeMirrorTableTransactionProvenanceAdapter } from '../webview/src/adapters/codeMirrorTableTransactionProvenanceAdapter';
@@ -122,11 +122,7 @@ const render = (): void => {
     }
     tableElement.append(body);
     shell.append(tableElement);
-    for (const command of [
-      'insert-row-above', 'insert-row-below', 'delete-row',
-      'insert-column-left', 'insert-column-right', 'delete-column',
-      'align-left', 'align-center', 'align-right'
-    ] satisfies TableCommand[]) {
+    for (const command of tableCommands) {
       const button = document.createElement('button');
       button.dataset.command = command;
       button.textContent = command;

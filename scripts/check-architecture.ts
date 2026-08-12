@@ -64,6 +64,33 @@ function readSource(file: string): Source {
   return { path, text: staged ? runGit(['show', `:${path}`]) : readFileSync(join(repoRoot, file), 'utf8') };
 }
 
+function projectFilesForCapabilityGuard(): string[] {
+  if (staged) {
+    return runGit(['ls-files', '--cached'])
+      .split(/\r?\n/)
+      .map((file) => file.replaceAll('\\', '/'))
+      .filter(Boolean);
+  }
+  const result: string[] = [];
+  const visit = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) visit(full);
+      else result.push(relative(repoRoot, full).replaceAll('\\', '/'));
+    }
+  };
+  for (const entry of readdirSync(repoRoot)) {
+    if (entry === 'package.json' || /^README(?:\.[^/]+)?\.md$/i.test(entry)) result.push(entry);
+  }
+  for (const root of ['docs', 'src', 'webview/src']) visit(join(repoRoot, root));
+  return result;
+}
+
+function readTrackedProjectFile(path: string): string {
+  return staged ? runGit(['show', `:${path}`]) : readFileSync(join(repoRoot, path), 'utf8');
+}
+
 function resolveImport(from: string, specifier: string, files: Set<string>): string | null {
   if (!specifier.startsWith('.')) return null;
   const base = normalize(join(dirname(from), specifier)).replaceAll('\\', '/');
@@ -499,6 +526,48 @@ for (const source of sources) {
   const layer = targetLayer(source.path);
   if (layer !== 'adapters' && /\.postMessage\s*\(/.test(source.text)) {
     failures.push(`PROT003 Webview 绕过 Transport: ${source.path}`);
+  }
+}
+
+// Product deletion guard: table sorting must stay absent from every production-facing entry.
+// Ordinary Array.sort calls, ordered-list behavior and Provenance source-row mappings are retained capabilities.
+const tableSortingScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedTableSortingTokens = [
+  /preview[-_. ]?sort/i,
+  /apply[-_. ]?sort/i,
+  /TableSort[A-Za-z0-9_]*/,
+  /sort(?:Button|Column|State|Direction|ByColumn|edRowOrder)/,
+  /meo-[A-Za-z0-9_-]*sort[A-Za-z0-9_-]*/i,
+  /\b(?:table|columns?|rows?)[-_. ]+(?:sort|order|reorder)(?:ing|ed)?\b/i,
+  /\b(?:sort|order|reorder)(?:ing|ed)?[-_. ]+(?:table|columns?|rows?)\b/i,
+  /\b(?:table|column|row)(?:Sort|Order|Reorder)[A-Za-z0-9_]*/,
+  /\b(?:sort|order|reorder)(?:Table|Column|Row)[A-Za-z0-9_]*/,
+  /\b(?:table|columns?|rows?)\b.{0,48}\b(?:sort|reorder)(?:ing|ed)?\b/i,
+  /\b(?:sort|reorder)(?:ing|ed)?\b.{0,48}\b(?:table|columns?|rows?)\b/i
+];
+const removedTableSortingImplementationTokens = [
+  /\bsourceBodyRows\b/,
+  /\bsourceBodyCellGrid\b/,
+  /\bvisualRows\b/
+];
+for (const path of tableSortingScope) {
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+      .replace(/\.(?:sort|toSorted)\s*\(/g, '(')
+      .replace(/\b(?:un)?ordered(?:List|Lists|ListMarker)?\b/gi, '')
+      .replace(/\b(?:sourceRowOrder|effectiveSourceRowOrder)\b/g, '');
+    if (
+      removedTableSortingTokens.some((pattern) => pattern.test(line)) ||
+      removedTableSortingImplementationTokens.some((pattern) => pattern.test(line))
+    ) {
+      failures.push(`ARCH013 已删除的表格排序能力重新出现: ${path}:${index + 1}`);
+    }
   }
 }
 

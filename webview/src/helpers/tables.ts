@@ -99,9 +99,7 @@ interface DomRefs {
   diffMarkerLayer: HTMLElement;
   cellGrid: HTMLTableCellElement[][];
   rowEntries: RowEntry[];
-  sourceBodyRows: HTMLTableRowElement[];
   sourceBodyRowInputs: HTMLTextAreaElement[][];
-  sourceBodyCellGrid: HTMLTableCellElement[][];
   stickyChrome: HTMLDivElement;
   stickyHeaderViewport: HTMLDivElement;
   stickyTable: HTMLTableElement;
@@ -3126,12 +3124,12 @@ class HtmlTableWidget extends WidgetType {
             ? { transaction: null, outcome: 'no-op' }
             : this.buildRemoveRowsAt(dom, [bodyRow], column ?? 0);
         }
-        const visualRows: number[] = [];
+        const bodyRowIndexes: number[] = [];
         for (let row = Math.max(1, selection.fromRow); row <= selection.toRow; row += 1) {
           const bodyIndex = row - 1;
-          if (bodyIndex >= 0 && bodyIndex < this.tableData.rows.length) visualRows.push(bodyIndex);
+          if (bodyIndex >= 0 && bodyIndex < this.tableData.rows.length) bodyRowIndexes.push(bodyIndex);
         }
-        return this.buildRemoveRowsAt(dom, visualRows, column ?? 0);
+        return this.buildRemoveRowsAt(dom, bodyRowIndexes, column ?? 0);
       }
       case 'insert-column-left': {
         return column === null
@@ -4325,8 +4323,6 @@ class HtmlTableWidget extends WidgetType {
 
     const tbody = document.createElement('tbody');
     const bodyRowInputs: HTMLTextAreaElement[][] = [];
-    const sourceBodyRows: HTMLTableRowElement[] = [];
-    const sourceBodyCellGrid: HTMLTableCellElement[][] = [];
     for (let rowIdx = 0; rowIdx < this.tableData.rows.length; rowIdx++) {
       const tr = document.createElement('tr');
       tr.dataset.sourceLineNumber = String((this.tableData.startLine ?? 0) + rowIdx + 2);
@@ -4358,8 +4354,6 @@ class HtmlTableWidget extends WidgetType {
       cellGrid.push(bodyCells);
       allRowInputs.push(inputs);
       bodyRowInputs.push(inputs);
-      sourceBodyRows.push(tr);
-      sourceBodyCellGrid.push(bodyCells);
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
@@ -4410,9 +4404,7 @@ class HtmlTableWidget extends WidgetType {
       rowInputs: bodyRowInputs,
       allRowInputs,
       cellGrid,
-      sourceBodyRows,
       sourceBodyRowInputs: bodyRowInputs,
-      sourceBodyCellGrid,
       stickyChrome,
       stickyHeaderViewport,
       stickyTable,
