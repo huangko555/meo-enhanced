@@ -4100,16 +4100,25 @@ class HtmlTableWidget extends WidgetType {
       const textarea = textareas[index];
       const content = contents[index];
       const preview = content?.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
-      // A zero-height probe forces Chromium to measure the newly wrapped value
-      // now instead of reporting the previous painted height for one frame.
-      textarea.style.height = '0px';
-      maxHeight = Math.max(maxHeight, textarea.scrollHeight, preview?.scrollHeight ?? 0);
+      const probe = textarea.cloneNode(false) as HTMLTextAreaElement;
+      probe.value = textarea.value;
+      probe.tabIndex = -1;
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.inset = 'auto';
+      probe.style.top = '0';
+      probe.style.left = '0';
+      probe.style.width = `${textarea.getBoundingClientRect().width}px`;
+      probe.style.height = '0px';
+      probe.style.visibility = 'hidden';
+      probe.style.pointerEvents = 'none';
+      content.appendChild(probe);
+      maxHeight = Math.max(maxHeight, probe.scrollHeight, preview?.scrollHeight ?? 0);
+      probe.remove();
     }
 
     for (const content of contents) {
       content.style.minHeight = `${maxHeight}px`;
     }
-    for (const textarea of textareas) textarea.style.height = 'auto';
   }
 
   resizeAllRows() {

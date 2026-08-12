@@ -543,6 +543,13 @@ async function main(): Promise<void> {
       const scrollerRect = scroller.getBoundingClientRect();
       scroller.scrollTop += row.getBoundingClientRect().bottom - scrollerRect.bottom + 12;
       (window as any).__tableWrapFrames = [];
+      (window as any).__focusedTableInputCollapsed = false;
+      const focusedInput = currentElements().input;
+      new MutationObserver((records) => {
+        if (records.some((record) => record.oldValue?.includes('height: 0px'))) {
+          (window as any).__focusedTableInputCollapsed = true;
+        }
+      }).observe(focusedInput, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
       const capture = (stage: string) => {
         const { shell, row, input } = currentElements();
         (window as any).__tableWrapFrames.push({
@@ -597,6 +604,9 @@ async function main(): Promise<void> {
         inputScrollTop: number;
       }>
     ));
+    const focusedTableInputCollapsed = await page.evaluate(() => (
+      Boolean((window as any).__focusedTableInputCollapsed)
+    ));
     const wrapHeights = tableWrapFrames
       .map((frame) => frame.rowHeight)
       .filter((height): height is number => height !== null);
@@ -633,10 +643,38 @@ async function main(): Promise<void> {
     if (
       scrollDirections.some((direction, index) => index > 0 && direction !== scrollDirections[index - 1]) ||
       shellDirections.some((direction, index) => index > 0 && direction !== shellDirections[index - 1]) ||
+      focusedTableInputCollapsed ||
       tableWrapFrames.some((frame) => frame.inputScrollTop > 1) ||
       !caretVisible
     ) {
       throw new Error(`Wrapping a focused table cell moved the viewport between frames: ${JSON.stringify(tableWrapFrames)}`);
+    }
+
+    const hiddenToolbarHitTest = await page.evaluate(async () => {
+      const editor = (window as any).__editor;
+      editor.view.contentDOM.focus();
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
+      const button = toolbar.querySelector<HTMLButtonElement>('.meo-md-html-table-toolbar-btn')!;
+      const rect = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return {
+        toolbarOpacity: getComputedStyle(toolbar).opacity,
+        toolbarPointerEvents: getComputedStyle(toolbar).pointerEvents,
+        toolbarVisibility: getComputedStyle(toolbar).visibility,
+        hitClassName: hit instanceof HTMLElement ? hit.className : '',
+        hitToolbarButton: Boolean(hit?.closest('.meo-md-html-table-toolbar-btn')),
+        cursor: hit instanceof Element ? getComputedStyle(hit).cursor : ''
+      };
+    });
+    if (
+      hiddenToolbarHitTest.toolbarOpacity !== '0' ||
+      hiddenToolbarHitTest.hitToolbarButton ||
+      hiddenToolbarHitTest.cursor === 'pointer'
+    ) {
+      throw new Error(`Hidden table toolbar remained pointer-interactive: ${JSON.stringify(hiddenToolbarHitTest)}`);
     }
 
     console.log('live layout stability browser tests passed');

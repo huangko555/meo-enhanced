@@ -4669,6 +4669,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn:acti
   outline-offset: -1px;
   box-shadow: none;
   backdrop-filter: none;
+  visibility: hidden;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
@@ -4683,6 +4684,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn:acti
 .cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-toolbar,
 .cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-toolbar,
 .cm-editor .meo-md-html-table-shell.has-active-sort .meo-md-html-table-toolbar {
+  visibility: visible;
   opacity: 1;
   pointer-events: auto;
 }
