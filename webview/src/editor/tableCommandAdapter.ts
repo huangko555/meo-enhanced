@@ -1,4 +1,4 @@
-import { Facet, type Transaction, type TransactionSpec } from '@codemirror/state';
+import { Facet, type TransactionSpec } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type {
   TableCommand,
@@ -23,15 +23,10 @@ export type TableCommandEditorTarget = {
   readonly identityKey: string;
   readonly from: number;
   isConnected(): boolean;
-  buildPendingEditTransactions(): readonly Transaction[];
   buildAtomicCommandTransaction(request: {
-    readonly command: Exclude<TableCommand, 'preview-sort'>;
+    readonly command: TableCommand;
     readonly target: TableCommandTarget;
   }): TableCommandTransactionPlan;
-  presentCommand(request: {
-    readonly command: Extract<TableCommand, 'preview-sort'>;
-    readonly target: TableCommandTarget;
-  }): 'presented' | 'no-op';
   preserveViewport(run: () => void): void;
 };
 

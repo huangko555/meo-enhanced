@@ -21,18 +21,11 @@ const executor: TableCommandEffectExecutor = {
         })
       };
     }
-    if (effect.type === 'flushPendingEdits') {
-      return {
-        completion: Promise.resolve({
-          type: 'pendingEditsFlushed', commandId: effect.commandId
-        })
-      };
-    }
     if (effect.type === 'executeCommand') {
       return {
         completion: Promise.resolve({
           type: 'commandCompleted', commandId: effect.commandId,
-          outcome: effect.command === 'preview-sort' ? 'presented' : 'changed'
+          outcome: 'changed'
         })
       };
     }
@@ -48,7 +41,7 @@ const first = runtime.dispatch({
   type: 'request', command: 'insert-row-below', target, enabled: true
 });
 const second = runtime.dispatch({
-  type: 'request', command: 'preview-sort', target, enabled: true
+  type: 'request', command: 'align-right', target, enabled: true
 });
 await Promise.resolve();
 assert.deepEqual(executionOrder, ['executeCommand:1']);
@@ -56,11 +49,11 @@ assert.equal(runtime.getState().phase, 'executing');
 assert.ok(settleFirst);
 settleFirst({ type: 'commandCompleted', commandId: 1, outcome: 'changed' });
 assert.equal(await first, 'changed');
-assert.equal(await second, 'presented');
+assert.equal(await second, 'changed');
 await runtime.whenIdle();
 assert.deepEqual(executionOrder, [
   'executeCommand:1', 'restoreInteraction:1',
-  'flushPendingEdits:2', 'executeCommand:2', 'restoreInteraction:2'
+  'executeCommand:2', 'restoreInteraction:2'
 ]);
 assert.equal(runtime.getState().phase, 'idle');
 assert.deepEqual(errors, []);
@@ -103,7 +96,7 @@ const disposableRuntime = createTableCommandRuntime(
   createTableCommandApplication(), disposableExecutor, () => {}
 );
 const pending = disposableRuntime.dispatch({
-  type: 'request', command: 'apply-sort', target, enabled: true
+  type: 'request', command: 'delete-column', target, enabled: true
 });
 await Promise.resolve();
 disposableRuntime.dispose();

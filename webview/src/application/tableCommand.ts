@@ -7,9 +7,7 @@ export type TableCommand =
   | 'delete-column'
   | 'align-left'
   | 'align-center'
-  | 'align-right'
-  | 'preview-sort'
-  | 'apply-sort';
+  | 'align-right';
 
 export type TableCommandSelection = {
   readonly fromRow: number;
@@ -26,7 +24,7 @@ export type TableCommandTarget = {
 };
 
 export type TableCommandState = {
-  readonly phase: 'idle' | 'flushing-pending-edits' | 'executing' | 'disposed';
+  readonly phase: 'idle' | 'executing' | 'disposed';
   readonly activeCommandId: number | null;
 };
 
@@ -37,30 +35,28 @@ export type TableCommandInput =
       readonly target: TableCommandTarget;
       readonly enabled: boolean;
     }
-  | { readonly type: 'pendingEditsFlushed'; readonly commandId: number }
   | {
       readonly type: 'commandCompleted';
       readonly commandId: number;
-      readonly outcome: 'changed' | 'presented' | 'no-op';
+      readonly outcome: 'changed' | 'no-op';
     }
   | { readonly type: 'commandFailed'; readonly commandId: number }
   | { readonly type: 'externalDocumentPresented' }
   | { readonly type: 'dispose' };
 
 export type TableCommandEffect =
-  | { readonly type: 'flushPendingEdits'; readonly commandId: number; readonly tableId: string }
   | {
       readonly type: 'executeCommand';
       readonly commandId: number;
       readonly command: TableCommand;
       readonly target: TableCommandTarget;
-      readonly pendingEdits: 'atomic' | 'flushed';
+      readonly pendingEdits: 'atomic';
     }
   | {
       readonly type: 'restoreInteraction';
       readonly commandId: number;
       readonly target: TableCommandTarget;
-      readonly outcome: 'changed' | 'presented' | 'failed';
+      readonly outcome: 'changed' | 'failed';
     };
 
 export type TableCommandApplication = {
@@ -103,12 +99,12 @@ export function createTableCommandApplication(): TableCommandApplication {
 
   const finish = (
     commandId: number,
-    outcome: 'changed' | 'presented' | 'no-op' | 'failed'
+    outcome: 'changed' | 'no-op' | 'failed'
   ): readonly TableCommandEffect[] => {
     if (
       !active ||
       active.id !== commandId ||
-      (phase !== 'executing' && !(outcome === 'failed' && phase === 'flushing-pending-edits'))
+      phase !== 'executing'
     ) return [];
     const completed = active;
     active = null;
@@ -130,10 +126,6 @@ export function createTableCommandApplication(): TableCommandApplication {
         if (!input.enabled || phase !== 'idle') return [];
         const id = ++sequence;
         active = { id, command: input.command, target: input.target };
-        if (input.command === 'preview-sort') {
-          phase = 'flushing-pending-edits';
-          return [{ type: 'flushPendingEdits', commandId: id, tableId: input.target.tableId }];
-        }
         phase = 'executing';
         return [{
           type: 'executeCommand',
@@ -141,17 +133,6 @@ export function createTableCommandApplication(): TableCommandApplication {
           command: input.command,
           target: input.target,
           pendingEdits: 'atomic'
-        }];
-      }
-      case 'pendingEditsFlushed': {
-        if (!active || active.id !== input.commandId || phase !== 'flushing-pending-edits') return [];
-        phase = 'executing';
-        return [{
-          type: 'executeCommand',
-          commandId: active.id,
-          command: active.command,
-          target: active.target,
-          pendingEdits: 'flushed'
         }];
       }
       case 'commandCompleted':

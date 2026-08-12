@@ -25,26 +25,6 @@ assert.deepEqual(
 );
 assert.equal(structural.getState().phase, 'idle');
 
-const visualSort = createTableCommandApplication();
-const sortRequest = visualSort.dispatch({
-  type: 'request',
-  command: 'preview-sort',
-  target,
-  enabled: true
-});
-assert.deepEqual(types(sortRequest), ['flushPendingEdits']);
-const sortId = visualSort.getState().activeCommandId;
-assert.ok(sortId);
-assert.deepEqual(
-  types(visualSort.dispatch({ type: 'pendingEditsFlushed', commandId: sortId })),
-  ['executeCommand']
-);
-assert.equal(visualSort.getState().phase, 'executing');
-assert.deepEqual(
-  types(visualSort.dispatch({ type: 'commandCompleted', commandId: sortId, outcome: 'presented' })),
-  ['restoreInteraction']
-);
-
 const disabled = createTableCommandApplication();
 assert.deepEqual(disabled.dispatch({
   type: 'request', command: 'delete-column', target, enabled: false
@@ -80,18 +60,8 @@ assert.deepEqual(
 );
 assert.equal(failed.getState().phase, 'idle');
 
-const flushFailed = createTableCommandApplication();
-flushFailed.dispatch({ type: 'request', command: 'preview-sort', target, enabled: true });
-const flushFailedId = flushFailed.getState().activeCommandId;
-assert.ok(flushFailedId);
-assert.deepEqual(
-  types(flushFailed.dispatch({ type: 'commandFailed', commandId: flushFailedId })),
-  ['restoreInteraction']
-);
-assert.equal(flushFailed.getState().phase, 'idle');
-
 const disposed = createTableCommandApplication();
-disposed.dispatch({ type: 'request', command: 'apply-sort', target, enabled: true });
+disposed.dispatch({ type: 'request', command: 'delete-column', target, enabled: true });
 const disposedId = disposed.getState().activeCommandId;
 assert.ok(disposedId);
 assert.deepEqual(disposed.dispatch({ type: 'dispose' }), []);

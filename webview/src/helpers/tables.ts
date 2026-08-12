@@ -102,8 +102,6 @@ interface DomRefs {
   sourceBodyRows: HTMLTableRowElement[];
   sourceBodyRowInputs: HTMLTextAreaElement[][];
   sourceBodyCellGrid: HTMLTableCellElement[][];
-  sortButton: HTMLButtonElement;
-  applySortButton: HTMLButtonElement;
   stickyChrome: HTMLDivElement;
   stickyHeaderViewport: HTMLDivElement;
   stickyTable: HTMLTableElement;
@@ -115,7 +113,6 @@ interface DomRefs {
     insertColumnLeft: HTMLButtonElement;
     insertColumnRight: HTMLButtonElement;
     deleteColumn: HTMLButtonElement;
-    sortColumn: HTMLButtonElement;
     alignColumnLeft: HTMLButtonElement;
     alignColumnCenter: HTMLButtonElement;
     alignColumnRight: HTMLButtonElement;
@@ -199,14 +196,6 @@ function isPendingTableCommitDetail(value: unknown): value is PendingTableCommit
   );
 }
 
-type TableSortDirection = 'asc' | 'desc';
-
-interface TableSortState {
-  column: number;
-  direction: TableSortDirection;
-  order: number[];
-}
-
 interface TableCellDiagnostics {
   from: number;
   to: number;
@@ -238,9 +227,8 @@ const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
 const tableDelimiterRegex = /^\s*\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
-const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-html-apply-sort-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
+const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
 const tableToolbarHeight = 24;
-const tableSortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 let nextTableCellEditSequence = 0;
 
 export function commitPendingTableEdits(view: EditorView): boolean {
@@ -576,28 +564,6 @@ const tableToolbarIcons: Record<string, TableToolbarIcon> = {
       'M6 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-14a1 1 0 0 1 1 -1',
       'M16 10l4 4',
       'M16 14l4 -4'
-    ]
-  },
-  sortNeutral: {
-    className: 'icon-tabler-arrows-sort',
-    paths: [
-      'M7 7l5 -5l5 5',
-      'M12 2v20',
-      'M17 17l-5 5l-5 -5'
-    ]
-  },
-  sortAsc: {
-    className: 'icon-tabler-arrow-up',
-    paths: [
-      'M12 19v-14',
-      'M5 12l7 -7l7 7'
-    ]
-  },
-  sortDesc: {
-    className: 'icon-tabler-arrow-down',
-    paths: [
-      'M12 5v14',
-      'M19 12l-7 7l-7 -7'
     ]
   },
   alignLeft: {
@@ -2068,51 +2034,6 @@ function serializeTableMarkdown(indent: string, headerCells: string[], alignment
   return [header, delimiter, ...dataRows].map((line) => `${indent}${line}`).join('\n');
 }
 
-function parseTableSortNumber(value: string): number | null {
-  const normalized = value.replace(/,/g, '').replace(/%$/, '').trim();
-  if (!/^[+-]?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
-    return null;
-  }
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parseTableSortDate(value: string): number | null {
-  const normalized = value.trim();
-  if (!/^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(normalized)) {
-    return null;
-  }
-  const parsed = Date.parse(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function compareTableSortValues(leftValue: string | undefined, rightValue: string | undefined, direction: TableSortDirection): number {
-  const left = `${leftValue ?? ''}`.trim();
-  const right = `${rightValue ?? ''}`.trim();
-  const leftEmpty = left.length === 0;
-  const rightEmpty = right.length === 0;
-  if (leftEmpty || rightEmpty) {
-    if (leftEmpty && rightEmpty) return 0;
-    return leftEmpty ? 1 : -1;
-  }
-
-  const leftNumber = parseTableSortNumber(left);
-  const rightNumber = parseTableSortNumber(right);
-  let comparison = 0;
-  if (leftNumber !== null && rightNumber !== null) {
-    comparison = leftNumber - rightNumber;
-  } else {
-    const leftDate = parseTableSortDate(left);
-    const rightDate = parseTableSortDate(right);
-    comparison = leftDate !== null && rightDate !== null
-      ? leftDate - rightDate
-      : tableSortCollator.compare(left, right);
-  }
-
-  if (comparison === 0) return 0;
-  return direction === 'desc' ? -comparison : comparison;
-}
-
 function parseTableLine(lineNo: number, from: number, to: number, text: string): ParsedTableLine {
   const { cells, pipes, segments } = parseTableRowCells(text, from);
   return { lineNo, from, to, text, cells, pipes, segments };
@@ -2194,7 +2115,6 @@ class HtmlTableWidget extends WidgetType {
   hasPendingCellEdits: boolean;
   pendingCellEdits: PendingCellEdit[];
   pendingCellSwitchCommit: boolean;
-  sortState: TableSortState | null;
   activeTarget: TableActionTarget;
   searchState: TableSearchState | null;
   stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory;
@@ -2224,7 +2144,6 @@ class HtmlTableWidget extends WidgetType {
     this.hasPendingCellEdits = false;
     this.pendingCellEdits = [];
     this.pendingCellSwitchCommit = false;
-    this.sortState = null;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
     this.searchState = null;
     this.tableCommandEnvironment = tableCommandEnvironment;
@@ -2291,9 +2210,7 @@ class HtmlTableWidget extends WidgetType {
   stickyControlsHeight(): number {
     const shell = this.domRefs?.shell;
     if (!shell || !shell.classList.contains('is-controls-sticky')) return 0;
-    const visible = shell.matches(':focus-within') ||
-      shell.classList.contains('is-interacting') ||
-      shell.classList.contains('has-active-sort');
+    const visible = shell.matches(':focus-within') || shell.classList.contains('is-interacting');
     return visible ? tableToolbarHeight : 0;
   }
 
@@ -2371,19 +2288,6 @@ class HtmlTableWidget extends WidgetType {
     return { headerCells, rows, alignments: this.tableData.alignments };
   }
 
-  sourceRowOrder(): number[] {
-    return this.tableData.rows.map((_row, index) => index);
-  }
-
-  sortedRowOrder(column: number, direction: TableSortDirection): number[] {
-    return this.sourceRowOrder().sort((leftIndex, rightIndex) => {
-      const leftRow = this.tableData.rows[leftIndex] ?? [];
-      const rightRow = this.tableData.rows[rightIndex] ?? [];
-      const comparison = compareTableSortValues(leftRow[column], rightRow[column], direction);
-      return comparison || leftIndex - rightIndex;
-    });
-  }
-
   updateBodyRowDatasets(rowInputs: HTMLTextAreaElement[][], cellGrid: HTMLTableCellElement[][]) {
     for (let row = 0; row < rowInputs.length; row += 1) {
       const tableRow = row + 1;
@@ -2398,77 +2302,6 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
-  setVisualRowOrder(order: number[]) {
-    if (!this.domRefs) return;
-    const {
-      tbody,
-      sourceBodyRows,
-      sourceBodyRowInputs,
-      sourceBodyCellGrid,
-      headerInputs,
-      cellGrid,
-      rowEntries
-    } = this.domRefs;
-    const normalizedOrder = order.filter((index) => sourceBodyRows[index]);
-    const nextRows = normalizedOrder.map((index) => sourceBodyRows[index]);
-    const nextRowInputs = normalizedOrder.map((index) => sourceBodyRowInputs[index]);
-    const nextCellGrid = normalizedOrder.map((index) => sourceBodyCellGrid[index]);
-
-    for (const row of nextRows) {
-      tbody.appendChild(row);
-    }
-
-    this.updateBodyRowDatasets(nextRowInputs, nextCellGrid);
-    this.domRefs.rowInputs = nextRowInputs;
-    this.domRefs.allRowInputs = [headerInputs, ...nextRowInputs];
-    this.domRefs.cellGrid = [cellGrid[0], ...nextCellGrid];
-    this.domRefs.rowEntries = [
-      rowEntries[0],
-      ...nextRows.map((row, index) => ({ row, inputs: nextRowInputs[index] }))
-    ];
-    this.clearSelection();
-    this.updateActionTargetStyles();
-    this.scheduleLayout({ resizeRows: true });
-  }
-
-  updateSortControls() {
-    if (!this.domRefs) return;
-    const { shell, sortButton, applySortButton } = this.domRefs;
-    const activeColumn = this.activeColumnIndex();
-    const sortState = this.sortState;
-    const active = activeColumn !== null && sortState?.column === activeColumn;
-    sortButton.classList.toggle('is-active', active);
-    sortButton.dataset.sortDirection = active ? sortState.direction : '';
-    this.setSortButtonIcon(sortButton, active ? sortState.direction : null);
-    sortButton.title = active
-      ? `Sorted ${sortState.direction === 'desc' ? 'descending' : 'ascending'}; click to toggle`
-      : 'Sort selected column descending';
-    sortButton.setAttribute('aria-label', sortButton.title);
-    sortButton.setAttribute('aria-pressed', active ? 'true' : 'false');
-    applySortButton.hidden = !this.sortState;
-    shell.classList.toggle('has-active-sort', Boolean(this.sortState));
-  }
-
-  setSortButtonIcon(button: HTMLButtonElement, direction: TableSortDirection | null) {
-    const icon = direction === 'asc'
-      ? tableToolbarIcons.sortAsc
-      : direction === 'desc'
-        ? tableToolbarIcons.sortDesc
-        : tableToolbarIcons.sortNeutral;
-    const svg = this.createToolbarIcon(icon);
-    svg.setAttribute('width', '14');
-    svg.setAttribute('height', '14');
-    svg.classList.add('meo-md-html-sort-icon');
-    button.replaceChildren(svg);
-  }
-
-  clearVisualSort() {
-    if (!this.sortState) return;
-    this.sortState = null;
-    this.setVisualRowOrder(this.sourceRowOrder());
-    this.updateSortControls();
-  }
-
   activeBodyRowIndex(): number | null {
     return this.bodyRowIndexFor(this.activeTarget.row);
   }
@@ -2476,12 +2309,8 @@ class HtmlTableWidget extends WidgetType {
   bodyRowIndexFor(row: number | null) {
     if (this.tableData.rows.length === 0) return null;
     if (row === null || row <= 0) return null;
-    const visualIndex = row - 1;
-    if (this.sortState?.order) {
-      const sourceIndex = this.sortState.order[visualIndex];
-      return Number.isInteger(sourceIndex) ? sourceIndex : null;
-    }
-    return visualIndex >= 0 && visualIndex < this.tableData.rows.length ? visualIndex : null;
+    const bodyIndex = row - 1;
+    return bodyIndex >= 0 && bodyIndex < this.tableData.rows.length ? bodyIndex : null;
   }
 
   activeColumnIndex(): number | null {
@@ -2508,7 +2337,6 @@ class HtmlTableWidget extends WidgetType {
     toolbarButtons.insertColumnLeft.disabled = !hasColumnTarget;
     toolbarButtons.insertColumnRight.disabled = !hasColumnTarget;
     toolbarButtons.deleteColumn.disabled = !hasColumnTarget || this.tableData.colCount <= 1;
-    toolbarButtons.sortColumn.disabled = !hasColumnTarget || this.tableData.rows.length <= 1;
     toolbarButtons.alignColumnLeft.disabled = !hasColumnTarget;
     toolbarButtons.alignColumnCenter.disabled = !hasColumnTarget;
     toolbarButtons.alignColumnRight.disabled = !hasColumnTarget;
@@ -2516,7 +2344,6 @@ class HtmlTableWidget extends WidgetType {
 
   updateActionTargetStyles() {
     this.updateToolbarState();
-    this.updateSortControls();
   }
 
   setActionTarget(target: TableActionTarget) {
@@ -2576,11 +2403,6 @@ class HtmlTableWidget extends WidgetType {
     this.requestTableCommand('delete-column', this.activeColumnIndex() !== null && this.tableData.colCount > 1);
   }
 
-  requestSortPreview(container: HTMLElement, column: number | null) {
-    void container;
-    this.requestTableCommand('preview-sort', this.tableData.rows.length > 1 && column !== null);
-  }
-
   requestColumnAlignment(container: HTMLElement, alignment: Exclude<TableAlignment, null>) {
     void container;
     const command = alignment === 'center' ? 'align-center' : alignment === 'right' ? 'align-right' : 'align-left';
@@ -2597,11 +2419,6 @@ class HtmlTableWidget extends WidgetType {
       if (rangeFrom === from && rangeTo === to) matches.push(value.columns);
     });
     return matches[0] ?? null;
-  }
-
-  requestApplySort(container: HTMLElement) {
-    void container;
-    this.requestTableCommand('apply-sort', Boolean(this.sortState));
   }
 
   parseCellCoords(rowText: string | undefined, colText: string | undefined): CellCoords | null {
@@ -2762,10 +2579,6 @@ class HtmlTableWidget extends WidgetType {
   }
 
   exitTableInteraction(container: HTMLElement) {
-    const shell = container?.closest?.('.meo-md-html-table-shell');
-    if (shell instanceof HTMLElement) {
-      shell.classList.remove('has-active-sort');
-    }
     this.setTableInteractionActive(container, false);
     this.clearSelection();
   }
@@ -2773,7 +2586,7 @@ class HtmlTableWidget extends WidgetType {
   transferTableInteraction(container: HTMLElement) {
     const shell = container?.closest?.('.meo-md-html-table-shell');
     if (shell instanceof HTMLElement) {
-      shell.classList.remove('has-active-sort', 'is-interacting');
+      shell.classList.remove('is-interacting');
     }
     this.updateStickyControls();
     this.stickyHeaderAdapter.invalidate();
@@ -3261,42 +3074,10 @@ class HtmlTableWidget extends WidgetType {
     };
   }
 
-  buildPendingEditTransactions(): readonly Transaction[] {
-    const pending = this.takePendingTransactionBuilders(this.domRefs?.wrap);
-    if (!pending) return [];
-    let state = pending.view.state;
-    const transactions: Transaction[] = [];
-    for (const builder of pending.builders.sort((left, right) => left.sequence - right.sequence)) {
-      const transaction = builder.build(state);
-      if (!transaction) continue;
-      transactions.push(transaction);
-      state = transaction.state;
-    }
-    return transactions;
-  }
-
   preserveTableCommandViewport(run: () => void) {
     const controller = this.view ? getViewportController(this.view) : null;
     if (controller) controller.preserveScrollPosition(run);
     else run();
-  }
-
-  presentTableCommand(
-    command: Extract<TableCommand, 'preview-sort'>,
-    target: TableCommandTarget
-  ): 'presented' | 'no-op' {
-    if (command !== 'preview-sort' || !this.domRefs || this.tableData.rows.length <= 1) return 'no-op';
-    const column = this.columnIndexFor(target.column);
-    if (column === null) return 'no-op';
-    const direction: TableSortDirection = this.sortState?.column === column && this.sortState.direction === 'desc'
-      ? 'asc'
-      : 'desc';
-    const order = this.sortedRowOrder(column, direction);
-    this.sortState = { column, direction, order };
-    this.setVisualRowOrder(order);
-    this.updateSortControls();
-    this.setTableInteractionActive(this.domRefs.wrap, true);
-    return 'presented';
   }
 
   buildAlignmentTransaction(
@@ -3308,7 +3089,6 @@ class HtmlTableWidget extends WidgetType {
     const column = this.columnIndexFor(target.column);
     if (!dom || !view || column === null) return { transaction: null, outcome: 'no-op' };
     if (!this.resolveCurrentTableRange(view, dom)) return { transaction: null, outcome: 'no-op' };
-    this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length, '').map((value) => value ?? null);
@@ -3320,7 +3100,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildTableCommandTransaction(
-    command: Exclude<TableCommand, 'preview-sort'>,
+    command: TableCommand,
     target: TableCommandTarget
   ): TableCommandTransactionPlan {
     const dom = this.domRefs?.wrap;
@@ -3348,9 +3128,8 @@ class HtmlTableWidget extends WidgetType {
         }
         const visualRows: number[] = [];
         for (let row = Math.max(1, selection.fromRow); row <= selection.toRow; row += 1) {
-          const visualIndex = row - 1;
-          const sourceIndex = this.sortState?.order?.[visualIndex] ?? visualIndex;
-          if (sourceIndex >= 0 && sourceIndex < this.tableData.rows.length) visualRows.push(sourceIndex);
+          const bodyIndex = row - 1;
+          if (bodyIndex >= 0 && bodyIndex < this.tableData.rows.length) visualRows.push(bodyIndex);
         }
         return this.buildRemoveRowsAt(dom, visualRows, column ?? 0);
       }
@@ -3382,20 +3161,6 @@ class HtmlTableWidget extends WidgetType {
         return this.buildAlignmentTransaction('center', target);
       case 'align-right':
         return this.buildAlignmentTransaction('right', target);
-      case 'apply-sort': {
-        if (!this.sortState) return { transaction: null, outcome: 'no-op' };
-        const plan = this.buildMatrixTransaction(this.readCellMatrix(), dom, null, {
-          preserveScrollPosition: true,
-          sourceRowOrder: this.sortState.order
-        });
-        return {
-          ...plan,
-          afterDispatch: () => {
-            this.sortState = null;
-            this.updateSortControls();
-          }
-        };
-      }
     }
   }
 
@@ -3662,7 +3427,6 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildAddRowAfter(dom: HTMLElement, rowIndex: number, focusColumn: number): TableCommandTransactionPlan {
-    this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(rowIndex + 1, 0), matrix.rows.length);
@@ -3681,7 +3445,6 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildAddRowBefore(dom: HTMLElement, rowIndex: number, focusColumn: number): TableCommandTransactionPlan {
-    this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(rowIndex, 0), matrix.rows.length);
@@ -3738,7 +3501,6 @@ class HtmlTableWidget extends WidgetType {
   buildRemoveRowsAt(dom: HTMLElement, rowIndexes: number[], focusColumn: number): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(rowIndexes)].sort((left, right) => right - left);
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
-    this.clearVisualSort();
     const matrix = this.readCellMatrix();
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.rows.length);
     if (!validIndexes.length) return { transaction: null, outcome: 'no-op' };
@@ -3838,7 +3600,6 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildAddColumnAfter(dom: HTMLElement, colIndex: number, focusRow: number): TableCommandTransactionPlan {
-    this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(colIndex + 1, 0), matrix.headerCells.length);
@@ -3855,7 +3616,6 @@ class HtmlTableWidget extends WidgetType {
   }
 
   buildAddColumnBefore(dom: HTMLElement, colIndex: number, focusRow: number): TableCommandTransactionPlan {
-    this.clearVisualSort();
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const insertAt = Math.min(Math.max(colIndex, 0), matrix.headerCells.length);
@@ -3874,7 +3634,6 @@ class HtmlTableWidget extends WidgetType {
   buildRemoveColumnsAt(dom: HTMLElement, columnIndexes: number[], focusRow: number): TableCommandTransactionPlan {
     const uniqueIndexes = [...new Set(columnIndexes)].sort((left, right) => right - left);
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
-    this.clearVisualSort();
     const matrix = this.readCellMatrix();
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.headerCells.length);
     if (!validIndexes.length) return { transaction: null, outcome: 'no-op' };
@@ -4057,7 +3816,6 @@ class HtmlTableWidget extends WidgetType {
           }
         });
       }
-      this.clearVisualSort();
       this.setCellEditingState(input, true);
       this.setTableInteractionActive(container, true);
       this.setSingleCellSelection({ row: rowIndex, col: colIndex });
@@ -4169,7 +3927,7 @@ class HtmlTableWidget extends WidgetType {
     if (!this.domRefs || !this.view) return;
     const { shell, table } = this.domRefs;
     const scroller = this.view.scrollDOM;
-    const controlsVisible = shell.classList.contains('is-interacting') || shell.classList.contains('has-active-sort');
+    const controlsVisible = shell.classList.contains('is-interacting');
     if (!controlsVisible) {
       shell.classList.remove('is-controls-sticky');
       shell.style.removeProperty('--meo-html-table-sticky-top');
@@ -4448,10 +4206,6 @@ class HtmlTableWidget extends WidgetType {
     const deleteColumn = this.createToolbarButton('Delete column', tableToolbarIcons.columnRemove, () => {
       this.requestDeleteColumn(container);
     });
-    const sortColumn = this.createToolbarButton('Sort selected column', tableToolbarIcons.sortNeutral, () => {
-      const column = this.activeColumnIndex();
-      if (column !== null) this.requestSortPreview(container, column);
-    });
     const alignColumnLeft = this.createToolbarButton('Align selected column left', tableToolbarIcons.alignLeft, () => {
       this.requestColumnAlignment(container, 'left');
     });
@@ -4477,8 +4231,7 @@ class HtmlTableWidget extends WidgetType {
       columnSeparator,
       alignColumnLeft,
       alignColumnCenter,
-      alignColumnRight,
-      sortColumn
+      alignColumnRight
     );
 
     return {
@@ -4490,7 +4243,6 @@ class HtmlTableWidget extends WidgetType {
         insertColumnLeft,
         insertColumnRight,
         deleteColumn,
-        sortColumn,
         alignColumnLeft,
         alignColumnCenter,
         alignColumnRight
@@ -4518,25 +4270,6 @@ class HtmlTableWidget extends WidgetType {
     }
     shell.dataset.meoRenderedBlockKind = 'table';
     const { toolbar, buttons: toolbarButtons } = this.createTableToolbar(wrap);
-
-    const applySortButton = document.createElement('button');
-    applySortButton.type = 'button';
-    applySortButton.tabIndex = -1;
-    applySortButton.className = 'meo-md-html-apply-sort-btn';
-    applySortButton.textContent = 'Apply Sort';
-    applySortButton.title = 'Apply current sort to markdown';
-    applySortButton.hidden = true;
-    applySortButton.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      this.requestApplySort(wrap);
-    });
-    applySortButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    toolbar.appendChild(applySortButton);
 
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
@@ -4680,8 +4413,6 @@ class HtmlTableWidget extends WidgetType {
       sourceBodyRows,
       sourceBodyRowInputs: bodyRowInputs,
       sourceBodyCellGrid,
-      sortButton: toolbarButtons.sortColumn,
-      applySortButton,
       stickyChrome,
       stickyHeaderViewport,
       stickyTable,
@@ -4693,9 +4424,7 @@ class HtmlTableWidget extends WidgetType {
       identityKey: JSON.stringify({ indent: this.tableData.indent, header: this.tableData.headerCells }),
       from: this.tableData.from ?? 0,
       isConnected: () => Boolean(this.domRefs?.shell.isConnected),
-      buildPendingEditTransactions: () => this.buildPendingEditTransactions(),
       buildAtomicCommandTransaction: ({ command, target }) => this.buildTableCommandTransaction(command, target),
-      presentCommand: ({ command, target }) => this.presentTableCommand(command, target),
       preserveViewport: (run) => this.preserveTableCommandViewport(run)
     };
     this.tableCommandTargetRegistration = this.tableCommandEnvironment.registerTarget(tableCommandTarget);
@@ -4759,7 +4488,6 @@ class HtmlTableWidget extends WidgetType {
     this.hasPendingCellEdits = false;
     this.pendingCellEdits = [];
     this.pendingCellSwitchCommit = false;
-    this.sortState = null;
   }
 }
 

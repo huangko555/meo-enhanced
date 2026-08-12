@@ -6,7 +6,7 @@ import type {
   TableCommandState
 } from '../application/tableCommand';
 
-export type TableCommandRuntimeOutcome = 'changed' | 'presented' | 'no-op' | 'failed';
+export type TableCommandRuntimeOutcome = 'changed' | 'no-op' | 'failed';
 
 export type TableCommandRuntime = {
   dispatch(input: TableCommandInput): Promise<TableCommandRuntimeOutcome | null>;
@@ -54,7 +54,6 @@ export function createTableCommandRuntime(
 
   const failureFor = (effect: TableCommandEffect): TableCommandInput | null => {
     switch (effect.type) {
-      case 'flushPendingEdits':
       case 'executeCommand':
         return { type: 'commandFailed', commandId: effect.commandId };
       case 'restoreInteraction':

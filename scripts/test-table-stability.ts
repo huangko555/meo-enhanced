@@ -647,25 +647,6 @@ async function main() {
       const indentedCodeRenderedAsTable = Boolean(document.querySelector('.meo-md-html-table'));
       indentedCodeEditor.destroy();
 
-      const sortedDeleteEditor = await create('| N    |\n| ---- |\n| 3    |\n| 1    |\n| 2    |');
-      dragSelectCells(
-        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
-        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
-        23
-      );
-      document.querySelector<HTMLButtonElement>('button[title="Sort selected column descending"]')!
-        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
-      dragSelectCells(
-        document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
-        document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="0"]')!,
-        24
-      );
-      document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
-        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
-      await waitFrames();
-      const sortedNoncontiguousDeleteSource = sortedDeleteEditor.view.state.doc.toString();
-      sortedDeleteEditor.destroy();
-
       const pendingEditDeleteEditor = await create('| A             |\n| ------------- |\n| keep          |\n| removed one   |\n| removed two   |\n| last          |');
       const retainedInput = document.querySelector<HTMLTextAreaElement>(
         'td[data-table-row="1"][data-table-col="0"] textarea'
@@ -1120,7 +1101,6 @@ async function main() {
         lastNavigationTarget,
         navigationSource,
         deleteRowsSource,
-        sortedNoncontiguousDeleteSource,
         pendingEditDeleteSource,
         editDiffSource,
         editDiffActiveCell,
@@ -1388,9 +1368,6 @@ async function main() {
     }
     if (result.deleteRowsSource.includes('r1a') || result.deleteRowsSource.includes('r2a') || !result.deleteRowsSource.includes('r3a')) {
       failures.push(`multi-cell row deletion used only one active row: ${JSON.stringify(result.deleteRowsSource)}`);
-    }
-    if (result.sortedNoncontiguousDeleteSource !== '| N    |\n| ---- |\n| 1    |') {
-      failures.push(`sorted noncontiguous EOF row delete produced ${JSON.stringify(result.sortedNoncontiguousDeleteSource)}`);
     }
     if (result.pendingEditDeleteSource !== '| A             |\n| ------------- |\n| changed          |\n| last          |') {
       failures.push(`row delete with a retained pending edit rewrote unrelated lines: ${JSON.stringify(result.pendingEditDeleteSource)}`);

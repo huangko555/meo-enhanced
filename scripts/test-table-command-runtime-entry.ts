@@ -61,8 +61,6 @@ const locateTables = (doc: string): LocatedTable[] => {
 };
 
 const pending = new Map<string, Map<string, string>>();
-const previewOrders = new Map<string, number[]>();
-const previewDirections = new Map<string, 'asc' | 'desc'>();
 let view: EditorView;
 let documentTransactions = 0;
 let restoreCount = 0;
@@ -101,24 +99,22 @@ const render = (): void => {
   for (const table of locateTables(view.state.doc.toString())) {
     const tableId = tableIdFor(table.index);
     const matrix = applyPending(tableId, table);
-    const order = previewOrders.get(tableId) ?? matrix.rows.map((_row, index) => index);
     const shell = document.createElement('section');
     shell.dataset.tableId = tableId;
     const tableElement = document.createElement('table');
     const body = document.createElement('tbody');
-    for (const [visualRow, sourceRow] of order.entries()) {
+    for (const [bodyIndex, row] of matrix.rows.entries()) {
       const tr = document.createElement('tr');
       for (let col = 0; col < matrix.header.length; col += 1) {
         const td = document.createElement('td');
         td.contentEditable = 'true';
-        td.dataset.row = String(sourceRow + 1);
+        td.dataset.row = String(bodyIndex + 1);
         td.dataset.col = String(col);
-        td.dataset.visualRow = String(visualRow + 1);
-        td.textContent = matrix.rows[sourceRow]?.[col] ?? '';
+        td.textContent = row[col] ?? '';
         td.addEventListener('input', () => {
           let edits = pending.get(tableId);
           if (!edits) pending.set(tableId, edits = new Map());
-          edits.set(`${sourceRow + 1}:${col}`, td.textContent ?? '');
+          edits.set(`${bodyIndex + 1}:${col}`, td.textContent ?? '');
         });
         tr.append(td);
       }
@@ -129,7 +125,7 @@ const render = (): void => {
     for (const command of [
       'insert-row-above', 'insert-row-below', 'delete-row',
       'insert-column-left', 'insert-column-right', 'delete-column',
-      'align-left', 'align-center', 'align-right', 'preview-sort', 'apply-sort'
+      'align-left', 'align-center', 'align-right'
     ] satisfies TableCommand[]) {
       const button = document.createElement('button');
       button.dataset.command = command;
@@ -140,8 +136,7 @@ const render = (): void => {
         const current = tableFor(tableId);
         const enabled = Boolean(current && !(
           (command === 'delete-row' && current.rows.length <= 1) ||
-          (command === 'delete-column' && current.header.length <= 1) ||
-          (command === 'apply-sort' && !previewOrders.has(tableId))
+          (command === 'delete-column' && current.header.length <= 1)
         ));
         void runtime.dispatch({
           type: 'request', command, target: { tableId, row: 1, column: 0, selection: null }, enabled
@@ -161,13 +156,6 @@ const targetFor = (tableId: string): TableCommandEditorTarget | null => {
     identityKey: tableId,
     from: current.from,
     isConnected: () => true,
-    buildPendingEditTransactions() {
-      const table = tableFor(tableId);
-      if (!table || !(pending.get(tableId)?.size)) return [];
-      const matrix = applyPending(tableId, table);
-      pending.delete(tableId);
-      return [view.state.update(replaceTable(table, matrix))];
-    },
     buildAtomicCommandTransaction(request) {
       const table = tableFor(tableId);
       if (!table) return { transaction: null, outcome: 'no-op' };
@@ -210,17 +198,7 @@ const targetFor = (tableId: string): TableCommandEditorTarget | null => {
         case 'align-left': matrix.alignments[col] = 'left'; break;
         case 'align-center': matrix.alignments[col] = 'center'; break;
         case 'align-right': matrix.alignments[col] = 'right'; break;
-        case 'apply-sort': {
-          const order = previewOrders.get(tableId);
-          if (!order) return { transaction: null, outcome: 'no-op' };
-          matrix.rows = order.map((index) => matrix.rows[index]);
-          previewOrders.delete(tableId);
-          previewDirections.delete(tableId);
-          break;
-        }
       }
-      previewOrders.delete(tableId);
-      previewDirections.delete(tableId);
       const transaction = replaceTable(table, matrix, effects);
       const restoreInteraction = () => {
         restoreCount += 1;
@@ -234,20 +212,6 @@ const targetFor = (tableId: string): TableCommandEditorTarget | null => {
       return serialize(matrix) === view.state.doc.sliceString(table.from, table.to)
         ? { transaction: null, outcome: 'no-op' }
         : { transaction, outcome: 'changed', restoreInteraction };
-    },
-    presentCommand(request) {
-      const table = tableFor(tableId);
-      if (!table || table.rows.length <= 1) return 'no-op';
-      const column = Math.max(0, Math.min(request.target.column ?? 0, table.header.length - 1));
-      const direction = previewDirections.get(tableId) === 'desc' ? 'asc' : 'desc';
-      const order = table.rows.map((_row, index) => index).sort((left, right) => {
-        const result = table.rows[left][column].localeCompare(table.rows[right][column], undefined, { numeric: true });
-        return direction === 'asc' ? result : -result;
-      });
-      previewDirections.set(tableId, direction);
-      previewOrders.set(tableId, order);
-      render();
-      return 'presented';
     },
     preserveViewport(run) { run(); }
   };
@@ -264,8 +228,6 @@ const runtime = createTableCommandRuntime(application, effectAdapter, () => { re
 const initialize = (text: string): void => {
   view?.destroy();
   pending.clear();
-  previewOrders.clear();
-  previewDirections.clear();
   documentTransactions = 0;
   restoreCount = 0;
   reportCount = 0;
@@ -289,8 +251,6 @@ const initialize = (text: string): void => {
 const externalPresent = (text: string): void => {
   runtime.externalDocumentPresented();
   pending.clear();
-  previewOrders.clear();
-  previewDirections.clear();
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
     effects: provenanceAdapter.effect({ type: 'externalDocumentPresented' }),
@@ -313,7 +273,6 @@ const externalPresent = (text: string): void => {
     reportCount,
     consumedCount,
     phase: runtime.getState().phase,
-    preview: Array.from(previewOrders.entries()),
     activeText: document.activeElement?.textContent ?? '',
     applicationStarts: 1,
     runtimeStarts: 1,

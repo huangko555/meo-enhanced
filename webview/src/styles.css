@@ -4573,85 +4573,6 @@ body.outline-resizing .preview-frame {
   background: var(--meo-active-line-bg);
 }
 
-.cm-editor .meo-md-html-apply-sort-btn {
-  position: relative;
-  isolation: isolate;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  appearance: none;
-  width: max-content;
-  box-sizing: border-box;
-  height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 0;
-  background-color: transparent !important;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.35;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.cm-editor .meo-md-html-apply-sort-btn::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: 2px;
-  border-radius: 5px;
-  background-color: rgb(31 111 235 / 55%);
-  pointer-events: none;
-}
-
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn {
-  color: #fff;
-}
-
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn::before {
-  background-color: #0969da;
-}
-
-.cm-editor .meo-md-html-apply-sort-btn[hidden] {
-  display: none;
-}
-
-.cm-editor .meo-md-html-apply-sort-btn:hover,
-.cm-editor .meo-md-html-apply-sort-btn:focus-visible {
-  outline: none;
-}
-
-.cm-editor .meo-md-html-apply-sort-btn:hover::before,
-.cm-editor .meo-md-html-apply-sort-btn:focus-visible::before {
-  background-color: rgb(31 111 235 / 66%);
-}
-
-.cm-editor .meo-md-html-apply-sort-btn:focus-visible::before {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 1px;
-}
-
-.cm-editor .meo-md-html-apply-sort-btn:active::before {
-  background-color: rgb(31 111 235 / 76%);
-}
-
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn:hover::before,
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn:focus-visible::before {
-  background-color: #0550ae;
-}
-
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn:active::before {
-  background-color: #033d8b;
-}
-
-.cm-editor .meo-md-html-sort-icon {
-  display: block;
-  flex: 0 0 auto;
-}
-
 .cm-editor .meo-md-html-table-toolbar {
   position: absolute;
   top: calc(-1 * var(--meo-html-table-toolbar-height));
@@ -4682,8 +4603,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-apply-sort-btn:acti
 }
 
 .cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-toolbar,
-.cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-toolbar,
-.cm-editor .meo-md-html-table-shell.has-active-sort .meo-md-html-table-toolbar {
+.cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-toolbar {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;

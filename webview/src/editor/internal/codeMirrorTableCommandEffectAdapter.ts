@@ -43,20 +43,6 @@ export function createCodeMirrorTableCommandEffectAdapter(
       return { type: 'commandCompleted', commandId: effect.commandId, outcome: 'no-op' };
     }
 
-    if (effect.pendingEdits === 'flushed') {
-      if (effect.command !== 'preview-sort') {
-        throw new Error(`Only preview-sort may execute after a separate pending-edit flush`);
-      }
-      return {
-        type: 'commandCompleted',
-        commandId: effect.commandId,
-        outcome: target.presentCommand({ command: effect.command, target: effect.target })
-      };
-    }
-
-    if (effect.command === 'preview-sort') {
-      throw new Error(`preview-sort must execute after pending edits are flushed`);
-    }
     const plan = target.buildAtomicCommandTransaction({ command: effect.command, target: effect.target });
     if (plan.restoreInteraction) pendingRestores.set(effect.commandId, plan.restoreInteraction);
     if (plan.transaction) {
@@ -73,17 +59,6 @@ export function createCodeMirrorTableCommandEffectAdapter(
       if (disposed) return immediate(null);
 
       switch (effect.type) {
-        case 'flushPendingEdits':
-          try {
-            const target = options.resolveTarget(effect.tableId);
-            const transactions = target?.buildPendingEditTransactions() ?? [];
-            if (transactions.length) target?.view.dispatch(transactions);
-            return immediate({ type: 'pendingEditsFlushed', commandId: effect.commandId });
-          } catch (error) {
-            options.reportError(error);
-            return immediate({ type: 'commandFailed', commandId: effect.commandId });
-          }
-
         case 'executeCommand':
           try {
             return immediate(complete(effect));

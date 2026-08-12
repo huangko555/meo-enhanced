@@ -56,29 +56,6 @@ async function main(): Promise<void> {
     assert.equal(await page.evaluate(() => (window as any).__tableCommandCandidate.redo()), true);
     assert.equal((await snapshot()).text, afterInsert.text);
 
-    await page.evaluate(() => {
-      const cell = document.querySelector<HTMLElement>('[data-table-id="table-1"] td[data-row="1"][data-col="0"]')!;
-      cell.textContent = '30';
-      cell.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '0' }));
-    });
-    const beforePreviewTransactions = (await snapshot()).transactions;
-    await click(1, 'preview-sort');
-    const previewed = await snapshot();
-    assert.equal(previewed.transactions, beforePreviewTransactions + 1, 'preview must flush pending edits once');
-    assert.ok(previewed.text.includes('| 30 | beta |'));
-    assert.equal(previewed.preview.length, 1);
-    const sourceBeforeApply = previewed.text;
-    await click(1, 'preview-sort');
-    const previewedAgain = await snapshot();
-    assert.equal(previewedAgain.transactions, previewed.transactions, 'continuous preview must not add history');
-    await click(1, 'apply-sort');
-    const applied = await snapshot();
-    assert.equal(applied.transactions, previewed.transactions + 1);
-    assert.equal(applied.preview.length, 0);
-    assert.notEqual(applied.text, sourceBeforeApply);
-    assert.equal(await page.evaluate(() => (window as any).__tableCommandCandidate.undo()), true);
-    assert.equal((await snapshot()).text, sourceBeforeApply);
-
     const beforeAlignment = (await snapshot()).text;
     await click(1, 'align-center');
     const afterAlignment = (await snapshot()).text;

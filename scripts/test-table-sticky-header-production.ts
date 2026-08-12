@@ -244,16 +244,9 @@ async function main() {
       const toolbarElement = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
       const toolbarButton = toolbarElement.querySelector<HTMLElement>('.meo-md-html-table-toolbar-btn')!;
       const deleteButton = toolbarElement.querySelector<HTMLElement>('[aria-label="Delete row"]')!;
-      const sortButton = toolbarElement.querySelector<HTMLButtonElement>('[aria-label^="Sort selected column"]')!;
-      sortButton.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
-      await waitFrames();
-      const applyButton = document.querySelector<HTMLElement>('.meo-md-html-apply-sort-btn')!;
       const toolbarSizeState = {
         toolbarHeight: toolbarElement.getBoundingClientRect().height,
         buttonHeight: toolbarButton.getBoundingClientRect().height,
-        applyHeight: applyButton.getBoundingClientRect().height,
-        applyVisible: getComputedStyle(applyButton).display !== 'none',
-        applyInsideToolbar: applyButton.parentElement === toolbarElement,
         usesSharedSurface: toolbarElement.classList.contains('meo-visual-surface'),
         usesSharedButtons: toolbarButton.classList.contains('meo-visual-control-btn'),
         toolbarBackground: getComputedStyle(toolbarElement).backgroundColor,
@@ -261,9 +254,7 @@ async function main() {
         toolbarOutlineStyle: getComputedStyle(toolbarElement).outlineStyle,
         toolbarOutlineWidth: getComputedStyle(toolbarElement).outlineWidth,
         deleteColor: getComputedStyle(deleteButton).color,
-        regularColor: getComputedStyle(toolbarButton).color,
-        applyBackground: getComputedStyle(applyButton, '::before').backgroundColor,
-        applyShadow: getComputedStyle(applyButton, '::before').boxShadow
+        regularColor: getComputedStyle(toolbarButton).color
       };
       toolbarEditor.destroy();
 
@@ -492,8 +483,6 @@ async function main() {
       failures.push(`sticky header disappeared while a tall trailing row remained: ${JSON.stringify(result.tallTailState)}`);
     }
     if (
-      !result.toolbarSizeState.applyVisible ||
-      !result.toolbarSizeState.applyInsideToolbar ||
       !result.toolbarSizeState.usesSharedSurface ||
       !result.toolbarSizeState.usesSharedButtons ||
       result.toolbarSizeState.toolbarBackground !== 'rgb(20, 24, 28)' ||
@@ -501,11 +490,8 @@ async function main() {
       result.toolbarSizeState.toolbarOutlineStyle !== 'solid' ||
       Number.parseFloat(result.toolbarSizeState.toolbarOutlineWidth) < 1 ||
       result.toolbarSizeState.deleteColor === result.toolbarSizeState.regularColor ||
-      result.toolbarSizeState.applyBackground === 'rgba(0, 0, 0, 0)' ||
-      result.toolbarSizeState.applyShadow !== 'none' ||
       result.toolbarSizeState.toolbarHeight < 24 ||
-      result.toolbarSizeState.buttonHeight < 20 ||
-      result.toolbarSizeState.applyHeight < 22
+      result.toolbarSizeState.buttonHeight < 20
     ) {
       failures.push(`table controls remained too small: ${JSON.stringify(result.toolbarSizeState)}`);
     }
