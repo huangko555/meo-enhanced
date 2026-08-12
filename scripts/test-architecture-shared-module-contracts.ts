@@ -160,6 +160,59 @@ try {
   assert.match(commitNavigationForLine.output, /ARCH014/);
   rmSync(join(fixtureRoot, 'webview', 'src', 'adapters', 'removedCommitNavigation.ts'));
 
+  const normalizedGitLineCapabilityFixtures = [
+    {
+      label: 'singular line-annotation setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.gitLineAnnotation.enabled': { type: 'boolean' }
+      } } } }, null, 2)
+    },
+    {
+      label: 'line-annotation source identifier',
+      path: 'webview/src/adapters/lineAnnotation.ts',
+      contents: 'export const lineAnnotationFromGit = true;\n'
+    },
+    {
+      label: 'plural line-annotations setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.gitLineAnnotations.enabled': { type: 'boolean' }
+      } } } }, null, 2)
+    },
+    {
+      label: 'Git line-history setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.gitLineHistory.enabled': { type: 'boolean' }
+      } } } }, null, 2)
+    },
+    {
+      label: 'Git line commit-info source identifier',
+      path: 'src/host/gitLineCommitInfo.ts',
+      contents: 'export const getGitLineCommitInfo = () => null;\n'
+    },
+    {
+      label: 'Git line-revision API',
+      path: 'src/host/gitLineRevision.ts',
+      contents: 'export const openGitLineRevision = () => undefined;\n'
+    }
+  ];
+  const missedNormalizedGitLineCapabilities: string[] = [];
+  for (const fixture of normalizedGitLineCapabilityFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (outcome.ok || !/ARCH014/.test(outcome.output)) {
+      missedNormalizedGitLineCapabilities.push(fixture.label);
+    }
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+  assert.deepEqual(
+    missedNormalizedGitLineCapabilities,
+    [],
+    'camelCase, plural and reordered Git line-capability aliases must all be rejected'
+  );
+
   write('webview/src/helpers/retainedGitDiff.ts', [
     "export const gitChangesGutter = 'source-live';",
     "export const diffBaselineMode = 'git-head';",
@@ -167,6 +220,10 @@ try {
     "export const blameHover = { hidden: true };",
     "export const gitRepository = { root: '/repo' };",
     "export const runGitCli = (args: string[]) => args;",
+    "export const annotateDocument = (text: string) => text;",
+    "export const commitInfo = { oid: 'abc' };",
+    "export const documentHistory: string[] = [];",
+    "export const retainedDiff = { modifiedLineColoring: true, gitAuthorInfo: true };",
     "export const openDocumentLink = (href: string) => href.startsWith('#') ? href : `#${href}`;",
     ''
   ].join('\n'));

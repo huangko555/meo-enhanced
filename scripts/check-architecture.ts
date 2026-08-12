@@ -616,13 +616,39 @@ const gitBlameScope = projectFilesForCapabilityGuard().filter((path) => (
   /^docs\/.*\.md$/i.test(path) ||
   /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
 ));
+const normalizeCapabilityWords = (text: string): string[] => text
+  .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+  .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+  .replace(/[^A-Za-z0-9]+/g, ' ')
+  .toLowerCase()
+  .trim()
+  .split(/\s+/)
+  .filter(Boolean);
+const hasRemovedGitLineCapability = (text: string): boolean => {
+  const words = normalizeCapabilityWords(text);
+  if (!words.includes('git')) return false;
+  if (words.includes('annotate')) return true;
+  for (let start = 0; start < words.length; start += 1) {
+    const window = words.slice(start, start + 5);
+    const wordSet = new Set(window);
+    if (!wordSet.has('git') || !wordSet.has('line')) continue;
+    if (wordSet.has('annotation') || wordSet.has('annotations') || wordSet.has('history')) {
+      return true;
+    }
+    if (window.some((word, index) => (
+      word === 'line' && (window[index + 1] === 'author' || window[index + 1] === 'authors')
+    ))) return true;
+    if (wordSet.has('commit') && wordSet.has('info')) return true;
+    const navigation = ['open', 'show', 'navigate', 'navigation', 'reveal', 'jump']
+      .some((word) => wordSet.has(word));
+    if (navigation && ['revision', 'commit', 'history'].some((word) => wordSet.has(word))) {
+      return true;
+    }
+  }
+  return false;
+};
 const removedGitBlameTokens = [
   /git[-_. ]?blame/i,
-  /\bgit(?:[-_. ]?annotat(?:e|ion)|.{0,48}\bline[-_. ]?annotat(?:e|ion))\b/i,
-  /\bline[-_. ]?annotat(?:e|ion)\b.{0,48}\bgit\b/i,
-  /\b(?:request|show|toggle|enable|disable|cache)[A-Za-z0-9_. -]{0,32}line[-_. ]?authors?\b/i,
-  /\bgit[A-Za-z0-9_. -]{0,32}line[-_. ]?authors?\b/i,
-  /\bline[-_. ]?authors?[A-Za-z0-9_. -]{0,32}(?:git|commits?|revisions?)\b/i,
   /\brequestLineAuthor[A-Za-z0-9_]*/,
   /\b(?:request|show|get|load|fetch)(?:Git)?CommitInfoForLine[A-Za-z0-9_]*/,
   /\b(?:show|request|open|toggle|enable|disable)LineHistory[A-Za-z0-9_]*/,
@@ -632,7 +658,10 @@ const removedGitBlameTokens = [
 for (const path of gitBlameScope) {
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    if (removedGitBlameTokens.some((pattern) => pattern.test(lines[index]))) {
+    if (
+      hasRemovedGitLineCapability(lines[index]) ||
+      removedGitBlameTokens.some((pattern) => pattern.test(lines[index]))
+    ) {
       failures.push(`ARCH014 已删除的 Git Blame 能力重新出现: ${path}:${index + 1}`);
     }
   }
