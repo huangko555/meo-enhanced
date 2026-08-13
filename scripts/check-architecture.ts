@@ -167,6 +167,56 @@ function sourceFileFor(source: Source): ts.SourceFile {
   return ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, true, scriptKind);
 }
 
+const applicationDomIdentifiers = new Set([
+  'Node', 'Element', 'HTMLElement', 'SVGElement', 'Document', 'Window',
+  'Event', 'UIEvent', 'MouseEvent', 'KeyboardEvent', 'InputEvent', 'ClipboardEvent',
+  'DragEvent', 'PointerEvent', 'FocusEvent', 'EventTarget',
+  'Storage', 'MutationObserver', 'MutationRecord', 'MutationCallback',
+  'ResizeObserver', 'ResizeObserverEntry', 'IntersectionObserver', 'IntersectionObserverEntry',
+  'CSSStyleDeclaration', 'DOMRect', 'DOMRectReadOnly', 'Selection', 'Range',
+  'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLButtonElement', 'HTMLDivElement',
+  'HTMLAnchorElement', 'HTMLImageElement', 'HTMLCanvasElement', 'CanvasRenderingContext2D',
+  'DataTransfer', 'FileReader',
+  'document', 'window', 'navigator', 'location', 'history', 'localStorage', 'sessionStorage',
+  'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'matchMedia'
+]);
+
+function applicationDomReference(source: Source): string | null {
+  const sourceFile = sourceFileFor(source);
+  const isNamedDeclaration = (node: ts.Identifier): boolean => {
+    const parent = node.parent;
+    return ('name' in parent && parent.name === node)
+      && (ts.isVariableDeclaration(parent) || ts.isParameter(parent) || ts.isBindingElement(parent)
+        || ts.isFunctionDeclaration(parent) || ts.isClassDeclaration(parent)
+        || ts.isInterfaceDeclaration(parent) || ts.isTypeAliasDeclaration(parent)
+        || ts.isEnumDeclaration(parent) || ts.isModuleDeclaration(parent)
+        || ts.isImportClause(parent) || ts.isImportSpecifier(parent) || ts.isNamespaceImport(parent)
+        || ts.isPropertySignature(parent) || ts.isPropertyDeclaration(parent)
+        || ts.isMethodSignature(parent) || ts.isMethodDeclaration(parent)
+        || ts.isPropertyAssignment(parent) || ts.isEnumMember(parent));
+  };
+  let forbidden: string | null = null;
+  const visit = (node: ts.Node): void => {
+    if (forbidden !== null) return;
+    if (ts.isPropertyAccessExpression(node)
+      && node.expression.getText(sourceFile) === 'globalThis'
+      && applicationDomIdentifiers.has(node.name.text)) {
+      forbidden = node.name.text;
+      return;
+    }
+    if (ts.isIdentifier(node)
+      && applicationDomIdentifiers.has(node.text)
+      && !isNamedDeclaration(node)
+      && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) {
+      forbidden = node.text;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return forbidden;
+}
+
 function targetLayer(path: string): string | null {
   const normalized = path.replaceAll('\\', '/');
   for (const root of config.targetRoots) {
@@ -207,7 +257,7 @@ const edges: Edge[] = [];
 const failures: string[] = [];
 const forbiddenFor: Record<string, RegExp[]> = {
   domain: [/^vscode$/, /^node:/, /^@codemirror\//, /^dom$/i],
-  application: [/^vscode$/, /^node:/, /^@codemirror\//, /^@shikijs\//, /^dom$/i],
+  application: [/^vscode$/, /^node:/, /^@codemirror\//, /^@shikijs\//, /^shiki(?:\/|$)/, /^dom$/i],
   protocol: [/^vscode$/, /^node:/, /^@codemirror\//, /^dom$/i],
   foundation: [/^vscode$/, /^node:/, /^@codemirror\//, /^dom$/i],
 };
@@ -228,18 +278,7 @@ for (const source of sources) {
 
 for (const source of sources) {
   if (targetLayer(source.path) !== 'application') continue;
-  const sourceFile = sourceFileFor(source);
-  let forbiddenDomIdentifier: string | null = null;
-  const visit = (node: ts.Node): void => {
-    if (forbiddenDomIdentifier !== null) return;
-    if (ts.isIdentifier(node)
-      && (node.text === 'document' || node.text === 'window' || node.text === 'CSSStyleDeclaration')) {
-      forbiddenDomIdentifier = node.text;
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
+  const forbiddenDomIdentifier = applicationDomReference(source);
   if (forbiddenDomIdentifier !== null) {
     failures.push(`ARCH004 application 禁止依赖 DOM 标识符 ${forbiddenDomIdentifier}: ${source.path}`);
   }
@@ -2006,7 +2045,6 @@ const removedCustomThemeTokens = [
   /meoEnhanced\.codeBlocks\.useVscodeTheme\b/,
   /meoEnhanced\.theme(?:\b|["'])/,
   /CODE_BLOCKS_VSCODE_THEME_SETTING_KEY/,
-  /\b(?:Custom|Imported)Theme(?:s|State|Storage|QuickPickItem)?\b/i,
   /\b(?:get|reset|serialize|validate|parse|delete|upsert)(?:Custom|Imported)?Theme(?:Settings|Payload|Jsonc|File|ById)?\b/,
   /\bThemeSettings(?:Dto|Payload)?\b/,
   /\bThemeFontsDto\b/,
@@ -2016,11 +2054,14 @@ const removedCustomThemeTokens = [
   /\bpreviewAppearanceChanged\b/,
   /\bpreviewSourceColoringChanged\b/,
   /\bthemeJsonc\b/i,
-  /(?:custom|imported)[-_. ]+themes?\b/i,
   /\b(?:select|import|export|delete|reset|manage|edit)(?:ing|ed)?\b.{0,32}\bMEO[-_. ]+themes?\b/i,
   /\bMEO[-_. ]+themes?\b.{0,32}\b(?:select|import|export|delete|reset|manage|edit)(?:ing|ed)?\b/i
 ];
 const normalizeCapabilityAlias = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+const hasProductionCustomThemeOwnerAlias = (value: string): boolean => {
+  const normalized = normalizeCapabilityAlias(value);
+  return normalized.includes('customtheme') || normalized.includes('importedtheme');
+};
 const hasRemovedCustomThemeAlias = (value: string): boolean => {
   const normalized = normalizeCapabilityAlias(value);
   if (normalized.includes('codeblocksusevscodetheme')) return true;
@@ -2040,8 +2081,11 @@ const hasRemovedCustomThemeAlias = (value: string): boolean => {
   return hasMeoThemeCommand || hasCustomThemeOwner;
 };
 for (const path of customThemeCapabilityScope) {
-  if (/^(?:src|webview\/src)\//.test(path)
-    && (removedCustomThemeTokens.some((pattern) => pattern.test(path)) || hasRemovedCustomThemeAlias(path))) {
+  const isProductionPath = /^(?:src|webview\/src)\//.test(path);
+  if (isProductionPath
+    && (hasProductionCustomThemeOwnerAlias(path)
+      || removedCustomThemeTokens.some((pattern) => pattern.test(path))
+      || hasRemovedCustomThemeAlias(path))) {
     failures.push(`ARCH020 已删除的自定义主题系统或旧代码主题开关重新出现: ${path}:1`);
     continue;
   }
@@ -2049,7 +2093,9 @@ for (const path of customThemeCapabilityScope) {
   for (let index = 0; index < lines.length; index += 1) {
     if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(lines[index])) continue;
     const line = lines[index].replace(/^\s*\|\|\s*'(?:theme|shikiCodeBlocks|codeTheme)'\s+in\s+value\s*$/, '');
-    if (removedCustomThemeTokens.some((pattern) => pattern.test(line)) || hasRemovedCustomThemeAlias(line)) {
+    if ((isProductionPath && hasProductionCustomThemeOwnerAlias(line))
+      || removedCustomThemeTokens.some((pattern) => pattern.test(line))
+      || hasRemovedCustomThemeAlias(line)) {
       failures.push(`ARCH020 已删除的自定义主题系统或旧代码主题开关重新出现: ${path}:${index + 1}`);
     }
   }

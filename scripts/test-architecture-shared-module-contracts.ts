@@ -157,14 +157,38 @@ try {
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: ['webview/src/application'], knownLegacyTestFailures: []
   }));
-  write('webview/src/application/palette.ts', "import fallback from '@shikijs/themes/github-light';\nexport const palette = fallback;\n");
-  const applicationShikiDependency = runCheck();
-  assert.equal(applicationShikiDependency.ok, false, 'Application must reject concrete Shiki dependencies');
-  assert.match(applicationShikiDependency.output, /ARCH004/);
-  write('webview/src/application/palette.ts', 'export const apply = () => document.documentElement.style;\n');
-  const applicationDomDependency = runCheck();
-  assert.equal(applicationDomDependency.ok, false, 'Application must reject DOM globals');
-  assert.match(applicationDomDependency.output, /ARCH004/);
+  const applicationExternalDependencyFixtures = [
+    "import fallback from '@shikijs/themes/github-light';\nexport const palette = fallback;\n",
+    "import 'shiki';\nexport const palette = true;\n",
+    "import { createHighlighter } from 'shiki';\nexport const palette = createHighlighter;\n",
+    'export type Surface = HTMLElement;\n',
+    'export type OwnerDocument = Document;\n',
+    'export type SurfaceElement = Element;\n',
+    'export const readStyle = (value: unknown) => getComputedStyle(value as Element);\n',
+    'export const readStorage = () => localStorage.getItem("palette");\n',
+    'export const observe = (callback: MutationCallback) => new MutationObserver(callback);\n'
+  ] as const;
+  for (const contents of applicationExternalDependencyFixtures) {
+    write('webview/src/application/palette.ts', contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, false, `Application external dependency must be rejected: ${contents}`);
+    assert.match(outcome.output, /ARCH004/);
+  }
+  write('webview/src/application/palette.ts', [
+    'export type SerializablePalette = { document: string; elementColor: string; storageKey: string };',
+    'export const describeDocument = (palette: SerializablePalette) => palette.document;',
+    ''
+  ].join('\n'));
+  const applicationDomainWords = runCheck();
+  assert.equal(applicationDomainWords.ok, true, `ordinary serializable/domain words must pass: ${applicationDomainWords.output}`);
+  write('webview/src/adapters/palette.ts', [
+    "import 'shiki';",
+    'export const attach = (element: HTMLElement) => getComputedStyle(element);',
+    ''
+  ].join('\n'));
+  const adapterExternalDependencies = runCheck();
+  assert.equal(adapterExternalDependencies.ok, true, `Adapter Shiki/DOM dependencies must pass: ${adapterExternalDependencies.output}`);
+  rmSync(join(fixtureRoot, 'webview/src/adapters/palette.ts'));
   rmSync(join(fixtureRoot, 'webview/src/application/palette.ts'));
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: [],
@@ -2142,6 +2166,25 @@ try {
   assert.match(stagedOrdinaryThemeProse, /Architecture checks passed/);
   writeFileSync(join(stagedRoot, 'README.md'), 'No custom appearance capability here.\n');
   execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  mkdirSync(join(stagedRoot, 'src', 'host'), { recursive: true });
+  writeFileSync(join(stagedRoot, 'src', 'host', 'themeOwners.ts'), 'export const ImportedThemeRegistry = new Map();\n');
+  execFileSync('git', ['add', '--', 'src/host/themeOwners.ts'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'src', 'host', 'themeOwners.ts'), 'export const currentVscodeTheme = {};\n');
+  const stagedProductionThemeOwner = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedProductionThemeOwner.ok, false, 'staged ARCH020 must reject production custom-theme owners from the index');
+  assert.match(stagedProductionThemeOwner.output, /ARCH020/);
+  execFileSync('git', ['rm', '--cached', '--force', '--quiet', '--', 'src/host/themeOwners.ts'], { cwd: stagedRoot });
+  rmSync(join(stagedRoot, 'src', 'host', 'themeOwners.ts'));
 
   writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
   execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
@@ -2465,6 +2508,15 @@ try {
     ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.codeBlocks.useVscodeTheme': { type: 'boolean' } } } } })],
     ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.codeBlocks-use-vscode-theme': { type: 'boolean' } } } } })],
     ['src/host/customThemeStorage.ts', 'export const customThemes = [];\n'],
+    ['src/host/customThemePalette.ts', 'export const palette = {};\n'],
+    ['src/host/custom-theme-repository.ts', 'export const repository = {};\n'],
+    ['src/host/themeOwners.ts', 'export const ImportedThemeRegistry = new Map();\n'],
+    ['src/host/themeOwners.ts', 'export const customThemeService = {};\n'],
+    ['src/host/themeOwners.ts', 'export const customThemeController = {};\n'],
+    ['src/host/themeOwners.ts', 'export const customThemeConfig = {};\n'],
+    ['src/host/themeOwners.ts', 'export const customThemeModel = {};\n'],
+    ['src/host/themeOwners.ts', 'export const customThemeSchema = {};\n'],
+    ['src/host/themeOwners.ts', 'export const customThemeJson = {};\n'],
     ['src/protocol/editorState.ts', 'export type ThemeSettingsDto = { colors: Record<string, string> };\n'],
     ['src/protocol/editorState.ts', 'export type BuiltInVisualBaselineDto = { colors: Record<string, string> };\n'],
     ['src/protocol/editorEvents.ts', "export const event = { type: 'themeChanged' };\n"],
@@ -2504,6 +2556,15 @@ try {
   assert.equal(pairedCustomThemeCommand.ok, false, 'custom-theme command must still be rejected beside allowed prose');
   assert.match(pairedCustomThemeCommand.output, /ARCH020/);
   rmSync(join(fixtureRoot, 'README.md'));
+
+  write('docs/history.md', 'The historical custom theme palette was removed before this release.\n');
+  const customThemeHistory = runCheck();
+  assert.equal(customThemeHistory.ok, true, `ordinary custom-theme history in docs must pass: ${customThemeHistory.output}`);
+  rmSync(join(fixtureRoot, 'docs/history.md'));
+  write('CHANGELOG.md', '- Removed the historical ImportedThemeRegistry implementation.\n');
+  const customThemeChangelog = runCheck();
+  assert.equal(customThemeChangelog.ok, true, `CHANGELOG history must remain allowed: ${customThemeChangelog.output}`);
+  rmSync(join(fixtureRoot, 'CHANGELOG.md'));
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });
 }
