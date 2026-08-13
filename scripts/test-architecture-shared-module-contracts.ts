@@ -674,6 +674,11 @@ try {
       contents: "let field = settings;\nif (enabled) {\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n"
     },
     {
+      label: 'while-loop non-DOM state restored before spellcheck use',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field = settings;\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n"
+    },
+    {
       label: 'finally DOM reassignment before outer spellcheck use',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = settings;\ntry { run(); } finally { field = document.createElement('input'); }\nfield.spellcheck = true;\n"
@@ -686,7 +691,12 @@ try {
     {
       label: 'for incrementor DOM reassignment and spellcheck use share a path',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
-      contents: "let field = settings;\nfor (; ready; (field = document.createElement('input'), field.spellcheck = true)) { break; }\n"
+      contents: "let field = settings;\nfor (; ready; (field = settings, field = document.createElement('input'), field.spellcheck = true)) { break; }\n"
+    },
+    {
+      label: 'nested-loop DOM recovery only kills its own carried state',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  field = settings;\n  while (innerReady) {\n    field = document.createElement('input');\n    field.spellcheck = true;\n    break;\n  }\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n"
     },
     {
       label: 'for-of iteration binding resets before each loop body',

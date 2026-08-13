@@ -1026,18 +1026,19 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       binding.events.every((event) => event.dom);
     const capturedMutableDom = binding.kind !== 'const' && binding.events.length > 0 &&
       binding.events.every((event) => event.dom);
-    const loopCarriedNonDomByContext = new Map<Scope, Set<ts.Node>>();
+    const loopEntryEventsByContext = new Map<Scope, Map<ts.Node, Map<string, BindingEvent>>>();
     for (const event of binding.events) {
-      if (event.dom) continue;
       for (const frame of event.controlPath) {
         if (frame.branch !== 'loop') continue;
         if (frame.owner === binding.iterationResetLoop) continue;
-        let loopOwners = loopCarriedNonDomByContext.get(event.context);
-        if (!loopOwners) {
-          loopOwners = new Set();
-          loopCarriedNonDomByContext.set(event.context, loopOwners);
+        let loopEvents = loopEntryEventsByContext.get(event.context);
+        if (!loopEvents) {
+          loopEvents = new Map();
+          loopEntryEventsByContext.set(event.context, loopEvents);
         }
-        loopOwners.add(frame.owner);
+        const latestByPath = loopEvents.get(frame.owner) ?? new Map<string, BindingEvent>();
+        latestByPath.set(controlPathKey(event.controlPath), event);
+        loopEvents.set(frame.owner, latestByPath);
       }
     }
     const flowByContext = new Map<Scope, {
@@ -1067,9 +1068,17 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       }
       const possibleNonDomAfterDefinite = flow?.latestPossibleNonDom &&
         (!definiteEvent || flow.latestPossibleNonDom.position > definiteEvent.position);
-      const loopCarriedNonDom = use.controlPath.some((frame) => (
-        frame.branch === 'loop' && loopCarriedNonDomByContext.get(use.context)?.has(frame.owner)
-      ));
+      const loopCarriedNonDom = use.controlPath.some((frame) => {
+        if (frame.branch !== 'loop') return false;
+        const latestByPath = loopEntryEventsByContext.get(use.context)?.get(frame.owner);
+        let lastEntryEvent: BindingEvent | undefined;
+        for (const key of controlPathKeys(use.controlPath)) {
+          const event = latestByPath?.get(key);
+          if (!event) continue;
+          if (!lastEntryEvent || event.position > lastEntryEvent.position) lastEntryEvent = event;
+        }
+        return lastEntryEvent?.dom === false;
+      });
       const sameContextDom = definiteEvent?.dom === true &&
         !possibleNonDomAfterDefinite &&
         !loopCarriedNonDom;
