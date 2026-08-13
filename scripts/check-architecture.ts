@@ -798,7 +798,6 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   const scopeByNode = new Map<ts.Node, Scope>();
   const bindings = new Set<Binding>();
   const continueExitsByContext = new Map<Scope, Map<ts.Node, ContinueExit[]>>();
-  const finallyBlocksWithBypassingAbruptCompletion = new Set<ts.Block>();
 
   const isDomType = (node: ts.TypeNode | undefined): boolean => {
     if (!node) return false;
@@ -1093,17 +1092,6 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     controlPathMetadataCache.set(controlPath, metadata);
     return metadata;
   };
-  const abruptSkipsFinallyTail = (
-    node: ts.ReturnStatement | ts.ThrowStatement | ts.BreakStatement | ts.ContinueStatement,
-    block: ts.Block,
-    context: Scope
-  ): boolean => {
-    const blockScope = scopeByNode.get(block);
-    if (!blockScope || executionContext(blockScope) !== context) return false;
-    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) return true;
-    const destination = ts.isContinueStatement(node) ? continueTargetLoop(node) : breakTarget(node);
-    return destination !== null && syntaxContains(destination, block);
-  };
   const collectUsesAndAssignments = (
     node: ts.Node,
     inheritedScope: Scope,
@@ -1114,24 +1102,6 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     const controlPath = controlPathForNode(node, inheritedPath);
     controlPathByNode.set(node, controlPath);
     const pathMetadata = controlPathMetadata(controlPath);
-    if (
-      ts.isReturnStatement(node) ||
-      ts.isThrowStatement(node) ||
-      ts.isBreakStatement(node) ||
-      ts.isContinueStatement(node)
-    ) {
-      for (let parent = node.parent; parent; parent = parent.parent) {
-        if (
-          ts.isBlock(parent) &&
-          ts.isTryStatement(parent.parent) &&
-          parent.parent.finallyBlock === parent &&
-          abruptSkipsFinallyTail(node, parent, context)
-        ) {
-          finallyBlocksWithBypassingAbruptCompletion.add(parent);
-          break;
-        }
-      }
-    }
     if (ts.isContinueStatement(node)) {
       const target = continueTargetLoop(node);
       if (target) {
@@ -1220,12 +1190,24 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     positions.push(position);
     positionsByPath.set(path, positions);
   };
-  const continueBlockingPosition = (exit: ContinueExit): number => exit.finallyBlocks.reduce(
-    (position, block) => finallyBlocksWithBypassingAbruptCompletion.has(block)
-      ? position
-      : Math.max(position, block.end),
-    exit.position
-  );
+  const firstPositionAfter = (positions: readonly number[] | undefined, after: number): number => {
+    if (!positions) return Number.POSITIVE_INFINITY;
+    let low = 0;
+    let high = positions.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (positions[middle] <= after) low = middle + 1;
+      else high = middle;
+    }
+    return positions[low] ?? Number.POSITIVE_INFINITY;
+  };
+  const continueBlockingPosition = (
+    exit: ContinueExit,
+    targetContinuePositions: readonly number[]
+  ): number => exit.finallyBlocks.reduce((position, block) => {
+    const sameTargetCompletion = firstPositionAfter(targetContinuePositions, block.getStart(sourceFile));
+    return sameTargetCompletion < block.end ? sameTargetCompletion : Math.max(position, block.end);
+  }, exit.position);
   const continueUnreachableRanges = (
     exit: ContinueExit,
     target: ts.Node
@@ -1254,6 +1236,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   for (const [context, exitsByOwner] of continueExitsByContext) {
     const summariesByOwner = new Map<ts.Node, ContinueOwnerSummary>();
     for (const [owner, exits] of exitsByOwner) {
+      const targetContinuePositions = exits.map((exit) => exit.position).sort((left, right) => left - right);
       const summary: ContinueOwnerSummary = {
         blockerPositionsByAncestorPath: new Map(),
         unreachableRangesByPath: new Map(),
@@ -1264,7 +1247,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           summary.noBackedgePathKeys.add(exit.dominancePathKey);
           continue;
         }
-        const blockingPosition = continueBlockingPosition(exit);
+        const blockingPosition = continueBlockingPosition(exit, targetContinuePositions);
         for (const prefix of exit.pathPrefixes) {
           addPosition(summary.blockerPositionsByAncestorPath, prefix, blockingPosition);
         }
@@ -1291,17 +1274,6 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     }
     continueSummariesByContext.set(context, summariesByOwner);
   }
-  const firstPositionAfter = (positions: readonly number[] | undefined, after: number): number => {
-    if (!positions) return Number.POSITIVE_INFINITY;
-    let low = 0;
-    let high = positions.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (positions[middle] <= after) low = middle + 1;
-      else high = middle;
-    }
-    return positions[low] ?? Number.POSITIVE_INFINITY;
-  };
   const positionIsInRanges = (
     ranges: readonly NativeSpellcheckRange[] | undefined,
     position: number

@@ -44,10 +44,11 @@ try {
   assert.match(architectureSource, /positions\.sort\(\(left, right\) => left - right\)/);
   assert.match(architectureSource, /const firstPositionAfter =/);
   assert.match(architectureSource, /const positionIsInRanges =/);
+  assert.match(architectureSource, /targetContinuePositions/);
   assert.doesNotMatch(
     architectureSource,
-    /dominancePositionsByPath/,
-    'ARCH015 must not reuse blocker positions as post-continue dominance ranges'
+    /dominancePositionsByPath|finallyBlocksWithBypassingAbruptCompletion/,
+    'ARCH015 must not reuse blocker positions or a block-level abrupt flag for completion paths'
   );
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: [],
@@ -833,6 +834,31 @@ try {
       label: 'continue exit includes mandatory finally DOM recovery',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    field = settings;\n    continue;\n  } finally {\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
+      label: 'conditional return path does not block backedge DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally {\n      if (abort) return;\n      field = document.createElement('input');\n    }\n  }\n}\n"
+    },
+    {
+      label: 'conditional throw path does not block backedge DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    if (abort) throw new Error('stop');\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
+      label: 'caught throw does not block backedge DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    try { throw new Error('caught'); } catch {}\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
+      label: 'conditional outer continue does not block inner backedge DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field = document.createElement('input');\n  while (innerReady) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally {\n      if (abort) continue outer;\n      field = document.createElement('input');\n    }\n  }\n}\n"
+    },
+    {
+      label: 'conditional target break does not block target backedge DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field = document.createElement('input');\n  while (innerReady) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally {\n      if (abort) break;\n      field = document.createElement('input');\n    }\n  }\n}\n"
     },
     {
       label: 'inner break does not skip later mandatory finally DOM recovery',
