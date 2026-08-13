@@ -189,6 +189,43 @@ try {
       label: 'Vim capability in public docs',
       path: 'README.md',
       contents: 'Enable Vi keybindings in Source mode.\n'
+    },
+    {
+      label: 'pure vimEnabled state alias',
+      path: 'src/host/editorPreferences.ts',
+      contents: 'export const vimEnabled = true;\n'
+    },
+    {
+      label: 'pure viEnabled state alias',
+      path: 'webview/src/editor/preferences.ts',
+      contents: 'export const viEnabled = true;\n'
+    },
+    {
+      label: 'pure VimState alias',
+      path: 'src/protocol/editorState.ts',
+      contents: 'export type VimState = { active: boolean };\n'
+    },
+    {
+      label: 'pure VimConfiguration alias',
+      path: 'src/host/editorConfiguration.ts',
+      contents: 'export type VimConfiguration = { active: boolean };\n'
+    },
+    {
+      label: 'dotted Vim active setting alias',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.vim.active': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab Vim behavior state alias',
+      path: 'webview/src/editor/preferences.ts',
+      contents: "export const setting = { 'vim-behavior': 'active' };\n"
+    },
+    {
+      label: 'path-only Vim state entry',
+      path: 'webview/src/adapters/vimState.ts',
+      contents: 'export const enabled = true;\n'
     }
   ];
   const missedVimCapabilities: string[] = [];

@@ -1724,13 +1724,17 @@ const hasRemovedVimCapability = (text: string): boolean => {
     const wordSet = new Set(window);
     if (!wordSet.has('vim') && !wordSet.has('vi')) continue;
     const hasCapabilityNoun = window.some((word) => (
-      /^(?:emulation|integration|keybinding|keybindings|leader|map|mapping|mappings|mode|panel)$/.test(word)
+      /^(?:active|behavior|config|configuration|disabled|emulation|enabled|integration|keybinding|keybindings|leader|map|mapping|mappings|mode|panel|setting|settings|state)$/.test(word)
     ));
     if (hasCapabilityNoun) return true;
   }
   return false;
 };
 for (const path of vimCapabilityScope) {
+  if (hasRemovedVimCapability(path)) {
+    failures.push(`ARCH016 已删除的 Vim 模式或编辑器集成能力重新出现: ${path}:1`);
+    continue;
+  }
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     if (hasRemovedVimCapability(lines[index])) {
