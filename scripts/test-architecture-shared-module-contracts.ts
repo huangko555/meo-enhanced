@@ -618,7 +618,10 @@ try {
     'export declare const mermaidColonSyntax: string;',
     'export abstract class MermaidColonSyntax { abstract label(): string }',
     'export default function mermaidColonSyntax() { return "Node: ready"; }',
-    'export default class MermaidColonSyntax {}'
+    'export default class MermaidColonSyntax {}',
+    'export { mermaidColonSyntax };',
+    'export { mermaidColonSyntax as standardMermaidColonSyntax };',
+    'export = mermaidColonSyntax;'
   ];
   const rejectedMermaidColonSourceDeclarations: string[] = [];
   for (const [index, declaration] of retainedMermaidColonSourceDeclarations.entries()) {

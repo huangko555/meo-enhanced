@@ -1841,15 +1841,20 @@ const removedMermaidColonTokens = [
 const withoutSourceExportModifiers = (text: string, path: string): string => {
   if (!/^(?:src|webview\/src)\//.test(path) || !/\bexport\b/.test(text)) return text;
   const sourceFile = sourceFileFor({ path, text });
-  const exportModifiers = sourceFile.statements.flatMap((statement) => (
-    ts.canHaveModifiers(statement)
-      ? (ts.getModifiers(statement) ?? []).filter((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
-      : []
-  ));
+  const exportKeywords = sourceFile.statements.flatMap((statement) => {
+    const exportModifier = ts.canHaveModifiers(statement)
+      ? (ts.getModifiers(statement) ?? []).find((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+      : undefined;
+    if (exportModifier) return [exportModifier];
+    if (!ts.isExportDeclaration(statement) && !ts.isExportAssignment(statement)) return [];
+    const exportKeyword = statement.getChildren(sourceFile)
+      .find((child) => child.kind === ts.SyntaxKind.ExportKeyword);
+    return exportKeyword ? [exportKeyword] : [];
+  });
   let result = text;
-  for (const modifier of exportModifiers.toReversed()) {
-    const from = modifier.getStart(sourceFile);
-    result = `${result.slice(0, from)}${' '.repeat(modifier.getEnd() - from)}${result.slice(modifier.getEnd())}`;
+  for (const keyword of exportKeywords.toReversed()) {
+    const from = keyword.getStart(sourceFile);
+    result = `${result.slice(0, from)}${' '.repeat(keyword.getEnd() - from)}${result.slice(keyword.getEnd())}`;
   }
   return result;
 };
