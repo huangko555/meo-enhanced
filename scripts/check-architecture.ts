@@ -779,6 +779,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   type Binding = {
     kind: BindingKind;
     declarationContext: Scope | null;
+    iterationResetLoop: ts.ForInStatement | ts.ForOfStatement | null;
     readonly events: BindingEvent[];
     readonly uses: SpellcheckUse[];
   };
@@ -850,7 +851,13 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     const bindingScope = kind === 'var' ? nearestFunctionScope(scope) : scope;
     const existing = bindingScope.bindings.get(name);
     if (existing) return existing;
-    const binding: Binding = { kind, declarationContext: null, events: [], uses: [] };
+    const binding: Binding = {
+      kind,
+      declarationContext: null,
+      iterationResetLoop: null,
+      events: [],
+      uses: []
+    };
     bindingScope.bindings.set(name, binding);
     bindings.add(binding);
     return binding;
@@ -873,13 +880,31 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       const kind = ts.isParameter(node) || ts.isCatchClause(node.parent)
         ? 'parameter'
         : variableKind(node);
-      bind(scope, node.name.text, kind);
+      const binding = bind(scope, node.name.text, kind);
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isVariableDeclarationList(node.parent) &&
+        (ts.isForInStatement(node.parent.parent) || ts.isForOfStatement(node.parent.parent)) &&
+        node.parent.parent.initializer === node.parent
+      ) {
+        binding.iterationResetLoop = node.parent.parent;
+      }
     }
     ts.forEachChild(node, (child) => collectBindings(child, scope));
   };
   collectBindings(sourceFile, null);
 
   const executionContext = (scope: Scope): Scope => nearestFunctionScope(scope);
+  const statementDefinitelyTerminates = (node: ts.Statement): boolean => {
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) return true;
+    if (ts.isBlock(node)) {
+      const last = node.statements.at(-1);
+      return last ? statementDefinitelyTerminates(last) : false;
+    }
+    return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
+      statementDefinitelyTerminates(node.thenStatement) &&
+      statementDefinitelyTerminates(node.elseStatement!);
+  };
   const controlPathForNode = (
     node: ts.Node,
     inheritedPath: readonly ControlFrame[]
@@ -888,23 +913,43 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     if (!parent) return inheritedPath;
     let frame: ControlFrame | undefined;
     if (ts.isIfStatement(parent)) {
-      if (node === parent.thenStatement) frame = { owner: parent, branch: 'then' };
-      else if (node === parent.elseStatement) frame = { owner: parent, branch: 'else' };
+      if (
+        node === parent.thenStatement &&
+        (!parent.elseStatement || !statementDefinitelyTerminates(parent.elseStatement))
+      ) {
+        frame = { owner: parent, branch: 'then' };
+      } else if (
+        node === parent.elseStatement &&
+        !statementDefinitelyTerminates(parent.thenStatement)
+      ) {
+        frame = { owner: parent, branch: 'else' };
+      }
     } else if (
       (ts.isForStatement(parent) || ts.isForInStatement(parent) || ts.isForOfStatement(parent) ||
         ts.isWhileStatement(parent) || ts.isDoStatement(parent)) &&
       node === parent.statement
     ) {
       frame = { owner: parent, branch: 'loop' };
+    } else if (ts.isForStatement(parent) && node === parent.incrementor) {
+      frame = { owner: parent, branch: 'loop' };
     } else if (ts.isCaseClause(node) || ts.isDefaultClause(node)) {
       frame = { owner: node.parent.parent, branch: `case:${node.pos}` };
     } else if (ts.isTryStatement(parent)) {
       if (node === parent.tryBlock) frame = { owner: parent, branch: 'try' };
       else if (node === parent.catchClause) frame = { owner: parent, branch: 'catch' };
-      else if (node === parent.finallyBlock) frame = { owner: parent, branch: 'finally' };
     } else if (ts.isConditionalExpression(parent)) {
       if (node === parent.whenTrue) frame = { owner: parent, branch: 'then' };
       else if (node === parent.whenFalse) frame = { owner: parent, branch: 'else' };
+    } else if (
+      ts.isBinaryExpression(parent) &&
+      node === parent.right &&
+      (
+        parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+        parent.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+        parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+      )
+    ) {
+      frame = { owner: parent, branch: 'short-circuit' };
     }
     return frame ? [...inheritedPath, frame] : inheritedPath;
   };
@@ -981,6 +1026,20 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       binding.events.every((event) => event.dom);
     const capturedMutableDom = binding.kind !== 'const' && binding.events.length > 0 &&
       binding.events.every((event) => event.dom);
+    const loopCarriedNonDomByContext = new Map<Scope, Set<ts.Node>>();
+    for (const event of binding.events) {
+      if (event.dom) continue;
+      for (const frame of event.controlPath) {
+        if (frame.branch !== 'loop') continue;
+        if (frame.owner === binding.iterationResetLoop) continue;
+        let loopOwners = loopCarriedNonDomByContext.get(event.context);
+        if (!loopOwners) {
+          loopOwners = new Set();
+          loopCarriedNonDomByContext.set(event.context, loopOwners);
+        }
+        loopOwners.add(frame.owner);
+      }
+    }
     const flowByContext = new Map<Scope, {
       readonly latestByPath: Map<string, BindingEvent>;
       latestPossibleNonDom: BindingEvent | null;
@@ -1008,7 +1067,12 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       }
       const possibleNonDomAfterDefinite = flow?.latestPossibleNonDom &&
         (!definiteEvent || flow.latestPossibleNonDom.position > definiteEvent.position);
-      const sameContextDom = definiteEvent?.dom === true && !possibleNonDomAfterDefinite;
+      const loopCarriedNonDom = use.controlPath.some((frame) => (
+        frame.branch === 'loop' && loopCarriedNonDomByContext.get(use.context)?.has(frame.owner)
+      ));
+      const sameContextDom = definiteEvent?.dom === true &&
+        !possibleNonDomAfterDefinite &&
+        !loopCarriedNonDom;
       const captured = use.context !== binding.declarationContext;
       const allowed = sameContextDom || (captured && (stableConstDom || capturedMutableDom));
       if (allowed) ranges.push(use.range);

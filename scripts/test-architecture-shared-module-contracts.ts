@@ -356,6 +356,54 @@ try {
       expectedLine: 3
     },
     {
+      label: 'for incrementor DOM assignment before outer spellcheck use',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = settings;\nfor (; ready; field = document.createElement('input')) {}\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'logical-and RHS DOM assignment before outer spellcheck use',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = settings;\nready && (field = document.createElement('input'));\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'logical-or RHS DOM assignment before outer spellcheck use',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = settings;\nready || (field = document.createElement('input'));\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'nullish-coalescing RHS DOM assignment before outer spellcheck use',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = settings;\nvalue ?? (field = document.createElement('input'));\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'short-circuit non-DOM assignment remains a possible outer state',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nready && (field = settings);\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'while-loop carried non-DOM receiver state',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (enabled) {\n  field.spellcheck = true;\n  field = settings;\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'do-while-loop carried non-DOM receiver state',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\ndo {\n  field.spellcheck = true;\n  field = settings;\n} while (enabled);\n",
+      expectedLine: 3
+    },
+    {
+      label: 'for-loop carried non-DOM receiver state',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nfor (; enabled;) {\n  field.spellcheck = true;\n  field = settings;\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'for-loop DOM binding must not pollute outer non-DOM receiver',
       path: 'webview/src/helpers/loopNativeSpellcheck.ts',
       contents: "const field = settings;\nfor (let field = document.createElement('input'); ready;) {\n  field.spellcheck = false;\n  break;\n}\nfield.spellcheck = true;\n",
@@ -624,6 +672,26 @@ try {
       label: 'same-branch DOM reassignment before spellcheck use',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = settings;\nif (enabled) {\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n"
+    },
+    {
+      label: 'finally DOM reassignment before outer spellcheck use',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = settings;\ntry { run(); } finally { field = document.createElement('input'); }\nfield.spellcheck = true;\n"
+    },
+    {
+      label: 'early-return join requires DOM branch before spellcheck use',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = settings;\nif (enabled) field = document.createElement('input'); else return;\nfield.spellcheck = true;\n"
+    },
+    {
+      label: 'for incrementor DOM reassignment and spellcheck use share a path',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = settings;\nfor (; ready; (field = document.createElement('input'), field.spellcheck = true)) { break; }\n"
+    },
+    {
+      label: 'for-of iteration binding resets before each loop body',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "for (let field: HTMLInputElement of fields) {\n  field.spellcheck = true;\n  field = settings;\n}\n"
     },
     {
       label: 'catch parameter does not pollute outer DOM receiver',
