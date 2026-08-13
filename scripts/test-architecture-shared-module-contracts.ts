@@ -256,7 +256,12 @@ try {
     rejectedAllowedDistantGitAnnotateFixtures: []
   }, 'Git line aliases must be rejected without rejecting distant annotate/Git diff text');
 
-  const removedSpellDiagnosticFixtures = [
+  const removedSpellDiagnosticFixtures: Array<{
+    label: string;
+    path: string;
+    contents: string;
+    expectedLine?: number;
+  }> = [
     {
       label: 'built-in spell-check setting',
       path: 'package.json',
@@ -307,6 +312,29 @@ try {
       label: 'arbitrary receiver spellcheck state owner',
       path: 'src/shared/spellcheckState.ts',
       contents: 'widget.spellcheck = true;\n'
+    },
+    {
+      label: 'shadowed DOM receiver spellcheck state owner',
+      path: 'webview/src/helpers/shadowedNativeSpellcheck.ts',
+      contents: "const field = document.createElement('input');\nfield.spellcheck = true;\nfunction update(field: { spellcheck: boolean }) {\n  field.spellcheck = false;\n}\n",
+      expectedLine: 4
+    },
+    {
+      label: 'standalone spellcheck after unclosed tag candidate',
+      path: 'webview/src/helpers/unclosedNativeSpellcheck.ts',
+      contents: "const fragment = '<input';\nconst spellcheck = true;\nconst comparison = value > 0;\n"
+    },
+    {
+      label: 'standalone spellcheck after whitespace-terminated unclosed tag candidate',
+      path: 'webview/src/helpers/unclosedNativeSpellcheck.ts',
+      contents: "const fragment = '<input ';\nconst spellcheck = true;\nconst comparison = 'value > zero';\n",
+      expectedLine: 2
+    },
+    {
+      label: 'emoji-prefixed standalone spellcheck state owner',
+      path: 'webview/src/helpers/emojiSpellcheckState.ts',
+      contents: "const marker = '😀';\nconst spellcheck = true;\n",
+      expectedLine: 2
     },
     {
       label: 'TypeScript function generic spellcheck state',
@@ -420,7 +448,11 @@ try {
   for (const fixture of removedSpellDiagnosticFixtures) {
     write(fixture.path, fixture.contents);
     const outcome = runCheck();
-    if (outcome.ok || !/ARCH015/.test(outcome.output)) {
+    if (
+      outcome.ok ||
+      !/ARCH015/.test(outcome.output) ||
+      (fixture.expectedLine !== undefined && !outcome.output.includes(`${fixture.path}:${fixture.expectedLine}`))
+    ) {
       missedSpellDiagnosticCapabilities.push(fixture.label);
     }
     rmSync(join(fixtureRoot, ...fixture.path.split('/')));
@@ -448,6 +480,21 @@ try {
       contents: "export const markup = `<input spellcheck='true' title='a > b'>`;\n"
     },
     {
+      label: 'HTML spellcheck after an unclosed tag candidate',
+      path: 'webview/src/helpers/nativeSpellcheckMarkup.ts',
+      contents: "const fragment = '<input';\nconst markup = '<textarea spellcheck=true>';\n"
+    },
+    {
+      label: 'HTML spellcheck after a whitespace-terminated unclosed tag candidate',
+      path: 'webview/src/helpers/nativeSpellcheckMarkup.ts',
+      contents: "const fragment = '<input ';\nconst markup = '<textarea spellcheck=true>';\n"
+    },
+    {
+      label: 'emoji-prefixed HTML native spellcheck attribute',
+      path: 'webview/src/helpers/nativeSpellcheckMarkup.ts',
+      contents: "const marker = '😀';\nconst markup = '<textarea spellcheck=false>';\n"
+    },
+    {
       label: 'DOM native spellcheck properties',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "const input = document.createElement('input');\ninput.spellcheck = true;\nconst textarea = document.createElement('textarea');\ntextarea.spellcheck = false;\nlet element: HTMLElement;\nelement.spellcheck = true;\n"
@@ -466,6 +513,16 @@ try {
       label: 'DOM generic and cast spellcheck receivers',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "const selected = document.querySelector<HTMLInputElement>('#field');\nselected!.spellcheck = true;\nconst area = node as HTMLTextAreaElement;\narea.spellcheck = false;\n"
+    },
+    {
+      label: 'emoji-prefixed DOM native spellcheck property',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const marker = '😀';\nconst field = document.createElement('input');\nfield.spellcheck = true;\n"
+    },
+    {
+      label: 'multiple DOM native spellcheck receivers',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const first = document.createElement('input');\nconst second = document.createElement('textarea');\nlet third: HTMLElement;\nfirst.spellcheck = true;\nsecond.spellcheck = false;\nthird.spellcheck = true;\n"
     },
     {
       label: 'DOM native spellcheck setAttribute calls',
@@ -508,6 +565,15 @@ try {
     rmSync(join(fixtureRoot, ...fixture.path.split('/')));
   }
 
+  const architectureCheckerSource = readFileSync(
+    join(fixtureRoot, 'scripts', 'check-architecture.ts'),
+    'utf8'
+  );
+  const perReceiverFullFileScan = /for \(const receiver of [^)]+\)[\s\S]{0,500}?\.replace\(/.test(
+    architectureCheckerSource
+  );
+  const usesCodePointMask = /\[\.\.\.text\]/.test(architectureCheckerSource);
+
   write('webview/src/helpers/retainedDiagnosticsAndSelection.ts', [
     "export const platformDiagnostics = 'VS Code diagnostics';",
     "export const compilerErrorsVisible = true;",
@@ -518,10 +584,14 @@ try {
   assert.deepEqual({
     missedSpellDiagnosticCapabilities,
     rejectedAllowedSpellDiagnosticFixtures,
+    perReceiverFullFileScan,
+    usesCodePointMask,
     retainedDiagnosticsAndSelection: retainedDiagnosticsAndSelection.ok ? '' : retainedDiagnosticsAndSelection.output
   }, {
     missedSpellDiagnosticCapabilities: [],
     rejectedAllowedSpellDiagnosticFixtures: [],
+    perReceiverFullFileScan: false,
+    usesCodePointMask: false,
     retainedDiagnosticsAndSelection: ''
   }, 'MEO spell/diagnostic suggestion aliases must be rejected without rejecting platform diagnostics or selection commands');
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedDiagnosticsAndSelection.ts'));

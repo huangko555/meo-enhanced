@@ -686,74 +686,169 @@ const spellDiagnosticScope = projectFilesForCapabilityGuard().filter((path) => (
   /^docs\/.*\.md$/i.test(path) ||
   /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
 ));
-const stripNativeSpellcheckAttributes = (text: string): string => {
-  const chars = [...text];
+type NativeSpellcheckRange = { readonly start: number; readonly end: number };
+
+const nativeHtmlSpellcheckRanges = (text: string): NativeSpellcheckRange[] => {
+  const ranges: NativeSpellcheckRange[] = [];
+  const attributePattern = /spellcheck\s*=\s*(?:(["'])(?:true|false)\1|(?:true|false))(?=\s|\/?>)/iy;
   for (let index = 0; index < text.length; index += 1) {
     if (
       text[index] !== '<' ||
       !/[A-Za-z]/.test(text[index + 1] ?? '') ||
       /[A-Za-z0-9_$]/.test(text[index - 1] ?? '')
     ) continue;
-    let cursor = index + 2;
-    while (/[A-Za-z0-9:-]/.test(text[cursor] ?? '')) cursor += 1;
-    if (!/[\s/>]/.test(text[cursor] ?? '')) continue;
+
+    let nameEnd = index + 2;
+    while (/[A-Za-z0-9:-]/.test(text[nameEnd] ?? '')) nameEnd += 1;
+    if (!/[\s/>]/.test(text[nameEnd] ?? '')) continue;
+
     let quote = '';
-    let end = cursor;
-    for (; end < text.length; end += 1) {
-      const char = text[end];
+    let tagEnd = -1;
+    let cursor = nameEnd;
+    for (; cursor < text.length; cursor += 1) {
+      const char = text[cursor];
       if (quote) {
         if (char === quote) quote = '';
-      } else if (char === '"' || char === "'") {
-        quote = char;
-      } else if (char === '>') {
+        continue;
+      }
+      if (char === '>') {
+        tagEnd = cursor;
         break;
       }
+      if (char === '<' || char === '`') break;
+      if (char === '"' || char === "'") {
+        let previous = cursor - 1;
+        while (/\s/.test(text[previous] ?? '')) previous -= 1;
+        if (text[previous] !== '=') break;
+        quote = char;
+      }
     }
-    if (end >= text.length) break;
+    if (tagEnd < 0) {
+      if (text[cursor] === '<') index = cursor - 1;
+      continue;
+    }
 
-    let attribute = cursor;
     quote = '';
-    while (attribute < end) {
+    for (let attribute = nameEnd; attribute < tagEnd; attribute += 1) {
       const char = text[attribute];
       if (quote) {
         if (char === quote) quote = '';
-        attribute += 1;
         continue;
       }
       if (char === '"' || char === "'") {
         quote = char;
-        attribute += 1;
         continue;
       }
-      const match = /^spellcheck\s*=\s*(?:(["'])(?:true|false)\1|(?:true|false))(?=\s|\/?>|$)/i.exec(
-        text.slice(attribute, end + 1)
-      );
-      if (match && (attribute === cursor || /[\s/]/.test(text[attribute - 1] ?? ''))) {
-        for (let mask = attribute; mask < attribute + match[0].length; mask += 1) {
-          if (chars[mask] !== '\r' && chars[mask] !== '\n') chars[mask] = ' ';
-        }
-        attribute += match[0].length;
-        continue;
+      if (attribute !== nameEnd && !/[\s/]/.test(text[attribute - 1] ?? '')) continue;
+      attributePattern.lastIndex = attribute;
+      const match = attributePattern.exec(text);
+      if (match && attributePattern.lastIndex <= tagEnd) {
+        ranges.push({ start: attribute, end: attributePattern.lastIndex });
+        attribute = attributePattern.lastIndex - 1;
       }
-      attribute += 1;
     }
-    index = end;
+    index = tagEnd;
   }
+  return ranges;
+};
 
-  let result = chars.join('');
-  const domReceivers = new Set<string>();
-  const recordReceiver = (pattern: RegExp): void => {
-    for (const match of text.matchAll(pattern)) domReceivers.add(match[1]);
+const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheckRange[] => {
+  if (!/\.tsx?$/i.test(path)) return [];
+  const sourceFile = sourceFileFor({ path, text });
+  const ranges: NativeSpellcheckRange[] = [];
+  const scopes: Array<Map<string, boolean>> = [];
+  const domTypes = new Set(['HTMLInputElement', 'HTMLTextAreaElement', 'HTMLElement']);
+
+  const isDomType = (node: ts.TypeNode | undefined): boolean => {
+    if (!node) return false;
+    if (ts.isTypeReferenceNode(node)) return domTypes.has(node.typeName.getText(sourceFile));
+    return false;
   };
-  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.createElement\(\s*["'][A-Za-z][\w-]*["']\s*\)/g);
-  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*:\s*(?:HTMLInputElement|HTMLTextAreaElement|HTMLElement)\b/g);
-  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.querySelector<\s*(?:HTMLInputElement|HTMLTextAreaElement|HTMLElement)\s*>/g);
-  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=.*?\bas\s+(?:HTMLInputElement|HTMLTextAreaElement|HTMLElement)\b/g);
-  for (const receiver of domReceivers) {
-    const escaped = receiver.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    result = result.replace(new RegExp(`\\b${escaped}!?\\.spellcheck\\s*=\\s*(?:true|false)\\b`, 'g'), '');
+  const unwrapExpression = (node: ts.Expression): ts.Expression => {
+    let current = node;
+    while (ts.isParenthesizedExpression(current) || ts.isNonNullExpression(current)) {
+      current = current.expression;
+    }
+    return current;
+  };
+  const isDomInitializer = (node: ts.Expression | undefined): boolean => {
+    if (!node) return false;
+    const expression = unwrapExpression(node);
+    if (ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
+      return isDomType(expression.type);
+    }
+    if (!ts.isCallExpression(expression) || !ts.isPropertyAccessExpression(expression.expression)) {
+      return false;
+    }
+    const method = expression.expression;
+    if (
+      method.expression.getText(sourceFile) === 'document' &&
+      method.name.text === 'createElement' &&
+      expression.arguments.length > 0 &&
+      ts.isStringLiteralLike(expression.arguments[0])
+    ) {
+      return /^(?:input|textarea)$/i.test(expression.arguments[0].text);
+    }
+    return method.name.text === 'querySelector' && isDomType(expression.typeArguments?.[0]);
+  };
+  const isLexicalScope = (node: ts.Node): boolean => (
+    ts.isSourceFile(node) || ts.isFunctionLike(node) || ts.isBlock(node) || ts.isCatchClause(node)
+  );
+  const evidenceForDeclaration = (node: ts.VariableDeclaration | ts.ParameterDeclaration): boolean => (
+    isDomType(node.type) || isDomInitializer(node.initializer)
+  );
+  const receiverIsDom = (name: string): boolean => {
+    for (let index = scopes.length - 1; index >= 0; index -= 1) {
+      const evidence = scopes[index].get(name);
+      if (evidence !== undefined) return evidence;
+    }
+    return false;
+  };
+  const visit = (node: ts.Node): void => {
+    const entersScope = isLexicalScope(node);
+    if (entersScope) scopes.push(new Map());
+    if (
+      (ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
+      ts.isIdentifier(node.name)
+    ) {
+      scopes.at(-1)?.set(node.name.text, evidenceForDeclaration(node));
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      (node.right.kind === ts.SyntaxKind.TrueKeyword || node.right.kind === ts.SyntaxKind.FalseKeyword)
+    ) {
+      const left = unwrapExpression(node.left);
+      if (ts.isPropertyAccessExpression(left) && left.name.text.toLowerCase() === 'spellcheck') {
+        const receiver = unwrapExpression(left.expression);
+        if (ts.isIdentifier(receiver) && receiverIsDom(receiver.text)) {
+          ranges.push({ start: node.getStart(sourceFile), end: node.end });
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+    if (entersScope) scopes.pop();
+  };
+  visit(sourceFile);
+  return ranges;
+};
+
+const stripNativeSpellcheckSyntax = (text: string, path: string): string => {
+  const ranges = [
+    ...nativeHtmlSpellcheckRanges(text),
+    ...nativeDomSpellcheckRanges(text, path)
+  ];
+  const setAttributePattern = /\.setAttribute\(\s*(["'])spellcheck\1\s*,\s*(?:(["'])(?:true|false)\2|(?:true|false))\s*\)/gi;
+  for (const match of text.matchAll(setAttributePattern)) {
+    ranges.push({ start: match.index, end: match.index + match[0].length });
   }
-  return result.replace(/\.setAttribute\(\s*["']spellcheck["']\s*,\s*["'](?:true|false)["']\s*\)/gi, '');
+  const chars = text.split('');
+  for (const range of ranges) {
+    for (let index = range.start; index < range.end; index += 1) {
+      if (chars[index] !== '\r' && chars[index] !== '\n') chars[index] = ' ';
+    }
+  }
+  return chars.join('');
 };
 const hasRemovedSpellDiagnosticCapability = (text: string, path: string): boolean => {
   if (/cspell|proofread(?:er|ing)?/i.test(text)) return true;
@@ -789,7 +884,7 @@ const hasRemovedSpellDiagnosticCapability = (text: string, path: string): boolea
   return false;
 };
 for (const path of spellDiagnosticScope) {
-  const lines = stripNativeSpellcheckAttributes(readTrackedProjectFile(path)).split(/\r?\n/);
+  const lines = stripNativeSpellcheckSyntax(readTrackedProjectFile(path), path).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     if (hasRemovedSpellDiagnosticCapability(lines[index], path)) {
       failures.push(`ARCH015 已删除的 MEO 拼写检查或诊断建议能力重新出现: ${path}:${index + 1}`);
