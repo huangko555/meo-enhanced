@@ -317,6 +317,92 @@ try {
   assert.equal(ordinaryVimPackageDescription.ok, true, `ordinary package prose must remain allowed: ${ordinaryVimPackageDescription.output}`);
   rmSync(join(fixtureRoot, 'package.json'));
 
+  const removedEmojiShortcodeFixtures = [
+    {
+      label: 'markdown-it Emoji dependency',
+      path: 'package.json',
+      contents: JSON.stringify({ dependencies: { 'markdown-it-emoji': '^3.0.0' } })
+    },
+    {
+      label: 'Emoji shortcode lock entry',
+      path: 'bun.lock',
+      contents: '"markdown-it-emoji": ["markdown-it-emoji@3.0.0", ""]\n'
+    },
+    {
+      label: 'Live Emoji shortcode conversion',
+      path: 'webview/src/liveEmojiPresentation.ts',
+      contents: 'export const collectEmojiShortcodeRanges = () => [];\n'
+    },
+    {
+      label: 'table Emoji shortcode conversion',
+      path: 'webview/src/tableInlinePresentation.ts',
+      contents: 'export const tableEmojiShortcode = { render: true };\n'
+    },
+    {
+      label: 'export Emoji plugin alias',
+      path: 'src/export/emojiPresentation.ts',
+      contents: 'export const renderEmojiShortcode = (value: string) => value;\n'
+    },
+    {
+      label: 'Emoji selector UI',
+      path: 'webview/src/editor/emojiControls.ts',
+      contents: 'export const openEmojiPicker = () => undefined;\n'
+    },
+    {
+      label: 'Emoji setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.emojiShortcodes.enabled': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'Emoji Protocol command',
+      path: 'src/protocol/emojiSelection.ts',
+      contents: "export type EmojiCommand = { type: 'selectEmojiPicker' };\n"
+    },
+    {
+      label: 'Emoji Host selector',
+      path: 'src/host/emojiSelector.ts',
+      contents: 'export const showEmojiPalette = () => undefined;\n'
+    },
+    {
+      label: 'Emoji conversion docs',
+      path: 'README.md',
+      contents: 'Convert Emoji shortcodes such as :smile: into symbols.\n'
+    },
+    {
+      label: 'Emoji selector docs',
+      path: 'docs/editor-toolbar.md',
+      contents: 'Open the Emoji picker to insert a symbol.\n'
+    }
+  ];
+  const missedEmojiShortcodeCapabilities: string[] = [];
+  for (const fixture of removedEmojiShortcodeFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (outcome.ok || !/ARCH017/.test(outcome.output)) {
+      missedEmojiShortcodeCapabilities.push(fixture.label);
+    }
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+  assert.deepEqual(
+    missedEmojiShortcodeCapabilities,
+    [],
+    `ARCH017 missed removed Emoji shortcode capabilities: ${missedEmojiShortcodeCapabilities.join(', ')}`
+  );
+
+  write('webview/src/editor/ordinaryEmojiText.ts', [
+    "import emojiRegex from 'emoji-regex';",
+    "export const ordinaryText = 'Unicode emoji stays ordinary text: 😄';",
+    'export const findUnicodeEmoji = (text: string) => emojiRegex().exec(text);',
+    ''
+  ].join('\n'));
+  write('docs/unicode-text.md', 'Unicode emoji 😄 and the word emoji are ordinary document text.\n');
+  const retainedEmojiText = runCheck();
+  assert.equal(retainedEmojiText.ok, true, `Unicode emoji and emoji-regex must remain allowed: ${retainedEmojiText.output}`);
+  rmSync(join(fixtureRoot, 'webview', 'src', 'editor', 'ordinaryEmojiText.ts'));
+  rmSync(join(fixtureRoot, 'docs', 'unicode-text.md'));
+
   write('README.md', 'Show Git line authors and open the matching revision.\n');
   const gitLineAuthorDocs = runCheck();
   assert.equal(gitLineAuthorDocs.ok, false, 'Git Blame aliases in public docs must be rejected');
@@ -1394,6 +1480,30 @@ try {
     cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
   });
   assert.match(unstagedVimLock, /Architecture checks passed/);
+
+  writeFileSync(join(stagedRoot, 'bun.lock'), '"markdown-it-emoji": ["markdown-it-emoji@3.0.0", ""]\n');
+  execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'bun.lock'), '# clean working-tree lock\n');
+  const stagedEmojiLock = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedEmojiLock.ok, false, 'staged ARCH017 must read removed Emoji dependencies from the index');
+  assert.match(stagedEmojiLock.output, /ARCH017/);
+
+  execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'bun.lock'), '"markdown-it-emoji": ["markdown-it-emoji@3.0.0", ""]\n');
+  const unstagedEmojiLock = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(unstagedEmojiLock, /Architecture checks passed/);
 
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();

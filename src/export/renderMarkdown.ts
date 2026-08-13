@@ -1,5 +1,4 @@
 import MarkdownIt from 'markdown-it';
-import { full as emoji } from 'markdown-it-emoji';
 import hljs from 'highlight.js';
 import sanitizeHtml from 'sanitize-html';
 import { rewriteExportImageSrc, type ExportHtmlImageMode } from './assetPaths';
@@ -66,7 +65,6 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     breaks: true,
     langPrefix: 'language-'
   });
-  md.use(emoji);
   installHighlightTransform(md);
   installSourcePositionAndHeadingAnchorTransform(md, (startIndex, endIndex) => ({
     start: bodySourceLines?.[startIndex] ?? 0,

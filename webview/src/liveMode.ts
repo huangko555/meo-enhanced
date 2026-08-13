@@ -22,7 +22,6 @@ import { getImagePresentationFactory } from './editor/imagePresentation';
 import { liveHighlightStyle } from './theme';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
-import { collectEmojiRangesFromText } from './helpers/emoji';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { headingLevelFromName, resolvedSyntaxTree } from './helpers/markdownSyntax';
 import {
@@ -2067,7 +2066,6 @@ function buildDecorations(state: EditorState): DecorationSet {
     ]
   );
   addKbdTagDecorations(ranges, state, activeLines, renderedTableRanges, mathRanges, frontmatter, codeBlockLines);
-  addEmojiDecorationsWithMath(ranges, state, mathRanges, codeBlockLines);
   addMermaidColonFenceDecorations(ranges, state, mermaidColonBlocks, activeLines);
   addFootnoteDefinitionDecorations(ranges, state, footnotes, activeLines);
   const htmlEditingRange = getHtmlEditingRange(state);
@@ -2260,8 +2258,6 @@ function addMermaidColonFenceDecorations(
     });
   }
 }
-
-const emojiWidgetCache = new Map<string, WidgetType>();
 
 class KbdTagWidget extends WidgetType {
   keyText: string;
@@ -2698,60 +2694,6 @@ function addKbdTagDecorations(
           widget: getKbdWidget(keyText),
           inclusive: false
         }).range(kbdRange.from, kbdRange.to)
-      );
-    }
-  }
-}
-
-function getEmojiWidget(emoji: string): WidgetType {
-  let widget = emojiWidgetCache.get(emoji);
-  if (!widget) {
-    widget = new (class extends WidgetType {
-      toDOM() {
-        const span = document.createElement('span');
-        span.className = 'meo-md-emoji';
-        span.textContent = emoji;
-        return span;
-      }
-      ignoreEvent() {
-        return true;
-      }
-    })();
-    emojiWidgetCache.set(emoji, widget);
-  }
-  return widget;
-}
-
-function addEmojiDecorationsWithMath(
-  builder: DecorationCollector,
-  state: EditorState,
-  mathRanges: ReadonlyArray<LatexMathRange>,
-  codeBlockLines: Set<number> | null = null
-): void {
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
-    if (codeBlockLines?.has(lineNo)) {
-      continue;
-    }
-    const line = state.doc.line(lineNo);
-    const lineText = state.doc.sliceString(line.from, line.to);
-    if (overlapsParsedTableRange(line.from, line.to, mathRanges)) {
-      continue;
-    }
-
-    if (lineText.indexOf(':') === -1) {
-      continue;
-    }
-
-    const emojiRanges = collectEmojiRangesFromText(lineText, line.from);
-    for (const emojiRange of emojiRanges) {
-      if (overlapsParsedTableRange(emojiRange.from, emojiRange.to, mathRanges)) {
-        continue;
-      }
-      builder.push(
-        Decoration.replace({
-          widget: getEmojiWidget(emojiRange.emoji),
-          inclusive: false
-        }).range(emojiRange.from, emojiRange.to)
       );
     }
   }

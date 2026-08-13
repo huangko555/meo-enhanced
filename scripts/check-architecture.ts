@@ -1762,6 +1762,61 @@ for (const path of vimCapabilityScope) {
   }
 }
 
+// Product deletion guard: Emoji shortcode conversion and product-owned selectors must stay absent.
+// Unicode emoji, ordinary text mentioning emoji and transitive emoji-regex dependencies remain supported.
+const emojiShortcodeCapabilityScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^(?:bun\.lockb?|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i.test(path) ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedEmojiShortcodeTokens = [
+  /markdown-it-emoji/i,
+  /(?:node[-_. /]?emoji|emoji[-_. /]?(?:toolkit|shortcodes?))/i,
+  /\b(?:collect|convert|decorate|expand|parse|render|replace|resolve|scan)(?:EmojiShortcode|EmojiRanges?)(?:\b|[A-Z0-9_])/,
+  /\b(?:collect|convert|decorate|expand|parse|render|replace|resolve|scan)[-_.](?:emoji[-_.])?(?:shortcodes?|ranges?)\b/i,
+  /\b(?:EmojiShortcode|EmojiRange|EmojiWidget|EmojiDecoration|EmojiSelector|EmojiPicker|EmojiPalette|EmojiMenu)(?:\b|[A-Z0-9_])/,
+  /\b(?:emojiShortcode|emojiWidget|emojiDecoration|emojiSelector|emojiPicker|emojiPalette|emojiMenu)(?:\b|[A-Z0-9_])/,
+  /\b(?:open|show|toggle|select|insert)(?:EmojiSelector|EmojiPicker|EmojiPalette|EmojiMenu|EmojiShortcode)(?:\b|[A-Z0-9_])/,
+  /\b(?:open|show|toggle|select|insert)[-_.]emoji[-_.](?:selector|picker|palette|menu|shortcode)\b/i,
+  /meo-[A-Za-z0-9_-]*emoji[A-Za-z0-9_-]*(?:shortcode|widget|selector|picker|palette|menu)?/i
+];
+const emojiShortcodeSettingKey = /["'][^"']*emoji[-_.]?(?:shortcode|conversion|selector|picker|palette|menu|enabled|setting)[^"']*["']\s*:/i;
+const hasRemovedEmojiShortcodeCapability = (text: string, path: string): boolean => {
+  if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
+  if (removedEmojiShortcodeTokens.some((pattern) => pattern.test(text))) return true;
+  if (path === 'package.json' && emojiShortcodeSettingKey.test(text)) return true;
+  const words = normalizeCapabilityWords(text);
+  for (let start = 0; start < words.length; start += 1) {
+    const window = words.slice(start, start + 9);
+    const wordSet = new Set(window);
+    if (!wordSet.has('emoji')) continue;
+    const hasShortcodeConversion = wordSet.has('shortcode') || wordSet.has('shortcodes')
+      ? ['convert', 'conversion', 'expand', 'parse', 'render', 'replace', 'transform']
+        .some((word) => wordSet.has(word))
+      : false;
+    const hasSelector = ['selector', 'picker', 'palette', 'menu']
+      .some((word) => wordSet.has(word));
+    const hasProductAction = ['choose', 'insert', 'open', 'select', 'show', 'toggle']
+      .some((word) => wordSet.has(word));
+    if (hasShortcodeConversion || (hasSelector && hasProductAction)) return true;
+  }
+  return false;
+};
+for (const path of emojiShortcodeCapabilityScope) {
+  if (/^(?:src|webview\/src)\//.test(path) && hasRemovedEmojiShortcodeCapability(path, path)) {
+    failures.push(`ARCH017 已删除的 Emoji shortcode 转换或选择器重新出现: ${path}:1`);
+    continue;
+  }
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (hasRemovedEmojiShortcodeCapability(lines[index], path)) {
+      failures.push(`ARCH017 已删除的 Emoji shortcode 转换或选择器重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }

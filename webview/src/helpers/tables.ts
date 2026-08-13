@@ -8,7 +8,6 @@ import {
   getImagePresentationFactory,
   type ImagePresentationFactory
 } from '../editor/imagePresentation';
-import { emojiData } from './emoji';
 import { parseKbdTagAt } from './kbd';
 import { createLatexMathElement, parseLatexMathAt } from './math';
 import { isPrimaryModifierPointerClick } from './linkNavigation';
@@ -634,7 +633,6 @@ function isRedoShortcut(event: KeyboardEvent): boolean {
 // live here to keep all HTML-table behavior in one helper module.
 const tableInlineSchemeRe = /^[a-z][a-z0-9+.-]*:/i;
 const tableInlineRawUrlRe = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|file:|www\.)[^\s<]+/i;
-const tableInlineEmojiShortcodeRe = /^:([a-zA-Z0-9_+-]+):/;
 const tableInlineTagRe = /^#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/u;
 const tableInlineTagPrefixRe = /[\p{L}\p{N}_/-]/u;
 const tableCellBreakAtRe = /^<br\s*\/?>/i;
@@ -1422,18 +1420,6 @@ function parseTableInlineRawUrl(text: string, index: number) {
   };
 }
 
-function parseTableInlineEmojiShortcode(text: string, index: number) {
-  if (text[index] !== ':' || isTableInlineEscaped(text, index)) return null;
-  const match = tableInlineEmojiShortcodeRe.exec(text.slice(index));
-  if (!match) return null;
-  const emoji = emojiData[match[1]];
-  if (!emoji) return null;
-  return {
-    emoji,
-    nextIndex: index + match[0].length
-  };
-}
-
 function appendTableInlinePreviewLink(parent: HTMLElement, label: string, href: string, options: {
   baseOffset?: number;
   diagnostics?: TableCellDiagnostics[];
@@ -1722,22 +1708,6 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         i = rawUrl.nextIndex;
         continue;
       }
-    }
-
-    const emoji = parseTableInlineEmojiShortcode(text, i);
-    if (emoji) {
-      flushBuffer();
-      const el = document.createElement('span');
-      el.className = 'meo-md-emoji';
-      el.textContent = emoji.emoji;
-      setInlineSourceRange(
-        el,
-        { from: baseOffset + i, to: baseOffset + emoji.nextIndex },
-        { atomic: true }
-      );
-      parent.appendChild(el);
-      i = emoji.nextIndex;
-      continue;
     }
 
     appendToBuffer(text[i], i);
