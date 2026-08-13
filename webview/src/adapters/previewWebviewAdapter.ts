@@ -1,12 +1,14 @@
 import type { HostToWebviewMessage } from '../../../src/protocol/messages';
 import type {
-  PreviewAppearance,
   PreviewRenderResponse
 } from '../../../src/protocol/previewRender';
+import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
+
+type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 
 export type PreviewSurface = {
   setAppearance(appearance: PreviewAppearance): void;
-  getAppearance(): PreviewAppearance;
+  getAppearance(): ResolvedPreviewAppearance;
   setVisible(visible: boolean): void;
   preload(text: string): void;
   requestRender(text: string, options?: { restoreLine?: number | null }): void;
@@ -25,7 +27,7 @@ export type PreviewWebviewAdapter = {
   }): void;
   refreshVisible(text: string, options?: { restoreLine?: number | null }): void;
   accept(message: HostToWebviewMessage): boolean;
-  getAppearance(): PreviewAppearance;
+  getAppearance(): ResolvedPreviewAppearance;
   dispose(): void;
 };
 

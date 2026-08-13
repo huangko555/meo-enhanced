@@ -5,7 +5,7 @@ import { logWebviewRenderError } from './errors';
 import { createDocumentScrollToTopController } from './scrollToTop';
 import { createSegmentedControl } from './segmentedControl';
 import type { OutlineHeading } from './outline';
-import type { PreviewAppearance } from '../../../src/shared/preview';
+import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
 import type { PreviewRenderResponse, PreviewRenderValue } from '../../../src/protocol/previewRender';
 import { createPreviewRenderTransport } from '../adapters/previewRenderTransport';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
@@ -13,6 +13,7 @@ import type { MermaidDiagramRenderResources } from '../application/mermaidDiagra
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
+  getEditorAppearance: () => 'light' | 'dark';
   onRendered?: () => void;
   onFindRequested?: () => void;
   mermaidRenderResources: MermaidDiagramRenderResources;
@@ -132,6 +133,7 @@ function collectPreviewKatexStyles(katexHref: string): string {
 
 export function createPreviewController({
   vscode,
+  getEditorAppearance,
   onRendered,
   onFindRequested,
   mermaidRenderResources
@@ -152,6 +154,10 @@ export function createPreviewController({
     datasetKey: 'appearance',
     role: 'group',
     options: [
+      {
+        value: 'auto',
+        label: 'Auto'
+      },
       {
         value: 'light',
         label: 'Light',
@@ -177,7 +183,8 @@ export function createPreviewController({
   const scrollToTopController = createDocumentScrollToTopController();
   host.append(frame, status, scrollToTopController.button);
 
-  let appearance: PreviewAppearance = 'dark';
+  let appearancePreference: PreviewAppearance = 'auto';
+  let appearance: 'light' | 'dark' = 'dark';
   let requestGeneration = 0;
   let frameGeneration = 0;
   let mermaidPresentationGeneration = 0;
@@ -316,7 +323,7 @@ export function createPreviewController({
     return { found: true, current: activeSearchIndex + 1, total: searchMatches.length };
   };
 
-  const updateThemeToggle = () => appearanceSegmentedControl.setActive(appearance);
+  const updateThemeToggle = () => appearanceSegmentedControl.setActive(appearancePreference);
 
   const setStatus = (message: string | null) => {
     status.hidden = !message;
@@ -429,17 +436,19 @@ export function createPreviewController({
     nextAppearance: PreviewAppearance,
     { post = false }: { post?: boolean } = {}
   ): void => {
-    if (nextAppearance !== 'light' && nextAppearance !== 'dark') {
+    if (nextAppearance !== 'auto' && nextAppearance !== 'light' && nextAppearance !== 'dark') {
       return;
     }
-    const changed = appearance !== nextAppearance;
-    appearance = nextAppearance;
+    const resolvedAppearance = nextAppearance === 'auto' ? getEditorAppearance() : nextAppearance;
+    const changed = appearance !== resolvedAppearance;
+    appearancePreference = nextAppearance;
+    appearance = resolvedAppearance;
     updateThemeToggle();
     if (changed) {
       applyAppearanceToFrame();
     }
     if (post) {
-      vscode.postMessage({ type: 'setPreviewAppearance', appearance });
+      vscode.postMessage({ type: 'setPreviewAppearance', appearance: appearancePreference });
     }
   };
 
@@ -496,7 +505,7 @@ export function createPreviewController({
       ? event.target.closest<HTMLButtonElement>('.preview-appearance-button[data-appearance]')
       : null;
     const nextAppearance = button?.dataset.appearance;
-    if (nextAppearance !== 'light' && nextAppearance !== 'dark') {
+    if (nextAppearance !== 'auto' && nextAppearance !== 'light' && nextAppearance !== 'dark') {
       return;
     }
     setAppearance(nextAppearance, { post: true });
@@ -628,6 +637,9 @@ export function createPreviewController({
     preload: (text: string) => requestRender(text, { background: true }),
     acceptRenderResponse,
     setAppearance,
+    syncAutoAppearance: () => {
+      if (appearancePreference === 'auto') setAppearance('auto');
+    },
     getAppearance: () => appearance,
     setVisible: (visible: boolean) => {
       host.hidden = !visible;

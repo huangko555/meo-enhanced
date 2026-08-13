@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-webview-viewport-'));
@@ -130,10 +130,10 @@ async function main() {
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
-        theme, shikiCodeBlocks: false, codeTheme: null,
+        vscodeTheme: null,
         restoreTopLine: 139, restoreTopLineOffset: 0
       }}));
-    }, { text: initialText, theme: defaultThemeSettings });
+    }, { text: initialText, theme: defaultBuiltInVisualBaseline });
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
@@ -502,14 +502,15 @@ async function main() {
     ) {
       throw new Error(`Editor light appearance did not preserve established accents: ${JSON.stringify({ darkAppearanceState, lightAppearanceState })}`);
     }
-    await page.evaluate((theme) => {
+    await page.evaluate(() => {
       document.body.className = 'vscode-dark';
       document.documentElement.style.setProperty('--vscode-editor-background', '#010203');
       document.documentElement.style.setProperty('--vscode-sideBar-background', '#040506');
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'themeChanged', theme, codeTheme: null
+        type: 'vscodeCodeThemeChanged',
+        vscodeTheme: { name: 'Host Dark', type: 'dark', colors: {}, tokenColors: [] }
       }}));
-    }, defaultThemeSettings);
+    });
     await waitForFrames(page, 2);
     const lightAfterHostThemeChange = await page.evaluate(() => ({
       appearance: document.documentElement.dataset.editorAppearance,
@@ -594,14 +595,15 @@ async function main() {
     ) {
       throw new Error(`Editor dark appearance was not restored exactly: ${JSON.stringify({ darkAppearanceState, restoredDarkAppearanceState })}`);
     }
-    await page.evaluate((theme) => {
+    await page.evaluate(() => {
       document.body.className = 'vscode-light';
       document.documentElement.style.setProperty('--vscode-editor-background', '#fafafa');
       document.documentElement.style.setProperty('--vscode-sideBar-background', '#f0f0f0');
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'themeChanged', theme, codeTheme: null
+        type: 'vscodeCodeThemeChanged',
+        vscodeTheme: { name: 'Host Light', type: 'light', colors: {}, tokenColors: [] }
       }}));
-    }, defaultThemeSettings);
+    });
     await waitForFrames(page, 2);
     const darkAfterHostThemeChange = await page.evaluate(() => ({
       appearance: document.documentElement.dataset.editorAppearance,
@@ -712,7 +714,7 @@ async function main() {
       !previewToolbarLayout.appearanceUsesSharedComponent ||
       previewToolbarLayout.activeAppearance !== 'dark' ||
       JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
-        'outline-left', 'light', 'dark', 'Export HTML', 'Export PDF'
+        'outline-left', 'auto', 'light', 'dark', 'Export HTML', 'Export PDF'
       ]) ||
       previewToolbarLayout.moreExports !== 0 ||
       previewToolbarLayout.floatingThemeToggle
@@ -760,17 +762,21 @@ async function main() {
       lightAppearanceGeometry.active !== 'light' ||
       lightAppearanceGeometry.top !== 3 ||
       lightAppearanceGeometry.bottom !== 3 ||
-      lightAppearanceGeometry.left !== 3 ||
+      Math.abs(lightAppearanceGeometry.left - (lightAppearanceGeometry.buttonWidths.auto + 3)) > 0.01 ||
       lightAppearanceGeometry.height !== 20 ||
       lightAppearanceGeometry.radius !== '5px' ||
       lightAppearanceGeometry.labelOffset !== 0.5 ||
       darkAppearanceGeometry.buttonWidths.dark === darkAppearanceGeometry.buttonWidths.light ||
       darkAppearanceGeometry.buttonWidths.light < 56 ||
       darkAppearanceGeometry.buttonWidths.dark < 56 ||
-      Math.abs(darkAppearanceGeometry.left - (darkAppearanceGeometry.buttonWidths.light + 3)) > 0.01 ||
+      Math.abs(darkAppearanceGeometry.left - (
+        darkAppearanceGeometry.buttonWidths.auto + darkAppearanceGeometry.buttonWidths.light + 3
+      )) > 0.01 ||
       Math.abs(lightAppearanceGeometry.right - (lightAppearanceGeometry.buttonWidths.dark + 3)) > 0.01 ||
       Math.abs(darkAppearanceGeometry.controlWidth - (
-        darkAppearanceGeometry.buttonWidths.light + darkAppearanceGeometry.buttonWidths.dark
+        darkAppearanceGeometry.buttonWidths.auto
+        + darkAppearanceGeometry.buttonWidths.light
+        + darkAppearanceGeometry.buttonWidths.dark
       )) > 0.01
     ) {
       throw new Error(`Preview appearance control geometry is inconsistent: ${JSON.stringify({
@@ -1505,13 +1511,13 @@ async function main() {
     await waitForFrames(page, 8);
     const afterUpdate = await readViewport();
 
-    await page.evaluate((theme) => {
+    await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', {
-        data: { type: 'themeChanged', theme, codeTheme: null }
+        data: {
+          type: 'vscodeCodeThemeChanged',
+          vscodeTheme: { name: 'Current Dark', type: 'dark', colors: {}, tokenColors: [] }
+        }
       }));
-    }, {
-      ...defaultThemeSettings,
-      fonts: { ...defaultThemeSettings.fonts, liveFontSize: 18 }
     });
     await waitForFrames(page);
     const afterTheme = await readViewport();

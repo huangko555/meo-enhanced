@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-ime-composition-'));
@@ -67,9 +67,9 @@ async function main() {
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: true, outlineWidth: 260,
-        theme, shikiCodeBlocks: false, codeTheme: null
+        vscodeTheme: null
       }}));
-    }, { text: initialText, theme: defaultThemeSettings });
+    }, { text: initialText, theme: defaultBuiltInVisualBaseline });
     await page.waitForSelector('.editor-host > .cm-editor');
     const initialStrikePairing = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))

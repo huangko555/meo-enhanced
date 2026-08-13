@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-cursor-after-enter-'));
@@ -62,9 +62,9 @@ async function main(): Promise<void> {
         longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
-        theme, shikiCodeBlocks: false, codeTheme: null
+        vscodeTheme: null
       }}));
-    }, { theme: defaultThemeSettings, text: initialText });
+    }, { theme: defaultBuiltInVisualBaseline, text: initialText });
     await syncedPage.waitForSelector('.editor-host > .cm-editor');
 
     await syncedPage.click('.cm-line');

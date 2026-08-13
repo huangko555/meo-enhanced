@@ -1,5 +1,5 @@
 import exportRuntime from '../src/export/runtime';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const rendered = exportRuntime.renderExportHtmlDocument({
@@ -8,7 +8,7 @@ const rendered = exportRuntime.renderExportHtmlDocument({
   outputFilePath: 'C:/tmp/export.html',
   target: 'html',
   htmlImageMode: 'embedded',
-  theme: defaultThemeSettings,
+  theme: defaultBuiltInVisualBaseline,
   appearance: 'dark',
   styleEnvironment: {
     editorBackgroundColor: '#20252b',

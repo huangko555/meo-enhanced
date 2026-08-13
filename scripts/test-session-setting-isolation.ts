@@ -5,7 +5,7 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const extensionSource = fs.readFileSync(path.join(repoRoot, 'src', 'extension.ts'), 'utf8');
 
 const configurationHandlerStart = extensionSource.indexOf('async handleConfigurationChanged(');
-const configurationHandlerEnd = extensionSource.indexOf('\n  notifyThemeChanged()', configurationHandlerStart);
+const configurationHandlerEnd = extensionSource.indexOf('\n  notifyVscodeCodeThemeChanged()', configurationHandlerStart);
 if (configurationHandlerStart < 0 || configurationHandlerEnd < 0) {
   throw new Error('Could not locate the configuration-change handler');
 }

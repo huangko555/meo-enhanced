@@ -26,7 +26,7 @@ try {
       '<div class="meo-export-doc">',
       '<a id="external" href="https://example.com/">External</a>',
       '<a id="ticket" href="https://docs.example.com/issues">Ticket</a>',
-      '<a id="theme" href="./docs/theming.md">Guide</a>',
+      '<a id="theme" href="./CONTRIBUTING.md">Guide</a>',
       '<a id="changelog" href="CHANGELOG.md">Changelog</a>',
       '<a id="license" href="LICENSE">License</a>',
       '<a id="fragment" href="#target">Fragment</a>',
@@ -147,7 +147,7 @@ try {
   const expectedHrefs = [
     'https://example.com/',
     'https://docs.example.com/issues',
-    './docs/theming.md',
+    './CONTRIBUTING.md',
     'CHANGELOG.md',
     'LICENSE'
   ];

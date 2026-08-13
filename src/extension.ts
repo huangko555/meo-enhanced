@@ -31,9 +31,7 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
-  CODE_BLOCKS_VSCODE_THEME_SETTING_KEY,
-  getUseVscodeThemeForCodeBlocks,
-  getCodeBlockVscodeTheme,
+  getCurrentVscodeCodeTheme,
   syncEditorAssociations,
   type ExportHtmlImageMode,
   getExportHtmlImageMode,
@@ -43,10 +41,8 @@ import {
   getRememberPositionLines,
   getOutlineVisible,
   getContentMaxWidthEnabled,
-  getThemeSettings,
   isMarkdownDocumentPath,
-  migrateLegacyToggleSettings,
-  resetThemeSettingsToDefault
+  migrateLegacyToggleSettings
 } from './shared/extensionConfig';
 import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
 import { createVscodePendingDraftRecoveryAdapter } from './host/vscodePendingDraftRecoveryAdapter';
@@ -56,7 +52,7 @@ import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefr
 import { createVscodeDiagnosticsAdapter } from './host/vscodeDiagnosticsAdapter';
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
-import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
+import { defaultBuiltInVisualBaseline, type BuiltInVisualBaseline } from './shared/builtInVisualBaseline';
 import {
   normalizePreviewAppearance,
   PREVIEW_APPEARANCE_STATE_KEY,
@@ -68,7 +64,6 @@ import {
   normalizeEditorAppearance,
   type EditorAppearance
 } from './shared/editorAppearance';
-import { parseThemeJsonc, serializeThemeFile } from './shared/themeJsonc';
 import {
   collectWebviewImageResourceRoots,
   getDocumentFragmentHref,
@@ -78,9 +73,7 @@ import {
   runWithTimedUiTimeout,
   showTimedErrorMessage,
   showTimedInformationMessage,
-  showTimedQuickPick,
   showTimedWarningMessage,
-  showTimedWarningMessageWithItems
 } from './shared/timedUi';
 import type { ExportStyleEnvironment } from './export/runtime';
 import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents';
@@ -88,22 +81,10 @@ import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents'
 const VIEW_TYPE = 'meoEnhanced.editor';
 const ACTIVE_EDITOR_CONTEXT_KEY = 'meoEnhanced.activeEditor';
 const FIND_OPTIONS_STATE_KEY = 'findOptions';
-const CUSTOM_THEMES_STATE_KEY = 'customThemes';
 
 type FindOptionsState = {
   wholeWord: boolean;
   caseSensitive: boolean;
-};
-
-type ThemeSource = 'built-in' | 'imported';
-
-type ThemeQuickPickItem = vscode.QuickPickItem & {
-  theme: ThemeSettings;
-  source: ThemeSource;
-};
-
-type ImportedThemeQuickPickItem = vscode.QuickPickItem & {
-  theme: ThemeSettings;
 };
 
 type ExportRuntimeModule = {
@@ -113,7 +94,7 @@ type ExportRuntimeModule = {
     outputFilePath: string;
     target: ExportFormat;
     htmlImageMode: ExportHtmlImageMode;
-    theme: ThemeSettings;
+    theme: BuiltInVisualBaseline;
     appearance: PreviewAppearance;
     styleEnvironment?: ExportStyleEnvironment;
     editorFontEnvironment?: {
@@ -129,7 +110,7 @@ type ExportRuntimeModule = {
   renderPreviewDocument: (options: {
     markdownText: string;
     sourceDocumentPath: string;
-    theme: ThemeSettings;
+    theme: BuiltInVisualBaseline;
     styleEnvironment?: ExportStyleEnvironment;
   }) => PreviewRenderResult;
   writeFinalizedHtmlExport: (options: {
@@ -195,7 +176,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.window.onDidChangeActiveColorTheme(() => {
-      provider.notifyThemeChanged();
+      provider.notifyVscodeCodeThemeChanged();
     })
   );
 
@@ -319,156 +300,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('meoEnhanced.resetThemeToDefault', async () => {
-      await resetThemeSettingsToDefault();
-      provider.notifyThemeChanged();
-      void showTimedInformationMessage('MEO Enhanced theme was reset to default.');
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('meoEnhanced.selectTheme', async () => {
-      const themeItems = buildThemeQuickPickItems(context);
-      const selectedTheme = await showTimedQuickPick(
-        themeItems,
-        { title: 'Select Theme', placeHolder: 'Select & apply a theme preset.' },
-        0
-      );
-
-      if (!selectedTheme) {
-        return;
-      }
-
-      const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-      try {
-        await config.update('theme', serializeThemeSettings(selectedTheme.theme), vscode.ConfigurationTarget.Global);
-      } catch {
-        void showTimedErrorMessage('Failed to apply theme preset.');
-        return;
-      }
-
-      provider.notifyThemeChanged();
-      const sourceSuffix = selectedTheme.source === 'imported' ? ' (imported)' : '';
-      void showTimedInformationMessage(`Selected theme: ${selectedTheme.theme.name}${sourceSuffix}`);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('meoEnhanced.importTheme', async () => {
-      const openFiles = await vscode.window.showOpenDialog({
-        title: 'Import Theme JSON / JSONC',
-        filters: { 'Theme JSON': ['json', 'jsonc'] },
-        canSelectMany: false
-      });
-
-      if (!openFiles?.length) {
-        return;
-      }
-
-      const fileUri = openFiles[0];
-      try {
-        const fileContent = await vscode.workspace.fs.readFile(fileUri);
-        const payload = parseThemeJsonc(new TextDecoder().decode(fileContent));
-        const validated = validateThemePayload(payload);
-        if (!validated.success) {
-          void showTimedErrorMessage(
-            `Invalid theme file: ${validated.errors[0] || 'payload does not match schema.'}`
-          );
-          return;
-        }
-
-        const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-        await config.update('theme', serializeThemeSettings(validated.theme), vscode.ConfigurationTarget.Global);
-        await upsertImportedTheme(context, validated.theme);
-        provider.notifyThemeChanged();
-        void showTimedInformationMessage(`Imported theme: ${validated.theme.name}`);
-      } catch (error) {
-        void showTimedErrorMessage(`Failed to import theme: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('meoEnhanced.exportTheme', async () => {
-      const uri = await vscode.window.showSaveDialog({
-        title: 'Export Theme JSONC',
-        filters: { 'Theme JSONC': ['jsonc'], 'Theme JSON': ['json'] },
-        defaultUri: vscode.Uri.file('meo-theme.jsonc'),
-        saveLabel: 'Export Theme'
-      });
-
-      if (!uri) {
-        return;
-      }
-
-      const theme = getThemeSettings();
-      try {
-        const format = path.extname(uri.fsPath).toLowerCase() === '.json' ? 'json' : 'jsonc';
-        await vscode.workspace.fs.writeFile(
-          uri,
-          new TextEncoder().encode(serializeThemeFile(theme, format))
-        );
-        void showTimedInformationMessage(`Theme exported to ${uri.fsPath}`);
-      } catch (error) {
-        void showTimedErrorMessage(`Failed to export theme: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('meoEnhanced.deleteImportedTheme', async () => {
-      const importedThemes = getImportedThemes(context);
-      if (!importedThemes.length) {
-        void showTimedInformationMessage('No imported themes to delete.');
-        return;
-      }
-
-      const selected = await showTimedQuickPick(
-        importedThemes.map((theme) => ({
-          label: theme.name,
-          description: theme.id,
-          theme
-        } satisfies ImportedThemeQuickPickItem)),
-        {
-          title: 'Delete Imported Theme',
-          placeHolder: 'Select an imported theme to delete'
-        }
-      );
-      if (!selected) {
-        return;
-      }
-
-      const confirm = await showTimedWarningMessageWithItems(
-        `Delete imported theme "${selected.theme.name}"?`,
-        { modal: true },
-        ['Delete'] as const
-      );
-      if (confirm !== 'Delete') {
-        return;
-      }
-
-      const deleted = await deleteImportedThemeById(context, selected.theme.id);
-      if (!deleted) {
-        void showTimedWarningMessage(`Could not find imported theme "${selected.theme.name}" to delete.`);
-        return;
-      }
-
-      const currentTheme = getThemeSettings();
-      const deletingActiveTheme = normalizeThemeId(currentTheme.id) === normalizeThemeId(selected.theme.id);
-      const collidesWithBuiltIn = isBuiltInThemeId(selected.theme.id);
-      if (deletingActiveTheme && !collidesWithBuiltIn) {
-        const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-        await config.update('theme', serializeThemeSettings(themePresets[0] as ThemeSettings), vscode.ConfigurationTarget.Global);
-        provider.notifyThemeChanged();
-        void showTimedInformationMessage(`Deleted imported theme: ${selected.theme.name}. Active theme reset to ${themePresets[0].name}.`);
-        return;
-      }
-
-      void showTimedInformationMessage(`Deleted imported theme: ${selected.theme.name}`);
-    })
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('meoEnhanced.toggleMode', async () => {
       await provider.toggleActiveEditorMode();
     })
@@ -571,23 +402,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       }
     }
 
-    if (
-      event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.theme`)
-    ) {
-      this.broadcast({ type: 'themeChanged', theme: getThemeSettings(), codeTheme: getCodeBlockVscodeTheme() });
-    }
-
-    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${CODE_BLOCKS_VSCODE_THEME_SETTING_KEY}`)) {
-      this.broadcast({
-        type: 'shikiCodeBlocksChanged',
-        enabled: getUseVscodeThemeForCodeBlocks(),
-        codeTheme: getCodeBlockVscodeTheme()
-      });
-    }
   }
 
-  notifyThemeChanged(): void {
-    this.broadcast({ type: 'themeChanged', theme: getThemeSettings(), codeTheme: getCodeBlockVscodeTheme() });
+  notifyVscodeCodeThemeChanged(): void {
+    this.broadcast({ type: 'vscodeCodeThemeChanged', vscodeTheme: getCurrentVscodeCodeTheme() });
   }
 
   async toggleActiveEditorMode(): Promise<void> {
@@ -680,7 +498,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
         return exportRuntime.renderPreviewDocument({
           ...options,
-          theme: getThemeSettings()
+          theme: defaultBuiltInVisualBaseline
         });
       },
       getFindOptions: () => this.getFindOptions(),
@@ -914,7 +732,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       outputFilePath: params.outputFileUri.fsPath,
       target: params.target,
       htmlImageMode: params.htmlImageMode,
-      theme: getThemeSettings(),
+      theme: defaultBuiltInVisualBaseline,
       appearance: params.appearance,
       styleEnvironment: params.styleEnvironment,
       editorFontEnvironment: getExportEditorFontEnvironment(),
@@ -1209,85 +1027,6 @@ function getNativeWorkingTreeTitle(gitUri: vscode.Uri, fileUri: vscode.Uri): str
   }
 
   return fileName;
-}
-
-function buildThemeQuickPickItems(context: vscode.ExtensionContext): ThemeQuickPickItem[] {
-  const builtInItems: ThemeQuickPickItem[] = themePresets.map((theme) => ({
-    label: theme.name,
-    description: theme.id,
-    detail: 'Built-in',
-    theme,
-    source: 'built-in'
-  }));
-  const importedItems: ThemeQuickPickItem[] = getImportedThemes(context).map((theme) => ({
-    label: theme.name,
-    description: theme.id,
-    detail: 'Imported',
-    theme,
-    source: 'imported'
-  }));
-
-  return [...builtInItems, ...importedItems];
-}
-
-function getImportedThemes(context: vscode.ExtensionContext): ThemeSettings[] {
-  const raw = context.globalState.get<unknown>(CUSTOM_THEMES_STATE_KEY);
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  const themesById = new Map<string, ThemeSettings>();
-  for (const item of raw) {
-    const validated = validateThemePayload(item);
-    if (!validated.success) {
-      continue;
-    }
-    themesById.set(normalizeThemeId(validated.theme.id), validated.theme);
-  }
-
-  return Array.from(themesById.values())
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-async function upsertImportedTheme(context: vscode.ExtensionContext, theme: ThemeSettings): Promise<void> {
-  const importedThemes = getImportedThemes(context);
-  const existingIndex = importedThemes.findIndex((item) => normalizeThemeId(item.id) === normalizeThemeId(theme.id));
-  if (existingIndex >= 0) {
-    importedThemes[existingIndex] = theme;
-  } else {
-    importedThemes.push(theme);
-  }
-
-  importedThemes.sort((a, b) => a.name.localeCompare(b.name));
-  await context.globalState.update(
-    CUSTOM_THEMES_STATE_KEY,
-    importedThemes.map((item) => serializeThemeSettings(item))
-  );
-}
-
-async function deleteImportedThemeById(context: vscode.ExtensionContext, themeId: string): Promise<boolean> {
-  const normalizedThemeId = normalizeThemeId(themeId);
-  const importedThemes = getImportedThemes(context);
-  const nextImportedThemes = importedThemes.filter((item) => normalizeThemeId(item.id) !== normalizedThemeId);
-
-  if (nextImportedThemes.length === importedThemes.length) {
-    return false;
-  }
-
-  await context.globalState.update(
-    CUSTOM_THEMES_STATE_KEY,
-    nextImportedThemes.map((item) => serializeThemeSettings(item))
-  );
-  return true;
-}
-
-function isBuiltInThemeId(themeId: string): boolean {
-  const normalizedThemeId = normalizeThemeId(themeId);
-  return themePresets.some((item) => normalizeThemeId(item.id) === normalizedThemeId);
-}
-
-function normalizeThemeId(id: string): string {
-  return id.trim().toLowerCase();
 }
 
 export function deactivate(): void {}

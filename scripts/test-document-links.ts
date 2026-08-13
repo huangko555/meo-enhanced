@@ -56,7 +56,7 @@ const documentUri = URI.file(path.join(repoRoot, 'README.md'));
 const hrefs = [
   'https://example.com/',
   'https://docs.example.com/issues',
-  './docs/theming.md',
+  './CONTRIBUTING.md',
   './README.md#meo-enhanced',
   'CHANGELOG.md',
   'LICENSE'

@@ -1,10 +1,9 @@
 import {
-  resolveTheme,
+  defaultBuiltInVisualBaseline,
   semanticColorKeys,
   SYNTAX_TAG_SPECS,
-  type ThemeSettings,
   themeColorKeys
-} from '../../../src/shared/themeDefaults';
+} from '../../../src/shared/builtInVisualBaseline';
 import type { EditorAppearance } from '../../../src/shared/editorAppearance';
 import { lightCssVariableOverrides, resolveEditorTheme } from '../themes/editorLightTheme';
 import { darkCssVariableOverrides } from '../themes/editorDarkTheme';
@@ -110,18 +109,10 @@ const applyHostAppearance = (appearance: EditorAppearance): void => {
   }
 };
 
-export const applyThemeSettings = (theme?: ThemeSettings, appearance: EditorAppearance = 'dark'): void => {
-  let resolvedTheme: ThemeSettings;
+export const applyBuiltInVisualBaseline = (appearance: EditorAppearance = 'dark'): void => {
   const editorFontWeight = resolveEditorFontWeight();
-  try {
-    resolvedTheme = resolveTheme(theme);
-  } catch (error) {
-    console.error('[MEO webview] Failed to resolve theme payload, using defaults.', error);
-    resolvedTheme = resolveTheme();
-  }
-
   applyHostAppearance(appearance);
-  resolvedTheme = resolveEditorTheme(resolvedTheme, appearance);
+  const resolvedTheme = resolveEditorTheme(defaultBuiltInVisualBaseline, appearance);
 
   const rootStyle = document.documentElement.style;
   const insetBackground = getInsetBackground(resolvedTheme.backgroundColor, resolvedTheme.colors.base03);

@@ -1,13 +1,11 @@
 import { decodeDiagnosticsChangedEvent, type SerializedDiagnostic } from './diagnostics';
 import {
   decodeCodeTheme,
-  decodeThemeSettings,
-  type CodeThemeDto,
-  type ThemeSettingsDto
+  type CodeThemeDto
 } from './hostConfigurationEvents';
 
 export type EditorMode = 'live' | 'source' | 'preview';
-export type PreviewAppearance = 'dark' | 'light';
+export type PreviewAppearance = 'auto' | 'dark' | 'light';
 
 export type ReadyMessage = {
   readonly type: 'ready';
@@ -40,9 +38,7 @@ export type InitMessage = {
   readonly outlinePosition: 'left' | 'right';
   readonly outlineVisible: boolean;
   readonly outlineWidth: number;
-  readonly theme: ThemeSettingsDto;
-  readonly shikiCodeBlocks: boolean;
-  readonly codeTheme: CodeThemeDto | null;
+  readonly vscodeTheme: CodeThemeDto | null;
   readonly restoreTopLine?: number;
   readonly restoreTopLineOffset?: number;
 };
@@ -56,7 +52,7 @@ function isEditorMode(value: unknown): value is EditorMode {
 }
 
 function isPreviewAppearance(value: unknown): value is PreviewAppearance {
-  return value === 'dark' || value === 'light';
+  return value === 'auto' || value === 'dark' || value === 'light';
 }
 
 export function decodeReadyMessage(value: unknown): ReadyMessage | null {
@@ -66,6 +62,9 @@ export function decodeReadyMessage(value: unknown): ReadyMessage | null {
 export function decodeInitMessage(value: unknown): InitMessage | null {
   if (!isRecord(value)
     || value.type !== 'init'
+    || 'theme' in value
+    || 'shikiCodeBlocks' in value
+    || 'codeTheme' in value
     || typeof value.documentId !== 'string'
     || value.documentId.length === 0
     || typeof value.text !== 'string'
@@ -96,10 +95,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || typeof value.outlineWidth !== 'number'
     || !Number.isFinite(value.outlineWidth)
     || value.outlineWidth <= 0
-    || decodeThemeSettings(value.theme) === null
-    || typeof value.shikiCodeBlocks !== 'boolean'
-    || decodeCodeTheme(value.codeTheme) === false
-    || decodeCodeTheme(value.codeTheme) === undefined
+    || decodeCodeTheme(value.vscodeTheme) === false
+    || decodeCodeTheme(value.vscodeTheme) === undefined
     || (value.restoreTopLine !== undefined
       && (typeof value.restoreTopLine !== 'number' || !Number.isInteger(value.restoreTopLine) || value.restoreTopLine < 1))
     || (value.restoreTopLineOffset !== undefined

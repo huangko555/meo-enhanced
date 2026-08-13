@@ -22,23 +22,6 @@ import { decodeDiagnosticsChangedEvent } from '../src/protocol/diagnostics';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import { createDocumentSessionCoordinatorFromInit } from '../webview/src/adapters/documentSessionTransport';
 
-const theme = {
-  id: 'dark',
-  name: 'Dark',
-  backgroundColor: '#111',
-  colors: { base01: '#fff' },
-  semanticColors: { foreground: '#fff' },
-  syntaxTokens: { keyword: '#f00' },
-  fonts: {
-    liveFont: '', sourceFont: '', liveFontWeight: '', sourceFontWeight: '',
-    liveFontSize: null, sourceFontSize: null,
-    h1FontSize: 1.6, h2FontSize: 1.5, h3FontSize: 1.3,
-    h4FontSize: 1.2, h5FontSize: 1.1, h6FontSize: 1,
-    h1FontWeight: '400', h2FontWeight: '400', h3FontWeight: '400',
-    h4FontWeight: '400', h5FontWeight: '400', h6FontWeight: '400',
-    liveLineHeight: 1.5, sourceLineHeight: 1.5
-  }
-};
 const codeTheme = { name: 'VS Dark', type: 'dark' as const, colors: {}, tokenColors: [] };
 const completeInit = {
   type: 'init' as const,
@@ -62,9 +45,7 @@ const completeInit = {
   outlinePosition: 'right' as const,
   outlineVisible: true,
   outlineWidth: 260,
-  theme,
-  shikiCodeBlocks: true,
-  codeTheme
+  vscodeTheme: codeTheme
 };
 
 assert.deepEqual(decodeReadyMessage({ type: 'ready', extra: true }), { type: 'ready' });
@@ -91,11 +72,18 @@ for (const requiredKey of [
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
   'findOptions', 'outlinePosition', 'outlineVisible',
-  'outlineWidth', 'theme', 'shikiCodeBlocks', 'codeTheme'
+  'outlineWidth', 'vscodeTheme'
 ]) {
   const incomplete = { ...completeInit } as Record<string, unknown>;
   delete incomplete[requiredKey];
   assert.equal(decodeInitMessage(incomplete), null, `Init without ${requiredKey} must be rejected`);
+}
+for (const removedKey of ['theme', 'shikiCodeBlocks', 'codeTheme']) {
+  assert.equal(
+    decodeInitMessage({ ...completeInit, [removedKey]: removedKey === 'shikiCodeBlocks' ? true : {} }),
+    null,
+    `Init must reject removed ${removedKey} payloads`
+  );
 }
 assert.deepEqual(decodeHostToWebviewMessage(completeInit), completeInit);
 assert.deepEqual(decodeWebviewToHostMessage({ type: 'ready' }), { type: 'ready' });
@@ -521,9 +509,9 @@ for (const command of [
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
   { type: 'discardChanges', topLine: 1 },
-  { type: 'exportDocument', format: 'pdf', appearance: 'dark' },
-  { type: 'setPreviewAppearance', appearance: 'light' },
-  { type: 'setEditorAppearance', appearance: 'dark' }
+{ type: 'exportDocument', format: 'pdf', appearance: 'dark' },
+{ type: 'setPreviewAppearance', appearance: 'auto' },
+{ type: 'setEditorAppearance', appearance: 'auto' }
 ]) {
   assert.notEqual(decodeEditorCommand(command), null, `Editor command was rejected: ${command.type}`);
 }
@@ -551,12 +539,10 @@ for (const event of [
 }
 assert.equal(decodeHostEditorEvent({ type: 'revealSelection', anchor: -1, head: 0 }), null);
 assert.equal(decodeHostEditorEvent({ type: 'fixedBaselineChanged', pinned: true, active: 'yes' }), null);
-const themeEvent = {
-  type: 'themeChanged',
-  theme,
-  codeTheme
-};
-assert.deepEqual(decodeHostConfigurationEvent(themeEvent), themeEvent);
+const vscodeThemeEvent = { type: 'vscodeCodeThemeChanged', vscodeTheme: codeTheme } as const;
+assert.deepEqual(decodeHostConfigurationEvent(vscodeThemeEvent), vscodeThemeEvent);
+assert.equal(decodeHostConfigurationEvent({ type: 'themeChanged', theme: {}, codeTheme }), null);
+assert.equal(decodeHostConfigurationEvent({ type: 'shikiCodeBlocksChanged', enabled: true, codeTheme }), null);
 assert.deepEqual(decodeHostConfigurationEvent({ type: 'toggleMode' }), { type: 'toggleMode' });
 assert.deepEqual(decodeDiagnosticsChangedEvent({
   type: 'diagnosticsChanged', diagnostics: [{ from: 1, to: 3, severity: 2, message: 'Typo', source: 'meo' }]

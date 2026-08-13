@@ -37,7 +37,8 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
     case 'revealDocumentFragment':
       return typeof value.href === 'string' && value.href.length > 0 ? value as HostEditorEvent : null;
     case 'previewAppearanceChanged':
-      return value.appearance === 'dark' || value.appearance === 'light' ? value as HostEditorEvent : null;
+      return value.appearance === 'auto' || value.appearance === 'dark' || value.appearance === 'light'
+        ? value as HostEditorEvent : null;
     case 'outlinePositionChanged':
       return value.position === 'left' || value.position === 'right' ? value as HostEditorEvent : null;
     case 'outlineVisibilityChanged':

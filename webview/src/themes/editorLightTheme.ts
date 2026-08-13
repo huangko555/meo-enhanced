@@ -1,16 +1,10 @@
 import githubLight from '@shikijs/themes/github-light';
 import darkPlus from '@shikijs/themes/dark-plus';
-import { themePresets, type ThemeSettings } from '../../../src/shared/themeDefaults';
+import { lightBuiltInVisualBaseline, type BuiltInVisualBaseline } from '../../../src/shared/builtInVisualBaseline';
 import type { EditorAppearance } from '../../../src/shared/editorAppearance';
 import type { RawVscodeTheme } from '../helpers/shikiHighlighter';
 
-const githubLightEditorTheme = (() => {
-  const theme = themePresets.find((preset) => preset.id === 'github-light');
-  if (!theme) {
-    throw new Error('GitHub Light editor theme is unavailable.');
-  }
-  return theme;
-})();
+const githubLightEditorTheme = lightBuiltInVisualBaseline;
 const lightAccentBlue = '#0550ae';
 
 export const lightCssVariableOverrides = {
@@ -55,7 +49,7 @@ const preservedSemanticColors = [
   'searchMatchActiveBorder'
 ] as const;
 
-export function resolveEditorTheme(theme: ThemeSettings, appearance: EditorAppearance): ThemeSettings {
+export function resolveEditorTheme(theme: BuiltInVisualBaseline, appearance: EditorAppearance): BuiltInVisualBaseline {
   if (appearance === 'dark') {
     return theme;
   }
@@ -65,7 +59,7 @@ export function resolveEditorTheme(theme: ThemeSettings, appearance: EditorAppea
       key,
       value === '#0969da' ? lightAccentBlue : value
     ])
-  ) as ThemeSettings['semanticColors'];
+  ) as BuiltInVisualBaseline['semanticColors'];
   for (const key of preservedSemanticColors) {
     semanticColors[key] = theme.semanticColors[key];
   }
@@ -85,15 +79,16 @@ export function resolveEditorTheme(theme: ThemeSettings, appearance: EditorAppea
         key,
         value === '#0969da' ? lightAccentBlue : value
       ])
-    ) as ThemeSettings['syntaxTokens'],
+    ) as BuiltInVisualBaseline['syntaxTokens'],
     fonts: theme.fonts
   };
 }
 
 export function resolveCodeTheme(
-  _theme: RawVscodeTheme | null | undefined,
+  theme: RawVscodeTheme | null | undefined,
   appearance: EditorAppearance
 ): RawVscodeTheme | null | undefined {
+  if (theme?.type === appearance) return theme;
   return appearance === 'light'
     ? githubLight as RawVscodeTheme
     : darkPlus as RawVscodeTheme;

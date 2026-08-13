@@ -4,7 +4,7 @@ import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 import { createPreviewMermaidRenderer } from '../webview/src/helpers/previewMermaid';
 import {
   MermaidDiagramResourceUnavailableError,
@@ -128,8 +128,8 @@ try {
     editorBackgroundColor: '#20252b',
     editorForegroundColor: '#d8dee9'
   };
-  const lightStyles = buildPreviewStyles(defaultThemeSettings, styleEnvironment, 'light');
-  const darkStyles = buildPreviewStyles(defaultThemeSettings, styleEnvironment, 'dark');
+  const lightStyles = buildPreviewStyles(defaultBuiltInVisualBaseline, styleEnvironment, 'light');
+  const darkStyles = buildPreviewStyles(defaultBuiltInVisualBaseline, styleEnvironment, 'dark');
   const liveSvg = await page.evaluate(async () => {
     const renderLiveMermaid = (window as typeof window & { __renderLiveMermaid?: () => Promise<string> })
       .__renderLiveMermaid;

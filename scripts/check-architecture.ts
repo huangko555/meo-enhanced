@@ -1974,6 +1974,46 @@ for (const path of headingFoldAndOutlineReorderScope) {
   }
 }
 
+// Product deletion guard: MEO-owned custom theme configuration, storage and transport must stay absent.
+// Editor/Preview appearance, VS Code theme discovery, fixed built-in visual baselines and final code palettes remain.
+const customThemeCapabilityScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedCustomThemeTokens = [
+  /meoEnhanced\.(?:resetThemeToDefault|selectTheme|importTheme|exportTheme|deleteImportedTheme)\b/,
+  /meoEnhanced\.codeBlocks\.useVscodeTheme\b/,
+  /meoEnhanced\.theme(?:\b|["'])/,
+  /CODE_BLOCKS_VSCODE_THEME_SETTING_KEY/,
+  /\b(?:Custom|Imported)Theme(?:s|State|Storage|QuickPickItem)?\b/i,
+  /\b(?:get|reset|serialize|validate|parse|delete|upsert)(?:Custom|Imported)?Theme(?:Settings|Payload|Jsonc|File|ById)?\b/,
+  /\bThemeSettings(?:Dto|Payload)?\b/,
+  /\bThemeFontsDto\b/,
+  /\bthemeChanged\b/,
+  /\bshikiCodeBlocksChanged\b/,
+  /\bshikiCodeBlocks\b/,
+  /\bthemeJsonc\b/i,
+  /(?:custom|imported)[-_. ]+themes?\b/i,
+  /\b(?:select|import|export|delete|reset|manage|edit)(?:ing|ed)?\b.{0,32}\bMEO[-_. ]+themes?\b/i,
+  /\bMEO[-_. ]+themes?\b.{0,32}\b(?:select|import|export|delete|reset|manage|edit)(?:ing|ed)?\b/i
+];
+for (const path of customThemeCapabilityScope) {
+  if (/^(?:src|webview\/src)\//.test(path) && removedCustomThemeTokens.some((pattern) => pattern.test(path))) {
+    failures.push(`ARCH020 已删除的自定义主题系统或旧代码主题开关重新出现: ${path}:1`);
+    continue;
+  }
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(lines[index])) continue;
+    const line = lines[index].replace(/^\s*\|\|\s*'(?:theme|shikiCodeBlocks|codeTheme)'\s+in\s+value\s*$/, '');
+    if (removedCustomThemeTokens.some((pattern) => pattern.test(line))) {
+      failures.push(`ARCH020 已删除的自定义主题系统或旧代码主题开关重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }

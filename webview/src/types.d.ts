@@ -12,7 +12,7 @@ type WebviewMessage = import('../../src/protocol/messages').WebviewToHostMessage
 
 type ExtensionMessage = import('../../src/protocol/messages').HostToWebviewMessage;
 
-type ThemeSettings = import('../../src/protocol/hostConfigurationEvents').ThemeSettingsDto;
+type BuiltInVisualBaseline = import('../../src/protocol/hostConfigurationEvents').BuiltInVisualBaselineDto;
 type EditorDiagnostic = import('../../src/protocol/diagnostics').SerializedDiagnostic;
 
 interface WikiLinkStatus {

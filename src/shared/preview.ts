@@ -1,12 +1,13 @@
-export type PreviewAppearance = 'dark' | 'light';
+export type PreviewAppearance = 'auto' | 'dark' | 'light';
+export type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 
 export const PREVIEW_APPEARANCE_STATE_KEY = 'previewAppearance';
 
 export function normalizePreviewAppearance(value: unknown): PreviewAppearance {
-  return value === 'light' ? 'light' : 'dark';
+  return value === 'light' || value === 'dark' ? value : 'auto';
 }
 
-export type PreviewStyles = Record<PreviewAppearance, string>;
+export type PreviewStyles = Record<ResolvedPreviewAppearance, string>;
 
 export type PreviewStyleEnvironment = {
   editorFontFamily?: string;

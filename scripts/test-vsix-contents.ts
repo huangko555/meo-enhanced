@@ -25,7 +25,6 @@ const requiredFiles = [
   'LICENSE',
   'THIRD_PARTY_NOTICES.md',
   'logo.png',
-  'themes/hkk-theme.jsonc',
   'dist/extension.js',
   'dist/export-runtime.js',
   'dist/puppeteer-runtime.js',

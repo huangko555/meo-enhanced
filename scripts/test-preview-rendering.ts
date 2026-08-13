@@ -1,6 +1,6 @@
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const rendered = renderMarkdownToHtml({
   markdownText: '# Intro\n\nParagraph\n\n```ts\nconst value = 1;\n```\n\n## Details\n\n# Intro',
@@ -235,10 +235,10 @@ const environment = {
   sideBarBackgroundColor: '#252b32',
   panelBorderColor: '#474b50'
 };
-const darkPreviewStyles = buildPreviewStyles(defaultThemeSettings, environment, 'dark');
-const lightPreviewStyles = buildPreviewStyles(defaultThemeSettings, environment, 'light');
-const exportStyles = buildExportStyles(defaultThemeSettings, environment, 'light');
-const darkExportStyles = buildExportStyles(defaultThemeSettings, environment, 'dark');
+const darkPreviewStyles = buildPreviewStyles(defaultBuiltInVisualBaseline, environment, 'dark');
+const lightPreviewStyles = buildPreviewStyles(defaultBuiltInVisualBaseline, environment, 'light');
+const exportStyles = buildExportStyles(defaultBuiltInVisualBaseline, environment, 'light');
+const darkExportStyles = buildExportStyles(defaultBuiltInVisualBaseline, environment, 'dark');
 
 if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(darkPreviewStyles)) {
   throw new Error('Preview level-one and level-two headings must render the shared divider line');

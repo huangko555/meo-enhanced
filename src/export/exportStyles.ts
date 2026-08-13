@@ -3,8 +3,8 @@ import {
   defaultThemeFonts,
   type ThemeColorKey,
   type ThemeColors,
-  type ThemeSettings
-} from '../shared/themeDefaults';
+  type BuiltInVisualBaseline
+} from '../shared/builtInVisualBaseline';
 import type { PreviewAppearance, PreviewStyleEnvironment } from '../shared/preview';
 
 const styleValueInjectionPattern = /[\n\r;{}]/g;
@@ -14,7 +14,7 @@ export type ExportStyleEnvironment = PreviewStyleEnvironment & {
 };
 
 export function buildExportStyles(
-  theme: ThemeSettings,
+  theme: BuiltInVisualBaseline,
   environment: ExportStyleEnvironment = {},
   appearance: PreviewAppearance = 'light'
 ): string {
@@ -22,7 +22,7 @@ export function buildExportStyles(
 }
 
 export function buildPreviewStyles(
-  theme: ThemeSettings,
+  theme: BuiltInVisualBaseline,
   environment: ExportStyleEnvironment = {},
   appearance: PreviewAppearance = 'dark'
 ): string {
@@ -30,7 +30,7 @@ export function buildPreviewStyles(
 }
 
 function buildReadingStyles(
-  theme: ThemeSettings,
+  theme: BuiltInVisualBaseline,
   environment: ExportStyleEnvironment,
   appearance: PreviewAppearance
 ): string {
@@ -976,7 +976,7 @@ th:empty::before {
 `.trim();
 }
 
-function resolveThemeColors(theme: ThemeSettings, environment: ExportStyleEnvironment): ThemeColors {
+function resolveThemeColors(theme: BuiltInVisualBaseline, environment: ExportStyleEnvironment): ThemeColors {
   const themeColors = theme.colors ?? defaultThemeColors;
   const envColors = environment.meoThemeColors ?? {};
   const resolved = {} as ThemeColors;

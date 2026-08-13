@@ -1,5 +1,5 @@
 import exportRuntime from '../src/export/runtime';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const baseOptions = {
   markdownText: '# Export appearance\n\n```mermaid\nflowchart LR\nA --> B\n```',
@@ -7,7 +7,7 @@ const baseOptions = {
   outputFilePath: 'C:/tmp/export.html',
   target: 'html' as const,
   htmlImageMode: 'embedded' as const,
-  theme: defaultThemeSettings,
+  theme: defaultBuiltInVisualBaseline,
   styleEnvironment: {
     editorBackgroundColor: '#20252b',
     editorForegroundColor: '#d8dee9',

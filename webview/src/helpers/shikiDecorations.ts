@@ -7,7 +7,6 @@ import {
   getShikiTokens,
   requestShikiTokens,
   isShikiThemeReady,
-  isShikiEnabled,
   subscribeShikiRefresh,
   getShikiThemeMeta,
   type ShikiToken
@@ -136,7 +135,7 @@ function addBlockDecorations(
 }
 
 function buildDecorations(view: EditorView): DecorationSet {
-  if (!isShikiEnabled() || !isShikiThemeReady()) {
+  if (!isShikiThemeReady()) {
     return Decoration.none;
   }
   const builder = new RangeSetBuilder<Decoration>();

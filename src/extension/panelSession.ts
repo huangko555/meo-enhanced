@@ -35,9 +35,7 @@ import {
   getOutlineVisible,
   getOutlineWidth,
   normalizeOutlineWidth,
-  getThemeSettings,
-  getUseVscodeThemeForCodeBlocks,
-  getCodeBlockVscodeTheme
+  getCurrentVscodeCodeTheme
 } from '../shared/extensionConfig';
 import {
   openImageExternally,
@@ -51,7 +49,7 @@ import { GitDocumentState } from '../git/documentState';
 import type { GitBaselinePayload } from '../git/types';
 import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
 import type { ExportStyleEnvironment } from '../export/runtime';
-import type { ThemeSettings } from '../shared/themeDefaults';
+import type { BuiltInVisualBaseline } from '../shared/builtInVisualBaseline';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
@@ -317,9 +315,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       outlinePosition: getOutlinePosition(),
       outlineVisible: getOutlineVisible(context),
       outlineWidth: getOutlineWidth(context),
-      theme: getThemeSettings(),
-      shikiCodeBlocks: getUseVscodeThemeForCodeBlocks(),
-      codeTheme: getCodeBlockVscodeTheme(),
+      vscodeTheme: getCurrentVscodeCodeTheme(),
       restoreTopLine: initialRestore?.line,
       restoreTopLineOffset: initialRestore?.lineOffset
     };

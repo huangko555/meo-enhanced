@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import exportRuntime from '../src/export/runtime';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-image-'));
 const localImagePath = path.join(tempDir, 'absolute-image.png');
@@ -18,7 +18,7 @@ const markdownText = `![local](${localImagePath} "title")\n\n![remote](${remoteI
 const baseOptions = {
   markdownText,
   sourceDocumentPath: path.join(tempDir, 'document.md'),
-  theme: defaultThemeSettings,
+  theme: defaultBuiltInVisualBaseline,
   appearance: 'dark' as const,
   styleEnvironment: {},
   mermaidRuntimeSrc: 'mermaid.min.js',

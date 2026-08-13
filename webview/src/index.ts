@@ -5,8 +5,8 @@ import { createOutlineController } from './helpers/outline';
 import { normalizeWikiTarget, replaceWikiLinkStatuses, initializeWikiLinkHandling, collectWikiLinkTargets, requestWikiLinkStatuses, scheduleWikiLinkStatusRefresh, setWikiLinkRefreshContext, cancelPendingWikiStatusRefresh, handleResolvedWikiLinks } from './helpers/wikiLinks';
 import { initializeLocalLinkHandling, requestLocalLinkStatuses, scheduleLocalLinkStatusRefresh, setLocalLinkRefreshContext, cancelPendingLocalLinkStatusRefresh, handleResolvedLocalLinks } from './helpers/localLinks';
 import { setGitDiffLineHighlightsEnabled } from './helpers/gitDiffLineHighlights';
-import { applyThemeSettings } from './helpers/theme';
-import { setShikiTheme, setShikiEnabled } from './helpers/shikiHighlighter';
+import { applyBuiltInVisualBaseline } from './helpers/theme';
+import { setShikiTheme } from './helpers/shikiHighlighter';
 import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeError, shouldAutoFallbackToSourceForLiveError, logWebviewRenderError, type FailureNoticeManager } from './helpers/errors';
 import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
@@ -31,7 +31,7 @@ import { resolveCodeTheme } from './themes/editorLightTheme';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
-import { createThemeWebviewAdapter } from './adapters/themeWebviewAdapter';
+import { createAppearanceWebviewAdapter } from './adapters/appearanceWebviewAdapter';
 import { createEditorModeApplication, type EditorMode } from './application/editorMode';
 import { createEditorModeEffectAdapter } from './adapters/editorModeEffectAdapter';
 import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/editorModeRuntime';
@@ -92,7 +92,7 @@ initializeImageHandling(vscode);
 initializeWikiLinkHandling(vscode);
 initializeLocalLinkHandling(vscode);
 
-applyThemeSettings();
+applyBuiltInVisualBaseline();
 setImageSrcResolver(resolveImageSrc);
 
 const root = document.getElementById('app');
@@ -778,6 +778,10 @@ const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
   role: 'group',
   options: [
     {
+      value: 'auto',
+      label: 'Auto'
+    },
+    {
       value: 'light',
       label: 'Light',
       renderLeading: () => createElement(Sun, { width: 14, height: 14, 'aria-hidden': 'true' })
@@ -996,8 +1000,10 @@ const mermaidDiagramPresentationFactory = createMermaidDiagramPresentationFactor
     };
   }
 });
+let resolveEditorAppearanceForPreview: () => 'light' | 'dark' = () => 'dark';
 const previewController = createPreviewController({
   vscode,
+  getEditorAppearance: () => resolveEditorAppearanceForPreview(),
   mermaidRenderResources: mermaidDiagramRenderPool,
   onFindRequested: () => findPanelController.open('find'),
   onRendered: () => {
@@ -1072,7 +1078,7 @@ editorAppearanceControl.element.addEventListener('click', (event) => {
     ? event.target.closest<HTMLButtonElement>('.editor-appearance-button[data-editor-appearance]')
     : null;
   const appearance = button?.dataset.editorAppearance;
-  if (appearance === 'light' || appearance === 'dark') {
+  if (appearance === 'auto' || appearance === 'light' || appearance === 'dark') {
     themeAdapter.setAppearance(appearance, { post: true });
   }
 });
@@ -1752,13 +1758,11 @@ const exportAdapter = createExportWebviewAdapter({
   getStyleEnvironment: getExportStyleEnvironment
 });
 
-const themeAdapter = createThemeWebviewAdapter({
+const themeAdapter = createAppearanceWebviewAdapter({
   setAppearanceControl: (appearance) => editorAppearanceControl.setActive(appearance),
-  applyTheme: (theme, appearance) =>
-    applyThemeSettings(theme as Parameters<typeof applyThemeSettings>[0], appearance),
-  setShikiEnabled,
+  applyAppearance: applyBuiltInVisualBaseline,
   resolveCodeTheme,
-  setShikiTheme,
+  setCodeTheme: setShikiTheme,
   refreshMermaidTheme: () => mermaidDiagramRenderPool.refreshTheme(),
   applyWithEditorViewportPreserved: (action) => {
     if (editor) editor.preserveViewport(action);
@@ -1766,6 +1770,7 @@ const themeAdapter = createThemeWebviewAdapter({
   },
   refreshEditorDecorations: () => editor?.refreshDecorations(),
   refreshPreview: () => previewAdapter.refreshVisible(getCurrentEditorText()),
+  syncPreviewAutoAppearance: () => previewController.syncAutoAppearance(),
   postEditorAppearance: (appearance) => {
     vscode.postMessage({ type: 'setEditorAppearance', appearance });
   },
@@ -1773,6 +1778,7 @@ const themeAdapter = createThemeWebviewAdapter({
     console.error(`[MEO webview] ${context}`, error);
   }
 });
+resolveEditorAppearanceForPreview = () => themeAdapter.getAppearance();
 
 const withMessageErrorBoundary = (context: string, action: () => void): void => {
   try {
@@ -1798,10 +1804,8 @@ window.addEventListener('message', (event) => {
     acknowledgeReadyHandshake();
     withMessageErrorBoundary('init handler', () => {
       themeAdapter.start({
-        theme: message.theme,
-        codeTheme: message.codeTheme,
-        appearance: message.editorAppearance,
-        shikiEnabled: message.shikiCodeBlocks
+        vscodeTheme: message.vscodeTheme,
+        appearance: message.editorAppearance
       });
       failureNotice.clearFailureNotice();
       documentSessionAdapter.start(message);

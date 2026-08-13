@@ -2364,6 +2364,35 @@ try {
   const regexDuplicate = runCheck();
   assert.equal(regexDuplicate.ok, false, 'caller-owned delimiter regex must be rejected');
   assert.match(regexDuplicate.output, /ARCH011/);
+
+  write('webview/src/helpers/math.ts', [
+    "import { scanLatexMath, scanLatexMathAt } from '../../../src/shared/latexMathScanner';",
+    'export function collect(text: string) { return scanLatexMath(text); }',
+    'export function find(text: string, index: number) { const range = scanLatexMathAt(text, index); if (!range) return null; return range; }',
+    ''
+  ].join('\n'));
+  const removedCustomThemeFixtures = [
+    ['package.json', JSON.stringify({ contributes: { commands: [{ command: 'meoEnhanced.importTheme' }] } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.theme': { type: 'object' } } } } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.codeBlocks.useVscodeTheme': { type: 'boolean' } } } } })],
+    ['src/host/customThemeStorage.ts', 'export const customThemes = [];\n'],
+    ['src/protocol/editorState.ts', 'export type ThemeSettingsDto = { colors: Record<string, string> };\n'],
+    ['src/protocol/editorEvents.ts', "export const event = { type: 'themeChanged' };\n"],
+    ['webview/src/editor/themeControls.ts', 'export const importedThemeState = {};\n'],
+    ['docs/appearance.md', 'Use MEO theme management to import a palette.\n']
+  ] as const;
+  for (const [fixturePath, contents] of removedCustomThemeFixtures) {
+    write(fixturePath, contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, false, `${fixturePath} custom-theme alias must be rejected`);
+    assert.match(outcome.output, /ARCH020/);
+    rmSync(join(fixtureRoot, ...fixturePath.split('/')));
+  }
+
+  write('README.md', 'Editor appearance follows the current VS Code theme and uses a built-in code palette when reversed.\n');
+  const retainedAppearanceTheme = runCheck();
+  assert.equal(retainedAppearanceTheme.ok, true, `retained appearance/theme prose must pass: ${retainedAppearanceTheme.output}`);
+  rmSync(join(fixtureRoot, 'README.md'));
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });
 }

@@ -1,4 +1,6 @@
-import type { PreviewAppearance } from '../../../src/shared/preview';
+import type { EditorAppearance } from '../../../src/protocol/editorCommands';
+
+type PreviewAppearance = Exclude<EditorAppearance, 'auto'>;
 import {
   MermaidDiagramResourceUnavailableError,
   type MermaidDiagramRenderResources

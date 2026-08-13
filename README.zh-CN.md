@@ -12,8 +12,7 @@ Edit complex Markdown and see every addition, modification, and deletion as you 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced">从 VS Code Marketplace 安装</a> ·
   <a href="https://github.com/huangko555/meo-enhanced/releases">下载 VSIX</a> ·
-  <a href="https://github.com/huangko555/meo-enhanced/blob/main/CHANGELOG.md">查看变更记录</a> ·
-  <a href="https://github.com/huangko555/meo-enhanced/blob/main/docs/theming.md">主题配置</a>
+  <a href="https://github.com/huangko555/meo-enhanced/blob/main/CHANGELOG.md">查看变更记录</a>
 </p>
 
 ![MEO Enhanced 在同一份 Live 文档中显示独立的深色和浅色外观](docs/readme/editor-appearance-dark-light.png)
@@ -39,7 +38,7 @@ code --install-extension huangko555.meo-enhanced
 - **Live**：保持 Markdown 可直接编辑，同时在原位置渲染标题、表格、链接、图片、安全 HTML、提示块、代码块、Mermaid、LaTeX 等富内容。
 - **Source**：提供专注的 Markdown 源码编辑体验，并保留语法高亮和文档导航能力。
 - **Preview**：提供适合最终检查的只读渲染结果。
-- **独立的 Dark 与 Light 外观**：可在 More 菜单底部手动切换。选择会立即应用到当前编辑器，并成为之后新打开编辑器的默认值，不会强制改变已经打开的其他编辑器。
+- **独立的 Auto、Dark 与 Light 外观**：可在 More 菜单底部切换。Editor Auto 跟随 VS Code，Preview Auto 跟随解析后的 Editor 外观。选择会立即应用到当前编辑器，并成为之后新打开编辑器的默认值，不会强制改变已经打开的其他编辑器。
 - **一致的渲染与模式切换**：在 Live、Source 和 Preview 之间保持所选外观与阅读位置稳定。
 
 ## 在文档中直接审阅改动
@@ -97,13 +96,9 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 | 在表格单元格中换行 | `Shift + Enter` |
 | 选择改动基线 | 打开 **More**，选择 Current Edits、Recent Save 或 Git HEAD |
 
-## 配置与主题
+## 配置与外观
 
-编辑器提供独立的 Dark 与 Light 外观，以及可自定义的主题系统。主题选择器内置十套预设：One Monokai、One Dark Pro、Dracula、Gruvbox、Nord、Solarized Dark、Catppuccin Mocha、Tokyo Night、GitHub Dark 和 GitHub Light。
-
-可以在命令面板中选择、导出、修改和导入主题。主题可控制文档配色、Markdown 与代码语法、字体排版、标题以及 HTML/PDF 导出样式。
-
-完整结构、回退规则和语法颜色列表见[主题配置文档](docs/theming.md)。
+Editor 与 Preview 外观彼此独立。Live 和 Preview 使用固定的浅色/深色设计；Source 在同向外观使用 VS Code 原生配色，反向时使用内置 VS Code-like 配色。代码块明暗与 VS Code 一致时使用当前 VS Code 语法颜色，反向时使用内置匹配配色。HTML/PDF 导出使用最终 Preview 颜色。
 
 常用设置包括：
 

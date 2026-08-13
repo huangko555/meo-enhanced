@@ -1,4 +1,4 @@
-import { defaultCodeBlockBackgroundColor, themeColorKeys } from '../../../src/shared/themeDefaults';
+import { defaultCodeBlockBackgroundColor, themeColorKeys } from '../../../src/shared/builtInVisualBaseline';
 
 export interface ExportStyleEnvironment extends Record<string, unknown> {
   editorBackgroundColor: string;

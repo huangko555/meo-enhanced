@@ -4,7 +4,7 @@ import { buildExportStyles, buildPreviewStyles, type ExportStyleEnvironment } fr
 import { writeFinalizedHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
 import type { ExportHtmlImageMode } from './assetPaths';
-import type { ThemeSettings } from '../shared/themeDefaults';
+import type { BuiltInVisualBaseline } from '../shared/builtInVisualBaseline';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 
 export type ExportRuntimeBuildHtmlOptions = {
@@ -13,7 +13,7 @@ export type ExportRuntimeBuildHtmlOptions = {
   outputFilePath: string;
   target: 'html' | 'pdf';
   htmlImageMode: ExportHtmlImageMode;
-  theme: ThemeSettings;
+  theme: BuiltInVisualBaseline;
   appearance: PreviewAppearance;
   styleEnvironment?: ExportStyleEnvironment;
   editorFontEnvironment?: {
@@ -65,7 +65,7 @@ function renderExportHtmlDocument(
 function renderPreviewDocument(options: {
   markdownText: string;
   sourceDocumentPath: string;
-  theme: ThemeSettings;
+  theme: BuiltInVisualBaseline;
   styleEnvironment?: ExportStyleEnvironment;
 }): PreviewRenderResult {
   const rendered = renderMarkdownToHtml({

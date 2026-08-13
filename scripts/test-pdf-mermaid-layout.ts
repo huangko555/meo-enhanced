@@ -1,8 +1,8 @@
 import { launchTestBrowser } from './browser-test-helpers';
 import { buildExportStyles } from '../src/export/exportStyles';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
-const styles = buildExportStyles(defaultThemeSettings, {
+const styles = buildExportStyles(defaultBuiltInVisualBaseline, {
   editorBackgroundColor: '#20252b',
   editorForegroundColor: '#d8dee9',
   codeBlockBackgroundColor: '#171b20',

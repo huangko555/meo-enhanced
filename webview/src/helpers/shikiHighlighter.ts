@@ -123,23 +123,6 @@ export function subscribeShikiRefresh(listener: () => void): () => void {
   return () => refreshListeners.delete(listener);
 }
 
-let enabled = false;
-
-export function isShikiEnabled(): boolean {
-  return enabled;
-}
-
-export function setShikiEnabled(value: boolean): void {
-  if (enabled === value) {
-    return;
-  }
-  enabled = value;
-  if (enabled && rawTheme) {
-    void getHighlighter();
-  }
-  notifyRefresh();
-}
-
 export function isShikiThemeReady(): boolean {
   return rawTheme !== null;
 }
@@ -292,8 +275,6 @@ export function setShikiTheme(theme: RawVscodeTheme | null | undefined): void {
   loadedLangs.clear();
   tokenCache.clear();
   pending.clear();
-  if (enabled) {
-    void getHighlighter();
-  }
+  void getHighlighter();
   notifyRefresh();
 }

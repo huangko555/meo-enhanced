@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import exportRuntime from '../src/export/runtime';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -15,7 +15,7 @@ const rendered = exportRuntime.renderExportHtmlDocument({
   outputFilePath: 'C:/tmp/export.html',
   target: 'html',
   htmlImageMode: 'embedded',
-  theme: defaultThemeSettings,
+  theme: defaultBuiltInVisualBaseline,
   appearance: 'dark',
   styleEnvironment: {
     editorBackgroundColor: '#20252b',

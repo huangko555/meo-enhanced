@@ -11,8 +11,7 @@ Edit complex Markdown and see every addition, modification, and deletion as you 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced">Install from VS Code Marketplace</a> ·
   <a href="https://github.com/huangko555/meo-enhanced/releases">Download VSIX</a> ·
-  <a href="https://github.com/huangko555/meo-enhanced/blob/main/CHANGELOG.md">Changelog</a> ·
-  <a href="https://github.com/huangko555/meo-enhanced/blob/main/docs/theming.md">Theming guide</a>
+  <a href="https://github.com/huangko555/meo-enhanced/blob/main/CHANGELOG.md">Changelog</a>
 </p>
 
 ![MEO Enhanced showing the same Live document in independent Dark and Light appearances](docs/readme/editor-appearance-dark-light.png)
@@ -38,7 +37,7 @@ For offline installation, download a `.vsix` package from [GitHub Releases](http
 - **Live** keeps Markdown directly editable while rendering headings, tables, links, images, safe HTML, alerts, code blocks, Mermaid, LaTeX, and other rich content in place.
 - **Source** provides a focused Markdown source editor with syntax highlighting and the same document navigation tools.
 - **Preview** provides a read-only rendering for final review.
-- **Independent Dark and Light appearances** can be switched from the bottom of the More menu. The selected appearance applies to the current editor and becomes the default for editors opened later, without forcing already-open editors to change.
+- **Independent Auto, Dark, and Light appearances** can be switched from the bottom of the More menu. Editor Auto follows VS Code; Preview Auto follows the resolved Editor appearance. The selected preference applies to the current editor and becomes the default for editors opened later, without forcing already-open editors to change.
 - **Consistent rendering and mode switching** keep the selected appearance and reading position stable across Live, Source, and Preview.
 
 ## Review changes without leaving the document
@@ -96,13 +95,9 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 | Add a line break in a table cell | `Shift + Enter` |
 | Choose a change baseline | Open **More**, then select Current Edits, Recent Save, or Git HEAD |
 
-## Configuration and themes
+## Configuration and appearance
 
-The editor includes independent Dark and Light appearances plus a customizable theme system. The theme picker ships with ten presets, including One Monokai, One Dark Pro, Dracula, Gruvbox, Nord, Solarized Dark, Catppuccin Mocha, Tokyo Night, GitHub Dark, and GitHub Light.
-
-Use the Command Palette to select, export, edit, and import themes. Themes control document colors, Markdown and code syntax, typography, headings, and HTML/PDF export styling.
-
-See the [theming guide](docs/theming.md) for the schema, fallback behavior, and complete token list.
+Editor and Preview appearances are independent. Live and Preview use fixed light/dark designs; Source keeps VS Code-native colors for the matching appearance and a built-in VS Code-like palette for the reverse appearance. Fenced code uses the active VS Code syntax colors when the brightness matches and a built-in matching palette otherwise. HTML/PDF export uses the final Preview colors.
 
 Common settings include:
 

@@ -1,7 +1,7 @@
 import { HighlightStyle } from '@codemirror/language';
-import { resolveTheme, SYNTAX_TAG_SPECS, type SyntaxTokenStyleSpec } from '../../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline, SYNTAX_TAG_SPECS, type SyntaxTokenStyleSpec } from '../../src/shared/builtInVisualBaseline';
 
-const defaultTheme = resolveTheme();
+const defaultTheme = defaultBuiltInVisualBaseline;
 const liveDecoratedMarkdownTokenIds = new Set(['heading', 'emphasis', 'strong', 'strikethrough']);
 
 const buildSpec = (spec: SyntaxTokenStyleSpec) => {

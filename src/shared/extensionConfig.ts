@@ -1,11 +1,4 @@
 import * as vscode from 'vscode';
-import {
-  defaultThemeSettings,
-  resolveTheme,
-  serializeThemeSettings,
-  type ThemeSettings,
-  validateThemePayload
-} from './themeDefaults';
 import { getActiveVscodeRawTheme, type RawVscodeTheme } from './vscodeTheme';
 import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from './outlineWidth';
 export { normalizeOutlineWidth } from './outlineWidth';
@@ -15,7 +8,6 @@ export const LINE_NUMBERS_SETTING_KEY = 'lineNumbers.visible';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
 export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
-export const CODE_BLOCKS_VSCODE_THEME_SETTING_KEY = 'codeBlocks.useVscodeTheme';
 export const LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY = 'codeBlocks.collapseLongBlocks';
 export const REMEMBER_POSITION_LINES_SETTING_KEY = 'rememberPosition.lines';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
@@ -34,22 +26,6 @@ export const MARKDOWN_FILE_EXTENSIONS = ['.md', '.markdown', '.mdx', '.mdc'] as 
 export type OutlinePosition = 'left' | 'right';
 export type ExportHtmlImageMode = 'embedded' | 'linked';
 export type DiffBaselineMode = 'current-edit' | 'recent-save' | 'git-head';
-
-export function getThemeSettings(): ThemeSettings {
-  const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-  const themeValue = config.get<unknown>('theme');
-
-  if (!themeValue) {
-    return defaultThemeSettings;
-  }
-
-  const result = validateThemePayload(themeValue);
-  if (!result.success) {
-    return resolveTheme(themeValue as Partial<ThemeSettings>);
-  }
-
-  return result.theme;
-}
 
 export function getLineNumbersEnabled(context: vscode.ExtensionContext): boolean {
   return getToggleSettingValue(context, LINE_NUMBERS_SETTING_KEY, LINE_NUMBERS_KEY, [
@@ -70,20 +46,14 @@ export function getGitDiffLineHighlightsEnabled(): boolean {
   return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY, true);
 }
 
-export function getUseVscodeThemeForCodeBlocks(): boolean {
-  return vscode.workspace
-    .getConfiguration(EXTENSION_CONFIG_SECTION)
-    .get<boolean>(CODE_BLOCKS_VSCODE_THEME_SETTING_KEY, false);
-}
-
 export function getLongCodeBlockFoldingEnabled(): boolean {
   return vscode.workspace
     .getConfiguration(EXTENSION_CONFIG_SECTION)
     .get<boolean>(LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY, true);
 }
 
-export function getCodeBlockVscodeTheme(): RawVscodeTheme | null {
-  return getUseVscodeThemeForCodeBlocks() ? getActiveVscodeRawTheme() : null;
+export function getCurrentVscodeCodeTheme(): RawVscodeTheme | null {
+  return getActiveVscodeRawTheme();
 }
 
 export function getRememberPositionLines(): number {
@@ -174,18 +144,6 @@ export async function migrateLegacyToggleSettings(context: vscode.ExtensionConte
   await migrateLegacyToggleSetting(context, CONTENT_MAX_WIDTH_SETTING_KEY, CONTENT_MAX_WIDTH_ENABLED_KEY);
 }
 
-export async function resetThemeSettingsToDefault(): Promise<void> {
-  const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-  const key = 'theme';
-
-  try {
-    await config.update(key, serializeThemeSettings(defaultThemeSettings), vscode.ConfigurationTarget.Global);
-  } catch {
-    // Fall back to clearing global values if writing default payload fails.
-    await clearThemeKeysForTarget(config, [key], vscode.ConfigurationTarget.Global);
-  }
-}
-
 export async function syncEditorAssociations(useAsDefault: boolean): Promise<void> {
   const config = vscode.workspace.getConfiguration('workbench');
   const inspected = config.inspect<Record<string, string>>('editorAssociations');
@@ -271,20 +229,6 @@ function hasExplicitConfigurationValue<T>(config: vscode.WorkspaceConfiguration,
     languageScoped.workspaceLanguageValue !== undefined ||
     languageScoped.workspaceFolderLanguageValue !== undefined
   );
-}
-
-async function clearThemeKeysForTarget(
-  config: vscode.WorkspaceConfiguration,
-  keys: string[],
-  target: vscode.ConfigurationTarget
-): Promise<void> {
-  for (const key of keys) {
-    try {
-      await config.update(key, undefined, target);
-    } catch {
-      // Ignore failures so editor startup is not blocked by unsupported target writes.
-    }
-  }
 }
 
 async function syncEditorAssociationsForTarget(

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultThemeSettings } from '../src/shared/themeDefaults';
+import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -56,9 +56,9 @@ async function main() {
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
-        theme, shikiCodeBlocks: false, codeTheme: null, restoreTopLine: 1, restoreTopLineOffset: 0
+        vscodeTheme: null, restoreTopLine: 1, restoreTopLineOffset: 0
       }}));
-    }, { documentText: text, theme: defaultThemeSettings });
+    }, { documentText: text, theme: defaultBuiltInVisualBaseline });
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 100));
 

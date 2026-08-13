@@ -1,5 +1,5 @@
 export type EditorMode = 'live' | 'source' | 'preview';
-export type EditorAppearance = 'dark' | 'light';
+export type EditorAppearance = 'auto' | 'dark' | 'light';
 export type DiffBaselineMode = 'current-edit' | 'recent-save' | 'git-head';
 export type OutlinePosition = 'left' | 'right';
 
@@ -92,7 +92,8 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
         && (value.appearance === 'dark' || value.appearance === 'light') ? value as EditorCommand : null;
     case 'setPreviewAppearance':
     case 'setEditorAppearance':
-      return value.appearance === 'dark' || value.appearance === 'light' ? value as EditorCommand : null;
+      return value.appearance === 'auto' || value.appearance === 'dark' || value.appearance === 'light'
+        ? value as EditorCommand : null;
     default:
       return null;
   }
