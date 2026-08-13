@@ -177,7 +177,7 @@ async function main(): Promise<void> {
     await page.evaluate(() => {
       const editor = (window as any).__editor;
       const anchor = editor.getText().indexOf('<details>');
-      (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+      (window as any).LiveLayoutStabilityHarness.toggleDetailsBlock(editor.view, anchor);
     });
     await waitForFrames(page);
     const detailsExpandedState = await page.evaluate(() => {
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
       const editor = (window as any).__editor;
       const sourceVisible = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .some((line) => line.textContent?.includes('**source markers**'));
-      const toggled = (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+      const toggled = (window as any).LiveLayoutStabilityHarness.toggleDetailsBlock(editor.view, anchor);
       return { sourceVisible, toggled };
     }, detailsSourceAnchor);
     await waitForFrames(page);
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
 
     const sourceExpandResult = await page.evaluate((anchor) => {
       const editor = (window as any).__editor;
-      return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+      return (window as any).LiveLayoutStabilityHarness.toggleDetailsBlock(editor.view, anchor);
     }, detailsSourceAnchor);
     await waitForFrames(page);
     const detailsAfterSourceExpand = await page.evaluate(() => {
@@ -285,7 +285,7 @@ async function main(): Promise<void> {
     }
     const defaultOpenCollapseResult = await page.evaluate((anchor) => {
       const editor = (window as any).__editor;
-      return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+      return (window as any).LiveLayoutStabilityHarness.toggleDetailsBlock(editor.view, anchor);
     }, defaultOpenSourceAnchor);
     await waitForFrames(page);
     const defaultOpenAfterCollapse = await page.evaluate(() => {
@@ -309,7 +309,7 @@ async function main(): Promise<void> {
     }
     const defaultOpenExpandResult = await page.evaluate((anchor) => {
       const editor = (window as any).__editor;
-      return (window as any).LiveLayoutStabilityHarness.toggleCollapsibleSection(editor.view, anchor);
+      return (window as any).LiveLayoutStabilityHarness.toggleDetailsBlock(editor.view, anchor);
     }, defaultOpenSourceAnchor);
     await waitForFrames(page);
     const defaultOpenAfterExpand = await page.evaluate(() => {

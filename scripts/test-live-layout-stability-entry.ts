@@ -5,10 +5,10 @@ import { getDetailsBlocks, toggleDetailsBlock } from '../webview/src/helpers/det
   LiveLayoutStabilityHarness?: {
     createEditor: typeof createEditor;
     getDetailsBlocks: typeof getDetailsBlocks;
-    toggleCollapsibleSection: typeof toggleDetailsBlock;
+    toggleDetailsBlock: typeof toggleDetailsBlock;
   };
 }).LiveLayoutStabilityHarness = {
   createEditor,
   getDetailsBlocks,
-  toggleCollapsibleSection: toggleDetailsBlock
+  toggleDetailsBlock
 };

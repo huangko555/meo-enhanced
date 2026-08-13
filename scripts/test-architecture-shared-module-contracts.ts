@@ -584,6 +584,102 @@ try {
 
   const removedHeadingFoldAndOutlineReorderFixtures = [
     {
+      label: 'bare heading folding owner',
+      path: 'webview/src/editor/heading.ts',
+      contents: 'export const headingFolding = new Map();\n'
+    },
+    {
+      label: 'heading folding path owner',
+      path: 'webview/src/helpers/headingFolding.ts',
+      contents: 'export const state = new Map();\n'
+    },
+    {
+      label: 'heading folding owner suffix',
+      path: 'webview/src/editor/heading.ts',
+      contents: 'export const headingFoldingController = {};\n'
+    },
+    {
+      label: 'dotted heading folding setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.heading.folding.enabled': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab heading folding alias',
+      path: 'webview/src/editor/heading.ts',
+      contents: "export const capability = 'heading-folding-controller';\n"
+    },
+    {
+      label: 'heading folding Protocol command',
+      path: 'src/protocol/heading.ts',
+      contents: "export type HeadingCommand = { type: 'toggleHeadingFolding' };\n"
+    },
+    {
+      label: 'heading folding documentation',
+      path: 'docs/editor.md',
+      contents: 'Use heading folding in the editor.\n'
+    },
+    {
+      label: 'camel Markdown section fold action',
+      path: 'webview/src/editor/markdown.ts',
+      contents: 'export const foldMarkdownSection = () => undefined;\n'
+    },
+    {
+      label: 'dotted Markdown section collapse setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.markdown.section.collapse': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab Markdown section fold Host action',
+      path: 'src/host/markdown.ts',
+      contents: "export const capability = 'fold-markdown-section';\n"
+    },
+    {
+      label: 'outline section reorder owner',
+      path: 'webview/src/helpers/outline.ts',
+      contents: 'export const outlineSectionReorder = () => undefined;\n'
+    },
+    {
+      label: 'outline section move owner',
+      path: 'src/host/outline.ts',
+      contents: 'export const outlineSectionMove = () => undefined;\n'
+    },
+    {
+      label: 'drag outline item action',
+      path: 'webview/src/editor/outline.ts',
+      contents: 'export const dragOutlineItem = () => undefined;\n'
+    },
+    {
+      label: 'dotted outline node drop setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.outline.node.drop': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab outline node move alias',
+      path: 'webview/src/editor/outline.ts',
+      contents: "export const capability = 'move-outline-node';\n"
+    },
+    {
+      label: 'outline item reorder Protocol command',
+      path: 'src/protocol/outline.ts',
+      contents: "export type OutlineCommand = { type: 'reorderOutlineItem' };\n"
+    },
+    {
+      label: 'outline section drag documentation',
+      path: 'README.md',
+      contents: 'Drag an outline section to reorder the document.\n'
+    },
+    {
+      label: 'outline section reorder documentation without drag wording',
+      path: 'README.md',
+      contents: 'Use the outline to reorder sections.\n'
+    },
+    {
       label: 'heading collapse state owner',
       path: 'webview/src/helpers/headingCollapse.ts',
       contents: 'export const headingCollapseState = new Map();\n'
@@ -1917,7 +2013,7 @@ try {
   mkdirSync(join(stagedRoot, 'src', 'host'), { recursive: true });
   writeFileSync(
     join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
-    'export const moveHeadingSection = () => true;\n'
+    'export const dragOutlineItem = () => true;\n'
   );
   execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });
   writeFileSync(
@@ -1935,7 +2031,7 @@ try {
       return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
     }
   })();
-  assert.equal(stagedOutlineReorderOwner.ok, false, 'staged ARCH019 must reject outline section moves from the index');
+  assert.equal(stagedOutlineReorderOwner.ok, false, 'staged ARCH019 must reject outline item drag owners from the index');
   assert.match(stagedOutlineReorderOwner.output, /ARCH019/);
 
   execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });

@@ -83,7 +83,7 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 ## Navigate and keep your place
 
 - Jump to an exact line from the toolbar or return to the top through the floating document button.
-- Use the resizable outline on either side to collapse, reorder, and follow sections.
+- Use the resizable outline on either side to collapse and follow sections.
 - Preserve the visible document position across editing, saving, folding, table interaction, rich block rendering, and mode changes whenever possible.
 - Double-click the discard button to abandon all unsaved edits in the current document.
 
