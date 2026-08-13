@@ -284,6 +284,26 @@ try {
       contents: 'settings.spellcheck = true;\n'
     },
     {
+      label: 'const spellcheck state owner',
+      path: 'src/shared/spellcheckState.ts',
+      contents: 'const spellcheck = true;\n'
+    },
+    {
+      label: 'let spellcheck state owner',
+      path: 'src/shared/spellcheckState.ts',
+      contents: 'let spellcheck = false;\n'
+    },
+    {
+      label: 'bare spellcheck state owner',
+      path: 'src/shared/spellcheckState.ts',
+      contents: 'spellcheck = true;\n'
+    },
+    {
+      label: 'object spellcheck state owner',
+      path: 'src/shared/spellcheckState.ts',
+      contents: 'export const state = { spellcheck: true };\n'
+    },
+    {
       label: 'spell-check dependency',
       path: 'package.json',
       contents: JSON.stringify({ dependencies: { 'cspell-lib': '^10.0.1' } }, null, 2)
@@ -395,7 +415,12 @@ try {
     {
       label: 'HTML native spellcheck attributes',
       path: 'webview/src/helpers/nativeSpellcheck.html',
-      contents: '<textarea spellcheck="false"></textarea>\n<input spellcheck="true">\n'
+      contents: '<textarea spellcheck="false"></textarea>\n<input spellcheck="true">\n<textarea spellcheck=false></textarea>\n<input spellcheck=true>\n<textarea\n  spellcheck=true\n></textarea>\n'
+    },
+    {
+      label: 'HTML native spellcheck attributes in TypeScript strings',
+      path: 'webview/src/helpers/nativeSpellcheckMarkup.ts',
+      contents: "export const markup = '<input spellcheck=true>';\nexport const template = `<textarea spellcheck=\"false\"></textarea>`;\n"
     },
     {
       label: 'DOM native spellcheck properties',

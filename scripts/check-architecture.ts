@@ -687,7 +687,10 @@ const spellDiagnosticScope = projectFilesForCapabilityGuard().filter((path) => (
   /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
 ));
 const stripNativeSpellcheckAttributes = (text: string): string => text
-  .replace(/\bspellcheck\s*=\s*(?:["'](?:true|false)["']|(?:true|false))(?=\s|\/?>|$)/gi, '')
+  .replace(/<[A-Za-z][^<>]*>/g, (tag) => tag.replace(
+    /\bspellcheck\s*=\s*(?:["'](?:true|false)["']|(?:true|false))(?=\s|\/?>|$)/gi,
+    ''
+  ))
   .replace(/\b(?:input|textarea|element|[A-Za-z_$][\w$]*(?:Input|Textarea|TextArea|Element))\.spellcheck\s*=\s*(?:true|false)\b/g, '')
   .replace(/\.setAttribute\(\s*["']spellcheck["']\s*,\s*["'](?:true|false)["']\s*\)/gi, '');
 const hasRemovedSpellDiagnosticCapability = (text: string, path: string): boolean => {
@@ -711,7 +714,7 @@ const hasRemovedSpellDiagnosticCapability = (text: string, path: string): boolea
     const hasBuiltInOwner = wordSet.has('built') && wordSet.has('in');
     const hasSpellCheck = hasSpelling && wordSet.has('check');
     if (
-      (hasSingleWordSpellcheck && (hasCapabilityContext || hasCapabilityAction || hasMEOOwner || hasBuiltInOwner)) ||
+      hasSingleWordSpellcheck ||
       (hasDiagnostic && hasSuggestion && (isProtocolPath || hasCapabilityContext || hasCapabilityAction)) ||
       (hasDiagnostic && hasQuickFix && (hasCapabilityContext || hasCapabilityAction)) ||
       (hasSpellCheck && (hasCapabilityContext || hasCapabilityAction || hasMEOOwner || hasBuiltInOwner)) ||
@@ -724,10 +727,9 @@ const hasRemovedSpellDiagnosticCapability = (text: string, path: string): boolea
   return false;
 };
 for (const path of spellDiagnosticScope) {
-  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  const lines = stripNativeSpellcheckAttributes(readTrackedProjectFile(path)).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    const line = stripNativeSpellcheckAttributes(lines[index]);
-    if (hasRemovedSpellDiagnosticCapability(line, path)) {
+    if (hasRemovedSpellDiagnosticCapability(lines[index], path)) {
       failures.push(`ARCH015 已删除的 MEO 拼写检查或诊断建议能力重新出现: ${path}:${index + 1}`);
     }
   }
