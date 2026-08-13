@@ -434,6 +434,18 @@ try {
       expectedLine: 3
     },
     {
+      label: 'conditional DOM in finally does not recover continue exit',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    if (ok) field = document.createElement('input');\n  }\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'abrupt finally keeps continue exit recovery conservative',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    if (abort) continue;\n    field = document.createElement('input');\n  }\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'do-while-loop carried non-DOM receiver state',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\ndo {\n  field.spellcheck = true;\n  field = settings;\n} while (enabled);\n",
@@ -744,6 +756,26 @@ try {
       label: 'unlabeled inner continue preserves outer ancestor DOM kill',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  field.spellcheck = true;\n  while (innerReady) {\n    if (disabled) { field = settings; continue; }\n    field = document.createElement('input');\n  }\n  field = document.createElement('input');\n}\n"
+    },
+    {
+      label: 'unreachable non-DOM after continue does not enter while state',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  field = document.createElement('input');\n  continue;\n  field = settings;\n}\n"
+    },
+    {
+      label: 'unreachable non-DOM after labeled outer continue is excluded',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field.spellcheck = true;\n  if (innerReady) {\n    field = document.createElement('input');\n    continue outer;\n    field = settings;\n  }\n}\n"
+    },
+    {
+      label: 'continue exit includes mandatory finally DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    field = settings;\n    continue;\n  } finally {\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
+      label: 'labeled outer continue includes mandatory finally recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field.spellcheck = true;\n  try {\n    if (innerReady) { field = settings; continue outer; }\n  } finally {\n    field = document.createElement('input');\n  }\n}\n"
     },
     {
       label: 'for-of iteration binding resets before each loop body',
