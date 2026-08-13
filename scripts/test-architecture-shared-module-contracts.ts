@@ -272,6 +272,18 @@ try {
       } } } }, null, 2)
     },
     {
+      label: 'lowercase MEO spellcheck setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.spellcheck.enabled': { type: 'boolean' }
+      } } } }, null, 2)
+    },
+    {
+      label: 'non-DOM settings spellcheck property',
+      path: 'src/shared/spellPreferences.ts',
+      contents: 'settings.spellcheck = true;\n'
+    },
+    {
       label: 'spell-check dependency',
       path: 'package.json',
       contents: JSON.stringify({ dependencies: { 'cspell-lib': '^10.0.1' } }, null, 2)
@@ -287,6 +299,16 @@ try {
       contents: 'export type DiagnosticSuggestionsResult = { suggestions: string[] };\n'
     },
     {
+      label: 'pure Protocol diagnostic suggestions DTO',
+      path: 'src/protocol/diagnosticSuggestions.ts',
+      contents: 'export type DiagnosticSuggestions = { suggestions: string[] };\n'
+    },
+    {
+      label: 'removed diagnostic suggestions Protocol path',
+      path: 'src/protocol/diagnosticSuggestions.ts',
+      contents: 'export {};\n'
+    },
+    {
       label: 'diagnostic suggestion transport alias',
       path: 'webview/src/adapters/diagnosticSuggestionsTransport.ts',
       contents: 'export const diagnosticSuggestionsTransport = {};\n'
@@ -295,6 +317,31 @@ try {
       label: 'diagnostic suggestion UI alias',
       path: 'webview/src/helpers/diagnosticSuggestionsMenu.ts',
       contents: 'export const showDiagnosticSuggestionsMenu = () => undefined;\n'
+    },
+    {
+      label: 'pure MEO spell diagnostics phrase',
+      path: 'README.md',
+      contents: 'MEO spell diagnostics\n'
+    },
+    {
+      label: 'pure meoSpellDiagnostics alias',
+      path: 'src/host/meoSpellDiagnostics.ts',
+      contents: 'export const meoSpellDiagnostics = [];\n'
+    },
+    {
+      label: 'pure MEO spell diagnostic collection',
+      path: 'src/host/meoSpellDiagnosticCollection.ts',
+      contents: "createDiagnosticCollection('meo-spell');\n"
+    },
+    {
+      label: 'pure diagnostic suggestions decoder function',
+      path: 'src/protocol/decodeDiagnosticSuggestions.ts',
+      contents: 'export const decodeDiagnosticSuggestions = undefined;\n'
+    },
+    {
+      label: 'pure diagnostic suggestion decoder type',
+      path: 'src/protocol/diagnosticSuggestionDecoder.ts',
+      contents: 'export class DiagnosticSuggestionDecoder {}\n'
     },
     {
       label: 'spelling diagnostics Host alias',
@@ -353,7 +400,7 @@ try {
     {
       label: 'DOM native spellcheck properties',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
-      contents: 'input.spellcheck = true;\ntextarea.spellcheck = false;\n'
+      contents: 'input.spellcheck = true;\ntextarea.spellcheck = false;\nelement.spellcheck = true;\n'
     },
     {
       label: 'DOM native spellcheck setAttribute calls',
@@ -364,6 +411,26 @@ try {
       label: 'ordinary diagnostics logging suggestion',
       path: 'src/host/diagnosticLogging.ts',
       contents: "export const note = 'Suggest diagnostic logging improvements.';\n"
+    },
+    {
+      label: 'ordinary DiagnosticSuggestions wording',
+      path: 'README.md',
+      contents: 'DiagnosticSuggestions is a generic example type.\n'
+    },
+    {
+      label: 'platform diagnostic collections',
+      path: 'src/host/platformDiagnostics.ts',
+      contents: "vscode.languages.createDiagnosticCollection('compiler');\nexport class CompilerDiagnosticCollection {}\n"
+    },
+    {
+      label: 'ordinary diagnostics decoders',
+      path: 'src/protocol/platformDiagnostics.ts',
+      contents: 'export const decodeDiagnostics = undefined;\nexport class CompilerDiagnosticDecoder {}\n'
+    },
+    {
+      label: 'ordinary MEO diagnostics wording',
+      path: 'README.md',
+      contents: 'MEO diagnostics remain visible.\n'
     }
   ];
   const rejectedAllowedSpellDiagnosticFixtures: string[] = [];

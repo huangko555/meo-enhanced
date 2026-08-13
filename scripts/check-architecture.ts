@@ -688,11 +688,13 @@ const spellDiagnosticScope = projectFilesForCapabilityGuard().filter((path) => (
 ));
 const stripNativeSpellcheckAttributes = (text: string): string => text
   .replace(/\bspellcheck\s*=\s*(?:["'](?:true|false)["']|(?:true|false))(?=\s|\/?>|$)/gi, '')
-  .replace(/\b[A-Za-z_$][\w$]*\.spellcheck\s*=\s*(?:true|false)\b/gi, '')
+  .replace(/\b(?:input|textarea|element|[A-Za-z_$][\w$]*(?:Input|Textarea|TextArea|Element))\.spellcheck\s*=\s*(?:true|false)\b/g, '')
   .replace(/\.setAttribute\(\s*["']spellcheck["']\s*,\s*["'](?:true|false)["']\s*\)/gi, '');
-const hasRemovedSpellDiagnosticCapability = (text: string): boolean => {
+const hasRemovedSpellDiagnosticCapability = (text: string, path: string): boolean => {
   if (/cspell|proofread(?:er|ing)?/i.test(text)) return true;
+  if (/^src\/protocol\/.*diagnostic[-_. ]?suggestions?/i.test(path)) return true;
   const words = normalizeCapabilityWords(text);
+  const isProtocolPath = /^src\/protocol\//i.test(path);
   for (let start = 0; start < words.length; start += 1) {
     const window = words.slice(start, start + 6);
     const wordSet = new Set(window);
@@ -700,15 +702,18 @@ const hasRemovedSpellDiagnosticCapability = (text: string): boolean => {
     const hasCorrection = window.some((word) => /^correction(?:s)?$/.test(word));
     const hasDiagnostic = window.some((word) => /^diagnostic(?:s)?$/.test(word));
     const hasSpelling = window.some((word) => /^(?:spell|spelling|typo|typos)$/.test(word));
+    const hasSingleWordSpellcheck = wordSet.has('spellcheck');
     const hasChecker = window.some((word) => /^checker(?:s)?$/.test(word));
     const hasQuickFix = wordSet.has('quick') && (wordSet.has('fix') || wordSet.has('fixes'));
-    const hasCapabilityContext = window.some((word) => /^(?:adapter|application|cache|command|controller|disabled|enabled|event|lifecycle|menu|message|protocol|request|response|result|runtime|setting|toggle|transport|ui|view)$/.test(word));
-    const hasCapabilityAction = window.some((word) => /^(?:apply|collect|disable|enable|request|set|show|toggle)$/.test(word));
-    const hasMEOOwner = wordSet.has('meo') && wordSet.has('enhanced');
+    const hasCapabilityContext = window.some((word) => /^(?:adapter|application|cache|collection|command|config|configuration|controller|decoder|disabled|enabled|event|lifecycle|menu|message|options|preferences|protocol|request|response|result|runtime|setting|settings|toggle|transport|ui|view)$/.test(word));
+    const hasCapabilityAction = window.some((word) => /^(?:apply|collect|create|decode|disable|enable|request|set|show|toggle)$/.test(word));
+    const hasMEOOwner = wordSet.has('meo');
     const hasBuiltInOwner = wordSet.has('built') && wordSet.has('in');
     const hasSpellCheck = hasSpelling && wordSet.has('check');
     if (
-      (hasDiagnostic && (hasSuggestion || hasQuickFix) && (hasCapabilityContext || hasCapabilityAction)) ||
+      (hasSingleWordSpellcheck && (hasCapabilityContext || hasCapabilityAction || hasMEOOwner || hasBuiltInOwner)) ||
+      (hasDiagnostic && hasSuggestion && (isProtocolPath || hasCapabilityContext || hasCapabilityAction)) ||
+      (hasDiagnostic && hasQuickFix && (hasCapabilityContext || hasCapabilityAction)) ||
       (hasSpellCheck && (hasCapabilityContext || hasCapabilityAction || hasMEOOwner || hasBuiltInOwner)) ||
       (hasSpelling && (hasSuggestion || hasQuickFix || hasCorrection || hasChecker)) ||
       (hasSpelling && hasDiagnostic && (hasCapabilityContext || hasCapabilityAction || hasMEOOwner || hasBuiltInOwner))
@@ -722,7 +727,7 @@ for (const path of spellDiagnosticScope) {
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const line = stripNativeSpellcheckAttributes(lines[index]);
-    if (hasRemovedSpellDiagnosticCapability(line)) {
+    if (hasRemovedSpellDiagnosticCapability(line, path)) {
       failures.push(`ARCH015 已删除的 MEO 拼写检查或诊断建议能力重新出现: ${path}:${index + 1}`);
     }
   }
