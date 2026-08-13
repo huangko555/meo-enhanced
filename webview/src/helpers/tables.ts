@@ -4106,6 +4106,7 @@ class HtmlTableWidget extends WidgetType {
   createCellInput(value: string, rowIndex: number, colIndex: number) {
     const input = document.createElement('textarea');
     input.rows = 1;
+    input.spellcheck = true;
     input.value = tableCellSourceToEditorValue(value);
     input.dataset.tableRow = String(rowIndex);
     input.dataset.tableCol = String(colIndex);

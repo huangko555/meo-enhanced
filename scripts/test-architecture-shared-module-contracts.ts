@@ -265,6 +265,13 @@ try {
       } } } }, null, 2)
     },
     {
+      label: 'canonical MEO spell-check setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.spellCheck.enabled': { type: 'boolean' }
+      } } } }, null, 2)
+    },
+    {
       label: 'spell-check dependency',
       path: 'package.json',
       contents: JSON.stringify({ dependencies: { 'cspell-lib': '^10.0.1' } }, null, 2)
@@ -275,6 +282,21 @@ try {
       contents: "export type QuickFixRequest = { type: 'requestSuggestionsForDiagnostic'; from: number; to: number };\n"
     },
     {
+      label: 'diagnostic suggestion result alias',
+      path: 'src/protocol/diagnosticSuggestionResult.ts',
+      contents: 'export type DiagnosticSuggestionsResult = { suggestions: string[] };\n'
+    },
+    {
+      label: 'diagnostic suggestion transport alias',
+      path: 'webview/src/adapters/diagnosticSuggestionsTransport.ts',
+      contents: 'export const diagnosticSuggestionsTransport = {};\n'
+    },
+    {
+      label: 'diagnostic suggestion UI alias',
+      path: 'webview/src/helpers/diagnosticSuggestionsMenu.ts',
+      contents: 'export const showDiagnosticSuggestionsMenu = () => undefined;\n'
+    },
+    {
       label: 'spelling diagnostics Host alias',
       path: 'src/host/proofreadingAdapter.ts',
       contents: 'export const collectSpellingDiagnostics = () => [];\n'
@@ -283,6 +305,33 @@ try {
       label: 'typo suggestions Webview alias',
       path: 'webview/src/adapters/typoQuickFix.ts',
       contents: 'export const showTypoSuggestions = () => undefined;\n'
+    },
+    {
+      label: 'pure SpellingChecker alias',
+      path: 'src/host/spellingChecker.ts',
+      contents: 'export class SpellingChecker {}\n'
+    },
+    {
+      label: 'pure TypoQuickFix alias',
+      path: 'webview/src/helpers/typoQuickFix.ts',
+      contents: 'export const applyTypoQuickFix = () => undefined;\n'
+    },
+    {
+      label: 'dotted typo corrections setting alias',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.typo.corrections.enabled': { type: 'boolean' }
+      } } } }, null, 2)
+    },
+    {
+      label: 'natural-language spelling corrections capability',
+      path: 'README.md',
+      contents: 'Show spelling corrections in the editor menu.\n'
+    },
+    {
+      label: 'natural-language spelling quick-fix capability',
+      path: 'README.md',
+      contents: 'Apply spelling quick fixes from the selection menu.\n'
     }
   ];
   const missedSpellDiagnosticCapabilities: string[] = [];
@@ -291,6 +340,38 @@ try {
     const outcome = runCheck();
     if (outcome.ok || !/ARCH015/.test(outcome.output)) {
       missedSpellDiagnosticCapabilities.push(fixture.label);
+    }
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+
+  const allowedNativeSpellcheckAndDiagnosticsFixtures = [
+    {
+      label: 'HTML native spellcheck attributes',
+      path: 'webview/src/helpers/nativeSpellcheck.html',
+      contents: '<textarea spellcheck="false"></textarea>\n<input spellcheck="true">\n'
+    },
+    {
+      label: 'DOM native spellcheck properties',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: 'input.spellcheck = true;\ntextarea.spellcheck = false;\n'
+    },
+    {
+      label: 'DOM native spellcheck setAttribute calls',
+      path: 'webview/src/helpers/nativeSpellcheckAttribute.ts',
+      contents: "input.setAttribute('spellcheck', 'false');\ntextarea.setAttribute('spellcheck', 'true');\n"
+    },
+    {
+      label: 'ordinary diagnostics logging suggestion',
+      path: 'src/host/diagnosticLogging.ts',
+      contents: "export const note = 'Suggest diagnostic logging improvements.';\n"
+    }
+  ];
+  const rejectedAllowedSpellDiagnosticFixtures: string[] = [];
+  for (const fixture of allowedNativeSpellcheckAndDiagnosticsFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (!outcome.ok) {
+      rejectedAllowedSpellDiagnosticFixtures.push(`${fixture.label}: ${outcome.output}`);
     }
     rmSync(join(fixtureRoot, ...fixture.path.split('/')));
   }
@@ -304,9 +385,11 @@ try {
   const retainedDiagnosticsAndSelection = runCheck();
   assert.deepEqual({
     missedSpellDiagnosticCapabilities,
+    rejectedAllowedSpellDiagnosticFixtures,
     retainedDiagnosticsAndSelection: retainedDiagnosticsAndSelection.ok ? '' : retainedDiagnosticsAndSelection.output
   }, {
     missedSpellDiagnosticCapabilities: [],
+    rejectedAllowedSpellDiagnosticFixtures: [],
     retainedDiagnosticsAndSelection: ''
   }, 'MEO spell/diagnostic suggestion aliases must be rejected without rejecting platform diagnostics or selection commands');
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedDiagnosticsAndSelection.ts'));

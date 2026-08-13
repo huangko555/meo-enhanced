@@ -57,6 +57,7 @@ async function main() {
       editingInput.dispatchEvent(new Event('input', { bubbles: true }));
       await waitFrames(1);
       const editingPreviewText = editingInput.parentElement?.querySelector('.meo-md-html-table-cell-preview')?.textContent ?? '';
+      const editingInputSpellcheck = editingInput.spellcheck;
       editingEditor.destroy();
 
       const inlineEditingEditor = await create('| A | B |\n| --- | --- |\n| before `literal` #tag [external](https://example.com) [internal](#target) **bold** | editing |');
@@ -1068,6 +1069,7 @@ async function main() {
 
       return {
         editingPreviewText,
+        editingInputSpellcheck,
         inlineDecorationCount,
         inlineLinkButtons,
         inlineOpenedHrefs,
@@ -1207,6 +1209,7 @@ async function main() {
       failures.push(`real Ctrl+C did not copy the selected table cells as TSV: ${JSON.stringify(keyboardCopiedText)}`);
     }
     if (result.editingPreviewText !== 'asdx') failures.push(`editing preview remained ${JSON.stringify(result.editingPreviewText)}`);
+    if (result.editingInputSpellcheck !== true) failures.push(`table input native spellcheck was ${JSON.stringify(result.editingInputSpellcheck)}`);
     if (
       result.inlineDecorationCount !== 5 ||
       JSON.stringify(result.inlineLinkButtons) !== JSON.stringify(['Open link', 'Jump within document']) ||
