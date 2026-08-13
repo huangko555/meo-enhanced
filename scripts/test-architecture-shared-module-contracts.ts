@@ -332,6 +332,60 @@ try {
       expectedLine: 3
     },
     {
+      label: 'same-context const spellcheck use before DOM declaration',
+      path: 'webview/src/helpers/tdzNativeSpellcheck.ts',
+      contents: "field.spellcheck = true;\nconst field = document.createElement('input');\n",
+      expectedLine: 1
+    },
+    {
+      label: 'conditional DOM assignment before outer spellcheck use',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = settings;\nif (enabled) field = document.createElement('input');\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'conditional non-DOM assignment after DOM initialization',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nif (enabled) field = settings;\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'loop DOM assignment before outer spellcheck use',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = settings;\nfor (; enabled;) { field = document.createElement('input'); break; }\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'for-loop DOM binding must not pollute outer non-DOM receiver',
+      path: 'webview/src/helpers/loopNativeSpellcheck.ts',
+      contents: "const field = settings;\nfor (let field = document.createElement('input'); ready;) {\n  field.spellcheck = false;\n  break;\n}\nfield.spellcheck = true;\n",
+      expectedLine: 6
+    },
+    {
+      label: 'for-in DOM binding must not pollute outer non-DOM receiver',
+      path: 'webview/src/helpers/loopNativeSpellcheck.ts',
+      contents: "const field = settings;\nfor (let field: HTMLInputElement in fields) { field.spellcheck = false; }\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'for-of DOM binding must not pollute outer non-DOM receiver',
+      path: 'webview/src/helpers/loopNativeSpellcheck.ts',
+      contents: "const field = settings;\nfor (const field: HTMLTextAreaElement of fields) { field.spellcheck = true; }\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'catch parameter must shadow outer DOM receiver',
+      path: 'webview/src/helpers/catchNativeSpellcheck.ts',
+      contents: "const field = document.createElement('input');\ntry { run(); } catch (field) {\n  field.spellcheck = false;\n}\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
+      label: 'switch case binding must shadow outer DOM receiver',
+      path: 'webview/src/helpers/switchNativeSpellcheck.ts',
+      contents: "const field = document.createElement('input');\nswitch (mode) { case 'edit': let field = settings;\n  field.spellcheck = false; break; default: break; }\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
       label: 'standalone spellcheck after unclosed tag candidate',
       path: 'webview/src/helpers/unclosedNativeSpellcheck.ts',
       contents: "const fragment = '<input';\nconst spellcheck = true;\nconst comparison = value > 0;\n"
@@ -552,6 +606,36 @@ try {
       contents: "const field = document.createElement('input');\nfunction later() {\n  field.spellcheck = true;\n}\n"
     },
     {
+      label: 'loop-scoped DOM receivers and unshadowed outer DOM receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const outer = document.createElement('input');\nfor (let field = document.createElement('input'); ready;) { field.spellcheck = false; break; }\nfor (let field: HTMLInputElement in fields) { field.spellcheck = false; }\nfor (const field: HTMLTextAreaElement of fields) { field.spellcheck = true; }\nouter.spellcheck = true;\n"
+    },
+    {
+      label: 'loop var receiver and nested loop bindings',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "for (var outer = document.createElement('input'); ready;) {\n  for (const field: HTMLInputElement of fields) {\n    field.spellcheck = false;\n  }\n  break;\n}\nouter.spellcheck = true;\n"
+    },
+    {
+      label: 'straight-line non-DOM to DOM reassignment',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = settings;\nfield = document.createElement('input');\nfield.spellcheck = true;\n"
+    },
+    {
+      label: 'same-branch DOM reassignment before spellcheck use',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = settings;\nif (enabled) {\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n"
+    },
+    {
+      label: 'catch parameter does not pollute outer DOM receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const field = document.createElement('input');\ntry { run(); } catch (field) { consume(field); }\nfield.spellcheck = true;\n"
+    },
+    {
+      label: 'switch case binding does not pollute outer DOM receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const field = document.createElement('input');\nswitch (mode) { case 'edit': let field = settings; consume(field); break; default: break; }\nfield.spellcheck = true;\n"
+    },
+    {
       label: 'DOM native spellcheck setAttribute calls',
       path: 'webview/src/helpers/nativeSpellcheckAttribute.ts',
       contents: "input.setAttribute('spellcheck', 'false');\ntextarea.setAttribute('spellcheck', 'true');\n"
@@ -602,7 +686,7 @@ try {
   const usesCodePointMask = /\[\.\.\.text\]/.test(architectureCheckerSource);
   const bindingCollection = architectureCheckerSource.indexOf('collectBindings(sourceFile, null)');
   const useCollection = architectureCheckerSource.indexOf(
-    'collectUsesAndAssignments(sourceFile, scopeByNode.get(sourceFile)!)'
+    'collectUsesAndAssignments(sourceFile, scopeByNode.get(sourceFile)!'
   );
   const usesTwoPhaseSpellcheckBindingAnalysis = bindingCollection >= 0 && useCollection > bindingCollection;
   const routesVarToFunctionScope = /kind === 'var' \? nearestFunctionScope\(scope\) : scope/.test(
