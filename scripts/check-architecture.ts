@@ -789,6 +789,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     readonly uses: SpellcheckUse[];
   };
   type ContinueExit = {
+    readonly node: ts.ContinueStatement;
     readonly position: number;
     readonly pathPrefixes: readonly string[];
     readonly dominancePathKey: string;
@@ -798,6 +799,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   const scopeByNode = new Map<ts.Node, Scope>();
   const bindings = new Set<Binding>();
   const continueExitsByContext = new Map<Scope, Map<ts.Node, ContinueExit[]>>();
+  const throwsByFinallyBlock = new Map<ts.Block, ts.ThrowStatement[]>();
 
   const isDomType = (node: ts.TypeNode | undefined): boolean => {
     if (!node) return false;
@@ -916,6 +918,20 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
       statementDefinitelyTerminates(node.thenStatement) &&
       statementDefinitelyTerminates(node.elseStatement!);
+  };
+  const statementDefinitelySkipsFollowing = (node: ts.Statement): boolean => {
+    if (
+      ts.isReturnStatement(node) || ts.isThrowStatement(node) ||
+      ts.isBreakStatement(node) || ts.isContinueStatement(node)
+    ) return true;
+    if (ts.isBlock(node)) return node.statements.some(statementDefinitelySkipsFollowing);
+    if (ts.isLabeledStatement(node)) return statementDefinitelySkipsFollowing(node.statement);
+    if (ts.isTryStatement(node) && node.finallyBlock && statementDefinitelySkipsFollowing(node.finallyBlock)) {
+      return true;
+    }
+    return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
+      statementDefinitelySkipsFollowing(node.thenStatement) &&
+      statementDefinitelySkipsFollowing(node.elseStatement!);
   };
   const isLoopStatement = (node: ts.Node): node is ts.IterationStatement => (
     ts.isForStatement(node) ||
@@ -1102,6 +1118,20 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     const controlPath = controlPathForNode(node, inheritedPath);
     controlPathByNode.set(node, controlPath);
     const pathMetadata = controlPathMetadata(controlPath);
+    if (ts.isThrowStatement(node)) {
+      for (let parent = node.parent; parent; parent = parent.parent) {
+        if (ts.isFunctionLike(parent) || ts.isSourceFile(parent)) break;
+        if (
+          ts.isBlock(parent) && ts.isTryStatement(parent.parent) &&
+          parent.parent.finallyBlock === parent
+        ) {
+          const throws = throwsByFinallyBlock.get(parent) ?? [];
+          throws.push(node);
+          throwsByFinallyBlock.set(parent, throws);
+          break;
+        }
+      }
+    }
     if (ts.isContinueStatement(node)) {
       const target = continueTargetLoop(node);
       if (target) {
@@ -1109,6 +1139,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         const dominanceRoot = continueDominanceRoot(node, target);
         const reachesBackedge = !finallyBlocks.some((block) => statementOverridesContinue(block, target));
         const exit: ContinueExit = {
+          node,
           position: node.getStart(sourceFile),
           pathPrefixes: pathMetadata.prefixes,
           dominancePathKey: controlPathMetadata(controlPathByNode.get(dominanceRoot) ?? controlPath).key,
@@ -1184,6 +1215,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     readonly blockerPositionsByAncestorPath: Map<string, number[]>;
     readonly unreachableRangesByPath: Map<string, NativeSpellcheckRange[]>;
     readonly noBackedgePathKeys: Set<string>;
+    readonly targetContinuePositions: readonly number[];
   };
   const addPosition = (positionsByPath: Map<string, number[]>, path: string, position: number): void => {
     const positions = positionsByPath.get(path) ?? [];
@@ -1200,6 +1232,57 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       else high = middle;
     }
     return positions[low] ?? Number.POSITIVE_INFINITY;
+  };
+  const directChildOfBlock = (node: ts.Node, block: ts.Block): ts.Node | null => {
+    let current = node;
+    while (current.parent && current.parent !== block) current = current.parent;
+    return current.parent === block ? current : null;
+  };
+  const nodeIsReachableFromBoundaryEntry = (node: ts.Node, boundary: ts.Node): boolean => {
+    let current = node;
+    while (current.parent && current !== boundary) {
+      const parent = current.parent;
+      if (ts.isBlock(parent)) {
+        const child = directChildOfBlock(current, parent);
+        const childIndex = child ? parent.statements.indexOf(child as ts.Statement) : -1;
+        if (
+          childIndex > 0 &&
+          parent.statements.slice(0, childIndex).some(statementDefinitelySkipsFollowing)
+        ) return false;
+      }
+      current = parent;
+    }
+    return current === boundary;
+  };
+  const enclosingCatchBeforeTarget = (
+    node: ts.Node,
+    target: ts.Node
+  ): ts.CatchClause | null => {
+    let child = node;
+    for (let parent = node.parent; parent && parent !== target; parent = parent.parent) {
+      if (ts.isFunctionLike(parent) || ts.isSourceFile(parent)) return null;
+      if (ts.isTryStatement(parent) && parent.catchClause && child === parent.tryBlock) {
+        return parent.catchClause;
+      }
+      child = parent;
+    }
+    return null;
+  };
+  const catchDefinitelyLeavesTarget = (node: ts.Statement, target: ts.IterationStatement): boolean => {
+    if (ts.isReturnStatement(node)) return true;
+    if (ts.isThrowStatement(node)) return enclosingCatchBeforeTarget(node, target) === null;
+    if (ts.isBreakStatement(node) || ts.isContinueStatement(node)) {
+      return abruptOverridesContinue(node, target);
+    }
+    if (ts.isBlock(node)) return node.statements.some((statement) => catchDefinitelyLeavesTarget(statement, target));
+    return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
+      catchDefinitelyLeavesTarget(node.thenStatement, target) &&
+      catchDefinitelyLeavesTarget(node.elseStatement!, target);
+  };
+  type CaughtThrowCompletion = {
+    readonly position: number;
+    readonly catchClause: ts.CatchClause;
+    readonly pathPrefixes: readonly string[];
   };
   const continueBlockingPosition = (
     exit: ContinueExit,
@@ -1233,16 +1316,23 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     rangesByPath.set(path, ranges);
   };
   const continueSummariesByContext = new Map<Scope, Map<ts.Node, ContinueOwnerSummary>>();
+  const caughtThrowsByContext = new Map<Scope, Map<ts.Node, CaughtThrowCompletion[]>>();
   for (const [context, exitsByOwner] of continueExitsByContext) {
     const summariesByOwner = new Map<ts.Node, ContinueOwnerSummary>();
+    const caughtThrowsByOwner = new Map<ts.Node, CaughtThrowCompletion[]>();
     for (const [owner, exits] of exitsByOwner) {
-      const targetContinuePositions = exits.map((exit) => exit.position).sort((left, right) => left - right);
+      const targetContinuePositions = exits
+        .filter((exit) => exit.reachesBackedge && nodeIsReachableFromBoundaryEntry(exit.node, owner))
+        .map((exit) => exit.position)
+        .sort((left, right) => left - right);
       const summary: ContinueOwnerSummary = {
         blockerPositionsByAncestorPath: new Map(),
         unreachableRangesByPath: new Map(),
-        noBackedgePathKeys: new Set()
+        noBackedgePathKeys: new Set(),
+        targetContinuePositions
       };
       for (const exit of exits) {
+        if (!nodeIsReachableFromBoundaryEntry(exit.node, owner)) continue;
         if (!exit.reachesBackedge) {
           summary.noBackedgePathKeys.add(exit.dominancePathKey);
           continue;
@@ -1253,6 +1343,20 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         }
         for (const range of continueUnreachableRanges(exit, owner)) {
           addRange(summary.unreachableRangesByPath, exit.dominancePathKey, range);
+        }
+        for (const block of exit.finallyBlocks) {
+          for (const throwStatement of throwsByFinallyBlock.get(block) ?? []) {
+            if (!nodeIsReachableFromBoundaryEntry(throwStatement, block)) continue;
+            const catchClause = enclosingCatchBeforeTarget(throwStatement, owner);
+            if (!catchClause || syntaxContains(block, catchClause)) continue;
+            const completions = caughtThrowsByOwner.get(owner) ?? [];
+            completions.push({
+              position: throwStatement.getStart(sourceFile),
+              catchClause,
+              pathPrefixes: exit.pathPrefixes
+            });
+            caughtThrowsByOwner.set(owner, completions);
+          }
         }
       }
       for (const positions of summary.blockerPositionsByAncestorPath.values()) {
@@ -1273,6 +1377,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       summariesByOwner.set(owner, summary);
     }
     continueSummariesByContext.set(context, summariesByOwner);
+    caughtThrowsByContext.set(context, caughtThrowsByOwner);
   }
   const positionIsInRanges = (
     ranges: readonly NativeSpellcheckRange[] | undefined,
@@ -1295,6 +1400,36 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       binding.events.every((event) => event.dom);
     const capturedMutableDom = binding.kind !== 'const' && binding.events.length > 0 &&
       binding.events.every((event) => event.dom);
+    const latestEventByContextPath = new Map<Scope, Map<string, BindingEvent>>();
+    for (const event of binding.events) {
+      const latestByPath = latestEventByContextPath.get(event.context) ?? new Map<string, BindingEvent>();
+      latestByPath.set(event.pathKey, event);
+      latestEventByContextPath.set(event.context, latestByPath);
+    }
+    const caughtBlockersByContext = new Map<Scope, Map<ts.Node, Map<string, number[]>>>();
+    for (const [context, caughtByOwner] of caughtThrowsByContext) {
+      const blockersByOwner = new Map<ts.Node, Map<string, number[]>>();
+      for (const [owner, completions] of caughtByOwner) {
+        const targetPositions = continueSummariesByContext.get(context)?.get(owner)?.targetContinuePositions ?? [];
+        const blockersByPath = new Map<string, number[]>();
+        for (const completion of completions) {
+          if (catchDefinitelyLeavesTarget(completion.catchClause.block, owner as ts.IterationStatement)) continue;
+          const catchPath = controlPathMetadata(controlPathByNode.get(completion.catchClause.block) ?? []).key;
+          const catchEvent = latestEventByContextPath.get(context)?.get(catchPath);
+          const catchContinue = firstPositionAfter(targetPositions, completion.catchClause.block.getStart(sourceFile));
+          const catchRecoversDom = catchEvent?.dom === true &&
+            catchEvent.position < completion.catchClause.block.end &&
+            catchEvent.position < catchContinue;
+          if (catchRecoversDom) continue;
+          for (const prefix of completion.pathPrefixes) {
+            addPosition(blockersByPath, prefix, completion.position);
+          }
+        }
+        for (const positions of blockersByPath.values()) positions.sort((left, right) => left - right);
+        blockersByOwner.set(owner, blockersByPath);
+      }
+      caughtBlockersByContext.set(context, blockersByOwner);
+    }
     const loopEntryEventsByContext = new Map<Scope, Map<ts.Node, Map<string, BindingEvent>>>();
     for (const event of binding.events) {
       for (const frame of event.controlPath) {
@@ -1331,7 +1466,9 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
             if (!later?.dom || later.position <= event.position) return false;
             const positions = continueSummariesByContext.get(context)?.get(owner)
               ?.blockerPositionsByAncestorPath.get(event.pathKey);
-            return firstPositionAfter(positions, event.position) >= later.position;
+            const caughtPositions = caughtBlockersByContext.get(context)?.get(owner)?.get(event.pathKey);
+            return firstPositionAfter(positions, event.position) >= later.position &&
+              firstPositionAfter(caughtPositions, event.position) >= later.position;
           });
           if (!killedByLaterAncestorDom) {
             possibleNonDom = true;

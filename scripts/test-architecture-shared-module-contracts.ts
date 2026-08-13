@@ -45,6 +45,10 @@ try {
   assert.match(architectureSource, /const firstPositionAfter =/);
   assert.match(architectureSource, /const positionIsInRanges =/);
   assert.match(architectureSource, /targetContinuePositions/);
+  assert.match(
+    architectureSource,
+    /filter\(\(exit\) => exit\.reachesBackedge && nodeIsReachableFromBoundaryEntry\(exit\.node, owner\)\)/
+  );
   assert.doesNotMatch(
     architectureSource,
     /dominancePositionsByPath|finallyBlocksWithBypassingAbruptCompletion/,
@@ -486,6 +490,18 @@ try {
       expectedLine: 4
     },
     {
+      label: 'caught finally throw can carry non-DOM through catch fallthrough',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    try { field = settings; continue; } finally {\n      if (abort) throw new Error('caught');\n      field = document.createElement('input');\n    }\n  } catch { observe(); }\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'caught finally throw can carry non-DOM through catch continue',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    try { field = settings; continue; } finally {\n      if (abort) throw new Error('caught');\n      field = document.createElement('input');\n    }\n  } catch { continue; }\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'conditional continue preserves reachable outer fallthrough state',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (flag) continue;\n  field = settings;\n}\n",
@@ -859,6 +875,41 @@ try {
       label: 'conditional target break does not block target backedge DOM recovery',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field = document.createElement('input');\n  while (innerReady) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally {\n      if (abort) break;\n      field = document.createElement('input');\n    }\n  }\n}\n"
+    },
+    {
+      label: 'catch DOM recovery restores caught throw backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    try { field = settings; continue; } finally {\n      if (abort) throw new Error('caught');\n      field = document.createElement('input');\n    }\n  } catch { field = document.createElement('input'); }\n}\n"
+    },
+    {
+      label: 'catch return leaves target backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    try {\n      try { field = settings; continue; } finally {\n        if (abort) throw new Error('caught');\n        field = document.createElement('input');\n      }\n    } catch { return; }\n  }\n}\n"
+    },
+    {
+      label: 'catch throw leaves target backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    try { field = settings; continue; } finally {\n      if (abort) throw new Error('caught');\n      field = document.createElement('input');\n    }\n  } catch { throw new Error('leave'); }\n}\n"
+    },
+    {
+      label: 'catch target break leaves target backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    try { field = settings; continue; } finally {\n      if (abort) throw new Error('caught');\n      field = document.createElement('input');\n    }\n  } catch { break; }\n}\n"
+    },
+    {
+      label: 'catch outer continue leaves inner target backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field = document.createElement('input');\n  while (innerReady) {\n    field.spellcheck = true;\n    try {\n      try { field = settings; continue; } finally {\n        if (abort) throw new Error('caught');\n        field = document.createElement('input');\n      }\n    } catch { continue outer; }\n  }\n}\n"
+    },
+    {
+      label: 'unreachable same-target continue after inner break does not block DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    inner: { break inner; continue; }\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
+      label: 'same-target continue overridden by nested finally does not block DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally {\n      try { continue; } finally { return; }\n      field = document.createElement('input');\n    }\n  }\n}\n"
     },
     {
       label: 'inner break does not skip later mandatory finally DOM recovery',
