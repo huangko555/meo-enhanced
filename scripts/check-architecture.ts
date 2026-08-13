@@ -686,13 +686,75 @@ const spellDiagnosticScope = projectFilesForCapabilityGuard().filter((path) => (
   /^docs\/.*\.md$/i.test(path) ||
   /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
 ));
-const stripNativeSpellcheckAttributes = (text: string): string => text
-  .replace(/<[A-Za-z][^<>]*>/g, (tag) => tag.replace(
-    /\bspellcheck\s*=\s*(?:["'](?:true|false)["']|(?:true|false))(?=\s|\/?>|$)/gi,
-    ''
-  ))
-  .replace(/\b(?:input|textarea|element|[A-Za-z_$][\w$]*(?:Input|Textarea|TextArea|Element))\.spellcheck\s*=\s*(?:true|false)\b/g, '')
-  .replace(/\.setAttribute\(\s*["']spellcheck["']\s*,\s*["'](?:true|false)["']\s*\)/gi, '');
+const stripNativeSpellcheckAttributes = (text: string): string => {
+  const chars = [...text];
+  for (let index = 0; index < text.length; index += 1) {
+    if (
+      text[index] !== '<' ||
+      !/[A-Za-z]/.test(text[index + 1] ?? '') ||
+      /[A-Za-z0-9_$]/.test(text[index - 1] ?? '')
+    ) continue;
+    let cursor = index + 2;
+    while (/[A-Za-z0-9:-]/.test(text[cursor] ?? '')) cursor += 1;
+    if (!/[\s/>]/.test(text[cursor] ?? '')) continue;
+    let quote = '';
+    let end = cursor;
+    for (; end < text.length; end += 1) {
+      const char = text[end];
+      if (quote) {
+        if (char === quote) quote = '';
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '>') {
+        break;
+      }
+    }
+    if (end >= text.length) break;
+
+    let attribute = cursor;
+    quote = '';
+    while (attribute < end) {
+      const char = text[attribute];
+      if (quote) {
+        if (char === quote) quote = '';
+        attribute += 1;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        quote = char;
+        attribute += 1;
+        continue;
+      }
+      const match = /^spellcheck\s*=\s*(?:(["'])(?:true|false)\1|(?:true|false))(?=\s|\/?>|$)/i.exec(
+        text.slice(attribute, end + 1)
+      );
+      if (match && (attribute === cursor || /[\s/]/.test(text[attribute - 1] ?? ''))) {
+        for (let mask = attribute; mask < attribute + match[0].length; mask += 1) {
+          if (chars[mask] !== '\r' && chars[mask] !== '\n') chars[mask] = ' ';
+        }
+        attribute += match[0].length;
+        continue;
+      }
+      attribute += 1;
+    }
+    index = end;
+  }
+
+  let result = chars.join('');
+  const domReceivers = new Set<string>();
+  const recordReceiver = (pattern: RegExp): void => {
+    for (const match of text.matchAll(pattern)) domReceivers.add(match[1]);
+  };
+  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.createElement\(\s*["'][A-Za-z][\w-]*["']\s*\)/g);
+  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*:\s*(?:HTMLInputElement|HTMLTextAreaElement|HTMLElement)\b/g);
+  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.querySelector<\s*(?:HTMLInputElement|HTMLTextAreaElement|HTMLElement)\s*>/g);
+  recordReceiver(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=.*?\bas\s+(?:HTMLInputElement|HTMLTextAreaElement|HTMLElement)\b/g);
+  for (const receiver of domReceivers) {
+    const escaped = receiver.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(`\\b${escaped}!?\\.spellcheck\\s*=\\s*(?:true|false)\\b`, 'g'), '');
+  }
+  return result.replace(/\.setAttribute\(\s*["']spellcheck["']\s*,\s*["'](?:true|false)["']\s*\)/gi, '');
+};
 const hasRemovedSpellDiagnosticCapability = (text: string, path: string): boolean => {
   if (/cspell|proofread(?:er|ing)?/i.test(text)) return true;
   if (/^src\/protocol\/.*diagnostic[-_. ]?suggestions?/i.test(path)) return true;

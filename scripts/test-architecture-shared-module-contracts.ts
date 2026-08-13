@@ -304,6 +304,21 @@ try {
       contents: 'export const state = { spellcheck: true };\n'
     },
     {
+      label: 'arbitrary receiver spellcheck state owner',
+      path: 'src/shared/spellcheckState.ts',
+      contents: 'widget.spellcheck = true;\n'
+    },
+    {
+      label: 'TypeScript function generic spellcheck state',
+      path: 'src/shared/spellcheckState.ts',
+      contents: 'function read<Spellcheck = false>() {}\n'
+    },
+    {
+      label: 'TypeScript type generic spellcheck state',
+      path: 'src/shared/spellcheckState.ts',
+      contents: 'type Flag<spellcheck = true> = boolean;\n'
+    },
+    {
       label: 'spell-check dependency',
       path: 'package.json',
       contents: JSON.stringify({ dependencies: { 'cspell-lib': '^10.0.1' } }, null, 2)
@@ -423,9 +438,34 @@ try {
       contents: "export const markup = '<input spellcheck=true>';\nexport const template = `<textarea spellcheck=\"false\"></textarea>`;\n"
     },
     {
+      label: 'HTML spellcheck after quoted greater-than',
+      path: 'webview/src/helpers/nativeSpellcheckMarkup.ts',
+      contents: 'export const markup = `<input title="a > b" spellcheck=false>`;\n'
+    },
+    {
+      label: 'HTML spellcheck before quoted greater-than',
+      path: 'webview/src/helpers/nativeSpellcheckMarkup.ts',
+      contents: "export const markup = `<input spellcheck='true' title='a > b'>`;\n"
+    },
+    {
       label: 'DOM native spellcheck properties',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
-      contents: 'input.spellcheck = true;\ntextarea.spellcheck = false;\nelement.spellcheck = true;\n'
+      contents: "const input = document.createElement('input');\ninput.spellcheck = true;\nconst textarea = document.createElement('textarea');\ntextarea.spellcheck = false;\nlet element: HTMLElement;\nelement.spellcheck = true;\n"
+    },
+    {
+      label: 'DOM createElement spellcheck receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const field = document.createElement('textarea');\nfield.spellcheck = true;\n"
+    },
+    {
+      label: 'DOM annotated spellcheck receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: 'let control: HTMLInputElement;\ncontrol.spellcheck = false;\n'
+    },
+    {
+      label: 'DOM generic and cast spellcheck receivers',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const selected = document.querySelector<HTMLInputElement>('#field');\nselected!.spellcheck = true;\nconst area = node as HTMLTextAreaElement;\narea.spellcheck = false;\n"
     },
     {
       label: 'DOM native spellcheck setAttribute calls',
