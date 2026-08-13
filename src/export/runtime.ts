@@ -68,7 +68,8 @@ function renderPreviewDocument(options: {
     markdownText: options.markdownText,
     markdownFilePath: options.sourceDocumentPath,
     target: 'html',
-    htmlImageMode: 'embedded'
+    htmlImageMode: 'embedded',
+    renderHexColorSwatches: true
   });
   return {
     html: rendered.html,

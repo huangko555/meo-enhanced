@@ -2,7 +2,7 @@ import { RangeSetBuilder, StateField } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
-import { collectColorRangesFromText } from './colorSwatches';
+import { collectHexColorRangesFromText } from '../../../src/shared/hexColorSwatches';
 
 const markdownTagDeco = Decoration.mark({ class: 'meo-md-tag' });
 const markdownTagRegex = /(^|[^\p{L}\p{N}_/-])#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/gu;
@@ -56,7 +56,7 @@ function buildMarkdownTagDecorations(state: any): DecorationSet {
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
     const line = state.doc.line(lineNumber);
     const text = line.text;
-    const colorRanges = collectColorRangesFromText(text, line.from);
+    const colorRanges = collectHexColorRangesFromText(text, line.from);
     markdownTagRegex.lastIndex = 0;
     for (const match of text.matchAll(markdownTagRegex)) {
       const prefixLength = match[1]?.length ?? 0;
@@ -65,9 +65,13 @@ function buildMarkdownTagDecorations(state: any): DecorationSet {
       const to = from + 1 + (match[2]?.length ?? 0);
       const linePosition = from - line.from;
       const isColor = colorRanges.some((range) => range.from === from && range.to === to);
+      const rawTag = text.slice(linePosition, to - line.from);
+      const isHexColorText = collectHexColorRangesFromText(rawTag)
+        .some((range) => range.from === 0 && range.to === rawTag.length);
       if (
         to <= from + 1 ||
         isColor ||
+        isHexColorText ||
         isInsideMarkdownLinkDestination(text, linePosition) ||
         hasBlockedTagAncestor(state, from)
       ) {

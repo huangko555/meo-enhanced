@@ -34,7 +34,7 @@ async function main() {
         text: [
           '| Colors | Tag | Protected |',
           '| --- | --- | --- |',
-          '| #f00 rgba(51, 153, 255, 0.55) | #todo #abc/tag | `#0f0` |'
+          '| #f00 #0f08 #336699 #33669988 rgba(51, 153, 255, 0.55) hsl(210 100% 60%) red linear-gradient(#fff, #000) | #todo #abc/tag | `#0f0` |'
         ].join('\n'),
         onApplyChanges() {}
       });
@@ -76,7 +76,7 @@ async function main() {
     });
 
     const expectedInitial = {
-      colors: ['#f00', 'rgba(51, 153, 255, 0.55)'],
+      colors: ['#f00', '#0f08', '#336699', '#33669988'],
       colorTags: [],
       tags: ['#todo', '#abc/tag'],
       protectedColors: 0
@@ -86,6 +86,50 @@ async function main() {
     }
     if (JSON.stringify(result.updated) !== JSON.stringify({ colors: ['#00ff00'], tags: ['#todo'] })) {
       throw new Error(`Edited table colors were not refreshed: ${JSON.stringify(result.updated)}`);
+    }
+
+    const liveResult = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      const text = [
+        'Live swatches',
+        'HEX #abc #abcd #aabbcc #aabbccdd',
+        'Plain rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)',
+        'Links https://example.com/#abc [section](#abc) tag #abc/tag code `#fff`'
+      ].join('\n');
+      let applyCount = 0;
+      const editor = harness.createEditor({
+        parent: app,
+        initialMode: 'live',
+        text,
+        onApplyChanges() { applyCount += 1; }
+      });
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const swatches = Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'));
+      const before = editor.getText();
+      swatches[0]?.click();
+      const result = {
+        colors: swatches.map((swatch) => swatch.title),
+        roles: swatches.map((swatch) => swatch.getAttribute('role')),
+        interactiveDescendants: swatches.reduce(
+          (count, swatch) => count + swatch.querySelectorAll('input, button, select, textarea').length,
+          0
+        ),
+        textUnchanged: editor.getText() === before,
+        applyCount
+      };
+      editor.destroy();
+      return result;
+    });
+    if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd'])
+      || liveResult.roles.some((role) => role !== 'img')
+      || liveResult.interactiveDescendants !== 0
+      || !liveResult.textUnchanged
+      || liveResult.applyCount !== 0) {
+      throw new Error(`Live HEX swatches must be read-only and exclusive: ${JSON.stringify(liveResult)}`);
     }
   } finally {
     await browser.close();

@@ -1,5 +1,22 @@
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
+import exportRuntime from '../src/export/runtime';
+
+const previewColors = exportRuntime.renderPreviewDocument({
+  markdownText: [
+    'HEX #abc #abcd #aabbcc #aabbccdd',
+    '',
+    'Plain rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)',
+    '',
+    'Links https://example.com/#abc [section](#abc) tag #abc/tag code `#fff`'
+  ].join('\n'),
+  sourceDocumentPath: 'C:/tmp/preview-colors.md'
+});
+const exportedColors = renderMarkdownToHtml({
+  markdownText: 'Export keeps #abc as ordinary text',
+  markdownFilePath: 'C:/tmp/export-colors.md',
+  target: 'html'
+});
 
 const rendered = renderMarkdownToHtml({
   markdownText: '# Intro\n\nParagraph\n\n```ts\nconst value = 1;\n```\n\n## Details\n\n# Intro',
@@ -159,6 +176,15 @@ if (!transformedSources.html.includes('<h2 data-source-line="8"')) {
 if (!transformedSources.html.includes('class="meo-export-frontmatter" data-source-line="1" data-source-end-line="3"')) {
   throw new Error('Preview frontmatter must participate in viewport position mapping');
 }
+const previewSwatches = Array.from(previewColors.html.matchAll(/<span class="meo-md-color-swatch"[^>]*title="([^"]+)"[^>]*><\/span>/g), (match) => match[1]);
+if (JSON.stringify(previewSwatches) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd'])
+  || /<(?:input|button|select|textarea)\b[^>]*meo-md-color-swatch/i.test(previewColors.html)
+  || !previewColors.html.includes('rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)')) {
+  throw new Error(`Preview HEX swatches must be read-only and exclusive: ${JSON.stringify(previewSwatches)}`);
+}
+if (exportedColors.html.includes('meo-md-color-swatch') || !exportedColors.html.includes('#abc')) {
+  throw new Error('HTML export must keep HEX text without enabling Preview-only swatches');
+}
 if (!rawHtmlUnderline.html.includes('<u>underlined</u>')) {
   throw new Error(`Preview must preserve safe HTML underline tags: ${rawHtmlUnderline.html}`);
 }
@@ -303,6 +329,9 @@ if (!lightPreviewStyles.includes('--meo-link: #1f2328')) {
 }
 if (!darkPreviewStyles.includes('padding-inline-start: 1.5em')) {
   throw new Error('Preview lists must retain readable indentation in documents and table cells');
+}
+if (!darkPreviewStyles.includes('.meo-md-color-swatch') || !darkPreviewStyles.includes('pointer-events: none')) {
+  throw new Error('Preview HEX swatches must have a visible, non-interactive reading style');
 }
 if (
   !/\.meo-table-scroll\s*\{[^}]*\bwidth:\s*100%;/s.test(darkPreviewStyles) ||

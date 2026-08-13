@@ -380,6 +380,17 @@ h1, h2 {
   border-bottom: 1px solid var(--meo-hr);
 }
 
+.meo-md-color-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.3em;
+  border: 1px solid var(--meo-border);
+  border-radius: 3px;
+  vertical-align: -0.08em;
+  pointer-events: none;
+}
+
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
 }

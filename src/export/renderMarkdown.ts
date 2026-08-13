@@ -14,6 +14,7 @@ import {
   isSupportedHtmlSource,
   supportedHtmlTags
 } from '../shared/htmlPolicy';
+import { collectHexColorRangesFromText } from '../shared/hexColorSwatches';
 
 const POWER_QUERY_KEYWORDS =
   'let in each if then else try otherwise error and or not as is type meta section shared';
@@ -41,6 +42,7 @@ export type RenderMarkdownOptions = {
   outputFilePath?: string;
   target: RenderMarkdownTarget;
   htmlImageMode?: ExportHtmlImageMode;
+  renderHexColorSwatches?: boolean;
 };
 
 export type RenderMarkdownResult = {
@@ -77,6 +79,9 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   installTaskListTransform(md);
   installKbdFallbackTransform(md);
   installAlertTransform(md);
+  if (options.renderHexColorSwatches) {
+    installHexColorSwatchTransform(md);
+  }
   installSafeHtmlTransform(
     md,
     options,
@@ -210,6 +215,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       ol: ['start', 'reversed'],
       li: ['value'],
       '*': ['class', 'style', 'id', 'data-source-b64', 'data-source-line', 'data-source-end-line', 'aria-hidden'],
+      span: ['class', 'style', 'title', 'role', 'aria-label'],
       th: ['colspan', 'rowspan', 'scope', 'style'],
       td: ['colspan', 'rowspan', 'style'],
       code: ['class'],
@@ -264,6 +270,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
         'padding-left': [/^-?\d*\.?\d+(?:px|em|rem|%)?$/i, /^0$/],
         'vertical-align': [/^-?\d*\.?\d+(?:px|em|rem|%)?$/i, /^baseline$/i, /^middle$/i],
         'border-bottom-width': [/^-?\d*\.?\d+(?:px|em|rem|%)?$/i, /^0$/],
+        'background-color': [/^#[0-9a-f]{3,8}$/i],
         color: [/^[-#(),.%\w\s]+$/]
       }
     },
@@ -296,6 +303,50 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   });
 
   return { html, hasMermaid, hasMath };
+}
+
+function installHexColorSwatchTransform(md: MarkdownIt): void {
+  md.renderer.rules.meo_hex_color_swatch = (tokens, index) => {
+    const value = escapeHtmlAttr(tokens[index].content);
+    return `<span class="meo-md-color-swatch" style="background-color:${value}" title="${value}" role="img" aria-label="Color ${value}"></span>`;
+  };
+  md.core.ruler.after('inline', 'meo-hex-color-swatches', (state) => {
+    for (const inlineToken of state.tokens) {
+      if (inlineToken.type !== 'inline' || !inlineToken.children) continue;
+      const nextChildren = [];
+      let linkDepth = 0;
+      for (const child of inlineToken.children) {
+        if (child.type === 'link_open') linkDepth += 1;
+        if (child.type !== 'text' || linkDepth > 0) {
+          nextChildren.push(child);
+        } else {
+          const ranges = collectHexColorRangesFromText(child.content);
+          let cursor = 0;
+          for (const range of ranges) {
+            if (range.from > cursor) {
+              const textNode = new state.Token('text', '', 0);
+              textNode.content = child.content.slice(cursor, range.from);
+              nextChildren.push(textNode);
+            }
+            const swatchNode = new state.Token('meo_hex_color_swatch', '', 0);
+            swatchNode.content = range.value;
+            nextChildren.push(swatchNode);
+            const valueNode = new state.Token('text', '', 0);
+            valueNode.content = range.value;
+            nextChildren.push(valueNode);
+            cursor = range.to;
+          }
+          if (cursor < child.content.length) {
+            const textNode = new state.Token('text', '', 0);
+            textNode.content = child.content.slice(cursor);
+            nextChildren.push(textNode);
+          }
+        }
+        if (child.type === 'link_close') linkDepth = Math.max(0, linkDepth - 1);
+      }
+      inlineToken.children = nextChildren;
+    }
+  });
 }
 
 function installSafeHtmlTransform(

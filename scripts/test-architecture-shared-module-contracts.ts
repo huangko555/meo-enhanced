@@ -2209,6 +2209,25 @@ try {
   execFileSync('git', ['rm', '--cached', '--force', '--quiet', '--', 'src/host/themeOwners.ts'], { cwd: stagedRoot });
   rmSync(join(stagedRoot, 'src', 'host', 'themeOwners.ts'));
 
+  writeFileSync(join(stagedRoot, 'README.md'), 'MEO Enhanced provides meoEnhanced.color-picker.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'Pick a color in an external design tool.\n');
+  const stagedColorPickerAlias = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedColorPickerAlias.ok, false, 'staged ARCH021 must reject color-picker aliases from the index');
+  assert.match(stagedColorPickerAlias.output, /ARCH021/);
+  writeFileSync(join(stagedRoot, 'README.md'), 'Pick a color in an external design tool.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+
   writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
   execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
   writeFileSync(join(stagedRoot, 'bun.lock'), '# clean working-tree lock\n');
@@ -2637,6 +2656,45 @@ try {
   assert.equal(mixedHistoricalAndCurrentClaim.ok, false, 'historical sentence must not hide a current claim on the same line');
   assert.match(mixedHistoricalAndCurrentClaim.output, /ARCH020/);
   rmSync(join(fixtureRoot, 'docs/appearance.md'));
+
+  const removedColorCapabilityFixtures = [
+    ['package.json', JSON.stringify({ contributes: { commands: [{ command: 'meoEnhanced.openColorPicker' }] } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.color-swatches.rgb': { type: 'boolean' } } } } })],
+    ['src/host/color-picker-service.ts', 'export const owner = {};\n'],
+    ['src/protocol/editorEvents.ts', "export const event = { type: 'colorPicked' };\n"],
+    ['webview/src/helpers/colorSwatches.ts', 'const FUNCTION_COLOR_REGEX = /rgb/;\n'],
+    ['webview/src/helpers/rgbColorDecorator.ts', 'export const decorate = () => undefined;\n'],
+    ['webview/src/helpers/named-color-swatch.ts', 'export const swatch = {};\n'],
+    ['webview/src/helpers/gradientColorWidget.ts', 'export const widget = {};\n'],
+    ['webview/src/editor/colorChooserState.ts', 'export const state = {};\n'],
+    ['webview/src/editor/colorDialog.ts', 'export const dialog = {};\n'],
+    ['webview/src/editor/colorInput.ts', "const input = '<input type=\"color\">';\n"],
+    ['docs/colors.md', 'MEO Enhanced supports RGB and HSL color swatches.\n'],
+    ['docs/colors.md', 'MEO Enhanced provides a color picker.\n'],
+    ['docs/colors.md', 'MEO Enhanced no longer supports RGB swatches, and MEO Enhanced provides a color picker.\n']
+  ] as const;
+  for (const [fixturePath, contents] of removedColorCapabilityFixtures) {
+    write(fixturePath, contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, false, `${fixturePath} removed color capability alias must be rejected: ${contents}`);
+    assert.match(outcome.output, /ARCH021/);
+    rmSync(join(fixtureRoot, ...fixturePath.split('/')));
+  }
+
+  const retainedColorFixtures = [
+    ['src/shared/hexColorSwatches.ts', 'export const collectHexColorRangesFromText = () => [];\n'],
+    ['webview/src/helpers/colorSwatches.ts', 'export const createColorSwatchElement = () => document.createElement(\'span\');\n'],
+    ['webview/src/styles.css', '.sample { color: rgb(1 2 3); background: linear-gradient(red, blue); }\n'],
+    ['src/shared/themePalette.ts', 'export const currentThemePalette = {};\n'],
+    ['docs/colors.md', 'Pick a color in an external design tool. MEO Enhanced shows read-only HEX swatches.\n'],
+    ['docs/history.md', 'MEO Enhanced no longer supports RGB swatches or a color picker.\n']
+  ] as const;
+  for (const [fixturePath, contents] of retainedColorFixtures) {
+    write(fixturePath, contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, true, `${fixturePath} retained color semantics must pass: ${outcome.output}`);
+    rmSync(join(fixtureRoot, ...fixturePath.split('/')));
+  }
 } finally {
   removeFixtureRoot();
 }

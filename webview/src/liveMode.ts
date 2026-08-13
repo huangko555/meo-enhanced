@@ -70,7 +70,8 @@ import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import { mermaidEditingStateField } from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles, type ParsedInlineStyleRange } from './helpers/inlineStyleFallback';
-import { addColorSwatchDecoration, collectColorRangesFromText } from './helpers/colorSwatches';
+import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
+import { addColorSwatchDecoration } from './helpers/colorSwatches';
 import { longCodeBlockExtensions } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
 import {
@@ -2655,7 +2656,7 @@ function addColorSwatchDecorations(
   activeLines: Set<number>,
   excludedRanges: ReadonlyArray<SourceRange>
 ): void {
-  const colorRanges = collectColorRangesFromText(state.doc.toString());
+  const colorRanges = collectHexColorRangesFromText(state.doc.toString());
   const syntaxExcludedRanges = [
     ...collectColorExcludedRanges(tree),
     ...excludedRanges

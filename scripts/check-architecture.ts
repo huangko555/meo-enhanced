@@ -2146,6 +2146,96 @@ for (const path of customThemeCapabilityScope) {
   }
 }
 
+// Product deletion guard: swatches are read-only HEX decorations only. Non-HEX color
+// parsers/decorators and every MEO-owned picker/chooser/palette/editor UI must stay absent.
+// Ordinary CSS color text, external "pick a color" prose and current theme/code palettes remain.
+const removedColorCapabilityScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedColorCapabilityTokens = [
+  /\bFUNCTION_COLOR_REGEX\b/,
+  /\bCOLOR_FUNCTION_NAMES\b/,
+  /\b(?:splitColorFunctionArguments|isValidColorFunction)\b/,
+  /\b(?:openColorPicker|colorPicked|showColorPicker|selectColorFromPalette)\b/,
+  /<input\b[^>]*\btype\s*=\s*["']?color\b/i,
+  /\.type\s*=\s*["']color["']/i,
+  /\b(?:rgb|rgba|hsl|hsla|named|gradient|function)[-_. ]*color[-_. ]*(?:swatches?|decorator|decoration|widget|parser)\b/i,
+  /\bcolor[-_. ]*(?:swatches?|decorator|decoration|widget|parser)[-_. ]*(?:rgb|rgba|hsl|hsla|named|gradient|function)\b/i,
+  /\bcolor[-_. ]*(?:picker|chooser|dialog|input)(?:[-_. ]*(?:owner|state|settings?|config|controller|manager|registry|store|service|ui))?\b/i,
+  /\b(?:picker|chooser|dialog|input)[-_. ]*color(?:[-_. ]*(?:owner|state|settings?|config|controller|manager|registry|store|service|ui))?\b/i
+];
+const removedColorOwnerTerms = [
+  'owner', 'state', 'setting', 'settings', 'config', 'controller', 'manager', 'registry', 'store',
+  'storage', 'service', 'module', 'interface', 'adapter', 'protocol', 'host', 'webview', 'ui', 'dialog', 'input'
+];
+const hasRemovedColorCapabilityAlias = (value: string): boolean => {
+  const normalized = normalizeCapabilityAlias(value);
+  const nonHexKinds = ['rgb', 'rgba', 'hsl', 'hsla', 'named', 'gradient', 'function'];
+  const renderTerms = ['swatch', 'swatches', 'decorator', 'decoration', 'widget', 'parser'];
+  if (nonHexKinds.some((kind) => renderTerms.some((term) => (
+    normalized.includes(`${kind}color${term}`)
+      || normalized.includes(`color${kind}${term}`)
+      || normalized.includes(`${kind}${term}color`)
+      || normalized.includes(`color${term}${kind}`)
+      || normalized.includes(`${term}${kind}color`)
+      || normalized.includes(`${term}color${kind}`)
+  )))) return true;
+  if (['colorpicker', 'pickercolor', 'colorchooser', 'choosercolor', 'colordialog', 'dialogcolor', 'colorinput', 'inputcolor']
+    .some((phrase) => normalized.includes(phrase))) return true;
+  const hasRemovedPalette = ['namedcolorpalette', 'gradientcolorpalette', 'rgbcolorpalette', 'hslcolorpalette']
+    .some((phrase) => normalized.includes(phrase));
+  if (hasRemovedPalette) return true;
+  const hasOwnedColorPalette = normalized.includes('colorpalette')
+    && removedColorOwnerTerms.some((term) => normalized.includes(`colorpalette${term}`)
+      || normalized.includes(`${term}colorpalette`));
+  return hasOwnedColorPalette;
+};
+const currentRemovedColorDocumentationPatterns = [
+  /(?:meoenhanced|meo)(?:currently|now)?(?:supports?|includes?|provides?|exposes?|shows?|decorates?|has)(?:a|an|the)?(?:rgb|rgba|hsl|hsla|named|gradient|nonhex).{0,24}colors?(?:swatches?|pickers?|choosers?|palettes?)/,
+  /(?:meoenhanced|meo)(?:currently|now)?(?:supports?|includes?|provides?|exposes?|has)(?:a|an|the)?color(?:pickers?|choosers?|dialogs?|inputs?)/
+] as const;
+const hasCurrentRemovedColorDocumentationClaim = (value: string): boolean => {
+  const wholeNormalized = normalizeCapabilityAlias(value);
+  const historicalMarkers = [
+    'removed', 'historical', 'former', 'previously', 'deprecated', 'usedto',
+    'nolonger', 'doesnotsupport', 'donotsupport', 'didnotsupport'
+  ];
+  const explicitMeoColorAlias = ['meoenhancedcolorpicker', 'meoenhancedopencolorpicker', 'meoenhancedcolorchooser']
+    .some((alias) => wholeNormalized.includes(alias));
+  if (explicitMeoColorAlias && !historicalMarkers.some((marker) => wholeNormalized.includes(marker))) return true;
+  return value.split(customThemeDocumentationClauseBoundary).some((segment) => {
+    const normalized = normalizeCapabilityAlias(segment);
+    const hasMeoProduct = normalized.includes('meoenhanced') || /(?:^|[^a-z])meo(?:[^a-z]|$)/i.test(segment);
+    if (!hasMeoProduct) return false;
+    const historicalOrNegative = historicalMarkers.some((marker) => normalized.includes(marker));
+    if (historicalOrNegative) return false;
+    if (['meoenhancedcolorpicker', 'meoenhancedopencolorpicker', 'meoenhancedcolorchooser']
+      .some((alias) => normalized.includes(alias))) return true;
+    return currentRemovedColorDocumentationPatterns.some((pattern) => pattern.test(normalized));
+  });
+};
+for (const path of removedColorCapabilityScope) {
+  const isProductionPath = /^(?:src|webview\/src)\//.test(path);
+  const isDocumentationPath = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path);
+  if (isProductionPath && (hasRemovedColorCapabilityAlias(path)
+    || removedColorCapabilityTokens.some((pattern) => pattern.test(path)))) {
+    failures.push(`ARCH021 已删除的非 HEX color swatch 或颜色 picker 能力重新出现: ${path}:1`);
+    continue;
+  }
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(lines[index])) continue;
+    if ((isProductionPath && hasRemovedColorCapabilityAlias(lines[index]))
+      || (isDocumentationPath && hasCurrentRemovedColorDocumentationClaim(lines[index]))
+      || (!isDocumentationPath && removedColorCapabilityTokens.some((pattern) => pattern.test(lines[index])))) {
+      failures.push(`ARCH021 已删除的非 HEX color swatch 或颜色 picker 能力重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }

@@ -18,7 +18,8 @@ import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from '
 import { getViewportController } from './viewportController';
 import { changedDocumentRange, runEditorHistoryCommand } from './historyCommands';
 import { createOpenLinkButton } from './linkOpenButton';
-import { collectColorRangesFromText, createColorSwatchElement } from './colorSwatches';
+import { collectHexColorRangesFromText } from '../../../src/shared/hexColorSwatches';
+import { createColorSwatchElement } from './colorSwatches';
 import {
   createMissingLocalLinkIndicator,
   isMissingLocalLinkTarget
@@ -1485,7 +1486,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   presentationFactory: ImagePresentationFactory;
 }) {
   const { baseOffset = 0, diagnostics = [], disableLinkParsers = false, searchState = null, sourceRange = null } = options;
-  const colorRangesByStart = new Map(collectColorRangesFromText(text).map((range) => [range.from, range]));
+  const colorRangesByStart = new Map(collectHexColorRangesFromText(text).map((range) => [range.from, range]));
   let buffer = '';
   let bufferStart = 0;
   const flushBuffer = () => {
@@ -1684,6 +1685,13 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       parent.appendChild(createColorSwatchElement(color.value));
       appendTablePlainText(parent, color.value, baseOffset + i, diagnostics, searchState, sourceRange);
       i = color.to;
+      continue;
+    }
+
+    if (tag && collectHexColorRangesFromText(tag[0])
+      .some((range) => range.from === 0 && range.to === tag[0].length)) {
+      appendToBuffer(tag[0], i);
+      i += tag[0].length;
       continue;
     }
 
