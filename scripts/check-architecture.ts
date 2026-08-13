@@ -798,7 +798,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   const scopeByNode = new Map<ts.Node, Scope>();
   const bindings = new Set<Binding>();
   const continueExitsByContext = new Map<Scope, Map<ts.Node, ContinueExit[]>>();
-  const finallyBlocksWithPossibleAbruptCompletion = new Set<ts.Block>();
+  const finallyBlocksWithBypassingAbruptCompletion = new Set<ts.Block>();
 
   const isDomType = (node: ts.TypeNode | undefined): boolean => {
     if (!node) return false;
@@ -912,8 +912,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   const statementDefinitelyTerminates = (node: ts.Statement): boolean => {
     if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) return true;
     if (ts.isBlock(node)) {
-      const last = node.statements.at(-1);
-      return last ? statementDefinitelyTerminates(last) : false;
+      return node.statements.some(statementDefinitelyTerminates);
     }
     return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
       statementDefinitelyTerminates(node.thenStatement) &&
@@ -981,8 +980,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       return abruptOverridesContinue(node, target);
     }
     if (ts.isBlock(node)) {
-      const last = node.statements.at(-1);
-      return last ? statementOverridesContinue(last, target) : false;
+      return node.statements.some((statement) => statementOverridesContinue(statement, target));
     }
     return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
       statementOverridesContinue(node.thenStatement, target) &&
@@ -1095,6 +1093,17 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     controlPathMetadataCache.set(controlPath, metadata);
     return metadata;
   };
+  const abruptSkipsFinallyTail = (
+    node: ts.ReturnStatement | ts.ThrowStatement | ts.BreakStatement | ts.ContinueStatement,
+    block: ts.Block,
+    context: Scope
+  ): boolean => {
+    const blockScope = scopeByNode.get(block);
+    if (!blockScope || executionContext(blockScope) !== context) return false;
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) return true;
+    const destination = ts.isContinueStatement(node) ? continueTargetLoop(node) : breakTarget(node);
+    return destination !== null && syntaxContains(destination, block);
+  };
   const collectUsesAndAssignments = (
     node: ts.Node,
     inheritedScope: Scope,
@@ -1115,9 +1124,10 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         if (
           ts.isBlock(parent) &&
           ts.isTryStatement(parent.parent) &&
-          parent.parent.finallyBlock === parent
+          parent.parent.finallyBlock === parent &&
+          abruptSkipsFinallyTail(node, parent, context)
         ) {
-          finallyBlocksWithPossibleAbruptCompletion.add(parent);
+          finallyBlocksWithBypassingAbruptCompletion.add(parent);
           break;
         }
       }
@@ -1202,7 +1212,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
 
   type ContinueOwnerSummary = {
     readonly blockerPositionsByAncestorPath: Map<string, number[]>;
-    readonly dominancePositionsByPath: Map<string, number[]>;
+    readonly unreachableRangesByPath: Map<string, NativeSpellcheckRange[]>;
     readonly noBackedgePathKeys: Set<string>;
   };
   const addPosition = (positionsByPath: Map<string, number[]>, path: string, position: number): void => {
@@ -1211,18 +1221,42 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     positionsByPath.set(path, positions);
   };
   const continueBlockingPosition = (exit: ContinueExit): number => exit.finallyBlocks.reduce(
-    (position, block) => finallyBlocksWithPossibleAbruptCompletion.has(block)
+    (position, block) => finallyBlocksWithBypassingAbruptCompletion.has(block)
       ? position
       : Math.max(position, block.end),
     exit.position
   );
+  const continueUnreachableRanges = (
+    exit: ContinueExit,
+    target: ts.Node
+  ): NativeSpellcheckRange[] => {
+    const ranges: NativeSpellcheckRange[] = [];
+    let cursor = exit.position;
+    const finallyBlocks = [...exit.finallyBlocks].sort((left, right) => left.getStart(sourceFile) - right.getStart(sourceFile));
+    for (const block of finallyBlocks) {
+      const start = block.getStart(sourceFile);
+      if (start > cursor) ranges.push({ start: cursor, end: start });
+      cursor = Math.max(cursor, block.end);
+    }
+    if (cursor < target.end) ranges.push({ start: cursor, end: target.end });
+    return ranges;
+  };
+  const addRange = (
+    rangesByPath: Map<string, NativeSpellcheckRange[]>,
+    path: string,
+    range: NativeSpellcheckRange
+  ): void => {
+    const ranges = rangesByPath.get(path) ?? [];
+    ranges.push(range);
+    rangesByPath.set(path, ranges);
+  };
   const continueSummariesByContext = new Map<Scope, Map<ts.Node, ContinueOwnerSummary>>();
   for (const [context, exitsByOwner] of continueExitsByContext) {
     const summariesByOwner = new Map<ts.Node, ContinueOwnerSummary>();
     for (const [owner, exits] of exitsByOwner) {
       const summary: ContinueOwnerSummary = {
         blockerPositionsByAncestorPath: new Map(),
-        dominancePositionsByPath: new Map(),
+        unreachableRangesByPath: new Map(),
         noBackedgePathKeys: new Set()
       };
       for (const exit of exits) {
@@ -1234,13 +1268,24 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         for (const prefix of exit.pathPrefixes) {
           addPosition(summary.blockerPositionsByAncestorPath, prefix, blockingPosition);
         }
-        addPosition(summary.dominancePositionsByPath, exit.dominancePathKey, blockingPosition);
+        for (const range of continueUnreachableRanges(exit, owner)) {
+          addRange(summary.unreachableRangesByPath, exit.dominancePathKey, range);
+        }
       }
       for (const positions of summary.blockerPositionsByAncestorPath.values()) {
         positions.sort((left, right) => left - right);
       }
-      for (const positions of summary.dominancePositionsByPath.values()) {
-        positions.sort((left, right) => left - right);
+      for (const ranges of summary.unreachableRangesByPath.values()) {
+        ranges.sort((left, right) => left.start - right.start);
+        let writeIndex = 0;
+        for (const range of ranges) {
+          const previous = ranges[writeIndex - 1];
+          if (previous && range.start <= previous.end) {
+            ranges[writeIndex - 1] = { start: previous.start, end: Math.max(previous.end, range.end) };
+          }
+          else ranges[writeIndex++] = range;
+        }
+        ranges.length = writeIndex;
       }
       summariesByOwner.set(owner, summary);
     }
@@ -1256,6 +1301,21 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       else high = middle;
     }
     return positions[low] ?? Number.POSITIVE_INFINITY;
+  };
+  const positionIsInRanges = (
+    ranges: readonly NativeSpellcheckRange[] | undefined,
+    position: number
+  ): boolean => {
+    if (!ranges) return false;
+    let low = 0;
+    let high = ranges.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (ranges[middle].start <= position) low = middle + 1;
+      else high = middle;
+    }
+    const candidate = ranges[low - 1];
+    return Boolean(candidate && position < candidate.end);
   };
 
   for (const binding of bindings) {
@@ -1280,7 +1340,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         ));
         if (pathDoesNotReachBackedge) continue;
         const unreachableAfterContinue = event.pathPrefixes.some((prefix) => (
-          firstPositionAfter(continueSummary?.dominancePositionsByPath.get(prefix), -1) < event.position
+          positionIsInRanges(continueSummary?.unreachableRangesByPath.get(prefix), event.position)
         ));
         if (unreachableAfterContinue) continue;
         latestByPath.set(event.pathKey, event);

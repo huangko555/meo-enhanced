@@ -40,8 +40,15 @@ try {
     'ARCH015 event processing must query an owner summary instead of scanning continue exits'
   );
   assert.match(architectureSource, /blockerPositionsByAncestorPath: Map<string, number\[]>/);
+  assert.match(architectureSource, /unreachableRangesByPath: Map<string, NativeSpellcheckRange\[]>/);
   assert.match(architectureSource, /positions\.sort\(\(left, right\) => left - right\)/);
   assert.match(architectureSource, /const firstPositionAfter =/);
+  assert.match(architectureSource, /const positionIsInRanges =/);
+  assert.doesNotMatch(
+    architectureSource,
+    /dominancePositionsByPath/,
+    'ARCH015 must not reuse blocker positions as post-continue dominance ranges'
+  );
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: [],
     sharedModuleContracts: [{
@@ -466,6 +473,18 @@ try {
       expectedLine: 3
     },
     {
+      label: 'conditional return after non-DOM finally event can reach backedge',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    try { continue; } finally {\n      field = settings;\n      if (abort) return;\n    }\n  }\n}\n",
+      expectedLine: 4
+    },
+    {
+      label: 'conditional return before non-DOM finally event can reach backedge',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    try { continue; } finally {\n      if (abort) return;\n      field = settings;\n    }\n  }\n}\n",
+      expectedLine: 4
+    },
+    {
       label: 'conditional continue preserves reachable outer fallthrough state',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (flag) continue;\n  field = settings;\n}\n",
@@ -816,6 +835,16 @@ try {
       contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try {\n    field = settings;\n    continue;\n  } finally {\n    field = document.createElement('input');\n  }\n}\n"
     },
     {
+      label: 'inner break does not skip later mandatory finally DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    while (inner) { break; }\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
+      label: 'nested function return does not skip outer mandatory finally DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    function nested() { return; }\n    nested();\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
       label: 'labeled outer continue includes mandatory finally recovery',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field.spellcheck = true;\n  try {\n    if (innerReady) { field = settings; continue outer; }\n  } finally {\n    field = document.createElement('input');\n  }\n}\n"
@@ -844,6 +873,11 @@ try {
       label: 'returning finally overrides continue after DOM recovery',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally {\n      field = document.createElement('input');\n      return;\n    }\n  }\n}\n"
+    },
+    {
+      label: 'definite return excludes unreachable later finally state',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    try { continue; } finally {\n      return;\n      field = settings;\n    }\n  }\n}\n"
     },
     {
       label: 'breaking finally overrides continue after DOM recovery',
