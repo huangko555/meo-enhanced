@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import {
+  darkBuiltInVisuals,
+  getBuiltInVisuals,
+  lightBuiltInVisuals
+} from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = resolve(import.meta.dir, '..');
 const fixtureRoot = mkdtempSync(join(repoRoot, '.tmp-architecture-shared-module-'));
@@ -32,6 +37,33 @@ try {
   mkdirSync(join(fixtureRoot, 'scripts'), { recursive: true });
   cpSync(join(repoRoot, 'scripts', 'check-architecture.ts'), join(fixtureRoot, 'scripts', 'check-architecture.ts'));
   const architectureSource = readFileSync(join(fixtureRoot, 'scripts', 'check-architecture.ts'), 'utf8');
+  const finalCodePaletteSource = readFileSync(
+    join(repoRoot, 'webview/src/application/finalCodePalette.ts'),
+    'utf8'
+  );
+  assert.doesNotMatch(finalCodePaletteSource, /@shikijs|\b(?:document|CSSStyleDeclaration)\b/);
+  const builtInVisualsSource = readFileSync(join(repoRoot, 'src/shared/builtInVisualBaseline.ts'), 'utf8');
+  for (const removedShape of [
+    /\bThemeFonts\b/,
+    /\bBuiltInVisualBaseline\b/,
+    /\bh[1-6]Font(?:Size|Weight)\b/,
+    /Partial<(?:Visual|Theme|Semantic|Syntax|BuiltIn)/
+  ]) {
+    assert.doesNotMatch(builtInVisualsSource, removedShape);
+  }
+  assert.equal(getBuiltInVisuals('dark'), darkBuiltInVisuals);
+  assert.equal(getBuiltInVisuals('light'), lightBuiltInVisuals);
+  for (const visuals of [darkBuiltInVisuals, lightBuiltInVisuals]) {
+    assert.equal('id' in visuals, false);
+    assert.equal('name' in visuals, false);
+    assert.equal(Object.isFrozen(visuals), true);
+    assert.equal(Object.isFrozen(visuals.colors), true);
+    assert.equal(Object.isFrozen(visuals.semanticColors), true);
+    assert.equal(Object.isFrozen(visuals.syntaxTokens), true);
+    assert.equal(Object.isFrozen(visuals.typography), true);
+    assert.equal(visuals.typography.headingFontSizes.length, 6);
+    assert.equal(visuals.typography.headingFontWeights.length, 6);
+  }
   assert.match(architectureSource, /cat-file', '--batch/);
   assert.doesNotMatch(architectureSource, /runGit\(\['show'/, 'staged reads must not spawn Git once per file');
   assert.doesNotMatch(
@@ -121,6 +153,32 @@ try {
 
   const valid = runCheck();
   assert.equal(valid.ok, true, `valid thin callers should pass: ${valid.output}`);
+
+  write('scripts/architecture-baseline.json', JSON.stringify({
+    targetRoots: ['webview/src/application'], knownLegacyTestFailures: []
+  }));
+  write('webview/src/application/palette.ts', "import fallback from '@shikijs/themes/github-light';\nexport const palette = fallback;\n");
+  const applicationShikiDependency = runCheck();
+  assert.equal(applicationShikiDependency.ok, false, 'Application must reject concrete Shiki dependencies');
+  assert.match(applicationShikiDependency.output, /ARCH004/);
+  write('webview/src/application/palette.ts', 'export const apply = () => document.documentElement.style;\n');
+  const applicationDomDependency = runCheck();
+  assert.equal(applicationDomDependency.ok, false, 'Application must reject DOM globals');
+  assert.match(applicationDomDependency.output, /ARCH004/);
+  rmSync(join(fixtureRoot, 'webview/src/application/palette.ts'));
+  write('scripts/architecture-baseline.json', JSON.stringify({
+    targetRoots: [],
+    sharedModuleContracts: [{
+      module: 'src/shared/latexMathScanner.ts',
+      exactImporters: ['webview/src/helpers/math.ts', 'src/export/math.ts'],
+      delegates: [
+        { file: 'webview/src/helpers/math.ts', function: 'collect', requiredCall: 'scanLatexMath' },
+        { file: 'webview/src/helpers/math.ts', function: 'find', requiredCall: 'scanLatexMathAt', allowNullReturn: true },
+        { file: 'src/export/math.ts', function: 'collect', requiredCall: 'scanLatexMath' }
+      ]
+    }],
+    knownLegacyTestFailures: []
+  }, null, 2));
 
   write('README.md', 'The table toolbar can order columns.\n');
   const tableSortingAlias = runCheck();
@@ -2075,6 +2133,15 @@ try {
   assert.match(stagedCustomThemeAlias.output, /ARCH020/);
   writeFileSync(join(stagedRoot, 'README.md'), 'No custom appearance capability here.\n');
   execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'MEO Enhanced exports HTML using the current VS Code theme.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'meoEnhanced.import.theme\n');
+  const stagedOrdinaryThemeProse = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(stagedOrdinaryThemeProse, /Architecture checks passed/);
+  writeFileSync(join(stagedRoot, 'README.md'), 'No custom appearance capability here.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
 
   writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
   execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
@@ -2401,6 +2468,8 @@ try {
     ['src/protocol/editorState.ts', 'export type ThemeSettingsDto = { colors: Record<string, string> };\n'],
     ['src/protocol/editorState.ts', 'export type BuiltInVisualBaselineDto = { colors: Record<string, string> };\n'],
     ['src/protocol/editorEvents.ts', "export const event = { type: 'themeChanged' };\n"],
+    ['src/protocol/editorEvents.ts', "export const event = { type: 'previewAppearanceChanged' };\n"],
+    ['src/protocol/editorEvents.ts', "export const event = { type: 'previewSourceColoringChanged' };\n"],
     ['webview/src/editor/themeControls.ts', 'export const importedThemeState = {};\n'],
     ['webview/src/editor/themeControls.ts', 'export const custom_theme_heading_size_editor = {};\n'],
     ['docs/appearance.md', 'Use MEO theme management to import a palette.\n']
@@ -2416,6 +2485,24 @@ try {
   write('README.md', 'Editor appearance follows the current VS Code theme and uses a built-in code palette when reversed.\n');
   const retainedAppearanceTheme = runCheck();
   assert.equal(retainedAppearanceTheme.ok, true, `retained appearance/theme prose must pass: ${retainedAppearanceTheme.output}`);
+  rmSync(join(fixtureRoot, 'README.md'));
+
+  const retainedThemeImportExportFixtures = [
+    'MEO Enhanced exports HTML using the current VS Code theme.\n',
+    'Import an external theme for another editor; export that external theme from its own settings.\n'
+  ] as const;
+  for (const contents of retainedThemeImportExportFixtures) {
+    write('README.md', contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, true, `ordinary theme import/export prose must pass: ${outcome.output}`);
+  }
+  write(
+    'README.md',
+    'MEO Enhanced exports HTML using the current VS Code theme; the custom-theme import command stays removed.\n'
+  );
+  const pairedCustomThemeCommand = runCheck();
+  assert.equal(pairedCustomThemeCommand.ok, false, 'custom-theme command must still be rejected beside allowed prose');
+  assert.match(pairedCustomThemeCommand.output, /ARCH020/);
   rmSync(join(fixtureRoot, 'README.md'));
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });

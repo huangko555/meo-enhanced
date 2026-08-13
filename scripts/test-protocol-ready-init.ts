@@ -526,8 +526,6 @@ for (const event of [
   { type: 'focusEditor' },
   { type: 'revealSelection', anchor: 0, head: 4, preserveViewport: true },
   { type: 'revealDocumentFragment', href: '#intro' },
-  { type: 'previewAppearanceChanged', appearance: 'light' },
-  { type: 'previewSourceColoringChanged', enabled: false },
   { type: 'outlinePositionChanged', position: 'left' },
   { type: 'outlineVisibilityChanged', visible: true },
   { type: 'lineNumbersChanged', enabled: true },
@@ -543,6 +541,10 @@ for (const event of [
 }
 assert.equal(decodeHostEditorEvent({ type: 'revealSelection', anchor: -1, head: 0 }), null);
 assert.equal(decodeHostEditorEvent({ type: 'fixedBaselineChanged', pinned: true, active: 'yes' }), null);
+assert.equal(decodeHostEditorEvent({ type: 'previewAppearanceChanged', appearance: 'light' }), null);
+assert.equal(decodeHostEditorEvent({ type: 'previewSourceColoringChanged', enabled: false }), null);
+assert.equal(decodeHostToWebviewMessage({ type: 'previewAppearanceChanged', appearance: 'light' }), null);
+assert.equal(decodeHostToWebviewMessage({ type: 'previewSourceColoringChanged', enabled: false }), null);
 const vscodeThemeEvent = { type: 'vscodeCodeThemeChanged', vscodeTheme: codeTheme } as const;
 assert.deepEqual(decodeHostConfigurationEvent(vscodeThemeEvent), vscodeThemeEvent);
 assert.equal(decodeHostConfigurationEvent({ type: 'themeChanged', theme: {}, codeTheme }), null);

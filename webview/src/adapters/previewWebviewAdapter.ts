@@ -59,14 +59,6 @@ export function createPreviewWebviewAdapter(surface: PreviewSurface): PreviewWeb
       surface.requestRender(text, { restoreLine, force: true });
     },
     accept(message) {
-      if (message.type === 'previewAppearanceChanged') {
-        if (!disposed) surface.setAppearance(message.appearance);
-        return true;
-      }
-      if (message.type === 'previewSourceColoringChanged') {
-        if (!disposed) surface.setSourceColoring(message.enabled);
-        return true;
-      }
       if (message.type === 'previewRenderResult') {
         if (!disposed) surface.acceptRenderResponse(message);
         return true;

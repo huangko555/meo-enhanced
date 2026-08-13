@@ -207,7 +207,7 @@ const edges: Edge[] = [];
 const failures: string[] = [];
 const forbiddenFor: Record<string, RegExp[]> = {
   domain: [/^vscode$/, /^node:/, /^@codemirror\//, /^dom$/i],
-  application: [/^vscode$/, /^node:/, /^@codemirror\//, /^dom$/i],
+  application: [/^vscode$/, /^node:/, /^@codemirror\//, /^@shikijs\//, /^dom$/i],
   protocol: [/^vscode$/, /^node:/, /^@codemirror\//, /^dom$/i],
   foundation: [/^vscode$/, /^node:/, /^@codemirror\//, /^dom$/i],
 };
@@ -223,6 +223,25 @@ for (const source of sources) {
         failures.push(`ARCH004 ${layer} 禁止依赖 ${specifier}: ${source.path}`);
       }
     }
+  }
+}
+
+for (const source of sources) {
+  if (targetLayer(source.path) !== 'application') continue;
+  const sourceFile = sourceFileFor(source);
+  let forbiddenDomIdentifier: string | null = null;
+  const visit = (node: ts.Node): void => {
+    if (forbiddenDomIdentifier !== null) return;
+    if (ts.isIdentifier(node)
+      && (node.text === 'document' || node.text === 'window' || node.text === 'CSSStyleDeclaration')) {
+      forbiddenDomIdentifier = node.text;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  if (forbiddenDomIdentifier !== null) {
+    failures.push(`ARCH004 application 禁止依赖 DOM 标识符 ${forbiddenDomIdentifier}: ${source.path}`);
   }
 }
 
@@ -1994,6 +2013,8 @@ const removedCustomThemeTokens = [
   /\bthemeChanged\b/,
   /\bshikiCodeBlocksChanged\b/,
   /\bshikiCodeBlocks\b/,
+  /\bpreviewAppearanceChanged\b/,
+  /\bpreviewSourceColoringChanged\b/,
   /\bthemeJsonc\b/i,
   /(?:custom|imported)[-_. ]+themes?\b/i,
   /\b(?:select|import|export|delete|reset|manage|edit)(?:ing|ed)?\b.{0,32}\bMEO[-_. ]+themes?\b/i,
@@ -2004,14 +2025,18 @@ const hasRemovedCustomThemeAlias = (value: string): boolean => {
   const normalized = normalizeCapabilityAlias(value);
   if (normalized.includes('codeblocksusevscodetheme')) return true;
   if (normalized.includes('builtinvisualbaselinedto')) return true;
-  const hasTheme = normalized.includes('theme');
-  const hasRemovedAction = ['import', 'export', 'select', 'delete', 'reset', 'manage', 'edit']
-    .some((word) => normalized.includes(word));
-  const hasMeoThemeCommand = normalized.includes('meoenhanced') && hasTheme && hasRemovedAction;
-  const hasCustomThemeOwner = hasTheme
-    && (normalized.includes('custom') || normalized.includes('imported'))
-    && (hasRemovedAction || ['storage', 'state', 'editor', 'semantic', 'font', 'headingsize']
-      .some((word) => normalized.includes(word)));
+  const removedActions = ['import', 'export', 'select', 'delete', 'reset', 'manage', 'edit'];
+  const ownerTerms = ['command', 'setting', 'owner', 'storage', 'state', 'editor', 'semantic', 'font', 'headingsize'];
+  const hasMeoThemeCommand = removedActions.some((action) => (
+    normalized.includes(`meoenhanced${action}theme`)
+    || normalized.includes(`meoenhancedtheme${action}`)
+  ));
+  const customThemePhrases = ['customtheme', 'customthemes', 'importedtheme', 'importedthemes'];
+  const hasCustomThemeOwner = customThemePhrases.some((phrase) => (
+    [...removedActions, ...ownerTerms].some((term) => (
+      normalized.includes(`${phrase}${term}`) || normalized.includes(`${term}${phrase}`)
+    ))
+  ));
   return hasMeoThemeCommand || hasCustomThemeOwner;
 };
 for (const path of customThemeCapabilityScope) {

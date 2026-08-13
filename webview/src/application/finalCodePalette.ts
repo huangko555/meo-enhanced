@@ -1,6 +1,3 @@
-import githubLight from '@shikijs/themes/github-light';
-import darkPlus from '@shikijs/themes/dark-plus';
-
 export type RawCodeTheme = Readonly<{
   name: string;
   type: 'light' | 'dark';
@@ -112,13 +109,12 @@ function resolveTokenColor(
 
 export function resolveFinalCodePalette(
   currentVscodeTheme: RawCodeTheme | null | undefined,
+  fallbackTheme: RawCodeTheme,
   appearance: 'light' | 'dark'
 ): FinalCodePalette {
   const theme = currentVscodeTheme?.type === appearance
     ? currentVscodeTheme
-    : appearance === 'light'
-      ? githubLight as RawCodeTheme
-      : darkPlus as RawCodeTheme;
+    : fallbackTheme;
   const foreground = theme?.colors['editor.foreground'] ?? (appearance === 'light' ? '#24292f' : '#d4d4d4');
   const sourceTokens = Object.fromEntries(Object.entries(SOURCE_TOKEN_SCOPES).map(([id, scopes]) => (
     [id, resolveTokenColor(theme, scopes, foreground)]
@@ -137,13 +133,4 @@ export function resolveFinalCodePalette(
       link: resolveTokenColor(theme, ['markup.underline.link', 'string.other.link'], foreground)
     })
   });
-}
-
-export function applySourceCodePalette(
-  palette: FinalCodePalette,
-  style: Pick<CSSStyleDeclaration, 'setProperty'> = document.documentElement.style
-): void {
-  for (const [id, color] of Object.entries(palette.sourceTokens)) {
-    style.setProperty(`--meo-token-${id}-color`, color);
-  }
 }

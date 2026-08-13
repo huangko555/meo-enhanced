@@ -26,7 +26,7 @@ import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
-import { applySourceCodePalette, resolveFinalCodePalette } from './application/finalCodePalette';
+import { createCodePaletteWebviewAdapter } from './adapters/codePaletteWebviewAdapter';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
@@ -1002,8 +1002,9 @@ const mermaidDiagramPresentationFactory = createMermaidDiagramPresentationFactor
   }
 });
 let resolveEditorAppearanceForPreview: () => 'light' | 'dark' = () => 'dark';
+const codePaletteAdapter = createCodePaletteWebviewAdapter({ setShikiTheme });
 let resolveCodePaletteForPreview = (appearance: 'light' | 'dark') => (
-  resolveFinalCodePalette(undefined, appearance).preview
+  codePaletteAdapter.resolve(undefined, appearance).preview
 );
 const previewController = createPreviewController({
   vscode,
@@ -1766,11 +1767,8 @@ const exportAdapter = createExportWebviewAdapter({
 const themeAdapter = createAppearanceWebviewAdapter({
   setAppearanceControl: (appearance) => editorAppearanceControl.setActive(appearance),
   applyAppearance: applyBuiltInVisualBaseline,
-  resolveCodePalette: resolveFinalCodePalette,
-  applyCodePalette: (palette) => {
-    applySourceCodePalette(palette);
-    setShikiTheme(palette.theme);
-  },
+  resolveCodePalette: codePaletteAdapter.resolve,
+  applyCodePalette: codePaletteAdapter.apply,
   refreshMermaidTheme: () => mermaidDiagramRenderPool.refreshTheme(),
   applyWithEditorViewportPreserved: (action) => {
     if (editor) editor.preserveViewport(action);

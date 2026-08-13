@@ -67,8 +67,8 @@ const response: PreviewRenderResponse = {
   }
 };
 assert.equal(adapter.accept(response), true);
-assert.equal(adapter.accept({ type: 'previewAppearanceChanged', appearance: 'dark' }), true);
-assert.equal(adapter.accept({ type: 'previewSourceColoringChanged', enabled: true }), true);
+assert.equal(adapter.accept({ type: 'previewAppearanceChanged', appearance: 'dark' } as HostToWebviewMessage), false);
+assert.equal(adapter.accept({ type: 'previewSourceColoringChanged', enabled: true } as HostToWebviewMessage), false);
 assert.equal(adapter.accept({ type: 'focusEditor' } as HostToWebviewMessage), false);
 assert.equal(adapter.getAppearance(), 'dark');
 

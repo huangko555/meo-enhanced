@@ -1,11 +1,9 @@
-import type { DiffBaselineMode, EditorAppearance, OutlinePosition } from './editorCommands';
+import type { DiffBaselineMode, OutlinePosition } from './editorCommands';
 
 export type HostEditorEvent =
   | { readonly type: 'focusEditor' }
   | { readonly type: 'revealSelection'; readonly anchor: number; readonly head: number; readonly focus?: boolean; readonly preserveViewport?: boolean }
   | { readonly type: 'revealDocumentFragment'; readonly href: string }
-  | { readonly type: 'previewAppearanceChanged'; readonly appearance: EditorAppearance }
-  | { readonly type: 'previewSourceColoringChanged'; readonly enabled: boolean }
   | { readonly type: 'outlinePositionChanged'; readonly position: OutlinePosition }
   | { readonly type: 'outlineVisibilityChanged'; readonly visible: boolean }
   | { readonly type: 'lineNumbersChanged'; readonly enabled: boolean }
@@ -37,11 +35,6 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
         ? value as HostEditorEvent : null;
     case 'revealDocumentFragment':
       return typeof value.href === 'string' && value.href.length > 0 ? value as HostEditorEvent : null;
-    case 'previewAppearanceChanged':
-      return value.appearance === 'auto' || value.appearance === 'dark' || value.appearance === 'light'
-        ? value as HostEditorEvent : null;
-    case 'previewSourceColoringChanged':
-      return typeof value.enabled === 'boolean' ? value as HostEditorEvent : null;
     case 'outlinePositionChanged':
       return value.position === 'left' || value.position === 'right' ? value as HostEditorEvent : null;
     case 'outlineVisibilityChanged':
