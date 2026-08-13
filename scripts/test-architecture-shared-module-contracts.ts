@@ -613,16 +613,26 @@ try {
     'export type MermaidColonSyntax = string;',
     'export interface MermaidColonSyntax { label: string }',
     'export enum MermaidColonSyntax { Label }',
+    'export async function mermaidColonSyntax() { return "Node: ready"; }',
+    'export default async function mermaidColonSyntax() { return "Node: ready"; }',
+    'export declare const mermaidColonSyntax: string;',
+    'export abstract class MermaidColonSyntax { abstract label(): string }',
     'export default function mermaidColonSyntax() { return "Node: ready"; }',
     'export default class MermaidColonSyntax {}'
   ];
+  const rejectedMermaidColonSourceDeclarations: string[] = [];
   for (const [index, declaration] of retainedMermaidColonSourceDeclarations.entries()) {
     const path = `webview/src/editor/standardMermaidDeclaration${index}.ts`;
     write(path, `${declaration}\n`);
     const outcome = runCheck();
-    assert.equal(outcome.ok, true, `source export declaration must remain allowed: ${declaration}\n${outcome.output}`);
+    if (!outcome.ok) rejectedMermaidColonSourceDeclarations.push(`${declaration}\n${outcome.output}`);
     rmSync(join(fixtureRoot, ...path.split('/')));
   }
+  assert.deepEqual(
+    rejectedMermaidColonSourceDeclarations,
+    [],
+    `source export declarations must remain allowed:\n${rejectedMermaidColonSourceDeclarations.join('\n')}`
+  );
 
   write('README.md', 'Show Git line authors and open the matching revision.\n');
   const gitLineAuthorDocs = runCheck();

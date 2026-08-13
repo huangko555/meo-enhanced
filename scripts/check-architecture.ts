@@ -1838,11 +1838,25 @@ const removedMermaidColonTokens = [
   /\b(?:collect|detect|enable|export|get|normalize|parse|preview|render|scan)[-_.](?:mermaid[-_.]colon|colon[-_.]mermaid)(?:[-_.](?:blocks?|containers?|fences?|ranges?|syntax))?\b/i,
   /meo-[A-Za-z0-9_-]*colon[-_]?fence[A-Za-z0-9_-]*/i
 ];
+const withoutSourceExportModifiers = (text: string, path: string): string => {
+  if (!/^(?:src|webview\/src)\//.test(path) || !/\bexport\b/.test(text)) return text;
+  const sourceFile = sourceFileFor({ path, text });
+  const exportModifiers = sourceFile.statements.flatMap((statement) => (
+    ts.canHaveModifiers(statement)
+      ? (ts.getModifiers(statement) ?? []).filter((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+      : []
+  ));
+  let result = text;
+  for (const modifier of exportModifiers.toReversed()) {
+    const from = modifier.getStart(sourceFile);
+    result = `${result.slice(0, from)}${' '.repeat(modifier.getEnd() - from)}${result.slice(modifier.getEnd())}`;
+  }
+  return result;
+};
 const hasRemovedMermaidColonCapability = (text: string, path: string): boolean => {
   if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
   if (removedMermaidColonTokens.some((pattern) => pattern.test(text))) return true;
-  const sourceExportDeclaration = /^(?:src|webview\/src)\//.test(path) && /^\s*export\s+(?:(?:const|let|var|function|class|type|interface|enum)\b|default\s+(?:function|class)\b)/.test(text);
-  const words = normalizeCapabilityWords(text);
+  const words = normalizeCapabilityWords(withoutSourceExportModifiers(text, path));
   const mermaidPositions = words.flatMap((word, index) => word === 'mermaid' ? [index] : []);
   const colonPositions = words.flatMap((word, index) => word === 'colon' ? [index] : []);
   for (const mermaidPosition of mermaidPositions) {
@@ -1853,8 +1867,7 @@ const hasRemovedMermaidColonCapability = (text: string, path: string): boolean =
       const capabilityWords = words.slice(from, to);
       if (capabilityWords.some((word) => (
         /^(?:block|blocks|cache|container|containers|decoration|decorations|fence|fences|parser|range|ranges)$/.test(word) ||
-        /^(?:collect|detect|enable|get|normalize|parse|preview|render|scan)$/.test(word) ||
-        (word === 'export' && !sourceExportDeclaration)
+        /^(?:collect|detect|enable|export|get|normalize|parse|preview|render|scan)$/.test(word)
       ))) return true;
     }
   }
