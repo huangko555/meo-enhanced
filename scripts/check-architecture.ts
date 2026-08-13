@@ -2164,33 +2164,44 @@ const removedColorCapabilityTokens = [
   /\.type\s*=\s*["']color["']/i,
   /\b(?:rgb|rgba|hsl|hsla|named|gradient|function)[-_. ]*color[-_. ]*(?:swatches?|decorator|decoration|widget|parser)\b/i,
   /\bcolor[-_. ]*(?:swatches?|decorator|decoration|widget|parser)[-_. ]*(?:rgb|rgba|hsl|hsla|named|gradient|function)\b/i,
-  /\bcolor[-_. ]*(?:picker|chooser|dialog|input)(?:[-_. ]*(?:owner|state|settings?|config|controller|manager|registry|store|service|ui))?\b/i,
-  /\b(?:picker|chooser|dialog|input)[-_. ]*color(?:[-_. ]*(?:owner|state|settings?|config|controller|manager|registry|store|service|ui))?\b/i
+  /\bcolor[-_. ]*(?:pick|choose|chooser|picker|editor|dialog|input|palette)(?:[-_. ]*(?:owner|state|settings?|config|controller|manager|registry|store|service|ui))?\b/i,
+  /\b(?:pick|choose|chooser|picker|editor|dialog|input|palette)[-_. ]*color(?:[-_. ]*(?:owner|state|settings?|config|controller|manager|registry|store|service|ui))?\b/i
 ];
 const removedColorOwnerTerms = [
   'owner', 'state', 'setting', 'settings', 'config', 'controller', 'manager', 'registry', 'store',
   'storage', 'service', 'module', 'interface', 'adapter', 'protocol', 'host', 'webview', 'ui', 'dialog', 'input'
 ];
-const hasRemovedColorCapabilityAlias = (value: string): boolean => {
-  const normalized = normalizeCapabilityAlias(value);
-  const nonHexKinds = ['rgb', 'rgba', 'hsl', 'hsla', 'named', 'gradient', 'function'];
+const retainedPaletteAliases = ['currentthemepalette', 'currentthemecolorpalette', 'codepalette', 'codecolorpalette',
+  'builtinpalette', 'builtincolorpalette', 'finalpalette', 'finalcolorpalette'];
+const hasRemovedColorCapabilityAlias = (value: string, ownerContext = ''): boolean => {
+  // Alias separators are removable; syntax punctuation is not. This keeps
+  // `ColorPalette` equivalent to `color-palette` without folding `color: palette`.
+  const normalizeSeparatedAlias = (candidate: string) => candidate.toLowerCase().replace(/[-_.\s/\\]+/g, '');
+  const normalized = normalizeSeparatedAlias(value);
+  const normalizedContext = normalizeSeparatedAlias(ownerContext);
+  const nonHexKinds = ['rgb', 'rgba', 'hsl', 'hsla', 'named', 'name', 'gradient'];
   const renderTerms = ['swatch', 'swatches', 'decorator', 'decoration', 'widget', 'parser'];
   if (nonHexKinds.some((kind) => renderTerms.some((term) => (
-    normalized.includes(`${kind}color${term}`)
+    normalized.includes(`${kind}${term}`)
+      || normalized.includes(`${term}${kind}`)
+      || normalized.includes(`${kind}color${term}`)
       || normalized.includes(`color${kind}${term}`)
       || normalized.includes(`${kind}${term}color`)
       || normalized.includes(`color${term}${kind}`)
       || normalized.includes(`${term}${kind}color`)
       || normalized.includes(`${term}color${kind}`)
   )))) return true;
-  if (['colorpicker', 'pickercolor', 'colorchooser', 'choosercolor', 'colordialog', 'dialogcolor', 'colorinput', 'inputcolor']
-    .some((phrase) => normalized.includes(phrase))) return true;
+  const pickerTerms = ['pick', 'choose', 'chooser', 'picker', 'editor', 'dialog', 'input'];
+  if (pickerTerms.some((term) => normalized.includes(`color${term}`) || normalized.includes(`${term}color`))) return true;
   const hasRemovedPalette = ['namedcolorpalette', 'gradientcolorpalette', 'rgbcolorpalette', 'hslcolorpalette']
     .some((phrase) => normalized.includes(phrase));
   if (hasRemovedPalette) return true;
-  const hasOwnedColorPalette = normalized.includes('colorpalette')
+  const hasRetainedPaletteMeaning = retainedPaletteAliases.some((alias) => normalized.includes(alias));
+  const hasOwnedColorPalette = !hasRetainedPaletteMeaning
+    && (normalized.includes('colorpalette') || normalized.includes('palettecolor'))
     && removedColorOwnerTerms.some((term) => normalized.includes(`colorpalette${term}`)
-      || normalized.includes(`${term}colorpalette`));
+      || normalized.includes(`${term}colorpalette`)
+      || normalizedContext.includes(term));
   return hasOwnedColorPalette;
 };
 const currentRemovedColorDocumentationPatterns = [
@@ -2203,8 +2214,14 @@ const hasCurrentRemovedColorDocumentationClaim = (value: string): boolean => {
     'removed', 'historical', 'former', 'previously', 'deprecated', 'usedto',
     'nolonger', 'doesnotsupport', 'donotsupport', 'didnotsupport'
   ];
-  const explicitMeoColorAlias = ['meoenhancedcolorpicker', 'meoenhancedopencolorpicker', 'meoenhancedcolorchooser']
-    .some((alias) => wholeNormalized.includes(alias));
+  const explicitMeoColorAliases = [
+    'meoenhancedcolorpick', 'meoenhancedpickcolor', 'meoenhancedcolorchoose', 'meoenhancedchoosecolor',
+    'meoenhancedcolorchooser', 'meoenhancedchoosercolor', 'meoenhancedcolorpicker', 'meoenhancedpickercolor',
+    'meoenhancedcoloreditor', 'meoenhancededitorcolor', 'meoenhancedcolordialog', 'meoenhanceddialogcolor',
+    'meoenhancedcolorinput', 'meoenhancedinputcolor', 'meoenhancedcolorpalette', 'meoenhancedpalettecolor',
+    'meoenhancedopencolorpicker'
+  ];
+  const explicitMeoColorAlias = explicitMeoColorAliases.some((alias) => wholeNormalized.includes(alias));
   if (explicitMeoColorAlias && !historicalMarkers.some((marker) => wholeNormalized.includes(marker))) return true;
   return value.split(customThemeDocumentationClauseBoundary).some((segment) => {
     const normalized = normalizeCapabilityAlias(segment);
@@ -2212,7 +2229,7 @@ const hasCurrentRemovedColorDocumentationClaim = (value: string): boolean => {
     if (!hasMeoProduct) return false;
     const historicalOrNegative = historicalMarkers.some((marker) => normalized.includes(marker));
     if (historicalOrNegative) return false;
-    if (['meoenhancedcolorpicker', 'meoenhancedopencolorpicker', 'meoenhancedcolorchooser']
+    if (explicitMeoColorAliases
       .some((alias) => normalized.includes(alias))) return true;
     return currentRemovedColorDocumentationPatterns.some((pattern) => pattern.test(normalized));
   });
@@ -2220,7 +2237,7 @@ const hasCurrentRemovedColorDocumentationClaim = (value: string): boolean => {
 for (const path of removedColorCapabilityScope) {
   const isProductionPath = /^(?:src|webview\/src)\//.test(path);
   const isDocumentationPath = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path);
-  if (isProductionPath && (hasRemovedColorCapabilityAlias(path)
+  if (isProductionPath && (hasRemovedColorCapabilityAlias(path, path)
     || removedColorCapabilityTokens.some((pattern) => pattern.test(path)))) {
     failures.push(`ARCH021 已删除的非 HEX color swatch 或颜色 picker 能力重新出现: ${path}:1`);
     continue;
@@ -2228,7 +2245,7 @@ for (const path of removedColorCapabilityScope) {
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(lines[index])) continue;
-    if ((isProductionPath && hasRemovedColorCapabilityAlias(lines[index]))
+    if ((isProductionPath && hasRemovedColorCapabilityAlias(lines[index], path))
       || (isDocumentationPath && hasCurrentRemovedColorDocumentationClaim(lines[index]))
       || (!isDocumentationPath && removedColorCapabilityTokens.some((pattern) => pattern.test(lines[index])))) {
       failures.push(`ARCH021 已删除的非 HEX color swatch 或颜色 picker 能力重新出现: ${path}:${index + 1}`);

@@ -2228,6 +2228,45 @@ try {
   writeFileSync(join(stagedRoot, 'README.md'), 'Pick a color in an external design tool.\n');
   execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
 
+  writeFileSync(join(stagedRoot, 'README.md'), 'MEO Enhanced provides meoEnhanced.pickColor.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'Pick a color in an external design tool.\n');
+  const stagedPickColorAlias = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedPickColorAlias.ok, false, 'staged ARCH021 must reject pickColor aliases from the index');
+  assert.match(stagedPickColorAlias.output, /ARCH021/);
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+
+  mkdirSync(join(stagedRoot, 'src', 'host'), { recursive: true });
+  writeFileSync(join(stagedRoot, 'src', 'host', 'choose-color-owner.ts'), 'export const chooseColorOwner = {};\n');
+  execFileSync('git', ['add', '--', 'src/host/choose-color-owner.ts'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'src', 'host', 'external-color-reference.ts'), 'export const externalColorReference = {};\n');
+  const stagedChooseColorOwner = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedChooseColorOwner.ok, false, 'staged ARCH021 must reject choose-color owner paths from the index');
+  assert.match(stagedChooseColorOwner.output, /ARCH021/);
+  execFileSync('git', ['rm', '--cached', '--force', '--quiet', '--', 'src/host/choose-color-owner.ts'], { cwd: stagedRoot });
+  rmSync(join(stagedRoot, 'src', 'host', 'choose-color-owner.ts'));
+  rmSync(join(stagedRoot, 'src', 'host', 'external-color-reference.ts'));
+
   writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
   execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
   writeFileSync(join(stagedRoot, 'bun.lock'), '# clean working-tree lock\n');
@@ -2669,6 +2708,15 @@ try {
     ['webview/src/editor/colorChooserState.ts', 'export const state = {};\n'],
     ['webview/src/editor/colorDialog.ts', 'export const dialog = {};\n'],
     ['webview/src/editor/colorInput.ts', "const input = '<input type=\"color\">';\n"],
+    ['src/host/pickColor.ts', 'export const pickColor = () => undefined;\n'],
+    ['src/host/color.choose.owner.ts', 'export const owner = {};\n'],
+    ['src/host/choose-color-owner.ts', 'export const owner = {};\n'],
+    ['webview/src/helpers/rgbSwatchParser.ts', 'export const parse = () => undefined;\n'],
+    ['webview/src/helpers/namedSwatchWidget.ts', 'export const widget = {};\n'],
+    ['webview/src/helpers/gradientDecorator.ts', 'export const decorate = () => undefined;\n'],
+    ['webview/src/editor/colorEditor.ts', 'export const editor = {};\n'],
+    ['webview/src/editor/palette.ts', 'export class ColorPalette {}\n'],
+    ['webview/src/editor/paletteColorOwner.ts', 'export const paletteColorOwner = {};\n'],
     ['docs/colors.md', 'MEO Enhanced supports RGB and HSL color swatches.\n'],
     ['docs/colors.md', 'MEO Enhanced provides a color picker.\n'],
     ['docs/colors.md', 'MEO Enhanced no longer supports RGB swatches, and MEO Enhanced provides a color picker.\n']
@@ -2686,6 +2734,9 @@ try {
     ['webview/src/helpers/colorSwatches.ts', 'export const createColorSwatchElement = () => document.createElement(\'span\');\n'],
     ['webview/src/styles.css', '.sample { color: rgb(1 2 3); background: linear-gradient(red, blue); }\n'],
     ['src/shared/themePalette.ts', 'export const currentThemePalette = {};\n'],
+    ['webview/src/theme/codePalette.ts', 'export const codePalette = {};\n'],
+    ['webview/src/theme/built-in-palette.ts', 'export const builtInPalette = {};\n'],
+    ['webview/src/theme/final.palette.ts', 'export const finalPalette = {};\n'],
     ['docs/colors.md', 'Pick a color in an external design tool. MEO Enhanced shows read-only HEX swatches.\n'],
     ['docs/history.md', 'MEO Enhanced no longer supports RGB swatches or a color picker.\n']
   ] as const;
