@@ -13,7 +13,6 @@ import { java } from '@codemirror/lang-java';
 import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
-import { getMermaidColonBlocks } from './mermaidColonBlocks';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import {
   addMermaidToolbar,
@@ -536,8 +535,6 @@ export function insertCodeBlock(view: EditorView, selection: { from: number; to:
 }
 
 const sourceCodeBlockLine = Decoration.line({ class: 'meo-src-code-block' });
-const mermaidColonFenceMarker = Decoration.mark({ class: 'meo-md-colon-fence-marker' });
-const mermaidColonFenceCode = Decoration.mark({ class: 'meo-md-colon-fence-code' });
 
 function computeSourceCodeBlockLines(state: EditorState): any {
   const ranges: any[] = [];
@@ -558,22 +555,6 @@ function computeSourceCodeBlockLines(state: EditorState): any {
       return false;
     }
   });
-
-  for (const block of getMermaidColonBlocks(state)) {
-    for (let lineNo = block.startLine; lineNo <= block.endLine; lineNo += 1) {
-      const line = state.doc.line(lineNo);
-      ranges.push(sourceCodeBlockLine.range(line.from));
-
-      if (lineNo === block.startLine || lineNo === block.endLine) {
-        ranges.push(mermaidColonFenceMarker.range(line.from, line.to));
-        continue;
-      }
-
-      if (line.from < line.to) {
-        ranges.push(mermaidColonFenceCode.range(line.from, line.to));
-      }
-    }
-  }
 
   return Decoration.set(ranges, true);
 }
@@ -808,7 +789,7 @@ export function addMermaidDiagram(builder: any[], state: EditorState, node: any)
   });
 }
 
-export function addMermaidDiagramBlock(
+function addMermaidDiagramBlock(
   builder: any[],
   state: EditorState,
   block: {

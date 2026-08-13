@@ -1483,16 +1483,6 @@ body {
   background-color: var(--meo-code-block-active-line-bg);
 }
 
-.cm-editor.meo-mode-source .meo-md-colon-fence-marker,
-.cm-editor.meo-mode-source .meo-md-colon-fence-marker * {
-  color: var(--meo-color-base02) !important;
-}
-
-.cm-editor.meo-mode-source .meo-md-colon-fence-code,
-.cm-editor.meo-mode-source .meo-md-colon-fence-code * {
-  color: var(--meo-color-base07) !important;
-}
-
 .cm-editor.meo-mode-live .cm-activeLine.meo-md-code-block {
   background-color: var(--meo-code-block-active-line-bg);
 }
@@ -2042,8 +2032,6 @@ body {
 .cm-editor .meo-md-inline-code *,
 .cm-editor .cm-line.meo-md-code-block,
 .cm-editor .cm-line.meo-md-code-block *,
-.cm-editor.meo-mode-source .meo-md-colon-fence-code,
-.cm-editor.meo-mode-source .meo-md-colon-fence-code *,
 .cm-editor .meo-mermaid-fallback code {
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;

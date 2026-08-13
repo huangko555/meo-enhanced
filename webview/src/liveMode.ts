@@ -14,7 +14,6 @@ import {
   addTopLineCopyButton,
   addTopLinePillLabel,
   addMermaidDiagram,
-  addMermaidDiagramBlock,
   addCopyCodeButton
 } from './helpers/codeBlocks';
 import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl, type ImageGroupItem } from './helpers/images';
@@ -61,7 +60,6 @@ import {
 } from './helpers/alerts';
 import { parseFootnotes, footnoteReferenceKey, type FootnoteReference, type ParsedFootnotes } from './helpers/footnotes';
 import { getLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRenderedBlocks';
-import { getMermaidColonBlocks, rangeOverlapsMermaidColonBlock, type MermaidColonBlock } from './helpers/mermaidColonBlocks';
 import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls';
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
 import { createOpenLinkButton } from './helpers/linkOpenButton';
@@ -1635,7 +1633,6 @@ function buildDecorations(state: EditorState): DecorationSet {
   const activeLines = collectActiveLines(state);
   const indentSelectedLines = collectIndentSelectedLines(state);
   const tree = resolvedSyntaxTree(state);
-  const mermaidColonBlocks = getMermaidColonBlocks(state);
   const footnotes = parseFootnotes(state);
   const collapsedHeadingSections = getCollapsedHeadingSections(state);
   const detailsBlocks = getDetailsBlocks(state);
@@ -1648,7 +1645,7 @@ function buildDecorations(state: EditorState): DecorationSet {
       }
     }
   });
-  const codeBlockLines = collectCodeBlockLines(state, tree, mermaidColonBlocks);
+  const codeBlockLines = collectCodeBlockLines(state, tree);
   const renderedTableRanges = collectRenderedTableRanges(
     state,
     getLiveRenderedBlocks(state)
@@ -1667,7 +1664,7 @@ function buildDecorations(state: EditorState): DecorationSet {
     frontmatter = null;
   }
   addForcedThematicBreakDecorations(ranges, state, activeLines, frontmatter, codeBlockLines);
-  const mathRanges = collectMathRanges(state, tree, mermaidColonBlocks, renderedTableRanges, frontmatter);
+  const mathRanges = collectMathRanges(state, tree, renderedTableRanges, frontmatter);
   const renderedHtmlBlocks = addHtmlContentDecorations(ranges, state, activeLines);
 
   tree.iterate({
@@ -2038,7 +2035,7 @@ function buildDecorations(state: EditorState): DecorationSet {
     );
   }
 
-  addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, mermaidColonBlocks, diagnostics);
+  addFallbackTableDecorations(ranges, state, tree, parsedTableRanges, diagnostics);
   addRawFileUrlDecorations(ranges, state, tree, activeLines, frontmatter);
   addPunctuationClosingInlineStyleDecorations(
     ranges,
@@ -2059,14 +2056,13 @@ function buildDecorations(state: EditorState): DecorationSet {
     activeLines,
     [
       ...collectInlineCodeRanges(tree),
-      ...collectCodeBlockRanges(state, tree, mermaidColonBlocks),
+      ...collectCodeBlockRanges(tree),
       ...renderedTableRanges,
       ...mathRanges,
       ...(frontmatter ? [{ from: frontmatter.openingFrom, to: frontmatter.closingTo }] : [])
     ]
   );
   addKbdTagDecorations(ranges, state, activeLines, renderedTableRanges, mathRanges, frontmatter, codeBlockLines);
-  addMermaidColonFenceDecorations(ranges, state, mermaidColonBlocks, activeLines);
   addFootnoteDefinitionDecorations(ranges, state, footnotes, activeLines);
   const htmlEditingRange = getHtmlEditingRange(state);
   addDetailsBlockDecorations(
@@ -2192,7 +2188,7 @@ function filterDecorationsOutsideMergeConflicts(state: EditorState, decorations:
   return Decoration.set(filtered, true);
 }
 
-function collectCodeBlockLines(state: EditorState, tree: Tree, mermaidColonBlocks: readonly MermaidColonBlock[]): Set<number> {
+function collectCodeBlockLines(state: EditorState, tree: Tree): Set<number> {
   const lines = new Set<number>();
   tree.iterate({
     enter(node: SyntaxNodeRef) {
@@ -2209,54 +2205,7 @@ function collectCodeBlockLines(state: EditorState, tree: Tree, mermaidColonBlock
     }
   });
 
-  for (const block of mermaidColonBlocks) {
-    for (let lineNo = block.startLine; lineNo <= block.endLine; lineNo += 1) {
-      lines.add(lineNo);
-    }
-  }
-
   return lines;
-}
-
-function addMermaidColonFenceDecorations(
-  builder: DecorationCollector,
-  state: EditorState,
-  mermaidColonBlocks: readonly MermaidColonBlock[],
-  activeLines: Set<number>
-): void {
-  for (const block of mermaidColonBlocks) {
-    const startLine = state.doc.line(block.startLine);
-    const endLine = state.doc.line(block.endLine);
-    const indentColumns = getLiveListBlockIndentColumns(state, startLine.from);
-
-    addLineClass(builder, state, startLine.from, endLine.to, lineStyleDecos.codeBlock);
-    addBlockIndentLines(builder, state, startLine.from, endLine.to, indentColumns);
-
-    addRange(
-      builder,
-      startLine.from,
-      startLine.to,
-      activeLines.has(startLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
-    );
-    if (!activeLines.has(startLine.number)) {
-      addTopLinePillLabel(builder, startLine.to, 'mermaid');
-    }
-
-    addRange(
-      builder,
-      endLine.from,
-      endLine.to,
-      activeLines.has(endLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
-    );
-
-    addMermaidDiagramBlock(builder, state, {
-      startLine: block.startLine,
-      endLine: block.endLine,
-      diagramText: block.diagramText,
-      fullBlockText: block.fullBlockText,
-      indentColumns
-    });
-  }
 }
 
 class KbdTagWidget extends WidgetType {
@@ -2456,11 +2405,7 @@ function collectInlineCodeRanges(tree: Tree): SourceRange[] {
   return ranges;
 }
 
-function collectCodeBlockRanges(
-  state: EditorState,
-  tree: Tree,
-  mermaidColonBlocks: readonly MermaidColonBlock[]
-): SourceRange[] {
+function collectCodeBlockRanges(tree: Tree): SourceRange[] {
   const ranges: Array<{ from: number; to: number }> = [];
 
   tree.iterate({
@@ -2473,26 +2418,18 @@ function collectCodeBlockRanges(
     }
   });
 
-  for (const block of mermaidColonBlocks) {
-    ranges.push({
-      from: state.doc.line(block.startLine).from,
-      to: state.doc.line(block.endLine).to
-    });
-  }
-
   return ranges;
 }
 
 function collectMathRanges(
   state: EditorState,
   tree: Tree,
-  mermaidColonBlocks: readonly MermaidColonBlock[],
   renderedTableRanges: ReadonlyArray<SourceRange>,
   frontmatter: FrontmatterInfo | null = null
 ): LatexMathRange[] {
   const excludedRanges = [
     ...collectInlineCodeRanges(tree),
-    ...collectCodeBlockRanges(state, tree, mermaidColonBlocks),
+    ...collectCodeBlockRanges(tree),
     ...renderedTableRanges
   ];
 
@@ -2837,7 +2774,6 @@ function addFallbackTableDecorations(
   state: EditorState,
   tree: Tree,
   parsedTableRanges: ReadonlyArray<SourceRange>,
-  mermaidColonBlocks: readonly MermaidColonBlock[],
   diagnostics: EditorDiagnostic[] = []
 ): void {
   const tableBlocks = detectTableBlocks(state);
@@ -2848,7 +2784,6 @@ function addFallbackTableDecorations(
     const headerText = state.doc.line(block.startLineNo).text;
     const syntaxProbe = from + (/^[ \t]*/.exec(headerText)?.[0].length ?? 0);
     if (isInsideCodeBlock(tree, syntaxProbe)) continue;
-    if (rangeOverlapsMermaidColonBlock(mermaidColonBlocks, from, to)) continue;
     addTableDecorationsForLineRange(
       builder,
       state,

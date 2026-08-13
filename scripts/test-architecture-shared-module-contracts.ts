@@ -453,6 +453,95 @@ try {
   rmSync(join(fixtureRoot, 'docs', 'emoji-choice.md'));
   rmSync(join(fixtureRoot, 'bun.lock'));
 
+  const removedMermaidColonFixtures = [
+    {
+      label: 'Mermaid colon parser and cache',
+      path: 'webview/src/helpers/mermaidColonBlocks.ts',
+      contents: 'export const mermaidColonBlockCache = new WeakMap();\nexport const getMermaidColonBlocks = () => [];\n'
+    },
+    {
+      label: 'Mermaid colon fence parser alias',
+      path: 'src/export/markdownCompatibility.ts',
+      contents: 'export const parseMermaidColonFenceOpenLine = (line: string) => line;\n'
+    },
+    {
+      label: 'Mermaid colon export normalization',
+      path: 'src/export/markdownCompatibility.ts',
+      contents: 'export const normalizeMermaidColonFences = (markdown: string) => markdown;\n'
+    },
+    {
+      label: 'Live Mermaid colon decoration',
+      path: 'webview/src/liveMode.ts',
+      contents: 'export const addMermaidColonFenceDecorations = () => undefined;\n'
+    },
+    {
+      label: 'Source Mermaid colon CSS',
+      path: 'webview/src/styles.css',
+      contents: '.meo-md-colon-fence-marker { color: red; }\n'
+    },
+    {
+      label: 'Mermaid colon container alias',
+      path: 'webview/src/editor/mermaidContainer.ts',
+      contents: 'export const renderColonMermaidBlock = (source: string) => source;\n'
+    },
+    {
+      label: 'Mermaid colon setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.mermaidColonFences.enabled': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'Mermaid colon Protocol command',
+      path: 'src/protocol/mermaidColon.ts',
+      contents: "export type MermaidCommand = { type: 'enableMermaidColonSyntax' };\n"
+    },
+    {
+      label: 'Mermaid colon Host capability',
+      path: 'src/host/mermaidContainers.ts',
+      contents: 'export const renderMermaidColonContainer = () => undefined;\n'
+    },
+    {
+      label: 'Mermaid colon documentation',
+      path: 'docs/mermaid.md',
+      contents: 'MEO supports :::mermaid blocks in Live and Preview.\n'
+    }
+  ];
+  const missedMermaidColonCapabilities: string[] = [];
+  for (const fixture of removedMermaidColonFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (outcome.ok || !/ARCH018/.test(outcome.output)) {
+      missedMermaidColonCapabilities.push(fixture.label);
+    }
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+  assert.deepEqual(
+    missedMermaidColonCapabilities,
+    [],
+    `ARCH018 missed removed Mermaid colon capabilities: ${missedMermaidColonCapabilities.join(', ')}`
+  );
+
+  write('webview/src/editor/standardMermaid.ts', [
+    "export const mermaidLanguage = 'mermaid';",
+    "export const fencedMermaid = ['```mermaid', 'flowchart LR', '```'].join('\\n');",
+    "export const ordinaryColonContainer = '::: warning';",
+    ''
+  ].join('\n'));
+  write('docs/standard-mermaid.md', [
+    'Use standard fenced Mermaid code blocks.',
+    'Ordinary colon container text remains ordinary Markdown.',
+    ''
+  ].join('\n'));
+  const retainedStandardMermaid = runCheck();
+  assert.equal(
+    retainedStandardMermaid.ok,
+    true,
+    `standard fenced Mermaid and ordinary colon text must remain allowed: ${retainedStandardMermaid.output}`
+  );
+  rmSync(join(fixtureRoot, 'webview', 'src', 'editor', 'standardMermaid.ts'));
+  rmSync(join(fixtureRoot, 'docs', 'standard-mermaid.md'));
+
   write('README.md', 'Show Git line authors and open the matching revision.\n');
   const gitLineAuthorDocs = runCheck();
   assert.equal(gitLineAuthorDocs.ok, false, 'Git Blame aliases in public docs must be rejected');
@@ -1578,6 +1667,41 @@ try {
   })();
   assert.equal(stagedEmojiRegexOwner.ok, false, 'staged ARCH017 must reject a direct emoji-regex source owner');
   assert.match(stagedEmojiRegexOwner.output, /ARCH017/);
+
+  execFileSync('git', ['add', '--', 'webview/src/editor/emojiText.ts'], { cwd: stagedRoot });
+  mkdirSync(join(stagedRoot, 'src', 'export'), { recursive: true });
+  writeFileSync(
+    join(stagedRoot, 'src', 'export', 'mermaidCompatibility.ts'),
+    'export const normalizeMermaidColonFences = (markdown) => markdown;\n'
+  );
+  execFileSync('git', ['add', '--', 'src/export/mermaidCompatibility.ts'], { cwd: stagedRoot });
+  writeFileSync(
+    join(stagedRoot, 'src', 'export', 'mermaidCompatibility.ts'),
+    "export const standardMermaidLanguage = 'mermaid';\n"
+  );
+  const stagedMermaidColonOwner = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedMermaidColonOwner.ok, false, 'staged ARCH018 must reject Mermaid colon normalization');
+  assert.match(stagedMermaidColonOwner.output, /ARCH018/);
+
+  execFileSync('git', ['add', '--', 'src/export/mermaidCompatibility.ts'], { cwd: stagedRoot });
+  writeFileSync(
+    join(stagedRoot, 'src', 'export', 'mermaidCompatibility.ts'),
+    'export const parseMermaidColonFenceOpenLine = (line) => line;\n'
+  );
+  const unstagedMermaidColonOwner = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(unstagedMermaidColonOwner, /Architecture checks passed/);
 
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();

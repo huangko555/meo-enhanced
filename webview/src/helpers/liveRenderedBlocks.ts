@@ -3,7 +3,6 @@ import type { SyntaxNodeRef } from '@lezer/common';
 import { getFencedCodeInfo } from './codeBlocks';
 import { isThematicBreakLine } from './frontmatter';
 import { resolvedSyntaxTree } from './markdownSyntax';
-import { getMermaidColonBlocks, rangeOverlapsMermaidColonBlock } from './mermaidColonBlocks';
 import { collectLatexMathRanges, resolveFencedDisplayMathInnerLineRange } from './math';
 import { isTableDelimiterLine, parseTableInfo } from './tables';
 import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';
@@ -95,8 +94,7 @@ function isInsideCodeBlock(tree: any, pos: number): boolean {
 function detectFallbackTableBlocks(
   state: EditorState,
   tree: any,
-  parsedTableRanges: Array<{ from: number; to: number }>,
-  mermaidColonBlocks: ReadonlyArray<{ from: number; to: number }>
+  parsedTableRanges: Array<{ from: number; to: number }>
 ): LiveRenderedBlock[] {
   const blocks: LiveRenderedBlock[] = [];
 
@@ -129,11 +127,6 @@ function detectFallbackTableBlocks(
       lineNo = endLineNo;
       continue;
     }
-    if (rangeOverlapsMermaidColonBlock(mermaidColonBlocks, from, to)) {
-      lineNo = endLineNo;
-      continue;
-    }
-
     const block = createRenderedBlock('table', headerLineNo, endLineNo, lineNo);
     if (block) {
       blocks.push(block);
@@ -144,10 +137,7 @@ function detectFallbackTableBlocks(
   return blocks;
 }
 
-function collectCodeLikeRanges(
-  tree: any,
-  mermaidColonBlocks: ReadonlyArray<{ from: number; to: number }>
-): Array<{ from: number; to: number }> {
+function collectCodeLikeRanges(tree: any): Array<{ from: number; to: number }> {
   const ranges: Array<{ from: number; to: number }> = [];
 
   tree.iterate({
@@ -159,13 +149,6 @@ function collectCodeLikeRanges(
       return false;
     }
   });
-
-  for (const block of mermaidColonBlocks) {
-    ranges.push({
-      from: block.from,
-      to: block.to
-    });
-  }
 
   ranges.sort((left, right) => left.from - right.from || left.to - right.to);
   return ranges;
@@ -213,8 +196,7 @@ export function getLiveRenderedBlocks(
 
   const blocks: LiveRenderedBlock[] = [];
   const parsedTableRanges: Array<{ from: number; to: number }> = [];
-  const mermaidColonBlocks = getMermaidColonBlocks(state);
-  const codeLikeRanges = collectCodeLikeRanges(tree, mermaidColonBlocks);
+  const codeLikeRanges = collectCodeLikeRanges(tree);
   const htmlEditingRange = getHtmlEditingRange(state);
 
   tree.iterate({
@@ -250,13 +232,6 @@ export function getLiveRenderedBlocks(
       }
     }
   });
-
-  for (const block of mermaidColonBlocks) {
-    const renderedBlock = createRenderedBlock('mermaid', block.startLine, block.endLine, null);
-    if (renderedBlock) {
-      blocks.push(renderedBlock);
-    }
-  }
 
   const mathRanges = collectLatexMathRanges(state.doc.toString(), {
     excludedRanges: codeLikeRanges
@@ -300,7 +275,7 @@ export function getLiveRenderedBlocks(
     blocks.push(block);
   }
 
-  blocks.push(...detectFallbackTableBlocks(state, tree, parsedTableRanges, mermaidColonBlocks));
+  blocks.push(...detectFallbackTableBlocks(state, tree, parsedTableRanges));
   blocks.sort((left, right) => (
     left.startLine - right.startLine ||
     left.endLine - right.endLine

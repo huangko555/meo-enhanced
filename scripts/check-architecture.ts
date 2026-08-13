@@ -1822,6 +1822,49 @@ for (const path of emojiShortcodeCapabilityScope) {
   }
 }
 
+// Product deletion guard: Mermaid is supported only through standard fenced code blocks.
+// Ordinary colon text and standard Mermaid language/rendering owners remain valid.
+const mermaidColonCapabilityScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedMermaidColonTokens = [
+  /:::mermaid\b/i,
+  /\b(?:MermaidColon|ColonMermaid)(?:Block|Blocks|Container|Containers|Decoration|Decorations|Fence|Fences|Range|Ranges|Syntax)?(?:\b|[A-Z0-9_])/,
+  /\b(?:mermaidColon|colonMermaid)(?:Block|Blocks|Container|Containers|Decoration|Decorations|Fence|Fences|Range|Ranges|Syntax)?(?:\b|[A-Z0-9_])/,
+  /\b(?:collect|detect|get|normalize|parse|render|scan)(?:MermaidColon|ColonMermaid)(?:Block|Blocks|Container|Containers|Fence|Fences|Range|Ranges|Syntax)?(?:\b|[A-Z0-9_])/,
+  /\b(?:collect|detect|get|normalize|parse|render|scan)[-_.](?:mermaid[-_.]colon|colon[-_.]mermaid)(?:[-_.](?:blocks?|containers?|fences?|ranges?|syntax))?\b/i,
+  /meo-[A-Za-z0-9_-]*colon[-_]?fence[A-Za-z0-9_-]*/i
+];
+const hasRemovedMermaidColonCapability = (text: string, path: string): boolean => {
+  if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
+  if (removedMermaidColonTokens.some((pattern) => pattern.test(text))) return true;
+  const words = normalizeCapabilityWords(text);
+  for (let start = 0; start < words.length; start += 1) {
+    const window = words.slice(start, start + 10);
+    const wordSet = new Set(window);
+    if (!wordSet.has('mermaid') || !wordSet.has('colon')) continue;
+    if (window.some((word) => (
+      /^(?:block|blocks|cache|container|containers|decoration|decorations|detect|detection|export|fence|fences|host|live|normalize|normalization|parse|parser|preview|protocol|range|ranges|render|renderer|setting|settings|source|syntax)$/.test(word)
+    ))) return true;
+  }
+  return false;
+};
+for (const path of mermaidColonCapabilityScope) {
+  if (/^(?:src|webview\/src)\//.test(path) && hasRemovedMermaidColonCapability(path, path)) {
+    failures.push(`ARCH018 已删除的 Mermaid colon fence 语法重新出现: ${path}:1`);
+    continue;
+  }
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (hasRemovedMermaidColonCapability(lines[index], path)) {
+      failures.push(`ARCH018 已删除的 Mermaid colon fence 语法重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }
