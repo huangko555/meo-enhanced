@@ -1,4 +1,4 @@
-import { createElement, Moon, Sun } from 'lucide';
+import { createElement, Code2, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { logWebviewRenderError } from './errors';
@@ -10,10 +10,12 @@ import type { PreviewRenderResponse, PreviewRenderValue } from '../../../src/pro
 import { createPreviewRenderTransport } from '../adapters/previewRenderTransport';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 import type { MermaidDiagramRenderResources } from '../application/mermaidDiagramRenderResources';
+import type { PreviewCodePalette } from '../application/finalCodePalette';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
   getEditorAppearance: () => 'light' | 'dark';
+  getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   onRendered?: () => void;
   onFindRequested?: () => void;
   mermaidRenderResources: MermaidDiagramRenderResources;
@@ -134,6 +136,7 @@ function collectPreviewKatexStyles(katexHref: string): string {
 export function createPreviewController({
   vscode,
   getEditorAppearance,
+  getCodePalette,
   onRendered,
   onFindRequested,
   mermaidRenderResources
@@ -173,6 +176,15 @@ export function createPreviewController({
   const appearanceControl = appearanceSegmentedControl.element;
   const lightAppearanceButton = appearanceSegmentedControl.getButton('light');
   const darkAppearanceButton = appearanceSegmentedControl.getButton('dark');
+  const sourceColoringControl = document.createElement('button');
+  sourceColoringControl.type = 'button';
+  sourceColoringControl.className = 'preview-toolbar-action preview-source-coloring';
+  sourceColoringControl.title = 'Preview source coloring';
+  sourceColoringControl.setAttribute('aria-label', 'Preview source coloring');
+  sourceColoringControl.append(
+    createElement(Code2, { width: 15, height: 15, 'aria-hidden': 'true' }),
+    document.createTextNode('Code colors')
+  );
 
   const status = document.createElement('div');
   status.className = 'preview-status';
@@ -185,6 +197,7 @@ export function createPreviewController({
 
   let appearancePreference: PreviewAppearance = 'auto';
   let appearance: 'light' | 'dark' = 'dark';
+  let sourceColoring = true;
   let requestGeneration = 0;
   let frameGeneration = 0;
   let mermaidPresentationGeneration = 0;
@@ -452,12 +465,24 @@ export function createPreviewController({
     }
   };
 
+  const getStyleEnvironment = () => getExportStyleEnvironment({
+    previewSourceColoring: sourceColoring,
+    previewCodePalettes: {
+      light: getCodePalette('light'),
+      dark: getCodePalette('dark')
+    }
+  });
+
   const requestRender = (
     text: string,
-    { restoreLine = null, background = false }: { restoreLine?: number | null; background?: boolean } = {}
+    { restoreLine = null, background = false, force = false }: {
+      restoreLine?: number | null;
+      background?: boolean;
+      force?: boolean;
+    } = {}
   ) => {
     if (disposed) return;
-    if (latestPayload && text === latestRenderedText && frame.contentDocument?.querySelector('.meo-export-doc')) {
+    if (!force && latestPayload && text === latestRenderedText && frame.contentDocument?.querySelector('.meo-export-doc')) {
       setStatus(null);
       if (restoreLine !== null) {
         restoreTopLine(restoreLine);
@@ -478,7 +503,7 @@ export function createPreviewController({
     if (!background) setStatus('正在生成预览…');
     void previewRenderTransport.render({
       text,
-      environment: getExportStyleEnvironment()
+      environment: getStyleEnvironment()
     }).then((result) => {
       if (generation !== requestGeneration) return;
       hasPendingRequest = false;
@@ -500,6 +525,29 @@ export function createPreviewController({
     disposed ? false : previewRenderTransport.accept(message)
   );
 
+  const updateSourceColoringControl = (): void => {
+    sourceColoringControl.classList.toggle('is-active', sourceColoring);
+    sourceColoringControl.setAttribute('aria-pressed', String(sourceColoring));
+  };
+
+  const setSourceColoring = (
+    enabled: boolean,
+    { post = false }: { readonly post?: boolean } = {}
+  ): void => {
+    if (sourceColoring === enabled) {
+      updateSourceColoringControl();
+      return;
+    }
+    sourceColoring = enabled;
+    updateSourceColoringControl();
+    if (latestPayload) {
+      const text = latestRenderedText;
+      latestRenderedText = '';
+      requestRender(text, { restoreLine: getTopVisiblePosition()?.topLine ?? null });
+    }
+    if (post) vscode.postMessage({ type: 'setPreviewSourceColoring', enabled });
+  };
+
   const handleAppearanceControlClick = (event: Event) => {
     const button = event.target instanceof Element
       ? event.target.closest<HTMLButtonElement>('.preview-appearance-button[data-appearance]')
@@ -511,7 +559,10 @@ export function createPreviewController({
     setAppearance(nextAppearance, { post: true });
   };
   appearanceControl.addEventListener('click', handleAppearanceControlClick);
+  const handleSourceColoringClick = () => setSourceColoring(!sourceColoring, { post: true });
+  sourceColoringControl.addEventListener('click', handleSourceColoringClick);
   updateThemeToggle();
+  updateSourceColoringControl();
 
   const getFrameDocument = () => frame.contentDocument;
   const getSourceElements = (): HTMLElement[] => Array.from(
@@ -633,14 +684,18 @@ export function createPreviewController({
   return {
     host,
     appearanceControl,
+    sourceColoringControl,
     requestRender,
     preload: (text: string) => requestRender(text, { background: true }),
     acceptRenderResponse,
     setAppearance,
+    setSourceColoring,
     syncAutoAppearance: () => {
       if (appearancePreference === 'auto') setAppearance('auto');
     },
     getAppearance: () => appearance,
+    getSourceColoring: () => sourceColoring,
+    getStyleEnvironment,
     setVisible: (visible: boolean) => {
       host.hidden = !visible;
     },
@@ -674,6 +729,7 @@ export function createPreviewController({
       pendingRestoreLine = null;
       previewRenderTransport.cancelAll('Preview closed');
       appearanceControl.removeEventListener('click', handleAppearanceControlClick);
+      sourceColoringControl.removeEventListener('click', handleSourceColoringClick);
       frame.onload = null;
       disposePreviewMathViewports();
       scrollToTopController.setScrollElement(null);

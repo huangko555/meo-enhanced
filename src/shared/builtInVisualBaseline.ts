@@ -12,8 +12,8 @@ export const themeColorKeys = [
   'base09'
 ] as const;
 
-export type ThemeColorKey = (typeof themeColorKeys)[number];
-export type ThemeColors = Record<ThemeColorKey, string>;
+export type VisualColorKey = (typeof themeColorKeys)[number];
+export type VisualColors = Readonly<Record<VisualColorKey, string>>;
 
 export const semanticColorKeys = [
   'foreground',
@@ -96,38 +96,28 @@ export const semanticColorKeys = [
   'alertCautionBorder'
 ] as const;
 
-export type SemanticColorKey = (typeof semanticColorKeys)[number];
-export type SemanticColors = Record<SemanticColorKey, string>;
+export type SemanticVisualColorKey = (typeof semanticColorKeys)[number];
+export type SemanticVisualColors = Readonly<Record<SemanticVisualColorKey, string>>;
 
-export const defaultThemeLineHeight = 1.5;
+const builtInLineHeight = 1.5;
 
-export type ThemeFonts = {
+export type BuiltInTypography = Readonly<{
   liveFont: string;
   sourceFont: string;
   liveFontWeight: string;
   sourceFontWeight: string;
   liveFontSize: number | null;
   sourceFontSize: number | null;
-  h1FontSize: number | null;
-  h2FontSize: number | null;
-  h3FontSize: number | null;
-  h4FontSize: number | null;
-  h5FontSize: number | null;
-  h6FontSize: number | null;
-  h1FontWeight: string;
-  h2FontWeight: string;
-  h3FontWeight: string;
-  h4FontWeight: string;
-  h5FontWeight: string;
-  h6FontWeight: string;
+  headingFontSizes: readonly [number, number, number, number, number, number];
+  headingFontWeights: readonly [string, string, string, string, string, string];
   liveLineHeight: number;
   sourceLineHeight: number;
-};
+}>;
 
 export type SyntaxTokenStyleSpec = {
   id: string;
   tags: Tag | readonly Tag[];
-  paletteKey: ThemeColorKey;
+  paletteKey: VisualColorKey;
   style: {
     fontWeight?: 'normal' | 'bold' | 'bolder' | 'lighter' | string;
     fontStyle?: 'normal' | 'italic' | 'oblique' | string;
@@ -409,21 +399,19 @@ export const SYNTAX_TAG_SPECS: readonly SyntaxTokenStyleSpec[] = [
   }
 ] as const;
 
-export type ThemeSyntaxTokenKey = (typeof SYNTAX_TAG_SPECS)[number]['id'];
-export type ThemeSyntaxTokens = Record<ThemeSyntaxTokenKey, string>;
-type ThemeSyntaxTokenPalette = Record<ThemeSyntaxTokenKey, ThemeColorKey>;
+export type SyntaxTokenKey = (typeof SYNTAX_TAG_SPECS)[number]['id'];
+export type SyntaxTokenColors = Readonly<Record<SyntaxTokenKey, string>>;
+type SyntaxTokenPalette = Record<SyntaxTokenKey, VisualColorKey>;
 
-export type BuiltInVisualBaseline = {
-  id: string;
-  name: string;
+export type BuiltInVisuals = Readonly<{
   backgroundColor: string;
-  colors: ThemeColors;
-  semanticColors: SemanticColors;
-  syntaxTokens: ThemeSyntaxTokens;
-  fonts: ThemeFonts;
-};
+  colors: VisualColors;
+  semanticColors: SemanticVisualColors;
+  syntaxTokens: SyntaxTokenColors;
+  typography: BuiltInTypography;
+}>;
 
-export const defaultThemeColors: ThemeColors = {
+export const defaultThemeColors: VisualColors = Object.freeze({
   base01: 'var(--vscode-editor-foreground)',
   base02: '#676f7d',
   base03: '#3e444d',
@@ -433,12 +421,12 @@ export const defaultThemeColors: ThemeColors = {
   base07: '#e5c07b',
   base08: '#c678dd',
   base09: '#98c379'
-};
+});
 
 export const defaultThemeBackgroundColor = 'var(--vscode-editor-background)';
 export const defaultCodeBlockBackgroundColor = '#1b1f23';
 
-export const defaultSemanticColors: SemanticColors = {
+export const defaultSemanticColors: SemanticVisualColors = Object.freeze({
   foreground: defaultThemeColors.base01,
   mutedForeground: defaultThemeColors.base02,
   background: defaultThemeBackgroundColor,
@@ -517,72 +505,64 @@ export const defaultSemanticColors: SemanticColors = {
   alertCautionForeground: defaultThemeColors.base04,
   alertCautionBackground: 'color-mix(in srgb, var(--meo-semantic-alertCautionForeground) 8%, transparent)',
   alertCautionBorder: defaultThemeColors.base04
-};
+});
 
-export const defaultThemeFonts: ThemeFonts = {
+export const builtInTypography: BuiltInTypography = Object.freeze({
   liveFont: '',
   sourceFont: '',
   liveFontWeight: '',
   sourceFontWeight: '',
   liveFontSize: null,
   sourceFontSize: null,
-  h1FontSize: 1.6,
-  h2FontSize: 1.5,
-  h3FontSize: 1.3,
-  h4FontSize: 1.2,
-  h5FontSize: 1.1,
-  h6FontSize: 1,
-  h1FontWeight: '400',
-  h2FontWeight: '400',
-  h3FontWeight: '400',
-  h4FontWeight: '400',
-  h5FontWeight: '400',
-  h6FontWeight: '400',
-  liveLineHeight: defaultThemeLineHeight,
-  sourceLineHeight: defaultThemeLineHeight
-};
+  headingFontSizes: Object.freeze([1.6, 1.5, 1.3, 1.2, 1.1, 1] as const),
+  headingFontWeights: Object.freeze(['400', '400', '400', '400', '400', '400'] as const),
+  liveLineHeight: builtInLineHeight,
+  sourceLineHeight: builtInLineHeight
+});
 
 const defaultSyntaxTokenPalette = SYNTAX_TAG_SPECS.reduce((acc, spec) => {
-  acc[spec.id as ThemeSyntaxTokenKey] = spec.paletteKey;
+  acc[spec.id as SyntaxTokenKey] = spec.paletteKey;
   return acc;
-}, {} as ThemeSyntaxTokenPalette);
+}, {} as SyntaxTokenPalette);
 
 const buildSyntaxTokenColors = (
-  colors: ThemeColors,
-  paletteOverrides: Partial<ThemeSyntaxTokenPalette> = {}
-): ThemeSyntaxTokens => {
-  const tokens = {} as ThemeSyntaxTokens;
+  colors: VisualColors,
+  appearance: 'light' | 'dark'
+): SyntaxTokenColors => {
+  const tokens = {} as Record<SyntaxTokenKey, string>;
 
-  for (const tokenId of Object.keys(defaultSyntaxTokenPalette) as ThemeSyntaxTokenKey[]) {
-    const paletteKey = paletteOverrides[tokenId] ?? defaultSyntaxTokenPalette[tokenId];
+  for (const tokenId of Object.keys(defaultSyntaxTokenPalette) as SyntaxTokenKey[]) {
+    const paletteKey = appearance === 'light' && tokenId === 'string'
+      ? 'base09'
+      : appearance === 'light' && (tokenId === 'comment' || tokenId === 'quote')
+        ? 'base02'
+        : defaultSyntaxTokenPalette[tokenId];
     tokens[tokenId] = colors[paletteKey];
   }
 
-  return tokens;
+  return Object.freeze(tokens);
 };
 
-const createThemeFromColors = (params: {
-  id: string;
-  name: string;
-  backgroundColor?: string;
-  colors?: Partial<ThemeColors>;
-  syntaxTokenPaletteOverrides?: Partial<ThemeSyntaxTokenPalette>;
-  syntaxTokenOverrides?: Partial<ThemeSyntaxTokens>;
-  semanticColorOverrides?: Partial<SemanticColors>;
-  fonts?: Partial<ThemeFonts>;
-}): BuiltInVisualBaseline => {
-  const colors = { ...defaultThemeColors, ...params.colors };
+const createBuiltInVisuals = (appearance: 'light' | 'dark'): BuiltInVisuals => {
+  const isLight = appearance === 'light';
+  const backgroundColor = isLight ? '#ffffff' : defaultThemeBackgroundColor;
+  const colors: VisualColors = Object.freeze(isLight ? {
+    base01: '#24292f',
+    base02: '#57606a',
+    base03: '#d0d7de',
+    base04: '#cf222e',
+    base05: '#0550ae',
+    base06: '#1a7f37',
+    base07: '#9a6700',
+    base08: '#8250df',
+    base09: '#116329'
+  } : { ...defaultThemeColors });
 
-  return {
-    id: params.id,
-    name: params.name,
-    backgroundColor: params.backgroundColor ?? defaultThemeBackgroundColor,
-    colors,
-    semanticColors: {
+  const semanticColors: SemanticVisualColors = Object.freeze({
       ...defaultSemanticColors,
       foreground: colors.base01,
       mutedForeground: colors.base02,
-      background: params.backgroundColor ?? defaultThemeBackgroundColor,
+      background: backgroundColor,
       caret: colors.base01,
       tagForeground: colors.base05,
       markdownSyntax: '#8e999e',
@@ -629,65 +609,48 @@ const createThemeFromColors = (params: {
       alertWarningBorder: colors.base07,
       alertCautionForeground: colors.base04,
       alertCautionBorder: colors.base04,
-      ...(params.semanticColorOverrides ?? {})
-    },
-    syntaxTokens: {
-      ...buildSyntaxTokenColors(colors, params.syntaxTokenPaletteOverrides),
-      ...(params.syntaxTokenOverrides ?? {})
-    } as ThemeSyntaxTokens,
-    fonts: { ...defaultThemeFonts, ...(params.fonts ?? {}) }
-  };
+      ...(isLight ? {
+        codeBlockBackground: '#f6f8fa',
+        codeBlockActiveLineBackground: '#eef1f4',
+        codeLanguageLabelForeground: '#57606a',
+        codeCopyForeground: '#0550ae',
+        codeCopyHoverForeground: '#0550ae',
+        inlineCodeBackground: '#eff1f3',
+        markdownSyntax: '#57606a',
+        headingForeground: '#0550ae',
+        orderedListMarker: '#0550ae',
+        unorderedListMarker: '#0550ae',
+        taskCheckboxBorder: '#8c959f',
+        taskCheckboxBorderHover: '#57606a',
+        taskCheckboxDoneBackground: '#8c959f',
+        taskCheckboxDoneBorder: '#8c959f',
+        taskCheckboxDoneCheck: '#ffffff',
+        blockquoteBorder: '#8c959f',
+        blockquoteForeground: '#57606a',
+        horizontalRule: '#d0d7de',
+        tableBorder: '#d0d7de',
+        tableDelimiterForeground: '#8c959f',
+        imageBorder: '#d0d7de',
+        imageFallbackForeground: '#57606a',
+        kbdBorder: '#d0d7de',
+        frontmatterPillBackground: '#d0d7de',
+        searchMatchForeground: 'inherit',
+        searchMatchActiveForeground: 'inherit'
+      } : {})
+    });
+
+  return Object.freeze({
+    backgroundColor,
+    colors,
+    semanticColors,
+    syntaxTokens: buildSyntaxTokenColors(colors, appearance),
+    typography: builtInTypography
+  });
 };
 
-export const defaultBuiltInVisualBaseline: BuiltInVisualBaseline = createThemeFromColors({
-    id: 'hkk',
-    name: 'HKK (default)',
-  });
+export const darkBuiltInVisuals = createBuiltInVisuals('dark');
+export const lightBuiltInVisuals = createBuiltInVisuals('light');
 
-export const lightBuiltInVisualBaseline: BuiltInVisualBaseline = createThemeFromColors({
-    id: 'github-light',
-    name: 'GitHub Light',
-    backgroundColor: '#ffffff',
-    colors: {
-      base01: '#24292f',
-      base02: '#57606a',
-      base03: '#d0d7de',
-      base04: '#cf222e',
-      base05: '#0969da',
-      base06: '#1a7f37',
-      base07: '#9a6700',
-      base08: '#8250df',
-      base09: '#116329'
-    },
-    syntaxTokenPaletteOverrides: {
-      string: 'base09',
-      comment: 'base02',
-      quote: 'base02'
-    },
-    semanticColorOverrides: {
-      codeBlockBackground: '#f6f8fa',
-      codeBlockActiveLineBackground: '#eef1f4',
-      codeLanguageLabelForeground: '#57606a',
-      codeCopyForeground: '#0969da',
-      codeCopyHoverForeground: '#0969da',
-      inlineCodeBackground: '#eff1f3',
-      markdownSyntax: '#57606a',
-      headingForeground: '#0969da',
-      orderedListMarker: '#0969da',
-      unorderedListMarker: '#0969da',
-      taskCheckboxBorder: '#8c959f',
-      taskCheckboxBorderHover: '#57606a',
-      taskCheckboxDoneBackground: '#8c959f',
-      taskCheckboxDoneBorder: '#8c959f',
-      taskCheckboxDoneCheck: '#ffffff',
-      blockquoteBorder: '#8c959f',
-      blockquoteForeground: '#57606a',
-      horizontalRule: '#d0d7de',
-      tableBorder: '#d0d7de',
-      tableDelimiterForeground: '#8c959f',
-      imageBorder: '#d0d7de',
-      imageFallbackForeground: '#57606a',
-      kbdBorder: '#d0d7de',
-      frontmatterPillBackground: '#d0d7de'
-    }
-  });
+export function getBuiltInVisuals(appearance: 'light' | 'dark'): BuiltInVisuals {
+  return appearance === 'light' ? lightBuiltInVisuals : darkBuiltInVisuals;
+}

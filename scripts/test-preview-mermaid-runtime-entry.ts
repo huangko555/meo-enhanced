@@ -1,4 +1,5 @@
 import { createPreviewController } from '../webview/src/helpers/preview';
+import { resolveFinalCodePalette } from '../webview/src/application/finalCodePalette';
 import { createEditor } from '../webview/src/editor';
 import {
   initializeMermaidEditorRuntime,
@@ -51,6 +52,8 @@ const previewMermaidResources = {
 const previewMessages: unknown[] = [];
 const controller = createPreviewController({
   vscode: { postMessage(message) { previewMessages.push(message); } },
+  getEditorAppearance: () => 'dark',
+  getCodePalette: (appearance) => resolveFinalCodePalette(undefined, appearance).preview,
   mermaidRenderResources: previewMermaidResources,
   onRendered: () => {
     (window as typeof window & { __previewRenderedAt?: number }).__previewRenderedAt = performance.now();

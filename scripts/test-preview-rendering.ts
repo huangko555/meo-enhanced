@@ -1,6 +1,5 @@
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
-import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const rendered = renderMarkdownToHtml({
   markdownText: '# Intro\n\nParagraph\n\n```ts\nconst value = 1;\n```\n\n## Details\n\n# Intro',
@@ -233,12 +232,31 @@ const environment = {
   editorForegroundColor: '#d8dee9',
   codeBlockBackgroundColor: '#171b20',
   sideBarBackgroundColor: '#252b32',
-  panelBorderColor: '#474b50'
+  panelBorderColor: '#474b50',
+  previewSourceColoring: true,
+  previewCodePalettes: {
+    light: { foreground: '#101010', comment: '#111111', keyword: '#121212', string: '#131313', number: '#141414', type: '#151515', property: '#161616', link: '#171717' },
+    dark: { foreground: '#e0e0e0', comment: '#e1e1e1', keyword: '#e2e2e2', string: '#e3e3e3', number: '#e4e4e4', type: '#e5e5e5', property: '#e6e6e6', link: '#e7e7e7' }
+  }
 };
-const darkPreviewStyles = buildPreviewStyles(defaultBuiltInVisualBaseline, environment, 'dark');
-const lightPreviewStyles = buildPreviewStyles(defaultBuiltInVisualBaseline, environment, 'light');
-const exportStyles = buildExportStyles(defaultBuiltInVisualBaseline, environment, 'light');
-const darkExportStyles = buildExportStyles(defaultBuiltInVisualBaseline, environment, 'dark');
+const darkPreviewStyles = buildPreviewStyles(environment, 'dark');
+const lightPreviewStyles = buildPreviewStyles(environment, 'light');
+const exportStyles = buildExportStyles(environment, 'light');
+const darkExportStyles = buildExportStyles(environment, 'dark');
+const plainTextStyles = buildPreviewStyles({
+  ...environment,
+  previewSourceColoring: false
+}, 'dark');
+
+if (!lightPreviewStyles.includes('--meo-code-keyword: #121212')
+  || !darkPreviewStyles.includes('--meo-code-keyword: #e2e2e2')) {
+  throw new Error('Preview/export must use the frozen final code palette for each resolved appearance');
+}
+for (const token of ['fg', 'comment', 'keyword', 'string', 'number', 'type', 'property', 'link']) {
+  if (!plainTextStyles.includes(`--meo-code-${token}: #d8dee9`)) {
+    throw new Error(`Disabled Preview source coloring must use plain body text for ${token}`);
+  }
+}
 
 if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(darkPreviewStyles)) {
   throw new Error('Preview level-one and level-two headings must render the shared divider line');

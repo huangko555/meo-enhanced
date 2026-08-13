@@ -97,7 +97,7 @@ MEO Enhanced can show additions, modifications, and deletions directly beside th
 
 ## Configuration and appearance
 
-Editor and Preview appearances are independent. Live and Preview use fixed light/dark designs; Source keeps VS Code-native colors for the matching appearance and a built-in VS Code-like palette for the reverse appearance. Fenced code uses the active VS Code syntax colors when the brightness matches and a built-in matching palette otherwise. HTML/PDF export uses the final Preview colors.
+Editor and Preview appearances are independent. Live and Preview use fixed light/dark designs; Source keeps VS Code-native colors for the matching appearance and a built-in VS Code-like palette for the reverse appearance. Fenced code uses the active VS Code syntax colors when the brightness matches and a built-in matching palette otherwise. Preview's **Code colors** toolbar control can render code as plain body-colored text; HTML/PDF export freezes and uses that final Preview choice and palette.
 
 Common settings include:
 

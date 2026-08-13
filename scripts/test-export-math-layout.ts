@@ -1,6 +1,5 @@
 import exportRuntime from '../src/export/runtime';
 import { fitBlockMathForPdf } from '../src/export/pdfRenderer';
-import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 import { launchTestBrowser } from './browser-test-helpers';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +20,6 @@ const baseOptions = {
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
   htmlImageMode: 'embedded' as const,
-  theme: defaultBuiltInVisualBaseline,
   appearance: 'dark' as const,
   styleEnvironment: {
     editorBackgroundColor: '#20252b',

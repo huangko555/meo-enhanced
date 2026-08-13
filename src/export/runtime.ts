@@ -4,7 +4,6 @@ import { buildExportStyles, buildPreviewStyles, type ExportStyleEnvironment } fr
 import { writeFinalizedHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
 import type { ExportHtmlImageMode } from './assetPaths';
-import type { BuiltInVisualBaseline } from '../shared/builtInVisualBaseline';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 
 export type ExportRuntimeBuildHtmlOptions = {
@@ -13,7 +12,6 @@ export type ExportRuntimeBuildHtmlOptions = {
   outputFilePath: string;
   target: 'html' | 'pdf';
   htmlImageMode: ExportHtmlImageMode;
-  theme: BuiltInVisualBaseline;
   appearance: PreviewAppearance;
   styleEnvironment?: ExportStyleEnvironment;
   editorFontEnvironment?: {
@@ -39,7 +37,6 @@ function renderExportHtmlDocument(
   });
 
   const stylesCss = buildExportStyles(
-    options.theme,
     {
       ...(options.editorFontEnvironment ?? {}),
       ...(options.styleEnvironment ?? {})
@@ -65,7 +62,6 @@ function renderExportHtmlDocument(
 function renderPreviewDocument(options: {
   markdownText: string;
   sourceDocumentPath: string;
-  theme: BuiltInVisualBaseline;
   styleEnvironment?: ExportStyleEnvironment;
 }): PreviewRenderResult {
   const rendered = renderMarkdownToHtml({
@@ -78,8 +74,8 @@ function renderPreviewDocument(options: {
     html: rendered.html,
     hasMermaid: rendered.hasMermaid,
     styles: {
-      dark: buildPreviewStyles(options.theme, options.styleEnvironment, 'dark'),
-      light: buildPreviewStyles(options.theme, options.styleEnvironment, 'light')
+      dark: buildPreviewStyles(options.styleEnvironment, 'dark'),
+      light: buildPreviewStyles(options.styleEnvironment, 'light')
     }
   };
 }

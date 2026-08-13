@@ -25,6 +25,7 @@ export type InitMessage = {
   readonly diagnostics: readonly SerializedDiagnostic[];
   readonly mode: EditorMode;
   readonly previewAppearance: PreviewAppearance;
+  readonly previewSourceColoring: boolean;
   readonly editorAppearance: PreviewAppearance;
   readonly lineNumbers: boolean;
   readonly gitChangesGutter: boolean;
@@ -74,6 +75,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isSavedRevision(value.savedRevision, value.version, value.text)
     || !isEditorMode(value.mode)
     || !isPreviewAppearance(value.previewAppearance)
+    || typeof value.previewSourceColoring !== 'boolean'
     || !isPreviewAppearance(value.editorAppearance)
     || !Array.isArray(value.diagnostics)
     || decodeDiagnosticsChangedEvent({ type: 'diagnosticsChanged', diagnostics: value.diagnostics }) === null

@@ -14,6 +14,17 @@ export type EditorStyleEnvironment = {
   readonly liveLineHeight?: number;
   readonly sourceLineHeight?: number;
   readonly meoThemeColors?: Readonly<Record<string, string>>;
+  readonly previewSourceColoring?: boolean;
+  readonly previewCodePalettes?: Readonly<Record<'light' | 'dark', Readonly<{
+    foreground: string;
+    comment: string;
+    keyword: string;
+    string: string;
+    number: string;
+    type: string;
+    property: string;
+    link: string;
+  }>>>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,6 +58,16 @@ export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnviron
   if (value.meoThemeColors !== undefined) {
     if (!isRecord(value.meoThemeColors)
       || Object.values(value.meoThemeColors).some((color) => typeof color !== 'string')) return null;
+  }
+  if (value.previewSourceColoring !== undefined && typeof value.previewSourceColoring !== 'boolean') return null;
+  if (value.previewCodePalettes !== undefined) {
+    if (!isRecord(value.previewCodePalettes)) return null;
+    for (const appearance of ['light', 'dark'] as const) {
+      const palette = value.previewCodePalettes[appearance];
+      if (!isRecord(palette)
+        || ['foreground', 'comment', 'keyword', 'string', 'number', 'type', 'property', 'link']
+          .some((key) => typeof palette[key] !== 'string')) return null;
+    }
   }
   return value as EditorStyleEnvironment;
 }

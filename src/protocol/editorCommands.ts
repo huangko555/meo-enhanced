@@ -27,6 +27,7 @@ export type EditorCommand =
   | { readonly type: 'discardChanges'; readonly topLine: number; readonly topLineOffset?: number }
   | { readonly type: 'exportDocument'; readonly format: 'html' | 'pdf'; readonly appearance: EditorAppearance }
   | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
+  | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
   | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -94,6 +95,8 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
     case 'setEditorAppearance':
       return value.appearance === 'auto' || value.appearance === 'dark' || value.appearance === 'light'
         ? value as EditorCommand : null;
+    case 'setPreviewSourceColoring':
+      return typeof value.enabled === 'boolean' ? value as EditorCommand : null;
     default:
       return null;
   }

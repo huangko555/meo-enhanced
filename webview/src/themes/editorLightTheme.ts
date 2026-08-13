@@ -1,12 +1,3 @@
-import githubLight from '@shikijs/themes/github-light';
-import darkPlus from '@shikijs/themes/dark-plus';
-import { lightBuiltInVisualBaseline, type BuiltInVisualBaseline } from '../../../src/shared/builtInVisualBaseline';
-import type { EditorAppearance } from '../../../src/shared/editorAppearance';
-import type { RawVscodeTheme } from '../helpers/shikiHighlighter';
-
-const githubLightEditorTheme = lightBuiltInVisualBaseline;
-const lightAccentBlue = '#0550ae';
-
 export const lightCssVariableOverrides = {
   '--vscode-editor-background': '#ffffff',
   '--vscode-editor-foreground': '#24292f',
@@ -41,55 +32,3 @@ export const lightCssVariableOverrides = {
   '--git-changed': '#0969da',
   '--git-deleted': '#cf222e'
 } as const;
-
-const preservedSemanticColors = [
-  'searchMatchBackground',
-  'searchMatchBorder',
-  'searchMatchActiveBackground',
-  'searchMatchActiveBorder'
-] as const;
-
-export function resolveEditorTheme(theme: BuiltInVisualBaseline, appearance: EditorAppearance): BuiltInVisualBaseline {
-  if (appearance === 'dark') {
-    return theme;
-  }
-
-  const semanticColors = Object.fromEntries(
-    Object.entries(githubLightEditorTheme.semanticColors).map(([key, value]) => [
-      key,
-      value === '#0969da' ? lightAccentBlue : value
-    ])
-  ) as BuiltInVisualBaseline['semanticColors'];
-  for (const key of preservedSemanticColors) {
-    semanticColors[key] = theme.semanticColors[key];
-  }
-  semanticColors.searchMatchForeground = 'inherit';
-  semanticColors.searchMatchActiveForeground = 'inherit';
-
-  return {
-    ...theme,
-    backgroundColor: githubLightEditorTheme.backgroundColor,
-    colors: {
-      ...githubLightEditorTheme.colors,
-      base05: lightAccentBlue
-    },
-    semanticColors,
-    syntaxTokens: Object.fromEntries(
-      Object.entries(githubLightEditorTheme.syntaxTokens).map(([key, value]) => [
-        key,
-        value === '#0969da' ? lightAccentBlue : value
-      ])
-    ) as BuiltInVisualBaseline['syntaxTokens'],
-    fonts: theme.fonts
-  };
-}
-
-export function resolveCodeTheme(
-  theme: RawVscodeTheme | null | undefined,
-  appearance: EditorAppearance
-): RawVscodeTheme | null | undefined {
-  if (theme?.type === appearance) return theme;
-  return appearance === 'light'
-    ? githubLight as RawVscodeTheme
-    : darkPlus as RawVscodeTheme;
-}

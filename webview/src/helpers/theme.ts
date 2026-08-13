@@ -1,11 +1,11 @@
 import {
-  defaultBuiltInVisualBaseline,
+  getBuiltInVisuals,
   semanticColorKeys,
   SYNTAX_TAG_SPECS,
   themeColorKeys
 } from '../../../src/shared/builtInVisualBaseline';
 import type { EditorAppearance } from '../../../src/shared/editorAppearance';
-import { lightCssVariableOverrides, resolveEditorTheme } from '../themes/editorLightTheme';
+import { lightCssVariableOverrides } from '../themes/editorLightTheme';
 import { darkCssVariableOverrides } from '../themes/editorDarkTheme';
 
 const vscodeEditorFontFamily = 'var(--vscode-editor-font-family)';
@@ -109,10 +109,10 @@ const applyHostAppearance = (appearance: EditorAppearance): void => {
   }
 };
 
-export const applyBuiltInVisualBaseline = (appearance: EditorAppearance = 'dark'): void => {
+export const applyBuiltInVisualBaseline = (appearance: Exclude<EditorAppearance, 'auto'> = 'dark'): void => {
   const editorFontWeight = resolveEditorFontWeight();
   applyHostAppearance(appearance);
-  const resolvedTheme = resolveEditorTheme(defaultBuiltInVisualBaseline, appearance);
+  const resolvedTheme = getBuiltInVisuals(appearance);
 
   const rootStyle = document.documentElement.style;
   const insetBackground = getInsetBackground(resolvedTheme.backgroundColor, resolvedTheme.colors.base03);
@@ -141,30 +141,21 @@ export const applyBuiltInVisualBaseline = (appearance: EditorAppearance = 'dark'
     rootStyle.setProperty(`--meo-token-${spec.id}-color`, tokenColor);
   }
 
-  const liveFont = sanitizeThemeFontStyle(resolvedTheme.fonts.liveFont);
-  const sourceFont = sanitizeThemeFontStyle(resolvedTheme.fonts.sourceFont);
-  const liveFontWeight = sanitizeThemeFontStyle(resolvedTheme.fonts.liveFontWeight);
-  const sourceFontWeight = sanitizeThemeFontStyle(resolvedTheme.fonts.sourceFontWeight);
-  const liveFontSize = normalizeThemeFontSize(resolvedTheme.fonts.liveFontSize);
-  const sourceFontSize = normalizeThemeFontSize(resolvedTheme.fonts.sourceFontSize);
-  const headingFontSizes = [
-    normalizeThemeHeadingSize(resolvedTheme.fonts.h1FontSize, headingSizeFallbacks[0], 'em'),
-    normalizeThemeHeadingSize(resolvedTheme.fonts.h2FontSize, headingSizeFallbacks[1], 'em'),
-    normalizeThemeHeadingSize(resolvedTheme.fonts.h3FontSize, headingSizeFallbacks[2], 'em'),
-    normalizeThemeHeadingSize(resolvedTheme.fonts.h4FontSize, headingSizeFallbacks[3], 'em'),
-    normalizeThemeHeadingSize(resolvedTheme.fonts.h5FontSize, headingSizeFallbacks[4], 'em'),
-    normalizeThemeHeadingSize(resolvedTheme.fonts.h6FontSize, headingSizeFallbacks[5], 'em')
-  ];
-  const headingFontWeights = [
-    normalizeThemeFontWeight(resolvedTheme.fonts.h1FontWeight, defaultHeadingFontWeight),
-    normalizeThemeFontWeight(resolvedTheme.fonts.h2FontWeight, defaultHeadingFontWeight),
-    normalizeThemeFontWeight(resolvedTheme.fonts.h3FontWeight, defaultHeadingFontWeight),
-    normalizeThemeFontWeight(resolvedTheme.fonts.h4FontWeight, defaultHeadingFontWeight),
-    normalizeThemeFontWeight(resolvedTheme.fonts.h5FontWeight, defaultHeadingFontWeight),
-    normalizeThemeFontWeight(resolvedTheme.fonts.h6FontWeight, defaultHeadingFontWeight)
-  ];
-  const liveLineHeight = normalizeThemeLineHeight(resolvedTheme.fonts.liveLineHeight, 1.5);
-  const sourceLineHeight = normalizeThemeLineHeight(resolvedTheme.fonts.sourceLineHeight, 1.5);
+  const typography = resolvedTheme.typography;
+  const liveFont = sanitizeThemeFontStyle(typography.liveFont);
+  const sourceFont = sanitizeThemeFontStyle(typography.sourceFont);
+  const liveFontWeight = sanitizeThemeFontStyle(typography.liveFontWeight);
+  const sourceFontWeight = sanitizeThemeFontStyle(typography.sourceFontWeight);
+  const liveFontSize = normalizeThemeFontSize(typography.liveFontSize);
+  const sourceFontSize = normalizeThemeFontSize(typography.sourceFontSize);
+  const headingFontSizes = typography.headingFontSizes.map((size, index) => (
+    normalizeThemeHeadingSize(size, headingSizeFallbacks[index] ?? '1em', 'em')
+  ));
+  const headingFontWeights = typography.headingFontWeights.map((weight) => (
+    normalizeThemeFontWeight(weight, defaultHeadingFontWeight)
+  ));
+  const liveLineHeight = normalizeThemeLineHeight(typography.liveLineHeight, 1.5);
+  const sourceLineHeight = normalizeThemeLineHeight(typography.sourceLineHeight, 1.5);
   rootStyle.setProperty('--meo-font-live', liveFont || vscodeEditorFontFamily);
   rootStyle.setProperty('--meo-font-source', sourceFont || vscodeEditorFontFamily);
   rootStyle.setProperty('--meo-font-live-weight', liveFontWeight || editorFontWeight);

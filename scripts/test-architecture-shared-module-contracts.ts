@@ -2057,6 +2057,25 @@ try {
   });
   assert.match(unstagedAlias, /Architecture checks passed/);
 
+  writeFileSync(join(stagedRoot, 'README.md'), 'meoEnhanced.import.theme\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'No custom appearance capability here.\n');
+  const stagedCustomThemeAlias = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedCustomThemeAlias.ok, false, 'staged ARCH020 must reject normalized custom-theme aliases from the index');
+  assert.match(stagedCustomThemeAlias.output, /ARCH020/);
+  writeFileSync(join(stagedRoot, 'README.md'), 'No custom appearance capability here.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+
   writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
   execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
   writeFileSync(join(stagedRoot, 'bun.lock'), '# clean working-tree lock\n');
@@ -2373,12 +2392,17 @@ try {
   ].join('\n'));
   const removedCustomThemeFixtures = [
     ['package.json', JSON.stringify({ contributes: { commands: [{ command: 'meoEnhanced.importTheme' }] } })],
+    ['package.json', JSON.stringify({ contributes: { commands: [{ command: 'meoEnhanced.import-theme' }] } })],
+    ['package.json', JSON.stringify({ contributes: { commands: [{ command: 'meoEnhanced.import.theme' }] } })],
     ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.theme': { type: 'object' } } } } })],
     ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.codeBlocks.useVscodeTheme': { type: 'boolean' } } } } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.codeBlocks-use-vscode-theme': { type: 'boolean' } } } } })],
     ['src/host/customThemeStorage.ts', 'export const customThemes = [];\n'],
     ['src/protocol/editorState.ts', 'export type ThemeSettingsDto = { colors: Record<string, string> };\n'],
+    ['src/protocol/editorState.ts', 'export type BuiltInVisualBaselineDto = { colors: Record<string, string> };\n'],
     ['src/protocol/editorEvents.ts', "export const event = { type: 'themeChanged' };\n"],
     ['webview/src/editor/themeControls.ts', 'export const importedThemeState = {};\n'],
+    ['webview/src/editor/themeControls.ts', 'export const custom_theme_heading_size_editor = {};\n'],
     ['docs/appearance.md', 'Use MEO theme management to import a palette.\n']
   ] as const;
   for (const [fixturePath, contents] of removedCustomThemeFixtures) {

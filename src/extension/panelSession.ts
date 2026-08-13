@@ -49,7 +49,6 @@ import { GitDocumentState } from '../git/documentState';
 import type { GitBaselinePayload } from '../git/types';
 import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
 import type { ExportStyleEnvironment } from '../export/runtime';
-import type { BuiltInVisualBaseline } from '../shared/builtInVisualBaseline';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
@@ -111,6 +110,8 @@ type PanelSessionControllerParams = {
   setFindOptions: (options: FindOptions) => Promise<void>;
   getPreviewAppearance: () => PreviewAppearance;
   setPreviewAppearance: (appearance: PreviewAppearance) => Promise<void>;
+  getPreviewSourceColoring: () => boolean;
+  setPreviewSourceColoring: (enabled: boolean) => Promise<void>;
   getEditorAppearance: () => EditorAppearance;
   setEditorAppearance: (appearance: EditorAppearance) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
@@ -158,6 +159,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     setFindOptions,
     getPreviewAppearance,
     setPreviewAppearance,
+    getPreviewSourceColoring,
+    setPreviewSourceColoring,
     getEditorAppearance,
     setEditorAppearance,
     setOutlineVisible,
@@ -302,6 +305,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: diagnostics.read(),
       mode,
       previewAppearance: getPreviewAppearance(),
+      previewSourceColoring: getPreviewSourceColoring(),
       editorAppearance: getEditorAppearance(),
       lineNumbers: getLineNumbersEnabled(context),
       gitChangesGutter: getGitChangesGutterEnabled(context),
@@ -543,6 +547,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setPreviewAppearance':
         await setPreviewAppearance(raw.appearance);
+        return;
+      case 'setPreviewSourceColoring':
+        await setPreviewSourceColoring(raw.enabled);
         return;
       case 'setEditorAppearance':
         await setEditorAppearance(raw.appearance);

@@ -1999,8 +1999,24 @@ const removedCustomThemeTokens = [
   /\b(?:select|import|export|delete|reset|manage|edit)(?:ing|ed)?\b.{0,32}\bMEO[-_. ]+themes?\b/i,
   /\bMEO[-_. ]+themes?\b.{0,32}\b(?:select|import|export|delete|reset|manage|edit)(?:ing|ed)?\b/i
 ];
+const normalizeCapabilityAlias = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+const hasRemovedCustomThemeAlias = (value: string): boolean => {
+  const normalized = normalizeCapabilityAlias(value);
+  if (normalized.includes('codeblocksusevscodetheme')) return true;
+  if (normalized.includes('builtinvisualbaselinedto')) return true;
+  const hasTheme = normalized.includes('theme');
+  const hasRemovedAction = ['import', 'export', 'select', 'delete', 'reset', 'manage', 'edit']
+    .some((word) => normalized.includes(word));
+  const hasMeoThemeCommand = normalized.includes('meoenhanced') && hasTheme && hasRemovedAction;
+  const hasCustomThemeOwner = hasTheme
+    && (normalized.includes('custom') || normalized.includes('imported'))
+    && (hasRemovedAction || ['storage', 'state', 'editor', 'semantic', 'font', 'headingsize']
+      .some((word) => normalized.includes(word)));
+  return hasMeoThemeCommand || hasCustomThemeOwner;
+};
 for (const path of customThemeCapabilityScope) {
-  if (/^(?:src|webview\/src)\//.test(path) && removedCustomThemeTokens.some((pattern) => pattern.test(path))) {
+  if (/^(?:src|webview\/src)\//.test(path)
+    && (removedCustomThemeTokens.some((pattern) => pattern.test(path)) || hasRemovedCustomThemeAlias(path))) {
     failures.push(`ARCH020 已删除的自定义主题系统或旧代码主题开关重新出现: ${path}:1`);
     continue;
   }
@@ -2008,7 +2024,7 @@ for (const path of customThemeCapabilityScope) {
   for (let index = 0; index < lines.length; index += 1) {
     if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(lines[index])) continue;
     const line = lines[index].replace(/^\s*\|\|\s*'(?:theme|shikiCodeBlocks|codeTheme)'\s+in\s+value\s*$/, '');
-    if (removedCustomThemeTokens.some((pattern) => pattern.test(line))) {
+    if (removedCustomThemeTokens.some((pattern) => pattern.test(line)) || hasRemovedCustomThemeAlias(line)) {
       failures.push(`ARCH020 已删除的自定义主题系统或旧代码主题开关重新出现: ${path}:${index + 1}`);
     }
   }

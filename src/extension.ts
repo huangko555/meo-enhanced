@@ -52,10 +52,10 @@ import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefr
 import { createVscodeDiagnosticsAdapter } from './host/vscodeDiagnosticsAdapter';
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
-import { defaultBuiltInVisualBaseline, type BuiltInVisualBaseline } from './shared/builtInVisualBaseline';
 import {
   normalizePreviewAppearance,
   PREVIEW_APPEARANCE_STATE_KEY,
+  PREVIEW_SOURCE_COLORING_STATE_KEY,
   type PreviewAppearance,
   type PreviewRenderResult
 } from './shared/preview';
@@ -94,7 +94,6 @@ type ExportRuntimeModule = {
     outputFilePath: string;
     target: ExportFormat;
     htmlImageMode: ExportHtmlImageMode;
-    theme: BuiltInVisualBaseline;
     appearance: PreviewAppearance;
     styleEnvironment?: ExportStyleEnvironment;
     editorFontEnvironment?: {
@@ -110,7 +109,6 @@ type ExportRuntimeModule = {
   renderPreviewDocument: (options: {
     markdownText: string;
     sourceDocumentPath: string;
-    theme: BuiltInVisualBaseline;
     styleEnvironment?: ExportStyleEnvironment;
   }) => PreviewRenderResult;
   writeFinalizedHtmlExport: (options: {
@@ -497,14 +495,15 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       renderPreview: async (options) => {
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
         return exportRuntime.renderPreviewDocument({
-          ...options,
-          theme: defaultBuiltInVisualBaseline
+          ...options
         });
       },
       getFindOptions: () => this.getFindOptions(),
       setFindOptions: (options) => this.setFindOptions(options),
       getPreviewAppearance: () => this.getPreviewAppearance(),
       setPreviewAppearance: (appearance) => this.setPreviewAppearance(appearance),
+      getPreviewSourceColoring: () => this.getPreviewSourceColoring(),
+      setPreviewSourceColoring: (enabled) => this.setPreviewSourceColoring(enabled),
       getEditorAppearance: () => this.getEditorAppearance(),
       setEditorAppearance: (appearance) => this.setEditorAppearance(appearance),
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
@@ -572,6 +571,15 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       return;
     }
     await this.context.globalState.update(PREVIEW_APPEARANCE_STATE_KEY, nextAppearance);
+  }
+
+  private getPreviewSourceColoring(): boolean {
+    return this.context.globalState.get(PREVIEW_SOURCE_COLORING_STATE_KEY, true);
+  }
+
+  private async setPreviewSourceColoring(enabled: boolean): Promise<void> {
+    if (this.getPreviewSourceColoring() === enabled) return;
+    await this.context.globalState.update(PREVIEW_SOURCE_COLORING_STATE_KEY, enabled);
   }
 
   private getEditorAppearance(): EditorAppearance {
@@ -732,7 +740,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       outputFilePath: params.outputFileUri.fsPath,
       target: params.target,
       htmlImageMode: params.htmlImageMode,
-      theme: defaultBuiltInVisualBaseline,
       appearance: params.appearance,
       styleEnvironment: params.styleEnvironment,
       editorFontEnvironment: getExportEditorFontEnvironment(),

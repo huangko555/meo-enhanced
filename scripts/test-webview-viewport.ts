@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
-import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
+import { darkBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-webview-viewport-'));
@@ -124,7 +124,7 @@ async function main() {
     await page.evaluate(({ text, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///viewport.md', text, version: 1,
-        savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', editorAppearance: 'dark',
+        savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', previewSourceColoring: true, editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
@@ -133,7 +133,7 @@ async function main() {
         vscodeTheme: null,
         restoreTopLine: 139, restoreTopLineOffset: 0
       }}));
-    }, { text: initialText, theme: defaultBuiltInVisualBaseline });
+    }, { text: initialText, theme: darkBuiltInVisuals });
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
@@ -709,12 +709,13 @@ async function main() {
       previewToolbarLayout.appearanceControlHeight !== 26 ||
       previewToolbarLayout.appearanceControlRadius !== 8 ||
       previewToolbarLayout.activeAppearanceRadius !== 5 ||
-      JSON.stringify(previewToolbarLayout.activeAppearanceInsets) !== JSON.stringify({ top: 3, right: 3, bottom: 3 }) ||
+      previewToolbarLayout.activeAppearanceInsets.top !== 3 ||
+      previewToolbarLayout.activeAppearanceInsets.bottom !== 3 ||
       previewToolbarLayout.appearanceSegmentGap !== 0 ||
       !previewToolbarLayout.appearanceUsesSharedComponent ||
-      previewToolbarLayout.activeAppearance !== 'dark' ||
+      previewToolbarLayout.activeAppearance !== 'light' ||
       JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
-        'outline-left', 'auto', 'light', 'dark', 'Export HTML', 'Export PDF'
+        'outline-left', 'Code colors', 'auto', 'light', 'dark', 'Export HTML', 'Export PDF'
       ]) ||
       previewToolbarLayout.moreExports !== 0 ||
       previewToolbarLayout.floatingThemeToggle
@@ -747,10 +748,9 @@ async function main() {
         ]))
       };
     });
-    const darkAppearanceGeometry = await measureAppearanceIndicator();
-    await page.click('.preview-appearance-button[data-appearance="light"]');
     const lightAppearanceGeometry = await measureAppearanceIndicator();
     await page.click('.preview-appearance-button[data-appearance="dark"]');
+    const darkAppearanceGeometry = await measureAppearanceIndicator();
     if (
       darkAppearanceGeometry.active !== 'dark' ||
       darkAppearanceGeometry.top !== 3 ||

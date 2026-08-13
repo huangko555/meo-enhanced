@@ -8,9 +8,12 @@ import { createPreviewWebviewAdapter } from '../webview/src/adapters/previewWebv
 const calls: Array<{ type: string; [key: string]: unknown }> = [];
 let appearance: 'dark' | 'light' = 'dark';
 const surface = {
-  setAppearance(next: 'dark' | 'light') {
-    appearance = next;
+  setAppearance(next: 'auto' | 'dark' | 'light') {
+    appearance = next === 'auto' ? 'dark' : next;
     calls.push({ type: 'appearance', appearance: next });
+  },
+  setSourceColoring(enabled: boolean) {
+    calls.push({ type: 'sourceColoring', enabled });
   },
   getAppearance: () => appearance,
   setVisible(visible: boolean) {
@@ -19,8 +22,8 @@ const surface = {
   preload(text: string) {
     calls.push({ type: 'preload', text });
   },
-  requestRender(text: string, options: { restoreLine?: number | null } = {}) {
-    calls.push({ type: 'render', text, restoreLine: options.restoreLine ?? null });
+  requestRender(text: string, options: { restoreLine?: number | null; force?: boolean } = {}) {
+    calls.push({ type: 'render', text, restoreLine: options.restoreLine ?? null, force: options.force === true });
   },
   acceptRenderResponse(message: PreviewRenderResponse) {
     calls.push({ type: 'response', requestId: message.requestId });
@@ -33,25 +36,27 @@ const surface = {
 };
 
 const adapter = createPreviewWebviewAdapter(surface);
-adapter.start({ text: 'hidden', appearance: 'dark', active: false });
+adapter.start({ text: 'hidden', appearance: 'auto', sourceColoring: false, active: false });
 assert.deepEqual(calls, [
-  { type: 'appearance', appearance: 'dark' },
+  { type: 'appearance', appearance: 'auto' },
+  { type: 'sourceColoring', enabled: false },
   { type: 'preload', text: 'hidden' }
 ]);
 
-adapter.setActive({ active: true, text: 'visible', restoreLine: 3, initialAppearance: 'light' });
-assert.deepEqual(calls.slice(2), [
+adapter.setActive({ active: true, text: 'visible', restoreLine: 3 });
+assert.deepEqual(calls.slice(3), [
   { type: 'visible', visible: true },
-  { type: 'appearance', appearance: 'light' },
-  { type: 'render', text: 'visible', restoreLine: 3 }
+  { type: 'render', text: 'visible', restoreLine: 3, force: false }
 ]);
 
-adapter.setActive({ active: true, text: 'updated', restoreLine: null, initialAppearance: 'dark' });
-assert.equal(calls.filter(call => call.type === 'appearance' && call.appearance === 'dark').length, 1);
+adapter.setActive({ active: true, text: 'updated', restoreLine: null });
+assert.deepEqual(calls.filter(call => call.type === 'appearance'), [
+  { type: 'appearance', appearance: 'auto' }
+]);
 adapter.refreshVisible('theme refresh');
-assert.deepEqual(calls.at(-1), { type: 'render', text: 'theme refresh', restoreLine: 6 });
+assert.deepEqual(calls.at(-1), { type: 'render', text: 'theme refresh', restoreLine: 6, force: true });
 adapter.refreshVisible('explicit restore', { restoreLine: 9 });
-assert.deepEqual(calls.at(-1), { type: 'render', text: 'explicit restore', restoreLine: 9 });
+assert.deepEqual(calls.at(-1), { type: 'render', text: 'explicit restore', restoreLine: 9, force: true });
 
 const response: PreviewRenderResponse = {
   type: 'previewRenderResult',
@@ -63,10 +68,11 @@ const response: PreviewRenderResponse = {
 };
 assert.equal(adapter.accept(response), true);
 assert.equal(adapter.accept({ type: 'previewAppearanceChanged', appearance: 'dark' }), true);
+assert.equal(adapter.accept({ type: 'previewSourceColoringChanged', enabled: true }), true);
 assert.equal(adapter.accept({ type: 'focusEditor' } as HostToWebviewMessage), false);
 assert.equal(adapter.getAppearance(), 'dark');
 
-adapter.setActive({ active: false, text: 'hidden again', initialAppearance: 'dark' });
+adapter.setActive({ active: false, text: 'hidden again' });
 const beforeHiddenRefresh = calls.length;
 adapter.refreshVisible('must not render');
 assert.equal(calls.length, beforeHiddenRefresh);
@@ -74,7 +80,7 @@ assert.equal(calls.length, beforeHiddenRefresh);
 adapter.dispose();
 adapter.dispose();
 const beforeDisposedActions = calls.length;
-adapter.setActive({ active: true, text: 'ignored', initialAppearance: 'dark' });
+adapter.setActive({ active: true, text: 'ignored' });
 adapter.refreshVisible('ignored');
 assert.equal(adapter.accept(response), true);
 assert.equal(calls.length, beforeDisposedActions);
@@ -94,6 +100,8 @@ for (const forbiddenCall of [
   assert.equal(bootstrap.includes(forbiddenCall), false, `Preview lifecycle leaked into Bootstrap: ${forbiddenCall}`);
 }
 assert.match(bootstrap, /previewAdapter\.start\s*\(/);
+assert.doesNotMatch(bootstrap, /message\.previewAppearance\s*===/);
+assert.doesNotMatch(bootstrap, /initialAppearance/);
 assert.match(bootstrap, /previewAdapter\.accept\s*\(message\)/);
 assert.match(bootstrap, /previewAdapter\.dispose\s*\(\s*\)/);
 

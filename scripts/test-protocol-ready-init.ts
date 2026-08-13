@@ -32,6 +32,7 @@ const completeInit = {
   diagnostics: [],
   mode: 'live' as const,
   previewAppearance: 'dark' as const,
+  previewSourceColoring: true,
   editorAppearance: 'dark' as const,
   lineNumbers: true,
   gitChangesGutter: true,
@@ -60,6 +61,7 @@ assert.deepEqual(initializedSession.handle({
   type: 'hostRevisionChanged', version: 3, text: '# title'
 }), []);
 assert.equal(decodeInitMessage({ ...completeInit, version: -1 }), null);
+assert.equal(decodeInitMessage({ ...completeInit, previewSourceColoring: undefined }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: undefined }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: -1, text: '# saved' } }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: 4, text: '# future' } }), null);
@@ -511,6 +513,7 @@ for (const command of [
   { type: 'discardChanges', topLine: 1 },
 { type: 'exportDocument', format: 'pdf', appearance: 'dark' },
 { type: 'setPreviewAppearance', appearance: 'auto' },
+{ type: 'setPreviewSourceColoring', enabled: false },
 { type: 'setEditorAppearance', appearance: 'auto' }
 ]) {
   assert.notEqual(decodeEditorCommand(command), null, `Editor command was rejected: ${command.type}`);
@@ -524,6 +527,7 @@ for (const event of [
   { type: 'revealSelection', anchor: 0, head: 4, preserveViewport: true },
   { type: 'revealDocumentFragment', href: '#intro' },
   { type: 'previewAppearanceChanged', appearance: 'light' },
+  { type: 'previewSourceColoringChanged', enabled: false },
   { type: 'outlinePositionChanged', position: 'left' },
   { type: 'outlineVisibilityChanged', visible: true },
   { type: 'lineNumbersChanged', enabled: true },

@@ -1,7 +1,6 @@
 import { launchTestBrowser } from './browser-test-helpers';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
-import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
 
 const markdown = [
   '| No. | Product | Category | Owner | Created | Updated | Version | Notes |',
@@ -27,7 +26,7 @@ const rendered = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview-layout.md',
   target: 'html'
 });
-const styles = buildPreviewStyles(defaultBuiltInVisualBaseline, {
+const styles = buildPreviewStyles({
   editorBackgroundColor: '#20252b',
   editorForegroundColor: '#d8dee9',
   codeBlockBackgroundColor: '#171b20',

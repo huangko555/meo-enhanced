@@ -2,6 +2,7 @@ export type PreviewAppearance = 'auto' | 'dark' | 'light';
 export type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 
 export const PREVIEW_APPEARANCE_STATE_KEY = 'previewAppearance';
+export const PREVIEW_SOURCE_COLORING_STATE_KEY = 'previewSourceColoring';
 
 export function normalizePreviewAppearance(value: unknown): PreviewAppearance {
   return value === 'light' || value === 'dark' ? value : 'auto';

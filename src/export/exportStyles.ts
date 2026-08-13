@@ -1,51 +1,55 @@
 import {
   defaultThemeColors,
-  defaultThemeFonts,
-  type ThemeColorKey,
-  type ThemeColors,
-  type BuiltInVisualBaseline
+  getBuiltInVisuals,
+  type VisualColorKey,
+  type VisualColors,
+  type BuiltInVisuals
 } from '../shared/builtInVisualBaseline';
-import type { PreviewAppearance, PreviewStyleEnvironment } from '../shared/preview';
+import type { PreviewAppearance } from '../shared/preview';
+import type { EditorStyleEnvironment } from '../protocol/editorStyleEnvironment';
 
 const styleValueInjectionPattern = /[\n\r;{}]/g;
 
-export type ExportStyleEnvironment = PreviewStyleEnvironment & {
-  meoThemeColors?: Partial<Record<ThemeColorKey, string>>;
-};
+export type ExportStyleEnvironment = EditorStyleEnvironment;
 
 export function buildExportStyles(
-  theme: BuiltInVisualBaseline,
   environment: ExportStyleEnvironment = {},
   appearance: PreviewAppearance = 'light'
 ): string {
-  return buildReadingStyles(theme, environment, appearance);
+  return buildReadingStyles(environment, appearance);
 }
 
 export function buildPreviewStyles(
-  theme: BuiltInVisualBaseline,
   environment: ExportStyleEnvironment = {},
   appearance: PreviewAppearance = 'dark'
 ): string {
-  return buildReadingStyles(theme, environment, appearance);
+  return buildReadingStyles(environment, appearance);
 }
 
 function buildReadingStyles(
-  theme: BuiltInVisualBaseline,
   environment: ExportStyleEnvironment,
   appearance: PreviewAppearance
 ): string {
+  const theme = getBuiltInVisuals(appearance === 'light' ? 'light' : 'dark');
   const colors = resolveThemeColors(theme, environment);
-  const fonts = theme.fonts ?? defaultThemeFonts;
+  const fonts = theme.typography;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
   const editorFontWeight = sanitizeFontWeight(environment.editorFontWeight, 'normal');
   const darkBackgroundColor =
     sanitizeCssColor(environment.editorBackgroundColor ?? '') ||
-    sanitizeCssColor(theme.backgroundColor ?? '') ||
+    sanitizeCssColor(theme.backgroundColor) ||
     colors.base03;
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
   const editorForegroundColor = previewForegroundColor;
+  const previewCodePalette = environment.previewCodePalettes?.[appearance === 'auto' ? 'dark' : appearance];
+  const sourceColoring = environment.previewSourceColoring !== false;
+  const codeColor = (key: keyof NonNullable<typeof previewCodePalette>): string => (
+    sourceColoring
+      ? sanitizeCssColor(previewCodePalette?.[key] ?? '') || editorForegroundColor
+      : editorForegroundColor
+  );
   const defaultCodeBlockColor = appearance === 'light'
     ? '#f6f8fa'
     : `color-mix(in srgb, ${editorBackgroundColor} 80%, ${colors.base03} 20%)`;
@@ -90,31 +94,10 @@ function buildReadingStyles(
   const editorFontSizePx = clampFontSize(environment.editorFontSizePx);
   const liveFontSizePx = Math.max(16, resolveThemeFontSizePx(fonts.liveFontSize, editorFontSizePx));
   const sourceFontSizePx = Math.max(14, resolveThemeFontSizePx(fonts.sourceFontSize, editorFontSizePx));
-  const lineHeight = Math.max(1.7, clampLineHeight(environment.liveLineHeight ?? fonts.liveLineHeight ?? defaultThemeFonts.liveLineHeight));
-  const sourceLineHeight = clampLineHeight(environment.sourceLineHeight ?? fonts.sourceLineHeight ?? defaultThemeFonts.sourceLineHeight);
-  const headingFontSizes = [
-    fonts.h1FontSize,
-    fonts.h2FontSize,
-    fonts.h3FontSize,
-    fonts.h4FontSize,
-    fonts.h5FontSize,
-    fonts.h6FontSize
-  ].map((fontSize, index) => {
-    const fallback = defaultThemeFonts[`h${index + 1}FontSize` as keyof typeof defaultThemeFonts];
-    const value = typeof fontSize === 'number' && Number.isFinite(fontSize) ? fontSize : fallback;
-    return `${value}em`;
-  });
-  const headingFontWeights = [
-    fonts.h1FontWeight,
-    fonts.h2FontWeight,
-    fonts.h3FontWeight,
-    fonts.h4FontWeight,
-    fonts.h5FontWeight,
-    fonts.h6FontWeight
-  ].map((fontWeight, index) => sanitizeFontWeight(
-    fontWeight,
-    defaultThemeFonts[`h${index + 1}FontWeight` as keyof typeof defaultThemeFonts] as string
-  ));
+  const lineHeight = Math.max(1.7, clampLineHeight(environment.liveLineHeight ?? fonts.liveLineHeight));
+  const sourceLineHeight = clampLineHeight(environment.sourceLineHeight ?? fonts.sourceLineHeight);
+  const headingFontSizes = fonts.headingFontSizes.map((fontSize) => `${fontSize}em`);
+  const headingFontWeights = fonts.headingFontWeights.map((fontWeight) => sanitizeFontWeight(fontWeight, '400'));
   const headingSizeVarsCss = headingFontSizes
     .map((fontSize, index) => `  --meo-heading-${index + 1}-size: ${fontSize};`)
     .join('\n');
@@ -135,6 +118,14 @@ function buildReadingStyles(
   --meo-font-system-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --meo-bg: ${editorBackgroundColor};
   --meo-fg: ${editorForegroundColor};
+  --meo-code-fg: ${codeColor('foreground')};
+  --meo-code-comment: ${codeColor('comment')};
+  --meo-code-keyword: ${codeColor('keyword')};
+  --meo-code-string: ${codeColor('string')};
+  --meo-code-number: ${codeColor('number')};
+  --meo-code-type: ${codeColor('type')};
+  --meo-code-property: ${codeColor('property')};
+  --meo-code-link: ${codeColor('link')};
   --meo-muted: ${readingMutedColor};
   --meo-border: ${panelBorderColor};
   --meo-base04: ${readingForegroundColor};
@@ -937,14 +928,14 @@ th:empty::before {
 .meo-export-mermaid.is-rendered pre { display: none; }
 
 /* highlight.js token colors */
-.hljs { color: var(--meo-fg); background: transparent; }
-.hljs-comment, .hljs-quote { color: var(--meo-muted); font-style: italic; }
-.hljs-keyword, .hljs-selector-tag, .hljs-title.function_ { color: var(--meo-heading); }
-.hljs-string, .hljs-regexp { color: var(--meo-strong); }
-.hljs-number, .hljs-literal, .hljs-symbol { color: var(--meo-number); }
-.hljs-type, .hljs-class, .hljs-built_in, .hljs-function { color: var(--meo-accent-2); }
-.hljs-attr, .hljs-attribute, .hljs-property { color: var(--meo-quote); }
-.hljs-link { color: var(--meo-link); text-decoration: underline; }
+.hljs { color: var(--meo-code-fg); background: transparent; }
+.hljs-comment, .hljs-quote { color: var(--meo-code-comment); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-title.function_ { color: var(--meo-code-keyword); }
+.hljs-string, .hljs-regexp { color: var(--meo-code-string); }
+.hljs-number, .hljs-literal, .hljs-symbol { color: var(--meo-code-number); }
+.hljs-type, .hljs-class, .hljs-built_in, .hljs-function { color: var(--meo-code-type); }
+.hljs-attr, .hljs-attribute, .hljs-property { color: var(--meo-code-property); }
+.hljs-link { color: var(--meo-code-link); text-decoration: underline; }
 
 @media (max-width: 700px) {
   .meo-export-page { padding: 12px; }
@@ -976,19 +967,19 @@ th:empty::before {
 `.trim();
 }
 
-function resolveThemeColors(theme: BuiltInVisualBaseline, environment: ExportStyleEnvironment): ThemeColors {
-  const themeColors = theme.colors ?? defaultThemeColors;
+function resolveThemeColors(theme: BuiltInVisuals, environment: ExportStyleEnvironment): VisualColors {
+  const themeColors = theme.colors;
   const envColors = environment.meoThemeColors ?? {};
-  const resolved = {} as ThemeColors;
+  const resolved = {} as Record<VisualColorKey, string>;
 
-  for (const key of Object.keys(defaultThemeColors) as ThemeColorKey[]) {
+  for (const key of Object.keys(defaultThemeColors) as VisualColorKey[]) {
     resolved[key] =
       sanitizeCssColor(envColors[key] ?? '') ||
       sanitizeCssColor(themeColors[key] ?? '') ||
       defaultThemeColors[key];
   }
 
-  return resolved;
+  return Object.freeze(resolved);
 }
 
 function sanitizeCssFont(value: string | undefined): string {
@@ -1029,7 +1020,7 @@ function sanitizeCssColor(value: string): string {
 
 function clampLineHeight(value: number): number {
   if (!Number.isFinite(value)) {
-    return defaultThemeFonts.liveLineHeight;
+    return 1.5;
   }
   return Math.min(3, Math.max(1, value));
 }

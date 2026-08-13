@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
+import { darkBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -50,7 +50,7 @@ async function main() {
     await page.evaluate(({ documentText, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///search.md', text: documentText, version: 1,
-        savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live', previewAppearance: 'dark', editorAppearance: 'dark',
+        savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live', previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
@@ -58,7 +58,7 @@ async function main() {
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
         vscodeTheme: null, restoreTopLine: 1, restoreTopLineOffset: 0
       }}));
-    }, { documentText: text, theme: defaultBuiltInVisualBaseline });
+    }, { documentText: text, theme: darkBuiltInVisuals });
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 100));
 

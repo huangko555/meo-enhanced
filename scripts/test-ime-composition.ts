@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
-import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
+import { darkBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-ime-composition-'));
@@ -61,7 +61,7 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///ime.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live',
-        previewAppearance: 'dark', editorAppearance: 'dark',
+        previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
@@ -69,7 +69,7 @@ async function main() {
         outlinePosition: 'right', outlineVisible: true, outlineWidth: 260,
         vscodeTheme: null
       }}));
-    }, { text: initialText, theme: defaultBuiltInVisualBaseline });
+    }, { text: initialText, theme: darkBuiltInVisuals });
     await page.waitForSelector('.editor-host > .cm-editor');
     const initialStrikePairing = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))

@@ -11,7 +11,6 @@ import { createFailureNoticeManager, getErrorMessage, isTransientMermaidRuntimeE
 import { isPrimaryModifier, isShortcutKey, handleEditorShortcut, type ShortcutHandlerContext } from './helpers/shortcuts';
 import { createFindPanel, createFindPanelController, type FindPanelController } from './helpers/findPanel';
 import { createSelectionMenu, createSelectionMenuController, type SelectionMenuController } from './helpers/selectionMenu';
-import { getExportStyleEnvironment } from './helpers/export';
 import {
   initializeMermaidEditorRuntime,
   normalizeMermaidDiagramText,
@@ -27,7 +26,7 @@ import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
-import { resolveCodeTheme } from './themes/editorLightTheme';
+import { applySourceCodePalette, resolveFinalCodePalette } from './application/finalCodePalette';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
@@ -739,12 +738,14 @@ exportPdfOption.append(
 );
 
 const previewAppearanceSlot = document.createElement('span');
+const previewSourceColoringSlot = document.createElement('span');
 const previewFormatGroup = document.createElement('div');
 previewFormatGroup.className = 'preview-format-group';
 previewFormatGroup.setAttribute('role', 'group');
 previewFormatGroup.setAttribute('aria-label', 'Preview tools');
 previewFormatGroup.append(
   previewOutlineLeftBtn,
+  previewSourceColoringSlot,
   previewAppearanceSlot,
   exportHtmlOption,
   exportPdfOption
@@ -1001,9 +1002,13 @@ const mermaidDiagramPresentationFactory = createMermaidDiagramPresentationFactor
   }
 });
 let resolveEditorAppearanceForPreview: () => 'light' | 'dark' = () => 'dark';
+let resolveCodePaletteForPreview = (appearance: 'light' | 'dark') => (
+  resolveFinalCodePalette(undefined, appearance).preview
+);
 const previewController = createPreviewController({
   vscode,
   getEditorAppearance: () => resolveEditorAppearanceForPreview(),
+  getCodePalette: (appearance) => resolveCodePaletteForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,
   onFindRequested: () => findPanelController.open('find'),
   onRendered: () => {
@@ -1014,6 +1019,7 @@ const previewController = createPreviewController({
 });
 const previewAdapter = createPreviewWebviewAdapter(previewController);
 previewAppearanceSlot.replaceWith(previewController.appearanceControl);
+previewSourceColoringSlot.replaceWith(previewController.sourceColoringControl);
 outlineController = createOutlineController({
   root,
   editorWrapper,
@@ -1618,8 +1624,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     previewAdapter.setActive({
       active,
       text: getCurrentEditorText(),
-      restoreLine,
-      initialAppearance: themeAdapter.getAppearance()
+      restoreLine
     });
     if (active && document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
@@ -1755,14 +1760,17 @@ const exportAdapter = createExportWebviewAdapter({
   getCurrentText: getCurrentEditorText,
   whenDocumentIdle: () => documentSessionAdapter.whenIdle(),
   getPreviewAppearance: () => previewAdapter.getAppearance(),
-  getStyleEnvironment: getExportStyleEnvironment
+  getStyleEnvironment: () => previewController.getStyleEnvironment()
 });
 
 const themeAdapter = createAppearanceWebviewAdapter({
   setAppearanceControl: (appearance) => editorAppearanceControl.setActive(appearance),
   applyAppearance: applyBuiltInVisualBaseline,
-  resolveCodeTheme,
-  setCodeTheme: setShikiTheme,
+  resolveCodePalette: resolveFinalCodePalette,
+  applyCodePalette: (palette) => {
+    applySourceCodePalette(palette);
+    setShikiTheme(palette.theme);
+  },
   refreshMermaidTheme: () => mermaidDiagramRenderPool.refreshTheme(),
   applyWithEditorViewportPreserved: (action) => {
     if (editor) editor.preserveViewport(action);
@@ -1779,6 +1787,7 @@ const themeAdapter = createAppearanceWebviewAdapter({
   }
 });
 resolveEditorAppearanceForPreview = () => themeAdapter.getAppearance();
+resolveCodePaletteForPreview = (appearance) => themeAdapter.getCodePalette(appearance).preview;
 
 const withMessageErrorBoundary = (context: string, action: () => void): void => {
   try {
@@ -1811,7 +1820,8 @@ window.addEventListener('message', (event) => {
       documentSessionAdapter.start(message);
       previewAdapter.start({
         text: message.text,
-        appearance: message.previewAppearance === 'light' ? 'light' : 'dark',
+        appearance: message.previewAppearance,
+        sourceColoring: message.previewSourceColoring,
         active: false
       });
 

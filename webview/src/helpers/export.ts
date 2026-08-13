@@ -1,4 +1,5 @@
 import { defaultCodeBlockBackgroundColor, themeColorKeys } from '../../../src/shared/builtInVisualBaseline';
+import type { PreviewCodePalette } from '../application/finalCodePalette';
 
 export interface ExportStyleEnvironment extends Record<string, unknown> {
   editorBackgroundColor: string;
@@ -16,9 +17,14 @@ export interface ExportStyleEnvironment extends Record<string, unknown> {
   liveLineHeight: number | undefined;
   sourceLineHeight: number | undefined;
   meoThemeColors: Record<string, string>;
+  previewSourceColoring: boolean;
+  previewCodePalettes: Readonly<Record<'light' | 'dark', PreviewCodePalette>>;
 }
 
-export const getExportStyleEnvironment = (): ExportStyleEnvironment => {
+export const getExportStyleEnvironment = (code: {
+  readonly previewSourceColoring: boolean;
+  readonly previewCodePalettes: Readonly<Record<'light' | 'dark', PreviewCodePalette>>;
+}): ExportStyleEnvironment => {
   const rootStyles = getComputedStyle(document.documentElement);
   const bodyStyles = getComputedStyle(document.body);
   const editorEl = document.querySelector('.cm-editor');
@@ -74,6 +80,8 @@ export const getExportStyleEnvironment = (): ExportStyleEnvironment => {
     sourceFontWeight: colorVar('--meo-font-source-weight', ''),
     liveLineHeight: Number.isFinite(parsedLiveLineHeight) ? parsedLiveLineHeight : undefined,
     sourceLineHeight: Number.isFinite(parsedSourceLineHeight) ? parsedSourceLineHeight : undefined,
-    meoThemeColors
+    meoThemeColors,
+    previewSourceColoring: code.previewSourceColoring,
+    previewCodePalettes: code.previewCodePalettes
   };
 };

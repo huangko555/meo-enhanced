@@ -1,15 +1,16 @@
 import type { EditorAppearance } from '../../../src/protocol/editorCommands';
 import type { CodeThemeDto } from '../../../src/protocol/hostConfigurationEvents';
 import type { HostToWebviewMessage } from '../../../src/protocol/messages';
+import type { FinalCodePalette } from '../application/finalCodePalette';
 
 export type AppearanceWebviewAdapterDependencies = {
   readonly setAppearanceControl: (appearance: EditorAppearance) => void;
   readonly applyAppearance: (appearance: 'light' | 'dark') => void;
-  readonly resolveCodeTheme: (
+  readonly resolveCodePalette: (
     currentVscodeTheme: CodeThemeDto | null | undefined,
     appearance: 'light' | 'dark'
-  ) => CodeThemeDto | null | undefined;
-  readonly setCodeTheme: (theme: CodeThemeDto | null | undefined) => void;
+  ) => FinalCodePalette;
+  readonly applyCodePalette: (palette: FinalCodePalette) => void;
   readonly refreshMermaidTheme: () => void;
   readonly applyWithEditorViewportPreserved: (action: () => void) => void;
   readonly refreshEditorDecorations: () => void;
@@ -26,6 +27,7 @@ export type AppearanceWebviewAdapter = {
   }): void;
   setAppearance(appearance: EditorAppearance, options?: { readonly post?: boolean }): void;
   getAppearance(): 'light' | 'dark';
+  getCodePalette(appearance?: 'light' | 'dark'): FinalCodePalette;
   accept(message: HostToWebviewMessage): boolean;
 };
 
@@ -41,8 +43,8 @@ export function createAppearanceWebviewAdapter(
     appearancePreference === 'auto' ? vscodeTheme?.type ?? 'dark' : appearancePreference
   );
 
-  const applyCodeTheme = (): void => {
-    dependencies.setCodeTheme(dependencies.resolveCodeTheme(vscodeTheme, appearance));
+  const applyCodePalette = (): void => {
+    dependencies.applyCodePalette(dependencies.resolveCodePalette(vscodeTheme, appearance));
   };
 
   return {
@@ -52,7 +54,7 @@ export function createAppearanceWebviewAdapter(
       appearance = resolveAppearance();
       dependencies.setAppearanceControl(appearancePreference);
       dependencies.applyAppearance(appearance);
-      applyCodeTheme();
+      applyCodePalette();
     },
     setAppearance(nextAppearance, { post = false } = {}) {
       const previousAppearance = appearance;
@@ -64,7 +66,7 @@ export function createAppearanceWebviewAdapter(
       if (changed) {
         dependencies.applyWithEditorViewportPreserved(() => {
           dependencies.applyAppearance(appearance);
-          applyCodeTheme();
+          applyCodePalette();
           dependencies.refreshMermaidTheme();
           dependencies.refreshEditorDecorations();
           dependencies.syncPreviewAutoAppearance();
@@ -75,6 +77,9 @@ export function createAppearanceWebviewAdapter(
     },
     getAppearance() {
       return appearance;
+    },
+    getCodePalette(requestedAppearance = appearance) {
+      return dependencies.resolveCodePalette(vscodeTheme, requestedAppearance);
     },
     accept(message) {
       if (message.type !== 'vscodeCodeThemeChanged') return false;
@@ -87,7 +92,7 @@ export function createAppearanceWebviewAdapter(
           // baseline even when a manual appearance itself did not change.
           dependencies.applyAppearance(appearance);
           dependencies.refreshMermaidTheme();
-          applyCodeTheme();
+          applyCodePalette();
           dependencies.refreshEditorDecorations();
           dependencies.syncPreviewAutoAppearance();
         });

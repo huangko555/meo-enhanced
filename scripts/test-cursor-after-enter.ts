@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
-import { defaultBuiltInVisualBaseline } from '../src/shared/builtInVisualBaseline';
+import { darkBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-cursor-after-enter-'));
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///cursor.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live',
-        previewAppearance: 'dark', editorAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
+        previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
         gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false,
         longCodeBlockFoldingEnabled: true,
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
         vscodeTheme: null
       }}));
-    }, { theme: defaultBuiltInVisualBaseline, text: initialText });
+    }, { theme: darkBuiltInVisuals, text: initialText });
     await syncedPage.waitForSelector('.editor-host > .cm-editor');
 
     await syncedPage.click('.cm-line');

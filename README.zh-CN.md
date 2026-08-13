@@ -98,7 +98,7 @@ MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并�
 
 ## 配置与外观
 
-Editor 与 Preview 外观彼此独立。Live 和 Preview 使用固定的浅色/深色设计；Source 在同向外观使用 VS Code 原生配色，反向时使用内置 VS Code-like 配色。代码块明暗与 VS Code 一致时使用当前 VS Code 语法颜色，反向时使用内置匹配配色。HTML/PDF 导出使用最终 Preview 颜色。
+Editor 与 Preview 外观彼此独立。Live 和 Preview 使用固定的浅色/深色设计；Source 在同向外观使用 VS Code 原生配色，反向时使用内置 VS Code-like 配色。代码块明暗与 VS Code 一致时使用当前 VS Code 语法颜色，反向时使用内置匹配配色。Preview 工具栏的 **Code colors** 可将代码显示为正文纯文本色；HTML/PDF 导出会冻结并使用最终 Preview 选择与配色。
 
 常用设置包括：
 
