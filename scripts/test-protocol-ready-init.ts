@@ -58,9 +58,6 @@ const completeInit = {
   fixedBaselineActive: false,
   contentMaxWidthEnabled: true,
   longCodeBlockFoldingEnabled: true,
-  vimMode: false,
-  vimKeybindings: [],
-  vimLeader: ' ',
   findOptions: { wholeWord: false, caseSensitive: false },
   outlinePosition: 'right' as const,
   outlineVisible: true,
@@ -93,7 +90,7 @@ for (const requiredKey of [
   'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'lineNumbers', 'gitChangesGutter',
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
-  'vimMode', 'vimKeybindings', 'vimLeader', 'findOptions', 'outlinePosition', 'outlineVisible',
+  'findOptions', 'outlinePosition', 'outlineVisible',
   'outlineWidth', 'theme', 'shikiCodeBlocks', 'codeTheme'
 ]) {
   const incomplete = { ...completeInit } as Record<string, unknown>;
@@ -561,17 +558,6 @@ const themeEvent = {
 };
 assert.deepEqual(decodeHostConfigurationEvent(themeEvent), themeEvent);
 assert.deepEqual(decodeHostConfigurationEvent({ type: 'toggleMode' }), { type: 'toggleMode' });
-assert.deepEqual(decodeHostConfigurationEvent({ type: 'vimModeChanged', enabled: true }), {
-  type: 'vimModeChanged', enabled: true
-});
-assert.deepEqual(decodeHostConfigurationEvent({
-  type: 'vimKeybindingsChanged', leaderKey: ' ',
-  keybindings: [{ before: 'j', after: 'gj', mode: 'normal', recursive: false }]
-}), {
-  type: 'vimKeybindingsChanged', leaderKey: ' ',
-  keybindings: [{ before: 'j', after: 'gj', mode: 'normal', recursive: false }]
-});
-assert.equal(decodeHostConfigurationEvent({ type: 'vimModeChanged', enabled: 'yes' }), null);
 assert.deepEqual(decodeDiagnosticsChangedEvent({
   type: 'diagnosticsChanged', diagnostics: [{ from: 1, to: 3, severity: 2, message: 'Typo', source: 'meo' }]
 }), {

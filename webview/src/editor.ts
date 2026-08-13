@@ -4,7 +4,6 @@ import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
-import { vim, Vim } from '@replit/codemirror-vim';
 import { sourceHighlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect, setLongCodeBlockSearchRevealEffect } from './liveMode';
@@ -76,7 +75,6 @@ import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter'
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
 import type { GitBaselinePayload } from '../../src/protocol/git';
-import type { VimKeybindingDto } from '../../src/protocol/hostConfigurationEvents';
 import type { SelectionMenuState } from './helpers/selectionMenu';
 import { focusMermaidEditingOffset, getMermaidBlockMode, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 import { focusLatexMathEditingOffset, getLatexMathBlockMode, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
@@ -155,9 +153,6 @@ type CreateEditorOptions = {
   initialTopLineOffset?: number;
   initialLineNumbers?: boolean;
   initialGitGutter?: boolean;
-  initialVimMode?: boolean;
-  initialVimKeybindings?: readonly VimKeybindingDto[];
-  initialVimLeader?: string;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
 };
@@ -268,9 +263,6 @@ export function createEditor({
   initialTopLineOffset = 0,
   initialLineNumbers = true,
   initialGitGutter = true,
-  initialVimMode = false,
-  initialVimKeybindings = [],
-  initialVimLeader = '\\',
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory
 }: CreateEditorOptions) {
@@ -284,56 +276,10 @@ export function createEditor({
 
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
-  const vimCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
   let lineNumbersVisible = initialLineNumbers !== false;
   let gitGutterVisible = initialGitGutter !== false;
-  let vimModeEnabled = initialVimMode === true;
-  let vimKeybindings = [...initialVimKeybindings];
-  let vimLeader = initialVimLeader;
-  let appliedVimKeybindings: Array<{ before: string; mode: string }> = [];
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
-
-  const expandVimLeader = (keys: string, leaderKey: string) => keys.replace(/<leader>/gi, leaderKey || '\\');
-  const clearVimKeybindings = () => {
-    for (const { before, mode } of appliedVimKeybindings) {
-      try {
-        Vim.unmap(before, mode);
-      } catch {
-        // Ignore stale or unsupported mappings.
-      }
-    }
-    appliedVimKeybindings = [];
-  };
-  const applyVimKeybindings = (
-    bindings: Array<{ before: string; after: string; mode: string; recursive: boolean }>,
-    leaderKey: string
-  ) => {
-    clearVimKeybindings();
-    try {
-      Vim.setOption('leader', leaderKey);
-    } catch {
-      // Keep Vim usable if the embedded Vim implementation rejects the option.
-    }
-    for (const { before, after, mode, recursive } of bindings) {
-      const mappedBefore = expandVimLeader(before, leaderKey);
-      const mappedAfter = expandVimLeader(after, leaderKey);
-      try {
-        if (recursive) {
-          Vim.map(mappedBefore, mappedAfter, mode);
-        } else {
-          Vim.noremap(mappedBefore, mappedAfter, mode);
-        }
-        appliedVimKeybindings.push({ before: mappedBefore, mode });
-      } catch {
-        // Ignore individual mappings that CodeMirror Vim cannot represent.
-      }
-    }
-  };
-
-  if (initialVimMode === true) {
-    applyVimKeybindings(vimKeybindings, vimLeader);
-  }
   let applyingExternal = false;
   let imeCompositionActive = false;
   let imeCompositionChanged = false;
@@ -417,7 +363,6 @@ export function createEditor({
       publishComposedDocumentChange();
     }, 20);
   };
-  const vimExtensionsForState = () => (vimModeEnabled ? vim() : []);
   const getLineStartOffset = (docText: string, targetLineNumber: number) => {
     const targetLine = Math.max(1, Math.floor(targetLineNumber));
     if (targetLine === 1) {
@@ -1910,7 +1855,6 @@ export function createEditor({
     extensions: [
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
-      vimCompartment.of(vimExtensionsForState()),
       keymap.of([
         { key: 'Tab', run: (view) => indentListByTwoSpaces(view) || indentMore(view) },
         { key: 'Shift-Tab', run: (view) => outdentListByTwoSpaces(view) || indentLess(view) },
@@ -2766,8 +2710,7 @@ export function createEditor({
             modeCompartment.reconfigure(nextMode === 'live' ? liveModeExtensions() : sourceMode()),
             gitGutterCompartment.reconfigure(
               nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
-            ),
-            vimCompartment.reconfigure(vimExtensionsForState())
+            )
           ]
         });
         forceParsing(view, view.state.doc.length, 500);
@@ -2799,28 +2742,6 @@ export function createEditor({
       }
       gitGutterVisible = nextVisible;
       syncGitGutterVisibility();
-    },
-    setVimMode(enabled: boolean) {
-      const nextEnabled = enabled === true;
-      if (nextEnabled === vimModeEnabled) {
-        return;
-      }
-      vimModeEnabled = nextEnabled;
-      if (vimModeEnabled) {
-        applyVimKeybindings(vimKeybindings, vimLeader);
-      } else {
-        clearVimKeybindings();
-      }
-      view.dispatch({
-        effects: vimCompartment.reconfigure(vimExtensionsForState())
-      });
-    },
-    setVimKeybindings(bindings: readonly VimKeybindingDto[], leaderKey: string) {
-      vimKeybindings = [...bindings];
-      vimLeader = leaderKey;
-      if (vimModeEnabled) {
-        applyVimKeybindings(vimKeybindings, vimLeader);
-      }
     },
     insertFormat(action: EditorFormatAction, level?: EditorFormatLevel) {
       const activeTableInput = getActiveTableInput();

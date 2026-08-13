@@ -305,36 +305,9 @@ body {
   display: flex;
 }
 
-.cm-editor .cm-vim-panel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  min-height: 28px;
-  box-sizing: border-box;
-  color: var(--vscode-editor-foreground);
-  background: var(--vscode-sideBar-background);
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: var(--vscode-editor-font-size, 13px);
-}
-
-.cm-editor .cm-vim-panel input {
-  min-width: 0;
-  color: var(--vscode-editor-foreground);
-  font: inherit;
-  font-size: inherit;
-  line-height: 1.4;
-}
-
 .cm-editor .cm-panels.cm-panels-bottom {
   border-top: none !important;
   box-shadow: none !important;
-}
-
-.cm-editor .cm-vim-panel span[style*='cursor: pointer'],
-.cm-editor .cm-vim-panel span[style*='cursor:pointer'] {
-  font-size: 0.9em;
-  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
 }
 
 .find-row {

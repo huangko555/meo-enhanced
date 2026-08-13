@@ -170,10 +170,6 @@ taskBtn.dataset.action = 'task';
 taskBtn.title = 'Task';
 taskBtn.appendChild(createElement(ListTodo, { width: 18, height: 18 }));
 
-let vimModeEnabled = false;
-let vimKeybindingsState: VimKeybinding[] = [];
-let vimLeaderState = '\\';
-
 let lineNumbersVisible = true;
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
@@ -432,15 +428,6 @@ const setOutlineVisible = (visible: boolean, { post = true }: PostUpdateOptions 
   if (post && changed) {
     vscode.postMessage({ type: 'setOutlineVisible', visible: nextVisible });
   }
-};
-
-const setVimModeEnabled = (enabled: boolean) => {
-  const nextEnabled = enabled === true;
-  if (nextEnabled === vimModeEnabled) {
-    return;
-  }
-  vimModeEnabled = nextEnabled;
-  editor?.setVimMode(vimModeEnabled);
 };
 
 const toggleLineNumbers = () => {
@@ -1528,7 +1515,6 @@ saveBtn.addEventListener('click', () => {
 const shortcutHandlerContext: ShortcutHandlerContext = {
   get editor() { return editor; },
   get editableMode() { return getActiveEditableMode(); },
-  get vimModeEnabled() { return vimModeEnabled; },
   requestSave,
   openFindPanel: (target) => findPanelController.open(target),
   requestMode: (mode) => {
@@ -1563,9 +1549,6 @@ const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
     initialTopLineOffset,
     initialLineNumbers: lineNumbersVisible,
     initialGitGutter: gitChangesGutterVisible,
-    initialVimMode: vimModeEnabled,
-    initialVimKeybindings: vimKeybindingsState,
-    initialVimLeader: vimLeaderState,
     initialDiagnostics: pendingDiagnostics,
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
@@ -1744,14 +1727,6 @@ const handleInit = (message: InitMessage) => {
     gitDiffLineHighlightsEnabled = message.gitDiffLineHighlights;
     syncGitDiffLineHighlights();
   }
-  if (typeof message.vimMode === 'boolean') {
-    setVimModeEnabled(message.vimMode);
-  }
-  if (Array.isArray(message.vimKeybindings)) {
-    vimKeybindingsState = message.vimKeybindings;
-    vimLeaderState = typeof message.vimLeader === 'string' ? message.vimLeader : '\\';
-    editor?.setVimKeybindings(vimKeybindingsState, vimLeaderState);
-  }
   if (message.findOptions && typeof message.findOptions === 'object') {
     findPanelController.setSearchOptions(message.findOptions);
   }
@@ -1910,18 +1885,6 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'longCodeBlockFoldingChanged') {
     setLongCodeBlockFoldingEnabled(message.enabled, { post: false });
-    return;
-  }
-
-  if (message.type === 'vimModeChanged') {
-    setVimModeEnabled(message.enabled);
-    return;
-  }
-
-  if (message.type === 'vimKeybindingsChanged') {
-    vimKeybindingsState = [...message.keybindings];
-    vimLeaderState = message.leaderKey;
-    editor?.setVimKeybindings(vimKeybindingsState, vimLeaderState);
     return;
   }
 

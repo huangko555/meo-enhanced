@@ -36,12 +36,8 @@ import {
   getOutlineWidth,
   normalizeOutlineWidth,
   getThemeSettings,
-  getVimKeybindings,
-  getVimLeaderKey,
-  getVimModeEnabled,
   getUseVscodeThemeForCodeBlocks,
-  getCodeBlockVscodeTheme,
-  type VimKeybinding
+  getCodeBlockVscodeTheme
 } from '../shared/extensionConfig';
 import {
   openImageExternally,
@@ -317,9 +313,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       fixedBaselineActive: diffBaselineState.fixedActive,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
       longCodeBlockFoldingEnabled: getLongCodeBlockFoldingEnabled(),
-      vimMode: getVimModeEnabled(context),
-      vimKeybindings: getVimKeybindings(),
-      vimLeader: getVimLeaderKey(),
       findOptions: getFindOptions(),
       outlinePosition: getOutlinePosition(),
       outlineVisible: getOutlineVisible(context),

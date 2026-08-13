@@ -13,7 +13,6 @@ export const normalizeEol = (text: string): string => text.replace(/\r\n?/g, '\n
 export interface ShortcutHandlerContext {
   editor: any;
   editableMode: 'live' | 'source';
-  vimModeEnabled: boolean;
   requestSave: () => void;
   openFindPanel: (target: 'find' | 'replace') => void;
   requestMode: (mode: 'live' | 'source') => void;
@@ -23,7 +22,7 @@ export const handleEditorShortcut = (
   event: KeyboardEvent,
   context: ShortcutHandlerContext
 ): boolean => {
-  const { editor, editableMode, vimModeEnabled } = context;
+  const { editor, editableMode } = context;
   
   if (!editor || event.isComposing) {
     return false;
@@ -31,8 +30,6 @@ export const handleEditorShortcut = (
   
   const hasPrimaryModifier = isPrimaryModifier(event);
   const editorFocused = editor.hasFocus();
-  const vimEditorFocused = vimModeEnabled && editorFocused;
-  const vimWinsCtrlConflicts = vimEditorFocused && !isMac;
   const isPlainAltShiftChord =
     event.altKey &&
     event.shiftKey &&
@@ -47,17 +44,6 @@ export const handleEditorShortcut = (
     return true;
   }
 
-  if (
-    vimEditorFocused &&
-    (
-      isPlainAltShiftChord ||
-      (isMac && event.metaKey && !event.ctrlKey)
-    )
-  ) {
-    event.stopPropagation();
-    return false;
-  }
-
   if (hasPrimaryModifier && isShortcutKey(event, 's', 'KeyS') && !event.altKey) {
     event.preventDefault();
     event.stopPropagation();
@@ -66,9 +52,6 @@ export const handleEditorShortcut = (
   }
 
   if (hasPrimaryModifier && isShortcutKey(event, 'f', 'KeyF') && !event.altKey && !event.shiftKey) {
-    if (vimWinsCtrlConflicts) {
-      return false;
-    }
     event.preventDefault();
     event.stopPropagation();
     context.openFindPanel('find');
@@ -82,9 +65,6 @@ export const handleEditorShortcut = (
       (!isMac && isShortcutKey(event, 'h', 'KeyH') && !event.altKey)
     )
   ) {
-    if (vimWinsCtrlConflicts) {
-      return false;
-    }
     event.preventDefault();
     event.stopPropagation();
     context.openFindPanel('replace');
@@ -100,9 +80,6 @@ export const handleEditorShortcut = (
   }
 
   if (isShortcutKey(event, 'a', 'KeyA') && !event.altKey) {
-    if (vimWinsCtrlConflicts) {
-      return false;
-    }
     event.preventDefault();
     event.stopPropagation();
     editor.selectAll();
@@ -119,9 +96,6 @@ export const handleEditorShortcut = (
   const redoByShiftZ = isShortcutKey(event, 'z', 'KeyZ') && event.shiftKey;
   const redoByY = isShortcutKey(event, 'y', 'KeyY');
   if ((redoByShiftZ || redoByY) && !event.altKey) {
-    if (vimWinsCtrlConflicts && redoByY) {
-      return false;
-    }
     event.preventDefault();
     event.stopPropagation();
     editor.redo();

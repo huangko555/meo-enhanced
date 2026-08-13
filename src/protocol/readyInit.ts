@@ -3,8 +3,7 @@ import {
   decodeCodeTheme,
   decodeThemeSettings,
   type CodeThemeDto,
-  type ThemeSettingsDto,
-  type VimKeybindingDto
+  type ThemeSettingsDto
 } from './hostConfigurationEvents';
 
 export type EditorMode = 'live' | 'source' | 'preview';
@@ -37,9 +36,6 @@ export type InitMessage = {
   readonly fixedBaselineActive: boolean;
   readonly contentMaxWidthEnabled: boolean;
   readonly longCodeBlockFoldingEnabled: boolean;
-  readonly vimMode: boolean;
-  readonly vimKeybindings: readonly VimKeybindingDto[];
-  readonly vimLeader: string;
   readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean };
   readonly outlinePosition: 'left' | 'right';
   readonly outlineVisible: boolean;
@@ -61,14 +57,6 @@ function isEditorMode(value: unknown): value is EditorMode {
 
 function isPreviewAppearance(value: unknown): value is PreviewAppearance {
   return value === 'dark' || value === 'light';
-}
-
-function isVimKeybinding(value: unknown): value is VimKeybindingDto {
-  return isRecord(value)
-    && typeof value.before === 'string'
-    && typeof value.after === 'string'
-    && (value.mode === 'normal' || value.mode === 'insert' || value.mode === 'visual')
-    && typeof value.recursive === 'boolean';
 }
 
 export function decodeReadyMessage(value: unknown): ReadyMessage | null {
@@ -100,10 +88,6 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || typeof value.fixedBaselineActive !== 'boolean'
     || typeof value.contentMaxWidthEnabled !== 'boolean'
     || typeof value.longCodeBlockFoldingEnabled !== 'boolean'
-    || typeof value.vimMode !== 'boolean'
-    || !Array.isArray(value.vimKeybindings)
-    || value.vimKeybindings.some((binding) => !isVimKeybinding(binding))
-    || typeof value.vimLeader !== 'string'
     || !isRecord(value.findOptions)
     || typeof value.findOptions.wholeWord !== 'boolean'
     || typeof value.findOptions.caseSensitive !== 'boolean'

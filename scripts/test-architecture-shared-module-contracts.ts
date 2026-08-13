@@ -152,6 +152,65 @@ try {
   assert.equal(retainedOrdering.ok, true, `ordinary sorting and retained ordering terms must pass: ${retainedOrdering.output}`);
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedTableBehavior.ts'));
 
+  const removedVimCapabilityFixtures = [
+    {
+      label: 'CodeMirror Vim dependency',
+      path: 'package.json',
+      contents: JSON.stringify({ dependencies: { '@replit/codemirror-vim': '^6.3.0' } })
+    },
+    {
+      label: 'Vim dependency lock entry',
+      path: 'bun.lock',
+      contents: '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n'
+    },
+    {
+      label: 'Vim mode setting alias',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.viMode.behavior': { type: 'string' }
+      } } } })
+    },
+    {
+      label: 'VSCodeVim Host integration',
+      path: 'src/host/vimIntegration.ts',
+      contents: "export const extensionId = 'vscodevim.vim';\n"
+    },
+    {
+      label: 'Vim Protocol state aliases',
+      path: 'src/protocol/vimConfiguration.ts',
+      contents: "export type VimConfiguration = { type: 'syncViKeybindings'; vimLeader: string };\n"
+    },
+    {
+      label: 'Vim editor UI aliases',
+      path: 'webview/src/editor/vimControls.ts',
+      contents: "export const vimModePanel = { label: 'Enable Vim emulation' };\n"
+    },
+    {
+      label: 'Vim capability in public docs',
+      path: 'README.md',
+      contents: 'Enable Vi keybindings in Source mode.\n'
+    }
+  ];
+  const missedVimCapabilities: string[] = [];
+  for (const fixture of removedVimCapabilityFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (outcome.ok || !/ARCH016/.test(outcome.output)) {
+      missedVimCapabilities.push(fixture.label);
+    }
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+  assert.deepEqual(missedVimCapabilities, [], `ARCH016 missed removed Vim capabilities: ${missedVimCapabilities.join(', ')}`);
+
+  write('README.md', [
+    'Open this document in Vim before comparing the Markdown output.',
+    'Set Vim as your external editor if that is your preferred tool.',
+    ''
+  ].join('\n'));
+  const ordinaryVimText = runCheck();
+  assert.equal(ordinaryVimText.ok, true, `ordinary Vim text must remain allowed: ${ordinaryVimText.output}`);
+  rmSync(join(fixtureRoot, 'README.md'));
+
   write('README.md', 'Show Git line authors and open the matching revision.\n');
   const gitLineAuthorDocs = runCheck();
   assert.equal(gitLineAuthorDocs.ok, false, 'Git Blame aliases in public docs must be rejected');
@@ -1205,6 +1264,30 @@ try {
     cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
   });
   assert.match(unstagedAlias, /Architecture checks passed/);
+
+  writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
+  execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'bun.lock'), '# clean working-tree lock\n');
+  const stagedVimLock = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedVimLock.ok, false, 'staged ARCH016 must read removed Vim dependencies from the index');
+  assert.match(stagedVimLock.output, /ARCH016/);
+
+  execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
+  const unstagedVimLock = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(unstagedVimLock, /Architecture checks passed/);
 
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();

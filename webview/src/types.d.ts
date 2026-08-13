@@ -10,7 +10,6 @@ interface VsCodeWebviewApi {
 
 type WebviewMessage = import('../../src/protocol/messages').WebviewToHostMessage;
 
-type VimKeybinding = import('../../src/protocol/hostConfigurationEvents').VimKeybindingDto;
 type ExtensionMessage = import('../../src/protocol/messages').HostToWebviewMessage;
 
 type ThemeSettings = import('../../src/protocol/hostConfigurationEvents').ThemeSettingsDto;

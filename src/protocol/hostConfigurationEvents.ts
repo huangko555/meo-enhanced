@@ -1,10 +1,3 @@
-export type VimKeybindingDto = {
-  readonly before: string;
-  readonly after: string;
-  readonly mode: 'normal' | 'insert' | 'visual';
-  readonly recursive: boolean;
-};
-
 export type ThemeFontsDto = {
   readonly liveFont: string;
   readonly sourceFont: string;
@@ -47,8 +40,6 @@ export type CodeThemeDto = {
 
 export type HostConfigurationEvent =
   | { readonly type: 'toggleMode' }
-  | { readonly type: 'vimModeChanged'; readonly enabled: boolean }
-  | { readonly type: 'vimKeybindingsChanged'; readonly keybindings: readonly VimKeybindingDto[]; readonly leaderKey: string }
   | { readonly type: 'themeChanged'; readonly theme: ThemeSettingsDto; readonly codeTheme?: CodeThemeDto | null }
   | { readonly type: 'shikiCodeBlocksChanged'; readonly enabled: boolean; readonly codeTheme?: CodeThemeDto | null };
 
@@ -120,16 +111,6 @@ export function decodeHostConfigurationEvent(value: unknown): HostConfigurationE
   switch (value.type) {
     case 'toggleMode':
       return { type: 'toggleMode' };
-    case 'vimModeChanged':
-      return typeof value.enabled === 'boolean' ? value as HostConfigurationEvent : null;
-    case 'vimKeybindingsChanged':
-      return Array.isArray(value.keybindings)
-        && value.keybindings.every((binding) => isRecord(binding)
-          && typeof binding.before === 'string'
-          && typeof binding.after === 'string'
-          && (binding.mode === 'normal' || binding.mode === 'insert' || binding.mode === 'visual')
-          && typeof binding.recursive === 'boolean')
-        && typeof value.leaderKey === 'string' ? value as HostConfigurationEvent : null;
     case 'themeChanged':
       return decodeThemeSettings(value.theme) !== null && decodeCodeTheme(value.codeTheme) !== false
         ? value as HostConfigurationEvent : null;

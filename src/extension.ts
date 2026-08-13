@@ -31,8 +31,6 @@ import {
   GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   OUTLINE_VISIBLE_KEY,
-  VIM_MODE_BEHAVIOR_SETTING_KEY,
-  VIM_MODE_SETTING_KEY,
   CODE_BLOCKS_VSCODE_THEME_SETTING_KEY,
   getUseVscodeThemeForCodeBlocks,
   getCodeBlockVscodeTheme,
@@ -46,9 +44,6 @@ import {
   getOutlineVisible,
   getContentMaxWidthEnabled,
   getThemeSettings,
-  getVimKeybindings,
-  getVimLeaderKey,
-  getVimModeEnabled,
   isMarkdownDocumentPath,
   migrateLegacyToggleSettings,
   resetThemeSettingsToDefault
@@ -574,26 +569,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       for (const session of this.panelSessions.values()) {
         session.refreshGitBaseline({ forcePost: true, forceReload: true, delayMs: enabled ? 150 : 0 });
       }
-    }
-
-    if (
-      event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${VIM_MODE_BEHAVIOR_SETTING_KEY}`) ||
-      event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${VIM_MODE_SETTING_KEY}`) ||
-      event.affectsConfiguration('vim.enable')
-    ) {
-      this.broadcast({ type: 'vimModeChanged', enabled: getVimModeEnabled(this.context) });
-    }
-
-    if (
-      event.affectsConfiguration('vim.normalModeKeyBindings') ||
-      event.affectsConfiguration('vim.normalModeKeyBindingsNonRecursive') ||
-      event.affectsConfiguration('vim.insertModeKeyBindings') ||
-      event.affectsConfiguration('vim.insertModeKeyBindingsNonRecursive') ||
-      event.affectsConfiguration('vim.visualModeKeyBindings') ||
-      event.affectsConfiguration('vim.visualModeKeyBindingsNonRecursive') ||
-      event.affectsConfiguration('vim.leader')
-    ) {
-      this.broadcast({ type: 'vimKeybindingsChanged', keybindings: getVimKeybindings(), leaderKey: getVimLeaderKey() });
     }
 
     if (

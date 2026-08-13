@@ -18,6 +18,7 @@ function indexPaths(): string[] {
 function isArchitectureTextPath(path: string): boolean {
   return path === 'scripts/architecture-baseline.json' ||
     path === 'package.json' ||
+    /^(?:bun\.lockb?|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i.test(path) ||
     /^README(?:\.[^/]+)?\.md$/i.test(path) ||
     /^docs\/.*\.md$/i.test(path) ||
     /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path);
@@ -120,7 +121,11 @@ function projectFilesForCapabilityGuard(): string[] {
     }
   };
   for (const entry of readdirSync(repoRoot)) {
-    if (entry === 'package.json' || /^README(?:\.[^/]+)?\.md$/i.test(entry)) result.push(entry);
+    if (
+      entry === 'package.json' ||
+      /^(?:bun\.lockb?|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i.test(entry) ||
+      /^README(?:\.[^/]+)?\.md$/i.test(entry)
+    ) result.push(entry);
   }
   for (const root of ['docs', 'src', 'webview/src']) visit(join(repoRoot, root));
   return result;
@@ -1689,6 +1694,47 @@ for (const path of spellDiagnosticScope) {
   for (let index = 0; index < lines.length; index += 1) {
     if (hasRemovedSpellDiagnosticCapability(lines[index], path)) {
       failures.push(`ARCH015 已删除的 MEO 拼写检查或诊断建议能力重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
+// Product deletion guard: embedded Vim/Vi mode and editor-integration capabilities must stay absent.
+// Historical changelogs and ordinary references to using Vim remain valid documentation.
+const vimCapabilityScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^(?:bun\.lockb?|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i.test(path) ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedVimIntegrationTokens = [
+  /(?:@replit\/)?codemirror[-_. /]?vim/i,
+  /vscodevim\.vim/i,
+  /asvetliakov\.vscode[-_.]?neovim/i,
+  /cm[-_. ]?vim[-_. ]?panel/i,
+  /\b(?:apply|disable|enable|set|sync|toggle)(?:Vi|Vim)(?:\b|[A-Z0-9_])/,
+  /\b(?:apply|disable|enable|set|sync|toggle)[-_.](?:vi|vim)\b/i,
+  /\b(?:vi|vim)[-_.](?:disabled|enabled)\b/i
+];
+const hasRemovedVimCapability = (text: string): boolean => {
+  if (removedVimIntegrationTokens.some((pattern) => pattern.test(text))) return true;
+  const words = normalizeCapabilityWords(text);
+  for (let start = 0; start < words.length; start += 1) {
+    const window = words.slice(start, start + 6);
+    const wordSet = new Set(window);
+    if (!wordSet.has('vim') && !wordSet.has('vi')) continue;
+    const hasCapabilityNoun = window.some((word) => (
+      /^(?:emulation|integration|keybinding|keybindings|leader|map|mapping|mappings|mode|panel)$/.test(word)
+    ));
+    if (hasCapabilityNoun) return true;
+  }
+  return false;
+};
+for (const path of vimCapabilityScope) {
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (hasRemovedVimCapability(lines[index])) {
+      failures.push(`ARCH016 已删除的 Vim 模式或编辑器集成能力重新出现: ${path}:${index + 1}`);
     }
   }
 }
