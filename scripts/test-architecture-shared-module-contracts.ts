@@ -584,6 +584,48 @@ try {
 
   const removedHeadingFoldAndOutlineReorderFixtures = [
     {
+      label: 'heading collapsed state owner',
+      path: 'webview/src/editor/heading.ts',
+      contents: 'export const headingCollapsedState = new Map();\n'
+    },
+    {
+      label: 'heading folded state owner',
+      path: 'webview/src/editor/heading.ts',
+      contents: 'export const headingFoldedState = new Map();\n'
+    },
+    {
+      label: 'heading expanded state owner',
+      path: 'webview/src/editor/heading.ts',
+      contents: 'export const headingExpandedState = new Map();\n'
+    },
+    {
+      label: 'Markdown section folded state owner',
+      path: 'webview/src/editor/markdown.ts',
+      contents: 'export const markdownSectionFoldedState = new Map();\n'
+    },
+    {
+      label: 'dotted heading collapsed state setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.heading.collapsed.state': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab Markdown section folded state Host action',
+      path: 'src/host/markdown.ts',
+      contents: "export const capability = 'markdown-section-folded-state';\n"
+    },
+    {
+      label: 'retained outline collapse with removed Markdown section fold',
+      path: 'webview/src/editor/outline.ts',
+      contents: "export const capabilities = ['outline-heading-collapse', markdownSectionFoldedState];\n"
+    },
+    {
+      label: 'retained outline collapse with removed heading fold',
+      path: 'webview/src/editor/outline.ts',
+      contents: "export const capabilities = ['outline-heading-collapse', headingFoldedState];\n"
+    },
+    {
       label: 'outline section reordering owner',
       path: 'webview/src/helpers/outline.ts',
       contents: 'export const outlineSectionReordering = () => undefined;\n'
@@ -838,7 +880,40 @@ try {
   );
   rmSync(join(fixtureRoot, 'webview', 'src', 'editor', 'retainedFolding.ts'));
 
+  write('webview/src/styles.css', '.cm-line.meo-md-heading-collapsed { opacity: 0.95; }\n');
+  const retainedHeadingSyntaxClass = runCheck();
+  assert.equal(
+    retainedHeadingSyntaxClass.ok,
+    true,
+    `heading syntax classes without folding capability state must remain allowed: ${retainedHeadingSyntaxClass.output}`
+  );
+  rmSync(join(fixtureRoot, 'webview', 'src', 'styles.css'));
+
   const retainedOutlineCollapseFixtures = [
+    {
+      label: 'kebab outline heading collapse capability',
+      path: 'webview/src/editor/outline-heading-collapse.ts',
+      contents: 'export const outlineTreeState = new Set();\n'
+    },
+    {
+      label: 'dotted outline heading folding controller',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.outline.heading.folding.controller': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'outline heading collapsed state owner',
+      path: 'webview/src/editor/outline.ts',
+      contents: 'export const outlineHeadingCollapsedState = new Set();\n'
+    },
+    {
+      label: 'dotted outline node expanded state',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.outline.node.expanded.state': { type: 'boolean' }
+      } } } })
+    },
     {
       label: 'outline heading collapse owner',
       path: 'webview/src/editor/outlineHeadingCollapse.ts',
@@ -2097,7 +2172,7 @@ try {
   execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });
   writeFileSync(
     join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
-    'export const navigateOutline = () => undefined;\n'
+    'export const headingFoldedState = new Map();\n'
   );
   const stagedOutlineReorderOwner = (() => {
     try {
@@ -2113,15 +2188,42 @@ try {
   assert.equal(stagedOutlineReorderOwner.ok, false, 'staged ARCH019 must reject outline item dragging owners from the index');
   assert.match(stagedOutlineReorderOwner.output, /ARCH019/);
 
+  writeFileSync(
+    join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
+    'export const headingFoldedState = new Map();\n'
+  );
   execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });
   writeFileSync(
     join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
-    'export const toggleHeadingCollapse = () => undefined;\n'
+    'export const navigateOutline = () => undefined;\n'
   );
-  const unstagedHeadingCollapseOwner = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+  const stagedHeadingFoldedState = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedHeadingFoldedState.ok, false, 'staged ARCH019 must reject heading folded state owners from the index');
+  assert.match(stagedHeadingFoldedState.output, /ARCH019/);
+
+  writeFileSync(
+    join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
+    "export const capability = 'outline-heading-collapse';\n"
+  );
+  execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });
+  writeFileSync(
+    join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
+    'export const headingFoldedState = new Map();\n'
+  );
+  const stagedRetainedOutlineCollapse = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
     cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
   });
-  assert.match(unstagedHeadingCollapseOwner, /Architecture checks passed/);
+  assert.match(stagedRetainedOutlineCollapse, /Architecture checks passed/);
 
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();
