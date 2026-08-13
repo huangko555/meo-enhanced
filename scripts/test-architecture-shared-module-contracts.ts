@@ -34,6 +34,16 @@ try {
   const architectureSource = readFileSync(join(fixtureRoot, 'scripts', 'check-architecture.ts'), 'utf8');
   assert.match(architectureSource, /cat-file', '--batch/);
   assert.doesNotMatch(architectureSource, /runGit\(\['show'/, 'staged reads must not spawn Git once per file');
+  assert.doesNotMatch(
+    architectureSource,
+    /new Set<ContinueExit>/,
+    'ARCH015 must not deduplicate repeatedly indexed continue exits inside each event query'
+  );
+  assert.doesNotMatch(
+    architectureSource,
+    /for \(const prefix of pathMetadata\.prefixes\)[\s\S]{0,180}(?:push|add)\(exit\)/,
+    'ARCH015 must index each continue exit once instead of copying it into every path prefix'
+  );
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: [],
     sharedModuleContracts: [{
@@ -452,6 +462,18 @@ try {
       expectedLine: 3
     },
     {
+      label: 'same-target continue in finally preserves target backedge',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally { continue; }\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'break from target-internal labeled block preserves target backedge',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    innerBlock: { break innerBlock; }\n  }\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'do-while-loop carried non-DOM receiver state',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\ndo {\n  field.spellcheck = true;\n  field = settings;\n} while (enabled);\n",
@@ -817,6 +839,36 @@ try {
       label: 'throwing finally excludes its non-DOM state from loop entry',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { continue; } finally {\n    field = settings;\n    throw new Error('stop');\n  }\n}\n"
+    },
+    {
+      label: 'throwing finally removes ancestor non-DOM state from loop entry',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  field = settings;\n  try { continue; } finally { throw new Error('stop'); }\n}\n"
+    },
+    {
+      label: 'returning finally removes ancestor non-DOM state from loop entry',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "function update() {\n  let field = document.createElement('input');\n  while (ready) {\n    field.spellcheck = true;\n    field = settings;\n    try { continue; } finally { return; }\n  }\n}\n"
+    },
+    {
+      label: 'target break in finally removes ancestor non-DOM state from loop entry',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  field = settings;\n  try { continue; } finally { break; }\n}\n"
+    },
+    {
+      label: 'outer continue in finally overrides inner loop backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field = document.createElement('input');\n  while (innerReady) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally { continue outer; }\n  }\n}\n"
+    },
+    {
+      label: 'break to enclosing block overrides contained loop backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouterBlock: {\n  while (ready) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally { break outerBlock; }\n  }\n}\n"
+    },
+    {
+      label: 'break to enclosing outer loop overrides inner loop backedge',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field = document.createElement('input');\n  while (innerReady) {\n    field.spellcheck = true;\n    try { field = settings; continue; } finally { break outer; }\n  }\n}\n"
     },
     {
       label: 'for-of iteration binding resets before each loop body',
