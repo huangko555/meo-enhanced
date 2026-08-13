@@ -584,6 +584,50 @@ try {
 
   const removedHeadingFoldAndOutlineReorderFixtures = [
     {
+      label: 'outline section reordering owner',
+      path: 'webview/src/helpers/outline.ts',
+      contents: 'export const outlineSectionReordering = () => undefined;\n'
+    },
+    {
+      label: 'outline item dragging owner',
+      path: 'webview/src/helpers/outline.ts',
+      contents: 'export const outlineItemDragging = () => undefined;\n'
+    },
+    {
+      label: 'dotted outline node moving setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.outline.node.moving': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab outline section dropping Host action',
+      path: 'src/host/outline.ts',
+      contents: "export const capability = 'outline-section-dropping';\n"
+    },
+    {
+      label: 'outline node moved Protocol event',
+      path: 'src/protocol/outline.ts',
+      contents: "export type OutlineEvent = { type: 'outlineNodeMoved' };\n"
+    },
+    {
+      label: 'outline item dragged documentation',
+      path: 'docs/outline.md',
+      contents: 'The outline item is dragged into a new document position.\n'
+    },
+    {
+      label: 'outline section reordered owner',
+      path: 'webview/src/helpers/outline.ts',
+      contents: 'export const outlineSectionReordered = () => undefined;\n'
+    },
+    {
+      label: 'dotted outline node dropped setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.outline.node.dropped': { type: 'boolean' }
+      } } } })
+    },
+    {
       label: 'bare heading folding owner',
       path: 'webview/src/editor/heading.ts',
       contents: 'export const headingFolding = new Map();\n'
@@ -793,6 +837,41 @@ try {
     `HTML details, code folding, outline tree collapse and unrelated drag must remain allowed: ${retainedFoldingAndDrag.output}`
   );
   rmSync(join(fixtureRoot, 'webview', 'src', 'editor', 'retainedFolding.ts'));
+
+  const retainedOutlineCollapseFixtures = [
+    {
+      label: 'outline heading collapse owner',
+      path: 'webview/src/editor/outlineHeadingCollapse.ts',
+      contents: 'export const outlineHeadingCollapse = new Set();\n'
+    },
+    {
+      label: 'outline heading folding controller',
+      path: 'webview/src/editor/outline.ts',
+      contents: 'export const outlineHeadingFoldingController = {};\n'
+    },
+    {
+      label: 'ordinary outline heading collapse documentation',
+      path: 'docs/outline.md',
+      contents: 'Use outline heading collapse to hide children in the navigation tree.\n'
+    },
+    {
+      label: 'outline section collapse owner',
+      path: 'webview/src/editor/outline.ts',
+      contents: 'export const outlineSectionCollapse = new Set();\n'
+    }
+  ];
+  const rejectedRetainedOutlineCollapse: string[] = [];
+  for (const fixture of retainedOutlineCollapseFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (!outcome.ok) rejectedRetainedOutlineCollapse.push(fixture.label);
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+  assert.deepEqual(
+    rejectedRetainedOutlineCollapse,
+    [],
+    `ARCH019 rejected retained outline tree collapse: ${rejectedRetainedOutlineCollapse.join(', ')}`
+  );
 
   write('webview/src/editor/standardMermaid.ts', [
     "export const mermaidLanguage = 'mermaid';",
@@ -2013,7 +2092,7 @@ try {
   mkdirSync(join(stagedRoot, 'src', 'host'), { recursive: true });
   writeFileSync(
     join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
-    'export const dragOutlineItem = () => true;\n'
+    'export const outlineItemDragging = () => true;\n'
   );
   execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });
   writeFileSync(
@@ -2031,7 +2110,7 @@ try {
       return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
     }
   })();
-  assert.equal(stagedOutlineReorderOwner.ok, false, 'staged ARCH019 must reject outline item drag owners from the index');
+  assert.equal(stagedOutlineReorderOwner.ok, false, 'staged ARCH019 must reject outline item dragging owners from the index');
   assert.match(stagedOutlineReorderOwner.output, /ARCH019/);
 
   execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });

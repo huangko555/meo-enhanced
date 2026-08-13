@@ -1900,15 +1900,14 @@ const headingFoldAndOutlineReorderScope = projectFilesForCapabilityGuard().filte
   /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
 ));
 const removedHeadingFoldAndOutlineReorderTokens = [
-  /(?:Heading|heading)(?:Folding|Collapse)(?:\b|[A-Z0-9_])/,
   /\b(?:headingFold|foldHeading|collapseHeading|collapsedHeading)(?:\b|[A-Z0-9_])/,
   /\b(?:fold|collapse)MarkdownSections?(?:\b|[A-Z0-9_])|\bmarkdownSections?(?:Fold|Collapse)(?:\b|[A-Z0-9_])/,
-  /\b(?:Outline|outline)(?:Section|Item|Node)(?:Drag|Drop|Move|Reorder)(?:\b|[A-Z0-9_])/,
-  /\b(?:drag|drop|move|reorder)Outline(?:Section|Item|Node)(?:\b|[A-Z0-9_])/,
+  /\b(?:Outline|outline)(?:Heading|Section|Item|Node)(?:Drag|Dragging|Dragged|Drop|Dropping|Dropped|Move|Moving|Moved|Reorder|Reordering|Reordered)(?:\b|[A-Z0-9_])/,
+  /\b(?:drag|dragging|dragged|drop|dropping|dropped|move|moving|moved|reorder|reordering|reordered)Outline(?:Heading|Section|Item|Node)(?:\b|[A-Z0-9_])/,
   /\b(?:toggle|expand|restore|get|set)[-_.](?:markdown[-_.])?heading[-_.](?:collapse|fold)(?:[-_.](?:state|effect|gutter|button|sections?))?\b/i,
   /\b(?:heading[-_.](?:collapse|fold(?:ing)?)|(?:collapse|fold)[-_.]heading)(?:[-_.](?:enabled|state|effect|gutter|button|controller|sections?))?\b/i,
   /\b(?:markdown[-_.]sections?[-_.](?:collapse|fold)|(?:collapse|fold)[-_.]markdown[-_.]sections?)(?:[-_.](?:enabled|state|effect|button|controller))?\b/i,
-  /\b(?:outline[-_.](?:sections?|items?|nodes?)[-_.](?:drag|drop|move|reorder)|(?:drag|drop|move|reorder)[-_.]outline[-_.](?:sections?|items?|nodes?))(?:[-_.](?:enabled|state|effect|indicator))?\b/i,
+  /\b(?:outline[-_.](?:headings?|sections?|items?|nodes?)[-_.](?:drag|dragging|dragged|drop|dropping|dropped|move|moving|moved|reorder|reordering|reordered)|(?:drag|dragging|dragged|drop|dropping|dropped|move|moving|moved|reorder|reordering|reordered)[-_.]outline[-_.](?:headings?|sections?|items?|nodes?))(?:[-_.](?:enabled|state|effect|indicator))?\b/i,
   /meo-[A-Za-z0-9_-]*heading[-_]?fold[A-Za-z0-9_-]*|meo-md-fold-(?:gutter|toggle|chevron)/i,
   /\b(?:moveHeadingSection|reorderOutlineHeading|outlineDragState|outlineDropCandidate|outlineHeadingMove|applyOutlineHeadingMove)(?:\b|[A-Z0-9_])/,
   /\b(?:move|reorder|drag|drop)[-_.]outline[-_.]headings?(?:[-_.]sections?)?\b/i,
@@ -1917,23 +1916,39 @@ const removedHeadingFoldAndOutlineReorderTokens = [
 ];
 const hasRemovedHeadingFoldOrOutlineReorderCapability = (text: string, path: string): boolean => {
   if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
-  if (removedHeadingFoldAndOutlineReorderTokens.some((pattern) => pattern.test(text))) return true;
   const words = normalizeCapabilityWords(text);
-  for (let start = 0; start < words.length; start += 1) {
-    const window = words.slice(start, start + 10);
+  for (let anchor = 0; anchor < words.length; anchor += 1) {
+    if (!['heading', 'headings', 'markdown', 'outline'].includes(words[anchor])) continue;
+    const window = words.slice(Math.max(0, anchor - 9), anchor + 10);
     const wordSet = new Set(window);
     const hasHeading = wordSet.has('heading') || wordSet.has('headings');
+    const hasOutline = wordSet.has('outline');
+    const hasFoldAction = ['collapse', 'expand', 'fold', 'folding'].some((word) => wordSet.has(word));
+    const hasOutlineTreeSubject = hasHeading || ['node', 'nodes', 'tree', 'children', 'key', 'keys', 'section', 'sections']
+      .some((word) => wordSet.has(word));
+    const outlineActionWords = [
+      'drag', 'dragging', 'dragged',
+      'drop', 'dropping', 'dropped',
+      'move', 'moving', 'moved',
+      'reorder', 'reordering', 'reordered'
+    ];
+    const hasOutlineDocumentAction = outlineActionWords.some((word) => wordSet.has(word));
+    const hasRemovedHeadingContext = ['custom', 'effect', 'gutter', 'markdown', 'state', 'toggle']
+      .some((word) => wordSet.has(word));
+    const isRetainedOutlineTreeCollapse = hasOutline && hasOutlineTreeSubject && hasFoldAction
+      && !hasRemovedHeadingContext && !hasOutlineDocumentAction;
+    if (isRetainedOutlineTreeCollapse) continue;
     const hasHeadingFold = hasHeading
-      && (wordSet.has('fold') || wordSet.has('folding') || wordSet.has('collapse'));
+      && hasFoldAction;
     const hasMarkdownSectionFold = wordSet.has('markdown')
       && (wordSet.has('section') || wordSet.has('sections'))
       && (wordSet.has('fold') || wordSet.has('folding') || wordSet.has('collapse'));
     const hasOutlineSubject = hasHeading || ['section', 'sections', 'item', 'items', 'node', 'nodes']
       .some((word) => wordSet.has(word));
-    const hasOutlineReorder = wordSet.has('outline') && hasOutlineSubject
-      && ['drag', 'drop', 'move', 'reorder'].some((word) => wordSet.has(word));
+    const hasOutlineReorder = hasOutline && hasOutlineSubject && hasOutlineDocumentAction;
     if (hasHeadingFold || hasMarkdownSectionFold || hasOutlineReorder) return true;
   }
+  if (removedHeadingFoldAndOutlineReorderTokens.some((pattern) => pattern.test(text))) return true;
   return false;
 };
 for (const path of headingFoldAndOutlineReorderScope) {
