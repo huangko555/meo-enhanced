@@ -455,14 +455,24 @@ try {
 
   const removedMermaidColonFixtures = [
     {
-      label: 'Mermaid colon parser and cache',
+      label: 'Mermaid colon block cache',
       path: 'webview/src/helpers/mermaidColonBlocks.ts',
-      contents: 'export const mermaidColonBlockCache = new WeakMap();\nexport const getMermaidColonBlocks = () => [];\n'
+      contents: 'export const mermaidColonBlockCache = new WeakMap();\n'
+    },
+    {
+      label: 'Mermaid colon blocks accessor',
+      path: 'webview/src/helpers/mermaidColonBlocks.ts',
+      contents: 'export const getMermaidColonBlocks = () => [];\n'
     },
     {
       label: 'Mermaid colon fence parser alias',
       path: 'src/export/markdownCompatibility.ts',
       contents: 'export const parseMermaidColonFenceOpenLine = (line: string) => line;\n'
+    },
+    {
+      label: 'Mermaid colon fence detection alias',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: 'export const detectMermaidColonFences = (markdown: string) => markdown;\n'
     },
     {
       label: 'Mermaid colon export normalization',
@@ -485,6 +495,36 @@ try {
       contents: 'export const renderColonMermaidBlock = (source: string) => source;\n'
     },
     {
+      label: 'Mermaid colon Source action',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: 'export const renderMermaidColonBlockInSource = () => undefined;\n'
+    },
+    {
+      label: 'Mermaid colon Live action',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: 'export const renderMermaidColonContainerInLive = () => undefined;\n'
+    },
+    {
+      label: 'Mermaid colon Preview action',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: 'export const previewMermaidColonFence = () => undefined;\n'
+    },
+    {
+      label: 'Mermaid colon export action',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: 'export const exportMermaidColonBlock = () => undefined;\n'
+    },
+    {
+      label: 'Mermaid colon dotted alias',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: "export const dottedCapability = 'mermaid.colon.fence';\n"
+    },
+    {
+      label: 'Mermaid colon kebab alias',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: "export const kebabCapability = 'detect-mermaid-colon-containers';\n"
+    },
+    {
       label: 'Mermaid colon setting',
       path: 'package.json',
       contents: JSON.stringify({ contributes: { configuration: { properties: {
@@ -505,6 +545,11 @@ try {
       label: 'Mermaid colon documentation',
       path: 'docs/mermaid.md',
       contents: 'MEO supports :::mermaid blocks in Live and Preview.\n'
+    },
+    {
+      label: 'Mermaid colon semantic capability documentation',
+      path: 'docs/mermaid.md',
+      contents: 'Render Mermaid colon containers in Live and export.\n'
     }
   ];
   const missedMermaidColonCapabilities: string[] = [];
@@ -525,11 +570,13 @@ try {
   write('webview/src/editor/standardMermaid.ts', [
     "export const mermaidLanguage = 'mermaid';",
     "export const fencedMermaid = ['```mermaid', 'flowchart LR', '```'].join('\\n');",
+    "export const mermaidColonLabel = 'Node: ready';",
     "export const ordinaryColonContainer = '::: warning';",
     ''
   ].join('\n'));
   write('docs/standard-mermaid.md', [
-    'Use standard fenced Mermaid code blocks.',
+    'Use standard fenced Mermaid blocks; ordinary colon text remains ordinary Markdown.',
+    'Standard Mermaid diagrams allow colon syntax inside labels.',
     'Ordinary colon container text remains ordinary Markdown.',
     ''
   ].join('\n'));

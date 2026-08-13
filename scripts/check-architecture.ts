@@ -1832,23 +1832,29 @@ const mermaidColonCapabilityScope = projectFilesForCapabilityGuard().filter((pat
 ));
 const removedMermaidColonTokens = [
   /:::mermaid\b/i,
-  /\b(?:MermaidColon|ColonMermaid)(?:Block|Blocks|Container|Containers|Decoration|Decorations|Fence|Fences|Range|Ranges|Syntax)?(?:\b|[A-Z0-9_])/,
-  /\b(?:mermaidColon|colonMermaid)(?:Block|Blocks|Container|Containers|Decoration|Decorations|Fence|Fences|Range|Ranges|Syntax)?(?:\b|[A-Z0-9_])/,
-  /\b(?:collect|detect|get|normalize|parse|render|scan)(?:MermaidColon|ColonMermaid)(?:Block|Blocks|Container|Containers|Fence|Fences|Range|Ranges|Syntax)?(?:\b|[A-Z0-9_])/,
-  /\b(?:collect|detect|get|normalize|parse|render|scan)[-_.](?:mermaid[-_.]colon|colon[-_.]mermaid)(?:[-_.](?:blocks?|containers?|fences?|ranges?|syntax))?\b/i,
+  /\b(?:MermaidColon|ColonMermaid)(?:Block|Blocks|Container|Containers|Decoration|Decorations|Fence|Fences|Parser|Range|Ranges)(?:\b|[A-Z0-9_])/,
+  /\b(?:mermaidColon|colonMermaid)(?:Block|Blocks|Container|Containers|Decoration|Decorations|Fence|Fences|Parser|Range|Ranges)(?:\b|[A-Z0-9_])/,
+  /\b(?:collect|detect|enable|export|get|normalize|parse|preview|render|scan)(?:MermaidColon|ColonMermaid)(?:(?:Block|Blocks|Container|Containers|Fence|Fences|Parser|Range|Ranges|Syntax)(?:\b|[A-Z0-9_])|\b|_)/,
+  /\b(?:collect|detect|enable|export|get|normalize|parse|preview|render|scan)[-_.](?:mermaid[-_.]colon|colon[-_.]mermaid)(?:[-_.](?:blocks?|containers?|fences?|ranges?|syntax))?\b/i,
   /meo-[A-Za-z0-9_-]*colon[-_]?fence[A-Za-z0-9_-]*/i
 ];
 const hasRemovedMermaidColonCapability = (text: string, path: string): boolean => {
   if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
   if (removedMermaidColonTokens.some((pattern) => pattern.test(text))) return true;
   const words = normalizeCapabilityWords(text);
-  for (let start = 0; start < words.length; start += 1) {
-    const window = words.slice(start, start + 10);
-    const wordSet = new Set(window);
-    if (!wordSet.has('mermaid') || !wordSet.has('colon')) continue;
-    if (window.some((word) => (
-      /^(?:block|blocks|cache|container|containers|decoration|decorations|detect|detection|export|fence|fences|host|live|normalize|normalization|parse|parser|preview|protocol|range|ranges|render|renderer|setting|settings|source|syntax)$/.test(word)
-    ))) return true;
+  const mermaidPositions = words.flatMap((word, index) => word === 'mermaid' ? [index] : []);
+  const colonPositions = words.flatMap((word, index) => word === 'colon' ? [index] : []);
+  for (const mermaidPosition of mermaidPositions) {
+    for (const colonPosition of colonPositions) {
+      if (Math.abs(mermaidPosition - colonPosition) > 2) continue;
+      const from = Math.max(0, Math.min(mermaidPosition, colonPosition) - 3);
+      const to = Math.min(words.length, Math.max(mermaidPosition, colonPosition) + 4);
+      const capabilityWords = words.slice(from, to);
+      if (capabilityWords.some((word) => (
+        /^(?:block|blocks|cache|container|containers|decoration|decorations|fence|fences|parser|range|ranges)$/.test(word) ||
+        /^(?:collect|detect|enable|get|normalize|parse|preview|render|scan)$/.test(word)
+      ))) return true;
+    }
   }
   return false;
 };
