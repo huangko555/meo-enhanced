@@ -36,14 +36,12 @@ try {
   assert.doesNotMatch(architectureSource, /runGit\(\['show'/, 'staged reads must not spawn Git once per file');
   assert.doesNotMatch(
     architectureSource,
-    /new Set<ContinueExit>/,
-    'ARCH015 must not deduplicate repeatedly indexed continue exits inside each event query'
+    /continueExitsForEvent|hasBlockingContinueBetween|new Set<ContinueExit>/,
+    'ARCH015 event processing must query an owner summary instead of scanning continue exits'
   );
-  assert.doesNotMatch(
-    architectureSource,
-    /for \(const prefix of pathMetadata\.prefixes\)[\s\S]{0,180}(?:push|add)\(exit\)/,
-    'ARCH015 must index each continue exit once instead of copying it into every path prefix'
-  );
+  assert.match(architectureSource, /blockerPositionsByAncestorPath: Map<string, number\[]>/);
+  assert.match(architectureSource, /positions\.sort\(\(left, right\) => left - right\)/);
+  assert.match(architectureSource, /const firstPositionAfter =/);
   write('scripts/architecture-baseline.json', JSON.stringify({
     targetRoots: [],
     sharedModuleContracts: [{
@@ -432,6 +430,18 @@ try {
       expectedLine: 3
     },
     {
+      label: 'nested conditional continue bypasses later ancestor DOM',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (flag) {\n    field = settings;\n    if (skip) continue;\n  }\n  field = document.createElement('input');\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'position ordering finds earlier branch continue before later ancestor continue',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (flag) { field = settings; continue; }\n  field = document.createElement('input');\n  continue;\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'unlabeled continue only carries into nearest inner loop',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  while (innerReady) {\n    field.spellcheck = true;\n    if (disabled) { field = settings; continue; }\n    field = document.createElement('input');\n  }\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n",
@@ -779,6 +789,11 @@ try {
       label: 'nested-loop DOM recovery only kills its own carried state',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  field = settings;\n  while (innerReady) {\n    field = document.createElement('input');\n    field.spellcheck = true;\n    break;\n  }\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n"
+    },
+    {
+      label: 'continue after ancestor DOM does not bypass recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (flag) field = settings;\n  field = document.createElement('input');\n  continue;\n}\n"
     },
     {
       label: 'unlabeled inner continue preserves outer ancestor DOM kill',
