@@ -53,30 +53,97 @@ function scanFunction(text: string, openIndex: number): number {
   return text.length;
 }
 
-function isEscaped(text: string, index: number): boolean {
-  let slashCount = 0;
-  for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) slashCount += 1;
-  return slashCount % 2 === 1;
+interface BacktickRun {
+  from: number;
+  to: number;
+  length: number;
 }
 
-function scanBacktickCode(text: string, start: number): number | null {
-  if (isEscaped(text, start)) return null;
-  let markerLength = 1;
-  while (text[start + markerLength] === '`') markerLength += 1;
-  let cursor = start + markerLength;
+interface DelimiterSummary {
+  codeEndByStart: ReadonlyMap<number, number>;
+  linkEndByOpen: ReadonlyMap<number, number>;
+}
+
+function collectBacktickRuns(text: string): BacktickRun[] {
+  const runs: BacktickRun[] = [];
+  let precedingSlashes = 0;
+  let cursor = 0;
   while (cursor < text.length) {
-    if (text[cursor] !== '`') {
+    if (text[cursor] === '\\') {
+      precedingSlashes += 1;
       cursor += 1;
       continue;
     }
-    let closingLength = 1;
-    while (text[cursor + closingLength] === '`') closingLength += 1;
-    if (closingLength === markerLength) return cursor + closingLength;
-    cursor += closingLength;
+    if (text[cursor] !== '`') {
+      precedingSlashes = 0;
+      cursor += 1;
+      continue;
+    }
+    const from = cursor;
+    while (text[cursor] === '`') cursor += 1;
+    if (precedingSlashes % 2 === 0) {
+      runs.push({ from, to: cursor, length: cursor - from });
+    }
+    precedingSlashes = 0;
   }
-  // CommonMark treats an unmatched inline marker as ordinary text. Fenced
-  // blocks remain owned by the consumers' Markdown syntax/token layers.
-  return null;
+  return runs;
+}
+
+function collectDelimiterSummary(text: string): DelimiterSummary {
+  const runs = collectBacktickRuns(text);
+  const nextRunByLength = new Map<number, number>();
+  const nextMatchingRun = new Array<number>(runs.length).fill(-1);
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    nextMatchingRun[index] = nextRunByLength.get(runs[index].length) ?? -1;
+    nextRunByLength.set(runs[index].length, index);
+  }
+
+  const codeEndByStart = new Map<number, number>();
+  const codeRanges: ExcludedRange[] = [];
+  for (let index = 0; index < runs.length;) {
+    const closeIndex = nextMatchingRun[index];
+    if (closeIndex < 0) {
+      index += 1;
+      continue;
+    }
+    const range = { from: runs[index].from, to: runs[closeIndex].to };
+    codeRanges.push(range);
+    codeEndByStart.set(range.from, range.to);
+    index = closeIndex + 1;
+  }
+
+  const matchingParenthesisEnd = new Map<number, number>();
+  const openParentheses: number[] = [];
+  let codeIndex = 0;
+  let precedingSlashes = 0;
+  for (let cursor = 0; cursor < text.length; cursor += 1) {
+    const codeRange = codeRanges[codeIndex];
+    if (codeRange && cursor === codeRange.from) {
+      cursor = codeRange.to - 1;
+      codeIndex += 1;
+      precedingSlashes = 0;
+      continue;
+    }
+    const character = text[cursor];
+    if (character === '\\') {
+      precedingSlashes += 1;
+      continue;
+    }
+    const escaped = precedingSlashes % 2 === 1;
+    precedingSlashes = 0;
+    if (escaped) continue;
+    if (character === '(') openParentheses.push(cursor);
+    else if (character === ')') {
+      const open = openParentheses.pop();
+      if (open !== undefined) matchingParenthesisEnd.set(open, cursor + 1);
+    }
+  }
+
+  const linkEndByOpen = new Map<number, number>();
+  for (const [open, to] of matchingParenthesisEnd) {
+    if (text[open - 1] === ']') linkEndByOpen.set(open, to);
+  }
+  return { codeEndByStart, linkEndByOpen };
 }
 
 function scanHtmlTag(text: string, start: number): number {
@@ -99,35 +166,17 @@ function scanAbsoluteUrl(text: string, start: number): number {
   return cursor;
 }
 
-function scanMarkdownLinkDestination(text: string, openIndex: number): number | null {
-  let depth = 1;
-  let cursor = openIndex + 1;
-  while (cursor < text.length) {
-    if (text[cursor] === '\\') {
-      cursor += 2;
-      continue;
-    }
-    if (text[cursor] === '(') depth += 1;
-    if (text[cursor] === ')' && --depth === 0) return cursor + 1;
-    cursor += 1;
-  }
-  return null;
-}
-
 /** Builds sorted, non-overlapping ranges that cannot own standalone swatches. */
 function collectExcludedRanges(text: string): ExcludedRange[] {
   const ranges: ExcludedRange[] = [];
+  const delimiters = collectDelimiterSummary(text);
   let cursor = 0;
 
   while (cursor < text.length) {
-    if (text[cursor] === '`') {
-      const to = scanBacktickCode(text, cursor);
-      if (to !== null) {
-        ranges.push({ from: cursor, to });
-        cursor = to;
-        continue;
-      }
-      cursor += 1;
+    const codeEnd = delimiters.codeEndByStart.get(cursor);
+    if (codeEnd !== undefined) {
+      ranges.push({ from: cursor, to: codeEnd });
+      cursor = codeEnd;
       continue;
     }
 
@@ -150,8 +199,8 @@ function collectExcludedRanges(text: string): ExcludedRange[] {
     }
 
     if (text[cursor] === ']' && text[cursor + 1] === '(') {
-      const to = scanMarkdownLinkDestination(text, cursor + 1);
-      if (to !== null) {
+      const to = delimiters.linkEndByOpen.get(cursor + 1);
+      if (to !== undefined) {
         ranges.push({ from: cursor + 1, to });
         cursor = to;
         continue;

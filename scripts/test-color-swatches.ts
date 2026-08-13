@@ -106,5 +106,41 @@ assert.doesNotMatch(
   /(?:slice|substring)\(\s*0\s*,\s*(?:index|from|match)/,
   'collector must not rescan a growing prefix for each HEX match'
 );
+const unmatchedDestinations = `${Array.from({ length: 2_500 }, (_, index) => `[label-${index}](`).join(' ')}\n#abc`;
+assert.deepEqual(
+  sources(unmatchedDestinations),
+  ['#abc'],
+  'many unmatched link destinations must remain ordinary text without hiding a trailing HEX value'
+);
+const unmatchedBacktickRuns = `${Array.from(
+  { length: 180 },
+  (_, index) => `${'`'.repeat(index + 1)}run-${index}`
+).join(' ')}\n#abcd`;
+assert.deepEqual(
+  sources(unmatchedBacktickRuns),
+  ['#abcd'],
+  'many different-length unmatched backtick runs must not hide a trailing HEX value'
+);
+const mixedBacktickRuns = [
+  'odd \\` literal #abc',
+  'even \\\\`#def` outside #123456',
+  'unmatched `` marker',
+  'matched ```#456``` outside #aabbccdd'
+].join('\n');
+assert.deepEqual(
+  sources(mixedBacktickRuns),
+  ['#abc', '#123456', '#aabbccdd'],
+  'escaped, matched and unmatched backtick runs must retain their existing Markdown semantics'
+);
+assert.doesNotMatch(
+  collectorSource,
+  /function\s+scan(?:BacktickCode|MarkdownLinkDestination)\b/,
+  'delimiter matching must be summarized once instead of rescanning from each opener'
+);
+assert.match(
+  collectorSource,
+  /function\s+collectDelimiterSummary\b/,
+  'collector must build one private delimiter summary before producing excluded ranges'
+);
 
 console.log('color swatch parser checks passed');
