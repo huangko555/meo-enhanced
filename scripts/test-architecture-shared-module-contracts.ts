@@ -52,16 +52,37 @@ try {
   const caughtSummaryIndex = architectureSource.indexOf('const caughtCompletionSummariesByContext =');
   const bindingLoopIndex = architectureSource.indexOf('for (const binding of bindings)');
   assert.ok(caughtSummaryIndex >= 0 && caughtSummaryIndex < bindingLoopIndex);
+  const exitLoopIndex = architectureSource.indexOf('for (const exit of exits)');
+  const exitLoopEnd = architectureSource.indexOf(
+    'for (const positions of summary.blockerPositionsByAncestorPath.values())',
+    exitLoopIndex
+  );
+  assert.doesNotMatch(
+    architectureSource.slice(exitLoopIndex, exitLoopEnd),
+    /throwsByFinallyBlock/,
+    'ARCH015 exit processing must only associate finally blocks, not rescan their throws'
+  );
+  assert.match(architectureSource, /const associatedFinallyPrefixesByContext =/);
+  assert.match(architectureSource, /allBlockerPositionsByAncestorPath/);
+  assert.match(architectureSource, /catchesByPath/);
+  assert.doesNotMatch(architectureSource, /caughtThrowsByContext|orderedCompletions/);
   const bindingLoopSource = architectureSource.slice(
     bindingLoopIndex,
     architectureSource.indexOf('\n  return ranges;', bindingLoopIndex)
   );
   assert.doesNotMatch(
     bindingLoopSource,
-    /caughtThrowsByContext|\.sort\(\(left, right\) => left - right\)/,
+    /caughtThrowsByContext|orderedCompletions|completion\.pathPrefixes|\.sort\(\(left, right\) => left - right\)/,
     'ARCH015 binding processing must query prebuilt caught-completion summaries without rebuilding or sorting them'
   );
   assert.match(bindingLoopSource, /for \(const \[context, loopEvents\] of loopEntryEventsByContext\)/);
+  assert.match(bindingLoopSource, /catchesByPath\.get\(event\.pathKey\)/);
+  assert.match(bindingLoopSource, /firstPositionAfterExcluding\(/);
+  assert.doesNotMatch(
+    bindingLoopSource,
+    /for \([^\n]+allBlockerPositionsByAncestorPath/,
+    'bindings without catch-root events must binary-query the owner index without traversing all completions'
+  );
   assert.doesNotMatch(
     architectureSource,
     /dominancePositionsByPath|finallyBlocksWithBypassingAbruptCompletion/,

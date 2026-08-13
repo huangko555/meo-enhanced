@@ -1289,19 +1289,16 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       catchDefinitelyLeavesTarget(node.thenStatement, target) &&
       catchDefinitelyLeavesTarget(node.elseStatement!, target);
   };
-  type CaughtThrowCompletion = {
-    readonly position: number;
-    readonly catchClause: ts.CatchClause;
-    readonly pathPrefixes: readonly string[];
-  };
   type CaughtCompletionSummary = {
+    readonly block: ts.Block;
     readonly catchPath: string;
     readonly catchEnd: number;
     readonly targetContinuePosition: number;
+    readonly blockerPositionsByAncestorPath: ReadonlyMap<string, readonly number[]>;
   };
   type CaughtOwnerCompletionSummary = {
-    readonly byCatch: ReadonlyMap<ts.Block, CaughtCompletionSummary>;
-    readonly orderedCompletions: readonly CaughtThrowCompletion[];
+    readonly allBlockerPositionsByAncestorPath: ReadonlyMap<string, readonly number[]>;
+    readonly catchesByPath: ReadonlyMap<string, readonly CaughtCompletionSummary[]>;
   };
   const continueBlockingPosition = (
     exit: ContinueExit,
@@ -1335,11 +1332,15 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     rangesByPath.set(path, ranges);
   };
   const continueSummariesByContext = new Map<Scope, Map<ts.Node, ContinueOwnerSummary>>();
-  const caughtThrowsByContext = new Map<Scope, Map<ts.Node, CaughtThrowCompletion[]>>();
+  const associatedFinallyPrefixesByContext = new Map<
+    Scope,
+    Map<ts.Node, Map<ts.Block, Set<string>>>
+  >();
   for (const [context, exitsByOwner] of continueExitsByContext) {
     const summariesByOwner = new Map<ts.Node, ContinueOwnerSummary>();
-    const caughtThrowsByOwner = new Map<ts.Node, CaughtThrowCompletion[]>();
+    const finallyPrefixesByOwner = new Map<ts.Node, Map<ts.Block, Set<string>>>();
     for (const [owner, exits] of exitsByOwner) {
+      const finallyPrefixes = new Map<ts.Block, Set<string>>();
       const targetContinuePositions = exits
         .filter((exit) => exit.reachesBackedge && nodeIsReachableFromBoundaryEntry(exit.node, owner))
         .map((exit) => exit.position)
@@ -1364,18 +1365,9 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           addRange(summary.unreachableRangesByPath, exit.dominancePathKey, range);
         }
         for (const block of exit.finallyBlocks) {
-          for (const throwStatement of throwsByFinallyBlock.get(block) ?? []) {
-            if (!nodeIsReachableFromBoundaryEntry(throwStatement, block)) continue;
-            const catchClause = enclosingCatchBeforeTarget(throwStatement, owner);
-            if (!catchClause || syntaxContains(block, catchClause)) continue;
-            const completions = caughtThrowsByOwner.get(owner) ?? [];
-            completions.push({
-              position: throwStatement.getStart(sourceFile),
-              catchClause,
-              pathPrefixes: exit.pathPrefixes
-            });
-            caughtThrowsByOwner.set(owner, completions);
-          }
+          const prefixes = finallyPrefixes.get(block) ?? new Set<string>();
+          for (const prefix of exit.pathPrefixes) prefixes.add(prefix);
+          finallyPrefixes.set(block, prefixes);
         }
       }
       for (const positions of summary.blockerPositionsByAncestorPath.values()) {
@@ -1394,38 +1386,71 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         ranges.length = writeIndex;
       }
       summariesByOwner.set(owner, summary);
+      if (finallyPrefixes.size > 0) finallyPrefixesByOwner.set(owner, finallyPrefixes);
     }
     continueSummariesByContext.set(context, summariesByOwner);
-    caughtThrowsByContext.set(context, caughtThrowsByOwner);
+    associatedFinallyPrefixesByContext.set(context, finallyPrefixesByOwner);
   }
+  const addPositionSet = (
+    positionsByPath: Map<string, Set<number>>,
+    path: string,
+    position: number
+  ): void => {
+    const positions = positionsByPath.get(path) ?? new Set<number>();
+    positions.add(position);
+    positionsByPath.set(path, positions);
+  };
+  const sortedPositionArrays = (
+    positionSetsByPath: ReadonlyMap<string, ReadonlySet<number>>
+  ): Map<string, readonly number[]> => new Map(
+    [...positionSetsByPath].map(([path, positions]) => [
+      path,
+      [...positions].sort((left, right) => left - right)
+    ])
+  );
   const caughtCompletionSummariesByContext = new Map<
     Scope,
     Map<ts.Node, CaughtOwnerCompletionSummary>
   >();
-  for (const [context, caughtByOwner] of caughtThrowsByContext) {
+  for (const [context, finallyPrefixesByOwner] of associatedFinallyPrefixesByContext) {
     const summariesByOwner = new Map<ts.Node, CaughtOwnerCompletionSummary>();
-    for (const [owner, completions] of caughtByOwner) {
-      const completionsByCatch = new Map<ts.Block, CaughtThrowCompletion[]>();
-      const orderedCompletions = completions.filter((completion) => (
-        !catchDefinitelyLeavesTarget(completion.catchClause.block, owner as ts.IterationStatement)
-      ));
-      orderedCompletions.sort((left, right) => left.position - right.position);
-      for (const completion of orderedCompletions) {
-        const catchBlock = completion.catchClause.block;
-        const catchCompletions = completionsByCatch.get(catchBlock) ?? [];
-        catchCompletions.push(completion);
-        completionsByCatch.set(catchBlock, catchCompletions);
-      }
-      const summariesByCatch = new Map<ts.Block, CaughtCompletionSummary>();
+    for (const [owner, prefixesByFinally] of finallyPrefixesByOwner) {
+      const allPositionSetsByPath = new Map<string, Set<number>>();
+      const positionSetsByCatch = new Map<ts.Block, Map<string, Set<number>>>();
       const targetPositions = continueSummariesByContext.get(context)?.get(owner)?.targetContinuePositions ?? [];
-      for (const catchBlock of completionsByCatch.keys()) {
-        summariesByCatch.set(catchBlock, {
+      for (const [finallyBlock, pathPrefixes] of prefixesByFinally) {
+        for (const throwStatement of throwsByFinallyBlock.get(finallyBlock) ?? []) {
+          if (!nodeIsReachableFromBoundaryEntry(throwStatement, finallyBlock)) continue;
+          const catchClause = enclosingCatchBeforeTarget(throwStatement, owner);
+          if (!catchClause || syntaxContains(finallyBlock, catchClause)) continue;
+          const catchBlock = catchClause.block;
+          if (catchDefinitelyLeavesTarget(catchBlock, owner as ts.IterationStatement)) continue;
+          const position = throwStatement.getStart(sourceFile);
+          const catchPositionSets = positionSetsByCatch.get(catchBlock) ?? new Map<string, Set<number>>();
+          for (const prefix of pathPrefixes) {
+            addPositionSet(allPositionSetsByPath, prefix, position);
+            addPositionSet(catchPositionSets, prefix, position);
+          }
+          positionSetsByCatch.set(catchBlock, catchPositionSets);
+        }
+      }
+      const catchesByPath = new Map<string, CaughtCompletionSummary[]>();
+      for (const [catchBlock, positionSets] of positionSetsByCatch) {
+        const summary: CaughtCompletionSummary = {
+          block: catchBlock,
           catchPath: controlPathMetadata(controlPathByNode.get(catchBlock) ?? []).key,
           catchEnd: catchBlock.end,
-          targetContinuePosition: firstPositionAfter(targetPositions, catchBlock.getStart(sourceFile))
-        });
+          targetContinuePosition: firstPositionAfter(targetPositions, catchBlock.getStart(sourceFile)),
+          blockerPositionsByAncestorPath: sortedPositionArrays(positionSets)
+        };
+        const catchSummaries = catchesByPath.get(summary.catchPath) ?? [];
+        catchSummaries.push(summary);
+        catchesByPath.set(summary.catchPath, catchSummaries);
       }
-      summariesByOwner.set(owner, { byCatch: summariesByCatch, orderedCompletions });
+      summariesByOwner.set(owner, {
+        allBlockerPositionsByAncestorPath: sortedPositionArrays(allPositionSetsByPath),
+        catchesByPath
+      });
     }
     caughtCompletionSummariesByContext.set(context, summariesByOwner);
   }
@@ -1444,19 +1469,33 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     const candidate = ranges[low - 1];
     return Boolean(candidate && position < candidate.end);
   };
+  const firstPositionAfterExcluding = (
+    positions: readonly number[] | undefined,
+    after: number,
+    excluded: ReadonlySet<number> | undefined
+  ): number => {
+    if (!positions) return Number.POSITIVE_INFINITY;
+    let low = 0;
+    let high = positions.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (positions[middle] <= after) low = middle + 1;
+      else high = middle;
+    }
+    while (low < positions.length && excluded?.has(positions[low])) low += 1;
+    return positions[low] ?? Number.POSITIVE_INFINITY;
+  };
 
   for (const binding of bindings) {
     const stableConstDom = binding.kind === 'const' && binding.events.length > 0 &&
       binding.events.every((event) => event.dom);
     const capturedMutableDom = binding.kind !== 'const' && binding.events.length > 0 &&
       binding.events.every((event) => event.dom);
-    const latestEventByContextPath = new Map<Scope, Map<string, BindingEvent>>();
-    for (const event of binding.events) {
-      const latestByPath = latestEventByContextPath.get(event.context) ?? new Map<string, BindingEvent>();
-      latestByPath.set(event.pathKey, event);
-      latestEventByContextPath.set(event.context, latestByPath);
-    }
     const loopEntryEventsByContext = new Map<Scope, Map<ts.Node, Map<string, BindingEvent>>>();
+    const catchRootEventsByContext = new Map<
+      Scope,
+      Map<ts.Node, Map<ts.Block, { readonly event: BindingEvent; readonly summary: CaughtCompletionSummary }>>
+    >();
     for (const event of binding.events) {
       for (const frame of event.controlPath) {
         if (frame.branch !== 'loop') continue;
@@ -1467,6 +1506,21 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           loopEntryEventsByContext.set(event.context, loopEvents);
         }
         const latestByPath = loopEvents.get(frame.owner) ?? new Map<string, BindingEvent>();
+        const catchSummaries = caughtCompletionSummariesByContext.get(event.context)?.get(frame.owner)
+          ?.catchesByPath.get(event.pathKey);
+        if (catchSummaries) {
+          for (const catchSummary of catchSummaries) {
+            if (!syntaxContains(catchSummary.block, event.node)) continue;
+            let catchEventsByOwner = catchRootEventsByContext.get(event.context);
+            if (!catchEventsByOwner) {
+              catchEventsByOwner = new Map();
+              catchRootEventsByContext.set(event.context, catchEventsByOwner);
+            }
+            const catchEvents = catchEventsByOwner.get(frame.owner) ?? new Map();
+            catchEvents.set(catchSummary.block, { event, summary: catchSummary });
+            catchEventsByOwner.set(frame.owner, catchEvents);
+          }
+        }
         const continueSummary = continueSummariesByContext.get(event.context)?.get(frame.owner);
         const pathDoesNotReachBackedge = event.pathPrefixes.some((prefix) => (
           continueSummary?.noBackedgePathKeys.has(prefix)
@@ -1480,30 +1534,25 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         loopEvents.set(frame.owner, latestByPath);
       }
     }
-    const caughtBlockersByContext = new Map<Scope, Map<ts.Node, Map<string, number[]>>>();
-    for (const [context, loopEvents] of loopEntryEventsByContext) {
-      const blockersByOwner = new Map<ts.Node, Map<string, number[]>>();
-      for (const owner of loopEvents.keys()) {
-        const ownerSummary = caughtCompletionSummariesByContext.get(context)?.get(owner);
-        if (!ownerSummary) continue;
-        const blockersByPath = new Map<string, number[]>();
-        const recoveredByCatch = new Map<ts.Block, boolean>();
-        for (const [catchBlock, summary] of ownerSummary.byCatch) {
-          const catchEvent = latestEventByContextPath.get(context)?.get(summary.catchPath);
-          const catchRecoversDom = catchEvent?.dom === true &&
-            catchEvent.position < summary.catchEnd &&
-            catchEvent.position < summary.targetContinuePosition;
-          recoveredByCatch.set(catchBlock, catchRecoversDom);
-        }
-        for (const completion of ownerSummary.orderedCompletions) {
-          if (recoveredByCatch.get(completion.catchClause.block)) continue;
-          for (const prefix of completion.pathPrefixes) {
-            addPosition(blockersByPath, prefix, completion.position);
+    const ignoredCaughtPositionsByContext = new Map<Scope, Map<ts.Node, Map<string, Set<number>>>>();
+    for (const [context, catchEventsByOwner] of catchRootEventsByContext) {
+      const ignoredByOwner = new Map<ts.Node, Map<string, Set<number>>>();
+      for (const [owner, catchEvents] of catchEventsByOwner) {
+        const ignoredByPath = new Map<string, Set<number>>();
+        for (const { event, summary } of catchEvents.values()) {
+          const catchRecoversDom = event.dom &&
+            event.position < summary.catchEnd &&
+            event.position < summary.targetContinuePosition;
+          if (!catchRecoversDom) continue;
+          for (const [path, positions] of summary.blockerPositionsByAncestorPath) {
+            const ignored = ignoredByPath.get(path) ?? new Set<number>();
+            for (const position of positions) ignored.add(position);
+            ignoredByPath.set(path, ignored);
           }
         }
-        blockersByOwner.set(owner, blockersByPath);
+        ignoredByOwner.set(owner, ignoredByPath);
       }
-      caughtBlockersByContext.set(context, blockersByOwner);
+      ignoredCaughtPositionsByContext.set(context, ignoredByOwner);
     }
     const loopEntryNonDomByContext = new Map<Scope, Map<ts.Node, boolean>>();
     for (const [context, loopEvents] of loopEntryEventsByContext) {
@@ -1517,9 +1566,16 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
             if (!later?.dom || later.position <= event.position) return false;
             const positions = continueSummariesByContext.get(context)?.get(owner)
               ?.blockerPositionsByAncestorPath.get(event.pathKey);
-            const caughtPositions = caughtBlockersByContext.get(context)?.get(owner)?.get(event.pathKey);
+            const caughtPositions = caughtCompletionSummariesByContext.get(context)?.get(owner)
+              ?.allBlockerPositionsByAncestorPath.get(event.pathKey);
+            const ignoredCaughtPositions = ignoredCaughtPositionsByContext.get(context)?.get(owner)
+              ?.get(event.pathKey);
             return firstPositionAfter(positions, event.position) >= later.position &&
-              firstPositionAfter(caughtPositions, event.position) >= later.position;
+              firstPositionAfterExcluding(
+                caughtPositions,
+                event.position,
+                ignoredCaughtPositions
+              ) >= later.position;
           });
           if (!killedByLaterAncestorDom) {
             possibleNonDom = true;
