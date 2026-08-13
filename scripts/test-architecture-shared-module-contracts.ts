@@ -49,6 +49,19 @@ try {
     architectureSource,
     /filter\(\(exit\) => exit\.reachesBackedge && nodeIsReachableFromBoundaryEntry\(exit\.node, owner\)\)/
   );
+  const caughtSummaryIndex = architectureSource.indexOf('const caughtCompletionSummariesByContext =');
+  const bindingLoopIndex = architectureSource.indexOf('for (const binding of bindings)');
+  assert.ok(caughtSummaryIndex >= 0 && caughtSummaryIndex < bindingLoopIndex);
+  const bindingLoopSource = architectureSource.slice(
+    bindingLoopIndex,
+    architectureSource.indexOf('\n  return ranges;', bindingLoopIndex)
+  );
+  assert.doesNotMatch(
+    bindingLoopSource,
+    /caughtThrowsByContext|\.sort\(\(left, right\) => left - right\)/,
+    'ARCH015 binding processing must query prebuilt caught-completion summaries without rebuilding or sorting them'
+  );
+  assert.match(bindingLoopSource, /for \(const \[context, loopEvents\] of loopEntryEventsByContext\)/);
   assert.doesNotMatch(
     architectureSource,
     /dominancePositionsByPath|finallyBlocksWithBypassingAbruptCompletion/,
@@ -502,6 +515,12 @@ try {
       expectedLine: 3
     },
     {
+      label: 'inner labeled break does not hide reachable same-target continue',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    inner: { break inner; }\n    continue;\n    field = document.createElement('input');\n  }\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'conditional continue preserves reachable outer fallthrough state',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (flag) continue;\n  field = settings;\n}\n",
@@ -905,6 +924,11 @@ try {
       label: 'unreachable same-target continue after inner break does not block DOM recovery',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    inner: { break inner; continue; }\n    field = document.createElement('input');\n  }\n}\n"
+    },
+    {
+      label: 'inner labeled break preserves following mandatory DOM recovery',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  try { field = settings; continue; } finally {\n    inner: { break inner; }\n    field = document.createElement('input');\n  }\n}\n"
     },
     {
       label: 'same-target continue overridden by nested finally does not block DOM recovery',

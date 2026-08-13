@@ -919,20 +919,6 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       statementDefinitelyTerminates(node.thenStatement) &&
       statementDefinitelyTerminates(node.elseStatement!);
   };
-  const statementDefinitelySkipsFollowing = (node: ts.Statement): boolean => {
-    if (
-      ts.isReturnStatement(node) || ts.isThrowStatement(node) ||
-      ts.isBreakStatement(node) || ts.isContinueStatement(node)
-    ) return true;
-    if (ts.isBlock(node)) return node.statements.some(statementDefinitelySkipsFollowing);
-    if (ts.isLabeledStatement(node)) return statementDefinitelySkipsFollowing(node.statement);
-    if (ts.isTryStatement(node) && node.finallyBlock && statementDefinitelySkipsFollowing(node.finallyBlock)) {
-      return true;
-    }
-    return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
-      statementDefinitelySkipsFollowing(node.thenStatement) &&
-      statementDefinitelySkipsFollowing(node.elseStatement!);
-  };
   const isLoopStatement = (node: ts.Node): node is ts.IterationStatement => (
     ts.isForStatement(node) ||
     ts.isForInStatement(node) ||
@@ -974,6 +960,28 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       if (current === container) return true;
     }
     return false;
+  };
+  const statementDefinitelySkipsFollowing = (node: ts.Statement, boundary: ts.Block): boolean => {
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) return true;
+    if (ts.isBreakStatement(node)) {
+      const destination = breakTarget(node);
+      return destination !== null && !syntaxContains(boundary, destination);
+    }
+    if (ts.isContinueStatement(node)) {
+      const destination = continueTargetLoop(node);
+      return destination !== null && !syntaxContains(boundary, destination);
+    }
+    if (ts.isBlock(node)) {
+      return node.statements.some((statement) => statementDefinitelySkipsFollowing(statement, boundary));
+    }
+    if (ts.isLabeledStatement(node)) return statementDefinitelySkipsFollowing(node.statement, boundary);
+    if (
+      ts.isTryStatement(node) && node.finallyBlock &&
+      statementDefinitelySkipsFollowing(node.finallyBlock, boundary)
+    ) return true;
+    return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
+      statementDefinitelySkipsFollowing(node.thenStatement, boundary) &&
+      statementDefinitelySkipsFollowing(node.elseStatement!, boundary);
   };
   const abruptOverridesContinue = (
     node: ts.ContinueStatement | ts.BreakStatement,
@@ -1247,7 +1255,9 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         const childIndex = child ? parent.statements.indexOf(child as ts.Statement) : -1;
         if (
           childIndex > 0 &&
-          parent.statements.slice(0, childIndex).some(statementDefinitelySkipsFollowing)
+          parent.statements.slice(0, childIndex).some((statement) => (
+            statementDefinitelySkipsFollowing(statement, parent)
+          ))
         ) return false;
       }
       current = parent;
@@ -1283,6 +1293,15 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     readonly position: number;
     readonly catchClause: ts.CatchClause;
     readonly pathPrefixes: readonly string[];
+  };
+  type CaughtCompletionSummary = {
+    readonly catchPath: string;
+    readonly catchEnd: number;
+    readonly targetContinuePosition: number;
+  };
+  type CaughtOwnerCompletionSummary = {
+    readonly byCatch: ReadonlyMap<ts.Block, CaughtCompletionSummary>;
+    readonly orderedCompletions: readonly CaughtThrowCompletion[];
   };
   const continueBlockingPosition = (
     exit: ContinueExit,
@@ -1379,6 +1398,37 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     continueSummariesByContext.set(context, summariesByOwner);
     caughtThrowsByContext.set(context, caughtThrowsByOwner);
   }
+  const caughtCompletionSummariesByContext = new Map<
+    Scope,
+    Map<ts.Node, CaughtOwnerCompletionSummary>
+  >();
+  for (const [context, caughtByOwner] of caughtThrowsByContext) {
+    const summariesByOwner = new Map<ts.Node, CaughtOwnerCompletionSummary>();
+    for (const [owner, completions] of caughtByOwner) {
+      const completionsByCatch = new Map<ts.Block, CaughtThrowCompletion[]>();
+      const orderedCompletions = completions.filter((completion) => (
+        !catchDefinitelyLeavesTarget(completion.catchClause.block, owner as ts.IterationStatement)
+      ));
+      orderedCompletions.sort((left, right) => left.position - right.position);
+      for (const completion of orderedCompletions) {
+        const catchBlock = completion.catchClause.block;
+        const catchCompletions = completionsByCatch.get(catchBlock) ?? [];
+        catchCompletions.push(completion);
+        completionsByCatch.set(catchBlock, catchCompletions);
+      }
+      const summariesByCatch = new Map<ts.Block, CaughtCompletionSummary>();
+      const targetPositions = continueSummariesByContext.get(context)?.get(owner)?.targetContinuePositions ?? [];
+      for (const catchBlock of completionsByCatch.keys()) {
+        summariesByCatch.set(catchBlock, {
+          catchPath: controlPathMetadata(controlPathByNode.get(catchBlock) ?? []).key,
+          catchEnd: catchBlock.end,
+          targetContinuePosition: firstPositionAfter(targetPositions, catchBlock.getStart(sourceFile))
+        });
+      }
+      summariesByOwner.set(owner, { byCatch: summariesByCatch, orderedCompletions });
+    }
+    caughtCompletionSummariesByContext.set(context, summariesByOwner);
+  }
   const positionIsInRanges = (
     ranges: readonly NativeSpellcheckRange[] | undefined,
     position: number
@@ -1406,30 +1456,6 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       latestByPath.set(event.pathKey, event);
       latestEventByContextPath.set(event.context, latestByPath);
     }
-    const caughtBlockersByContext = new Map<Scope, Map<ts.Node, Map<string, number[]>>>();
-    for (const [context, caughtByOwner] of caughtThrowsByContext) {
-      const blockersByOwner = new Map<ts.Node, Map<string, number[]>>();
-      for (const [owner, completions] of caughtByOwner) {
-        const targetPositions = continueSummariesByContext.get(context)?.get(owner)?.targetContinuePositions ?? [];
-        const blockersByPath = new Map<string, number[]>();
-        for (const completion of completions) {
-          if (catchDefinitelyLeavesTarget(completion.catchClause.block, owner as ts.IterationStatement)) continue;
-          const catchPath = controlPathMetadata(controlPathByNode.get(completion.catchClause.block) ?? []).key;
-          const catchEvent = latestEventByContextPath.get(context)?.get(catchPath);
-          const catchContinue = firstPositionAfter(targetPositions, completion.catchClause.block.getStart(sourceFile));
-          const catchRecoversDom = catchEvent?.dom === true &&
-            catchEvent.position < completion.catchClause.block.end &&
-            catchEvent.position < catchContinue;
-          if (catchRecoversDom) continue;
-          for (const prefix of completion.pathPrefixes) {
-            addPosition(blockersByPath, prefix, completion.position);
-          }
-        }
-        for (const positions of blockersByPath.values()) positions.sort((left, right) => left - right);
-        blockersByOwner.set(owner, blockersByPath);
-      }
-      caughtBlockersByContext.set(context, blockersByOwner);
-    }
     const loopEntryEventsByContext = new Map<Scope, Map<ts.Node, Map<string, BindingEvent>>>();
     for (const event of binding.events) {
       for (const frame of event.controlPath) {
@@ -1453,6 +1479,31 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         latestByPath.set(event.pathKey, event);
         loopEvents.set(frame.owner, latestByPath);
       }
+    }
+    const caughtBlockersByContext = new Map<Scope, Map<ts.Node, Map<string, number[]>>>();
+    for (const [context, loopEvents] of loopEntryEventsByContext) {
+      const blockersByOwner = new Map<ts.Node, Map<string, number[]>>();
+      for (const owner of loopEvents.keys()) {
+        const ownerSummary = caughtCompletionSummariesByContext.get(context)?.get(owner);
+        if (!ownerSummary) continue;
+        const blockersByPath = new Map<string, number[]>();
+        const recoveredByCatch = new Map<ts.Block, boolean>();
+        for (const [catchBlock, summary] of ownerSummary.byCatch) {
+          const catchEvent = latestEventByContextPath.get(context)?.get(summary.catchPath);
+          const catchRecoversDom = catchEvent?.dom === true &&
+            catchEvent.position < summary.catchEnd &&
+            catchEvent.position < summary.targetContinuePosition;
+          recoveredByCatch.set(catchBlock, catchRecoversDom);
+        }
+        for (const completion of ownerSummary.orderedCompletions) {
+          if (recoveredByCatch.get(completion.catchClause.block)) continue;
+          for (const prefix of completion.pathPrefixes) {
+            addPosition(blockersByPath, prefix, completion.position);
+          }
+        }
+        blockersByOwner.set(owner, blockersByPath);
+      }
+      caughtBlockersByContext.set(context, blockersByOwner);
     }
     const loopEntryNonDomByContext = new Map<Scope, Map<ts.Node, boolean>>();
     for (const [context, loopEvents] of loopEntryEventsByContext) {
