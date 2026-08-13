@@ -1729,14 +1729,18 @@ const hasRemovedVimCapability = (text: string, surface: VimCapabilitySurface): b
     const hasExplicitCapabilityNoun = window.some((word) => (
       /^(?:emulation|integration|keybinding|keybindings|leader|map|mapping|mappings|mode|panel)$/.test(word)
     ));
-    if (hasExplicitCapabilityNoun) return true;
     const hasStateNoun = window.some((word) => (
       /^(?:active|behavior|config|configuration|disabled|enabled|setting|settings|state)$/.test(word)
     ));
-    if (!hasStateNoun) continue;
-    if (surface === 'source' || window.some((word) => (
+    if (!hasExplicitCapabilityNoun && !hasStateNoun) continue;
+    if (surface === 'source') return true;
+    const hasProductOwner = window.some((word) => (
       /^(?:meo|meoenhanced|source|live|toolbar)$/.test(word)
-    ))) return true;
+    ));
+    const hasEmbeddedProductAction = window.some((word) => (
+      /^(?:control|controls|disable|enable|embedded|toggle)$/.test(word)
+    ));
+    if (hasProductOwner || hasEmbeddedProductAction) return true;
   }
   return false;
 };

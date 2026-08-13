@@ -196,6 +196,21 @@ try {
       contents: 'The Vim configuration in MEO controls editor behavior.\n'
     },
     {
+      label: 'MEO Vim mode in public docs',
+      path: 'docs/editor-mode.md',
+      contents: 'MEO provides a Vim mode in the editor.\n'
+    },
+    {
+      label: 'MEO Vim toolbar panel in public docs',
+      path: 'docs/editor-toolbar.md',
+      contents: 'The MEO toolbar exposes a Vim panel.\n'
+    },
+    {
+      label: 'embedded Vim integration in public docs',
+      path: 'docs/editor-integration.md',
+      contents: 'Enable the embedded Vim integration in Live mode.\n'
+    },
+    {
       label: 'pure vimEnabled state alias',
       path: 'src/host/editorPreferences.ts',
       contents: 'export const vimEnabled = true;\n'
@@ -268,6 +283,26 @@ try {
       label: 'ordinary external Vim documentation path',
       path: 'docs/vim-configuration.md',
       contents: '# External editor\n\nSee ~/.vimrc for setup.\n'
+    },
+    {
+      label: 'ordinary external Vim keybindings prose',
+      path: 'docs/external-vim.md',
+      contents: 'Vim keybindings are configured in ~/.vimrc.\n'
+    },
+    {
+      label: 'ordinary external Vim mode prose',
+      path: 'docs/external-vim-mode.md',
+      contents: 'Vim starts in normal mode.\n'
+    },
+    {
+      label: 'ordinary external Vim integration prose',
+      path: 'docs/external-vim-integration.md',
+      contents: 'Vim integration with tmux is documented upstream.\n'
+    },
+    {
+      label: 'ordinary external Vim emulation prose',
+      path: 'docs/external-vim-emulation.md',
+      contents: 'Vim emulation in a terminal is configured separately.\n'
     }
   ];
   for (const fixture of ordinaryVimDocumentationFixtures) {
