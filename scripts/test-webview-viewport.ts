@@ -127,7 +127,7 @@ async function main() {
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', editorAppearance: 'dark',
         lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
-        spellCheckEnabled: false, contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
+        contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
@@ -245,7 +245,7 @@ async function main() {
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         'Release Fixed Baseline',
         'Current Edits', 'Recent Save', 'Git HEAD',
-        'Constrain Width', 'Line Numbers', 'Fold Long Code Blocks', 'Spellcheck'
+        'Constrain Width', 'Line Numbers', 'Fold Long Code Blocks'
       ]) ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||

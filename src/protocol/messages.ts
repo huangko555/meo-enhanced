@@ -1,5 +1,4 @@
 import { decodeSaveImageFromClipboardRequest, decodeSavedImagePathResponse, type SaveImageFromClipboardRequest, type SavedImagePathResponse } from './clipboardImageSave';
-import { decodeDiagnosticSuggestionsRequest, decodeDiagnosticSuggestionsResult, type DiagnosticSuggestionsResult, type RequestDiagnosticSuggestions } from './diagnosticSuggestions';
 import { decodeDiagnosticsChangedEvent, type DiagnosticsChangedEvent } from './diagnostics';
 import { decodeDocumentSyncCommand, decodeDocumentSyncMessage, type DocumentSyncCommand, type DocumentSyncMessage } from './documentSync';
 import { decodeDocumentRevisionRequest, decodeDocumentRevisionResponse, decodeSaveDocumentRevisionRequest, decodeSaveDocumentRevisionResponse, type DocumentRevisionRequest, type DocumentRevisionResponse, type SaveDocumentRevisionRequest, type SaveDocumentRevisionResponse } from './documentSession';
@@ -23,7 +22,6 @@ export type WebviewToHostMessage =
   | ResolveImageSrcRequest
   | ResolveWikiLinksRequest
   | ResolveLocalLinksRequest
-  | RequestDiagnosticSuggestions
   | SaveImageFromClipboardRequest
   | PreviewRenderRequest
   | ExportSnapshotResponse;
@@ -39,7 +37,6 @@ export type HostToWebviewMessage =
   | ResolvedImageSrcResponse
   | ResolvedWikiLinksResponse
   | ResolvedLocalLinksResponse
-  | DiagnosticSuggestionsResult
   | SavedImagePathResponse
   | PreviewRenderResponse
   | ExportSnapshotRequest
@@ -54,7 +51,6 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
     ?? decodeResolveImageSrcRequest(value)
     ?? decodeResolveWikiLinksRequest(value)
     ?? decodeResolveLocalLinksRequest(value)
-    ?? decodeDiagnosticSuggestionsRequest(value)
     ?? decodeSaveImageFromClipboardRequest(value)
     ?? decodePreviewRenderRequest(value)
     ?? decodeExportSnapshotResponse(value);
@@ -71,7 +67,6 @@ export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage
     ?? decodeResolvedImageSrcResponse(value)
     ?? decodeResolvedWikiLinksResponse(value)
     ?? decodeResolvedLocalLinksResponse(value)
-    ?? decodeDiagnosticSuggestionsResult(value)
     ?? decodeSavedImagePathResponse(value)
     ?? decodePreviewRenderResponse(value)
     ?? decodeExportSnapshotRequest(value)

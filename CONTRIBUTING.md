@@ -28,7 +28,6 @@ feature contracts in `package.json` include, for example:
 bun run test:table-command
 bun run test:image-presentation
 bun run test:mermaid-presentation
-bun run test:diagnostic-suggestion
 ```
 
 Before submitting a change, run the relevant feature contract and the baseline

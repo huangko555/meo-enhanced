@@ -18,7 +18,6 @@ const sessionSettingBroadcasts = [
   'diffBaselineModeChanged',
   'contentMaxWidthChanged',
   'longCodeBlockFoldingChanged',
-  'spellCheckChanged',
   'outlinePositionChanged',
   'outlineVisibilityChanged'
 ];

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createDiagnosticSuggestionsTransport } from '../webview/src/adapters/diagnosticSuggestionsTransport';
 import {
   getWikiLinkStatus,
   handleResolvedWikiLinks,
@@ -89,40 +88,5 @@ assert.equal(handleResolvedLocalLinks({
 await flushPromises();
 assert.equal(getLocalLinkStatus('latest.md'), true);
 assert.equal(getLocalLinkStatus('older.md'), null, 'An out-of-order local-link response must not replace the latest result');
-
-const diagnosticRequests: Array<{ requestId: string }> = [];
-const diagnosticResults: string[] = [];
-let canceledDiagnosticTimeouts = 0;
-const diagnosticTransport = createDiagnosticSuggestionsTransport(
-  (message) => diagnosticRequests.push(message),
-  (message) => diagnosticResults.push(message.requestId),
-  {
-    scheduleTimeout: () => ({}),
-    cancelTimeout: () => { canceledDiagnosticTimeouts += 1; }
-  }
-);
-const firstDiagnosticRequest = diagnosticTransport.request({ from: 0, to: 1, message: 'first' });
-const latestDiagnosticRequest = diagnosticTransport.request({ from: 2, to: 3, message: 'latest' });
-assert.equal(canceledDiagnosticTimeouts, 1, 'Starting a newer diagnostic request must invalidate the older request');
-assert.equal(diagnosticTransport.accept({
-  type: 'diagnosticSuggestionsResult', requestId: firstDiagnosticRequest, from: 0, to: 1,
-  result: { ok: true, value: { suggestions: ['old'] } }
-}), false);
-assert.equal(diagnosticTransport.accept({
-  type: 'diagnosticSuggestionsResult', requestId: latestDiagnosticRequest, from: 2, to: 3,
-  result: { ok: true, value: { suggestions: ['new'] } }
-}), true);
-assert.equal(diagnosticTransport.accept({
-  type: 'diagnosticSuggestionsResult', requestId: latestDiagnosticRequest, from: 2, to: 3,
-  result: { ok: true, value: { suggestions: ['duplicate'] } }
-}), false);
-assert.deepEqual(diagnosticResults, [latestDiagnosticRequest]);
-
-const invalidatedDiagnosticRequest = diagnosticTransport.request({ from: 4, to: 5, message: 'invalidated' });
-diagnosticTransport.cancelAll();
-assert.equal(diagnosticTransport.accept({
-  type: 'diagnosticSuggestionsResult', requestId: invalidatedDiagnosticRequest, from: 4, to: 5,
-  result: { ok: true, value: { suggestions: ['late'] } }
-}), false, 'A response invalidated by a diagnostics refresh must stay ignored');
 
 console.log('Protocol stale-response checks passed');

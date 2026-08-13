@@ -67,7 +67,6 @@ import {
   sourceTableHeaderLineField,
   refreshTableLocalLinkIndicators,
   tableCellEditorOffsetToSourceOffset,
-  tableCellSourceOffsetToEditorOffset,
   tableHeaderAlignmentOverrideField,
   commitPendingTableEdits,
   focusHistoryChange,
@@ -76,13 +75,6 @@ import {
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
 import { diagnosticDataField, diagnosticField, setDiagnosticsEffect, type EditorDiagnostic } from './helpers/diagnostics';
-import { createDiagnosticSuggestionApplication } from './application/diagnosticSuggestion';
-import { createDiagnosticSuggestionRuntime } from './adapters/diagnosticSuggestionRuntime';
-import { createCodeMirrorDiagnosticSuggestionAdapter } from './editor/diagnosticSuggestionAdapter';
-import type {
-  DiagnosticSuggestionsResult,
-  RequestDiagnosticSuggestions
-} from '../../src/protocol/diagnosticSuggestions';
 import type { GitBaselinePayload } from '../../src/protocol/git';
 import type { VimKeybindingDto } from '../../src/protocol/hostConfigurationEvents';
 import type { SelectionMenuState } from './helpers/selectionMenu';
@@ -157,7 +149,6 @@ type CreateEditorOptions = {
   onApplyChanges: (text: string) => void;
   onOpenLink?: (href: string) => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
-  postDiagnosticSuggestionsMessage?: (message: RequestDiagnosticSuggestions) => void;
   onViewportChange?: () => void;
   initialMode?: EditableEditorMode;
   initialTopLine?: number | null;
@@ -271,9 +262,6 @@ export function createEditor({
   onApplyChanges,
   onOpenLink,
   onSelectionChange,
-  postDiagnosticSuggestionsMessage = (_message: RequestDiagnosticSuggestions): void => {
-    throw new Error('Diagnostic suggestions transport is unavailable');
-  },
   onViewportChange,
   initialMode = 'source',
   initialTopLine = null,
@@ -1017,28 +1005,10 @@ export function createEditor({
   const getActiveTableSelectionState = (input: HTMLTextAreaElement): (SelectionMenuState & { from: number; to: number }) | null => {
     const selection = getTableInputDocumentSelection(input);
     if (!selection) return null;
-    const diagnostic = diagnosticSuggestionApplication.resolveDiagnostic(selection.from, {
-      from: selection.from,
-      to: selection.to
-    });
-    if (diagnostic) {
-      diagnosticSuggestionRuntime.dispatch(diagnosticSuggestionAdapter.inputFromSelectionRequest(
-        diagnostic,
-        () => {
-          const current = getTableInputDocumentSelection(input);
-          return current ? {
-            x: current.anchorX,
-            y: current.anchorY,
-            bottomY: current.anchorBottomY
-          } : null;
-        }
-      ));
-    }
     return {
       visible: true,
       from: selection.from,
       to: selection.to,
-      align: diagnostic ? 'start' as const : undefined,
       anchorX: selection.anchorX,
       anchorY: selection.anchorY,
       anchorBottomY: selection.anchorBottomY
@@ -1304,10 +1274,6 @@ export function createEditor({
     };
   };
 
-  const isDiagnosticSelectionRange = (from: number, to: number): boolean => currentDiagnostics.some((diagnostic) => (
-    diagnostic.from === from && diagnostic.to === to
-  ));
-
   const emitSelectionChange = () => {
     if (!view || typeof onSelectionChange !== 'function') {
       return;
@@ -1342,14 +1308,12 @@ export function createEditor({
       return;
     }
 
-    const align = isDiagnosticSelectionRange(from, to) ? 'start' : undefined;
     const nativeAnchor = resolveNativeSelectionAnchor();
     if (nativeAnchor) {
       onSelectionChange({
         visible: true,
         from,
         to,
-        align,
         anchorX: nativeAnchor.anchorX,
         anchorY: nativeAnchor.anchorY,
         anchorBottomY: nativeAnchor.anchorBottomY
@@ -1373,21 +1337,10 @@ export function createEditor({
       visible: true,
       from,
       to,
-      align,
       anchorX,
       anchorY,
       anchorBottomY
     });
-  };
-
-  const dispatchDiagnosticSuggestionPointer = (
-    kind: 'click' | 'request',
-    event: MouseEvent | PointerEvent
-  ): boolean => {
-    const input = diagnosticSuggestionAdapter.inputFromPointer(kind, event);
-    if (!input) return false;
-    diagnosticSuggestionRuntime.dispatch(input);
-    return true;
   };
 
   const isHistoryReplayUpdate = (update: ViewUpdate): boolean => {
@@ -2032,18 +1985,12 @@ export function createEditor({
 
           const target = event.target;
           const targetElement = targetElementFrom(target);
-          if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
-            diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
-            return false;
-          }
+          if (!(target instanceof Node) || !view.contentDOM.contains(target)) return false;
 
           if (tableInteractionActive && !targetElement?.closest('.meo-md-html-table-shell')) {
             setTableInteractionActive(false);
           }
 
-          if (!dispatchDiagnosticSuggestionPointer('click', event)) {
-            diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
-          }
           trackFrontmatterBoundaryClick(event, view);
 
           if (targetElement && targetElement.closest(
@@ -2092,12 +2039,6 @@ export function createEditor({
           if (view.dom.setPointerCapture) {
             view.dom.setPointerCapture(event.pointerId);
             capturedPointerId = event.pointerId;
-          }
-          return false;
-        },
-        contextmenu(event, view) {
-          if (!dispatchDiagnosticSuggestionPointer('request', event)) {
-            return false;
           }
           return false;
         },
@@ -2261,9 +2202,6 @@ export function createEditor({
           onViewportChange?.();
         }
 
-        if (update.docChanged && !applyingExternal) {
-          diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
-        }
         if (update.docChanged) {
           if (!applyingExternal && !applyingRenumber && !isHistoryReplayUpdate(update)) {
             recentRenderedReplayPresentation = null;
@@ -2305,35 +2243,6 @@ export function createEditor({
     state,
     parent,
     scrollTo: initialScrollTo
-  });
-  const diagnosticSuggestionApplication = createDiagnosticSuggestionApplication();
-  const diagnosticSuggestionAdapter = createCodeMirrorDiagnosticSuggestionAdapter({
-    view,
-    resolveDiagnostic: (position, selectedRange) => (
-      diagnosticSuggestionApplication.resolveDiagnostic(position, selectedRange)
-    ),
-    postMessage: postDiagnosticSuggestionsMessage,
-    presentSuggestions(effect) {
-      onSelectionChange?.({
-        visible: true,
-        align: 'start',
-        anchorX: effect.anchor.x,
-        anchorY: effect.anchor.y,
-        anchorBottomY: effect.anchor.bottomY,
-        diagnosticSuggestions: [...effect.suggestions]
-      });
-    },
-    hideSuggestions() {
-      onSelectionChange?.({ visible: false });
-    }
-  });
-  const diagnosticSuggestionRuntime = createDiagnosticSuggestionRuntime({
-    application: diagnosticSuggestionApplication,
-    executor: diagnosticSuggestionAdapter
-  });
-  diagnosticSuggestionRuntime.dispatch({
-    type: 'diagnosticsChanged',
-    diagnostics: currentDiagnostics
   });
   tableColumnWidthAdapter.adapter.refresh();
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
@@ -2781,7 +2690,6 @@ export function createEditor({
         pendingLiveSearchRevealFrame = null;
       }
       setEditableLinkHoverCursor(view, false);
-      diagnosticSuggestionRuntime.dispose();
       editorHistoryRuntime?.dispose();
       editorHistoryRuntime = null;
       tableCommandRuntime.dispose();
@@ -2793,7 +2701,6 @@ export function createEditor({
       imagePresentationResourcePool.dispose();
     },
     setText(textValue: string) {
-      diagnosticSuggestionRuntime.dispatch({ type: 'externalDocumentPresented' });
       tableCommandRuntime.externalDocumentPresented();
       imagePresentationFactory.externalDocumentPresented();
       void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
@@ -2839,7 +2746,6 @@ export function createEditor({
       emitSelectionChange();
     },
     setMode(mode: EditableEditorMode) {
-      diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
       commitActiveTableInput();
       const nextMode = mode === 'live' ? 'live' : 'source';
       if (nextMode === currentMode) {
@@ -3115,46 +3021,7 @@ export function createEditor({
     },
     setDiagnostics(diagnostics: EditorDiagnostic[]) {
       currentDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];
-      diagnosticSuggestionRuntime.dispatch({
-        type: 'diagnosticsChanged',
-        diagnostics: currentDiagnostics
-      });
       view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
-    },
-    acceptDiagnosticSuggestionsResult(response: DiagnosticSuggestionsResult) {
-      return diagnosticSuggestionAdapter.accept(response);
-    },
-    diagnosticSuggestionPresentationChanged() {
-      diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
-    },
-    applyDiagnosticSuggestion(from: number, to: number, insert: string) {
-      const activeTableInput = getActiveTableInput();
-      const tableSourceRange = activeTableInput ? getTableInputSourceRange(activeTableInput) : null;
-      if (
-        activeTableInput &&
-        tableSourceRange &&
-        from >= tableSourceRange.from &&
-        to <= tableSourceRange.to
-      ) {
-        const localFrom = tableCellSourceOffsetToEditorOffset(activeTableInput.value, from - tableSourceRange.from);
-        const localTo = tableCellSourceOffsetToEditorOffset(activeTableInput.value, to - tableSourceRange.from);
-        diagnosticSuggestionRuntime.dispatch({ type: 'presentationChanged' });
-        updateActiveTableInput(
-          activeTableInput,
-          activeTableInput.value.slice(0, localFrom) + insert + activeTableInput.value.slice(localTo),
-          localFrom + insert.length
-        );
-        return;
-      }
-
-      const docLength = view.state.doc.length;
-      const safeFrom = Math.max(0, Math.min(Math.floor(from), docLength));
-      const safeTo = Math.max(safeFrom, Math.min(Math.floor(to), docLength));
-      view.dispatch({
-        changes: { from: safeFrom, to: safeTo, insert },
-        selection: { anchor: safeFrom + insert.length }
-      });
-      emitSelectionChange();
     },
     refreshLayout() {
       view.requestMeasure();

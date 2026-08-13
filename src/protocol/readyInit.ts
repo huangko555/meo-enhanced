@@ -35,7 +35,6 @@ export type InitMessage = {
   readonly diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head';
   readonly fixedBaselinePinned: boolean;
   readonly fixedBaselineActive: boolean;
-  readonly spellCheckEnabled: boolean;
   readonly contentMaxWidthEnabled: boolean;
   readonly longCodeBlockFoldingEnabled: boolean;
   readonly vimMode: boolean;
@@ -99,7 +98,6 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
       && value.diffBaselineMode !== 'git-head')
     || typeof value.fixedBaselinePinned !== 'boolean'
     || typeof value.fixedBaselineActive !== 'boolean'
-    || typeof value.spellCheckEnabled !== 'boolean'
     || typeof value.contentMaxWidthEnabled !== 'boolean'
     || typeof value.longCodeBlockFoldingEnabled !== 'boolean'
     || typeof value.vimMode !== 'boolean'

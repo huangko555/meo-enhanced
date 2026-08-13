@@ -41,7 +41,6 @@ async function main(): Promise<void> {
         diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false,
         fixedBaselineActive: false,
-        spellCheckEnabled: false,
         contentMaxWidthEnabled: false,
         longCodeBlockFoldingEnabled: true,
         vimMode: false,

@@ -256,6 +256,61 @@ try {
     rejectedAllowedDistantGitAnnotateFixtures: []
   }, 'Git line aliases must be rejected without rejecting distant annotate/Git diff text');
 
+  const removedSpellDiagnosticFixtures = [
+    {
+      label: 'built-in spell-check setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.proofreading.enabled': { type: 'boolean' }
+      } } } }, null, 2)
+    },
+    {
+      label: 'spell-check dependency',
+      path: 'package.json',
+      contents: JSON.stringify({ dependencies: { 'cspell-lib': '^10.0.1' } }, null, 2)
+    },
+    {
+      label: 'diagnostic suggestion Protocol alias',
+      path: 'src/protocol/removedDiagnosticSuggestions.ts',
+      contents: "export type QuickFixRequest = { type: 'requestSuggestionsForDiagnostic'; from: number; to: number };\n"
+    },
+    {
+      label: 'spelling diagnostics Host alias',
+      path: 'src/host/proofreadingAdapter.ts',
+      contents: 'export const collectSpellingDiagnostics = () => [];\n'
+    },
+    {
+      label: 'typo suggestions Webview alias',
+      path: 'webview/src/adapters/typoQuickFix.ts',
+      contents: 'export const showTypoSuggestions = () => undefined;\n'
+    }
+  ];
+  const missedSpellDiagnosticCapabilities: string[] = [];
+  for (const fixture of removedSpellDiagnosticFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (outcome.ok || !/ARCH015/.test(outcome.output)) {
+      missedSpellDiagnosticCapabilities.push(fixture.label);
+    }
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+
+  write('webview/src/helpers/retainedDiagnosticsAndSelection.ts', [
+    "export const platformDiagnostics = 'VS Code diagnostics';",
+    "export const compilerErrorsVisible = true;",
+    "export const selectionCommands = ['bold', 'italic', 'strikethrough', 'highlight', 'inline-code', 'link', 'wiki', 'kbd', 'underline'];",
+    ''
+  ].join('\n'));
+  const retainedDiagnosticsAndSelection = runCheck();
+  assert.deepEqual({
+    missedSpellDiagnosticCapabilities,
+    retainedDiagnosticsAndSelection: retainedDiagnosticsAndSelection.ok ? '' : retainedDiagnosticsAndSelection.output
+  }, {
+    missedSpellDiagnosticCapabilities: [],
+    retainedDiagnosticsAndSelection: ''
+  }, 'MEO spell/diagnostic suggestion aliases must be rejected without rejecting platform diagnostics or selection commands');
+  rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedDiagnosticsAndSelection.ts'));
+
   write('webview/src/helpers/retainedGitDiff.ts', [
     "export const gitChangesGutter = 'source-live';",
     "export const diffBaselineMode = 'git-head';",

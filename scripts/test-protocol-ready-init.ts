@@ -7,8 +7,6 @@ import { decodeResolveWikiLinksRequest, decodeResolvedWikiLinksResponse } from '
 import { createWikiLinkResolutionTransport } from '../webview/src/adapters/wikiLinkResolutionTransport';
 import { decodeResolveLocalLinksRequest, decodeResolvedLocalLinksResponse } from '../src/protocol/localLinkResolution';
 import { createLocalLinkResolutionTransport } from '../webview/src/adapters/localLinkResolutionTransport';
-import { decodeDiagnosticSuggestionsRequest, decodeDiagnosticSuggestionsResult } from '../src/protocol/diagnosticSuggestions';
-import { createDiagnosticSuggestionsTransport } from '../webview/src/adapters/diagnosticSuggestionsTransport';
 import { decodeSaveImageFromClipboardRequest, decodeSavedImagePathResponse } from '../src/protocol/clipboardImageSave';
 import { createClipboardImageSaveTransport } from '../webview/src/adapters/clipboardImageSaveTransport';
 import { decodePreviewRenderRequest, decodePreviewRenderResponse } from '../src/protocol/previewRender';
@@ -58,7 +56,6 @@ const completeInit = {
   diffBaselineMode: 'git-head' as const,
   fixedBaselinePinned: false,
   fixedBaselineActive: false,
-  spellCheckEnabled: true,
   contentMaxWidthEnabled: true,
   longCodeBlockFoldingEnabled: true,
   vimMode: false,
@@ -95,7 +92,7 @@ assert.equal(decodeInitMessage({ ...completeInit, previewAppearance: 'broken' })
 for (const requiredKey of [
   'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'lineNumbers', 'gitChangesGutter',
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
-  'fixedBaselineActive', 'spellCheckEnabled', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
+  'fixedBaselineActive', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
   'vimMode', 'vimKeybindings', 'vimLeader', 'findOptions', 'outlinePosition', 'outlineVisible',
   'outlineWidth', 'theme', 'shikiCodeBlocks', 'codeTheme'
 ]) {
@@ -268,72 +265,6 @@ assert.deepEqual(await timedOutLocal, {
 });
 assert.equal(localTransport.accept({
   type: 'resolvedLocalLinks', requestId: 'local-link-1', result: { ok: true, value: { results: [] } }
-}), false);
-assert.deepEqual(decodeDiagnosticSuggestionsRequest({
-  type: 'requestDiagnosticSuggestions', requestId: 'diag-1', from: 2, to: 4, message: 'Unknown name'
-}), { type: 'requestDiagnosticSuggestions', requestId: 'diag-1', from: 2, to: 4, message: 'Unknown name' });
-assert.equal(decodeDiagnosticSuggestionsRequest({
-  type: 'requestDiagnosticSuggestions', requestId: 'diag-1', from: 5, to: 4, message: 'bad'
-}), null);
-assert.deepEqual(decodeDiagnosticSuggestionsResult({
-  type: 'diagnosticSuggestionsResult', requestId: 'diag-1', from: 2, to: 4,
-  result: { ok: true, value: { suggestions: ['Fix'] } }
-}), {
-  type: 'diagnosticSuggestionsResult', requestId: 'diag-1', from: 2, to: 4,
-  result: { ok: true, value: { suggestions: ['Fix'] } }
-});
-assert.deepEqual(decodeDiagnosticSuggestionsResult({
-  type: 'diagnosticSuggestionsResult', requestId: 'diag-1', from: 2, to: 4,
-  result: { ok: false, error: { code: 'operation-failed', message: 'unavailable' } }
-}), {
-  type: 'diagnosticSuggestionsResult', requestId: 'diag-1', from: 2, to: 4,
-  result: { ok: false, error: { code: 'operation-failed', message: 'unavailable' } }
-});
-let postedDiagnosticRequest: unknown;
-const diagnosticResults: unknown[] = [];
-let scheduledDiagnosticTimeout: (() => void) | null = null;
-let canceledDiagnosticTimeouts = 0;
-const diagnosticTransport = createDiagnosticSuggestionsTransport(
-  (message) => { postedDiagnosticRequest = message; },
-  (message) => { diagnosticResults.push(message); },
-  {
-    scheduleTimeout(callback) {
-      scheduledDiagnosticTimeout = callback;
-      return 'diagnostic-timeout';
-    },
-    cancelTimeout(timeout) {
-      assert.equal(timeout, 'diagnostic-timeout');
-      canceledDiagnosticTimeouts += 1;
-    }
-  }
-);
-const diagnosticRequestId = diagnosticTransport.request({
-  from: 0, to: 1, message: 'Missing', code: 'x'
-});
-assert.match(diagnosticRequestId, /^diagnostic-suggestions-\d+-0$/);
-assert.deepEqual(postedDiagnosticRequest, {
-  type: 'requestDiagnosticSuggestions', requestId: diagnosticRequestId, from: 0, to: 1, message: 'Missing', code: 'x'
-});
-assert.equal(diagnosticTransport.accept({
-  type: 'diagnosticSuggestionsResult', requestId: diagnosticRequestId, from: 0, to: 1,
-  result: { ok: true, value: { suggestions: ['Fixed'] } }
-}), true);
-assert.deepEqual(diagnosticResults.at(-1), {
-  type: 'diagnosticSuggestionsResult', requestId: diagnosticRequestId, from: 0, to: 1,
-  result: { ok: true, value: { suggestions: ['Fixed'] } }
-});
-assert.equal(canceledDiagnosticTimeouts, 1);
-const timedOutDiagnosticId = diagnosticTransport.request({ from: 2, to: 3, message: 'Missing' });
-const triggerDiagnosticTimeout = scheduledDiagnosticTimeout as (() => void) | null;
-assert.notEqual(triggerDiagnosticTimeout, null);
-triggerDiagnosticTimeout?.();
-assert.deepEqual(diagnosticResults.at(-1), {
-  type: 'diagnosticSuggestionsResult', requestId: timedOutDiagnosticId, from: 2, to: 3,
-  result: { ok: false, error: { code: 'timeout', message: 'Timed out while resolving diagnostic suggestions' } }
-});
-assert.equal(diagnosticTransport.accept({
-  type: 'diagnosticSuggestionsResult', requestId: timedOutDiagnosticId, from: 2, to: 3,
-  result: { ok: true, value: { suggestions: [] } }
 }), false);
 assert.deepEqual(decodeSaveImageFromClipboardRequest({
   type: 'saveImageFromClipboard', requestId: 'save-1', imageData: 'data:image/png;base64,AA==', fileName: 'a.png'
@@ -583,7 +514,6 @@ for (const command of [
   { type: 'setDiffBaselineMode', mode: 'git-head' },
   { type: 'setFixedBaseline', enabled: true },
   { type: 'releaseFixedBaseline' },
-  { type: 'setSpellCheck', enabled: true },
   { type: 'setOutlineVisible', visible: false },
   { type: 'setOutlinePosition', position: 'right' },
   { type: 'setOutlineWidth', width: 240 },
@@ -616,7 +546,6 @@ for (const event of [
   { type: 'gitDiffLineHighlightsChanged', enabled: true },
   { type: 'diffBaselineModeChanged', mode: 'recent-save' },
   { type: 'fixedBaselineChanged', pinned: true, active: false },
-  { type: 'spellCheckChanged', enabled: true },
   { type: 'contentMaxWidthChanged', enabled: true },
   { type: 'longCodeBlockFoldingChanged', enabled: true },
   { type: 'findOptionsChanged', findOptions: { wholeWord: false, caseSensitive: true } }

@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, SpellCheck2, Settings2, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, Settings2, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -180,7 +180,6 @@ let gitDiffLineHighlightsEnabled = true;
 let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
 let fixedBaselinePinned = false;
 let fixedBaselineActive = false;
-let spellCheckEnabled = true;
 let contentMaxWidthEnabled = false;
 let longCodeBlockFoldingEnabled = true;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
@@ -277,14 +276,6 @@ const changesControls = document.createElement('div');
 changesControls.className = 'changes-controls preview-hidden-toolbar-control';
 changesControls.append(fixedBaselineBtn, gitChangesGutterBtn);
 
-const spellCheckBtn = document.createElement('button');
-spellCheckBtn.type = 'button';
-spellCheckBtn.className = 'more-tools-option more-tools-toggle-option is-active';
-spellCheckBtn.dataset.action = 'spellCheck';
-spellCheckBtn.title = 'Disable Spellcheck';
-spellCheckBtn.setAttribute('role', 'menuitemcheckbox');
-appendMoreToolsOptionContent(spellCheckBtn, SpellCheck2, 'Spellcheck');
-
 const longCodeBlockFoldingBtn = document.createElement('button');
 longCodeBlockFoldingBtn.type = 'button';
 longCodeBlockFoldingBtn.className = 'more-tools-option more-tools-toggle-option is-active';
@@ -345,12 +336,6 @@ const setFixedBaselineState = (pinned: boolean, active: boolean) => {
   updateGitChangesGutterUI();
 };
 
-const updateSpellCheckUI = () => {
-  spellCheckBtn.classList.toggle('is-active', spellCheckEnabled);
-  spellCheckBtn.setAttribute('aria-checked', spellCheckEnabled ? 'true' : 'false');
-  spellCheckBtn.title = spellCheckEnabled ? 'Disable Spellcheck' : 'Enable Spellcheck';
-};
-
 const updateContentMaxWidthUI = () => {
   contentMaxWidthBtn.classList.toggle('is-active', contentMaxWidthEnabled);
   contentMaxWidthBtn.setAttribute('aria-checked', contentMaxWidthEnabled ? 'true' : 'false');
@@ -402,18 +387,6 @@ const setGitChangesGutterVisible = (visible: boolean, { post = true }: PostUpdat
   updateGitChangesGutterUI();
   if (post && changed) {
     vscode.postMessage({ type: 'setGitChangesGutter', visible: gitChangesGutterVisible });
-  }
-};
-
-const setSpellCheckEnabled = (enabled: boolean, { post = true }: PostUpdateOptions = {}) => {
-  const nextEnabled = enabled !== false;
-  const changed = nextEnabled !== spellCheckEnabled;
-  if (changed) {
-    spellCheckEnabled = nextEnabled;
-  }
-  updateSpellCheckUI();
-  if (post && changed) {
-    vscode.postMessage({ type: 'setSpellCheck', enabled: spellCheckEnabled });
   }
 };
 
@@ -476,10 +449,6 @@ const toggleLineNumbers = () => {
 
 const toggleGitChangesGutter = () => {
   setGitChangesGutterVisible(!gitChangesGutterVisible);
-};
-
-const toggleSpellCheck = () => {
-  setSpellCheckEnabled(!spellCheckEnabled);
 };
 
 const separator = document.createElement('div');
@@ -845,7 +814,6 @@ moreToolsPanel.append(
   contentMaxWidthBtn,
   lineNumbersBtn,
   longCodeBlockFoldingBtn,
-  spellCheckBtn,
   editorAppearanceRow
 );
 
@@ -1602,7 +1570,6 @@ const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onSelectionChange: (state: any) => selectionMenuController.update(state),
-    postDiagnosticSuggestionsMessage: (message) => vscode.postMessage(message),
     onViewportChange: () => scheduleViewPositionCapture(),
     mermaidDiagramPresentationFactory
   });
@@ -1660,7 +1627,6 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     failureNotice.updateEditorNotice();
   },
   setPreviewActive(active, restoreLine) {
-    if (active) editor?.diagnosticSuggestionPresentationChanged?.();
     previewAdapter.setActive({
       active,
       text: getCurrentEditorText(),
@@ -1773,9 +1739,6 @@ const handleInit = (message: InitMessage) => {
   }
   if (typeof message.fixedBaselinePinned === 'boolean' && typeof message.fixedBaselineActive === 'boolean') {
     setFixedBaselineState(message.fixedBaselinePinned, message.fixedBaselineActive);
-  }
-  if (typeof message.spellCheckEnabled === 'boolean') {
-    setSpellCheckEnabled(message.spellCheckEnabled, { post: false });
   }
   if (typeof message.gitDiffLineHighlights === 'boolean') {
     gitDiffLineHighlightsEnabled = message.gitDiffLineHighlights;
@@ -1940,11 +1903,6 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  if (message.type === 'spellCheckChanged') {
-    setSpellCheckEnabled(message.enabled, { post: false });
-    return;
-  }
-
   if (message.type === 'contentMaxWidthChanged') {
     setContentMaxWidthEnabled(message.enabled, { post: false });
     return;
@@ -1987,11 +1945,6 @@ window.addEventListener('message', (event) => {
 
   if (message.type === 'diagnosticsChanged') {
     applyDiagnosticsFromHost(message.diagnostics);
-    return;
-  }
-
-  if (message.type === 'diagnosticSuggestionsResult') {
-    editor?.acceptDiagnosticSuggestionsResult?.(message);
     return;
   }
 
@@ -2254,15 +2207,6 @@ selectionMenuElements.menu.addEventListener('pointerdown', (event) => {
 });
 
 selectionMenuElements.menu.addEventListener('click', (event) => {
-  const suggestionButton = (event.target as Element).closest('.selection-inline-suggestion') as HTMLElement | null;
-  if (suggestionButton) {
-    const index = parseInt(suggestionButton.dataset.suggestionIndex ?? '', 10);
-    if (Number.isFinite(index)) {
-      selectionMenuController.handleSuggestion(index);
-    }
-    return;
-  }
-
   const button = (event.target as Element).closest('.selection-inline-button') as HTMLElement | null;
   if (!button) return;
   const { action } = button.dataset;
@@ -2325,7 +2269,6 @@ releaseFixedBaselineBtn.addEventListener('click', () => {
   vscode.postMessage({ type: 'releaseFixedBaseline' });
   setMoreToolsVisible(false);
 });
-spellCheckBtn.addEventListener('click', toggleSpellCheck);
 longCodeBlockFoldingBtn.addEventListener('click', () => {
   setLongCodeBlockFoldingEnabled(!longCodeBlockFoldingEnabled);
 });

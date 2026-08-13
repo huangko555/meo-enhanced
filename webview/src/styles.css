@@ -207,40 +207,6 @@ body {
   background-color: var(--vscode-toolbar-hoverBackground);
 }
 
-.selection-inline-suggestions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-  max-width: 360px;
-  margin-left: 4px;
-  padding-left: 4px;
-  border-left: 1px solid var(--vscode-panel-border);
-}
-
-.selection-inline-suggestions[hidden] {
-  display: none;
-}
-
-.selection-inline-suggestion {
-  min-width: 0;
-  max-width: 160px;
-  height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 5px;
-  color: var(--vscode-editor-foreground);
-  background: transparent;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.selection-inline-suggestion:hover {
-  background-color: var(--vscode-toolbar-hoverBackground);
-}
-
 .mode-toolbar {
   box-sizing: border-box;
   position: relative;

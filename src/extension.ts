@@ -34,7 +34,6 @@ import {
   VIM_MODE_BEHAVIOR_SETTING_KEY,
   VIM_MODE_SETTING_KEY,
   CODE_BLOCKS_VSCODE_THEME_SETTING_KEY,
-  SPELL_CHECK_SETTING_KEY,
   getUseVscodeThemeForCodeBlocks,
   getCodeBlockVscodeTheme,
   syncEditorAssociations,
@@ -59,8 +58,7 @@ import { createVscodePendingDraftRecoveryAdapter } from './host/vscodePendingDra
 import { createGitBaselineRefreshTimerAdapter } from './host/gitBaselineRefreshTimerAdapter';
 import { createVscodeSavedRevisionFileAdapter } from './host/vscodeSavedRevisionFileAdapter';
 import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefreshTimerAdapter';
-import { createVscodeSpellDiagnosticsAdapter } from './host/vscodeSpellDiagnosticsAdapter';
-import { createHostDiagnosticsTimerAdapter } from './host/hostDiagnosticsTimerAdapter';
+import { createVscodeDiagnosticsAdapter } from './host/vscodeDiagnosticsAdapter';
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
 import { serializeThemeSettings, themePresets, type ThemeSettings, validateThemePayload } from './shared/themeDefaults';
@@ -497,15 +495,12 @@ export function activate(context: vscode.ExtensionContext): void {
 class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   private readonly activePanels = new Set<vscode.WebviewPanel>();
   private readonly panelSessions = new Map<vscode.WebviewPanel, PanelSession>();
-  private readonly spellDiagnosticCollection = vscode.languages.createDiagnosticCollection('meo-spell');
   private lastActivePanel: vscode.WebviewPanel | null = null;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly agentReviewHandoff: AgentReviewHandoffController
-  ) {
-    this.context.subscriptions.push(this.spellDiagnosticCollection);
-  }
+  ) {}
 
   async initializeGitWatcher(): Promise<void> {
     const watcher = await createGitApiWatcher((repoRootFsPath) => {
@@ -607,15 +602,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       this.broadcast({ type: 'themeChanged', theme: getThemeSettings(), codeTheme: getCodeBlockVscodeTheme() });
     }
 
-    if (
-      event.affectsConfiguration('cSpell') &&
-      !event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${SPELL_CHECK_SETTING_KEY}`)
-    ) {
-      for (const session of this.panelSessions.values()) {
-        session.refreshSpellDiagnostics();
-      }
-    }
-
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.${CODE_BLOCKS_VSCODE_THEME_SETTING_KEY}`)) {
       this.broadcast({
         type: 'shikiCodeBlocksChanged',
@@ -676,8 +662,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       document,
       documentUri,
       context: this.context,
-      spellDiagnostics: createVscodeSpellDiagnosticsAdapter(document, this.spellDiagnosticCollection),
-      hostDiagnosticsTimer: createHostDiagnosticsTimerAdapter(),
+      diagnostics: createVscodeDiagnosticsAdapter(document),
       agentReviewHandoff: this.agentReviewHandoff,
       pendingDraftRecovery: createVscodePendingDraftRecoveryAdapter({
         document,

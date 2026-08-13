@@ -84,7 +84,6 @@ try {
     (window as any).__highlightEditor = editor;
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     const menu = harness.createSelectionMenu().menu;
-    menu.querySelector<HTMLElement>('.selection-inline-suggestions')!.hidden = true;
     document.body.appendChild(menu);
     const menuRect = menu.getBoundingClientRect();
     const buttons = Array.from(menu.querySelectorAll<HTMLElement>('.selection-inline-button'));
@@ -99,6 +98,7 @@ try {
         .find((node) => node.textContent?.includes('表格'))?.textContent ?? null,
       toolbarButton: Boolean(menu.querySelector('[data-action="highlight"]')),
       underlineToolbarButton: Boolean(menu.querySelector('[data-action="underline"]')),
+      toolbarActions: buttons.map((button) => button.dataset.action),
       lastToolbarAction: lastButton?.dataset.action ?? null,
       toolbarGeometry: {
         outerRadius: getComputedStyle(menu).borderRadius,
@@ -119,6 +119,17 @@ try {
     !live.tableHighlight?.includes('表格') ||
     !live.toolbarButton ||
     !live.underlineToolbarButton ||
+    JSON.stringify(live.toolbarActions) !== JSON.stringify([
+      'bold',
+      'italic',
+      'lineover',
+      'highlight',
+      'inlineCode',
+      'link',
+      'wikiLink',
+      'kbd',
+      'underline'
+    ]) ||
     live.lastToolbarAction !== 'underline' ||
     !live.headingHighlight
   ) {

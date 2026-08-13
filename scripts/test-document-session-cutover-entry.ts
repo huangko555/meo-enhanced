@@ -160,7 +160,6 @@ const candidate = {
       onApplyChanges: enqueueLocalText,
       onOpenLink: () => undefined,
       onSelectionChange: () => undefined,
-      postDiagnosticSuggestionsMessage: () => undefined,
       onViewportChange: () => undefined,
     });
   },

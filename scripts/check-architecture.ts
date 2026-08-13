@@ -678,6 +678,40 @@ for (const path of gitBlameScope) {
   }
 }
 
+// Product deletion guard: MEO-owned spell checking and diagnostic suggestions must stay absent.
+// VS Code/compiler diagnostics display and ordinary selection formatting commands remain supported.
+const spellDiagnosticScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const hasRemovedSpellDiagnosticCapability = (text: string): boolean => {
+  if (/cspell|spell[-_. ]?check(?:er|ing|ed)?|proofread(?:er|ing)?/i.test(text)) return true;
+  const words = normalizeCapabilityWords(text);
+  for (let start = 0; start < words.length; start += 1) {
+    const window = words.slice(start, start + 6);
+    const wordSet = new Set(window);
+    const hasSuggestion = window.some((word) => /^suggest(?:ion|ions|ed|ing)?$/.test(word));
+    const hasDiagnostic = window.some((word) => /^diagnostic(?:s)?$/.test(word));
+    const hasSpelling = window.some((word) => /^(?:spell|spelling|typo|typos)$/.test(word));
+    const hasQuickFix = wordSet.has('quick') && (wordSet.has('fix') || wordSet.has('fixes'));
+    if ((hasDiagnostic && (hasSuggestion || hasQuickFix)) || (hasSpelling && (hasDiagnostic || hasSuggestion))) {
+      return true;
+    }
+  }
+  return false;
+};
+for (const path of spellDiagnosticScope) {
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\.spellcheck\s*=\s*false\b/gi, '');
+    if (hasRemovedSpellDiagnosticCapability(line)) {
+      failures.push(`ARCH015 已删除的 MEO 拼写检查或诊断建议能力重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }

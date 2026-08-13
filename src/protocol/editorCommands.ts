@@ -10,7 +10,6 @@ export type EditorCommand =
   | { readonly type: 'setDiffBaselineMode'; readonly mode: DiffBaselineMode }
   | { readonly type: 'setFixedBaseline'; readonly enabled: boolean }
   | { readonly type: 'releaseFixedBaseline' }
-  | { readonly type: 'setSpellCheck'; readonly enabled: boolean }
   | { readonly type: 'setOutlineVisible'; readonly visible: boolean }
   | { readonly type: 'setOutlinePosition'; readonly position: OutlinePosition }
   | { readonly type: 'setOutlineWidth'; readonly width: number }
@@ -57,7 +56,6 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
         && (value.enabled === undefined || isBoolean(value.enabled))
         && (isBoolean(value.visible) || isBoolean(value.enabled)) ? value as EditorCommand : null;
     case 'setFixedBaseline':
-    case 'setSpellCheck':
     case 'setContentMaxWidth':
     case 'setLongCodeBlockFolding':
       return isBoolean(value.enabled) ? value as EditorCommand : null;

@@ -13,11 +13,6 @@ import {
   type SavedRevisionRefreshTimer
 } from '../application/savedRevisionLifecycle';
 import {
-  createHostDiagnosticsLifecycle,
-  type HostDiagnosticsRuntime,
-  type HostDiagnosticsTimer
-} from '../application/hostDiagnosticsLifecycle';
-import {
   createDiffBaselineSelection,
   type DiffBaselineOutput
 } from '../application/diffBaselineSelection';
@@ -29,7 +24,6 @@ import {
   DIFF_BASELINE_MODE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
   LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY,
-  SPELL_CHECK_SETTING_KEY,
   OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
   getLongCodeBlockFoldingEnabled,
@@ -37,7 +31,6 @@ import {
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getDiffBaselineMode,
-  getSpellCheckEnabled,
   getOutlinePosition,
   getOutlineVisible,
   getOutlineWidth,
@@ -72,7 +65,6 @@ import type { AppliedMessage, ApplyChangesMessage, DiscardedChangesMessage, Docu
 import type { ResolvedImageSrcResponse } from '../protocol/imageResolution';
 import type { ResolvedWikiLinksResponse } from '../protocol/wikiLinkResolution';
 import type { ResolvedLocalLinksResponse } from '../protocol/localLinkResolution';
-import type { DiagnosticSuggestionsResult, RequestDiagnosticSuggestions } from '../protocol/diagnosticSuggestions';
 import type { SaveImageFromClipboardRequest, SavedImagePathResponse } from '../protocol/clipboardImageSave';
 import type { PreviewRenderResponse } from '../protocol/previewRender';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
@@ -97,11 +89,8 @@ type FindOptions = {
 
 const GIT_BASELINE_STARTUP_DELAY_MS = 350;
 const GIT_BASELINE_REFRESH_DELAY_MS = 150;
-const MAX_DIAGNOSTIC_SUGGESTIONS = 1;
-type PanelSpellDiagnostics = HostDiagnosticsRuntime<vscode.Diagnostic> & {
-  readCombined(): SerializedDiagnostic[];
-  isInternalSource(source: string | undefined): boolean;
-  collectSuggestions(from: number, to: number, enabled: boolean): Promise<string[]>;
+type PanelDiagnostics = {
+  read(): SerializedDiagnostic[];
 };
 
 type PanelSessionControllerParams = {
@@ -109,8 +98,7 @@ type PanelSessionControllerParams = {
   document: vscode.TextDocument;
   documentUri: vscode.Uri;
   context: vscode.ExtensionContext;
-  spellDiagnostics: PanelSpellDiagnostics;
-  hostDiagnosticsTimer: HostDiagnosticsTimer;
+  diagnostics: PanelDiagnostics;
   agentReviewHandoff: AgentReviewHandoffController;
   pendingDraftRecovery: PendingDraftRecovery;
   gitBaselineRefreshTimer: GitBaselineRefreshTimer;
@@ -146,7 +134,6 @@ export type PanelSession = {
   ensureInitDelivered: () => Promise<void>;
   requestExportSnapshot: () => Promise<{ text: string; environment?: ExportStyleEnvironment }>;
   refreshGitBaseline: (options?: GitBaselineRefreshOptions) => void;
-  refreshSpellDiagnostics: () => void;
   getGitRepoRoot: () => string | null;
 };
 
@@ -162,8 +149,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     document,
     documentUri,
     context,
-    spellDiagnostics,
-    hostDiagnosticsTimer,
+    diagnostics,
     agentReviewHandoff,
     pendingDraftRecovery,
     gitBaselineRefreshTimer,
@@ -189,7 +175,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const documentKey = document.uri.toString();
   const persistedMode = context.globalState.get(EDITOR_MODE_STATE_KEY);
   let mode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
-  let spellCheckEnabled = getSpellCheckEnabled();
   let applyQueue: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
@@ -320,7 +305,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       text: document.getText(),
       version: document.version,
       savedRevision,
-      diagnostics: spellDiagnostics.readCombined(),
+      diagnostics: diagnostics.read(),
       mode,
       previewAppearance: getPreviewAppearance(),
       editorAppearance: getEditorAppearance(),
@@ -330,7 +315,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diffBaselineMode: diffBaselineState.mode,
       fixedBaselinePinned: diffBaselineState.fixedPinned,
       fixedBaselineActive: diffBaselineState.fixedActive,
-      spellCheckEnabled,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
       longCodeBlockFoldingEnabled: getLongCodeBlockFoldingEnabled(),
       vimMode: getVimModeEnabled(context),
@@ -352,18 +336,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const sendDiagnosticsChanged = async (): Promise<boolean> => {
     const message: DiagnosticsChangedEvent = {
       type: 'diagnosticsChanged',
-      diagnostics: spellDiagnostics.readCombined()
+      diagnostics: diagnostics.read()
     };
     return postToWebview(message);
   };
-
-  const hostDiagnosticsLifecycle = createHostDiagnosticsLifecycle({
-    runtime: spellDiagnostics,
-    timer: hostDiagnosticsTimer,
-    readEnabled: () => spellCheckEnabled,
-    publishCombined: async () => { await sendDiagnosticsChanged(); },
-    reportFailure: (error) => reportBackgroundError('spellCheck', error)
-  });
 
   const sendDocChanged = async (): Promise<boolean> => {
     const message: DocumentChangedMessage = {
@@ -481,7 +457,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     ensureInitDelivered,
     requestExportSnapshot,
     refreshGitBaseline,
-    refreshSpellDiagnostics: () => hostDiagnosticsLifecycle.requestRefresh(0),
     getGitRepoRoot: () => gitDocumentState.getRepoRoot()
   };
 
@@ -493,7 +468,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'ready':
         webviewReady = true;
         await ensureInitDelivered();
-        hostDiagnosticsLifecycle.requestRefresh(0);
         refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_STARTUP_DELAY_MS });
         return;
       case 'setMode':
@@ -535,13 +509,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await enqueue(async () => {
           await diffBaselineSelection.releaseFixed();
         });
-        return;
-      case 'setSpellCheck':
-        spellCheckEnabled = raw.enabled === true;
-        await vscode.workspace
-          .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .update(SPELL_CHECK_SETTING_KEY, spellCheckEnabled, vscode.ConfigurationTarget.Global);
-        hostDiagnosticsLifecycle.requestRefresh(0);
         return;
       case 'setOutlineVisible':
         await setOutlineVisible(raw.visible);
@@ -741,25 +708,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await postToWebview(response);
         return;
       }
-      case 'requestDiagnosticSuggestions': {
-        let response: DiagnosticSuggestionsResult;
-        try {
-          response = await resolveDiagnosticSuggestions(document, raw, spellCheckEnabled, spellDiagnostics);
-        } catch (error) {
-          response = {
-            type: 'diagnosticSuggestionsResult',
-            requestId: raw.requestId,
-            from: raw.from,
-            to: raw.to,
-            result: {
-              ok: false,
-              error: { code: 'operation-failed', message: error instanceof Error ? error.message : 'Failed to resolve diagnostic suggestions' }
-            }
-          };
-        }
-        await postToWebview(response);
-        return;
-      }
     }
   };
 
@@ -783,8 +731,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (event.contentChanges.length === 0) {
       return;
     }
-
-    hostDiagnosticsLifecycle.requestRefresh();
 
     runBackground(enqueue(async () => {
       await sendDocChanged();
@@ -822,7 +768,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!event.uris.some((uri) => uri.toString() === documentKey)) {
       return;
     }
-    runBackground(hostDiagnosticsLifecycle.handleDiagnosticsChanged(), 'sendDiagnosticsChanged');
+    runBackground(sendDiagnosticsChanged(), 'sendDiagnosticsChanged');
   });
 
   const textEditorSelectionSubscription = vscode.window.onDidChangeTextEditorSelection((event) => {
@@ -864,7 +810,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return;
     }
     disposed = true;
-    hostDiagnosticsLifecycle.dispose();
     viewNavigation.dispose();
     diffBaselineSelection.dispose();
     gitBaselineRefresh.dispose();
@@ -976,199 +921,6 @@ function mapNormalizedOffsetToDocumentOffset(documentText: string, normalizedOff
   }
 
   return documentIndex;
-}
-
-function mapDocumentOffsetToNormalizedOffset(documentText: string, documentOffset: number): number {
-  const target = Number.isFinite(documentOffset) ? Math.max(0, Math.min(documentOffset, documentText.length)) : 0;
-  if (target === 0) {
-    return 0;
-  }
-
-  let normalizedIndex = 0;
-  let documentIndex = 0;
-
-  while (documentIndex < target) {
-    if (documentText.charCodeAt(documentIndex) === 13) {
-      if (documentText.charCodeAt(documentIndex + 1) === 10 && documentIndex + 1 < target) {
-        documentIndex += 2;
-      } else {
-        documentIndex += 1;
-      }
-      normalizedIndex += 1;
-      continue;
-    }
-
-    documentIndex += 1;
-    normalizedIndex += 1;
-  }
-
-  return normalizedIndex;
-}
-
-function normalizeDiagnosticCode(code: vscode.Diagnostic['code']): string | undefined {
-  if (typeof code === 'string' || typeof code === 'number') {
-    return String(code);
-  }
-  if (code && typeof code === 'object' && 'value' in code) {
-    return String(code.value);
-  }
-  return undefined;
-}
-
-function clampDiagnosticRange(from: number, to: number, textLength: number): { from: number; to: number } | null {
-  const clampedFrom = Math.max(0, Math.min(Math.floor(from), textLength));
-  let clampedTo = Math.max(0, Math.min(Math.floor(to), textLength));
-  if (clampedTo < clampedFrom) {
-    clampedTo = clampedFrom;
-  }
-  if (clampedTo === clampedFrom && clampedFrom < textLength) {
-    clampedTo = clampedFrom + 1;
-  }
-  if (clampedTo === clampedFrom && clampedFrom > 0) {
-    return { from: clampedFrom - 1, to: clampedFrom };
-  }
-  if (clampedTo === clampedFrom) {
-    return null;
-  }
-  return { from: clampedFrom, to: clampedTo };
-}
-
-async function resolveDiagnosticSuggestions(
-  document: vscode.TextDocument,
-  request: RequestDiagnosticSuggestions,
-  spellCheckEnabled: boolean,
-  spellDiagnostics: PanelSpellDiagnostics
-): Promise<DiagnosticSuggestionsResult> {
-  const emptyResponse: DiagnosticSuggestionsResult = {
-    type: 'diagnosticSuggestionsResult',
-    requestId: request.requestId,
-    from: request.from,
-    to: request.to,
-    result: { ok: true, value: { suggestions: [] } }
-  };
-
-  const documentText = document.getText();
-  const normalizedTextLength = documentText.replace(/\r\n?/g, '\n').length;
-  const requestedRange = clampDiagnosticRange(request.from, request.to, normalizedTextLength);
-  if (!requestedRange) {
-    return emptyResponse;
-  }
-
-  const mappedFrom = mapNormalizedOffsetToDocumentOffset(documentText, requestedRange.from);
-  const mappedTo = mapNormalizedOffsetToDocumentOffset(documentText, requestedRange.to);
-  const range = new vscode.Range(
-    document.positionAt(Math.min(mappedFrom, mappedTo)),
-    document.positionAt(Math.max(mappedFrom, mappedTo))
-  );
-
-  if (!hasMatchingDiagnostic(document, request, requestedRange)) {
-    return emptyResponse;
-  }
-
-  const actions = await vscode.commands.executeCommand<Array<vscode.Command | vscode.CodeAction>>(
-    'vscode.executeCodeActionProvider',
-    document.uri,
-    range,
-    vscode.CodeActionKind.QuickFix.value,
-    64
-  );
-  const suggestions: string[] = [];
-  const seen = new Set<string>();
-
-  if (Array.isArray(actions)) {
-    for (const action of actions) {
-      const replacement = simpleReplacementFromCodeAction(document, requestedRange, action);
-      if (replacement === null || seen.has(replacement)) {
-        continue;
-      }
-      seen.add(replacement);
-      suggestions.push(replacement);
-      if (suggestions.length >= MAX_DIAGNOSTIC_SUGGESTIONS) {
-        break;
-      }
-    }
-  }
-
-  if (suggestions.length === 0 && spellDiagnostics.isInternalSource(request.source)) {
-    const spellSuggestions = await spellDiagnostics.collectSuggestions(
-      requestedRange.from,
-      requestedRange.to,
-      spellCheckEnabled
-    );
-    for (const suggestion of spellSuggestions) {
-      if (seen.has(suggestion)) {
-        continue;
-      }
-      seen.add(suggestion);
-      suggestions.push(suggestion);
-      if (suggestions.length >= MAX_DIAGNOSTIC_SUGGESTIONS) {
-        break;
-      }
-    }
-  }
-
-  return {
-    ...emptyResponse,
-    result: { ok: true, value: { suggestions } }
-  };
-}
-
-function hasMatchingDiagnostic(
-  document: vscode.TextDocument,
-  request: RequestDiagnosticSuggestions,
-  requestedRange: { from: number; to: number }
-): boolean {
-  const documentText = document.getText();
-  return vscode.languages.getDiagnostics(document.uri).some((diagnostic) => {
-    const from = mapDocumentOffsetToNormalizedOffset(documentText, document.offsetAt(diagnostic.range.start));
-    const to = mapDocumentOffsetToNormalizedOffset(documentText, document.offsetAt(diagnostic.range.end));
-    const range = clampDiagnosticRange(from, to, documentText.replace(/\r\n?/g, '\n').length);
-    if (!range || range.from !== requestedRange.from || range.to !== requestedRange.to) {
-      return false;
-    }
-    if (diagnostic.message !== request.message) {
-      return false;
-    }
-    if ((diagnostic.source ?? undefined) !== (request.source ?? undefined)) {
-      return false;
-    }
-    return (normalizeDiagnosticCode(diagnostic.code) ?? undefined) === (request.code ?? undefined);
-  });
-}
-
-function simpleReplacementFromCodeAction(
-  document: vscode.TextDocument,
-  requestedRange: { from: number; to: number },
-  action: vscode.Command | vscode.CodeAction
-): string | null {
-  if (!('edit' in action) || !action.edit || ('disabled' in action && action.disabled)) {
-    return null;
-  }
-
-  const entries = action.edit.entries();
-  if (entries.length !== 1) {
-    return null;
-  }
-
-  const [uri, edits] = entries[0];
-  if (uri.toString() !== document.uri.toString() || edits.length !== 1) {
-    return null;
-  }
-
-  const [edit] = edits;
-  const documentText = document.getText();
-  const editFrom = mapDocumentOffsetToNormalizedOffset(documentText, document.offsetAt(edit.range.start));
-  const editTo = mapDocumentOffsetToNormalizedOffset(documentText, document.offsetAt(edit.range.end));
-  const editRange = clampDiagnosticRange(editFrom, editTo, documentText.replace(/\r\n?/g, '\n').length);
-  if (!editRange || !rangesOverlap(editRange, requestedRange)) {
-    return null;
-  }
-
-  return edit.newText;
-}
-
-function rangesOverlap(left: { from: number; to: number }, right: { from: number; to: number }): boolean {
-  return left.from < right.to && right.from < left.to;
 }
 
 async function handleSaveImageFromClipboard(

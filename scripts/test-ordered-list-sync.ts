@@ -56,7 +56,7 @@ async function main(): Promise<void> {
         savedRevision: { version: 1, text: '' }, diagnostics: [], mode: 'live',
         previewAppearance: 'dark', editorAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
         gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
-        fixedBaselinePinned: false, fixedBaselineActive: false, spellCheckEnabled: false,
+        fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         vimMode: false, vimKeybindings: [], vimLeader: '\\',
         findOptions: { wholeWord: false, caseSensitive: false },

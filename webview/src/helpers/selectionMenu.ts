@@ -2,13 +2,6 @@ import { createElement, Bold, Italic, Strikethrough, Highlighter, Terminal, Link
 
 export interface SelectionMenuElements {
   menu: HTMLDivElement;
-  suggestions: HTMLDivElement;
-}
-
-export type DiagnosticSuggestionMenuItem = {
-  from: number;
-  to: number;
-  text: string;
 };
 
 export type SelectionMenuState = {
@@ -17,7 +10,6 @@ export type SelectionMenuState = {
   anchorY?: number;
   anchorBottomY?: number;
   align?: 'center' | 'start';
-  diagnosticSuggestions?: DiagnosticSuggestionMenuItem[];
 };
 
 const createSelectionActionButton = (action: string, label: string, Icon: any): HTMLButtonElement => {
@@ -46,11 +38,6 @@ export const createSelectionMenu = (): SelectionMenuElements => {
   const selectionWikiLinkBtn = createSelectionActionButton('wikiLink', 'Wiki Link', Brackets);
   const selectionKbdBtn = createSelectionActionButton('kbd', 'Kbd', Keyboard);
   const selectionUnderlineBtn = createSelectionActionButton('underline', 'Underline', Underline);
-  const suggestions = document.createElement('div');
-  suggestions.className = 'selection-inline-suggestions';
-  suggestions.setAttribute('role', 'group');
-  suggestions.setAttribute('aria-label', 'Suggested replacements');
-
   menu.append(
     selectionBoldBtn,
     selectionItalicBtn,
@@ -60,40 +47,19 @@ export const createSelectionMenu = (): SelectionMenuElements => {
     selectionLinkBtn,
     selectionWikiLinkBtn,
     selectionKbdBtn,
-    selectionUnderlineBtn,
-    suggestions
+    selectionUnderlineBtn
   );
 
-  return { menu, suggestions };
+  return { menu };
 };
 
 export const createSelectionMenuController = (
   elements: SelectionMenuElements,
   getEditor: () => any
 ) => {
-  let activeSuggestions: DiagnosticSuggestionMenuItem[] = [];
-
-  const renderSuggestions = (suggestions: DiagnosticSuggestionMenuItem[] = []): void => {
-    activeSuggestions = suggestions.slice(0, 1);
-    elements.suggestions.replaceChildren();
-    elements.suggestions.hidden = activeSuggestions.length === 0;
-
-    for (let index = 0; index < activeSuggestions.length; index += 1) {
-      const suggestion = activeSuggestions[index];
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'selection-inline-suggestion';
-      button.dataset.suggestionIndex = String(index);
-      button.title = suggestion.text;
-      button.textContent = suggestion.text;
-      elements.suggestions.appendChild(button);
-    }
-  };
-
   const hide = (): void => {
     elements.menu.classList.remove('is-visible');
     elements.menu.classList.remove('is-below');
-    renderSuggestions();
   };
 
   const topToolbarBottom = (): number => {
@@ -111,7 +77,6 @@ export const createSelectionMenuController = (
       return;
     }
 
-    renderSuggestions(selectionState.diagnosticSuggestions ?? []);
     elements.menu.classList.add('is-visible');
     const margin = 8;
     const menuWidth = elements.menu.offsetWidth;
@@ -138,20 +103,10 @@ export const createSelectionMenuController = (
     editor.focus();
   };
 
-  const handleSuggestion = (index: number): void => {
-    const editor = getEditor();
-    const suggestion = activeSuggestions[index];
-    if (!editor || !suggestion) return;
-    editor.applyDiagnosticSuggestion(suggestion.from, suggestion.to, suggestion.text);
-    hide();
-    editor.focus();
-  };
-
   return {
     hide,
     update,
     handleAction,
-    handleSuggestion,
     elements
   };
 };
