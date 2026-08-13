@@ -769,12 +769,16 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     readonly dom: boolean;
     readonly context: Scope;
     readonly controlPath: readonly ControlFrame[];
+    readonly pathKey: string;
+    readonly pathPrefixes: readonly string[];
   };
   type SpellcheckUse = {
     readonly position: number;
     readonly range: NativeSpellcheckRange;
     readonly context: Scope;
     readonly controlPath: readonly ControlFrame[];
+    readonly pathKey: string;
+    readonly pathPrefixes: readonly string[];
   };
   type Binding = {
     kind: BindingKind;
@@ -953,6 +957,24 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     }
     return frame ? [...inheritedPath, frame] : inheritedPath;
   };
+  type ControlPathMetadata = {
+    readonly key: string;
+    readonly prefixes: readonly string[];
+  };
+  const controlPathMetadataCache = new WeakMap<readonly ControlFrame[], ControlPathMetadata>();
+  const controlPathMetadata = (controlPath: readonly ControlFrame[]): ControlPathMetadata => {
+    const cached = controlPathMetadataCache.get(controlPath);
+    if (cached) return cached;
+    const prefixes = [''];
+    let key = '';
+    for (const frame of controlPath) {
+      key += `/${frame.owner.pos}:${frame.branch}`;
+      prefixes.push(key);
+    }
+    const metadata = { key, prefixes };
+    controlPathMetadataCache.set(controlPath, metadata);
+    return metadata;
+  };
   const collectUsesAndAssignments = (
     node: ts.Node,
     inheritedScope: Scope,
@@ -961,6 +983,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     const scope = scopeByNode.get(node) ?? inheritedScope;
     const context = executionContext(scope);
     const controlPath = controlPathForNode(node, inheritedPath);
+    const pathMetadata = controlPathMetadata(controlPath);
     if (
       (ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
       ts.isIdentifier(node.name)
@@ -971,7 +994,9 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         position: node.getStart(sourceFile),
         dom: isDomType(node.type) || isDomInitializer(node.initializer),
         context,
-        controlPath
+        controlPath,
+        pathKey: pathMetadata.key,
+        pathPrefixes: pathMetadata.prefixes
       });
     }
     if (
@@ -985,7 +1010,9 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           position: node.getStart(sourceFile),
           dom: node.operatorToken.kind === ts.SyntaxKind.EqualsToken && isDomInitializer(node.right),
           context,
-          controlPath
+          controlPath,
+          pathKey: pathMetadata.key,
+          pathPrefixes: pathMetadata.prefixes
         });
       } else if (
         node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
@@ -999,7 +1026,9 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
             position: node.getStart(sourceFile),
             range: { start: node.getStart(sourceFile), end: node.end },
             context,
-            controlPath
+            controlPath,
+            pathKey: pathMetadata.key,
+            pathPrefixes: pathMetadata.prefixes
           });
         }
       }
@@ -1007,19 +1036,6 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     ts.forEachChild(node, (child) => collectUsesAndAssignments(child, scope, controlPath));
   };
   collectUsesAndAssignments(sourceFile, scopeByNode.get(sourceFile)!, []);
-
-  const controlPathKeys = (controlPath: readonly ControlFrame[]): string[] => {
-    const keys = [''];
-    let key = '';
-    for (const frame of controlPath) {
-      key += `/${frame.owner.pos}:${frame.branch}`;
-      keys.push(key);
-    }
-    return keys;
-  };
-  const controlPathKey = (controlPath: readonly ControlFrame[]): string => (
-    controlPathKeys(controlPath).at(-1)!
-  );
 
   for (const binding of bindings) {
     const stableConstDom = binding.kind === 'const' && binding.events.length > 0 &&
@@ -1037,9 +1053,29 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           loopEntryEventsByContext.set(event.context, loopEvents);
         }
         const latestByPath = loopEvents.get(frame.owner) ?? new Map<string, BindingEvent>();
-        latestByPath.set(controlPathKey(event.controlPath), event);
+        latestByPath.set(event.pathKey, event);
         loopEvents.set(frame.owner, latestByPath);
       }
+    }
+    const loopEntryNonDomByContext = new Map<Scope, Map<ts.Node, boolean>>();
+    for (const [context, loopEvents] of loopEntryEventsByContext) {
+      const nonDomByLoop = new Map<ts.Node, boolean>();
+      for (const [owner, latestByPath] of loopEvents) {
+        let possibleNonDom = false;
+        for (const event of latestByPath.values()) {
+          if (event.dom) continue;
+          const killedByLaterAncestorDom = event.pathPrefixes.some((prefix) => {
+            const later = latestByPath.get(prefix);
+            return Boolean(later?.dom && later.position > event.position);
+          });
+          if (!killedByLaterAncestorDom) {
+            possibleNonDom = true;
+            break;
+          }
+        }
+        nonDomByLoop.set(owner, possibleNonDom);
+      }
+      loopEntryNonDomByContext.set(context, nonDomByLoop);
     }
     const flowByContext = new Map<Scope, {
       readonly latestByPath: Map<string, BindingEvent>;
@@ -1054,13 +1090,13 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           flow = { latestByPath: new Map(), latestPossibleNonDom: null };
           flowByContext.set(event.context, flow);
         }
-        flow.latestByPath.set(controlPathKey(event.controlPath), event);
+        flow.latestByPath.set(event.pathKey, event);
         if (!event.dom) flow.latestPossibleNonDom = event;
         eventIndex += 1;
       }
       const flow = flowByContext.get(use.context);
       let definiteEvent: BindingEvent | undefined;
-      for (const key of controlPathKeys(use.controlPath)) {
+      for (const key of use.pathPrefixes) {
         const candidate = flow?.latestByPath.get(key);
         if (candidate && (!definiteEvent || candidate.position > definiteEvent.position)) {
           definiteEvent = candidate;
@@ -1070,14 +1106,13 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
         (!definiteEvent || flow.latestPossibleNonDom.position > definiteEvent.position);
       const loopCarriedNonDom = use.controlPath.some((frame) => {
         if (frame.branch !== 'loop') return false;
-        const latestByPath = loopEntryEventsByContext.get(use.context)?.get(frame.owner);
-        let lastEntryEvent: BindingEvent | undefined;
-        for (const key of controlPathKeys(use.controlPath)) {
-          const event = latestByPath?.get(key);
-          if (!event) continue;
-          if (!lastEntryEvent || event.position > lastEntryEvent.position) lastEntryEvent = event;
-        }
-        return lastEntryEvent?.dom === false;
+        const possibleEntryNonDom = loopEntryNonDomByContext.get(use.context)?.get(frame.owner);
+        if (!possibleEntryNonDom) return false;
+        const killedInCurrentIteration = definiteEvent?.dom === true &&
+          definiteEvent.controlPath.some((eventFrame) => (
+            eventFrame.branch === 'loop' && eventFrame.owner === frame.owner
+          ));
+        return !killedInCurrentIteration;
       });
       const sameContextDom = definiteEvent?.dom === true &&
         !possibleNonDomAfterDefinite &&

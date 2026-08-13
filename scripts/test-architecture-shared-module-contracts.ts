@@ -392,6 +392,30 @@ try {
       expectedLine: 3
     },
     {
+      label: 'loop entry joins previous iteration sibling branch state',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  if (ok) {\n    field.spellcheck = true;\n    field = document.createElement('input');\n  } else {\n    field = settings;\n  }\n}\n",
+      expectedLine: 4
+    },
+    {
+      label: 'conditional non-DOM after use carries into next iteration',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (ok) field = settings;\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'short-circuit non-DOM after use carries into next iteration',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  ok && (field = settings);\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'inner-loop possible non-DOM carries into outer next iteration',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  field.spellcheck = true;\n  while (innerReady) {\n    if (ok) field = settings;\n  }\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'do-while-loop carried non-DOM receiver state',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\ndo {\n  field.spellcheck = true;\n  field = settings;\n} while (enabled);\n",
@@ -770,6 +794,9 @@ try {
   const routesVarToFunctionScope = /kind === 'var' \? nearestFunctionScope\(scope\) : scope/.test(
     architectureCheckerSource
   );
+  const cachesSpellcheckControlPathMetadata =
+    architectureCheckerSource.includes('controlPathMetadataCache.get(controlPath)') &&
+    architectureCheckerSource.includes('controlPathMetadataCache.set(controlPath, metadata)');
 
   write('webview/src/helpers/retainedDiagnosticsAndSelection.ts', [
     "export const platformDiagnostics = 'VS Code diagnostics';",
@@ -785,6 +812,7 @@ try {
     usesCodePointMask,
     usesTwoPhaseSpellcheckBindingAnalysis,
     routesVarToFunctionScope,
+    cachesSpellcheckControlPathMetadata,
     retainedDiagnosticsAndSelection: retainedDiagnosticsAndSelection.ok ? '' : retainedDiagnosticsAndSelection.output
   }, {
     missedSpellDiagnosticCapabilities: [],
@@ -793,6 +821,7 @@ try {
     usesCodePointMask: false,
     usesTwoPhaseSpellcheckBindingAnalysis: true,
     routesVarToFunctionScope: true,
+    cachesSpellcheckControlPathMetadata: true,
     retainedDiagnosticsAndSelection: ''
   }, 'MEO spell/diagnostic suggestion aliases must be rejected without rejecting platform diagnostics or selection commands');
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedDiagnosticsAndSelection.ts'));
