@@ -756,8 +756,22 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   if (!/\.tsx?$/i.test(path)) return [];
   const sourceFile = sourceFileFor({ path, text });
   const ranges: NativeSpellcheckRange[] = [];
-  const scopes: Array<Map<string, boolean>> = [];
   const domTypes = new Set(['HTMLInputElement', 'HTMLTextAreaElement', 'HTMLElement']);
+  type Scope = {
+    readonly parent: Scope | null;
+    readonly kind: 'source' | 'function' | 'block';
+    readonly bindings: Map<string, Binding>;
+  };
+  type BindingKind = 'const' | 'let' | 'var' | 'parameter';
+  type BindingEvent = { readonly position: number; readonly dom: boolean; readonly context: Scope };
+  type SpellcheckUse = { readonly position: number; readonly range: NativeSpellcheckRange; readonly context: Scope };
+  type Binding = {
+    kind: BindingKind;
+    readonly events: BindingEvent[];
+    readonly uses: SpellcheckUse[];
+  };
+  const scopeByNode = new Map<ts.Node, Scope>();
+  const bindings = new Set<Binding>();
 
   const isDomType = (node: ts.TypeNode | undefined): boolean => {
     if (!node) return false;
@@ -794,42 +808,122 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   const isLexicalScope = (node: ts.Node): boolean => (
     ts.isSourceFile(node) || ts.isFunctionLike(node) || ts.isBlock(node) || ts.isCatchClause(node)
   );
-  const evidenceForDeclaration = (node: ts.VariableDeclaration | ts.ParameterDeclaration): boolean => (
-    isDomType(node.type) || isDomInitializer(node.initializer)
-  );
-  const receiverIsDom = (name: string): boolean => {
-    for (let index = scopes.length - 1; index >= 0; index -= 1) {
-      const evidence = scopes[index].get(name);
-      if (evidence !== undefined) return evidence;
-    }
-    return false;
+  const scopeKind = (node: ts.Node): Scope['kind'] => {
+    if (ts.isSourceFile(node)) return 'source';
+    if (ts.isFunctionLike(node)) return 'function';
+    return 'block';
   };
-  const visit = (node: ts.Node): void => {
-    const entersScope = isLexicalScope(node);
-    if (entersScope) scopes.push(new Map());
+  const nearestFunctionScope = (scope: Scope): Scope => {
+    let current = scope;
+    while (current.kind === 'block' && current.parent) current = current.parent;
+    return current;
+  };
+  const resolveBinding = (scope: Scope, name: string): Binding | undefined => {
+    let current: Scope | null = scope;
+    while (current) {
+      const binding = current.bindings.get(name);
+      if (binding) return binding;
+      current = current.parent;
+    }
+    return undefined;
+  };
+  const bind = (scope: Scope, name: string, kind: BindingKind): Binding => {
+    const bindingScope = kind === 'var' ? nearestFunctionScope(scope) : scope;
+    const existing = bindingScope.bindings.get(name);
+    if (existing) return existing;
+    const binding: Binding = { kind, events: [], uses: [] };
+    bindingScope.bindings.set(name, binding);
+    bindings.add(binding);
+    return binding;
+  };
+  const variableKind = (node: ts.VariableDeclaration): BindingKind => {
+    const flags = node.parent.flags;
+    if (flags & ts.NodeFlags.Const) return 'const';
+    if (flags & ts.NodeFlags.Let) return 'let';
+    return 'var';
+  };
+  const collectBindings = (node: ts.Node, parentScope: Scope | null): void => {
+    const scope = isLexicalScope(node)
+      ? { parent: parentScope, kind: scopeKind(node), bindings: new Map<string, Binding>() }
+      : parentScope!;
+    if (isLexicalScope(node)) scopeByNode.set(node, scope);
     if (
       (ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
       ts.isIdentifier(node.name)
     ) {
-      scopes.at(-1)?.set(node.name.text, evidenceForDeclaration(node));
+      bind(scope, node.name.text, ts.isParameter(node) ? 'parameter' : variableKind(node));
+    }
+    ts.forEachChild(node, (child) => collectBindings(child, scope));
+  };
+  collectBindings(sourceFile, null);
+
+  const executionContext = (scope: Scope): Scope => nearestFunctionScope(scope);
+  const collectUsesAndAssignments = (node: ts.Node, inheritedScope: Scope): void => {
+    const scope = scopeByNode.get(node) ?? inheritedScope;
+    const context = executionContext(scope);
+    if (
+      (ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
+      ts.isIdentifier(node.name)
+    ) {
+      const binding = resolveBinding(scope, node.name.text);
+      binding?.events.push({
+        position: node.getStart(sourceFile),
+        dom: isDomType(node.type) || isDomInitializer(node.initializer),
+        context
+      });
     }
     if (
       ts.isBinaryExpression(node) &&
-      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      (node.right.kind === ts.SyntaxKind.TrueKeyword || node.right.kind === ts.SyntaxKind.FalseKeyword)
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
     ) {
       const left = unwrapExpression(node.left);
-      if (ts.isPropertyAccessExpression(left) && left.name.text.toLowerCase() === 'spellcheck') {
+      if (ts.isIdentifier(left)) {
+        resolveBinding(scope, left.text)?.events.push({
+          position: node.getStart(sourceFile),
+          dom: node.operatorToken.kind === ts.SyntaxKind.EqualsToken && isDomInitializer(node.right),
+          context
+        });
+      } else if (
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(left) &&
+        left.name.text.toLowerCase() === 'spellcheck' &&
+        (node.right.kind === ts.SyntaxKind.TrueKeyword || node.right.kind === ts.SyntaxKind.FalseKeyword)
+      ) {
         const receiver = unwrapExpression(left.expression);
-        if (ts.isIdentifier(receiver) && receiverIsDom(receiver.text)) {
-          ranges.push({ start: node.getStart(sourceFile), end: node.end });
+        if (ts.isIdentifier(receiver)) {
+          resolveBinding(scope, receiver.text)?.uses.push({
+            position: node.getStart(sourceFile),
+            range: { start: node.getStart(sourceFile), end: node.end },
+            context
+          });
         }
       }
     }
-    ts.forEachChild(node, visit);
-    if (entersScope) scopes.pop();
+    ts.forEachChild(node, (child) => collectUsesAndAssignments(child, scope));
   };
-  visit(sourceFile);
+  collectUsesAndAssignments(sourceFile, scopeByNode.get(sourceFile)!);
+
+  for (const binding of bindings) {
+    const stableConstDom = binding.kind === 'const' && binding.events.length > 0 &&
+      binding.events.every((event) => event.dom);
+    const capturedMutableDom = binding.kind !== 'const' && binding.events.length > 0 &&
+      binding.events.every((event) => event.dom);
+    const latestEventByContext = new Map<Scope, BindingEvent>();
+    let eventIndex = 0;
+    for (const use of binding.uses) {
+      while (eventIndex < binding.events.length && binding.events[eventIndex].position <= use.position) {
+        const event = binding.events[eventIndex];
+        latestEventByContext.set(event.context, event);
+        eventIndex += 1;
+      }
+      const sameContext = latestEventByContext.get(use.context);
+      const allowed = stableConstDom || sameContext?.dom === true || (
+        use.context !== binding.events[0]?.context && capturedMutableDom
+      );
+      if (allowed) ranges.push(use.range);
+    }
+  }
   return ranges;
 };
 

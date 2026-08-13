@@ -320,6 +320,18 @@ try {
       expectedLine: 4
     },
     {
+      label: 'locally shadowed DOM receiver spellcheck state owner',
+      path: 'webview/src/helpers/shadowedNativeSpellcheck.ts',
+      contents: "const field = document.createElement('input');\nfunction update() {\n  const field = settings;\n  field.spellcheck = false;\n}\n",
+      expectedLine: 4
+    },
+    {
+      label: 'DOM receiver invalidated by non-DOM reassignment',
+      path: 'webview/src/helpers/reassignedNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nfield = settings;\nfield.spellcheck = true;\n",
+      expectedLine: 3
+    },
+    {
       label: 'standalone spellcheck after unclosed tag candidate',
       path: 'webview/src/helpers/unclosedNativeSpellcheck.ts',
       contents: "const fragment = '<input';\nconst spellcheck = true;\nconst comparison = value > 0;\n"
@@ -525,6 +537,21 @@ try {
       contents: "const first = document.createElement('input');\nconst second = document.createElement('textarea');\nlet third: HTMLElement;\nfirst.spellcheck = true;\nsecond.spellcheck = false;\nthird.spellcheck = true;\n"
     },
     {
+      label: 'function-scoped var DOM native spellcheck receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "{\n  var field = document.createElement('input');\n}\nfield.spellcheck = true;\n"
+    },
+    {
+      label: 'forward closure capture of const DOM receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "function later() {\n  field.spellcheck = true;\n}\nconst field = document.createElement('input');\n"
+    },
+    {
+      label: 'declared-before closure capture of const DOM receiver',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "const field = document.createElement('input');\nfunction later() {\n  field.spellcheck = true;\n}\n"
+    },
+    {
       label: 'DOM native spellcheck setAttribute calls',
       path: 'webview/src/helpers/nativeSpellcheckAttribute.ts',
       contents: "input.setAttribute('spellcheck', 'false');\ntextarea.setAttribute('spellcheck', 'true');\n"
@@ -573,6 +600,14 @@ try {
     architectureCheckerSource
   );
   const usesCodePointMask = /\[\.\.\.text\]/.test(architectureCheckerSource);
+  const bindingCollection = architectureCheckerSource.indexOf('collectBindings(sourceFile, null)');
+  const useCollection = architectureCheckerSource.indexOf(
+    'collectUsesAndAssignments(sourceFile, scopeByNode.get(sourceFile)!)'
+  );
+  const usesTwoPhaseSpellcheckBindingAnalysis = bindingCollection >= 0 && useCollection > bindingCollection;
+  const routesVarToFunctionScope = /kind === 'var' \? nearestFunctionScope\(scope\) : scope/.test(
+    architectureCheckerSource
+  );
 
   write('webview/src/helpers/retainedDiagnosticsAndSelection.ts', [
     "export const platformDiagnostics = 'VS Code diagnostics';",
@@ -586,12 +621,16 @@ try {
     rejectedAllowedSpellDiagnosticFixtures,
     perReceiverFullFileScan,
     usesCodePointMask,
+    usesTwoPhaseSpellcheckBindingAnalysis,
+    routesVarToFunctionScope,
     retainedDiagnosticsAndSelection: retainedDiagnosticsAndSelection.ok ? '' : retainedDiagnosticsAndSelection.output
   }, {
     missedSpellDiagnosticCapabilities: [],
     rejectedAllowedSpellDiagnosticFixtures: [],
     perReceiverFullFileScan: false,
     usesCodePointMask: false,
+    usesTwoPhaseSpellcheckBindingAnalysis: true,
+    routesVarToFunctionScope: true,
     retainedDiagnosticsAndSelection: ''
   }, 'MEO spell/diagnostic suggestion aliases must be rejected without rejecting platform diagnostics or selection commands');
   rmSync(join(fixtureRoot, 'webview', 'src', 'helpers', 'retainedDiagnosticsAndSelection.ts'));
