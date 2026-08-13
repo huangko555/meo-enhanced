@@ -23,13 +23,7 @@ import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './hel
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { headingLevelFromName, resolvedSyntaxTree } from './helpers/markdownSyntax';
-import {
-  headingCollapseLiveExtensions,
-  headingCollapseSharedExtensions,
-  getCollapsedHeadingSections,
-  getDetailsBlocks,
-  toggleCollapsibleSection
-} from './helpers/headingCollapse';
+import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
   listMarkerData,
@@ -166,11 +160,10 @@ const inlineSyntaxBoundaryDeco = Decoration.widget({
 const hrMarkerDeco = Decoration.mark({ class: 'meo-md-hr-marker' });
 const hiddenLinkUrlDeco = Decoration.mark({ class: 'meo-md-link-url-hidden' });
 const linkBoundaryDeco = Decoration.mark({ class: 'meo-md-url-boundary' });
-const collapsedHeadingBodyDeco = Decoration.replace({
+const hiddenDetailsSourceDeco = Decoration.replace({
   inclusiveStart: false,
   inclusiveEnd: false
 });
-const collapsedHeadingLineDeco = Decoration.line({ class: 'meo-md-heading-collapsed' });
 const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
   elementClass = 'meo-md-hide-line-number';
 })();
@@ -907,7 +900,7 @@ class DetailsSummaryWidget extends WidgetType {
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      toggleCollapsibleSection(view, this.anchor);
+      toggleDetailsBlock(view, this.anchor);
     });
 
     return button;
@@ -1393,7 +1386,7 @@ function addDetailsBlockDecorations(builder: DecorationCollector, state: EditorS
 
     if (detailsBlock.summaryFrom > detailsBlock.anchorFrom) {
       builder.push(
-        collapsedHeadingBodyDeco.range(detailsBlock.anchorFrom, detailsBlock.summaryFrom)
+        hiddenDetailsSourceDeco.range(detailsBlock.anchorFrom, detailsBlock.summaryFrom)
       );
     }
 
@@ -1416,14 +1409,14 @@ function addDetailsBlockDecorations(builder: DecorationCollector, state: EditorS
 
     if (detailsBlock.anchorTo > detailsBlock.summaryTo) {
       builder.push(
-        collapsedHeadingBodyDeco.range(detailsBlock.summaryTo, detailsBlock.anchorTo)
+        hiddenDetailsSourceDeco.range(detailsBlock.summaryTo, detailsBlock.anchorTo)
       );
     }
 
-    builder.push(collapsedHeadingBodyDeco.range(detailsBlock.closingFrom, detailsBlock.closingTo));
+    builder.push(hiddenDetailsSourceDeco.range(detailsBlock.closingFrom, detailsBlock.closingTo));
 
     if (detailsBlock.collapsed && detailsBlock.bodyTo > detailsBlock.bodyFrom) {
-      builder.push(collapsedHeadingBodyDeco.range(detailsBlock.bodyFrom, detailsBlock.bodyTo));
+      builder.push(hiddenDetailsSourceDeco.range(detailsBlock.bodyFrom, detailsBlock.bodyTo));
     }
   }
 }
@@ -1634,7 +1627,6 @@ function buildDecorations(state: EditorState): DecorationSet {
   const indentSelectedLines = collectIndentSelectedLines(state);
   const tree = resolvedSyntaxTree(state);
   const footnotes = parseFootnotes(state);
-  const collapsedHeadingSections = getCollapsedHeadingSections(state);
   const detailsBlocks = getDetailsBlocks(state);
   const strikeRanges = collectStrikethroughRanges(tree);
   const parsedInlineStyleRanges: ParsedInlineStyleRange[] = [];
@@ -2075,11 +2067,6 @@ function buildDecorations(state: EditorState): DecorationSet {
       htmlEditingRange.to === detailsBlock.sectionTo
     ))
   );
-  for (const section of collapsedHeadingSections) {
-    addLineClass(ranges, state, section.lineFrom, section.lineTo, collapsedHeadingLineDeco);
-    addRange(ranges, section.collapseFrom, section.collapseTo, collapsedHeadingBodyDeco);
-  }
-
   const result = Decoration.set(ranges, true);
   return filterDecorationsOutsideMergeConflicts(state, result);
 }
@@ -2900,8 +2887,7 @@ export function liveModeExtensions(): Extension[] {
     ...longCodeBlockExtensions(),
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),
-    ...headingCollapseSharedExtensions(),
-    ...headingCollapseLiveExtensions()
+    ...detailsBlockLiveExtensions()
   ];
 }
 

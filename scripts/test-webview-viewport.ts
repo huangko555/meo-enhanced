@@ -137,6 +137,70 @@ async function main() {
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
+    await page.evaluate((position) => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'revealSelection', anchor: position, head: position, focus: false }
+    })), initialText.indexOf('stable line 83'));
+    await waitForFrames(page);
+    const liveHeadingFolding = await page.evaluate(() => ({
+      gutterCount: document.querySelectorAll('.meo-md-fold-gutter').length,
+      toggleCount: document.querySelectorAll('.meo-md-fold-toggle').length,
+      sectionContentVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .some((line) => line.textContent?.includes('stable line 83'))
+    }));
+    if (
+      liveHeadingFolding.gutterCount !== 0 ||
+      liveHeadingFolding.toggleCount !== 0 ||
+      !liveHeadingFolding.sectionContentVisible
+    ) {
+      throw new Error(`Live exposed custom heading folding: ${JSON.stringify(liveHeadingFolding)}`);
+    }
+    await page.evaluate((position) => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'revealSelection', anchor: position, head: position, focus: false }
+    })), initialText.indexOf('stable line 139'));
+    await waitForFrames(page);
+    await page.click('[data-action="outline-right"]');
+    await waitForFrames(page, 2);
+    const outlineDragSurface = await page.evaluate(() => {
+      const items = Array.from(document.querySelectorAll<HTMLElement>('.outline-item'));
+      const source = items[0]!;
+      const target = items[1]!;
+      const dataTransfer = new DataTransfer();
+      const dragStartAllowed = source.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer
+      }));
+      target.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientY: target.getBoundingClientRect().bottom,
+        dataTransfer
+      }));
+      target.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        clientY: target.getBoundingClientRect().bottom,
+        dataTransfer
+      }));
+      return {
+        itemCount: items.length,
+        draggable: source.draggable,
+        dragStartAllowed,
+        ariaGrabbed: source.hasAttribute('aria-grabbed'),
+        indicatorCount: document.querySelectorAll('.outline-drop-before, .outline-drop-after').length
+      };
+    });
+    if (
+      outlineDragSurface.itemCount < 2 ||
+      outlineDragSurface.draggable ||
+      !outlineDragSurface.dragStartAllowed ||
+      outlineDragSurface.ariaGrabbed ||
+      outlineDragSurface.indicatorCount !== 0
+    ) {
+      throw new Error(`Outline exposed a heading drag surface: ${JSON.stringify(outlineDragSurface)}`);
+    }
+    await page.click('.outline-header [data-action="close"]');
+    await waitForFrames(page, 2);
     const darkEditorOnLightHost = await page.evaluate(() => ({
       appearance: document.documentElement.dataset.editorAppearance,
       background: getComputedStyle(document.body).backgroundColor
@@ -174,12 +238,13 @@ async function main() {
     ).filter((message) => message.type === 'exportSnapshotResult').map((message) => ({
       requestId: message.requestId,
       ok: message.result?.ok,
+      text: message.result?.value?.text,
       hasCurrentText: message.result?.value?.text?.includes('## Tall Mermaid') === true,
       hasStyleEnvironment: typeof message.result?.value?.environment?.editorBackgroundColor === 'string'
     })));
     if (JSON.stringify(snapshotResults) !== JSON.stringify([
-      { requestId: 'browser-snapshot-1', ok: true, hasCurrentText: true, hasStyleEnvironment: true },
-      { requestId: 'browser-snapshot-2', ok: true, hasCurrentText: true, hasStyleEnvironment: true }
+      { requestId: 'browser-snapshot-1', ok: true, text: initialText, hasCurrentText: true, hasStyleEnvironment: true },
+      { requestId: 'browser-snapshot-2', ok: true, text: initialText, hasCurrentText: true, hasStyleEnvironment: true }
     ])) {
       throw new Error(`Export snapshot lifecycle did not return independent decoded responses: ${JSON.stringify(snapshotResults)}`);
     }
@@ -574,6 +639,13 @@ async function main() {
       if (persistedMode !== mode) {
         throw new Error(`Webview did not persist ${mode} mode: ${persistedMode}`);
       }
+      const headingFoldControls = await page.evaluate(() => ({
+        gutterCount: document.querySelectorAll('.meo-md-fold-gutter').length,
+        toggleCount: document.querySelectorAll('.meo-md-fold-toggle').length
+      }));
+      if (headingFoldControls.gutterCount !== 0 || headingFoldControls.toggleCount !== 0) {
+        throw new Error(`${mode} exposed custom heading folding: ${JSON.stringify(headingFoldControls)}`);
+      }
     }
     const editorScrollTopBeforePreview = await page.$eval<HTMLElement, number>(
       '.editor-host > .cm-editor .cm-scroller',
@@ -585,6 +657,17 @@ async function main() {
     ));
     if (persistedPreviewMode !== 'preview') {
       throw new Error(`Webview did not persist preview mode: ${persistedPreviewMode}`);
+    }
+    const previewHeadingFoldControls = await page.evaluate(() => {
+      const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+      return {
+        mainGutterCount: document.querySelectorAll('.meo-md-fold-gutter').length,
+        mainToggleCount: document.querySelectorAll('.meo-md-fold-toggle').length,
+        frameToggleCount: frameDocument?.querySelectorAll('.meo-md-fold-toggle, [data-heading-fold]').length ?? 0
+      };
+    });
+    if (Object.values(previewHeadingFoldControls).some((count) => count !== 0)) {
+      throw new Error(`Preview exposed custom heading folding: ${JSON.stringify(previewHeadingFoldControls)}`);
     }
     const previewToolbarLayout = await page.evaluate(() => {
       const group = document.querySelector<HTMLElement>('.preview-format-group')!;

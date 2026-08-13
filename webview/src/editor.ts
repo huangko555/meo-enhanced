@@ -7,7 +7,7 @@ import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codem
 import { sourceHighlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect, setLongCodeBlockSearchRevealEffect } from './liveMode';
-import { headingCollapseSharedExtensions, headingCollapseSourceSpacerExtensions } from './helpers/headingCollapse';
+import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
 import { highlightMarkdownExtension, sourceHighlightField } from './helpers/highlightSyntax';
@@ -46,7 +46,7 @@ import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewR
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
 import { createGitDiffContentHoverController } from './helpers/gitDeletionHover';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
-import { resolvedSyntaxTree, extractHeadings, extractHeadingSections } from './helpers/markdownSyntax';
+import { resolvedSyntaxTree, extractHeadings } from './helpers/markdownSyntax';
 import {
   sourceListMarkerField,
   listMarkerData,
@@ -2095,7 +2095,7 @@ export function createEditor({
           return false;
         }
       }),
-      ...headingCollapseSharedExtensions(),
+      ...detailsBlockStateExtensions(),
       tableHeaderAlignmentOverrideField,
       tableColumnWidthAdapter.extension,
       tableStickyHeaderAdapterFactoryFacet.of(tableStickyHeaderAdapterFactory),
@@ -2854,50 +2854,6 @@ export function createEditor({
     getScrollElement() {
       return view.scrollDOM;
     },
-    moveHeadingSection(sourceHeadingFrom: number, targetHeadingFrom: number, placement: 'before' | 'after') {
-      if (placement !== 'before' && placement !== 'after') {
-        return false;
-      }
-
-      const sections = extractHeadingSections(view.state);
-      const source = sections.find((heading) => heading.from === sourceHeadingFrom);
-      const target = sections.find((heading) => heading.from === targetHeadingFrom);
-      if (!source || !target) {
-        return false;
-      }
-
-      const insertionPoint = placement === 'before' ? target.sectionFrom : target.sectionTo;
-      if (insertionPoint > source.sectionFrom && insertionPoint < source.sectionTo) {
-        return false;
-      }
-
-      const currentText = view.state.doc.toString();
-      const movedText = currentText.slice(source.sectionFrom, source.sectionTo);
-      if (!movedText) {
-        return false;
-      }
-
-      const textWithoutSource = currentText.slice(0, source.sectionFrom) + currentText.slice(source.sectionTo);
-      const sourceLength = source.sectionTo - source.sectionFrom;
-      const adjustedInsertionPoint = insertionPoint >= source.sectionTo ? insertionPoint - sourceLength : insertionPoint;
-      const nextText =
-        textWithoutSource.slice(0, adjustedInsertionPoint) +
-        movedText +
-        textWithoutSource.slice(adjustedInsertionPoint);
-
-      if (nextText === currentText) {
-        return false;
-      }
-
-      const nextAnchor = Math.min(adjustedInsertionPoint, nextText.length);
-      viewportController.markInteraction();
-      view.dispatch({
-        changes: { from: 0, to: currentText.length, insert: nextText },
-        selection: { anchor: nextAnchor },
-        effects: EditorView.scrollIntoView(nextAnchor, { y: 'start' })
-      });
-      return true;
-    },
     scrollToLine(lineNumber: number, align: RevealOptions['align'] = 'center') {
       const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
       if (align === 'upper' && revealRenderedTableLine(line.number)) {
@@ -3555,7 +3511,6 @@ function sourceMode(): Extension[] {
     sourceTableHeaderLineField,
     sourceFrontmatterField,
     gitDiffLineHighlightsField,
-    ...headingCollapseSourceSpacerExtensions(),
     ...mergeConflictSourceExtensions()
   ];
 }

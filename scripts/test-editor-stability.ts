@@ -564,8 +564,7 @@ async function main() {
         getViewportAnchorOffset: () => 0,
         getVisibleDocumentRange: () => ({ from: 20, to: 300, fromLine: 3, toLine: 20 }),
         getScrollElement: () => editorWrapper,
-        scrollToLine: (line: number) => scrolledLines.push(line),
-        moveHeadingSection: () => false
+        scrollToLine: (line: number) => scrolledLines.push(line)
       };
       const outline = (window as any).EditorStabilityHarness.createOutlineController({
         root,
@@ -596,6 +595,30 @@ async function main() {
       const resizerWidth = getComputedStyle(resizer).width;
       const firstOutlineItem = outline.sidebar.querySelector<HTMLElement>('.outline-level-1')!;
       const firstOutlineStrong = firstOutlineItem.querySelector<HTMLElement>('strong')!;
+      const secondOutlineItem = Array.from(outline.sidebar.querySelectorAll<HTMLElement>('.outline-item'))[1]!;
+      const dragData = new DataTransfer();
+      firstOutlineItem.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dragData
+      }));
+      secondOutlineItem.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientY: secondOutlineItem.getBoundingClientRect().bottom,
+        dataTransfer: dragData
+      }));
+      secondOutlineItem.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        clientY: secondOutlineItem.getBoundingClientRect().bottom,
+        dataTransfer: dragData
+      }));
+      const outlineDragState = {
+        draggable: firstOutlineItem.draggable,
+        ariaGrabbed: firstOutlineItem.hasAttribute('aria-grabbed'),
+        indicatorCount: outline.sidebar.querySelectorAll('.outline-drop-before, .outline-drop-after').length
+      };
       const outlineWeights = {
         normal: getComputedStyle(firstOutlineItem).fontWeight,
         strong: getComputedStyle(firstOutlineStrong).fontWeight
@@ -620,7 +643,8 @@ async function main() {
         wheelAllowed,
         wheelBubbled,
         resizerWidth,
-        outlineWeights
+        outlineWeights,
+        outlineDragState
       };
     });
     if (outlineJump.scrolledLines.at(-1) !== 20) {
@@ -752,6 +776,13 @@ async function main() {
     const foldedInternalLinkCapsules = await readInternalLinkCapsules();
     if (foldedInternalLinkCapsules.length > 0) {
       throw new Error(`Folded internal Markdown link rendered a capsule: ${JSON.stringify(foldedInternalLinkCapsules)}`);
+    }
+    if (
+      outlineJump.outlineDragState.draggable ||
+      outlineJump.outlineDragState.ariaGrabbed ||
+      outlineJump.outlineDragState.indicatorCount !== 0
+    ) {
+      throw new Error(`Outline exposed heading drag reordering: ${JSON.stringify(outlineJump.outlineDragState)}`);
     }
     const internalLinkPoint = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))

@@ -582,6 +582,122 @@ try {
     `ARCH018 missed removed Mermaid colon capabilities: ${missedMermaidColonCapabilities.join(', ')}`
   );
 
+  const removedHeadingFoldAndOutlineReorderFixtures = [
+    {
+      label: 'heading collapse state owner',
+      path: 'webview/src/helpers/headingCollapse.ts',
+      contents: 'export const headingCollapseState = new Map();\n'
+    },
+    {
+      label: 'heading fold effect alias',
+      path: 'webview/src/editor/heading.ts',
+      contents: 'export const toggleHeadingFoldEffect = {};\n'
+    },
+    {
+      label: 'heading fold gutter CSS',
+      path: 'webview/src/styles.css',
+      contents: '.meo-md-fold-gutter { display: block; }\n'
+    },
+    {
+      label: 'dotted heading collapse setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.heading.collapse.enabled': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab heading fold alias',
+      path: 'webview/src/editor/heading.ts',
+      contents: "export const capability = 'toggle-heading-fold';\n"
+    },
+    {
+      label: 'heading fold Protocol command',
+      path: 'src/protocol/headingFold.ts',
+      contents: "export type HeadingCommand = { type: 'collapseHeadingSection' };\n"
+    },
+    {
+      label: 'heading fold Host owner',
+      path: 'src/host/headingCollapse.ts',
+      contents: 'export const restoreCollapsedHeadings = () => undefined;\n'
+    },
+    {
+      label: 'heading fold documentation',
+      path: 'docs/editor.md',
+      contents: 'Click the heading fold button to collapse a Markdown section.\n'
+    },
+    {
+      label: 'outline move callback',
+      path: 'webview/src/helpers/outline.ts',
+      contents: 'export const moveHeadingSection = () => true;\n'
+    },
+    {
+      label: 'outline drag state',
+      path: 'webview/src/helpers/outline.ts',
+      contents: 'export const outlineDragState = { sourceFrom: 1 };\n'
+    },
+    {
+      label: 'outline drop indicator CSS',
+      path: 'webview/src/styles.css',
+      contents: '.outline-drop-before { display: block; }\n'
+    },
+    {
+      label: 'dotted outline reorder setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.outline.heading.reorder': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'kebab outline drag alias',
+      path: 'webview/src/editor/outline.ts',
+      contents: "export const capability = 'outline-heading-drag';\n"
+    },
+    {
+      label: 'outline reorder Protocol command',
+      path: 'src/protocol/outline.ts',
+      contents: "export type OutlineCommand = { type: 'reorderOutlineHeading' };\n"
+    },
+    {
+      label: 'outline reorder Host owner',
+      path: 'src/host/outline.ts',
+      contents: 'export const applyOutlineHeadingMove = () => undefined;\n'
+    },
+    {
+      label: 'outline reorder documentation',
+      path: 'README.md',
+      contents: 'Drag outline headings to reorder document sections.\n'
+    }
+  ];
+  const missedHeadingFoldAndOutlineReorderCapabilities: string[] = [];
+  for (const fixture of removedHeadingFoldAndOutlineReorderFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    if (outcome.ok || !/ARCH019/.test(outcome.output)) {
+      missedHeadingFoldAndOutlineReorderCapabilities.push(fixture.label);
+    }
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+  assert.deepEqual(
+    missedHeadingFoldAndOutlineReorderCapabilities,
+    [],
+    `ARCH019 missed removed heading fold/outline reorder capabilities: ${missedHeadingFoldAndOutlineReorderCapabilities.join(', ')}`
+  );
+
+  write('webview/src/editor/retainedFolding.ts', [
+    "export const details = '<details><summary>More</summary>Body</details>';",
+    "export const longCodeBlockFolding = 'fold long code blocks';",
+    "export const outlineTreeCollapse = 'collapse outline tree nodes';",
+    "export const ordinaryDrag = 'drag table column width';",
+    ''
+  ].join('\n'));
+  const retainedFoldingAndDrag = runCheck();
+  assert.equal(
+    retainedFoldingAndDrag.ok,
+    true,
+    `HTML details, code folding, outline tree collapse and unrelated drag must remain allowed: ${retainedFoldingAndDrag.output}`
+  );
+  rmSync(join(fixtureRoot, 'webview', 'src', 'editor', 'retainedFolding.ts'));
+
   write('webview/src/editor/standardMermaid.ts', [
     "export const mermaidLanguage = 'mermaid';",
     "export const fencedMermaid = ['```mermaid', 'flowchart LR', '```'].join('\\n');",
@@ -1797,6 +1913,40 @@ try {
     cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
   });
   assert.match(unstagedMermaidColonOwner, /Architecture checks passed/);
+
+  mkdirSync(join(stagedRoot, 'src', 'host'), { recursive: true });
+  writeFileSync(
+    join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
+    'export const moveHeadingSection = () => true;\n'
+  );
+  execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });
+  writeFileSync(
+    join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
+    'export const navigateOutline = () => undefined;\n'
+  );
+  const stagedOutlineReorderOwner = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedOutlineReorderOwner.ok, false, 'staged ARCH019 must reject outline section moves from the index');
+  assert.match(stagedOutlineReorderOwner.output, /ARCH019/);
+
+  execFileSync('git', ['add', '--', 'src/host/outlineCompatibility.ts'], { cwd: stagedRoot });
+  writeFileSync(
+    join(stagedRoot, 'src', 'host', 'outlineCompatibility.ts'),
+    'export const toggleHeadingCollapse = () => undefined;\n'
+  );
+  const unstagedHeadingCollapseOwner = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(unstagedHeadingCollapseOwner, /Architecture checks passed/);
 
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();

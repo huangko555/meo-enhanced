@@ -16,7 +16,6 @@ interface EditorApi {
   getVisibleDocumentRange(): { from: number; to: number; fromLine: number; toLine: number };
   getScrollElement(): EventTarget;
   scrollToLine(line: number, position: string): void;
-  moveHeadingSection(sourceFrom: number, targetFrom: number, placement: 'before' | 'after'): boolean;
 }
 
 type OutlineMode = 'floating' | 'fixed';
@@ -34,7 +33,6 @@ interface OutlineControllerOptions {
   outlineLeftButton?: HTMLElement;
   additionalOutlineLeftButtons?: HTMLElement[];
   getEditor: () => EditorApi | null;
-  canReorder?: () => boolean;
   onVisibilityRequest?: (visible: boolean) => void;
   onPositionRequest?: (position: OutlinePosition) => void;
   onUiStateChange?: (state: OutlineUiState) => void;
@@ -48,19 +46,6 @@ export interface OutlineTreeNode {
   key: string;
   parentIndex: number | null;
   children: OutlineTreeNode[];
-}
-
-interface OutlineDragState {
-  sourceFrom: number;
-  draggedElement: Element;
-  dropTargetFrom: number | null;
-  dropPlacement: 'before' | 'after' | null;
-}
-
-interface DropCandidate {
-  targetFrom: number;
-  placement: 'before' | 'after';
-  targetItem: Element;
 }
 
 interface OutlineController {
@@ -77,7 +62,6 @@ interface OutlineController {
 
 const ACTIVE_VIEWPORT_RATIO = 0.2;
 const OUTLINE_SCROLL_CONTEXT_PX = 100;
-const OUTLINE_DROP_CLICK_GRACE_PERIOD_MS = 250;
 
 export function buildOutlineTree(headings: OutlineHeading[]): {
   roots: OutlineTreeNode[];
@@ -146,7 +130,6 @@ export function createOutlineController({
   outlineLeftButton,
   additionalOutlineLeftButtons = [],
   getEditor,
-  canReorder,
   onVisibilityRequest,
   onPositionRequest,
   onUiStateChange,
@@ -191,8 +174,6 @@ export function createOutlineController({
   let collapsedKeys = new Set<string>();
   let activeHeadingIndex = -1;
   let visibleHeadingIndexes = new Set<number>();
-  let outlineDragState: OutlineDragState | null = null;
-  let suppressOutlineClickUntil = 0;
   let boundScrollElement: EventTarget | null = null;
   let scrollFrame = 0;
 
@@ -200,78 +181,6 @@ export function createOutlineController({
   const applyOutlineWidth = () => {
     outlineSidebar.style.width = `${width}px`;
     editorWrapper.style.setProperty('--meo-outline-width', `${width}px`);
-  };
-
-  const buildOutlineSubtreeEndIndexes = (headings: OutlineHeading[]): number[] => {
-    const subtreeEnds = new Array(headings.length);
-    for (let index = 0; index < headings.length; index += 1) {
-      let endIndex = headings.length - 1;
-      for (let next = index + 1; next < headings.length; next += 1) {
-        if (headings[next].level <= headings[index].level) {
-          endIndex = next - 1;
-          break;
-        }
-      }
-      subtreeEnds[index] = endIndex;
-    }
-    return subtreeEnds;
-  };
-
-  const clearOutlineDropIndicators = () => {
-    for (const indicator of outlineContent.querySelectorAll('.outline-drop-before, .outline-drop-after')) {
-      indicator.classList.remove('outline-drop-before', 'outline-drop-after');
-    }
-  };
-
-  const clearOutlineDragState = () => {
-    clearOutlineDropIndicators();
-    outlineContent.classList.remove('is-dragging-outline');
-    if (outlineDragState?.draggedElement instanceof Element) {
-      outlineDragState.draggedElement.classList.remove('is-dragging');
-      outlineDragState.draggedElement.removeAttribute('aria-grabbed');
-    }
-    outlineDragState = null;
-  };
-
-  const getOutlineDropCandidate = (targetItem: Element, clientY: number): DropCandidate | null => {
-    if (!outlineDragState) return null;
-    const targetFrom = Number.parseInt((targetItem as HTMLElement).dataset.headingFrom ?? '', 10);
-    if (!Number.isFinite(targetFrom)) return null;
-    const sourceIndex = currentOutlineHeadingIndexByFrom.get(outlineDragState.sourceFrom);
-    const targetIndex = currentOutlineHeadingIndexByFrom.get(targetFrom);
-    if (typeof sourceIndex !== 'number' || typeof targetIndex !== 'number') return null;
-
-    const subtreeEnds = buildOutlineSubtreeEndIndexes(currentOutlineHeadings);
-    const sourceSubtreeEndIndex = subtreeEnds[sourceIndex];
-    const targetSubtreeEndIndex = subtreeEnds[targetIndex];
-    const rect = targetItem.getBoundingClientRect();
-    const placement = clientY <= rect.top + rect.height / 2 ? 'before' : 'after';
-    if (targetIndex >= sourceIndex && targetIndex <= sourceSubtreeEndIndex) return null;
-
-    const insertionSlot = placement === 'before' ? targetIndex : targetSubtreeEndIndex + 1;
-    const sourceBlockLength = sourceSubtreeEndIndex - sourceIndex + 1;
-    const adjustedSlot = insertionSlot > sourceSubtreeEndIndex ? insertionSlot - sourceBlockLength : insertionSlot;
-    if (adjustedSlot === sourceIndex) return null;
-    return { targetFrom, placement, targetItem };
-  };
-
-  const applyOutlineDropIndicator = (candidate: DropCandidate | null) => {
-    if (!outlineDragState || !candidate) {
-      clearOutlineDropIndicators();
-      if (outlineDragState) {
-        outlineDragState.dropTargetFrom = null;
-        outlineDragState.dropPlacement = null;
-      }
-      return;
-    }
-    if (
-      outlineDragState.dropTargetFrom === candidate.targetFrom &&
-      outlineDragState.dropPlacement === candidate.placement
-    ) return;
-    clearOutlineDropIndicators();
-    candidate.targetItem.classList.add(candidate.placement === 'before' ? 'outline-drop-before' : 'outline-drop-after');
-    outlineDragState.dropTargetFrom = candidate.targetFrom;
-    outlineDragState.dropPlacement = candidate.placement;
   };
 
   const scrollItemsIntoView = (items: HTMLElement[]) => {
@@ -434,7 +343,6 @@ export function createOutlineController({
     item.className = `outline-item outline-level-${node.heading.level}`;
     appendHeadingContent(item, node.heading);
     item.title = node.heading.text;
-    item.draggable = canReorder?.() !== false;
     item.dataset.headingFrom = String(node.heading.from);
     item.dataset.outlineKey = node.key;
     row.append(foldButton, item);
@@ -466,7 +374,6 @@ export function createOutlineController({
   };
 
   const refresh = () => {
-    if (outlineDragState) clearOutlineDragState();
     const editor = getEditor();
     if (!editor) {
       currentOutlineHeadings = [];
@@ -591,11 +498,6 @@ export function createOutlineController({
     }
     const item = target?.closest<HTMLElement>('.outline-item');
     if (!item || !outlineContent.contains(item)) return;
-    if (performance.now() < suppressOutlineClickUntil) {
-      suppressOutlineClickUntil = 0;
-      event.preventDefault();
-      return;
-    }
     const headingFrom = Number.parseInt(item.dataset.headingFrom ?? '', 10);
     const headingIndex = currentOutlineHeadingIndexByFrom.get(headingFrom);
     const cachedHeading = typeof headingIndex === 'number' ? currentOutlineHeadings[headingIndex] : null;
@@ -616,56 +518,6 @@ export function createOutlineController({
     if (heading) getEditor()?.scrollToLine(heading.line, 'top');
     if (mode === 'floating') requestVisible(false);
   });
-
-  outlineContent.addEventListener('dragstart', (event) => {
-    const item = event.target instanceof Element ? event.target.closest<HTMLElement>('.outline-item') : null;
-    if (!item || !outlineContent.contains(item) || canReorder?.() === false) {
-      event.preventDefault();
-      return;
-    }
-    const sourceFrom = Number.parseInt(item.dataset.headingFrom ?? '', 10);
-    if (!getEditor() || !currentOutlineHeadingIndexByFrom.has(sourceFrom)) {
-      event.preventDefault();
-      return;
-    }
-    clearOutlineDragState();
-    outlineDragState = { sourceFrom, draggedElement: item, dropTargetFrom: null, dropPlacement: null };
-    outlineContent.classList.add('is-dragging-outline');
-    item.classList.add('is-dragging');
-    item.setAttribute('aria-grabbed', 'true');
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', String(sourceFrom));
-    }
-  });
-
-  outlineContent.addEventListener('dragover', (event) => {
-    if (!outlineDragState) return;
-    const item = event.target instanceof Element ? event.target.closest<HTMLElement>('.outline-item') : null;
-    const candidate = item && outlineContent.contains(item) ? getOutlineDropCandidate(item, event.clientY) : null;
-    if (!candidate) {
-      applyOutlineDropIndicator(null);
-      return;
-    }
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    applyOutlineDropIndicator(candidate);
-  });
-
-  outlineContent.addEventListener('drop', (event) => {
-    if (!outlineDragState) return;
-    const item = event.target instanceof Element ? event.target.closest<HTMLElement>('.outline-item') : null;
-    const candidate = item && outlineContent.contains(item) ? getOutlineDropCandidate(item, event.clientY) : null;
-    event.preventDefault();
-    event.stopPropagation();
-    const sourceFrom = outlineDragState.sourceFrom;
-    clearOutlineDragState();
-    if (candidate && getEditor()?.moveHeadingSection(sourceFrom, candidate.targetFrom, candidate.placement)) {
-      suppressOutlineClickUntil = performance.now() + OUTLINE_DROP_CLICK_GRACE_PERIOD_MS;
-    }
-  });
-
-  outlineContent.addEventListener('dragend', clearOutlineDragState);
 
   document.addEventListener('pointerdown', (event) => {
     if (!visible || mode !== 'floating') return;

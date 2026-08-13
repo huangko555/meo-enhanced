@@ -618,8 +618,7 @@ export function createPreviewController({
     getScrollElement: () => getFrameDocument() ?? frame,
     scrollToLine: (line: number) => {
       getFrameDocument()?.querySelector<HTMLElement>(`[data-source-line="${line}"]`)?.scrollIntoView({ block: 'start' });
-    },
-    moveHeadingSection: () => false
+    }
   };
 
   return {

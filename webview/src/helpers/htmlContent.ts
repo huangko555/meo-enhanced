@@ -17,7 +17,7 @@ import { resolvedSyntaxTree } from './markdownSyntax';
 import { getViewportController } from './viewportController';
 import { ImageWidget } from './images';
 import { getImagePresentationFactory } from '../editor/imagePresentation';
-import { getDetailsBlocks, toggleCollapsibleSection } from './headingCollapse';
+import { getDetailsBlocks, toggleDetailsBlock } from './detailsBlocks';
 
 export interface RenderableHtmlBlock {
   from: number;
@@ -277,7 +277,7 @@ class HtmlBlockWidget extends WidgetType {
       details.open = !this.block.detailsCollapsed;
       details.addEventListener('toggle', () => {
         if (details.open === !this.block.detailsCollapsed) return;
-        toggleCollapsibleSection(view, this.block.from);
+        toggleDetailsBlock(view, this.block.from);
       });
     }
 

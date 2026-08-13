@@ -1891,6 +1891,55 @@ for (const path of mermaidColonCapabilityScope) {
   }
 }
 
+// Product deletion guard: Markdown heading folding and outline-driven section reordering stay absent.
+// HTML details, long code block folding, outline tree expansion/collapse and unrelated drag interactions remain valid.
+const headingFoldAndOutlineReorderScope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedHeadingFoldAndOutlineReorderTokens = [
+  /\b(?:headingCollapse|collapsedHeading|headingFold|foldHeading|collapseHeading)(?:\b|[A-Z0-9_])/,
+  /\b(?:toggle|expand|restore|get|set)[-_.](?:markdown[-_.])?heading[-_.](?:collapse|fold)(?:[-_.](?:state|effect|gutter|button|sections?))?\b/i,
+  /\b(?:heading[-_.](?:collapse|fold)|(?:collapse|fold)[-_.]heading)(?:[-_.](?:enabled|state|effect|gutter|button|sections?))?\b/i,
+  /meo-[A-Za-z0-9_-]*heading[-_]?fold[A-Za-z0-9_-]*|meo-md-fold-(?:gutter|toggle|chevron)/i,
+  /\b(?:moveHeadingSection|reorderOutlineHeading|outlineDragState|outlineDropCandidate|outlineHeadingMove|applyOutlineHeadingMove)(?:\b|[A-Z0-9_])/,
+  /\b(?:move|reorder|drag|drop)[-_.]outline[-_.]headings?(?:[-_.]sections?)?\b/i,
+  /\boutline[-_.]headings?[-_.](?:move|reorder|drag|drop)(?:[-_.]sections?)?\b/i,
+  /outline-(?:drop-(?:before|after)|drag(?:ging)?-outline)/i
+];
+const hasRemovedHeadingFoldOrOutlineReorderCapability = (text: string, path: string): boolean => {
+  if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
+  if (removedHeadingFoldAndOutlineReorderTokens.some((pattern) => pattern.test(text))) return true;
+  const words = normalizeCapabilityWords(text);
+  for (let start = 0; start < words.length; start += 1) {
+    const window = words.slice(start, start + 10);
+    const wordSet = new Set(window);
+    const hasHeading = wordSet.has('heading') || wordSet.has('headings');
+    const hasHeadingFold = hasHeading
+      && (wordSet.has('fold') || wordSet.has('folding') || wordSet.has('collapse'))
+      && ['button', 'custom', 'effect', 'enabled', 'gutter', 'markdown', 'restore', 'section', 'state', 'toggle']
+        .some((word) => wordSet.has(word));
+    const hasOutlineReorder = wordSet.has('outline') && hasHeading
+      && ['drag', 'drop', 'move', 'reorder'].some((word) => wordSet.has(word));
+    if (hasHeadingFold || hasOutlineReorder) return true;
+  }
+  return false;
+};
+for (const path of headingFoldAndOutlineReorderScope) {
+  if (/^(?:src|webview\/src)\//.test(path) && hasRemovedHeadingFoldOrOutlineReorderCapability(path, path)) {
+    failures.push(`ARCH019 已删除的 Markdown 标题折叠或目录章节拖拽重排重新出现: ${path}:1`);
+    continue;
+  }
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (hasRemovedHeadingFoldOrOutlineReorderCapability(lines[index], path)) {
+      failures.push(`ARCH019 已删除的 Markdown 标题折叠或目录章节拖拽重排重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }

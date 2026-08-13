@@ -1,10 +1,14 @@
 import { createEditor } from './test-editor-factory';
-import { getDetailsBlocks, toggleCollapsibleSection } from '../webview/src/helpers/headingCollapse';
+import { getDetailsBlocks, toggleDetailsBlock } from '../webview/src/helpers/detailsBlocks';
 
 (globalThis as typeof globalThis & {
   LiveLayoutStabilityHarness?: {
     createEditor: typeof createEditor;
     getDetailsBlocks: typeof getDetailsBlocks;
-    toggleCollapsibleSection: typeof toggleCollapsibleSection;
+    toggleCollapsibleSection: typeof toggleDetailsBlock;
   };
-}).LiveLayoutStabilityHarness = { createEditor, getDetailsBlocks, toggleCollapsibleSection };
+}).LiveLayoutStabilityHarness = {
+  createEditor,
+  getDetailsBlocks,
+  toggleCollapsibleSection: toggleDetailsBlock
+};

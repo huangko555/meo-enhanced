@@ -1015,7 +1015,6 @@ outlineController = createOutlineController({
   outlineLeftButton: outlineLeftBtn,
   additionalOutlineLeftButtons: [previewOutlineLeftBtn],
   getEditor: () => getActiveEditorMode() === 'preview' ? previewController.getOutlineAdapter() : editor,
-  canReorder: () => getActiveEditorMode() !== 'preview',
   onVisibilityRequest: (visible) => {
     vscode.postMessage({ type: 'setOutlineVisible', visible });
   },
