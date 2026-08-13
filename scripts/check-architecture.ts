@@ -765,6 +765,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   type BindingKind = 'const' | 'let' | 'var' | 'parameter';
   type ControlFrame = { readonly owner: ts.Node; readonly branch: string };
   type BindingEvent = {
+    readonly node: ts.Node;
     readonly position: number;
     readonly dom: boolean;
     readonly context: Scope;
@@ -791,11 +792,13 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     readonly position: number;
     readonly pathKey: string;
     readonly finallyBlocks: readonly ts.Block[];
+    readonly dominanceRoot: ts.Node;
+    readonly reachesBackedge: boolean;
   };
   const scopeByNode = new Map<ts.Node, Scope>();
   const bindings = new Set<Binding>();
   const continueExitsByContext = new Map<Scope, Map<ts.Node, Map<string, ContinueExit[]>>>();
-  const finallyBlocksWithAbruptCompletion = new Set<ts.Block>();
+  const finallyBlocksWithPossibleAbruptCompletion = new Set<ts.Block>();
 
   const isDomType = (node: ts.TypeNode | undefined): boolean => {
     if (!node) return false;
@@ -941,6 +944,39 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     }
     return null;
   };
+  const breakTarget = (node: ts.BreakStatement): ts.Node | null => {
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (ts.isFunctionLike(parent) || ts.isSourceFile(parent)) return null;
+      if (node.label) {
+        if (ts.isLabeledStatement(parent) && parent.label.text === node.label.text) return parent;
+      } else if (isLoopStatement(parent) || ts.isSwitchStatement(parent)) {
+        return parent;
+      }
+    }
+    return null;
+  };
+  const breakExitsLoop = (node: ts.BreakStatement, target: ts.IterationStatement): boolean => {
+    const destination = breakTarget(node);
+    return destination === target || (
+      destination !== null &&
+      ts.isLabeledStatement(destination) &&
+      labeledLoop(destination) === target
+    );
+  };
+  const statementOverridesContinue = (
+    node: ts.Statement,
+    target: ts.IterationStatement
+  ): boolean => {
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) return true;
+    if (ts.isBreakStatement(node)) return breakExitsLoop(node, target);
+    if (ts.isBlock(node)) {
+      const last = node.statements.at(-1);
+      return last ? statementOverridesContinue(last, target) : false;
+    }
+    return ts.isIfStatement(node) && Boolean(node.elseStatement) &&
+      statementOverridesContinue(node.thenStatement, target) &&
+      statementOverridesContinue(node.elseStatement!, target);
+  };
   const associatedFinallyBlocks = (
     node: ts.ContinueStatement,
     target: ts.IterationStatement
@@ -958,6 +994,28 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       child = parent;
     }
     return blocks;
+  };
+  const continueDominanceRoot = (
+    node: ts.ContinueStatement,
+    target: ts.IterationStatement
+  ): ts.Node => {
+    let root: ts.Node = node;
+    while (root.parent && root.parent !== target) {
+      const parent = root.parent;
+      if (ts.isBlock(parent)) {
+        if (parent.parent === target) break;
+        root = parent;
+      } else if (ts.isLabeledStatement(parent)) {
+        root = parent;
+      } else if (ts.isDoStatement(parent) && parent.statement === root) {
+        root = parent;
+      } else if (ts.isTryStatement(parent) && parent.tryBlock === root) {
+        root = parent;
+      } else {
+        break;
+      }
+    }
+    return root;
   };
   const controlPathForNode = (
     node: ts.Node,
@@ -1046,7 +1104,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           ts.isTryStatement(parent.parent) &&
           parent.parent.finallyBlock === parent
         ) {
-          finallyBlocksWithAbruptCompletion.add(parent);
+          finallyBlocksWithPossibleAbruptCompletion.add(parent);
           break;
         }
       }
@@ -1054,10 +1112,13 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     if (ts.isContinueStatement(node)) {
       const target = continueTargetLoop(node);
       if (target) {
+        const finallyBlocks = associatedFinallyBlocks(node, target);
         const exit: ContinueExit = {
           position: node.getStart(sourceFile),
           pathKey: pathMetadata.key,
-          finallyBlocks: associatedFinallyBlocks(node, target)
+          finallyBlocks,
+          dominanceRoot: continueDominanceRoot(node, target),
+          reachesBackedge: !finallyBlocks.some((block) => statementOverridesContinue(block, target))
         };
         let byOwner = continueExitsByContext.get(context);
         if (!byOwner) {
@@ -1080,6 +1141,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       const binding = resolveBinding(scope, node.name.text);
       if (binding && binding.declarationContext === null) binding.declarationContext = context;
       binding?.events.push({
+        node,
         position: node.getStart(sourceFile),
         dom: isDomType(node.type) || isDomInitializer(node.initializer),
         context,
@@ -1096,6 +1158,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       const left = unwrapExpression(node.left);
       if (ts.isIdentifier(left)) {
         resolveBinding(scope, left.text)?.events.push({
+          node,
           position: node.getStart(sourceFile),
           dom: node.operatorToken.kind === ts.SyntaxKind.EqualsToken && isDomInitializer(node.right),
           context,
@@ -1128,11 +1191,51 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
 
   const runsInMandatoryFinally = (exit: ContinueExit, position: number): boolean => (
     exit.finallyBlocks.some((block) => (
-      !finallyBlocksWithAbruptCompletion.has(block) &&
+      !finallyBlocksWithPossibleAbruptCompletion.has(block) &&
       position >= block.getStart(sourceFile) &&
       position < block.end
     ))
   );
+  const runsInAssociatedFinally = (exit: ContinueExit, position: number): boolean => (
+    exit.finallyBlocks.some((block) => (
+      position >= block.getStart(sourceFile) && position < block.end
+    ))
+  );
+  const directChildOfBlock = (node: ts.Node, block: ts.Block): ts.Node | null => {
+    let current = node;
+    while (current.parent && current.parent !== block) current = current.parent;
+    return current.parent === block ? current : null;
+  };
+  const eventFollowsDominanceRoot = (exit: ContinueExit, event: BindingEvent): boolean => {
+    const block = exit.dominanceRoot.parent;
+    if (!ts.isBlock(block)) return false;
+    const eventChild = directChildOfBlock(event.node, block);
+    if (!eventChild) return false;
+    const rootIndex = block.statements.indexOf(exit.dominanceRoot as ts.Statement);
+    const eventIndex = block.statements.indexOf(eventChild as ts.Statement);
+    return rootIndex >= 0 && eventIndex > rootIndex;
+  };
+  const continueDominatesEvent = (exit: ContinueExit, event: BindingEvent): boolean => {
+    if (exit.position >= event.position || runsInMandatoryFinally(exit, event.position)) return false;
+    return event.pathPrefixes.includes(exit.pathKey) || eventFollowsDominanceRoot(exit, event);
+  };
+  const eventBelongsToExitPath = (exit: ContinueExit, event: BindingEvent): boolean => (
+    runsInAssociatedFinally(exit, event.position) ||
+    (event.position < exit.position && event.pathKey === exit.pathKey) ||
+    continueDominatesEvent(exit, event)
+  );
+  const continueExitsForEvent = (
+    context: Scope,
+    owner: ts.Node,
+    event: BindingEvent
+  ): ContinueExit[] => {
+    const exits = new Set<ContinueExit>();
+    const byPath = continueExitsByContext.get(context)?.get(owner);
+    for (const prefix of event.pathPrefixes) {
+      for (const exit of byPath?.get(prefix) ?? []) exits.add(exit);
+    }
+    return [...exits];
+  };
   const hasBlockingContinueBetween = (
     exits: readonly ContinueExit[] | undefined,
     after: number,
@@ -1169,12 +1272,13 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           loopEntryEventsByContext.set(event.context, loopEvents);
         }
         const latestByPath = loopEvents.get(frame.owner) ?? new Map<string, BindingEvent>();
-        const exitsOnPath = continueExitsByContext
-          .get(event.context)?.get(frame.owner)?.get(event.pathKey);
-        const unreachableAfterContinue = exitsOnPath?.some((exit) => (
-          exit.pathKey === event.pathKey &&
-          exit.position < event.position &&
-          !runsInMandatoryFinally(exit, event.position)
+        const exitsOnPath = continueExitsForEvent(event.context, frame.owner, event);
+        const pathDoesNotReachBackedge = exitsOnPath.some((exit) => (
+          !exit.reachesBackedge && eventBelongsToExitPath(exit, event)
+        ));
+        if (pathDoesNotReachBackedge) continue;
+        const unreachableAfterContinue = exitsOnPath.some((exit) => (
+          exit.reachesBackedge && continueDominatesEvent(exit, event)
         ));
         if (unreachableAfterContinue) continue;
         latestByPath.set(event.pathKey, event);
@@ -1191,8 +1295,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           const killedByLaterAncestorDom = event.pathPrefixes.some((prefix) => {
             const later = latestByPath.get(prefix);
             if (!later?.dom || later.position <= event.position) return false;
-            const continueExits = continueExitsByContext
-              .get(context)?.get(owner)?.get(event.pathKey);
+            const continueExits = continueExitsForEvent(context, owner, event);
             return !hasBlockingContinueBetween(
               continueExits,
               event.position,
