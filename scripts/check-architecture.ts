@@ -181,6 +181,23 @@ const applicationDomIdentifiers = new Set([
   'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'matchMedia'
 ]);
 
+function unwrapParenthesizedExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (ts.isParenthesizedExpression(current)) current = current.expression;
+  return current;
+}
+
+function globalThisMemberName(expression: ts.Expression): string | null {
+  if (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression)) return null;
+  const receiver = unwrapParenthesizedExpression(expression.expression);
+  if (!ts.isIdentifier(receiver) || receiver.text !== 'globalThis') return null;
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
+  const argument = expression.argumentExpression
+    ? unwrapParenthesizedExpression(expression.argumentExpression)
+    : null;
+  return argument && ts.isStringLiteralLike(argument) ? argument.text : null;
+}
+
 function applicationDomReference(source: Source): string | null {
   const sourceFile = sourceFileFor(source);
   const isNamedDeclaration = (node: ts.Identifier): boolean => {
@@ -198,11 +215,12 @@ function applicationDomReference(source: Source): string | null {
   let forbidden: string | null = null;
   const visit = (node: ts.Node): void => {
     if (forbidden !== null) return;
-    if (ts.isPropertyAccessExpression(node)
-      && node.expression.getText(sourceFile) === 'globalThis'
-      && applicationDomIdentifiers.has(node.name.text)) {
-      forbidden = node.name.text;
-      return;
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const memberName = globalThisMemberName(node);
+      if (memberName !== null && applicationDomIdentifiers.has(memberName)) {
+        forbidden = memberName;
+        return;
+      }
     }
     if (ts.isIdentifier(node)
       && applicationDomIdentifiers.has(node.text)
@@ -2080,8 +2098,30 @@ const hasRemovedCustomThemeAlias = (value: string): boolean => {
   ));
   return hasMeoThemeCommand || hasCustomThemeOwner;
 };
+const currentCustomThemeDocumentationPatterns = [
+  /(?:meoenhanced|meo)(?:currently)?(?:supports?|includes?|creates?|apply|applies|chooses?|enables?|provides?|exposes?|has)(?:a|an|the)?(?:custom|imported)themes?/,
+  /(?:meoenhanced|meo)(?:includes|has|provides|exposes)?(?:a|an|the)?(?:custom|imported)themes?(?:pickers?|palettes?|controllers?)/,
+  /(?:create|apply|choose|enable|provide|expose)(?:and(?:create|apply|choose|enable|provide|expose))*(?:custom|imported)themes?(?:in|with|for)(?:meoenhanced|meo)/
+] as const;
+const hasCurrentCustomThemeDocumentationClaim = (value: string): boolean => {
+  const segments = value.split(/[.!?;。！？；\r\n]+|\b(?:but|however)\b/gi);
+  return segments.some((segment) => {
+    const normalized = normalizeCapabilityAlias(segment);
+    const hasMeoProduct = normalized.includes('meoenhanced') || /(?:^|[^a-z])meo(?:[^a-z]|$)/i.test(segment);
+    const hasCustomTheme = ['customtheme', 'customthemes', 'importedtheme', 'importedthemes']
+      .some((phrase) => normalized.includes(phrase));
+    if (!hasMeoProduct || !hasCustomTheme) return false;
+    const historicalOrNegative = [
+      'removed', 'historical', 'former', 'previously', 'deprecated', 'usedto',
+      'nolonger', 'doesnotsupport', 'donotsupport', 'didnotsupport'
+    ].some((marker) => normalized.includes(marker));
+    if (historicalOrNegative) return false;
+    return currentCustomThemeDocumentationPatterns.some((pattern) => pattern.test(normalized));
+  });
+};
 for (const path of customThemeCapabilityScope) {
   const isProductionPath = /^(?:src|webview\/src)\//.test(path);
+  const isDocumentationPath = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path);
   if (isProductionPath
     && (hasProductionCustomThemeOwnerAlias(path)
       || removedCustomThemeTokens.some((pattern) => pattern.test(path))
@@ -2094,6 +2134,7 @@ for (const path of customThemeCapabilityScope) {
     if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(lines[index])) continue;
     const line = lines[index].replace(/^\s*\|\|\s*'(?:theme|shikiCodeBlocks|codeTheme)'\s+in\s+value\s*$/, '');
     if ((isProductionPath && hasProductionCustomThemeOwnerAlias(line))
+      || (isDocumentationPath && hasCurrentCustomThemeDocumentationClaim(line))
       || removedCustomThemeTokens.some((pattern) => pattern.test(line))
       || hasRemovedCustomThemeAlias(line)) {
       failures.push(`ARCH020 已删除的自定义主题系统或旧代码主题开关重新出现: ${path}:${index + 1}`);

@@ -166,7 +166,13 @@ try {
     'export type SurfaceElement = Element;\n',
     'export const readStyle = (value: unknown) => getComputedStyle(value as Element);\n',
     'export const readStorage = () => localStorage.getItem("palette");\n',
-    'export const observe = (callback: MutationCallback) => new MutationObserver(callback);\n'
+    'export const observe = (callback: MutationCallback) => new MutationObserver(callback);\n',
+    'export const root = globalThis.document;\n',
+    "export const root = globalThis['document'];\n",
+    'export const storage = globalThis["localStorage"];\n',
+    'export const root = globalThis[`document`];\n',
+    'export const root = (globalThis).document;\n',
+    "export const Observer = ((globalThis))['MutationObserver'];\n"
   ] as const;
   for (const contents of applicationExternalDependencyFixtures) {
     write('webview/src/application/palette.ts', contents);
@@ -177,6 +183,8 @@ try {
   write('webview/src/application/palette.ts', [
     'export type SerializablePalette = { document: string; elementColor: string; storageKey: string };',
     'export const describeDocument = (palette: SerializablePalette) => palette.document;',
+    'export const readOrdinaryObject = (value: { document: string }) => value.document;',
+    "export const readDynamicGlobal = (key: string) => globalThis[key as keyof typeof globalThis];",
     ''
   ].join('\n'));
   const applicationDomainWords = runCheck();
@@ -184,6 +192,7 @@ try {
   write('webview/src/adapters/palette.ts', [
     "import 'shiki';",
     'export const attach = (element: HTMLElement) => getComputedStyle(element);',
+    "export const root = ((globalThis))['document'];",
     ''
   ].join('\n'));
   const adapterExternalDependencies = runCheck();
@@ -2565,6 +2574,38 @@ try {
   const customThemeChangelog = runCheck();
   assert.equal(customThemeChangelog.ok, true, `CHANGELOG history must remain allowed: ${customThemeChangelog.output}`);
   rmSync(join(fixtureRoot, 'CHANGELOG.md'));
+
+  const currentCustomThemeDocsFixtures = [
+    'MEO Enhanced supports custom theme palettes.\n',
+    'MEO Enhanced includes a custom theme picker.\n',
+    'Create and apply custom themes in MEO Enhanced.\n',
+    'MEO Enhanced provides an imported theme controller.\n'
+  ] as const;
+  for (const contents of currentCustomThemeDocsFixtures) {
+    write('docs/appearance.md', contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, false, `current custom-theme product claim must be rejected: ${contents}`);
+    assert.match(outcome.output, /ARCH020/);
+  }
+  const historicalCustomThemeDocsFixtures = [
+    'MEO Enhanced no longer supports custom themes.\n',
+    'MEO Enhanced does not support custom themes.\n',
+    'MEO Enhanced previously supported custom theme palettes.\n',
+    'The former MEO Enhanced custom theme picker was removed.\n'
+  ] as const;
+  for (const contents of historicalCustomThemeDocsFixtures) {
+    write('docs/appearance.md', contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, true, `historical/negative custom-theme prose must pass: ${outcome.output}`);
+  }
+  write(
+    'docs/appearance.md',
+    'MEO Enhanced no longer supports custom themes. MEO Enhanced provides a custom theme picker.\n'
+  );
+  const mixedHistoricalAndCurrentClaim = runCheck();
+  assert.equal(mixedHistoricalAndCurrentClaim.ok, false, 'historical sentence must not hide a current claim on the same line');
+  assert.match(mixedHistoricalAndCurrentClaim.output, /ARCH020/);
+  rmSync(join(fixtureRoot, 'docs/appearance.md'));
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });
 }
