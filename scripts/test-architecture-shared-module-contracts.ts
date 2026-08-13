@@ -10,6 +10,20 @@ import {
 
 const repoRoot = resolve(import.meta.dir, '..');
 const fixtureRoot = mkdtempSync(join(repoRoot, '.tmp-architecture-shared-module-'));
+const cleanupWait = new Int32Array(new SharedArrayBuffer(4));
+
+const removeFixtureRoot = (): void => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 9 || (code !== 'EBUSY' && code !== 'EPERM' && code !== 'ENOTEMPTY')) throw error;
+      Atomics.wait(cleanupWait, 0, 0, 500);
+    }
+  }
+};
 
 const write = (path: string, contents: string): void => {
   const absolute = join(fixtureRoot, path);
@@ -2598,6 +2612,23 @@ try {
     const outcome = runCheck();
     assert.equal(outcome.ok, true, `historical/negative custom-theme prose must pass: ${outcome.output}`);
   }
+  const coordinatedHistoricalAndCurrentClaimFixtures = [
+    'MEO Enhanced no longer supports custom themes and MEO Enhanced provides a custom theme picker.\n',
+    'MEO Enhanced no longer supports custom themes, and MEO Enhanced provides a custom theme picker.\n',
+    'MEO Enhanced previously supported custom themes while MEO Enhanced now exposes a custom theme controller.\n',
+    'MEO Enhanced removed custom themes whereas MEO Enhanced now includes a custom theme palette.\n',
+    'MEO Enhanced deprecated imported themes yet MEO Enhanced enables an imported theme picker.\n'
+  ] as const;
+  for (const contents of coordinatedHistoricalAndCurrentClaimFixtures) {
+    write('docs/appearance.md', contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, false, `coordinated current custom-theme claim must be rejected: ${contents}`);
+    assert.match(outcome.output, /ARCH020/);
+  }
+  write('docs/appearance.md', 'Create and apply custom themes in MEO Enhanced.\n');
+  const compoundCurrentClaim = runCheck();
+  assert.equal(compoundCurrentClaim.ok, false, 'compound create-and-apply claim must remain rejected');
+  assert.match(compoundCurrentClaim.output, /ARCH020/);
   write(
     'docs/appearance.md',
     'MEO Enhanced no longer supports custom themes. MEO Enhanced provides a custom theme picker.\n'
@@ -2607,7 +2638,7 @@ try {
   assert.match(mixedHistoricalAndCurrentClaim.output, /ARCH020/);
   rmSync(join(fixtureRoot, 'docs/appearance.md'));
 } finally {
-  rmSync(fixtureRoot, { recursive: true, force: true });
+  removeFixtureRoot();
 }
 
 console.log('Shared Module architecture contract checks passed');

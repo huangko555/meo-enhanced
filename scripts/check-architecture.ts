@@ -2099,12 +2099,16 @@ const hasRemovedCustomThemeAlias = (value: string): boolean => {
   return hasMeoThemeCommand || hasCustomThemeOwner;
 };
 const currentCustomThemeDocumentationPatterns = [
-  /(?:meoenhanced|meo)(?:currently)?(?:supports?|includes?|creates?|apply|applies|chooses?|enables?|provides?|exposes?|has)(?:a|an|the)?(?:custom|imported)themes?/,
-  /(?:meoenhanced|meo)(?:includes|has|provides|exposes)?(?:a|an|the)?(?:custom|imported)themes?(?:pickers?|palettes?|controllers?)/,
+  /(?:meoenhanced|meo)(?:currently|now)?(?:supports?|includes?|creates?|apply|applies|chooses?|enables?|provides?|exposes?|has)(?:a|an|the)?(?:custom|imported)themes?/,
+  /(?:meoenhanced|meo)(?:currently|now)?(?:includes|has|provides|exposes)?(?:a|an|the)?(?:custom|imported)themes?(?:pickers?|palettes?|controllers?)/,
   /(?:create|apply|choose|enable|provide|expose)(?:and(?:create|apply|choose|enable|provide|expose))*(?:custom|imported)themes?(?:in|with|for)(?:meoenhanced|meo)/
 ] as const;
+const customThemeDocumentationClauseBoundary = new RegExp(
+  '[.!?;。！？；\\r\\n]+|\\b(?:but|however)\\b|(?:,\\s*)?\\b(?:and|while|whereas|yet)\\b\\s+(?=(?:meoenhanced|meo(?:\\s+enhanced)?)\\b)',
+  'gi'
+);
 const hasCurrentCustomThemeDocumentationClaim = (value: string): boolean => {
-  const segments = value.split(/[.!?;。！？；\r\n]+|\b(?:but|however)\b/gi);
+  const segments = value.split(customThemeDocumentationClauseBoundary);
   return segments.some((segment) => {
     const normalized = normalizeCapabilityAlias(segment);
     const hasMeoProduct = normalized.includes('meoenhanced') || /(?:^|[^a-z])meo(?:[^a-z]|$)/i.test(segment);
