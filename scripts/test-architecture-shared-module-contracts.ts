@@ -349,11 +349,54 @@ try {
       contents: 'export const openEmojiPicker = () => undefined;\n'
     },
     {
+      label: 'Emoji chooser open alias',
+      path: 'webview/src/editor/emojiChooser.ts',
+      contents: 'export const openEmojiChooser = () => undefined;\n'
+    },
+    {
+      label: 'Emoji chooser show alias',
+      path: 'webview/src/editor/emojiControls.ts',
+      contents: 'export const showEmojiChooser = () => undefined;\n'
+    },
+    {
       label: 'Emoji setting',
       path: 'package.json',
       contents: JSON.stringify({ contributes: { configuration: { properties: {
         'meoEnhanced.emojiShortcodes.enabled': { type: 'boolean' }
       } } } })
+    },
+    {
+      label: 'Emoji chooser dotted setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.emoji.chooser.enabled': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'Emoji chooser camel setting',
+      path: 'package.json',
+      contents: JSON.stringify({ contributes: { configuration: { properties: {
+        'meoEnhanced.emojiChooser.enabled': { type: 'boolean' }
+      } } } })
+    },
+    {
+      label: 'root emoji-regex dependency',
+      path: 'package.json',
+      contents: JSON.stringify({ dependencies: { 'emoji-regex': '^8.0.0' } })
+    },
+    {
+      label: 'root emoji-regex lock dependency',
+      path: 'bun.lock',
+      contents: '        "emoji-regex": "^8.0.0",\n'
+    },
+    {
+      label: 'source emoji-regex owner',
+      path: 'webview/src/editor/emojiText.ts',
+      contents: [
+        "import emojiRegex from 'emoji-regex';",
+        'export const matchEmoji = (text: string) => emojiRegex().exec(text);',
+        ''
+      ].join('\n')
     },
     {
       label: 'Emoji Protocol command',
@@ -391,17 +434,24 @@ try {
     `ARCH017 missed removed Emoji shortcode capabilities: ${missedEmojiShortcodeCapabilities.join(', ')}`
   );
 
-  write('webview/src/editor/ordinaryEmojiText.ts', [
-    "import emojiRegex from 'emoji-regex';",
-    "export const ordinaryText = 'Unicode emoji stays ordinary text: 😄';",
-    'export const findUnicodeEmoji = (text: string) => emojiRegex().exec(text);',
+  write('webview/src/editor/ordinaryEmojiText.ts', "export const ordinaryText = 'Unicode emoji stays ordinary text: 😄';\n");
+  write('docs/unicode-text.md', 'Unicode emoji 😄 and the word emoji are ordinary document text.\n');
+  write('docs/emoji-choice.md', 'Choose an emoji character in your operating system, then paste it as ordinary text.\n');
+  write('bun.lock', [
+    '"emoji-regex": ["emoji-regex@8.0.0", "", {}, "sha512-test"]',
+    '"string-width": ["string-width@4.2.3", "", { "dependencies": { "emoji-regex": "^8.0.0" } }]',
     ''
   ].join('\n'));
-  write('docs/unicode-text.md', 'Unicode emoji 😄 and the word emoji are ordinary document text.\n');
   const retainedEmojiText = runCheck();
-  assert.equal(retainedEmojiText.ok, true, `Unicode emoji and emoji-regex must remain allowed: ${retainedEmojiText.output}`);
+  assert.equal(
+    retainedEmojiText.ok,
+    true,
+    `Unicode emoji prose and transitive emoji-regex lock records must remain allowed: ${retainedEmojiText.output}`
+  );
   rmSync(join(fixtureRoot, 'webview', 'src', 'editor', 'ordinaryEmojiText.ts'));
   rmSync(join(fixtureRoot, 'docs', 'unicode-text.md'));
+  rmSync(join(fixtureRoot, 'docs', 'emoji-choice.md'));
+  rmSync(join(fixtureRoot, 'bun.lock'));
 
   write('README.md', 'Show Git line authors and open the matching revision.\n');
   const gitLineAuthorDocs = runCheck();
@@ -1504,6 +1554,30 @@ try {
     cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
   });
   assert.match(unstagedEmojiLock, /Architecture checks passed/);
+
+  mkdirSync(join(stagedRoot, 'webview', 'src', 'editor'), { recursive: true });
+  writeFileSync(
+    join(stagedRoot, 'webview', 'src', 'editor', 'emojiText.ts'),
+    "import emojiRegex from 'emoji-regex';\nexport const matchEmoji = (text) => emojiRegex().exec(text);\n"
+  );
+  execFileSync('git', ['add', '--', 'webview/src/editor/emojiText.ts'], { cwd: stagedRoot });
+  writeFileSync(
+    join(stagedRoot, 'webview', 'src', 'editor', 'emojiText.ts'),
+    "export const ordinaryText = 'Unicode emoji 😄';\n"
+  );
+  const stagedEmojiRegexOwner = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedEmojiRegexOwner.ok, false, 'staged ARCH017 must reject a direct emoji-regex source owner');
+  assert.match(stagedEmojiRegexOwner.output, /ARCH017/);
 
   write('src/export/math.ts', 'export function collect(_text: string) { return []; }\n');
   const missingImporter = runCheck();

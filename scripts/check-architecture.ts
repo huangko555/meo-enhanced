@@ -1776,15 +1776,20 @@ const removedEmojiShortcodeTokens = [
   /(?:node[-_. /]?emoji|emoji[-_. /]?(?:toolkit|shortcodes?))/i,
   /\b(?:collect|convert|decorate|expand|parse|render|replace|resolve|scan)(?:EmojiShortcode|EmojiRanges?)(?:\b|[A-Z0-9_])/,
   /\b(?:collect|convert|decorate|expand|parse|render|replace|resolve|scan)[-_.](?:emoji[-_.])?(?:shortcodes?|ranges?)\b/i,
-  /\b(?:EmojiShortcode|EmojiRange|EmojiWidget|EmojiDecoration|EmojiSelector|EmojiPicker|EmojiPalette|EmojiMenu)(?:\b|[A-Z0-9_])/,
-  /\b(?:emojiShortcode|emojiWidget|emojiDecoration|emojiSelector|emojiPicker|emojiPalette|emojiMenu)(?:\b|[A-Z0-9_])/,
-  /\b(?:open|show|toggle|select|insert)(?:EmojiSelector|EmojiPicker|EmojiPalette|EmojiMenu|EmojiShortcode)(?:\b|[A-Z0-9_])/,
-  /\b(?:open|show|toggle|select|insert)[-_.]emoji[-_.](?:selector|picker|palette|menu|shortcode)\b/i,
-  /meo-[A-Za-z0-9_-]*emoji[A-Za-z0-9_-]*(?:shortcode|widget|selector|picker|palette|menu)?/i
+  /\b(?:EmojiShortcode|EmojiRange|EmojiWidget|EmojiDecoration|EmojiSelector|EmojiPicker|EmojiPalette|EmojiMenu|EmojiChooser)(?:\b|[A-Z0-9_])/,
+  /\b(?:emojiShortcode|emojiWidget|emojiDecoration|emojiSelector|emojiPicker|emojiPalette|emojiMenu|emojiChooser)(?:\b|[A-Z0-9_])/,
+  /\b(?:open|show|toggle|select|insert)(?:EmojiSelector|EmojiPicker|EmojiPalette|EmojiMenu|EmojiChooser|EmojiShortcode)(?:\b|[A-Z0-9_])/,
+  /\b(?:open|show|toggle|select|insert)[-_.]emoji[-_.](?:selector|picker|palette|menu|chooser|shortcode)\b/i,
+  /meo-[A-Za-z0-9_-]*emoji[A-Za-z0-9_-]*(?:shortcode|widget|selector|picker|palette|menu|chooser)?/i
 ];
-const emojiShortcodeSettingKey = /["'][^"']*emoji[-_.]?(?:shortcode|conversion|selector|picker|palette|menu|enabled|setting)[^"']*["']\s*:/i;
+const emojiShortcodeSettingKey = /["'][^"']*emoji[-_.]?(?:shortcode|conversion|selector|picker|palette|menu|chooser|enabled|setting)[^"']*["']\s*:/i;
+const directEmojiRegexDependency = /["']emoji-regex["']\s*:/i;
+const bunRootEmojiRegexDependency = /^\s*["']emoji-regex["']\s*:\s*["'][^"']+["']\s*,?\s*$/i;
 const hasRemovedEmojiShortcodeCapability = (text: string, path: string): boolean => {
   if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
+  if (/^(?:src|webview\/src)\//.test(path) && /\bemoji-regex\b/i.test(text)) return true;
+  if (path === 'package.json' && directEmojiRegexDependency.test(text)) return true;
+  if (/^bun\.lockb?$/i.test(path) && bunRootEmojiRegexDependency.test(text)) return true;
   if (removedEmojiShortcodeTokens.some((pattern) => pattern.test(text))) return true;
   if (path === 'package.json' && emojiShortcodeSettingKey.test(text)) return true;
   const words = normalizeCapabilityWords(text);
@@ -1796,7 +1801,7 @@ const hasRemovedEmojiShortcodeCapability = (text: string, path: string): boolean
       ? ['convert', 'conversion', 'expand', 'parse', 'render', 'replace', 'transform']
         .some((word) => wordSet.has(word))
       : false;
-    const hasSelector = ['selector', 'picker', 'palette', 'menu']
+    const hasSelector = ['selector', 'picker', 'palette', 'menu', 'chooser']
       .some((word) => wordSet.has(word));
     const hasProductAction = ['choose', 'insert', 'open', 'select', 'show', 'toggle']
       .some((word) => wordSet.has(word));
