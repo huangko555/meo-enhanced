@@ -1716,28 +1716,43 @@ const removedVimIntegrationTokens = [
   /\b(?:apply|disable|enable|set|sync|toggle)[-_.](?:vi|vim)\b/i,
   /\b(?:vi|vim)[-_.](?:disabled|enabled)\b/i
 ];
-const hasRemovedVimCapability = (text: string): boolean => {
+type VimCapabilitySurface = 'source' | 'package' | 'documentation';
+const vimPackageCapabilityKey = /["'][^"']*(?:vi|vim)(?:[-_.]?(?:active|behavior|config|configuration|disabled|emulation|enabled|integration|keybinding|keybindings|leader|map|mapping|mappings|mode|panel|setting|settings|state))[^"']*["']\s*:/i;
+const hasRemovedVimCapability = (text: string, surface: VimCapabilitySurface): boolean => {
   if (removedVimIntegrationTokens.some((pattern) => pattern.test(text))) return true;
+  if (surface === 'package') return vimPackageCapabilityKey.test(text);
   const words = normalizeCapabilityWords(text);
   for (let start = 0; start < words.length; start += 1) {
-    const window = words.slice(start, start + 6);
+    const window = words.slice(start, start + 8);
     const wordSet = new Set(window);
     if (!wordSet.has('vim') && !wordSet.has('vi')) continue;
-    const hasCapabilityNoun = window.some((word) => (
-      /^(?:active|behavior|config|configuration|disabled|emulation|enabled|integration|keybinding|keybindings|leader|map|mapping|mappings|mode|panel|setting|settings|state)$/.test(word)
+    const hasExplicitCapabilityNoun = window.some((word) => (
+      /^(?:emulation|integration|keybinding|keybindings|leader|map|mapping|mappings|mode|panel)$/.test(word)
     ));
-    if (hasCapabilityNoun) return true;
+    if (hasExplicitCapabilityNoun) return true;
+    const hasStateNoun = window.some((word) => (
+      /^(?:active|behavior|config|configuration|disabled|enabled|setting|settings|state)$/.test(word)
+    ));
+    if (!hasStateNoun) continue;
+    if (surface === 'source' || window.some((word) => (
+      /^(?:meo|meoenhanced|source|live|toolbar)$/.test(word)
+    ))) return true;
   }
   return false;
 };
 for (const path of vimCapabilityScope) {
-  if (hasRemovedVimCapability(path)) {
+  const surface: VimCapabilitySurface = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path)
+    ? 'documentation'
+    : path === 'package.json' || /^(?:bun\.lockb?|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i.test(path)
+      ? 'package'
+      : 'source';
+  if (surface === 'source' && hasRemovedVimCapability(path, surface)) {
     failures.push(`ARCH016 已删除的 Vim 模式或编辑器集成能力重新出现: ${path}:1`);
     continue;
   }
   const lines = readTrackedProjectFile(path).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    if (hasRemovedVimCapability(lines[index])) {
+    if (hasRemovedVimCapability(lines[index], surface)) {
       failures.push(`ARCH016 已删除的 Vim 模式或编辑器集成能力重新出现: ${path}:${index + 1}`);
     }
   }

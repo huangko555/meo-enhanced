@@ -191,6 +191,11 @@ try {
       contents: 'Enable Vi keybindings in Source mode.\n'
     },
     {
+      label: 'Vim configuration in MEO public docs',
+      path: 'docs/editor-settings.md',
+      contents: 'The Vim configuration in MEO controls editor behavior.\n'
+    },
+    {
       label: 'pure vimEnabled state alias',
       path: 'src/host/editorPreferences.ts',
       contents: 'export const vimEnabled = true;\n'
@@ -247,6 +252,35 @@ try {
   const ordinaryVimText = runCheck();
   assert.equal(ordinaryVimText.ok, true, `ordinary Vim text must remain allowed: ${ordinaryVimText.output}`);
   rmSync(join(fixtureRoot, 'README.md'));
+
+  const ordinaryVimDocumentationFixtures = [
+    {
+      label: 'ordinary Vim configuration prose in README',
+      path: 'README.md',
+      contents: 'The Vim configuration lives in ~/.vimrc.\n'
+    },
+    {
+      label: 'ordinary active Vim state prose in docs',
+      path: 'docs/external-editor.md',
+      contents: 'Check the active Vim state before editing.\n'
+    },
+    {
+      label: 'ordinary external Vim documentation path',
+      path: 'docs/vim-configuration.md',
+      contents: '# External editor\n\nSee ~/.vimrc for setup.\n'
+    }
+  ];
+  for (const fixture of ordinaryVimDocumentationFixtures) {
+    write(fixture.path, fixture.contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, true, `${fixture.label} must remain allowed: ${outcome.output}`);
+    rmSync(join(fixtureRoot, ...fixture.path.split('/')));
+  }
+
+  write('package.json', JSON.stringify({ description: 'The Vim configuration lives in ~/.vimrc.' }));
+  const ordinaryVimPackageDescription = runCheck();
+  assert.equal(ordinaryVimPackageDescription.ok, true, `ordinary package prose must remain allowed: ${ordinaryVimPackageDescription.output}`);
+  rmSync(join(fixtureRoot, 'package.json'));
 
   write('README.md', 'Show Git line authors and open the matching revision.\n');
   const gitLineAuthorDocs = runCheck();
