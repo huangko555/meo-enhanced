@@ -38,6 +38,22 @@ assert.deepEqual(
   'an unclosed excluded function conservatively owns the remaining text'
 );
 
+const unmatchedInlineCode = 'Unmatched ` inline marker\n\n#abc';
+assert.deepEqual(
+  sources(unmatchedInlineCode),
+  ['#abc'],
+  'an unmatched inline backtick must remain ordinary Markdown text'
+);
+const backslashBacktickBoundaries = [
+  ['odd escaped unmatched', 'odd \\` literal\n\n#abc', ['#abc']],
+  ['even unescaped unmatched', 'even \\\\` literal\n\n#abc', ['#abc']],
+  ['odd escaped then unmatched', 'odd \\`#abc` #def', ['#abc', '#def']],
+  ['even unescaped and closed', 'even \\\\`#abc` #def', ['#def']]
+] as const;
+for (const [label, text, expectedSources] of backslashBacktickBoundaries) {
+  assert.deepEqual(sources(text), expectedSources, `${label} must follow Markdown backtick escaping`);
+}
+
 const excludedByBoundary = [
   'heading#abc',
   'color-#fff',
@@ -46,7 +62,11 @@ const excludedByBoundary = [
   '##abc',
   'https://example.com/#abc',
   'https://example.com/?color=#abc',
+  'HTTPS://example.com/?color=#abc',
+  '//example.com/?color=#abc',
   '[section](#abc)',
+  '[section]( #abc)',
+  '[section](\n#abc)',
   '#abc/tag',
   'url(#abc)',
   '`#abc`',

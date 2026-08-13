@@ -8,7 +8,11 @@ const previewColors = exportRuntime.renderPreviewDocument({
     '',
     'Plain rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)',
     '',
-    'Links https://example.com/#abc [section](#abc) tag #abc/tag code `#fff`'
+    'Links https://example.com/#abc HTTPS://example.com/?color=#abc //example.com/?color=#abc [section](#abc) [spaced]( #abc) tag #abc/tag code `#fff`',
+    '',
+    'Unmatched ` inline marker',
+    '',
+    'After unmatched #010203'
   ].join('\n'),
   sourceDocumentPath: 'C:/tmp/preview-colors.md'
 });
@@ -177,7 +181,7 @@ if (!transformedSources.html.includes('class="meo-export-frontmatter" data-sourc
   throw new Error('Preview frontmatter must participate in viewport position mapping');
 }
 const previewSwatches = Array.from(previewColors.html.matchAll(/<span class="meo-md-color-swatch"[^>]*title="([^"]+)"[^>]*><\/span>/g), (match) => match[1]);
-if (JSON.stringify(previewSwatches) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd'])
+if (JSON.stringify(previewSwatches) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203'])
   || /<(?:input|button|select|textarea)\b[^>]*meo-md-color-swatch/i.test(previewColors.html)
   || !previewColors.html.includes('rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)')) {
   throw new Error(`Preview HEX swatches must be read-only and exclusive: ${JSON.stringify(previewSwatches)}`);

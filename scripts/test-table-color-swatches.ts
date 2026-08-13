@@ -34,7 +34,7 @@ async function main() {
         text: [
           '| Colors | Tag | Protected |',
           '| --- | --- | --- |',
-          '| #f00 #0f08 #336699 #33669988 rgba(51, 153, 255, 0.55) hsl(210 100% 60%) red linear-gradient(#fff, #000) | #todo #abc/tag | `#0f0` |'
+          '| #f00 #0f08 #336699 #33669988 rgba(51, 153, 255, 0.55) hsl(210 100% 60%) red linear-gradient(#fff, #000) | #todo #abc/tag | `#0f0` HTTPS://example.com/?color=#abc //example.com/?color=#abc [section]( #abc) |'
         ].join('\n'),
         onApplyChanges() {}
       });
@@ -96,7 +96,11 @@ async function main() {
         'Live swatches',
         'HEX #abc #abcd #aabbcc #aabbccdd',
         'Plain rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)',
-        'Links https://example.com/#abc [section](#abc) tag #abc/tag code `#fff`'
+        'Links https://example.com/#abc HTTPS://example.com/?color=#abc //example.com/?color=#abc [section](#abc) [spaced]( #abc) tag #abc/tag code `#fff`',
+        '',
+        'Unmatched ` inline marker',
+        '',
+        'After unmatched #010203'
       ].join('\n');
       let applyCount = 0;
       const editor = harness.createEditor({
@@ -124,7 +128,7 @@ async function main() {
       editor.destroy();
       return result;
     });
-    if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd'])
+    if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203'])
       || liveResult.roles.some((role) => role !== 'img')
       || liveResult.interactiveDescendants !== 0
       || !liveResult.textUnchanged

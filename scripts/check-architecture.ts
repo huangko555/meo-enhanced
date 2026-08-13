@@ -2206,7 +2206,8 @@ const hasRemovedColorCapabilityAlias = (value: string, ownerContext = ''): boole
 };
 const currentRemovedColorDocumentationPatterns = [
   /(?:meoenhanced|meo)(?:currently|now)?(?:supports?|includes?|provides?|exposes?|shows?|decorates?|has)(?:a|an|the)?(?:rgb|rgba|hsl|hsla|named|gradient|nonhex).{0,24}colors?(?:swatches?|pickers?|choosers?|palettes?)/,
-  /(?:meoenhanced|meo)(?:currently|now)?(?:supports?|includes?|provides?|exposes?|has)(?:a|an|the)?color(?:pickers?|choosers?|dialogs?|inputs?)/
+  /(?:meoenhanced|meo)(?:currently|now)?(?:supports?|includes?|provides?|exposes?|has)(?:a|an|the)?color(?:pickers?|choosers?|dialogs?|inputs?|palettes?)/,
+  /(?:meoenhanced|meo)(?:currently|now)?(?:supports?|includes?|provides?|exposes?|has)(?:a|an|the)?(?:color)?palettes?for(?:pick(?:ing)?|choos(?:e|ing))colors?/
 ] as const;
 const hasCurrentRemovedColorDocumentationClaim = (value: string): boolean => {
   const wholeNormalized = normalizeCapabilityAlias(value);

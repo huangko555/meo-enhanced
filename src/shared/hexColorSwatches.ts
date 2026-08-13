@@ -53,7 +53,14 @@ function scanFunction(text: string, openIndex: number): number {
   return text.length;
 }
 
-function scanBacktickCode(text: string, start: number): number {
+function isEscaped(text: string, index: number): boolean {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) slashCount += 1;
+  return slashCount % 2 === 1;
+}
+
+function scanBacktickCode(text: string, start: number): number | null {
+  if (isEscaped(text, start)) return null;
   let markerLength = 1;
   while (text[start + markerLength] === '`') markerLength += 1;
   let cursor = start + markerLength;
@@ -67,7 +74,9 @@ function scanBacktickCode(text: string, start: number): number {
     if (closingLength === markerLength) return cursor + closingLength;
     cursor += closingLength;
   }
-  return text.length;
+  // CommonMark treats an unmatched inline marker as ordinary text. Fenced
+  // blocks remain owned by the consumers' Markdown syntax/token layers.
+  return null;
 }
 
 function scanHtmlTag(text: string, start: number): number {
@@ -90,6 +99,21 @@ function scanAbsoluteUrl(text: string, start: number): number {
   return cursor;
 }
 
+function scanMarkdownLinkDestination(text: string, openIndex: number): number | null {
+  let depth = 1;
+  let cursor = openIndex + 1;
+  while (cursor < text.length) {
+    if (text[cursor] === '\\') {
+      cursor += 2;
+      continue;
+    }
+    if (text[cursor] === '(') depth += 1;
+    if (text[cursor] === ')' && --depth === 0) return cursor + 1;
+    cursor += 1;
+  }
+  return null;
+}
+
 /** Builds sorted, non-overlapping ranges that cannot own standalone swatches. */
 function collectExcludedRanges(text: string): ExcludedRange[] {
   const ranges: ExcludedRange[] = [];
@@ -98,8 +122,12 @@ function collectExcludedRanges(text: string): ExcludedRange[] {
   while (cursor < text.length) {
     if (text[cursor] === '`') {
       const to = scanBacktickCode(text, cursor);
-      ranges.push({ from: cursor, to });
-      cursor = to;
+      if (to !== null) {
+        ranges.push({ from: cursor, to });
+        cursor = to;
+        continue;
+      }
+      cursor += 1;
       continue;
     }
 
@@ -111,12 +139,23 @@ function collectExcludedRanges(text: string): ExcludedRange[] {
     }
 
     const previous = cursor > 0 ? text[cursor - 1] : '';
-    if (!/[\w-]/.test(previous)
-      && (text.startsWith('http://', cursor) || text.startsWith('https://', cursor))) {
+    const scheme = text.substring(cursor, cursor + 8).toLowerCase();
+    const startsAbsoluteUrl = scheme.startsWith('http://') || scheme.startsWith('https://');
+    const startsProtocolRelativeUrl = text.startsWith('//', cursor);
+    if (!/[\w-]/.test(previous) && (startsAbsoluteUrl || startsProtocolRelativeUrl)) {
       const to = scanAbsoluteUrl(text, cursor);
       ranges.push({ from: cursor, to });
       cursor = to;
       continue;
+    }
+
+    if (text[cursor] === ']' && text[cursor + 1] === '(') {
+      const to = scanMarkdownLinkDestination(text, cursor + 1);
+      if (to !== null) {
+        ranges.push({ from: cursor + 1, to });
+        cursor = to;
+        continue;
+      }
     }
 
     if (/[a-z]/i.test(text[cursor]) && !/[\w-]/.test(previous)) {

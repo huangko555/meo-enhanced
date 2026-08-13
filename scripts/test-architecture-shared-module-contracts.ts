@@ -2228,6 +2228,24 @@ try {
   writeFileSync(join(stagedRoot, 'README.md'), 'Pick a color in an external design tool.\n');
   execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
 
+  writeFileSync(join(stagedRoot, 'README.md'), 'MEO Enhanced provides a color palette for choosing colors.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'Use the OS pick-a-color dialog in an external tool.\n');
+  const stagedColorPaletteClaim = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedColorPaletteClaim.ok, false, 'staged ARCH021 must reject current color-palette claims from the index');
+  assert.match(stagedColorPaletteClaim.output, /ARCH021/);
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+
   writeFileSync(join(stagedRoot, 'README.md'), 'MEO Enhanced provides meoEnhanced.pickColor.\n');
   execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
   writeFileSync(join(stagedRoot, 'README.md'), 'Pick a color in an external design tool.\n');
@@ -2719,6 +2737,8 @@ try {
     ['webview/src/editor/paletteColorOwner.ts', 'export const paletteColorOwner = {};\n'],
     ['docs/colors.md', 'MEO Enhanced supports RGB and HSL color swatches.\n'],
     ['docs/colors.md', 'MEO Enhanced provides a color picker.\n'],
+    ['docs/colors.md', 'MEO Enhanced provides a color palette for choosing colors.\n'],
+    ['docs/colors.md', 'MEO Enhanced includes a palette for choosing colors.\n'],
     ['docs/colors.md', 'MEO Enhanced no longer supports RGB swatches, and MEO Enhanced provides a color picker.\n']
   ] as const;
   for (const [fixturePath, contents] of removedColorCapabilityFixtures) {
@@ -2738,7 +2758,10 @@ try {
     ['webview/src/theme/built-in-palette.ts', 'export const builtInPalette = {};\n'],
     ['webview/src/theme/final.palette.ts', 'export const finalPalette = {};\n'],
     ['docs/colors.md', 'Pick a color in an external design tool. MEO Enhanced shows read-only HEX swatches.\n'],
-    ['docs/history.md', 'MEO Enhanced no longer supports RGB swatches or a color picker.\n']
+    ['docs/colors.md', 'Use the OS pick-a-color dialog in an external tool.\n'],
+    ['docs/colors.md', 'MEO Enhanced uses the current theme palette and built-in code palette.\n'],
+    ['docs/history.md', 'MEO Enhanced no longer supports RGB swatches or a color picker.\n'],
+    ['docs/history.md', 'MEO Enhanced no longer provides a color palette for choosing colors.\n']
   ] as const;
   for (const [fixturePath, contents] of retainedColorFixtures) {
     write(fixturePath, contents);
