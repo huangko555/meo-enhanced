@@ -1841,6 +1841,7 @@ const removedMermaidColonTokens = [
 const hasRemovedMermaidColonCapability = (text: string, path: string): boolean => {
   if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(text)) return false;
   if (removedMermaidColonTokens.some((pattern) => pattern.test(text))) return true;
+  const sourceExportDeclaration = /^(?:src|webview\/src)\//.test(path) && /^\s*export\s+(?:(?:const|let|var|function|class|type|interface|enum)\b|default\s+(?:function|class)\b)/.test(text);
   const words = normalizeCapabilityWords(text);
   const mermaidPositions = words.flatMap((word, index) => word === 'mermaid' ? [index] : []);
   const colonPositions = words.flatMap((word, index) => word === 'colon' ? [index] : []);
@@ -1852,7 +1853,8 @@ const hasRemovedMermaidColonCapability = (text: string, path: string): boolean =
       const capabilityWords = words.slice(from, to);
       if (capabilityWords.some((word) => (
         /^(?:block|blocks|cache|container|containers|decoration|decorations|fence|fences|parser|range|ranges)$/.test(word) ||
-        /^(?:collect|detect|enable|get|normalize|parse|preview|render|scan)$/.test(word)
+        /^(?:collect|detect|enable|get|normalize|parse|preview|render|scan)$/.test(word) ||
+        (word === 'export' && !sourceExportDeclaration)
       ))) return true;
     }
   }

@@ -515,6 +515,11 @@ try {
       contents: 'export const exportMermaidColonBlock = () => undefined;\n'
     },
     {
+      label: 'Mermaid colon export syntax camel action',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: 'export const exportMermaidColonSyntax = () => undefined;\n'
+    },
+    {
       label: 'Mermaid colon dotted alias',
       path: 'webview/src/editor/mermaidCompatibility.ts',
       contents: "export const dottedCapability = 'mermaid.colon.fence';\n"
@@ -523,6 +528,11 @@ try {
       label: 'Mermaid colon kebab alias',
       path: 'webview/src/editor/mermaidCompatibility.ts',
       contents: "export const kebabCapability = 'detect-mermaid-colon-containers';\n"
+    },
+    {
+      label: 'Mermaid colon export syntax kebab action',
+      path: 'webview/src/editor/mermaidCompatibility.ts',
+      contents: "export const kebabCapability = 'export-mermaid-colon-syntax';\n"
     },
     {
       label: 'Mermaid colon setting',
@@ -550,6 +560,11 @@ try {
       label: 'Mermaid colon semantic capability documentation',
       path: 'docs/mermaid.md',
       contents: 'Render Mermaid colon containers in Live and export.\n'
+    },
+    {
+      label: 'Mermaid colon export syntax documentation action',
+      path: 'docs/mermaid.md',
+      contents: 'Export Mermaid colon syntax.\n'
     }
   ];
   const missedMermaidColonCapabilities: string[] = [];
@@ -588,6 +603,26 @@ try {
   );
   rmSync(join(fixtureRoot, 'webview', 'src', 'editor', 'standardMermaid.ts'));
   rmSync(join(fixtureRoot, 'docs', 'standard-mermaid.md'));
+
+  const retainedMermaidColonSourceDeclarations = [
+    'export const mermaidColonSyntax = "Node: ready";',
+    'export let mermaidColonSyntax = "Node: ready";',
+    'export var mermaidColonSyntax = "Node: ready";',
+    'export function mermaidColonSyntax() { return "Node: ready"; }',
+    'export class MermaidColonSyntax {}',
+    'export type MermaidColonSyntax = string;',
+    'export interface MermaidColonSyntax { label: string }',
+    'export enum MermaidColonSyntax { Label }',
+    'export default function mermaidColonSyntax() { return "Node: ready"; }',
+    'export default class MermaidColonSyntax {}'
+  ];
+  for (const [index, declaration] of retainedMermaidColonSourceDeclarations.entries()) {
+    const path = `webview/src/editor/standardMermaidDeclaration${index}.ts`;
+    write(path, `${declaration}\n`);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, true, `source export declaration must remain allowed: ${declaration}\n${outcome.output}`);
+    rmSync(join(fixtureRoot, ...path.split('/')));
+  }
 
   write('README.md', 'Show Git line authors and open the matching revision.\n');
   const gitLineAuthorDocs = runCheck();
