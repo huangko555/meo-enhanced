@@ -416,6 +416,24 @@ try {
       expectedLine: 3
     },
     {
+      label: 'continue bypasses later ancestor DOM before next iteration',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (ready) {\n  field.spellcheck = true;\n  if (disabled) { field = settings; continue; }\n  field = document.createElement('input');\n}\n",
+      expectedLine: 3
+    },
+    {
+      label: 'unlabeled continue only carries into nearest inner loop',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  while (innerReady) {\n    field.spellcheck = true;\n    if (disabled) { field = settings; continue; }\n    field = document.createElement('input');\n  }\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n",
+      expectedLine: 4
+    },
+    {
+      label: 'labeled continue carries inner non-DOM into outer loop',
+      path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nouter: while (outerReady) {\n  field.spellcheck = true;\n  while (innerReady) {\n    if (disabled) { field = settings; continue outer; }\n  }\n  field = document.createElement('input');\n}\n",
+      expectedLine: 3
+    },
+    {
       label: 'do-while-loop carried non-DOM receiver state',
       path: 'webview/src/helpers/conditionalNativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\ndo {\n  field.spellcheck = true;\n  field = settings;\n} while (enabled);\n",
@@ -721,6 +739,11 @@ try {
       label: 'nested-loop DOM recovery only kills its own carried state',
       path: 'webview/src/helpers/nativeSpellcheck.ts',
       contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  field = settings;\n  while (innerReady) {\n    field = document.createElement('input');\n    field.spellcheck = true;\n    break;\n  }\n  field = document.createElement('input');\n  field.spellcheck = true;\n}\n"
+    },
+    {
+      label: 'unlabeled inner continue preserves outer ancestor DOM kill',
+      path: 'webview/src/helpers/nativeSpellcheck.ts',
+      contents: "let field = document.createElement('input');\nwhile (outerReady) {\n  field.spellcheck = true;\n  while (innerReady) {\n    if (disabled) { field = settings; continue; }\n    field = document.createElement('input');\n  }\n  field = document.createElement('input');\n}\n"
     },
     {
       label: 'for-of iteration binding resets before each loop body',

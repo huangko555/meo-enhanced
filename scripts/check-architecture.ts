@@ -789,6 +789,7 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   };
   const scopeByNode = new Map<ts.Node, Scope>();
   const bindings = new Set<Binding>();
+  const continuePositionsByContext = new Map<Scope, Map<ts.Node, Map<string, number[]>>>();
 
   const isDomType = (node: ts.TypeNode | undefined): boolean => {
     if (!node) return false;
@@ -909,6 +910,31 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
       statementDefinitelyTerminates(node.thenStatement) &&
       statementDefinitelyTerminates(node.elseStatement!);
   };
+  const isLoopStatement = (node: ts.Node): node is ts.IterationStatement => (
+    ts.isForStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isForOfStatement(node) ||
+    ts.isWhileStatement(node) ||
+    ts.isDoStatement(node)
+  );
+  const labeledLoop = (node: ts.LabeledStatement): ts.IterationStatement | null => {
+    let statement = node.statement;
+    while (ts.isLabeledStatement(statement)) statement = statement.statement;
+    return isLoopStatement(statement) ? statement : null;
+  };
+  const continueTargetLoop = (node: ts.ContinueStatement): ts.IterationStatement | null => {
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (ts.isFunctionLike(parent) || ts.isSourceFile(parent)) return null;
+      if (node.label) {
+        if (ts.isLabeledStatement(parent) && parent.label.text === node.label.text) {
+          return labeledLoop(parent);
+        }
+      } else if (isLoopStatement(parent)) {
+        return parent;
+      }
+    }
+    return null;
+  };
   const controlPathForNode = (
     node: ts.Node,
     inheritedPath: readonly ControlFrame[]
@@ -984,6 +1010,23 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
     const context = executionContext(scope);
     const controlPath = controlPathForNode(node, inheritedPath);
     const pathMetadata = controlPathMetadata(controlPath);
+    if (ts.isContinueStatement(node)) {
+      const target = continueTargetLoop(node);
+      if (target) {
+        let byOwner = continuePositionsByContext.get(context);
+        if (!byOwner) {
+          byOwner = new Map();
+          continuePositionsByContext.set(context, byOwner);
+        }
+        const byPath = byOwner.get(target) ?? new Map<string, number[]>();
+        for (const prefix of pathMetadata.prefixes) {
+          const positions = byPath.get(prefix) ?? [];
+          positions.push(node.getStart(sourceFile));
+          byPath.set(prefix, positions);
+        }
+        byOwner.set(target, byPath);
+      }
+    }
     if (
       (ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
       ts.isIdentifier(node.name)
@@ -1037,6 +1080,22 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
   };
   collectUsesAndAssignments(sourceFile, scopeByNode.get(sourceFile)!, []);
 
+  const hasPositionBetween = (
+    positions: readonly number[] | undefined,
+    after: number,
+    before: number
+  ): boolean => {
+    if (!positions) return false;
+    let low = 0;
+    let high = positions.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (positions[middle] <= after) low = middle + 1;
+      else high = middle;
+    }
+    return low < positions.length && positions[low] < before;
+  };
+
   for (const binding of bindings) {
     const stableConstDom = binding.kind === 'const' && binding.events.length > 0 &&
       binding.events.every((event) => event.dom);
@@ -1066,7 +1125,10 @@ const nativeDomSpellcheckRanges = (text: string, path: string): NativeSpellcheck
           if (event.dom) continue;
           const killedByLaterAncestorDom = event.pathPrefixes.some((prefix) => {
             const later = latestByPath.get(prefix);
-            return Boolean(later?.dom && later.position > event.position);
+            if (!later?.dom || later.position <= event.position) return false;
+            const continuePositions = continuePositionsByContext
+              .get(context)?.get(owner)?.get(event.pathKey);
+            return !hasPositionBetween(continuePositions, event.position, later.position);
           });
           if (!killedByLaterAncestorDom) {
             possibleNonDom = true;
