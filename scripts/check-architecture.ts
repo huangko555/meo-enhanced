@@ -2219,7 +2219,7 @@ const hasCurrentRemovedColorDocumentationClaim = (value: string): boolean => {
     'meoenhancedcolorpick', 'meoenhancedpickcolor', 'meoenhancedcolorchoose', 'meoenhancedchoosecolor',
     'meoenhancedcolorchooser', 'meoenhancedchoosercolor', 'meoenhancedcolorpicker', 'meoenhancedpickercolor',
     'meoenhancedcoloreditor', 'meoenhancededitorcolor', 'meoenhancedcolordialog', 'meoenhanceddialogcolor',
-    'meoenhancedcolorinput', 'meoenhancedinputcolor', 'meoenhancedcolorpalette', 'meoenhancedpalettecolor',
+    'meoenhancedcolorinput', 'meoenhancedinputcolor',
     'meoenhancedopencolorpicker'
   ];
   const explicitMeoColorAlias = explicitMeoColorAliases.some((alias) => wholeNormalized.includes(alias));

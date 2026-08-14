@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import MarkdownIt from 'markdown-it';
 import { collectHexColorRangesFromText } from '../src/shared/hexColorSwatches';
 
 function sources(text: string): string[] {
@@ -52,6 +53,29 @@ const backslashBacktickBoundaries = [
 ] as const;
 for (const [label, text, expectedSources] of backslashBacktickBoundaries) {
   assert.deepEqual(sources(text), expectedSources, `${label} must follow Markdown backtick escaping`);
+}
+const backslash = String.fromCharCode(92);
+const backtick = String.fromCharCode(96);
+const escapedMultiBacktick = `${backslash}${backtick.repeat(2)}#abc${backtick} #def`;
+const escapedMultiTokens = new MarkdownIt().parseInline(escapedMultiBacktick, {})[0]?.children ?? [];
+assert.deepEqual(
+  escapedMultiTokens.map((token) => [token.type, token.content]),
+  [['text', backtick], ['code_inline', '#abc'], ['text', ' #def']],
+  'project markdown-it must define the escaped multi-backtick fixture semantics'
+);
+assert.deepEqual(
+  sources(escapedMultiBacktick),
+  ['#def'],
+  'an odd slash escapes only the first backtick of a multi-backtick run'
+);
+const escapedRunMatrix = [
+  ['odd single matched becomes text', `${backslash}${backtick}#abc${backtick} #def`, ['#abc', '#def']],
+  ['odd triple leaves paired double', `${backslash}${backtick.repeat(3)}#abc${backtick.repeat(2)} #def`, ['#def']],
+  ['odd triple without double close stays text', `${backslash}${backtick.repeat(3)}#abc${backtick} #def`, ['#abc', '#def']],
+  ['even double stays paired double', `${backslash.repeat(2)}${backtick.repeat(2)}#abc${backtick.repeat(2)} #def`, ['#def']]
+] as const;
+for (const [label, text, expectedSources] of escapedRunMatrix) {
+  assert.deepEqual(sources(text), expectedSources, label);
 }
 
 const excludedByBoundary = [

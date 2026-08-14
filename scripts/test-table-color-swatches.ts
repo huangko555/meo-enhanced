@@ -34,7 +34,7 @@ async function main() {
         text: [
           '| Colors | Tag | Protected |',
           '| --- | --- | --- |',
-          '| #f00 #0f08 #336699 #33669988 rgba(51, 153, 255, 0.55) hsl(210 100% 60%) red linear-gradient(#fff, #000) | #todo #abc/tag | `#0f0` HTTPS://example.com/?color=#abc //example.com/?color=#abc [section]( #abc) |'
+          `| #f00 #0f08 #336699 #33669988 rgba(51, 153, 255, 0.55) hsl(210 100% 60%) red linear-gradient(#fff, #000) | #todo #abc/tag | \`#0f0\` HTTPS://example.com/?color=#abc //example.com/?color=#abc [section]( #abc) ${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0 |`
         ].join('\n'),
         onApplyChanges() {}
       });
@@ -55,7 +55,8 @@ async function main() {
         colors: swatchTitles(previews[0]),
         colorTags: tagTexts(previews[0]),
         tags: tagTexts(previews[1]),
-        protectedColors: previews[2].querySelectorAll('.meo-md-color-swatch').length
+        protectedColors: previews[2].querySelectorAll('.meo-md-color-swatch').length,
+        protectedColorTitles: swatchTitles(previews[2])
       };
 
       const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
@@ -79,7 +80,8 @@ async function main() {
       colors: ['#f00', '#0f08', '#336699', '#33669988'],
       colorTags: [],
       tags: ['#todo', '#abc/tag'],
-      protectedColors: 0
+      protectedColors: 1,
+      protectedColorTitles: ['#0b0']
     };
     if (JSON.stringify(result.initial) !== JSON.stringify(expectedInitial)) {
       throw new Error(`Table colors were not rendered separately from tags: ${JSON.stringify(result.initial)}`);
@@ -100,7 +102,8 @@ async function main() {
         '',
         'Unmatched ` inline marker',
         '',
-        'After unmatched #010203'
+        'After unmatched #010203',
+        `${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0`
       ].join('\n');
       let applyCount = 0;
       const editor = harness.createEditor({
@@ -128,7 +131,7 @@ async function main() {
       editor.destroy();
       return result;
     });
-    if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203'])
+    if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203', '#0b0'])
       || liveResult.roles.some((role) => role !== 'img')
       || liveResult.interactiveDescendants !== 0
       || !liveResult.textUnchanged

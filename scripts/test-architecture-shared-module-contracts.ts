@@ -2760,6 +2760,8 @@ try {
     ['docs/colors.md', 'Pick a color in an external design tool. MEO Enhanced shows read-only HEX swatches.\n'],
     ['docs/colors.md', 'Use the OS pick-a-color dialog in an external tool.\n'],
     ['docs/colors.md', 'MEO Enhanced provides a color palette for code highlighting.\n'],
+    ['docs/colors.md', 'MEO Enhanced color palette is used for code highlighting.\n'],
+    ['docs/colors.md', 'MEO Enhanced color palette for code highlighting.\n'],
     ['docs/colors.md', 'MEO Enhanced uses the current theme palette and built-in code palette.\n'],
     ['docs/history.md', 'MEO Enhanced no longer supports RGB swatches or a color picker.\n'],
     ['docs/history.md', 'MEO Enhanced no longer provides a color palette for choosing colors.\n']

@@ -2,6 +2,8 @@ import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyles';
 import exportRuntime from '../src/export/runtime';
 
+const escapedMultiBacktick = `${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0`;
+
 const previewColors = exportRuntime.renderPreviewDocument({
   markdownText: [
     'HEX #abc #abcd #aabbcc #aabbccdd',
@@ -12,7 +14,8 @@ const previewColors = exportRuntime.renderPreviewDocument({
     '',
     'Unmatched ` inline marker',
     '',
-    'After unmatched #010203'
+    'After unmatched #010203',
+    escapedMultiBacktick
   ].join('\n'),
   sourceDocumentPath: 'C:/tmp/preview-colors.md'
 });
@@ -181,7 +184,7 @@ if (!transformedSources.html.includes('class="meo-export-frontmatter" data-sourc
   throw new Error('Preview frontmatter must participate in viewport position mapping');
 }
 const previewSwatches = Array.from(previewColors.html.matchAll(/<span class="meo-md-color-swatch"[^>]*title="([^"]+)"[^>]*><\/span>/g), (match) => match[1]);
-if (JSON.stringify(previewSwatches) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203'])
+if (JSON.stringify(previewSwatches) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203', '#0b0'])
   || /<(?:input|button|select|textarea)\b[^>]*meo-md-color-swatch/i.test(previewColors.html)
   || !previewColors.html.includes('rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)')) {
   throw new Error(`Preview HEX swatches must be read-only and exclusive: ${JSON.stringify(previewSwatches)}`);

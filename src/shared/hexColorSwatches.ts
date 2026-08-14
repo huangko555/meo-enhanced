@@ -57,6 +57,7 @@ interface BacktickRun {
   from: number;
   to: number;
   length: number;
+  scope: number;
 }
 
 interface DelimiterSummary {
@@ -67,8 +68,18 @@ interface DelimiterSummary {
 function collectBacktickRuns(text: string): BacktickRun[] {
   const runs: BacktickRun[] = [];
   let precedingSlashes = 0;
+  let scope = 0;
+  let lineOnlyWhitespace = true;
   let cursor = 0;
   while (cursor < text.length) {
+    if (text[cursor] === '\n') {
+      if (lineOnlyWhitespace) scope += 1;
+      lineOnlyWhitespace = true;
+      precedingSlashes = 0;
+      cursor += 1;
+      continue;
+    }
+    if (!/[ \t\r]/.test(text[cursor])) lineOnlyWhitespace = false;
     if (text[cursor] === '\\') {
       precedingSlashes += 1;
       cursor += 1;
@@ -81,8 +92,10 @@ function collectBacktickRuns(text: string): BacktickRun[] {
     }
     const from = cursor;
     while (text[cursor] === '`') cursor += 1;
-    if (precedingSlashes % 2 === 0) {
-      runs.push({ from, to: cursor, length: cursor - from });
+    const escapedPrefixLength = precedingSlashes % 2 === 1 ? 1 : 0;
+    const delimiterFrom = from + escapedPrefixLength;
+    if (delimiterFrom < cursor) {
+      runs.push({ from: delimiterFrom, to: cursor, length: cursor - delimiterFrom, scope });
     }
     precedingSlashes = 0;
   }
@@ -93,7 +106,12 @@ function collectDelimiterSummary(text: string): DelimiterSummary {
   const runs = collectBacktickRuns(text);
   const nextRunByLength = new Map<number, number>();
   const nextMatchingRun = new Array<number>(runs.length).fill(-1);
+  let scope = -1;
   for (let index = runs.length - 1; index >= 0; index -= 1) {
+    if (runs[index].scope !== scope) {
+      nextRunByLength.clear();
+      scope = runs[index].scope;
+    }
     nextMatchingRun[index] = nextRunByLength.get(runs[index].length) ?? -1;
     nextRunByLength.set(runs[index].length, index);
   }
