@@ -3,6 +3,15 @@ import { buildExportStyles, buildPreviewStyles } from '../src/export/exportStyle
 import exportRuntime from '../src/export/runtime';
 
 const escapedMultiBacktick = `${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0`;
+const backtick = String.fromCharCode(96);
+const markdownBlockBoundaryCases = [
+  `# Heading ${backtick}\nParagraph #abc ${backtick}`,
+  `open ${backtick}\n# Heading #abc\nclose ${backtick}`
+] as const;
+const blockBoundaryPreviews = markdownBlockBoundaryCases.map((markdownText, index) => exportRuntime.renderPreviewDocument({
+  markdownText,
+  sourceDocumentPath: `C:/tmp/preview-color-block-${index}.md`
+}));
 
 const previewColors = exportRuntime.renderPreviewDocument({
   markdownText: [
@@ -184,6 +193,12 @@ if (!transformedSources.html.includes('class="meo-export-frontmatter" data-sourc
   throw new Error('Preview frontmatter must participate in viewport position mapping');
 }
 const previewSwatches = Array.from(previewColors.html.matchAll(/<span class="meo-md-color-swatch"[^>]*title="([^"]+)"[^>]*><\/span>/g), (match) => match[1]);
+for (const [index, preview] of blockBoundaryPreviews.entries()) {
+  const colors = Array.from(preview.html.matchAll(/class="meo-md-color-swatch"[^>]*title="([^"]+)"/g), (match) => match[1]);
+  if (JSON.stringify(colors) !== JSON.stringify(['#abc'])) {
+    throw new Error(`Preview Markdown block boundary ${index} did not preserve #abc: ${JSON.stringify(colors)}`);
+  }
+}
 if (JSON.stringify(previewSwatches) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203', '#0b0'])
   || /<(?:input|button|select|textarea)\b[^>]*meo-md-color-swatch/i.test(previewColors.html)
   || !previewColors.html.includes('rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)')) {

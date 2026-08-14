@@ -4,6 +4,11 @@ export type HexColorRange = {
   value: string;
 };
 
+export type HexColorScanRange = {
+  from: number;
+  to: number;
+};
+
 const HEX_COLOR_REGEX = /#[0-9a-f]{3,8}/gi;
 const excludedFunctionNames = new Set([
   'linear-gradient',
@@ -20,9 +25,9 @@ interface ExcludedRange {
   to: number;
 }
 
-function scanQuoted(text: string, start: number, quote: string): number {
+function scanQuoted(text: string, start: number, quote: string, scanTo: number): number {
   let cursor = start + 1;
-  while (cursor < text.length) {
+  while (cursor < scanTo) {
     if (text[cursor] === '\\') {
       cursor += 2;
       continue;
@@ -30,16 +35,16 @@ function scanQuoted(text: string, start: number, quote: string): number {
     if (text[cursor] === quote) return cursor + 1;
     cursor += 1;
   }
-  return text.length;
+  return scanTo;
 }
 
-function scanFunction(text: string, openIndex: number): number {
+function scanFunction(text: string, openIndex: number, scanTo: number): number {
   let depth = 1;
   let cursor = openIndex + 1;
-  while (cursor < text.length) {
+  while (cursor < scanTo) {
     const character = text[cursor];
     if (character === '"' || character === "'") {
-      cursor = scanQuoted(text, cursor, character);
+      cursor = scanQuoted(text, cursor, character, scanTo);
       continue;
     }
     if (character === '\\') {
@@ -50,14 +55,13 @@ function scanFunction(text: string, openIndex: number): number {
     if (character === ')' && --depth === 0) return cursor + 1;
     cursor += 1;
   }
-  return text.length;
+  return scanTo;
 }
 
 interface BacktickRun {
   from: number;
   to: number;
   length: number;
-  scope: number;
 }
 
 interface DelimiterSummary {
@@ -65,21 +69,16 @@ interface DelimiterSummary {
   linkEndByOpen: ReadonlyMap<number, number>;
 }
 
-function collectBacktickRuns(text: string): BacktickRun[] {
+function collectBacktickRuns(text: string, scanFrom: number, scanTo: number): BacktickRun[] {
   const runs: BacktickRun[] = [];
   let precedingSlashes = 0;
-  let scope = 0;
-  let lineOnlyWhitespace = true;
-  let cursor = 0;
-  while (cursor < text.length) {
+  let cursor = scanFrom;
+  while (cursor < scanTo) {
     if (text[cursor] === '\n') {
-      if (lineOnlyWhitespace) scope += 1;
-      lineOnlyWhitespace = true;
       precedingSlashes = 0;
       cursor += 1;
       continue;
     }
-    if (!/[ \t\r]/.test(text[cursor])) lineOnlyWhitespace = false;
     if (text[cursor] === '\\') {
       precedingSlashes += 1;
       cursor += 1;
@@ -91,27 +90,22 @@ function collectBacktickRuns(text: string): BacktickRun[] {
       continue;
     }
     const from = cursor;
-    while (text[cursor] === '`') cursor += 1;
+    while (cursor < scanTo && text[cursor] === '`') cursor += 1;
     const escapedPrefixLength = precedingSlashes % 2 === 1 ? 1 : 0;
     const delimiterFrom = from + escapedPrefixLength;
     if (delimiterFrom < cursor) {
-      runs.push({ from: delimiterFrom, to: cursor, length: cursor - delimiterFrom, scope });
+      runs.push({ from: delimiterFrom, to: cursor, length: cursor - delimiterFrom });
     }
     precedingSlashes = 0;
   }
   return runs;
 }
 
-function collectDelimiterSummary(text: string): DelimiterSummary {
-  const runs = collectBacktickRuns(text);
+function collectDelimiterSummary(text: string, scanFrom: number, scanTo: number): DelimiterSummary {
+  const runs = collectBacktickRuns(text, scanFrom, scanTo);
   const nextRunByLength = new Map<number, number>();
   const nextMatchingRun = new Array<number>(runs.length).fill(-1);
-  let scope = -1;
   for (let index = runs.length - 1; index >= 0; index -= 1) {
-    if (runs[index].scope !== scope) {
-      nextRunByLength.clear();
-      scope = runs[index].scope;
-    }
     nextMatchingRun[index] = nextRunByLength.get(runs[index].length) ?? -1;
     nextRunByLength.set(runs[index].length, index);
   }
@@ -134,7 +128,7 @@ function collectDelimiterSummary(text: string): DelimiterSummary {
   const openParentheses: number[] = [];
   let codeIndex = 0;
   let precedingSlashes = 0;
-  for (let cursor = 0; cursor < text.length; cursor += 1) {
+  for (let cursor = scanFrom; cursor < scanTo; cursor += 1) {
     const codeRange = codeRanges[codeIndex];
     if (codeRange && cursor === codeRange.from) {
       cursor = codeRange.to - 1;
@@ -164,33 +158,33 @@ function collectDelimiterSummary(text: string): DelimiterSummary {
   return { codeEndByStart, linkEndByOpen };
 }
 
-function scanHtmlTag(text: string, start: number): number {
+function scanHtmlTag(text: string, start: number, scanTo: number): number {
   let cursor = start + 1;
-  while (cursor < text.length) {
+  while (cursor < scanTo) {
     const character = text[cursor];
     if (character === '"' || character === "'") {
-      cursor = scanQuoted(text, cursor, character);
+      cursor = scanQuoted(text, cursor, character, scanTo);
       continue;
     }
     if (character === '>') return cursor + 1;
     cursor += 1;
   }
-  return text.length;
+  return scanTo;
 }
 
-function scanAbsoluteUrl(text: string, start: number): number {
+function scanAbsoluteUrl(text: string, start: number, scanTo: number): number {
   let cursor = start;
-  while (cursor < text.length && !/[\s<>]/.test(text[cursor])) cursor += 1;
+  while (cursor < scanTo && !/[\s<>]/.test(text[cursor])) cursor += 1;
   return cursor;
 }
 
 /** Builds sorted, non-overlapping ranges that cannot own standalone swatches. */
-function collectExcludedRanges(text: string): ExcludedRange[] {
+function collectExcludedRanges(text: string, scanFrom: number, scanTo: number): ExcludedRange[] {
   const ranges: ExcludedRange[] = [];
-  const delimiters = collectDelimiterSummary(text);
-  let cursor = 0;
+  const delimiters = collectDelimiterSummary(text, scanFrom, scanTo);
+  let cursor = scanFrom;
 
-  while (cursor < text.length) {
+  while (cursor < scanTo) {
     const codeEnd = delimiters.codeEndByStart.get(cursor);
     if (codeEnd !== undefined) {
       ranges.push({ from: cursor, to: codeEnd });
@@ -199,18 +193,18 @@ function collectExcludedRanges(text: string): ExcludedRange[] {
     }
 
     if (text[cursor] === '<' && /[a-z!/]/i.test(text[cursor + 1] ?? '')) {
-      const to = scanHtmlTag(text, cursor);
+      const to = scanHtmlTag(text, cursor, scanTo);
       ranges.push({ from: cursor, to });
       cursor = to;
       continue;
     }
 
     const previous = cursor > 0 ? text[cursor - 1] : '';
-    const scheme = text.substring(cursor, cursor + 8).toLowerCase();
+    const scheme = text.substring(cursor, Math.min(cursor + 8, scanTo)).toLowerCase();
     const startsAbsoluteUrl = scheme.startsWith('http://') || scheme.startsWith('https://');
     const startsProtocolRelativeUrl = text.startsWith('//', cursor);
     if (!/[\w-]/.test(previous) && (startsAbsoluteUrl || startsProtocolRelativeUrl)) {
-      const to = scanAbsoluteUrl(text, cursor);
+      const to = scanAbsoluteUrl(text, cursor, scanTo);
       ranges.push({ from: cursor, to });
       cursor = to;
       continue;
@@ -227,12 +221,12 @@ function collectExcludedRanges(text: string): ExcludedRange[] {
 
     if (/[a-z]/i.test(text[cursor]) && !/[\w-]/.test(previous)) {
       let nameEnd = cursor + 1;
-      while (/[\w-]/.test(text[nameEnd] ?? '')) nameEnd += 1;
+      while (nameEnd < scanTo && /[\w-]/.test(text[nameEnd] ?? '')) nameEnd += 1;
       let openIndex = nameEnd;
-      while (/\s/.test(text[openIndex] ?? '')) openIndex += 1;
+      while (openIndex < scanTo && /\s/.test(text[openIndex] ?? '')) openIndex += 1;
       const functionName = text.substring(cursor, nameEnd).toLowerCase();
       if (text[openIndex] === '(' && excludedFunctionNames.has(functionName)) {
-        const to = scanFunction(text, openIndex);
+        const to = scanFunction(text, openIndex, scanTo);
         ranges.push({ from: cursor, to });
         cursor = to;
         continue;
@@ -262,18 +256,27 @@ function isColorBoundary(text: string, index: number, value: string): boolean {
   return true;
 }
 
-/** Finds standalone HEX color literals without changing the source text. */
-export function collectHexColorRangesFromText(text: string, offset = 0): HexColorRange[] {
+/** Finds standalone HEX color literals in one source range without changing the source text. */
+export function collectHexColorRangesFromText(
+  text: string,
+  offset = 0,
+  scanRange: Readonly<HexColorScanRange> = { from: 0, to: text.length }
+): HexColorRange[] {
+  const scanFrom = Math.max(0, Math.min(text.length, Math.trunc(scanRange.from)));
+  const scanTo = Math.max(scanFrom, Math.min(text.length, Math.trunc(scanRange.to)));
   const ranges: HexColorRange[] = [];
-  const excludedRanges = collectExcludedRanges(text);
+  const excludedRanges = collectExcludedRanges(text, scanFrom, scanTo);
   let excludedIndex = 0;
 
-  for (const match of text.matchAll(HEX_COLOR_REGEX)) {
+  HEX_COLOR_REGEX.lastIndex = scanFrom;
+  for (let match = HEX_COLOR_REGEX.exec(text); match !== null; match = HEX_COLOR_REGEX.exec(text)) {
     const value = match[0];
-    const from = match.index ?? 0;
+    const from = match.index;
+    if (from >= scanTo) break;
     while (excludedRanges[excludedIndex]?.to <= from) excludedIndex += 1;
     const isExcluded = excludedRanges[excludedIndex]?.from <= from;
-    if (![4, 5, 7, 9].includes(value.length)
+    if (from + value.length > scanTo
+      || ![4, 5, 7, 9].includes(value.length)
       || !isColorBoundary(text, from, value)
       || isExcluded) {
       continue;

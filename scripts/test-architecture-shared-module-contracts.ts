@@ -2739,6 +2739,7 @@ try {
     ['docs/colors.md', 'MEO Enhanced provides a color picker.\n'],
     ['docs/colors.md', 'MEO Enhanced provides a color palette for choosing colors.\n'],
     ['docs/colors.md', 'MEO Enhanced includes a palette for choosing colors.\n'],
+    ['docs/colors.md', 'MEO Enhanced provides a palette to choose colors.\n'],
     ['docs/colors.md', 'MEO Enhanced no longer supports RGB swatches, and MEO Enhanced provides a color picker.\n']
   ] as const;
   for (const [fixturePath, contents] of removedColorCapabilityFixtures) {

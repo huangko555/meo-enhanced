@@ -2636,17 +2636,33 @@ const colorExcludedSyntaxNodes = new Set([
   'HTMLBlock'
 ]);
 
-function collectColorExcludedRanges(tree: Tree): SourceRange[] {
-  const ranges: Array<{ from: number; to: number }> = [];
+function collectColorSyntaxRanges(tree: Tree): {
+  scanRanges: SourceRange[];
+  excludedRanges: SourceRange[];
+} {
+  const scanRanges: SourceRange[] = [];
+  const excludedRanges: SourceRange[] = [];
+  const blockStack: Array<SourceRange & { hasBlockChild: boolean }> = [];
   tree.iterate({
     enter(node: SyntaxNodeRef) {
+      if (node.type.is('Block')) {
+        const parentBlock = blockStack[blockStack.length - 1];
+        if (parentBlock) parentBlock.hasBlockChild = true;
+        blockStack.push({ from: node.from, to: node.to, hasBlockChild: false });
+      }
       if (colorExcludedSyntaxNodes.has(node.name)) {
-        ranges.push({ from: node.from, to: node.to });
-        return false;
+        excludedRanges.push({ from: node.from, to: node.to });
+      }
+    },
+    leave(node: SyntaxNodeRef) {
+      if (!node.type.is('Block')) return;
+      const block = blockStack.pop();
+      if (block && !block.hasBlockChild && block.from < block.to) {
+        scanRanges.push({ from: block.from, to: block.to });
       }
     }
   });
-  return ranges;
+  return { scanRanges, excludedRanges };
 }
 
 function addColorSwatchDecorations(
@@ -2656,9 +2672,16 @@ function addColorSwatchDecorations(
   activeLines: Set<number>,
   excludedRanges: ReadonlyArray<SourceRange>
 ): void {
-  const colorRanges = collectHexColorRangesFromText(state.doc.toString());
+  const documentText = state.doc.toString();
+  const syntaxRanges = collectColorSyntaxRanges(tree);
+  const colorRanges = [];
+  for (const scanRange of syntaxRanges.scanRanges) {
+    for (const colorRange of collectHexColorRangesFromText(documentText, 0, scanRange)) {
+      colorRanges.push(colorRange);
+    }
+  }
   const syntaxExcludedRanges = [
-    ...collectColorExcludedRanges(tree),
+    ...syntaxRanges.excludedRanges,
     ...excludedRanges
   ];
 

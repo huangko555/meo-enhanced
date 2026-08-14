@@ -77,6 +77,39 @@ const escapedRunMatrix = [
 for (const [label, text, expectedSources] of escapedRunMatrix) {
   assert.deepEqual(sources(text), expectedSources, label);
 }
+const blockBoundaryCases = [
+  `${'# Heading '}${backtick}\nParagraph #abc ${backtick}`,
+  `open ${backtick}\n# Heading #abc\nclose ${backtick}`
+] as const;
+const markdown = new MarkdownIt();
+assert.deepEqual(
+  blockBoundaryCases.map((text) => markdown.parse(text, {}).filter((token) => token.type === 'inline').length),
+  [2, 3],
+  'project markdown-it must keep the reproduction lines in separate inline tokens'
+);
+const collectBounded = (text: string, from: number, to: number) => (
+  collectHexColorRangesFromText(text, 0, { from, to })
+);
+const firstBoundary = blockBoundaryCases[0];
+const firstBreak = firstBoundary.indexOf('\n');
+assert.deepEqual(
+  [...collectBounded(firstBoundary, 0, firstBreak), ...collectBounded(firstBoundary, firstBreak + 1, firstBoundary.length)]
+    .map((range) => range.value),
+  ['#abc'],
+  'caller-owned Markdown inline ranges must prevent cross-block delimiter pairing'
+);
+const secondBoundary = blockBoundaryCases[1];
+const secondFirstBreak = secondBoundary.indexOf('\n');
+const secondSecondBreak = secondBoundary.indexOf('\n', secondFirstBreak + 1);
+assert.deepEqual(
+  [
+    ...collectBounded(secondBoundary, 0, secondFirstBreak),
+    ...collectBounded(secondBoundary, secondFirstBreak + 1, secondSecondBreak),
+    ...collectBounded(secondBoundary, secondSecondBreak + 1, secondBoundary.length)
+  ].map((range) => range.value),
+  ['#abc'],
+  'bounded collector calls must keep unmatched markers ordinary in each Markdown block'
+);
 
 const excludedByBoundary = [
   'heading#abc',
@@ -125,6 +158,7 @@ assert.equal(
 );
 
 const collectorSource = readFileSync(new URL('../src/shared/hexColorSwatches.ts', import.meta.url), 'utf8');
+const liveModeSource = readFileSync(new URL('../webview/src/liveMode.ts', import.meta.url), 'utf8');
 assert.doesNotMatch(
   collectorSource,
   /(?:slice|substring)\(\s*0\s*,\s*(?:index|from|match)/,
@@ -165,6 +199,21 @@ assert.match(
   collectorSource,
   /function\s+collectDelimiterSummary\b/,
   'collector must build one private delimiter summary before producing excluded ranges'
+);
+assert.doesNotMatch(
+  collectorSource,
+  /lineOnlyWhitespace|\bscope\s*:/,
+  'plain-text collector must not infer Markdown block scope'
+);
+assert.doesNotMatch(
+  liveModeSource,
+  /collectHexColorRangesFromText\(state\.doc\.toString\(\)\)/,
+  'Live must not scan the whole document before applying syntax exclusions'
+);
+assert.match(
+  liveModeSource,
+  /collectColorSyntaxRanges\(tree\)/,
+  'Live must derive non-overlapping scan ranges from its existing Markdown syntax tree'
 );
 
 console.log('color swatch parser checks passed');

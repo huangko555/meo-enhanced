@@ -138,6 +138,30 @@ async function main() {
       || liveResult.applyCount !== 0) {
       throw new Error(`Live HEX swatches must be read-only and exclusive: ${JSON.stringify(liveResult)}`);
     }
+
+    const blockBoundaryResult = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      const backtick = String.fromCharCode(96);
+      const cases = [
+        `# Heading ${backtick}\nParagraph #abc ${backtick}`,
+        `open ${backtick}\n# Heading #abc\nclose ${backtick}`
+      ];
+      const results: string[][] = [];
+      for (const text of cases) {
+        app.replaceChildren();
+        const editor = harness.createEditor({ parent: app, initialMode: 'live', text, onApplyChanges() {} });
+        for (let index = 0; index < 3; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        results.push(Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'), (swatch) => swatch.title));
+        editor.destroy();
+      }
+      return results;
+    });
+    if (JSON.stringify(blockBoundaryResult) !== JSON.stringify([['#abc'], ['#abc']])) {
+      throw new Error(`Live Markdown block boundaries diverged from Preview: ${JSON.stringify(blockBoundaryResult)}`);
+    }
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
