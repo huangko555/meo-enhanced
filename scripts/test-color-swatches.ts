@@ -215,5 +215,20 @@ assert.match(
   /collectColorSyntaxRanges\(tree\)/,
   'Live must derive non-overlapping scan ranges from its existing Markdown syntax tree'
 );
+assert.doesNotMatch(
+  liveModeSource,
+  /syntaxExcludedRanges\.some\(/,
+  'Live must not restart exclusion scanning for each HEX candidate'
+);
+assert.match(
+  liveModeSource,
+  /function\s+mergeOrderedRangeStreams\b/,
+  'Live must linearly merge its constant number of source-ordered exclusion streams'
+);
+assert.match(
+  liveModeSource,
+  /let\s+excludedIndex\s*=\s*0/,
+  'Live must filter source-ordered HEX candidates with one monotonic exclusion cursor'
+);
 
 console.log('color swatch parser checks passed');

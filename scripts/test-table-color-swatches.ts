@@ -162,6 +162,28 @@ async function main() {
     if (JSON.stringify(blockBoundaryResult) !== JSON.stringify([['#abc'], ['#abc']])) {
       throw new Error(`Live Markdown block boundaries diverged from Preview: ${JSON.stringify(blockBoundaryResult)}`);
     }
+
+    const adversarialExclusionResult = await page.evaluate(async () => {
+      const harness = (window as any).TableStabilityHarness;
+      const app = document.getElementById('app')!;
+      const count = 2_500;
+      const text = Array.from({ length: count }, (_, index) => `[label #abc](target-${index}) #def`).join('\n\n');
+      app.replaceChildren();
+      const editor = harness.createEditor({ parent: app, initialMode: 'live', text, onApplyChanges() {} });
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const swatches = Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'), (swatch) => swatch.title);
+      const result = {
+        count: swatches.length,
+        onlyExternalHex: swatches.every((value) => value === '#def')
+      };
+      editor.destroy();
+      return result;
+    });
+    if (adversarialExclusionResult.count < 1 || !adversarialExclusionResult.onlyExternalHex) {
+      throw new Error(`Live exclusion stress fixture must render only external HEX values in the virtualized viewport: ${JSON.stringify(adversarialExclusionResult)}`);
+    }
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

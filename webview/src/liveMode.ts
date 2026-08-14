@@ -2048,11 +2048,9 @@ function buildDecorations(state: EditorState): DecorationSet {
     tree,
     activeLines,
     [
-      ...collectInlineCodeRanges(tree),
-      ...collectCodeBlockRanges(tree),
-      ...renderedTableRanges,
-      ...mathRanges,
-      ...(frontmatter ? [{ from: frontmatter.openingFrom, to: frontmatter.closingTo }] : [])
+      renderedTableRanges,
+      mathRanges,
+      frontmatter ? [{ from: frontmatter.openingFrom, to: frontmatter.closingTo }] : []
     ]
   );
   addKbdTagDecorations(ranges, state, activeLines, renderedTableRanges, mathRanges, frontmatter, codeBlockLines);
@@ -2631,6 +2629,10 @@ const colorExcludedSyntaxNodes = new Set([
   'URL',
   'LinkLabel',
   'LinkReference',
+  'InlineCode',
+  'CodeText',
+  'FencedCode',
+  'CodeBlock',
   'HTMLTag',
   'InlineHTML',
   'HTMLBlock'
@@ -2665,12 +2667,46 @@ function collectColorSyntaxRanges(tree: Tree): {
   return { scanRanges, excludedRanges };
 }
 
+/** Merges the fixed set of source-ordered exclusion streams in O(total ranges). */
+function mergeOrderedRangeStreams(
+  streams: ReadonlyArray<ReadonlyArray<SourceRange>>
+): SourceRange[] {
+  const streamIndexes = streams.map(() => 0);
+  const merged: SourceRange[] = [];
+
+  while (true) {
+    let nextStreamIndex = -1;
+    let nextRange: SourceRange | undefined;
+    for (let streamIndex = 0; streamIndex < streams.length; streamIndex += 1) {
+      const candidate = streams[streamIndex][streamIndexes[streamIndex]];
+      if (candidate && (!nextRange
+        || candidate.from < nextRange.from
+        || (candidate.from === nextRange.from && candidate.to < nextRange.to))) {
+        nextStreamIndex = streamIndex;
+        nextRange = candidate;
+      }
+    }
+    if (!nextRange || nextStreamIndex < 0) break;
+    streamIndexes[nextStreamIndex] += 1;
+    if (nextRange.to <= nextRange.from) continue;
+
+    const previous = merged[merged.length - 1];
+    if (previous && nextRange.from <= previous.to) {
+      previous.to = Math.max(previous.to, nextRange.to);
+    } else {
+      merged.push({ from: nextRange.from, to: nextRange.to });
+    }
+  }
+
+  return merged;
+}
+
 function addColorSwatchDecorations(
   ranges: DecorationCollector,
   state: EditorState,
   tree: Tree,
   activeLines: Set<number>,
-  excludedRanges: ReadonlyArray<SourceRange>
+  excludedRangeStreams: ReadonlyArray<ReadonlyArray<SourceRange>>
 ): void {
   const documentText = state.doc.toString();
   const syntaxRanges = collectColorSyntaxRanges(tree);
@@ -2680,13 +2716,17 @@ function addColorSwatchDecorations(
       colorRanges.push(colorRange);
     }
   }
-  const syntaxExcludedRanges = [
-    ...syntaxRanges.excludedRanges,
-    ...excludedRanges
-  ];
+  const syntaxExcludedRanges = mergeOrderedRangeStreams([
+    syntaxRanges.excludedRanges,
+    ...excludedRangeStreams
+  ]);
 
+  let excludedIndex = 0;
   for (const colorRange of colorRanges) {
-    if (syntaxExcludedRanges.some((range) => rangesOverlap(colorRange.from, colorRange.to, range.from, range.to))) {
+    while (syntaxExcludedRanges[excludedIndex]?.to <= colorRange.from) excludedIndex += 1;
+    const excludedRange = syntaxExcludedRanges[excludedIndex];
+    if (excludedRange
+      && rangesOverlap(colorRange.from, colorRange.to, excludedRange.from, excludedRange.to)) {
       continue;
     }
     const line = state.doc.lineAt(colorRange.from);
