@@ -37,7 +37,6 @@ export type HostViewNavigationDependencies = {
   readonly output: {
     reveal(reveal: ViewNavigationReveal): Promise<boolean>;
   };
-  readonly reportFailure: (context: string, error: unknown) => void;
 };
 
 const selectionKey = (selection: ViewSelection): string => `${selection.anchor}:${selection.head}`;

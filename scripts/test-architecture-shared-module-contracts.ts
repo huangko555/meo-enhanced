@@ -2311,6 +2311,32 @@ try {
   writeFileSync(join(stagedRoot, 'README.md'), 'HTML embeds local images.\n');
   execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
 
+  mkdirSync(join(stagedRoot, 'src', 'application'), { recursive: true });
+  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const setGlobalLineNumbers = () => undefined;\n');
+  execFileSync('git', ['add', '--', 'src/application/stage10Contract.ts'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const rememberViewportForModeSwitch = () => undefined;\n');
+  const stagedRemovedStage10Alias = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedRemovedStage10Alias.ok, false, 'staged ARCH022 must reject removed production aliases from the index');
+  assert.match(stagedRemovedStage10Alias.output, /ARCH022/);
+  execFileSync('git', ['add', '--', 'src/application/stage10Contract.ts'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const setGlobalLineNumbers = () => undefined;\n');
+  const unstagedRemovedStage10Alias = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(unstagedRemovedStage10Alias, /Architecture checks passed/);
+  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const rememberViewportForModeSwitch = () => undefined;\n');
+  execFileSync('git', ['add', '--', 'src/application/stage10Contract.ts'], { cwd: stagedRoot });
+
   writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
   execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
   writeFileSync(join(stagedRoot, 'bun.lock'), '# clean working-tree lock\n');
@@ -2810,11 +2836,18 @@ try {
     ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.export.browserPath': { type: 'string' } } } } })],
     ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.export.pdf.browserPath': { type: 'string' } } } } })],
     ['src/host/remembered-view-position-store.ts', 'export type RememberedViewport = { line: number };\n'],
+    ['src/host/view-position-settings.ts', 'export const rememberPositionLines = 40;\n'],
+    ['src/host/view-position-settings.ts', "export const setting = 'remember.position.lines';\n"],
+    ['webview/src/editor.ts', 'export type CreateEditorOptions = { initialTopLine?: number };\n'],
     ['src/protocol/editorEvents.ts', "export const event = { type: 'viewPositionChanged' };\n"],
     ['webview/src/editor/line-numbers-toggle.ts', 'export const setLineNumbersVisible = () => undefined;\n'],
+    ['webview/src/editor/line-numbers-toggle.ts', 'export const setGlobalLineNumbers = () => undefined;\n'],
     ['webview/src/styles.css', '.meo-line-numbers-hidden { display: none; }\n'],
     ['src/export/html-image-mode.ts', "export const htmlImageMode = 'linked';\n"],
     ['src/shared/extensionConfig.ts', 'export const getExportPdfBrowserPath = () => undefined;\n'],
+    ['src/shared/extensionConfig.ts', 'export const exportBrowserPath = undefined;\n'],
+    ['src/host/vscodeRetiredWorkspaceStateCleanup.ts', "const RETIRED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';\nexport const restore = (workspaceState) => workspaceState.get(RETIRED_VIEW_POSITIONS_STATE_KEY);\n"],
+    ['src/host/vscodeRetiredWorkspaceStateCleanup.ts', "const RETIRED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';\nexport const retain = (workspaceState) => workspaceState.update(RETIRED_VIEW_POSITIONS_STATE_KEY, { line: 5 });\n"],
     ['docs/position.md', 'MEO Enhanced remembers the cross-session scroll position.\n'],
     ['docs/line-numbers.md', 'MEO Enhanced provides a configurable line numbers setting.\n'],
     ['docs/export.md', 'MEO Enhanced lets users choose embedded or linked HTML images.\n'],
@@ -2832,6 +2865,9 @@ try {
     ['src/application/navigation.ts', 'export const revealSelection = (_preserveViewport: boolean) => undefined;\n'],
     ['webview/src/editor.ts', 'export const extensions = [lineNumbers()];\n'],
     ['webview/src/helpers/codeBlocks.ts', 'export const addCodeBlockLineNumbers = () => undefined;\n'],
+    ['webview/src/helpers/codeBlocks.ts', 'export const previewCodeBlockLineNumbersEnabled = true;\n'],
+    ['src/application/navigation.ts', 'export const rememberViewportForModeSwitch = () => undefined;\n'],
+    ['src/host/vscodeRetiredWorkspaceStateCleanup.ts', "const RETIRED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';\nexport const cleanup = (workspaceState) => workspaceState.update(RETIRED_VIEW_POSITIONS_STATE_KEY, undefined);\n"],
     ['src/export/assetPaths.ts', 'export const embeddedImageDataUrlCache = new Map();\n'],
     ['src/export/pdfRenderer.ts', 'export const browserExecutablePath = findPdfBrowserExecutablePath();\n'],
     ['docs/retained.md', 'MEO Enhanced preserves the viewport during same-session mode switching.\n'],

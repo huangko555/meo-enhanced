@@ -159,7 +159,6 @@ const candidate = {
       onApplyChanges: enqueueLocalText,
       onOpenLink: () => undefined,
       onSelectionChange: () => undefined,
-      onViewportChange: () => undefined,
     });
   },
   async whenIdle() {

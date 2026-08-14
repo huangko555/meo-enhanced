@@ -44,8 +44,7 @@ const adapter = createVscodeViewNavigationAdapter({
   documentUri: documentUri as never,
   getDocumentFragmentHref: (href) => href.includes('#') ? `#${href.split('#')[1]}` : null,
   resolveLocalLinkTarget: async () => resolvedLinkTarget as never,
-  post: async (message) => { messages.push(message); return true; },
-  reportFailure: () => undefined
+  post: async (message) => { messages.push(message); return true; }
 });
 await adapter.ready();
 assert.deepEqual(messages.splice(0), [{
@@ -68,8 +67,7 @@ const lineAdapter = createVscodeViewNavigationAdapter({
   documentUri: lineUri as never,
   getDocumentFragmentHref: () => null,
   resolveLocalLinkTarget: async () => null,
-  post: async (message) => { lineMessages.push(message); return true; },
-  reportFailure: () => undefined
+  post: async (message) => { lineMessages.push(message); return true; }
 });
 await lineAdapter.ready();
 assert.deepEqual(lineMessages, [{
@@ -84,8 +82,7 @@ const invalidAdapter = createVscodeViewNavigationAdapter({
   documentUri: invalidUri as never,
   getDocumentFragmentHref: () => null,
   resolveLocalLinkTarget: async () => null,
-  post: async (message) => { invalidMessages.push(message); return true; },
-  reportFailure: () => undefined
+  post: async (message) => { invalidMessages.push(message); return true; }
 });
 await invalidAdapter.ready();
 assert.deepEqual(

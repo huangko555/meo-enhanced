@@ -2265,19 +2265,25 @@ const removedStage10Scope = projectFilesForCapabilityGuard().filter((path) => (
   /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
 ));
 const removedStage10Aliases = [
-  'meoenhancedrememberpositionlines', 'rememberpositionlinessettingkey', 'getrememberpositionlines',
+  'meoenhancedrememberpositionlines', 'rememberpositionlines', 'rememberpositionlinessettingkey', 'getrememberpositionlines',
   'rememberedviewport', 'rememberviewport', 'rememberedviewpositionsbydocument', 'viewpositionchanged',
-  'restoretoplineoffset', 'readminimumrememberedlines',
+  'initialtopline', 'initialtoplineoffset', 'restoretoplineoffset', 'readminimumrememberedlines',
   'meoenhancedlinenumbersvisible', 'linenumberssettingkey', 'linenumberslegacysettingkey',
   'linenumberslegacyvisiblesettingkey', 'linenumbersenabled', 'getlinenumbersenabled', 'linenumbersvisible',
   'linenumbersbtn', 'updatelinenumbersui', 'setlinenumbersvisible', 'togglelinenumbers', 'initiallinenumbers',
-  'setlinenumbers', 'linenumberschanged', 'meolinenumbershidden',
+  'setlinenumbers', 'setgloballinenumbers', 'linenumberschanged', 'meolinenumbershidden',
   'meoenhancedexporthtmlimagemode', 'exporthtmlimagemode', 'getexporthtmlimagemode', 'htmlimagemode',
-  'meoenhancedexportbrowserpath', 'meoenhancedexportpdfbrowserpath', 'getexportpdfbrowserpath'
+  'meoenhancedexportbrowserpath', 'meoenhancedexportpdfbrowserpath', 'exportbrowserpath', 'getexportpdfbrowserpath'
 ] as const;
 const hasRemovedStage10Alias = (value: string): boolean => {
-  const normalized = value.toLowerCase().replace(/[-_.\s/\\]+/g, '');
-  return removedStage10Aliases.some((alias) => normalized.includes(alias));
+  const candidates = new Set<string>();
+  for (const token of value.match(/[a-z][a-z0-9_$]*(?:[-_.][a-z0-9_$]+)*/gi) ?? []) {
+    candidates.add(token.toLowerCase().replace(/[-_.]+/g, ''));
+    for (const part of token.split(/[-_.]+/)) {
+      candidates.add(part.toLowerCase());
+    }
+  }
+  return removedStage10Aliases.some((alias) => candidates.has(alias));
 };
 const stage10HistoricalMarkers = [
   'removed', 'historical', 'former', 'previously', 'deprecated', 'usedto',
@@ -2296,6 +2302,7 @@ const hasCurrentRemovedStage10DocumentationClaim = (value: string): boolean => {
     const normalized = normalizeCapabilityAlias(segment);
     if (!(normalized.includes('meoenhanced') || /(?:^|[^a-z])meo(?:[^a-z]|$)/i.test(segment))) return false;
     if (stage10HistoricalMarkers.some((marker) => normalized.includes(marker))) return false;
+    if (hasRemovedStage10Alias(segment)) return true;
     return [
       /(?:remember|restore).{0,24}(?:cross[- ]?session|scroll|reading|view).{0,12}(?:position|location)/i,
       /(?:global|toggle|configure|configurable|setting).{0,20}line numbers?/i,
@@ -2308,6 +2315,7 @@ const hasCurrentRemovedStage10DocumentationClaim = (value: string): boolean => {
 for (const path of removedStage10Scope) {
   const isProductionPath = /^(?:src|webview\/src)\//.test(path);
   const isDocumentationPath = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path);
+  const isRetiredWorkspaceStateCleanup = path === 'src/host/vscodeRetiredWorkspaceStateCleanup.ts';
   if (isProductionPath && hasRemovedStage10Alias(path)) {
     failures.push(`ARCH022 已删除的位置记忆、独立行号或重复导出设置重新出现: ${path}:1`);
     continue;
@@ -2319,6 +2327,16 @@ for (const path of removedStage10Scope) {
       /^\s*\|\|\s*'(?:lineNumbers|restoreTopLine|restoreTopLineOffset)'\s+in\s+value\s*$/,
       ''
     );
+    if (isRetiredWorkspaceStateCleanup
+      && /^const RETIRED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';$/.test(line.trim())) {
+      continue;
+    }
+    if (isRetiredWorkspaceStateCleanup
+      && /workspaceState\.(?:get|update)\s*\(/.test(line)
+      && !/workspaceState\.update\(RETIRED_VIEW_POSITIONS_STATE_KEY, undefined\)/.test(line)) {
+      failures.push(`ARCH022 旧 workspaceState 仅允许精确幂等删除: ${path}:${index + 1}`);
+      continue;
+    }
     if ((isDocumentationPath && hasCurrentRemovedStage10DocumentationClaim(line))
       || (!isDocumentationPath && hasRemovedStage10Alias(line))) {
       failures.push(`ARCH022 已删除的位置记忆、独立行号或重复导出设置重新出现: ${path}:${index + 1}`);

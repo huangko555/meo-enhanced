@@ -45,7 +45,6 @@ const adapter = createEditorModeEffectAdapter({
       onApplyChanges: () => undefined,
       onOpenLink: () => undefined,
       onSelectionChange: () => undefined,
-      onViewportChange: () => undefined,
     });
   },
   applyEditorMode(mode) {

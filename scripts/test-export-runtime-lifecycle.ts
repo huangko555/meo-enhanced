@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeHtmlExport } from '../src/export/htmlExport';
 import { renderPdfFromHtmlExport } from '../src/export/pdfRenderer';
 
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-export-runtime-contract-'));
@@ -82,6 +83,13 @@ const run = async (options: { failStage?: string; pageError?: string; cleanupFai
 };
 
 try {
+  const htmlOutputPath = path.join(fixtureRoot, 'mermaid.html');
+  await writeHtmlExport({
+    htmlDocument: '<!doctype html><html><body><pre class="mermaid">graph TD; A-->B</pre></body></html>',
+    outputHtmlPath: htmlOutputPath
+  });
+  assert.match(fs.readFileSync(htmlOutputPath, 'utf8'), /class="mermaid"/);
+
   const success = await run();
   assert.equal(success.error, undefined);
   assert.equal(success.events.at(-1), 'close');

@@ -48,6 +48,7 @@ import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefr
 import { createVscodeDiagnosticsAdapter } from './host/vscodeDiagnosticsAdapter';
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
+import { cleanupRetiredWorkspaceState } from './host/vscodeRetiredWorkspaceStateCleanup';
 import {
   normalizePreviewAppearance,
   PREVIEW_APPEARANCE_STATE_KEY,
@@ -106,13 +107,9 @@ type ExportRuntimeModule = {
     sourceDocumentPath: string;
     styleEnvironment?: ExportStyleEnvironment;
   }) => PreviewRenderResult;
-  writeFinalizedHtmlExport: (options: {
+  writeHtmlExport: (options: {
     htmlDocument: string;
     outputHtmlPath: string;
-    browserExecutablePath?: string;
-    puppeteerRuntimeModulePath?: string;
-    timeoutMs?: number;
-    skipHeadlessFinalize?: boolean;
   }) => Promise<void>;
   renderPdfFromHtmlExport: (options: {
     htmlDocument: string;
@@ -245,6 +242,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   void migrateLegacyToggleSettings(context);
+  void cleanupRetiredWorkspaceState(context.workspaceState);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('meoEnhanced.open', async (uriLike?: unknown) => {
@@ -478,9 +476,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
           } catch {
             return false;
           }
-        },
-        reportFailure: (contextLabel, error) => {
-          console.error(`[MEO viewNavigation] ${contextLabel}`, error);
         }
       }),
       saveDocument: async () => document.save(),
@@ -657,23 +652,21 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
               appearance
             });
 
+            if (format === 'html') {
+              progress.report({ message: 'Writing HTML…' });
+              await exportRuntime.writeHtmlExport({
+                htmlDocument: exportRender.htmlDocument,
+                outputHtmlPath: saveUri.fsPath
+              });
+              return;
+            }
+
+            progress.report({ message: 'Rendering PDF in headless browser…' });
             const puppeteerRuntimeModulePath = vscode.Uri.joinPath(
               this.context.extensionUri,
               'dist',
               'puppeteer-runtime.js'
             ).fsPath;
-            progress.report({ message: format === 'html' ? 'Finalizing HTML…' : 'Rendering PDF in headless browser…' });
-
-            if (format === 'html') {
-              await exportRuntime.writeFinalizedHtmlExport({
-                htmlDocument: exportRender.htmlDocument,
-                outputHtmlPath: saveUri.fsPath,
-                puppeteerRuntimeModulePath,
-                skipHeadlessFinalize: !exportRender.hasMermaid
-              });
-              return;
-            }
-
             await exportRuntime.renderPdfFromHtmlExport({
               htmlDocument: exportRender.htmlDocument,
               outputPdfPath: saveUri.fsPath,
@@ -926,7 +919,7 @@ function unwrapExportRuntimeModule(mod: unknown): ExportRuntimeModule {
       candidate &&
       typeof candidate.renderExportHtmlDocument === 'function' &&
       typeof candidate.renderPreviewDocument === 'function' &&
-      typeof candidate.writeFinalizedHtmlExport === 'function' &&
+      typeof candidate.writeHtmlExport === 'function' &&
       typeof candidate.renderPdfFromHtmlExport === 'function'
     ) {
       return candidate as ExportRuntimeModule;

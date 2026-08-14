@@ -148,8 +148,6 @@ type CreateEditorOptions = {
   onOpenLink?: (href: string) => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
   initialMode?: EditableEditorMode;
-  initialTopLine?: number | null;
-  initialTopLineOffset?: number;
   initialGitGutter?: boolean;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
@@ -256,8 +254,6 @@ export function createEditor({
   onOpenLink,
   onSelectionChange,
   initialMode = 'source',
-  initialTopLine = null,
-  initialTopLineOffset = 0,
   initialGitGutter = true,
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory
@@ -358,27 +354,7 @@ export function createEditor({
       publishComposedDocumentChange();
     }, 20);
   };
-  const getLineStartOffset = (docText: string, targetLineNumber: number) => {
-    const targetLine = Math.max(1, Math.floor(targetLineNumber));
-    if (targetLine === 1) {
-      return 0;
-    }
-    let line = 1;
-    for (let index = 0; index < docText.length; index += 1) {
-      if (docText.charCodeAt(index) !== 10) {
-        continue;
-      }
-      line += 1;
-      if (line === targetLine) {
-        return index + 1;
-      }
-    }
-    return docText.length;
-  };
   const initialCursorPos = (() => {
-    if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
-      return getLineStartOffset(text ?? '', initialTopLine);
-    }
     if (!text) {
       return 0;
     }
@@ -2160,19 +2136,9 @@ export function createEditor({
     ]
   });
 
-  const initialScrollTo = (() => {
-    if (typeof initialTopLine !== 'number' || !Number.isFinite(initialTopLine)) {
-      return undefined;
-    }
-    const lineNumber = Math.min(Math.max(1, Math.floor(initialTopLine)), state.doc.lines);
-    const line = state.doc.line(lineNumber);
-    return EditorView.scrollIntoView(line.from, { y: 'start' });
-  })();
-
   view = new EditorView({
     state,
-    parent,
-    scrollTo: initialScrollTo
+    parent
   });
   tableColumnWidthAdapter.adapter.refresh();
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
@@ -2338,9 +2304,6 @@ export function createEditor({
   view.dom.addEventListener('beforeinput', onHistoryBeforeInput, true);
   view.dom.addEventListener('pointerdown', onHistoryPointerDown, true);
   view.dom.addEventListener('blur', onHistoryBlur, true);
-  if (typeof initialTopLine === 'number' && Number.isFinite(initialTopLine)) {
-    restoreTopVisibleLine(initialTopLine, initialTopLineOffset, { syncCursor: true });
-  }
   onTableInteraction = (event) => {
     const detail: unknown = event instanceof CustomEvent ? event.detail : null;
     const active = Boolean(detail && typeof detail === 'object' && 'active' in detail && detail.active);

@@ -14,7 +14,6 @@ type VscodeViewNavigationDependencies = {
   readonly getDocumentFragmentHref: (href: string) => string | null;
   readonly resolveLocalLinkTarget: (href: string, documentUri: vscode.Uri) => Promise<vscode.Uri | null>;
   readonly post: (message: HostEditorEvent) => Promise<boolean>;
-  readonly reportFailure: (context: string, error: unknown) => void;
 };
 
 const isSameResource = (left: vscode.Uri, right: vscode.Uri): boolean => {
@@ -78,8 +77,7 @@ export function createVscodeViewNavigationAdapter(
             preserveViewport: reveal.preserveViewport
           }
         : { type: 'revealDocumentFragment', href: reveal.href })
-    },
-    reportFailure: dependencies.reportFailure
+    }
   });
 
   return {

@@ -30,7 +30,7 @@ const PDF_VIEWPORT = {
 };
 
 export async function renderPdfFromHtmlExport(options: RenderPdfExportOptions): Promise<void> {
-  await withPreparedExportPage(options, { exportTarget: 'pdf' }, async (page) => {
+  await withPreparedExportPage(options, async (page) => {
     await page.pdf({
       path: options.outputPdfPath,
       printBackground: true,
@@ -135,37 +135,8 @@ export async function fitBlockMathForPdf(page: any): Promise<void> {
   }
 }
 
-export async function finalizeHtmlExportInHeadlessBrowser(options: HeadlessExportOptions): Promise<string> {
-  return withPreparedExportPage(options, { exportTarget: 'html' }, async (page) => {
-    const serialized = await page.evaluate(() => {
-      document.querySelectorAll('script[data-meo-export-runtime], script[data-meo-export-mermaid-runtime]').forEach((node) => {
-        node.remove();
-      });
-      document.querySelectorAll('.meo-export-mermaid').forEach((node) => {
-        node.removeAttribute('data-source-b64');
-      });
-      document.documentElement.removeAttribute('data-meo-export-target');
-      document.body.removeAttribute('data-meo-export-target');
-
-      try {
-        delete window.__MEO_EXPORT_READY__;
-        delete window.__MEO_EXPORT_ERROR__;
-      } catch {
-        // Ignore delete failures.
-      }
-
-      return '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-    });
-
-    return String(serialized);
-  });
-}
-
 async function withPreparedExportPage<T>(
   options: HeadlessExportOptions,
-  runtimeOptions: {
-    exportTarget: 'html' | 'pdf';
-  },
   action: (page: any) => Promise<T>
 ): Promise<T> {
   const timeoutMs = Math.max(1000, options.timeoutMs ?? 30000);
@@ -199,17 +170,10 @@ async function withPreparedExportPage<T>(
       waitUntil: 'domcontentloaded'
     });
 
-    if (runtimeOptions.exportTarget === 'pdf') {
-      await page.evaluate(() => {
-        document.documentElement.setAttribute('data-meo-export-target', 'pdf');
-        document.body.setAttribute('data-meo-export-target', 'pdf');
-      });
-    } else {
-      await page.evaluate(() => {
-        document.documentElement.removeAttribute('data-meo-export-target');
-        document.body.removeAttribute('data-meo-export-target');
-      });
-    }
+    await page.evaluate(() => {
+      document.documentElement.setAttribute('data-meo-export-target', 'pdf');
+      document.body.setAttribute('data-meo-export-target', 'pdf');
+    });
 
     await page.waitForFunction(() => (window as any).__MEO_EXPORT_READY__ === true, {
       timeout: timeoutMs
@@ -224,9 +188,7 @@ async function withPreparedExportPage<T>(
         await refitMath();
       }
     });
-    if (runtimeOptions.exportTarget === 'pdf') {
-      await fitBlockMathForPdf(page);
-    }
+    await fitBlockMathForPdf(page);
 
     return await action(page);
   } catch (error) {

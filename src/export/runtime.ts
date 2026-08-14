@@ -1,7 +1,7 @@
 import { renderMarkdownToHtml } from './renderMarkdown';
 import { buildExportHtmlDocument as buildStandaloneExportHtmlDocument } from './exportHtmlTemplate';
 import { buildExportStyles, buildPreviewStyles, type ExportStyleEnvironment } from './exportStyles';
-import { writeFinalizedHtmlExport } from './htmlExport';
+import { writeHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 
@@ -80,7 +80,7 @@ function renderPreviewDocument(options: {
 const exportRuntime = {
   renderExportHtmlDocument,
   renderPreviewDocument,
-  writeFinalizedHtmlExport,
+  writeHtmlExport,
   renderPdfFromHtmlExport
 };
 
