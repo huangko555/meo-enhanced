@@ -2312,7 +2312,7 @@ try {
   execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
 
   mkdirSync(join(stagedRoot, 'src', 'application'), { recursive: true });
-  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const setGlobalLineNumbers = () => undefined;\n');
+  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const setGlobalLineNumbersState = () => undefined;\n');
   execFileSync('git', ['add', '--', 'src/application/stage10Contract.ts'], { cwd: stagedRoot });
   writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const rememberViewportForModeSwitch = () => undefined;\n');
   const stagedRemovedStage10Alias = (() => {
@@ -2329,7 +2329,7 @@ try {
   assert.equal(stagedRemovedStage10Alias.ok, false, 'staged ARCH022 must reject removed production aliases from the index');
   assert.match(stagedRemovedStage10Alias.output, /ARCH022/);
   execFileSync('git', ['add', '--', 'src/application/stage10Contract.ts'], { cwd: stagedRoot });
-  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const setGlobalLineNumbers = () => undefined;\n');
+  writeFileSync(join(stagedRoot, 'src', 'application', 'stage10Contract.ts'), 'export const setGlobalLineNumbersState = () => undefined;\n');
   const unstagedRemovedStage10Alias = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
     cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -2838,6 +2838,13 @@ try {
     ['src/host/remembered-view-position-store.ts', 'export type RememberedViewport = { line: number };\n'],
     ['src/host/view-position-settings.ts', 'export const rememberPositionLines = 40;\n'],
     ['src/host/view-position-settings.ts', "export const setting = 'remember.position.lines';\n"],
+    ['src/host/stage10-owner.ts', 'export const rememberedViewportStore = new Map();\n'],
+    ['webview/src/application/stage10-owner.ts', 'export const setGlobalLineNumbersState = {};\n'],
+    ['src/shared/stage10-owner.ts', 'export const exportBrowserPathSetting = undefined;\n'],
+    ['src/protocol/stage10-owner.ts', "export const command = 'set.global.line.numbers.controller';\n"],
+    ['src/host/remembered-viewport-owner.ts', 'export const owner = {};\n'],
+    ['webview/src/export/export-browser-path-manager.ts', 'export const manager = {};\n'],
+    ['src/shared/stage10-owner.ts', 'export const exportBrowserPathConfig = {};\n'],
     ['webview/src/editor.ts', 'export type CreateEditorOptions = { initialTopLine?: number };\n'],
     ['src/protocol/editorEvents.ts', "export const event = { type: 'viewPositionChanged' };\n"],
     ['webview/src/editor/line-numbers-toggle.ts', 'export const setLineNumbersVisible = () => undefined;\n'],
@@ -2867,6 +2874,8 @@ try {
     ['webview/src/helpers/codeBlocks.ts', 'export const addCodeBlockLineNumbers = () => undefined;\n'],
     ['webview/src/helpers/codeBlocks.ts', 'export const previewCodeBlockLineNumbersEnabled = true;\n'],
     ['src/application/navigation.ts', 'export const rememberViewportForModeSwitch = () => undefined;\n'],
+    ['src/application/remember-viewport-for-mode-switch.ts', 'export const preserve = () => undefined;\n'],
+    ['webview/src/helpers/preview-code-block-line-numbers-enabled.ts', 'export const enabled = true;\n'],
     ['src/host/vscodeRetiredWorkspaceStateCleanup.ts', "const RETIRED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';\nexport const cleanup = (workspaceState) => workspaceState.update(RETIRED_VIEW_POSITIONS_STATE_KEY, undefined);\n"],
     ['src/export/assetPaths.ts', 'export const embeddedImageDataUrlCache = new Map();\n'],
     ['src/export/pdfRenderer.ts', 'export const browserExecutablePath = findPdfBrowserExecutablePath();\n'],

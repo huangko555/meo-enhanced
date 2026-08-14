@@ -2275,15 +2275,29 @@ const removedStage10Aliases = [
   'meoenhancedexporthtmlimagemode', 'exporthtmlimagemode', 'getexporthtmlimagemode', 'htmlimagemode',
   'meoenhancedexportbrowserpath', 'meoenhancedexportpdfbrowserpath', 'exportbrowserpath', 'getexportpdfbrowserpath'
 ] as const;
+const removedStage10OwnerSuffixes = [
+  'state', 'store', 'setting', 'settings', 'owner', 'controller', 'manager',
+  'config', 'configuration', 'adapter', 'service', 'provider', 'module', 'interface', 'runtime'
+] as const;
 const hasRemovedStage10Alias = (value: string): boolean => {
   const candidates = new Set<string>();
   for (const token of value.match(/[a-z][a-z0-9_$]*(?:[-_.][a-z0-9_$]+)*/gi) ?? []) {
-    candidates.add(token.toLowerCase().replace(/[-_.]+/g, ''));
-    for (const part of token.split(/[-_.]+/)) {
+    const parts = token.split(/[-_.]+/);
+    candidates.add(parts.join('').toLowerCase());
+    if (/^(?:ts|tsx|css|json|md|html)$/i.test(parts.at(-1) ?? '')) {
+      candidates.add(parts.slice(0, -1).join('').toLowerCase());
+    }
+    for (const part of parts) {
       candidates.add(part.toLowerCase());
     }
   }
-  return removedStage10Aliases.some((alias) => candidates.has(alias));
+  return removedStage10Aliases.some((alias) => (
+    candidates.has(alias)
+    || removedStage10OwnerSuffixes.some((suffix) => (
+      candidates.has(`${alias}${suffix}`)
+      || removedStage10OwnerSuffixes.some((secondSuffix) => candidates.has(`${alias}${suffix}${secondSuffix}`))
+    ))
+  ));
 };
 const stage10HistoricalMarkers = [
   'removed', 'historical', 'former', 'previously', 'deprecated', 'usedto',
