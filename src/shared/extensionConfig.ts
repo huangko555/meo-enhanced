@@ -4,19 +4,14 @@ import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from './outlineWidth';
 export { normalizeOutlineWidth } from './outlineWidth';
 
 export const EXTENSION_CONFIG_SECTION = 'meoEnhanced';
-export const LINE_NUMBERS_SETTING_KEY = 'lineNumbers.visible';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
 export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
 export const LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY = 'codeBlocks.collapseLongBlocks';
-export const REMEMBER_POSITION_LINES_SETTING_KEY = 'rememberPosition.lines';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
-export const LINE_NUMBERS_LEGACY_SETTING_KEY = 'lineNumbers.enabled';
-export const LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY = 'lineNumbers.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY = 'gitChanges.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY = 'gitChangesGutter.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_SETTING_KEY = 'gitChangesGutter.enabled';
-export const LINE_NUMBERS_KEY = 'lineNumbersEnabled';
 export const GIT_CHANGES_GUTTER_KEY = 'gitChangesGutterEnabled';
 export const OUTLINE_VISIBLE_KEY = 'outlineVisible';
 export const OUTLINE_WIDTH_KEY = 'outlineWidth';
@@ -24,15 +19,7 @@ export const CONTENT_MAX_WIDTH_ENABLED_KEY = 'contentMaxWidthEnabled';
 export const MARKDOWN_FILE_EXTENSIONS = ['.md', '.markdown', '.mdx', '.mdc'] as const;
 
 export type OutlinePosition = 'left' | 'right';
-export type ExportHtmlImageMode = 'embedded' | 'linked';
 export type DiffBaselineMode = 'current-edit' | 'recent-save' | 'git-head';
-
-export function getLineNumbersEnabled(context: vscode.ExtensionContext): boolean {
-  return getToggleSettingValue(context, LINE_NUMBERS_SETTING_KEY, LINE_NUMBERS_KEY, [
-    LINE_NUMBERS_LEGACY_SETTING_KEY,
-    LINE_NUMBERS_LEGACY_VISIBLE_SETTING_KEY
-  ]);
-}
 
 export function getGitChangesGutterEnabled(context: vscode.ExtensionContext): boolean {
   return getToggleSettingValue(context, GIT_CHANGES_GUTTER_SETTING_KEY, GIT_CHANGES_GUTTER_KEY, [
@@ -54,11 +41,6 @@ export function getLongCodeBlockFoldingEnabled(): boolean {
 
 export function getCurrentVscodeCodeTheme(): RawVscodeTheme | null {
   return getActiveVscodeRawTheme();
-}
-
-export function getRememberPositionLines(): number {
-  const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-  return normalizeRememberPositionLineCount(config.get<number>(REMEMBER_POSITION_LINES_SETTING_KEY, 100));
 }
 
 export function getOutlinePosition(): OutlinePosition {
@@ -88,35 +70,6 @@ export function getContentMaxWidthEnabled(context: vscode.ExtensionContext): boo
   return getToggleSettingValue(context, CONTENT_MAX_WIDTH_SETTING_KEY, CONTENT_MAX_WIDTH_ENABLED_KEY, [], false);
 }
 
-export function getExportPdfBrowserPath(): string | undefined {
-  const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-  const settingKey = 'export.browserPath';
-
-  if (hasExplicitConfigurationValue<string>(config, settingKey)) {
-    const configured = config.get<string>(settingKey, '');
-    const trimmed = `${configured ?? ''}`.trim();
-    return trimmed || undefined;
-  }
-
-  const configured = config.get<string>(settingKey, '');
-  const trimmed = `${configured ?? ''}`.trim();
-  if (trimmed) {
-    return trimmed;
-  }
-
-  const legacyConfigured = config.get<string>('export.pdf.browserPath', '');
-  const legacyTrimmed = `${legacyConfigured ?? ''}`.trim();
-  return legacyTrimmed || undefined;
-}
-
-export function getExportHtmlImageMode(): ExportHtmlImageMode {
-  const configured = vscode.workspace
-    .getConfiguration(EXTENSION_CONFIG_SECTION)
-    .get<string>('export.html.imageMode', 'embedded');
-  const normalized = `${configured ?? ''}`.trim().toLowerCase();
-  return normalized === 'linked' ? 'linked' : 'embedded';
-}
-
 export function getExportEditorFontEnvironment(): { editorFontFamily?: string; editorFontWeight?: string; editorFontSizePx?: number } {
   const editorConfig = vscode.workspace.getConfiguration('editor');
   const fontFamily = `${editorConfig.get<string>('fontFamily', '') ?? ''}`.trim() || undefined;
@@ -139,7 +92,6 @@ export function withMarkdownExtensions(basePath: string, preferExtensionlessFirs
 }
 
 export async function migrateLegacyToggleSettings(context: vscode.ExtensionContext): Promise<void> {
-  await migrateLegacyToggleSetting(context, LINE_NUMBERS_SETTING_KEY, LINE_NUMBERS_KEY);
   await migrateLegacyToggleSetting(context, GIT_CHANGES_GUTTER_SETTING_KEY, GIT_CHANGES_GUTTER_KEY);
   await migrateLegacyToggleSetting(context, CONTENT_MAX_WIDTH_SETTING_KEY, CONTENT_MAX_WIDTH_ENABLED_KEY);
 }
@@ -174,13 +126,6 @@ function getToggleSettingValue(
     }
   }
   return context.globalState.get<boolean>(legacyStateKey, fallbackDefault);
-}
-
-function normalizeRememberPositionLineCount(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 100;
-  }
-  return Math.max(0, Math.floor(value));
 }
 
 async function migrateLegacyToggleSetting(

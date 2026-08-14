@@ -147,11 +147,9 @@ type CreateEditorOptions = {
   onApplyChanges: (text: string) => void;
   onOpenLink?: (href: string) => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
-  onViewportChange?: () => void;
   initialMode?: EditableEditorMode;
   initialTopLine?: number | null;
   initialTopLineOffset?: number;
-  initialLineNumbers?: boolean;
   initialGitGutter?: boolean;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
@@ -257,11 +255,9 @@ export function createEditor({
   onApplyChanges,
   onOpenLink,
   onSelectionChange,
-  onViewportChange,
   initialMode = 'source',
   initialTopLine = null,
   initialTopLineOffset = 0,
-  initialLineNumbers = true,
   initialGitGutter = true,
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory
@@ -277,7 +273,6 @@ export function createEditor({
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
-  let lineNumbersVisible = initialLineNumbers !== false;
   let gitGutterVisible = initialGitGutter !== false;
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
   let applyingExternal = false;
@@ -739,13 +734,6 @@ export function createEditor({
       editableLinkHoverPosition = null;
       setEditableLinkHoverCursor(view, false);
     }
-  };
-
-  const syncLineNumbersVisibility = () => {
-    if (!view) {
-      return;
-    }
-    view.dom.classList.toggle('meo-line-numbers-hidden', !lineNumbersVisible);
   };
 
   const syncGitGutterVisibility = () => {
@@ -2119,7 +2107,6 @@ export function createEditor({
           update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
         );
         syncModeClasses();
-        syncLineNumbersVisibility();
         syncGitGutterVisibility();
         emitSearchStateChange();
         const searchQueryChanged = update.transactions.some((transaction) => (
@@ -2143,7 +2130,6 @@ export function createEditor({
           emitSelectionChange();
         } else if (update.viewportChanged) {
           emitSelectionChange();
-          onViewportChange?.();
         }
 
         if (update.docChanged) {
@@ -2429,7 +2415,6 @@ export function createEditor({
   onScroll = () => {
     emitSelectionChange();
     gitDiffOverviewRuler?.refresh();
-    onViewportChange?.();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
   gitDiffContentHover = createGitDiffContentHoverController(view);
@@ -2452,7 +2437,6 @@ export function createEditor({
     }
   });
   syncModeClasses();
-  syncLineNumbersVisibility();
   syncGitGutterVisibility();
   syncSelectionClass();
   view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
@@ -2723,14 +2707,6 @@ export function createEditor({
       syncGitGutterVisibility();
 
       restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false, force: true });
-    },
-    setLineNumbers(visible: boolean) {
-      const nextVisible = visible !== false;
-      if (nextVisible === lineNumbersVisible) {
-        return;
-      }
-      lineNumbersVisible = nextVisible;
-      syncLineNumbersVisibility();
     },
     setLongCodeBlockFoldingEnabled(enabled: boolean) {
       setLongCodeBlockFoldingEnabled(view, enabled === true);

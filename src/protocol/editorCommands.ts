@@ -5,7 +5,6 @@ export type OutlinePosition = 'left' | 'right';
 
 export type EditorCommand =
   | { readonly type: 'setMode'; readonly mode: EditorMode }
-  | { readonly type: 'setLineNumbers'; readonly visible?: boolean; readonly enabled?: boolean }
   | { readonly type: 'setGitChangesGutter'; readonly visible?: boolean; readonly enabled?: boolean }
   | { readonly type: 'setDiffBaselineMode'; readonly mode: DiffBaselineMode }
   | { readonly type: 'setFixedBaseline'; readonly enabled: boolean }
@@ -21,7 +20,6 @@ export type EditorCommand =
       readonly caseSensitive?: boolean;
       readonly findOptions?: { readonly wholeWord?: boolean; readonly caseSensitive?: boolean };
     }
-  | { readonly type: 'viewPositionChanged'; readonly topLine: number; readonly topLineOffset?: number }
   | { readonly type: 'openLink'; readonly href: string; readonly source?: 'preview' }
   | { readonly type: 'openImageExternally'; readonly url: string }
   | { readonly type: 'discardChanges'; readonly topLine: number; readonly topLineOffset?: number }
@@ -51,7 +49,6 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
   switch (value.type) {
     case 'setMode':
       return value.mode === 'live' || value.mode === 'source' || value.mode === 'preview' ? value as EditorCommand : null;
-    case 'setLineNumbers':
     case 'setGitChangesGutter':
       return (value.visible === undefined || isBoolean(value.visible))
         && (value.enabled === undefined || isBoolean(value.enabled))
@@ -79,7 +76,6 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
       return (value.wholeWord === undefined || isBoolean(value.wholeWord))
         && (value.caseSensitive === undefined || isBoolean(value.caseSensitive)) ? value as EditorCommand : null;
     }
-    case 'viewPositionChanged':
     case 'discardChanges':
       return isPositiveInteger(value.topLine)
         && (value.topLineOffset === undefined || isFiniteNumber(value.topLineOffset)) ? value as EditorCommand : null;

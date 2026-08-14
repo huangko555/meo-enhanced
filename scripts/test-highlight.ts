@@ -14,7 +14,6 @@ const rendered = exportRuntime.renderExportHtmlDocument({
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
   target: 'html',
-  htmlImageMode: 'embedded',
   appearance: 'dark',
   styleEnvironment: {
     editorBackgroundColor: '#20252b',

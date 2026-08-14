@@ -176,12 +176,6 @@
           "order": 3,
           "description": "Constrain the editor content to a centered 800px column."
         },
-        "meoEnhanced.lineNumbers.visible": {
-          "type": "boolean",
-          "default": true,
-          "order": 4,
-          "description": "Show line numbers."
-        },
         "meoEnhanced.gitChanges.visible": {
           "type": "boolean",
           "default": true,
@@ -215,41 +209,6 @@
           "default": true,
           "order": 7,
           "description": "Collapse long fenced code blocks in Live mode."
-        },
-        "meoEnhanced.rememberPosition.lines": {
-          "type": "number",
-          "default": 100,
-          "minimum": 0,
-          "order": 7,
-          "description": "Markdown files with at least this many lines will remember the last viewed line and restore the scroll position when opened."
-        },
-        "meoEnhanced.export.browserPath": {
-          "type": "string",
-          "default": "",
-          "order": 7,
-          "description": "Optional path to a Chrome/Edge executable used for browser-based export rendering (PDF and HTML finalize). Leave empty to auto-detect."
-        },
-        "meoEnhanced.export.pdf.browserPath": {
-          "type": "string",
-          "default": "",
-          "order": 7,
-          "description": "Deprecated: use meoEnhanced.export.browserPath.",
-          "deprecationMessage": "Use meoEnhanced.export.browserPath instead.",
-          "markdownDeprecationMessage": "Use `meoEnhanced.export.browserPath` instead."
-        },
-        "meoEnhanced.export.html.imageMode": {
-          "type": "string",
-          "enum": [
-            "embedded",
-            "linked"
-          ],
-          "enumDescriptions": [
-            "Embed local image files in exported HTML.",
-            "Keep local image links as relative paths in exported HTML."
-          ],
-          "default": "embedded",
-          "order": 8,
-          "description": "How local images are handled during HTML export."
         },
         "meoEnhanced.imageFolder": {
           "type": "string",

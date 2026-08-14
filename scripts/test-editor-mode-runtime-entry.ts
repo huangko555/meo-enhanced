@@ -41,7 +41,6 @@ const adapter = createEditorModeEffectAdapter({
       parent: element('editor'),
       text: '# Editor Mode\n\nalpha\nbeta\ngamma',
       initialMode: mode,
-      initialLineNumbers: true,
       initialGitGutter: false,
       onApplyChanges: () => undefined,
       onOpenLink: () => undefined,

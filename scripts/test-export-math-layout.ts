@@ -19,7 +19,6 @@ const baseOptions = {
   markdownText: `$$\n${wideFormula} = 0\n$$`,
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
-  htmlImageMode: 'embedded' as const,
   appearance: 'dark' as const,
   styleEnvironment: {
     editorBackgroundColor: '#20252b',

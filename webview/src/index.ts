@@ -169,7 +169,6 @@ taskBtn.dataset.action = 'task';
 taskBtn.title = 'Task';
 taskBtn.appendChild(createElement(ListTodo, { width: 18, height: 18 }));
 
-let lineNumbersVisible = true;
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
 let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
@@ -222,14 +221,6 @@ contentMaxWidthBtn.title = 'Constrain Content Width';
 contentMaxWidthBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, 'Constrain Width');
 
-const lineNumbersBtn = document.createElement('button');
-lineNumbersBtn.type = 'button';
-lineNumbersBtn.className = 'more-tools-option more-tools-toggle-option is-active';
-lineNumbersBtn.dataset.action = 'lineNumbers';
-lineNumbersBtn.title = 'Hide Line Numbers';
-lineNumbersBtn.setAttribute('role', 'menuitemcheckbox');
-appendMoreToolsOptionContent(lineNumbersBtn, Hash, 'Line Numbers');
-
 const gitChangesGutterBtn = document.createElement('button');
 gitChangesGutterBtn.type = 'button';
 gitChangesGutterBtn.className = 'format-button toggle-button is-active';
@@ -278,12 +269,6 @@ longCodeBlockFoldingBtn.dataset.action = 'longCodeBlockFolding';
 longCodeBlockFoldingBtn.title = 'Disable Long Code Block Folding';
 longCodeBlockFoldingBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, 'Fold Long Code Blocks');
-
-const updateLineNumbersUI = () => {
-  lineNumbersBtn.classList.toggle('is-active', lineNumbersVisible);
-  lineNumbersBtn.setAttribute('aria-checked', lineNumbersVisible ? 'true' : 'false');
-  lineNumbersBtn.title = lineNumbersVisible ? 'Hide Line Numbers' : 'Show Line Numbers';
-};
 
 const updateGitChangesGutterUI = () => {
   gitChangesGutterBtn.classList.toggle('is-active', gitChangesGutterVisible);
@@ -358,19 +343,6 @@ const syncGitDiffLineHighlights = () => {
 type PostUpdateOptions = { post?: boolean };
 type PersistedPostUpdateOptions = PostUpdateOptions & { persist?: boolean };
 
-const setLineNumbersVisible = (visible: boolean, { post = true }: PostUpdateOptions = {}) => {
-  const nextVisible = visible !== false;
-  const changed = nextVisible !== lineNumbersVisible;
-  if (changed) {
-    lineNumbersVisible = nextVisible;
-    editor?.setLineNumbers(lineNumbersVisible);
-  }
-  updateLineNumbersUI();
-  if (post && changed) {
-    vscode.postMessage({ type: 'setLineNumbers', visible: lineNumbersVisible });
-  }
-};
-
 const setGitChangesGutterVisible = (visible: boolean, { post = true }: PostUpdateOptions = {}) => {
   const nextVisible = visible !== false;
   const changed = nextVisible !== gitChangesGutterVisible;
@@ -427,10 +399,6 @@ const setOutlineVisible = (visible: boolean, { post = true }: PostUpdateOptions 
   if (post && changed) {
     vscode.postMessage({ type: 'setOutlineVisible', visible: nextVisible });
   }
-};
-
-const toggleLineNumbers = () => {
-  setLineNumbersVisible(!lineNumbersVisible);
 };
 
 const toggleGitChangesGutter = () => {
@@ -804,7 +772,6 @@ moreToolsPanel.append(
   ...diffBaselineButtons,
   changesSeparator,
   contentMaxWidthBtn,
-  lineNumbersBtn,
   longCodeBlockFoldingBtn,
   editorAppearanceRow
 );
@@ -1067,14 +1034,8 @@ let pendingEditorFocus = false;
 let pendingDiagnostics: any[] = [];
 let pendingRevealSelection: { anchor: number; head: number; focus?: boolean } | null = null;
 let pendingRevealDocumentFragment: string | null = null;
-let pendingRestoreTopLine: number | null = null;
-let pendingRestoreTopLineOffset = 0;
-let pendingViewPositionTimer: number | null = null;
-let lastSentTopLine: number | null = null;
-let lastSentTopLineOffset: number | null = null;
 let pendingEditorSurfaceRecoveryRaf: number | null = null;
 let createEditorFactoryPromise: Promise<CreateEditorFactory> | null = null;
-const VIEW_POSITION_DEBOUNCE_MS = 250;
 const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
 
 const failureNotice = createFailureNoticeManager(editorNotice);
@@ -1247,51 +1208,6 @@ const getTopVisiblePosition = (): { topLine: number; topLineOffset: number } | n
   };
 };
 
-const postTopVisiblePositionIfChanged = (position: { topLine: number; topLineOffset: number } | null): void => {
-  if (!position) {
-    return;
-  }
-  if (position.topLine === lastSentTopLine && position.topLineOffset === lastSentTopLineOffset) {
-    return;
-  }
-  lastSentTopLine = position.topLine;
-  lastSentTopLineOffset = position.topLineOffset;
-  vscode.postMessage({
-    type: 'viewPositionChanged',
-    topLine: position.topLine,
-    topLineOffset: position.topLineOffset
-  });
-};
-
-const flushViewPositionNow = (): void => {
-  if (pendingViewPositionTimer !== null) {
-    window.clearTimeout(pendingViewPositionTimer);
-    pendingViewPositionTimer = null;
-  }
-  postTopVisiblePositionIfChanged(getTopVisiblePosition());
-};
-
-const scheduleViewPositionCapture = (): void => {
-  if (pendingViewPositionTimer !== null) {
-    window.clearTimeout(pendingViewPositionTimer);
-  }
-  pendingViewPositionTimer = window.setTimeout(() => {
-    pendingViewPositionTimer = null;
-    postTopVisiblePositionIfChanged(getTopVisiblePosition());
-  }, VIEW_POSITION_DEBOUNCE_MS);
-};
-
-const applyPendingRestoreTopLine = (): void => {
-  if (!editor || pendingRestoreTopLine === null || pendingRevealSelection !== null) {
-    return;
-  }
-  if (typeof editor.restoreTopLine === 'function') {
-    editor.restoreTopLine(pendingRestoreTopLine, pendingRestoreTopLineOffset);
-    pendingRestoreTopLine = null;
-    pendingRestoreTopLineOffset = 0;
-  }
-};
-
 const refreshEditorSurface = (): void => {
   if (!editor) {
     return;
@@ -1304,8 +1220,6 @@ const refreshEditorSurface = (): void => {
 const runEditorSurfaceRecovery = (): void => {
   pendingEditorSurfaceRecoveryRaf = null;
   refreshEditorSurface();
-  applyPendingRestoreTopLine();
-  scheduleViewPositionCapture();
 };
 
 const scheduleEditorSurfaceRecovery = (): void => {
@@ -1340,14 +1254,11 @@ const applyRevealSelectionFromHost = (revealMessage: any) => {
   const max = editor.getText().length;
   const clampedAnchor = clampRevealOffset(anchor, max);
   const clampedHead = clampRevealOffset(head, max);
-  pendingRestoreTopLine = null;
-  pendingRestoreTopLineOffset = 0;
   editor.revealSelection(clampedAnchor, clampedHead, {
     focusEditor: focus !== false,
     align: preserveViewport === true ? 'none' : 'center'
   });
   pendingRevealSelection = null;
-  scheduleViewPositionCapture();
 };
 
 const applyRevealDocumentFragmentFromHost = (href: unknown): void => {
@@ -1360,7 +1271,6 @@ const applyRevealDocumentFragmentFromHost = (href: unknown): void => {
   }
   editor.revealDocumentFragment(href);
   pendingRevealDocumentFragment = null;
-  scheduleViewPositionCapture();
 };
 
 const focusEditorFromHost = () => {
@@ -1474,18 +1384,8 @@ const presentDocumentText = (
     return false;
   }
   if (getActiveEditorMode() === 'preview') {
-    previewAdapter.refreshVisible(text, {
-      restoreLine: pendingRestoreTopLine ?? previewRestoreLine
-    });
-  } else if (pendingRestoreTopLine !== null) {
-    editor.restoreTopLine?.(
-      pendingRestoreTopLine,
-      pendingRestoreTopLineOffset,
-      { syncCursor: false }
-    );
+    previewAdapter.refreshVisible(text, { restoreLine: previewRestoreLine });
   }
-  pendingRestoreTopLine = null;
-  pendingRestoreTopLineOffset = 0;
   if (outlineController.isVisible()) {
     outlineController.refresh();
   }
@@ -1549,33 +1449,23 @@ const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
   if (editor) return;
   const createEditor = await loadCreateEditorFactory();
   const initialText = pendingInitialText;
-  const initialTopLine = pendingRevealSelection === null ? pendingRestoreTopLine : null;
-  const initialTopLineOffset = pendingRevealSelection === null ? pendingRestoreTopLineOffset : 0;
   if (editor || initialText === null) return;
 
   editor = createEditor({
     parent: editorHost,
     text: initialText,
     initialMode: mode,
-    initialTopLine,
-    initialTopLineOffset,
-    initialLineNumbers: lineNumbersVisible,
     initialGitGutter: gitChangesGutterVisible,
     initialDiagnostics: pendingDiagnostics,
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onSelectionChange: (state: any) => selectionMenuController.update(state),
-    onViewportChange: () => scheduleViewPositionCapture(),
     mermaidDiagramPresentationFactory
   });
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
   editor.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
   gitClient?.applyBaselineToEditor(editor);
   syncGitDiffLineHighlights();
-  if (initialTopLine !== null) {
-    pendingRestoreTopLine = null;
-    pendingRestoreTopLineOffset = 0;
-  }
   editor.focus();
   pendingInitialText = null;
   if (mode === 'live') failureNotice.clearFailureNotice();
@@ -1707,10 +1597,6 @@ editorModeRuntime = createEditorModeRuntime(
 );
 
 const handleInit = (message: InitMessage) => {
-  pendingRestoreTopLine = normalizeLineNumber(message.restoreTopLine);
-  pendingRestoreTopLineOffset = normalizeLineOffset(message.restoreTopLineOffset);
-  lastSentTopLine = null;
-  lastSentTopLineOffset = null;
   if (typeof message.contentMaxWidthEnabled === 'boolean') {
     setContentMaxWidthEnabled(message.contentMaxWidthEnabled, { post: false });
   }
@@ -1721,9 +1607,6 @@ const handleInit = (message: InitMessage) => {
     pendingInitialText = message.text;
   } else {
     setEditorTextSafely(message.text, 'init');
-  }
-  if (typeof message.lineNumbers === 'boolean') {
-    setLineNumbersVisible(message.lineNumbers, { post: false });
   }
   if (typeof message.gitChangesGutter === 'boolean') {
     setGitChangesGutterVisible(message.gitChangesGutter, { post: false });
@@ -1863,10 +1746,6 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  if (message.type === 'lineNumbersChanged') {
-    setLineNumbersVisible(message.enabled, { post: false });
-    return;
-  }
 
   if (message.type === 'gitChangesGutterChanged') {
     setGitChangesGutterVisible(message.enabled, { post: false });
@@ -1978,10 +1857,7 @@ window.addEventListener('paste', async (event) => {
   });
 });
 
-window.addEventListener('blur', () => {
-  commitEditorTransientEdits();
-  flushViewPositionNow();
-});
+window.addEventListener('blur', commitEditorTransientEdits);
 
 window.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
@@ -1990,7 +1866,6 @@ window.addEventListener('visibilitychange', () => {
       pendingEditorSurfaceRecoveryRaf = null;
     }
     commitEditorTransientEdits();
-    flushViewPositionNow();
     return;
   }
   scheduleEditorSurfaceRecovery();
@@ -2012,7 +1887,6 @@ window.addEventListener('beforeunload', () => {
     pendingEditorSurfaceRecoveryRaf = null;
   }
   commitEditorTransientEdits();
-  flushViewPositionNow();
   editorModeRuntime.dispose();
   mermaidDiagramPresentationFactory.dispose();
   mermaidDiagramRenderPool.dispose();
@@ -2048,7 +1922,6 @@ if (typeof state?.outlineWidth === 'number') {
   outlineController.setWidth(state.outlineWidth);
 }
 outlineController.setPosition('right');
-updateLineNumbersUI();
 updateGitChangesGutterUI();
 updateLongCodeBlockFoldingUI();
 
@@ -2226,7 +2099,6 @@ outlineBtn.addEventListener('click', () => showOutlineAt('right'));
 contentMaxWidthBtn.addEventListener('click', () => {
   setContentMaxWidthEnabled(!contentMaxWidthEnabled);
 });
-lineNumbersBtn.addEventListener('click', toggleLineNumbers);
 gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
 fixedBaselineBtn.addEventListener('pointerdown', (event) => {
   if (event.button === 0 && editor?.hasFocus()) {

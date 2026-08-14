@@ -12,7 +12,6 @@ if (configurationHandlerStart < 0 || configurationHandlerEnd < 0) {
 
 const configurationHandler = extensionSource.slice(configurationHandlerStart, configurationHandlerEnd);
 const sessionSettingBroadcasts = [
-  'lineNumbersChanged',
   'gitChangesGutterChanged',
   'gitDiffLineHighlightsChanged',
   'diffBaselineModeChanged',

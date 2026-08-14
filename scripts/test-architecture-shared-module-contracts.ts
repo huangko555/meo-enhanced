@@ -2285,6 +2285,32 @@ try {
   rmSync(join(stagedRoot, 'src', 'host', 'choose-color-owner.ts'));
   rmSync(join(stagedRoot, 'src', 'host', 'external-color-reference.ts'));
 
+  writeFileSync(join(stagedRoot, 'README.md'), 'Configure meoEnhanced.export.html.imageMode for linked images.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'HTML embeds local images.\n');
+  const stagedRemovedExportSetting = (() => {
+    try {
+      execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+        cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+      });
+      return { ok: true, output: '' };
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      return { ok: false, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}` };
+    }
+  })();
+  assert.equal(stagedRemovedExportSetting.ok, false, 'staged ARCH022 must read removed export settings from the index');
+  assert.match(stagedRemovedExportSetting.output, /ARCH022/);
+
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+  writeFileSync(join(stagedRoot, 'README.md'), 'MEO Enhanced provides a configurable line numbers setting.\n');
+  const unstagedRemovedLineNumbers = execFileSync('bun', ['scripts/check-architecture.ts', '--staged'], {
+    cwd: stagedRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  assert.match(unstagedRemovedLineNumbers, /Architecture checks passed/);
+  writeFileSync(join(stagedRoot, 'README.md'), 'HTML embeds local images.\n');
+  execFileSync('git', ['add', '--', 'README.md'], { cwd: stagedRoot });
+
   writeFileSync(join(stagedRoot, 'bun.lock'), '"codemirror-vim": ["codemirror-vim@6.3.0", ""]\n');
   execFileSync('git', ['add', '--', 'bun.lock'], { cwd: stagedRoot });
   writeFileSync(join(stagedRoot, 'bun.lock'), '# clean working-tree lock\n');
@@ -2774,6 +2800,48 @@ try {
     write(fixturePath, contents);
     const outcome = runCheck();
     assert.equal(outcome.ok, true, `${fixturePath} retained color semantics must pass: ${outcome.output}`);
+    rmSync(join(fixtureRoot, ...fixturePath.split('/')));
+  }
+
+  const removedStage10Fixtures = [
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.rememberPosition.lines': { type: 'number' } } } } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.lineNumbers.visible': { type: 'boolean' } } } } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.export.html.imageMode': { type: 'string' } } } } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.export.browserPath': { type: 'string' } } } } })],
+    ['package.json', JSON.stringify({ contributes: { configuration: { properties: { 'meoEnhanced.export.pdf.browserPath': { type: 'string' } } } } })],
+    ['src/host/remembered-view-position-store.ts', 'export type RememberedViewport = { line: number };\n'],
+    ['src/protocol/editorEvents.ts', "export const event = { type: 'viewPositionChanged' };\n"],
+    ['webview/src/editor/line-numbers-toggle.ts', 'export const setLineNumbersVisible = () => undefined;\n'],
+    ['webview/src/styles.css', '.meo-line-numbers-hidden { display: none; }\n'],
+    ['src/export/html-image-mode.ts', "export const htmlImageMode = 'linked';\n"],
+    ['src/shared/extensionConfig.ts', 'export const getExportPdfBrowserPath = () => undefined;\n'],
+    ['docs/position.md', 'MEO Enhanced remembers the cross-session scroll position.\n'],
+    ['docs/line-numbers.md', 'MEO Enhanced provides a configurable line numbers setting.\n'],
+    ['docs/export.md', 'MEO Enhanced lets users choose embedded or linked HTML images.\n'],
+    ['docs/export.md', 'Configure meoEnhanced.export.browserPath for PDF export.\n']
+  ] as const;
+  for (const [fixturePath, contents] of removedStage10Fixtures) {
+    write(fixturePath, contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, false, `${fixturePath} removed stage-10 alias must be rejected: ${contents}`);
+    assert.match(outcome.output, /ARCH022/);
+    rmSync(join(fixtureRoot, ...fixturePath.split('/')));
+  }
+
+  const retainedStage10Fixtures = [
+    ['src/application/navigation.ts', 'export const revealSelection = (_preserveViewport: boolean) => undefined;\n'],
+    ['webview/src/editor.ts', 'export const extensions = [lineNumbers()];\n'],
+    ['webview/src/helpers/codeBlocks.ts', 'export const addCodeBlockLineNumbers = () => undefined;\n'],
+    ['src/export/assetPaths.ts', 'export const embeddedImageDataUrlCache = new Map();\n'],
+    ['src/export/pdfRenderer.ts', 'export const browserExecutablePath = findPdfBrowserExecutablePath();\n'],
+    ['docs/retained.md', 'MEO Enhanced preserves the viewport during same-session mode switching.\n'],
+    ['docs/retained.md', 'Live uses source-mapped line numbers and Preview code blocks have their own line numbers.\n'],
+    ['docs/retained.md', 'HTML embeds local images; PDF automatically discovers Edge, Chrome, or Chromium.\n']
+  ] as const;
+  for (const [fixturePath, contents] of retainedStage10Fixtures) {
+    write(fixturePath, contents);
+    const outcome = runCheck();
+    assert.equal(outcome.ok, true, `${fixturePath} retained stage-10 semantics must pass: ${outcome.output}`);
     rmSync(join(fixtureRoot, ...fixturePath.split('/')));
   }
 } finally {

@@ -19,7 +19,6 @@ import {
 import type { HostViewNavigationPort } from '../application/hostViewNavigationLifecycle';
 import {
   EXTENSION_CONFIG_SECTION,
-  LINE_NUMBERS_SETTING_KEY,
   GIT_CHANGES_GUTTER_SETTING_KEY,
   DIFF_BASELINE_MODE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
@@ -27,7 +26,6 @@ import {
   OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
   getLongCodeBlockFoldingEnabled,
-  getLineNumbersEnabled,
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getDiffBaselineMode,
@@ -295,7 +293,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const sendInit = async (): Promise<boolean> => {
     const savedRevision = await readInitialSavedRevision();
     const diffBaselineState = diffBaselineSelection.getState();
-    const initialRestore = viewNavigation.getInitialRestore();
     const message: InitMessage = {
       type: 'init',
       documentId: documentKey,
@@ -307,7 +304,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       previewAppearance: getPreviewAppearance(),
       previewSourceColoring: getPreviewSourceColoring(),
       editorAppearance: getEditorAppearance(),
-      lineNumbers: getLineNumbersEnabled(context),
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       diffBaselineMode: diffBaselineState.mode,
@@ -320,8 +316,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       outlineVisible: getOutlineVisible(context),
       outlineWidth: getOutlineWidth(context),
       vscodeTheme: getCurrentVscodeCodeTheme(),
-      restoreTopLine: initialRestore?.line,
-      restoreTopLineOffset: initialRestore?.lineOffset
     };
     return postToWebview(message);
   };
@@ -470,16 +464,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         mode = raw.mode;
         await context.globalState.update(EDITOR_MODE_STATE_KEY, mode);
         return;
-      case 'setLineNumbers': {
-        const visible = raw.visible ?? raw.enabled;
-        if (typeof visible !== 'boolean') {
-          return;
-        }
-        await vscode.workspace
-          .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .update(LINE_NUMBERS_SETTING_KEY, visible, vscode.ConfigurationTarget.Global);
-        return;
-      }
       case 'setGitChangesGutter': {
         const visible = raw.visible ?? raw.enabled;
         if (typeof visible !== 'boolean') {
@@ -535,13 +519,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       }
-      case 'viewPositionChanged':
-        if (Number.isFinite(raw.topLine)) {
-          await enqueue(async () => {
-            await viewNavigation.rememberViewport(raw.topLine, raw.topLineOffset);
-          });
-        }
-        return;
       case 'exportDocument':
         await onExportDocument(session, raw.format, raw.appearance);
         return;

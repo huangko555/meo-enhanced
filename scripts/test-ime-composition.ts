@@ -62,7 +62,7 @@ async function main() {
         type: 'init', documentId: 'file:///ime.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live',
         previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark',
-        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
+        gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },

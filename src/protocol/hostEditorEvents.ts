@@ -6,7 +6,6 @@ export type HostEditorEvent =
   | { readonly type: 'revealDocumentFragment'; readonly href: string }
   | { readonly type: 'outlinePositionChanged'; readonly position: OutlinePosition }
   | { readonly type: 'outlineVisibilityChanged'; readonly visible: boolean }
-  | { readonly type: 'lineNumbersChanged'; readonly enabled: boolean }
   | { readonly type: 'gitChangesGutterChanged'; readonly enabled: boolean }
   | { readonly type: 'gitDiffLineHighlightsChanged'; readonly enabled: boolean }
   | { readonly type: 'diffBaselineModeChanged'; readonly mode: DiffBaselineMode }
@@ -39,7 +38,6 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
       return value.position === 'left' || value.position === 'right' ? value as HostEditorEvent : null;
     case 'outlineVisibilityChanged':
       return typeof value.visible === 'boolean' ? value as HostEditorEvent : null;
-    case 'lineNumbersChanged':
     case 'gitChangesGutterChanged':
     case 'gitDiffLineHighlightsChanged':
     case 'contentMaxWidthChanged':

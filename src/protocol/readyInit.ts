@@ -27,7 +27,6 @@ export type InitMessage = {
   readonly previewAppearance: PreviewAppearance;
   readonly previewSourceColoring: boolean;
   readonly editorAppearance: PreviewAppearance;
-  readonly lineNumbers: boolean;
   readonly gitChangesGutter: boolean;
   readonly gitDiffLineHighlights: boolean;
   readonly diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head';
@@ -40,8 +39,6 @@ export type InitMessage = {
   readonly outlineVisible: boolean;
   readonly outlineWidth: number;
   readonly vscodeTheme: CodeThemeDto | null;
-  readonly restoreTopLine?: number;
-  readonly restoreTopLineOffset?: number;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -66,6 +63,9 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || 'theme' in value
     || 'shikiCodeBlocks' in value
     || 'codeTheme' in value
+    || 'lineNumbers' in value
+    || 'restoreTopLine' in value
+    || 'restoreTopLineOffset' in value
     || typeof value.documentId !== 'string'
     || value.documentId.length === 0
     || typeof value.text !== 'string'
@@ -79,7 +79,6 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isPreviewAppearance(value.editorAppearance)
     || !Array.isArray(value.diagnostics)
     || decodeDiagnosticsChangedEvent({ type: 'diagnosticsChanged', diagnostics: value.diagnostics }) === null
-    || typeof value.lineNumbers !== 'boolean'
     || typeof value.gitChangesGutter !== 'boolean'
     || typeof value.gitDiffLineHighlights !== 'boolean'
     || (value.diffBaselineMode !== 'current-edit'
@@ -98,11 +97,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !Number.isFinite(value.outlineWidth)
     || value.outlineWidth <= 0
     || decodeCodeTheme(value.vscodeTheme) === false
-    || decodeCodeTheme(value.vscodeTheme) === undefined
-    || (value.restoreTopLine !== undefined
-      && (typeof value.restoreTopLine !== 'number' || !Number.isInteger(value.restoreTopLine) || value.restoreTopLine < 1))
-    || (value.restoreTopLineOffset !== undefined
-      && (typeof value.restoreTopLineOffset !== 'number' || !Number.isFinite(value.restoreTopLineOffset)))) {
+    || decodeCodeTheme(value.vscodeTheme) === undefined) {
     return null;
   }
   return value as InitMessage;

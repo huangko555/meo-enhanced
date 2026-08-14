@@ -5,7 +5,6 @@ const baseOptions = {
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
   target: 'html' as const,
-  htmlImageMode: 'embedded' as const,
   styleEnvironment: {
     editorBackgroundColor: '#20252b',
     editorForegroundColor: '#d8dee9',

@@ -33,12 +33,8 @@ import {
   OUTLINE_VISIBLE_KEY,
   getCurrentVscodeCodeTheme,
   syncEditorAssociations,
-  type ExportHtmlImageMode,
-  getExportHtmlImageMode,
   getExportEditorFontEnvironment,
-  getExportPdfBrowserPath,
   getGitChangesGutterEnabled,
-  getRememberPositionLines,
   getOutlineVisible,
   getContentMaxWidthEnabled,
   isMarkdownDocumentPath,
@@ -93,7 +89,6 @@ type ExportRuntimeModule = {
     sourceDocumentPath: string;
     outputFilePath: string;
     target: ExportFormat;
-    htmlImageMode: ExportHtmlImageMode;
     appearance: PreviewAppearance;
     styleEnvironment?: ExportStyleEnvironment;
     editorFontEnvironment?: {
@@ -475,8 +470,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       viewNavigation: createVscodeViewNavigationAdapter({
         document,
         documentUri,
-        context: this.context,
-        readMinimumRememberedLines: getRememberPositionLines,
         getDocumentFragmentHref,
         resolveLocalLinkTarget: resolveLocalLinkTargetUri,
         post: async (message) => {
@@ -660,12 +653,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
               sourceDocumentUri: session.documentUri,
               outputFileUri: saveUri,
               target: format,
-              htmlImageMode: getExportHtmlImageMode(),
               styleEnvironment: snapshot.environment,
               appearance
             });
 
-            const browserExecutablePath = getExportPdfBrowserPath();
             const puppeteerRuntimeModulePath = vscode.Uri.joinPath(
               this.context.extensionUri,
               'dist',
@@ -677,7 +668,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
               await exportRuntime.writeFinalizedHtmlExport({
                 htmlDocument: exportRender.htmlDocument,
                 outputHtmlPath: saveUri.fsPath,
-                browserExecutablePath,
                 puppeteerRuntimeModulePath,
                 skipHeadlessFinalize: !exportRender.hasMermaid
               });
@@ -687,7 +677,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
             await exportRuntime.renderPdfFromHtmlExport({
               htmlDocument: exportRender.htmlDocument,
               outputPdfPath: saveUri.fsPath,
-              browserExecutablePath,
               puppeteerRuntimeModulePath
             });
           }
@@ -722,7 +711,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       sourceDocumentUri: vscode.Uri;
       outputFileUri: vscode.Uri;
       target: ExportFormat;
-      htmlImageMode: ExportHtmlImageMode;
       styleEnvironment?: ExportStyleEnvironment;
       appearance: PreviewAppearance;
     }
@@ -739,7 +727,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       sourceDocumentPath: params.sourceDocumentUri.fsPath,
       outputFilePath: params.outputFileUri.fsPath,
       target: params.target,
-      htmlImageMode: params.htmlImageMode,
       appearance: params.appearance,
       styleEnvironment: params.styleEnvironment,
       editorFontEnvironment: getExportEditorFontEnvironment(),

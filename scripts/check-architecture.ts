@@ -2254,6 +2254,78 @@ for (const path of removedColorCapabilityScope) {
   }
 }
 
+// Product deletion guard: MEO no longer owns cross-session viewport persistence,
+// a global line-number toggle, or user-selectable export image/browser paths.
+// Same-session viewport navigation, native/source-mapped line numbers, HTML image
+// embedding and PDF browser discovery remain independent retained capabilities.
+const removedStage10Scope = projectFilesForCapabilityGuard().filter((path) => (
+  path === 'package.json' ||
+  /^README(?:\.[^/]+)?\.md$/i.test(path) ||
+  /^docs\/.*\.md$/i.test(path) ||
+  /^(?:src|webview\/src)\/.*\.(?:ts|tsx|css|json|md|html)$/i.test(path)
+));
+const removedStage10Aliases = [
+  'meoenhancedrememberpositionlines', 'rememberpositionlinessettingkey', 'getrememberpositionlines',
+  'rememberedviewport', 'rememberviewport', 'rememberedviewpositionsbydocument', 'viewpositionchanged',
+  'restoretoplineoffset', 'readminimumrememberedlines',
+  'meoenhancedlinenumbersvisible', 'linenumberssettingkey', 'linenumberslegacysettingkey',
+  'linenumberslegacyvisiblesettingkey', 'linenumbersenabled', 'getlinenumbersenabled', 'linenumbersvisible',
+  'linenumbersbtn', 'updatelinenumbersui', 'setlinenumbersvisible', 'togglelinenumbers', 'initiallinenumbers',
+  'setlinenumbers', 'linenumberschanged', 'meolinenumbershidden',
+  'meoenhancedexporthtmlimagemode', 'exporthtmlimagemode', 'getexporthtmlimagemode', 'htmlimagemode',
+  'meoenhancedexportbrowserpath', 'meoenhancedexportpdfbrowserpath', 'getexportpdfbrowserpath'
+] as const;
+const hasRemovedStage10Alias = (value: string): boolean => {
+  const normalized = value.toLowerCase().replace(/[-_.\s/\\]+/g, '');
+  return removedStage10Aliases.some((alias) => normalized.includes(alias));
+};
+const stage10HistoricalMarkers = [
+  'removed', 'historical', 'former', 'previously', 'deprecated', 'usedto',
+  'nolonger', 'doesnot', 'donot', 'didnot'
+] as const;
+const hasCurrentRemovedStage10DocumentationClaim = (value: string): boolean => {
+  const wholeNormalized = normalizeCapabilityAlias(value);
+  const hasRemovedPublicSetting = [
+    'meoenhancedrememberpositionlines', 'meoenhancedlinenumbersvisible',
+    'meoenhancedexporthtmlimagemode', 'meoenhancedexportbrowserpath', 'meoenhancedexportpdfbrowserpath'
+  ].some((alias) => wholeNormalized.includes(alias));
+  if (hasRemovedPublicSetting
+    && !stage10HistoricalMarkers.some((marker) => wholeNormalized.includes(marker))) return true;
+  return value.split(customThemeDocumentationClauseBoundary)
+  .some((segment) => {
+    const normalized = normalizeCapabilityAlias(segment);
+    if (!(normalized.includes('meoenhanced') || /(?:^|[^a-z])meo(?:[^a-z]|$)/i.test(segment))) return false;
+    if (stage10HistoricalMarkers.some((marker) => normalized.includes(marker))) return false;
+    return [
+      /(?:remember|restore).{0,24}(?:cross[- ]?session|scroll|reading|view).{0,12}(?:position|location)/i,
+      /(?:global|toggle|configure|configurable|setting).{0,20}line numbers?/i,
+      /line numbers?.{0,20}(?:global|toggle|configure|configurable|setting)/i,
+      /(?:choose|select|configure).{0,24}(?:embedded|linked).{0,20}(?:html )?images?/i,
+      /meoEnhanced\.export\.(?:browserPath|pdf\.browserPath|html\.imageMode)/i
+    ].some((pattern) => pattern.test(segment));
+  });
+};
+for (const path of removedStage10Scope) {
+  const isProductionPath = /^(?:src|webview\/src)\//.test(path);
+  const isDocumentationPath = /^README(?:\.[^/]+)?\.md$/i.test(path) || /^docs\/.*\.md$/i.test(path);
+  if (isProductionPath && hasRemovedStage10Alias(path)) {
+    failures.push(`ARCH022 已删除的位置记忆、独立行号或重复导出设置重新出现: ${path}:1`);
+    continue;
+  }
+  const lines = readTrackedProjectFile(path).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (path === 'package.json' && /^\s*"test(?::[^"]*)?"\s*:/.test(lines[index])) continue;
+    const line = lines[index].replace(
+      /^\s*\|\|\s*'(?:lineNumbers|restoreTopLine|restoreTopLineOffset)'\s+in\s+value\s*$/,
+      ''
+    );
+    if ((isDocumentationPath && hasCurrentRemovedStage10DocumentationClaim(line))
+      || (!isDocumentationPath && hasRemovedStage10Alias(line))) {
+      failures.push(`ARCH022 已删除的位置记忆、独立行号或重复导出设置重新出现: ${path}:${index + 1}`);
+    }
+  }
+}
+
 if (config.knownLegacyTestFailures.length > 0) {
   failures.push('ARCH012 Legacy 测试失败基线必须保持为空');
 }

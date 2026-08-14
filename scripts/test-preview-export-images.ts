@@ -13,7 +13,7 @@ const pngBytes = Buffer.from(
 fs.writeFileSync(localImagePath, pngBytes);
 
 const remoteImageUrl = 'https://i2.hdslb.com/bfs/banner/example.jpg@976w_550h_!web-home-carousel-cover.avif';
-const markdownText = `![local](${localImagePath} "title")\n\n![remote](${remoteImageUrl})`;
+const markdownText = `![local](${localImagePath} "title")\n\n![remote](${remoteImageUrl})\n\n![missing fallback](missing-image.png)`;
 const baseOptions = {
   markdownText,
   sourceDocumentPath: path.join(tempDir, 'document.md'),
@@ -29,14 +29,12 @@ try {
   const exported = exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
     outputFilePath: path.join(tempDir, 'export.html'),
-    target: 'html' as const,
-    htmlImageMode: 'embedded' as const
+    target: 'html' as const
   });
   const pdf = exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
     outputFilePath: path.join(tempDir, 'export.pdf'),
-    target: 'pdf' as const,
-    htmlImageMode: 'embedded' as const
+    target: 'pdf' as const
   });
 
   for (const [surface, html] of [
@@ -48,6 +46,9 @@ try {
     }
     if (!html.includes(remoteImageUrl)) {
       throw new Error(`${surface} changed or dropped a valid remote AVIF image URL`);
+    }
+    if (!html.includes('alt="missing fallback"')) {
+      throw new Error(`${surface} dropped fallback alt text for an unreadable local image`);
     }
   }
   if (!pdf.htmlDocument.includes(pathToFileURL(localImagePath).toString())) {

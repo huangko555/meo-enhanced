@@ -4,56 +4,18 @@ import {
   createHostViewNavigationLifecycle,
   type HostViewNavigationLifecycle,
   type HostViewNavigationPort,
-  type RememberedViewport,
   type ViewSelection
 } from '../application/hostViewNavigationLifecycle';
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 
-const REMEMBERED_VIEW_POSITIONS_STATE_KEY = 'rememberedViewPositionsByDocument';
-const MAX_REMEMBERED_VIEW_POSITIONS = 300;
-
 type VscodeViewNavigationDependencies = {
   readonly document: vscode.TextDocument;
   readonly documentUri: vscode.Uri;
-  readonly context: vscode.ExtensionContext;
-  readonly readMinimumRememberedLines: () => number;
   readonly getDocumentFragmentHref: (href: string) => string | null;
   readonly resolveLocalLinkTarget: (href: string, documentUri: vscode.Uri) => Promise<vscode.Uri | null>;
   readonly post: (message: HostEditorEvent) => Promise<boolean>;
   readonly reportFailure: (context: string, error: unknown) => void;
 };
-
-const normalizeLineOffset = (value: number | undefined): number => {
-  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : 0;
-  return Math.max(0, Math.round(numeric * 100) / 100);
-};
-
-const readRememberedMap = (workspaceState: vscode.Memento): Record<string, RememberedViewport> => {
-  const stored = workspaceState.get<unknown>(REMEMBERED_VIEW_POSITIONS_STATE_KEY);
-  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
-  const entries: Record<string, RememberedViewport> = {};
-  for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
-    if (!key || !value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const record = value as Partial<RememberedViewport>;
-    const line = Number(record.line);
-    const updatedAt = Number(record.updatedAt);
-    if (!Number.isFinite(line) || !Number.isFinite(updatedAt)) continue;
-    entries[key] = {
-      line: Math.max(1, Math.floor(line)),
-      lineOffset: normalizeLineOffset(Number(record.lineOffset)),
-      updatedAt: Math.floor(updatedAt)
-    };
-  }
-  return entries;
-};
-
-const pruneRememberedMap = (
-  entries: Record<string, RememberedViewport>
-): Record<string, RememberedViewport> => Object.fromEntries(
-  Object.entries(entries)
-    .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
-    .slice(0, MAX_REMEMBERED_VIEW_POSITIONS)
-);
 
 const isSameResource = (left: vscode.Uri, right: vscode.Uri): boolean => {
   if (left.scheme === 'file' && right.scheme === 'file') {
@@ -81,11 +43,11 @@ const parseLineFragmentSelection = (document: vscode.TextDocument): ViewSelectio
   return { anchor: offset, head: offset };
 };
 
-/** Adapts VS Code selection, workspace persistence and Protocol output to Host view navigation. */
+/** Adapts VS Code selection and Protocol output to Host view navigation. */
 export function createVscodeViewNavigationAdapter(
   dependencies: VscodeViewNavigationDependencies
 ): HostViewNavigationPort<vscode.TextEditor> {
-  const { document, documentUri, context } = dependencies;
+  const { document, documentUri } = dependencies;
   const documentKey = document.uri.toString();
   const isEditorForDocument = (editor: vscode.TextEditor | undefined): editor is vscode.TextEditor =>
     editor?.document.uri.toString() === documentKey;
@@ -103,24 +65,9 @@ export function createVscodeViewNavigationAdapter(
   const rawInitialFragment = document.uri.fragment?.trim() ?? '';
   const initialFragment = initialSelection === null && rawInitialFragment ? `#${rawInitialFragment}` : null;
 
-  const persistence = {
-    read(): RememberedViewport | null {
-      return readRememberedMap(context.workspaceState)[documentKey] ?? null;
-    },
-    async write(value: RememberedViewport | null): Promise<void> {
-      const entries = readRememberedMap(context.workspaceState);
-      if (value) entries[documentKey] = value;
-      else delete entries[documentKey];
-      await context.workspaceState.update(REMEMBERED_VIEW_POSITIONS_STATE_KEY, pruneRememberedMap(entries));
-    }
-  };
-
   const lifecycle: HostViewNavigationLifecycle = createHostViewNavigationLifecycle({
-    readLineCount: () => document.lineCount,
-    readMinimumRememberedLines: dependencies.readMinimumRememberedLines,
     initialSelection,
     initialFragment,
-    persistence,
     output: {
       reveal: (reveal) => dependencies.post(reveal.kind === 'selection'
         ? {
@@ -136,10 +83,8 @@ export function createVscodeViewNavigationAdapter(
   });
 
   return {
-    getInitialRestore: lifecycle.getInitialRestore,
     ready: lifecycle.ready,
     flush: lifecycle.flush,
-    rememberViewport: lifecycle.rememberViewport,
     async revealSelectionForEditor(editor) {
       if (isEditorForDocument(editor)) await lifecycle.revealSelection(readSelection(editor));
     },

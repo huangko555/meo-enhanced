@@ -51,12 +51,12 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///search.md', text: documentText, version: 1,
         savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live', previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark',
-        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
+        gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
-        vscodeTheme: null, restoreTopLine: 1, restoreTopLineOffset: 0
+        vscodeTheme: null
       }}));
     }, { documentText: text, theme: darkBuiltInVisuals });
     await page.waitForSelector('.editor-host > .cm-editor');

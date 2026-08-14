@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import sanitizeHtml from 'sanitize-html';
-import { rewriteExportImageSrc, type ExportHtmlImageMode } from './assetPaths';
+import { rewriteExportImageSrc } from './assetPaths';
 import { extractExportFrontmatter } from './frontmatter';
 import { prepareMarkdownWithFootnotes } from './footnotes';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
@@ -41,7 +41,6 @@ export type RenderMarkdownOptions = {
   markdownFilePath: string;
   outputFilePath?: string;
   target: RenderMarkdownTarget;
-  htmlImageMode?: ExportHtmlImageMode;
   renderHexColorSwatches?: boolean;
 };
 
@@ -107,7 +106,6 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       markdownFilePath: options.markdownFilePath,
       outputFilePath: options.outputFilePath,
       target: options.target,
-      htmlImageMode: options.htmlImageMode ?? 'embedded',
       embeddedImageDataUrlCache
     });
     token.attrSet('src', rewritten);
@@ -376,7 +374,6 @@ function installSafeHtmlTransform(
               markdownFilePath: options.markdownFilePath,
               outputFilePath: options.outputFilePath,
               target: options.target,
-              htmlImageMode: options.htmlImageMode ?? 'embedded',
               embeddedImageDataUrlCache
             })
           } : {})

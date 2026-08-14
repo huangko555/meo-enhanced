@@ -3,7 +3,6 @@ import { buildExportHtmlDocument as buildStandaloneExportHtmlDocument } from './
 import { buildExportStyles, buildPreviewStyles, type ExportStyleEnvironment } from './exportStyles';
 import { writeFinalizedHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
-import type { ExportHtmlImageMode } from './assetPaths';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 
 export type ExportRuntimeBuildHtmlOptions = {
@@ -11,7 +10,6 @@ export type ExportRuntimeBuildHtmlOptions = {
   sourceDocumentPath: string;
   outputFilePath: string;
   target: 'html' | 'pdf';
-  htmlImageMode: ExportHtmlImageMode;
   appearance: PreviewAppearance;
   styleEnvironment?: ExportStyleEnvironment;
   editorFontEnvironment?: {
@@ -32,8 +30,7 @@ function renderExportHtmlDocument(
     markdownText: options.markdownText,
     markdownFilePath: options.sourceDocumentPath,
     outputFilePath: options.outputFilePath,
-    target: options.target,
-    htmlImageMode: options.htmlImageMode
+    target: options.target
   });
 
   const stylesCss = buildExportStyles(
@@ -68,7 +65,6 @@ function renderPreviewDocument(options: {
     markdownText: options.markdownText,
     markdownFilePath: options.sourceDocumentPath,
     target: 'html',
-    htmlImageMode: 'embedded',
     renderHexColorSwatches: true
   });
   return {

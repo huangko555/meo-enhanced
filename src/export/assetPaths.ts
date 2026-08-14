@@ -6,7 +6,6 @@ const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const REMOTE_OR_INLINE_RE = /^(?:https?:|data:|blob:)/i;
 
 type ExportImageTarget = 'html' | 'pdf';
-export type ExportHtmlImageMode = 'embedded' | 'linked';
 
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   '.avif': 'image/avif',
@@ -26,7 +25,6 @@ export type RewriteExportImageSrcOptions = {
   markdownFilePath: string;
   target: ExportImageTarget;
   outputFilePath?: string;
-  htmlImageMode: ExportHtmlImageMode;
   embeddedImageDataUrlCache?: Map<string, string | null>;
 };
 
@@ -58,12 +56,10 @@ export function rewriteExportImageSrc(rawSrc: string, options: RewriteExportImag
     return `${toFileUrlString(filePath)}${suffix}`;
   }
 
-  if (options.htmlImageMode === 'embedded') {
-    const embedded = toEmbeddedImageDataUrl(filePath, options.embeddedImageDataUrlCache);
-    if (embedded) {
-      // Preserve hash fragments (e.g. SVG fragment refs), but skip query args for data URLs.
-      return `${embedded}${hash}`;
-    }
+  const embedded = toEmbeddedImageDataUrl(filePath, options.embeddedImageDataUrlCache);
+  if (embedded) {
+    // Preserve hash fragments (e.g. SVG fragment refs), but skip query args for data URLs.
+    return `${embedded}${hash}`;
   }
 
   const outputDir = options.outputFilePath ? path.dirname(options.outputFilePath) : path.dirname(options.markdownFilePath);

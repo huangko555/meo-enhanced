@@ -155,7 +155,6 @@ const candidate = {
       parent,
       text: init.text,
       initialMode: 'source',
-      initialLineNumbers: true,
       initialGitGutter: false,
       onApplyChanges: enqueueLocalText,
       onOpenLink: () => undefined,

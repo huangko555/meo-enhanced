@@ -125,18 +125,27 @@ async function main() {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///viewport.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', previewSourceColoring: true, editorAppearance: 'dark',
-        lineNumbers: true, gitChangesGutter: false, gitDiffLineHighlights: false,
+        gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
-        vscodeTheme: null,
-        restoreTopLine: 139, restoreTopLineOffset: 0
+        vscodeTheme: null
       }}));
     }, { text: initialText, theme: darkBuiltInVisuals });
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
+    const liveLineNumberBoundary = await page.evaluate(() => ({
+      gutter: Boolean(document.querySelector('.editor-host .cm-lineNumbers')),
+      meoToggle: Boolean(document.querySelector('[data-action="lineNumbers"]'))
+    }));
+    await page.click('[data-mode="source"]');
+    const sourceLineNumberGutter = await page.$('.editor-host .cm-lineNumbers');
+    await page.click('[data-mode="live"]');
+    if (!liveLineNumberBoundary.gutter || liveLineNumberBoundary.meoToggle || !sourceLineNumberGutter) {
+      throw new Error(`Line-number ownership boundary regressed: ${JSON.stringify(liveLineNumberBoundary)}`);
+    }
     await page.evaluate((position) => window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'revealSelection', anchor: position, head: position, focus: false }
     })), initialText.indexOf('stable line 83'));
@@ -309,7 +318,7 @@ async function main() {
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         'Release Fixed Baseline',
         'Current Edits', 'Recent Save', 'Git HEAD',
-        'Constrain Width', 'Line Numbers', 'Fold Long Code Blocks'
+        'Constrain Width', 'Fold Long Code Blocks'
       ]) ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||
@@ -385,7 +394,6 @@ async function main() {
     );
     await page.mouse.move(0, 0);
     await page.evaluate(() => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'lineNumbersChanged', enabled: false } }));
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'contentMaxWidthChanged', enabled: true } }));
     });
     await waitForFrames(page);
@@ -422,7 +430,6 @@ async function main() {
       throw new Error(`Toolbar settings did not update as expected: ${JSON.stringify({ initialToolbarStart, toggledToolbarStart, constrainedWidthState })}`);
     }
     await page.evaluate(() => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'lineNumbersChanged', enabled: true } }));
       window.dispatchEvent(new MessageEvent('message', { data: { type: 'contentMaxWidthChanged', enabled: false } }));
     });
     await waitForFrames(page);

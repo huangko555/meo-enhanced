@@ -1,8 +1,11 @@
 import * as fs from 'node:fs/promises';
-import { finalizeHtmlExportInHeadlessBrowser, type HeadlessExportOptions } from './pdfRenderer';
+import { finalizeHtmlExportInHeadlessBrowser } from './pdfRenderer';
 
-export type WriteHtmlExportOptions = HeadlessExportOptions & {
+export type WriteHtmlExportOptions = {
+  htmlDocument: string;
   outputHtmlPath: string;
+  puppeteerRuntimeModulePath?: string;
+  timeoutMs?: number;
   skipHeadlessFinalize?: boolean;
 };
 
@@ -11,6 +14,10 @@ export async function writeFinalizedHtmlExport(options: WriteHtmlExportOptions):
     await fs.writeFile(options.outputHtmlPath, options.htmlDocument, 'utf8');
     return;
   }
-  const finalizedHtml = await finalizeHtmlExportInHeadlessBrowser(options);
+  const finalizedHtml = await finalizeHtmlExportInHeadlessBrowser({
+    htmlDocument: options.htmlDocument,
+    puppeteerRuntimeModulePath: options.puppeteerRuntimeModulePath,
+    timeoutMs: options.timeoutMs
+  });
   await fs.writeFile(options.outputHtmlPath, finalizedHtml, 'utf8');
 }

@@ -16,7 +16,7 @@ export async function findPdfBrowserExecutablePath(configuredPath?: string): Pro
   }
 
   throw new Error(
-    'No supported Chrome/Edge executable was found. Install Chrome/Edge or set meoEnhanced.export.browserPath.'
+    'No supported Chrome/Edge executable was found. Install Chrome/Edge and retry.'
   );
 }
 

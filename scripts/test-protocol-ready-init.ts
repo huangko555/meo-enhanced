@@ -34,7 +34,6 @@ const completeInit = {
   previewAppearance: 'dark' as const,
   previewSourceColoring: true,
   editorAppearance: 'dark' as const,
-  lineNumbers: true,
   gitChangesGutter: true,
   gitDiffLineHighlights: true,
   diffBaselineMode: 'git-head' as const,
@@ -70,7 +69,7 @@ assert.notEqual(decodeInitMessage({ ...completeInit, savedRevision: null }), nul
 assert.equal(decodeInitMessage({ ...completeInit, mode: 'bad' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewAppearance: 'broken' }), null);
 for (const requiredKey of [
-  'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'lineNumbers', 'gitChangesGutter',
+  'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'gitChangesGutter',
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
   'findOptions', 'outlinePosition', 'outlineVisible',
@@ -80,7 +79,7 @@ for (const requiredKey of [
   delete incomplete[requiredKey];
   assert.equal(decodeInitMessage(incomplete), null, `Init without ${requiredKey} must be rejected`);
 }
-for (const removedKey of ['theme', 'shikiCodeBlocks', 'codeTheme']) {
+for (const removedKey of ['theme', 'shikiCodeBlocks', 'codeTheme', 'lineNumbers', 'restoreTopLine', 'restoreTopLineOffset']) {
   assert.equal(
     decodeInitMessage({ ...completeInit, [removedKey]: removedKey === 'shikiCodeBlocks' ? true : {} }),
     null,
@@ -496,7 +495,6 @@ assert.equal(decodeGitBaselineChangedEvent({
 }), null);
 for (const command of [
   { type: 'setMode', mode: 'preview' },
-  { type: 'setLineNumbers', visible: true },
   { type: 'setGitChangesGutter', enabled: false },
   { type: 'setDiffBaselineMode', mode: 'git-head' },
   { type: 'setFixedBaseline', enabled: true },
@@ -507,7 +505,6 @@ for (const command of [
   { type: 'setContentMaxWidth', enabled: true },
   { type: 'setLongCodeBlockFolding', enabled: false },
   { type: 'setFindOptions', findOptions: { wholeWord: true, caseSensitive: false } },
-  { type: 'viewPositionChanged', topLine: 3, topLineOffset: 0.5 },
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
   { type: 'discardChanges', topLine: 1 },
@@ -520,6 +517,8 @@ for (const command of [
 }
 assert.equal(decodeEditorCommand({ type: 'setMode', mode: 'unknown' }), null);
 assert.equal(decodeEditorCommand({ type: 'saveDocument' }), null);
+assert.equal(decodeEditorCommand({ type: 'setLineNumbers', visible: true }), null);
+assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 3 }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 0 }), null);
 assert.equal(decodeEditorCommand({ type: 'setOutlineWidth', width: Number.NaN }), null);
 for (const event of [
@@ -528,7 +527,6 @@ for (const event of [
   { type: 'revealDocumentFragment', href: '#intro' },
   { type: 'outlinePositionChanged', position: 'left' },
   { type: 'outlineVisibilityChanged', visible: true },
-  { type: 'lineNumbersChanged', enabled: true },
   { type: 'gitChangesGutterChanged', enabled: false },
   { type: 'gitDiffLineHighlightsChanged', enabled: true },
   { type: 'diffBaselineModeChanged', mode: 'recent-save' },
@@ -540,6 +538,7 @@ for (const event of [
   assert.notEqual(decodeHostEditorEvent(event), null, `Host editor event was rejected: ${event.type}`);
 }
 assert.equal(decodeHostEditorEvent({ type: 'revealSelection', anchor: -1, head: 0 }), null);
+assert.equal(decodeHostEditorEvent({ type: 'lineNumbersChanged', enabled: true }), null);
 assert.equal(decodeHostEditorEvent({ type: 'fixedBaselineChanged', pinned: true, active: 'yes' }), null);
 assert.equal(decodeHostEditorEvent({ type: 'previewAppearanceChanged', appearance: 'light' }), null);
 assert.equal(decodeHostEditorEvent({ type: 'previewSourceColoringChanged', enabled: false }), null);

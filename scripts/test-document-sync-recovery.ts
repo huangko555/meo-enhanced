@@ -39,7 +39,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///recovery.md', text: '1. alpha', version: 1,
         savedRevision: { version: 1, text: '1. alpha' }, diagnostics: [], mode: 'live',
-        previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark', lineNumbers: true, gitChangesGutter: false,
+        previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark', gitChangesGutter: false,
         gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
