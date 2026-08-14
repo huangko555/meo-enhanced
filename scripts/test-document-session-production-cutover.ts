@@ -14,6 +14,14 @@ const packageJson = read('package.json');
 const documentSessionAdapter = read('webview/src/adapters/documentSessionWebviewAdapter.ts');
 const hostBootstrap = read('src/extension.ts');
 const pendingDraftRecovery = read('src/application/pendingDraftRecovery.ts');
+const presentationSourceOwners = [
+  read('src/domain/documentSession.ts'),
+  read('src/application/documentSession.ts'),
+  read('webview/src/adapters/documentSessionActions.ts'),
+  read('webview/src/adapters/documentSessionRuntime.ts'),
+  documentSessionAdapter,
+  webviewBootstrap
+];
 
 assert.equal(fs.existsSync(path.join(repoRoot, 'webview/src/helpers/documentSync.ts')), false);
 assert.equal(fs.existsSync(path.join(repoRoot, 'scripts/test-document-sync.ts')), false);
@@ -69,5 +77,15 @@ assert.equal(
   'Host Bootstrap must create exactly one Pending Draft recovery Adapter per Panel Session'
 );
 assert.match(pendingDraftRecovery, /let pendingDraftText: string \| null = null/);
+assert.equal(
+  presentationSourceOwners.reduce(
+    (count, source) => count
+      + (source.match(/'revision' \| 'rebased-draft' \| 'disk-reload'/g) ?? []).length,
+    0
+  ),
+  1,
+  'Document presentation source literals must have one authoritative owner'
+);
+assert.match(presentationSourceOwners[0], /export type DocumentPresentationSource/);
 
 console.log('Document Session production cutover guards passed');

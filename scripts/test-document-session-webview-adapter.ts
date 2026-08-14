@@ -59,6 +59,21 @@ assert.equal(adapter.accept({
 await adapter.whenIdle();
 assert.deepEqual(restored, [{ topLine: 7, topLineOffset: 2 }]);
 assert.deepEqual(presented.at(-1), { text: 'disk version', source: 'disk-reload' });
+const presentedAfterCurrentReload = presented.length;
+assert.equal(adapter.accept({
+  type: 'documentReloadedFromDisk',
+  version: 3,
+  text: 'stale disk version',
+  topLine: 2,
+  topLineOffset: 9
+}), true);
+await adapter.whenIdle();
+assert.equal(presented.length, presentedAfterCurrentReload, 'a stale reload must not be presented');
+assert.deepEqual(
+  restored,
+  [{ topLine: 7, topLineOffset: 2 }],
+  'a stale reload must not restore an obsolete viewport'
+);
 assert.equal(adapter.accept({
   type: 'documentReloadFromDiskFailed',
   message: 'Could not reload the document from disk: VS Code refused to revert'

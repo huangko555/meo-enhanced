@@ -1,6 +1,7 @@
 import type {
   DocumentSessionAction,
-  DocumentSessionInput
+  DocumentSessionInput,
+  DocumentPresentationSource
 } from '../../../src/application/documentSession';
 import type {
   ApplyChangesMessage,
@@ -13,14 +14,14 @@ type RemoteDocumentSessionAction = Extract<
 >;
 
 export type DocumentSessionActionAdapter = {
-  execute(actions: readonly DocumentSessionAction[]): Promise<void>;
+  execute(actions: readonly DocumentSessionAction[]): Promise<boolean>;
 };
 
 export type DocumentSessionActionAdapterDependencies = {
   readonly postMessage: (message: ApplyChangesMessage | DraftChangedMessage) => void;
   readonly presentText: (
     text: string,
-    source: 'revision' | 'rebased-draft' | 'disk-reload'
+    source: DocumentPresentationSource
   ) => boolean | void;
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
   readonly handleInput: (input: DocumentSessionInput) => readonly DocumentSessionAction[];
@@ -42,6 +43,7 @@ export function createDocumentSessionActionAdapter(
     async execute(actions) {
       const queue = Array.from(actions);
       let revisionRequestAttempts = 0;
+      let presentationSucceeded = true;
 
       while (queue.length > 0) {
         const action = queue.shift();
@@ -60,7 +62,9 @@ export function createDocumentSessionActionAdapter(
           continue;
         }
         if (action.type === 'presentText') {
-          dependencies.presentText(action.text, action.source);
+          if (dependencies.presentText(action.text, action.source) === false) {
+            presentationSucceeded = false;
+          }
           continue;
         }
         if (action.type === 'requestRevision'
@@ -84,6 +88,7 @@ export function createDocumentSessionActionAdapter(
         }
         queue.unshift(...nextActions);
       }
+      return presentationSucceeded;
     }
   };
 }

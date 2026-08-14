@@ -1,4 +1,5 @@
 import type { HostToWebviewMessage, WebviewToHostMessage } from '../../../src/protocol/messages';
+import type { DocumentPresentationSource } from '../../../src/application/documentSession';
 import type { DocumentReloadedFromDiskMessage } from '../../../src/protocol/documentSync';
 import type { InitMessage } from '../../../src/protocol/readyInit';
 import { createDocumentSessionRuntime } from './documentSessionRuntime';
@@ -23,7 +24,7 @@ export type DocumentSessionWebviewAdapterDependencies = {
   readonly postMessage: (message: WebviewToHostMessage) => void;
   readonly presentText: (
     text: string,
-    source: 'revision' | 'rebased-draft' | 'disk-reload'
+    source: DocumentPresentationSource
   ) => boolean | void;
   readonly restoreReloadedView: (message: DocumentReloadedFromDiskMessage) => void;
   readonly showFailureNotice: (message: string) => void;
@@ -49,14 +50,14 @@ export function createDocumentSessionWebviewAdapter(
   let ready = false;
   let disposed = false;
 
-  const enqueue = (context: string, task: () => Promise<void> | void): void => {
+  const enqueue = (context: string, task: () => Promise<unknown> | void): void => {
     if (disposed) return;
     operation = operation
-      .then(task)
+      .then(async () => { await task(); })
       .catch((error) => dependencies.reportUnexpectedError(context, error));
   };
 
-  const enqueueSession = (context: string, task: () => Promise<void> | void): void => {
+  const enqueueSession = (context: string, task: () => Promise<unknown> | void): void => {
     enqueue(context, async () => {
       if (disposed) return;
       if (!ready) throw new Error('Document Session received input before Init');
@@ -86,12 +87,12 @@ export function createDocumentSessionWebviewAdapter(
     }
     if (message.type === 'documentReloadedFromDisk') {
       enqueueSession('document reload', async () => {
-        await runtime.handle({
+        const accepted = await runtime.handle({
           type: 'hostReloadedFromDisk',
           version: message.version,
           text: message.text
         });
-        if (!disposed) dependencies.restoreReloadedView(message);
+        if (accepted && !disposed) dependencies.restoreReloadedView(message);
       });
       return true;
     }

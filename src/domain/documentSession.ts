@@ -18,6 +18,8 @@ export type SavedRevision = {
   readonly text: string;
 };
 
+export type DocumentPresentationSource = 'revision' | 'rebased-draft' | 'disk-reload';
+
 export type DocumentSessionState = {
   readonly documentId: string;
   readonly revision: Revision;
@@ -43,7 +45,7 @@ export type DocumentSessionEffect =
   | {
       readonly type: 'presentText';
       readonly text: string;
-      readonly source: 'revision' | 'rebased-draft' | 'disk-reload';
+      readonly source: DocumentPresentationSource;
     }
   | { readonly type: 'requestResync' }
   | { readonly type: 'saveRevision'; readonly revision: Revision };

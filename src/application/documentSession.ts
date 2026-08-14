@@ -3,10 +3,13 @@ import {
   transitionDocumentSession,
   type DocumentSessionEffect,
   type DocumentSessionEvent,
+  type DocumentPresentationSource,
   type DocumentSessionState,
   type Revision,
   type SavedRevision
 } from '../domain/documentSession';
+
+export type { DocumentPresentationSource } from '../domain/documentSession';
 
 export type DocumentSessionInput =
   | { readonly type: 'localDraftChanged'; readonly text: string }
@@ -40,7 +43,7 @@ export type DocumentSessionAction =
   | {
       readonly type: 'presentText';
       readonly text: string;
-      readonly source: 'revision' | 'rebased-draft' | 'disk-reload';
+      readonly source: DocumentPresentationSource;
     }
   | { readonly type: 'saveDocument'; readonly revision: Revision }
   | { readonly type: 'requestRevision' };

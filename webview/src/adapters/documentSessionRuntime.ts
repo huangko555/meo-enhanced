@@ -1,7 +1,8 @@
 import type {
   DocumentSessionAction,
   DocumentSessionCoordinator,
-  DocumentSessionInput
+  DocumentSessionInput,
+  DocumentPresentationSource
 } from '../../../src/application/documentSession';
 import type { ApplyChangesMessage, DraftChangedMessage } from '../../../src/protocol/documentSync';
 import type { InitMessage } from '../../../src/protocol/readyInit';
@@ -18,7 +19,7 @@ type RemoteDocumentSessionAction = Extract<
 
 export type DocumentSessionRuntime = {
   initialize(message: InitMessage): Promise<void>;
-  handle(input: DocumentSessionInput): Promise<void>;
+  handle(input: DocumentSessionInput): Promise<boolean>;
   whenIdle(): Promise<void>;
 };
 
@@ -26,7 +27,7 @@ export type DocumentSessionRuntimeDependencies = {
   readonly postMessage: (message: ApplyChangesMessage | DraftChangedMessage) => void;
   readonly presentText: (
     text: string,
-    source: 'revision' | 'rebased-draft' | 'disk-reload'
+    source: DocumentPresentationSource
   ) => boolean | void;
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
   readonly showFailureNotice: (message: string) => void;
@@ -40,9 +41,9 @@ export function createDocumentSessionRuntime(
   let actionAdapter: DocumentSessionActionAdapter | null = null;
   let operation: Promise<void> = Promise.resolve();
 
-  const enqueue = (task: () => Promise<void>): Promise<void> => {
+  const enqueue = <Result>(task: () => Promise<Result>): Promise<Result> => {
     const result = operation.then(task);
-    operation = result.catch(() => undefined);
+    operation = result.then(() => undefined, () => undefined);
     return result;
   };
 
@@ -69,7 +70,12 @@ export function createDocumentSessionRuntime(
     handle(input) {
       return enqueue(async () => {
         const session = requireSession();
-        await session.actionAdapter.execute(session.coordinator.handle(input));
+        const actions = session.coordinator.handle(input);
+        const diskReloadAccepted = actions.some((action) => (
+          action.type === 'presentText' && action.source === 'disk-reload'
+        ));
+        const presentationSucceeded = await session.actionAdapter.execute(actions);
+        return diskReloadAccepted && presentationSucceeded;
       });
     },
     whenIdle() {

@@ -32,6 +32,7 @@ import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionW
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
 import { createAppearanceWebviewAdapter } from './adapters/appearanceWebviewAdapter';
 import { createEditorModeApplication, type EditorMode } from './application/editorMode';
+import type { DocumentPresentationSource } from '../../src/application/documentSession';
 import { createEditorModeEffectAdapter } from './adapters/editorModeEffectAdapter';
 import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/editorModeRuntime';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
@@ -1337,7 +1338,7 @@ const setEditorTextSafely = (text: string, context: string, resetHistory = false
 
     if (getActiveEditorMode() === 'live') {
       try {
-        editor.setText(text);
+        editor.setText(text, resetHistory);
         failureNotice.clearFailureNotice();
         return true;
       } catch (retryInLiveError) {
@@ -1354,7 +1355,7 @@ const setEditorTextSafely = (text: string, context: string, resetHistory = false
       }).then(() => {
         if (!editor || getActiveEditorMode() !== 'source') return;
         try {
-          editor.setText(text);
+          editor.setText(text, resetHistory);
         } catch (retryError) {
           logWebviewRenderError('setText.retryInSource', retryError, { context });
           failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
@@ -1370,7 +1371,7 @@ const setEditorTextSafely = (text: string, context: string, resetHistory = false
 
 const presentDocumentText = (
   text: string,
-  source: 'revision' | 'rebased-draft' | 'disk-reload'
+  source: DocumentPresentationSource
 ): boolean => {
   if (!editor) {
     pendingInitialText = text;
