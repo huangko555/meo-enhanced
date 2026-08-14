@@ -35,12 +35,16 @@ export type DocumentSessionEvent =
   | { readonly type: 'saveRequested' }
   | { readonly type: 'saveCompleted'; readonly revision: Revision }
   | { readonly type: 'saveFailed'; readonly revision: Revision }
-  | { readonly type: 'discardCompleted'; readonly revision: Revision };
+  | { readonly type: 'reloadedFromDisk'; readonly revision: Revision };
 
 export type DocumentSessionEffect =
   | { readonly type: 'persistDraft'; readonly draft: Draft | null }
   | { readonly type: 'submitChange'; readonly change: Change }
-  | { readonly type: 'presentText'; readonly text: string; readonly source: 'revision' | 'rebased-draft' }
+  | {
+      readonly type: 'presentText';
+      readonly text: string;
+      readonly source: 'revision' | 'rebased-draft' | 'disk-reload';
+    }
   | { readonly type: 'requestResync' }
   | { readonly type: 'saveRevision'; readonly revision: Revision };
 
@@ -206,7 +210,7 @@ export function transitionDocumentSession(
       : { state: { ...state, savePhase: 'idle', savingRevision: null }, effects: [] };
   }
 
-  if (event.type === 'discardCompleted') {
+  if (event.type === 'reloadedFromDisk') {
     if (event.revision.number < state.revision.number) return { state, effects: [] };
     if (event.revision.number === state.revision.number
       && event.revision.text !== state.revision.text) {
@@ -224,7 +228,7 @@ export function transitionDocumentSession(
       },
       effects: [
         { type: 'persistDraft', draft: null },
-        { type: 'presentText', text: event.revision.text, source: 'revision' }
+        { type: 'presentText', text: event.revision.text, source: 'disk-reload' }
       ]
     };
   }

@@ -1813,6 +1813,7 @@ export function createEditor({
     resources: imagePresentationResourcePool,
     resourceContextKey: 'editor-document'
   });
+  const historyCompartment = new Compartment();
   const state = EditorState.create({
     doc: text,
     selection: { anchor: initialCursorPos },
@@ -1844,7 +1845,7 @@ export function createEditor({
         ...defaultKeymap,
         ...editorHistoryKeymap
       ]),
-      history(),
+      historyCompartment.of(history()),
       lineNumbers(),
       tableTransactionProvenanceAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
@@ -2591,7 +2592,7 @@ export function createEditor({
       imagePresentationFactory.dispose();
       imagePresentationResourcePool.dispose();
     },
-    setText(textValue: string) {
+    setText(textValue: string, resetHistory = false) {
       tableCommandRuntime.externalDocumentPresented();
       imagePresentationFactory.externalDocumentPresented();
       void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
@@ -2600,7 +2601,10 @@ export function createEditor({
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
         view.dispatch({
-          effects: tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+          effects: [
+            tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+            ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
+          ],
           annotations: Transaction.addToHistory.of(false)
         });
         tableColumnWidthAdapter.adapter.refresh();
@@ -2625,7 +2629,10 @@ export function createEditor({
         view.dispatch({
           changes: syncChange,
           selection: { anchor: mappedAnchor, head: mappedHead },
-          effects: tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+          effects: [
+            tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+            ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
+          ],
           annotations: Transaction.addToHistory.of(false)
         });
       } finally {

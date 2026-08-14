@@ -22,7 +22,7 @@ export type EditorCommand =
     }
   | { readonly type: 'openLink'; readonly href: string; readonly source?: 'preview' }
   | { readonly type: 'openImageExternally'; readonly url: string }
-  | { readonly type: 'discardChanges'; readonly topLine: number; readonly topLineOffset?: number }
+  | { readonly type: 'reloadDocumentFromDisk'; readonly topLine: number; readonly topLineOffset?: number }
   | { readonly type: 'exportDocument'; readonly format: 'html' | 'pdf'; readonly appearance: EditorAppearance }
   | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
   | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
@@ -76,7 +76,7 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
       return (value.wholeWord === undefined || isBoolean(value.wholeWord))
         && (value.caseSensitive === undefined || isBoolean(value.caseSensitive)) ? value as EditorCommand : null;
     }
-    case 'discardChanges':
+    case 'reloadDocumentFromDisk':
       return isPositiveInteger(value.topLine)
         && (value.topLineOffset === undefined || isFiniteNumber(value.topLineOffset)) ? value as EditorCommand : null;
     case 'openLink':

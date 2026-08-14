@@ -14,15 +14,16 @@ const init = {
 const posted: WebviewToHostMessage[] = [];
 const presented: Array<{ text: string; source: string }> = [];
 const restored: Array<{ topLine: number; topLineOffset: number }> = [];
+const notices: string[] = [];
 const unexpected: Array<{ context: string; error: unknown }> = [];
 
 const adapter = createDocumentSessionWebviewAdapter({
   postMessage: (message) => { posted.push(message); },
   presentText: (text, source) => { presented.push({ text, source }); },
-  restoreDiscardedView: ({ topLine, topLineOffset }) => {
+  restoreReloadedView: ({ topLine, topLineOffset }) => {
     restored.push({ topLine, topLineOffset });
   },
-  showFailureNotice: () => undefined,
+  showFailureNotice: (message) => { notices.push(message); },
   reportUnexpectedError: (context, error) => { unexpected.push({ context, error }); }
 });
 
@@ -45,18 +46,25 @@ assert.equal(adapter.accept({ type: 'themeChanged' } as HostToWebviewMessage), f
 await adapter.whenIdle();
 assert.deepEqual(presented.at(-1), { text: 'remote', source: 'revision' });
 
-adapter.requestDiscard({ topLine: 7, topLineOffset: 2 });
+adapter.requestReloadFromDisk({ topLine: 7, topLineOffset: 2 });
 await adapter.whenIdle();
-assert.deepEqual(posted.at(-1), { type: 'discardChanges', topLine: 7, topLineOffset: 2 });
+assert.deepEqual(posted.at(-1), { type: 'reloadDocumentFromDisk', topLine: 7, topLineOffset: 2 });
 assert.equal(adapter.accept({
-  type: 'discardedChanges',
+  type: 'documentReloadedFromDisk',
   version: 4,
-  text: 'one',
+  text: 'disk version',
   topLine: 7,
   topLineOffset: 2
 }), true);
 await adapter.whenIdle();
 assert.deepEqual(restored, [{ topLine: 7, topLineOffset: 2 }]);
+assert.deepEqual(presented.at(-1), { text: 'disk version', source: 'disk-reload' });
+assert.equal(adapter.accept({
+  type: 'documentReloadFromDiskFailed',
+  message: 'Could not reload the document from disk: VS Code refused to revert'
+}), true);
+await adapter.whenIdle();
+assert.deepEqual(notices, ['Could not reload the document from disk: VS Code refused to revert']);
 
 adapter.requestSave();
 for (let attempt = 0; attempt < 10 && posted.at(-1)?.type !== 'saveDocumentRevision'; attempt += 1) {
@@ -82,7 +90,7 @@ const earlyErrors: string[] = [];
 const earlyAdapter = createDocumentSessionWebviewAdapter({
   postMessage: () => undefined,
   presentText: () => undefined,
-  restoreDiscardedView: () => undefined,
+  restoreReloadedView: () => undefined,
   showFailureNotice: () => undefined,
   reportUnexpectedError: (context) => { earlyErrors.push(context); }
 });

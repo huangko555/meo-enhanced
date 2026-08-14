@@ -152,12 +152,12 @@ assert.deepEqual(saveAfterConflict.handle({
 const discarded = createCoordinator();
 discarded.handle({ type: 'localDraftChanged', text: 'one\nlocal' });
 assert.deepEqual(discarded.handle({
-  type: 'hostDiscardSucceeded',
+  type: 'hostReloadedFromDisk',
   version: 4,
   text: 'saved disk'
 }), [
   { type: 'rememberDraft', text: null },
-  { type: 'presentText', text: 'saved disk', source: 'revision' }
+  { type: 'presentText', text: 'saved disk', source: 'disk-reload' }
 ]);
 
 console.log('Document Session application contract checks passed');

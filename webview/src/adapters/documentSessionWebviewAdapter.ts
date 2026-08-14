@@ -1,5 +1,5 @@
 import type { HostToWebviewMessage, WebviewToHostMessage } from '../../../src/protocol/messages';
-import type { DiscardedChangesMessage } from '../../../src/protocol/documentSync';
+import type { DocumentReloadedFromDiskMessage } from '../../../src/protocol/documentSync';
 import type { InitMessage } from '../../../src/protocol/readyInit';
 import { createDocumentSessionRuntime } from './documentSessionRuntime';
 import { createDocumentSessionTransport } from './documentSessionTransport';
@@ -14,7 +14,7 @@ export type DocumentSessionWebviewAdapter = {
   accept(message: HostToWebviewMessage): boolean;
   localDraftChanged(text: string): void;
   requestSave(): void;
-  requestDiscard(position: DocumentSessionViewPosition): void;
+  requestReloadFromDisk(position: DocumentSessionViewPosition): void;
   whenIdle(): Promise<void>;
   dispose(): void;
 };
@@ -23,9 +23,9 @@ export type DocumentSessionWebviewAdapterDependencies = {
   readonly postMessage: (message: WebviewToHostMessage) => void;
   readonly presentText: (
     text: string,
-    source: 'revision' | 'rebased-draft'
+    source: 'revision' | 'rebased-draft' | 'disk-reload'
   ) => boolean | void;
-  readonly restoreDiscardedView: (message: DiscardedChangesMessage) => void;
+  readonly restoreReloadedView: (message: DocumentReloadedFromDiskMessage) => void;
   readonly showFailureNotice: (message: string) => void;
   readonly reportUnexpectedError: (context: string, error: unknown) => void;
 };
@@ -84,15 +84,19 @@ export function createDocumentSessionWebviewAdapter(
       }));
       return true;
     }
-    if (message.type === 'discardedChanges') {
-      enqueueSession('discarded Changes', async () => {
+    if (message.type === 'documentReloadedFromDisk') {
+      enqueueSession('document reload', async () => {
         await runtime.handle({
-          type: 'hostDiscardSucceeded',
+          type: 'hostReloadedFromDisk',
           version: message.version,
           text: message.text
         });
-        if (!disposed) dependencies.restoreDiscardedView(message);
+        if (!disposed) dependencies.restoreReloadedView(message);
       });
+      return true;
+    }
+    if (message.type === 'documentReloadFromDiskFailed') {
+      enqueueSession('document reload failure', () => dependencies.showFailureNotice(message.message));
       return true;
     }
     return false;
@@ -121,12 +125,12 @@ export function createDocumentSessionWebviewAdapter(
     requestSave() {
       enqueueSession('save', () => runtime.handle({ type: 'saveRequested' }));
     },
-    requestDiscard(position) {
-      enqueueSession('discard request', async () => {
+    requestReloadFromDisk(position) {
+      enqueueSession('document reload request', async () => {
         await runtime.whenIdle();
         if (disposed) return;
         dependencies.postMessage({
-          type: 'discardChanges',
+          type: 'reloadDocumentFromDisk',
           topLine: position.topLine,
           topLineOffset: position.topLineOffset
         });

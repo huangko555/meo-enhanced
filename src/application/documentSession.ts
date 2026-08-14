@@ -22,7 +22,7 @@ export type DocumentSessionInput =
       readonly message?: string;
     }
   | { readonly type: 'hostRevisionRequestFailed'; readonly message: string }
-  | { readonly type: 'hostDiscardSucceeded'; readonly version: number; readonly text: string };
+  | { readonly type: 'hostReloadedFromDisk'; readonly version: number; readonly text: string };
 
 export type ApplicationTextChange = {
   readonly from: number;
@@ -40,7 +40,7 @@ export type DocumentSessionAction =
   | {
       readonly type: 'presentText';
       readonly text: string;
-      readonly source: 'revision' | 'rebased-draft';
+      readonly source: 'revision' | 'rebased-draft' | 'disk-reload';
     }
   | { readonly type: 'saveDocument'; readonly revision: Revision }
   | { readonly type: 'requestRevision' };
@@ -117,7 +117,7 @@ function mapInput(
     return null;
   }
   return {
-    type: 'discardCompleted',
+    type: 'reloadedFromDisk',
     revision: { number: input.version, text: input.text }
   };
 }

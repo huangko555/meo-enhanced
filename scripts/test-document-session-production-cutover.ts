@@ -32,7 +32,7 @@ assert.equal(webviewBootstrap.includes('createDocumentSessionRuntime'), false);
 assert.equal(webviewBootstrap.includes('createDocumentSessionTransport'), false);
 assert.equal(webviewBootstrap.includes("type: 'hostRevisionChanged'"), false);
 assert.equal(webviewBootstrap.includes("type: 'hostChangeApplied'"), false);
-assert.equal(webviewBootstrap.includes("type: 'hostDiscardSucceeded'"), false);
+assert.equal(webviewBootstrap.includes("type: 'hostReloadedFromDisk'"), false);
 assert.match(documentSessionAdapter, /createDocumentSessionRuntime/);
 assert.match(documentSessionAdapter, /createDocumentSessionTransport/);
 

@@ -52,7 +52,13 @@ import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
 import type { OutlinePosition } from '../shared/extensionConfig';
 import type { InitMessage, SavedRevisionDto } from '../protocol/readyInit';
-import type { AppliedMessage, ApplyChangesMessage, DiscardedChangesMessage, DocumentChangedMessage } from '../protocol/documentSync';
+import type {
+  AppliedMessage,
+  ApplyChangesMessage,
+  DocumentChangedMessage,
+  DocumentReloadFromDiskFailedMessage,
+  DocumentReloadedFromDiskMessage
+} from '../protocol/documentSync';
 import type { ResolvedImageSrcResponse } from '../protocol/imageResolution';
 import type { ResolvedWikiLinksResponse } from '../protocol/wikiLinkResolution';
 import type { ResolvedLocalLinksResponse } from '../protocol/localLinkResolution';
@@ -60,6 +66,7 @@ import type { SaveImageFromClipboardRequest, SavedImagePathResponse } from '../p
 import type { PreviewRenderResponse } from '../protocol/previewRender';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
+import { createVscodeDocumentReloadAdapter } from '../host/vscodeDocumentReloadAdapter';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
@@ -177,6 +184,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
   const savedRevisionTracker = new SavedRevisionTracker();
+  const documentReload = createVscodeDocumentReloadAdapter(document);
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     applyQueue = applyQueue.then(task, task);
     return applyQueue;
@@ -661,19 +669,27 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           await postToWebview(response);
         });
         return;
-      case 'discardChanges':
-        pendingDraftRecovery.remember(null);
+      case 'reloadDocumentFromDisk':
         await enqueue(async () => {
-          await vscode.commands.executeCommand('workbench.action.files.revert');
-          await refreshSavedRevisionNow();
-          const message: DiscardedChangesMessage = {
-            type: 'discardedChanges',
-            text: document.getText(),
-            version: document.version,
-            topLine: raw.topLine,
-            topLineOffset: raw.topLineOffset ?? 0
-          };
-          await postToWebview(message);
+          try {
+            const revision = await documentReload.reloadFromDisk();
+            pendingDraftRecovery.remember(null);
+            await refreshSavedRevisionNow();
+            const message: DocumentReloadedFromDiskMessage = {
+              type: 'documentReloadedFromDisk',
+              text: revision.text,
+              version: revision.version,
+              topLine: raw.topLine,
+              topLineOffset: raw.topLineOffset ?? 0
+            };
+            await postToWebview(message);
+          } catch (error) {
+            const message: DocumentReloadFromDiskFailedMessage = {
+              type: 'documentReloadFromDiskFailed',
+              message: error instanceof Error ? error.message : 'Could not reload the document from disk'
+            };
+            await postToWebview(message);
+          }
         });
         return;
       case 'saveImageFromClipboard': {

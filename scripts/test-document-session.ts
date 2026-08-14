@@ -127,7 +127,7 @@ assert.equal(contradictoryRevision.state, externalWithoutDraft.state);
 assert.deepEqual(contradictoryRevision.effects, [{ type: 'requestResync' }]);
 
 const contradictoryDiscard = transitionDocumentSession(externalWithoutDraft.state, {
-  type: 'discardCompleted',
+  type: 'reloadedFromDisk',
   revision: { number: 4, text: 'contradictory discard' }
 });
 assert.equal(contradictoryDiscard.state, externalWithoutDraft.state);
@@ -191,7 +191,7 @@ assert.deepEqual(saveAfterConflict.effects, [
 ]);
 
 const discarded = transitionDocumentSession(editedAgain.state, {
-  type: 'discardCompleted',
+  type: 'reloadedFromDisk',
   revision: { number: 4, text: 'saved disk' }
 });
 assert.deepEqual(discarded.state.revision, { number: 4, text: 'saved disk' });
@@ -201,7 +201,7 @@ assert.equal(discarded.state.pendingChange, null);
 assert.equal(discarded.state.savePhase, 'idle');
 assert.deepEqual(discarded.effects, [
   { type: 'persistDraft', draft: null },
-  { type: 'presentText', text: 'saved disk', source: 'revision' }
+    { type: 'presentText', text: 'saved disk', source: 'disk-reload' }
 ]);
 
 console.log('Document Session domain checks passed');

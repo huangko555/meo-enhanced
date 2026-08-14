@@ -92,8 +92,8 @@ assert.deepEqual(decodeDocumentSyncMessage({ type: 'docChanged', text: 'next', v
   type: 'docChanged', text: 'next', version: 4
 });
 assert.deepEqual(decodeDocumentSyncMessage({ type: 'applied', version: 4 }), { type: 'applied', version: 4 });
-assert.deepEqual(decodeDocumentSyncMessage({ type: 'discardedChanges', text: 'base', version: 5 }), {
-  type: 'discardedChanges', text: 'base', version: 5, topLine: 1, topLineOffset: 0
+assert.deepEqual(decodeDocumentSyncMessage({ type: 'documentReloadedFromDisk', text: 'base', version: 5 }), {
+  type: 'documentReloadedFromDisk', text: 'base', version: 5, topLine: 1, topLineOffset: 0
 });
 assert.equal(decodeDocumentSyncMessage({ type: 'docChanged', text: 'bad', version: -1 }), null);
 assert.deepEqual(decodeDocumentSyncCommand({ type: 'draftChanged', text: null }), { type: 'draftChanged', text: null });
@@ -507,7 +507,7 @@ for (const command of [
   { type: 'setFindOptions', findOptions: { wholeWord: true, caseSensitive: false } },
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
-  { type: 'discardChanges', topLine: 1 },
+  { type: 'reloadDocumentFromDisk', topLine: 1 },
 { type: 'exportDocument', format: 'pdf', appearance: 'dark' },
 { type: 'setPreviewAppearance', appearance: 'auto' },
 { type: 'setPreviewSourceColoring', enabled: false },

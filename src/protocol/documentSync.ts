@@ -9,15 +9,24 @@ export type AppliedMessage = {
   readonly version: number;
 };
 
-export type DiscardedChangesMessage = {
-  readonly type: 'discardedChanges';
+export type DocumentReloadedFromDiskMessage = {
+  readonly type: 'documentReloadedFromDisk';
   readonly text: string;
   readonly version: number;
   readonly topLine: number;
   readonly topLineOffset: number;
 };
 
-export type DocumentSyncMessage = DocumentChangedMessage | AppliedMessage | DiscardedChangesMessage;
+export type DocumentReloadFromDiskFailedMessage = {
+  readonly type: 'documentReloadFromDiskFailed';
+  readonly message: string;
+};
+
+export type DocumentSyncMessage =
+  | DocumentChangedMessage
+  | AppliedMessage
+  | DocumentReloadedFromDiskMessage
+  | DocumentReloadFromDiskFailedMessage;
 
 export type TextChange = {
   readonly from: number;
@@ -73,14 +82,17 @@ export function decodeDocumentSyncMessage(value: unknown): DocumentSyncMessage |
   if (value.type === 'applied' && isVersion(value.version)) {
     return { type: 'applied', version: value.version };
   }
-  if (value.type === 'discardedChanges' && typeof value.text === 'string' && isVersion(value.version)) {
+  if (value.type === 'documentReloadedFromDisk' && typeof value.text === 'string' && isVersion(value.version)) {
     return {
-      type: 'discardedChanges',
+      type: 'documentReloadedFromDisk',
       text: value.text,
       version: value.version,
       topLine: normalizeTopLine(value.topLine),
       topLineOffset: normalizeTopLineOffset(value.topLineOffset)
     };
+  }
+  if (value.type === 'documentReloadFromDiskFailed' && typeof value.message === 'string') {
+    return { type: 'documentReloadFromDiskFailed', message: value.message };
   }
   return null;
 }

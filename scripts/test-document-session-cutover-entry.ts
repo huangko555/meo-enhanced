@@ -196,7 +196,7 @@ const candidate = {
   },
   discard() {
     hostRevision = { version: hostRevision.version + 1, text: savedText };
-    return enqueueInput({ type: 'hostDiscardSucceeded', ...hostRevision });
+    return enqueueInput({ type: 'hostReloadedFromDisk', ...hostRevision });
   },
   snapshot() {
     const runtime = requireRuntime();

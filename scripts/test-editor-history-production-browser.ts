@@ -137,6 +137,21 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.undo()), false);
 
+    const reloadClearsUndo = await page.evaluate(async () => {
+      const editor = (window as any).__historyProductionEditor;
+      const view = editor.view;
+      view.dispatch({ changes: { from: view.state.doc.length, insert: ' LOCAL_TEXT_TO_DISCARD' } });
+      editor.setText('disk version after reload', true);
+      return {
+        text: editor.getText(),
+        undoApplied: await editor.undo()
+      };
+    });
+    assert.deepEqual(reloadClearsUndo, {
+      text: 'disk version after reload',
+      undoApplied: false
+    }, 'a disk reload must not leave discarded local text reachable by normal undo');
+
     const renderedHistoryEditorReady = await page.evaluate(async () => {
       const previous = (window as any).__historyProductionEditor;
       previous.destroy();

@@ -134,23 +134,23 @@ async function main() {
       const button = document.querySelector<HTMLButtonElement>('[data-action="discard"]');
       if (!button) return { exists: false, afterClick: 0, firstArmed: false, recoveredAfterTimeout: false, afterSecondClick: 0, finalArmed: false, topLine: null };
       button.click();
-      const afterClick = messages.filter((message) => message.type === 'discardChanges').length;
+      const afterClick = messages.filter((message) => message.type === 'reloadDocumentFromDisk').length;
       const firstArmed = button.classList.contains('is-discard-armed');
       await new Promise((resolve) => window.setTimeout(resolve, 550));
       const recoveredAfterTimeout = !button.classList.contains('is-discard-armed');
       button.click();
       button.click();
       for (let attempt = 0; attempt < 20
-        && !messages.some((message) => message.type === 'discardChanges'); attempt += 1) {
+        && !messages.some((message) => message.type === 'reloadDocumentFromDisk'); attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 10));
       }
-      const discard = messages.find((message) => message.type === 'discardChanges');
+      const discard = messages.find((message) => message.type === 'reloadDocumentFromDisk');
       return {
         exists: true,
         afterClick,
         firstArmed,
         recoveredAfterTimeout,
-        afterSecondClick: messages.filter((message) => message.type === 'discardChanges').length,
+        afterSecondClick: messages.filter((message) => message.type === 'reloadDocumentFromDisk').length,
         finalArmed: button.classList.contains('is-discard-armed'),
         topLine: discard?.topLine ?? null
       };

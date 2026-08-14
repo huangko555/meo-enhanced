@@ -20,7 +20,7 @@ export type DocumentSessionActionAdapterDependencies = {
   readonly postMessage: (message: ApplyChangesMessage | DraftChangedMessage) => void;
   readonly presentText: (
     text: string,
-    source: 'revision' | 'rebased-draft'
+    source: 'revision' | 'rebased-draft' | 'disk-reload'
   ) => boolean | void;
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
   readonly handleInput: (input: DocumentSessionInput) => readonly DocumentSessionAction[];

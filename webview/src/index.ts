@@ -640,8 +640,8 @@ const discardBtn = document.createElement('button');
 discardBtn.type = 'button';
 discardBtn.className = 'format-button';
 discardBtn.dataset.action = 'discard';
-discardBtn.title = 'Discard unsaved changes (double-click)';
-discardBtn.setAttribute('aria-label', 'Discard unsaved changes');
+discardBtn.title = 'Reload disk version (double-click)';
+discardBtn.setAttribute('aria-label', 'Reload disk version');
 discardBtn.appendChild(createElement(StickyNoteOff, { width: 18, height: 18 }));
 
 const preserveEditorFocusOnDocumentAction = (event: PointerEvent) => {
@@ -1308,7 +1308,7 @@ const discardUnsavedChanges = () => {
     ? previewController.getTopVisiblePosition()
     : getTopVisiblePosition();
   commitEditorTransientEdits();
-  documentSessionAdapter.requestDiscard({
+  documentSessionAdapter.requestReloadFromDisk({
     topLine: position?.topLine ?? 1,
     topLineOffset: position?.topLineOffset ?? 0
   });
@@ -1324,13 +1324,13 @@ discardBtn.addEventListener('click', () => {
   discardConfirmationTimer = window.setTimeout(clearDiscardConfirmation, discardConfirmationWindowMs);
 });
 
-const setEditorTextSafely = (text: string, context: string): boolean => {
+const setEditorTextSafely = (text: string, context: string, resetHistory = false): boolean => {
   if (!editor) {
     return false;
   }
 
   try {
-    editor.setText(text);
+    editor.setText(text, resetHistory);
     return true;
   } catch (error) {
     logWebviewRenderError('setText', error, { context });
@@ -1370,7 +1370,7 @@ const setEditorTextSafely = (text: string, context: string): boolean => {
 
 const presentDocumentText = (
   text: string,
-  source: 'revision' | 'rebased-draft'
+  source: 'revision' | 'rebased-draft' | 'disk-reload'
 ): boolean => {
   if (!editor) {
     pendingInitialText = text;
@@ -1380,7 +1380,7 @@ const presentDocumentText = (
   const previewRestoreLine = getActiveEditorMode() === 'preview'
     ? previewController.getTopVisiblePosition()?.topLine ?? null
     : null;
-  if (!setEditorTextSafely(text, `documentSession.${source}`)) {
+  if (!setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload')) {
     return false;
   }
   if (getActiveEditorMode() === 'preview') {
@@ -1398,7 +1398,7 @@ const presentDocumentText = (
 const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   postMessage: (message) => vscode.postMessage(message),
   presentText: presentDocumentText,
-  restoreDiscardedView: (message) => {
+  restoreReloadedView: (message) => {
     if (getActiveEditorMode() === 'preview') {
       previewAdapter.refreshVisible(getCurrentEditorText(), { restoreLine: message.topLine });
     } else {
