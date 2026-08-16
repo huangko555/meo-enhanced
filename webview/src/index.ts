@@ -1325,7 +1325,11 @@ discardBtn.addEventListener('click', () => {
   discardConfirmationTimer = window.setTimeout(clearDiscardConfirmation, discardConfirmationWindowMs);
 });
 
-const setEditorTextSafely = (text: string, context: string, resetHistory = false): boolean => {
+const setEditorTextSafely = async (
+  text: string,
+  context: string,
+  resetHistory = false
+): Promise<boolean> => {
   if (!editor) {
     return false;
   }
@@ -1350,18 +1354,18 @@ const setEditorTextSafely = (text: string, context: string, resetHistory = false
       }
 
       failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
-      void editorModeRuntime.dispatch({
+      await editorModeRuntime.dispatch({
         type: 'requestMode', mode: 'source', source: 'render-failure'
-      }).then(() => {
-        if (!editor || getActiveEditorMode() !== 'source') return;
-        try {
-          editor.setText(text, resetHistory);
-        } catch (retryError) {
-          logWebviewRenderError('setText.retryInSource', retryError, { context });
-          failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
-        }
       });
-      return true;
+      if (!editor || getActiveEditorMode() !== 'source') return false;
+      try {
+        editor.setText(text, resetHistory);
+        return true;
+      } catch (retryError) {
+        logWebviewRenderError('setText.retryInSource', retryError, { context });
+        failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+        return false;
+      }
     }
 
     failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
@@ -1369,10 +1373,10 @@ const setEditorTextSafely = (text: string, context: string, resetHistory = false
   }
 };
 
-const presentDocumentText = (
+const presentDocumentText = async (
   text: string,
   source: DocumentPresentationSource
-): boolean => {
+): Promise<boolean> => {
   if (!editor) {
     pendingInitialText = text;
     return true;
@@ -1381,7 +1385,7 @@ const presentDocumentText = (
   const previewRestoreLine = getActiveEditorMode() === 'preview'
     ? previewController.getTopVisiblePosition()?.topLine ?? null
     : null;
-  if (!setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload')) {
+  if (!await setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload')) {
     return false;
   }
   if (getActiveEditorMode() === 'preview') {

@@ -28,7 +28,7 @@ export type DocumentSessionRuntimeDependencies = {
   readonly presentText: (
     text: string,
     source: DocumentPresentationSource
-  ) => boolean | void;
+  ) => boolean | void | Promise<boolean | void>;
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
   readonly showFailureNotice: (message: string) => void;
 };

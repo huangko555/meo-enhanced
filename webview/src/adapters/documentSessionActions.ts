@@ -22,7 +22,7 @@ export type DocumentSessionActionAdapterDependencies = {
   readonly presentText: (
     text: string,
     source: DocumentPresentationSource
-  ) => boolean | void;
+  ) => boolean | void | Promise<boolean | void>;
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
   readonly handleInput: (input: DocumentSessionInput) => readonly DocumentSessionAction[];
   readonly showFailureNotice: (message: string) => void;
@@ -62,7 +62,7 @@ export function createDocumentSessionActionAdapter(
           continue;
         }
         if (action.type === 'presentText') {
-          if (dependencies.presentText(action.text, action.source) === false) {
+          if (await dependencies.presentText(action.text, action.source) === false) {
             presentationSucceeded = false;
           }
           continue;

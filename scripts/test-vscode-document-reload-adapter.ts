@@ -18,7 +18,7 @@ const createDocument = (uri: string, text: string, version: number): FakeDocumen
 const target = createDocument('file:///target.md', 'local unsaved', 3);
 const other = createDocument('file:///other.md', 'other local unsaved', 8);
 let activeDocument = other;
-let switchFocusAfterOpen = false;
+let switchFocusAfterTargetCheck = false;
 let commandFailure: Error | null = null;
 const commands: Array<{ command: string; target?: string }> = [];
 
@@ -29,7 +29,6 @@ mock.module('vscode', () => ({
       if (commandFailure) throw commandFailure;
       if (command === 'vscode.open') {
         activeDocument = target;
-        if (switchFocusAfterOpen) activeDocument = other;
         return;
       }
       if (command === 'workbench.action.files.revert') {
@@ -45,9 +44,22 @@ mock.module('vscode', () => ({
     tabGroups: {
       activeTabGroup: {
         get activeTab() {
-          return { input: { uri: activeDocument.uri } };
+          const checkedDocument = activeDocument;
+          if (switchFocusAfterTargetCheck && checkedDocument === target) {
+            switchFocusAfterTargetCheck = false;
+            activeDocument = other;
+          }
+          return { input: { uri: checkedDocument.uri } };
         }
       }
+    }
+  },
+  workspace: {
+    get textDocuments() {
+      return [
+        { uri: target.uri, get isDirty() { return target.dirty; } },
+        { uri: other.uri, get isDirty() { return other.dirty; } }
+      ];
     }
   }
 }));
@@ -61,6 +73,7 @@ const adapter = createVscodeDocumentReloadAdapter({
   get isDirty() { return target.dirty; }
 } as never);
 
+other.dirty = false;
 assert.deepEqual(await adapter.reloadFromDisk(), {
   version: 4,
   text: 'disk version from external tool'
@@ -69,26 +82,27 @@ assert.deepEqual(commands.splice(0), [
   { command: 'vscode.open', target: 'file:///target.md' },
   { command: 'workbench.action.files.revert', target: undefined }
 ]);
-assert.equal(other.dirty, true, 'binding the target must not revert another dirty tab');
+assert.equal(other.text, 'other local unsaved', 'binding the target must not touch another tab');
 
 target.text = 'second local draft';
 target.dirty = true;
 other.text = 'other second local draft';
 other.dirty = true;
-switchFocusAfterOpen = true;
+switchFocusAfterTargetCheck = true;
 await assert.rejects(
   () => adapter.reloadFromDisk(),
-  /target document is no longer active/
+  /another dirty document makes the active-editor revert unsafe/
 );
 assert.equal(target.text, 'second local draft');
 assert.equal(target.dirty, true, 'a failed target check must preserve the target Draft');
 assert.equal(other.text, 'other second local draft');
-assert.equal(other.dirty, true, 'a focus race must not revert the newly active dirty tab');
+assert.equal(other.dirty, true, 'a post-check focus race must not revert the newly active dirty tab');
 assert.deepEqual(commands.splice(0), [
   { command: 'vscode.open', target: 'file:///target.md' }
 ]);
 
-switchFocusAfterOpen = false;
+activeDocument = target;
+other.dirty = false;
 commandFailure = new Error('VS Code refused to revert');
 await assert.rejects(
   () => adapter.reloadFromDisk(),

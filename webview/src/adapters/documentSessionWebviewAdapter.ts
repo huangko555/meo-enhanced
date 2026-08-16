@@ -25,7 +25,7 @@ export type DocumentSessionWebviewAdapterDependencies = {
   readonly presentText: (
     text: string,
     source: DocumentPresentationSource
-  ) => boolean | void;
+  ) => boolean | void | Promise<boolean | void>;
   readonly restoreReloadedView: (message: DocumentReloadedFromDiskMessage) => void;
   readonly showFailureNotice: (message: string) => void;
   readonly reportUnexpectedError: (context: string, error: unknown) => void;

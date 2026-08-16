@@ -117,4 +117,44 @@ earlyAdapter.localDraftChanged('recovered');
 await earlyAdapter.whenIdle();
 earlyAdapter.dispose();
 
+const testAsyncReloadPresentation = async (
+  succeeded: boolean,
+  topLine: number,
+  expectedRestores: readonly number[]
+): Promise<void> => {
+  let finishPresentation!: (succeeded: boolean) => void;
+  const presentation = new Promise<boolean>((resolve) => {
+    finishPresentation = resolve;
+  });
+  const asyncRestores: number[] = [];
+  const asyncAdapter = createDocumentSessionWebviewAdapter({
+    postMessage: () => undefined,
+    presentText: () => presentation,
+    restoreReloadedView: ({ topLine }) => { asyncRestores.push(topLine); },
+    showFailureNotice: () => undefined,
+    reportUnexpectedError: (context, error) => {
+      throw new Error(`${context}: ${String(error)}`);
+    }
+  });
+  asyncAdapter.start(init);
+  await asyncAdapter.whenIdle();
+  assert.equal(asyncAdapter.accept({
+    type: 'documentReloadedFromDisk',
+    version: 2,
+    text: 'async disk version',
+    topLine,
+    topLineOffset: 4
+  }), true);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(asyncRestores, [], 'reload must wait for the final presentation result');
+  finishPresentation(succeeded);
+  await asyncAdapter.whenIdle();
+  assert.deepEqual(asyncRestores, expectedRestores);
+  asyncAdapter.dispose();
+};
+
+await testAsyncReloadPresentation(false, 11, []);
+await testAsyncReloadPresentation(true, 13, [13]);
+
 console.log('Document Session Webview Adapter checks passed');
