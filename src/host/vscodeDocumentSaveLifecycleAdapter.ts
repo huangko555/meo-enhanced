@@ -20,7 +20,7 @@ export type VscodeDocumentSaveLifecycleAdapterOptions = {
 
 export type VscodeDocumentSaveLifecycleAdapter = {
   accept(response: FlushDocumentEditsResponse): boolean;
-  runPreparedSave<Result>(expectedText: string, save: () => Promise<Result>): Promise<Result>;
+  runPreparedSave<Result>(save: () => Promise<Result>): Promise<Result>;
   dispose(): void;
 };
 
@@ -54,7 +54,7 @@ export function createVscodeDocumentSaveLifecycleAdapter(
   let nextRequestId = 0;
   let pending: PendingFlush | null = null;
   let activePreparation: Promise<void> | null = null;
-  let preparedSaveText: string | null = null;
+  let preparedWillSaveCorrelation: object | null = null;
   let disposed = false;
 
   const settle = (requestId: string, result: FlushDocumentEditsResolution): boolean => {
@@ -107,8 +107,9 @@ export function createVscodeDocumentSaveLifecycleAdapter(
 
   const willSaveSubscription = vscode.workspace.onWillSaveTextDocument((event) => {
     if (disposed || event.document.uri.toString() !== documentKey) return;
-    if (preparedSaveText !== null
-      && normalize(dependencies.document.getText()) === normalize(preparedSaveText)) {
+    if (preparedWillSaveCorrelation !== null
+      && event.reason === vscode.TextDocumentSaveReason.Manual) {
+      preparedWillSaveCorrelation = null;
       return;
     }
     // waitUntil must be registered synchronously during event dispatch.
@@ -119,7 +120,7 @@ export function createVscodeDocumentSaveLifecycleAdapter(
     accept(response) {
       if (disposed || pending?.requestId !== response.requestId) return false;
       if (response.result.ok === false) return settle(response.requestId, response.result);
-      if (normalize(dependencies.document.getText()) !== response.result.value.text) {
+      if (normalize(dependencies.document.getText()) !== normalize(response.result.value.text)) {
         return settle(response.requestId, failure(
           'operation-failed',
           'The TextDocument did not reach the editor Revision requested for save.'
@@ -127,13 +128,15 @@ export function createVscodeDocumentSaveLifecycleAdapter(
       }
       return settle(response.requestId, response.result);
     },
-    async runPreparedSave(expectedText, save) {
-      const previousPreparedText = preparedSaveText;
-      preparedSaveText = expectedText;
+    async runPreparedSave(save) {
+      const correlation = {};
+      preparedWillSaveCorrelation = correlation;
       try {
         return await save();
       } finally {
-        preparedSaveText = previousPreparedText;
+        if (preparedWillSaveCorrelation === correlation) {
+          preparedWillSaveCorrelation = null;
+        }
       }
     },
     dispose() {

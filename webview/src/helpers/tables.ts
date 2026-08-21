@@ -227,6 +227,7 @@ const tableDelimiterRegex = /^\s*\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
 const tableToolbarHeight = 24;
+const tableCellAutoCommitDelayMs = 250;
 let nextTableCellEditSequence = 0;
 
 export function commitPendingTableEdits(view: EditorView): boolean {
@@ -2090,6 +2091,7 @@ class HtmlTableWidget extends WidgetType {
   isDraggingSelection: boolean;
   hasPendingCellEdits: boolean;
   pendingCellEdits: PendingCellEdit[];
+  pendingCellAutoCommitTimer: number | null;
   pendingCellSwitchCommit: boolean;
   activeTarget: TableActionTarget;
   searchState: TableSearchState | null;
@@ -2119,6 +2121,7 @@ class HtmlTableWidget extends WidgetType {
     this.isDraggingSelection = false;
     this.hasPendingCellEdits = false;
     this.pendingCellEdits = [];
+    this.pendingCellAutoCommitTimer = null;
     this.pendingCellSwitchCommit = false;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
     this.searchState = null;
@@ -3147,6 +3150,30 @@ class HtmlTableWidget extends WidgetType {
     this.hasPendingCellEdits = true;
   }
 
+  cancelPendingCellAutoCommit() {
+    if (this.pendingCellAutoCommitTimer === null) return;
+    window.clearTimeout(this.pendingCellAutoCommitTimer);
+    this.pendingCellAutoCommitTimer = null;
+  }
+
+  schedulePendingCellAutoCommit(input: HTMLTextAreaElement, row: number, col: number) {
+    this.cancelPendingCellAutoCommit();
+    this.pendingCellAutoCommitTimer = window.setTimeout(() => {
+      this.pendingCellAutoCommitTimer = null;
+      const view = this.view;
+      if (!view || !this.hasPendingCellEdits || document.activeElement !== input) return;
+      const tableStartLine = view.state.doc.lineAt(
+        Math.max(0, Math.min(this.tableData.from, view.state.doc.length))
+      ).number;
+      const focusTarget = { row, col, caret: input.selectionStart ?? 0 };
+      this.preserveTableCommandViewport(() => {
+        if (commitPendingTableEdits(view)) {
+          this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
+        }
+      });
+    }, tableCellAutoCommitDelayMs);
+  }
+
   pendingCellSourceChange(state: EditorState, edit: PendingCellEdit, tableStartLine: number) {
     const lineNumber = tableStartLine + (edit.row === 0 ? 0 : edit.row + 1);
     if (lineNumber > state.doc.lines) return null;
@@ -3691,6 +3718,7 @@ class HtmlTableWidget extends WidgetType {
     input.addEventListener('input', () => {
       normalizeTableCellEditorInput(input);
       this.recordPendingCellEdit(rowIndex, colIndex, input.value);
+      if (!compositionActive) this.schedulePendingCellAutoCommit(input, rowIndex, colIndex);
       const hadSearchMatch = input.parentElement?.classList.contains('has-search-match') ?? false;
       const sourceValue = tableCellEditorValueToSource(input.value);
       if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(sourceValue, this.searchState))) {
@@ -3715,10 +3743,12 @@ class HtmlTableWidget extends WidgetType {
     input.addEventListener('pointerup', notifySelectionChange);
     input.addEventListener('compositionstart', () => {
       compositionActive = true;
+      this.cancelPendingCellAutoCommit();
     });
     input.addEventListener('compositionend', () => {
       compositionActive = false;
       compositionEndedAt = performance.now();
+      this.schedulePendingCellAutoCommit(input, rowIndex, colIndex);
     });
     input.addEventListener('keydown', (event) => {
       const followsCompositionEnd = performance.now() - compositionEndedAt < 100;
@@ -4457,6 +4487,7 @@ class HtmlTableWidget extends WidgetType {
     this.isDraggingSelection = false;
     this.hasPendingCellEdits = false;
     this.pendingCellEdits = [];
+    this.cancelPendingCellAutoCommit();
     this.pendingCellSwitchCommit = false;
   }
 }

@@ -34,12 +34,14 @@ async function main(): Promise<void> {
       const input = document.querySelector<HTMLTextAreaElement>(selector);
       if (!input) throw new Error('Missing production table cell editor');
       input.focus();
-      input.value = 'pending cell';
-      input.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        inputType: 'insertText',
-        data: 'pending cell'
-      }));
+      for (const value of ['pending', 'pending cell']) {
+        input.value = value;
+        input.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          inputType: 'insertText',
+          data: value
+        }));
+      }
     }, inputSelector);
 
     const before = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
@@ -48,11 +50,15 @@ async function main(): Promise<void> {
     assert.equal(before.diskText, initialText);
     assert.equal(before.persistedDraft, null);
 
-    const response = await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
-    assert.deepEqual(response, {
-      type: 'flushDocumentEditsResult',
-      requestId: 'native-save-0',
-      result: { ok: true, value: { text: expectedText } }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const autoSave = await page.evaluate(() => (window as any).__nativeSaveTableFlush.autoSaveIfDirty());
+    assert.deepEqual(autoSave, {
+      started: true,
+      response: {
+        type: 'flushDocumentEditsResult',
+        requestId: 'native-save-0',
+        result: { ok: true, value: { text: expectedText } }
+      }
     });
     const after = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
     assert.equal(after.hostRevision.text, expectedText);
@@ -60,8 +66,31 @@ async function main(): Promise<void> {
     assert.equal(after.persistedDraft, null);
     assert.equal(after.mode, before.mode);
     assert.deepEqual(after.top, before.top);
-    assert.equal(after.history.undo, before.history.undo + 1, 'flush adds only the pending cell edit transaction');
-    assert.equal(after.history.redo, before.history.redo);
+    assert.equal(after.activeTableInput, true, 'controlled commit must restore the focused table input');
+
+    assert.equal(
+      await page.evaluate(() => (window as any).__nativeSaveTableFlush.replayHistory('undo')),
+      true,
+      'one undo must consume the cell edit'
+    );
+    const undone = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+    assert.equal(undone.hostRevision.text, initialText);
+    assert.equal(undone.diskText, expectedText, 'history replay must not silently save');
+    assert.equal(undone.tableValue, 'old');
+    assert.equal(undone.mode, before.mode);
+    assert.deepEqual(undone.top, before.top);
+
+    assert.equal(
+      await page.evaluate(() => (window as any).__nativeSaveTableFlush.replayHistory('redo')),
+      true,
+      'one redo must restore the cell edit'
+    );
+    const redone = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+    assert.equal(redone.hostRevision.text, expectedText);
+    assert.equal(redone.diskText, expectedText);
+    assert.equal(redone.tableValue, 'pending cell');
+    assert.equal(redone.mode, before.mode);
+    assert.deepEqual(redone.top, before.top);
 
     await page.evaluate(() => (window as any).__nativeSaveTableFlush.destroy());
     console.log('Native save pending table flush browser trace passed');

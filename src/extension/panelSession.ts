@@ -383,7 +383,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
     const previousDisk = savedRevisionTracker.getCurrentEditBaseline();
     const readBack = await documentSaveLifecycle.runPreparedSave(
-      expected.text,
       () => savedRevisionLifecycle.saveAndReadBack(expected.text)
     );
     if (!readBack.ok && readBack.reason === 'save-rejected') {
@@ -697,9 +696,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       case 'flushDocumentEditsResult':
-        await enqueue(async () => {
-          documentSaveLifecycle.accept(raw);
-        });
+        documentSaveLifecycle.accept(raw);
         return;
       case 'reloadDocumentFromDisk':
         await enqueue(async () => {

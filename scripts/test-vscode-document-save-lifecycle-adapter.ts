@@ -9,6 +9,7 @@ type FakeDocument = {
 
 type FakeWillSaveEvent = {
   readonly document: FakeDocument;
+  readonly reason: number;
   waitUntil(thenable: PromiseLike<unknown>): void;
 };
 
@@ -16,6 +17,7 @@ let willSaveListener: ((event: FakeWillSaveEvent) => void) | null = null;
 let subscriptionDisposed = false;
 
 mock.module('vscode', () => ({
+  TextDocumentSaveReason: { Manual: 1, AfterDelay: 2, FocusOut: 3 },
   workspace: {
     onWillSaveTextDocument(listener: (event: FakeWillSaveEvent) => void) {
       willSaveListener = listener;
@@ -65,10 +67,11 @@ const createFixture = () => {
     cancelTimeout: (timeout) => { (timeout as Scheduled).canceled = true; }
   });
 
-  const fire = (document: FakeDocument) => {
+  const fire = (document: FakeDocument, reason = 1) => {
     const waiters: Promise<unknown>[] = [];
     willSaveListener?.({
       document,
+      reason,
       waitUntil(thenable) { waiters.push(Promise.resolve(thenable)); }
     });
     return waiters;
@@ -118,16 +121,92 @@ const createFixture = () => {
 
   const postedBeforePreparedSave = fixture.posted.length;
   let preparedWaiters = -1;
-  await fixture.adapter.runPreparedSave(fixture.target.text, async () => {
+  let independentWaiters = -1;
+  await fixture.adapter.runPreparedSave(async () => {
     preparedWaiters = fixture.fire(fixture.target).length;
+    const waiters = fixture.fire(fixture.target);
+    independentWaiters = waiters.length;
+    const independentRequest = fixture.posted.at(-1);
+    assert.ok(independentRequest);
+    assert.equal(fixture.adapter.accept({
+      type: 'flushDocumentEditsResult',
+      requestId: independentRequest.requestId,
+      result: { ok: true, value: { text: fixture.target.text } }
+    }), true);
+    await Promise.all(waiters);
     return true;
   });
   assert.equal(preparedWaiters, 0);
+  assert.equal(independentWaiters, 1, 'the one-shot correlation must not bypass a second will-save event');
   assert.equal(
     fixture.posted.length,
-    postedBeforePreparedSave,
-    'an exact Document Session prepared save must not re-enter the Webview handshake'
+    postedBeforePreparedSave + 1,
+    'only the concrete Document Session save event may bypass the Webview handshake'
   );
+  fixture.adapter.dispose();
+}
+
+{
+  const fixture = createFixture();
+  await fixture.adapter.runPreparedSave(async () => {
+    const autoSaveWaiters = fixture.fire(fixture.target, 2);
+    assert.equal(autoSaveWaiters.length, 1, 'an independent auto-save must not consume manual correlation');
+    const autoSaveRequest = fixture.posted.at(-1);
+    assert.ok(autoSaveRequest);
+    fixture.adapter.accept({
+      type: 'flushDocumentEditsResult',
+      requestId: autoSaveRequest.requestId,
+      result: { ok: true, value: { text: fixture.target.text } }
+    });
+    await Promise.all(autoSaveWaiters);
+    assert.equal(fixture.fire(fixture.target, 1).length, 0, 'the concrete manual event consumes the correlation');
+    return true;
+  });
+  fixture.adapter.dispose();
+}
+
+{
+  const fixture = createFixture();
+  fixture.target.text = 'a\r\nb';
+  const waiters = fixture.fire(fixture.target);
+  const request = fixture.posted[0];
+  assert.equal(fixture.adapter.accept({
+    type: 'flushDocumentEditsResult',
+    requestId: request.requestId,
+    result: { ok: true, value: { text: 'a\r\nb' } }
+  }), true);
+  await Promise.all(waiters);
+  assert.deepEqual(fixture.failures, [], 'raw CRLF text must match the same raw CRLF response');
+  fixture.adapter.dispose();
+}
+
+{
+  const fixture = createFixture();
+  fixture.target.text = 'a\r\nb';
+  const waiters = fixture.fire(fixture.target);
+  const request = fixture.posted[0];
+  assert.equal(fixture.adapter.accept({
+    type: 'flushDocumentEditsResult',
+    requestId: request.requestId,
+    result: { ok: true, value: { text: 'a\nb' } }
+  }), true);
+  await Promise.all(waiters);
+  assert.deepEqual(fixture.failures, [], 'CRLF and LF-equivalent text must match');
+  fixture.adapter.dispose();
+}
+
+{
+  const fixture = createFixture();
+  fixture.target.text = 'a\r\nb';
+  const waiters = fixture.fire(fixture.target);
+  const request = fixture.posted[0];
+  assert.equal(fixture.adapter.accept({
+    type: 'flushDocumentEditsResult',
+    requestId: request.requestId,
+    result: { ok: true, value: { text: 'a\ndifferent' } }
+  }), true);
+  await Promise.all(waiters);
+  assert.match(fixture.failures[0] ?? '', /did not reach the editor Revision/);
   fixture.adapter.dispose();
 }
 

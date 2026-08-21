@@ -1,110 +1,36 @@
 import assert from 'node:assert/strict';
 import { mock } from 'bun:test';
+import {
+  createPanelSessionControllerParams,
+  createPanelSessionTestDocument,
+  createPanelSessionTestUri,
+  createPanelSessionVscodeMock,
+  panelSessionDisposable,
+  type PanelSessionTestUri
+} from './panel-session-test-helper';
 
-type Disposable = { dispose(): void };
-
-const disposable = (): Disposable => ({ dispose: () => undefined });
-const cancelable = (): { cancel(): void } => ({ cancel: () => undefined });
-
-type FakeUri = {
-  readonly scheme: 'file';
-  readonly fsPath: string;
-  toString(): string;
-};
-
-type FakeDocument = {
-  readonly uri: FakeUri;
-  text: string;
-  version: number;
-  isDirty: boolean;
-  getText(): string;
-  positionAt(offset: number): { readonly offset: number };
-};
-
-const documentUri: FakeUri = {
-  scheme: 'file',
-  fsPath: 'C:/reload-recovery.md',
-  toString: () => 'file:///reload-recovery.md'
-};
-
-const document: FakeDocument = {
-  uri: documentUri,
-  text: 'accepted',
-  version: 1,
-  isDirty: true,
-  getText() { return this.text; },
-  positionAt(offset) { return { offset }; }
-};
+const documentUri = createPanelSessionTestUri('C:/reload-recovery.md');
+const document = createPanelSessionTestDocument(documentUri, 'accepted');
 
 let diskText = 'disk version';
-const configuration = {
-  get: <T>(_key: string, fallback?: T): T | undefined => fallback,
-  inspect: () => undefined,
-  update: async () => undefined
-};
 
 class FakeWorkspaceEdit {
-  replace(_uri: FakeUri, _range: unknown, text: string): void {
+  replace(_uri: PanelSessionTestUri, _range: unknown, text: string): void {
     document.text = text;
     document.version += 1;
     document.isDirty = true;
   }
 }
 
-mock.module('vscode', () => ({
-  ConfigurationTarget: { Global: 1 },
-  Range: class FakeRange {},
-  RelativePattern: class FakeRelativePattern {},
+mock.module('vscode', () => createPanelSessionVscodeMock(document, {
   WorkspaceEdit: FakeWorkspaceEdit,
-  Uri: {
-    file: (fsPath: string): FakeUri => ({
-      scheme: 'file',
-      fsPath,
-      toString: () => `file:///${fsPath.replace(/\\/g, '/')}`
-    }),
-    joinPath: (base: FakeUri, child: string): FakeUri => ({
-      scheme: 'file',
-      fsPath: `${base.fsPath}/${child}`,
-      toString: () => `${base.toString()}/${child}`
-    })
-  },
-  commands: {
-    executeCommand: async (command: string) => {
-      if (command === 'workbench.action.files.revert') {
-        document.text = diskText;
-        document.version += 1;
-        document.isDirty = false;
-      }
+  executeCommand: async (command) => {
+    if (command === 'workbench.action.files.revert') {
+      document.text = diskText;
+      document.version += 1;
+      document.isDirty = false;
     }
-  },
-  extensions: { all: [] },
-  languages: { onDidChangeDiagnostics: () => disposable() },
-  window: {
-    tabGroups: {
-      activeTabGroup: {
-        activeTab: { input: { uri: documentUri } }
-      }
-    },
-    showWarningMessage: async () => undefined,
-    onDidChangeTextEditorSelection: () => disposable(),
-    onDidChangeActiveTextEditor: () => disposable(),
-    onDidChangeVisibleTextEditors: () => disposable()
-  },
-  workspace: {
-    textDocuments: [document],
-    getWorkspaceFolder: () => undefined,
-    getConfiguration: () => configuration,
-    onWillSaveTextDocument: () => disposable(),
-    onDidChangeTextDocument: () => disposable(),
-    onDidSaveTextDocument: () => disposable(),
-    createFileSystemWatcher: () => ({
-      ...disposable(),
-      onDidChange: () => disposable(),
-      onDidCreate: () => disposable(),
-      onDidDelete: () => disposable()
-    }),
-    applyEdit: async () => true,
-    fs: {}
+    return undefined;
   }
 }));
 
@@ -136,11 +62,11 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
       },
       onDidReceiveMessage: (listener: (message: unknown) => void) => {
         receiveMessage = listener;
-        return disposable();
+        return panelSessionDisposable();
       }
     },
-    onDidChangeViewState: () => disposable(),
-    onDidDispose: () => disposable()
+    onDidChangeViewState: () => panelSessionDisposable(),
+    onDidDispose: () => panelSessionDisposable()
   };
   const pendingDraftRecovery = createPendingDraftRecovery({
     readCurrentText: () => document.text,
@@ -151,48 +77,12 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
       return true;
     }
   });
-  const controller = createPanelSessionController({
-    panel: panel as never,
-    document: document as never,
-    documentUri: documentUri as never,
-    context: {
-      globalState: { get: <T>(_key: string, fallback?: T): T | undefined => fallback, update: async () => undefined }
-    } as never,
-    diagnostics: { read: () => [] },
-    agentReviewHandoff: { noteRecentMEOOwnedFileChangeForUri: () => undefined } as never,
+  const controller = createPanelSessionController(createPanelSessionControllerParams({
+    panel,
+    document,
     pendingDraftRecovery,
-    gitBaselineRefreshTimer: { schedule: () => cancelable() },
-    savedRevisionFile: { read: async () => ({ ok: true as const, text: diskText }) },
-    savedRevisionRefreshTimer: { schedule: () => cancelable() },
-    diffBaselineOutput: {
-      hash: () => '',
-      publish: async () => true,
-      publishFixedState: async () => undefined
-    },
-    viewNavigation: {
-      ready: async () => undefined,
-      flush: async () => undefined,
-      revealCurrentEditorSelection: async () => undefined,
-      revealSelectionForEditor: async () => undefined,
-      revealDocumentLink: async () => false,
-      dispose: () => undefined
-    },
-    saveDocument: async () => true,
-    onExportDocument: async () => undefined,
-    renderPreview: async () => ({ html: '', metadata: {} }) as never,
-    getFindOptions: () => ({ wholeWord: false, caseSensitive: false }),
-    setFindOptions: async () => undefined,
-    getPreviewAppearance: () => 'light',
-    setPreviewAppearance: async () => undefined,
-    getPreviewSourceColoring: () => true,
-    setPreviewSourceColoring: async () => undefined,
-    getEditorAppearance: () => 'light',
-    setEditorAppearance: async () => undefined,
-    setOutlineVisible: async () => undefined,
-    onPanelActivated: () => undefined,
-    onPanelViewStateChanged: () => undefined,
-    onPanelDisposed: () => undefined
-  });
+    readDiskText: () => diskText
+  }) as never);
   return { controller, postedToWebview, getReceiveMessage: () => receiveMessage };
 };
 

@@ -104,6 +104,18 @@ const harness = {
     saveFlush.accept({ type: 'flushDocumentEdits', requestId });
     return response;
   },
+  autoSaveIfDirty() {
+    if (hostRevision.text === diskText) {
+      return Promise.resolve({ started: false as const });
+    }
+    return this.nativeSave().then((response) => ({ started: true as const, response }));
+  },
+  async replayHistory(direction: 'undo' | 'redo') {
+    if (!editor) throw new Error('Editor not initialized');
+    const applied = await editor[direction]();
+    await documentSession.whenIdle();
+    return applied;
+  },
   snapshot() {
     if (!editor) throw new Error('Editor not initialized');
     const active = document.activeElement;
@@ -113,7 +125,6 @@ const harness = {
       persistedDraft,
       mode: editor.view.dom.classList.contains('meo-mode-live') ? 'live' : 'source',
       top: editor.getTopVisiblePosition(),
-      history: editor.getHistoryDepth(),
       activeTableInput: active instanceof HTMLTextAreaElement
         && active.closest('.meo-md-html-table') !== null,
       tableValue: document.querySelector<HTMLTextAreaElement>(

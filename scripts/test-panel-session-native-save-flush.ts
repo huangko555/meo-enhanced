@@ -1,51 +1,35 @@
 import assert from 'node:assert/strict';
 import { mock } from 'bun:test';
+import {
+  createPanelSessionControllerParams,
+  createPanelSessionTestDocument,
+  createPanelSessionTestUri,
+  createPanelSessionVscodeMock,
+  panelSessionDisposable,
+  type PanelSessionTestDocument,
+  type PanelSessionTestUri
+} from './panel-session-test-helper';
 
-type Disposable = { dispose(): void };
 type Message = Record<string, unknown>;
 
-const disposable = (): Disposable => ({ dispose: () => undefined });
-const cancelable = (): { cancel(): void } => ({ cancel: () => undefined });
-
-type FakeUri = {
-  readonly scheme: 'file';
-  readonly fsPath: string;
-  toString(): string;
-};
-
-type FakeDocument = {
-  readonly uri: FakeUri;
-  text: string;
-  version: number;
-  isDirty: boolean;
-  getText(): string;
-  positionAt(offset: number): { readonly offset: number };
-};
-
-const documentUri: FakeUri = {
-  scheme: 'file',
-  fsPath: 'C:/native-save-flush.md',
-  toString: () => 'file:///native-save-flush.md'
-};
-
-const document: FakeDocument = {
-  uri: documentUri,
-  text: 'outer Draft\n\n| old |\n| --- |',
-  version: 2,
-  isDirty: true,
-  getText() { return this.text; },
-  positionAt(offset) { return { offset }; }
-};
+const documentUri = createPanelSessionTestUri('C:/native-save-flush.md');
+const document = createPanelSessionTestDocument(
+  documentUri,
+  'outer Draft\n\n| old |\n| --- |',
+  2
+);
 
 let diskText = 'accepted\n\n| old |\n| --- |';
-let willSaveListener: ((event: {
-  readonly document: FakeDocument;
+type WillSaveEvent = {
+  readonly document: PanelSessionTestDocument;
   readonly reason: number;
   waitUntil(thenable: PromiseLike<unknown>): void;
-}) => void) | null = null;
-const didSaveListeners: Array<(savedDocument: FakeDocument) => void> = [];
+};
+
+const willSaveListeners: Array<(event: WillSaveEvent) => void> = [];
+const didSaveListeners: Array<(savedDocument: PanelSessionTestDocument) => void> = [];
 const changeListeners: Array<(event: {
-  readonly document: FakeDocument;
+  readonly document: PanelSessionTestDocument;
   readonly contentChanges: readonly { readonly text: string }[];
 }) => void> = [];
 
@@ -58,79 +42,48 @@ class FakeRange {
 
 class FakeWorkspaceEdit {
   replacement: { readonly text: string } | null = null;
-  replace(_uri: FakeUri, _range: FakeRange, text: string): void {
+  replace(_uri: PanelSessionTestUri, _range: FakeRange, text: string): void {
     this.replacement = { text };
   }
 }
 
-const configuration = {
-  get: <T>(_key: string, fallback?: T): T | undefined => fallback,
-  inspect: () => undefined,
-  update: async () => undefined
+let priorParticipantText: string | null = null;
+
+const applyWorkspaceEdit = async (edit: FakeWorkspaceEdit): Promise<boolean> => {
+  if (!edit.replacement) return false;
+  document.text = edit.replacement.text;
+  document.version += 1;
+  document.isDirty = true;
+  for (const listener of changeListeners) {
+    listener({ document, contentChanges: [{ text: document.text }] });
+  }
+  return true;
 };
 
-mock.module('vscode', () => ({
-  ConfigurationTarget: { Global: 1 },
+willSaveListeners.push(() => {
+  if (priorParticipantText === null) return;
+  const edit = new FakeWorkspaceEdit();
+  edit.replace(document.uri, new FakeRange(document.positionAt(0), document.positionAt(document.text.length)), priorParticipantText);
+  priorParticipantText = null;
+  void applyWorkspaceEdit(edit);
+});
+
+mock.module('vscode', () => createPanelSessionVscodeMock(document, {
   Range: FakeRange,
-  RelativePattern: class FakeRelativePattern {},
-  TextDocumentSaveReason: { Manual: 1, AfterDelay: 2, FocusOut: 3 },
   WorkspaceEdit: FakeWorkspaceEdit,
-  Uri: {
-    file: (fsPath: string): FakeUri => ({
-      scheme: 'file',
-      fsPath,
-      toString: () => `file:///${fsPath.replace(/\\/g, '/')}`
-    }),
-    joinPath: (base: FakeUri, child: string): FakeUri => ({
-      scheme: 'file',
-      fsPath: `${base.fsPath}/${child}`,
-      toString: () => `${base.toString()}/${child}`
-    })
+  onWillSaveTextDocument: (listener) => {
+    willSaveListeners.push(listener as (event: WillSaveEvent) => void);
+    return panelSessionDisposable();
   },
-  commands: { executeCommand: async () => undefined },
-  extensions: { all: [] },
-  languages: { onDidChangeDiagnostics: () => disposable() },
-  window: {
-    tabGroups: { activeTabGroup: { activeTab: { input: { uri: documentUri } } } },
-    showWarningMessage: async () => undefined,
-    onDidChangeTextEditorSelection: () => disposable(),
-    onDidChangeActiveTextEditor: () => disposable(),
-    onDidChangeVisibleTextEditors: () => disposable()
+  onDidChangeTextDocument: (listener) => {
+    changeListeners.push(listener as (typeof changeListeners)[number]);
+    return panelSessionDisposable();
   },
-  workspace: {
-    textDocuments: [document],
-    getWorkspaceFolder: () => undefined,
-    getConfiguration: () => configuration,
-    onWillSaveTextDocument: (listener: typeof willSaveListener) => {
-      willSaveListener = listener;
-      return disposable();
-    },
-    onDidChangeTextDocument: (listener: (typeof changeListeners)[number]) => {
-      changeListeners.push(listener);
-      return disposable();
-    },
-    onDidSaveTextDocument: (listener: (typeof didSaveListeners)[number]) => {
-      didSaveListeners.push(listener);
-      return disposable();
-    },
-    createFileSystemWatcher: () => ({
-      ...disposable(),
-      onDidChange: () => disposable(),
-      onDidCreate: () => disposable(),
-      onDidDelete: () => disposable()
-    }),
-    applyEdit: async (edit: FakeWorkspaceEdit) => {
-      if (!edit.replacement) return false;
-      document.text = edit.replacement.text;
-      document.version += 1;
-      document.isDirty = true;
-      for (const listener of changeListeners) {
-        listener({ document, contentChanges: [{ text: document.text }] });
-      }
-      return true;
-    },
-    fs: {}
-  }
+  onDidSaveTextDocument: (listener) => {
+    didSaveListeners.push(listener as (typeof didSaveListeners)[number]);
+    return panelSessionDisposable();
+  },
+  applyEdit: (edit) => applyWorkspaceEdit(edit as FakeWorkspaceEdit)
 }));
 
 const [{ createPanelSessionController }, { createPendingDraftRecovery }] = await Promise.all([
@@ -172,11 +125,11 @@ const panel = {
     },
     onDidReceiveMessage: (listener: (message: unknown) => void) => {
       receiveMessage = listener;
-      return disposable();
+      return panelSessionDisposable();
     }
   },
-  onDidChangeViewState: () => disposable(),
-  onDidDispose: () => disposable()
+  onDidChangeViewState: () => panelSessionDisposable(),
+  onDidDispose: () => panelSessionDisposable()
 };
 
 const pendingDraftRecovery = createPendingDraftRecovery({
@@ -189,15 +142,16 @@ const pendingDraftRecovery = createPendingDraftRecovery({
   }
 });
 
-async function nativeSave(): Promise<boolean> {
+async function nativeSave(reason = 2): Promise<boolean> {
   const waiters: Promise<unknown>[] = [];
-  willSaveListener?.({
+  const event: WillSaveEvent = {
     document,
-    reason: 2,
+    reason,
     waitUntil(thenable) {
       waiters.push(Promise.resolve(thenable));
     }
-  });
+  };
+  for (const listener of willSaveListeners) listener(event);
   await Promise.allSettled(waiters);
   diskText = document.text;
   document.isDirty = false;
@@ -205,48 +159,13 @@ async function nativeSave(): Promise<boolean> {
   return true;
 }
 
-const controller = createPanelSessionController({
-  panel: panel as never,
-  document: document as never,
-  documentUri: documentUri as never,
-  context: {
-    globalState: { get: <T>(_key: string, fallback?: T): T | undefined => fallback, update: async () => undefined }
-  } as never,
-  diagnostics: { read: () => [] },
-  agentReviewHandoff: { noteRecentMEOOwnedFileChangeForUri: () => undefined } as never,
+const controller = createPanelSessionController(createPanelSessionControllerParams({
+  panel,
+  document,
   pendingDraftRecovery,
-  gitBaselineRefreshTimer: { schedule: () => cancelable() },
-  savedRevisionFile: { read: async () => ({ ok: true as const, text: diskText }) },
-  savedRevisionRefreshTimer: { schedule: () => cancelable() },
-  diffBaselineOutput: {
-    hash: () => '',
-    publish: async () => true,
-    publishFixedState: async () => undefined
-  },
-  viewNavigation: {
-    ready: async () => undefined,
-    flush: async () => undefined,
-    revealCurrentEditorSelection: async () => undefined,
-    revealSelectionForEditor: async () => undefined,
-    revealDocumentLink: async () => false,
-    dispose: () => undefined
-  },
-  saveDocument: nativeSave,
-  onExportDocument: async () => undefined,
-  renderPreview: async () => ({ html: '', metadata: {} }) as never,
-  getFindOptions: () => ({ wholeWord: false, caseSensitive: false }),
-  setFindOptions: async () => undefined,
-  getPreviewAppearance: () => 'light',
-  setPreviewAppearance: async () => undefined,
-  getPreviewSourceColoring: () => true,
-  setPreviewSourceColoring: async () => undefined,
-  getEditorAppearance: () => 'light',
-  setEditorAppearance: async () => undefined,
-  setOutlineVisible: async () => undefined,
-  onPanelActivated: () => undefined,
-  onPanelViewStateChanged: () => undefined,
-  onPanelDisposed: () => undefined
-});
+  readDiskText: () => diskText,
+  overrides: { saveDocument: () => nativeSave(1) }
+}) as never);
 
 await nativeSave();
 
@@ -272,6 +191,39 @@ assert.equal(
   nativeFlushCount,
   'MEO manual save must not re-enter the native flush handshake after Document Session prepared the exact Revision'
 );
+
+const participantExpected = document.text;
+const participantText = participantExpected.replace('pending cell', 'participant formatted');
+priorParticipantText = participantText;
+const flushCountBeforeParticipant = postedToWebview.filter(
+  (message) => message.type === 'flushDocumentEdits'
+).length;
+const participantSaveStartedAt = performance.now();
+await controller.handleMessage({
+  type: 'saveDocumentRevision',
+  requestId: 'manual-save-with-prior-participant',
+  revision: { version: document.version, text: participantExpected }
+});
+const participantSaveElapsedMs = performance.now() - participantSaveStartedAt;
+const participantResponse = postedToWebview.find(
+  (message) => message.type === 'saveDocumentRevisionResult'
+    && message.requestId === 'manual-save-with-prior-participant'
+);
+assert.equal(
+  postedToWebview.filter((message) => message.type === 'flushDocumentEdits').length,
+  flushCountBeforeParticipant,
+  'the concrete manual will-save event must consume its one-shot bypass even after a prior participant edits the model'
+);
+assert.ok(participantSaveElapsedMs < 250, `manual save must not wait for the 1s flush timeout (${participantSaveElapsedMs}ms)`);
+assert.equal(diskText, participantText, 'VS Code may still save the participant-modified model');
+assert.deepEqual(participantResponse, {
+  type: 'saveDocumentRevisionResult',
+  requestId: 'manual-save-with-prior-participant',
+  result: {
+    ok: false,
+    error: { code: 'operation-failed', message: 'Saved text differs from the requested Revision' }
+  }
+});
 
 controller.dispose();
 console.log('Panel Session native save flush checks passed');
