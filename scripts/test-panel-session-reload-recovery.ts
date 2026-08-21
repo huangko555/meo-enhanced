@@ -259,11 +259,68 @@ controller.dispose();
 await flushMicrotasks();
 assert.equal(
   document.text,
-  'last Host-confirmed Draft',
-  'Host must not clear recovery until it has confirmed the latest Webview Draft receipt'
+  'newer local Draft queued behind presentation',
+  'the reload receipt must wait until Host has confirmed the newer queued Draft'
 );
 
 assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
+
+{
+  const fixture = createHostFixture();
+  const recoveryEffects: Array<{ text: string | null; receiptVersion: number }> = [];
+  let closed = false;
+  const appliedBeforeEdit = createDocumentSessionWebviewAdapter({
+    postMessage: (message) => {
+      if (message.type === 'draftChanged') {
+        recoveryEffects.push({ text: message.text, receiptVersion: message.receiptVersion });
+      }
+      void fixture.controller.handleMessage(message);
+      if (message.type === 'draftChanged' && message.text === 'Draft after Host ack') {
+        appliedBeforeEdit.dispose();
+        fixture.controller.dispose();
+        closed = true;
+      }
+    },
+    presentText: () => true,
+    restoreReloadedView: () => undefined,
+    showFailureNotice: () => undefined,
+    reportUnexpectedError: (context, error) => {
+      throw new Error(`${context}: ${String(error)}`);
+    }
+  });
+
+  appliedBeforeEdit.start({
+    type: 'init',
+    documentId: documentUri.toString(),
+    text: 'accepted',
+    version: 1,
+    savedRevision: { version: 1, text: 'accepted' }
+  } as never);
+  appliedBeforeEdit.localDraftChanged('Draft before Host ack');
+  await appliedBeforeEdit.whenIdle();
+  await flushMicrotasks();
+  const applied = fixture.postedToWebview.find((message) => message.type === 'applied');
+  assert.ok(applied, 'Host must acknowledge the first Change through panel.webview.postMessage');
+
+  assert.equal(appliedBeforeEdit.accept(applied as never), true);
+  appliedBeforeEdit.localDraftChanged('Draft after Host ack');
+  await appliedBeforeEdit.whenIdle();
+  await flushMicrotasks();
+
+  assert.deepEqual({
+    closed,
+    recoveryEffects,
+    recoveredText: document.text
+  }, {
+    closed: true,
+    recoveryEffects: [
+      { text: 'Draft before Host ack', receiptVersion: 1 },
+      { text: null, receiptVersion: 2 },
+      { text: 'Draft after Host ack', receiptVersion: 3 }
+    ],
+    recoveredText: 'Draft after Host ack'
+  }, 'one ordered receipt owner must preserve a Draft queued after a Host acknowledgement');
+}
 
 {
   const fixture = createHostFixture();

@@ -66,7 +66,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   });
 
   await adapter.execute(coordinator.handle({
-    type: 'localDraftChanged', text: 'newer draft', receiptVersion: 1
+    type: 'localDraftChanged', text: 'newer draft'
   }));
   await adapter.execute(coordinator.handle({
     type: 'hostRevisionChanged',
@@ -98,7 +98,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   });
 
   await adapter.execute(coordinator.handle({
-    type: 'localDraftChanged', text: 'latest local edit', receiptVersion: 1
+    type: 'localDraftChanged', text: 'latest local edit'
   }));
   await adapter.execute([{ type: 'requestRevision' }]);
 

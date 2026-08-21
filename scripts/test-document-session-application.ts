@@ -16,7 +16,7 @@ assert.deepEqual(initialized.handle({
 
 const localEdit = createCoordinator();
 assert.deepEqual(localEdit.handle({
-  type: 'localDraftChanged', text: 'one\ntwo\nlocal', receiptVersion: 1
+  type: 'localDraftChanged', text: 'one\ntwo\nlocal'
 }), [
   { type: 'rememberDraft', text: 'one\ntwo\nlocal', receiptVersion: 1 }
 ]);
@@ -34,9 +34,9 @@ assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 4 }), []
 assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 3 }), []);
 
 const orderedEdits = createCoordinator();
-orderedEdits.handle({ type: 'localDraftChanged', text: 'first edit', receiptVersion: 1 });
+orderedEdits.handle({ type: 'localDraftChanged', text: 'first edit' });
 orderedEdits.handle({ type: 'submitPendingDraft' });
-orderedEdits.handle({ type: 'localDraftChanged', text: 'second edit', receiptVersion: 2 });
+orderedEdits.handle({ type: 'localDraftChanged', text: 'second edit' });
 assert.deepEqual(orderedEdits.handle({ type: 'hostChangeApplied', version: 4 }), [
   { type: 'rememberDraft', text: 'second edit', receiptVersion: 3 },
   {
@@ -66,7 +66,7 @@ assert.deepEqual(external.handle({
 }), []);
 
 const disjoint = createCoordinator();
-disjoint.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal', receiptVersion: 1 });
+disjoint.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' });
 assert.deepEqual(disjoint.handle({
   type: 'hostRevisionChanged',
   version: 4,
@@ -82,7 +82,7 @@ assert.deepEqual(disjoint.handle({
 ]);
 
 const overlap = createCoordinator();
-overlap.handle({ type: 'localDraftChanged', text: 'one\nlocal', receiptVersion: 1 });
+overlap.handle({ type: 'localDraftChanged', text: 'one\nlocal' });
 assert.deepEqual(overlap.handle({
   type: 'hostRevisionChanged',
   version: 4,
@@ -93,7 +93,7 @@ assert.deepEqual(overlap.handle({
 ]);
 
 const saveAfterEdit = createCoordinator();
-saveAfterEdit.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal', receiptVersion: 1 });
+saveAfterEdit.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' });
 saveAfterEdit.handle({ type: 'submitPendingDraft' });
 assert.deepEqual(saveAfterEdit.handle({ type: 'saveRequested' }), []);
 assert.deepEqual(saveAfterEdit.handle({ type: 'hostChangeApplied', version: 4 }), [
@@ -138,7 +138,7 @@ assert.deepEqual(immediateSave.handle({ type: 'saveRequested' }), [
 ]);
 
 const saveAfterConflict = createCoordinator();
-saveAfterConflict.handle({ type: 'localDraftChanged', text: 'one\nlocal', receiptVersion: 1 });
+saveAfterConflict.handle({ type: 'localDraftChanged', text: 'one\nlocal' });
 saveAfterConflict.handle({ type: 'submitPendingDraft' });
 saveAfterConflict.handle({ type: 'saveRequested' });
 assert.deepEqual(saveAfterConflict.handle({
@@ -152,7 +152,7 @@ assert.deepEqual(saveAfterConflict.handle({
 ]);
 
 const discarded = createCoordinator();
-discarded.handle({ type: 'localDraftChanged', text: 'one\nlocal', receiptVersion: 1 });
+discarded.handle({ type: 'localDraftChanged', text: 'one\nlocal' });
 assert.deepEqual(discarded.handle({
   type: 'hostReloadedFromDisk',
   version: 4,

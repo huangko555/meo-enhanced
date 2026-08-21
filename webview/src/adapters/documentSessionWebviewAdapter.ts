@@ -38,16 +38,9 @@ export type DocumentSessionWebviewAdapterDependencies = {
 export function createDocumentSessionWebviewAdapter(
   dependencies: DocumentSessionWebviewAdapterDependencies
 ): DocumentSessionWebviewAdapter {
-  let latestDraftReceiptVersion = 0;
-  const postSessionMessage = (message: WebviewToHostMessage): void => {
-    if (message.type === 'draftChanged') {
-      latestDraftReceiptVersion = Math.max(latestDraftReceiptVersion, message.receiptVersion);
-    }
-    dependencies.postMessage(message);
-  };
-  const transport = createDocumentSessionTransport(postSessionMessage);
+  const transport = createDocumentSessionTransport(dependencies.postMessage);
   const runtime = createDocumentSessionRuntime({
-    postMessage: postSessionMessage,
+    postMessage: dependencies.postMessage,
     presentText: dependencies.presentText,
     executeRemote: (action) => transport.execute(action),
     showFailureNotice: dependencies.showFailureNotice
@@ -100,15 +93,15 @@ export function createDocumentSessionWebviewAdapter(
           text: message.text
         });
         const accepted = completions.includes('discard-draft-recovery');
-        if (!disposed) {
+        enqueueSession('document reload completion', () => {
           dependencies.postMessage({
             type: 'documentReloadPresentationCompleted',
             reloadId: message.reloadId,
             presented: accepted,
-            receiptVersion: latestDraftReceiptVersion
+            receiptVersion: runtime.draftRecoveryReceiptVersion()
           });
-        }
-        if (accepted && !disposed) dependencies.restoreReloadedView(message);
+          if (accepted) dependencies.restoreReloadedView(message);
+        });
       });
       return true;
     }
@@ -133,10 +126,8 @@ export function createDocumentSessionWebviewAdapter(
       return acceptSessionMessage(message);
     },
     localDraftChanged(text) {
-      latestDraftReceiptVersion += 1;
-      const receiptVersion = latestDraftReceiptVersion;
       enqueueSession('local draft', async () => {
-        const changed = runtime.handle({ type: 'localDraftChanged', text, receiptVersion });
+        const changed = runtime.handle({ type: 'localDraftChanged', text });
         const submitted = runtime.handle({ type: 'submitPendingDraft' });
         await Promise.all([changed, submitted]);
       });
@@ -155,8 +146,12 @@ export function createDocumentSessionWebviewAdapter(
         });
       });
     },
-    whenIdle() {
-      return operation;
+    async whenIdle() {
+      let pending: Promise<void>;
+      do {
+        pending = operation;
+        await pending;
+      } while (pending !== operation);
     },
     dispose() {
       if (disposed) return;

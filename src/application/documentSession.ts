@@ -14,11 +14,7 @@ export type { DocumentPresentationSource } from '../domain/documentSession';
 export type { DocumentPresentationCompletion } from '../domain/documentSession';
 
 export type DocumentSessionInput =
-  | {
-      readonly type: 'localDraftChanged';
-      readonly text: string;
-      readonly receiptVersion: number;
-    }
+  | { readonly type: 'localDraftChanged'; readonly text: string }
   | { readonly type: 'submitPendingDraft' }
   | { readonly type: 'hostChangeApplied'; readonly version: number }
   | { readonly type: 'hostRevisionChanged'; readonly version: number; readonly text: string }
@@ -61,11 +57,14 @@ export type DocumentSessionAction =
 
 export type DocumentSessionCoordinator = {
   readonly handle: (input: DocumentSessionInput) => readonly DocumentSessionAction[];
+  /** Latest recovery effect receipt emitted by this ordered Interface. */
+  readonly draftRecoveryReceiptVersion: () => number;
 };
 
 /**
- * Coordinates validated editor and Host inputs through the deterministic Domain
- * model. Adapters execute the returned actions; this module performs no I/O.
+ * Orders validated editor and Host inputs through the deterministic Domain model.
+ * This Interface is the sole Draft Recovery Receipt allocator; Adapters only
+ * execute and propagate its returned actions.
  */
 export function createDocumentSessionCoordinator(input: {
   readonly documentId: string;
@@ -73,36 +72,42 @@ export function createDocumentSessionCoordinator(input: {
   readonly savedRevision: SavedRevision | null;
 }): DocumentSessionCoordinator {
   let state = createDocumentSession(input);
-  let latestDraftReceiptVersion = 0;
+  let nextDraftRecoveryReceiptVersion = 1;
+  let latestDraftRecoveryReceiptVersion = 0;
 
   return {
     handle(applicationInput) {
-      if (applicationInput.type === 'localDraftChanged') {
-        latestDraftReceiptVersion = Math.max(
-          latestDraftReceiptVersion,
-          applicationInput.receiptVersion
-        );
-      }
+      const inputReceiptVersion = canProduceDraftRecoveryEffect(applicationInput)
+        ? nextDraftRecoveryReceiptVersion++
+        : null;
       const event = mapInput(state, applicationInput);
       if (event === null) return [];
 
       const previousState = state;
       const transition = transitionDocumentSession(state, event);
       state = transition.state;
-      return mapEffects(
+      const actions = mapEffects(
         previousState,
         state,
         transition.effects,
-        () => {
-          latestDraftReceiptVersion += 1;
-          return latestDraftReceiptVersion;
-        },
-        applicationInput.type === 'localDraftChanged'
-          ? applicationInput.receiptVersion
-          : null
+        inputReceiptVersion
       );
-    }
+      if (actions.some((action) => action.type === 'rememberDraft')) {
+        if (inputReceiptVersion === null) {
+          throw new Error('Draft recovery effect was emitted by an unordered Document Session input');
+        }
+        latestDraftRecoveryReceiptVersion = inputReceiptVersion;
+      }
+      return actions;
+    },
+    draftRecoveryReceiptVersion: () => latestDraftRecoveryReceiptVersion
   };
+}
+
+function canProduceDraftRecoveryEffect(input: DocumentSessionInput): boolean {
+  return input.type === 'localDraftChanged'
+    || input.type === 'hostChangeApplied'
+    || input.type === 'hostRevisionChanged';
 }
 
 function mapInput(
@@ -158,15 +163,17 @@ function mapEffects(
   previousState: DocumentSessionState,
   nextState: DocumentSessionState,
   effects: readonly DocumentSessionEffect[],
-  nextDraftReceiptVersion: () => number,
-  localDraftReceiptVersion: number | null
+  inputReceiptVersion: number | null
 ): readonly DocumentSessionAction[] {
   return effects.map((effect): DocumentSessionAction => {
     if (effect.type === 'persistDraft') {
+      if (inputReceiptVersion === null) {
+        throw new Error('Draft recovery effect requires an ordered input receipt');
+      }
       return {
         type: 'rememberDraft',
         text: effect.draft?.text ?? null,
-        receiptVersion: localDraftReceiptVersion ?? nextDraftReceiptVersion()
+        receiptVersion: inputReceiptVersion
       };
     }
     if (effect.type === 'submitChange') {

@@ -21,6 +21,7 @@ type RemoteDocumentSessionAction = Extract<
 export type DocumentSessionRuntime = {
   initialize(message: InitMessage): Promise<void>;
   handle(input: DocumentSessionInput): Promise<readonly DocumentPresentationCompletion[]>;
+  draftRecoveryReceiptVersion(): number;
   whenIdle(): Promise<void>;
 };
 
@@ -74,6 +75,9 @@ export function createDocumentSessionRuntime(
         const actions = session.coordinator.handle(input);
         return session.actionAdapter.execute(actions);
       });
+    },
+    draftRecoveryReceiptVersion() {
+      return requireSession().coordinator.draftRecoveryReceiptVersion();
     },
     whenIdle() {
       return operation;
