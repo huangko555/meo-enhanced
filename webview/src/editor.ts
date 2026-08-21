@@ -2139,7 +2139,7 @@ export function createEditor({
     state,
     parent
   });
-  if (startMode === 'live') tableColumnWidthAdapter.adapter.refresh();
+  if (startMode === 'live') tableColumnWidthAdapter.adapter.acquire();
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
   // Native listeners keep hover behavior consistent across code, Mermaid, and math blocks.
   onBlockActionPointerMove = (event) => updateBlockActionToolbarHover(event, view);
@@ -2606,7 +2606,6 @@ export function createEditor({
           ],
           annotations: Transaction.addToHistory.of(false)
         });
-        if (currentMode === 'live') tableColumnWidthAdapter.adapter.refresh();
         return;
       }
 
@@ -2635,7 +2634,6 @@ export function createEditor({
       } finally {
         applyingExternal = false;
       }
-      if (currentMode === 'live') tableColumnWidthAdapter.adapter.refresh();
       restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
       syncSelectionClass();
       emitSelectionChange();
@@ -2666,10 +2664,10 @@ export function createEditor({
           ]
         });
         forceParsing(view, view.state.doc.length, 500);
-        if (nextMode === 'live') tableColumnWidthAdapter.adapter.refresh();
+        if (nextMode === 'live') tableColumnWidthAdapter.adapter.acquire();
       } catch (error) {
         currentMode = previousMode;
-        if (previousMode === 'live') tableColumnWidthAdapter.adapter.refresh();
+        if (previousMode === 'live') tableColumnWidthAdapter.adapter.acquire();
         syncModeClasses();
         throw error;
       }

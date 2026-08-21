@@ -10,6 +10,8 @@ type ObserverMetrics = {
   disconnects: number;
   callbacks: number;
   queries: number;
+  rafRequests: number;
+  projections: number;
 };
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -27,7 +29,7 @@ const readMetrics = (
   page: import('puppeteer-core').Page,
   editorId: string
 ): Promise<ObserverMetrics> => page.evaluate((id) => (
-  structuredClone((window as any).__tableColumnWidthObserverMetrics[id])
+  (window as any).__readTableColumnWidthObserverMetrics(id)
 ), editorId);
 
 const tableSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table)';
@@ -78,20 +80,38 @@ async function main(): Promise<void> {
     ].join(''));
     await page.evaluate(() => {
       const NativeMutationObserver = window.MutationObserver;
+      const NativeResizeObserver = window.ResizeObserver;
+      const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
       const nativeQuerySelectorAll = Element.prototype.querySelectorAll;
+      const nativeDispatchEvent = EventTarget.prototype.dispatchEvent;
       const metrics: Record<string, ObserverMetrics> = {};
-      const callbacks: Record<string, MutationCallback[]> = {};
+      const observerRecords: Array<{
+        callback: MutationCallback;
+        editorId: string | null;
+        observes: number;
+      }> = [];
+      let activeResizeEditorId: string | null = null;
       const forId = (id: string): ObserverMetrics => (
-        metrics[id] ??= { constructs: 0, observes: 0, disconnects: 0, callbacks: 0, queries: 0 }
+        metrics[id] ??= {
+          constructs: 0,
+          observes: 0,
+          disconnects: 0,
+          callbacks: 0,
+          queries: 0,
+          rafRequests: 0,
+          projections: 0
+        }
       );
 
       class ObservedMutationObserver implements MutationObserver {
         private readonly nativeObserver: MutationObserver;
-        private editorId: string | null = null;
+        private readonly record: (typeof observerRecords)[number];
 
-        constructor(private readonly callback: MutationCallback) {
+        constructor(callback: MutationCallback) {
+          this.record = { callback, editorId: null, observes: 0 };
+          observerRecords.push(this.record);
           this.nativeObserver = new NativeMutationObserver((records) => {
-            if (this.editorId) forId(this.editorId).callbacks += 1;
+            if (this.record.editorId) forId(this.record.editorId).callbacks += 1;
             callback(records, this);
           });
         }
@@ -103,22 +123,50 @@ async function main(): Promise<void> {
             options?.childList === true &&
             options.subtree === true
           ) {
-            this.editorId = target.dataset.columnWidthObserverHost;
-            forId(this.editorId).constructs += 1;
-            forId(this.editorId).observes += 1;
-            (callbacks[this.editorId] ??= []).push(this.callback);
+            this.record.editorId = target.dataset.columnWidthObserverHost;
+            this.record.observes += 1;
+            forId(this.record.editorId).observes += 1;
           }
           this.nativeObserver.observe(target, options);
         }
 
         disconnect(): void {
-          if (this.editorId) forId(this.editorId).disconnects += 1;
+          if (this.record.editorId) forId(this.record.editorId).disconnects += 1;
           this.nativeObserver.disconnect();
         }
 
         takeRecords(): MutationRecord[] {
           return this.nativeObserver.takeRecords();
         }
+      }
+
+      class ObservedResizeObserver implements ResizeObserver {
+        private readonly nativeObserver: ResizeObserver;
+        private editorId: string | null = null;
+
+        constructor(callback: ResizeObserverCallback) {
+          this.nativeObserver = new NativeResizeObserver((entries, observer) => {
+            const previous = activeResizeEditorId;
+            activeResizeEditorId = this.editorId;
+            try {
+              callback(entries, observer);
+            } finally {
+              activeResizeEditorId = previous;
+            }
+          });
+        }
+
+        observe(target: Element, options?: ResizeObserverOptions): void {
+          this.editorId = target instanceof HTMLElement
+            && target.classList.contains('meo-md-html-table-shell')
+            ? target.closest<HTMLElement>('[data-column-width-observer-host]')
+              ?.dataset.columnWidthObserverHost ?? null
+            : null;
+          this.nativeObserver.observe(target, options);
+        }
+
+        disconnect(): void { this.nativeObserver.disconnect(); }
+        unobserve(target: Element): void { this.nativeObserver.unobserve(target); }
       }
 
       Element.prototype.querySelectorAll = function querySelectorAll<E extends Element = Element>(
@@ -130,12 +178,30 @@ async function main(): Promise<void> {
         }
         return nativeQuerySelectorAll.call(this, selectors) as NodeListOf<E>;
       };
+      EventTarget.prototype.dispatchEvent = function dispatchEvent(event: Event): boolean {
+        if (event.type === 'meo-table-column-width-projected' && this instanceof Element) {
+          const id = this.closest<HTMLElement>('[data-column-width-observer-host]')
+            ?.dataset.columnWidthObserverHost;
+          if (id) forId(id).projections += 1;
+        }
+        return nativeDispatchEvent.call(this, event);
+      };
       window.MutationObserver = ObservedMutationObserver;
+      window.ResizeObserver = ObservedResizeObserver;
+      window.requestAnimationFrame = (callback) => {
+        if (activeResizeEditorId) forId(activeResizeEditorId).rafRequests += 1;
+        return nativeRequestAnimationFrame(callback);
+      };
       forId('first');
       forId('second');
-      (window as any).__tableColumnWidthObserverMetrics = metrics;
+      (window as any).__readTableColumnWidthObserverMetrics = (id: string): ObserverMetrics => ({
+        ...structuredClone(forId(id)),
+        constructs: observerRecords.filter((record) => record.editorId === id).length
+      });
       (window as any).__invokeTableColumnWidthObserver = (id: string) => {
-        for (const callback of callbacks[id] ?? []) callback([], {} as MutationObserver);
+        for (const record of observerRecords) {
+          if (record.editorId === id) record.callback([], {} as MutationObserver);
+        }
       };
     });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
@@ -147,54 +213,92 @@ async function main(): Promise<void> {
     const text = ['# Source table', '', '| A | B |', '| --- | --- |', '| one | two |'].join('\n');
     await page.evaluate((documentText) => {
       const harness = (window as any).SourceLightweightTableColumnWidthHarness;
+      (window as any).__tableWidthHostRevisions = { first: [] };
+      (window as any).__tableWidthSelections = { first: null };
       const editor = harness.createEditor({
         parent: document.getElementById('first'),
         text: documentText,
         initialMode: 'source',
-        onApplyChanges() {}
+        onApplyChanges(text: string) {
+          ((window as any).__tableWidthHostRevisions.first ??= []).push(text);
+        },
+        onSelectionChange(selection: unknown) {
+          (window as any).__tableWidthSelections.first = selection;
+        }
       });
       (window as any).__tableWidthEditors = { first: editor };
       const target = documentText.indexOf('one');
-      editor.view.dispatch({ selection: { anchor: target, head: target + 3 } });
+      editor.revealSelection(target, target + 3, { focusEditor: true, align: 'nearest' });
       editor.focus();
     }, text);
     await waitForFrames(page);
+    assert.equal(await page.$('#first .cm-editor.meo-mode-source').then(Boolean), true);
 
     assert.deepEqual(
       await readMetrics(page, 'first'),
-      { constructs: 0, observes: 0, disconnects: 0, callbacks: 0, queries: 0 },
+      {
+        constructs: 0,
+        observes: 0,
+        disconnects: 0,
+        callbacks: 0,
+        queries: 0,
+        rafRequests: 0,
+        projections: 0
+      },
       'production Source bootstrap must not create a Table Column Width observer or query rendered tables'
     );
 
     await page.evaluate(() => {
-      const editor = (window as any).__tableWidthEditors.first;
       const marker = document.createElement('span');
       marker.dataset.sourceMutation = 'ordinary';
-      editor.view.dom.append(marker);
+      document.querySelector('#first .cm-editor')!.append(marker);
     });
     await waitForFrames(page);
     assert.deepEqual(
       await readMetrics(page, 'first'),
-      { constructs: 0, observes: 0, disconnects: 0, callbacks: 0, queries: 0 },
+      {
+        constructs: 0,
+        observes: 0,
+        disconnects: 0,
+        callbacks: 0,
+        queries: 0,
+        rafRequests: 0,
+        projections: 0
+      },
       'ordinary Source DOM mutations must not schedule rendered-table discovery'
     );
 
+    await page.evaluate(() => {
+      const editor = (window as any).__tableWidthEditors.first;
+      editor.revealSelection(editor.getText().length, editor.getText().length, {
+        focusEditor: true,
+        align: 'nearest'
+      });
+    });
+    await page.keyboard.type('!');
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      const editor = (window as any).__tableWidthEditors.first;
+      const target = editor.getText().indexOf('one');
+      editor.revealSelection(target, target + 3, { focusEditor: true, align: 'nearest' });
+    });
+    await waitForFrames(page);
+
     const initialState = await page.evaluate(() => {
       const editor = (window as any).__tableWidthEditors.first;
+      const selection = (window as any).__tableWidthSelections.first;
       return {
         text: editor.getText(),
-        selection: {
-          anchor: editor.view.state.selection.main.anchor,
-          head: editor.view.state.selection.main.head
-        },
-        history: editor.getHistoryDepth(),
+        selection: { from: selection?.from, to: selection?.to },
+        hostRevision: (window as any).__tableWidthHostRevisions.first.at(-1),
         focused: editor.hasFocus(),
-        scrollTop: editor.view.scrollDOM.scrollTop
+        topVisible: editor.getTopVisiblePosition()
       };
     });
 
     await page.evaluate(() => (window as any).__tableWidthEditors.first.setMode('live'));
     await page.waitForSelector('#first table[data-table-column-width][data-table-column-width-owner="adapter"]');
+    await page.waitForSelector('#first .cm-editor.meo-mode-live');
     await waitForFrames(page);
     let firstMetrics = await readMetrics(page, 'first');
     assert.equal(firstMetrics.constructs, 1, 'Source-to-Live must construct one column-width observer');
@@ -220,27 +324,25 @@ async function main(): Promise<void> {
 
     const liveState = await page.evaluate(() => {
       const editor = (window as any).__tableWidthEditors.first;
+      const selection = (window as any).__tableWidthSelections.first;
       return {
         text: editor.getText(),
-        selection: {
-          anchor: editor.view.state.selection.main.anchor,
-          head: editor.view.state.selection.main.head
-        },
-        history: editor.getHistoryDepth(),
+        selection: { from: selection?.from, to: selection?.to },
+        hostRevision: (window as any).__tableWidthHostRevisions.first.at(-1),
         focused: editor.hasFocus(),
-        scrollTop: editor.view.scrollDOM.scrollTop
+        topVisible: editor.getTopVisiblePosition()
       };
     });
-    assert.deepEqual(liveState, initialState, 'mode and width presentation must preserve text/selection/focus/viewport/history');
+    assert.deepEqual(liveState, initialState, 'mode and width presentation must preserve text/selection/focus/viewport');
 
     await page.evaluate(() => (window as any).__tableWidthEditors.first.setMode('source'));
     await waitForFrames(page);
+    assert.equal(await page.$('#first .cm-editor.meo-mode-source').then(Boolean), true);
     firstMetrics = await readMetrics(page, 'first');
     assert.equal(firstMetrics.disconnects, 1, 'Live-to-Source must disconnect the active observer once');
     const sourceQueryBaseline = firstMetrics.queries;
     await page.evaluate(() => {
-      const editor = (window as any).__tableWidthEditors.first;
-      editor.view.dom.append(document.createElement('i'));
+      document.querySelector('#first .cm-editor')!.append(document.createElement('i'));
       (window as any).__invokeTableColumnWidthObserver('first');
     });
     await waitForFrames(page);
@@ -266,10 +368,30 @@ async function main(): Promise<void> {
     assert.equal(firstMetrics.observes, 3);
     assert.equal(firstMetrics.disconnects, 3, 'repeated mode switches must balance observer acquisition and release');
 
+    assert.equal(
+      await page.evaluate(async (originalText) => {
+        const editor = (window as any).__tableWidthEditors.first;
+        const applied = await editor.undo();
+        return applied && editor.getText() === originalText;
+      }, text),
+      true,
+      'one native undo after mode round trips must undo the user edit, not a mode transition'
+    );
+    assert.equal(
+      await page.evaluate(async (editedText) => {
+        const editor = (window as any).__tableWidthEditors.first;
+        const applied = await editor.redo();
+        return applied && editor.getText() === editedText;
+      }, initialState.text),
+      true,
+      'native redo must restore the same user edit after mode round trips'
+    );
+
     await page.evaluate((documentText) => {
       const harness = (window as any).SourceLightweightTableColumnWidthHarness;
       const state = (window as any).__tableWidthEditors;
       state.first.setMode('live');
+      state.first.setText(`host revision\n\n${state.first.getText()}`);
       state.second = harness.createEditor({
         parent: document.getElementById('second'),
         text: documentText.replace('Source table', 'Second table'),
@@ -280,6 +402,10 @@ async function main(): Promise<void> {
     await page.waitForSelector('#first table[data-table-column-width][data-table-column-width-owner="adapter"]');
     await page.waitForSelector('#second table[data-table-column-width][data-table-column-width-owner="adapter"]');
     await waitForFrames(page);
+    assert.ok(
+      Math.abs(await firstColumnWidth(page, '#first') - resizedWidth) < 2,
+      'WidthIntent must survive a production external presentation'
+    );
     assert.equal((await readMetrics(page, 'first')).constructs, 4);
     const initialLiveSecond = await readMetrics(page, 'second');
     assert.equal(initialLiveSecond.constructs, 1, 'an initial Live editor must construct one observer');
@@ -290,7 +416,7 @@ async function main(): Promise<void> {
     const beforeFirstMutation = await readMetrics(page, 'first');
     const beforeSecondMutation = await readMetrics(page, 'second');
     await page.evaluate(() => {
-      (window as any).__tableWidthEditors.first.view.dom.append(document.createElement('b'));
+      document.querySelector('#first .cm-editor')!.append(document.createElement('b'));
     });
     await waitForFrames(page, 2);
     const afterFirstMutation = await readMetrics(page, 'first');
@@ -307,9 +433,8 @@ async function main(): Promise<void> {
     const firstReleasedQueries = (await readMetrics(page, 'first')).queries;
     const secondLiveQueries = (await readMetrics(page, 'second')).queries;
     await page.evaluate(() => {
-      const state = (window as any).__tableWidthEditors;
-      state.first.view.dom.append(document.createElement('em'));
-      state.second.view.dom.append(document.createElement('em'));
+      document.querySelector('#first .cm-editor')!.append(document.createElement('em'));
+      document.querySelector('#second .cm-editor')!.append(document.createElement('em'));
     });
     await waitForFrames(page, 2);
     assert.equal((await readMetrics(page, 'first')).queries, firstReleasedQueries);

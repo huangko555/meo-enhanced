@@ -6,7 +6,7 @@ import {
 } from './tableColumnWidthPolicy';
 
 export type TableColumnWidthAdapter = {
-  refresh(): void;
+  acquire(): void;
   release(): void;
   dispose(): void;
 };
@@ -34,6 +34,10 @@ type TableBinding = {
   readonly table: HTMLTableElement;
   readonly cleanup: () => void;
   project(): void;
+};
+
+type LifecycleEpoch = {
+  alive: boolean;
 };
 
 const tableSelector = 'table[data-table-column-width]';
@@ -66,8 +70,12 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   const intents: WidthIntent[] = [];
   const bindings = new Map<HTMLTableElement, TableBinding>();
   let mutationObserver: MutationObserver | null = null;
-  let active = false;
+  let currentEpoch: LifecycleEpoch | null = null;
   let disposed = false;
+
+  const isCurrentEpoch = (epoch: LifecycleEpoch): boolean => (
+    !disposed && epoch.alive && currentEpoch === epoch
+  );
 
   const findIntent = (table: HTMLTableElement): WidthIntent | null => {
     const from = numberFromDataset(table, 'tableFrom');
@@ -125,8 +133,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     );
   };
 
-  const project = (table: HTMLTableElement): void => {
-    if (disposed) return;
+  const project = (table: HTMLTableElement, epoch: LifecycleEpoch): void => {
+    if (!isCurrentEpoch(epoch)) return;
     const intent = findIntent(table);
     if (!intent) {
       reset(table);
@@ -153,8 +161,9 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     else intents.push(value);
   };
 
-  const bind = (table: HTMLTableElement): TableBinding => {
+  const bind = (table: HTMLTableElement, epoch: LifecycleEpoch): TableBinding => {
     const cleanups: Array<() => void> = [];
+    const lifecycle = { alive: true };
     let dragCleanup: (() => void) | null = null;
     let refreshDragPreview: (() => void) | null = null;
     let resizeFrame = 0;
@@ -165,18 +174,20 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       cancelAnimationFrame(resizeFrame);
       resizeFrame = 0;
     };
+    const isCurrentBinding = () => lifecycle.alive && isCurrentEpoch(epoch);
     const scheduleProjection = () => {
-      if (disposed || resizeFrame) return;
+      if (!isCurrentBinding() || resizeFrame) return;
       resizeFrame = requestAnimationFrame(() => {
         resizeFrame = 0;
+        if (!isCurrentBinding()) return;
         if (refreshDragPreview) refreshDragPreview();
-        else project(table);
+        else project(table, epoch);
         table.dispatchEvent(new CustomEvent(projectionEventName));
       });
     };
 
     const start = (event: PointerEvent): void => {
-      if (disposed || event.button !== 0) return;
+      if (!isCurrentBinding() || event.button !== 0) return;
       const handle = event.target instanceof Element
         ? event.target.closest<HTMLElement>(handleSelector)
         : null;
@@ -212,6 +223,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const pointerBoundary = table.closest<HTMLElement>('.cm-editor') ?? options.root;
 
       const renderDragPreview = (): void => {
+        if (!isCurrentBinding()) return;
         const maximumTotalWidth = availableWidth(table);
         const result = policy.resize({
           widths: startWidths,
@@ -253,7 +265,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const finish = (finishEvent?: PointerEvent) => {
         if (finishEvent && finishEvent.pointerId !== event.pointerId) return;
         removeDragListeners();
-        if (disposed || !table.isConnected) return;
+        if (!isCurrentBinding() || !table.isConnected) return;
         const maximumTotalWidth = availableWidth(table);
         storeIntent(table, {
           widths: [...nextWidths],
@@ -265,7 +277,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         scheduleProjection();
       };
       const move = (moveEvent: PointerEvent) => {
-        if (moveEvent.pointerId !== event.pointerId) return;
+        if (!isCurrentBinding() || moveEvent.pointerId !== event.pointerId) return;
         if (moveEvent.pointerType === 'mouse' && (moveEvent.buttons & 1) === 0) {
           finish(moveEvent);
           return;
@@ -302,8 +314,10 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 
     return {
       table,
-      project: () => project(table),
+      project: () => project(table, epoch),
       cleanup() {
+        if (!lifecycle.alive) return;
+        lifecycle.alive = false;
         dragCleanup?.();
         cancelFrame();
         for (const cleanup of cleanups) cleanup();
@@ -312,8 +326,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     };
   };
 
-  const refresh = (): void => {
-    if (disposed || !active) return;
+  const reconcile = (epoch: LifecycleEpoch): void => {
+    if (!isCurrentEpoch(epoch)) return;
     const current = new Set(options.root.querySelectorAll<HTMLTableElement>(tableSelector));
     for (const [table, binding] of bindings) {
       if (current.has(table)) continue;
@@ -323,7 +337,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     for (const table of current) {
       let binding = bindings.get(table);
       if (!binding) {
-        binding = bind(table);
+        binding = bind(table, epoch);
         bindings.set(table, binding);
       }
       binding.project();
@@ -342,12 +356,14 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         if (intents[index].from >= intents[index].to) intents.splice(index, 1);
       }
     }
-    if (active) refresh();
+    if (currentEpoch) reconcile(currentEpoch);
   };
 
   const release = (): void => {
-    if (!active) return;
-    active = false;
+    const epoch = currentEpoch;
+    if (!epoch) return;
+    currentEpoch = null;
+    epoch.alive = false;
     mutationObserver?.disconnect();
     mutationObserver = null;
     for (const binding of bindings.values()) binding.cleanup();
@@ -355,14 +371,13 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   };
 
   const adapter: TableColumnWidthAdapter = {
-    refresh() {
-      if (disposed) return;
-      if (!active) {
-        active = true;
-        mutationObserver = new MutationObserver(refresh);
-        mutationObserver.observe(options.root, { childList: true, subtree: true });
-      }
-      refresh();
+    acquire() {
+      if (disposed || currentEpoch) return;
+      const epoch = { alive: true };
+      currentEpoch = epoch;
+      mutationObserver = new MutationObserver(() => reconcile(epoch));
+      mutationObserver.observe(options.root, { childList: true, subtree: true });
+      reconcile(epoch);
     },
     release,
     dispose() {

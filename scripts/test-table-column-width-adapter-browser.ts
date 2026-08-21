@@ -87,7 +87,7 @@ async function main(): Promise<void> {
       (window as any).__makeWidthTable = makeTable;
       makeTable('first', 0, 3, 3);
       makeTable('second', 3, 6, 3);
-      (window as any).__widthCandidate.adapter.refresh();
+      (window as any).__widthCandidate.adapter.acquire();
     });
     await waitForFrames(page, 6);
 
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
       const first = root.querySelector('[data-table-column-width="first"]')!;
       first.remove();
       (window as any).__makeWidthTable('first', 0, 3, 2);
-      (window as any).__widthCandidate.adapter.refresh();
+      (window as any).__widthCandidate.adapter.acquire();
     });
     await waitForFrames(page);
     assert.equal((await widths('first')).length, 2);
@@ -116,29 +116,29 @@ async function main(): Promise<void> {
       const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
       root.querySelector('[data-table-column-width="first"]')!.remove();
       (window as any).__makeWidthTable('first', 0, 3, 3);
-      (window as any).__widthCandidate.adapter.refresh();
+      (window as any).__widthCandidate.adapter.acquire();
     });
     await waitForFrames(page);
     assert.deepEqual(await widths('first'), resizedFirst);
 
     await page.evaluate(() => {
       const runtime = (window as any).__widthCandidate;
-      runtime.view.dispatch({ changes: { from: 0, insert: 'xx' } });
       const first = document.querySelector<HTMLElement>('[data-table-column-width="first"]')!;
       first.dataset.tableFrom = '2';
       first.dataset.tableTo = '5';
-      runtime.adapter.refresh();
+      runtime.view.dispatch({ changes: { from: 0, insert: 'xx' } });
+      runtime.adapter.acquire();
     });
     await waitForFrames(page);
     assert.deepEqual(await widths('first'), resizedFirst);
 
     await page.evaluate(() => {
       const runtime = (window as any).__widthCandidate;
-      assert(runtime.undo());
       const first = document.querySelector<HTMLElement>('[data-table-column-width="first"]')!;
       first.dataset.tableFrom = '0';
       first.dataset.tableTo = '3';
-      runtime.adapter.refresh();
+      assert(runtime.undo());
+      runtime.adapter.acquire();
       function assert(value: unknown): asserts value {
         if (!value) throw new Error('native undo was not applied');
       }
@@ -147,30 +147,30 @@ async function main(): Promise<void> {
     assert.deepEqual(await widths('first'), resizedFirst);
     await page.evaluate(() => {
       const runtime = (window as any).__widthCandidate;
-      if (!runtime.redo()) throw new Error('native redo was not applied');
       const first = document.querySelector<HTMLElement>('[data-table-column-width="first"]')!;
       first.dataset.tableFrom = '2';
       first.dataset.tableTo = '5';
-      runtime.adapter.refresh();
+      if (!runtime.redo()) throw new Error('native redo was not applied');
+      runtime.adapter.acquire();
     });
     await waitForFrames(page);
     assert.deepEqual(await widths('first'), resizedFirst);
 
     await page.evaluate(() => {
       const runtime = (window as any).__widthCandidate;
-      runtime.adapter.refresh();
+      runtime.adapter.acquire();
     });
     await waitForFrames(page);
     assert.deepEqual(await widths('first'), resizedFirst);
 
     await page.evaluate(() => {
       const runtime = (window as any).__widthCandidate;
-      runtime.view.dispatch({ changes: { from: 0, to: runtime.view.state.doc.length, insert: 'replacement' } });
       const first = document.querySelector<HTMLElement>('[data-table-column-width="first"]')!;
       first.dataset.tableFrom = '0';
       first.dataset.tableTo = '3';
-      runtime.adapter.refresh();
-      runtime.adapter.refresh();
+      runtime.view.dispatch({ changes: { from: 0, to: runtime.view.state.doc.length, insert: 'replacement' } });
+      runtime.adapter.acquire();
+      runtime.adapter.acquire();
     });
     await waitForFrames(page);
     assert.ok(Math.abs((await widths('first'))[0] - initialFirst[0]) < 2);
@@ -184,9 +184,9 @@ async function main(): Promise<void> {
       const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
       const saved = root.innerHTML;
       root.replaceChildren();
-      runtime.adapter.refresh();
+      runtime.adapter.acquire();
       root.innerHTML = saved;
-      runtime.adapter.refresh();
+      runtime.adapter.acquire();
     });
     await waitForFrames(page);
     assert.deepEqual(await widths('first'), cancelled);
