@@ -1,6 +1,6 @@
 import { EditorState, RangeSetBuilder, StateField, type Transaction } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import { normalizeSourceHref } from './rawUrls';
 import { trimDecoratedUrlRange } from './urlDecorationRange';
 
@@ -15,7 +15,7 @@ function addRange(builder: RangeSetBuilder<Decoration>, from: number, to: number
 
 function computeSourceUrlBoundaryDecorations(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  const tree = resolvedSyntaxTree(state);
+  const tree = currentSyntaxTree(state);
 
   tree.iterate({
     enter(node: any) {
@@ -54,7 +54,7 @@ export const sourceUrlBoundaryField = StateField.define<DecorationSet>({
     }
   },
   update(decorations: DecorationSet, transaction: Transaction) {
-    if (!transaction.docChanged) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
       return decorations;
     }
     try {

@@ -3,7 +3,7 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNodeRef } from '@lezer/common';
 import { tags } from '@lezer/highlight';
 import type { DelimiterType, MarkdownConfig } from '@lezer/markdown';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 
 const HIGHLIGHT_MARKER_CODE = 61;
 const highlightDelimiter: DelimiterType = { resolve: 'Highlight', mark: 'HighlightMark' };
@@ -51,7 +51,7 @@ const sourceHighlightDecoration = Decoration.mark({ class: 'meo-md-highlight' })
 
 function buildSourceHighlightDecorations(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  resolvedSyntaxTree(state).iterate({
+  currentSyntaxTree(state).iterate({
     enter(node: SyntaxNodeRef) {
       if (node.name !== 'Highlight' || node.to - node.from <= 4) return;
       builder.add(node.from + 2, node.to - 2, sourceHighlightDecoration);
@@ -63,7 +63,9 @@ function buildSourceHighlightDecorations(state: EditorState): DecorationSet {
 export const sourceHighlightField = StateField.define<DecorationSet>({
   create: buildSourceHighlightDecorations,
   update(decorations, transaction) {
-    return transaction.docChanged ? buildSourceHighlightDecorations(transaction.state) : decorations;
+    return transaction.docChanged || syntaxTreeChanged(transaction)
+      ? buildSourceHighlightDecorations(transaction.state)
+      : decorations;
   },
   provide: (field) => EditorView.decorations.from(field)
 });

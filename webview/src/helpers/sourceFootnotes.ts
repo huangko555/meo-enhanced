@@ -1,6 +1,6 @@
 import { EditorState, RangeSetBuilder, StateField, type Transaction } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import { collectInlineFootnoteMarkerRanges } from './inlineFootnotes';
 
 const sourceLinkMarkerDeco = Decoration.mark({
@@ -64,7 +64,7 @@ function addInlineFootnoteMarkerDecorations(
 
 function computeSourceFootnoteMarkerDecorations(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  const tree = resolvedSyntaxTree(state);
+  const tree = currentSyntaxTree(state);
 
   tree.iterate({
     enter(node: any) {
@@ -107,7 +107,7 @@ export const sourceFootnoteMarkerField = StateField.define<DecorationSet>({
     }
   },
   update(decorations: DecorationSet, transaction: Transaction) {
-    if (!transaction.docChanged) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
       return decorations;
     }
     try {

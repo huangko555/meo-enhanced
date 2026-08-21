@@ -1,6 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { SyntaxNodeRef } from '@lezer/common';
+import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
 import { extractHeadings, resolvedSyntaxTree } from './markdownSyntax';
 import { isWikiLinkNode, parseWikiLinkData } from './wikiLinks';
 import { findRawSourceUrlMatches, linkSchemeRe, normalizeSourceHref } from './rawUrls';
@@ -204,7 +204,7 @@ function hrefFromSourceSyntaxAtPos(state: EditorState, pos: number, options: Lin
   const candidates = [tree.resolveInner(pos, -1), tree.resolveInner(pos, 1)];
   const seen = new Set<string>();
   for (const candidate of candidates) {
-    for (let node = candidate; node; node = node.parent) {
+    for (let node: SyntaxNode | null = candidate; node; node = node.parent) {
       const key = `${node.name}:${node.from}:${node.to}`;
       if (seen.has(key)) {
         continue;

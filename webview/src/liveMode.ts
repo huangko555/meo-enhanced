@@ -1629,7 +1629,7 @@ function buildDecorations(state: EditorState): DecorationSet {
   const indentSelectedLines = collectIndentSelectedLines(state);
   const tree = resolvedSyntaxTree(state);
   const footnotes = parseFootnotes(state);
-  const detailsBlocks = getDetailsBlocks(state);
+  const detailsBlocks = getDetailsBlocks(state, tree);
   const strikeRanges = collectStrikethroughRanges(tree);
   const parsedInlineStyleRanges: ParsedInlineStyleRange[] = [];
   tree.iterate({

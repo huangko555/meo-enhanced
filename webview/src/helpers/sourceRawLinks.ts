@@ -1,6 +1,6 @@
 import { EditorState, RangeSetBuilder, StateField } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import { findRawSourceUrlMatches } from './rawUrls';
 
 const sourceFileLinkDeco = Decoration.mark({ class: 'meo-md-source-file-link' });
@@ -42,7 +42,7 @@ function hasBlockedAncestor(tree: any, from: number, to: number): boolean {
 
 function computeSourceFileLinkDecorations(state: EditorState): any {
   const builder = new RangeSetBuilder<any>();
-  const tree = resolvedSyntaxTree(state);
+  const tree = currentSyntaxTree(state);
 
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
     const line = state.doc.line(lineNo);
@@ -81,6 +81,9 @@ export const sourceFileLinkField = StateField.define<any>({
     }
   },
   update(markers: any, transaction: any) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
+      return markers;
+    }
     try {
       return computeSourceFileLinkDecorations(transaction.state);
     } catch (error) {

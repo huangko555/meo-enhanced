@@ -1,6 +1,6 @@
 import { StateField, RangeSetBuilder, EditorState } from '@codemirror/state';
 import { EditorView, Decoration } from '@codemirror/view';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 
 interface StrikeRange {
   from: number;
@@ -148,7 +148,7 @@ const sourceStrikeMarkerDeco = Decoration.mark({ class: 'meo-md-strike-marker' }
 
 function computeSourceStrikeMarkers(state: EditorState): any {
   const ranges = new RangeSetBuilder<any>();
-  const tree = resolvedSyntaxTree(state);
+  const tree = currentSyntaxTree(state);
   const strikeRanges = collectStrikethroughRanges(tree);
   tree.iterate({
     enter(node: any) {
@@ -177,7 +177,7 @@ export const sourceStrikeMarkerField = StateField.define<any>({
     }
   },
   update(markers: any, transaction: any) {
-    if (!transaction.docChanged) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
       return markers;
     }
     try {

@@ -1,8 +1,19 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Transaction } from '@codemirror/state';
+import type { Tree } from '@lezer/common';
 import { collectPunctuationClosingInlineStyles, type InlineStyleNodeName } from './inlineStyleFallback';
 
-export function resolvedSyntaxTree(state: EditorState, timeout: number = 50): any {
+/** Returns CodeMirror's published, possibly partial tree without extending the parse synchronously. */
+export function currentSyntaxTree(state: EditorState): ReturnType<typeof syntaxTree> {
+  return syntaxTree(state);
+}
+
+/** Detects a parser publication transaction as well as a document-driven tree replacement. */
+export function syntaxTreeChanged(transaction: Transaction): boolean {
+  return syntaxTree(transaction.startState) !== syntaxTree(transaction.state);
+}
+
+export function resolvedSyntaxTree(state: EditorState, timeout: number = 50): Tree {
   return ensureSyntaxTree(state, state.doc.length, timeout) ?? syntaxTree(state);
 }
 export function headingLevelFromName(name: string): number | null {
@@ -167,7 +178,10 @@ function normalizeSummaryText(rawText: string | undefined): string {
   return text || 'Details';
 }
 
-export function extractDetailsBlocks(state: EditorState): DetailsBlockInfo[] {
+export function extractDetailsBlocks(
+  state: EditorState,
+  tree: Tree = resolvedSyntaxTree(state)
+): DetailsBlockInfo[] {
   const detailsBlocks: DetailsBlockInfo[] = [];
   const pendingBlocks: Array<{
     anchorFrom: number;
@@ -179,8 +193,6 @@ export function extractDetailsBlocks(state: EditorState): DetailsBlockInfo[] {
     summaryText: string;
     defaultCollapsed: boolean;
   }> = [];
-  const tree = resolvedSyntaxTree(state);
-
   tree.iterate({
     enter(node: any) {
       if (node.name !== 'HTMLBlock') {

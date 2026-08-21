@@ -1,6 +1,6 @@
 import { StateField, RangeSetBuilder, EditorState, Transaction } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import { createWikiLinkResolutionTransport, type WikiLinkResolutionTransport } from '../adapters/wikiLinkResolutionTransport';
 import type { ResolvedWikiLinksResponse } from '../../../src/protocol/wikiLinkResolution';
 
@@ -306,7 +306,7 @@ const sourceWikiMarkerDeco = Decoration.mark({ class: 'meo-md-wiki-marker' });
 
 function computeSourceWikiMarkers(state: EditorState): any {
   const builder = new RangeSetBuilder<any>();
-  const tree = resolvedSyntaxTree(state);
+  const tree = currentSyntaxTree(state);
 
   tree.iterate({
     enter(node: any) {
@@ -332,7 +332,7 @@ export const sourceWikiMarkerField = StateField.define<any>({
     }
   },
   update(markers: any, transaction: Transaction) {
-    if (!transaction.docChanged) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
       return markers;
     }
     try {

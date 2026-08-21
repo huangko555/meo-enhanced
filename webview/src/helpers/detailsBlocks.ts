@@ -1,10 +1,19 @@
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { extractDetailsBlocks, type DetailsBlockInfo } from './markdownSyntax';
+import {
+  currentSyntaxTree,
+  extractDetailsBlocks,
+  resolvedSyntaxTree,
+  type DetailsBlockInfo
+} from './markdownSyntax';
 import { getViewportController } from './viewportController';
 
 const toggleDetailsBlockEffect = StateEffect.define<number>();
 const emptyDetailsOverrides = Object.freeze(new Map<number, boolean>());
+const detailsBlockLiveActiveField = StateField.define<boolean>({
+  create: () => true,
+  update: () => true
+});
 
 export interface DetailsBlockState extends DetailsBlockInfo {
   collapsed: boolean;
@@ -55,6 +64,9 @@ const detailsBlockStateField = StateField.define<ReadonlyMap<number, boolean>>({
     if (!transaction.docChanged && toggleEffects.length === 0) return overrides;
 
     const next = mapDetailsOverrides(overrides, transaction);
+    if (!transaction.state.field(detailsBlockLiveActiveField, false) && toggleEffects.length === 0) {
+      return overridesEqual(next, overrides) ? overrides : next;
+    }
     const blocks = new Map(extractDetailsBlocks(transaction.state).map((block) => [block.anchorFrom, block] as const));
     for (const effect of toggleEffects) {
       const block = blocks.get(effect.value);
@@ -75,9 +87,12 @@ export function detailsBlockStateExtensions(): readonly any[] {
   return detailsBlockStateExtension;
 }
 
-export function getDetailsBlocks(state: EditorState): DetailsBlockState[] {
+export function getDetailsBlocks(
+  state: EditorState,
+  tree = resolvedSyntaxTree(state)
+): DetailsBlockState[] {
   const overrides = state.field(detailsBlockStateField, false) ?? emptyDetailsOverrides;
-  return extractDetailsBlocks(state).map((block) => ({
+  return extractDetailsBlocks(state, tree).map((block) => ({
     ...block,
     collapsed: overrides.get(block.anchorFrom) ?? block.defaultCollapsed
   }));
@@ -111,11 +126,12 @@ export function toggleDetailsBlock(view: EditorView, anchor: number): boolean {
 }
 
 const detailsBlockAutoExpandSelectionExtension = EditorView.updateListener.of((update) => {
+  if (!update.state.field(detailsBlockLiveActiveField, false)) return;
   if (update.transactions.some((transaction) => (
     transaction.effects.some((effect) => effect.is(toggleDetailsBlockEffect))
   ))) return;
 
-  const blocks = getDetailsBlocks(update.state).filter((candidate) => candidate.collapsed && (
+  const blocks = getDetailsBlocks(update.state, currentSyntaxTree(update.state)).filter((candidate) => candidate.collapsed && (
     update.state.selection.ranges.some((range) => (
       range.empty
         ? range.from > candidate.bodyFrom && range.from < candidate.bodyTo
@@ -129,7 +145,10 @@ const detailsBlockAutoExpandSelectionExtension = EditorView.updateListener.of((u
   });
 });
 
-const detailsBlockLiveExtension = Object.freeze([detailsBlockAutoExpandSelectionExtension]);
+const detailsBlockLiveExtension = Object.freeze([
+  detailsBlockLiveActiveField,
+  detailsBlockAutoExpandSelectionExtension
+]);
 
 export function detailsBlockLiveExtensions(): readonly any[] {
   return detailsBlockLiveExtension;

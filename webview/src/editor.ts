@@ -539,7 +539,7 @@ export function createEditor({
     }
 
     const probePos = Math.min(line.to, line.from + 1);
-    let node = resolvedSyntaxTree(state).resolveInner(probePos, 1);
+    let node: SyntaxNode | null = resolvedSyntaxTree(state).resolveInner(probePos, 1);
     while (node) {
       if (node.name === 'Blockquote') {
         return line.from + quoteMatch[0].length;
@@ -2687,8 +2687,13 @@ export function createEditor({
       } else {
         releaseImagePresentationResources = acquiredImagePresentationResources;
       }
-      forceParsing(view, view.state.doc.length, 500);
-      if (nextMode === 'live') tableColumnWidthAdapter.adapter.acquire();
+      if (nextMode === 'live') {
+        // Live decorations consume the full Markdown tree. Bound the synchronous
+        // attempt; a false result keeps the published partial tree, and the Live
+        // field refreshes when CodeMirror publishes later parser transactions.
+        forceParsing(view, view.state.doc.length, 500);
+        tableColumnWidthAdapter.adapter.acquire();
+      }
       syncModeClasses();
       syncGitGutterVisibility();
 
