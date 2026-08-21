@@ -50,6 +50,7 @@ export type DocumentSessionEffect =
       readonly source: DocumentPresentationSource;
       readonly onPresented?: DocumentPresentationCompletion;
     }
+  | { readonly type: 'reportExternalConflict' }
   | { readonly type: 'requestResync' }
   | { readonly type: 'saveRevision'; readonly revision: Revision };
 
@@ -138,6 +139,11 @@ export function transitionDocumentSession(
       };
     }
     const rebasedText = reconcileDraft(state.revision.text, state.draft?.text ?? null, revision.text);
+    if (rebasedText === null
+      && state.draft !== null
+      && state.draft.text !== revision.text) {
+      return { state, effects: [{ type: 'reportExternalConflict' }] };
+    }
     if (rebasedText === null) {
       const effects: DocumentSessionEffect[] = [];
       if (state.draft !== null || state.pendingChange !== null) {

@@ -52,6 +52,7 @@ export type DocumentSessionAction =
       readonly source: DocumentPresentationSource;
       readonly onPresented?: DocumentPresentationCompletion;
     }
+  | { readonly type: 'showExternalConflict' }
   | { readonly type: 'saveDocument'; readonly revision: Revision }
   | { readonly type: 'requestRevision' };
 
@@ -196,6 +197,9 @@ function mapEffects(
     }
     if (effect.type === 'saveRevision') {
       return { type: 'saveDocument', revision: effect.revision };
+    }
+    if (effect.type === 'reportExternalConflict') {
+      return { type: 'showExternalConflict' };
     }
     return { type: 'requestRevision' };
   });

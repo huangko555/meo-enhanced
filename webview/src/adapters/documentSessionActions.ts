@@ -33,6 +33,8 @@ export type DocumentSessionActionAdapterDependencies = {
 
 const MAX_REVISION_REQUEST_ATTEMPTS = 2;
 const RESYNC_FAILURE_NOTICE = 'Could not resynchronize the document. Local edits were kept.';
+const EXTERNAL_CONFLICT_NOTICE =
+  'The document changed externally while local edits were pending. Local edits were kept.';
 
 /**
  * Executes Application effects against Webview capabilities. The Adapter owns
@@ -73,6 +75,10 @@ export function createDocumentSessionActionAdapter(
             && action.onPresented) {
             completions.push(action.onPresented);
           }
+          continue;
+        }
+        if (action.type === 'showExternalConflict') {
+          dependencies.showFailureNotice(EXTERNAL_CONFLICT_NOTICE);
           continue;
         }
         if (action.type === 'requestRevision'

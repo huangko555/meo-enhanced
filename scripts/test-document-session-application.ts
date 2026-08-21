@@ -87,10 +87,7 @@ assert.deepEqual(overlap.handle({
   type: 'hostRevisionChanged',
   version: 4,
   text: 'one\nremote'
-}), [
-  { type: 'rememberDraft', text: null, receiptVersion: 2 },
-  { type: 'presentText', text: 'one\nremote', source: 'revision' }
-]);
+}), [{ type: 'showExternalConflict' }]);
 
 const saveAfterEdit = createCoordinator();
 saveAfterEdit.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' });
@@ -145,11 +142,7 @@ assert.deepEqual(saveAfterConflict.handle({
   type: 'hostRevisionChanged',
   version: 4,
   text: 'one\nremote'
-}), [
-  { type: 'rememberDraft', text: null, receiptVersion: 2 },
-  { type: 'presentText', text: 'one\nremote', source: 'revision' },
-  { type: 'saveDocument', revision: { number: 4, text: 'one\nremote' } }
-]);
+}), [{ type: 'showExternalConflict' }]);
 
 const discarded = createCoordinator();
 discarded.handle({ type: 'localDraftChanged', text: 'one\nlocal' });

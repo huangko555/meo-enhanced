@@ -46,6 +46,44 @@ const createCoordinator = () => createDocumentSessionCoordinator({
 }
 
 {
+  const coordinator = createDocumentSessionCoordinator({
+    documentId: 'file:///external-conflict.md',
+    revision: { number: 3, text: 'one\ntwo' },
+    savedRevision: { revisionNumber: 3, text: 'one\ntwo' }
+  });
+  const messages: unknown[] = [];
+  const presentations: string[] = [];
+  const notices: string[] = [];
+  const adapter = createDocumentSessionActionAdapter({
+    postMessage: (message) => messages.push(message),
+    presentText: (text) => {
+      presentations.push(text);
+      return true;
+    },
+    executeRemote: async () => {
+      throw new Error('Dirty Draft external conflict must not start a remote action');
+    },
+    handleInput: (input) => coordinator.handle(input),
+    showFailureNotice: (message) => notices.push(message)
+  });
+
+  await adapter.execute(coordinator.handle({ type: 'localDraftChanged', text: 'one\nlocal' }));
+  await adapter.execute(coordinator.handle({ type: 'submitPendingDraft' }));
+  const messagesBeforeExternal = messages.length;
+  await adapter.execute(coordinator.handle({
+    type: 'hostRevisionChanged',
+    version: 4,
+    text: 'one\nremote'
+  }));
+
+  assert.deepEqual(presentations, [], 'dirty Draft must remain presented after an overlapping external update');
+  assert.equal(messages.length, messagesBeforeExternal, 'external conflict must not discard or resubmit the dirty Draft');
+  assert.deepEqual(notices, [
+    'The document changed externally while local edits were pending. Local edits were kept.'
+  ]);
+}
+
+{
   const coordinator = createCoordinator();
   const messages: unknown[] = [];
   const notices: string[] = [];

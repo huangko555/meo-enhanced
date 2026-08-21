@@ -105,12 +105,8 @@ const overlappingExternal = transitionDocumentSession(overlappingDraft.state, {
   type: 'revisionReceived',
   revision: { number: 2, text: 'one\nremote' }
 });
-assert.equal(overlappingExternal.state.draft, null);
-assert.equal(overlappingExternal.state.pendingChange, null);
-assert.deepEqual(overlappingExternal.effects, [
-  { type: 'persistDraft', draft: null },
-  { type: 'presentText', text: 'one\nremote', source: 'revision' }
-]);
+assert.equal(overlappingExternal.state, overlappingDraft.state);
+assert.deepEqual(overlappingExternal.effects, [{ type: 'reportExternalConflict' }]);
 
 const staleRevision = transitionDocumentSession(externalWithoutDraft.state, {
   type: 'revisionReceived',
@@ -183,12 +179,8 @@ const saveAfterConflict = transitionDocumentSession(saveQueued.state, {
   type: 'revisionReceived',
   revision: { number: 4, text: 'external wins' }
 });
-assert.equal(saveAfterConflict.state.savePhase, 'saving');
-assert.deepEqual(saveAfterConflict.effects, [
-  { type: 'persistDraft', draft: null },
-  { type: 'presentText', text: 'external wins', source: 'revision' },
-  { type: 'saveRevision', revision: { number: 4, text: 'external wins' } }
-]);
+assert.equal(saveAfterConflict.state, saveQueued.state);
+assert.deepEqual(saveAfterConflict.effects, [{ type: 'reportExternalConflict' }]);
 
 const discarded = transitionDocumentSession(editedAgain.state, {
   type: 'reloadedFromDisk',
