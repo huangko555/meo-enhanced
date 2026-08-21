@@ -2,6 +2,7 @@ import { decodeSaveImageFromClipboardRequest, decodeSavedImagePathResponse, type
 import { decodeDiagnosticsChangedEvent, type DiagnosticsChangedEvent } from './diagnostics';
 import { decodeDocumentSyncCommand, decodeDocumentSyncMessage, type DocumentSyncCommand, type DocumentSyncMessage } from './documentSync';
 import { decodeDocumentRevisionRequest, decodeDocumentRevisionResponse, decodeSaveDocumentRevisionRequest, decodeSaveDocumentRevisionResponse, type DocumentRevisionRequest, type DocumentRevisionResponse, type SaveDocumentRevisionRequest, type SaveDocumentRevisionResponse } from './documentSession';
+import { decodeFlushDocumentEditsRequest, decodeFlushDocumentEditsResponse, type FlushDocumentEditsRequest, type FlushDocumentEditsResponse } from './documentSaveFlush';
 import { decodeEditorCommand, type EditorCommand } from './editorCommands';
 import { decodeExportSnapshotRequest, decodeExportSnapshotResponse, type ExportSnapshotRequest, type ExportSnapshotResponse } from './exportSnapshot';
 import { decodeGitBaselineChangedEvent, type GitBaselineChangedEvent } from './git';
@@ -18,6 +19,7 @@ export type WebviewToHostMessage =
   | DocumentSyncCommand
   | SaveDocumentRevisionRequest
   | DocumentRevisionRequest
+  | FlushDocumentEditsResponse
   | EditorCommand
   | ResolveImageSrcRequest
   | ResolveWikiLinksRequest
@@ -31,6 +33,7 @@ export type HostToWebviewMessage =
   | DocumentSyncMessage
   | SaveDocumentRevisionResponse
   | DocumentRevisionResponse
+  | FlushDocumentEditsRequest
   | HostEditorEvent
   | HostConfigurationEvent
   | DiagnosticsChangedEvent
@@ -47,6 +50,7 @@ export function decodeWebviewToHostMessage(value: unknown): WebviewToHostMessage
     ?? decodeDocumentSyncCommand(value)
     ?? decodeSaveDocumentRevisionRequest(value)
     ?? decodeDocumentRevisionRequest(value)
+    ?? decodeFlushDocumentEditsResponse(value)
     ?? decodeEditorCommand(value)
     ?? decodeResolveImageSrcRequest(value)
     ?? decodeResolveWikiLinksRequest(value)
@@ -61,6 +65,7 @@ export function decodeHostToWebviewMessage(value: unknown): HostToWebviewMessage
     ?? decodeDocumentSyncMessage(value)
     ?? decodeSaveDocumentRevisionResponse(value)
     ?? decodeDocumentRevisionResponse(value)
+    ?? decodeFlushDocumentEditsRequest(value)
     ?? decodeHostEditorEvent(value)
     ?? decodeHostConfigurationEvent(value)
     ?? decodeDiagnosticsChangedEvent(value)

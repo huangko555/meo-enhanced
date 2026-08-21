@@ -94,6 +94,7 @@ mock.module('vscode', () => ({
     textDocuments: [document],
     getWorkspaceFolder: () => undefined,
     getConfiguration: () => configuration,
+    onWillSaveTextDocument: () => disposable(),
     onDidChangeTextDocument: () => disposable(),
     onDidSaveTextDocument: () => disposable(),
     createFileSystemWatcher: () => ({

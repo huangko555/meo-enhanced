@@ -29,6 +29,7 @@ import { createSegmentedControl } from './helpers/segmentedControl';
 import { createCodePaletteWebviewAdapter } from './adapters/codePaletteWebviewAdapter';
 import { createExportWebviewAdapter } from './adapters/exportWebviewAdapter';
 import { createDocumentSessionWebviewAdapter } from './adapters/documentSessionWebviewAdapter';
+import { createDocumentSaveFlushWebviewAdapter } from './adapters/documentSaveFlushWebviewAdapter';
 import { createPreviewWebviewAdapter } from './adapters/previewWebviewAdapter';
 import { createAppearanceWebviewAdapter } from './adapters/appearanceWebviewAdapter';
 import { createEditorModeApplication, type EditorMode } from './application/editorMode';
@@ -1420,6 +1421,13 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   }
 });
 
+const documentSaveFlushAdapter = createDocumentSaveFlushWebviewAdapter({
+  postMessage: (message) => vscode.postMessage(message),
+  commitTransientEdits: commitEditorTransientEdits,
+  getCurrentText: getCurrentEditorText,
+  whenDocumentIdle: () => documentSessionAdapter.whenIdle()
+});
+
 const requestSave = () => {
   commitEditorTransientEdits();
   documentSessionAdapter.requestSave();
@@ -1751,6 +1759,10 @@ window.addEventListener('message', (event) => {
     return;
   }
 
+  if (documentSaveFlushAdapter.accept(message)) {
+    return;
+  }
+
 
   if (message.type === 'gitChangesGutterChanged') {
     setGitChangesGutterVisible(message.enabled, { post: false });
@@ -1885,6 +1897,7 @@ window.addEventListener('beforeunload', () => {
   cancelPendingWikiStatusRefresh();
   cancelPendingLocalLinkStatusRefresh();
   documentSessionAdapter.dispose();
+  documentSaveFlushAdapter.dispose();
   previewAdapter.dispose();
   exportAdapter.dispose();
   if (pendingEditorSurfaceRecoveryRaf !== null) {

@@ -67,6 +67,7 @@ import type { PreviewRenderResponse } from '../protocol/previewRender';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
 import { createVscodeDocumentReloadAdapter } from '../host/vscodeDocumentReloadAdapter';
+import { createVscodeDocumentSaveLifecycleAdapter } from '../host/vscodeDocumentSaveLifecycleAdapter';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
@@ -240,6 +241,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const scheduleSavedRevisionRefresh = (delayMs?: number): void => {
     savedRevisionLifecycle.scheduleRefresh(delayMs);
   };
+
+  const documentSaveLifecycle = createVscodeDocumentSaveLifecycleAdapter({
+    document,
+    postMessage: postToWebview,
+    showFailure: (message) => { void vscode.window.showWarningMessage(message); }
+  });
   let requestDiffBaselineRefresh = (_options: GitBaselineRefreshOptions): void => undefined;
   const diffBaselineSelection = createDiffBaselineSelection<GitBaselinePayload>({
     initialMode: getDiffBaselineMode(),
@@ -375,7 +382,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       };
     }
     const previousDisk = savedRevisionTracker.getCurrentEditBaseline();
-    const readBack = await savedRevisionLifecycle.saveAndReadBack(expected.text);
+    const readBack = await documentSaveLifecycle.runPreparedSave(
+      expected.text,
+      () => savedRevisionLifecycle.saveAndReadBack(expected.text)
+    );
     if (!readBack.ok && readBack.reason === 'save-rejected') {
       return { ok: false, error: { code: 'operation-failed', message: 'VS Code rejected the document save' } };
     }
@@ -686,6 +696,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           await postToWebview(response);
         });
         return;
+      case 'flushDocumentEditsResult':
+        await enqueue(async () => {
+          documentSaveLifecycle.accept(raw);
+        });
+        return;
       case 'reloadDocumentFromDisk':
         await enqueue(async () => {
           try {
@@ -823,6 +838,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     diffBaselineSelection.dispose();
     gitBaselineRefresh.dispose();
     savedRevisionLifecycle.dispose();
+    documentSaveLifecycle.dispose();
 
     runBackground(enqueue(async () => {
       try {
