@@ -7,6 +7,7 @@ import {
 
 export type TableColumnWidthAdapter = {
   refresh(): void;
+  release(): void;
   dispose(): void;
 };
 
@@ -64,6 +65,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   const policy = options.policy ?? tableColumnWidthPolicy;
   const intents: WidthIntent[] = [];
   const bindings = new Map<HTMLTableElement, TableBinding>();
+  let mutationObserver: MutationObserver | null = null;
+  let active = false;
   let disposed = false;
 
   const findIntent = (table: HTMLTableElement): WidthIntent | null => {
@@ -310,7 +313,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   };
 
   const refresh = (): void => {
-    if (disposed) return;
+    if (disposed || !active) return;
     const current = new Set(options.root.querySelectorAll<HTMLTableElement>(tableSelector));
     for (const [table, binding] of bindings) {
       if (current.has(table)) continue;
@@ -339,24 +342,34 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         if (intents[index].from >= intents[index].to) intents.splice(index, 1);
       }
     }
-    refresh();
+    if (active) refresh();
   };
 
-  const mutationObserver = new MutationObserver(refresh);
-  mutationObserver.observe(options.root, { childList: true, subtree: true });
+  const release = (): void => {
+    if (!active) return;
+    active = false;
+    mutationObserver?.disconnect();
+    mutationObserver = null;
+    for (const binding of bindings.values()) binding.cleanup();
+    bindings.clear();
+  };
 
   const adapter: TableColumnWidthAdapter = {
     refresh() {
       if (disposed) return;
+      if (!active) {
+        active = true;
+        mutationObserver = new MutationObserver(refresh);
+        mutationObserver.observe(options.root, { childList: true, subtree: true });
+      }
       refresh();
     },
+    release,
     dispose() {
       if (disposed) return;
+      release();
       disposed = true;
-      mutationObserver.disconnect();
       intents.splice(0, intents.length);
-      for (const binding of bindings.values()) binding.cleanup();
-      bindings.clear();
     }
   };
 
