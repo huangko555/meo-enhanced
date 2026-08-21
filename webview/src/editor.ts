@@ -1805,13 +1805,16 @@ export function createEditor({
     }
   };
   const imagePresentationResourcePool = createImagePresentationResourcePool({
-    resolveSource: (_contextKey, rawSrc) => resolveConfiguredImageSrc(rawSrc),
+    resolveSource: (_contextKey, rawSrc, signal) => resolveConfiguredImageSrc(rawSrc, signal),
     loadImage: loadBrowserImage
   });
   const imagePresentationFactory = createImagePresentationFactory({
     resources: imagePresentationResourcePool,
     resourceContextKey: 'editor-document'
   });
+  let releaseImagePresentationResources = startMode === 'live'
+    ? imagePresentationFactory.acquire()
+    : null;
   const historyCompartment = new Compartment();
   const state = EditorState.create({
     doc: text,
@@ -2653,7 +2656,13 @@ export function createEditor({
 
       const previousMode = currentMode;
       currentMode = nextMode;
-      if (nextMode === 'source') tableColumnWidthAdapter.adapter.release();
+      if (nextMode === 'source') {
+        tableColumnWidthAdapter.adapter.release();
+        releaseImagePresentationResources?.();
+        releaseImagePresentationResources = null;
+      } else {
+        releaseImagePresentationResources = imagePresentationFactory.acquire();
+      }
       try {
         view.dispatch({
           effects: [
@@ -2667,7 +2676,13 @@ export function createEditor({
         if (nextMode === 'live') tableColumnWidthAdapter.adapter.acquire();
       } catch (error) {
         currentMode = previousMode;
-        if (previousMode === 'live') tableColumnWidthAdapter.adapter.acquire();
+        if (previousMode === 'live') {
+          tableColumnWidthAdapter.adapter.acquire();
+          releaseImagePresentationResources = imagePresentationFactory.acquire();
+        } else {
+          releaseImagePresentationResources?.();
+          releaseImagePresentationResources = null;
+        }
         syncModeClasses();
         throw error;
       }

@@ -12,7 +12,12 @@ import type {
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
-let imageSrcResolver: (url: string) => string | Promise<string | null | undefined> | null | undefined = (url) => url;
+type ImageSrcResolver = (
+  url: string,
+  signal?: AbortSignal
+) => string | Promise<string | null | undefined> | null | undefined;
+
+let imageSrcResolver: ImageSrcResolver = (url) => url;
 let vscodeApi: any = null;
 let imageResolutionTransport: ImageResolutionTransport = {
   resolve: async () => ({
@@ -104,8 +109,8 @@ const openImageExternally = (url: string): void => {
 
 const isImmediateImageSrc = (url: string): boolean => /^(?:https?:|data:|blob:|vscode-webview:|vscode-webview-resource:|vscode-resource:)/i.test(url);
 
-const requestImageSrcResolution = async (url: string): Promise<string> => {
-  const result = await imageResolutionTransport.resolve(url);
+const requestImageSrcResolution = async (url: string, signal?: AbortSignal): Promise<string> => {
+  const result = await imageResolutionTransport.resolve(url, signal);
   const resolvedUrl = result.ok === true ? result.value.resolvedUrl : '';
   return resolvedUrl || url;
 };
@@ -114,16 +119,22 @@ export const settleImageSrcRequest = (message: ResolvedImageSrcResponse): void =
   imageResolutionTransport.accept(message);
 };
 
-export const resolveImageSrc = (rawUrl: string | null | undefined): string | Promise<string> => {
+export const resolveImageSrc = (
+  rawUrl: string | null | undefined,
+  signal?: AbortSignal
+): string | Promise<string> => {
   const url = (rawUrl ?? '').trim();
   if (!url || isImmediateImageSrc(url)) {
     return url;
   }
-  return requestImageSrcResolution(url);
+  return requestImageSrcResolution(url, signal);
 };
 
-export const resolveConfiguredImageSrc = async (rawUrl: string): Promise<string | null> => {
-  const resolved = await imageSrcResolver(rawUrl);
+export const resolveConfiguredImageSrc = async (
+  rawUrl: string,
+  signal?: AbortSignal
+): Promise<string | null> => {
+  const resolved = await imageSrcResolver(rawUrl, signal);
   return resolved || null;
 };
 
@@ -258,7 +269,7 @@ export const handleImagePaste = async (
   return false;
 };
 
-export function setImageSrcResolver(resolver: (url: string) => string | Promise<string | null | undefined> | null | undefined): void {
+export function setImageSrcResolver(resolver: ImageSrcResolver): void {
   imageSrcResolver = typeof resolver === 'function' ? resolver : ((url) => url);
 }
 

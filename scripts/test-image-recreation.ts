@@ -45,6 +45,11 @@ class FakeElement {
     listeners.push(listener);
     this.listeners.set(type, listeners);
   }
+  removeEventListener(type: string, listener: () => void) {
+    const listeners = this.listeners.get(type);
+    if (!listeners) return;
+    this.listeners.set(type, listeners.filter((candidate) => candidate !== listener));
+  }
   dispatchEvent(event: Event) {
     for (const listener of this.listeners.get(event.type) ?? []) listener();
     return true;
@@ -89,6 +94,7 @@ const factory = createImagePresentationFactory({
   resources,
   resourceContextKey: 'test-document'
 });
+const releaseFactoryResources = factory.acquire();
 
 setImageSrcResolver(async () => undefined);
 if (await resolveConfiguredImageSrc('/missing-image.png') !== null) {
@@ -133,6 +139,7 @@ if (!preloadedImage?.complete) {
 
 const lifecycleHandles: Array<{ disposed: boolean }> = [];
 const lifecycleFactory = {
+  acquire: () => () => {},
   preload: async () => undefined,
   create() {
     const state = { disposed: false };
@@ -154,6 +161,7 @@ if (!lifecycleHandles[0]?.disposed || lifecycleHandles[1]?.disposed) {
   throw new Error('Disposing an old image DOM did not preserve the replacement handle');
 }
 
+releaseFactoryResources();
 factory.dispose();
 resources.dispose();
 

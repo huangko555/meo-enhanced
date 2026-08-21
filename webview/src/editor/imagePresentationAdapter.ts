@@ -20,7 +20,14 @@ const DEFAULT_MAX_PENDING_RESOLUTIONS = 512;
 const DEFAULT_MAX_QUEUED_LOADS = 512;
 const DEFAULT_FAILURE_RETRY_MS = 30_000;
 
+/**
+ * Shared resolve/load state for one active resource generation. Callers must
+ * acquire before requesting work; the last idempotent release invalidates the
+ * generation, settles its waiters and clears its bounded caches.
+ */
 export type ImagePresentationResourcePool = {
+  acquire(): () => void;
+  invalidate(): void;
   resolve(contextKey: string, rawSrc: string): Promise<string | null>;
   getResolved(contextKey: string, rawSrc: string): string | null;
   load(contextKey: string, resolvedSrc: string): Promise<HTMLImageElement | null>;
@@ -29,8 +36,15 @@ export type ImagePresentationResourcePool = {
 };
 
 export type ImagePresentationResourcePoolOptions = {
-  readonly resolveSource: (contextKey: string, rawSrc: string) => Promise<string | null>;
-  readonly loadImage: (resolvedSrc: string) => Promise<HTMLImageElement | null>;
+  readonly resolveSource: (
+    contextKey: string,
+    rawSrc: string,
+    signal: AbortSignal
+  ) => Promise<string | null>;
+  readonly loadImage: (
+    resolvedSrc: string,
+    signal: AbortSignal
+  ) => Promise<HTMLImageElement | null>;
   readonly now?: () => number;
   readonly maxConcurrentLoads?: number;
   readonly maxPendingResolutions?: number;
@@ -44,6 +58,20 @@ export type ImagePresentationResourcePoolOptions = {
 type QueuedLoad = {
   readonly run: () => void;
   readonly cancel: () => void;
+};
+
+type ImageResourceGeneration = {
+  readonly abortController: AbortController;
+  readonly releasedResult: Promise<null>;
+  readonly settleReleased: () => void;
+  readonly resolvedCache: Map<string, string>;
+  readonly resolutionInFlight: Map<string, Promise<string | null>>;
+  readonly loadedCache: Map<string, HTMLImageElement>;
+  readonly loadInFlight: Map<string, Promise<HTMLImageElement | null>>;
+  readonly failedAt: Map<string, number>;
+  readonly queue: QueuedLoad[];
+  activeLoads: number;
+  released: boolean;
 };
 
 const cacheKey = (contextKey: string, src: string): string => `${contextKey.length}:${contextKey}${src}`;
@@ -71,63 +99,108 @@ export function createImagePresentationResourcePool(
   const maxPendingResolutions = options.maxPendingResolutions ?? DEFAULT_MAX_PENDING_RESOLUTIONS;
   const maxQueuedLoads = options.maxQueuedLoads ?? DEFAULT_MAX_QUEUED_LOADS;
   const failureRetryMs = options.failureRetryMs ?? DEFAULT_FAILURE_RETRY_MS;
-  const resolvedCache = new Map<string, string>();
-  const resolutionInFlight = new Map<string, Promise<string | null>>();
-  const loadedCache = new Map<string, HTMLImageElement>();
-  const loadInFlight = new Map<string, Promise<HTMLImageElement | null>>();
-  const failedAt = new Map<string, number>();
-  const queue: QueuedLoad[] = [];
-  let settleDisposed!: () => void;
-  const disposedResult = new Promise<null>((resolve) => {
-    settleDisposed = () => resolve(null);
-  });
-  let activeLoads = 0;
   let disposed = false;
+  let consumers = 0;
+  let currentGeneration: ImageResourceGeneration | null = null;
 
-  const startNext = (): void => {
-    if (disposed || activeLoads >= maxConcurrentLoads) return;
-    queue.shift()?.run();
+  const createGeneration = (): ImageResourceGeneration => {
+    let settleReleased!: () => void;
+    const releasedResult = new Promise<null>((resolve) => {
+      settleReleased = () => resolve(null);
+    });
+    return {
+      abortController: new AbortController(),
+      releasedResult,
+      settleReleased,
+      resolvedCache: new Map(),
+      resolutionInFlight: new Map(),
+      loadedCache: new Map(),
+      loadInFlight: new Map(),
+      failedAt: new Map(),
+      queue: [],
+      activeLoads: 0,
+      released: false
+    };
   };
 
-  const schedule = (load: () => Promise<HTMLImageElement | null>): Promise<HTMLImageElement | null> => (
+  const releaseGeneration = (): void => {
+    const generation = currentGeneration;
+    if (!generation) return;
+    currentGeneration = null;
+    generation.released = true;
+    generation.abortController.abort();
+    generation.settleReleased();
+    while (generation.queue.length) generation.queue.shift()?.cancel();
+    generation.resolutionInFlight.clear();
+    generation.loadInFlight.clear();
+    generation.resolvedCache.clear();
+    generation.loadedCache.clear();
+    generation.failedAt.clear();
+  };
+
+  const startNext = (generation: ImageResourceGeneration): void => {
+    if (generation.released || generation.activeLoads >= maxConcurrentLoads) return;
+    generation.queue.shift()?.run();
+  };
+
+  const schedule = (
+    generation: ImageResourceGeneration,
+    load: () => Promise<HTMLImageElement | null>
+  ): Promise<HTMLImageElement | null> => (
     new Promise((resolve) => {
       const item: QueuedLoad = {
         run() {
-          if (disposed) {
+          if (generation.released) {
             resolve(null);
             return;
           }
-          activeLoads += 1;
-          void load().then(resolve, () => resolve(null)).finally(() => {
-            activeLoads -= 1;
-            startNext();
+          generation.activeLoads += 1;
+          let work: Promise<HTMLImageElement | null>;
+          try {
+            work = load();
+          } catch {
+            work = Promise.resolve(null);
+          }
+          void work.then(resolve, () => resolve(null)).finally(() => {
+            generation.activeLoads -= 1;
+            startNext(generation);
           });
         },
         cancel: () => resolve(null)
       };
-      if (activeLoads < maxConcurrentLoads) item.run();
-      else queue.push(item);
+      if (generation.activeLoads < maxConcurrentLoads) item.run();
+      else generation.queue.push(item);
     })
   );
 
   const resolve = (contextKey: string, rawSrc: string): Promise<string | null> => {
-    if (disposed) return Promise.resolve(null);
+    const generation = currentGeneration;
+    if (!generation || generation.released) return Promise.resolve(null);
     const key = cacheKey(contextKey, rawSrc);
-    const cached = resolvedCache.get(key);
+    const cached = generation.resolvedCache.get(key);
     if (cached !== undefined) {
-      touch(resolvedCache, key, cached);
+      touch(generation.resolvedCache, key, cached);
       return Promise.resolve(cached);
     }
-    const pending = resolutionInFlight.get(key);
+    const pending = generation.resolutionInFlight.get(key);
     if (pending) return pending;
-    if (resolutionInFlight.size >= maxPendingResolutions) return Promise.resolve(null);
-    const sourceResolution = options.resolveSource(contextKey, rawSrc).catch(() => null);
-    const resolution = Promise.race([sourceResolution, disposedResult])
+    if (generation.resolutionInFlight.size >= maxPendingResolutions) return Promise.resolve(null);
+    let sourceResolution: Promise<string | null>;
+    try {
+      sourceResolution = options.resolveSource(
+        contextKey,
+        rawSrc,
+        generation.abortController.signal
+      ).catch(() => null);
+    } catch {
+      sourceResolution = Promise.resolve(null);
+    }
+    const resolution = Promise.race([sourceResolution, generation.releasedResult])
       .then((resolved) => {
-        if (disposed) return null;
+        if (generation.released || currentGeneration !== generation) return null;
         if (resolved) {
           setBounded(
-            resolvedCache,
+            generation.resolvedCache,
             key,
             resolved,
             options.resolutionCacheLimit ?? DEFAULT_RESOLUTION_CACHE_LIMIT
@@ -135,42 +208,48 @@ export function createImagePresentationResourcePool(
         }
         return resolved || null;
       })
-      .finally(() => resolutionInFlight.delete(key));
-    resolutionInFlight.set(key, resolution);
+      .finally(() => generation.resolutionInFlight.delete(key));
+    generation.resolutionInFlight.set(key, resolution);
     return resolution;
   };
 
   const load = (contextKey: string, resolvedSrc: string): Promise<HTMLImageElement | null> => {
-    if (disposed) return Promise.resolve(null);
+    const generation = currentGeneration;
+    if (!generation || generation.released) return Promise.resolve(null);
     const key = cacheKey(contextKey, resolvedSrc);
-    const cached = loadedCache.get(key);
+    const cached = generation.loadedCache.get(key);
     if (cached) {
-      touch(loadedCache, key, cached);
+      touch(generation.loadedCache, key, cached);
       return Promise.resolve(cached);
     }
-    const failed = failedAt.get(key);
+    const failed = generation.failedAt.get(key);
     if (failed !== undefined) {
       if (now() - failed < failureRetryMs) return Promise.resolve(null);
-      failedAt.delete(key);
+      generation.failedAt.delete(key);
     }
-    const pending = loadInFlight.get(key);
+    const pending = generation.loadInFlight.get(key);
     if (pending) return pending;
-    if (loadInFlight.size >= maxConcurrentLoads + maxQueuedLoads) return Promise.resolve(null);
-    const browserLoad = schedule(() => options.loadImage(resolvedSrc));
-    const loading = Promise.race([browserLoad, disposedResult])
+    if (generation.loadInFlight.size >= maxConcurrentLoads + maxQueuedLoads) {
+      return Promise.resolve(null);
+    }
+    const browserLoad = schedule(
+      generation,
+      () => options.loadImage(resolvedSrc, generation.abortController.signal)
+    );
+    const loading = Promise.race([browserLoad, generation.releasedResult])
       .then((image) => {
-        if (disposed) return null;
+        if (generation.released || currentGeneration !== generation) return null;
         if (image) {
           setBounded(
-            loadedCache,
+            generation.loadedCache,
             key,
             image,
             options.loadedCacheLimit ?? DEFAULT_LOADED_CACHE_LIMIT
           );
-          failedAt.delete(key);
+          generation.failedAt.delete(key);
         } else {
           setBounded(
-            failedAt,
+            generation.failedAt,
             key,
             now(),
             options.failureCacheLimit ?? DEFAULT_FAILURE_CACHE_LIMIT
@@ -178,36 +257,52 @@ export function createImagePresentationResourcePool(
         }
         return image;
       })
-      .finally(() => loadInFlight.delete(key));
-    loadInFlight.set(key, loading);
+      .finally(() => generation.loadInFlight.delete(key));
+    generation.loadInFlight.set(key, loading);
     return loading;
   };
 
   return {
+    acquire() {
+      if (disposed) return () => {};
+      if (consumers === 0) currentGeneration = createGeneration();
+      consumers += 1;
+      let released = false;
+      return () => {
+        if (released || disposed) return;
+        released = true;
+        consumers -= 1;
+        if (consumers === 0) releaseGeneration();
+      };
+    },
+    invalidate() {
+      if (disposed || consumers === 0) return;
+      releaseGeneration();
+      currentGeneration = createGeneration();
+    },
     resolve,
     getResolved(contextKey, rawSrc) {
+      const generation = currentGeneration;
+      if (!generation || generation.released) return null;
       const key = cacheKey(contextKey, rawSrc);
-      const resolved = resolvedCache.get(key) ?? null;
-      if (resolved) touch(resolvedCache, key, resolved);
+      const resolved = generation.resolvedCache.get(key) ?? null;
+      if (resolved) touch(generation.resolvedCache, key, resolved);
       return resolved;
     },
     load,
     getLoaded(contextKey, resolvedSrc) {
+      const generation = currentGeneration;
+      if (!generation || generation.released) return null;
       const key = cacheKey(contextKey, resolvedSrc);
-      const image = loadedCache.get(key) ?? null;
-      if (image) touch(loadedCache, key, image);
+      const image = generation.loadedCache.get(key) ?? null;
+      if (image) touch(generation.loadedCache, key, image);
       return image;
     },
     dispose() {
       if (disposed) return;
       disposed = true;
-      settleDisposed();
-      while (queue.length) queue.shift()?.cancel();
-      resolutionInFlight.clear();
-      loadInFlight.clear();
-      resolvedCache.clear();
-      loadedCache.clear();
-      failedAt.clear();
+      consumers = 0;
+      releaseGeneration();
     }
   };
 }
@@ -304,6 +399,8 @@ export function createImagePresentationFactory(
   options: ImagePresentationFactoryOptions
 ): ImagePresentationFactory {
   const handles = new Set<ImagePresentationHandle>();
+  let resourceConsumers = 0;
+  let releaseResources: (() => void) | null = null;
   let disposed = false;
 
   const create = (view: ImagePresentationView): ImagePresentationHandle => {
@@ -335,6 +432,20 @@ export function createImagePresentationFactory(
   };
 
   return {
+    acquire() {
+      if (disposed) return () => {};
+      if (resourceConsumers === 0) releaseResources = options.resources.acquire();
+      resourceConsumers += 1;
+      let released = false;
+      return () => {
+        if (released || disposed) return;
+        released = true;
+        resourceConsumers -= 1;
+        if (resourceConsumers !== 0) return;
+        releaseResources?.();
+        releaseResources = null;
+      };
+    },
     async preload(rawSrc) {
       if (disposed) return;
       const resolved = await options.resources.resolve(options.resourceContextKey, rawSrc);
@@ -345,27 +456,59 @@ export function createImagePresentationFactory(
     externalDocumentPresented() {
       if (disposed) return;
       for (const handle of handles) handle.externalDocumentPresented();
+      options.resources.invalidate();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       for (const handle of [...handles]) handle.dispose();
       handles.clear();
+      resourceConsumers = 0;
+      releaseResources?.();
+      releaseResources = null;
     }
   };
 }
 
-export function loadBrowserImage(resolvedSrc: string): Promise<HTMLImageElement | null> {
+export function loadBrowserImage(
+  resolvedSrc: string,
+  signal?: AbortSignal
+): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const image = new Image();
     let settled = false;
-    const complete = (value: HTMLImageElement | null): void => {
+
+    function complete(value: HTMLImageElement | null): void {
       if (settled) return;
       settled = true;
+      image.removeEventListener('load', onLoad);
+      image.removeEventListener('error', onError);
+      signal?.removeEventListener('abort', onAbort);
       resolve(value);
-    };
-    image.addEventListener('load', () => complete(image), { once: true });
-    image.addEventListener('error', () => complete(null), { once: true });
+    }
+    function onLoad(): void {
+      complete(image);
+    }
+    function onError(): void {
+      complete(null);
+    }
+    function onAbort(): void {
+      image.removeEventListener('load', onLoad);
+      image.removeEventListener('error', onError);
+      try {
+        image.src = '';
+      } finally {
+        complete(null);
+      }
+    }
+
+    if (signal?.aborted) {
+      complete(null);
+      return;
+    }
+    image.addEventListener('load', onLoad, { once: true });
+    image.addEventListener('error', onError, { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
     image.src = resolvedSrc;
     if (image.complete && image.naturalWidth > 0) complete(image);
   });

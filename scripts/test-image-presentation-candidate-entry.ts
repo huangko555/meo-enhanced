@@ -55,6 +55,7 @@ type CandidateHarness = {
           return loadBrowserImage(resolvedSrc);
         }
       });
+      const releaseResources = resources.acquire();
 
       return {
         create(root, contextKey, altText) {
@@ -129,6 +130,7 @@ type CandidateHarness = {
         }),
         dispose() {
           for (const instance of [...instances]) instance.dispose();
+          releaseResources();
           resources.dispose();
         }
       };

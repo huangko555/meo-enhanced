@@ -29,6 +29,7 @@ const pool = createImagePresentationResourcePool({
     return failing.has(resolvedSrc) ? null : ({ src: resolvedSrc, cloneNode: () => ({ src: resolvedSrc }) } as never);
   }
 });
+const releasePool = pool.acquire();
 
 const sameA = pool.resolve('document-a', './same.png');
 const sameB = pool.resolve('document-a', './same.png');
@@ -69,6 +70,7 @@ loadReleases.shift()?.();
 await retried;
 assert.equal(loadCalls, 5, 'expired failure should retry');
 
+releasePool();
 pool.dispose();
 assert.equal(await pool.resolve('document-a', './after-dispose.png'), null);
 assert.equal(await pool.load('document-a', 'resolved:after-dispose'), null);
@@ -84,6 +86,7 @@ const disposablePool = createImagePresentationResourcePool({
     releasePendingLoad = resolve;
   })
 });
+disposablePool.acquire();
 const pendingResolution = disposablePool.resolve('document', 'pending-resolution');
 const pendingLoad = disposablePool.load('document', 'pending-load');
 const queuedLoad = disposablePool.load('document', 'queued-load');
@@ -109,6 +112,7 @@ const boundedPool = createImagePresentationResourcePool({
     return { src: resolvedSrc } as HTMLImageElement;
   }
 });
+boundedPool.acquire();
 const boundedResolution = boundedPool.resolve('document', 'first');
 assert.equal(
   await boundedPool.resolve('document', 'overflow'),

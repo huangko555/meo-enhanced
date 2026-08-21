@@ -12,6 +12,8 @@ export type ImagePresentationHandle = {
 
 /** Editor-internal seam consumed by image widgets without concrete runtime knowledge. */
 export type ImagePresentationFactory = {
+  /** Keeps shared image resource work active until the returned release is called. */
+  acquire(): () => void;
   preload(rawSrc: string): Promise<void>;
   create(view: ImagePresentationView): ImagePresentationHandle;
   externalDocumentPresented(): void;

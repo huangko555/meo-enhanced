@@ -8,6 +8,8 @@ import {
 type PendingRequest = {
   resolve: (result: ImageResolutionResult) => void;
   timeout: unknown;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 };
 
 export type ImageResolutionTransportOptions = {
@@ -17,7 +19,7 @@ export type ImageResolutionTransportOptions = {
 };
 
 export type ImageResolutionTransport = {
-  resolve(url: string): Promise<ImageResolutionResult>;
+  resolve(url: string, signal?: AbortSignal): Promise<ImageResolutionResult>;
   accept(response: ResolvedImageSrcResponse): boolean;
 };
 
@@ -31,46 +33,54 @@ export function createImageResolutionTransport(
   const pending = new Map<string, PendingRequest>();
   let requestCounter = 0;
 
+  const settle = (requestId: string, result: ImageResolutionResult): boolean => {
+    const request = pending.get(requestId);
+    if (!request) return false;
+    pending.delete(requestId);
+    cancelTimeout(request.timeout);
+    if (request.signal && request.onAbort) {
+      request.signal.removeEventListener('abort', request.onAbort);
+    }
+    request.resolve(result);
+    return true;
+  };
+
   return {
-    resolve(url) {
+    resolve(url, signal) {
       const requestId = `img-${requestCounter++}`;
       const result = new Promise<ImageResolutionResult>((resolve) => {
         const timeout = scheduleTimeout(() => {
-          pending.delete(requestId);
-          resolve({
+          settle(requestId, {
             ok: false,
             error: { code: 'timeout', message: 'Timed out while resolving image source' }
           });
         }, timeoutMs);
-        pending.set(requestId, { resolve, timeout });
+        const onAbort = () => {
+          settle(requestId, {
+            ok: false,
+            error: { code: 'operation-failed', message: 'Image source resolution was cancelled' }
+          });
+        };
+        pending.set(requestId, { resolve, timeout, signal, onAbort });
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener('abort', onAbort, { once: true });
       });
+      if (signal?.aborted) return result;
       try {
         postMessage({ type: 'resolveImageSrc', requestId, url });
       } catch (error) {
-        const pendingRequest = pending.get(requestId);
-        if (pendingRequest) {
-          pending.delete(requestId);
-          cancelTimeout(pendingRequest.timeout);
-          pendingRequest.resolve({
-            ok: false,
-            error: {
-              code: 'operation-failed',
-              message: error instanceof Error ? error.message : 'Failed to send image resolution request'
-            }
-          });
-        }
+        settle(requestId, {
+          ok: false,
+          error: {
+            code: 'operation-failed',
+            message: error instanceof Error ? error.message : 'Failed to send image resolution request'
+          }
+        });
       }
       return result;
     },
     accept(response) {
-      const request = pending.get(response.requestId);
-      if (!request) {
-        return false;
-      }
-      pending.delete(response.requestId);
-      cancelTimeout(request.timeout);
-      request.resolve(response.result);
-      return true;
+      return settle(response.requestId, response.result);
     }
   };
 }
