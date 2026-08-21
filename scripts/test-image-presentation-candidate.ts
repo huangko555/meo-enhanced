@@ -26,6 +26,8 @@ async function main(): Promise<void> {
       <div id="two" class="meo-md-image"></div>
       <div id="replace" class="meo-md-image"></div>
       <div id="failure" class="meo-md-image"></div>
+      <div id="projection-failure" class="meo-md-image"></div>
+      <div id="projection-correlation" class="meo-md-image"></div>
       <div id="other-context" class="meo-md-image"></div>
       <div style="height:2000px"></div>`);
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
@@ -84,10 +86,88 @@ async function main(): Promise<void> {
       };
 
       const failure = environment.create(document.getElementById('failure'), 'document-a', 'failure');
-      failure.present('![missing](missing.png)', 'missing.png');
+      failure.present('![failure-ready](failure-ready.png)', 'failure-ready.png');
       await failure.whenCurrentPresentationSettles();
+      const preservedBeforeFailure = environment.counts().preservedReplacements;
       failure.present('![broken](broken-load.png)', 'broken-load.png');
       await failure.whenCurrentPresentationSettles();
+      const preservedAfterFailure = environment.counts().preservedReplacements;
+
+      const projectionFailureRoot = document.getElementById('projection-failure') as HTMLElement;
+      const projectionFailure = environment.create(
+        projectionFailureRoot,
+        'document-a',
+        'projection failure'
+      );
+      projectionFailure.present('![confirmed](confirmed.png)', 'confirmed.png');
+      await projectionFailure.whenCurrentPresentationSettles();
+      const confirmedProjection = projectionFailure.state().projected;
+      const confirmedSrc = projectionFailureRoot.querySelector('img')?.getAttribute('src') ?? '';
+      const replaceChildren = projectionFailureRoot.replaceChildren.bind(projectionFailureRoot);
+      let rejectNextProjection = true;
+      projectionFailureRoot.replaceChildren = (...nodes: Array<Node | string>) => {
+        if (rejectNextProjection) {
+          rejectNextProjection = false;
+          throw new Error('injected unprojectable DOM');
+        }
+        replaceChildren(...nodes);
+      };
+      projectionFailure.present(
+        '![unprojectable](slow-unprojectable.png)',
+        'slow-unprojectable.png'
+      );
+      let waiterCompletedBeforeProjection = false;
+      const failedProjectionWaiter = projectionFailure.whenCurrentPresentationSettles().then(() => {
+        waiterCompletedBeforeProjection = true;
+      });
+      await Promise.resolve();
+      const waiterWasPending = !waiterCompletedBeforeProjection;
+      pending.get('slow-unprojectable.png')?.forEach((resolve: (value: string) => void) => {
+        resolve(svg('unprojectable', '#a66'));
+      });
+      await failedProjectionWaiter;
+      const afterProjectionFailure = {
+        currentPhase: projectionFailure.state().current?.phase,
+        projected: projectionFailure.state().projected,
+        projection: projectionFailure.state().projection,
+        src: projectionFailureRoot.querySelector('img')?.getAttribute('src') ?? ''
+      };
+      projectionFailure.present('![recovered](recovered.png)', 'recovered.png');
+      await projectionFailure.whenCurrentPresentationSettles();
+      const afterProjectionRecovery = {
+        projected: projectionFailure.state().projected,
+        src: projectionFailureRoot.querySelector('img')?.getAttribute('src') ?? ''
+      };
+
+      const correlationRoot = document.getElementById('projection-correlation') as HTMLElement;
+      const correlation = environment.create(correlationRoot, 'document-a', 'correlation');
+      correlation.present('![correlation-old](correlation-old.png)', 'correlation-old.png');
+      await correlation.whenCurrentPresentationSettles();
+      const correlationSources: string[] = [];
+      const correlationObserver = new MutationObserver(() => {
+        const source = correlationRoot.querySelector('img')?.getAttribute('src');
+        if (source) correlationSources.push(source);
+      });
+      correlationObserver.observe(correlationRoot, { childList: true, subtree: true });
+      correlationRoot.dataset.deferProjection = 'true';
+      correlation.present(
+        '![correlation-intermediate](correlation-intermediate.png)',
+        'correlation-intermediate.png'
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      correlation.present('![correlation-latest](correlation-latest.png)', 'correlation-latest.png');
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      delete correlationRoot.dataset.deferProjection;
+      correlationRoot.dispatchEvent(new Event('meo-release-projection'));
+      await correlation.whenCurrentPresentationSettles();
+      correlationObserver.disconnect();
+      const correlationResult = {
+        currentId: correlation.state().current?.presentationId,
+        projected: correlation.state().projected,
+        projection: correlation.state().projection,
+        src: correlationRoot.querySelector('img')?.getAttribute('src') ?? '',
+        sources: correlationSources
+      };
 
       const otherContext = environment.create(
         document.getElementById('other-context'),
@@ -161,8 +241,17 @@ async function main(): Promise<void> {
         afterOldCompletion,
         failure: {
           phase: failure.state().projected.phase,
-          text: document.getElementById('failure')?.textContent ?? ''
+          text: document.getElementById('failure')?.textContent ?? '',
+          preserveDelta: preservedAfterFailure - preservedBeforeFailure
         },
+        projectability: {
+          confirmedProjection,
+          confirmedSrc,
+          waiterWasPending,
+          afterFailure: afterProjectionFailure,
+          afterRecovery: afterProjectionRecovery
+        },
+        correlation: correlationResult,
         otherContext: document.querySelector('#other-context img')?.getAttribute('src') ?? '',
         activeBefore,
         activeAfter,
@@ -204,7 +293,32 @@ async function main(): Promise<void> {
     assert.equal(result.afterOldCompletion.phase, 'ready');
     assert.equal(result.afterOldCompletion.id, result.newId);
     assert.equal(result.afterOldCompletion.src, result.beforeOldCompletion.src);
-    assert.deepEqual(result.failure, { phase: 'error', text: '![broken](broken-load.png)' });
+    assert.deepEqual(result.failure, {
+      phase: 'error',
+      text: '![broken](broken-load.png)',
+      preserveDelta: 1
+    });
+    assert.equal(result.projectability.waiterWasPending, true);
+    assert.equal(result.projectability.afterFailure.currentPhase, 'ready');
+    assert.deepEqual(
+      result.projectability.afterFailure.projected,
+      result.projectability.confirmedProjection,
+      'an unprojectable replacement committed a phantom ready identity'
+    );
+    assert.equal(result.projectability.afterFailure.projection, null);
+    assert.equal(result.projectability.afterFailure.src, result.projectability.confirmedSrc);
+    assert.equal(result.projectability.afterRecovery.projected.phase, 'ready');
+    assert.notEqual(result.projectability.afterRecovery.src, result.projectability.confirmedSrc);
+    assert.ok(result.projectability.afterRecovery.src.includes('recovered'));
+    assert.equal(result.correlation.projected.phase, 'ready');
+    assert.equal(result.correlation.projected.presentationId, result.correlation.currentId);
+    assert.equal(result.correlation.projection, null);
+    assert.ok(result.correlation.src.includes('correlation-latest'));
+    assert.equal(
+      result.correlation.sources.some((source: string) => source.includes('correlation-intermediate')),
+      false,
+      'a stale deferred projection command mutated the DOM before its ack was rejected'
+    );
     assert.notEqual(result.otherContext, '');
     assert.equal(result.activeBefore, 'focus');
     assert.equal(result.activeAfter, 'focus');
@@ -237,7 +351,7 @@ async function main(): Promise<void> {
         resourcePools: result.counts.resourcePools,
         legacyWidgets: result.counts.legacyWidgets
       },
-      { applications: 9, runtimes: 9, adapters: 9, resourcePools: 1, legacyWidgets: 0 }
+      { applications: 11, runtimes: 11, adapters: 11, resourcePools: 1, legacyWidgets: 0 }
     );
     assert.ok(result.counts.preservedReplacements >= 6);
     assert.equal(result.legacyDom, 0);

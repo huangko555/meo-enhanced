@@ -1,5 +1,6 @@
 import type {
   ImagePresentationEffect,
+  ImagePresentationEffectContext,
   ImagePresentationEffectExecution,
   ImagePresentationEffectExecutor,
   ImagePresentationInput
@@ -335,23 +336,70 @@ export function createCodeMirrorDomImagePresentationAdapter(
 ): ImagePresentationEffectExecutor {
   let disposed = false;
 
-  const completion = (work: Promise<ImagePresentationInput | null>): ImagePresentationEffectExecution => ({
-    completion: work.then((input) => disposed ? null : input)
+  const completion = (work: Promise<ImagePresentationInput>): ImagePresentationEffectExecution => ({
+    completion: work
   });
 
-  const showImage = (resolvedSrc: string): void => {
-    const loaded = options.resources.getLoaded(options.resourceContextKey, resolvedSrc);
-    if (!loaded) return;
-    const image = loaded.cloneNode(false) as HTMLImageElement;
-    options.view.preserveLayoutChange(() => {
-      if (disposed) return;
-      options.view.showImage(image);
+  const projectionCompletion = (
+    effect: Extract<ImagePresentationEffect, { type: 'showImage' | 'showFallback' }>,
+    type: 'projectionSucceeded' | 'projectionFailed'
+  ): ImagePresentationEffectExecution => ({
+    immediateCompletion: {
+      type,
+      presentationId: effect.presentationId,
+      commandId: effect.commandId
+    }
+  });
+
+  const project = (
+    effect: Extract<ImagePresentationEffect, { type: 'showImage' | 'showFallback' }>,
+    context: ImagePresentationEffectContext,
+    apply: () => boolean
+  ): ImagePresentationEffectExecution => {
+    const result = options.view.preserveLayoutChange(() => (
+      disposed || !context.isCurrentProjection() ? false : apply()
+    ));
+    const completed = (projected: boolean): ImagePresentationInput => ({
+      type: projected ? 'projectionSucceeded' : 'projectionFailed',
+      presentationId: effect.presentationId,
+      commandId: effect.commandId
     });
+    return result instanceof Promise
+      ? completion(result.then(completed))
+      : { immediateCompletion: completed(result) };
+  };
+
+  const showImage = (
+    effect: Extract<ImagePresentationEffect, { type: 'showImage' }>,
+    context: ImagePresentationEffectContext
+  ): ImagePresentationEffectExecution => {
+    const resolvedSrc = effect.resolvedSrc;
+    const loaded = options.resources.getLoaded(options.resourceContextKey, resolvedSrc);
+    if (!loaded) return projectionCompletion(effect, 'projectionFailed');
+    const image = loaded.cloneNode(false) as HTMLImageElement;
+    return project(effect, context, () => options.view.showImage(image));
   };
 
   return {
-    execute(effect: ImagePresentationEffect): ImagePresentationEffectExecution {
-      if (disposed) return {};
+    execute(
+      effect: ImagePresentationEffect,
+      context: ImagePresentationEffectContext
+    ): ImagePresentationEffectExecution {
+      if (disposed) {
+        switch (effect.type) {
+          case 'resolveSource':
+            return {
+              immediateCompletion: { type: 'sourceFailed', presentationId: effect.presentationId }
+            };
+          case 'loadImage':
+            return {
+              immediateCompletion: { type: 'imageFailed', presentationId: effect.presentationId }
+            };
+          case 'showImage':
+          case 'showFallback':
+            return projectionCompletion(effect, 'projectionFailed');
+        }
+      }
       switch (effect.type) {
         case 'resolveSource': {
           const resolvedSrc = options.resources.getResolved(
@@ -392,11 +440,9 @@ export function createCodeMirrorDomImagePresentationAdapter(
             ))
           );
         case 'showFallback':
-          options.view.showFallback(effect.sourceKey);
-          return {};
+          return project(effect, context, () => options.view.showFallback(effect.sourceKey));
         case 'showImage':
-          showImage(effect.resolvedSrc);
-          return {};
+          return showImage(effect, context);
       }
     },
     dispose() {

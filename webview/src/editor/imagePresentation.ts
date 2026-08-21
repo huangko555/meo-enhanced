@@ -1,7 +1,7 @@
 export type ImagePresentationView = {
-  showFallback(sourceKey: string): void;
-  showImage(image: HTMLImageElement): void;
-  preserveLayoutChange(apply: () => void): void;
+  showFallback(sourceKey: string): boolean;
+  showImage(image: HTMLImageElement): boolean;
+  preserveLayoutChange(apply: () => boolean): boolean | Promise<boolean>;
 };
 
 export type ImagePresentationHandle = {

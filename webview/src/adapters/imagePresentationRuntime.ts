@@ -17,14 +17,13 @@ export type ImagePresentationRuntimeOptions = {
 };
 
 /**
- * Executes effects without serializing unrelated resource promises. The
- * Application remains the sole owner of presentation correlation and phase.
+ * Executes effects without retaining presentation identity. Application state
+ * alone decides whether the latest work and its required projection have settled.
  */
 export function createImagePresentationRuntime(
   options: ImagePresentationRuntimeOptions
 ): ImagePresentationRuntime {
   const { application, executor } = options;
-  const pendingByPresentation = new Map<number, number>();
   const idleWaiters = new Set<() => void>();
   let disposed = false;
 
@@ -32,7 +31,7 @@ export function createImagePresentationRuntime(
     const state = application.getState();
     if (state.lifecycle === 'disposed' || state.current === null) return true;
     if (state.current.phase !== 'ready' && state.current.phase !== 'error') return false;
-    return (pendingByPresentation.get(state.current.presentationId) ?? 0) === 0;
+    return state.projection === null;
   };
 
   const notifyIdle = (): void => {
@@ -41,27 +40,25 @@ export function createImagePresentationRuntime(
     idleWaiters.clear();
   };
 
+  const failureFor = (effect: ImagePresentationEffect): ImagePresentationInput => {
+    switch (effect.type) {
+      case 'resolveSource':
+        return { type: 'sourceFailed', presentationId: effect.presentationId };
+      case 'loadImage':
+        return { type: 'imageFailed', presentationId: effect.presentationId };
+      case 'showImage':
+      case 'showFallback':
+        return {
+          type: 'projectionFailed',
+          presentationId: effect.presentationId,
+          commandId: effect.commandId
+        };
+    }
+  };
+
   const dispatchInternal = (input: ImagePresentationInput): void => {
     if (disposed && input.type !== 'dispose') return;
     executeEffects(application.dispatch(input));
-    notifyIdle();
-  };
-
-  const failureFor = (effect: ImagePresentationEffect): ImagePresentationInput | null => {
-    if (effect.type === 'resolveSource') {
-      return { type: 'sourceFailed', presentationId: effect.presentationId };
-    }
-    if (effect.type === 'loadImage') {
-      return { type: 'imageFailed', presentationId: effect.presentationId };
-    }
-    return null;
-  };
-
-  const complete = (presentationId: number, input: ImagePresentationInput | null): void => {
-    const remaining = (pendingByPresentation.get(presentationId) ?? 1) - 1;
-    if (remaining > 0) pendingByPresentation.set(presentationId, remaining);
-    else pendingByPresentation.delete(presentationId);
-    if (!disposed && input) dispatchInternal(input);
     notifyIdle();
   };
 
@@ -69,33 +66,36 @@ export function createImagePresentationRuntime(
     for (const effect of effects) {
       let execution;
       try {
-        execution = executor.execute(effect);
+        execution = executor.execute(effect, {
+          isCurrentProjection() {
+            if (effect.type !== 'showImage' && effect.type !== 'showFallback') return false;
+            const state = application.getState();
+            return (
+              state.lifecycle === 'active' &&
+              state.current?.presentationId === effect.presentationId &&
+              state.projection?.commandId === effect.commandId &&
+              state.projection.target.presentationId === effect.presentationId
+            );
+          }
+        });
       } catch {
-        const failure = failureFor(effect);
-        if (failure) dispatchInternal(failure);
+        dispatchInternal(failureFor(effect));
         continue;
       }
 
-      if (execution.immediateCompletion) {
+      if ('immediateCompletion' in execution) {
         dispatchInternal(execution.immediateCompletion);
+        continue;
       }
-      if (!execution.completion) continue;
-
-      pendingByPresentation.set(
-        effect.presentationId,
-        (pendingByPresentation.get(effect.presentationId) ?? 0) + 1
-      );
       void execution.completion.then(
-        (input) => complete(effect.presentationId, input),
-        () => complete(effect.presentationId, failureFor(effect))
+        (input) => dispatchInternal(input),
+        () => dispatchInternal(failureFor(effect))
       );
     }
   }
 
   return {
-    dispatch(input) {
-      dispatchInternal(input);
-    },
+    dispatch: dispatchInternal,
     whenCurrentPresentationSettles() {
       if (isIdle()) return Promise.resolve();
       return new Promise<void>((resolve) => idleWaiters.add(resolve));
@@ -104,7 +104,6 @@ export function createImagePresentationRuntime(
       if (disposed) return;
       dispatchInternal({ type: 'dispose' });
       disposed = true;
-      pendingByPresentation.clear();
       executor.dispose();
       notifyIdle();
     }

@@ -26,10 +26,21 @@ export type ImageProjectedPresentation =
       readonly resolvedSrc: string;
     };
 
+export type ImageProjectionTarget = Exclude<ImageProjectedPresentation, { readonly phase: 'none' }>;
+
+export type ImageProjectionIntent = {
+  readonly commandId: number;
+  readonly target: ImageProjectionTarget;
+};
+
 export type ImagePresentationState = {
   readonly lifecycle: 'active' | 'disposed';
+  /** Latest resolve/load work; ready does not imply that its DOM projection succeeded. */
   readonly current: ImagePresentationCurrent | null;
+  /** Last projection confirmed by a correlated success acknowledgement. */
   readonly projected: ImageProjectedPresentation;
+  /** The only projection command whose acknowledgement can still change projected. */
+  readonly projection: ImageProjectionIntent | null;
 };
 
 export type ImagePresentationInput =
@@ -38,6 +49,11 @@ export type ImagePresentationInput =
   | { readonly type: 'sourceFailed'; readonly presentationId: number }
   | { readonly type: 'imageLoaded'; readonly presentationId: number }
   | { readonly type: 'imageFailed'; readonly presentationId: number }
+  | {
+      readonly type: 'projectionSucceeded' | 'projectionFailed';
+      readonly presentationId: number;
+      readonly commandId: number;
+    }
   | { readonly type: 'externalDocumentPresented' }
   | { readonly type: 'dispose' };
 
@@ -55,11 +71,13 @@ export type ImagePresentationEffect =
   | {
       readonly type: 'showImage';
       readonly presentationId: number;
+      readonly commandId: number;
       readonly resolvedSrc: string;
     }
   | {
       readonly type: 'showFallback';
       readonly presentationId: number;
+      readonly commandId: number;
       readonly sourceKey: string;
     };
 
@@ -68,29 +86,56 @@ export type ImagePresentationApplication = {
   dispatch(input: ImagePresentationInput): readonly ImagePresentationEffect[];
 };
 
-export type ImagePresentationEffectExecution = {
-  readonly immediateCompletion?: ImagePresentationInput | null;
-  readonly completion?: Promise<ImagePresentationInput | null>;
+export type ImagePresentationEffectExecution =
+  | { readonly immediateCompletion: ImagePresentationInput }
+  | { readonly completion: Promise<ImagePresentationInput> };
+
+export type ImagePresentationEffectContext = {
+  /** Re-checks Application correlation immediately before a deferred DOM mutation. */
+  isCurrentProjection(): boolean;
 };
 
 /** Application-owned port implemented by deterministic and Editor adapters. */
 export type ImagePresentationEffectExecutor = {
-  execute(effect: ImagePresentationEffect): ImagePresentationEffectExecution;
+  execute(
+    effect: ImagePresentationEffect,
+    context: ImagePresentationEffectContext
+  ): ImagePresentationEffectExecution;
   dispose(): void;
 };
 
+function sameProjectionTarget(
+  left: ImageProjectionTarget,
+  right: ImageProjectionTarget
+): boolean {
+  if (left.phase !== right.phase || left.presentationId !== right.presentationId) return false;
+  if (left.phase === 'ready' && right.phase === 'ready') {
+    return left.sourceKey === right.sourceKey && left.resolvedSrc === right.resolvedSrc;
+  }
+  if (left.phase !== 'ready' && right.phase !== 'ready') {
+    return left.sourceKey === right.sourceKey;
+  }
+  return false;
+}
+
+function isFallbackTarget(target: ImageProjectionTarget): boolean {
+  return target.phase === 'fallback' || target.phase === 'error';
+}
+
 /**
- * Owns both the latest asynchronous work and the presentation currently
- * projected into the DOM. Keeping those identities separate lets a ready
- * projection remain stable while a newer generation resolves and loads.
+ * Owns latest resource work, confirmed DOM identity, and one correlated
+ * projection command. Runtime and concrete DOM adapters only execute effects
+ * and return completions; they never infer or retain projected identity.
  */
 export function createImagePresentationApplication(): ImagePresentationApplication {
   let lifecycle: ImagePresentationState['lifecycle'] = 'active';
-  let sequence = 0;
+  let presentationSequence = 0;
+  let commandSequence = 0;
   let current: ImagePresentationCurrent | null = null;
   let projected: ImageProjectedPresentation = { phase: 'none' };
+  let projection: ImageProjectionIntent | null = null;
 
-  const getState = (): ImagePresentationState => ({ lifecycle, current, projected });
+  const getState = (): ImagePresentationState => ({ lifecycle, current, projected, projection });
 
   const currentInPhase = (
     candidateId: number,
@@ -101,11 +146,76 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
       : null
   );
 
+  const requiredProjection = (): ImageProjectionTarget | null => {
+    if (!current) return null;
+    if (current.phase === 'ready' && current.resolvedSrc) {
+      return {
+        phase: 'ready',
+        presentationId: current.presentationId,
+        sourceKey: current.sourceKey,
+        resolvedSrc: current.resolvedSrc
+      };
+    }
+    if (current.phase === 'error') {
+      return {
+        phase: 'error',
+        presentationId: current.presentationId,
+        sourceKey: current.sourceKey
+      };
+    }
+    if (projected.phase !== 'ready') {
+      return {
+        phase: 'fallback',
+        presentationId: current.presentationId,
+        sourceKey: current.sourceKey
+      };
+    }
+    return null;
+  };
+
+  const projectionEffect = (intent: ImageProjectionIntent): ImagePresentationEffect => (
+    intent.target.phase === 'ready'
+      ? {
+          type: 'showImage',
+          presentationId: intent.target.presentationId,
+          commandId: intent.commandId,
+          resolvedSrc: intent.target.resolvedSrc
+        }
+      : {
+          type: 'showFallback',
+          presentationId: intent.target.presentationId,
+          commandId: intent.commandId,
+          sourceKey: intent.target.sourceKey
+        }
+  );
+
+  const requestRequiredProjection = (
+    rejectedTarget: ImageProjectionTarget | null = null
+  ): readonly ImagePresentationEffect[] => {
+    const target = requiredProjection();
+    if (!target) return [];
+    if (projection) {
+      if (
+        isFallbackTarget(projection.target) &&
+        isFallbackTarget(target) &&
+        projection.target.presentationId === target.presentationId &&
+        projection.target.sourceKey === target.sourceKey
+      ) {
+        projection = { ...projection, target };
+      }
+      return [];
+    }
+    if (projected.phase !== 'none' && sameProjectionTarget(projected, target)) return [];
+    if (rejectedTarget && sameProjectionTarget(rejectedTarget, target)) return [];
+    projection = { commandId: ++commandSequence, target };
+    return [projectionEffect(projection)];
+  };
+
   const beginPresentation = (
     sourceKey: string,
     rawSrc: string
   ): readonly ImagePresentationEffect[] => {
-    const presentationId = ++sequence;
+    const presentationId = ++presentationSequence;
     current = {
       phase: 'resolving',
       presentationId,
@@ -113,29 +223,48 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
       rawSrc,
       resolvedSrc: null
     };
-
-    const effects: ImagePresentationEffect[] = [];
-    if (projected.phase !== 'ready') {
-      projected = { phase: 'fallback', presentationId, sourceKey };
-      effects.push({ type: 'showFallback', presentationId, sourceKey });
-    }
-    effects.push({ type: 'resolveSource', presentationId, rawSrc });
-    return effects;
+    return [
+      ...requestRequiredProjection(),
+      { type: 'resolveSource', presentationId, rawSrc }
+    ];
   };
 
-  const failCurrent = (presentationId: number): readonly ImagePresentationEffect[] => {
+  const failCurrent = (): readonly ImagePresentationEffect[] => {
     if (!current) return [];
     current = { ...current, phase: 'error', resolvedSrc: null };
-    projected = {
-      phase: 'error',
-      presentationId,
-      sourceKey: current.sourceKey
-    };
-    return [{
-      type: 'showFallback',
-      presentationId,
-      sourceKey: current.sourceKey
-    }];
+    if (
+      projected.phase === 'fallback' &&
+      projected.presentationId === current.presentationId &&
+      projected.sourceKey === current.sourceKey
+    ) {
+      // The fallback DOM was already acknowledged for this presentation. Its
+      // terminal classification can change without issuing the same DOM command twice.
+      projected = {
+        phase: 'error',
+        presentationId: current.presentationId,
+        sourceKey: current.sourceKey
+      };
+      return [];
+    }
+    return requestRequiredProjection();
+  };
+
+  const acknowledgeProjection = (
+    input: Extract<ImagePresentationInput, { type: 'projectionSucceeded' | 'projectionFailed' }>
+  ): readonly ImagePresentationEffect[] => {
+    if (
+      projection?.commandId !== input.commandId ||
+      projection.target.presentationId !== input.presentationId
+    ) {
+      return [];
+    }
+    const completed = projection;
+    projection = null;
+    if (input.type === 'projectionSucceeded' && current?.presentationId === input.presentationId) {
+      projected = completed.target;
+      return requestRequiredProjection();
+    }
+    return requestRequiredProjection(completed.target);
   };
 
   const dispatch = (input: ImagePresentationInput): readonly ImagePresentationEffect[] => {
@@ -156,32 +285,26 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
       }
       case 'sourceFailed':
         if (!currentInPhase(input.presentationId, 'resolving')) return [];
-        return failCurrent(input.presentationId);
+        return failCurrent();
       case 'imageLoaded': {
         const active = currentInPhase(input.presentationId, 'loading');
         if (!active || active.resolvedSrc === null) return [];
         current = { ...active, phase: 'ready' };
-        projected = {
-          phase: 'ready',
-          presentationId: input.presentationId,
-          sourceKey: active.sourceKey,
-          resolvedSrc: active.resolvedSrc
-        };
-        return [{
-          type: 'showImage',
-          presentationId: input.presentationId,
-          resolvedSrc: active.resolvedSrc
-        }];
+        return requestRequiredProjection();
       }
       case 'imageFailed':
         if (!currentInPhase(input.presentationId, 'loading')) return [];
-        return failCurrent(input.presentationId);
+        return failCurrent();
+      case 'projectionSucceeded':
+      case 'projectionFailed':
+        return acknowledgeProjection(input);
       case 'externalDocumentPresented':
         return current ? beginPresentation(current.sourceKey, current.rawSrc) : [];
       case 'dispose':
         lifecycle = 'disposed';
         current = null;
         projected = { phase: 'none' };
+        projection = null;
         return [];
     }
   };

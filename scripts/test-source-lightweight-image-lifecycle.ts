@@ -291,6 +291,11 @@ async function main(): Promise<void> {
       const root = host?.querySelector<HTMLElement>('.meo-md-image');
       const scroller = host?.querySelector<HTMLElement>('.cm-scroller');
       if (!root || !scroller) throw new Error('projection fixture missing');
+      const selectionAnchor = state.projection.getText().indexOf('Projection');
+      state.projection.view.dispatch({
+        selection: { anchor: selectionAnchor, head: selectionAnchor + 5 }
+      });
+      state.projection.focus();
       scroller.scrollTop = 24;
       state.projectedImage = root.querySelector('.meo-md-image-img');
       state.projectedControls = root.querySelector('.meo-md-image-controls');
@@ -305,7 +310,9 @@ async function main(): Promise<void> {
           sameControls: controls === state.projectedControls,
           src: image?.getAttribute('src') ?? '',
           height: root.getBoundingClientRect().height,
-          scrollTop: scroller.scrollTop
+          scrollTop: scroller.scrollTop,
+          selection: `${state.projection.view.state.selection.main.anchor}:${state.projection.view.state.selection.main.head}`,
+          focus: state.projection.hasFocus()
         };
       };
       state.projectionMutations = [];
@@ -344,6 +351,8 @@ async function main(): Promise<void> {
       assert.equal(frame.src, projectionBaseline.src);
       assert.ok(Math.abs(frame.height - projectionBaseline.height) < 0.5);
       assert.equal(frame.scrollTop, projectionBaseline.scrollTop);
+      assert.equal(frame.selection, projectionBaseline.selection);
+      assert.equal(frame.focus, true);
     }
 
     await page.evaluate(() => {
@@ -368,6 +377,8 @@ async function main(): Promise<void> {
       assert.equal(frame.fallback, false);
       assert.ok(Math.abs(frame.height - projectionBaseline.height) < 0.5);
       assert.equal(frame.scrollTop, projectionBaseline.scrollTop);
+      assert.equal(frame.selection, projectionBaseline.selection);
+      assert.equal(frame.focus, true);
     }
 
     await page.evaluate(() => {
@@ -396,6 +407,8 @@ async function main(): Promise<void> {
     assert.notEqual(successfulProjection.current.src, projectionBaseline.src);
     assert.ok(Math.abs(successfulProjection.current.height - projectionBaseline.height) < 0.5);
     assert.equal(successfulProjection.current.scrollTop, projectionBaseline.scrollTop);
+    assert.equal(successfulProjection.current.selection, projectionBaseline.selection);
+    assert.equal(successfulProjection.current.focus, true);
     assert.ok(successfulProjection.mutations.length >= 1);
     for (const mutation of successfulProjection.mutations) {
       assert.equal(mutation.image, true, 'success replacement exposed an image-free DOM state');
@@ -403,6 +416,8 @@ async function main(): Promise<void> {
       assert.equal(mutation.fallback, false, 'success replacement flashed fallback DOM');
       assert.ok(Math.abs(mutation.height - projectionBaseline.height) < 0.5);
       assert.equal(mutation.scrollTop, projectionBaseline.scrollTop);
+      assert.equal(mutation.selection, projectionBaseline.selection);
+      assert.equal(mutation.focus, true);
     }
 
     await page.evaluate((text) => {
@@ -434,11 +449,35 @@ async function main(): Promise<void> {
     await page.waitForFunction(() => (
       document.querySelector('#projection .meo-md-image-fallback') !== null
     ));
-    assert.deepEqual(await page.evaluate(() => ({
-      image: document.querySelector('#projection .meo-md-image-img') !== null,
-      controls: document.querySelector('#projection .meo-md-image-controls') !== null,
-      fallback: document.querySelector('#projection .meo-md-image-fallback') !== null
-    })), { image: false, controls: false, fallback: true });
+    const failedProjection = await page.evaluate(async () => {
+      const state = (window as any).__imageLifecycle;
+      const frames = [];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push(state.projectionSnapshot());
+      }
+      return {
+        current: state.projectionSnapshot(),
+        mutations: state.projectionMutations,
+        frames
+      };
+    });
+    assert.equal(failedProjection.current.image, false);
+    assert.equal(failedProjection.current.controls, false);
+    assert.equal(failedProjection.current.fallback, true);
+    assert.equal(failedProjection.current.scrollTop, projectionBaseline.scrollTop);
+    assert.equal(failedProjection.current.selection, projectionBaseline.selection);
+    assert.equal(failedProjection.current.focus, true);
+    assert.ok(failedProjection.mutations.length >= 1);
+    for (const observation of [...failedProjection.mutations, ...failedProjection.frames]) {
+      assert.equal(observation.image, false);
+      assert.equal(observation.controls, false);
+      assert.equal(observation.fallback, true);
+      assert.ok(Math.abs(observation.height - failedProjection.current.height) < 0.5);
+      assert.equal(observation.scrollTop, projectionBaseline.scrollTop);
+      assert.equal(observation.selection, projectionBaseline.selection);
+      assert.equal(observation.focus, true);
+    }
 
     await page.evaluate((text) => {
       const state = (window as any).__imageLifecycle;

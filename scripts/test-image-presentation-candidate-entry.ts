@@ -73,6 +73,7 @@ type CandidateHarness = {
                 fallback.textContent = sourceKey;
                 root.classList.add('meo-md-image-fallback');
                 root.replaceChildren(fallback);
+                return true;
               },
               showImage(loaded) {
                 const image = loaded.cloneNode(false) as HTMLImageElement;
@@ -80,13 +81,19 @@ type CandidateHarness = {
                 image.alt = altText;
                 root.classList.remove('meo-md-image-fallback');
                 root.replaceChildren(image);
+                return true;
               },
-              preserveLayoutChange(apply) {
+              async preserveLayoutChange(apply) {
                 preservedReplacements += 1;
                 const active = root.ownerDocument.activeElement;
                 const selection = root.ownerDocument.getSelection()?.toString() ?? '';
                 const scrollTop = root.ownerDocument.scrollingElement?.scrollTop ?? 0;
-                apply();
+                if (root.dataset.deferProjection === 'true') {
+                  await new Promise<void>((resolve) => {
+                    root.addEventListener('meo-release-projection', () => resolve(), { once: true });
+                  });
+                }
+                const projected = apply();
                 if (active instanceof HTMLElement && active.isConnected) active.focus({ preventScroll: true });
                 if (root.ownerDocument.scrollingElement) {
                   root.ownerDocument.scrollingElement.scrollTop = scrollTop;
@@ -94,6 +101,7 @@ type CandidateHarness = {
                 if (selection && root.ownerDocument.getSelection()?.toString() !== selection) {
                   throw new Error('image replacement changed the document selection');
                 }
+                return projected;
               }
             }
           });

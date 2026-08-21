@@ -10,7 +10,7 @@ import { createImagePresentationRuntime } from '../webview/src/adapters/imagePre
 
 type Deferred = {
   effect: ImagePresentationEffect;
-  resolve: (input: ImagePresentationInput | null) => void;
+  resolve: (input: ImagePresentationInput) => void;
 };
 
 const deferred: Deferred[] = [];
@@ -21,13 +21,19 @@ const executor: ImagePresentationEffectExecutor = {
     executed.push(effect);
     if (effect.type === 'resolveSource' || effect.type === 'loadImage') {
       let resolve!: Deferred['resolve'];
-      const completion = new Promise<ImagePresentationInput | null>((settle) => {
+      const completion = new Promise<ImagePresentationInput>((settle) => {
         resolve = settle;
       });
       deferred.push({ effect, resolve });
       return { completion };
     }
-    return {};
+    return {
+      immediateCompletion: {
+        type: 'projectionSucceeded',
+        presentationId: effect.presentationId,
+        commandId: effect.commandId
+      }
+    };
   },
   dispose() {
     executorDisposed += 1;
@@ -129,5 +135,141 @@ deferred.find((item) => item.effect.presentationId === disposeId)?.resolve({
 });
 await runtime.whenCurrentPresentationSettles();
 assert.equal(application.getState().lifecycle, 'disposed');
+
+const throwingApplication = createImagePresentationApplication();
+const throwingRuntime = createImagePresentationRuntime({
+  application: throwingApplication,
+  executor: {
+    execute(effect) {
+      switch (effect.type) {
+        case 'resolveSource':
+          return {
+            immediateCompletion: {
+              type: 'sourceResolved',
+              presentationId: effect.presentationId,
+              resolvedSrc: 'resolved:throwing'
+            }
+          };
+        case 'loadImage':
+          return {
+            immediateCompletion: {
+              type: 'imageLoaded',
+              presentationId: effect.presentationId
+            }
+          };
+        case 'showImage':
+          throw new Error('projection unavailable');
+        case 'showFallback':
+          return {
+            immediateCompletion: {
+              type: 'projectionSucceeded',
+              presentationId: effect.presentationId,
+              commandId: effect.commandId
+            }
+          };
+      }
+    },
+    dispose() {}
+  }
+});
+throwingRuntime.dispatch({ type: 'present', sourceKey: 'throwing', rawSrc: './throwing.png' });
+assert.equal(
+  throwingApplication.getState().projected.phase,
+  'fallback',
+  'a failed projection must not commit a phantom ready DOM identity'
+);
+throwingRuntime.dispose();
+
+const acknowledgedApplication = createImagePresentationApplication();
+const projectionCompletions: Deferred[] = [];
+let deferFailureFallback = false;
+const acknowledgedRuntime = createImagePresentationRuntime({
+  application: acknowledgedApplication,
+  executor: {
+    execute(effect) {
+      if (effect.type === 'resolveSource') {
+        return {
+          immediateCompletion: effect.rawSrc.includes('failure')
+            ? { type: 'sourceFailed', presentationId: effect.presentationId }
+            : {
+                type: 'sourceResolved',
+                presentationId: effect.presentationId,
+                resolvedSrc: `resolved:${effect.rawSrc}`
+              }
+        };
+      }
+      if (effect.type === 'loadImage') {
+        return {
+          immediateCompletion: { type: 'imageLoaded', presentationId: effect.presentationId }
+        };
+      }
+      if (effect.type === 'showFallback' && !deferFailureFallback) {
+        return {
+          immediateCompletion: {
+            type: 'projectionSucceeded',
+            presentationId: effect.presentationId,
+            commandId: effect.commandId
+          }
+        };
+      }
+      let resolve!: Deferred['resolve'];
+      const completion = new Promise<ImagePresentationInput>((settle) => { resolve = settle; });
+      projectionCompletions.push({ effect, resolve });
+      return { completion };
+    },
+    dispose() {}
+  }
+});
+
+acknowledgedRuntime.dispatch({ type: 'present', sourceKey: 'ack', rawSrc: './ack.png' });
+assert.equal(acknowledgedApplication.getState().current?.phase, 'ready');
+assert.equal(acknowledgedApplication.getState().projected.phase, 'fallback');
+assert.equal(acknowledgedApplication.getState().projection?.target.phase, 'ready');
+let projectionSettled = false;
+void acknowledgedRuntime.whenCurrentPresentationSettles().then(() => { projectionSettled = true; });
+await Promise.resolve();
+assert.equal(projectionSettled, false, 'ready resource work settled before its projection acknowledgement');
+const readyProjection = projectionCompletions.at(-1);
+assert.ok(readyProjection?.effect.type === 'showImage');
+readyProjection.resolve({
+  type: 'projectionSucceeded',
+  presentationId: readyProjection.effect.presentationId,
+  commandId: readyProjection.effect.commandId
+});
+await acknowledgedRuntime.whenCurrentPresentationSettles();
+assert.equal(projectionSettled, true);
+assert.equal(acknowledgedApplication.getState().projected.phase, 'ready');
+
+deferFailureFallback = true;
+acknowledgedRuntime.dispatch({
+  type: 'present',
+  sourceKey: 'failure',
+  rawSrc: './failure.png'
+});
+const committedBeforeProjectionFailure = acknowledgedApplication.getState().projected;
+assert.equal(acknowledgedApplication.getState().current?.phase, 'error');
+assert.equal(acknowledgedApplication.getState().projection?.target.phase, 'error');
+let failedProjectionSettled = false;
+void acknowledgedRuntime.whenCurrentPresentationSettles().then(() => {
+  failedProjectionSettled = true;
+});
+await Promise.resolve();
+assert.equal(failedProjectionSettled, false);
+const failedProjection = projectionCompletions.at(-1);
+assert.ok(failedProjection?.effect.type === 'showFallback');
+failedProjection.resolve({
+  type: 'projectionFailed',
+  presentationId: failedProjection.effect.presentationId,
+  commandId: failedProjection.effect.commandId
+});
+await acknowledgedRuntime.whenCurrentPresentationSettles();
+assert.equal(failedProjectionSettled, true);
+assert.deepEqual(
+  acknowledgedApplication.getState().projected,
+  committedBeforeProjectionFailure,
+  'failed fallback projection replaced the last confirmed ready fact'
+);
+assert.equal(acknowledgedApplication.getState().projection, null);
+acknowledgedRuntime.dispose();
 
 console.log('image presentation runtime contracts passed');

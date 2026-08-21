@@ -344,11 +344,15 @@ export class ImageWidget extends WidgetType {
 
     this.presentationHandle?.dispose();
     const presentationHandle = this.presentationFactory.create({
-      showFallback: () => this.renderFallback(container),
+      showFallback: () => {
+        this.renderFallback(container);
+        return true;
+      },
       showImage: (loadedImage) => {
         const image = this.createDisplayImage(loadedImage);
         container.classList.remove('meo-md-image-fallback');
         container.replaceChildren(image, this.createImageControls(image));
+        return true;
       },
       preserveLayoutChange: (apply) => this.preserveImageLayoutChange(container, view, apply)
     });
@@ -410,23 +414,35 @@ export class ImageWidget extends WidgetType {
     }));
   }
 
-  preserveImageLayoutChange(container: HTMLElement, view: EditorView | undefined, apply: () => void): void {
+  preserveImageLayoutChange(
+    container: HTMLElement,
+    view: EditorView | undefined,
+    apply: () => boolean
+  ): boolean | Promise<boolean> {
     if (!view || !container.isConnected) {
-      apply();
-      return;
+      return apply();
     }
 
     const controller = getViewportController(view);
-    if (controller && this.sourceFrom !== null) {
-      controller.preserveLayoutChange({
-        element: container,
-        from: this.sourceFrom,
-        to: this.sourceFrom
-      }, apply);
-      return;
+    const sourceFrom = this.sourceFrom;
+    if (controller && sourceFrom !== null) {
+      return new Promise<boolean>((resolve, reject) => {
+        controller.preserveLayoutChange({
+          element: container,
+          from: sourceFrom,
+          to: sourceFrom
+        }, () => {
+          try {
+            resolve(apply());
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
     }
-    apply();
+    const projected = apply();
     view.requestMeasure();
+    return projected;
   }
 
   fallbackText(): string {
