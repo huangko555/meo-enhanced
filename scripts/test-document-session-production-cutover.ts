@@ -69,7 +69,8 @@ assert.match(hostSession, /case 'draftChanged':/);
 assert.equal(hostSession.includes('pendingDraftText'), false);
 assert.equal(hostSession.includes('applyPendingDraftIfNeeded'), false);
 assert.match(hostSession, /pendingDraftRecovery\.remember\(raw\.text\)/);
-assert.match(hostSession, /pendingDraftRecovery\.remember\(null\)/);
+assert.match(hostSession, /case 'documentReloadPresentationCompleted':/);
+assert.match(hostSession, /pendingDraftRecovery\.discardIfCurrent\(recoveryVersion\)/);
 assert.match(hostSession, /pendingDraftRecovery\.recover\(\)/);
 assert.equal(
   (hostBootstrap.match(/createVscodePendingDraftRecoveryAdapter\s*\(/g) ?? []).length,
@@ -77,6 +78,7 @@ assert.equal(
   'Host Bootstrap must create exactly one Pending Draft recovery Adapter per Panel Session'
 );
 assert.match(pendingDraftRecovery, /let pendingDraftText: string \| null = null/);
+assert.match(pendingDraftRecovery, /discardIfCurrent\(receiptVersion/);
 assert.equal(
   presentationSourceOwners.reduce(
     (count, source) => count

@@ -130,7 +130,7 @@ async function main(): Promise<void> {
     const diskText = Array.from({ length: 100 }, (_, index) => `disk line ${index + 1}`).join('\n');
     await page.evaluate(({ text, topLine, topLineOffset }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'documentReloadedFromDisk', version: 2, text, topLine, topLineOffset
+        type: 'documentReloadedFromDisk', reloadId: 1, version: 2, text, topLine, topLineOffset
       }}));
     }, { text: diskText, topLine: position.topLine, topLineOffset: position.topLineOffset });
     await page.waitForFunction((text) => (
@@ -180,7 +180,7 @@ async function main(): Promise<void> {
     const rejectedDiskText = `${diskText}\nDISK_TEXT_THAT_MUST_NOT_BE_PRESENTED`;
     await page.evaluate(({ text, topLine, topLineOffset }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'documentReloadedFromDisk', version: 3, text, topLine, topLineOffset
+        type: 'documentReloadedFromDisk', reloadId: 2, version: 3, text, topLine, topLineOffset
       }}));
     }, { text: rejectedDiskText, topLine: position.topLine, topLineOffset: position.topLineOffset });
     await page.waitForFunction(() => (

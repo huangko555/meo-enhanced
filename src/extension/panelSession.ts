@@ -185,6 +185,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
   const savedRevisionTracker = new SavedRevisionTracker();
   const documentReload = createVscodeDocumentReloadAdapter(document);
+  let nextDiskReloadId = 1;
+  let draftRecoveryVersion = 0;
+  const pendingDiskReloadPresentations = new Map<number, number>();
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     applyQueue = applyQueue.then(task, task);
     return applyQueue;
@@ -657,8 +660,15 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       case 'draftChanged':
-        pendingDraftRecovery.remember(raw.text);
+        draftRecoveryVersion = pendingDraftRecovery.remember(raw.text);
         return;
+      case 'documentReloadPresentationCompleted': {
+        const recoveryVersion = pendingDiskReloadPresentations.get(raw.reloadId);
+        if (recoveryVersion === undefined) return;
+        pendingDiskReloadPresentations.delete(raw.reloadId);
+        if (raw.presented) pendingDraftRecovery.discardIfCurrent(recoveryVersion);
+        return;
+      }
       case 'saveDocumentRevision':
       case 'requestDocumentRevision':
         await enqueue(async () => {
@@ -673,10 +683,13 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await enqueue(async () => {
           try {
             const revision = await documentReload.reloadFromDisk();
-            pendingDraftRecovery.remember(null);
             await refreshSavedRevisionNow();
+            const reloadId = nextDiskReloadId;
+            nextDiskReloadId += 1;
+            pendingDiskReloadPresentations.set(reloadId, draftRecoveryVersion);
             const message: DocumentReloadedFromDiskMessage = {
               type: 'documentReloadedFromDisk',
+              reloadId,
               text: revision.text,
               version: revision.version,
               topLine: raw.topLine,

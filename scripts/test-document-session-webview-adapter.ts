@@ -49,8 +49,10 @@ assert.deepEqual(presented.at(-1), { text: 'remote', source: 'revision' });
 adapter.requestReloadFromDisk({ topLine: 7, topLineOffset: 2 });
 await adapter.whenIdle();
 assert.deepEqual(posted.at(-1), { type: 'reloadDocumentFromDisk', topLine: 7, topLineOffset: 2 });
+const postedBeforeCurrentReload = posted.length;
 assert.equal(adapter.accept({
   type: 'documentReloadedFromDisk',
+  reloadId: 1,
   version: 4,
   text: 'disk version',
   topLine: 7,
@@ -59,9 +61,20 @@ assert.equal(adapter.accept({
 await adapter.whenIdle();
 assert.deepEqual(restored, [{ topLine: 7, topLineOffset: 2 }]);
 assert.deepEqual(presented.at(-1), { text: 'disk version', source: 'disk-reload' });
+assert.deepEqual(posted.at(-1), {
+  type: 'documentReloadPresentationCompleted',
+  reloadId: 1,
+  presented: true
+}, 'only a successful final presentation may acknowledge discarding recovery');
+assert.equal(
+  posted.slice(postedBeforeCurrentReload).some((message) => message.type === 'draftChanged' && message.text === null),
+  false,
+  'disk reload must not clear Host recovery before its final presentation receipt'
+);
 const presentedAfterCurrentReload = presented.length;
 assert.equal(adapter.accept({
   type: 'documentReloadedFromDisk',
+  reloadId: 2,
   version: 3,
   text: 'stale disk version',
   topLine: 2,
@@ -120,7 +133,8 @@ earlyAdapter.dispose();
 const testAsyncReloadPresentation = async (
   succeeded: boolean,
   topLine: number,
-  expectedRestores: readonly number[]
+  expectedRestores: readonly number[],
+  reloadId: number
 ): Promise<void> => {
   let finishPresentation!: (succeeded: boolean) => void;
   const presentation = new Promise<boolean>((resolve) => {
@@ -128,7 +142,7 @@ const testAsyncReloadPresentation = async (
   });
   const asyncRestores: number[] = [];
   const asyncAdapter = createDocumentSessionWebviewAdapter({
-    postMessage: () => undefined,
+    postMessage: (message) => { asyncMessages.push(message); },
     presentText: () => presentation,
     restoreReloadedView: ({ topLine }) => { asyncRestores.push(topLine); },
     showFailureNotice: () => undefined,
@@ -136,10 +150,12 @@ const testAsyncReloadPresentation = async (
       throw new Error(`${context}: ${String(error)}`);
     }
   });
+  const asyncMessages: WebviewToHostMessage[] = [];
   asyncAdapter.start(init);
   await asyncAdapter.whenIdle();
   assert.equal(asyncAdapter.accept({
     type: 'documentReloadedFromDisk',
+    reloadId,
     version: 2,
     text: 'async disk version',
     topLine,
@@ -151,10 +167,15 @@ const testAsyncReloadPresentation = async (
   finishPresentation(succeeded);
   await asyncAdapter.whenIdle();
   assert.deepEqual(asyncRestores, expectedRestores);
+  assert.deepEqual(asyncMessages, [{
+    type: 'documentReloadPresentationCompleted',
+    reloadId,
+    presented: succeeded
+  }]);
   asyncAdapter.dispose();
 };
 
-await testAsyncReloadPresentation(false, 11, []);
-await testAsyncReloadPresentation(true, 13, [13]);
+await testAsyncReloadPresentation(false, 11, [], 3);
+await testAsyncReloadPresentation(true, 13, [13], 4);
 
 console.log('Document Session Webview Adapter checks passed');

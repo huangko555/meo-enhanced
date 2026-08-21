@@ -42,6 +42,9 @@ export function createDocumentSessionActionAdapter(
   return {
     async execute(actions) {
       const queue = Array.from(actions);
+      const defersDiskReloadRecoveryClear = actions.some((action) => (
+        action.type === 'presentText' && action.source === 'disk-reload'
+      ));
       let revisionRequestAttempts = 0;
       let presentationSucceeded = true;
 
@@ -50,6 +53,7 @@ export function createDocumentSessionActionAdapter(
         if (!action) continue;
 
         if (action.type === 'rememberDraft') {
+          if (defersDiskReloadRecoveryClear && action.text === null) continue;
           dependencies.postMessage({ type: 'draftChanged', text: action.text });
           continue;
         }

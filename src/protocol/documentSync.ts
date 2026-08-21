@@ -11,6 +11,8 @@ export type AppliedMessage = {
 
 export type DocumentReloadedFromDiskMessage = {
   readonly type: 'documentReloadedFromDisk';
+  /** Correlates the Host reload result with the Webview presentation receipt. */
+  readonly reloadId: number;
   readonly text: string;
   readonly version: number;
   readonly topLine: number;
@@ -45,7 +47,16 @@ export type DraftChangedMessage = {
   readonly text: string | null;
 };
 
-export type DocumentSyncCommand = ApplyChangesMessage | DraftChangedMessage;
+export type DocumentReloadPresentationCompletedMessage = {
+  readonly type: 'documentReloadPresentationCompleted';
+  readonly reloadId: number;
+  readonly presented: boolean;
+};
+
+export type DocumentSyncCommand =
+  | ApplyChangesMessage
+  | DraftChangedMessage
+  | DocumentReloadPresentationCompletedMessage;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -53,6 +64,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isVersion(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function isReloadId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
 }
 
 function isTextChange(value: unknown): value is TextChange {
@@ -82,9 +97,11 @@ export function decodeDocumentSyncMessage(value: unknown): DocumentSyncMessage |
   if (value.type === 'applied' && isVersion(value.version)) {
     return { type: 'applied', version: value.version };
   }
-  if (value.type === 'documentReloadedFromDisk' && typeof value.text === 'string' && isVersion(value.version)) {
+  if (value.type === 'documentReloadedFromDisk' && typeof value.text === 'string'
+    && isVersion(value.version) && isReloadId(value.reloadId)) {
     return {
       type: 'documentReloadedFromDisk',
+      reloadId: value.reloadId,
       text: value.text,
       version: value.version,
       topLine: normalizeTopLine(value.topLine),
@@ -105,6 +122,14 @@ export function decodeDocumentSyncCommand(value: unknown): DocumentSyncCommand |
   }
   if (value.type === 'draftChanged' && text === null) {
     return { type: 'draftChanged', text: null };
+  }
+  if (value.type === 'documentReloadPresentationCompleted'
+    && isReloadId(value.reloadId) && typeof value.presented === 'boolean') {
+    return {
+      type: 'documentReloadPresentationCompleted',
+      reloadId: value.reloadId,
+      presented: value.presented
+    };
   }
   const changes = value.changes;
   if (value.type === 'applyChanges' && isVersion(value.baseVersion)

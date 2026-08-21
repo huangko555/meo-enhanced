@@ -92,6 +92,13 @@ export function createDocumentSessionWebviewAdapter(
           version: message.version,
           text: message.text
         });
+        if (!disposed) {
+          dependencies.postMessage({
+            type: 'documentReloadPresentationCompleted',
+            reloadId: message.reloadId,
+            presented: accepted
+          });
+        }
         if (accepted && !disposed) dependencies.restoreReloadedView(message);
       });
       return true;

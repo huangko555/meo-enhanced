@@ -48,4 +48,24 @@ recovery.remember('discarded draft');
 recovery.remember(null);
 assert.equal(await recovery.recover(), false, 'null draft must explicitly clear recovery state');
 
+const presentationReceiptVersion = recovery.remember('local draft retained until presentation succeeds');
+assert.equal(
+  recovery.discardIfCurrent(presentationReceiptVersion),
+  true,
+  'the matching successful presentation receipt may clear recovery'
+);
+assert.equal(await recovery.recover(), false, 'a successful receipt must clear the discarded draft');
+
+const failedPresentationReceiptVersion = recovery.remember('local draft retained after presentation failure');
+assert.equal(
+  recovery.discardIfCurrent(failedPresentationReceiptVersion - 1),
+  false,
+  'a failed or stale presentation receipt must not clear recovery'
+);
+assert.equal(
+  await recovery.recover(),
+  true,
+  'the original discarded local draft must remain recoverable after presentation failure'
+);
+
 console.log('Pending Draft recovery checks passed');
