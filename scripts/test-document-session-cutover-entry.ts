@@ -182,6 +182,15 @@ const candidate = {
     hostRevision = { version: hostRevision.version + 1, text };
     return enqueueInput({ type: 'hostRevisionChanged', ...hostRevision });
   },
+  setMode(mode: 'live' | 'source') {
+    requireRuntime().editor.setMode(mode);
+  },
+  undo() {
+    return requireRuntime().editor.undo();
+  },
+  redo() {
+    return requireRuntime().editor.redo();
+  },
   replay(version: number, text: string) {
     return enqueueInput({ type: 'hostRevisionChanged', version, text });
   },
@@ -205,6 +214,7 @@ const candidate = {
       coordinatorStarts,
       legacyCoordinatorStarts,
       editorText: runtime.editor.getText(),
+      viewport: runtime.editor.getTopVisiblePosition(),
       hostRevision: { ...hostRevision },
       savedText,
       persistedDraft,

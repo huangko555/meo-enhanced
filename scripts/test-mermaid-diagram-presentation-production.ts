@@ -80,8 +80,6 @@ async function main(): Promise<void> {
       };
 
       await settle();
-      editor.setText(initialText);
-      await settle(20);
       const shared = {
         renderCalls: calls.length,
         calls: [...calls],

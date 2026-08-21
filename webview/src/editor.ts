@@ -2597,6 +2597,7 @@ export function createEditor({
       imagePresentationFactory.externalDocumentPresented();
       void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
       recentRenderedReplayPresentation = null;
+      mermaidDiagramPresentationFactory.externalDocumentPresented();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
@@ -2610,8 +2611,6 @@ export function createEditor({
         tableColumnWidthAdapter.adapter.refresh();
         return;
       }
-
-      mermaidDiagramPresentationFactory.externalDocumentPresented();
 
       const viewportAnchor = captureViewportAnchor();
       const { anchor, head } = view.state.selection.main;
