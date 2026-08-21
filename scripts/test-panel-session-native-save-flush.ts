@@ -32,6 +32,7 @@ const changeListeners: Array<(event: {
   readonly document: PanelSessionTestDocument;
   readonly contentChanges: readonly { readonly text: string }[];
 }) => void> = [];
+const warnings: string[] = [];
 
 class FakeRange {
   constructor(
@@ -48,9 +49,28 @@ class FakeWorkspaceEdit {
 }
 
 let priorParticipantText: string | null = null;
+let failNextWorkspaceApply = false;
+let delayNextWorkspaceApply = true;
+let releaseDelayedWorkspaceApply: () => void = () => undefined;
+let noteDelayedWorkspaceApplyStarted: () => void = () => undefined;
+const delayedWorkspaceApply = new Promise<void>((resolve) => {
+  releaseDelayedWorkspaceApply = resolve;
+});
+const delayedWorkspaceApplyStarted = new Promise<void>((resolve) => {
+  noteDelayedWorkspaceApplyStarted = resolve;
+});
 
 const applyWorkspaceEdit = async (edit: FakeWorkspaceEdit): Promise<boolean> => {
   if (!edit.replacement) return false;
+  if (delayNextWorkspaceApply) {
+    delayNextWorkspaceApply = false;
+    noteDelayedWorkspaceApplyStarted();
+    await delayedWorkspaceApply;
+  }
+  if (failNextWorkspaceApply) {
+    failNextWorkspaceApply = false;
+    return false;
+  }
   document.text = edit.replacement.text;
   document.version += 1;
   document.isDirty = true;
@@ -83,7 +103,8 @@ mock.module('vscode', () => createPanelSessionVscodeMock(document, {
     didSaveListeners.push(listener as (typeof didSaveListeners)[number]);
     return panelSessionDisposable();
   },
-  applyEdit: (edit) => applyWorkspaceEdit(edit as FakeWorkspaceEdit)
+  applyEdit: (edit) => applyWorkspaceEdit(edit as FakeWorkspaceEdit),
+  showWarningMessage: async (message) => { warnings.push(message); }
 }));
 
 const [{ createPanelSessionController }, { createPendingDraftRecovery }] = await Promise.all([
@@ -94,6 +115,7 @@ const [{ createPanelSessionController }, { createPendingDraftRecovery }] = await
 const postedToWebview: Message[] = [];
 let receiveMessage: ((message: unknown) => void) | null = null;
 let pendingTableCellText = 'outer Draft\n\n| pending cell |\n| --- |';
+let completedNativeSaveWaiters = 0;
 
 const panel = {
   active: true,
@@ -153,6 +175,7 @@ async function nativeSave(reason = 2): Promise<boolean> {
   };
   for (const listener of willSaveListeners) listener(event);
   await Promise.allSettled(waiters);
+  completedNativeSaveWaiters += 1;
   diskText = document.text;
   document.isDirty = false;
   for (const listener of didSaveListeners) listener(document);
@@ -167,13 +190,28 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
   overrides: { saveDocument: () => nativeSave(1) }
 }) as never);
 
-await nativeSave();
+const initialNativeSave = nativeSave();
+await delayedWorkspaceApplyStarted;
+try {
+  assert.equal(
+    completedNativeSaveWaiters,
+    0,
+    'will-save must remain pending until the corresponding Host applyEdit completes'
+  );
+  assert.deepEqual(warnings, [], 'the flush response must not validate against the pre-apply TextDocument');
+  assert.equal(document.text, 'outer Draft\n\n| old |\n| --- |');
+  assert.equal(diskText, 'accepted\n\n| old |\n| --- |');
+} finally {
+  releaseDelayedWorkspaceApply();
+  await initialNativeSave;
+}
 
 assert.equal(
   diskText,
   'outer Draft\n\n| pending cell |\n| --- |',
   'VS Code auto/native save must flush a pending table cell through Document Session before disk write'
 );
+assert.deepEqual(warnings, [], 'successful flush must not emit a mismatch warning');
 assert.equal(
   postedToWebview.some((message) => message.type === 'flushDocumentEdits'),
   true,
@@ -224,6 +262,20 @@ assert.deepEqual(participantResponse, {
     error: { code: 'operation-failed', message: 'Saved text differs from the requested Revision' }
   }
 });
+
+const textBeforeFailedApply = document.text;
+const warningsBeforeFailedApply = warnings.length;
+pendingTableCellText = textBeforeFailedApply.replace('participant formatted', 'failed apply');
+failNextWorkspaceApply = true;
+await nativeSave();
+assert.equal(document.text, textBeforeFailedApply, 'a rejected workspace edit must not advance the TextDocument');
+assert.equal(diskText, textBeforeFailedApply, 'VS Code may only save the unchanged model after applyEdit rejects');
+assert.equal(
+  warnings.length,
+  warningsBeforeFailedApply + 1,
+  'a flush whose Host applyEdit failed must remain a failed native-save participant'
+);
+assert.match(warnings.at(-1) ?? '', /did not reach the editor Revision/);
 
 controller.dispose();
 console.log('Panel Session native save flush checks passed');

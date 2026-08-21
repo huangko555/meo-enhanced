@@ -179,6 +179,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const persistedMode = context.globalState.get(EDITOR_MODE_STATE_KEY);
   let mode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
   let applyQueue: Promise<void> = Promise.resolve();
+  // Flush responses wait only for preceding TextDocument I/O, never for a manual save
+  // that may itself be inside applyQueue and awaiting VS Code's will-save lifecycle.
+  let latestDocumentApplyCompletion: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
   let disposed = false;
@@ -664,9 +667,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       }
       case 'applyChanges':
         agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(document.uri);
-        await enqueue(async () => {
+        const applyCompletion = enqueue(async () => {
           await applyDocumentChanges(document, raw, sendDocChanged, sendApplied);
         });
+        latestDocumentApplyCompletion = applyCompletion.then(() => undefined, () => undefined);
+        await applyCompletion;
         return;
       case 'draftChanged':
         draftRecoveryReceiptVersion = pendingDraftRecovery.remember(
@@ -696,6 +701,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       case 'flushDocumentEditsResult':
+        await latestDocumentApplyCompletion;
         documentSaveLifecycle.accept(raw);
         return;
       case 'reloadDocumentFromDisk':
