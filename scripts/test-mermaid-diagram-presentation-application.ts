@@ -34,6 +34,14 @@ assert.deepEqual(successful.getState(), {
   themeKey: 'light',
   configKey: 'default'
 });
+assert.deepEqual(successful.dispatch({ type: 'externalDocumentPresented' }), []);
+assert.deepEqual(successful.getState(), {
+  phase: 'ready',
+  presentationId,
+  source: 'graph TD\nA-->B',
+  themeKey: 'light',
+  configKey: 'default'
+});
 
 const failedThenRecovered = createMermaidDiagramPresentationApplication();
 failedThenRecovered.dispatch({
@@ -50,6 +58,14 @@ assert.deepEqual(failedThenRecovered.dispatch({
   error: 'parse error'
 }]);
 assert.equal(failedThenRecovered.getState().phase, 'error');
+assert.deepEqual(failedThenRecovered.dispatch({ type: 'externalDocumentPresented' }), []);
+assert.deepEqual(failedThenRecovered.getState(), {
+  phase: 'error',
+  presentationId: failedId,
+  source: 'invalid',
+  themeKey: 'light',
+  configKey: 'default'
+});
 const recoveryEffects = failedThenRecovered.dispatch({
   type: 'present', source: 'graph TD\nA-->B', themeKey: 'light', configKey: 'default'
 });

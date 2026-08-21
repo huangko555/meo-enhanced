@@ -84,6 +84,10 @@ assert.equal(
   effects.some((effect) => effect.type === 'showDiagram' && effect.svg.includes('cached')),
   true
 );
+const effectsBeforeReadyExternal = effects.length;
+runtime.dispatch({ type: 'externalDocumentPresented' });
+assert.equal(application.getState().phase, 'ready');
+assert.equal(effects.length, effectsBeforeReadyExternal);
 
 runtime.dispatch({ type: 'present', source: 'external', themeKey: 'light', configKey: 'default' });
 const externalId = application.getState().presentationId;

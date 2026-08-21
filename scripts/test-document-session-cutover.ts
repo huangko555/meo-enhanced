@@ -135,6 +135,108 @@ async function main(): Promise<void> {
     assert.equal(snapshot.coordinatorStarts, 1);
     assert.equal(snapshot.legacyCoordinatorStarts, 0);
 
+    await page.evaluate(() => {
+      const pending = new Map<string, {
+        resolve(value: { svg: string }): void;
+        reject(error: Error): void;
+      }>();
+      (window as any).mermaid = {
+        initialize() {},
+        render(_renderId: string, source: string) {
+          return new Promise<{ svg: string }>((resolve, reject) => {
+            pending.set(source, { resolve, reject });
+          });
+        }
+      };
+      (window as any).__completeDocumentSessionMermaid = (source: string, marker: string) => {
+        const render = pending.get(source);
+        if (!render) throw new Error(`No pending Mermaid render for ${source}`);
+        pending.delete(source);
+        render.resolve({ svg: `<svg data-marker="${marker}" width="160" height="80"></svg>` });
+      };
+      (window as any).__failDocumentSessionMermaid = (source: string, message: string) => {
+        const render = pending.get(source);
+        if (!render) throw new Error(`No pending Mermaid render for ${source}`);
+        pending.delete(source);
+        render.reject(new Error(message));
+      };
+    });
+
+    const readyMermaidBaseText = [
+      '```mermaid',
+      'READY_VISIBLE',
+      '```',
+      '',
+      ...Array.from({ length: 20 }, (_, index) => `ready-line-${index + 1}`)
+    ].join('\n');
+    await page.evaluate(
+      (text) => (window as any).__documentSessionCandidate.externalChange(text),
+      readyMermaidBaseText
+    );
+    await page.click('.cm-content');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Control');
+    await page.keyboard.type(' ready-edit');
+    await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());
+    const equalReadyMermaidText = `${readyMermaidBaseText} ready-edit`;
+    await page.evaluate(() => (window as any).__documentSessionCandidate.setMode('live'));
+    await page.waitForSelector('.meo-mermaid-loading');
+    await page.evaluate(() => {
+      (window as any).__completeDocumentSessionMermaid('READY_VISIBLE', 'ready-visible');
+    });
+    await page.waitForSelector('svg[data-marker="ready-visible"]');
+    await page.evaluate(async (text) => {
+      const candidate = (window as any).__documentSessionCandidate;
+      await candidate.externalChange(text);
+      await candidate.externalChange(text);
+    }, equalReadyMermaidText);
+    assert.equal(
+      await page.$('svg[data-marker="ready-visible"]') !== null,
+      true,
+      'equal-text external presentation must preserve an already visible Mermaid diagram'
+    );
+
+    const errorMermaidBaseText = [
+      '```mermaid',
+      'ERROR_VISIBLE',
+      '```',
+      '',
+      ...Array.from({ length: 20 }, (_, index) => `error-line-${index + 1}`)
+    ].join('\n');
+    await page.evaluate(() => (window as any).__documentSessionCandidate.setMode('source'));
+    await page.evaluate(
+      (text) => (window as any).__documentSessionCandidate.externalChange(text),
+      errorMermaidBaseText
+    );
+    await page.click('.cm-content');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Control');
+    await page.keyboard.type(' error-edit');
+    await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());
+    const equalErrorMermaidText = `${errorMermaidBaseText} error-edit`;
+    await page.evaluate(() => (window as any).__documentSessionCandidate.setMode('live'));
+    await page.waitForSelector('.meo-mermaid-loading');
+    await page.evaluate(() => {
+      (window as any).__failDocumentSessionMermaid('ERROR_VISIBLE', 'visible parse error');
+    });
+    await page.waitForSelector('.meo-mermaid-error-badge');
+    await page.evaluate(async (text) => {
+      const candidate = (window as any).__documentSessionCandidate;
+      await candidate.externalChange(text);
+      await candidate.externalChange(text);
+    }, equalErrorMermaidText);
+    assert.equal(
+      await page.$('.meo-mermaid-fallback') !== null,
+      true,
+      'equal-text external presentation must preserve the visible Mermaid source fallback'
+    );
+    assert.equal(
+      await page.$eval('.meo-mermaid-error-badge', (node) => node.textContent),
+      'Mermaid error: visible parse error'
+    );
+
     const mermaidBaseText = [
       '```mermaid',
       'SLOW_OLD',
@@ -142,22 +244,11 @@ async function main(): Promise<void> {
       '',
       ...Array.from({ length: 80 }, (_, index) => `history-line-${index + 1}`)
     ].join('\n');
-    await page.evaluate((text) => {
-      const pending = new Map<string, (value: { svg: string }) => void>();
-      (window as any).mermaid = {
-        initialize() {},
-        render(_renderId: string, source: string) {
-          return new Promise<{ svg: string }>((resolve) => pending.set(source, resolve));
-        }
-      };
-      (window as any).__completeDocumentSessionMermaid = (source: string, marker: string) => {
-        const resolve = pending.get(source);
-        if (!resolve) throw new Error(`No pending Mermaid render for ${source}`);
-        pending.delete(source);
-        resolve({ svg: `<svg data-marker="${marker}" width="160" height="80"></svg>` });
-      };
-      return (window as any).__documentSessionCandidate.externalChange(text);
-    }, mermaidBaseText);
+    await page.evaluate(() => (window as any).__documentSessionCandidate.setMode('source'));
+    await page.evaluate(
+      (text) => (window as any).__documentSessionCandidate.externalChange(text),
+      mermaidBaseText
+    );
     await page.click('.cm-content');
     await page.keyboard.down('Control');
     await page.keyboard.press('End');

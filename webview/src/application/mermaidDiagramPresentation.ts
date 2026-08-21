@@ -122,7 +122,7 @@ export function createMermaidDiagramPresentationApplication(): MermaidDiagramPre
           error: input.error
         }];
       case 'externalDocumentPresented':
-        if (presentationId === null) return [];
+        if (phase !== 'pending' || presentationId === null) return [];
         const invalidatedPresentationId = presentationId;
         clear('idle');
         return [{ type: 'clearPresentation', presentationId: invalidatedPresentationId }];

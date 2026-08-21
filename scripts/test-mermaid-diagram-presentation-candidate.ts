@@ -136,7 +136,7 @@ async function main(): Promise<void> {
     assert.equal(result.bAfterDispose, result.bBeforeDispose);
     assert.doesNotMatch(result.bAfterDispose ?? '', /meo-mermaid-svg-wrapper/);
     assert.match(result.errorHtml ?? '', /meo-mermaid-error-badge/);
-    assert.equal(result.externalHtml, '');
+    assert.match(result.externalHtml ?? '', /data-source="graph TD\nrecovered"/);
     assert.deepEqual(result.controls, ['zoom', 'fullscreen']);
     assert.equal(result.stats.applicationCount, 2);
     assert.equal(result.stats.runtimeCount, 2);
