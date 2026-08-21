@@ -3,6 +3,7 @@ import {
   transitionDocumentSession,
   type DocumentSessionEffect,
   type DocumentSessionEvent,
+  type DocumentPresentationCompletion,
   type DocumentPresentationSource,
   type DocumentSessionState,
   type Revision,
@@ -10,9 +11,14 @@ import {
 } from '../domain/documentSession';
 
 export type { DocumentPresentationSource } from '../domain/documentSession';
+export type { DocumentPresentationCompletion } from '../domain/documentSession';
 
 export type DocumentSessionInput =
-  | { readonly type: 'localDraftChanged'; readonly text: string }
+  | {
+      readonly type: 'localDraftChanged';
+      readonly text: string;
+      readonly receiptVersion: number;
+    }
   | { readonly type: 'submitPendingDraft' }
   | { readonly type: 'hostChangeApplied'; readonly version: number }
   | { readonly type: 'hostRevisionChanged'; readonly version: number; readonly text: string }
@@ -34,7 +40,11 @@ export type ApplicationTextChange = {
 };
 
 export type DocumentSessionAction =
-  | { readonly type: 'rememberDraft'; readonly text: string | null }
+  | {
+      readonly type: 'rememberDraft';
+      readonly text: string | null;
+      readonly receiptVersion: number;
+    }
   | {
       readonly type: 'applyTextChange';
       readonly baseVersion: number;
@@ -44,6 +54,7 @@ export type DocumentSessionAction =
       readonly type: 'presentText';
       readonly text: string;
       readonly source: DocumentPresentationSource;
+      readonly onPresented?: DocumentPresentationCompletion;
     }
   | { readonly type: 'saveDocument'; readonly revision: Revision }
   | { readonly type: 'requestRevision' };
@@ -62,16 +73,34 @@ export function createDocumentSessionCoordinator(input: {
   readonly savedRevision: SavedRevision | null;
 }): DocumentSessionCoordinator {
   let state = createDocumentSession(input);
+  let latestDraftReceiptVersion = 0;
 
   return {
     handle(applicationInput) {
+      if (applicationInput.type === 'localDraftChanged') {
+        latestDraftReceiptVersion = Math.max(
+          latestDraftReceiptVersion,
+          applicationInput.receiptVersion
+        );
+      }
       const event = mapInput(state, applicationInput);
       if (event === null) return [];
 
       const previousState = state;
       const transition = transitionDocumentSession(state, event);
       state = transition.state;
-      return mapEffects(previousState, state, transition.effects);
+      return mapEffects(
+        previousState,
+        state,
+        transition.effects,
+        () => {
+          latestDraftReceiptVersion += 1;
+          return latestDraftReceiptVersion;
+        },
+        applicationInput.type === 'localDraftChanged'
+          ? applicationInput.receiptVersion
+          : null
+      );
     }
   };
 }
@@ -128,11 +157,17 @@ function mapInput(
 function mapEffects(
   previousState: DocumentSessionState,
   nextState: DocumentSessionState,
-  effects: readonly DocumentSessionEffect[]
+  effects: readonly DocumentSessionEffect[],
+  nextDraftReceiptVersion: () => number,
+  localDraftReceiptVersion: number | null
 ): readonly DocumentSessionAction[] {
   return effects.map((effect): DocumentSessionAction => {
     if (effect.type === 'persistDraft') {
-      return { type: 'rememberDraft', text: effect.draft?.text ?? null };
+      return {
+        type: 'rememberDraft',
+        text: effect.draft?.text ?? null,
+        receiptVersion: localDraftReceiptVersion ?? nextDraftReceiptVersion()
+      };
     }
     if (effect.type === 'submitChange') {
       const baseRevision = nextState.revision.number === effect.change.baseRevision
@@ -148,7 +183,8 @@ function mapEffects(
       return {
         type: 'presentText',
         text: effect.text,
-        source: effect.source
+        source: effect.source,
+        ...(effect.onPresented ? { onPresented: effect.onPresented } : {})
       };
     }
     if (effect.type === 'saveRevision') {

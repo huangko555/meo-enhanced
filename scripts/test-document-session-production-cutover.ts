@@ -13,7 +13,6 @@ const gitClient = read('webview/src/helpers/gitClient.ts');
 const packageJson = read('package.json');
 const documentSessionAdapter = read('webview/src/adapters/documentSessionWebviewAdapter.ts');
 const hostBootstrap = read('src/extension.ts');
-const pendingDraftRecovery = read('src/application/pendingDraftRecovery.ts');
 const presentationSourceOwners = [
   read('src/domain/documentSession.ts'),
   read('src/application/documentSession.ts'),
@@ -65,20 +64,13 @@ for (const legacyIdentifier of [
 assert.equal(decodeWebviewToHostMessage({ type: 'saveDocument' }), null);
 assert.equal(editorCommands.includes("type: 'saveDocument'"), false);
 assert.equal(hostSession.includes("case 'saveDocument':"), false);
-assert.match(hostSession, /case 'draftChanged':/);
 assert.equal(hostSession.includes('pendingDraftText'), false);
 assert.equal(hostSession.includes('applyPendingDraftIfNeeded'), false);
-assert.match(hostSession, /pendingDraftRecovery\.remember\(raw\.text\)/);
-assert.match(hostSession, /case 'documentReloadPresentationCompleted':/);
-assert.match(hostSession, /pendingDraftRecovery\.discardIfCurrent\(recoveryVersion\)/);
-assert.match(hostSession, /pendingDraftRecovery\.recover\(\)/);
 assert.equal(
   (hostBootstrap.match(/createVscodePendingDraftRecoveryAdapter\s*\(/g) ?? []).length,
   1,
   'Host Bootstrap must create exactly one Pending Draft recovery Adapter per Panel Session'
 );
-assert.match(pendingDraftRecovery, /let pendingDraftText: string \| null = null/);
-assert.match(pendingDraftRecovery, /discardIfCurrent\(receiptVersion/);
 assert.equal(
   presentationSourceOwners.reduce(
     (count, source) => count

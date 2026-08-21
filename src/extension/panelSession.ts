@@ -186,7 +186,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const savedRevisionTracker = new SavedRevisionTracker();
   const documentReload = createVscodeDocumentReloadAdapter(document);
   let nextDiskReloadId = 1;
-  let draftRecoveryVersion = 0;
+  let draftRecoveryReceiptVersion = 0;
   const pendingDiskReloadPresentations = new Map<number, number>();
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     applyQueue = applyQueue.then(task, task);
@@ -660,13 +660,20 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         });
         return;
       case 'draftChanged':
-        draftRecoveryVersion = pendingDraftRecovery.remember(raw.text);
+        draftRecoveryReceiptVersion = pendingDraftRecovery.remember(
+          raw.text,
+          raw.receiptVersion
+        );
         return;
       case 'documentReloadPresentationCompleted': {
         const recoveryVersion = pendingDiskReloadPresentations.get(raw.reloadId);
         if (recoveryVersion === undefined) return;
         pendingDiskReloadPresentations.delete(raw.reloadId);
-        if (raw.presented) pendingDraftRecovery.discardIfCurrent(recoveryVersion);
+        if (raw.presented
+          && raw.receiptVersion === draftRecoveryReceiptVersion
+          && recoveryVersion === raw.receiptVersion) {
+          pendingDraftRecovery.discardIfCurrent(recoveryVersion);
+        }
         return;
       }
       case 'saveDocumentRevision':
@@ -686,7 +693,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
             await refreshSavedRevisionNow();
             const reloadId = nextDiskReloadId;
             nextDiskReloadId += 1;
-            pendingDiskReloadPresentations.set(reloadId, draftRecoveryVersion);
+            pendingDiskReloadPresentations.set(reloadId, draftRecoveryReceiptVersion);
             const message: DocumentReloadedFromDiskMessage = {
               type: 'documentReloadedFromDisk',
               reloadId,

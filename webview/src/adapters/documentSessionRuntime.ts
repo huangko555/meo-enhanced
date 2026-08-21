@@ -2,6 +2,7 @@ import type {
   DocumentSessionAction,
   DocumentSessionCoordinator,
   DocumentSessionInput,
+  DocumentPresentationCompletion,
   DocumentPresentationSource
 } from '../../../src/application/documentSession';
 import type { ApplyChangesMessage, DraftChangedMessage } from '../../../src/protocol/documentSync';
@@ -19,7 +20,7 @@ type RemoteDocumentSessionAction = Extract<
 
 export type DocumentSessionRuntime = {
   initialize(message: InitMessage): Promise<void>;
-  handle(input: DocumentSessionInput): Promise<boolean>;
+  handle(input: DocumentSessionInput): Promise<readonly DocumentPresentationCompletion[]>;
   whenIdle(): Promise<void>;
 };
 
@@ -71,11 +72,7 @@ export function createDocumentSessionRuntime(
       return enqueue(async () => {
         const session = requireSession();
         const actions = session.coordinator.handle(input);
-        const diskReloadAccepted = actions.some((action) => (
-          action.type === 'presentText' && action.source === 'disk-reload'
-        ));
-        const presentationSucceeded = await session.actionAdapter.execute(actions);
-        return diskReloadAccepted && presentationSucceeded;
+        return session.actionAdapter.execute(actions);
       });
     },
     whenIdle() {

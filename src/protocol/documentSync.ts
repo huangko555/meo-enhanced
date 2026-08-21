@@ -45,12 +45,14 @@ export type ApplyChangesMessage = {
 export type DraftChangedMessage = {
   readonly type: 'draftChanged';
   readonly text: string | null;
+  readonly receiptVersion: number;
 };
 
 export type DocumentReloadPresentationCompletedMessage = {
   readonly type: 'documentReloadPresentationCompleted';
   readonly reloadId: number;
   readonly presented: boolean;
+  readonly receiptVersion: number;
 };
 
 export type DocumentSyncCommand =
@@ -68,6 +70,10 @@ function isVersion(value: unknown): value is number {
 
 function isReloadId(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
+function isReceiptVersion(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
 function isTextChange(value: unknown): value is TextChange {
@@ -117,18 +123,22 @@ export function decodeDocumentSyncMessage(value: unknown): DocumentSyncMessage |
 export function decodeDocumentSyncCommand(value: unknown): DocumentSyncCommand | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
   const text = value.text;
-  if (value.type === 'draftChanged' && typeof text === 'string') {
-    return { type: 'draftChanged', text };
+  if (value.type === 'draftChanged' && typeof text === 'string'
+    && isReceiptVersion(value.receiptVersion)) {
+    return { type: 'draftChanged', text, receiptVersion: value.receiptVersion };
   }
-  if (value.type === 'draftChanged' && text === null) {
-    return { type: 'draftChanged', text: null };
+  if (value.type === 'draftChanged' && text === null
+    && isReceiptVersion(value.receiptVersion)) {
+    return { type: 'draftChanged', text: null, receiptVersion: value.receiptVersion };
   }
   if (value.type === 'documentReloadPresentationCompleted'
-    && isReloadId(value.reloadId) && typeof value.presented === 'boolean') {
+    && isReloadId(value.reloadId) && typeof value.presented === 'boolean'
+    && isReceiptVersion(value.receiptVersion)) {
     return {
       type: 'documentReloadPresentationCompleted',
       reloadId: value.reloadId,
-      presented: value.presented
+      presented: value.presented,
+      receiptVersion: value.receiptVersion
     };
   }
   const changes = value.changes;

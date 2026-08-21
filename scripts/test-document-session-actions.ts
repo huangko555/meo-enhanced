@@ -25,7 +25,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   });
 
   await adapter.execute([
-    { type: 'rememberDraft', text: 'local draft' },
+    { type: 'rememberDraft', text: 'local draft', receiptVersion: 1 },
     {
       type: 'applyTextChange',
       baseVersion: 3,
@@ -35,7 +35,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   ]);
 
   assert.deepEqual(messages, [
-    { type: 'draftChanged', text: 'local draft' },
+    { type: 'draftChanged', text: 'local draft', receiptVersion: 1 },
     {
       type: 'applyChanges',
       baseVersion: 3,
@@ -65,7 +65,9 @@ const createCoordinator = () => createDocumentSessionCoordinator({
     showFailureNotice: (message) => notices.push(message)
   });
 
-  await adapter.execute(coordinator.handle({ type: 'localDraftChanged', text: 'newer draft' }));
+  await adapter.execute(coordinator.handle({
+    type: 'localDraftChanged', text: 'newer draft', receiptVersion: 1
+  }));
   await adapter.execute(coordinator.handle({
     type: 'hostRevisionChanged',
     version: 3,
@@ -73,7 +75,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   }));
 
   assert.equal(revisionRequests, 2);
-  assert.deepEqual(messages, [{ type: 'draftChanged', text: 'newer draft' }]);
+  assert.deepEqual(messages, [{ type: 'draftChanged', text: 'newer draft', receiptVersion: 1 }]);
   assert.deepEqual(notices, ['Could not resynchronize the document. Local edits were kept.']);
 }
 
@@ -95,7 +97,9 @@ const createCoordinator = () => createDocumentSessionCoordinator({
     showFailureNotice: () => undefined
   });
 
-  await adapter.execute(coordinator.handle({ type: 'localDraftChanged', text: 'latest local edit' }));
+  await adapter.execute(coordinator.handle({
+    type: 'localDraftChanged', text: 'latest local edit', receiptVersion: 1
+  }));
   await adapter.execute([{ type: 'requestRevision' }]);
 
   assert.equal(revisionRequests, 1);

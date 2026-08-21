@@ -1,6 +1,6 @@
 export type PendingDraftRecovery = {
-  /** Replaces the recovery candidate; null explicitly clears it. */
-  remember(draftText: string | null): number;
+  /** Replaces the candidate only for a newer receipt; null explicitly clears it. */
+  remember(draftText: string | null, receiptVersion: number): number;
   /** Clears only the candidate that has not changed since the supplied receipt version. */
   discardIfCurrent(receiptVersion: number): boolean;
   /** Applies the latest non-equivalent candidate and clears it only after success. */
@@ -22,9 +22,10 @@ export function createPendingDraftRecovery(
   let version = 0;
 
   return {
-    remember(draftText) {
+    remember(draftText, receiptVersion) {
+      if (receiptVersion <= version) return version;
       pendingDraftText = draftText;
-      version += 1;
+      version = receiptVersion;
       return version;
     },
     discardIfCurrent(receiptVersion) {

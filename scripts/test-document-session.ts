@@ -200,8 +200,12 @@ assert.equal(discarded.state.draft, null);
 assert.equal(discarded.state.pendingChange, null);
 assert.equal(discarded.state.savePhase, 'idle');
 assert.deepEqual(discarded.effects, [
-  { type: 'persistDraft', draft: null },
-    { type: 'presentText', text: 'saved disk', source: 'disk-reload' }
+  {
+    type: 'presentText',
+    text: 'saved disk',
+    source: 'disk-reload',
+    onPresented: 'discard-draft-recovery'
+  }
 ]);
 
 console.log('Document Session domain checks passed');

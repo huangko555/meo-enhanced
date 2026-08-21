@@ -38,9 +38,16 @@ export type DocumentSessionWebviewAdapterDependencies = {
 export function createDocumentSessionWebviewAdapter(
   dependencies: DocumentSessionWebviewAdapterDependencies
 ): DocumentSessionWebviewAdapter {
-  const transport = createDocumentSessionTransport(dependencies.postMessage);
+  let latestDraftReceiptVersion = 0;
+  const postSessionMessage = (message: WebviewToHostMessage): void => {
+    if (message.type === 'draftChanged') {
+      latestDraftReceiptVersion = Math.max(latestDraftReceiptVersion, message.receiptVersion);
+    }
+    dependencies.postMessage(message);
+  };
+  const transport = createDocumentSessionTransport(postSessionMessage);
   const runtime = createDocumentSessionRuntime({
-    postMessage: dependencies.postMessage,
+    postMessage: postSessionMessage,
     presentText: dependencies.presentText,
     executeRemote: (action) => transport.execute(action),
     showFailureNotice: dependencies.showFailureNotice
@@ -87,16 +94,18 @@ export function createDocumentSessionWebviewAdapter(
     }
     if (message.type === 'documentReloadedFromDisk') {
       enqueueSession('document reload', async () => {
-        const accepted = await runtime.handle({
+        const completions = await runtime.handle({
           type: 'hostReloadedFromDisk',
           version: message.version,
           text: message.text
         });
+        const accepted = completions.includes('discard-draft-recovery');
         if (!disposed) {
           dependencies.postMessage({
             type: 'documentReloadPresentationCompleted',
             reloadId: message.reloadId,
-            presented: accepted
+            presented: accepted,
+            receiptVersion: latestDraftReceiptVersion
           });
         }
         if (accepted && !disposed) dependencies.restoreReloadedView(message);
@@ -124,8 +133,10 @@ export function createDocumentSessionWebviewAdapter(
       return acceptSessionMessage(message);
     },
     localDraftChanged(text) {
+      latestDraftReceiptVersion += 1;
+      const receiptVersion = latestDraftReceiptVersion;
       enqueueSession('local draft', async () => {
-        const changed = runtime.handle({ type: 'localDraftChanged', text });
+        const changed = runtime.handle({ type: 'localDraftChanged', text, receiptVersion });
         const submitted = runtime.handle({ type: 'submitPendingDraft' });
         await Promise.all([changed, submitted]);
       });

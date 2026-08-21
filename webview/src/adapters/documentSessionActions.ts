@@ -1,6 +1,7 @@
 import type {
   DocumentSessionAction,
   DocumentSessionInput,
+  DocumentPresentationCompletion,
   DocumentPresentationSource
 } from '../../../src/application/documentSession';
 import type {
@@ -14,7 +15,9 @@ type RemoteDocumentSessionAction = Extract<
 >;
 
 export type DocumentSessionActionAdapter = {
-  execute(actions: readonly DocumentSessionAction[]): Promise<boolean>;
+  execute(actions: readonly DocumentSessionAction[]): Promise<
+    readonly DocumentPresentationCompletion[]
+  >;
 };
 
 export type DocumentSessionActionAdapterDependencies = {
@@ -42,19 +45,19 @@ export function createDocumentSessionActionAdapter(
   return {
     async execute(actions) {
       const queue = Array.from(actions);
-      const defersDiskReloadRecoveryClear = actions.some((action) => (
-        action.type === 'presentText' && action.source === 'disk-reload'
-      ));
       let revisionRequestAttempts = 0;
-      let presentationSucceeded = true;
+      const completions: DocumentPresentationCompletion[] = [];
 
       while (queue.length > 0) {
         const action = queue.shift();
         if (!action) continue;
 
         if (action.type === 'rememberDraft') {
-          if (defersDiskReloadRecoveryClear && action.text === null) continue;
-          dependencies.postMessage({ type: 'draftChanged', text: action.text });
+          dependencies.postMessage({
+            type: 'draftChanged',
+            text: action.text,
+            receiptVersion: action.receiptVersion
+          });
           continue;
         }
         if (action.type === 'applyTextChange') {
@@ -66,8 +69,9 @@ export function createDocumentSessionActionAdapter(
           continue;
         }
         if (action.type === 'presentText') {
-          if (await dependencies.presentText(action.text, action.source) === false) {
-            presentationSucceeded = false;
+          if (await dependencies.presentText(action.text, action.source) !== false
+            && action.onPresented) {
+            completions.push(action.onPresented);
           }
           continue;
         }
@@ -92,7 +96,7 @@ export function createDocumentSessionActionAdapter(
         }
         queue.unshift(...nextActions);
       }
-      return presentationSucceeded;
+      return completions;
     }
   };
 }

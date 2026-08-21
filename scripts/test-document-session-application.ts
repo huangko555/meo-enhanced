@@ -15,8 +15,10 @@ assert.deepEqual(initialized.handle({
 }), []);
 
 const localEdit = createCoordinator();
-assert.deepEqual(localEdit.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' }), [
-  { type: 'rememberDraft', text: 'one\ntwo\nlocal' }
+assert.deepEqual(localEdit.handle({
+  type: 'localDraftChanged', text: 'one\ntwo\nlocal', receiptVersion: 1
+}), [
+  { type: 'rememberDraft', text: 'one\ntwo\nlocal', receiptVersion: 1 }
 ]);
 assert.deepEqual(localEdit.handle({ type: 'submitPendingDraft' }), [
   {
@@ -26,17 +28,17 @@ assert.deepEqual(localEdit.handle({ type: 'submitPendingDraft' }), [
   }
 ]);
 assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 4 }), [
-  { type: 'rememberDraft', text: null }
+  { type: 'rememberDraft', text: null, receiptVersion: 2 }
 ]);
 assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 4 }), []);
 assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 3 }), []);
 
 const orderedEdits = createCoordinator();
-orderedEdits.handle({ type: 'localDraftChanged', text: 'first edit' });
+orderedEdits.handle({ type: 'localDraftChanged', text: 'first edit', receiptVersion: 1 });
 orderedEdits.handle({ type: 'submitPendingDraft' });
-orderedEdits.handle({ type: 'localDraftChanged', text: 'second edit' });
+orderedEdits.handle({ type: 'localDraftChanged', text: 'second edit', receiptVersion: 2 });
 assert.deepEqual(orderedEdits.handle({ type: 'hostChangeApplied', version: 4 }), [
-  { type: 'rememberDraft', text: 'second edit' },
+  { type: 'rememberDraft', text: 'second edit', receiptVersion: 3 },
   {
     type: 'applyTextChange',
     baseVersion: 4,
@@ -64,13 +66,13 @@ assert.deepEqual(external.handle({
 }), []);
 
 const disjoint = createCoordinator();
-disjoint.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' });
+disjoint.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal', receiptVersion: 1 });
 assert.deepEqual(disjoint.handle({
   type: 'hostRevisionChanged',
   version: 4,
   text: 'remote\none\ntwo'
 }), [
-  { type: 'rememberDraft', text: 'remote\none\ntwo\nlocal' },
+  { type: 'rememberDraft', text: 'remote\none\ntwo\nlocal', receiptVersion: 2 },
   { type: 'presentText', text: 'remote\none\ntwo\nlocal', source: 'rebased-draft' },
   {
     type: 'applyTextChange',
@@ -80,22 +82,22 @@ assert.deepEqual(disjoint.handle({
 ]);
 
 const overlap = createCoordinator();
-overlap.handle({ type: 'localDraftChanged', text: 'one\nlocal' });
+overlap.handle({ type: 'localDraftChanged', text: 'one\nlocal', receiptVersion: 1 });
 assert.deepEqual(overlap.handle({
   type: 'hostRevisionChanged',
   version: 4,
   text: 'one\nremote'
 }), [
-  { type: 'rememberDraft', text: null },
+  { type: 'rememberDraft', text: null, receiptVersion: 2 },
   { type: 'presentText', text: 'one\nremote', source: 'revision' }
 ]);
 
 const saveAfterEdit = createCoordinator();
-saveAfterEdit.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' });
+saveAfterEdit.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal', receiptVersion: 1 });
 saveAfterEdit.handle({ type: 'submitPendingDraft' });
 assert.deepEqual(saveAfterEdit.handle({ type: 'saveRequested' }), []);
 assert.deepEqual(saveAfterEdit.handle({ type: 'hostChangeApplied', version: 4 }), [
-  { type: 'rememberDraft', text: null },
+  { type: 'rememberDraft', text: null, receiptVersion: 2 },
   { type: 'saveDocument', revision: { number: 4, text: 'one\ntwo\nlocal' } }
 ]);
 assert.deepEqual(saveAfterEdit.handle({
@@ -136,7 +138,7 @@ assert.deepEqual(immediateSave.handle({ type: 'saveRequested' }), [
 ]);
 
 const saveAfterConflict = createCoordinator();
-saveAfterConflict.handle({ type: 'localDraftChanged', text: 'one\nlocal' });
+saveAfterConflict.handle({ type: 'localDraftChanged', text: 'one\nlocal', receiptVersion: 1 });
 saveAfterConflict.handle({ type: 'submitPendingDraft' });
 saveAfterConflict.handle({ type: 'saveRequested' });
 assert.deepEqual(saveAfterConflict.handle({
@@ -144,20 +146,24 @@ assert.deepEqual(saveAfterConflict.handle({
   version: 4,
   text: 'one\nremote'
 }), [
-  { type: 'rememberDraft', text: null },
+  { type: 'rememberDraft', text: null, receiptVersion: 2 },
   { type: 'presentText', text: 'one\nremote', source: 'revision' },
   { type: 'saveDocument', revision: { number: 4, text: 'one\nremote' } }
 ]);
 
 const discarded = createCoordinator();
-discarded.handle({ type: 'localDraftChanged', text: 'one\nlocal' });
+discarded.handle({ type: 'localDraftChanged', text: 'one\nlocal', receiptVersion: 1 });
 assert.deepEqual(discarded.handle({
   type: 'hostReloadedFromDisk',
   version: 4,
   text: 'saved disk'
 }), [
-  { type: 'rememberDraft', text: null },
-  { type: 'presentText', text: 'saved disk', source: 'disk-reload' }
+  {
+    type: 'presentText',
+    text: 'saved disk',
+    source: 'disk-reload',
+    onPresented: 'discard-draft-recovery'
+  }
 ]);
 
 console.log('Document Session application contract checks passed');

@@ -20,6 +20,8 @@ export type SavedRevision = {
 
 export type DocumentPresentationSource = 'revision' | 'rebased-draft' | 'disk-reload';
 
+export type DocumentPresentationCompletion = 'discard-draft-recovery';
+
 export type DocumentSessionState = {
   readonly documentId: string;
   readonly revision: Revision;
@@ -46,6 +48,7 @@ export type DocumentSessionEffect =
       readonly type: 'presentText';
       readonly text: string;
       readonly source: DocumentPresentationSource;
+      readonly onPresented?: DocumentPresentationCompletion;
     }
   | { readonly type: 'requestResync' }
   | { readonly type: 'saveRevision'; readonly revision: Revision };
@@ -229,8 +232,12 @@ export function transitionDocumentSession(
         savingRevision: null
       },
       effects: [
-        { type: 'persistDraft', draft: null },
-        { type: 'presentText', text: event.revision.text, source: 'disk-reload' }
+        {
+          type: 'presentText',
+          text: event.revision.text,
+          source: 'disk-reload',
+          onPresented: 'discard-draft-recovery'
+        }
       ]
     };
   }

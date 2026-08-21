@@ -24,6 +24,7 @@ let holdApplyChanges = false;
 let failNextSave = false;
 let revisionFailuresRemaining = 0;
 let coordinatorStarts = 0;
+let nextDraftReceiptVersion = 1;
 const legacyCoordinatorStarts = 0;
 const heldApplyMessages: ApplyChangesMessage[] = [];
 const pendingHostInputs: DocumentSessionInput[] = [];
@@ -120,8 +121,10 @@ function enqueueInput(input: DocumentSessionInput): Promise<void> {
 }
 
 function enqueueLocalText(text: string): void {
+  const receiptVersion = nextDraftReceiptVersion;
+  nextDraftReceiptVersion += 1;
   operation = operation.then(async () => {
-    await processInput({ type: 'localDraftChanged', text });
+    await processInput({ type: 'localDraftChanged', text, receiptVersion });
     await processInput({ type: 'submitPendingDraft' });
   });
 }

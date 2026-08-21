@@ -96,12 +96,22 @@ assert.deepEqual(decodeDocumentSyncMessage({ type: 'documentReloadedFromDisk', r
   type: 'documentReloadedFromDisk', reloadId: 2, text: 'base', version: 5, topLine: 1, topLineOffset: 0
 });
 assert.equal(decodeDocumentSyncMessage({ type: 'docChanged', text: 'bad', version: -1 }), null);
-assert.deepEqual(decodeDocumentSyncCommand({ type: 'draftChanged', text: null }), { type: 'draftChanged', text: null });
+assert.deepEqual(
+  decodeDocumentSyncCommand({ type: 'draftChanged', text: null, receiptVersion: 3 }),
+  { type: 'draftChanged', text: null, receiptVersion: 3 }
+);
+assert.equal(
+  decodeDocumentSyncCommand({ type: 'draftChanged', text: 'missing receipt' }),
+  null
+);
 assert.deepEqual(decodeDocumentSyncCommand({
-  type: 'documentReloadPresentationCompleted', reloadId: 2, presented: true
-}), { type: 'documentReloadPresentationCompleted', reloadId: 2, presented: true });
+  type: 'documentReloadPresentationCompleted', reloadId: 2, presented: true, receiptVersion: 3
+}), { type: 'documentReloadPresentationCompleted', reloadId: 2, presented: true, receiptVersion: 3 });
 assert.equal(decodeDocumentSyncCommand({
-  type: 'documentReloadPresentationCompleted', reloadId: 0, presented: true
+  type: 'documentReloadPresentationCompleted', reloadId: 0, presented: true, receiptVersion: 3
+}), null);
+assert.equal(decodeDocumentSyncCommand({
+  type: 'documentReloadPresentationCompleted', reloadId: 2, presented: true
 }), null);
 assert.deepEqual(decodeDocumentSyncCommand({
   type: 'applyChanges', baseVersion: 2, changes: [{ from: 0, to: 1, insert: 'x' }]

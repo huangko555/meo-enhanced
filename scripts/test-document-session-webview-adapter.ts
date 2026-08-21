@@ -32,7 +32,7 @@ adapter.start({ ...init, version: 9, text: 'must-not-restart' });
 adapter.localDraftChanged('one local');
 await adapter.whenIdle();
 assert.deepEqual(posted.slice(0, 2), [
-  { type: 'draftChanged', text: 'one local' },
+  { type: 'draftChanged', text: 'one local', receiptVersion: 1 },
   {
     type: 'applyChanges',
     baseVersion: 1,
@@ -64,7 +64,8 @@ assert.deepEqual(presented.at(-1), { text: 'disk version', source: 'disk-reload'
 assert.deepEqual(posted.at(-1), {
   type: 'documentReloadPresentationCompleted',
   reloadId: 1,
-  presented: true
+  presented: true,
+  receiptVersion: 2
 }, 'only a successful final presentation may acknowledge discarding recovery');
 assert.equal(
   posted.slice(postedBeforeCurrentReload).some((message) => message.type === 'draftChanged' && message.text === null),
@@ -170,7 +171,8 @@ const testAsyncReloadPresentation = async (
   assert.deepEqual(asyncMessages, [{
     type: 'documentReloadPresentationCompleted',
     reloadId,
-    presented: succeeded
+    presented: succeeded,
+    receiptVersion: 0
   }]);
   asyncAdapter.dispose();
 };
