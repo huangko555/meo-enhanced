@@ -109,8 +109,35 @@ let themeVersion = 0;
 let highlighterPromise: Promise<HighlighterCore> | null = null;
 const loadedLangs = new Set<string>();
 const tokenCache = new Map<string, ShikiToken[][]>();
-const pending = new Set<string>();
+const pending = new Map<string, number>();
 const refreshListeners = new Set<() => void>();
+let activeHighlightConsumers = 0;
+let workGeneration = 0;
+
+function discardHighlighter(): void {
+  const discarded = highlighterPromise;
+  highlighterPromise = null;
+  loadedLangs.clear();
+  if (discarded) {
+    void discarded.then((highlighter) => highlighter.dispose()).catch(() => undefined);
+  }
+}
+
+export function activateShikiCodeHighlighting(): () => void {
+  activeHighlightConsumers += 1;
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    activeHighlightConsumers = Math.max(0, activeHighlightConsumers - 1);
+    if (activeHighlightConsumers === 0) {
+      workGeneration += 1;
+      pending.clear();
+      tokenCache.clear();
+      discardHighlighter();
+    }
+  };
+}
 
 function notifyRefresh(): void {
   for (const listener of refreshListeners) {
@@ -136,15 +163,16 @@ export function getShikiTokens(lang: string, code: string): ShikiToken[][] | nul
 }
 
 export function requestShikiTokens(lang: string, code: string): void {
-  if (!rawTheme) {
+  if (!rawTheme || activeHighlightConsumers === 0) {
     return;
   }
   const key = cacheKey(lang, code);
   if (tokenCache.has(key) || pending.has(key)) {
     return;
   }
-  pending.add(key);
-  void tokenizeAndCache(key, lang, code);
+  const generation = workGeneration;
+  pending.set(key, generation);
+  void tokenizeAndCache(key, lang, code, generation);
 }
 
 function toShikiTheme(theme: RawVscodeTheme) {
@@ -210,20 +238,35 @@ async function ensureLang(highlighter: HighlighterCore, lang: string): Promise<b
   return true;
 }
 
-async function tokenizeAndCache(key: string, lang: string, code: string): Promise<void> {
+async function tokenizeAndCache(
+  key: string,
+  lang: string,
+  code: string,
+  generation: number
+): Promise<void> {
+  const isCurrent = (): boolean => (
+    generation === workGeneration && activeHighlightConsumers > 0 && cacheKey(lang, code) === key
+  );
+  const finish = (): void => {
+    if (pending.get(key) === generation) pending.delete(key);
+  };
   try {
     const highlighterRef = getHighlighter();
     if (!highlighterRef) {
-      pending.delete(key);
+      finish();
       return;
     }
     const highlighter = await highlighterRef;
-    const ok = await ensureLang(highlighter, lang);
-    if (!ok) {
-      pending.delete(key);
+    if (!isCurrent()) {
+      finish();
       return;
     }
-    if (!tokenCache.has(key) && cacheKey(lang, code) === key) {
+    const ok = await ensureLang(highlighter, lang);
+    if (!ok || !isCurrent()) {
+      finish();
+      return;
+    }
+    if (!tokenCache.has(key)) {
       const { tokens } = highlighter.codeToTokens(code, {
         lang,
         theme: THEME_NAME,
@@ -246,11 +289,11 @@ async function tokenizeAndCache(key: string, lang: string, code: string): Promis
       }
       tokenCache.set(key, mapped);
     }
-    pending.delete(key);
+    finish();
     notifyRefresh();
   } catch (error) {
-    pending.delete(key);
-    console.error('[MEO webview] Shiki tokenization failed', error);
+    finish();
+    if (isCurrent()) console.error('[MEO webview] Shiki tokenization failed', error);
   }
 }
 
@@ -261,8 +304,8 @@ export function setShikiTheme(theme: RawVscodeTheme | null | undefined): void {
     }
     rawTheme = null;
     themeVersion += 1;
-    highlighterPromise = null;
-    loadedLangs.clear();
+    workGeneration += 1;
+    discardHighlighter();
     tokenCache.clear();
     pending.clear();
     notifyRefresh();
@@ -271,10 +314,9 @@ export function setShikiTheme(theme: RawVscodeTheme | null | undefined): void {
   rawTheme = theme;
   themeMeta = computeThemeMeta(theme);
   themeVersion += 1;
-  highlighterPromise = null;
-  loadedLangs.clear();
+  workGeneration += 1;
+  discardHighlighter();
   tokenCache.clear();
   pending.clear();
-  void getHighlighter();
   notifyRefresh();
 }

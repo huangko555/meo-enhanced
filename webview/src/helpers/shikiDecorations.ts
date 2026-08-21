@@ -6,6 +6,7 @@ import {
   resolveShikiLang,
   getShikiTokens,
   requestShikiTokens,
+  activateShikiCodeHighlighting,
   isShikiThemeReady,
   subscribeShikiRefresh,
   getShikiThemeMeta,
@@ -160,8 +161,10 @@ const shikiPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
     private readonly unsubscribe: () => void;
+    private readonly releaseHighlighting: () => void;
 
     constructor(view: EditorView) {
+      this.releaseHighlighting = activateShikiCodeHighlighting();
       this.decorations = buildDecorations(view);
       this.unsubscribe = subscribeShikiRefresh(() => {
         view.dispatch({ effects: shikiRefreshEffect.of(null) });
@@ -179,6 +182,7 @@ const shikiPlugin = ViewPlugin.fromClass(
 
     destroy(): void {
       this.unsubscribe();
+      this.releaseHighlighting();
     }
   },
   {

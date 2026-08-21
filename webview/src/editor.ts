@@ -5,7 +5,6 @@ import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, re
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
-import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect, setLongCodeBlockSearchRevealEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
@@ -1852,7 +1851,6 @@ export function createEditor({
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
       highlightActiveLineGutter(),
       highlightActiveLine(),
-      shikiCodeHighlight,
       EditorView.lineWrapping,
       EditorView.domEventHandlers({
         beforeinput(event) {

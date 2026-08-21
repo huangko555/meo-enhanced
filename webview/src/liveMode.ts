@@ -19,6 +19,7 @@ import {
 import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl, type ImageGroupItem } from './helpers/images';
 import { getImagePresentationFactory } from './editor/imagePresentation';
 import { liveHighlightStyle } from './theme';
+import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
@@ -2941,6 +2942,7 @@ export function liveModeExtensions(): Extension[] {
       extensions: [highlightMarkdownExtension, { remove: ['SetextHeading'] }]
     }),
     syntaxHighlighting(liveHighlightStyle),
+    shikiCodeHighlight,
     markdownTagField,
     livePointerSelectionActiveField,
     liveDocumentIdleField,
