@@ -28,6 +28,8 @@ export type DocumentSessionState = {
   readonly savedRevision: SavedRevision | null;
   readonly draft: Draft | null;
   readonly pendingChange: Change | null;
+  /** Suppresses replayed conflicts until the Draft context or accepted Revision changes. */
+  readonly lastRejectedExternalRevision: Revision | null;
   readonly savePhase: 'idle' | 'awaiting-change' | 'saving';
   readonly savingRevision: Revision | null;
 };
@@ -71,6 +73,7 @@ export function createDocumentSession(input: {
     savedRevision: input.savedRevision,
     draft: null,
     pendingChange: null,
+    lastRejectedExternalRevision: null,
     savePhase: 'idle',
     savingRevision: null
   };
@@ -86,15 +89,22 @@ export function transitionDocumentSession(
 ): DocumentSessionTransition {
   if (event.type === 'draftChanged') {
     if (state.pendingChange === null && event.text === state.revision.text) {
-      if (state.draft === null) return { state, effects: [] };
+      if (state.draft === null) {
+        return state.lastRejectedExternalRevision === null
+          ? { state, effects: [] }
+          : {
+              state: { ...state, lastRejectedExternalRevision: null },
+              effects: []
+            };
+      }
       return {
-        state: { ...state, draft: null },
+        state: { ...state, draft: null, lastRejectedExternalRevision: null },
         effects: [{ type: 'persistDraft', draft: null }]
       };
     }
     const draft = { baseRevision: state.revision.number, text: event.text };
     return {
-      state: { ...state, draft },
+      state: { ...state, draft, lastRejectedExternalRevision: null },
       effects: [{ type: 'persistDraft', draft }]
     };
   }
@@ -102,6 +112,10 @@ export function transitionDocumentSession(
   if (event.type === 'revisionReceived') {
     const revision = event.revision;
     if (revision.number < state.revision.number) {
+      return { state, effects: [] };
+    }
+    if (state.lastRejectedExternalRevision !== null
+      && revision.number < state.lastRejectedExternalRevision.number) {
       return { state, effects: [] };
     }
     if (revision.number === state.revision.number) {
@@ -114,7 +128,13 @@ export function transitionDocumentSession(
         const draft = { baseRevision: revision.number, text: state.draft.text };
         const pendingChange = { ...draft };
         return {
-          state: { ...state, revision, draft, pendingChange },
+          state: {
+            ...state,
+            revision,
+            draft,
+            pendingChange,
+            lastRejectedExternalRevision: null
+          },
           effects: [
             { type: 'persistDraft', draft },
             { type: 'submitChange', change: pendingChange }
@@ -127,6 +147,7 @@ export function transitionDocumentSession(
           revision,
           draft: null,
           pendingChange: null,
+          lastRejectedExternalRevision: null,
           savePhase: state.savePhase === 'awaiting-change' ? 'saving' : state.savePhase,
           savingRevision: state.savePhase === 'awaiting-change' ? revision : state.savingRevision
         },
@@ -142,7 +163,14 @@ export function transitionDocumentSession(
     if (rebasedText === null
       && state.draft !== null
       && state.draft.text !== revision.text) {
-      return { state, effects: [{ type: 'reportExternalConflict' }] };
+      if (state.lastRejectedExternalRevision?.number === revision.number
+        && state.lastRejectedExternalRevision.text === revision.text) {
+        return { state, effects: [] };
+      }
+      return {
+        state: { ...state, lastRejectedExternalRevision: revision },
+        effects: [{ type: 'reportExternalConflict' }]
+      };
     }
     if (rebasedText === null) {
       const effects: DocumentSessionEffect[] = [];
@@ -159,6 +187,7 @@ export function transitionDocumentSession(
           revision,
           draft: null,
           pendingChange: null,
+          lastRejectedExternalRevision: null,
           savePhase: state.savePhase === 'awaiting-change' ? 'saving' : state.savePhase,
           savingRevision: state.savePhase === 'awaiting-change' ? revision : state.savingRevision
         },
@@ -168,7 +197,13 @@ export function transitionDocumentSession(
     const draft = { baseRevision: revision.number, text: rebasedText };
     const pendingChange = { ...draft };
     return {
-      state: { ...state, revision, draft, pendingChange },
+      state: {
+        ...state,
+        revision,
+        draft,
+        pendingChange,
+        lastRejectedExternalRevision: null
+      },
       effects: [
         { type: 'persistDraft', draft },
         { type: 'presentText', text: draft.text, source: 'rebased-draft' },
@@ -234,6 +269,7 @@ export function transitionDocumentSession(
         savedRevision: { revisionNumber: event.revision.number, text: event.revision.text },
         draft: null,
         pendingChange: null,
+        lastRejectedExternalRevision: null,
         savePhase: 'idle',
         savingRevision: null
       },

@@ -75,9 +75,15 @@ const createCoordinator = () => createDocumentSessionCoordinator({
     version: 4,
     text: 'one\nremote'
   }));
+  await adapter.execute(coordinator.handle({
+    type: 'hostRevisionChanged',
+    version: 4,
+    text: 'one\nremote'
+  }));
 
   assert.deepEqual(presentations, [], 'dirty Draft must remain presented after an overlapping external update');
   assert.equal(messages.length, messagesBeforeExternal, 'external conflict must not discard or resubmit the dirty Draft');
+  assert.equal(coordinator.draftRecoveryReceiptVersion(), 1, 'external conflict must not advance the Draft Recovery Receipt');
   assert.deepEqual(notices, [
     'The document changed externally while local edits were pending. Local edits were kept.'
   ]);
