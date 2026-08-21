@@ -299,9 +299,122 @@ async function main(): Promise<void> {
     assertFullDocumentEnsures(initialLiveCalls, smallText.length, 'initial Live');
     assert.equal(initialLiveCalls.some((call: ParseCall) => call.kind === 'force'), false);
 
+    const publicationPrefix = Array.from(
+      { length: 6_200 },
+      (_, index) => `remote paragraph ${index.toString().padStart(4, '0')} with stable Markdown content and parser lookahead padding`
+    );
+    const publicationSuffix = [
+      '| Real A | Real B |',
+      '| --- | --- |',
+      '| one | two |',
+      'paragraph with #valid-tag',
+      '```text',
+      '| Fake A | Fake B |',
+      '| :--- | ---: |',
+      '#not-a-tag',
+      'const insideFence = true',
+      '```'
+    ];
+    const publicationText = [...publicationPrefix, ...publicationSuffix].join('\n');
+    assert.ok(publicationText.length > 347_000, 'publication matrix must cross the production-scale parser lookahead');
+
+    const publicationInitial = await page.evaluate((text) => {
+      const host = document.createElement('div');
+      host.id = 'publication';
+      host.className = 'host';
+      document.body.append(host);
+      const harness = (window as any).EditorSyntaxParsingHarness;
+      (window as any).__meoSyntaxParseCalls = [];
+      (window as any).__meoSyntaxParsePhase = 'publication-initial-source';
+      const editor = harness.createEditor({
+        parent: host,
+        text,
+        initialMode: 'source',
+        onApplyChanges() {}
+      });
+      (window as any).__syntaxPublicationEditor = editor;
+      return {
+        text: editor.getText(),
+        history: editor.getHistoryDepth(),
+        calls: structuredClone((window as any).__meoSyntaxParseCalls)
+      };
+    }, publicationText);
+    assert.equal(publicationInitial.text, publicationText);
+    assert.deepEqual(publicationInitial.history, { undo: 0, redo: 0 });
+    assert.deepEqual(publicationInitial.calls, []);
+
+    const fakeHeaderPosition = publicationText.indexOf('| Fake A | Fake B |');
+    const targetLine = publicationPrefix.length + 5;
+    await page.evaluate(({ line, position }) => {
+      const editor = (window as any).__syntaxPublicationEditor;
+      editor.scrollToLine(line, 'top');
+      editor.revealSelection(position, position, { align: 'nearest', focusEditor: true });
+    }, { line: targetLine, position: fakeHeaderPosition });
+    await page.waitForFunction((position) => {
+      const harness = (window as any).EditorSyntaxParsingHarness;
+      const editor = (window as any).__syntaxPublicationEditor;
+      const names = harness.publishedNodeNamesAt(editor, position);
+      return names.includes('CodeText') && names.includes('FencedCode');
+    }, {}, fakeHeaderPosition);
+    await page.evaluate(async () => {
+      for (let frame = 0; frame < 4; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+
+    const publicationDecorations = await page.evaluate(() => {
+      const lines = Array.from(document.querySelectorAll<HTMLElement>('#publication .cm-line'));
+      const findLine = (text: string) => lines.find((line) => line.textContent === text) ?? null;
+      const summarize = (text: string) => {
+        const line = findLine(text);
+        return {
+          visible: Boolean(line),
+          tableLine: line?.classList.contains('meo-md-source-table-header-line') ?? false,
+          tableCells: line?.querySelectorAll('.meo-md-source-table-header-cell').length ?? 0,
+          codeLine: line?.classList.contains('meo-src-code-block') ?? false,
+          tags: line?.querySelectorAll('.meo-md-tag').length ?? 0
+        };
+      };
+      const editor = (window as any).__syntaxPublicationEditor;
+      return {
+        realHeader: summarize('| Real A | Real B |'),
+        validTag: summarize('paragraph with #valid-tag'),
+        fenceStart: summarize('```text'),
+        fakeHeader: summarize('| Fake A | Fake B |'),
+        fakeDelimiter: summarize('| :--- | ---: |'),
+        fakeTag: summarize('#not-a-tag'),
+        codeText: summarize('const insideFence = true'),
+        fenceEnd: summarize('```'),
+        text: editor.getText(),
+        history: editor.getHistoryDepth(),
+        calls: structuredClone((window as any).__meoSyntaxParseCalls)
+      };
+    });
+    assert.equal(publicationDecorations.text, publicationText);
+    assert.deepEqual(publicationDecorations.history, publicationInitial.history);
+    assert.deepEqual(publicationDecorations.calls, [], 'parser publication must not add explicit ensure/force calls');
+    assert.equal(publicationDecorations.realHeader.tableLine, true, 'published legal table header must stay decorated');
+    assert.ok(publicationDecorations.realHeader.tableCells > 0);
+    assert.equal(publicationDecorations.validTag.tags, 1, 'published legal Source tag must stay decorated');
+    for (const [label, line] of Object.entries({
+      fenceStart: publicationDecorations.fenceStart,
+      fakeHeader: publicationDecorations.fakeHeader,
+      fakeDelimiter: publicationDecorations.fakeDelimiter,
+      fakeTag: publicationDecorations.fakeTag,
+      codeText: publicationDecorations.codeText,
+      fenceEnd: publicationDecorations.fenceEnd
+    })) {
+      assert.equal(line.visible, true, `${label} must be visible after scrolling past parser lookahead`);
+      assert.equal(line.codeLine, true, `${label} must receive the Source code-block line decoration after publication`);
+    }
+    assert.equal(publicationDecorations.fakeHeader.tableLine, false, 'table-like fenced code must lose temporary header line decoration');
+    assert.equal(publicationDecorations.fakeHeader.tableCells, 0, 'table-like fenced code must lose temporary header cell decorations');
+    assert.equal(publicationDecorations.fakeTag.tags, 0, 'fenced code must lose temporary Source tag decoration');
+
     await page.evaluate(() => {
       (window as any).__syntaxSourceEditor.destroy();
       (window as any).__syntaxLiveEditor.destroy();
+      (window as any).__syntaxPublicationEditor.destroy();
     });
   } finally {
     await browser.close();

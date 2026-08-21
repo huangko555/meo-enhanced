@@ -36,6 +36,7 @@ import {
   getTableTransactionProvenance,
   getTableTransactionProvenanceSnapshot
 } from '../adapters/tableTransactionProvenance';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import {
   tableStickyHeaderAdapterFactoryFacet,
   type TableStickyHeaderAdapter,
@@ -4731,7 +4732,7 @@ function addTableWidgetDecoration(
 
 function buildSourceTableHeaderDecorations(state: EditorState): DecorationSet {
   const ranges: Range<Decoration>[] = [];
-  const tree = syntaxTree(state);
+  const tree = currentSyntaxTree(state);
   const parsedTableRanges: TableRange[] = [];
   const decoratedHeaderLines = new Set<number>();
 
@@ -4798,7 +4799,7 @@ export const sourceTableHeaderLineField = StateField.define<DecorationSet>({
     }
   },
   update(decorations, transaction) {
-    if (!transaction.docChanged) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
       return decorations;
     }
     try {

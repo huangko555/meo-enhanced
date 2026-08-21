@@ -1,6 +1,6 @@
 import { StateField, EditorState } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
-import { syntaxTree, StreamLanguage } from '@codemirror/language';
+import { StreamLanguage } from '@codemirror/language';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
 import { css } from '@codemirror/lang-css';
@@ -22,6 +22,7 @@ import {
 import { getLiveListBlockIndentColumns } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -538,7 +539,7 @@ const sourceCodeBlockLine = Decoration.line({ class: 'meo-src-code-block' });
 
 function computeSourceCodeBlockLines(state: EditorState): any {
   const ranges: any[] = [];
-  syntaxTree(state).iterate({
+  currentSyntaxTree(state).iterate({
     enter(node: any) {
       if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') {
         return;
@@ -568,7 +569,7 @@ export const sourceCodeBlockField = StateField.define<any>({
     }
   },
   update(lines: any, transaction: any) {
-    if (!transaction.docChanged) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
       return lines;
     }
     try {

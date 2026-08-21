@@ -56,10 +56,23 @@ async function main(): Promise<void> {
     });
 
     const targetLine = 1_401;
+    const remoteParagraphCount = 6_500;
+    const remoteSyntax = [
+      '| Remote Real A | Remote Real B |',
+      '| --- | --- |',
+      '| one | two |',
+      'paragraph with #remote-valid-tag',
+      '```text',
+      '| Remote Fake A | Remote Fake B |',
+      '| :--- | ---: |',
+      '#remote-not-a-tag',
+      'const remoteInsideFence = true',
+      '```'
+    ];
     const documentText = [
       '# Large Source trace',
       '',
-      ...Array.from({ length: 2_800 }, (_, index) => (
+      ...Array.from({ length: remoteParagraphCount }, (_, index) => (
         index === targetLine - 3
           ? `## Visible target ${index} with ==trace-highlight==`
           : `paragraph ${index} with **Markdown** content and stable text`
@@ -67,10 +80,9 @@ async function main(): Promise<void> {
       '',
       '## OFFSCREEN FINAL SYNTAX',
       '',
-      '| Last A | Last B |',
-      '| --- | --- |',
-      '| one | two |'
+      ...remoteSyntax
     ].join('\n');
+    assert.ok(documentText.length > 347_000, 'production trace must exceed the reviewed 347k Source document');
 
     const initial = await page.evaluate((text) => {
       const harness = (window as any).EditorSyntaxParsingHarness;
@@ -92,6 +104,110 @@ async function main(): Promise<void> {
     assert.equal(initial.text, documentText);
     assert.deepEqual(initial.history, { undo: 0, redo: 0 });
     assert.deepEqual(initial.calls, [], 'production initial Source must not request a synchronous full parse');
+
+    const remoteFakeHeaderPosition = documentText.indexOf('| Remote Fake A | Remote Fake B |');
+    const remoteSyntaxLine = remoteParagraphCount + 6;
+    const assertRemotePublication = async (expectedText: string, label: string): Promise<void> => {
+      await page.evaluate(({ line, position }) => {
+        const editor = (window as any).__sourceForceParsingEditor;
+        editor.scrollToLine(line, 'top');
+        editor.revealSelection(position, position, { focusEditor: true, align: 'nearest' });
+        editor.focus();
+      }, { line: remoteSyntaxLine, position: remoteFakeHeaderPosition });
+      await waitForFrames(page, 2);
+      const beforePublication = await page.evaluate(() => {
+        const editor = (window as any).__sourceForceParsingEditor;
+        return {
+          text: editor.getText(),
+          selection: editor.view.state.selection.main.head,
+          history: editor.getHistoryDepth(),
+          focused: editor.hasFocus(),
+          viewport: editor.getTopVisiblePosition()
+        };
+      });
+      await page.waitForFunction((position) => {
+        const harness = (window as any).EditorSyntaxParsingHarness;
+        const editor = (window as any).__sourceForceParsingEditor;
+        const names = harness.publishedNodeNamesAt(editor, position);
+        return names.includes('CodeText') && names.includes('FencedCode');
+      }, {}, remoteFakeHeaderPosition);
+      await waitForFrames(page, 4);
+
+      const result = await page.evaluate(() => {
+        const lines = Array.from(document.querySelectorAll<HTMLElement>('#app .cm-line'));
+        const summarize = (text: string) => {
+          const line = lines.find((candidate) => candidate.textContent === text) ?? null;
+          return {
+            visible: Boolean(line),
+            tableLine: line?.classList.contains('meo-md-source-table-header-line') ?? false,
+            tableCells: line?.querySelectorAll('.meo-md-source-table-header-cell').length ?? 0,
+            codeLine: line?.classList.contains('meo-src-code-block') ?? false,
+            tags: line?.querySelectorAll('.meo-md-tag').length ?? 0
+          };
+        };
+        const editor = (window as any).__sourceForceParsingEditor;
+        return {
+          realHeader: summarize('| Remote Real A | Remote Real B |'),
+          validTag: summarize('paragraph with #remote-valid-tag'),
+          fenceStart: summarize('```text'),
+          fakeHeader: summarize('| Remote Fake A | Remote Fake B |'),
+          fakeDelimiter: summarize('| :--- | ---: |'),
+          fakeTag: summarize('#remote-not-a-tag'),
+          codeText: summarize('const remoteInsideFence = true'),
+          fenceEnd: summarize('```'),
+          text: editor.getText(),
+          selection: editor.view.state.selection.main.head,
+          history: editor.getHistoryDepth(),
+          focused: editor.hasFocus(),
+          viewport: editor.getTopVisiblePosition(),
+          calls: structuredClone((window as any).__meoSyntaxParseCalls)
+        };
+      });
+      assert.equal(result.text, expectedText, `${label} must preserve Document text`);
+      assert.equal(result.selection, remoteFakeHeaderPosition, `${label} must preserve selection`);
+      assert.deepEqual(result.history, { undo: 0, redo: 0 }, `${label} must not enter Editor History`);
+      assert.equal(result.focused, true, `${label} must preserve focus`);
+      assert.deepEqual(
+        {
+          text: result.text,
+          selection: result.selection,
+          history: result.history,
+          focused: result.focused,
+          viewport: result.viewport
+        },
+        beforePublication,
+        `${label} must preserve text, selection, history, focus and viewport while the parser publishes`
+      );
+      assert.deepEqual(result.calls, [], `${label} must not call ensureSyntaxTree/forceParsing`);
+      assert.equal(result.realHeader.tableLine, true, `${label} must keep the legal table header`);
+      assert.ok(result.realHeader.tableCells > 0, `${label} must keep legal table cells`);
+      assert.equal(result.validTag.tags, 1, `${label} must keep the legal Source tag`);
+      for (const [lineLabel, line] of Object.entries({
+        fenceStart: result.fenceStart,
+        fakeHeader: result.fakeHeader,
+        fakeDelimiter: result.fakeDelimiter,
+        fakeTag: result.fakeTag,
+        codeText: result.codeText,
+        fenceEnd: result.fenceEnd
+      })) {
+        assert.equal(line.visible, true, `${label} ${lineLabel} must be visible`);
+        assert.equal(line.codeLine, true, `${label} ${lineLabel} must have the Source code-block line decoration`);
+      }
+      assert.equal(result.fakeHeader.tableLine, false, `${label} must remove the temporary fake table line`);
+      assert.equal(result.fakeHeader.tableCells, 0, `${label} must remove temporary fake table cells`);
+      assert.equal(result.fakeTag.tags, 0, `${label} must remove the temporary fenced Source tag`);
+    };
+
+    await assertRemotePublication(documentText, 'first parser publication');
+
+    const externallyPresentedText = documentText.replace('paragraph 0 with', 'paragraph 0 WITH');
+    await page.evaluate((text) => {
+      const editor = (window as any).__sourceForceParsingEditor;
+      (window as any).__meoSyntaxParseCalls = [];
+      (window as any).__meoSyntaxParsePhase = 'source-external-republication';
+      editor.setText(text);
+    }, externallyPresentedText);
+    await assertRemotePublication(externallyPresentedText, 'repeated parser publication');
 
     await page.evaluate((lineNumber) => {
       const editor = (window as any).__sourceForceParsingEditor;
@@ -262,8 +378,8 @@ async function main(): Promise<void> {
     );
 
     console.log(JSON.stringify({
-      documentLength: documentText.length,
-      documentLines: documentText.split('\n').length,
+      documentLength: externallyPresentedText.length,
+      documentLines: externallyPresentedText.split('\n').length,
       visibleRangeBeforeSwitch: before.visibleRange,
       sourceToLive: {
         elapsed: sourceToLive.elapsed,

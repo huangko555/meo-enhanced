@@ -1,8 +1,8 @@
 import { RangeSetBuilder, StateField } from '@codemirror/state';
-import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { collectHexColorRangesFromText } from '../../../src/shared/hexColorSwatches';
+import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 
 const markdownTagDeco = Decoration.mark({ class: 'meo-md-tag' });
 const markdownTagRegex = /(^|[^\p{L}\p{N}_/-])#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/gu;
@@ -19,7 +19,7 @@ const blockedTagAncestorNames = new Set([
 ]);
 
 function hasBlockedTagAncestor(state: any, position: number): boolean {
-  let node: SyntaxNode | null = syntaxTree(state).resolveInner(position, 1);
+  let node: SyntaxNode | null = currentSyntaxTree(state).resolveInner(position, 1);
   while (node) {
     if (blockedTagAncestorNames.has(node.name)) {
       return true;
@@ -88,7 +88,7 @@ export const markdownTagField = StateField.define<DecorationSet>({
     return buildMarkdownTagDecorations(state);
   },
   update(value, transaction) {
-    if (!transaction.docChanged) {
+    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
       return value;
     }
     return buildMarkdownTagDecorations(transaction.state);
