@@ -106,8 +106,13 @@ export function getShikiThemeMeta(): ShikiThemeMeta {
 
 let rawTheme: RawVscodeTheme | null = null;
 let themeVersion = 0;
-let highlighterPromise: Promise<HighlighterCore> | null = null;
-const loadedLangs = new Set<string>();
+type HighlighterRecord = {
+  readonly generation: number;
+  readonly promise: Promise<HighlighterCore>;
+  readonly loadedLangs: Set<string>;
+};
+
+let highlighterRecord: HighlighterRecord | null = null;
 const tokenCache = new Map<string, ShikiToken[][]>();
 const pending = new Map<string, number>();
 const refreshListeners = new Set<() => void>();
@@ -115,11 +120,11 @@ let activeHighlightConsumers = 0;
 let workGeneration = 0;
 
 function discardHighlighter(): void {
-  const discarded = highlighterPromise;
-  highlighterPromise = null;
-  loadedLangs.clear();
+  const discarded = highlighterRecord;
+  highlighterRecord = null;
   if (discarded) {
-    void discarded.then((highlighter) => highlighter.dispose()).catch(() => undefined);
+    discarded.loadedLangs.clear();
+    void discarded.promise.then((highlighter) => highlighter.dispose()).catch(() => undefined);
   }
 }
 
@@ -191,7 +196,6 @@ async function createHighlighter(theme: RawVscodeTheme): Promise<HighlighterCore
     import('shiki/core'),
     import('shiki/engine/oniguruma')
   ]);
-  loadedLangs.clear();
   return createHighlighterCore({
     themes: [toShikiTheme(theme) as any],
     langs: [],
@@ -214,18 +218,26 @@ function tokenIsStringComment(token: { explanation?: { scopes?: { scopeName?: st
   return false;
 }
 
-function getHighlighter(): Promise<HighlighterCore> | null {
+function getHighlighter(): HighlighterRecord | null {
   if (!rawTheme) {
     return null;
   }
-  if (!highlighterPromise) {
-    highlighterPromise = createHighlighter(rawTheme);
+  if (!highlighterRecord) {
+    highlighterRecord = {
+      generation: workGeneration,
+      promise: createHighlighter(rawTheme),
+      loadedLangs: new Set<string>()
+    };
   }
-  return highlighterPromise;
+  return highlighterRecord;
 }
 
-async function ensureLang(highlighter: HighlighterCore, lang: string): Promise<boolean> {
-  if (loadedLangs.has(lang)) {
+async function ensureLang(
+  record: HighlighterRecord,
+  highlighter: HighlighterCore,
+  lang: string
+): Promise<boolean> {
+  if (record.loadedLangs.has(lang)) {
     return true;
   }
   const loader = LANG_LOADERS[lang];
@@ -234,7 +246,7 @@ async function ensureLang(highlighter: HighlighterCore, lang: string): Promise<b
   }
   const grammar = (await loader()).default;
   await highlighter.loadLanguage(grammar as any);
-  loadedLangs.add(lang);
+  record.loadedLangs.add(lang);
   return true;
 }
 
@@ -251,17 +263,17 @@ async function tokenizeAndCache(
     if (pending.get(key) === generation) pending.delete(key);
   };
   try {
-    const highlighterRef = getHighlighter();
-    if (!highlighterRef) {
+    const record = getHighlighter();
+    if (!record) {
       finish();
       return;
     }
-    const highlighter = await highlighterRef;
-    if (!isCurrent()) {
+    const highlighter = await record.promise;
+    if (record.generation !== generation || !isCurrent()) {
       finish();
       return;
     }
-    const ok = await ensureLang(highlighter, lang);
+    const ok = await ensureLang(record, highlighter, lang);
     if (!ok || !isCurrent()) {
       finish();
       return;
@@ -299,7 +311,7 @@ async function tokenizeAndCache(
 
 export function setShikiTheme(theme: RawVscodeTheme | null | undefined): void {
   if (!theme) {
-    if (!rawTheme && !highlighterPromise && tokenCache.size === 0 && pending.size === 0) {
+    if (!rawTheme && !highlighterRecord && tokenCache.size === 0 && pending.size === 0) {
       return;
     }
     rawTheme = null;
