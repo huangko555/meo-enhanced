@@ -84,12 +84,26 @@ runtime.dispatch({ type: 'present', sourceKey: 'external', rawSrc: './external.p
 const externalId = application.getState().presentationId;
 assert.ok(externalId);
 runtime.dispatch({ type: 'externalDocumentPresented' });
-await runtime.whenCurrentPresentationSettles();
+const externalReplayId = application.getState().presentationId;
+assert.ok(externalReplayId && externalReplayId !== externalId);
 deferred.find((item) => item.effect.presentationId === externalId)?.resolve({
   type: 'sourceFailed', presentationId: externalId
 });
+const externalReplayResolve = deferred.find((item) => (
+  item.effect.type === 'resolveSource' && item.effect.presentationId === externalReplayId
+));
+externalReplayResolve?.resolve({
+  type: 'sourceResolved', presentationId: externalReplayId, resolvedSrc: 'resolved:external-current'
+});
 await Promise.resolve();
-assert.equal(application.getState().phase, 'idle');
+await Promise.resolve();
+const externalReplayLoad = deferred.find((item) => (
+  item.effect.type === 'loadImage' && item.effect.presentationId === externalReplayId
+));
+assert.ok(externalReplayLoad, 'external replay did not advance the current presentation to loading');
+externalReplayLoad.resolve({ type: 'imageLoaded', presentationId: externalReplayId });
+await runtime.whenCurrentPresentationSettles();
+assert.equal(application.getState().phase, 'ready');
 
 runtime.dispatch({ type: 'present', sourceKey: 'dispose', rawSrc: './dispose.png' });
 const disposeId = application.getState().presentationId;

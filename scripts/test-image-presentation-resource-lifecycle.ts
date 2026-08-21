@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { createImagePresentationResourcePool } from '../webview/src/editor/imagePresentationAdapter';
+import {
+  createImagePresentationFactory,
+  createImagePresentationResourcePool,
+  type ImagePresentationResourcePool
+} from '../webview/src/editor/imagePresentationAdapter';
 
 type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -134,5 +138,39 @@ const releaseAfterDispose = pool.acquire();
 releaseAfterDispose();
 assert.equal(await pool.resolve('document', './after-dispose.png'), null);
 assert.equal(await pool.load('document', 'resolved:after-dispose'), null);
+
+let poolAcquireCalls = 0;
+let poolDisposeCalls = 0;
+const poolLeaseReleases: number[] = [];
+const factoryPool: ImagePresentationResourcePool = {
+  acquire() {
+    const leaseIndex = poolAcquireCalls++;
+    poolLeaseReleases[leaseIndex] = 0;
+    return () => { poolLeaseReleases[leaseIndex] += 1; };
+  },
+  invalidate() {},
+  resolve: async () => null,
+  getResolved: () => null,
+  load: async () => null,
+  getLoaded: () => null,
+  dispose() { poolDisposeCalls += 1; }
+};
+const factory = createImagePresentationFactory({
+  resources: factoryPool,
+  resourceContextKey: 'factory-matrix'
+});
+const releaseFactoryFirst = factory.acquire();
+const releaseFactorySecond = factory.acquire();
+assert.equal(poolAcquireCalls, 2, 'each Factory acquire must own exactly one Pool lease');
+releaseFactoryFirst();
+releaseFactoryFirst();
+assert.deepEqual(poolLeaseReleases, [1, 0], 'Factory release must be one-to-one and idempotent');
+factory.dispose();
+assert.deepEqual(poolLeaseReleases, [1, 1], 'Factory dispose must reclaim only unreleased Pool leases');
+releaseFactorySecond();
+assert.deepEqual(poolLeaseReleases, [1, 1], 'released Factory leases must stay idempotent after dispose');
+assert.equal(poolDisposeCalls, 0, 'Factory must not take ownership of Pool disposal');
+factory.acquire()();
+assert.equal(poolAcquireCalls, 2, 'disposed Factory must not acquire a new Pool lease');
 
 console.log('image presentation resource lifecycle matrix passed');

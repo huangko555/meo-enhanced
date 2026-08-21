@@ -62,11 +62,32 @@ const invalidated = createImagePresentationApplication();
 invalidated.dispatch({ type: 'present', sourceKey: 'external', rawSrc: './external.png' });
 const invalidatedId = invalidated.getState().presentationId;
 assert.ok(invalidatedId);
-assert.deepEqual(types(invalidated.dispatch({ type: 'externalDocumentPresented' })), []);
-assert.deepEqual(invalidated.getState(), { phase: 'idle', presentationId: null, sourceKey: null });
+assert.deepEqual(
+  types(invalidated.dispatch({ type: 'externalDocumentPresented' })),
+  ['showFallback', 'resolveSource'],
+  'external presentation must re-correlate the current handle through the Application owner'
+);
+const externalReplayId = invalidated.getState().presentationId;
+assert.ok(externalReplayId && externalReplayId !== invalidatedId);
 assert.deepEqual(invalidated.dispatch({
   type: 'sourceResolved', presentationId: invalidatedId, resolvedSrc: 'resolved:external'
 }), []);
+assert.deepEqual(invalidated.dispatch({
+  type: 'sourceResolved', presentationId: externalReplayId, resolvedSrc: 'resolved:current'
+}), [{ type: 'loadImage', presentationId: externalReplayId, resolvedSrc: 'resolved:current' }]);
+assert.deepEqual(invalidated.dispatch({
+  type: 'imageLoaded', presentationId: externalReplayId
+}), [{ type: 'showImage', presentationId: externalReplayId, resolvedSrc: 'resolved:current' }]);
+
+const retryAfterExternal = createImagePresentationApplication();
+retryAfterExternal.dispatch({ type: 'present', sourceKey: 'retry', rawSrc: './retry.png' });
+const failedBeforeExternal = retryAfterExternal.getState().presentationId;
+assert.ok(failedBeforeExternal);
+retryAfterExternal.dispatch({ type: 'sourceFailed', presentationId: failedBeforeExternal });
+const retryEffects = retryAfterExternal.dispatch({ type: 'externalDocumentPresented' });
+const retriedAfterExternal = retryAfterExternal.getState().presentationId;
+assert.ok(retriedAfterExternal && retriedAfterExternal !== failedBeforeExternal);
+assert.deepEqual(types(retryEffects), ['showFallback', 'resolveSource']);
 
 const disposed = createImagePresentationApplication();
 disposed.dispatch({ type: 'present', sourceKey: 'disposed', rawSrc: './disposed.png' });

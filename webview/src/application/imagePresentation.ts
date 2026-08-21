@@ -69,6 +69,7 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
   let sequence = 0;
   let presentationId: number | null = null;
   let sourceKey: string | null = null;
+  let rawSrc: string | null = null;
   let resolvedSrc: string | null = null;
 
   const getState = (): ImagePresentationState => ({ phase, presentationId, sourceKey });
@@ -81,7 +82,32 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
     phase = nextPhase;
     presentationId = null;
     sourceKey = null;
+    rawSrc = null;
     resolvedSrc = null;
+  };
+
+  const beginPresentation = (
+    nextSourceKey: string,
+    nextRawSrc: string
+  ): readonly ImagePresentationEffect[] => {
+    const nextPresentationId = ++sequence;
+    presentationId = nextPresentationId;
+    sourceKey = nextSourceKey;
+    rawSrc = nextRawSrc;
+    resolvedSrc = null;
+    phase = 'resolving';
+    return [
+      {
+        type: 'showFallback',
+        presentationId: nextPresentationId,
+        sourceKey: nextSourceKey
+      },
+      {
+        type: 'resolveSource',
+        presentationId: nextPresentationId,
+        rawSrc: nextRawSrc
+      }
+    ];
   };
 
   const dispatch = (input: ImagePresentationInput): readonly ImagePresentationEffect[] => {
@@ -89,22 +115,7 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
 
     switch (input.type) {
       case 'present': {
-        const effects: ImagePresentationEffect[] = [];
-        presentationId = ++sequence;
-        sourceKey = input.sourceKey;
-        resolvedSrc = null;
-        phase = 'resolving';
-        effects.push({
-          type: 'showFallback',
-          presentationId,
-          sourceKey: input.sourceKey
-        });
-        effects.push({
-          type: 'resolveSource',
-          presentationId,
-          rawSrc: input.rawSrc
-        });
-        return effects;
+        return beginPresentation(input.sourceKey, input.rawSrc);
       }
       case 'sourceResolved':
         if (!isCurrent(input.presentationId, 'resolving') || !input.resolvedSrc) return [];
@@ -125,8 +136,11 @@ export function createImagePresentationApplication(): ImagePresentationApplicati
         phase = 'fallback';
         return [{ type: 'showFallback', presentationId: input.presentationId, sourceKey }];
       case 'externalDocumentPresented': {
-        clear('idle');
-        return [];
+        if (sourceKey === null || rawSrc === null) {
+          clear('idle');
+          return [];
+        }
+        return beginPresentation(sourceKey, rawSrc);
       }
       case 'dispose': {
         clear('disposed');

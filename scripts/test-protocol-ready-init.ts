@@ -170,6 +170,43 @@ assert.equal(imageTransport.accept({
   type: 'resolvedImageSrc', requestId: 'img-1',
   result: { ok: true, value: { resolvedUrl: 'vscode-webview://c' } }
 }), false);
+const imageAbortController = new AbortController();
+const imageAbortSignal = imageAbortController.signal;
+const addAbortListener = imageAbortSignal.addEventListener.bind(imageAbortSignal);
+const removeAbortListener = imageAbortSignal.removeEventListener.bind(imageAbortSignal);
+let imageAbortListenersAdded = 0;
+let imageAbortListenersRemoved = 0;
+Object.defineProperty(imageAbortSignal, 'addEventListener', {
+  configurable: true,
+  value(type: string, listener: EventListenerOrEventListenerObject, options?: AddEventListenerOptions | boolean) {
+    if (type === 'abort') imageAbortListenersAdded += 1;
+    return addAbortListener(type, listener, options);
+  }
+});
+Object.defineProperty(imageAbortSignal, 'removeEventListener', {
+  configurable: true,
+  value(type: string, listener: EventListenerOrEventListenerObject, options?: EventListenerOptions | boolean) {
+    if (type === 'abort') imageAbortListenersRemoved += 1;
+    return removeAbortListener(type, listener, options);
+  }
+});
+const canceledBeforeImageAbort = canceledImageTimeouts;
+const abortedImageResolution = imageTransport.resolve('images/aborted.png', imageAbortSignal);
+assert.deepEqual(postedImageRequest, {
+  type: 'resolveImageSrc', requestId: 'img-2', url: 'images/aborted.png'
+});
+assert.equal(imageAbortListenersAdded, 1);
+imageAbortController.abort();
+assert.deepEqual(await abortedImageResolution, {
+  ok: false,
+  error: { code: 'operation-failed', message: 'Image source resolution was cancelled' }
+});
+assert.equal(canceledImageTimeouts, canceledBeforeImageAbort + 1, 'abort must cancel its timeout');
+assert.equal(imageAbortListenersRemoved, 1, 'abort must remove its transport listener');
+assert.equal(imageTransport.accept({
+  type: 'resolvedImageSrc', requestId: 'img-2',
+  result: { ok: true, value: { resolvedUrl: 'vscode-webview://late' } }
+}), false, 'late response after abort must be rejected');
 assert.deepEqual(decodeResolveWikiLinksRequest({ type: 'resolveWikiLinks', requestId: 'wiki-1', targets: ['One', 'Two'] }), {
   type: 'resolveWikiLinks', requestId: 'wiki-1', targets: ['One', 'Two']
 });

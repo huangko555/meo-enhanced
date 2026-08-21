@@ -1,4 +1,3 @@
-import { undoDepth } from '@codemirror/commands';
 import { createEditor } from './test-editor-factory';
 import { setImageSrcResolver } from '../webview/src/helpers/images';
 
@@ -6,12 +5,8 @@ import { setImageSrcResolver } from '../webview/src/helpers/images';
   SourceLightweightImageHarness?: {
     createEditor: typeof createEditor;
     setImageSrcResolver: typeof setImageSrcResolver;
-    historyDepth(editor: ReturnType<typeof createEditor>): number;
   };
 }).SourceLightweightImageHarness = {
   createEditor,
-  setImageSrcResolver,
-  historyDepth(editor) {
-    return undoDepth(editor.view.state);
-  }
+  setImageSrcResolver
 };

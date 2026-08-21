@@ -2656,12 +2656,11 @@ export function createEditor({
 
       const previousMode = currentMode;
       currentMode = nextMode;
+      let acquiredImagePresentationResources: (() => void) | null = null;
       if (nextMode === 'source') {
         tableColumnWidthAdapter.adapter.release();
-        releaseImagePresentationResources?.();
-        releaseImagePresentationResources = null;
       } else {
-        releaseImagePresentationResources = imagePresentationFactory.acquire();
+        acquiredImagePresentationResources = imagePresentationFactory.acquire();
       }
       try {
         view.dispatch({
@@ -2672,20 +2671,24 @@ export function createEditor({
             )
           ]
         });
-        forceParsing(view, view.state.doc.length, 500);
-        if (nextMode === 'live') tableColumnWidthAdapter.adapter.acquire();
       } catch (error) {
         currentMode = previousMode;
         if (previousMode === 'live') {
           tableColumnWidthAdapter.adapter.acquire();
-          releaseImagePresentationResources = imagePresentationFactory.acquire();
         } else {
-          releaseImagePresentationResources?.();
-          releaseImagePresentationResources = null;
+          acquiredImagePresentationResources?.();
         }
         syncModeClasses();
         throw error;
       }
+      if (nextMode === 'source') {
+        releaseImagePresentationResources?.();
+        releaseImagePresentationResources = null;
+      } else {
+        releaseImagePresentationResources = acquiredImagePresentationResources;
+      }
+      forceParsing(view, view.state.doc.length, 500);
+      if (nextMode === 'live') tableColumnWidthAdapter.adapter.acquire();
       syncModeClasses();
       syncGitGutterVisibility();
 

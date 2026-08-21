@@ -126,6 +126,7 @@ async function main(): Promise<void> {
       external.present('![external](slow-external.png)', 'slow-external.png');
       const externalId = external.state().presentationId;
       external.externalDocumentPresented();
+      const externalReplayId = external.state().presentationId;
       pending.get('slow-external.png')?.forEach((resolve: (value: string) => void) => resolve(svg('external', '#66a')));
       await external.whenCurrentPresentationSettles();
 
@@ -174,7 +175,7 @@ async function main(): Promise<void> {
           resolveDelta: sameSourceCountsAfter.resolveCalls - sameSourceCountsBefore.resolveCalls,
           loadDelta: sameSourceCountsAfter.loadCalls - sameSourceCountsBefore.loadCalls
         },
-        external: { id: externalId, state: external.state() },
+        external: { id: externalId, replayId: externalReplayId, state: external.state() },
         survivingShared,
         rebuiltShared,
         counts,
@@ -205,7 +206,12 @@ async function main(): Promise<void> {
       { resolveDelta: 0, loadDelta: 0 },
       'same-source restart should advance presentation without repeating shared resource work'
     );
-    assert.deepEqual(result.external.state, { phase: 'idle', presentationId: null, sourceKey: null });
+    assert.notEqual(result.external.replayId, result.external.id);
+    assert.deepEqual(result.external.state, {
+      phase: 'ready',
+      presentationId: result.external.replayId,
+      sourceKey: '![external](slow-external.png)'
+    });
     assert.notEqual(result.survivingShared, '', 'disposing one subscriber cancelled the shared resource');
     assert.notEqual(result.rebuiltShared, '', 'hidden Widget rebuild did not restore the cached image');
     assert.deepEqual(

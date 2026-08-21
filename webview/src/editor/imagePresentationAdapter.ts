@@ -60,7 +60,12 @@ type QueuedLoad = {
   readonly cancel: () => void;
 };
 
+type ImageResourceLease = {
+  released: boolean;
+};
+
 type ImageResourceGeneration = {
+  readonly leases: Set<ImageResourceLease>;
   readonly abortController: AbortController;
   readonly releasedResult: Promise<null>;
   readonly settleReleased: () => void;
@@ -100,15 +105,17 @@ export function createImagePresentationResourcePool(
   const maxQueuedLoads = options.maxQueuedLoads ?? DEFAULT_MAX_QUEUED_LOADS;
   const failureRetryMs = options.failureRetryMs ?? DEFAULT_FAILURE_RETRY_MS;
   let disposed = false;
-  let consumers = 0;
   let currentGeneration: ImageResourceGeneration | null = null;
 
-  const createGeneration = (): ImageResourceGeneration => {
+  const createGeneration = (
+    leases: readonly ImageResourceLease[] = []
+  ): ImageResourceGeneration => {
     let settleReleased!: () => void;
     const releasedResult = new Promise<null>((resolve) => {
       settleReleased = () => resolve(null);
     });
     return {
+      leases: new Set(leases),
       abortController: new AbortController(),
       releasedResult,
       settleReleased,
@@ -123,10 +130,16 @@ export function createImagePresentationResourcePool(
     };
   };
 
-  const releaseGeneration = (): void => {
-    const generation = currentGeneration;
-    if (!generation) return;
-    currentGeneration = null;
+  const releaseGeneration = (
+    generation: ImageResourceGeneration,
+    releaseLeases: boolean
+  ): void => {
+    if (currentGeneration === generation) currentGeneration = null;
+    if (releaseLeases) {
+      for (const lease of generation.leases) lease.released = true;
+    }
+    generation.leases.clear();
+    if (generation.released) return;
     generation.released = true;
     generation.abortController.abort();
     generation.settleReleased();
@@ -265,20 +278,23 @@ export function createImagePresentationResourcePool(
   return {
     acquire() {
       if (disposed) return () => {};
-      if (consumers === 0) currentGeneration = createGeneration();
-      consumers += 1;
-      let released = false;
+      if (!currentGeneration) currentGeneration = createGeneration();
+      const lease: ImageResourceLease = { released: false };
+      currentGeneration.leases.add(lease);
       return () => {
-        if (released || disposed) return;
-        released = true;
-        consumers -= 1;
-        if (consumers === 0) releaseGeneration();
+        if (lease.released) return;
+        lease.released = true;
+        const generation = currentGeneration;
+        if (!generation || !generation.leases.delete(lease)) return;
+        if (generation.leases.size === 0) releaseGeneration(generation, false);
       };
     },
     invalidate() {
-      if (disposed || consumers === 0) return;
-      releaseGeneration();
-      currentGeneration = createGeneration();
+      const generation = currentGeneration;
+      if (disposed || !generation) return;
+      const activeLeases = [...generation.leases];
+      releaseGeneration(generation, false);
+      currentGeneration = createGeneration(activeLeases);
     },
     resolve,
     getResolved(contextKey, rawSrc) {
@@ -301,8 +317,8 @@ export function createImagePresentationResourcePool(
     dispose() {
       if (disposed) return;
       disposed = true;
-      consumers = 0;
-      releaseGeneration();
+      const generation = currentGeneration;
+      if (generation) releaseGeneration(generation, true);
     }
   };
 }
@@ -399,8 +415,7 @@ export function createImagePresentationFactory(
   options: ImagePresentationFactoryOptions
 ): ImagePresentationFactory {
   const handles = new Set<ImagePresentationHandle>();
-  let resourceConsumers = 0;
-  let releaseResources: (() => void) | null = null;
+  const releaseResourceLeases = new Set<() => void>();
   let disposed = false;
 
   const create = (view: ImagePresentationView): ImagePresentationHandle => {
@@ -434,17 +449,16 @@ export function createImagePresentationFactory(
   return {
     acquire() {
       if (disposed) return () => {};
-      if (resourceConsumers === 0) releaseResources = options.resources.acquire();
-      resourceConsumers += 1;
+      const releasePoolLease = options.resources.acquire();
       let released = false;
-      return () => {
-        if (released || disposed) return;
+      const release = () => {
+        if (released) return;
         released = true;
-        resourceConsumers -= 1;
-        if (resourceConsumers !== 0) return;
-        releaseResources?.();
-        releaseResources = null;
+        releaseResourceLeases.delete(release);
+        releasePoolLease();
       };
+      releaseResourceLeases.add(release);
+      return release;
     },
     async preload(rawSrc) {
       if (disposed) return;
@@ -455,17 +469,16 @@ export function createImagePresentationFactory(
     create,
     externalDocumentPresented() {
       if (disposed) return;
-      for (const handle of handles) handle.externalDocumentPresented();
       options.resources.invalidate();
+      for (const handle of handles) handle.externalDocumentPresented();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       for (const handle of [...handles]) handle.dispose();
       handles.clear();
-      resourceConsumers = 0;
-      releaseResources?.();
-      releaseResources = null;
+      for (const release of [...releaseResourceLeases]) release();
+      releaseResourceLeases.clear();
     }
   };
 }
