@@ -10,6 +10,10 @@ const previewAdapterSource = readFileSync(
   new URL('../webview/src/adapters/previewWebviewAdapter.ts', import.meta.url),
   'utf8'
 );
+const hostSessionSource = readFileSync(
+  new URL('../src/extension/panelSession.ts', import.meta.url),
+  'utf8'
+);
 
 for (const legacyPattern of [
   /\blet currentMode\b/,
@@ -57,5 +61,10 @@ assert.equal(
   'Effect Adapter must not copy Application mode or transition state'
 );
 assert.equal(previewAdapterSource.includes('restoreActive'), false);
+assert.equal(
+  /\blet\s+mode:\s*EditorMode\b|\bgetMode:\s*\(\)\s*=>\s*mode\b/.test(hostSessionSource),
+  false,
+  'Host must persist accepted effects without copying the current Editor Mode owner'
+);
 
 console.log('Editor Mode production cutover guards passed');

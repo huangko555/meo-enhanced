@@ -22,7 +22,7 @@ export type EditorModeEffectAdapter = {
 export type EditorModeEffectCapabilities = {
   commitTransientEdits(): void;
   scheduleMount?(run: () => void): () => void;
-  mountEditor(mode: EditableMode): void | Promise<void>;
+  mountEditor(mode: EditableMode, signal: AbortSignal): void | Promise<void>;
   applyEditorMode(mode: EditableMode): void | Promise<void>;
   setPreviewActive(active: boolean, restoreLine: number | null): void;
   setEditorVisible(visible: boolean): void;
@@ -64,6 +64,7 @@ export function createEditorModeEffectAdapter(
 ): EditorModeEffectAdapter {
   let cancelScheduledMount: (() => void) | null = null;
   let resolveScheduledMount: ((run: boolean) => void) | null = null;
+  let mountAbortController: AbortController | null = null;
 
   const applyPresentation = (presentation: EditorModePresentation): void => {
     if (presentation.closeFind) capabilities.closeFind();
@@ -137,9 +138,12 @@ export function createEditorModeEffectAdapter(
         case 'showNotice':
           bestEffort('show-notice', () => capabilities.showNotice(effect.notice), capabilities.reportError);
           return {};
-        case 'scheduleEditorMount':
+        case 'scheduleEditorMount': {
+          mountAbortController?.abort();
+          const controller = new AbortController();
+          mountAbortController = controller;
           return {
-            immediate: { type: 'editorMountStarted' },
+            immediate: { type: 'editorMountStarted', mountId: effect.mountId },
             completion: new Promise<boolean>((resolve) => {
               cancelScheduledMount?.();
               resolveScheduledMount?.(false);
@@ -157,22 +161,31 @@ export function createEditorModeEffectAdapter(
             })
               .then(async (run): Promise<EditorModeInput | null> => {
                 if (!run) return null;
-                await capabilities.mountEditor(effect.mode);
-                return { type: 'editorMountSucceeded' };
+                await capabilities.mountEditor(effect.mode, controller.signal);
+                if (controller.signal.aborted) return null;
+                if (mountAbortController === controller) mountAbortController = null;
+                return { type: 'editorMountSucceeded', mountId: effect.mountId };
               })
-              .catch((error): EditorModeInput => ({
-                type: 'editorMountFailed',
-                failure: capabilities.classifyError(
-                  error,
-                  effect.mode === 'live' ? 'mount-live' : 'mount-source'
-                )
-              }))
+              .catch((error): EditorModeInput => {
+                if (mountAbortController === controller) mountAbortController = null;
+                return {
+                  type: 'editorMountFailed',
+                  mountId: effect.mountId,
+                  failure: capabilities.classifyError(
+                    error,
+                    effect.mode === 'live' ? 'mount-live' : 'mount-source'
+                  )
+                };
+              })
           };
+        }
         case 'disposeMode':
           cancelScheduledMount?.();
           cancelScheduledMount = null;
           resolveScheduledMount?.(false);
           resolveScheduledMount = null;
+          mountAbortController?.abort();
+          mountAbortController = null;
           capabilities.dispose();
           return {};
       }

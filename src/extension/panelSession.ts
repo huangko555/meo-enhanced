@@ -131,7 +131,6 @@ export type PanelSession = {
   document: vscode.TextDocument;
   documentUri: vscode.Uri;
   gitDocumentState: GitDocumentState;
-  getMode: () => EditorMode;
   ensureInitDelivered: () => Promise<void>;
   requestExportSnapshot: () => Promise<{ text: string; environment?: ExportStyleEnvironment }>;
   refreshGitBaseline: (options?: GitBaselineRefreshOptions) => void;
@@ -177,7 +176,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
 
   const documentKey = document.uri.toString();
   const persistedMode = context.globalState.get(EDITOR_MODE_STATE_KEY);
-  let mode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
+  const initialMode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
   let applyQueue: Promise<void> = Promise.resolve();
   // Flush responses wait only for preceding TextDocument I/O, never for a manual save
   // that may itself be inside applyQueue and awaiting VS Code's will-save lifecycle.
@@ -321,7 +320,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       version: document.version,
       savedRevision,
       diagnostics: diagnostics.read(),
-      mode,
+      mode: initialMode,
       previewAppearance: getPreviewAppearance(),
       previewSourceColoring: getPreviewSourceColoring(),
       editorAppearance: getEditorAppearance(),
@@ -463,7 +462,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     document,
     documentUri,
     gitDocumentState,
-    getMode: () => mode,
     ensureInitDelivered,
     requestExportSnapshot,
     refreshGitBaseline,
@@ -484,8 +482,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         if (!isEditorMode(raw.mode)) {
           return;
         }
-        mode = raw.mode;
-        await context.globalState.update(EDITOR_MODE_STATE_KEY, mode);
+        await context.globalState.update(EDITOR_MODE_STATE_KEY, raw.mode);
         return;
       case 'setGitChangesGutter': {
         const visible = raw.visible ?? raw.enabled;

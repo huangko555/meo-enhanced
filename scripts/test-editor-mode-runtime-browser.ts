@@ -19,14 +19,42 @@ async function main(): Promise<void> {
 
   const browser = await launchTestBrowser();
   try {
-    const page = await browser.newPage();
-    await page.setContent(`<!doctype html><body>
+    const createPage = async () => {
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html><body>
+      <button id="live-mode">Live</button><button id="source-mode">Source</button>
+      <button id="preview-mode">Preview</button>
       <div id="mode"></div><div id="search"></div><div id="outline"></div>
       <button id="replace"></button><div id="selection-menu"></div>
       <div id="editor"></div><div id="preview" hidden>Preview</div>
     </body>`);
-    await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
-    await page.addScriptTag({ path: path.join(tempDir, 'candidate.js') });
+      await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+      await page.addScriptTag({ path: path.join(tempDir, 'candidate.js') });
+      return page;
+    };
+
+    const preemptionPage = await createPage();
+    await preemptionPage.evaluate(() => {
+      void (window as any).__editorModeCandidate.initializeWithHeldMount();
+    });
+    await preemptionPage.waitForFunction(() => (
+      (window as any).__editorModeCandidate.snapshot().events.includes('mount-wait:live')
+    ));
+    await preemptionPage.click('#source-mode');
+    await preemptionPage.waitForSelector('.cm-editor');
+    await preemptionPage.evaluate(() => (window as any).__editorModeCandidate.releaseMount());
+    await preemptionPage.evaluate(() => (window as any).__editorModeCandidate.whenIdle());
+    const preempted = await preemptionPage.evaluate(() => (window as any).__editorModeCandidate.snapshot());
+    assert.equal(preempted.state.mode, 'source');
+    assert.deepEqual(
+      preempted.editorCreateModes,
+      ['source'],
+      'a stale Live mount must be aborted before production createEditor starts heavy Live resources'
+    );
+    assert.equal(preempted.events.includes('mount-aborted:live'), true);
+    await preemptionPage.close();
+
+    const page = await createPage();
     await page.evaluate(() => (window as any).__editorModeCandidate.initialize());
     await page.waitForSelector('.cm-editor');
 
@@ -41,7 +69,20 @@ async function main(): Promise<void> {
     assert.match(snapshot.persisted, /"mode":"live"/);
     assert.ok(snapshot.events.indexOf('persist:live:live') < snapshot.events.indexOf('post:live'));
 
-    await page.evaluate(() => (window as any).__editorModeCandidate.request('source', true));
+    const originalText = snapshot.text;
+    await page.evaluate(() => (window as any).__editorModeCandidate.focusEditor());
+    await page.keyboard.type('history-marker');
+    await page.waitForFunction(() => (
+      (window as any).__editorModeCandidate.snapshot().text !== '# Editor Mode\n\nalpha\nbeta\ngamma'
+    ));
+    const editedText = await page.evaluate(() => (window as any).__editorModeCandidate.snapshot().text);
+
+    await page.keyboard.down('Alt');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('KeyM');
+    await page.keyboard.up('Shift');
+    await page.keyboard.up('Alt');
+    await page.evaluate(() => (window as any).__editorModeCandidate.whenIdle());
     snapshot = await page.evaluate(() => (window as any).__editorModeCandidate.snapshot());
     assert.equal(snapshot.state.mode, 'source');
     assert.equal(snapshot.editorMode, 'source');
@@ -76,6 +117,13 @@ async function main(): Promise<void> {
     assert.equal(snapshot.editorVisible, true);
     assert.equal(snapshot.editorFocused, true);
     assert.equal(snapshot.events.includes('restore:preview:27'), true, 'Preview viewport must cross the Adapter only');
+
+    await page.evaluate(() => (window as any).__editorModeCandidate.undo());
+    snapshot = await page.evaluate(() => (window as any).__editorModeCandidate.snapshot());
+    assert.equal(snapshot.text, originalText, 'mode round-trips must not enter native document history');
+    await page.evaluate(() => (window as any).__editorModeCandidate.redo());
+    snapshot = await page.evaluate(() => (window as any).__editorModeCandidate.snapshot());
+    assert.equal(snapshot.text, editedText, 'redo must remain continuous after UI, keyboard, and public setMode paths');
 
     await page.evaluate(() => {
       const candidate = (window as any).__editorModeCandidate;

@@ -1331,6 +1331,7 @@ const setEditorTextSafely = async (
   context: string,
   resetHistory = false
 ): Promise<boolean> => {
+  const basisManualIntentId = editorModeApplication.getState().manualIntent?.id ?? 0;
   if (!editor) {
     return false;
   }
@@ -1356,7 +1357,7 @@ const setEditorTextSafely = async (
 
       failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
       await editorModeRuntime.dispatch({
-        type: 'requestMode', mode: 'source', source: 'render-failure'
+        type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId
       });
       if (!editor || getActiveEditorMode() !== 'source') return false;
       try {
@@ -1458,11 +1459,12 @@ const handleLocalEditorChange = (nextText: string) => {
   findPanelController.updateFindStatusSummary();
 };
 
-const mountEditorForMode = async (mode: 'live' | 'source'): Promise<void> => {
+const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal): Promise<void> => {
   if (editor) return;
   const createEditor = await loadCreateEditorFactory();
+  if (signal.aborted) return;
   const initialText = pendingInitialText;
-  if (editor || initialText === null) return;
+  if (signal.aborted || editor || initialText === null) return;
 
   editor = createEditor({
     parent: editorHost,

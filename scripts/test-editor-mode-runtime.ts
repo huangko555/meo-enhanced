@@ -65,7 +65,8 @@ await runtime.dispatch({ type: 'restoreLocal', mode: 'live', lastEditableMode: '
 await runtime.dispatch({ type: 'initialize', hostMode: 'source' });
 assert.equal(runtime.getState().editorMount, 'mounted');
 assert.equal(mountAttempts, 2, 'transient mount failure must retry once through Application effects');
-assert.deepEqual(events.slice(0, 4), ['mount:1:live', 'notice:mount-retry', 'mount:2:live', 'commit']);
+assert.ok(events.indexOf('mount:1:live') < events.indexOf('notice:mount-retry'));
+assert.ok(events.indexOf('notice:mount-retry') < events.indexOf('mount:2:live'));
 
 events.length = 0;
 await runtime.dispatch({ type: 'requestMode', mode: 'source', source: 'user', restoreEditorFocus: true });

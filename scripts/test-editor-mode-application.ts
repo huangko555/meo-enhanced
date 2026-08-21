@@ -8,15 +8,27 @@ import {
 
 const effectTypes = (effects: readonly EditorModeEffect[]): string[] => effects.map((effect) => effect.type);
 const viewport: EditorModeViewport = { owner: 'editor', topLine: 42, topLineOffset: 0.25 };
+type ModeApplication = ReturnType<typeof createEditorModeApplication>;
+const pendingMountId = (application: ModeApplication): number => {
+  const mountId = application.getState().pendingMount?.id;
+  assert.ok(mountId);
+  return mountId;
+};
+const mountEditor = (application: ModeApplication): void => {
+  const mountId = pendingMountId(application);
+  application.dispatch({ type: 'editorMountStarted', mountId });
+  application.dispatch({ type: 'editorMountSucceeded', mountId });
+};
 
 const hostInit = createEditorModeApplication();
 assert.deepEqual(hostInit.getState(), {
-  lifecycle: 'awaiting-init', mode: 'live', lastEditableMode: 'live', hasLocalPreference: false,
-  editorMount: 'unmounted', mountRecoveryAttempted: false, pendingTransition: null
+  lifecycle: 'awaiting-init', mode: 'live', requestedMode: 'live',
+  lastEditableMode: 'live', hasLocalPreference: false, intentId: 0, manualIntent: null,
+  editorMount: 'unmounted', pendingMount: null, mountRecoveryAttempted: false, pendingTransition: null
 });
 const hostInitEffects = hostInit.dispatch({ type: 'initialize', hostMode: 'source' });
 assert.deepEqual(effectTypes(hostInitEffects), ['scheduleEditorMount', 'commitTransientEdits', 'presentMode']);
-assert.deepEqual(hostInitEffects[0], { type: 'scheduleEditorMount', mode: 'source' });
+assert.deepEqual(hostInitEffects[0], { type: 'scheduleEditorMount', mountId: 1, mode: 'source' });
 assert.equal(hostInit.getState().mode, 'source');
 assert.equal(hostInitEffects.some((effect) => effect.type === 'postMode'), false, 'Host Init must not echo mode');
 
@@ -28,10 +40,9 @@ assert.equal(localInit.getState().lastEditableMode, 'source');
 assert.deepEqual(effectTypes(localInitEffects), [
   'scheduleEditorMount', 'commitTransientEdits', 'presentMode', 'persistMode', 'postMode'
 ]);
-assert.deepEqual(localInitEffects[0], { type: 'scheduleEditorMount', mode: 'source' });
+assert.deepEqual(localInitEffects[0], { type: 'scheduleEditorMount', mountId: 1, mode: 'source' });
 
-localInit.dispatch({ type: 'editorMountStarted' });
-localInit.dispatch({ type: 'editorMountSucceeded' });
+mountEditor(localInit);
 const leavePreview = localInit.dispatch({
   type: 'toggleMode', source: 'host-command',
   viewport: { owner: 'preview', topLine: 70, topLineOffset: 0 }, restoreEditorFocus: true
@@ -81,8 +92,7 @@ assert.equal(
 
 const fallback = createEditorModeApplication();
 fallback.dispatch({ type: 'initialize', hostMode: 'source' });
-fallback.dispatch({ type: 'editorMountStarted' });
-fallback.dispatch({ type: 'editorMountSucceeded' });
+mountEditor(fallback);
 assert.deepEqual(effectTypes(fallback.dispatch({ type: 'requestMode', mode: 'live', source: 'user', viewport })), [
   'commitTransientEdits', 'presentMode', 'applyEditorMode'
 ]);
@@ -100,8 +110,7 @@ assert.equal(fallback.getState().lastEditableMode, 'live', 'Legacy fallback keep
 
 const rollback = createEditorModeApplication();
 rollback.dispatch({ type: 'initialize', hostMode: 'source' });
-rollback.dispatch({ type: 'editorMountStarted' });
-rollback.dispatch({ type: 'editorMountSucceeded' });
+mountEditor(rollback);
 rollback.dispatch({ type: 'requestMode', mode: 'live', source: 'user' });
 const rollbackId = rollback.getState().pendingTransition?.id;
 assert.ok(rollbackId);
@@ -113,8 +122,7 @@ assert.equal(rollback.getState().lastEditableMode, 'live', 'rollback preserves L
 
 const rapid = createEditorModeApplication();
 rapid.dispatch({ type: 'initialize', hostMode: 'source' });
-rapid.dispatch({ type: 'editorMountStarted' });
-rapid.dispatch({ type: 'editorMountSucceeded' });
+mountEditor(rapid);
 rapid.dispatch({ type: 'requestMode', mode: 'live', source: 'user' });
 const staleId = rapid.getState().pendingTransition?.id;
 rapid.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
@@ -125,15 +133,86 @@ assert.deepEqual(effectTypes(rapid.dispatch({ type: 'editorModeApplied', transit
   'persistMode', 'postMode'
 ]);
 
+const manualMountIntent = createEditorModeApplication();
+const initialLiveMount = manualMountIntent.dispatch({ type: 'initialize', hostMode: 'live' });
+const initialLiveMountEffect = initialLiveMount.find((effect) => effect.type === 'scheduleEditorMount');
+assert.ok(initialLiveMountEffect?.type === 'scheduleEditorMount');
+assert.equal(
+  initialLiveMount.some((effect) => effect.type === 'scheduleEditorMount' && effect.mode === 'live'),
+  true
+);
+manualMountIntent.dispatch({ type: 'editorMountStarted', mountId: initialLiveMountEffect.mountId });
+const manualSourceWhileMounting = manualMountIntent.dispatch({
+  type: 'requestMode', mode: 'source', source: 'user'
+});
+assert.equal(
+  manualSourceWhileMounting.some(
+    (effect) => effect.type === 'scheduleEditorMount' && effect.mode === 'source'
+  ),
+  true,
+  'a manual Source intent must replace an older pending Live mount before createEditor runs'
+);
+manualMountIntent.dispatch({ type: 'editorMountSucceeded', mountId: initialLiveMountEffect.mountId });
+assert.notEqual(
+  manualMountIntent.getState().editorMount,
+  'mounted',
+  'the superseded Live mount completion must not claim the latest Source mount'
+);
+
+const manualBeatsAutomatic = createEditorModeApplication();
+manualBeatsAutomatic.dispatch({ type: 'initialize', hostMode: 'source' });
+mountEditor(manualBeatsAutomatic);
+manualBeatsAutomatic.dispatch({ type: 'requestMode', mode: 'live', source: 'user' });
+const manualLiveId = manualBeatsAutomatic.getState().pendingTransition?.id;
+assert.ok(manualLiveId);
+manualBeatsAutomatic.dispatch({ type: 'editorModeApplied', transitionId: manualLiveId });
+const staleAutomatic = manualBeatsAutomatic.dispatch({
+  type: 'requestMode',
+  mode: 'source',
+  source: 'render-failure',
+  basisManualIntentId: 0
+});
+assert.deepEqual(
+  staleAutomatic,
+  [],
+  'an automatic fallback based on an older intent must not override the latest manual Live choice'
+);
+assert.equal(manualBeatsAutomatic.getState().mode, 'live');
+
+assert.deepEqual(
+  manualBeatsAutomatic.dispatch({ type: 'requestMode', mode: 'live', source: 'user' }),
+  [],
+  'requesting the already active manual mode must be idempotent'
+);
+const currentManualIntentId = manualBeatsAutomatic.getState().manualIntent?.id;
+assert.ok(currentManualIntentId);
+assert.deepEqual(effectTypes(manualBeatsAutomatic.dispatch({
+  type: 'requestMode',
+  mode: 'source',
+  source: 'render-failure',
+  basisManualIntentId: currentManualIntentId
+})), ['commitTransientEdits', 'presentMode', 'applyEditorMode']);
+
+const isolatedSource = createEditorModeApplication();
+const isolatedLive = createEditorModeApplication();
+isolatedSource.dispatch({ type: 'initialize', hostMode: 'source' });
+isolatedLive.dispatch({ type: 'initialize', hostMode: 'live' });
+isolatedSource.dispatch({ type: 'requestMode', mode: 'live', source: 'user' });
+assert.equal(isolatedSource.getState().requestedMode, 'live');
+assert.equal(isolatedLive.getState().requestedMode, 'live');
+assert.equal(isolatedLive.getState().manualIntent, null, 'manual intent must remain isolated per Editor');
+
 const mountRetry = createEditorModeApplication();
 mountRetry.dispatch({ type: 'initialize', hostMode: 'live' });
-mountRetry.dispatch({ type: 'editorMountStarted' });
+let mountRetryId = pendingMountId(mountRetry);
+mountRetry.dispatch({ type: 'editorMountStarted', mountId: mountRetryId });
 assert.deepEqual(effectTypes(mountRetry.dispatch({
-  type: 'editorMountFailed', failure: 'transient-live'
+  type: 'editorMountFailed', mountId: mountRetryId, failure: 'transient-live'
 })), ['showNotice', 'scheduleEditorMount']);
-mountRetry.dispatch({ type: 'editorMountStarted' });
+mountRetryId = pendingMountId(mountRetry);
+mountRetry.dispatch({ type: 'editorMountStarted', mountId: mountRetryId });
 const exhaustedMountEffects = mountRetry.dispatch({
-  type: 'editorMountFailed', failure: 'transient-live'
+  type: 'editorMountFailed', mountId: mountRetryId, failure: 'transient-live'
 });
 assert.deepEqual(effectTypes(exhaustedMountEffects), ['showNotice']);
 assert.deepEqual(exhaustedMountEffects[0], { type: 'showNotice', notice: 'mount-failure' });
@@ -141,10 +220,11 @@ assert.equal(mountRetry.getState().editorMount, 'unmounted', 'mount retry must b
 
 const mountFallback = createEditorModeApplication();
 mountFallback.dispatch({ type: 'initialize', hostMode: 'live' });
-mountFallback.dispatch({ type: 'editorMountStarted' });
+const mountFallbackId = pendingMountId(mountFallback);
+mountFallback.dispatch({ type: 'editorMountStarted', mountId: mountFallbackId });
 assert.deepEqual(effectTypes(mountFallback.dispatch({
-  type: 'editorMountFailed', failure: 'live-incompatible'
-})), ['showNotice', 'commitTransientEdits', 'presentMode', 'postMode', 'scheduleEditorMount']);
+  type: 'editorMountFailed', mountId: mountFallbackId, failure: 'live-incompatible'
+})), ['showNotice', 'scheduleEditorMount', 'commitTransientEdits', 'presentMode', 'postMode']);
 assert.equal(mountFallback.getState().mode, 'source');
 assert.equal(mountFallback.getState().lastEditableMode, 'source');
 
@@ -153,7 +233,7 @@ disposed.dispatch({ type: 'initialize', hostMode: 'live' });
 assert.deepEqual(effectTypes(disposed.dispatch({ type: 'dispose' })), ['disposeMode']);
 assert.equal(disposed.getState().lifecycle, 'disposed');
 assert.deepEqual(disposed.dispatch({ type: 'requestMode', mode: 'preview', source: 'user' }), []);
-assert.deepEqual(disposed.dispatch({ type: 'editorMountStarted' }), []);
+assert.deepEqual(disposed.dispatch({ type: 'editorMountStarted', mountId: 1 }), []);
 
 const productionBootstrap = readFileSync(new URL('../webview/src/index.ts', import.meta.url), 'utf8');
 assert.equal(
