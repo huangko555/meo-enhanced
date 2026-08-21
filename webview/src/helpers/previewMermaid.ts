@@ -27,13 +27,18 @@ export function createPreviewMermaidRenderer(
   resources: MermaidDiagramRenderResources,
   reportError: (error: unknown) => void = () => undefined
 ) {
+  let activeConsumer: ReturnType<MermaidDiagramRenderResources['acquire']> | null = null;
+
   const render = (
     frameDocument: Document,
     appearance: PreviewAppearance,
     onDiagramRendered?: () => void,
     isCurrent: () => boolean = () => true
   ): Promise<void> => {
-    return resources.runExclusive(async () => {
+    activeConsumer?.release();
+    const consumer = resources.acquire();
+    activeConsumer = consumer;
+    return consumer.runExclusive(async () => {
       if (!isCurrent()) return;
       try {
         await renderMermaidBlocks(frameDocument, appearance, onDiagramRendered, isCurrent);
@@ -42,10 +47,19 @@ export function createPreviewMermaidRenderer(
       }
     }, 'high').catch((error) => {
       if (!(error instanceof MermaidDiagramResourceUnavailableError)) reportError(error);
+    }).finally(() => {
+      consumer.release();
+      if (activeConsumer === consumer) activeConsumer = null;
     });
   };
 
-  return { render };
+  return {
+    render,
+    dispose() {
+      activeConsumer?.release();
+      activeConsumer = null;
+    }
+  };
 }
 
 async function renderMermaidBlocks(

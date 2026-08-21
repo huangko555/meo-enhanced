@@ -8,7 +8,7 @@ import {
 } from './mermaidDiagram';
 import {
   getMermaidDiagramPresentationFactory,
-  type MermaidDiagramPresentationFactory
+  type MermaidDiagramPresentationConsumer
 } from '../editor/mermaidDiagramPresentation';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { getViewportController } from './viewportController';
@@ -356,7 +356,7 @@ class MermaidEditingController {
   private previewWidget: MermaidDiagramWidget | null = null;
   private previewTimer: number | null = null;
   private unsubscribeThemeRefresh: () => void;
-  private presentationFactory: MermaidDiagramPresentationFactory;
+  private presentationFactory: MermaidDiagramPresentationConsumer;
   private syncingFromOuter = false;
 
   constructor(

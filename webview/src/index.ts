@@ -950,11 +950,11 @@ const mermaidDiagramRenderPool = createMermaidDiagramRenderPool({
 });
 const mermaidDiagramPresentationFactory = createMermaidDiagramPresentationFactory({
   resources: mermaidDiagramRenderPool,
-  createHandle(view) {
+  createHandle(view, resources) {
     const application = createMermaidDiagramPresentationApplication();
     const executor = createMermaidDiagramPresentationEffectAdapter({
       view,
-      resources: mermaidDiagramRenderPool,
+      resources,
       normalizeSource: normalizeMermaidDiagramText
     });
     const runtime = createMermaidDiagramPresentationRuntime({ application, executor });

@@ -264,6 +264,7 @@ export function createEditor({
   if (!mermaidDiagramPresentationFactory) {
     throw new Error('Mermaid diagram presentation factory is required');
   }
+  const mermaidDiagramPresentationConsumer = mermaidDiagramPresentationFactory.createConsumer();
 
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
@@ -1815,6 +1816,9 @@ export function createEditor({
   let releaseImagePresentationResources = startMode === 'live'
     ? imagePresentationFactory.acquire()
     : null;
+  let releaseMermaidPresentationResources = startMode === 'live'
+    ? mermaidDiagramPresentationConsumer.acquire()
+    : null;
   const historyCompartment = new Compartment();
   const state = EditorState.create({
     doc: text,
@@ -2068,7 +2072,7 @@ export function createEditor({
       tableCommandEnvironmentFacet.of(tableCommandEnvironment),
       imagePresentationFactoryFacet.of(imagePresentationFactory),
       mermaidDiagramPresentationFactoryFacet.of(
-        mermaidDiagramPresentationFactory as MermaidDiagramPresentationFactory
+        mermaidDiagramPresentationConsumer
       ),
       modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
       searchQueryField,
@@ -2590,6 +2594,7 @@ export function createEditor({
       tableTransactionProvenanceAdapter.dispose();
       tableColumnWidthAdapter.adapter.dispose();
       view.destroy();
+      mermaidDiagramPresentationConsumer.dispose();
       imagePresentationFactory.dispose();
       imagePresentationResourcePool.dispose();
     },
@@ -2598,7 +2603,7 @@ export function createEditor({
       imagePresentationFactory.externalDocumentPresented();
       void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
       recentRenderedReplayPresentation = null;
-      mermaidDiagramPresentationFactory.externalDocumentPresented();
+      mermaidDiagramPresentationConsumer.externalDocumentPresented();
       const currentText = view.state.doc.toString();
       const syncChange = findSyncChange(currentText, textValue);
       if (!syncChange) {
@@ -2657,10 +2662,12 @@ export function createEditor({
       const previousMode = currentMode;
       currentMode = nextMode;
       let acquiredImagePresentationResources: (() => void) | null = null;
+      let acquiredMermaidPresentationResources: (() => void) | null = null;
       if (nextMode === 'source') {
         tableColumnWidthAdapter.adapter.release();
       } else {
         acquiredImagePresentationResources = imagePresentationFactory.acquire();
+        acquiredMermaidPresentationResources = mermaidDiagramPresentationConsumer.acquire();
       }
       try {
         view.dispatch({
@@ -2677,6 +2684,7 @@ export function createEditor({
           tableColumnWidthAdapter.adapter.acquire();
         } else {
           acquiredImagePresentationResources?.();
+          acquiredMermaidPresentationResources?.();
         }
         syncModeClasses();
         throw error;
@@ -2684,8 +2692,11 @@ export function createEditor({
       if (nextMode === 'source') {
         releaseImagePresentationResources?.();
         releaseImagePresentationResources = null;
+        releaseMermaidPresentationResources?.();
+        releaseMermaidPresentationResources = null;
       } else {
         releaseImagePresentationResources = acquiredImagePresentationResources;
+        releaseMermaidPresentationResources = acquiredMermaidPresentationResources;
       }
       if (nextMode === 'live') {
         // Live decorations consume the full Markdown tree. Bound the synchronous

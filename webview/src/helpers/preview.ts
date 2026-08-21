@@ -724,6 +724,7 @@ export function createPreviewController({
       requestGeneration += 1;
       frameGeneration += 1;
       mermaidPresentationGeneration += 1;
+      previewMermaidRenderer.dispose();
       activeFrameDocument = null;
       hasPendingRequest = false;
       pendingRestoreLine = null;

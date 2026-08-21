@@ -1,5 +1,6 @@
 import {
   MermaidDiagramResourceUnavailableError,
+  type MermaidDiagramRenderConsumer,
   type MermaidDiagramRenderRequest,
   type MermaidDiagramRenderResources,
   type MermaidDiagramRenderResult,
@@ -15,11 +16,35 @@ export type MermaidDiagramRenderPoolOptions = {
   readonly maxThemeListeners?: number;
 };
 
-type OperationJob<T = unknown> = {
-  readonly operation: () => Promise<T>;
-  readonly resolve: (value: T) => void;
+type RenderConsumerGroup = {
+  readonly retainedJobs: Set<OperationJob>;
+};
+
+type RenderConsumerRecord = {
+  active: boolean;
+  generation: number;
+  readonly group: RenderConsumerGroup;
+  readonly cacheKeys: Set<string>;
+  readonly waiters: Set<OperationWaiter>;
+};
+
+type OperationWaiter = {
+  readonly consumer: RenderConsumerRecord;
+  readonly generation: number;
+  readonly job: OperationJob;
+  readonly resolve: (value: unknown) => void;
   readonly reject: (reason: unknown) => void;
+  settled: boolean;
+};
+
+type OperationJob = {
+  readonly operation: () => Promise<unknown>;
+  readonly waiters: Set<OperationWaiter>;
   readonly external: boolean;
+  readonly resourceGeneration: number;
+  readonly cacheKey?: string;
+  readonly retainedGroups: Set<RenderConsumerGroup>;
+  state: 'queued' | 'running' | 'settled';
 };
 
 const DEFAULT_CACHE_LIMIT = 100;
@@ -41,18 +66,15 @@ export function createMermaidDiagramRenderPool(
   const maxQueuedOperations = options.maxQueuedOperations ?? DEFAULT_MAX_QUEUED_OPERATIONS;
   const maxThemeListeners = options.maxThemeListeners ?? DEFAULT_MAX_THEME_LISTENERS;
   const cache = new Map<string, MermaidDiagramRenderResult>();
-  const inFlight = new Map<string, Promise<MermaidDiagramRenderResult>>();
+  const renderJobs = new Map<string, OperationJob>();
   const heightCache = new Map<string, number>();
   const themeListeners = new Set<() => void>();
+  const consumers = new Set<RenderConsumerRecord>();
   const highPriority: OperationJob[] = [];
   const normalPriority: OperationJob[] = [];
-  let active = false;
+  let activeJob: OperationJob | null = null;
   let disposed = false;
   let resourceGeneration = 0;
-  let signalDisposed: (() => void) | null = null;
-  const disposedSignal = new Promise<void>((resolve) => {
-    signalDisposed = resolve;
-  });
   let renderSequence = 0;
   let initializedIdentity: string | null = null;
 
@@ -66,86 +88,353 @@ export function createMermaidDiagramRenderPool(
     }
   };
 
-  const runNext = (): void => {
-    if (active || disposed) return;
-    const job = highPriority.shift() ?? normalPriority.shift();
-    if (!job) return;
-    active = true;
-    void job.operation().then(job.resolve, job.reject).finally(() => {
-      if (job.external) initializedIdentity = null;
-      active = false;
-      runNext();
-    });
-  };
+  const unavailable = (message: string): MermaidDiagramRenderResult => ({
+    ok: false,
+    error: message
+  });
 
-  const enqueue = <T>(
-    operation: () => Promise<T>,
-    priority: MermaidRenderPriority,
-    external: boolean
-  ): Promise<T> => {
-    if (disposed) return Promise.reject(new MermaidDiagramResourceUnavailableError('Mermaid render Pool is disposed'));
-    if (highPriority.length + normalPriority.length >= maxQueuedOperations) {
-      return Promise.reject(new MermaidDiagramResourceUnavailableError('Mermaid render queue capacity exceeded'));
+  const removeQueuedJob = (job: OperationJob): void => {
+    for (const queue of [highPriority, normalPriority]) {
+      const index = queue.indexOf(job);
+      if (index >= 0) queue.splice(index, 1);
     }
-    return new Promise<T>((resolve, reject) => {
-      const job: OperationJob<T> = { operation, resolve, reject, external };
-      (priority === 'high' ? highPriority : normalPriority).push(job as OperationJob);
+    if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+  };
+
+  const settleWaiter = (
+    waiter: OperationWaiter,
+    outcome: { readonly value: unknown } | { readonly error: unknown }
+  ): void => {
+    if (waiter.settled) return;
+    waiter.settled = true;
+    waiter.consumer.waiters.delete(waiter);
+    waiter.job.waiters.delete(waiter);
+    if ('error' in outcome) waiter.reject(outcome.error);
+    else waiter.resolve(outcome.value);
+  };
+
+  const cancelIfOrphaned = (
+    job: OperationJob,
+    reusableGroup: RenderConsumerGroup | null
+  ): void => {
+    if (job.state === 'settled') return;
+    if (reusableGroup) {
+      job.retainedGroups.add(reusableGroup);
+      reusableGroup.retainedJobs.add(job);
+    }
+    if (job.waiters.size > 0) return;
+    if (reusableGroup) {
+      return;
+    }
+    if (job.retainedGroups.size > 0) return;
+    if (job.state === 'queued') removeQueuedJob(job);
+    else if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+  };
+
+  const invalidateConsumer = (
+    consumer: RenderConsumerRecord,
+    reason: MermaidDiagramResourceUnavailableError,
+    evictOwnedCache: boolean,
+    reusableGroup: RenderConsumerGroup | null
+  ): void => {
+    if (!consumer.active) return;
+    consumer.generation += 1;
+    const jobs = new Set<OperationJob>();
+    for (const waiter of [...consumer.waiters]) {
+      jobs.add(waiter.job);
+      settleWaiter(waiter, { error: reason });
+    }
+    if (evictOwnedCache) {
+      for (const job of jobs) {
+        job.retainedGroups.delete(consumer.group);
+        consumer.group.retainedJobs.delete(job);
+      }
+    }
+    for (const job of jobs) cancelIfOrphaned(job, reusableGroup);
+    if (evictOwnedCache) {
+      for (const key of consumer.cacheKeys) {
+        const shared = [...consumers].some((candidate) => (
+          candidate !== consumer && candidate.active && candidate.cacheKeys.has(key)
+        ));
+        if (!shared) cache.delete(key);
+      }
+    }
+    consumer.cacheKeys.clear();
+  };
+
+  const runNext = (): void => {
+    if (activeJob || disposed) return;
+    let job = highPriority.shift() ?? normalPriority.shift();
+    while (job && job.waiters.size === 0 && job.retainedGroups.size === 0) {
+      if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+      job.state = 'settled';
+      job = highPriority.shift() ?? normalPriority.shift();
+    }
+    if (!job) return;
+    activeJob = job;
+    job.state = 'running';
+    void job.operation().then(
+      (value) => {
+        if (
+          job.cacheKey &&
+          (job.waiters.size > 0 || job.retainedGroups.size > 0) &&
+          !disposed &&
+          job.resourceGeneration === resourceGeneration
+        ) {
+          remember(cache, job.cacheKey, value as MermaidDiagramRenderResult, cacheLimit);
+        }
+        for (const waiter of [...job.waiters]) settleWaiter(waiter, { value });
+      },
+      (error) => {
+        for (const waiter of [...job.waiters]) settleWaiter(waiter, { error });
+      }
+    ).finally(() => {
+      job.state = 'settled';
+      for (const group of job.retainedGroups) group.retainedJobs.delete(job);
+      job.retainedGroups.clear();
+      if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+      if (job.external) initializedIdentity = null;
+      activeJob = null;
       runNext();
     });
   };
 
-  const render = (request: MermaidDiagramRenderRequest): Promise<MermaidDiagramRenderResult> => {
-    if (disposed) return Promise.resolve({ ok: false, error: 'Mermaid render Pool is disposed' });
+  const enqueue = (
+    job: OperationJob,
+    priority: MermaidRenderPriority,
+  ): boolean => {
+    if (disposed) return false;
+    if (highPriority.length + normalPriority.length >= maxQueuedOperations) {
+      return false;
+    }
+    (priority === 'high' ? highPriority : normalPriority).push(job);
+    runNext();
+    return true;
+  };
+
+  const attach = <T>(job: OperationJob, consumer: RenderConsumerRecord): Promise<T> => (
+    new Promise<T>((resolve, reject) => {
+      job.retainedGroups.delete(consumer.group);
+      consumer.group.retainedJobs.delete(job);
+      const waiter: OperationWaiter = {
+        consumer,
+        generation: consumer.generation,
+        job,
+        resolve: (value) => resolve(value as T),
+        reject,
+        settled: false
+      };
+      consumer.waiters.add(waiter);
+      job.waiters.add(waiter);
+    })
+  );
+
+  const render = (
+    consumer: RenderConsumerRecord,
+    request: MermaidDiagramRenderRequest
+  ): Promise<MermaidDiagramRenderResult> => {
+    if (disposed || !consumer.active) {
+      return Promise.resolve(unavailable('Mermaid render consumer is released'));
+    }
     const key = cacheKeyFor(request);
+    consumer.cacheKeys.add(key);
     const cached = cache.get(key);
     if (cached) {
       remember(cache, key, cached, cacheLimit);
       return Promise.resolve(cached);
     }
-    const pending = inFlight.get(key);
-    if (pending) return pending;
+    const pending = renderJobs.get(key);
+    if (pending && pending.resourceGeneration === resourceGeneration) {
+      return attach<MermaidDiagramRenderResult>(pending, consumer).catch((error) => unavailable(
+        error instanceof Error ? error.message : String(error)
+      ));
+    }
 
     const generation = resourceGeneration;
-    const queuedOperation = enqueue(async () => {
-      const identity = JSON.stringify([request.themeKey, request.configKey]);
-      if (initializedIdentity !== identity) {
-        await options.initialize(request.themeKey, request.configKey);
-        if (!disposed && generation === resourceGeneration) initializedIdentity = identity;
-      }
-      return options.render(`mermaid-${++renderSequence}`, request.normalizedSource);
-    }, request.priority ?? 'normal', false)
-      .then(
-        (svg) => ({ result: { ok: true, svg } as MermaidDiagramRenderResult, cacheable: true }),
-        (error) => ({
-          result: {
+    const job: OperationJob = {
+      operation: async (): Promise<MermaidDiagramRenderResult> => {
+        try {
+          const identity = JSON.stringify([request.themeKey, request.configKey]);
+          if (initializedIdentity !== identity) {
+            await options.initialize(request.themeKey, request.configKey);
+            if (!disposed && generation === resourceGeneration) initializedIdentity = identity;
+          }
+          const svg = await options.render(`mermaid-${++renderSequence}`, request.normalizedSource);
+          return { ok: true, svg };
+        } catch (error) {
+          return {
             ok: false,
             error: error instanceof Error ? error.message : String(error)
-          } as MermaidDiagramRenderResult,
-          cacheable: !(error instanceof MermaidDiagramResourceUnavailableError)
-        })
-      )
-      .then(({ result, cacheable }) => {
-        if (cacheable && !disposed && generation === resourceGeneration) {
-          remember(cache, key, result, cacheLimit);
+          };
         }
-        return result;
+      },
+      waiters: new Set(),
+      external: false,
+      resourceGeneration: generation,
+      cacheKey: key,
+      retainedGroups: new Set(),
+      state: 'queued'
+    };
+    const result = attach<MermaidDiagramRenderResult>(job, consumer).catch((error) => unavailable(
+      error instanceof Error ? error.message : String(error)
+    ));
+    renderJobs.set(key, job);
+    if (!enqueue(job, request.priority ?? 'normal')) {
+      renderJobs.delete(key);
+      for (const waiter of [...job.waiters]) settleWaiter(waiter, {
+        error: new MermaidDiagramResourceUnavailableError('Mermaid render queue capacity exceeded')
       });
-    let operation!: Promise<MermaidDiagramRenderResult>;
-    operation = Promise.race([
-      queuedOperation,
-      disposedSignal.then((): MermaidDiagramRenderResult => ({
-        ok: false,
-        error: 'Mermaid render Pool is disposed'
-      }))
-    ]).finally(() => {
-      if (inFlight.get(key) === operation) inFlight.delete(key);
-    });
-    inFlight.set(key, operation);
-    return operation;
+    }
+    return result;
   };
 
+  const groupHasOtherConsumer = (
+    group: RenderConsumerGroup,
+    excluded: RenderConsumerRecord
+  ): boolean => [...consumers].some((candidate) => (
+    candidate !== excluded && candidate.active && candidate.group === group
+  ));
+
+  const releaseGroupIfUnused = (group: RenderConsumerGroup): void => {
+    if ([...consumers].some((consumer) => consumer.active && consumer.group === group)) return;
+    for (const job of [...group.retainedJobs]) {
+      group.retainedJobs.delete(job);
+      job.retainedGroups.delete(group);
+      if (job.waiters.size === 0) cancelIfOrphaned(job, null);
+    }
+  };
+
+  const invalidateGroup = (
+    group: RenderConsumerGroup,
+    reason: MermaidDiagramResourceUnavailableError,
+    evictOwnedCache: boolean
+  ): void => {
+    for (const consumer of [...consumers]) {
+      if (consumer.group === group) invalidateConsumer(consumer, reason, evictOwnedCache, null);
+    }
+    for (const job of [...group.retainedJobs]) {
+      group.retainedJobs.delete(job);
+      job.retainedGroups.delete(group);
+      if (job.waiters.size === 0) cancelIfOrphaned(job, null);
+    }
+  };
+
+  const releaseGroup = (
+    group: RenderConsumerGroup,
+    reason: MermaidDiagramResourceUnavailableError
+  ): void => {
+    invalidateGroup(group, reason, false);
+    for (const consumer of [...consumers]) {
+      if (consumer.group !== group) continue;
+      consumer.active = false;
+      consumers.delete(consumer);
+    }
+    if (consumers.size === 0) {
+      resourceGeneration += 1;
+      initializedIdentity = null;
+    }
+  };
+
+  const createConsumer = (
+    group: RenderConsumerGroup,
+    ownsGroup: boolean
+  ): MermaidDiagramRenderConsumer => {
+    const consumer: RenderConsumerRecord = {
+      active: true,
+      generation: 0,
+      group,
+      cacheKeys: new Set(),
+      waiters: new Set()
+    };
+    consumers.add(consumer);
+    return {
+      fork() {
+        if (!consumer.active || disposed) return createUnavailableConsumer();
+        return createConsumer(group, false);
+      },
+      render: (request) => render(consumer, request),
+      getCached(request) {
+        if (!consumer.active || disposed) return null;
+        const key = cacheKeyFor(request);
+        consumer.cacheKeys.add(key);
+        const cached = cache.get(key) ?? null;
+        if (cached) remember(cache, key, cached, cacheLimit);
+        return cached;
+      },
+      runExclusive<T>(
+        operation: () => Promise<T>,
+        priority: MermaidRenderPriority = 'normal'
+      ): Promise<T> {
+        if (!consumer.active || disposed) {
+          return Promise.reject(new MermaidDiagramResourceUnavailableError(
+            'Mermaid render consumer is released'
+          ));
+        }
+        const job: OperationJob = {
+          operation,
+          waiters: new Set(),
+          external: true,
+          resourceGeneration,
+          retainedGroups: new Set(),
+          state: 'queued'
+        };
+        const result = attach<T>(job, consumer);
+        if (!enqueue(job, priority)) {
+          for (const waiter of [...job.waiters]) settleWaiter(waiter, {
+            error: new MermaidDiagramResourceUnavailableError('Mermaid render queue capacity exceeded')
+          });
+        }
+        return result;
+      },
+      invalidate() {
+        const reason = new MermaidDiagramResourceUnavailableError(
+          'Mermaid render consumer generation was replaced'
+        );
+        if (ownsGroup) invalidateGroup(group, reason, true);
+        else invalidateConsumer(consumer, reason, true, null);
+      },
+      release() {
+        if (!consumer.active) return;
+        const reason = new MermaidDiagramResourceUnavailableError('Mermaid render consumer is released');
+        if (ownsGroup) {
+          releaseGroup(group, reason);
+          return;
+        }
+        invalidateConsumer(
+          consumer,
+          reason,
+          false,
+          groupHasOtherConsumer(group, consumer) ? group : null
+        );
+        consumer.active = false;
+        consumers.delete(consumer);
+        releaseGroupIfUnused(group);
+        if (consumers.size === 0) {
+          resourceGeneration += 1;
+          initializedIdentity = null;
+        }
+      }
+    };
+  };
+
+  const createUnavailableConsumer = (): MermaidDiagramRenderConsumer => ({
+    fork: createUnavailableConsumer,
+    render: async () => unavailable('Mermaid render Pool is disposed'),
+    getCached: () => null,
+    runExclusive: async () => {
+      throw new MermaidDiagramResourceUnavailableError('Mermaid render Pool is disposed');
+    },
+    invalidate() {},
+    release() {}
+  });
+
   return {
-    render,
+    acquire() {
+      if (disposed) {
+        return createUnavailableConsumer();
+      }
+      return createConsumer({ retainedJobs: new Set() }, true);
+    },
     getCached(request) {
       if (disposed) return null;
       const key = cacheKeyFor(request);
@@ -153,21 +442,18 @@ export function createMermaidDiagramRenderPool(
       if (cached) remember(cache, key, cached, cacheLimit);
       return cached;
     },
-    runExclusive(operation, priority = 'normal') {
-      const queuedOperation = enqueue(operation, priority, true);
-      return Promise.race([
-        queuedOperation,
-        disposedSignal.then(() => Promise.reject<never>(
-          new MermaidDiagramResourceUnavailableError('Mermaid render Pool is disposed')
-        ))
-      ]);
-    },
     refreshTheme() {
       if (disposed) return;
       cache.clear();
-      inFlight.clear();
       resourceGeneration += 1;
       initializedIdentity = null;
+      const reason = new MermaidDiagramResourceUnavailableError('Mermaid render theme generation was replaced');
+      for (const consumer of consumers) invalidateConsumer(consumer, reason, false, null);
+      for (const job of renderJobs.values()) {
+        for (const group of job.retainedGroups) group.retainedJobs.delete(job);
+        job.retainedGroups.clear();
+        if (job.waiters.size === 0) cancelIfOrphaned(job, null);
+      }
       for (const listener of themeListeners) listener();
     },
     subscribeThemeRefresh(listener) {
@@ -188,14 +474,25 @@ export function createMermaidDiagramRenderPool(
     dispose() {
       if (disposed) return;
       disposed = true;
-      signalDisposed?.();
-      signalDisposed = null;
       const error = new MermaidDiagramResourceUnavailableError('Mermaid render Pool is disposed');
-      for (const job of [...highPriority, ...normalPriority]) job.reject(error);
+      const groups = new Set([...consumers].map((consumer) => consumer.group));
+      for (const consumer of [...consumers]) {
+        invalidateConsumer(consumer, error, false, null);
+        consumer.active = false;
+      }
+      consumers.clear();
+      for (const group of groups) {
+        for (const job of group.retainedJobs) job.retainedGroups.delete(group);
+        group.retainedJobs.clear();
+      }
+      for (const job of [...highPriority, ...normalPriority]) {
+        for (const waiter of [...job.waiters]) settleWaiter(waiter, { error });
+        job.state = 'settled';
+      }
       highPriority.length = 0;
       normalPriority.length = 0;
       cache.clear();
-      inFlight.clear();
+      renderJobs.clear();
       heightCache.clear();
       resourceGeneration += 1;
       themeListeners.clear();

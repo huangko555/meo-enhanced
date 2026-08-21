@@ -17,10 +17,13 @@ let releaseFirstPreview!: () => void;
 const firstPreviewGate = new Promise<void>((resolve) => { releaseFirstPreview = resolve; });
 let previewResourceRequests = 0;
 const previewResources = {
-  runExclusive: async () => {
-    previewResourceRequests += 1;
-    if (previewResourceRequests === 1) await firstPreviewGate;
-  }
+  acquire: () => ({
+    runExclusive: async () => {
+      previewResourceRequests += 1;
+      if (previewResourceRequests === 1) await firstPreviewGate;
+    },
+    release() {}
+  })
 } as MermaidDiagramRenderResources;
 const previewRenderer = createPreviewMermaidRenderer(previewResources);
 const emptyFrame = {
@@ -39,14 +42,20 @@ if (previewResourceRequests !== 3) {
 releaseFirstPreview();
 await Promise.all(previewRequests);
 const rejectedPreviewRenderer = createPreviewMermaidRenderer({
-  runExclusive: () => Promise.reject(
-    new MermaidDiagramResourceUnavailableError('Mermaid render queue capacity exceeded')
-  )
+  acquire: () => ({
+    runExclusive: () => Promise.reject(
+      new MermaidDiagramResourceUnavailableError('Mermaid render queue capacity exceeded')
+    ),
+    release() {}
+  })
 } as MermaidDiagramRenderResources);
 await rejectedPreviewRenderer.render(emptyFrame, 'dark');
 const reportedPreviewErrors: unknown[] = [];
 const failedPreviewRenderer = createPreviewMermaidRenderer({
-  runExclusive: () => Promise.reject(new Error('runtime failed'))
+  acquire: () => ({
+    runExclusive: () => Promise.reject(new Error('runtime failed')),
+    release() {}
+  })
 } as MermaidDiagramRenderResources, (error) => reportedPreviewErrors.push(error));
 await failedPreviewRenderer.render(emptyFrame, 'dark');
 if (!(reportedPreviewErrors[0] instanceof Error)

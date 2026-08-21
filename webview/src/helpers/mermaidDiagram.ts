@@ -7,7 +7,7 @@ import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import type { MermaidDiagramRenderRequest } from '../application/mermaidDiagramRenderResources';
 import type {
-  MermaidDiagramPresentationFactory,
+  MermaidDiagramPresentationConsumer,
   MermaidDiagramPresentationHandle
 } from '../editor/mermaidDiagramPresentation';
 
@@ -76,7 +76,7 @@ function mermaidPreviewHeightKey(
 }
 
 export function getCachedMermaidPreviewHeight(
-  factory: MermaidDiagramPresentationFactory,
+  factory: MermaidDiagramPresentationConsumer,
   view: EditorView,
   diagramText: string,
   startLine: number
@@ -496,7 +496,7 @@ export class MermaidDiagramWidget extends WidgetType {
   previewResizeObserver: ResizeObserver | null;
   measuredHeight: number;
   indentColumns: number;
-  presentationFactory: MermaidDiagramPresentationFactory;
+  presentationFactory: MermaidDiagramPresentationConsumer;
   presentationHandle: MermaidDiagramPresentationHandle | null;
 
   constructor(
@@ -504,7 +504,7 @@ export class MermaidDiagramWidget extends WidgetType {
     startLine: number = 0,
     endLine: number = 0,
     options: {
-      presentationFactory: MermaidDiagramPresentationFactory;
+      presentationFactory: MermaidDiagramPresentationConsumer;
       cachePreviewHeight?: boolean;
       indentColumns?: number;
     }

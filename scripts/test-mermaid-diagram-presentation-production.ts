@@ -120,7 +120,7 @@ async function main(): Promise<void> {
       await settle();
       const cachedError = {
         errors: document.querySelectorAll('.meo-mermaid-error-badge').length,
-        reusedWithoutRender: calls.length === beforeCachedErrorCalls
+        retriedRender: calls.length > beforeCachedErrorCalls
       };
 
       presentText('```mermaid\nSLOW_OLD\n```');
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
     assert.equal(result.invalid.errors, 1);
     assert.equal(result.invalid.fallback, 'INVALID');
     assert.equal(result.recovered.marker, 'recovered', JSON.stringify(result.recovered));
-    assert.deepEqual(result.cachedError, { errors: 1, reusedWithoutRender: true });
+    assert.deepEqual(result.cachedError, { errors: 1, retriedRender: true });
     assert.deepEqual(result.rapid, { marker: 'new', oldVisible: false });
     assert.equal(result.theme.rerendered, true);
     assert.ok(result.theme.initializations >= 2);

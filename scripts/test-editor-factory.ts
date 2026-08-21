@@ -16,11 +16,11 @@ const resources = createMermaidDiagramRenderPool({
 });
 const factory = createMermaidDiagramPresentationFactory({
   resources,
-  createHandle(view) {
+  createHandle(view, consumer) {
     const application = createMermaidDiagramPresentationApplication();
     const executor = createMermaidDiagramPresentationEffectAdapter({
       view,
-      resources,
+      resources: consumer,
       normalizeSource: normalizeMermaidDiagramText
     });
     const runtime = createMermaidDiagramPresentationRuntime({ application, executor });

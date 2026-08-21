@@ -20,11 +20,11 @@ const mermaidResources = createMermaidDiagramRenderPool({
 });
 const mermaidPresentationFactory = createMermaidDiagramPresentationFactory({
   resources: mermaidResources,
-  createHandle(view) {
+  createHandle(view, consumer) {
     const application = createMermaidDiagramPresentationApplication();
     const executor = createMermaidDiagramPresentationEffectAdapter({
       view,
-      resources: mermaidResources,
+      resources: consumer,
       normalizeSource: normalizeMermaidDiagramText
     });
     const runtime = createMermaidDiagramPresentationRuntime({ application, executor });
@@ -41,15 +41,35 @@ const mermaidPresentationFactory = createMermaidDiagramPresentationFactory({
   }
 });
 
-const previewMermaidResources = {
-  runExclusive<T>(operation: () => Promise<T>, priority?: 'high' | 'normal') {
-    const testWindow = window as typeof window & { __previewMermaidRequests?: number };
-    testWindow.__previewMermaidRequests = (testWindow.__previewMermaidRequests ?? 0) + 1;
-    return mermaidResources.runExclusive(operation, priority);
+const previewMermaidResources: MermaidDiagramRenderResources = {
+  ...mermaidResources,
+  acquire() {
+    const consumer = mermaidResources.acquire();
+    return {
+      ...consumer,
+      runExclusive<T>(operation: () => Promise<T>, priority?: 'high' | 'normal') {
+        const testWindow = window as typeof window & { __previewMermaidRequests?: number };
+        testWindow.__previewMermaidRequests = (testWindow.__previewMermaidRequests ?? 0) + 1;
+        return consumer.runExclusive(operation, priority);
+      }
+    };
   }
-} as MermaidDiagramRenderResources;
+};
+
+const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
+  const consumer = mermaidResources.acquire();
+  try {
+    return await consumer.runExclusive(operation);
+  } finally {
+    consumer.release();
+  }
+};
 
 const previewMessages: unknown[] = [];
+type SharedMermaidEditorOptions = Omit<
+  Parameters<typeof createEditor>[0],
+  'mermaidDiagramPresentationFactory'
+>;
 const controller = createPreviewController({
   vscode: { postMessage(message) { previewMessages.push(message); } },
   getEditorAppearance: () => 'dark',
@@ -62,21 +82,28 @@ const controller = createPreviewController({
 document.body.append(controller.host);
 (window as typeof window & { __previewController?: typeof controller }).__previewController = controller;
 (window as typeof window & { __previewMessages?: unknown[] }).__previewMessages = previewMessages;
+(window as typeof window & {
+  __createSharedMermaidEditor?: (options: SharedMermaidEditorOptions) => ReturnType<typeof createEditor>;
+}).__createSharedMermaidEditor = (options) => createEditor({
+  ...options,
+  mermaidDiagramPresentationFactory: mermaidPresentationFactory
+});
 (window as typeof window & { __renderEditorMermaid?: (source: string) => HTMLElement }).__renderEditorMermaid = (source) => {
   const host = document.createElement('div');
   host.className = 'editor-host';
   document.body.appendChild(host);
-  createEditor({
+  (window as typeof window & {
+    __createSharedMermaidEditor?: (options: SharedMermaidEditorOptions) => ReturnType<typeof createEditor>;
+  }).__createSharedMermaidEditor?.({
     parent: host,
     text: `\`\`\`mermaid\n${source}\n\`\`\``,
     initialMode: 'live',
-    onApplyChanges() {},
-    mermaidDiagramPresentationFactory: mermaidPresentationFactory
+    onApplyChanges() {}
   });
   return host;
 };
 (window as typeof window & { __renderLiveMermaid?: () => Promise<string> }).__renderLiveMermaid = () =>
-  mermaidResources.runExclusive(async () => {
+  runExclusive(async () => {
     const mermaid = await loadMermaidRuntime();
     mermaid.initialize({
       startOnLoad: false,
@@ -90,6 +117,6 @@ document.body.append(controller.host);
 (window as typeof window & { __queueSlowLiveOperations?: (count: number, delayMs: number) => void })
   .__queueSlowLiveOperations = (count, delayMs) => {
     for (let index = 0; index < count; index += 1) {
-      void mermaidResources.runExclusive(() => new Promise((resolve) => window.setTimeout(resolve, delayMs)));
+      void runExclusive(() => new Promise((resolve) => window.setTimeout(resolve, delayMs)));
     }
   };
