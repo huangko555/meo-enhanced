@@ -30,9 +30,10 @@ async function main(): Promise<void> {
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 760, deviceScaleFactor: 1 });
     await page.setContent([
-      '<!doctype html><style>html,body{height:100%;margin:0}.host{height:24%;}</style>',
+      '<!doctype html><style>html,body{height:100%;margin:0}.host{height:180px;}</style>',
       '<div id="first" class="host"></div><div id="second" class="host"></div>',
-      '<div id="equal" class="host"></div><div id="error" class="host"></div>'
+      '<div id="equal" class="host"></div><div id="error" class="host"></div>',
+      '<div id="projection" class="host"></div>'
     ].join(''));
     await page.evaluate(() => {
       const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
@@ -43,7 +44,8 @@ async function main(): Promise<void> {
         imageErrors: 0,
         resolverSignals: [],
         resolverSignalsBySrc: {},
-        resolveCallsBySrc: {}
+        resolveCallsBySrc: {},
+        pendingLoadsBySrc: {}
       };
       Object.defineProperty(HTMLImageElement.prototype, 'src', {
         configurable: descriptor.configurable,
@@ -52,6 +54,12 @@ async function main(): Promise<void> {
         set(value: string) {
           const metrics = (window as any).__imageLifecycleMetrics;
           metrics.loadCalls += 1;
+          if (value.startsWith('deferred-load:')) {
+            const releases = metrics.pendingLoadsBySrc[value] ?? [];
+            releases.push((resolvedSrc: string) => descriptor.set!.call(this, resolvedSrc));
+            metrics.pendingLoadsBySrc[value] = releases;
+            return;
+          }
           if (value === 'invalid-image://broken') {
             this.addEventListener('error', () => { metrics.imageErrors += 1; }, { once: true });
           }
@@ -65,7 +73,7 @@ async function main(): Promise<void> {
     const initialText = '# Source\n\n![old](slow-old.png)';
     await page.evaluate((text) => {
       const harness = (window as any).SourceLightweightImageHarness;
-      const pending = new Map<string, Array<(value: string) => void>>();
+      const pending = new Map<string, Array<(value: string | null) => void>>();
       const svg = (label: string, color: string) => (
         `data:image/svg+xml,${encodeURIComponent(
           `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><rect width="160" height="80" fill="${color}"/><text x="8" y="42">${label}</text></svg>`
@@ -79,8 +87,10 @@ async function main(): Promise<void> {
         sourceSignals.push(signal ?? null);
         metrics.resolverSignalsBySrc[rawSrc] = sourceSignals;
         metrics.resolveCallsBySrc[rawSrc] = (metrics.resolveCallsBySrc[rawSrc] ?? 0) + 1;
-        if (rawSrc.startsWith('slow-')) {
-          return new Promise<string>((resolve) => {
+        if (rawSrc.startsWith('slow-') || (
+          rawSrc === 'projection-stable.png' && metrics.resolveCallsBySrc[rawSrc] > 1
+        )) {
+          return new Promise<string | null>((resolve) => {
             const waiters = pending.get(rawSrc) ?? [];
             waiters.push(resolve);
             pending.set(rawSrc, waiters);
@@ -256,6 +266,211 @@ async function main(): Promise<void> {
       'equal-text external must retry a failed current presentation in the new generation'
     );
 
+    const projectionText = [
+      '# Projection',
+      '![stable](projection-stable.png)',
+      ...Array.from({ length: 40 }, (_, index) => `paragraph ${index}`)
+    ].join('\n\n');
+    await page.evaluate((text) => {
+      const harness = (window as any).SourceLightweightImageHarness;
+      const state = (window as any).__imageLifecycle;
+      state.projection = harness.createEditor({
+        parent: document.getElementById('projection'),
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, projectionText);
+    await page.waitForFunction(() => (
+      document.querySelector('#projection .meo-md-image-img') !== null &&
+      document.querySelector('#projection .meo-md-image-controls') !== null
+    ));
+    await page.evaluate(() => {
+      const state = (window as any).__imageLifecycle;
+      const host = document.getElementById('projection');
+      const root = host?.querySelector<HTMLElement>('.meo-md-image');
+      const scroller = host?.querySelector<HTMLElement>('.cm-scroller');
+      if (!root || !scroller) throw new Error('projection fixture missing');
+      scroller.scrollTop = 24;
+      state.projectedImage = root.querySelector('.meo-md-image-img');
+      state.projectedControls = root.querySelector('.meo-md-image-controls');
+      state.projectionSnapshot = () => {
+        const image = root.querySelector<HTMLImageElement>('.meo-md-image-img');
+        const controls = root.querySelector('.meo-md-image-controls');
+        return {
+          image: image !== null,
+          controls: controls !== null,
+          fallback: root.classList.contains('meo-md-image-fallback'),
+          sameImage: image === state.projectedImage,
+          sameControls: controls === state.projectedControls,
+          src: image?.getAttribute('src') ?? '',
+          height: root.getBoundingClientRect().height,
+          scrollTop: scroller.scrollTop
+        };
+      };
+      state.projectionMutations = [];
+      state.projectionObserver = new MutationObserver(() => {
+        state.projectionMutations.push(state.projectionSnapshot());
+      });
+      state.projectionObserver.observe(root, { childList: true, subtree: true });
+    });
+    await waitForFrames(page, 3);
+    const projectionBaseline = await page.evaluate(() => (
+      (window as any).__imageLifecycle.projectionSnapshot()
+    ));
+    assert.ok(projectionBaseline.height > 0);
+
+    await page.evaluate((text) => {
+      (window as any).__imageLifecycle.projection.setText(text);
+    }, projectionText);
+    await page.waitForFunction(() => (
+      (window as any).__imageLifecycle.pending.get('projection-stable.png')?.length === 1
+    ));
+    const pendingResolveFrames = await page.evaluate(async () => {
+      const state = (window as any).__imageLifecycle;
+      const frames = [];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push(state.projectionSnapshot());
+      }
+      return frames;
+    });
+    for (const frame of pendingResolveFrames) {
+      assert.equal(frame.image, true);
+      assert.equal(frame.controls, true);
+      assert.equal(frame.fallback, false);
+      assert.equal(frame.sameImage, true);
+      assert.equal(frame.sameControls, true);
+      assert.equal(frame.src, projectionBaseline.src);
+      assert.ok(Math.abs(frame.height - projectionBaseline.height) < 0.5);
+      assert.equal(frame.scrollTop, projectionBaseline.scrollTop);
+    }
+
+    await page.evaluate(() => {
+      const state = (window as any).__imageLifecycle;
+      state.pending.get('projection-stable.png')?.[0]?.('deferred-load:projection-success');
+    });
+    await page.waitForFunction(() => (
+      (window as any).__imageLifecycleMetrics.pendingLoadsBySrc['deferred-load:projection-success']?.length === 1
+    ));
+    const pendingLoadFrames = await page.evaluate(async () => {
+      const state = (window as any).__imageLifecycle;
+      const frames = [];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push(state.projectionSnapshot());
+      }
+      return frames;
+    });
+    for (const frame of pendingLoadFrames) {
+      assert.equal(frame.sameImage, true);
+      assert.equal(frame.sameControls, true);
+      assert.equal(frame.fallback, false);
+      assert.ok(Math.abs(frame.height - projectionBaseline.height) < 0.5);
+      assert.equal(frame.scrollTop, projectionBaseline.scrollTop);
+    }
+
+    await page.evaluate(() => {
+      const state = (window as any).__imageLifecycle;
+      state.projectionMutations.length = 0;
+      (window as any).__imageLifecycleMetrics
+        .pendingLoadsBySrc['deferred-load:projection-success'][0](
+          state.svg('projection-success', '#68a')
+        );
+    });
+    await page.waitForFunction(() => (
+      document.querySelector('#projection .meo-md-image-img')
+        ?.getAttribute('src')?.includes('projection-success')
+    ));
+    await waitForFrames(page, 8);
+    const successfulProjection = await page.evaluate(() => {
+      const state = (window as any).__imageLifecycle;
+      return {
+        current: state.projectionSnapshot(),
+        mutations: state.projectionMutations
+      };
+    });
+    assert.equal(successfulProjection.current.image, true);
+    assert.equal(successfulProjection.current.controls, true);
+    assert.equal(successfulProjection.current.fallback, false);
+    assert.notEqual(successfulProjection.current.src, projectionBaseline.src);
+    assert.ok(Math.abs(successfulProjection.current.height - projectionBaseline.height) < 0.5);
+    assert.equal(successfulProjection.current.scrollTop, projectionBaseline.scrollTop);
+    assert.ok(successfulProjection.mutations.length >= 1);
+    for (const mutation of successfulProjection.mutations) {
+      assert.equal(mutation.image, true, 'success replacement exposed an image-free DOM state');
+      assert.equal(mutation.controls, true, 'success replacement exposed controls-free DOM state');
+      assert.equal(mutation.fallback, false, 'success replacement flashed fallback DOM');
+      assert.ok(Math.abs(mutation.height - projectionBaseline.height) < 0.5);
+      assert.equal(mutation.scrollTop, projectionBaseline.scrollTop);
+    }
+
+    await page.evaluate((text) => {
+      const state = (window as any).__imageLifecycle;
+      const root = document.querySelector('#projection .meo-md-image');
+      state.projectedImage = root?.querySelector('.meo-md-image-img');
+      state.projectedControls = root?.querySelector('.meo-md-image-controls');
+      state.projectionMutations.length = 0;
+      state.projection.setText(text);
+    }, projectionText);
+    await page.waitForFunction(() => (
+      (window as any).__imageLifecycle.pending.get('projection-stable.png')?.length === 2
+    ));
+    const pendingFailureFrames = await page.evaluate(async () => {
+      const state = (window as any).__imageLifecycle;
+      const frames = [];
+      for (let frame = 0; frame < 6; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push(state.projectionSnapshot());
+      }
+      return frames;
+    });
+    assert.equal(pendingFailureFrames.every((frame) => (
+      frame.sameImage && frame.sameControls && !frame.fallback
+    )), true, 'a pending failure replaced the ready projection before completion');
+    await page.evaluate(() => {
+      (window as any).__imageLifecycle.pending.get('projection-stable.png')?.[1]?.(null);
+    });
+    await page.waitForFunction(() => (
+      document.querySelector('#projection .meo-md-image-fallback') !== null
+    ));
+    assert.deepEqual(await page.evaluate(() => ({
+      image: document.querySelector('#projection .meo-md-image-img') !== null,
+      controls: document.querySelector('#projection .meo-md-image-controls') !== null,
+      fallback: document.querySelector('#projection .meo-md-image-fallback') !== null
+    })), { image: false, controls: false, fallback: true });
+
+    await page.evaluate((text) => {
+      const state = (window as any).__imageLifecycle;
+      state.projectionMutations.length = 0;
+      state.projection.setText(text);
+      state.projection.setText(text);
+    }, projectionText);
+    await page.waitForFunction(() => (
+      (window as any).__imageLifecycle.pending.get('projection-stable.png')?.length === 4
+    ));
+    await page.evaluate(() => {
+      const state = (window as any).__imageLifecycle;
+      state.pending.get('projection-stable.png')?.[2]?.(state.svg('intermediate-external', '#a66'));
+    });
+    await waitForFrames(page, 6);
+    assert.equal(await page.$('#projection .meo-md-image-img'), null,
+      'an intermediate external completion replaced the latest projection');
+    await page.evaluate(() => {
+      const state = (window as any).__imageLifecycle;
+      state.pending.get('projection-stable.png')?.[3]?.(state.svg('latest-external', '#6a8'));
+    });
+    await page.waitForFunction(() => (
+      document.querySelector('#projection .meo-md-image-img')
+        ?.getAttribute('src')?.includes('latest-external')
+    ));
+    assert.equal(
+      await page.$eval('#projection .meo-md-image-img', (image) => (
+        image.getAttribute('src')?.includes('intermediate-external') ?? false
+      )),
+      false
+    );
+
     await page.evaluate(() => {
       const harness = (window as any).SourceLightweightImageHarness;
       const state = (window as any).__imageLifecycle;
@@ -297,6 +512,8 @@ async function main(): Promise<void> {
       state.second.destroy();
       state.equal.destroy();
       state.error.destroy();
+      state.projectionObserver.disconnect();
+      state.projection.destroy();
     });
   } finally {
     await browser.close();

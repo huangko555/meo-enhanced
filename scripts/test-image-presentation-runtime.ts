@@ -37,7 +37,7 @@ const executor: ImagePresentationEffectExecutor = {
 const application = createImagePresentationApplication();
 const runtime = createImagePresentationRuntime({ application, executor });
 runtime.dispatch({ type: 'present', sourceKey: 'a', rawSrc: './a.png' });
-const firstId = application.getState().presentationId;
+const firstId = application.getState().current?.presentationId;
 assert.ok(firstId);
 assert.deepEqual(executed.map((effect) => effect.type), ['showFallback', 'resolveSource']);
 
@@ -47,7 +47,7 @@ await Promise.resolve();
 assert.equal(firstIdle, false, 'resolving presentation must not be idle');
 
 runtime.dispatch({ type: 'present', sourceKey: 'b', rawSrc: './b.png' });
-const secondId = application.getState().presentationId;
+const secondId = application.getState().current?.presentationId;
 assert.ok(secondId && secondId !== firstId);
 assert.deepEqual(executed.slice(-2).map((effect) => effect.type), [
   'showFallback', 'resolveSource'
@@ -58,7 +58,7 @@ deferred.find((item) => item.effect.presentationId === firstId)?.resolve({
 });
 await Promise.resolve();
 await Promise.resolve();
-assert.equal(application.getState().presentationId, secondId);
+assert.equal(application.getState().current?.presentationId, secondId);
 assert.equal(
   executed.some((effect) => effect.type === 'loadImage' && effect.presentationId === firstId),
   false,
@@ -77,15 +77,23 @@ const secondLoad = deferred.find((item) => (
 assert.ok(secondLoad, 'current resolve completion did not start image load');
 secondLoad.resolve({ type: 'imageLoaded', presentationId: secondId });
 await runtime.whenCurrentPresentationSettles();
-assert.equal(application.getState().phase, 'ready');
+assert.equal(application.getState().current?.phase, 'ready');
+assert.equal(application.getState().projected.phase, 'ready');
 assert.equal(firstIdle, true, 'old idle waiter should resolve when the replacement becomes idle');
 
+const fallbacksBeforeReadyReplacement = executed.filter((effect) => effect.type === 'showFallback').length;
 runtime.dispatch({ type: 'present', sourceKey: 'external', rawSrc: './external.png' });
-const externalId = application.getState().presentationId;
+const externalId = application.getState().current?.presentationId;
 assert.ok(externalId);
+assert.equal(application.getState().projected.phase, 'ready');
 runtime.dispatch({ type: 'externalDocumentPresented' });
-const externalReplayId = application.getState().presentationId;
+const externalReplayId = application.getState().current?.presentationId;
 assert.ok(externalReplayId && externalReplayId !== externalId);
+assert.equal(
+  executed.filter((effect) => effect.type === 'showFallback').length,
+  fallbacksBeforeReadyReplacement,
+  'ready replacement must never execute a fallback projection effect'
+);
 deferred.find((item) => item.effect.presentationId === externalId)?.resolve({
   type: 'sourceFailed', presentationId: externalId
 });
@@ -103,18 +111,23 @@ const externalReplayLoad = deferred.find((item) => (
 assert.ok(externalReplayLoad, 'external replay did not advance the current presentation to loading');
 externalReplayLoad.resolve({ type: 'imageLoaded', presentationId: externalReplayId });
 await runtime.whenCurrentPresentationSettles();
-assert.equal(application.getState().phase, 'ready');
+assert.equal(application.getState().current?.phase, 'ready');
+assert.equal(application.getState().projected.phase, 'ready');
+assert.equal(
+  executed.filter((effect) => effect.type === 'showFallback').length,
+  fallbacksBeforeReadyReplacement
+);
 
 runtime.dispatch({ type: 'present', sourceKey: 'dispose', rawSrc: './dispose.png' });
-const disposeId = application.getState().presentationId;
+const disposeId = application.getState().current?.presentationId;
 assert.ok(disposeId);
 runtime.dispose();
 assert.equal(executorDisposed, 1);
-assert.equal(application.getState().phase, 'disposed');
+assert.equal(application.getState().lifecycle, 'disposed');
 deferred.find((item) => item.effect.presentationId === disposeId)?.resolve({
   type: 'sourceFailed', presentationId: disposeId
 });
 await runtime.whenCurrentPresentationSettles();
-assert.equal(application.getState().phase, 'disposed');
+assert.equal(application.getState().lifecycle, 'disposed');
 
 console.log('image presentation runtime contracts passed');

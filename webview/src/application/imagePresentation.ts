@@ -1,15 +1,35 @@
-export type ImagePresentationPhase =
-  | 'idle'
+export type ImagePresentationWorkPhase =
   | 'resolving'
   | 'loading'
   | 'ready'
-  | 'fallback'
-  | 'disposed';
+  | 'error';
+
+export type ImagePresentationCurrent = {
+  readonly phase: ImagePresentationWorkPhase;
+  readonly presentationId: number;
+  readonly sourceKey: string;
+  readonly rawSrc: string;
+  readonly resolvedSrc: string | null;
+};
+
+export type ImageProjectedPresentation =
+  | { readonly phase: 'none' }
+  | {
+      readonly phase: 'fallback' | 'error';
+      readonly presentationId: number;
+      readonly sourceKey: string;
+    }
+  | {
+      readonly phase: 'ready';
+      readonly presentationId: number;
+      readonly sourceKey: string;
+      readonly resolvedSrc: string;
+    };
 
 export type ImagePresentationState = {
-  readonly phase: ImagePresentationPhase;
-  readonly presentationId: number | null;
-  readonly sourceKey: string | null;
+  readonly lifecycle: 'active' | 'disposed';
+  readonly current: ImagePresentationCurrent | null;
+  readonly projected: ImageProjectedPresentation;
 };
 
 export type ImagePresentationInput =
@@ -60,92 +80,109 @@ export type ImagePresentationEffectExecutor = {
 };
 
 /**
- * Owns correlation and failure ordering for one rendered image presentation.
- * Resolution, browser loading, DOM projection and viewport preservation remain
- * concrete Editor-adapter effects.
+ * Owns both the latest asynchronous work and the presentation currently
+ * projected into the DOM. Keeping those identities separate lets a ready
+ * projection remain stable while a newer generation resolves and loads.
  */
 export function createImagePresentationApplication(): ImagePresentationApplication {
-  let phase: ImagePresentationPhase = 'idle';
+  let lifecycle: ImagePresentationState['lifecycle'] = 'active';
   let sequence = 0;
-  let presentationId: number | null = null;
-  let sourceKey: string | null = null;
-  let rawSrc: string | null = null;
-  let resolvedSrc: string | null = null;
+  let current: ImagePresentationCurrent | null = null;
+  let projected: ImageProjectedPresentation = { phase: 'none' };
 
-  const getState = (): ImagePresentationState => ({ phase, presentationId, sourceKey });
+  const getState = (): ImagePresentationState => ({ lifecycle, current, projected });
 
-  const isCurrent = (candidateId: number, expectedPhase: ImagePresentationPhase): boolean => (
-    presentationId === candidateId && phase === expectedPhase
+  const currentInPhase = (
+    candidateId: number,
+    expectedPhase: ImagePresentationWorkPhase
+  ): ImagePresentationCurrent | null => (
+    current?.presentationId === candidateId && current.phase === expectedPhase
+      ? current
+      : null
   );
 
-  const clear = (nextPhase: ImagePresentationPhase): void => {
-    phase = nextPhase;
-    presentationId = null;
-    sourceKey = null;
-    rawSrc = null;
-    resolvedSrc = null;
+  const beginPresentation = (
+    sourceKey: string,
+    rawSrc: string
+  ): readonly ImagePresentationEffect[] => {
+    const presentationId = ++sequence;
+    current = {
+      phase: 'resolving',
+      presentationId,
+      sourceKey,
+      rawSrc,
+      resolvedSrc: null
+    };
+
+    const effects: ImagePresentationEffect[] = [];
+    if (projected.phase !== 'ready') {
+      projected = { phase: 'fallback', presentationId, sourceKey };
+      effects.push({ type: 'showFallback', presentationId, sourceKey });
+    }
+    effects.push({ type: 'resolveSource', presentationId, rawSrc });
+    return effects;
   };
 
-  const beginPresentation = (
-    nextSourceKey: string,
-    nextRawSrc: string
-  ): readonly ImagePresentationEffect[] => {
-    const nextPresentationId = ++sequence;
-    presentationId = nextPresentationId;
-    sourceKey = nextSourceKey;
-    rawSrc = nextRawSrc;
-    resolvedSrc = null;
-    phase = 'resolving';
-    return [
-      {
-        type: 'showFallback',
-        presentationId: nextPresentationId,
-        sourceKey: nextSourceKey
-      },
-      {
-        type: 'resolveSource',
-        presentationId: nextPresentationId,
-        rawSrc: nextRawSrc
-      }
-    ];
+  const failCurrent = (presentationId: number): readonly ImagePresentationEffect[] => {
+    if (!current) return [];
+    current = { ...current, phase: 'error', resolvedSrc: null };
+    projected = {
+      phase: 'error',
+      presentationId,
+      sourceKey: current.sourceKey
+    };
+    return [{
+      type: 'showFallback',
+      presentationId,
+      sourceKey: current.sourceKey
+    }];
   };
 
   const dispatch = (input: ImagePresentationInput): readonly ImagePresentationEffect[] => {
-    if (phase === 'disposed') return [];
+    if (lifecycle === 'disposed') return [];
 
     switch (input.type) {
-      case 'present': {
+      case 'present':
         return beginPresentation(input.sourceKey, input.rawSrc);
+      case 'sourceResolved': {
+        const active = currentInPhase(input.presentationId, 'resolving');
+        if (!active || !input.resolvedSrc) return [];
+        current = { ...active, phase: 'loading', resolvedSrc: input.resolvedSrc };
+        return [{
+          type: 'loadImage',
+          presentationId: input.presentationId,
+          resolvedSrc: input.resolvedSrc
+        }];
       }
-      case 'sourceResolved':
-        if (!isCurrent(input.presentationId, 'resolving') || !input.resolvedSrc) return [];
-        resolvedSrc = input.resolvedSrc;
-        phase = 'loading';
-        return [{ type: 'loadImage', presentationId: input.presentationId, resolvedSrc }];
       case 'sourceFailed':
-        if (!isCurrent(input.presentationId, 'resolving') || sourceKey === null) return [];
-        phase = 'fallback';
-        return [{ type: 'showFallback', presentationId: input.presentationId, sourceKey }];
-      case 'imageLoaded':
-        if (!isCurrent(input.presentationId, 'loading') || resolvedSrc === null) return [];
-        phase = 'ready';
-        return [{ type: 'showImage', presentationId: input.presentationId, resolvedSrc }];
+        if (!currentInPhase(input.presentationId, 'resolving')) return [];
+        return failCurrent(input.presentationId);
+      case 'imageLoaded': {
+        const active = currentInPhase(input.presentationId, 'loading');
+        if (!active || active.resolvedSrc === null) return [];
+        current = { ...active, phase: 'ready' };
+        projected = {
+          phase: 'ready',
+          presentationId: input.presentationId,
+          sourceKey: active.sourceKey,
+          resolvedSrc: active.resolvedSrc
+        };
+        return [{
+          type: 'showImage',
+          presentationId: input.presentationId,
+          resolvedSrc: active.resolvedSrc
+        }];
+      }
       case 'imageFailed':
-        if (!isCurrent(input.presentationId, 'loading') || sourceKey === null) return [];
-        resolvedSrc = null;
-        phase = 'fallback';
-        return [{ type: 'showFallback', presentationId: input.presentationId, sourceKey }];
-      case 'externalDocumentPresented': {
-        if (sourceKey === null || rawSrc === null) {
-          clear('idle');
-          return [];
-        }
-        return beginPresentation(sourceKey, rawSrc);
-      }
-      case 'dispose': {
-        clear('disposed');
+        if (!currentInPhase(input.presentationId, 'loading')) return [];
+        return failCurrent(input.presentationId);
+      case 'externalDocumentPresented':
+        return current ? beginPresentation(current.sourceKey, current.rawSrc) : [];
+      case 'dispose':
+        lifecycle = 'disposed';
+        current = null;
+        projected = { phase: 'none' };
         return [];
-      }
     }
   };
 

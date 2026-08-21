@@ -30,9 +30,9 @@ export function createImagePresentationRuntime(
 
   const isIdle = (): boolean => {
     const state = application.getState();
-    if (state.phase === 'disposed' || state.phase === 'idle') return true;
-    if (state.phase !== 'ready' && state.phase !== 'fallback') return false;
-    return state.presentationId === null || (pendingByPresentation.get(state.presentationId) ?? 0) === 0;
+    if (state.lifecycle === 'disposed' || state.current === null) return true;
+    if (state.current.phase !== 'ready' && state.current.phase !== 'error') return false;
+    return (pendingByPresentation.get(state.current.presentationId) ?? 0) === 0;
   };
 
   const notifyIdle = (): void => {

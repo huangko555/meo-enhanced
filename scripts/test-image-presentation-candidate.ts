@@ -66,20 +66,20 @@ async function main(): Promise<void> {
 
       const replacement = environment.create(document.getElementById('replace'), 'document-a', 'replacement');
       replacement.present('![old](slow-old.png)', 'slow-old.png');
-      const oldId = replacement.state().presentationId;
+      const oldId = replacement.state().current?.presentationId;
       replacement.present('![new](new.png)', 'new.png');
-      const newId = replacement.state().presentationId;
+      const newId = replacement.state().current?.presentationId;
       await replacement.whenCurrentPresentationSettles();
       const beforeOldCompletion = {
-        phase: replacement.state().phase,
+        phase: replacement.state().projected.phase,
         src: document.querySelector('#replace img')?.getAttribute('src') ?? ''
       };
       pending.get('slow-old.png')?.forEach((resolve: (value: string) => void) => resolve(svg('old', '#a66')));
       await Promise.resolve();
       await Promise.resolve();
       const afterOldCompletion = {
-        phase: replacement.state().phase,
-        id: replacement.state().presentationId,
+        phase: replacement.state().projected.phase,
+        id: replacement.state().current?.presentationId,
         src: document.querySelector('#replace img')?.getAttribute('src') ?? ''
       };
 
@@ -115,18 +115,18 @@ async function main(): Promise<void> {
       documentSelection?.addRange(range);
       const selectionBefore = documentSelection?.toString() ?? '';
       const sameSourceCountsBefore = environment.counts();
-      const sameSourceIdBefore = replacement.state().presentationId;
+      const sameSourceIdBefore = replacement.state().current?.presentationId;
       replacement.present('![viewport](viewport.png)', 'viewport.png');
-      const sameSourceIdAfter = replacement.state().presentationId;
+      const sameSourceIdAfter = replacement.state().current?.presentationId;
       await replacement.whenCurrentPresentationSettles();
       const sameSourceCountsAfter = environment.counts();
       const selectionAfter = document.getSelection()?.toString() ?? '';
 
       const external = environment.create(document.createElement('div'), 'document-a', 'external');
       external.present('![external](slow-external.png)', 'slow-external.png');
-      const externalId = external.state().presentationId;
+      const externalId = external.state().current?.presentationId;
       external.externalDocumentPresented();
-      const externalReplayId = external.state().presentationId;
+      const externalReplayId = external.state().current?.presentationId;
       pending.get('slow-external.png')?.forEach((resolve: (value: string) => void) => resolve(svg('external', '#66a')));
       await external.whenCurrentPresentationSettles();
 
@@ -152,6 +152,7 @@ async function main(): Promise<void> {
       const rebuiltShared = rebuiltRoot.querySelector('img')?.getAttribute('src') ?? '';
 
       const counts = environment.counts();
+      const externalState = external.state();
       const output = {
         shared,
         oldId,
@@ -159,7 +160,7 @@ async function main(): Promise<void> {
         beforeOldCompletion,
         afterOldCompletion,
         failure: {
-          phase: failure.state().phase,
+          phase: failure.state().projected.phase,
           text: document.getElementById('failure')?.textContent ?? ''
         },
         otherContext: document.querySelector('#other-context img')?.getAttribute('src') ?? '',
@@ -175,7 +176,17 @@ async function main(): Promise<void> {
           resolveDelta: sameSourceCountsAfter.resolveCalls - sameSourceCountsBefore.resolveCalls,
           loadDelta: sameSourceCountsAfter.loadCalls - sameSourceCountsBefore.loadCalls
         },
-        external: { id: externalId, replayId: externalReplayId, state: external.state() },
+        external: {
+          id: externalId,
+          replayId: externalReplayId,
+          currentId: externalState.current?.presentationId,
+          currentPhase: externalState.current?.phase,
+          projectedId: externalState.projected.phase === 'none'
+            ? null
+            : externalState.projected.presentationId,
+          projectedPhase: externalState.projected.phase,
+          sourceKey: externalState.current?.sourceKey
+        },
         survivingShared,
         rebuiltShared,
         counts,
@@ -193,7 +204,7 @@ async function main(): Promise<void> {
     assert.equal(result.afterOldCompletion.phase, 'ready');
     assert.equal(result.afterOldCompletion.id, result.newId);
     assert.equal(result.afterOldCompletion.src, result.beforeOldCompletion.src);
-    assert.deepEqual(result.failure, { phase: 'fallback', text: '![broken](broken-load.png)' });
+    assert.deepEqual(result.failure, { phase: 'error', text: '![broken](broken-load.png)' });
     assert.notEqual(result.otherContext, '');
     assert.equal(result.activeBefore, 'focus');
     assert.equal(result.activeAfter, 'focus');
@@ -207,9 +218,13 @@ async function main(): Promise<void> {
       'same-source restart should advance presentation without repeating shared resource work'
     );
     assert.notEqual(result.external.replayId, result.external.id);
-    assert.deepEqual(result.external.state, {
-      phase: 'ready',
-      presentationId: result.external.replayId,
+    assert.deepEqual(result.external, {
+      id: result.external.id,
+      replayId: result.external.replayId,
+      currentId: result.external.replayId,
+      currentPhase: 'ready',
+      projectedId: result.external.replayId,
+      projectedPhase: 'ready',
       sourceKey: '![external](slow-external.png)'
     });
     assert.notEqual(result.survivingShared, '', 'disposing one subscriber cancelled the shared resource');
