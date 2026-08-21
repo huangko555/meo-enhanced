@@ -278,7 +278,10 @@ async function main(): Promise<void> {
         parent: document.getElementById('projection'),
         text,
         initialMode: 'live',
-        onApplyChanges() {}
+        onApplyChanges() {},
+        onSelectionChange(selection: { from?: number; to?: number }) {
+          state.projectionSelection = selection;
+        }
       });
     }, projectionText);
     await page.waitForFunction(() => (
@@ -291,11 +294,11 @@ async function main(): Promise<void> {
       const root = host?.querySelector<HTMLElement>('.meo-md-image');
       const scroller = host?.querySelector<HTMLElement>('.cm-scroller');
       if (!root || !scroller) throw new Error('projection fixture missing');
-      const selectionAnchor = state.projection.getText().indexOf('Projection');
-      state.projection.view.dispatch({
-        selection: { anchor: selectionAnchor, head: selectionAnchor + 5 }
+      const selectionAnchor = state.projection.getText().indexOf('paragraph 0');
+      state.projection.revealSelection(selectionAnchor, selectionAnchor + 5, {
+        focusEditor: true,
+        align: 'none'
       });
-      state.projection.focus();
       scroller.scrollTop = 24;
       state.projectedImage = root.querySelector('.meo-md-image-img');
       state.projectedControls = root.querySelector('.meo-md-image-controls');
@@ -311,7 +314,8 @@ async function main(): Promise<void> {
           src: image?.getAttribute('src') ?? '',
           height: root.getBoundingClientRect().height,
           scrollTop: scroller.scrollTop,
-          selection: `${state.projection.view.state.selection.main.anchor}:${state.projection.view.state.selection.main.head}`,
+          selection: `${state.projectionSelection.from}:${state.projectionSelection.to}`,
+          domSelection: window.getSelection()?.toString() ?? '',
           focus: state.projection.hasFocus()
         };
       };
@@ -326,6 +330,8 @@ async function main(): Promise<void> {
       (window as any).__imageLifecycle.projectionSnapshot()
     ));
     assert.ok(projectionBaseline.height > 0);
+    assert.equal(projectionBaseline.domSelection, 'parag');
+    assert.equal(projectionBaseline.focus, true);
 
     await page.evaluate((text) => {
       (window as any).__imageLifecycle.projection.setText(text);
@@ -352,6 +358,7 @@ async function main(): Promise<void> {
       assert.ok(Math.abs(frame.height - projectionBaseline.height) < 0.5);
       assert.equal(frame.scrollTop, projectionBaseline.scrollTop);
       assert.equal(frame.selection, projectionBaseline.selection);
+      assert.equal(frame.domSelection, projectionBaseline.domSelection);
       assert.equal(frame.focus, true);
     }
 
@@ -378,6 +385,7 @@ async function main(): Promise<void> {
       assert.ok(Math.abs(frame.height - projectionBaseline.height) < 0.5);
       assert.equal(frame.scrollTop, projectionBaseline.scrollTop);
       assert.equal(frame.selection, projectionBaseline.selection);
+      assert.equal(frame.domSelection, projectionBaseline.domSelection);
       assert.equal(frame.focus, true);
     }
 
@@ -408,6 +416,7 @@ async function main(): Promise<void> {
     assert.ok(Math.abs(successfulProjection.current.height - projectionBaseline.height) < 0.5);
     assert.equal(successfulProjection.current.scrollTop, projectionBaseline.scrollTop);
     assert.equal(successfulProjection.current.selection, projectionBaseline.selection);
+    assert.equal(successfulProjection.current.domSelection, projectionBaseline.domSelection);
     assert.equal(successfulProjection.current.focus, true);
     assert.ok(successfulProjection.mutations.length >= 1);
     for (const mutation of successfulProjection.mutations) {
@@ -417,6 +426,7 @@ async function main(): Promise<void> {
       assert.ok(Math.abs(mutation.height - projectionBaseline.height) < 0.5);
       assert.equal(mutation.scrollTop, projectionBaseline.scrollTop);
       assert.equal(mutation.selection, projectionBaseline.selection);
+      assert.equal(mutation.domSelection, projectionBaseline.domSelection);
       assert.equal(mutation.focus, true);
     }
 
@@ -467,6 +477,7 @@ async function main(): Promise<void> {
     assert.equal(failedProjection.current.fallback, true);
     assert.equal(failedProjection.current.scrollTop, projectionBaseline.scrollTop);
     assert.equal(failedProjection.current.selection, projectionBaseline.selection);
+    assert.equal(failedProjection.current.domSelection, projectionBaseline.domSelection);
     assert.equal(failedProjection.current.focus, true);
     assert.ok(failedProjection.mutations.length >= 1);
     for (const observation of [...failedProjection.mutations, ...failedProjection.frames]) {
@@ -476,6 +487,7 @@ async function main(): Promise<void> {
       assert.ok(Math.abs(observation.height - failedProjection.current.height) < 0.5);
       assert.equal(observation.scrollTop, projectionBaseline.scrollTop);
       assert.equal(observation.selection, projectionBaseline.selection);
+      assert.equal(observation.domSelection, projectionBaseline.domSelection);
       assert.equal(observation.focus, true);
     }
 
