@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict';
 import { createMermaidDiagramPresentationApplication } from '../webview/src/application/mermaidDiagramPresentation';
 import { createMermaidDiagramPresentationRuntime } from '../webview/src/adapters/mermaidDiagramPresentationRuntime';
-import { createMermaidDiagramPresentationEffectAdapter } from '../webview/src/editor/mermaidDiagramPresentationAdapter';
+import {
+  createMermaidDiagramPresentationEffectAdapter,
+  type MermaidDiagramPresentationAdapterOptions
+} from '../webview/src/editor/mermaidDiagramPresentationAdapter';
 import { createMermaidDiagramPresentationFactory } from '../webview/src/editor/mermaidDiagramPresentation';
 import { createMermaidDiagramRenderPool } from '../webview/src/editor/mermaidDiagramRenderPool';
+import type {
+  MermaidDiagramLeafRenderConsumer,
+  MermaidDiagramRenderGroupLease
+} from '../webview/src/application/mermaidDiagramRenderResources';
+
+type Assert<T extends true> = T;
+type IsNever<T> = [T] extends [never] ? true : false;
+type _LeafHasNoGroupOwnerCapability = Assert<IsNever<Extract<
+  keyof MermaidDiagramLeafRenderConsumer,
+  'createLeaf' | 'runExclusive' | 'replaceForExternalDocument' | 'end'
+>>>;
+type _GroupHasNoLeafCapability = Assert<IsNever<Extract<
+  keyof MermaidDiagramRenderGroupLease,
+  'render' | 'getCached' | 'replacePending' | 'release'
+>>>;
+type _AdapterReceivesOnlyLeaf = Assert<
+  MermaidDiagramPresentationAdapterOptions['resources'] extends MermaidDiagramLeafRenderConsumer
+    ? true
+    : false
+>;
 
 type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -52,8 +75,10 @@ const sharedRequest = request('graph TD\nA-->B');
 assert.equal(pool.getCached(sharedRequest), null);
 assert.equal(renderGates.length, 0, 'zero consumers must not initialize, queue, or render');
 
-const first = pool.acquire();
-const second = pool.acquire();
+const firstGroup = pool.acquireGroup();
+const secondGroup = pool.acquireGroup();
+const first = firstGroup.createLeaf();
+const second = secondGroup.createLeaf();
 const firstPending = first.render(sharedRequest);
 const secondPending = second.render(sharedRequest);
 await waitFor(() => renderGates.length === 1);
@@ -61,6 +86,7 @@ assert.deepEqual(initializeCalls, [['light', 'default']]);
 
 first.release();
 first.release();
+firstGroup.end();
 assert.match((await firstPending).error, /released/);
 let secondSettled = false;
 void secondPending.then(() => { secondSettled = true; });
@@ -69,49 +95,54 @@ assert.equal(secondSettled, false, '2→1 release must not settle the surviving 
 renderGates[0]!.gate.resolve('<svg data-generation="shared"></svg>');
 assert.deepEqual(await secondPending, { ok: true, svg: '<svg data-generation="shared"></svg>' });
 
-const cachedConsumer = pool.acquire();
+const cachedGroup = pool.acquireGroup();
+const cachedConsumer = cachedGroup.createLeaf();
 assert.deepEqual(await cachedConsumer.render(sharedRequest), {
   ok: true,
   svg: '<svg data-generation="shared"></svg>'
 });
 assert.equal(renderGates.length, 1, 'same-key consumers must reuse the shared cache');
 second.release();
+secondGroup.end();
 assert.notEqual(pool.getCached(sharedRequest), null, 'one surviving consumer must retain shared results');
 cachedConsumer.release();
 cachedConsumer.release();
+cachedGroup.end();
 assert.notEqual(
   pool.getCached(sharedRequest),
   null,
   'last release keeps bounded completed results reusable across viewport-driven Widget recreation'
 );
 
-const replacement = pool.acquire();
+const replacementGroup = pool.acquireGroup();
+const replacement = replacementGroup.createLeaf();
 const oldRequest = request('graph TD\nOLD-->STALE');
 const latestRequest = request('graph TD\nLATEST-->READY', 'dark', 'strict');
 const oldPending = replacement.render(oldRequest);
 await waitFor(() => renderGates.length === 2);
-replacement.invalidate();
+replacement.replacePending();
 assert.match((await oldPending).error, /replaced/);
 const latestPending = replacement.render(latestRequest);
 renderGates[1]!.gate.resolve('<svg data-generation="old"></svg>');
 await waitFor(() => renderGates.length === 3);
 renderGates[2]!.gate.resolve('<svg data-generation="latest"></svg>');
 assert.deepEqual(await latestPending, { ok: true, svg: '<svg data-generation="latest"></svg>' });
-assert.equal(pool.getCached(oldRequest), null, 'stale replacement completion must not enter cache');
+assert.deepEqual(
+  pool.getCached(oldRequest),
+  { ok: true, svg: '<svg data-generation="old"></svg>' },
+  'leaf replacement detaches stale DOM correlation but keeps Pool-owned reusable content'
+);
 assert.deepEqual(pool.getCached(latestRequest), {
   ok: true,
   svg: '<svg data-generation="latest"></svg>'
 });
 
 const errorRequest = request('INVALID');
-replacement.invalidate();
+replacement.replacePending();
 const failed = replacement.render(errorRequest);
 await waitFor(() => renderGates.length === 4);
 renderGates[3]!.gate.reject(new Error('parse error'));
 assert.deepEqual(await failed, { ok: false, error: 'parse error' });
-assert.deepEqual(await replacement.render(errorRequest), { ok: false, error: 'parse error' });
-assert.equal(renderGates.length, 4, 'error result remains cached within the active generation');
-replacement.invalidate();
 const retried = replacement.render(errorRequest);
 await waitFor(() => renderGates.length === 5);
 renderGates[4]!.gate.resolve('<svg data-generation="retry"></svg>');
@@ -119,7 +150,7 @@ assert.deepEqual(await retried, { ok: true, svg: '<svg data-generation="retry"><
 
 let themeRefreshCount = 0;
 const unsubscribe = pool.subscribeThemeRefresh(() => { themeRefreshCount += 1; });
-replacement.invalidate();
+replacement.replacePending();
 const oldThemePending = replacement.render(request('THEME_RACE'));
 await waitFor(() => renderGates.length === 6);
 pool.refreshTheme();
@@ -134,14 +165,15 @@ unsubscribe();
 pool.refreshTheme();
 assert.equal(themeRefreshCount, 1, 'unsubscribed theme listener must not be retained');
 replacement.release();
+replacementGroup.end();
 
 const offscreenGate = deferred<string>();
 const offscreenPool = createMermaidDiagramRenderPool({
   initialize() {},
   render: () => offscreenGate.promise
 });
-const liveEditorLease = offscreenPool.acquire();
-const offscreenWidget = liveEditorLease.fork();
+const liveEditorLease = offscreenPool.acquireGroup();
+const offscreenWidget = liveEditorLease.createLeaf();
 const offscreenRequest = request('LIVE_WIDGET_OFFSCREEN');
 const offscreenPending = offscreenWidget.render(offscreenRequest);
 await Promise.resolve();
@@ -153,22 +185,103 @@ assert.deepEqual(offscreenPool.getCached(offscreenRequest), {
   ok: true,
   svg: '<svg data-generation="offscreen-reuse"></svg>'
 });
-liveEditorLease.release();
+liveEditorLease.end();
 offscreenPool.dispose();
+
+const completedCachePool = createMermaidDiagramRenderPool({
+  initialize() {},
+  async render() { return '<svg data-generation="completed"></svg>'; }
+});
+const completedCacheRoot = completedCachePool.acquireGroup();
+const completedCacheLeaf = completedCacheRoot.createLeaf();
+const completedCacheRequest = request('COMPLETED_CACHE_SURVIVES_CHILD_REPLACEMENT');
+assert.deepEqual(await completedCacheLeaf.render(completedCacheRequest), {
+  ok: true,
+  svg: '<svg data-generation="completed"></svg>'
+});
+completedCacheLeaf.replacePending();
+assert.deepEqual(
+  completedCachePool.getCached(completedCacheRequest),
+  { ok: true, svg: '<svg data-generation="completed"></svg>' },
+  'child replacement must not delete the Pool-owned successful cache'
+);
+completedCacheLeaf.release();
+completedCacheRoot.end();
+completedCacheRoot.end();
+assert.throws(() => completedCacheRoot.createLeaf(), /ended/);
+await assert.rejects(completedCacheRoot.runExclusive(async () => undefined), /ended/);
+assert.throws(() => completedCacheRoot.replaceForExternalDocument(), /ended/);
+assert.deepEqual(await completedCacheLeaf.render(completedCacheRequest), {
+  ok: false,
+  error: 'Mermaid render leaf consumer is released'
+});
+completedCachePool.dispose();
+
+let lruRenderCount = 0;
+const lruPool = createMermaidDiagramRenderPool({
+  initialize() {},
+  async render(_renderId, source) {
+    lruRenderCount += 1;
+    return `<svg data-source="${source}"></svg>`;
+  },
+  cacheLimit: 2
+});
+const lruGroup = lruPool.acquireGroup();
+const lruLeaf = lruGroup.createLeaf();
+const lruA = request('LRU_A');
+const lruB = request('LRU_B');
+const lruC = request('LRU_C');
+await lruLeaf.render(lruA);
+await lruLeaf.render(lruB);
+assert.notEqual(lruPool.getCached(lruA), null, 'cache lookup must refresh Pool LRU recency');
+await lruLeaf.render(lruC);
+assert.notEqual(lruPool.getCached(lruA), null);
+assert.equal(lruPool.getCached(lruB), null, 'capacity eviction removes the least-recent Pool entry');
+assert.notEqual(lruPool.getCached(lruC), null);
+assert.equal(lruRenderCount, 3);
+lruLeaf.release();
+lruGroup.end();
+lruPool.dispose();
+
+const siblingGate = deferred<string>();
+const siblingPool = createMermaidDiagramRenderPool({
+  initialize() {},
+  render: () => siblingGate.promise
+});
+const siblingRoot = siblingPool.acquireGroup();
+const siblingA = siblingRoot.createLeaf();
+const siblingB = siblingRoot.createLeaf();
+const siblingRequest = request('LIVE_SIBLING_REPLACEMENT');
+const siblingPendingA = siblingA.render(siblingRequest);
+const siblingPendingB = siblingB.render(siblingRequest);
+await Promise.resolve();
+siblingA.release();
+siblingB.replacePending();
+assert.match((await siblingPendingA).error, /released/);
+assert.match((await siblingPendingB).error, /replaced/);
+siblingGate.resolve('<svg data-generation="sibling-reuse"></svg>');
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(
+  siblingPool.getCached(siblingRequest),
+  { ok: true, svg: '<svg data-generation="sibling-reuse"></svg>' },
+  'an active Live group must retain offscreen work after sibling release and replacement'
+);
+siblingRoot.end();
+siblingPool.dispose();
 
 const externalGate = deferred<string>();
 const externalPool = createMermaidDiagramRenderPool({
   initialize() {},
   render: () => externalGate.promise
 });
-const externalEditor = externalPool.acquire();
-const externalWidget = externalEditor.fork();
+const externalEditor = externalPool.acquireGroup();
+const externalWidget = externalEditor.createLeaf();
 const externalRequest = request('OFFSCREEN_BEFORE_EXTERNAL');
 const externalPending = externalWidget.render(externalRequest);
 await Promise.resolve();
 externalWidget.release();
 assert.match((await externalPending).error, /released/);
-externalEditor.invalidate();
+externalEditor.replaceForExternalDocument();
 externalGate.resolve('<svg data-generation="stale-external"></svg>');
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(
@@ -176,7 +289,7 @@ assert.equal(
   null,
   'external replacement must invalidate offscreen work retained by the same Live Editor group'
 );
-externalEditor.release();
+externalEditor.end();
 externalPool.dispose();
 
 const priorityOrder: string[] = [];
@@ -184,7 +297,7 @@ const priorityPool = createMermaidDiagramRenderPool({
   initialize() {},
   async render() { return '<svg></svg>'; }
 });
-const priorityConsumer = priorityPool.acquire();
+const priorityConsumer = priorityPool.acquireGroup();
 const activeGate = deferred<void>();
 const activeOperation = priorityConsumer.runExclusive(async () => {
   priorityOrder.push('active');
@@ -197,8 +310,34 @@ const highTwo = priorityConsumer.runExclusive(async () => { priorityOrder.push('
 activeGate.resolve();
 await Promise.all([activeOperation, normalOne, highOne, normalTwo, highTwo]);
 assert.deepEqual(priorityOrder, ['active', 'high-1', 'high-2', 'normal-1', 'normal-2']);
-priorityConsumer.release();
+priorityConsumer.end();
 priorityPool.dispose();
+
+let queuedRenderCount = 0;
+const queuedPool = createMermaidDiagramRenderPool({
+  initialize() {},
+  async render() {
+    queuedRenderCount += 1;
+    return '<svg data-generation="queued"></svg>';
+  }
+});
+const queueBlocker = queuedPool.acquireGroup();
+const queueBlockerGate = deferred<void>();
+const blockingOperation = queueBlocker.runExclusive(() => queueBlockerGate.promise);
+const queuedGroup = queuedPool.acquireGroup();
+const queuedLeaf = queuedGroup.createLeaf();
+const queuedRequest = request('QUEUED_GROUP_END');
+const abandonedQueued = queuedLeaf.render(queuedRequest);
+queuedLeaf.release();
+queuedGroup.end();
+assert.match((await abandonedQueued).error, /released/);
+queueBlockerGate.resolve();
+await blockingOperation;
+await Promise.resolve();
+assert.equal(queuedRenderCount, 0, 'an orphaned queued render must never start');
+assert.equal(queuedPool.getCached(queuedRequest), null);
+queueBlocker.end();
+queuedPool.dispose();
 
 let capacityRenderCount = 0;
 const capacityPool = createMermaidDiagramRenderPool({
@@ -209,7 +348,8 @@ const capacityPool = createMermaidDiagramRenderPool({
   },
   maxQueuedOperations: 1
 });
-const capacityConsumer = capacityPool.acquire();
+const capacityConsumer = capacityPool.acquireGroup();
+const capacityLeaf = capacityConsumer.createLeaf();
 const capacityGate = deferred<void>();
 const capacityActive = capacityConsumer.runExclusive(() => capacityGate.promise);
 const capacityQueued = capacityConsumer.runExclusive(async () => undefined);
@@ -218,15 +358,16 @@ await assert.rejects(
   /queue capacity exceeded/
 );
 const capacityRequest = request('retry-after-capacity');
-assert.deepEqual(await capacityConsumer.render(capacityRequest), {
+assert.deepEqual(await capacityLeaf.render(capacityRequest), {
   ok: false,
   error: 'Mermaid render queue capacity exceeded'
 });
 capacityGate.resolve();
 await Promise.all([capacityActive, capacityQueued]);
-assert.deepEqual(await capacityConsumer.render(capacityRequest), { ok: true, svg: '<svg></svg>' });
+assert.deepEqual(await capacityLeaf.render(capacityRequest), { ok: true, svg: '<svg></svg>' });
 assert.equal(capacityRenderCount, 1);
-capacityConsumer.release();
+capacityLeaf.release();
+capacityConsumer.end();
 capacityPool.dispose();
 
 const abandonedGate = deferred<string>();
@@ -301,17 +442,19 @@ const orphanPool = createMermaidDiagramRenderPool({
     return orphanGate.promise;
   }
 });
-const orphanConsumer = orphanPool.acquire();
-const unrelatedPreviewConsumer = orphanPool.acquire();
+const orphanGroup = orphanPool.acquireGroup();
+const orphanConsumer = orphanGroup.createLeaf();
+const unrelatedPreviewConsumer = orphanPool.acquireGroup();
 const orphanRequest = request('ORPHAN_AFTER_SOURCE_EXIT');
 const orphanPending = orphanConsumer.render(orphanRequest);
 await waitFor(() => orphanStarted);
 orphanConsumer.release();
+orphanGroup.end();
 assert.match((await orphanPending).error, /released/);
 orphanGate.resolve('<svg data-generation="orphan"></svg>');
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(orphanPool.getCached(orphanRequest), null, 'last release must reject orphan completion cache writes');
-unrelatedPreviewConsumer.release();
+unrelatedPreviewConsumer.end();
 orphanPool.dispose();
 
 const never = new Promise<string>(() => undefined);
@@ -319,20 +462,19 @@ const disposalPool = createMermaidDiagramRenderPool({
   initialize() {},
   render: () => never
 });
-const disposalConsumer = disposalPool.acquire();
-const activeRender = disposalConsumer.render(request('never'));
+const disposalConsumer = disposalPool.acquireGroup();
+const disposalLeaf = disposalConsumer.createLeaf();
+const activeRender = disposalLeaf.render(request('never'));
 const queuedExclusive = disposalConsumer.runExclusive(async () => undefined);
 disposalPool.dispose();
 disposalPool.dispose();
 assert.deepEqual(await activeRender, { ok: false, error: 'Mermaid render Pool is disposed' });
 await assert.rejects(queuedExclusive, /disposed/);
-disposalConsumer.release();
+disposalLeaf.release();
+disposalConsumer.end();
 
 pool.dispose();
 pool.dispose();
-assert.deepEqual(await pool.acquire().render(sharedRequest), {
-  ok: false,
-  error: 'Mermaid render Pool is disposed'
-});
+assert.throws(() => pool.acquireGroup(), /disposed/);
 
 console.log('Mermaid diagram Render Pool consumer lifecycle contracts passed');

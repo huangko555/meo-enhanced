@@ -40,7 +40,8 @@ function createEnvironment() {
   const create = (root: HTMLElement): CandidateWidget => {
     const body = root.querySelector<HTMLElement>('[data-diagram-body]');
     if (!body) throw new Error('Candidate diagram body is required');
-    const resources = pool.acquire();
+    const group = pool.acquireGroup();
+    const resources = group.createLeaf();
     const application = createMermaidDiagramPresentationApplication();
     applicationCount += 1;
     const adapter = createMermaidDiagramPresentationEffectAdapter({
@@ -80,18 +81,19 @@ function createEnvironment() {
     runtimeCount += 1;
     return {
       present(source, themeKey = 'light', configKey = 'default') {
-        resources.invalidate();
+        resources.replacePending();
         runtime.dispatch({ type: 'present', source, themeKey, configKey });
       },
       externalDocumentPresented() {
         runtime.dispatch({ type: 'externalDocumentPresented' });
-        resources.invalidate();
+        group.replaceForExternalDocument();
       },
       whenIdle: () => runtime.whenCurrentPresentationSettles(),
       state: () => application.getState(),
       dispose() {
         runtime.dispose();
         resources.release();
+        group.end();
       }
     };
   };
@@ -99,7 +101,7 @@ function createEnvironment() {
   return {
     create,
     async runPreview(label: string) {
-      const resources = pool.acquire();
+      const resources = pool.acquireGroup();
       try {
         return await resources.runExclusive(async () => {
         events.push(`preview:${label}`);
@@ -107,7 +109,7 @@ function createEnvironment() {
         return label;
         }, 'high');
       } finally {
-        resources.release();
+        resources.end();
       }
     },
     refreshTheme: () => pool.refreshTheme(),

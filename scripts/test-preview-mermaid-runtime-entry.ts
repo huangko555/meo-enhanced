@@ -43,8 +43,8 @@ const mermaidPresentationFactory = createMermaidDiagramPresentationFactory({
 
 const previewMermaidResources: MermaidDiagramRenderResources = {
   ...mermaidResources,
-  acquire() {
-    const consumer = mermaidResources.acquire();
+  acquireGroup() {
+    const consumer = mermaidResources.acquireGroup();
     return {
       ...consumer,
       runExclusive<T>(operation: () => Promise<T>, priority?: 'high' | 'normal') {
@@ -57,11 +57,11 @@ const previewMermaidResources: MermaidDiagramRenderResources = {
 };
 
 const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
-  const consumer = mermaidResources.acquire();
+  const consumer = mermaidResources.acquireGroup();
   try {
     return await consumer.runExclusive(operation);
   } finally {
-    consumer.release();
+    consumer.end();
   }
 };
 

@@ -1,6 +1,7 @@
 import { Facet, type EditorState } from '@codemirror/state';
 import type {
-  MermaidDiagramRenderConsumer,
+  MermaidDiagramLeafRenderConsumer,
+  MermaidDiagramRenderGroupLease,
   MermaidDiagramRenderRequest,
   MermaidDiagramRenderResources,
   MermaidDiagramRenderResult
@@ -44,7 +45,7 @@ export type MermaidDiagramPresentationFactoryOptions = {
   readonly resources: MermaidDiagramRenderResources;
   readonly createHandle: (
     view: MermaidDiagramPresentationView,
-    resources: MermaidDiagramRenderConsumer
+    resources: MermaidDiagramLeafRenderConsumer
   ) => MermaidDiagramPresentationHandle;
 };
 
@@ -60,41 +61,40 @@ export function createMermaidDiagramPresentationFactory(
       if (disposed) throw new Error('Mermaid diagram presentation factory is disposed');
       const handles = new Set<MermaidDiagramPresentationHandle>();
       const releaseResourceLeases = new Set<() => void>();
-      let activeResources: MermaidDiagramRenderConsumer | null = null;
+      let activeGroup: MermaidDiagramRenderGroupLease | null = null;
       let consumerDisposed = false;
       const consumer: MermaidDiagramPresentationConsumer = {
         acquire() {
-          if (consumerDisposed) return () => undefined;
-          if (activeResources) throw new Error('Mermaid diagram presentation consumer is already active');
-          const releasePoolLease = options.resources.acquire();
-          activeResources = releasePoolLease;
+          if (consumerDisposed) throw new Error('Mermaid diagram presentation consumer is disposed');
+          if (activeGroup) throw new Error('Mermaid diagram presentation consumer is already active');
+          const group = options.resources.acquireGroup();
+          activeGroup = group;
           let released = false;
           const release = () => {
             if (released) return;
             released = true;
             releaseResourceLeases.delete(release);
-            if (activeResources === releasePoolLease) activeResources = null;
-            releasePoolLease.release();
+            if (activeGroup === group) activeGroup = null;
+            group.end();
           };
           releaseResourceLeases.add(release);
           return release;
         },
         create(view) {
           if (consumerDisposed) throw new Error('Mermaid diagram presentation consumer is disposed');
-          if (!activeResources) throw new Error('Mermaid diagram presentation consumer is not active');
-          const resources = activeResources.fork();
+          if (!activeGroup) throw new Error('Mermaid diagram presentation consumer is not active');
+          const resources = activeGroup.createLeaf();
           const delegate = options.createHandle(view, resources);
           let active = true;
           const handle: MermaidDiagramPresentationHandle = {
             present(source, themeKey, configKey) {
               if (!active) return;
-              resources.invalidate();
+              resources.replacePending();
               delegate.present(source, themeKey, configKey);
             },
             externalDocumentPresented() {
               if (!active) return;
               delegate.externalDocumentPresented();
-              resources.invalidate();
             },
             whenIdle: () => active ? delegate.whenIdle() : Promise.resolve(),
             dispose() {
@@ -114,7 +114,7 @@ export function createMermaidDiagramPresentationFactory(
         subscribeThemeRefresh: (listener) => options.resources.subscribeThemeRefresh(listener),
         externalDocumentPresented() {
           for (const handle of [...handles]) handle.externalDocumentPresented();
-          activeResources?.invalidate();
+          activeGroup?.replaceForExternalDocument();
         },
         dispose() {
           if (consumerDisposed) return;

@@ -3,12 +3,12 @@ import {
   type MermaidDiagramPresentationEffectExecution,
   type MermaidDiagramPresentationEffectExecutor
 } from '../application/mermaidDiagramPresentation';
-import type { MermaidDiagramRenderConsumer } from '../application/mermaidDiagramRenderResources';
+import type { MermaidDiagramLeafRenderConsumer } from '../application/mermaidDiagramRenderResources';
 import type { MermaidDiagramPresentationView } from './mermaidDiagramPresentation';
 
 export type MermaidDiagramPresentationAdapterOptions = {
   readonly view: MermaidDiagramPresentationView;
-  readonly resources: MermaidDiagramRenderConsumer;
+  readonly resources: MermaidDiagramLeafRenderConsumer;
   readonly normalizeSource: (source: string) => string;
 };
 

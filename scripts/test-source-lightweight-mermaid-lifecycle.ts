@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
-    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.setContent('<!doctype html><style>html,body,#app,#app2{height:100%;margin:0}</style><div id="app"></div><div id="app2"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
       content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-size:16px;--meo-font-source:monospace;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
         text: editor.view.state.doc.toString(),
         selection: editor.view.state.selection.main.head,
         focused: editor.view.hasFocus,
-        mermaidDom: document.querySelectorAll('.cm-editor .meo-mermaid-block').length
+        mermaidDom: document.querySelectorAll('#app .cm-editor .meo-mermaid-block').length
       };
     });
     assert.deepEqual(initialSourceState, {
@@ -118,6 +118,23 @@ async function main(): Promise<void> {
     await page.waitForFunction((source) => (
       (window as typeof window & { __mermaidCalls?: string[] }).__mermaidCalls?.includes(source)
     ), {}, initialSource);
+
+    const sharedEditorCallCount = await page.evaluate(({ text, source }) => {
+      const testWindow = window as typeof window & {
+        __createSharedMermaidEditor?: (options: any) => any;
+        __mermaidCalls?: string[];
+        __secondMermaidEditor?: any;
+      };
+      testWindow.__secondMermaidEditor = testWindow.__createSharedMermaidEditor?.({
+        parent: document.getElementById('app2')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      if (!testWindow.__secondMermaidEditor) throw new Error('Second shared Mermaid Editor was not created');
+      return testWindow.__mermaidCalls?.filter((entry) => entry === source).length ?? -1;
+    }, { text: initialText, source: initialSource });
+    assert.equal(sharedEditorCallCount, 1, 'two Editor groups with the same key must share one physical render');
 
     const previewSource = 'flowchart LR\nPreview-->Continues';
     const previewHtml = `<div class="meo-export-page" data-source-line="1"><div class="meo-export-mermaid" data-source-b64="${Buffer.from(previewSource).toString('base64')}"></div></div>`;
@@ -156,7 +173,7 @@ async function main(): Promise<void> {
       return {
         selection: editor.view.state.selection.main.head,
         focused: editor.view.hasFocus,
-        mermaidDom: document.querySelectorAll('.cm-editor .meo-mermaid-block').length
+        mermaidDom: document.querySelectorAll('#app .cm-editor .meo-mermaid-block').length
       };
     });
     assert.deepEqual(sourceAfterPendingLive, { selection: 4, focused: true, mermaidDom: 0 });
@@ -181,16 +198,44 @@ async function main(): Promise<void> {
         ?.querySelector('svg[data-marker="preview-current"]')
     ));
     const sharedConsumerResult = await page.evaluate(() => ({
-      liveOldVisible: Boolean(document.querySelector('.cm-editor svg[data-marker="stale-live"]')),
-      liveDom: document.querySelectorAll('.cm-editor .meo-mermaid-block').length,
+      sourceOldVisible: Boolean(document.querySelector('#app .cm-editor svg[data-marker="stale-live"]')),
+      sourceLiveDom: document.querySelectorAll('#app .cm-editor .meo-mermaid-block').length,
+      secondEditorVisible: Boolean(document.querySelector('#app2 .cm-editor svg[data-marker="stale-live"]')),
       previewVisible: Boolean(document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
         ?.querySelector('svg[data-marker="preview-current"]'))
     }));
     assert.deepEqual(sharedConsumerResult, {
-      liveOldVisible: false,
-      liveDom: 0,
+      sourceOldVisible: false,
+      sourceLiveDom: 0,
+      secondEditorVisible: true,
       previewVisible: true
     });
+
+    const callsBeforeCachedReturn = await page.evaluate((source) => (
+      (window as typeof window & { __mermaidCalls?: string[] }).__mermaidCalls
+        ?.filter((entry) => entry === source).length ?? -1
+    ), initialSource);
+    await page.evaluate(() => {
+      (window as typeof window & { __sourceMermaidEditor?: any }).__sourceMermaidEditor.setMode('live');
+    });
+    await page.waitForSelector('#app .cm-editor svg[data-marker="stale-live"]');
+    const cachedReturnResult = await page.evaluate((source) => {
+      const testWindow = window as typeof window & {
+        __mermaidCalls?: string[];
+        __secondMermaidEditor?: any;
+      };
+      const calls = testWindow.__mermaidCalls?.filter((entry) => entry === source).length ?? -1;
+      testWindow.__secondMermaidEditor.destroy();
+      testWindow.__secondMermaidEditor = null;
+      return {
+        calls,
+        latestVisible: Boolean(document.querySelector('#app .cm-editor svg[data-marker="stale-live"]'))
+      };
+    }, initialSource);
+    assert.deepEqual(cachedReturnResult, {
+      calls: callsBeforeCachedReturn,
+      latestVisible: true
+    }, 'the surviving Editor group must populate Pool cache for a Source→Live return');
 
     const slowOldSource = 'graph TD\nSLOW_OLD-->STALE';
     const latestSource = 'graph TD\nLATEST-->VISIBLE';
