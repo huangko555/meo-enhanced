@@ -302,10 +302,15 @@ interface BuiltTableData {
   endLine: number;
 }
 
-function stabilizeHistoryScrollTop(view: EditorView, targetTop: number) {
+function stabilizeHistoryScrollTop(
+  view: EditorView,
+  targetTop: number,
+  isCurrent: () => boolean
+) {
+  if (!isCurrent()) return;
   const viewportController = getViewportController(view);
   if (viewportController) {
-    viewportController.lockScrollTop(targetTop);
+    viewportController.lockScrollTop(targetTop, isCurrent);
   }
 }
 
@@ -365,7 +370,7 @@ export function focusTableHistoryChange(
     if (wasVisible) {
       if (!viewportPreservationScheduled) {
         viewportPreservationScheduled = true;
-        stabilizeHistoryScrollTop(view, previousScrollTop);
+        stabilizeHistoryScrollTop(view, previousScrollTop, isCurrent);
       }
       return true;
     }
@@ -441,7 +446,7 @@ export function focusHistoryChange(
     if (wasVisibleBeforeReplay) {
       if (!viewportPreservationScheduled) {
         viewportPreservationScheduled = true;
-        stabilizeHistoryScrollTop(view, previousScrollTop);
+        stabilizeHistoryScrollTop(view, previousScrollTop, isCurrent);
       }
       return;
     }

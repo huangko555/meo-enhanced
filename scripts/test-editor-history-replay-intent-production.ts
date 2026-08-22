@@ -91,7 +91,6 @@ async function main(): Promise<void> {
     assert.equal(snapshot.hostRevision.text, initialText);
     assert.equal(snapshot.hostRevision.version, 41);
     assert.equal(snapshot.focused, true);
-    assert.equal(snapshot.selectionHead, initialText.length);
 
     await page.keyboard.down('Control');
     try {
@@ -112,7 +111,21 @@ async function main(): Promise<void> {
     assert.equal(snapshot.hostRevision.text, initialText + additions);
     assert.equal(snapshot.hostRevision.version, 61);
     assert.equal(snapshot.focused, true);
-    assert.equal(snapshot.selectionHead, (initialText + additions).length);
+
+    const redoCaretProbe = 'Q';
+    await page.keyboard.type(redoCaretProbe);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());
+    snapshot = await page.evaluate(() => (window as any).__documentSessionCandidate.snapshot());
+    assert.equal(snapshot.editorText, initialText + additions + redoCaretProbe);
+    assert.equal(snapshot.hostRevision.text, initialText + additions + redoCaretProbe);
+    assert.equal(snapshot.hostRevision.version, 62);
+    assert.equal(await page.evaluate(() => (window as any).__documentSessionCandidate.undo()), true);
+    await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());
+    snapshot = await page.evaluate(() => (window as any).__documentSessionCandidate.snapshot());
+    assert.equal(snapshot.editorText, initialText + additions);
+    assert.equal(snapshot.hostRevision.text, initialText + additions);
+    assert.equal(snapshot.hostRevision.version, 63);
 
     const lateRestore = await page.evaluate(async () => {
       const candidate = (window as any).__documentSessionCandidate;
@@ -141,13 +154,21 @@ async function main(): Promise<void> {
     assert.equal(lateRestore.applied, true);
     assert.equal(lateRestore.snapshot.editorText, initialText + additions.slice(0, -1));
     assert.equal(lateRestore.snapshot.hostRevision.text, initialText + additions.slice(0, -1));
-    assert.equal(lateRestore.snapshot.hostRevision.version, 62);
-    assert.equal(lateRestore.snapshot.selectionHead, (initialText + additions.slice(0, -1)).length);
+    assert.equal(lateRestore.snapshot.hostRevision.version, 64);
     assert.equal(lateRestore.snapshot.focused, true);
     assert.ok(
       lateRestore.scrollSamples.every((scrollTop: number) => scrollTop < 1),
       `older replay restore overrode the newer wheel interaction: ${JSON.stringify(lateRestore.scrollSamples)}`
     );
+
+    const lateCaretProbe = 'R';
+    await page.keyboard.type(lateCaretProbe);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());
+    snapshot = await page.evaluate(() => (window as any).__documentSessionCandidate.snapshot());
+    assert.equal(snapshot.editorText, initialText + additions.slice(0, -1) + lateCaretProbe);
+    assert.equal(snapshot.hostRevision.text, initialText + additions.slice(0, -1) + lateCaretProbe);
+    assert.equal(snapshot.hostRevision.version, 65);
 
     await page.evaluate(() => (window as any).__documentSessionCandidate.destroy());
   } finally {

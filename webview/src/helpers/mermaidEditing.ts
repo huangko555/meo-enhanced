@@ -304,15 +304,20 @@ type MermaidEditingBlockElement = HTMLElement & {
   __meoMermaidEditingController?: MermaidEditingController;
 };
 
-export function focusMermaidEditingOffset(view: EditorView, anchor: number, offset: number): boolean {
+export function focusMermaidEditingOffset(
+  view: EditorView,
+  anchor: number,
+  offset: number,
+  isCurrent: () => boolean = () => true
+): boolean {
+  if (!isCurrent()) return false;
   const editingBlock = view.dom.querySelector<HTMLElement>(
     `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"]`
   ) as MermaidEditingBlockElement | null;
   if (!editingBlock?.__meoMermaidEditingController) {
     return false;
   }
-  editingBlock.__meoMermaidEditingController.focusOuterOffset(offset);
-  return true;
+  return editingBlock.__meoMermaidEditingController.focusOuterOffset(offset, isCurrent);
 }
 
 function applyMermaidSourceLinePrefix(sourceText: string, prefix: string): string {
@@ -452,15 +457,19 @@ class MermaidEditingController {
     this.innerView.focus();
   }
 
-  focusOffset(offset: number): void {
+  focusOffset(offset: number, isCurrent: () => boolean = () => true): boolean {
+    if (!isCurrent()) return false;
     const position = Math.max(0, Math.min(offset, this.innerView.state.doc.length));
     this.innerView.dispatch({
       selection: { anchor: position },
       scrollIntoView: true
     });
+    if (!isCurrent()) return false;
     this.innerView.focus();
+    if (!isCurrent()) return false;
     this.innerView.requestMeasure({
       read: (innerView) => {
+        if (!isCurrent()) return null;
         const coords = innerView.coordsAtPos(position);
         const viewport = this.outerView.scrollDOM.getBoundingClientRect();
         if (!coords || (coords.top >= viewport.top && coords.bottom <= viewport.bottom)) {
@@ -469,19 +478,20 @@ class MermaidEditingController {
         return coords.top - viewport.top - viewport.height * 0.3;
       },
       write: (delta) => {
-        if (delta !== null) {
+        if (isCurrent() && delta !== null) {
           getViewportController(this.outerView)?.navigateBy({ top: delta });
         }
       }
     });
+    return true;
   }
 
-  focusOuterOffset(offset: number): void {
-    this.focusOffset(mermaidOuterOffsetToEditorOffset(
+  focusOuterOffset(offset: number, isCurrent: () => boolean = () => true): boolean {
+    return this.focusOffset(mermaidOuterOffsetToEditorOffset(
       this.block.diagramText,
       this.block.sourceLinePrefix,
       offset
-    ));
+    ), isCurrent);
   }
 
   update(

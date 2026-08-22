@@ -194,6 +194,60 @@ async function main() {
       throw new Error(`Formula Ctrl+Y was blocked inside its source editor: ${JSON.stringify(mathRedo)}`);
     }
 
+    const tallMermaidText = [
+      'before block',
+      '```mermaid',
+      'graph TD',
+      ...Array.from({ length: 80 }, (_, index) => `NODE_${index} --> NODE_${index + 1}`),
+      '```',
+      ...Array.from({ length: 60 }, (_, index) => `after block ${index + 1}`)
+    ].join('\n');
+    await page.evaluate((text) => {
+      (window as any).__blockHistoryEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__blockHistoryEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, tallMermaidText);
+    await waitForFrames(page, 8);
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page, 4);
+    await page.click('.meo-mermaid-source-editor .cm-content');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Control');
+    await page.keyboard.type('STALE_MEASURE');
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    const staleInnerMeasure = await page.evaluate(async () => {
+      const editor = (window as any).__blockHistoryEditor;
+      const scroller = document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block')!;
+      scroller.scrollTop += block.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      const applied = await editor.undo();
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
+      const scrollSamples = [scroller.scrollTop];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        scrollSamples.push(scroller.scrollTop);
+      }
+      return {
+        applied,
+        markerRemoved: !editor.getText().includes('STALE_MEASURE'),
+        scrollSamples
+      };
+    });
+    if (
+      !staleInnerMeasure.applied ||
+      !staleInnerMeasure.markerRemoved ||
+      staleInnerMeasure.scrollSamples.some((scrollTop: number) => scrollTop > 1)
+    ) {
+      throw new Error(`Stale Mermaid inner measure overrode a newer wheel: ${JSON.stringify(staleInnerMeasure)}`);
+    }
+
     console.log('block inner history checks passed');
   } finally {
     await browser.close();

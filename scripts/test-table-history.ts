@@ -971,6 +971,61 @@ async function main() {
       throw new Error(`Redo did not restore the cross-table cells independently: ${reverseRedos}`);
     }
 
+    const staleLockDocument = [
+      ...Array.from({ length: 30 }, (_, index) => `before table ${index + 1}`),
+      '| Name | Value |',
+      '| --- | --- |',
+      '| Alpha | Before |',
+      ...Array.from({ length: 80 }, (_, index) => `after table ${index + 1}`)
+    ].join('\n');
+    await page.evaluate((text) => {
+      (window as any).__tableHistoryEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableHistoryEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, staleLockDocument);
+    await waitForFrames(page, 8);
+    const staleLockSetup = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!;
+      const input = document.querySelector<HTMLTextAreaElement>('tbody td:nth-child(2) textarea')!;
+      const table = input.closest<HTMLElement>('.meo-md-html-table')!;
+      scroller.scrollTop += table.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 120;
+      input.focus({ preventScroll: true });
+      input.value = 'After';
+      input.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: 'After'
+      }));
+      return { scrollTop: scroller.scrollTop };
+    });
+    if (staleLockSetup.scrollTop < 1) {
+      throw new Error(`Stale table lock fixture was not scrollable: ${JSON.stringify(staleLockSetup)}`);
+    }
+    const staleLockResult = await page.evaluate(async () => {
+      const editor = (window as any).__tableHistoryEditor;
+      const scroller = document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!;
+      const applied = await editor.undo();
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
+      const scrollSamples = [scroller.scrollTop];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        scrollSamples.push(scroller.scrollTop);
+      }
+      return { applied, scrollSamples };
+    });
+    if (
+      !staleLockResult.applied ||
+      staleLockResult.scrollSamples.some((scrollTop: number) => scrollTop > 1)
+    ) {
+      throw new Error(`Older table history lock overrode a newer wheel: ${JSON.stringify(staleLockResult)}`);
+    }
+
     console.log('table history checks passed');
   } finally {
     await browser.close();

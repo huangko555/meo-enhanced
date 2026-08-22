@@ -321,6 +321,28 @@ const dispatchWheel = (deltaY: number) => wheelScrollDOM.dispatch('wheel', {
   preventDefault: () => { defaultPrevented = true; }
 });
 
+wheelController.lockScrollTop(200);
+dispatchWheel(-80);
+wheelScrollDOM.scrollTop = 0;
+wheelFrames.shift()?.(0);
+if (wheelScrollDOM.scrollTop !== 0) {
+  throw new Error(`A newer wheel interaction was pulled back to ${wheelScrollDOM.scrollTop}`);
+}
+
+let historyRestoreCurrent = false;
+wheelController.lockScrollTop(300, () => historyRestoreCurrent);
+if (wheelScrollDOM.scrollTop !== 0 || wheelFrames.length !== 0) {
+  throw new Error('A stale history restore scheduled a viewport lock');
+}
+historyRestoreCurrent = true;
+wheelController.lockScrollTop(300, () => historyRestoreCurrent);
+historyRestoreCurrent = false;
+wheelScrollDOM.scrollTop = 0;
+wheelFrames.shift()?.(0);
+if (wheelScrollDOM.scrollTop !== 0 || wheelFrames.length !== 0) {
+  throw new Error('A stale history restore continued its viewport lock');
+}
+
 dispatchWheel(-80);
 wheelScrollDOM.scrollTop = 920;
 wheelScrollDOM.dispatch('scroll', {});

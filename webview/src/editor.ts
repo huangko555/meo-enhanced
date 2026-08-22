@@ -1441,7 +1441,8 @@ export function createEditor({
   };
 
   const prepareRenderedHistoryPosition = (
-    position: number
+    position: number,
+    isCurrent: () => boolean
   ): (() => boolean) | null => {
     if (currentMode !== 'live') {
       return null;
@@ -1497,8 +1498,8 @@ export function createEditor({
     // coordinator owns cancellation when a newer command or user action wins.
     view.focus();
     return () => block.kind === 'mermaid'
-      ? focusMermaidEditingOffset(view, openingLine.from, offset)
-      : focusLatexMathEditingOffset(view, openingLine.from, offset);
+      ? focusMermaidEditingOffset(view, openingLine.from, offset, isCurrent)
+      : focusLatexMathEditingOffset(view, openingLine.from, offset, isCurrent);
   };
 
   const revealRenderedSourceLine = (lineNumber: number) => {
@@ -2214,7 +2215,8 @@ export function createEditor({
       }
       if (pendingRenderedHistoryFocus?.replayId !== request.replayId) {
         const run = prepareRenderedHistoryPosition(
-          request.targetPosition
+          request.targetPosition,
+          isCurrent
         );
         if (!run) return 'not-rendered';
         pendingRenderedHistoryFocus = { replayId: request.replayId, run };

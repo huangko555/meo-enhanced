@@ -220,21 +220,26 @@ export class ViewportController {
     this.stabilizeScrollPosition(target);
   }
 
-  lockScrollTop(targetTop: number): void {
+  lockScrollTop(targetTop: number, isCurrent: () => boolean = () => true): void {
     // Live decorations can finish measuring several frames after a history
     // transaction. Hold the absolute viewport until that layout has settled;
     // markInteraction cancels the lock as soon as the user acts again.
+    if (this.destroyed || !isCurrent()) return;
     this.markInteraction();
     const lockGeneration = ++this.scrollLockGeneration;
     let remainingFrames = MAX_SETTLE_FRAMES;
     const write = () => {
-      if (this.destroyed || lockGeneration !== this.scrollLockGeneration) return;
+      if (
+        this.destroyed ||
+        lockGeneration !== this.scrollLockGeneration ||
+        !isCurrent()
+      ) return;
       this.view.scrollDOM.scrollTop = Math.max(0, Math.min(
         targetTop,
         this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight
       ));
       remainingFrames -= 1;
-      if (remainingFrames > 0) requestAnimationFrame(write);
+      if (remainingFrames > 0 && isCurrent()) requestAnimationFrame(write);
     };
     write();
   }
@@ -508,6 +513,7 @@ export class ViewportController {
       return;
     }
     this.generation += 1;
+    this.scrollLockGeneration += 1;
     this.activeScrollTarget = null;
     this.lastWheelAt = performance.now();
     this.lastScrollDirection = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : this.lastScrollDirection;
