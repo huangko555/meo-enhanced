@@ -6,7 +6,8 @@ import {
 } from './tableColumnWidthPolicy';
 import {
   isLiveInputDerivedWorkRefresh,
-  requestLiveInputDerivedWork
+  requestLiveInputDerivedWork,
+  requestLiveInputDerivedWorkOnFrame
 } from './liveInputDerivedWork';
 
 export type TableColumnWidthAdapter = {
@@ -42,6 +43,7 @@ type TableBinding = {
 
 type LifecycleEpoch = {
   alive: boolean;
+  readonly projectionConsumer: object;
 };
 
 const tableSelector = 'table[data-table-column-width]';
@@ -77,8 +79,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   let currentEpoch: LifecycleEpoch | null = null;
   let currentView: EditorView | null = null;
   let disposed = false;
-  const projectionConsumer = {};
-  let reconcile: (epoch: LifecycleEpoch) => void;
+  let reconcile: (epoch: LifecycleEpoch, forceProjectionEvent?: boolean) => void;
 
   const isCurrentEpoch = (epoch: LifecycleEpoch): boolean => (
     !disposed && epoch.alive && currentEpoch === epoch
@@ -87,8 +88,15 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   const requestCurrentProjection = (epoch: LifecycleEpoch): void => {
     const operation = () => reconcile(epoch);
     const view = currentView;
-    if (view) requestLiveInputDerivedWork(view, projectionConsumer, operation);
+    if (view) requestLiveInputDerivedWork(view, epoch.projectionConsumer, operation);
     else operation();
+  };
+
+  const requestCurrentProjectionOnFrame = (epoch: LifecycleEpoch): void => {
+    const operation = () => reconcile(epoch, true);
+    const view = currentView;
+    if (view) requestLiveInputDerivedWorkOnFrame(view, epoch.projectionConsumer, operation);
+    else requestAnimationFrame(operation);
   };
 
   const findIntent = (table: HTMLTableElement): WidthIntent | null => {
@@ -199,7 +207,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         if (projectedContainerWidth !== null && observedWidth !== undefined
           && Math.round(observedWidth) === Math.round(projectedContainerWidth)) return;
       }
-      requestCurrentProjection(epoch);
+      requestCurrentProjectionOnFrame(epoch);
     };
 
     const start = (event: PointerEvent): void => {
@@ -348,7 +356,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     };
   };
 
-  reconcile = (epoch: LifecycleEpoch): void => {
+  reconcile = (epoch: LifecycleEpoch, forceProjectionEvent = false): void => {
     if (!isCurrentEpoch(epoch)) return;
     const current = new Set(options.root.querySelectorAll<HTMLTableElement>(tableSelector));
     for (const [table, binding] of bindings) {
@@ -365,7 +373,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       }
       if (!isCurrentEpoch(epoch) || !table.isConnected || !options.root.contains(table)) continue;
       const projectionChanged = binding.project();
-      if (isNewBinding || projectionChanged) {
+      if (forceProjectionEvent || isNewBinding || projectionChanged) {
         table.dispatchEvent(new CustomEvent(projectionEventName));
       }
     }
@@ -407,7 +415,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   const adapter: TableColumnWidthAdapter = {
     acquire() {
       if (disposed || currentEpoch) return;
-      const epoch = { alive: true };
+      const epoch = { alive: true, projectionConsumer: {} };
       currentEpoch = epoch;
       mutationObserver = new MutationObserver(() => {
         requestCurrentProjection(epoch);

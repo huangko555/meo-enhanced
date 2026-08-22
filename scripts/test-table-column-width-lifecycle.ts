@@ -254,17 +254,35 @@ async function main(): Promise<void> {
       const currentRootCallback = lifecycle.callbacks('mutation', 'first')[1];
       const currentResizeCallback = lifecycle.callbacks('resize', 'first')[1];
       currentRootCallback([], {});
+      const afterCurrentRoot = lifecycle.snapshot();
       currentResizeCallback([], {});
+      const afterCurrentResize = lifecycle.snapshot();
       lifecycle.runFrame(lifecycle.lastFrameId());
-      return { beforeOldCallbacks, afterOldCallbacks, current: lifecycle.snapshot() };
+      return {
+        beforeOldCallbacks,
+        afterOldCallbacks,
+        afterCurrentRoot,
+        afterCurrentResize,
+        current: lifecycle.snapshot()
+      };
     });
     assert.deepEqual(
       reacquired.afterOldCallbacks,
       reacquired.beforeOldCallbacks,
       'a previous epoch must remain inert after reacquire'
     );
-    assert.ok(reacquired.current.queries > reacquired.afterOldCallbacks.queries);
-    assert.ok(reacquired.current.frameRequests > reacquired.afterOldCallbacks.frameRequests);
+    assert.ok(reacquired.afterCurrentRoot.queries > reacquired.afterOldCallbacks.queries);
+    assert.equal(
+      reacquired.afterCurrentResize.frameRequests,
+      reacquired.afterCurrentRoot.frameRequests + 1,
+      'the current resize observer must schedule projection on a frame after reacquire'
+    );
+    assert.equal(
+      reacquired.afterCurrentResize.queries,
+      reacquired.afterCurrentRoot.queries,
+      'the resize observer must not project before its requested frame runs'
+    );
+    assert.ok(reacquired.current.queries > reacquired.afterCurrentResize.queries);
     assert.ok(reacquired.current.projections > reacquired.afterOldCallbacks.projections);
 
     const balanced = await page.evaluate(() => {
