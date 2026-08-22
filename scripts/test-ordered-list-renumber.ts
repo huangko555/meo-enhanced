@@ -10,10 +10,10 @@ if (nestedMarker?.indentLevel !== 1) {
 }
 const changes = collectOrderedListRenumberChanges(state);
 const renumbered = state.update({ changes }).state.doc.toString();
-const expected = '1. First\n2. Second\n3. Third\n  1. Nested first\n  2. Nested second';
+const expected = '1. First\n2. Second\n3. Third\n  4. Nested first\n  5. Nested second';
 
 if (renumbered !== expected) {
-  throw new Error(`Nested ordered lists must restart at 1. Received:\n${renumbered}`);
+  throw new Error(`Nested ordered lists must preserve an explicit start. Received:\n${renumbered}`);
 }
 
 console.log('ordered list nesting renumber checks passed');

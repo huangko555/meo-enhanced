@@ -3,6 +3,8 @@ import {
   RangeSetBuilder,
   EditorState,
   Transaction,
+  Annotation,
+  type Extension,
   type Line,
   type Range
 } from '@codemirror/state';
@@ -69,6 +71,9 @@ const FOUR_SPACE_INDENT = '    ';
 const TAB_INDENT = '\t';
 const TWO_SPACE_INDENT_COLUMNS = 2;
 const FOUR_SPACE_INDENT_COLUMNS = 4;
+const orderedListNormalizationIntent = Annotation.define<{
+  resetNestedStartsAtLines: readonly number[];
+}>();
 
 const listIndentStyle = {
   twoSpaces: {
@@ -194,7 +199,8 @@ function lineIndentStyle(
 export function nextOrderedSequenceNumber(
   orderedCountsByLevel: Array<number | null>,
   level: number,
-  orderedNumber: string | null | undefined
+  orderedNumber: string | null | undefined,
+  preserveNestedExplicitStart = true
 ): { expected: number | null; isAnchor: boolean } {
   orderedCountsByLevel.length = level + 1;
   if (!orderedNumber) {
@@ -204,9 +210,10 @@ export function nextOrderedSequenceNumber(
 
   const current = orderedCountsByLevel[level];
   if (current === null || current === undefined) {
-    const parsed = level === 0 ? Number.parseInt(orderedNumber, 10) : 1;
+    const isAnchor = level === 0 || preserveNestedExplicitStart;
+    const parsed = isAnchor ? Number.parseInt(orderedNumber, 10) : 1;
     orderedCountsByLevel[level] = parsed;
-    return { expected: parsed, isAnchor: level === 0 };
+    return { expected: parsed, isAnchor };
   }
 
   const next = current + 1;
@@ -241,6 +248,7 @@ export function indentListByTwoSpaces(view: EditorView): boolean {
   const { state } = view;
   const stylesByLine = detectListIndentStylesByLine(state);
   const changes: ListTextChange[] = [];
+  const resetNestedStartsAtLines: number[] = [];
 
   forEachSelectionLine(state, (line) => {
     const lineText = state.doc.sliceString(line.from, line.to);
@@ -249,13 +257,19 @@ export function indentListByTwoSpaces(view: EditorView): boolean {
     }
     const style = lineIndentStyle(line.number, stylesByLine);
     changes.push({ from: line.from, insert: style.insert });
+    if (listMarkerData(lineText, null, style)?.orderedNumber !== undefined) {
+      resetNestedStartsAtLines.push(line.number);
+    }
   });
 
   if (!changes.length) {
     return false;
   }
 
-  view.dispatch({ changes });
+  view.dispatch({
+    changes,
+    annotations: orderedListNormalizationIntent.of({ resetNestedStartsAtLines })
+  });
   return true;
 }
 
@@ -448,20 +462,32 @@ export function listMarkerData(
 class ListMarkerWidget extends WidgetType {
   text: string;
   classes: string;
+  widthColumns: number;
 
-  constructor(text: string, classes: string) {
+  constructor(text: string, classes: string, widthColumns: number) {
     super();
     this.text = text;
     this.classes = classes;
+    this.widthColumns = widthColumns;
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof ListMarkerWidget && other.text === this.text && other.classes === this.classes;
+    return other instanceof ListMarkerWidget &&
+      other.text === this.text &&
+      other.classes === this.classes &&
+      other.widthColumns === this.widthColumns;
   }
 
   toDOM(): HTMLElement {
     const marker = document.createElement('span');
     marker.className = `meo-md-list-marker ${this.classes}`;
+    marker.style.width = `${this.widthColumns}ch`;
+    const appendSourceGap = () => {
+      const sourceGap = document.createElement('span');
+      sourceGap.className = 'meo-md-list-source-gap';
+      sourceGap.textContent = ' ';
+      marker.appendChild(sourceGap);
+    };
     if (this.classes.includes('meo-md-list-marker-bullet')) {
       marker.setAttribute('aria-hidden', 'true');
       const dot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -473,10 +499,12 @@ class ListMarkerWidget extends WidgetType {
       circle.setAttribute('r', '5');
       dot.appendChild(circle);
       marker.appendChild(dot);
+      appendSourceGap();
       return marker;
     }
 
     marker.textContent = this.text;
+    appendSourceGap();
     return marker;
   }
 }
@@ -550,13 +578,12 @@ export function addListMarkerDecoration(
 
   if (marker.taskBracketStart !== undefined) {
     const bracketStart = line.from + marker.taskBracketStart;
-    const fullEnd = markerTo - 1;
     const taskStatus = marker.taskStatus ?? 'todo';
     builder.push(
       Decoration.replace({
         widget: new CheckboxWidget(taskStatus, bracketStart),
         inclusive: false
-      }).range(indentEnd, fullEnd)
+      }).range(indentEnd, markerTo)
     );
 
     if (taskStatus === 'done' || taskStatus === 'dropped') {
@@ -568,9 +595,13 @@ export function addListMarkerDecoration(
   } else if (markerEnd > indentEnd) {
     builder.push(
       Decoration.replace({
-        widget: new ListMarkerWidget(marker.markerText, marker.classes),
+        widget: new ListMarkerWidget(
+          marker.markerText,
+          marker.classes,
+          marker.toOffset - marker.fromOffset
+        ),
         inclusive: false
-      }).range(indentEnd, markerEnd)
+      }).range(indentEnd, markerTo)
     );
   }
 
@@ -849,7 +880,10 @@ export function handleEnterBeforeNestedList(view: EditorView): boolean {
   return true;
 }
 
-export function collectOrderedListRenumberChanges(state: EditorState): ListTextChange[] {
+export function collectOrderedListRenumberChanges(
+  state: EditorState,
+  resetNestedStartsAtLines: ReadonlySet<number> = new Set()
+): ListTextChange[] {
   const changes: ListTextChange[] = [];
   const stylesByLine = detectListIndentStylesByLine(state);
   const orderedCountsByLevel: Array<number | null> = [];
@@ -869,7 +903,8 @@ export function collectOrderedListRenumberChanges(state: EditorState): ListTextC
     const { expected, isAnchor } = nextOrderedSequenceNumber(
       orderedCountsByLevel,
       level,
-      marker.orderedNumber
+      marker.orderedNumber,
+      !resetNestedStartsAtLines.has(lineNo)
     );
     if (expected === null || isAnchor || marker.orderedNumber === undefined) {
       continue;
@@ -886,6 +921,35 @@ export function collectOrderedListRenumberChanges(state: EditorState): ListTextC
   }
 
   return changes;
+}
+
+/**
+ * Keeps ordered-list normalization inside the originating CodeMirror transaction.
+ * External Document presentation and native history replay remain authoritative.
+ */
+export function orderedListRenumberTransactionFilter(
+  shouldNormalize: () => boolean
+): Extension {
+  return EditorState.transactionFilter.of((transaction) => {
+    if (
+      !transaction.docChanged ||
+      !shouldNormalize() ||
+      transaction.annotation(Transaction.addToHistory) === false ||
+      transaction.isUserEvent('undo') ||
+      transaction.isUserEvent('redo')
+    ) {
+      return transaction;
+    }
+
+    const intent = transaction.annotation(orderedListNormalizationIntent);
+    const changes = collectOrderedListRenumberChanges(
+      transaction.state,
+      new Set(intent?.resetNestedStartsAtLines ?? [])
+    );
+    return changes.length
+      ? [transaction, { changes, sequential: true }]
+      : transaction;
+  });
 }
 
 function computeSourceListMarkers(state: EditorState): DecorationSet {

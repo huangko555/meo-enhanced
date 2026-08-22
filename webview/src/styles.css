@@ -2474,12 +2474,18 @@ body {
 }
 
 .cm-editor .meo-md-list-marker {
-  display: inline;
+  display: inline-block;
+  box-sizing: border-box;
+  padding-right: 1ch;
 }
 
 .cm-editor .meo-md-list-indent-spacer {
   display: inline-block;
   min-width: 0;
+}
+
+.cm-editor .meo-md-list-source-gap {
+  display: none;
 }
 
 .cm-editor .meo-md-list-prefix {
@@ -2516,6 +2522,7 @@ body {
 .cm-editor .meo-md-list-marker-ordered {
   color: var(--meo-semantic-orderedListMarker) !important;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .cm-editor .meo-md-list-marker-task {
@@ -2539,10 +2546,11 @@ body {
 .cm-editor .meo-task-checkbox {
   appearance: none;
   -webkit-appearance: none;
+  font: inherit;
   box-sizing: border-box;
   width: var(--meo-task-checkbox-size);
   height: var(--meo-task-checkbox-size);
-  margin: 0;
+  margin: 0 1ch 0 0;
   padding: 0;
   border: 1.5px solid var(--meo-semantic-taskCheckboxBorder);
   border-radius: 6px;

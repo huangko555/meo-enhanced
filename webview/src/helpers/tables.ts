@@ -907,7 +907,8 @@ function renumberTableCellOrderedLists(input: HTMLTextAreaElement) {
       const { expected, isAnchor } = nextOrderedSequenceNumber(
         orderedCountsByLevel,
         marker.indentLevel,
-        marker.orderedNumber
+        marker.orderedNumber,
+        false
       );
       if (
         expected !== null

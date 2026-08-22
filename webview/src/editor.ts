@@ -56,9 +56,9 @@ import {
   handleEnterOnEmptyListItem,
   handleEnterContinueList,
   handleEnterBeforeNestedList,
-  collectOrderedListRenumberChanges,
   indentListByTwoSpaces,
-  outdentListByTwoSpaces
+  outdentListByTwoSpaces,
+  orderedListRenumberTransactionFilter
 } from './helpers/listMarkers';
 import {
   insertTable,
@@ -105,7 +105,6 @@ import {
   beginLiveInputComposition,
   completeLiveInputComposition,
   isLiveInputDerivedWorkRefresh,
-  markLiveInputDerivedWorkFollowUp,
   mapLiveInputDerivedDecorations,
   requestLiveInputDerivedWork,
   requestLiveInputDerivedWorkOnFrame,
@@ -313,7 +312,6 @@ export function createEditor({
   let frontmatterBoundaryClick: FrontmatterBoundaryClickState | null = null;
   let view: EditorView;
   let currentMode: EditableEditorMode = startMode;
-  let applyingRenumber = false;
   let lastSearchStateSignature = '';
   let tableInteractionActive = false;
   let tableInteractionOwner: HTMLElement | null = null;
@@ -359,23 +357,8 @@ export function createEditor({
   const bootstrapDerivedConsumer = {};
   let editorDestroyed = false;
   const publishComposedDocumentChange = () => {
-    if (!view || applyingExternal || applyingRenumber) {
+    if (!view || applyingExternal) {
       return;
-    }
-    const renumberChanges = collectOrderedListRenumberChanges(view.state);
-    if (renumberChanges.length) {
-      applyingRenumber = true;
-      try {
-        view.dispatch({
-          changes: renumberChanges,
-          annotations: [
-            Transaction.addToHistory.of(false),
-            markLiveInputDerivedWorkFollowUp()
-          ]
-        });
-      } finally {
-        applyingRenumber = false;
-      }
     }
     onApplyChanges(view.state.doc.toString());
   };
@@ -1146,32 +1129,12 @@ export function createEditor({
   };
 
   const dispatchSelectedListFormatChanges = (
-    state: EditorState,
-    changes: ChangeSpec[],
-    shouldRenumberOrdered: boolean
+    changes: ChangeSpec[]
   ): void => {
     if (!changes.length) {
       return;
     }
-
-    if (!shouldRenumberOrdered) {
-      view.dispatch({ changes });
-      return;
-    }
-
-    const withMarkers = state.update({ changes });
-    const renumberChanges = collectOrderedListRenumberChanges(withMarkers.state);
-    if (!renumberChanges.length) {
-      view.dispatch(withMarkers);
-      return;
-    }
-
-    view.dispatch(
-      state.update(
-        { changes },
-        { changes: renumberChanges, sequential: true }
-      )
-    );
+    view.dispatch({ changes });
   };
 
   const isSearchMatchSelection = (from: number, to: number) => {
@@ -1795,6 +1758,7 @@ export function createEditor({
     extensions: [
       EditorState.tabSize.of(4),
       indentUnit.of('  '),
+      orderedListRenumberTransactionFilter(() => !applyingExternal && !editorDestroyed),
       keymap.of([
         { key: 'Tab', run: (view) => indentListByTwoSpaces(view) || indentMore(view) },
         { key: 'Shift-Tab', run: (view) => outdentListByTwoSpaces(view) || indentLess(view) },
@@ -2093,13 +2057,13 @@ export function createEditor({
         }
 
         if (update.docChanged) {
-          if (!applyingExternal && !applyingRenumber && !isHistoryReplayUpdate(update)) {
+          if (!applyingExternal && !isHistoryReplayUpdate(update)) {
             recentRenderedReplayPresentation = null;
             void editorHistoryRuntime?.dispatch({ type: 'localDocumentEdited' });
           }
         }
 
-        if (update.docChanged && !applyingExternal && !applyingRenumber) {
+        if (update.docChanged && !applyingExternal) {
           if (imeCompositionActive) {
             imeCompositionChanged = true;
           } else {
@@ -2814,7 +2778,7 @@ export function createEditor({
 
       if (!selection.empty && (action === 'bulletList' || action === 'numberedList')) {
         const changes = buildListFormatChangesForSelection(state, insert);
-        dispatchSelectedListFormatChanges(state, changes, action === 'numberedList');
+        dispatchSelectedListFormatChanges(changes);
         return;
       }
 

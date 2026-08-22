@@ -427,6 +427,12 @@ ol ol {
   top: -1px;
 }
 
+.meo-export-task-text {
+  display: inline-block;
+  width: calc(100% - 17px - 0.55em);
+  vertical-align: top;
+}
+
 .meo-export-task-checkbox.is-done::after {
   content: '';
   position: absolute;
