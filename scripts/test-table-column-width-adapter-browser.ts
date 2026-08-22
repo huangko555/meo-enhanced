@@ -104,19 +104,118 @@ async function main(): Promise<void> {
     assert.deepEqual(await widths('second'), initialSecond);
 
     await page.evaluate(() => {
+      document.querySelector('[data-table-column-width="second"]')?.remove();
+    });
+    await waitForFrames(page, 3);
+
+    const failedTableGeneration = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const candidate = window.TableColumnWidthAdapterCandidate!;
+      const runtime = candidate.create(host, 'failure');
+      const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+      const table = document.createElement('table');
+      table.dataset.tableColumnWidth = 'failure';
+      table.dataset.tableFrom = '0';
+      table.dataset.tableTo = '7';
+      const colgroup = document.createElement('colgroup');
+      const head = document.createElement('thead');
+      const row = document.createElement('tr');
+      for (let index = 0; index < 2; index += 1) {
+        colgroup.append(document.createElement('col'));
+        const cell = document.createElement('th');
+        const handle = document.createElement('span');
+        handle.dataset.tableResizeColumn = String(index);
+        cell.append(handle);
+        row.append(cell);
+      }
+      head.append(row);
+      table.append(colgroup, head);
+      root.append(table);
+      let events = 0;
+      table.addEventListener('meo-table-column-width-projected', () => { events += 1; });
+      runtime.adapter.acquire();
+      const frames = async (count: number) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      await frames(4);
+      const handle = table.querySelector<HTMLElement>('[data-table-resize-column="0"]')!;
+      handle.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons: 1,
+        pointerId: 71,
+        pointerType: 'mouse',
+        clientX: 100
+      }));
+      window.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        buttons: 1,
+        pointerId: 71,
+        pointerType: 'mouse',
+        clientX: 120
+      }));
+      window.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true,
+        buttons: 0,
+        pointerId: 71,
+        pointerType: 'mouse',
+        clientX: 120
+      }));
+      await frames(3);
+      const intentEstablished = runtime.projectCalls() > 0;
+      runtime.resetProjectCalls();
+      events = 0;
+      runtime.failNextRefresh();
+      runtime.dispatchInput(runtime.view.state.doc.length, 'a');
+      table.dataset.tableTo = String(runtime.view.state.doc.length);
+      root.style.width = '330px';
+      await frames(4);
+      const afterFailure = { projects: runtime.projectCalls(), events };
+      runtime.resetProjectCalls();
+      events = 0;
+      runtime.dispatchInput(runtime.view.state.doc.length, 'b');
+      table.dataset.tableTo = String(runtime.view.state.doc.length);
+      await frames(4);
+      const afterRecovery = { projects: runtime.projectCalls(), events };
+      runtime.destroy();
+      host.remove();
+      return { intentEstablished, afterFailure, afterRecovery };
+    });
+    assert.equal(failedTableGeneration.intentEstablished, true, 'failure fixture must own a projected width intent');
+    assert.deepEqual(failedTableGeneration.afterFailure, { projects: 0, events: 0 });
+    assert.deepEqual(
+      failedTableGeneration.afterRecovery,
+      { projects: 1, events: 1 },
+      'a failed Table generation must not replay its Resize consumer during recovery input'
+    );
+
+    await page.evaluate(() => {
       const runtime = (window as any).__widthCandidate;
       const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
       const oldTable = root.querySelector<HTMLTableElement>('[data-table-column-width="first"]')!;
-      const facts = { queries: 0, writes: 0, currentEvents: 0, detachedEvents: 0 };
+      const facts = { queries: 0, reconciles: 0, writes: 0, currentEvents: 0, detachedEvents: 0 };
+      const writtenTables = new Set<Element>();
       const originalQuery = Element.prototype.querySelectorAll;
       Element.prototype.querySelectorAll = function(selectors: string) {
+        if (this === root && selectors === 'table[data-table-column-width]') {
+          facts.reconciles += 1;
+        }
         if ((this === root || root.contains(this)) && /data-table-column-width|thead th|colgroup/.test(selectors)) {
           facts.queries += 1;
         }
         return originalQuery.call(this, selectors);
       } as typeof Element.prototype.querySelectorAll;
       const writes = new MutationObserver((records) => {
-        facts.writes += records.filter((record) => record.type === 'attributes').length;
+        for (const record of records) {
+          if (record.type === 'attributes' && record.target instanceof HTMLTableElement) {
+            writtenTables.add(record.target);
+          }
+        }
+        facts.writes = writtenTables.size;
       });
       oldTable.addEventListener('meo-table-column-width-projected', () => { facts.detachedEvents += 1; });
       runtime.resetProjectCalls();
@@ -143,7 +242,7 @@ async function main(): Promise<void> {
     ));
     assert.deepEqual(
       pendingObserverFirstFrame,
-      { queries: 0, writes: 0, currentEvents: 0, detachedEvents: 0, projects: 0 },
+      { queries: 0, reconciles: 0, writes: 0, currentEvents: 0, detachedEvents: 0, projects: 0 },
       'pending Mutation/Resize callbacks must not query, project, write, or emit for current/detached tables'
     );
     await waitForFrames(page, 5);
@@ -157,8 +256,9 @@ async function main(): Promise<void> {
       return result;
     });
     assert.ok(pendingObserverSettled.queries > 0, 'current replacement must be queried after the barrier');
-    assert.ok(pendingObserverSettled.projects > 0, 'current replacement must be projected after the barrier');
-    assert.ok(pendingObserverSettled.writes > 0, 'current replacement must be written after the barrier');
+    assert.equal(pendingObserverSettled.reconciles, 1, 'Mutation/Resize/refresh must share one reconcile leaf');
+    assert.equal(pendingObserverSettled.projects, 1, 'current replacement must be projected exactly once');
+    assert.equal(pendingObserverSettled.writes, 1, 'only the current replacement may receive style writes');
     assert.equal(pendingObserverSettled.currentEvents, 1, 'current replacement must emit one latest projection event');
     assert.equal(pendingObserverSettled.detachedEvents, 0, 'detached binding must remain a bounded no-op');
     await waitForFrames(page, 3);
@@ -312,7 +412,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse', buttons: 0 }));
     });
     await page.mouse.up();
-    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 1);
+    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 2);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.legacyInstances), 0);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.policyInstances), 1);
   } finally {

@@ -16,6 +16,8 @@ type FrameSample = {
   derivedAdditions: number;
   tableProjectionEvents: number;
   searchEvents: number;
+  gitOverviewRenders: number;
+  searchOverviewRenders: number;
   derivedMutationKinds: string[];
 };
 
@@ -41,7 +43,23 @@ async function armFirstFrame(
         let derivedAdditions = 0;
         let tableProjectionEvents = 0;
         let searchEvents = 0;
+        let gitOverviewRenders = 0;
+        let searchOverviewRenders = 0;
         const derivedMutationKinds: string[] = [];
+        const textContentDescriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+        if (!textContentDescriptor?.get || !textContentDescriptor.set) {
+          throw new Error('Node.textContent is not observable');
+        }
+        Object.defineProperty(Node.prototype, 'textContent', {
+          ...textContentDescriptor,
+          set(value: string | null) {
+            if (this instanceof HTMLElement) {
+              if (this.classList.contains('meo-git-overview-ruler')) gitOverviewRenders += 1;
+              if (this.classList.contains('meo-search-overview-ruler')) searchOverviewRenders += 1;
+            }
+            textContentDescriptor.set!.call(this, value);
+          }
+        });
         const derivedSelector = '.meo-md-marker, .meo-md-html-table-shell, .meo-md-list-marker, .meo-md-long-code-placeholder, .meo-md-long-code-footer';
         const observer = new MutationObserver((records) => {
           for (const record of records) {
@@ -77,6 +95,8 @@ async function armFirstFrame(
             derivedAdditions,
             tableProjectionEvents,
             searchEvents,
+            gitOverviewRenders,
+            searchOverviewRenders,
             derivedMutationKinds: [...derivedMutationKinds]
           };
         };
@@ -93,6 +113,7 @@ async function armFirstFrame(
               setTimeout(() => {
                 const sample = snapshot();
                 observer.disconnect();
+                Object.defineProperty(Node.prototype, 'textContent', textContentDescriptor);
                 editorRoot.removeEventListener('meo-table-column-width-projected', onProjection, { capture: true });
                 editorRoot.removeEventListener('meo-search-state-change', onSearch, { capture: true });
                 resolveSettled(sample);
@@ -179,6 +200,95 @@ async function main(): Promise<void> {
       });
     }, original);
     await waitForFrames(page, 6);
+
+    const failedGenerationConsumerFacts = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const probe = (window as any).__createLiveInputConsumerProbe(host);
+      const staleTableKey = {};
+      const currentKey = {};
+      const facts = { stale: 0, current: 0 };
+      probe.failNextRefresh();
+      probe.input('a');
+      probe.request(staleTableKey, () => { facts.stale += 1; });
+      await new Promise<void>((resolve) => {
+        let frames = 4;
+        const next = () => requestAnimationFrame(() => {
+          frames -= 1;
+          if (frames === 0) resolve();
+          else next();
+        });
+        next();
+      });
+      probe.input('b');
+      probe.request(currentKey, () => { facts.current += 1; });
+      await new Promise<void>((resolve) => {
+        let frames = 4;
+        const next = () => requestAnimationFrame(() => {
+          frames -= 1;
+          if (frames === 0) resolve();
+          else next();
+        });
+        next();
+      });
+      probe.destroy();
+      host.remove();
+      return facts;
+    });
+    if (failedGenerationConsumerFacts.stale !== 0 || failedGenerationConsumerFacts.current !== 1) {
+      throw new Error(`Failed refresh replayed an old consumer generation: ${JSON.stringify(failedGenerationConsumerFacts)}`);
+    }
+
+    const reentrantConsumerFacts = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const probe = (window as any).__createLiveInputConsumerProbe(host);
+      const keyA = {};
+      const keyB = {};
+      const keyThrow = {};
+      const keyAfterThrow = {};
+      const facts = { a: 0, self: 0, b: 0, threw: 0, afterThrow: 0 };
+      probe.input('a');
+      probe.request(keyA, () => {
+        facts.a += 1;
+        probe.request(keyA, () => { facts.self += 1; });
+        probe.request(keyB, () => { facts.b += 1; });
+      });
+      probe.request(keyThrow, () => {
+        facts.threw += 1;
+        throw new Error('controlled consumer failure');
+      });
+      probe.request(keyAfterThrow, () => { facts.afterThrow += 1; });
+      await new Promise<void>((resolve) => {
+        let frames = 4;
+        const next = () => requestAnimationFrame(() => {
+          frames -= 1;
+          if (frames === 0) resolve();
+          else next();
+        });
+        next();
+      });
+      probe.input('b');
+      await new Promise<void>((resolve) => {
+        let frames = 4;
+        const next = () => requestAnimationFrame(() => {
+          frames -= 1;
+          if (frames === 0) resolve();
+          else next();
+        });
+        next();
+      });
+      probe.destroy();
+      host.remove();
+      return facts;
+    });
+    if (
+      reentrantConsumerFacts.a !== 1 || reentrantConsumerFacts.self !== 0 ||
+      reentrantConsumerFacts.b !== 1 || reentrantConsumerFacts.threw !== 1 ||
+      reentrantConsumerFacts.afterThrow !== 1
+    ) {
+      throw new Error(`Reentrant consumer generation was not drained exactly once: ${JSON.stringify(reentrantConsumerFacts)}`);
+    }
 
     const initialTableCount = await page.evaluate(() => (
       document.querySelectorAll('#primary .meo-md-html-table-shell').length
@@ -338,6 +448,18 @@ async function main(): Promise<void> {
     }, original);
     await waitForFrames(page, 5);
 
+    await page.evaluate((text) => {
+      const editor = (window as any).__liveInputEditor;
+      editor.setGitBaseline({
+        available: true,
+        tracked: true,
+        mode: 'fixed',
+        baseText: text
+      });
+      editor.setSearchQuery('cell');
+    }, original);
+    await waitForFrames(page, 5);
+
     await page.evaluate(() => {
       const editor = (window as any).__liveInputEditor;
       editor.revealSelection('plain '.length, 'plain '.length, { focusEditor: true, align: 'nearest' });
@@ -350,6 +472,7 @@ async function main(): Promise<void> {
       applies: [...(window as any).__liveInputApplies]
     }));
     const plainFrame = await readFirstFrame(page);
+    const plainSettled = await readSettledFrame(page);
     if (
       !plainImmediate.text.startsWith('plain Xline') ||
       plainImmediate.applies.at(-1) !== plainImmediate.text ||
@@ -360,9 +483,13 @@ async function main(): Promise<void> {
       plainFrame.tableCount !== 1 ||
       plainFrame.derivedAdditions !== 0 ||
       plainFrame.tableProjectionEvents !== 0 ||
-      plainFrame.searchEvents !== 0
+      plainFrame.searchEvents !== 0 ||
+      plainFrame.gitOverviewRenders !== 0 ||
+      plainFrame.searchOverviewRenders !== 0 ||
+      plainSettled.gitOverviewRenders !== 1 ||
+      plainSettled.searchOverviewRenders !== 1
     ) {
-      throw new Error(`Plain input was not committed and visible before derived work: ${JSON.stringify({ plainImmediate, plainFrame })}`);
+      throw new Error(`Plain input/overview render ordering failed: ${JSON.stringify({ plainImmediate, plainFrame, plainSettled })}`);
     }
 
     await page.evaluate((text) => {

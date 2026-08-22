@@ -213,7 +213,21 @@ export function mapLiveInputDerivedDecorations(
 }
 
 function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
-  const consumers = new Map<object, () => void>();
+  type ConsumerRecordState = 'queued' | 'running' | 'settled' | 'cancelled';
+  type ConsumerRecord = {
+    operation: () => void;
+    state: ConsumerRecordState;
+  };
+  type ConsumerGeneration = {
+    id: number;
+    state: 'accepting' | 'flushing' | 'settled' | 'cancelled';
+    records: Map<object, ConsumerRecord>;
+  };
+
+  let nextConsumerGeneration = 0;
+  let consumerGeneration: ConsumerGeneration | null = null;
+  let settleGenerationToken = 0;
+  const immediateConsumers = new Set<object>();
   let disposed = false;
   const reportError = (error: unknown): void => {
     console.error('[MEO live input] derived refresh failed', error);
@@ -225,12 +239,81 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       reportError(error);
     }
   };
-  const flushConsumers = (): void => {
-    if (disposed || isLiveInputDerivedWorkPending(view.state)) return;
-    const current = [...consumers.values()];
-    consumers.clear();
-    for (const operation of current) run(operation);
-    if (view.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'committed-refresh') {
+  const cancelConsumerGeneration = (): void => {
+    settleGenerationToken += 1;
+    const generation = consumerGeneration;
+    if (!generation || generation.state === 'cancelled') return;
+    generation.state = 'cancelled';
+    for (const record of generation.records.values()) record.state = 'cancelled';
+    generation.records.clear();
+  };
+  const startConsumerGeneration = (): ConsumerGeneration => {
+    cancelConsumerGeneration();
+    consumerGeneration = {
+      id: nextConsumerGeneration += 1,
+      state: 'accepting',
+      records: new Map()
+    };
+    return consumerGeneration;
+  };
+  const currentConsumerGeneration = (): ConsumerGeneration => {
+    if (!consumerGeneration || consumerGeneration.state === 'cancelled'
+      || consumerGeneration.state === 'settled') {
+      return startConsumerGeneration();
+    }
+    return consumerGeneration;
+  };
+  const queueConsumer = (
+    generation: ConsumerGeneration,
+    key: object,
+    operation: () => void
+  ): void => {
+    const existing = generation.records.get(key);
+    if (!existing) {
+      generation.records.set(key, { operation, state: 'queued' });
+      return;
+    }
+    if (existing.state === 'queued') existing.operation = operation;
+    // A stable key already running or settled represents this generation's
+    // invalidation. Recursive requests cannot create a retained ghost record.
+  };
+  const drainConsumerGeneration = (generation: ConsumerGeneration): void => {
+    generation.state = 'flushing';
+    // Consumer keys are stable, caller-owned identities. Draining queued
+    // records dynamically includes cross-key requests while each key can run
+    // at most once, so same-key recursion cannot produce an infinite drain.
+    while (generation === consumerGeneration && generation.state === 'flushing') {
+      const next = [...generation.records.values()].find((record) => record.state === 'queued');
+      if (!next) break;
+      next.state = 'running';
+      run(next.operation);
+      if (generation === consumerGeneration && next.state === 'running') {
+        next.state = 'settled';
+      }
+    }
+  };
+  const isCurrentConsumerGeneration = (generation: ConsumerGeneration): boolean => (
+    generation === consumerGeneration && generation.state !== 'cancelled'
+  );
+  const settleConsumers = (generation: ConsumerGeneration | null): void => {
+    const settleToken = settleGenerationToken += 1;
+    // Mutation/Resize observers caused by a leaf are delivered at the same
+    // microtask checkpoint. Keep committed-refresh open through that delivery
+    // so a settled key absorbs its own DOM echo and cross-key work is drained.
+    queueMicrotask(() => {
+      if (settleToken !== settleGenerationToken
+        || disposed || isLiveInputDerivedWorkPending(view.state)
+        || generation !== consumerGeneration || generation?.state === 'cancelled') return;
+      if (generation) {
+        drainConsumerGeneration(generation);
+        if (!isCurrentConsumerGeneration(generation)) return;
+        if ([...generation.records.values()].some((record) => record.state === 'queued')) {
+          settleConsumers(generation);
+          return;
+        }
+        generation.state = 'settled';
+      }
+      if (view.state.field(liveInputDerivedWorkPhaseField, false)?.phase !== 'committed-refresh') return;
       try {
         view.dispatch({
           effects: settleLiveInputDerivedWorkEffect.of(true),
@@ -239,7 +322,13 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       } catch (error) {
         reportError(error);
       }
-    }
+    });
+  };
+  const flushConsumers = (): void => {
+    if (disposed || isLiveInputDerivedWorkPending(view.state)) return;
+    const generation = consumerGeneration;
+    if (generation && generation.state !== 'cancelled') drainConsumerGeneration(generation);
+    settleConsumers(generation);
   };
   const scheduler = createLiveInputDerivedWorkScheduler({
     requestFrame: (callback) => window.requestAnimationFrame(() => callback()),
@@ -263,10 +352,16 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       if (disposed) return;
       const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
       if (isLiveInputDerivedWorkPending(view.state) || phase === 'committed-refresh') {
-        consumers.set(key, operation);
+        queueConsumer(currentConsumerGeneration(), key, operation);
         return;
       }
-      run(operation);
+      if (immediateConsumers.has(key)) return;
+      immediateConsumers.add(key);
+      try {
+        run(operation);
+      } finally {
+        immediateConsumers.delete(key);
+      }
     },
     update(update: { transactions: readonly Transaction[] }) {
       for (const transaction of update.transactions) {
@@ -276,16 +371,24 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
         }
         if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) {
           scheduler.cancelPending();
-          consumers.clear();
+          cancelConsumerGeneration();
+        }
+        if (transaction.effects.some((effect) => effect.is(cancelLiveInputDerivedWorkEffect))) {
+          scheduler.cancelPending();
+          cancelConsumerGeneration();
         }
         if (transaction.effects.some((effect) => effect.is(completeLiveInputCompositionEffect))
           && transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'pending-input') {
           scheduler.documentChanged();
         }
         if (transaction.effects.some((effect) => effect.is(deferLiveInputDerivedWorkEffect))) {
+          startConsumerGeneration();
           if (transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'pending-input') {
             scheduler.documentChanged();
           }
+        }
+        if (transaction.effects.some((effect) => effect.is(changeLiveInputCompositionEffect))) {
+          startConsumerGeneration();
         }
         if (transaction.effects.some((effect) => effect.is(refreshLiveInputDerivedWorkEffect))) {
           queueMicrotask(flushConsumers);
@@ -295,7 +398,8 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     destroy() {
       disposed = true;
       scheduler.dispose();
-      consumers.clear();
+      cancelConsumerGeneration();
+      immediateConsumers.clear();
     }
   };
 }

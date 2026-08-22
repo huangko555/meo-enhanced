@@ -1,6 +1,5 @@
 import { createEditor } from './test-editor-factory';
-import { Transaction } from '@codemirror/state';
-import { EditorState } from '@codemirror/state';
+import { EditorState, StateField, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
@@ -9,7 +8,11 @@ import {
   detailsBlockLiveExtensions,
   detailsBlockStateExtensions
 } from '../webview/src/helpers/detailsBlocks';
-import { liveInputDerivedWorkExtensions } from '../webview/src/editor/liveInputDerivedWork';
+import {
+  isLiveInputDerivedWorkRefresh,
+  liveInputDerivedWorkExtensions,
+  requestLiveInputDerivedWork
+} from '../webview/src/editor/liveInputDerivedWork';
 
 (window as typeof window & {
   __createInputCursorEditor?: typeof createEditor;
@@ -24,6 +27,48 @@ import { liveInputDerivedWorkExtensions } from '../webview/src/editor/liveInputD
     destroy(): void;
   };
 }).__createInputCursorEditor = createEditor;
+
+(window as any).__createLiveInputConsumerProbe = (parent: HTMLElement) => {
+  let throwNextRefresh = false;
+  const throwingRefreshField = StateField.define<boolean>({
+    create: () => false,
+    update(value, transaction) {
+      if (throwNextRefresh && isLiveInputDerivedWorkRefresh(transaction)) {
+        throwNextRefresh = false;
+        throw new Error('controlled live-input refresh failure');
+      }
+      return value;
+    }
+  });
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: 'probe',
+      extensions: [
+        ...liveInputDerivedWorkExtensions(),
+        throwingRefreshField
+      ]
+    })
+  });
+  return {
+    view,
+    input(insert: string) {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert },
+        annotations: Transaction.userEvent.of('input.type')
+      });
+    },
+    request(key: object, operation: () => void) {
+      requestLiveInputDerivedWork(view, key, operation);
+    },
+    failNextRefresh() {
+      throwNextRefresh = true;
+    },
+    destroy() {
+      view.destroy();
+    }
+  };
+};
 
 (window as typeof window & {
   __dispatchProductionInput?: (editor: ReturnType<typeof createEditor>, from: number, insert: string, to?: number) => void;

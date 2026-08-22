@@ -1,9 +1,12 @@
-import { EditorState, Transaction } from '@codemirror/state';
+import { EditorState, StateField, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { history, redo, undo } from '@codemirror/commands';
 import { createCodeMirrorDomTableColumnWidthAdapter } from '../webview/src/editor/tableColumnWidthAdapter';
 import { tableColumnWidthPolicy } from '../webview/src/editor/tableColumnWidthPolicy';
-import { liveInputDerivedWorkExtensions } from '../webview/src/editor/liveInputDerivedWork';
+import {
+  isLiveInputDerivedWorkRefresh,
+  liveInputDerivedWorkExtensions
+} from '../webview/src/editor/liveInputDerivedWork';
 
 declare global {
   interface Window {
@@ -14,6 +17,7 @@ declare global {
         undo(): boolean;
         redo(): boolean;
         dispatchInput(from: number, insert: string): void;
+        failNextRefresh(): void;
         resetProjectCalls(): void;
         projectCalls(): number;
         destroy(): void;
@@ -33,6 +37,17 @@ window.TableColumnWidthAdapterCandidate = {
     adapterRoot.className = 'table-column-width-candidate-root';
     parent.append(adapterRoot);
     let projectCalls = 0;
+    let throwNextRefresh = false;
+    const throwingRefreshField = StateField.define<boolean>({
+      create: () => false,
+      update(value, transaction) {
+        if (throwNextRefresh && isLiveInputDerivedWorkRefresh(transaction)) {
+          throwNextRefresh = false;
+          throw new Error('controlled table refresh failure');
+        }
+        return value;
+      }
+    });
     const candidate = createCodeMirrorDomTableColumnWidthAdapter({
       root: adapterRoot,
       policy: {
@@ -47,7 +62,12 @@ window.TableColumnWidthAdapterCandidate = {
       parent,
       state: EditorState.create({
         doc: text,
-        extensions: [history(), ...liveInputDerivedWorkExtensions(), candidate.extension]
+        extensions: [
+          history(),
+          ...liveInputDerivedWorkExtensions(),
+          candidate.extension,
+          throwingRefreshField
+        ]
       })
     });
     instances += 1;
@@ -62,6 +82,7 @@ window.TableColumnWidthAdapterCandidate = {
           annotations: Transaction.userEvent.of('input.type')
         });
       },
+      failNextRefresh() { throwNextRefresh = true; },
       resetProjectCalls() { projectCalls = 0; },
       projectCalls: () => projectCalls,
       destroy() {

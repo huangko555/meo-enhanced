@@ -105,12 +105,12 @@ export function createSearchOverviewRulerController({
 
   const refresh = ({ positionsChanged = false }: { positionsChanged?: boolean } = {}) => {
     if (positionsChanged) invalidatePositions();
-    scheduleDerived(() => {
-      if (destroyed || frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        scheduleDerived(render);
-      });
+    if (destroyed || frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      // Submit the actual DOM render leaf. A consumer operation must never
+      // re-enter the Module through a wrapper that schedules the same key.
+      scheduleDerived(render);
     });
   };
 

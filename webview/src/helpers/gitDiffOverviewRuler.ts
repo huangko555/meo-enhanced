@@ -316,12 +316,12 @@ export function createGitDiffOverviewRulerController({
   };
 
   const scheduleRender = () => {
-    scheduleDerived(() => {
-      if (destroyed || rafId) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        scheduleDerived(renderNow);
-      });
+    if (destroyed || rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      // Only the observable render leaf crosses the derived-work boundary.
+      // Scheduling this RAF is an idempotent invalidation, not derived work.
+      scheduleDerived(renderNow);
     });
   };
 

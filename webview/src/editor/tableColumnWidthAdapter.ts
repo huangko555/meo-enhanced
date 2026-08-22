@@ -37,7 +37,7 @@ type WidthIntent = {
 type TableBinding = {
   readonly table: HTMLTableElement;
   readonly cleanup: () => void;
-  project(): void;
+  project(): boolean;
 };
 
 type LifecycleEpoch = {
@@ -77,11 +77,19 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   let currentEpoch: LifecycleEpoch | null = null;
   let currentView: EditorView | null = null;
   let disposed = false;
-  const reconcileConsumer = {};
+  const projectionConsumer = {};
+  let reconcile: (epoch: LifecycleEpoch) => void;
 
   const isCurrentEpoch = (epoch: LifecycleEpoch): boolean => (
     !disposed && epoch.alive && currentEpoch === epoch
   );
+
+  const requestCurrentProjection = (epoch: LifecycleEpoch): void => {
+    const operation = () => reconcile(epoch);
+    const view = currentView;
+    if (view) requestLiveInputDerivedWork(view, projectionConsumer, operation);
+    else operation();
+  };
 
   const findIntent = (table: HTMLTableElement): WidthIntent | null => {
     const from = numberFromDataset(table, 'tableFrom');
@@ -172,37 +180,26 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     const lifecycle = { alive: true };
     let dragCleanup: (() => void) | null = null;
     let refreshDragPreview: (() => void) | null = null;
-    let resizeFrame = 0;
-    const projectionConsumer = {};
+    let initialResizePending = true;
+    let projectedContainerWidth: number | null = null;
     table.dataset.tableColumnWidthOwner = 'adapter';
 
-    const cancelFrame = () => {
-      if (!resizeFrame) return;
-      cancelAnimationFrame(resizeFrame);
-      resizeFrame = 0;
-    };
     const isCurrentBinding = () => lifecycle.alive
       && isCurrentEpoch(epoch)
       && table.isConnected
       && options.root.contains(table);
-    const requestProjection = (operation: () => void): void => {
-      const view = currentView;
-      if (view) requestLiveInputDerivedWork(view, projectionConsumer, operation);
-      else operation();
-    };
-    const scheduleProjection = () => {
-      requestProjection(() => {
-        if (!isCurrentBinding() || resizeFrame) return;
-        resizeFrame = requestAnimationFrame(() => {
-          resizeFrame = 0;
-          requestProjection(() => {
-            if (!isCurrentBinding()) return;
-            if (refreshDragPreview) refreshDragPreview();
-            else project(table, epoch);
-            table.dispatchEvent(new CustomEvent(projectionEventName));
-          });
-        });
-      });
+    const scheduleProjection = (entries: readonly ResizeObserverEntry[]) => {
+      if (!isCurrentBinding()) return;
+      // observe() always delivers the current size once. The binding was
+      // projected by the same reconcile leaf, so that notification is not a
+      // second invalidation.
+      if (initialResizePending) {
+        initialResizePending = false;
+        const observedWidth = entries[0]?.contentRect.width;
+        if (projectedContainerWidth !== null && observedWidth !== undefined
+          && Math.round(observedWidth) === Math.round(projectedContainerWidth)) return;
+      }
+      requestCurrentProjection(epoch);
     };
 
     const start = (event: PointerEvent): void => {
@@ -293,7 +290,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           defaultWidthWasCapped
         });
         table.dispatchEvent(new CustomEvent(projectionEventName));
-        scheduleProjection();
+        requestCurrentProjection(epoch);
       };
       const move = (moveEvent: PointerEvent) => {
         if (!isCurrentBinding() || moveEvent.pointerId !== event.pointerId) return;
@@ -333,19 +330,25 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 
     return {
       table,
-      project: () => project(table, epoch),
+      project() {
+        const previousContainerWidth = projectedContainerWidth;
+        if (refreshDragPreview) refreshDragPreview();
+        else project(table, epoch);
+        projectedContainerWidth = (table.parentElement ?? options.root).clientWidth;
+        return previousContainerWidth === null
+          || Math.round(previousContainerWidth) !== Math.round(projectedContainerWidth);
+      },
       cleanup() {
         if (!lifecycle.alive) return;
         lifecycle.alive = false;
         dragCleanup?.();
-        cancelFrame();
         for (const cleanup of cleanups) cleanup();
         delete table.dataset.tableColumnWidthOwner;
       }
     };
   };
 
-  const reconcile = (epoch: LifecycleEpoch): void => {
+  reconcile = (epoch: LifecycleEpoch): void => {
     if (!isCurrentEpoch(epoch)) return;
     const current = new Set(options.root.querySelectorAll<HTMLTableElement>(tableSelector));
     for (const [table, binding] of bindings) {
@@ -355,11 +358,16 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     }
     for (const table of current) {
       let binding = bindings.get(table);
+      const isNewBinding = !binding;
       if (!binding) {
         binding = bind(table, epoch);
         bindings.set(table, binding);
       }
-      binding.project();
+      if (!isCurrentEpoch(epoch) || !table.isConnected || !options.root.contains(table)) continue;
+      const projectionChanged = binding.project();
+      if (isNewBinding || projectionChanged) {
+        table.dispatchEvent(new CustomEvent(projectionEventName));
+      }
     }
   };
 
@@ -381,8 +389,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       }
     }
     if (shouldReconcile && currentEpoch) {
-      const epoch = currentEpoch;
-      requestLiveInputDerivedWork(update.view, reconcileConsumer, () => reconcile(epoch));
+      requestCurrentProjection(currentEpoch);
     }
   };
 
@@ -403,12 +410,10 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const epoch = { alive: true };
       currentEpoch = epoch;
       mutationObserver = new MutationObserver(() => {
-        const view = currentView;
-        if (view) requestLiveInputDerivedWork(view, reconcileConsumer, () => reconcile(epoch));
-        else reconcile(epoch);
+        requestCurrentProjection(epoch);
       });
       mutationObserver.observe(options.root, { childList: true, subtree: true });
-      reconcile(epoch);
+      requestCurrentProjection(epoch);
     },
     release,
     dispose() {
