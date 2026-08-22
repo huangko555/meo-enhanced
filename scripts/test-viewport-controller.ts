@@ -567,8 +567,10 @@ const delayedDocumentChange = delayedDocumentChangeController.runAnchorTransacti
   delayedDocumentChangeHandle,
   'preview',
   async () => {
-    delayedDocumentChangeView.state.doc = changedDocument;
     await new Promise<void>((resolve) => { finishDelayedDocumentChange = resolve; });
+    delayedDocumentChangeController.runDocumentChange(() => {
+      delayedDocumentChangeView.state.doc = changedDocument;
+    });
   }
 );
 delayedDocumentChangeController.markInteraction();
@@ -577,6 +579,31 @@ await delayedDocumentChange;
 if (delayedDocumentChangeProjections.length !== 0) {
   throw new Error(
     `A newer interaction allowed a delayed Document projection: ${JSON.stringify(delayedDocumentChangeProjections)}`
+  );
+}
+if (delayedDocumentChangeView.state.doc !== changedDocument) {
+  throw new Error('A stale async transaction suppressed its awaited Document mutation');
+}
+
+delayedDocumentChangeView.state.doc = oldDocument;
+const awaitedCurrentHandle = delayedDocumentChangeController.captureAnchorToken('preview');
+await delayedDocumentChangeController.runAnchorTransaction(
+  awaitedCurrentHandle,
+  'preview',
+  async () => {
+    await Promise.resolve();
+    delayedDocumentChangeController.runDocumentChange(() => {
+      delayedDocumentChangeView.state.doc = changedDocument;
+    });
+  }
+);
+if (
+  delayedDocumentChangeProjections.length !== 1 ||
+  delayedDocumentChangeProjections[0]?.line !== 7 ||
+  delayedDocumentChangeView.state.doc !== changedDocument
+) {
+  throw new Error(
+    `An awaited current Document change escaped its handle (${JSON.stringify(delayedDocumentChangeProjections)})`
   );
 }
 delayedDocumentChangeController.destroy();
@@ -635,11 +662,13 @@ const crossScrollDOM = {
   ...anchorScrollDOM,
   scrollTop: 111
 };
-const crossController = new ViewportController({
+const crossControllerView = {
   ...anchorView,
   dom: {},
-  scrollDOM: crossScrollDOM
-} as any, {
+  scrollDOM: crossScrollDOM,
+  state: { doc: oldDocument }
+};
+const crossController = new ViewportController(crossControllerView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 2, lineOffset: 3 }),
@@ -650,17 +679,65 @@ const foreignHandle = anchorController.captureAnchorToken('preview');
 let crossTokenWasCurrent = true;
 crossController.runAnchorTransaction(foreignHandle, 'preview', (isCurrent) => {
   crossTokenWasCurrent = isCurrent();
+  crossController.runDocumentChange(() => {
+    crossControllerView.state.doc = changedDocument;
+  });
 });
-if (crossTokenWasCurrent || crossControllerPreviewWrites !== 0 || crossScrollDOM.scrollTop !== 111) {
-  throw new Error('A cross-Controller token produced a viewport write');
+await flushFrames(anchorFrames);
+if (
+  crossTokenWasCurrent ||
+  crossControllerPreviewWrites !== 0 ||
+  crossScrollDOM.scrollTop !== 111 ||
+  crossControllerView.state.doc !== changedDocument
+) {
+  throw new Error('A cross-Controller token suppressed its mutation or produced a viewport write');
 }
 
+crossControllerView.state.doc = oldDocument;
+crossScrollDOM.scrollTop = 111;
 let nullTokenWasCurrent = true;
 crossController.runAnchorTransaction(null, 'editor', (isCurrent) => {
   nullTokenWasCurrent = isCurrent();
+  crossController.runDocumentChange(() => {
+    crossControllerView.state.doc = changedDocument;
+  });
 });
-if (nullTokenWasCurrent || crossScrollDOM.scrollTop !== 111) {
-  throw new Error('A null token produced a viewport write');
+await flushFrames(anchorFrames);
+if (
+  nullTokenWasCurrent ||
+  crossScrollDOM.scrollTop !== 111 ||
+  crossControllerView.state.doc !== changedDocument
+) {
+  throw new Error('A null token suppressed its mutation or produced a viewport write');
+}
+
+crossControllerView.state.doc = oldDocument;
+crossScrollDOM.scrollTop = 111;
+const staleHandle = crossController.captureAnchorToken('editor');
+crossController.captureAnchorToken('editor');
+crossController.runAnchorTransaction(staleHandle, 'editor', () => {
+  crossController.runDocumentChange(() => {
+    crossControllerView.state.doc = changedDocument;
+  });
+});
+await flushFrames(anchorFrames);
+if (crossScrollDOM.scrollTop !== 111 || crossControllerView.state.doc !== changedDocument) {
+  throw new Error('A stale token suppressed its mutation or produced a viewport write');
+}
+
+crossControllerView.state.doc = oldDocument;
+const duplicateHandle = crossController.captureAnchorToken('editor');
+crossController.runAnchorTransaction(duplicateHandle, 'editor', () => undefined);
+await flushFrames(anchorFrames);
+crossScrollDOM.scrollTop = 111;
+crossController.runAnchorTransaction(duplicateHandle, 'editor', () => {
+  crossController.runDocumentChange(() => {
+    crossControllerView.state.doc = changedDocument;
+  });
+});
+await flushFrames(anchorFrames);
+if (crossScrollDOM.scrollTop !== 111 || crossControllerView.state.doc !== changedDocument) {
+  throw new Error('A duplicate target suppressed its mutation or produced a viewport write');
 }
 
 const failedTargetHandle = crossController.captureAnchorToken('editor');
@@ -675,23 +752,296 @@ try {
 if (!failedTargetThrew || crossControllerPreviewWrites !== 0) {
   throw new Error('A failed target projected an anchor');
 }
+
+crossControllerView.state.doc = oldDocument;
+crossScrollDOM.scrollTop = 111;
+crossController.runDocumentChange(() => {
+  crossControllerView.state.doc = changedDocument;
+});
+await flushFrames(anchorFrames);
+if (crossScrollDOM.scrollTop === 111 || crossControllerView.state.doc !== changedDocument) {
+  throw new Error('A thrown transaction leaked its scope into the next standalone Document change');
+}
+
+crossControllerView.state.doc = oldDocument;
+crossScrollDOM.scrollTop = 111;
+let rejectedMutationRan = false;
+let rejectedMutationPropagated = false;
+try {
+  await crossController.runAnchorTransaction(null, 'editor', async () => {
+    await Promise.resolve();
+    crossController.runDocumentChange(() => {
+      rejectedMutationRan = true;
+      crossControllerView.state.doc = changedDocument;
+    });
+    throw new Error('async target mutation rejected');
+  });
+} catch (error) {
+  rejectedMutationPropagated = error instanceof Error && error.message === 'async target mutation rejected';
+}
+await flushFrames(anchorFrames);
+if (
+  !rejectedMutationRan ||
+  !rejectedMutationPropagated ||
+  crossScrollDOM.scrollTop !== 111 ||
+  crossControllerView.state.doc !== changedDocument
+) {
+  throw new Error('A rejected suppressed transaction changed its mutation, failure, or viewport contract');
+}
+
+crossControllerView.state.doc = oldDocument;
+crossController.runDocumentChange(() => {
+  crossControllerView.state.doc = changedDocument;
+});
+await flushFrames(anchorFrames);
+if (crossScrollDOM.scrollTop === 111) {
+  throw new Error('A rejected transaction leaked its scope into the next standalone Document change');
+}
+
+crossControllerView.state.doc = oldDocument;
+crossScrollDOM.scrollTop = 111;
+const suppressedNestedHandle = crossController.captureAnchorToken('editor');
+let suppressedNestedWasCurrent = true;
+crossController.runAnchorTransaction(null, 'preview', () => {
+  crossController.runAnchorTransaction(suppressedNestedHandle, 'editor', (isCurrent) => {
+    suppressedNestedWasCurrent = isCurrent();
+    crossController.runDocumentChange(() => {
+      crossController.markInteraction();
+      crossControllerView.state.doc = changedDocument;
+    });
+  });
+});
+await flushFrames(anchorFrames);
+if (
+  suppressedNestedWasCurrent ||
+  crossScrollDOM.scrollTop !== 111 ||
+  crossControllerPreviewWrites !== 0 ||
+  crossControllerView.state.doc !== changedDocument
+) {
+  throw new Error('A current transaction escaped a suppressed parent scope');
+}
+
+crossControllerView.state.doc = oldDocument;
+crossScrollDOM.scrollTop = 111;
+let currentParentWasCurrent = false;
+let suppressedChildWasCurrent = true;
+const currentParentHandle = crossController.captureAnchorToken('preview');
+crossController.runAnchorTransaction(currentParentHandle, 'preview', (isParentCurrent) => {
+  currentParentWasCurrent = isParentCurrent();
+  crossController.runAnchorTransaction(null, 'editor', (isChildCurrent) => {
+    suppressedChildWasCurrent = isChildCurrent();
+    crossController.runDocumentChange(() => {
+      crossController.markInteraction();
+      crossControllerView.state.doc = changedDocument;
+    });
+  });
+});
+await flushFrames(anchorFrames);
+if (
+  !currentParentWasCurrent ||
+  suppressedChildWasCurrent ||
+  crossControllerPreviewWrites !== 0 ||
+  crossScrollDOM.scrollTop !== 111 ||
+  crossControllerView.state.doc !== changedDocument
+) {
+  throw new Error('A suppressed child escaped or corrupted its current parent scope');
+}
+
+crossControllerView.state.doc = oldDocument;
+crossScrollDOM.scrollTop = 111;
+crossController.runDocumentChange(() => {
+  crossControllerView.state.doc = changedDocument;
+});
+await flushFrames(anchorFrames);
+if (crossScrollDOM.scrollTop === 111) {
+  throw new Error('A nested suppressed scope leaked into the next standalone Document change');
+}
 crossController.destroy();
 
 const unavailableScrollDOM = { ...anchorScrollDOM, scrollTop: 222 };
-const unavailableController = new ViewportController({
+const unavailableView = {
   ...anchorView,
   dom: {},
-  scrollDOM: unavailableScrollDOM
-} as any, { attachInteractions: false });
+  scrollDOM: unavailableScrollDOM,
+  state: { doc: oldDocument }
+};
+const unavailableController = new ViewportController(unavailableView as any, { attachInteractions: false });
 const unavailableHandle = unavailableController.captureAnchorToken('editor');
 let unavailableWasCurrent = true;
 unavailableController.runAnchorTransaction(unavailableHandle, 'preview', (isCurrent) => {
   unavailableWasCurrent = isCurrent();
+  unavailableController.runDocumentChange(() => {
+    unavailableView.state.doc = changedDocument;
+  });
 });
-if (unavailableWasCurrent || unavailableScrollDOM.scrollTop !== 222) {
-  throw new Error('An unavailable Preview target produced a viewport write');
+await flushFrames(anchorFrames);
+if (
+  unavailableWasCurrent ||
+  unavailableScrollDOM.scrollTop !== 222 ||
+  unavailableView.state.doc !== changedDocument
+) {
+  throw new Error('An unavailable Preview target suppressed its mutation or produced a viewport write');
 }
 unavailableController.destroy();
+
+const nestedCurrentFrames: FrameRequestCallback[] = [];
+globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+  nestedCurrentFrames.push(callback);
+  return nestedCurrentFrames.length;
+};
+const nestedCurrentScrollDOM = { ...anchorScrollDOM, scrollTop: 333 };
+const nestedCurrentView = {
+  ...anchorView,
+  dom: {},
+  scrollDOM: nestedCurrentScrollDOM,
+  state: { doc: oldDocument }
+};
+let nestedCurrentPreviewWrites = 0;
+const nestedCurrentController = new ViewportController(nestedCurrentView as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => ({ line: 2, lineOffset: 3 }),
+    restoreTopVisiblePosition() { nestedCurrentPreviewWrites += 1; }
+  }
+});
+const nestedCurrentHandle = nestedCurrentController.captureAnchorToken('preview');
+let outerCurrent = false;
+let innerCurrent = false;
+nestedCurrentController.runAnchorTransaction(nestedCurrentHandle, 'preview', (isOuterCurrent) => {
+  outerCurrent = isOuterCurrent();
+  nestedCurrentController.runAnchorTransaction(nestedCurrentHandle, 'editor', (isInnerCurrent) => {
+    innerCurrent = isInnerCurrent();
+    nestedCurrentController.runDocumentChange(() => {
+      nestedCurrentController.markInteraction();
+      nestedCurrentView.state.doc = changedDocument;
+    });
+  });
+});
+await flushFrames(nestedCurrentFrames);
+if (
+  !outerCurrent ||
+  !innerCurrent ||
+  nestedCurrentPreviewWrites !== 1 ||
+  nestedCurrentScrollDOM.scrollTop === 333 ||
+  nestedCurrentView.state.doc !== changedDocument
+) {
+  throw new Error('Nested current scopes did not map and project their shared token atomically');
+}
+nestedCurrentController.destroy();
+
+const serialView = {
+  ...anchorView,
+  dom: {},
+  scrollDOM: { ...anchorScrollDOM, scrollTop: 444 },
+  state: { doc: oldDocument }
+};
+let serialPreviewWrites = 0;
+const serialController = new ViewportController(serialView as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => ({ line: 3, lineOffset: 4 }),
+    restoreTopVisiblePosition() { serialPreviewWrites += 1; }
+  }
+});
+const serialHandle = serialController.captureAnchorToken('preview');
+let releaseSerialTransaction!: () => void;
+const serialTransaction = serialController.runAnchorTransaction(serialHandle, 'preview', async () => {
+  await new Promise<void>((resolve) => { releaseSerialTransaction = resolve; });
+  serialController.runDocumentChange(() => {
+    serialView.state.doc = changedDocument;
+  });
+});
+let parallelMutationRan = false;
+let parallelFailure = '';
+try {
+  serialController.runAnchorTransaction(null, 'editor', () => {
+    parallelMutationRan = true;
+  });
+} catch (error) {
+  parallelFailure = error instanceof Error ? error.message : String(error);
+}
+if (
+  parallelMutationRan ||
+  parallelFailure !== 'Viewport anchor transactions must be awaited serially'
+) {
+  throw new Error(`Parallel transaction failure was not deterministic: ${parallelFailure}`);
+}
+releaseSerialTransaction();
+await serialTransaction;
+if (serialPreviewWrites !== 1 || serialView.state.doc !== changedDocument) {
+  throw new Error('A rejected parallel transaction corrupted the active transaction scope');
+}
+serialController.destroy();
+
+const successorView = {
+  ...anchorView,
+  dom: {},
+  scrollDOM: { ...anchorScrollDOM, scrollTop: 555 },
+  state: { doc: oldDocument }
+};
+let successorPreviewWrites = 0;
+const successorController = new ViewportController(successorView as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => ({ line: 3, lineOffset: 4 }),
+    restoreTopVisiblePosition() { successorPreviewWrites += 1; }
+  }
+});
+const supersededHandle = successorController.captureAnchorToken('preview');
+let enterSuccessor!: () => void;
+const supersededTransaction = successorController.runAnchorTransaction(
+  supersededHandle,
+  'preview',
+  async () => {
+    await new Promise<void>((resolve) => { enterSuccessor = resolve; });
+    const successorHandle = successorController.captureAnchorToken('preview');
+    await successorController.runAnchorTransaction(successorHandle, 'preview', async () => {
+      await Promise.resolve();
+      successorController.runDocumentChange(() => {
+        successorView.state.doc = changedDocument;
+      });
+    });
+  }
+);
+enterSuccessor();
+await supersededTransaction;
+if (successorPreviewWrites !== 1 || successorView.state.doc !== changedDocument) {
+  throw new Error('A newly-current async successor could not reenter its superseded parent scope');
+}
+successorController.destroy();
+
+const destroyView = {
+  ...anchorView,
+  dom: {},
+  scrollDOM: { ...anchorScrollDOM, scrollTop: 555 },
+  state: { doc: oldDocument }
+};
+let destroyPreviewWrites = 0;
+const destroyController = new ViewportController(destroyView as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => ({ line: 4, lineOffset: 5 }),
+    restoreTopVisiblePosition() { destroyPreviewWrites += 1; }
+  }
+});
+const destroyHandle = destroyController.captureAnchorToken('preview');
+let releaseDestroyedTransaction!: () => void;
+const destroyedTransaction = destroyController.runAnchorTransaction(destroyHandle, 'preview', async () => {
+  await new Promise<void>((resolve) => { releaseDestroyedTransaction = resolve; });
+  destroyController.runDocumentChange(() => {
+    destroyView.state.doc = changedDocument;
+  });
+});
+destroyController.destroy();
+releaseDestroyedTransaction();
+await destroyedTransaction;
+if (
+  destroyPreviewWrites !== 0 ||
+  destroyView.scrollDOM.scrollTop !== 555 ||
+  destroyView.state.doc !== changedDocument
+) {
+  throw new Error('Destroy suppressed the mutation or allowed a pending transaction to write');
+}
 
 const disposedHandle = anchorController.captureAnchorToken('preview');
 anchorController.destroy();

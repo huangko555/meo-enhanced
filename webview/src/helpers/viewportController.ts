@@ -23,7 +23,7 @@ export interface ViewportLayoutRegion {
 export type ViewportAnchorOwner = 'editor' | 'preview';
 
 export type ViewportAnchorToken = object & {
-  readonly __viewportAnchorToken: unique symbol;
+  readonly __viewportAnchorHandle: unique symbol;
 };
 
 export interface PreviewViewportSurface {
@@ -91,6 +91,43 @@ interface ViewportAnchorTokenRecord {
   readonly interactionGeneration: number;
   readonly projectedOwners: Set<ViewportAnchorOwner>;
 }
+
+type ViewportAnchorSuppressionReason =
+  | 'parent-suppressed'
+  | 'null-token'
+  | 'foreign-token'
+  | 'stale-token'
+  | 'duplicate-target'
+  | 'unavailable-target';
+
+type IdleAnchorTransactionScope = {
+  readonly kind: 'idle';
+};
+
+type ActiveAnchorTransactionScope = {
+  closed: boolean;
+  conflicted: boolean;
+  readonly parent: AnchorTransactionScope;
+} & (
+  | {
+      readonly kind: 'current';
+      readonly record: ViewportAnchorTokenRecord;
+      readonly target: ViewportAnchorOwner;
+      readonly anchor: ViewportDocumentAnchor;
+      readonly previousDocumentText: string;
+      documentChangeObserved: boolean;
+    }
+  | {
+      readonly kind: 'suppressed';
+      readonly reason: ViewportAnchorSuppressionReason;
+    }
+);
+
+type AnchorTransactionScope = IdleAnchorTransactionScope | ActiveAnchorTransactionScope;
+
+const IDLE_ANCHOR_TRANSACTION_SCOPE: IdleAnchorTransactionScope = Object.freeze({ kind: 'idle' });
+const CONCURRENT_ANCHOR_TRANSACTION_ERROR =
+  'Viewport anchor transactions must be awaited serially';
 
 interface ChangedDocumentRange {
   readonly from: number;
@@ -206,7 +243,10 @@ export class ViewportController {
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
-  private activeAnchorTransaction: ViewportAnchorTokenRecord | null = null;
+  private anchorTransactionScope: AnchorTransactionScope = IDLE_ANCHOR_TRANSACTION_SCOPE;
+  private anchorMutationDepth = 0;
+  private documentChangeDepth = 0;
+  private pendingAsyncAnchorTransactions = 0;
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => this.scheduleActiveScrollFrame();
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
@@ -241,7 +281,11 @@ export class ViewportController {
   }
 
   markInteraction(): void {
-    if (!this.activeAnchorTransaction || !this.isAnchorTokenCurrent(this.activeAnchorTransaction)) {
+    const scope = this.anchorTransactionScope;
+    const programmaticCurrentTransaction = scope.kind === 'current'
+      && this.isAnchorTokenCurrent(scope.record)
+      && (this.anchorMutationDepth > 0 || this.documentChangeDepth > 0);
+    if (!programmaticCurrentTransaction) {
       this.interactionGeneration += 1;
     }
     this.scrollLockGeneration += 1;
@@ -791,62 +835,172 @@ export class ViewportController {
   }
 
   /**
-   * Runs one programmatic surface mutation and then projects the Controller-bound token.
-   * Null, foreign, stale, duplicate and unavailable targets still run the mutation with a
-   * false current predicate but never write a viewport. Rejected mutations never project.
-   * Synchronous markInteraction calls belong to this transaction; later real interactions
-   * invalidate the predicate and every delayed projection.
+   * Runs one serialized surface transaction and then projects its Controller-bound token.
+   * Every outer call establishes a scope: invalid targets are suppressed while their mutation
+   * still runs, and awaited Document changes remain in that scope until settlement. Synchronous
+   * nesting is allowed; after a mutation yields, only a newly-current successor may nest, while
+   * every invalid or already-used competing transaction throws before mutation. Real interactions
+   * outside the active mutation invalidate every delayed projection.
    */
   runAnchorTransaction(
     handle: ViewportAnchorToken | null,
     owner: ViewportAnchorOwner,
     mutate: (isCurrent: () => boolean) => void | Promise<void>
   ): void | Promise<void> {
+    const parent = this.anchorTransactionScope;
     const record = handle ? this.anchorTokens.get(handle) : undefined;
     const targetAvailable = owner === 'editor' || this.previewSurface !== null;
-    const current = Boolean(
+    const currentTarget = Boolean(
       record &&
       targetAvailable &&
       this.isAnchorTokenCurrent(record) &&
       !record.projectedOwners.has(owner)
     );
-    const previousTransaction = this.activeAnchorTransaction;
-    this.activeAnchorTransaction = current && record ? record : null;
-    const isCurrent = () => Boolean(current && record && this.isAnchorTokenCurrent(record));
-    const previousDocumentText = current && record ? this.view.state.doc.toString() : null;
+    if (
+      this.pendingAsyncAnchorTransactions > 0 &&
+      this.anchorMutationDepth === 0 &&
+      !currentTarget
+    ) {
+      throw new Error(CONCURRENT_ANCHOR_TRANSACTION_ERROR);
+    }
+    let scope: ActiveAnchorTransactionScope;
+    if (parent.kind === 'suppressed') {
+      scope = {
+        kind: 'suppressed',
+        reason: 'parent-suppressed',
+        parent,
+        closed: false,
+        conflicted: false
+      };
+    } else if (record && currentTarget) {
+      scope = {
+        kind: 'current',
+        record,
+        target: owner,
+        anchor: { ...record.anchor },
+        previousDocumentText: this.view.state.doc.toString(),
+        documentChangeObserved: false,
+        parent,
+        closed: false,
+        conflicted: false
+      };
+    } else {
+      const reason: ViewportAnchorSuppressionReason = !handle
+        ? 'null-token'
+        : !record
+          ? 'foreign-token'
+          : !targetAvailable
+            ? 'unavailable-target'
+            : record.projectedOwners.has(owner)
+              ? 'duplicate-target'
+              : 'stale-token';
+      scope = { kind: 'suppressed', reason, parent, closed: false, conflicted: false };
+    }
+    this.anchorTransactionScope = scope;
+    const isCurrent = () => this.isAnchorTransactionScopeCurrent(scope);
     let result: void | Promise<void>;
+    this.anchorMutationDepth += 1;
     try {
       result = mutate(isCurrent);
+    } catch (error) {
+      this.closeAnchorTransactionScope(scope);
+      throw error;
     } finally {
-      this.activeAnchorTransaction = previousTransaction;
+      this.anchorMutationDepth -= 1;
     }
-    const project = (): void => {
-      if (!isCurrent() || !record) return;
-      const anchor = previousDocumentText === null
-        ? record.anchor
-        : this.mapAnchorThroughDocumentChange(
-            record.anchor,
-            previousDocumentText,
-            this.view.state.doc.toString()
-          );
-      if (!anchor) return;
-      this.projectAnchorRecord(record, owner, anchor);
-      record.anchor = anchor;
-    };
     if (result && typeof result.then === 'function') {
-      return result.then(project);
+      this.pendingAsyncAnchorTransactions += 1;
+      return Promise.resolve(result).then(
+        () => this.completeAnchorTransactionScope(scope, true),
+        (error: unknown) => {
+          this.completeAnchorTransactionScope(scope, false);
+          throw error;
+        }
+      ).finally(() => {
+        this.pendingAsyncAnchorTransactions -= 1;
+      });
     }
-    project();
+    this.completeAnchorTransactionScope(scope, true);
   }
 
-  /** Uses the active token, or captures the Editor surface for a standalone Document change. */
+  /** Uses the active scope, or captures the Editor surface for a standalone Document change. */
   runDocumentChange(mutate: () => void): void {
-    if (this.activeAnchorTransaction && this.isAnchorTokenCurrent(this.activeAnchorTransaction)) {
-      mutate();
+    if (this.anchorTransactionScope.kind !== 'idle') {
+      if (this.anchorTransactionScope.kind === 'current') {
+        this.anchorTransactionScope.documentChangeObserved = true;
+      }
+      this.documentChangeDepth += 1;
+      try {
+        mutate();
+      } finally {
+        this.documentChangeDepth -= 1;
+      }
       return;
     }
     const handle = this.captureAnchorToken('editor');
-    this.runAnchorTransaction(handle, 'editor', () => mutate());
+    this.runAnchorTransaction(handle, 'editor', () => this.runDocumentChange(mutate));
+  }
+
+  private isAnchorTransactionScopeCurrent(scope: ActiveAnchorTransactionScope): boolean {
+    return scope.kind === 'current'
+      && !scope.closed
+      && !scope.conflicted
+      && this.isAnchorTokenCurrent(scope.record);
+  }
+
+  private completeAnchorTransactionScope(
+    scope: ActiveAnchorTransactionScope,
+    project: boolean
+  ): void {
+    this.ensureAnchorTransactionScopeCanComplete(scope);
+    try {
+      if (project) this.projectAnchorTransactionScope(scope);
+    } finally {
+      this.closeAnchorTransactionScope(scope);
+    }
+  }
+
+  private ensureAnchorTransactionScopeCanComplete(scope: ActiveAnchorTransactionScope): void {
+    if (this.anchorTransactionScope !== scope) {
+      this.invalidateConflictingAnchorTransactionScopes(scope);
+      this.closeAnchorTransactionScope(scope);
+      throw new Error(CONCURRENT_ANCHOR_TRANSACTION_ERROR);
+    }
+  }
+
+  private projectAnchorTransactionScope(scope: ActiveAnchorTransactionScope): void {
+    if (!this.isAnchorTransactionScopeCurrent(scope) || scope.kind !== 'current') return;
+    if (scope.documentChangeObserved) {
+      // A presentation can synchronously invalidate rendered-block geometry. Commit the concrete
+      // Editor layout before projecting the semantic entry anchor, including equal-text refreshes.
+      this.captureDocumentAnchor();
+    }
+    const anchor = this.mapAnchorThroughDocumentChange(
+      scope.anchor,
+      scope.previousDocumentText,
+      this.view.state.doc.toString()
+    );
+    if (!anchor) return;
+    this.projectAnchorRecord(scope.record, scope.target, anchor);
+    scope.record.anchor = anchor;
+  }
+
+  private invalidateConflictingAnchorTransactionScopes(scope: ActiveAnchorTransactionScope): void {
+    scope.conflicted = true;
+    let current = this.anchorTransactionScope;
+    while (current.kind !== 'idle') {
+      current.conflicted = true;
+      current = current.parent;
+    }
+    this.interactionGeneration += 1;
+  }
+
+  private closeAnchorTransactionScope(scope: ActiveAnchorTransactionScope): void {
+    scope.closed = true;
+    if (this.anchorTransactionScope !== scope) return;
+    let parent = scope.parent;
+    while (parent.kind !== 'idle' && parent.closed) parent = parent.parent;
+    this.anchorTransactionScope = parent;
   }
 
   private projectAnchorRecord(

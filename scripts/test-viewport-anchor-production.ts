@@ -7,6 +7,7 @@ import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-viewport-anchor-production-'));
+const editorModulePath = path.join(repoRoot, 'webview', 'src', 'editor.ts').replaceAll('\\', '/');
 
 const waitForFrames = async (page: Page, count = 2): Promise<void> => {
   await page.evaluate(async (frameCount) => {
@@ -47,7 +48,49 @@ async function main(): Promise<void> {
     outdir: tempDir,
     target: 'browser',
     format: 'iife',
-    naming: 'bundle.js'
+    naming: 'bundle.js',
+    plugins: [{
+      name: 'viewport-anchor-public-editor-seam',
+      setup(builder) {
+        builder.onResolve({ filter: /^\.\/editor$/ }, () => (
+          { path: 'viewport-anchor-test-editor', namespace: 'viewport-anchor-test' }
+        ));
+        builder.onLoad({ filter: /.*/, namespace: 'viewport-anchor-test' }, () => ({
+          loader: 'ts',
+          contents: `
+            import { createEditor as createRealEditor } from ${JSON.stringify(editorModulePath)};
+            export function createEditor(options: Parameters<typeof createRealEditor>[0]) {
+              const editor = createRealEditor(options);
+              let foreignEditor: ReturnType<typeof createRealEditor> | null = null;
+              (window as any).__viewportAnchorTransaction = {
+                editor,
+                createForeignToken(text: string) {
+                  if (!foreignEditor) {
+                    const parent = document.createElement('div');
+                    parent.style.display = 'none';
+                    document.body.append(parent);
+                    foreignEditor = createRealEditor({
+                      ...options,
+                      parent,
+                      text,
+                      initialMode: 'source',
+                      previewViewportSurface: undefined,
+                      onApplyChanges() {}
+                    });
+                  }
+                  return foreignEditor.captureViewportAnchorToken('editor');
+                },
+                destroyForeign() {
+                  foreignEditor?.destroy();
+                  foreignEditor = null;
+                }
+              };
+              return editor;
+            }
+          `
+        }));
+      }
+    }]
   });
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
@@ -108,6 +151,77 @@ async function main(): Promise<void> {
       }}));
     }, fixture);
     await page.waitForSelector('.editor-host > .cm-editor');
+    await page.evaluate(({ anchor, head }) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor, head, focus: true
+      }}));
+    }, { anchor: selectionStart, head: selectionEnd });
+    await waitForFrames(page, 4);
+
+    const invalidTransactionTrace = await page.evaluate(async (originalText) => {
+      const seam = (window as any).__viewportAnchorTransaction;
+      const editor = seam.editor;
+      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      const wait = async (frameCount = 10) => {
+        for (let index = 0; index < frameCount; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      const foreignText = `expanded invalid foreign heading\n${originalText}`;
+      const foreignToken = seam.createForeignToken(originalText);
+      let foreignTarget = 0;
+      await editor.runViewportAnchorTransaction(foreignToken, 'editor', async () => {
+        editor.setText(foreignText);
+        await wait(2);
+        foreignTarget = Math.min(640, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+        scroller.scrollTop = foreignTarget;
+      });
+      await wait();
+      const foreign = {
+        scrollTop: scroller.scrollTop,
+        target: foreignTarget,
+        maxScrollTop: Math.max(0, scroller.scrollHeight - scroller.clientHeight),
+        text: editor.getText()
+      };
+
+      let nullTarget = 0;
+      await editor.runViewportAnchorTransaction(null, 'editor', async () => {
+        editor.setText(originalText);
+        await wait(2);
+        nullTarget = Math.min(420, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+        scroller.scrollTop = nullTarget;
+      });
+      await wait();
+      return {
+        foreign,
+        nullToken: {
+          scrollTop: scroller.scrollTop,
+          target: nullTarget,
+          maxScrollTop: Math.max(0, scroller.scrollHeight - scroller.clientHeight),
+          text: editor.getText()
+        }
+      };
+    }, fixture);
+    assert.equal(invalidTransactionTrace.foreign.text.startsWith('expanded invalid foreign heading\n'), true);
+    assert.ok(
+      Math.abs(
+        invalidTransactionTrace.foreign.scrollTop - Math.min(
+          invalidTransactionTrace.foreign.target,
+          invalidTransactionTrace.foreign.maxScrollTop
+        )
+      ) <= 40,
+      `foreign receipt pulled the production viewport back: ${JSON.stringify(invalidTransactionTrace)}`
+    );
+    assert.equal(invalidTransactionTrace.nullToken.text, fixture);
+    assert.ok(
+      Math.abs(
+        invalidTransactionTrace.nullToken.scrollTop - Math.min(
+          invalidTransactionTrace.nullToken.target,
+          invalidTransactionTrace.nullToken.maxScrollTop
+        )
+      ) <= 1,
+      `null receipt pulled the production viewport back: ${JSON.stringify(invalidTransactionTrace)}`
+    );
     await page.evaluate(({ anchor, head }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'revealSelection', anchor, head, focus: true
@@ -481,6 +595,7 @@ async function main(): Promise<void> {
       )) ?? null
     )).then((handle) => handle.jsonValue() as Promise<{ presented: boolean }>);
     assert.equal(reloadReceipt.presented, true, 'disk reload presentation was not accepted');
+    await page.evaluate(() => (window as any).__viewportAnchorTransaction.destroyForeign());
     console.log(`Viewport Anchor production Chromium trace passed: ${JSON.stringify(traceResult.samples)}`);
   } finally {
     await browser.close();
