@@ -19,6 +19,13 @@ async function pressHistoryShortcut(page: any, key: 'z' | 'y') {
   await page.keyboard.up('Control');
 }
 
+async function runSettledHistoryCommand(page: any, direction: 'undo' | 'redo') {
+  const applied = await page.evaluate(async (command) => (
+    (window as any).__historyMatrixEditor[command]()
+  ), direction);
+  if (!applied) throw new Error(`History ${direction} was not applied`);
+}
+
 async function documentText(page: any): Promise<string> {
   return page.evaluate(() => (window as any).__historyMatrixEditor.getText());
 }
@@ -693,13 +700,13 @@ async function main() {
     await record({ kind: 'math', marker: 'MATH_EXTRA_TWO', mode: 'split' });
 
     for (let index = targets.length - 1; index >= 0; index -= 1) {
-      await pressHistoryShortcut(page, 'z');
+      await runSettledHistoryCommand(page, 'undo');
       await waitForDocumentText(page, versions[index]);
       await assertHistoryTarget(page, targets[index], 'undo', targets.length - index);
     }
 
     for (let index = 0; index < targets.length; index += 1) {
-      await pressHistoryShortcut(page, 'y');
+      await runSettledHistoryCommand(page, 'redo');
       await waitForDocumentText(page, versions[index + 1]);
       await assertHistoryTarget(page, targets[index], 'redo', index + 1);
     }
