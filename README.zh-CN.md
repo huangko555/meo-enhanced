@@ -105,7 +105,6 @@ Editor 与 Preview 外观彼此独立。Live 和 Preview 使用固定的浅色/�
 - `meoEnhanced.outline.position`：将大纲放在左侧或右侧。
 - `meoEnhanced.changes.baseline`：选择 `current-edit`、`recent-save` 或 `git-head` 作为对比基线。
 - `meoEnhanced.gitChanges.visible`：显示或隐藏文档改动标记。
-- `meoEnhanced.codeBlocks.collapseLongBlocks`：启用或关闭过长代码块自动折叠。
 
 ## 兼容性与项目范围
 

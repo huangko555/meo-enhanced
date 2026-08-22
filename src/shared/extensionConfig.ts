@@ -7,7 +7,6 @@ export const EXTENSION_CONFIG_SECTION = 'meoEnhanced';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
 export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
-export const LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY = 'codeBlocks.collapseLongBlocks';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY = 'gitChanges.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY = 'gitChangesGutter.visibility';
@@ -31,12 +30,6 @@ export function getGitChangesGutterEnabled(context: vscode.ExtensionContext): bo
 
 export function getGitDiffLineHighlightsEnabled(): boolean {
   return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY, true);
-}
-
-export function getLongCodeBlockFoldingEnabled(): boolean {
-  return vscode.workspace
-    .getConfiguration(EXTENSION_CONFIG_SECTION)
-    .get<boolean>(LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY, true);
 }
 
 export function getCurrentVscodeCodeTheme(): RawVscodeTheme | null {

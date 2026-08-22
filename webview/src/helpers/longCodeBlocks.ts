@@ -18,6 +18,7 @@ type LongCodeBlockDescriptor = {
   end: number;
   endLineFrom: number;
   indentColumns: number;
+  language: string;
   contentFrom: number;
   contentTo: number;
   collapsedFrom: number;
@@ -28,21 +29,19 @@ type LongCodeBlockDescriptor = {
 
 type LongCodeBlockRecord = LongCodeBlockDescriptor & {
   wasLong: boolean;
+  manualCollapsed: boolean;
+  temporaryTarget: boolean;
   collapsed: boolean;
-  userExpanded: boolean;
-  searchTemporary: boolean;
 };
 
 type LongCodeBlockState = {
-  enabled: boolean;
   blocks: LongCodeBlockRecord[];
   decorations: DecorationSet;
 };
 
-export const setLongCodeBlockSearchRevealEffect = StateEffect.define<{ from: number; to: number } | null>();
-const setLongCodeBlockFoldingEnabledEffect = StateEffect.define<boolean>();
 const setLongCodeBlockPointerInteractionEffect = StateEffect.define<{ position: number }>();
 const toggleLongCodeBlockEffect = StateEffect.define<{ anchor: number; collapsed: boolean }>();
+const viewportGeneration = new WeakMap<EditorView, number>();
 
 function isMermaidLanguage(info: string | null): boolean {
   return info === 'mermaid';
@@ -57,7 +56,7 @@ function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescr
       }
 
       const info = getFencedCodeInfo(state, node);
-      if (!info || isMermaidLanguage(info)) {
+      if (isMermaidLanguage(info)) {
         return false;
       }
 
@@ -85,6 +84,7 @@ function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescr
         end: endLine.to,
         endLineFrom: endLine.from,
         indentColumns: getLiveListBlockIndentColumns(state, node.from, node.node),
+        language: info || 'Plain text',
         contentFrom: contentStartLine.from,
         contentTo: contentEndLine.to,
         collapsedFrom,
@@ -106,14 +106,27 @@ function findBlockContainingPosition(
   return blocks.find((block) => from >= block.contentFrom && to <= block.contentTo) ?? null;
 }
 
+function findBlockIntersectingHiddenRange(
+  blocks: ReadonlyArray<LongCodeBlockRecord>,
+  from: number,
+  to: number
+): LongCodeBlockRecord | null {
+  const rangeFrom = Math.min(from, to);
+  const rangeTo = Math.max(from, to);
+  return blocks.find((block) => rangeFrom === rangeTo
+    ? rangeFrom >= block.collapsedFrom && rangeFrom <= block.contentTo
+    : rangeFrom < block.contentTo && rangeTo > block.collapsedFrom) ?? null;
+}
+
 function getCollapseSelectionPosition(view: EditorView, anchor: number): number {
   return collectLongCodeBlockDescriptors(view.state)
     .find((block) => block.anchor === anchor)?.collapsedFrom ?? anchor;
 }
 
-function ensureCollapsedBlockVisible(view: EditorView, anchor: number): void {
+function ensureCollapsedBlockVisible(view: EditorView, anchor: number, generation: number): void {
   view.requestMeasure({
     read: (measuredView) => {
+      if (viewportGeneration.get(measuredView) !== generation) return null;
       const descriptor = collectLongCodeBlockDescriptors(measuredView.state)
         .find((block) => block.anchor === anchor);
       const scroller = measuredView.scrollDOM.getBoundingClientRect();
@@ -138,11 +151,11 @@ function ensureCollapsedBlockVisible(view: EditorView, anchor: number): void {
       return null;
     },
     write: (scrollTop) => {
-      if (scrollTop !== null) {
+      if (scrollTop !== null && viewportGeneration.get(view) === generation) {
         view.scrollDOM.scrollTop = scrollTop;
         // CodeMirror may apply its own selection anchoring after the measure write.
         requestAnimationFrame(() => {
-          if (view.scrollDOM.scrollTop !== scrollTop) {
+          if (viewportGeneration.get(view) === generation && view.scrollDOM.scrollTop !== scrollTop) {
             view.scrollDOM.scrollTop = scrollTop;
           }
         });
@@ -152,6 +165,8 @@ function ensureCollapsedBlockVisible(view: EditorView, anchor: number): void {
 }
 
 function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: boolean): void {
+  const generation = (viewportGeneration.get(view) ?? 0) + 1;
+  viewportGeneration.set(view, generation);
   const previousScrollTop = view.scrollDOM.scrollTop;
   view.dispatch({
     selection: { anchor: collapsed ? getCollapseSelectionPosition(view, anchor) : anchor },
@@ -163,7 +178,7 @@ function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: 
   }
 
   view.scrollDOM.scrollTop = previousScrollTop;
-  ensureCollapsedBlockVisible(view, anchor);
+  ensureCollapsedBlockVisible(view, anchor, generation);
 }
 
 function makeActionButton(
@@ -193,7 +208,10 @@ function makeActionButton(
 class LongCodePlaceholderWidget extends WidgetType {
   constructor(
     readonly anchor: number,
+    readonly language: string,
+    readonly lineCount: number,
     readonly hiddenLineCount: number,
+    readonly contentTo: number,
     readonly indentColumns: number
   ) {
     super();
@@ -202,7 +220,10 @@ class LongCodePlaceholderWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return other instanceof LongCodePlaceholderWidget &&
       other.anchor === this.anchor &&
+      other.language === this.language &&
+      other.lineCount === this.lineCount &&
       other.hiddenLineCount === this.hiddenLineCount &&
+      other.contentTo === this.contentTo &&
       other.indentColumns === this.indentColumns;
   }
 
@@ -210,7 +231,19 @@ class LongCodePlaceholderWidget extends WidgetType {
     const container = document.createElement('div');
     container.className = 'meo-md-long-code-placeholder';
     container.dataset.longCodeAnchor = String(this.anchor);
+    const contentEndLineNumber = view.state.doc.lineAt(
+      Math.min(this.contentTo, view.state.doc.length)
+    ).number;
+    container.dataset.meoRenderedBlockStartLine = String(contentEndLineNumber);
+    container.dataset.meoRenderedBlockEndLine = String(contentEndLineNumber);
     applyLiveBlockIndent(container, this.indentColumns);
+    const language = document.createElement('span');
+    language.className = 'meo-long-code-language';
+    language.textContent = this.language;
+    const metadata = document.createElement('span');
+    metadata.className = 'meo-long-code-line-count';
+    metadata.textContent = `${this.lineCount} lines`;
+    container.append(language, metadata);
     container.appendChild(makeActionButton(view, 'expand', this.anchor, this.hiddenLineCount));
     return container;
   }
@@ -221,13 +254,20 @@ class LongCodePlaceholderWidget extends WidgetType {
 }
 
 class LongCodeFooterWidget extends WidgetType {
-  constructor(readonly anchor: number, readonly indentColumns: number) {
+  constructor(
+    readonly anchor: number,
+    readonly language: string,
+    readonly lineCount: number,
+    readonly indentColumns: number
+  ) {
     super();
   }
 
   eq(other: WidgetType): boolean {
     return other instanceof LongCodeFooterWidget &&
       other.anchor === this.anchor &&
+      other.language === this.language &&
+      other.lineCount === this.lineCount &&
       other.indentColumns === this.indentColumns;
   }
 
@@ -236,6 +276,13 @@ class LongCodeFooterWidget extends WidgetType {
     container.className = 'meo-md-long-code-footer';
     container.dataset.longCodeAnchor = String(this.anchor);
     applyLiveBlockIndent(container, this.indentColumns);
+    const language = document.createElement('span');
+    language.className = 'meo-long-code-language';
+    language.textContent = this.language;
+    const metadata = document.createElement('span');
+    metadata.className = 'meo-long-code-line-count';
+    metadata.textContent = `${this.lineCount} lines`;
+    container.append(language, metadata);
     container.appendChild(makeActionButton(view, 'collapse', this.anchor));
     return container;
   }
@@ -246,11 +293,9 @@ class LongCodeFooterWidget extends WidgetType {
 }
 
 function buildLongCodeDecorations(
-  blocks: ReadonlyArray<LongCodeBlockRecord>,
-  enabled: boolean
+  blocks: ReadonlyArray<LongCodeBlockRecord>
 ): DecorationSet {
   const ranges: Array<{ from: number; to: number; decoration: Decoration }> = [];
-  if (!enabled) return Decoration.none;
   for (const block of blocks) {
     if (!block.isLong) {
       continue;
@@ -261,7 +306,14 @@ function buildLongCodeDecorations(
           from: block.collapsedFrom,
           to: block.end,
           decoration: Decoration.replace({
-            widget: new LongCodePlaceholderWidget(block.anchor, block.hiddenLineCount, block.indentColumns),
+            widget: new LongCodePlaceholderWidget(
+              block.anchor,
+              block.language,
+              block.lineCount,
+              block.hiddenLineCount,
+              block.contentTo,
+              block.indentColumns
+            ),
             block: true
           })
         });
@@ -272,7 +324,12 @@ function buildLongCodeDecorations(
       from: block.end,
       to: block.end,
       decoration: Decoration.widget({
-        widget: new LongCodeFooterWidget(block.anchor, block.indentColumns),
+        widget: new LongCodeFooterWidget(
+          block.anchor,
+          block.language,
+          block.lineCount,
+          block.indentColumns
+        ),
         block: true,
         side: 1
       })
@@ -304,118 +361,102 @@ function buildLongCodeState(
       return {
         ...descriptor,
         wasLong: descriptor.isLong,
-        collapsed: descriptor.isLong,
-        userExpanded: false,
-        searchTemporary: false
+        manualCollapsed: descriptor.isLong,
+        temporaryTarget: false,
+        collapsed: descriptor.isLong
       };
     }
 
     const crossedThreshold = !old.wasLong && descriptor.isLong;
+    const manualCollapsed = crossedThreshold ? false : old.manualCollapsed;
+    const temporaryTarget = crossedThreshold ? false : old.temporaryTarget;
     return {
       ...descriptor,
       wasLong: old.wasLong || descriptor.isLong,
-      collapsed: crossedThreshold ? false : old.collapsed,
-      userExpanded: crossedThreshold ? true : old.userExpanded,
-      searchTemporary: old.searchTemporary
+      manualCollapsed,
+      temporaryTarget,
+      collapsed: descriptor.isLong && manualCollapsed && !temporaryTarget
     };
   });
 
-  const reduced = reduceLongCodeInteractions(
-    blocks,
-    previous?.enabled ?? true,
-    transaction
-  );
+  const reduced = reduceLongCodeInteractions(blocks, transaction);
 
   return {
-    enabled: reduced.enabled,
     blocks: reduced.blocks,
-    decorations: buildLongCodeDecorations(reduced.blocks, reduced.enabled)
+    decorations: buildLongCodeDecorations(reduced.blocks)
   };
 }
 
 function hasLongCodeImmediateEffect(transaction: Transaction): boolean {
   return transaction.effects.some((effect) => (
-    effect.is(setLongCodeBlockFoldingEnabledEffect)
-    || effect.is(setLongCodeBlockSearchRevealEffect)
-    || effect.is(toggleLongCodeBlockEffect)
+    effect.is(toggleLongCodeBlockEffect)
     || effect.is(setLongCodeBlockPointerInteractionEffect)
   ));
+}
+
+function applyTemporaryTarget(
+  blocks: LongCodeBlockRecord[],
+  target: LongCodeBlockRecord | null
+): boolean {
+  let changed = false;
+  for (const block of blocks) {
+    const temporaryTarget = block === target && block.manualCollapsed;
+    if (block.temporaryTarget === temporaryTarget) continue;
+    block.temporaryTarget = temporaryTarget;
+    block.collapsed = block.isLong && block.manualCollapsed && !temporaryTarget;
+    changed = true;
+  }
+  return changed;
 }
 
 /** One-shot effects and selection intent have one reducer regardless of descriptor source. */
 function reduceLongCodeInteractions(
   sourceBlocks: LongCodeBlockRecord[],
-  currentEnabled: boolean,
   transaction: Transaction | null
-): { enabled: boolean; blocks: LongCodeBlockRecord[]; presentationChanged: boolean } {
+): { blocks: LongCodeBlockRecord[]; presentationChanged: boolean } {
   if (!transaction) {
-    return { enabled: currentEnabled, blocks: sourceBlocks, presentationChanged: false };
+    return { blocks: sourceBlocks, presentationChanged: false };
   }
-  let enabled = currentEnabled;
   let presentationChanged = false;
   const blocks = sourceBlocks;
-  for (const effect of transaction.effects) {
-    if (effect.is(setLongCodeBlockFoldingEnabledEffect)) {
-      presentationChanged ||= enabled !== effect.value;
-      enabled = effect.value;
-    }
-  }
 
-  let searchReveal: { from: number; to: number } | null | undefined;
-  for (const effect of transaction.effects) {
-    if (effect.is(setLongCodeBlockSearchRevealEffect)) searchReveal = effect.value;
-  }
-  if (searchReveal !== undefined) {
+  const searchClear = transaction.isUserEvent('select.search.clear');
+  const searchReveal = !searchClear && transaction.isUserEvent('select.search');
+  if (searchReveal || searchClear) {
+    const selection = transaction.state.selection.main;
     const target = searchReveal
-      ? findBlockContainingPosition(blocks, searchReveal.from, searchReveal.to)
+      ? findBlockIntersectingHiddenRange(blocks, selection.from, selection.to)
       : null;
-    for (const block of blocks) {
-      if (block.searchTemporary && !block.userExpanded && block !== target) {
-        block.collapsed = true;
-        block.searchTemporary = false;
-        presentationChanged = true;
-      }
-    }
-    if (target?.isLong && target.collapsed) {
-      target.collapsed = false;
-      target.searchTemporary = true;
-      presentationChanged = true;
-    }
+    if (applyTemporaryTarget(blocks, target)) presentationChanged = true;
   }
 
   for (const effect of transaction.effects) {
     if (effect.is(toggleLongCodeBlockEffect)) {
       const target = blocks.find((block) => block.anchor === effect.value.anchor);
       if (target?.isLong) {
+        target.manualCollapsed = effect.value.collapsed;
+        target.temporaryTarget = false;
         target.collapsed = effect.value.collapsed;
-        target.userExpanded = !effect.value.collapsed;
-        target.searchTemporary = false;
         presentationChanged = true;
       }
     } else if (effect.is(setLongCodeBlockPointerInteractionEffect)) {
       const target = findBlockContainingPosition(blocks, effect.value.position);
       if (target?.isLong) {
+        target.manualCollapsed = false;
+        target.temporaryTarget = false;
         target.collapsed = false;
-        target.userExpanded = true;
-        target.searchTemporary = false;
         presentationChanged = true;
       }
     }
   }
 
-  const searchEffectPresent = transaction.effects.some((effect) => effect.is(setLongCodeBlockSearchRevealEffect));
   const toggleEffectPresent = transaction.effects.some((effect) => effect.is(toggleLongCodeBlockEffect));
-  if (transaction.selection && !searchEffectPresent && !toggleEffectPresent) {
+  if (transaction.selection && !searchReveal && !searchClear && !toggleEffectPresent) {
     const selection = transaction.state.selection.main;
-    const target = findBlockContainingPosition(blocks, selection.from, selection.to);
-    if (target?.isLong) {
-      presentationChanged ||= target.collapsed || !target.userExpanded || target.searchTemporary;
-      target.collapsed = false;
-      target.userExpanded = true;
-      target.searchTemporary = false;
-    }
+    const target = findBlockIntersectingHiddenRange(blocks, selection.from, selection.to);
+    if (applyTemporaryTarget(blocks, target)) presentationChanged = true;
   }
-  return { enabled, blocks, presentationChanged };
+  return { blocks, presentationChanged };
 }
 
 function updateDeferredLongCodeState(
@@ -436,15 +477,14 @@ function updateDeferredLongCodeState(
       }
     : { ...block });
 
-  const reduced = reduceLongCodeInteractions(blocks, value.enabled, transaction);
+  const reduced = reduceLongCodeInteractions(blocks, transaction);
 
   return {
-    enabled: reduced.enabled,
     blocks: reduced.blocks,
     decorations: hasLongCodeImmediateEffect(transaction)
       || reduced.presentationChanged
       || !transaction.docChanged
-      ? buildLongCodeDecorations(reduced.blocks, reduced.enabled)
+      ? buildLongCodeDecorations(reduced.blocks)
       : mapLiveInputDerivedDecorations(value.decorations, transaction)
   };
 }
@@ -478,7 +518,7 @@ class LongCodeFloatingButtonPlugin {
       return;
     }
     const state = this.view.state.field(longCodeBlockStateField, false);
-    if (!state?.enabled) {
+    if (!state) {
       return;
     }
     const block = findBlockContainingPosition(state.blocks, position);
@@ -519,6 +559,7 @@ class LongCodeFloatingButtonPlugin {
   }
 
   destroy(): void {
+    viewportGeneration.set(this.view, (viewportGeneration.get(this.view) ?? 0) + 1);
     this.view.dom.removeEventListener('pointerdown', this.onPointerDown, true);
     this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
     this.button.remove();
@@ -531,7 +572,7 @@ class LongCodeFloatingButtonPlugin {
         const scroller = view.scrollDOM.getBoundingClientRect();
         const content = view.contentDOM.getBoundingClientRect();
         const contentCenter = content.left + content.width / 2;
-        if (!state?.enabled || scroller.width <= 0 || scroller.height <= 0) {
+        if (!state || scroller.width <= 0 || scroller.height <= 0) {
           return { visible: false, anchor: 0, left: 0, top: 0 };
         }
 
@@ -592,10 +633,6 @@ class LongCodeFloatingButtonPlugin {
 
 const longCodeBlockViewPlugin = ViewPlugin.fromClass(LongCodeFloatingButtonPlugin);
 
-export function longCodeBlockExtensions() {
+export function longCodeBlockSessionUiExtension() {
   return [longCodeBlockStateField, longCodeBlockViewPlugin];
-}
-
-export function setLongCodeBlockFoldingEnabled(view: EditorView, enabled: boolean): void {
-  view.dispatch({ effects: setLongCodeBlockFoldingEnabledEffect.of(enabled) });
 }

@@ -3,6 +3,7 @@ import type { EditorView } from '@codemirror/view';
 export interface ViewportDocumentAnchor {
   position: number;
   lineOffset: number;
+  viewportOffset?: number;
 }
 
 type RestoreDocumentAnchorOptions = {
@@ -259,6 +260,7 @@ export class ViewportController {
   private lastScrollDirection: -1 | 0 | 1 = 0;
   private interactionGeneration = 0;
   private navigationGeneration = 0;
+  private pendingNavigationTarget: { position: number; generation: number } | null = null;
   private scrollLockGeneration = 0;
   private activeScrollTarget: ActiveScrollTarget | null = null;
   private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
@@ -317,6 +319,7 @@ export class ViewportController {
       this.interactionGeneration += 1;
     }
     this.navigationGeneration += 1;
+    this.pendingNavigationTarget = null;
     this.scrollLockGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
@@ -506,8 +509,15 @@ export class ViewportController {
     if (!force && this.isUserScrolling()) return;
     const position = Math.min(Math.max(0, anchor.position), this.view.state?.doc?.length ?? anchor.position);
     const lineOffset = Number.isFinite(anchor.lineOffset) ? Math.max(0, anchor.lineOffset) : 0;
+    const viewportOffset = Number.isFinite(anchor.viewportOffset)
+      ? Math.max(0, anchor.viewportOffset ?? 0)
+      : null;
     this.stabilize(
-      () => ({ top: Math.max(0, this.view.lineBlockAt(position).top + lineOffset) }),
+      () => ({
+        top: Math.max(0, this.view.lineBlockAt(position).top + (
+          viewportOffset === null ? lineOffset : -viewportOffset
+        ))
+      }),
       { onSettled }
     );
   }
@@ -1022,6 +1032,7 @@ export class ViewportController {
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
     const navigationGeneration = ++this.navigationGeneration;
+    this.pendingNavigationTarget = null;
     return () => !this.destroyed && navigationGeneration === this.navigationGeneration;
   }
 
@@ -1036,6 +1047,12 @@ export class ViewportController {
     isCurrent: () => boolean = () => true
   ): void {
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
+    if (isCurrent()) {
+      this.pendingNavigationTarget = {
+        position: targetPosition,
+        generation: this.navigationGeneration
+      };
+    }
     this.runNavigationReveal(() => {
       const current = this.readScrollPosition();
       const coords = this.view.coordsAtPos(targetPosition);
@@ -1091,9 +1108,12 @@ export class ViewportController {
 
   captureAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
     if (this.destroyed) return null;
+    const navigationAnchor = owner === 'editor'
+      ? this.consumeVisibleNavigationTargetAnchor()
+      : null;
     this.markInteraction();
     const anchor = owner === 'editor'
-      ? this.captureDocumentAnchor()
+      ? navigationAnchor ?? this.captureDocumentAnchor()
       : this.capturePreviewDocumentAnchor();
     if (!anchor) return null;
     const handle = Object.freeze({}) as ViewportAnchorToken;
@@ -1369,6 +1389,21 @@ export class ViewportController {
     return {
       position: this.view.state.doc.line(lineNumber).from,
       lineOffset: Number.isFinite(position.lineOffset) ? Math.max(0, position.lineOffset) : 0
+    };
+  }
+
+  private consumeVisibleNavigationTargetAnchor(): ViewportDocumentAnchor | null {
+    const target = this.pendingNavigationTarget;
+    this.pendingNavigationTarget = null;
+    if (!target || target.generation !== this.navigationGeneration) return null;
+    const { position } = target;
+    const coords = this.view.coordsAtPos(position);
+    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+    if (!coords || coords.bottom <= scrollerRect.top || coords.top >= scrollerRect.bottom) return null;
+    return {
+      position,
+      lineOffset: 0,
+      viewportOffset: Math.max(0, coords.top - scrollerRect.top)
     };
   }
 

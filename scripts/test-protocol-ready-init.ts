@@ -40,7 +40,6 @@ const completeInit = {
   fixedBaselinePinned: false,
   fixedBaselineActive: false,
   contentMaxWidthEnabled: true,
-  longCodeBlockFoldingEnabled: true,
   findOptions: { wholeWord: false, caseSensitive: false },
   outlinePosition: 'right' as const,
   outlineVisible: true,
@@ -71,7 +70,7 @@ assert.equal(decodeInitMessage({ ...completeInit, previewAppearance: 'broken' })
 for (const requiredKey of [
   'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'gitChangesGutter',
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
-  'fixedBaselineActive', 'contentMaxWidthEnabled', 'longCodeBlockFoldingEnabled',
+  'fixedBaselineActive', 'contentMaxWidthEnabled',
   'findOptions', 'outlinePosition', 'outlineVisible',
   'outlineWidth', 'vscodeTheme'
 ]) {
@@ -556,7 +555,6 @@ for (const command of [
   { type: 'setOutlinePosition', position: 'right' },
   { type: 'setOutlineWidth', width: 240 },
   { type: 'setContentMaxWidth', enabled: true },
-  { type: 'setLongCodeBlockFolding', enabled: false },
   { type: 'setFindOptions', findOptions: { wholeWord: true, caseSensitive: false } },
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
@@ -571,6 +569,7 @@ for (const command of [
 assert.equal(decodeEditorCommand({ type: 'setMode', mode: 'unknown' }), null);
 assert.equal(decodeEditorCommand({ type: 'saveDocument' }), null);
 assert.equal(decodeEditorCommand({ type: 'setLineNumbers', visible: true }), null);
+assert.equal(decodeEditorCommand({ type: 'setLongCodeBlockFolding', enabled: false }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 3 }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 0 }), null);
 assert.equal(decodeEditorCommand({ type: 'setOutlineWidth', width: Number.NaN }), null);
@@ -585,13 +584,13 @@ for (const event of [
   { type: 'diffBaselineModeChanged', mode: 'recent-save' },
   { type: 'fixedBaselineChanged', pinned: true, active: false },
   { type: 'contentMaxWidthChanged', enabled: true },
-  { type: 'longCodeBlockFoldingChanged', enabled: true },
   { type: 'findOptionsChanged', findOptions: { wholeWord: false, caseSensitive: true } }
 ]) {
   assert.notEqual(decodeHostEditorEvent(event), null, `Host editor event was rejected: ${event.type}`);
 }
 assert.equal(decodeHostEditorEvent({ type: 'revealSelection', anchor: -1, head: 0 }), null);
 assert.equal(decodeHostEditorEvent({ type: 'lineNumbersChanged', enabled: true }), null);
+assert.equal(decodeHostEditorEvent({ type: 'longCodeBlockFoldingChanged', enabled: true }), null);
 assert.equal(decodeHostEditorEvent({ type: 'fixedBaselineChanged', pinned: true, active: 'yes' }), null);
 assert.equal(decodeHostEditorEvent({ type: 'previewAppearanceChanged', appearance: 'light' }), null);
 assert.equal(decodeHostEditorEvent({ type: 'previewSourceColoringChanged', enabled: false }), null);

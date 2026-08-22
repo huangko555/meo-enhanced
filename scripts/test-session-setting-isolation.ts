@@ -16,7 +16,6 @@ const sessionSettingBroadcasts = [
   'gitDiffLineHighlightsChanged',
   'diffBaselineModeChanged',
   'contentMaxWidthChanged',
-  'longCodeBlockFoldingChanged',
   'outlinePositionChanged',
   'outlineVisibilityChanged'
 ];

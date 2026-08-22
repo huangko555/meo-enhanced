@@ -33,7 +33,6 @@ export type InitMessage = {
   readonly fixedBaselinePinned: boolean;
   readonly fixedBaselineActive: boolean;
   readonly contentMaxWidthEnabled: boolean;
-  readonly longCodeBlockFoldingEnabled: boolean;
   readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean };
   readonly outlinePosition: 'left' | 'right';
   readonly outlineVisible: boolean;
@@ -87,7 +86,6 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || typeof value.fixedBaselinePinned !== 'boolean'
     || typeof value.fixedBaselineActive !== 'boolean'
     || typeof value.contentMaxWidthEnabled !== 'boolean'
-    || typeof value.longCodeBlockFoldingEnabled !== 'boolean'
     || !isRecord(value.findOptions)
     || typeof value.findOptions.wholeWord !== 'boolean'
     || typeof value.findOptions.caseSensitive !== 'boolean'

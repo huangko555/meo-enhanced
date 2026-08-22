@@ -11,7 +11,6 @@ export type HostEditorEvent =
   | { readonly type: 'diffBaselineModeChanged'; readonly mode: DiffBaselineMode }
   | { readonly type: 'fixedBaselineChanged'; readonly pinned: boolean; readonly active: boolean }
   | { readonly type: 'contentMaxWidthChanged'; readonly enabled: boolean }
-  | { readonly type: 'longCodeBlockFoldingChanged'; readonly enabled: boolean }
   | { readonly type: 'findOptionsChanged'; readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean } };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -41,7 +40,6 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
     case 'gitChangesGutterChanged':
     case 'gitDiffLineHighlightsChanged':
     case 'contentMaxWidthChanged':
-    case 'longCodeBlockFoldingChanged':
       return typeof value.enabled === 'boolean' ? value as HostEditorEvent : null;
     case 'diffBaselineModeChanged':
       return value.mode === 'current-edit' || value.mode === 'recent-save' || value.mode === 'git-head'

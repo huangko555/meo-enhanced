@@ -127,7 +127,7 @@ async function main() {
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', previewSourceColoring: true, editorAppearance: 'dark',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
-        contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
+        contentMaxWidthEnabled: false,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
         vscodeTheme: null
@@ -318,7 +318,7 @@ async function main() {
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         'Release Fixed Baseline',
         'Current Edits', 'Recent Save', 'Git HEAD',
-        'Constrain Width', 'Fold Long Code Blocks'
+        'Constrain Width'
       ]) ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||
@@ -327,31 +327,6 @@ async function main() {
     ) {
       throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
     }
-    const longCodeFoldingInitial = await page.$eval('[data-action="longCodeBlockFolding"]', (button) => ({
-      active: button.classList.contains('is-active'),
-      checked: button.getAttribute('aria-checked')
-    }));
-    if (!longCodeFoldingInitial.active || longCodeFoldingInitial.checked !== 'true') {
-      throw new Error(`Long code block folding was not enabled by default: ${JSON.stringify(longCodeFoldingInitial)}`);
-    }
-    await page.click('[data-action="longCodeBlockFolding"]');
-    await waitForFrames(page, 2);
-    const longCodeFoldingDisabled = await page.evaluate(() => {
-      const button = document.querySelector<HTMLElement>('[data-action="longCodeBlockFolding"]')!;
-      const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; enabled?: boolean }> }).__hostMessages ?? [];
-      return {
-        active: button.classList.contains('is-active'),
-        checked: button.getAttribute('aria-checked'),
-        posted: messages.some((message) => message.type === 'setLongCodeBlockFolding' && message.enabled === false)
-      };
-    });
-    if (longCodeFoldingDisabled.active || longCodeFoldingDisabled.checked !== 'false' || !longCodeFoldingDisabled.posted) {
-      throw new Error(`Long code block folding did not disable: ${JSON.stringify(longCodeFoldingDisabled)}`);
-    }
-    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'longCodeBlockFoldingChanged', enabled: true }
-    })));
-    await waitForFrames(page, 2);
     await page.click('[aria-label="More tools"]');
     const measureToolbarStart = () => page.evaluate(() => {
       const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
@@ -1474,6 +1449,15 @@ async function main() {
         type: 'revealSelection', anchor: selection, head: selection, focus: false
       }}));
     }, initialText);
+    await waitForFrames(page, 2);
+    const persistentCodeAnchor = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent === 'const line10 = 10;');
+      const rect = line?.getBoundingClientRect();
+      return rect ? { x: rect.left + 8, y: rect.top + rect.height / 2 } : null;
+    });
+    if (!persistentCodeAnchor) throw new Error('Could not expand the long viewport anchor block');
+    await page.mouse.click(persistentCodeAnchor.x, persistentCodeAnchor.y);
     await waitForFrames(page, 2);
     await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;

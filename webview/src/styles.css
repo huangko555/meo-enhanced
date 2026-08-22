@@ -1015,6 +1015,23 @@ body {
   background: var(--meo-code-background);
 }
 
+.meo-long-code-language,
+.meo-long-code-line-count {
+  color: var(--meo-semantic-mutedForeground, var(--meo-foreground));
+  font-size: 12px;
+  user-select: none;
+}
+
+.meo-long-code-language {
+  margin-right: 8px;
+  color: var(--meo-foreground);
+}
+
+.meo-md-long-code-placeholder .meo-long-code-action,
+.meo-md-long-code-footer .meo-long-code-action {
+  margin-left: 8px;
+}
+
 .meo-long-code-action,
 .meo-long-code-floating-action {
   display: inline-flex;

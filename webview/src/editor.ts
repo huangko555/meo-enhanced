@@ -5,7 +5,7 @@ import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, re
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
-import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect, setLongCodeBlockSearchRevealEffect } from './liveMode';
+import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
@@ -78,7 +78,6 @@ import type { SelectionMenuState } from './helpers/selectionMenu';
 import { focusMermaidEditingOffset, getMermaidBlockMode, setMermaidBlockModeEffect, setMermaidSearchRevealEffect } from './helpers/mermaidEditing';
 import { focusLatexMathEditingOffset, getLatexMathBlockMode, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
-import { setLongCodeBlockFoldingEnabled } from './helpers/longCodeBlocks';
 import {
   ViewportController,
   type PreviewViewportSurface,
@@ -1322,8 +1321,8 @@ export function createEditor({
     const isRevealCurrent = viewportController.beginNavigationReveal();
     view.dispatch({
       selection: { anchor: from, head: to },
+      annotations: Transaction.userEvent.of('select.search'),
       effects: [
-        setLongCodeBlockSearchRevealEffect.of({ from, to }),
         setMermaidSearchRevealEffect.of({ from, to }),
         setLatexMathSearchRevealEffect.of({ from, to }),
         ...(htmlBlock ? [setHtmlEditingRangeEffect.of({ from: htmlBlock.from, to: htmlBlock.to })] : []),
@@ -2454,9 +2453,9 @@ export function createEditor({
         return;
       }
       view.dispatch({
+        annotations: Transaction.userEvent.of('select.search.clear'),
         effects: [
           setSearchQueryEffect.of(nextQuery),
-          setLongCodeBlockSearchRevealEffect.of(null),
           setMermaidSearchRevealEffect.of(null),
           setLatexMathSearchRevealEffect.of(null),
           preserveLiveDecorationsForSearchEffect.of(true)
@@ -2695,9 +2694,6 @@ export function createEditor({
       };
 
       viewportController.runAnchorTransaction(viewport, 'editor', applyMode);
-    },
-    setLongCodeBlockFoldingEnabled(enabled: boolean) {
-      setLongCodeBlockFoldingEnabled(view, enabled === true);
     },
     setGitGutterVisible(visible: boolean) {
       const nextVisible = visible !== false;

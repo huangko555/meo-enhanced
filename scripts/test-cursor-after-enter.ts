@@ -59,7 +59,6 @@ async function main(): Promise<void> {
         previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark', gitChangesGutter: false,
         gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false,
-        longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
         vscodeTheme: null

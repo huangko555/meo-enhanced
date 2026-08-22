@@ -74,7 +74,7 @@ import { mermaidEditingStateField } from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles, type ParsedInlineStyleRange } from './helpers/inlineStyleFallback';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
 import { addColorSwatchDecoration } from './helpers/colorSwatches';
-import { longCodeBlockExtensions } from './helpers/longCodeBlocks';
+import { longCodeBlockSessionUiExtension } from './helpers/longCodeBlocks';
 import { attachLatexMathViewport, type LatexMathViewportController } from './helpers/latexMathViewport';
 import {
   addHtmlContentDecorations,
@@ -83,7 +83,6 @@ import {
   htmlContentExtensions
 } from './helpers/htmlContent';
 
-export { setLongCodeBlockSearchRevealEffect } from './helpers/longCodeBlocks';
 import {
   addLatexMathToolbar,
   getLatexMathBlockMode,
@@ -2973,7 +2972,7 @@ export function liveModeExtensions(): Extension[] {
     latexMathEditingStateField,
     ...htmlContentExtensions(),
     liveDecorationField,
-    ...longCodeBlockExtensions(),
+    ...longCodeBlockSessionUiExtension(),
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),
     ...detailsBlockLiveExtensions()

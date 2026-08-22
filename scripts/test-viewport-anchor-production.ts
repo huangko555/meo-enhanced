@@ -144,7 +144,7 @@ async function main(): Promise<void> {
         previewAppearance: 'light', previewSourceColoring: true, editorAppearance: 'light',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
-        contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
+        contentMaxWidthEnabled: false,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
         vscodeTheme: null

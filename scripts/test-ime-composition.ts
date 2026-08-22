@@ -64,7 +64,7 @@ async function main() {
         previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
-        contentMaxWidthEnabled: false, longCodeBlockFoldingEnabled: true,
+        contentMaxWidthEnabled: false,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: true, outlineWidth: 260,
         vscodeTheme: null

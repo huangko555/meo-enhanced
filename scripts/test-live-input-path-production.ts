@@ -877,11 +877,10 @@ async function main(): Promise<void> {
       throw new Error(`Details refresh did not perform exactly one current scan: ${JSON.stringify(detailsProbeSettled)}`);
     }
 
-    const pendingDetailsAndFolding = await page.evaluate(() => {
+    const pendingDetails = await page.evaluate(() => {
       const editor = (window as any).__liveInputEditor;
       (window as any).__dispatchProductionInput(editor, 'plain'.length, 'D');
       const toggled = (window as any).__toggleFirstDetails(editor);
-      editor.setLongCodeBlockFoldingEnabled(false);
       return {
         toggled,
         detailsOpen: document.querySelector<HTMLDetailsElement>('#primary .meo-md-html-content details')?.open,
@@ -889,22 +888,21 @@ async function main(): Promise<void> {
       };
     });
     await waitForFrames(page, 5);
-    const settledDetailsAndFolding = await page.evaluate(() => ({
+    const settledDetails = await page.evaluate(() => ({
       detailsOpen: document.querySelector<HTMLDetailsElement>('#primary .meo-md-html-content details')?.open,
       placeholders: document.querySelectorAll('#primary .meo-md-long-code-placeholder').length
     }));
     if (
-      !pendingDetailsAndFolding.toggled || pendingDetailsAndFolding.detailsOpen !== false ||
-      pendingDetailsAndFolding.placeholders !== 0 || settledDetailsAndFolding.detailsOpen !== false ||
-      settledDetailsAndFolding.placeholders !== 0
+      !pendingDetails.toggled || pendingDetails.detailsOpen !== false ||
+      pendingDetails.placeholders !== 1 || settledDetails.detailsOpen !== false ||
+      settledDetails.placeholders !== 1
     ) {
-      throw new Error(`Pending input swallowed a details/folding command: ${JSON.stringify({ pendingDetailsAndFolding, settledDetailsAndFolding })}`);
+      throw new Error(`Pending input swallowed details or long-code session state: ${JSON.stringify({ pendingDetails, settledDetails })}`);
     }
 
     await page.evaluate((text) => {
       const editor = (window as any).__liveInputEditor;
       (window as any).__toggleFirstDetails(editor);
-      editor.setLongCodeBlockFoldingEnabled(true);
       editor.setSearchQuery('');
       editor.setText(text, true);
     }, original);

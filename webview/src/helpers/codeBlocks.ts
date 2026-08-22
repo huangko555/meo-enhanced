@@ -767,10 +767,7 @@ export function addCodeLanguageLabel(builder: any[], state: EditorState, node: a
     return;
   }
 
-  const labelText = getFencedCodeInfo(state, node);
-  if (!labelText) {
-    return;
-  }
+  const labelText = getFencedCodeInfo(state, node) || 'Plain text';
 
   addTopLinePillLabel(builder, startLine.to, labelText);
 }

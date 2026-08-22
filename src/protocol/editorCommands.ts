@@ -13,7 +13,6 @@ export type EditorCommand =
   | { readonly type: 'setOutlinePosition'; readonly position: OutlinePosition }
   | { readonly type: 'setOutlineWidth'; readonly width: number }
   | { readonly type: 'setContentMaxWidth'; readonly enabled: boolean }
-  | { readonly type: 'setLongCodeBlockFolding'; readonly enabled: boolean }
   | {
       readonly type: 'setFindOptions';
       readonly wholeWord?: boolean;
@@ -55,7 +54,6 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
         && (isBoolean(value.visible) || isBoolean(value.enabled)) ? value as EditorCommand : null;
     case 'setFixedBaseline':
     case 'setContentMaxWidth':
-    case 'setLongCodeBlockFolding':
       return isBoolean(value.enabled) ? value as EditorCommand : null;
     case 'setDiffBaselineMode':
       return value.mode === 'current-edit' || value.mode === 'recent-save' || value.mode === 'git-head'

@@ -45,7 +45,6 @@ async function main(): Promise<void> {
         fixedBaselinePinned: false,
         fixedBaselineActive: false,
         contentMaxWidthEnabled: false,
-        longCodeBlockFoldingEnabled: true,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right',
         outlineVisible: false,

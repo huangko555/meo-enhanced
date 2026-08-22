@@ -22,10 +22,8 @@ import {
   GIT_CHANGES_GUTTER_SETTING_KEY,
   DIFF_BASELINE_MODE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
-  LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY,
   OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
-  getLongCodeBlockFoldingEnabled,
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getDiffBaselineMode,
@@ -330,7 +328,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       fixedBaselinePinned: diffBaselineState.fixedPinned,
       fixedBaselineActive: diffBaselineState.fixedActive,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
-      longCodeBlockFoldingEnabled: getLongCodeBlockFoldingEnabled(),
       findOptions: getFindOptions(),
       outlinePosition: getOutlinePosition(),
       outlineVisible: getOutlineVisible(context),
@@ -524,11 +521,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         await vscode.workspace
           .getConfiguration(EXTENSION_CONFIG_SECTION)
           .update(CONTENT_MAX_WIDTH_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
-        return;
-      case 'setLongCodeBlockFolding':
-        await vscode.workspace
-          .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .update(LONG_CODE_BLOCKS_COLLAPSE_SETTING_KEY, raw.enabled === true, vscode.ConfigurationTarget.Global);
         return;
       case 'setFindOptions': {
         const wholeWord = raw.findOptions?.wholeWord ?? raw.wholeWord;
