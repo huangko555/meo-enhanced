@@ -363,30 +363,50 @@ async function main(): Promise<void> {
     await page.click('[data-mode="live"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
     await waitForFrames(page, 4);
-    const finalState = await page.evaluate(() => {
+    const previewExitAnchor = traceResult.before.anchor;
+    const previewExitLine = previewExitAnchor.documentPosition;
+    assert.ok(
+      Number.isInteger(previewExitLine) && previewExitLine >= 1 && previewExitLine <= fixtureLines.length,
+      `Preview anchor must expose a 1-based source line: ${JSON.stringify(previewExitAnchor)}`
+    );
+    const previewExitText = fixtureLines[previewExitLine - 1];
+    assert.equal(
+      fixtureLines.filter((line) => line === previewExitText).length,
+      1,
+      `Preview anchor line must have unique public text: ${JSON.stringify(previewExitAnchor)}`
+    );
+    const finalState = await page.evaluate(({ anchorLine, anchorText }) => {
       const selection = window.getSelection();
       const editorContent = document.querySelector<HTMLElement>('.editor-host .cm-content');
       const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller');
       const scrollerTop = scroller?.getBoundingClientRect().top ?? 0;
-      const topLine = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
-        .find((line) => line.getBoundingClientRect().bottom > scrollerTop);
-      const topLineNumber = Number(topLine?.textContent?.match(/semantic line (\d+)/)?.[1] ?? 0);
+      const anchors = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+        .filter((line) => line.textContent === anchorText);
+      const anchor = anchors.length === 1 ? anchors[0] : null;
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
         selection: selection?.toString() ?? '',
         focusInEditor: Boolean(editorContent && document.activeElement && editorContent.contains(document.activeElement)),
-        topLineNumber,
-        topLineOffset: topLine ? scrollerTop - topLine.getBoundingClientRect().top : null
+        anchorLine,
+        anchorMatches: anchors.length,
+        anchorViewportOffset: anchor ? anchor.getBoundingClientRect().top - scrollerTop : null
       };
+    }, {
+      anchorLine: previewExitLine,
+      anchorText: previewExitText
     });
     assert.equal(finalState.mode, 'live');
     assert.equal(finalState.selection, 'semantic anchor');
     assert.equal(finalState.focusInEditor, true);
+    assert.equal(finalState.anchorMatches, 1, `Expected one public anchor line: ${JSON.stringify(finalState)}`);
     assert.ok(
-      finalState.topLineNumber >= 75 && finalState.topLineNumber <= 77,
+      Math.abs((finalState.anchorViewportOffset ?? 99) - previewExitAnchor.viewportOffset) <= 2,
       `Preview to different editable mode lost its semantic anchor: ${JSON.stringify(finalState)}`
     );
-    assert.ok(Math.abs(finalState.topLineOffset ?? 99) <= 2, JSON.stringify(finalState));
+    if (process.argv.includes('--preview-live-only')) {
+      console.log(`Preview to Live semantic anchor passed: ${JSON.stringify(finalState)}`);
+      return;
+    }
 
     await page.evaluate((anchor) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
