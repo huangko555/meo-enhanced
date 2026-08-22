@@ -31,9 +31,10 @@ async function waitForFrames(page: import('puppeteer-core').Page, count: number)
 
 async function armFirstFrame(
   page: import('puppeteer-core').Page,
-  eventName: 'beforeinput' | 'paste' | 'compositionend'
+  eventName: 'beforeinput' | 'paste' | 'compositionend',
+  settleDelayMs = 0
 ): Promise<void> {
-  await page.evaluate((inputEventName) => {
+  await page.evaluate(({ inputEventName, delayMs }) => {
     const content = document.querySelector<HTMLElement>('.cm-content');
     if (!content) throw new Error('CodeMirror content was not mounted');
     const editorRoot = content.closest<HTMLElement>('.cm-editor');
@@ -119,12 +120,16 @@ async function armFirstFrame(
                 resolveSettled(sample);
               }, 0);
             });
-            settleAfterPaint();
+            if (delayMs > 0) {
+              setTimeout(settleAfterPaint, delayMs);
+            } else {
+              settleAfterPaint();
+            }
           });
         });
       }, { capture: true, once: true });
     });
-  }, eventName);
+  }, { inputEventName: eventName, delayMs: settleDelayMs });
 }
 
 async function readFirstFrame(page: import('puppeteer-core').Page): Promise<FrameSample> {
@@ -675,6 +680,9 @@ async function main(): Promise<void> {
       content.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
       editor.setSearchQuery('search');
       const found = editor.findNext('target', { focusEditor: false }).found;
+      // The production composition owner completes on a 20ms timer. Await that
+      // boundary before advancing the Module's frame and observer checkpoints.
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
       for (let index = 0; index < 6; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
@@ -1211,7 +1219,7 @@ async function main(): Promise<void> {
       throw new Error(`Long IME preedit triggered derived work: ${JSON.stringify({ preeditFirstFrame, preeditFourthFrame })}`);
     }
 
-    await armFirstFrame(page, 'beforeinput');
+    await armFirstFrame(page, 'beforeinput', 25);
     await session.send('Input.imeSetComposition', { text: '拼', selectionStart: 1, selectionEnd: 1 });
     await session.send('Input.insertText', { text: '拼' });
     const imeFrame = await readFirstFrame(page);
@@ -1249,7 +1257,7 @@ async function main(): Promise<void> {
     ) {
       throw new Error(`IME cancel preedit triggered derived work: ${JSON.stringify({ cancelPreeditFirst, cancelPreeditSettled })}`);
     }
-    await armFirstFrame(page, 'compositionend');
+    await armFirstFrame(page, 'compositionend', 25);
     await page.evaluate(() => {
       const editor = (window as any).__liveInputEditor;
       const cancelFrom = 'plain line'.length;
