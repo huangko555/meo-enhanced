@@ -1,7 +1,9 @@
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import {
+  currentSyntaxTree,
   extractDetailsBlocks,
+  syntaxTreeChanged,
   type DetailsBlockInfo
 } from './markdownSyntax';
 import { getViewportController } from './viewportController';
@@ -52,7 +54,7 @@ function rebuildDetailsBlocks(
     transaction ? transaction.changes.mapPos(block.anchorFrom, 1) : block.anchorFrom,
     block
   ]));
-  return extractDetailsBlocks(state).map((block) => {
+  return extractDetailsBlocks(state, currentSyntaxTree(state)).map((block) => {
     const override = previousByAnchor.get(block.anchorFrom)?.override ?? null;
     return {
       ...block,
@@ -95,6 +97,7 @@ const detailsBlockStateField = StateField.define<DetailsBlockRecord[]>({
     }
     if (!transaction.docChanged
       && !isLiveInputDerivedWorkRefresh(transaction)
+      && !syntaxTreeChanged(transaction)
       && !transaction.reconfigured
       && toggleEffects.length === 0) return previous;
 
@@ -105,6 +108,7 @@ const detailsBlockStateField = StateField.define<DetailsBlockRecord[]>({
     }
     const needsRebuild = transaction.docChanged
       || isLiveInputDerivedWorkRefresh(transaction)
+      || syntaxTreeChanged(transaction)
       || transaction.reconfigured;
     const blocks = needsRebuild
       ? rebuildDetailsBlocks(transaction.state, previous, transaction)

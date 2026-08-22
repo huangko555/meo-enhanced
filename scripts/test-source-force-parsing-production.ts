@@ -55,6 +55,83 @@ async function main(): Promise<void> {
       (window as any).__meoSyntaxParsePhase = 'initial-source-production';
     });
 
+    const immediateDetailsText = [
+      '# Immediate Source to Live details trace',
+      '',
+      ...Array.from(
+        { length: 4_162 },
+        (_, index) => `remote paragraph ${index} with **Markdown** content and stable parser padding`
+      ),
+      '',
+      '<details>',
+      '<summary>Remote details summary</summary>',
+      '',
+      'Remote **Markdown** details body.',
+      '</details>'
+    ].join('\n');
+    assert.ok(immediateDetailsText.length > 306_000 && immediateDetailsText.length < 308_000);
+    const immediateDetailsPosition = immediateDetailsText.indexOf('<summary>');
+    const immediateDetailsLine = immediateDetailsText.slice(0, immediateDetailsPosition).split('\n').length;
+    const immediateDetails = await page.evaluate(({ text, line, position }) => {
+      const harness = (window as any).EditorSyntaxParsingHarness;
+      (window as any).__meoSyntaxParseCalls = [];
+      (window as any).__meoSyntaxParsePhase = 'immediate-details-source';
+      const editor = harness.createEditor({
+        parent: document.getElementById('app'),
+        text,
+        initialMode: 'source',
+        onApplyChanges() {}
+      });
+      const sourceCalls = structuredClone((window as any).__meoSyntaxParseCalls);
+      (window as any).__meoSyntaxParseCalls = [];
+      (window as any).__meoSyntaxParsePhase = 'immediate-details-live';
+      editor.setMode('live');
+      const liveCalls = structuredClone((window as any).__meoSyntaxParseCalls);
+      editor.scrollToLine(line, 'top');
+      editor.revealSelection(position, position, { focusEditor: true, align: 'nearest' });
+      (window as any).__immediateDetailsEditor = editor;
+      return { sourceCalls, liveCalls };
+    }, { text: immediateDetailsText, line: immediateDetailsLine, position: immediateDetailsPosition });
+    assert.deepEqual(immediateDetails.sourceCalls, []);
+    assert.equal(immediateDetails.liveCalls.filter((call: ParseCall) => call.kind === 'force').length, 1);
+    assert.equal(
+      immediateDetails.liveCalls.find((call: ParseCall) => call.kind === 'force')?.result,
+      'complete'
+    );
+    await waitForFrames(page, 4);
+    const immediateDetailsPresentation = await page.evaluate(() => ({
+      summary: document.querySelector('.meo-md-details-summary-label')?.textContent ?? null,
+      sourceToggle: Boolean(document.querySelector('.meo-md-details-source-toggle')),
+      rawDetails: Array.from(document.querySelectorAll<HTMLElement>('#app .cm-line'))
+        .some((line) => line.textContent?.includes('<details>')),
+      history: (window as any).__immediateDetailsEditor.getHistoryDepth()
+    }));
+    assert.deepEqual(immediateDetailsPresentation, {
+      summary: 'Remote details summary',
+      sourceToggle: true,
+      rawDetails: false,
+      history: { undo: 0, redo: 0 }
+    });
+    await page.click('.meo-md-details-summary');
+    await waitForFrames(page, 2);
+    const immediateDetailsToggle = await page.evaluate(() => ({
+      label: document.querySelector('.meo-md-details-summary')?.getAttribute('aria-label') ?? null,
+      history: (window as any).__immediateDetailsEditor.getHistoryDepth()
+    }));
+    assert.deepEqual(immediateDetailsToggle, {
+      label: 'Collapse details',
+      history: { undo: 0, redo: 0 }
+    });
+    await page.evaluate(() => {
+      (window as any).__immediateDetailsEditor.destroy();
+      document.getElementById('app')?.replaceChildren();
+    });
+    await waitForFrames(page, 4);
+    await page.evaluate(() => {
+      (window as any).__meoSyntaxParseCalls = [];
+      (window as any).__meoSyntaxParsePhase = 'initial-source-production';
+    });
+
     const targetLine = 1_401;
     const remoteParagraphCount = 6_500;
     const remoteSyntax = [

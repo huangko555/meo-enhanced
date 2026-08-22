@@ -344,12 +344,13 @@ async function main(): Promise<void> {
     assert.deepEqual(publicationInitial.calls, []);
 
     const fakeHeaderPosition = publicationText.indexOf('| Fake A | Fake B |');
-    const targetLine = publicationPrefix.length + 5;
+    const fenceEndPosition = publicationText.lastIndexOf('```');
+    const targetLine = publicationPrefix.length + publicationSuffix.length;
     await page.evaluate(({ line, position }) => {
       const editor = (window as any).__syntaxPublicationEditor;
       editor.scrollToLine(line, 'top');
       editor.revealSelection(position, position, { align: 'nearest', focusEditor: true });
-    }, { line: targetLine, position: fakeHeaderPosition });
+    }, { line: targetLine, position: fenceEndPosition });
     await page.waitForFunction((position) => {
       const harness = (window as any).EditorSyntaxParsingHarness;
       const editor = (window as any).__syntaxPublicationEditor;
