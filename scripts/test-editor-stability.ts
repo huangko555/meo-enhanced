@@ -25,24 +25,33 @@ async function assertExternalViewportStability(page: Page): Promise<void> {
   });
   if (beforeTop === null) throw new Error('Could not locate viewport anchor before external update');
 
-  await page.evaluate(() => {
+  const after = await page.evaluate(async () => {
     const editor = (window as any).__editor;
     editor.setText(['后台新增 1', '后台新增 2', '后台新增 3', editor.getText()].join('\n'));
-  });
-  await waitForFrames(page);
-  const after = await page.evaluate(() => {
-    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-      .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+    const topTrace: Array<number | null> = [];
+    for (let frame = 0; frame <= 8; frame += 1) {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+      topTrace.push(line?.getBoundingClientRect().top ?? null);
+      if (frame < 8) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
     return {
-      top: line?.getBoundingClientRect().top ?? null,
-      text: (window as any).__editor.getText()
+      topTrace,
+      text: editor.getText()
     };
   });
   if (!after.text.startsWith('后台新增 1\n后台新增 2\n后台新增 3\n')) {
     throw new Error('External document update was not applied');
   }
-  if (after.top === null || Math.abs(after.top - beforeTop) > 1) {
-    throw new Error(`External update moved the viewport anchor: ${beforeTop} -> ${after.top}`);
+  const unstableFrame = after.topTrace.findIndex((top) => top === null || Math.abs(top - beforeTop) > 1);
+  if (unstableFrame >= 0) {
+    throw new Error(
+      `External update moved the viewport anchor during settlement at frame ${unstableFrame}: ${beforeTop} -> ${JSON.stringify(after.topTrace)}`
+    );
+  }
+  const finalTop = after.topTrace.at(-1) ?? null;
+  if (finalTop === null || Math.abs(finalTop - beforeTop) > 1) {
+    throw new Error(`External update moved the final viewport anchor: ${beforeTop} -> ${finalTop}`);
   }
 
   await page.evaluate(() => {

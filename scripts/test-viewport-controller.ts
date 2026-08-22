@@ -172,6 +172,20 @@ const documentScrollDOM = {
   clientWidth: 900,
   getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
 };
+
+const traceFrames = async <T>(
+  animationFrames: FrameRequestCallback[],
+  sample: () => T
+): Promise<T[]> => {
+  const trace = [sample()];
+  await Promise.resolve();
+  while (animationFrames.length > 0) {
+    animationFrames.shift()?.(0);
+    await Promise.resolve();
+    trace.push(sample());
+  }
+  return trace;
+};
 const documentView = {
   dom: {},
   scrollDOM: documentScrollDOM,
@@ -636,7 +650,16 @@ if (!navigationAnchorHandle) throw new Error('Visible navigation target did not 
 navigationAnchorTop = 1888.390625;
 navigationAnchorController.restoreAnchorToken(navigationAnchorHandle, 'editor');
 await Promise.resolve();
-await flushFrames(wheelFrames);
+const navigationAnchorTrace = await traceFrames(
+  wheelFrames,
+  () => navigationAnchorScrollDOM.scrollTop
+);
+const unstableNavigationFrame = navigationAnchorTrace.findIndex((scrollTop) => scrollTop !== 1888);
+if (unstableNavigationFrame >= 0) {
+  throw new Error(
+    `Navigation target moved during settlement at frame ${unstableNavigationFrame}: ${JSON.stringify(navigationAnchorTrace)}`
+  );
+}
 if (navigationAnchorScrollDOM.scrollTop !== 1888) {
   throw new Error(
     `Navigation target mixed text and line-box offsets: ${navigationAnchorScrollDOM.scrollTop}`
