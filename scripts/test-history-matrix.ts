@@ -184,36 +184,35 @@ async function editRenderedBlock(
     ? `Mermaid editor at line ${targetLineNumber}`
     : `Formula editor at line ${targetLineNumber}`;
   const clickTargetModeButton = async () => {
-    const previousLabel = await page.evaluate(({ blockKind, needle, selector, lineNumber }) => {
-      const toolbarLabel = blockKind === 'mermaid'
-        ? `Mermaid block controls at line ${lineNumber}`
-        : `Formula block controls at line ${lineNumber}`;
-      const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${toolbarLabel}"]`)
-        ?.querySelector<HTMLButtonElement>(selector) ?? null;
-      if (!button) throw new Error(`Missing ${blockKind} mode button for ${needle}`);
-      const label = button.getAttribute('aria-label');
-      button.click();
-      return label;
-    }, { blockKind: kind, needle: lineNeedle, selector: modeButton, lineNumber: targetLineNumber });
     targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
-    await page.waitForFunction(({ blockKind, selector, previous, regionLabel, needle, lineNumber }) => {
-      const toolbarLabel = blockKind === 'mermaid'
-        ? `Mermaid block controls at line ${lineNumber}`
-        : `Formula block controls at line ${lineNumber}`;
-      const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${toolbarLabel}"]`)
-        ?.querySelector<HTMLButtonElement>(selector) ?? null;
-      if (/show .* preview/i.test(previous ?? '')) {
-        return Boolean(button && /edit .* split view/i.test(button.getAttribute('aria-label') ?? ''));
-      }
-      return Boolean(document.querySelector<HTMLElement>(`[role="region"][aria-label="${regionLabel}"]`)
-        ?.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(needle));
+    const transition = await page.evaluate(({ blockKind, needle, selector, lineNumber }) => {
+      const editor = (window as any).__historyMatrixEditor;
+      const anchor = editor.view.state.doc.line(lineNumber).from;
+      const button = Array.from(document.querySelectorAll<HTMLButtonElement>(selector)).find((candidate) => (
+        candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(anchor)
+      )) ?? null;
+      if (!button) throw new Error(`Missing ${blockKind} mode button for ${needle}`);
+      const blockSelector = blockKind === 'mermaid'
+        ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"]`
+        : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${anchor}"]`;
+      const block = document.querySelector<HTMLElement>(blockSelector);
+      const previousMode = !block ? 'preview' : block.classList.contains('is-source') ? 'source' : 'split';
+      button.click();
+      return {
+        anchor,
+        expectedMode: previousMode === 'preview' ? 'split' : previousMode === 'split' ? 'source' : 'preview'
+      };
+    }, { blockKind: kind, needle: lineNeedle, selector: modeButton, lineNumber: targetLineNumber });
+    await page.waitForFunction(({ blockKind, anchor, expectedMode }) => {
+      const selector = blockKind === 'mermaid'
+        ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"]`
+        : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${anchor}"]`;
+      const block = document.querySelector<HTMLElement>(selector);
+      const actualMode = !block ? 'preview' : block.classList.contains('is-source') ? 'source' : 'split';
+      return actualMode === expectedMode;
     }, {}, {
       blockKind: kind,
-      selector: modeButton,
-      previous: previousLabel,
-      regionLabel: editorRegionLabel(),
-      needle: lineNeedle,
-      lineNumber: targetLineNumber
+      ...transition
     });
   };
   targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
@@ -273,18 +272,15 @@ async function editRenderedBlock(
   }
   const desiredMode = finalMode === 'preview' ? 'split' : finalMode;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const actualMode = await page.evaluate(({ blockKind, selector, lineNumber }) => {
-      const toolbarLabel = blockKind === 'mermaid'
-        ? `Mermaid block controls at line ${lineNumber}`
-        : `Formula block controls at line ${lineNumber}`;
-      const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${toolbarLabel}"]`)
-        ?.querySelector<HTMLButtonElement>(selector) ?? null;
-      const label = button?.getAttribute('aria-label') ?? '';
-      if (!label) return null;
-      if (/preview/i.test(label)) return 'source';
-      if (/source only|code only/i.test(label)) return 'split';
-      return 'preview';
-    }, { blockKind: kind, selector: modeButton, lineNumber: targetLineNumber });
+    const actualMode = await page.evaluate(({ blockKind, lineNumber }) => {
+      const editor = (window as any).__historyMatrixEditor;
+      const anchor = editor.view.state.doc.line(lineNumber).from;
+      const selector = blockKind === 'mermaid'
+        ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"]`
+        : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${anchor}"]`;
+      const block = document.querySelector<HTMLElement>(selector);
+      return !block ? 'preview' : block.classList.contains('is-source') ? 'source' : 'split';
+    }, { blockKind: kind, lineNumber: targetLineNumber });
     if (actualMode === desiredMode) break;
     await clickTargetModeButton();
   }

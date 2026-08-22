@@ -113,11 +113,15 @@ async function scrollToNeedle(page: any, needle: string, occurrence: NeedleOccur
         if (targetOccurrence === 'first') break;
       }
     }
-    if (targetLine) {
-      editor.scrollToLine(targetLine, 'center');
-      return;
+    if (!targetLine) throw new Error(`Missing rendered-block line: ${lineNeedle}`);
+    for (let lineNumber = targetLine; lineNumber >= 1; lineNumber -= 1) {
+      const line = editor.view.state.doc.line(lineNumber).text;
+      if (line.trimStart().startsWith('```mermaid') || line.trim() === '$$') {
+        editor.scrollToLine(lineNumber, 'center');
+        return;
+      }
     }
-    throw new Error(`Missing rendered-block line: ${lineNeedle}`);
+    throw new Error(`Missing rendered-block opening line: ${lineNeedle}`);
   }, { lineNeedle: needle, targetOccurrence: occurrence });
   await waitForFrames(page, 16);
   await page.evaluate(({ lineNeedle, targetOccurrence }) => {
@@ -143,7 +147,7 @@ async function clickModeButton(
   needle: string,
   occurrence: NeedleOccurrence = 'first'
 ) {
-  await page.evaluate(({ blockKind, lineNeedle, targetOccurrence }) => {
+  const transition = await page.evaluate(({ blockKind, lineNeedle, targetOccurrence }) => {
     const editor = (window as any).__renderedHistoryStressEditor;
     const view = editor.view;
     let targetLine = 0;
@@ -164,12 +168,27 @@ async function clickModeButton(
         candidate.closest<HTMLElement>('[data-meo-block-from]')?.dataset.meoBlockFrom === String(line.from)
       ));
       if (!button) throw new Error(`Missing ${blockKind} mode button for ${lineNeedle}`);
+      const blockSelector = blockKind === 'mermaid'
+        ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${line.from}"]`
+        : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${line.from}"]`;
+      const block = document.querySelector<HTMLElement>(blockSelector);
+      const previousMode = !block ? 'preview' : block.classList.contains('is-source') ? 'source' : 'split';
       button.click();
-      return;
+      return {
+        anchor: line.from,
+        expectedMode: previousMode === 'preview' ? 'split' : previousMode === 'split' ? 'source' : 'preview'
+      };
     }
     throw new Error(`Missing ${blockKind} opening line for ${lineNeedle}`);
   }, { blockKind: kind, lineNeedle: needle, targetOccurrence: occurrence });
-  await waitForFrames(page);
+  await page.waitForFunction(({ blockKind, anchor, expectedMode }) => {
+    const selector = blockKind === 'mermaid'
+      ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${anchor}"]`
+      : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${anchor}"]`;
+    const block = document.querySelector<HTMLElement>(selector);
+    const actualMode = !block ? 'preview' : block.classList.contains('is-source') ? 'source' : 'split';
+    return actualMode === expectedMode;
+  }, {}, { blockKind: kind, ...transition });
 }
 
 async function setMode(
