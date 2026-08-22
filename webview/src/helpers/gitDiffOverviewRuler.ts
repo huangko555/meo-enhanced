@@ -129,12 +129,14 @@ interface GitDiffOverviewRulerOptions {
   view: EditorView;
   getMode: () => string;
   isGitChangesVisible: () => boolean;
+  scheduleDerived?: (operation: () => void) => void;
 }
 
 export function createGitDiffOverviewRulerController({
   view,
   getMode,
-  isGitChangesVisible
+  isGitChangesVisible,
+  scheduleDerived = (operation) => operation()
 }: GitDiffOverviewRulerOptions): GitDiffOverviewRulerController {
   let destroyed = false;
   let host: HTMLElement | null = null;
@@ -314,12 +316,12 @@ export function createGitDiffOverviewRulerController({
   };
 
   const scheduleRender = () => {
-    if (destroyed || rafId) {
-      return;
-    }
-    rafId = requestAnimationFrame(() => {
-      rafId = 0;
-      renderNow();
+    scheduleDerived(() => {
+      if (destroyed || rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        scheduleDerived(renderNow);
+      });
     });
   };
 

@@ -104,10 +104,10 @@ import {
 import {
   beginLiveInputComposition,
   completeLiveInputComposition,
-  isLiveInputDerivedWorkPending,
   isLiveInputDerivedWorkRefresh,
   markLiveInputDerivedWorkFollowUp,
   mapLiveInputDerivedDecorations,
+  requestLiveInputDerivedWork,
   shouldDeferLiveInputDerivedWork,
   supersedeLiveInputDerivedWork
 } from './editor/liveInputDerivedWork';
@@ -351,6 +351,14 @@ export function createEditor({
   let editableLinkHoverMode = currentMode;
   let hoveredBlockActionToolbar: HTMLElement | null = null;
   let hoveredBlockActionRange: { from: number; to: number } | null = null;
+  const toolbarDerivedConsumer = {};
+  const gitDerivedConsumer = {};
+  const searchDerivedConsumer = {};
+  const gitOverviewDerivedConsumer = {};
+  const searchOverviewDerivedConsumer = {};
+  const liveSearchDecorationDerivedConsumer = {};
+  const bootstrapDerivedConsumer = {};
+  let editorDestroyed = false;
   const publishComposedDocumentChange = () => {
     if (!view || applyingExternal || applyingRenumber) {
       return;
@@ -423,17 +431,19 @@ export function createEditor({
     if (blockActionToolbarReconcileFrame !== null || !hoveredBlockActionRange) return;
     blockActionToolbarReconcileFrame = window.requestAnimationFrame(() => {
       blockActionToolbarReconcileFrame = null;
-      if (!hoveredBlockActionRange || hoveredBlockActionToolbar?.isConnected) return;
-      const expectedRange = hoveredBlockActionRange;
-      const replacement = Array.from(
-        view.dom.querySelectorAll(blockActionToolbarSelector)
-      ).find((toolbar) => {
-        if (!(toolbar instanceof HTMLElement)) return false;
-        const range = readBlockActionToolbarRange(toolbar);
-        return range?.from === expectedRange.from && range.to === expectedRange.to;
+      requestLiveInputDerivedWork(view, toolbarDerivedConsumer, () => {
+        if (!hoveredBlockActionRange || hoveredBlockActionToolbar?.isConnected) return;
+        const expectedRange = hoveredBlockActionRange;
+        const replacement = Array.from(
+          view.dom.querySelectorAll(blockActionToolbarSelector)
+        ).find((toolbar) => {
+          if (!(toolbar instanceof HTMLElement)) return false;
+          const range = readBlockActionToolbarRange(toolbar);
+          return range?.from === expectedRange.from && range.to === expectedRange.to;
+        });
+        hoveredBlockActionToolbar = replacement instanceof HTMLElement ? replacement : null;
+        hoveredBlockActionToolbar?.classList.add('is-block-hovered');
       });
-      hoveredBlockActionToolbar = replacement instanceof HTMLElement ? replacement : null;
-      hoveredBlockActionToolbar?.classList.add('is-block-hovered');
     });
   };
   const updateBlockActionToolbarHover = (event: PointerEvent, editorView: EditorView) => {
@@ -1341,15 +1351,19 @@ export function createEditor({
       return;
     }
 
-    pendingLiveSearchDecorationRefreshFrame = window.requestAnimationFrame(() => {
-      pendingLiveSearchDecorationRefreshFrame = null;
-      if (!view || currentMode !== 'live' || refreshGeneration !== pendingLiveSearchDecorationRefreshGeneration) {
-        return;
-      }
-      if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
-        forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
-      }
-      view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) });
+    requestLiveInputDerivedWork(view, liveSearchDecorationDerivedConsumer, () => {
+      pendingLiveSearchDecorationRefreshFrame = window.requestAnimationFrame(() => {
+        pendingLiveSearchDecorationRefreshFrame = null;
+        requestLiveInputDerivedWork(view, liveSearchDecorationDerivedConsumer, () => {
+          if (!view || currentMode !== 'live' || refreshGeneration !== pendingLiveSearchDecorationRefreshGeneration) {
+            return;
+          }
+          if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
+            forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
+          }
+          view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) });
+        });
+      });
     });
   };
 
@@ -2055,18 +2069,7 @@ export function createEditor({
         return suppressHistoryAutoScrollAt(range.head);
       }),
       EditorView.updateListener.of((update) => {
-        const derivedPresentationDeferred = isLiveInputDerivedWorkPending(update.state);
-        if (!derivedPresentationDeferred) {
-          scheduleBlockActionToolbarReconcile();
-        }
-        viewportController?.reconcileAfterEditorUpdate(
-          update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
-        );
-
-        syncModeClasses();
-        if (!derivedPresentationDeferred) {
-          syncGitGutterVisibility();
-        }
+        const liveDerivedRefresh = update.transactions.some(isLiveInputDerivedWorkRefresh);
         const searchQueryChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => effect.is(setSearchQueryEffect))
         ));
@@ -2075,6 +2078,24 @@ export function createEditor({
             effect.is(setMermaidBlockModeEffect) || effect.is(setLatexMathBlockModeEffect)
           ))
         ));
+        const presentationMayHaveChanged = update.docChanged
+          || update.viewportChanged
+          || renderedPresentationChanged;
+        if (!liveDerivedRefresh && presentationMayHaveChanged) {
+          requestLiveInputDerivedWork(update.view, toolbarDerivedConsumer, () => {
+            scheduleBlockActionToolbarReconcile();
+          });
+        }
+        viewportController?.reconcileAfterEditorUpdate(
+          update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
+        );
+
+        syncModeClasses();
+        if (!liveDerivedRefresh && presentationMayHaveChanged) {
+          requestLiveInputDerivedWork(update.view, gitDerivedConsumer, () => {
+            syncGitGutterVisibility();
+          });
+        }
         if (renderedPresentationChanged) {
           recentRenderedReplayPresentation = null;
         }
@@ -2108,11 +2129,11 @@ export function createEditor({
 
         // Search indicators consume accepted Document/Selection and must not
         // stand between the public change callback and its owner.
-        if (!derivedPresentationDeferred) {
-          emitSearchStateChange();
-          if (update.docChanged || update.selectionSet || searchQueryChanged) {
+        if (!liveDerivedRefresh && (update.docChanged || update.selectionSet || searchQueryChanged)) {
+          requestLiveInputDerivedWork(update.view, searchDerivedConsumer, () => {
+            emitSearchStateChange();
             searchOverviewRuler?.refresh({ positionsChanged: update.docChanged || searchQueryChanged });
-          }
+          });
         }
       })
     ]
@@ -2380,10 +2401,16 @@ export function createEditor({
   gitDiffOverviewRuler = createGitDiffOverviewRulerController({
     view,
     getMode: () => currentMode,
-    isGitChangesVisible: () => gitGutterVisible
+    isGitChangesVisible: () => gitGutterVisible,
+    scheduleDerived: (operation) => requestLiveInputDerivedWork(
+      view, gitOverviewDerivedConsumer, operation
+    )
   });
   searchOverviewRuler = createSearchOverviewRulerController({
     view,
+    scheduleDerived: (operation) => requestLiveInputDerivedWork(
+      view, searchOverviewDerivedConsumer, operation
+    ),
     getMatches: () => {
       const matches = view.state.field(searchMatchField).matches;
       const selection = view.state.selection.main;
@@ -2491,6 +2518,10 @@ export function createEditor({
     hasFocus() {
       return view.hasFocus;
     },
+    requestDerivedWork(operation: () => void) {
+      if (editorDestroyed) return;
+      requestLiveInputDerivedWork(view, bootstrapDerivedConsumer, operation);
+    },
     captureViewportAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
       return viewportController.captureAnchorToken(owner);
     },
@@ -2516,6 +2547,7 @@ export function createEditor({
       view.focus();
     },
     destroy() {
+      editorDestroyed = true;
       view.dom.classList.remove('meo-live-pointer-selecting');
       gitDiffContentHover?.destroy();
       gitDiffContentHover = null;

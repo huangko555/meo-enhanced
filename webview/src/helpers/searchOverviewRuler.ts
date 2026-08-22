@@ -9,6 +9,7 @@ type SearchOverviewMatch = {
 type SearchOverviewRulerOptions = {
   view: EditorView;
   getMatches: () => SearchOverviewMatch[];
+  scheduleDerived?: (operation: () => void) => void;
 };
 
 type SearchOverviewRulerController = {
@@ -25,7 +26,8 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 export function createSearchOverviewRulerController({
   view,
-  getMatches
+  getMatches,
+  scheduleDerived = (operation) => operation()
 }: SearchOverviewRulerOptions): SearchOverviewRulerController {
   let host: HTMLElement | null = null;
   let destroyed = false;
@@ -103,12 +105,12 @@ export function createSearchOverviewRulerController({
 
   const refresh = ({ positionsChanged = false }: { positionsChanged?: boolean } = {}) => {
     if (positionsChanged) invalidatePositions();
-    if (destroyed || frame) {
-      return;
-    }
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      render();
+    scheduleDerived(() => {
+      if (destroyed || frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        scheduleDerived(render);
+      });
     });
   };
 

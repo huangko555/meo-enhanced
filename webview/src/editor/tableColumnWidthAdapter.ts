@@ -1,13 +1,12 @@
 import type { Extension } from '@codemirror/state';
-import { EditorView, type ViewUpdate } from '@codemirror/view';
+import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import {
   tableColumnWidthPolicy,
   type TableColumnWidthPolicy
 } from './tableColumnWidthPolicy';
 import {
-  isLiveInputDerivedWorkPending,
   isLiveInputDerivedWorkRefresh,
-  shouldDeferLiveInputDerivedWork
+  requestLiveInputDerivedWork
 } from './liveInputDerivedWork';
 
 export type TableColumnWidthAdapter = {
@@ -76,8 +75,9 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   const bindings = new Map<HTMLTableElement, TableBinding>();
   let mutationObserver: MutationObserver | null = null;
   let currentEpoch: LifecycleEpoch | null = null;
+  let currentView: EditorView | null = null;
   let disposed = false;
-  let projectionDeferred = false;
+  const reconcileConsumer = {};
 
   const isCurrentEpoch = (epoch: LifecycleEpoch): boolean => (
     !disposed && epoch.alive && currentEpoch === epoch
@@ -173,6 +173,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     let dragCleanup: (() => void) | null = null;
     let refreshDragPreview: (() => void) | null = null;
     let resizeFrame = 0;
+    const projectionConsumer = {};
     table.dataset.tableColumnWidthOwner = 'adapter';
 
     const cancelFrame = () => {
@@ -180,15 +181,27 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       cancelAnimationFrame(resizeFrame);
       resizeFrame = 0;
     };
-    const isCurrentBinding = () => lifecycle.alive && isCurrentEpoch(epoch);
+    const isCurrentBinding = () => lifecycle.alive
+      && isCurrentEpoch(epoch)
+      && table.isConnected
+      && options.root.contains(table);
+    const requestProjection = (operation: () => void): void => {
+      const view = currentView;
+      if (view) requestLiveInputDerivedWork(view, projectionConsumer, operation);
+      else operation();
+    };
     const scheduleProjection = () => {
-      if (!isCurrentBinding() || resizeFrame) return;
-      resizeFrame = requestAnimationFrame(() => {
-        resizeFrame = 0;
-        if (!isCurrentBinding()) return;
-        if (refreshDragPreview) refreshDragPreview();
-        else project(table, epoch);
-        table.dispatchEvent(new CustomEvent(projectionEventName));
+      requestProjection(() => {
+        if (!isCurrentBinding() || resizeFrame) return;
+        resizeFrame = requestAnimationFrame(() => {
+          resizeFrame = 0;
+          requestProjection(() => {
+            if (!isCurrentBinding()) return;
+            if (refreshDragPreview) refreshDragPreview();
+            else project(table, epoch);
+            table.dispatchEvent(new CustomEvent(projectionEventName));
+          });
+        });
       });
     };
 
@@ -363,28 +376,20 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           if (intents[index].from >= intents[index].to) intents.splice(index, 1);
         }
       }
-      if (isLiveInputDerivedWorkRefresh(transaction)) {
-        projectionDeferred = false;
-        shouldReconcile = true;
-      } else if (shouldDeferLiveInputDerivedWork(transaction)) {
-        projectionDeferred = true;
-      } else if (transaction.docChanged) {
-        projectionDeferred = false;
+      if (transaction.docChanged || isLiveInputDerivedWorkRefresh(transaction)) {
         shouldReconcile = true;
       }
     }
-    if (projectionDeferred && !isLiveInputDerivedWorkPending(update.state)) {
-      projectionDeferred = false;
-      shouldReconcile = true;
+    if (shouldReconcile && currentEpoch) {
+      const epoch = currentEpoch;
+      requestLiveInputDerivedWork(update.view, reconcileConsumer, () => reconcile(epoch));
     }
-    if (currentEpoch && shouldReconcile && !projectionDeferred) reconcile(currentEpoch);
   };
 
   const release = (): void => {
     const epoch = currentEpoch;
     if (!epoch) return;
     currentEpoch = null;
-    projectionDeferred = false;
     epoch.alive = false;
     mutationObserver?.disconnect();
     mutationObserver = null;
@@ -398,7 +403,9 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const epoch = { alive: true };
       currentEpoch = epoch;
       mutationObserver = new MutationObserver(() => {
-        if (!projectionDeferred) reconcile(epoch);
+        const view = currentView;
+        if (view) requestLiveInputDerivedWork(view, reconcileConsumer, () => reconcile(epoch));
+        else reconcile(epoch);
       });
       mutationObserver.observe(options.root, { childList: true, subtree: true });
       reconcile(epoch);
@@ -414,6 +421,14 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 
   return {
     adapter,
-    extension: EditorView.updateListener.of(mapIntents)
+    extension: ViewPlugin.define((view) => {
+      currentView = view;
+      return {
+        update: mapIntents,
+        destroy() {
+          if (currentView === view) currentView = null;
+        }
+      };
+    })
   };
 }

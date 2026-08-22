@@ -194,6 +194,44 @@ async function main(): Promise<void> {
       throw new Error(`Live one-shot fixture did not render: ${JSON.stringify(initialOneShotFixture)}`);
     }
 
+    const detailsProbeImmediate = await page.evaluate(() => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const probe = (window as any).__createDetailsOperationProbe(
+        host,
+        '<details>\n<summary>Probe</summary>\nBody\n</details>'
+      );
+      (window as any).__detailsOperationProbe = probe;
+      probe.reset();
+      probe.input(0, 'x');
+      const toggled = probe.toggle();
+      (window as any).__detailsProbeFirstFrame = new Promise((resolve) => {
+        requestAnimationFrame(() => setTimeout(() => resolve(probe.iterations()), 0));
+      });
+      return { toggled, iterations: probe.iterations() };
+    });
+    if (!detailsProbeImmediate.toggled || detailsProbeImmediate.iterations !== 0) {
+      throw new Error(`Deferred details input synchronously scanned syntax: ${JSON.stringify(detailsProbeImmediate)}`);
+    }
+    const detailsProbeFirstFrame = await page.evaluate(() => (
+      (window as any).__detailsProbeFirstFrame
+    ));
+    if (detailsProbeFirstFrame !== 0) {
+      throw new Error(`Deferred details input scanned before the barrier: ${detailsProbeFirstFrame}`);
+    }
+    await waitForFrames(page, 4);
+    const detailsProbeSettled = await page.evaluate(() => {
+      const probe = (window as any).__detailsOperationProbe;
+      const iterations = probe.iterations();
+      const collapsed = getComputedStyle(probe.view.dom).display !== 'none';
+      probe.destroy();
+      probe.view.dom.parentElement?.remove();
+      return { iterations, collapsed };
+    });
+    if (detailsProbeSettled.iterations !== 1) {
+      throw new Error(`Details refresh did not perform exactly one current scan: ${JSON.stringify(detailsProbeSettled)}`);
+    }
+
     const pendingDetailsAndFolding = await page.evaluate(() => {
       const editor = (window as any).__liveInputEditor;
       (window as any).__dispatchProductionInput(editor, 'plain'.length, 'D');
@@ -398,6 +436,91 @@ async function main(): Promise<void> {
       editor.revealSelection('plain line'.length, 'plain line'.length, { focusEditor: true, align: 'nearest' });
     }, coreOriginal);
     await waitForFrames(page, 2);
+    const emptyImePendingStart = await page.evaluate(() => {
+      const editor = (window as any).__liveInputEditor;
+      const root = document.querySelector<HTMLElement>('#primary .cm-editor')!;
+      const content = document.querySelector<HTMLElement>('#primary .cm-content')!;
+      const facts = { searches: 0, projections: 0, derivedAdds: 0 };
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (!(node instanceof Element)) continue;
+            if (node.matches('.meo-md-marker, .meo-md-html-table-shell, .meo-md-list-marker')) {
+              facts.derivedAdds += 1;
+            }
+            facts.derivedAdds += node.querySelectorAll(
+              '.meo-md-marker, .meo-md-html-table-shell, .meo-md-list-marker'
+            ).length;
+          }
+        }
+      });
+      const onSearch = () => { facts.searches += 1; };
+      const onProjection = () => { facts.projections += 1; };
+      observer.observe(content, { childList: true, subtree: true });
+      root.addEventListener('meo-search-state-change', onSearch, true);
+      root.addEventListener('meo-table-column-width-projected', onProjection, true);
+      (window as any).__emptyImePendingFacts = facts;
+      (window as any).__emptyImePendingCleanup = () => {
+        observer.disconnect();
+        root.removeEventListener('meo-search-state-change', onSearch, true);
+        root.removeEventListener('meo-table-column-width-projected', onProjection, true);
+      };
+      (window as any).__dispatchProductionInput(editor, 'plain'.length, 'E');
+      content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      return { text: editor.getText(), applies: (window as any).__liveInputApplies.length };
+    });
+    await waitForFrames(page, 4);
+    const emptyImePendingHeld = await page.evaluate(() => ({
+      ...(window as any).__emptyImePendingFacts,
+      text: (window as any).__liveInputEditor.getText()
+    }));
+    if (
+      !emptyImePendingStart.text.startsWith('plainE line') ||
+      emptyImePendingHeld.searches !== 0 ||
+      emptyImePendingHeld.projections !== 0 ||
+      emptyImePendingHeld.derivedAdds !== 0
+    ) {
+      throw new Error(`Empty IME start lost the pending barrier: ${JSON.stringify({ emptyImePendingStart, emptyImePendingHeld })}`);
+    }
+    await page.evaluate(() => {
+      document.querySelector<HTMLElement>('#primary .cm-content')!.dispatchEvent(
+        new CompositionEvent('compositionend', { data: '', bubbles: true })
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    await waitForFrames(page, 5);
+    const emptyImePendingSettled = await page.evaluate(() => {
+      (window as any).__emptyImePendingCleanup();
+      return { ...(window as any).__emptyImePendingFacts };
+    });
+    if (emptyImePendingSettled.searches !== 1) {
+      throw new Error(`Empty IME completion did not resume latest derived work once: ${JSON.stringify(emptyImePendingSettled)}`);
+    }
+
+    await page.evaluate((text) => {
+      const editor = (window as any).__liveInputEditor;
+      editor.setText(text, true);
+      const root = document.querySelector<HTMLElement>('#primary .cm-editor')!;
+      const content = document.querySelector<HTMLElement>('#primary .cm-content')!;
+      (window as any).__emptyImeNoPendingSearches = 0;
+      const onSearch = () => { (window as any).__emptyImeNoPendingSearches += 1; };
+      root.addEventListener('meo-search-state-change', onSearch, true);
+      content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      content.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+      (window as any).__emptyImeNoPendingCleanup = () => (
+        root.removeEventListener('meo-search-state-change', onSearch, true)
+      );
+    }, coreOriginal);
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    await waitForFrames(page, 4);
+    const emptyImeNoPendingSearches = await page.evaluate(() => {
+      (window as any).__emptyImeNoPendingCleanup();
+      return (window as any).__emptyImeNoPendingSearches;
+    });
+    if (emptyImeNoPendingSearches !== 0) {
+      throw new Error(`Empty IME without pending input ran derived work: ${emptyImeNoPendingSearches}`);
+    }
+
     const beforeImeApplyCount = await page.evaluate(() => (window as any).__liveInputApplies.length);
     const session = await page.createCDPSession();
     await armFirstFrame(page, 'beforeinput');

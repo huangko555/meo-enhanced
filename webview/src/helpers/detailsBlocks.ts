@@ -1,9 +1,7 @@
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import {
-  currentSyntaxTree,
   extractDetailsBlocks,
-  resolvedSyntaxTree,
   type DetailsBlockInfo
 } from './markdownSyntax';
 import { getViewportController } from './viewportController';
@@ -13,7 +11,6 @@ import {
 } from '../editor/liveInputDerivedWork';
 
 const toggleDetailsBlockEffect = StateEffect.define<number>();
-const emptyDetailsOverrides = Object.freeze(new Map<number, boolean>());
 const detailsBlockLiveActiveField = StateField.define<boolean>({
   create: () => true,
   update: () => true
@@ -23,83 +20,96 @@ export interface DetailsBlockState extends DetailsBlockInfo {
   collapsed: boolean;
 }
 
-function mapDetailsOverrides(
-  overrides: ReadonlyMap<number, boolean>,
-  transaction: Transaction
-): Map<number, boolean> {
-  if (!overrides.size || !transaction.docChanged) return new Map(overrides);
-  return new Map(Array.from(overrides, ([anchor, collapsed]) => [
-    transaction.changes.mapPos(anchor, 1),
-    collapsed
-  ]));
+type DetailsBlockRecord = DetailsBlockState & {
+  override: boolean | null;
+};
+
+function mapDetailsBlock(block: DetailsBlockRecord, transaction: Transaction): DetailsBlockRecord {
+  const map = (position: number, assoc: -1 | 1 = 1) => transaction.changes.mapPos(position, assoc);
+  return {
+    ...block,
+    anchorFrom: map(block.anchorFrom),
+    anchorTo: map(block.anchorTo, -1),
+    summaryFrom: map(block.summaryFrom),
+    summaryTo: map(block.summaryTo, -1),
+    lineFrom: map(block.lineFrom),
+    lineTo: map(block.lineTo, -1),
+    sectionFrom: map(block.sectionFrom),
+    sectionTo: map(block.sectionTo, -1),
+    bodyFrom: map(block.bodyFrom),
+    bodyTo: map(block.bodyTo, -1),
+    closingFrom: map(block.closingFrom),
+    closingTo: map(block.closingTo, -1)
+  };
 }
 
-function normalizeDetailsOverrides(
+function rebuildDetailsBlocks(
   state: EditorState,
-  overrides: Map<number, boolean>
-): ReadonlyMap<number, boolean> {
-  const blocks = new Map(extractDetailsBlocks(state).map((block) => [block.anchorFrom, block] as const));
-  const entries = Array.from(overrides)
-    .filter(([anchor, collapsed]) => {
-      const block = blocks.get(anchor);
-      return block && collapsed !== block.defaultCollapsed;
-    })
-    .sort((a, b) => a[0] - b[0]);
-  return entries.length ? new Map(entries) : emptyDetailsOverrides;
+  previous: readonly DetailsBlockRecord[],
+  transaction: Transaction | null
+): DetailsBlockRecord[] {
+  const previousByAnchor = new Map(previous.map((block) => [
+    transaction ? transaction.changes.mapPos(block.anchorFrom, 1) : block.anchorFrom,
+    block
+  ]));
+  return extractDetailsBlocks(state).map((block) => {
+    const override = previousByAnchor.get(block.anchorFrom)?.override ?? null;
+    return {
+      ...block,
+      collapsed: override ?? block.defaultCollapsed,
+      override
+    };
+  });
 }
 
-function overridesEqual(a: ReadonlyMap<number, boolean>, b: ReadonlyMap<number, boolean>): boolean {
-  if (a === b) return true;
-  if (a.size !== b.size) return false;
-  const aEntries = a.entries();
-  const bEntries = b.entries();
-  while (true) {
-    const nextA = aEntries.next();
-    const nextB = bEntries.next();
-    if (nextA.done || nextB.done) return nextA.done === nextB.done;
-    if (nextA.value[0] !== nextB.value[0] || nextA.value[1] !== nextB.value[1]) return false;
+function applyDetailsToggleEffects(
+  blocks: readonly DetailsBlockRecord[],
+  transaction: Transaction
+): DetailsBlockRecord[] {
+  const toggles = transaction.effects
+    .filter((effect) => effect.is(toggleDetailsBlockEffect))
+    .map((effect) => effect.value);
+  if (toggles.length === 0) return blocks as DetailsBlockRecord[];
+  let next = blocks as DetailsBlockRecord[];
+  for (const anchor of toggles) {
+    next = next.map((block) => block.anchorFrom === anchor
+      ? {
+          ...block,
+          collapsed: !block.collapsed,
+          override: !block.collapsed === block.defaultCollapsed ? null : !block.collapsed
+        }
+      : block);
   }
+  return next;
 }
 
-const detailsBlockStateField = StateField.define<ReadonlyMap<number, boolean>>({
-  create: () => emptyDetailsOverrides,
-  update(overrides, transaction) {
+const detailsBlockStateField = StateField.define<DetailsBlockRecord[]>({
+  create: (state) => rebuildDetailsBlocks(state, [], null),
+  update(previous, transaction) {
     const toggleEffects = transaction.effects.filter((effect) => effect.is(toggleDetailsBlockEffect));
     if (shouldDeferLiveInputDerivedWork(transaction)) {
-      const next = transaction.docChanged ? mapDetailsOverrides(overrides, transaction) : new Map(overrides);
-      if (toggleEffects.length === 0) return next;
-      const blocks = new Map(
-        extractDetailsBlocks(transaction.state, currentSyntaxTree(transaction.state))
-          .map((block) => [block.anchorFrom, block] as const)
-      );
-      for (const effect of toggleEffects) {
-        const block = blocks.get(effect.value);
-        if (!block) continue;
-        const collapsed = !(next.get(block.anchorFrom) ?? block.defaultCollapsed);
-        if (collapsed === block.defaultCollapsed) next.delete(block.anchorFrom);
-        else next.set(block.anchorFrom, collapsed);
-      }
-      return overridesEqual(next, overrides) ? overrides : next;
+      const mapped = transaction.docChanged
+        ? previous.map((block) => mapDetailsBlock(block, transaction))
+        : previous;
+      return applyDetailsToggleEffects(mapped, transaction);
     }
     if (!transaction.docChanged
       && !isLiveInputDerivedWorkRefresh(transaction)
-      && toggleEffects.length === 0) return overrides;
+      && !transaction.reconfigured
+      && toggleEffects.length === 0) return previous;
 
-    const next = mapDetailsOverrides(overrides, transaction);
     if (!transaction.state.field(detailsBlockLiveActiveField, false) && toggleEffects.length === 0) {
-      return overridesEqual(next, overrides) ? overrides : next;
+      return transaction.docChanged
+        ? previous.map((block) => mapDetailsBlock(block, transaction))
+        : previous;
     }
-    const blocks = new Map(extractDetailsBlocks(transaction.state).map((block) => [block.anchorFrom, block] as const));
-    for (const effect of toggleEffects) {
-      const block = blocks.get(effect.value);
-      if (!block) continue;
-      const collapsed = !(next.get(block.anchorFrom) ?? block.defaultCollapsed);
-      if (collapsed === block.defaultCollapsed) next.delete(block.anchorFrom);
-      else next.set(block.anchorFrom, collapsed);
-    }
-
-    const normalized = normalizeDetailsOverrides(transaction.state, next);
-    return overridesEqual(normalized, overrides) ? overrides : normalized;
+    const needsRebuild = transaction.docChanged
+      || isLiveInputDerivedWorkRefresh(transaction)
+      || transaction.reconfigured;
+    const blocks = needsRebuild
+      ? rebuildDetailsBlocks(transaction.state, previous, transaction)
+      : previous;
+    return applyDetailsToggleEffects(blocks, transaction);
   }
 });
 
@@ -111,21 +121,16 @@ export function detailsBlockStateExtensions(): readonly any[] {
 
 export function getDetailsBlocks(
   state: EditorState,
-  tree = resolvedSyntaxTree(state)
+  _tree?: unknown
 ): DetailsBlockState[] {
-  const overrides = state.field(detailsBlockStateField, false) ?? emptyDetailsOverrides;
-  return extractDetailsBlocks(state, tree).map((block) => ({
-    ...block,
-    collapsed: overrides.get(block.anchorFrom) ?? block.defaultCollapsed
-  }));
+  return state.field(detailsBlockStateField, false) ?? [];
 }
 
 export function toggleDetailsBlock(view: EditorView, anchor: number): boolean {
-  const block = extractDetailsBlocks(view.state).find((candidate) => candidate.anchorFrom === anchor);
+  const block = getDetailsBlocks(view.state).find((candidate) => candidate.anchorFrom === anchor);
   if (!block) return false;
 
-  const collapsed = getDetailsBlocks(view.state)
-    .find((candidate) => candidate.anchorFrom === anchor)?.collapsed ?? block.defaultCollapsed;
+  const collapsed = block.collapsed;
   const nextCollapsed = !collapsed;
   const selectionTouchesBody = view.state.selection.ranges.some((range) => (
     range.empty
@@ -160,7 +165,7 @@ const detailsBlockAutoExpandSelectionExtension = EditorView.updateListener.of((u
     transaction.effects.some((effect) => effect.is(toggleDetailsBlockEffect))
   ))) return;
 
-  const blocks = getDetailsBlocks(update.state, currentSyntaxTree(update.state)).filter((candidate) => candidate.collapsed && (
+  const blocks = getDetailsBlocks(update.state).filter((candidate) => candidate.collapsed && (
     update.state.selection.ranges.some((range) => (
       range.empty
         ? range.from > candidate.bodyFrom && range.from < candidate.bodyTo

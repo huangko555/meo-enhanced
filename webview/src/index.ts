@@ -21,7 +21,6 @@ import { createMermaidDiagramPresentationApplication } from './application/merma
 import { createMermaidDiagramPresentationRuntime } from './adapters/mermaidDiagramPresentationRuntime';
 import { createMermaidDiagramPresentationEffectAdapter } from './editor/mermaidDiagramPresentationAdapter';
 import { createMermaidDiagramPresentationFactory } from './editor/mermaidDiagramPresentation';
-import { createLiveInputDerivedWorkScheduler } from './editor/liveInputDerivedWork';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
@@ -1394,29 +1393,24 @@ const setEditorTextSafely = async (
 
 const viewportPresentationFailed = Object.freeze({});
 let pendingDocumentDerivedText = '';
-const documentDerivedUiScheduler = createLiveInputDerivedWorkScheduler({
-  requestFrame: (callback) => window.requestAnimationFrame(() => callback()),
-  cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
-  apply() {
-    const operations: ReadonlyArray<readonly [string, () => void]> = [
-      ['outline', () => { if (outlineController.isVisible()) outlineController.refresh(); }],
-      ['wikiLinks', () => scheduleWikiLinkStatusRefresh(pendingDocumentDerivedText)],
-      ['localLinks', () => scheduleLocalLinkStatusRefresh(pendingDocumentDerivedText)],
-      ['findSummary', () => findPanelController.updateFindStatusSummary()]
-    ];
-    for (const [name, run] of operations) {
-      try {
-        run();
-      } catch (error) {
-        logWebviewRenderError(`documentDerived.${name}`, error);
-      }
+const runDocumentDerivedUiRefresh = (): void => {
+  const operations: ReadonlyArray<readonly [string, () => void]> = [
+    ['outline', () => { if (outlineController.isVisible()) outlineController.refresh(); }],
+    ['wikiLinks', () => scheduleWikiLinkStatusRefresh(pendingDocumentDerivedText)],
+    ['localLinks', () => scheduleLocalLinkStatusRefresh(pendingDocumentDerivedText)],
+    ['findSummary', () => findPanelController.updateFindStatusSummary()]
+  ];
+  for (const [name, run] of operations) {
+    try {
+      run();
+    } catch (error) {
+      logWebviewRenderError(`documentDerived.${name}`, error);
     }
-  },
-  reportError: (error) => logWebviewRenderError('documentDerived.scheduler', error)
-});
+  }
+};
 const scheduleDocumentDerivedUiRefresh = (text: string): void => {
   pendingDocumentDerivedText = text;
-  documentDerivedUiScheduler.documentChanged();
+  editor?.requestDerivedWork(runDocumentDerivedUiRefresh);
 };
 
 const presentDocumentText = async (
@@ -1934,7 +1928,6 @@ window.addEventListener('beforeunload', () => {
   clearReadyRetryTimers();
   cancelPendingWikiStatusRefresh();
   cancelPendingLocalLinkStatusRefresh();
-  documentDerivedUiScheduler.dispose();
   documentSessionAdapter.dispose();
   documentSaveFlushAdapter.dispose();
   previewAdapter.dispose();

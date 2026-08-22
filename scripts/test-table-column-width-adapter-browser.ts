@@ -104,6 +104,66 @@ async function main(): Promise<void> {
     assert.deepEqual(await widths('second'), initialSecond);
 
     await page.evaluate(() => {
+      const runtime = (window as any).__widthCandidate;
+      const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+      const oldTable = root.querySelector<HTMLTableElement>('[data-table-column-width="first"]')!;
+      const facts = { queries: 0, writes: 0, currentEvents: 0, detachedEvents: 0 };
+      const originalQuery = Element.prototype.querySelectorAll;
+      Element.prototype.querySelectorAll = function(selectors: string) {
+        if ((this === root || root.contains(this)) && /data-table-column-width|thead th|colgroup/.test(selectors)) {
+          facts.queries += 1;
+        }
+        return originalQuery.call(this, selectors);
+      } as typeof Element.prototype.querySelectorAll;
+      const writes = new MutationObserver((records) => {
+        facts.writes += records.filter((record) => record.type === 'attributes').length;
+      });
+      oldTable.addEventListener('meo-table-column-width-projected', () => { facts.detachedEvents += 1; });
+      runtime.resetProjectCalls();
+      (window as any).__pendingObserverFirstFrame = new Promise((resolve) => {
+        requestAnimationFrame(() => setTimeout(() => resolve({
+          ...facts,
+          projects: runtime.projectCalls()
+        }), 0));
+      });
+      runtime.dispatchInput(runtime.view.state.doc.length, '!');
+      oldTable.remove();
+      const replacement = (window as any).__makeWidthTable('first', 0, 3, 3) as HTMLTableElement;
+      replacement.addEventListener('meo-table-column-width-projected', () => { facts.currentEvents += 1; });
+      root.style.width = '340px';
+      writes.observe(root, { attributes: true, subtree: true, attributeFilter: ['style'] });
+      (window as any).__pendingObserverFacts = facts;
+      (window as any).__pendingObserverFinish = () => {
+        writes.disconnect();
+        Element.prototype.querySelectorAll = originalQuery;
+      };
+    });
+    const pendingObserverFirstFrame = await page.evaluate(() => (
+      (window as any).__pendingObserverFirstFrame
+    ));
+    assert.deepEqual(
+      pendingObserverFirstFrame,
+      { queries: 0, writes: 0, currentEvents: 0, detachedEvents: 0, projects: 0 },
+      'pending Mutation/Resize callbacks must not query, project, write, or emit for current/detached tables'
+    );
+    await waitForFrames(page, 5);
+    const pendingObserverSettled = await page.evaluate(() => {
+      (window as any).__pendingObserverFinish();
+      const result = {
+        ...(window as any).__pendingObserverFacts,
+        projects: (window as any).__widthCandidate.projectCalls()
+      };
+      document.querySelector<HTMLElement>('.table-column-width-candidate-root')!.style.width = '360px';
+      return result;
+    });
+    assert.ok(pendingObserverSettled.queries > 0, 'current replacement must be queried after the barrier');
+    assert.ok(pendingObserverSettled.projects > 0, 'current replacement must be projected after the barrier');
+    assert.ok(pendingObserverSettled.writes > 0, 'current replacement must be written after the barrier');
+    assert.equal(pendingObserverSettled.currentEvents, 1, 'current replacement must emit one latest projection event');
+    assert.equal(pendingObserverSettled.detachedEvents, 0, 'detached binding must remain a bounded no-op');
+    await waitForFrames(page, 3);
+
+    await page.evaluate(() => {
       const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
       const first = root.querySelector('[data-table-column-width="first"]')!;
       first.remove();
