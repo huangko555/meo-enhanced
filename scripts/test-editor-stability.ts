@@ -27,13 +27,85 @@ async function assertExternalViewportStability(page: Page): Promise<void> {
 
   const after = await page.evaluate(async () => {
     const editor = (window as any).__editor;
-    editor.setText(['后台新增 1', '后台新增 2', '后台新增 3', editor.getText()].join('\n'));
-    const topTrace: Array<number | null> = [];
-    for (let frame = 0; frame <= 8; frame += 1) {
+    const originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    const originalCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+    const originalQueueMicrotask = window.queueMicrotask.bind(window);
+    const pendingCallbacks = new Map<number, FrameRequestCallback>();
+    let nextCallbackId = 1;
+    let nextFrame: number[] = [];
+    let causalDepth = 0;
+    let pendingMicrotasks = 0;
+    let resolveMicrotasks: (() => void) | null = null;
+
+    const runCausal = (callback: () => void) => {
+      causalDepth += 1;
+      try {
+        callback();
+      } finally {
+        causalDepth -= 1;
+      }
+    };
+    const waitForMicrotasks = () => pendingMicrotasks === 0
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => { resolveMicrotasks = resolve; });
+    const readTop = () => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
-      topTrace.push(line?.getBoundingClientRect().top ?? null);
-      if (frame < 8) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return line?.getBoundingClientRect().top ?? null;
+    };
+
+    window.requestAnimationFrame = (callback: FrameRequestCallback) => {
+      if (causalDepth === 0) return originalRequestAnimationFrame(callback);
+      const callbackId = nextCallbackId++;
+      pendingCallbacks.set(callbackId, callback);
+      nextFrame.push(callbackId);
+      return callbackId;
+    };
+    window.cancelAnimationFrame = (callbackId: number) => {
+      if (pendingCallbacks.delete(callbackId)) return;
+      originalCancelAnimationFrame(callbackId);
+    };
+    window.queueMicrotask = (callback: VoidFunction) => {
+      if (causalDepth === 0) {
+        originalQueueMicrotask(callback);
+        return;
+      }
+      pendingMicrotasks += 1;
+      originalQueueMicrotask(() => {
+        try {
+          runCausal(callback);
+        } finally {
+          pendingMicrotasks -= 1;
+          if (pendingMicrotasks === 0) {
+            resolveMicrotasks?.();
+            resolveMicrotasks = null;
+          }
+        }
+      });
+    };
+
+    const topTrace: Array<number | null> = [];
+    try {
+      runCausal(() => {
+        editor.setText(['后台新增 1', '后台新增 2', '后台新增 3', editor.getText()].join('\n'));
+      });
+      await waitForMicrotasks();
+      topTrace.push(readTop());
+      while (nextFrame.some((callbackId) => pendingCallbacks.has(callbackId))) {
+        const currentFrame = nextFrame;
+        nextFrame = [];
+        for (const callbackId of currentFrame) {
+          const callback = pendingCallbacks.get(callbackId);
+          pendingCallbacks.delete(callbackId);
+          if (callback) runCausal(() => callback(performance.now()));
+        }
+        await waitForMicrotasks();
+        topTrace.push(readTop());
+      }
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      window.queueMicrotask = originalQueueMicrotask;
     }
     return {
       topTrace,

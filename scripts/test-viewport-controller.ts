@@ -173,19 +173,145 @@ const documentScrollDOM = {
   getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
 };
 
-const traceFrames = async <T>(
-  animationFrames: FrameRequestCallback[],
-  sample: () => T
-): Promise<T[]> => {
-  const trace = [sample()];
-  await Promise.resolve();
-  while (animationFrames.length > 0) {
-    animationFrames.shift()?.(0);
-    await Promise.resolve();
-    trace.push(sample());
+const runCausalFrameTrace = async <T>(root: () => void, sample: () => T): Promise<T[]> => {
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  const originalQueueMicrotask = globalThis.queueMicrotask;
+  const pendingCallbacks = new Map<number, FrameRequestCallback>();
+  let nextCallbackId = 1;
+  let nextFrame: number[] = [];
+  let causalDepth = 0;
+  let pendingMicrotasks = 0;
+  let resolveMicrotasks: (() => void) | null = null;
+
+  const runCausal = (callback: () => void) => {
+    causalDepth += 1;
+    try {
+      callback();
+    } finally {
+      causalDepth -= 1;
+    }
+  };
+  const waitForMicrotasks = () => pendingMicrotasks === 0
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => { resolveMicrotasks = resolve; });
+
+  globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+    if (causalDepth === 0) return originalRequestAnimationFrame(callback);
+    const callbackId = nextCallbackId++;
+    pendingCallbacks.set(callbackId, callback);
+    nextFrame.push(callbackId);
+    return callbackId;
+  };
+  globalThis.cancelAnimationFrame = (callbackId: number) => {
+    if (pendingCallbacks.delete(callbackId)) return;
+    originalCancelAnimationFrame(callbackId);
+  };
+  globalThis.queueMicrotask = (callback: VoidFunction) => {
+    if (causalDepth === 0) {
+      originalQueueMicrotask(callback);
+      return;
+    }
+    pendingMicrotasks += 1;
+    originalQueueMicrotask(() => {
+      try {
+        runCausal(callback);
+      } finally {
+        pendingMicrotasks -= 1;
+        if (pendingMicrotasks === 0) {
+          resolveMicrotasks?.();
+          resolveMicrotasks = null;
+        }
+      }
+    });
+  };
+
+  try {
+    runCausal(root);
+    await waitForMicrotasks();
+    const trace = [sample()];
+    while (nextFrame.some((callbackId) => pendingCallbacks.has(callbackId))) {
+      const currentFrame = nextFrame;
+      nextFrame = [];
+      for (const callbackId of currentFrame) {
+        const callback = pendingCallbacks.get(callbackId);
+        pendingCallbacks.delete(callbackId);
+        if (callback) runCausal(() => callback(performance.now()));
+      }
+      await waitForMicrotasks();
+      trace.push(sample());
+    }
+    return trace;
+  } finally {
+    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+    globalThis.queueMicrotask = originalQueueMicrotask;
   }
-  return trace;
 };
+
+let schedulerValue = 0;
+const zeroCallbackTrace = await runCausalFrameTrace(() => { schedulerValue = 1; }, () => schedulerValue);
+if (JSON.stringify(zeroCallbackTrace) !== '[1]') {
+  throw new Error(`Zero-callback scheduler trace did not complete: ${JSON.stringify(zeroCallbackTrace)}`);
+}
+const oneCallbackTrace = await runCausalFrameTrace(() => {
+  schedulerValue = 1;
+  requestAnimationFrame(() => { schedulerValue = 2; });
+}, () => schedulerValue);
+if (JSON.stringify(oneCallbackTrace) !== '[1,2]') {
+  throw new Error(`One-callback scheduler trace did not drain: ${JSON.stringify(oneCallbackTrace)}`);
+}
+const continuationTrace = await runCausalFrameTrace(() => {
+  schedulerValue = 0;
+  requestAnimationFrame(() => {
+    schedulerValue = 1;
+    queueMicrotask(() => {
+      requestAnimationFrame(() => { schedulerValue = 2; });
+      requestAnimationFrame(() => { schedulerValue = 3; });
+    });
+  });
+}, () => schedulerValue);
+if (JSON.stringify(continuationTrace) !== '[0,1,3]') {
+  throw new Error(`Callback continuation scheduler trace was incomplete: ${JSON.stringify(continuationTrace)}`);
+}
+const longSettlementTrace = await runCausalFrameTrace(() => {
+  schedulerValue = 1888;
+  const scheduleFrame = (frame: number) => requestAnimationFrame(() => {
+    if (frame === 9) schedulerValue = 1885;
+    if (frame === 10) schedulerValue = 1888;
+    if (frame < 10) scheduleFrame(frame + 1);
+  });
+  scheduleFrame(1);
+}, () => schedulerValue);
+const longSettlementUnstableFrame = longSettlementTrace.findIndex((value) => value !== 1888);
+if (
+  longSettlementUnstableFrame !== 9 ||
+  longSettlementTrace.length !== 11 ||
+  longSettlementTrace.at(-1) !== 1888
+) {
+  throw new Error(
+    `Long settlement trace did not expose frame 9 before final drain: ${JSON.stringify(longSettlementTrace)}`
+  );
+}
+const originalUnrelatedRequestAnimationFrame = globalThis.requestAnimationFrame;
+let unrelatedFrameRequests = 0;
+globalThis.requestAnimationFrame = () => {
+  unrelatedFrameRequests += 1;
+  return 10_000 + unrelatedFrameRequests;
+};
+const cancelledTrace = await runCausalFrameTrace(() => {
+  schedulerValue = 7;
+  const cancelled = requestAnimationFrame(() => { schedulerValue = -1; });
+  cancelAnimationFrame(cancelled);
+  void Promise.resolve().then(() => requestAnimationFrame(() => { schedulerValue = -2; }));
+}, () => schedulerValue);
+globalThis.requestAnimationFrame = originalUnrelatedRequestAnimationFrame;
+if (JSON.stringify(cancelledTrace) !== '[7]' || unrelatedFrameRequests !== 1) {
+  throw new Error(
+    `Cancelled or unrelated RAF changed scheduler completion: ${JSON.stringify({ cancelledTrace, unrelatedFrameRequests })}`
+  );
+}
+
 const documentView = {
   dom: {},
   scrollDOM: documentScrollDOM,
@@ -648,10 +774,8 @@ navigationAnchorController.revealPosition(760, { y: 'nearest' }, exactNavigation
 const navigationAnchorHandle = navigationAnchorController.captureAnchorToken('editor');
 if (!navigationAnchorHandle) throw new Error('Visible navigation target did not produce an Editor anchor');
 navigationAnchorTop = 1888.390625;
-navigationAnchorController.restoreAnchorToken(navigationAnchorHandle, 'editor');
-await Promise.resolve();
-const navigationAnchorTrace = await traceFrames(
-  wheelFrames,
+const navigationAnchorTrace = await runCausalFrameTrace(
+  () => navigationAnchorController.restoreAnchorToken(navigationAnchorHandle, 'editor'),
   () => navigationAnchorScrollDOM.scrollTop
 );
 const unstableNavigationFrame = navigationAnchorTrace.findIndex((scrollTop) => scrollTop !== 1888);
