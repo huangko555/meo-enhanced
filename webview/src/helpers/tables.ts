@@ -2504,10 +2504,11 @@ class HtmlTableWidget extends WidgetType {
 
     commitPendingTableEdits(view);
     this.exitTableInteraction(container);
-    view.dispatch({
-      selection: { anchor: targetPos },
-      effects: EditorView.scrollIntoView(targetPos, { y: 'nearest' })
-    });
+    const viewport = getViewportController(view);
+    const isRevealCurrent = viewport?.beginNavigationReveal();
+    view.dispatch({ selection: { anchor: targetPos } });
+    if (viewport && isRevealCurrent) viewport.revealPosition(targetPos, { y: 'nearest' }, isRevealCurrent);
+    else view.dispatch({ effects: EditorView.scrollIntoView(targetPos, { y: 'nearest' }) });
     view.focus();
     return true;
   }
@@ -3319,7 +3320,10 @@ class HtmlTableWidget extends WidgetType {
   }
 
   scheduleFocusCellAfterCommit(view: EditorView, tableStartLine: number, focusTarget: PendingCellFocus) {
+    const viewport = getViewportController(view);
+    const isRevealCurrent = viewport?.beginNavigationReveal() ?? (() => true);
     const focusCell = () => {
+      if (!isRevealCurrent()) return false;
       const input = view.dom.querySelector(
         `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] textarea[data-table-row="${focusTarget.row}"][data-table-col="${focusTarget.col}"]`
       );
@@ -3327,7 +3331,11 @@ class HtmlTableWidget extends WidgetType {
       input.focus({ preventScroll: true });
       const caret = Math.min(Math.max(focusTarget.caret ?? 0, 0), input.value.length);
       input.setSelectionRange(caret, caret);
-      input.closest(tableCellSelector)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      const cell = input.closest<HTMLElement>(tableCellSelector);
+      if (cell) {
+        if (viewport) viewport.revealElement(cell);
+        else cell.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      }
       return true;
     };
 

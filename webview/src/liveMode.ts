@@ -58,6 +58,7 @@ import { getLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRen
 import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls';
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
 import { createOpenLinkButton } from './helpers/linkOpenButton';
+import { getViewportController } from './helpers/viewportController';
 import { collectInlineFootnoteMarkerRanges } from './helpers/inlineFootnotes';
 import {
   collectLatexMathRanges,
@@ -950,10 +951,11 @@ class FootnoteReferenceWidget extends WidgetType {
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      view.dispatch({
-        selection: { anchor: this.definitionFrom },
-        effects: EditorView.scrollIntoView(this.definitionFrom, { y: 'center' })
-      });
+      const viewport = getViewportController(view);
+      const isRevealCurrent = viewport?.beginNavigationReveal();
+      view.dispatch({ selection: { anchor: this.definitionFrom } });
+      if (viewport && isRevealCurrent) viewport.revealPosition(this.definitionFrom, { y: 'center' }, isRevealCurrent);
+      else view.dispatch({ effects: EditorView.scrollIntoView(this.definitionFrom, { y: 'center' }) });
       view.focus();
     });
 
@@ -999,10 +1001,11 @@ class FootnoteBacklinkWidget extends WidgetType {
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      view.dispatch({
-        selection: { anchor: this.referenceFrom },
-        effects: EditorView.scrollIntoView(this.referenceFrom, { y: 'center' })
-      });
+      const viewport = getViewportController(view);
+      const isRevealCurrent = viewport?.beginNavigationReveal();
+      view.dispatch({ selection: { anchor: this.referenceFrom } });
+      if (viewport && isRevealCurrent) viewport.revealPosition(this.referenceFrom, { y: 'center' }, isRevealCurrent);
+      else view.dispatch({ effects: EditorView.scrollIntoView(this.referenceFrom, { y: 'center' }) });
       view.focus();
     });
 

@@ -319,8 +319,6 @@ export function createEditor({
   let onHistoryWheel: (() => void) | null = null;
   let onHistoryBlur: ((event: FocusEvent) => void) | null = null;
   let blockActionToolbarReconcileFrame: number | null = null;
-  let pendingLiveSearchRevealFrame: number | null = null;
-  let pendingLiveSearchRevealGeneration = 0;
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
   let pendingLiveSearchDecorationRefreshGeneration = 0;
   let gitDiffContentHover: ReturnType<typeof createGitDiffContentHoverController> | null = null;
@@ -444,11 +442,9 @@ export function createEditor({
         editorView.focus();
         const targetPosition = findDocumentFragmentPosition(editorView.state, href);
         if (targetPosition === null) return true;
-        viewportController?.markInteraction();
-        editorView.dispatch({
-          selection: { anchor: targetPosition },
-          effects: EditorView.scrollIntoView(targetPosition, { y: 'start' })
-        });
+        const isRevealCurrent = viewportController.beginNavigationReveal();
+        editorView.dispatch({ selection: { anchor: targetPosition } });
+        viewportController.revealPosition(targetPosition, { y: 'start' }, isRevealCurrent);
       }
       return true;
     }
@@ -1300,56 +1296,6 @@ export function createEditor({
     return null;
   };
 
-  const scheduleLiveSearchMatchReveal = (position: number) => {
-    pendingLiveSearchRevealGeneration += 1;
-    const revealGeneration = pendingLiveSearchRevealGeneration;
-    if (pendingLiveSearchRevealFrame !== null) {
-      window.cancelAnimationFrame(pendingLiveSearchRevealFrame);
-      pendingLiveSearchRevealFrame = null;
-    }
-    if (currentMode !== 'live') {
-      return;
-    }
-
-    pendingLiveSearchRevealFrame = window.requestAnimationFrame(() => {
-      pendingLiveSearchRevealFrame = null;
-      if (!view || currentMode !== 'live' || revealGeneration !== pendingLiveSearchRevealGeneration) {
-        return;
-      }
-
-      view.requestMeasure({
-        read(editorView) {
-          if (currentMode !== 'live' || revealGeneration !== pendingLiveSearchRevealGeneration) {
-            return null;
-          }
-          const max = editorView.state.doc.length;
-          const targetPos = Math.max(0, Math.min(position, max));
-          const coords = editorView.coordsAtPos(targetPos);
-          const scrollerRect = editorView.scrollDOM.getBoundingClientRect();
-          if (!coords || scrollerRect.height <= 0) {
-            return null;
-          }
-          if (coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom) {
-            return null;
-          }
-
-          const lineBlock = editorView.lineBlockAt(targetPos);
-          const targetTop = Math.max(
-            0,
-            lineBlock.top - Math.max(0, (editorView.scrollDOM.clientHeight - lineBlock.height) / 2)
-          );
-          return { targetTop };
-        },
-        write(measure, editorView) {
-          if (!measure || currentMode !== 'live' || revealGeneration !== pendingLiveSearchRevealGeneration) {
-            return;
-          }
-          viewportController.navigateBy({ top: measure.targetTop - editorView.scrollDOM.scrollTop });
-        }
-      });
-    });
-  };
-
   const scheduleLiveSearchDecorationRefresh = (targetPosition: number | null = null) => {
     pendingLiveSearchDecorationRefreshGeneration += 1;
     const refreshGeneration = pendingLiveSearchDecorationRefreshGeneration;
@@ -1377,11 +1323,10 @@ export function createEditor({
     const htmlBlock = currentMode === 'live'
       ? collectRenderableHtmlBlocks(view.state).find((block) => from < block.to && to > block.from)
       : null;
-    viewportController.markInteraction();
+    const isRevealCurrent = viewportController.beginNavigationReveal();
     view.dispatch({
       selection: { anchor: from, head: to },
       effects: [
-        EditorView.scrollIntoView(from, { y: 'center' }),
         setLongCodeBlockSearchRevealEffect.of({ from, to }),
         setMermaidSearchRevealEffect.of({ from, to }),
         setLatexMathSearchRevealEffect.of({ from, to }),
@@ -1390,7 +1335,7 @@ export function createEditor({
       ]
     });
     scheduleLiveSearchDecorationRefresh(to);
-    scheduleLiveSearchMatchReveal(from);
+    viewportController.revealPosition(from, { y: 'center', schedule: 'next-frame' }, isRevealCurrent);
     if (focusEditor) {
       view.focus();
     }
@@ -1400,30 +1345,19 @@ export function createEditor({
     const max = view.state.doc.length;
     const nextAnchor = Math.max(0, Math.min(anchor, max));
     const nextHead = Math.max(0, Math.min(head, max));
-    const scrollOptions = align === 'upper'
-      ? { y: 'start' as const, yMargin: Math.round(view.scrollDOM.clientHeight * 0.3) }
-      : { y: align === 'top' ? 'start' as const : align === 'nearest' ? 'nearest' as const : 'center' as const };
-    const scrollEffects = align === 'none' ? [] : [EditorView.scrollIntoView(nextAnchor, scrollOptions)];
     const selection = view.state.selection.main;
-    if (scrollEffects.length > 0) viewportController.markInteraction();
+    const isRevealCurrent = viewportController.beginNavigationReveal();
 
-    if (selection.anchor === nextAnchor && selection.head === nextHead) {
-      view.dispatch({
-        effects: scrollEffects
-      });
-      if (focusEditor) {
-        view.focus();
-      }
-      return;
+    if (selection.anchor !== nextAnchor || selection.head !== nextHead) {
+      view.dispatch({ selection: { anchor: nextAnchor, head: nextHead } });
     }
-
-    view.dispatch({
-      selection: { anchor: nextAnchor, head: nextHead },
-      effects: scrollEffects
-    });
     if (focusEditor) {
       view.focus();
     }
+    if (align === 'none') return;
+    viewportController.revealPosition(nextAnchor, align === 'upper'
+      ? { y: 'start', yMargin: Math.round(view.scrollDOM.clientHeight * 0.3) }
+      : { y: align === 'top' ? 'start' : align === 'nearest' ? 'nearest' : 'center' }, isRevealCurrent);
   };
 
   const isPositionVisible = (position: number) => {
@@ -1487,16 +1421,13 @@ export function createEditor({
         : setLatexMathBlockModeEffect.of({ anchor: openingLine.from, mode: desiredMode })
       : null;
 
-    viewportController.markInteraction();
     view.dispatch({
       selection: { anchor: targetPosition },
-      effects: [
-        ...(modeEffect ? [modeEffect] : []),
-        EditorView.scrollIntoView(openingLine.from, {
-          y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
-        })
-      ]
+      effects: modeEffect ? [modeEffect] : []
     });
+    viewportController.revealPosition(openingLine.from, {
+      y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
+    }, isCurrent);
     // Mode effects dispatched by this replay synchronously invalidate the
     // previous hint. Record the accepted presentation only after dispatch so
     // a later replay can reuse it, while a user-initiated mode effect wins.
@@ -1530,16 +1461,14 @@ export function createEditor({
         candidate.startLine === block.startLine && candidate.endLine === block.endLine
       ));
       if (!htmlBlock) return false;
-      viewportController.markInteraction();
+      const isRevealCurrent = viewportController.beginNavigationReveal();
       view.dispatch({
         selection: { anchor: targetLine.from },
-        effects: [
-          setHtmlEditingRangeEffect.of({ from: htmlBlock.from, to: htmlBlock.to }),
-          EditorView.scrollIntoView(targetLine.from, {
-            y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
-          })
-        ]
+        effects: setHtmlEditingRangeEffect.of({ from: htmlBlock.from, to: htmlBlock.to })
       });
+      viewportController.revealPosition(targetLine.from, {
+        y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
+      }, isRevealCurrent);
       view.focus();
       return true;
     }
@@ -1549,26 +1478,24 @@ export function createEditor({
       ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' })
       : setLatexMathBlockModeEffect.of({ anchor: openingLine.from, mode: 'source' });
 
-    viewportController.markInteraction();
+    const isRevealCurrent = viewportController.beginNavigationReveal();
     view.dispatch({
       selection: { anchor: targetLine.from },
-      effects: [
-        modeEffect,
-        EditorView.scrollIntoView(openingLine.from, {
-          y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
-        })
-      ]
+      effects: modeEffect
     });
+    viewportController.revealPosition(openingLine.from, {
+      y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
+    }, isRevealCurrent);
     view.requestMeasure({
       read() {
         return null;
       },
       write() {
         const focusSource = () => block.kind === 'mermaid'
-          ? focusMermaidEditingOffset(view, openingLine.from, offset)
-          : focusLatexMathEditingOffset(view, openingLine.from, offset);
+          ? focusMermaidEditingOffset(view, openingLine.from, offset, isRevealCurrent)
+          : focusLatexMathEditingOffset(view, openingLine.from, offset, isRevealCurrent);
         requestAnimationFrame(() => {
-          if (!focusSource()) {
+          if (isRevealCurrent() && !focusSource()) {
             requestAnimationFrame(focusSource);
           }
         });
@@ -1593,17 +1520,16 @@ export function createEditor({
 
     const targetLine = view.state.doc.line(lineNumber);
     const rowLineNumber = lineNumber === block.delimiterLine ? block.startLine : lineNumber;
-    viewportController.markInteraction();
-    view.dispatch({
-      selection: { anchor: targetLine.from },
-      effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' })
-    });
+    const isRevealCurrent = viewportController.beginNavigationReveal();
+    view.dispatch({ selection: { anchor: targetLine.from } });
+    viewportController.revealPosition(targetLine.from, { y: 'center' }, isRevealCurrent);
     view.requestMeasure({
       read() {
         return null;
       },
       write() {
         const focusRow = () => {
+          if (!isRevealCurrent()) return false;
           const shell = view.dom.querySelector(
             `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${block.startLine}"]`
           ) as HTMLElement | null;
@@ -2619,11 +2545,6 @@ export function createEditor({
       if (capturedPointerId !== null) {
         releasePointerCaptureIfHeld(capturedPointerId);
         capturedPointerId = null;
-      }
-      pendingLiveSearchRevealGeneration += 1;
-      if (pendingLiveSearchRevealFrame !== null) {
-        window.cancelAnimationFrame(pendingLiveSearchRevealFrame);
-        pendingLiveSearchRevealFrame = null;
       }
       setEditableLinkHoverCursor(view, false);
       editorHistoryRuntime?.dispose();

@@ -227,12 +227,14 @@ class MermaidToolbarWidget extends WidgetType {
       event.stopPropagation();
       const currentMode = toolbar.dataset.meoMermaidMode as MermaidBlockMode;
       const nextMode = nextMermaidMode(currentMode);
+      const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
         this.anchor,
         setMermaidBlockModeEffect.of({ anchor: this.anchor, mode: nextMode })
       );
       requestAnimationFrame(() => {
+        if (!isRevealCurrent()) return;
         if (nextMode === 'preview') {
           focusOuterWithoutMovingViewport(view);
           return;
@@ -246,12 +248,14 @@ class MermaidToolbarWidget extends WidgetType {
     modeButton.addEventListener('click', changeMode);
 
     const selectAllButton = createSelectAllCodeButton(() => {
+      const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
         this.anchor,
         setMermaidBlockModeEffect.of({ anchor: this.anchor, mode: 'source' })
       );
       requestAnimationFrame(() => {
+        if (!isRevealCurrent()) return;
         const editingBlock = view.dom.querySelector<HTMLElement>(
           `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${this.anchor}"]`
         );

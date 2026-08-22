@@ -220,12 +220,14 @@ class LatexMathToolbarWidget extends WidgetType {
       event.stopPropagation();
       const currentMode = toolbar.dataset.meoLatexMathMode as LatexMathBlockMode;
       const nextMode = nextLatexMathMode(currentMode);
+      const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
         this.anchor,
         setLatexMathBlockModeEffect.of({ anchor: this.anchor, mode: nextMode })
       );
       requestAnimationFrame(() => {
+        if (!isRevealCurrent()) return;
         if (nextMode === 'preview') {
           focusOuterWithoutMovingViewport(view);
           return;
@@ -238,12 +240,14 @@ class LatexMathToolbarWidget extends WidgetType {
     });
 
     const selectAllButton = createSelectAllCodeButton(() => {
+      const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
         this.anchor,
         setLatexMathBlockModeEffect.of({ anchor: this.anchor, mode: 'source' })
       );
       requestAnimationFrame(() => {
+        if (!isRevealCurrent()) return;
         const editingBlock = view.dom.querySelector<HTMLElement>(
           `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`
         );

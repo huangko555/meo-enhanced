@@ -354,6 +354,89 @@ const dispatchWheel = (deltaY: number) => wheelScrollDOM.dispatch('wheel', {
   preventDefault: () => { defaultPrevented = true; }
 });
 
+const firstNavigationReveal = wheelController.beginNavigationReveal();
+if (!firstNavigationReveal()) {
+  throw new Error('A fresh navigation reveal was not current');
+}
+const secondNavigationReveal = wheelController.beginNavigationReveal();
+if (firstNavigationReveal() || !secondNavigationReveal()) {
+  throw new Error('A newer navigation reveal did not replace the older intent');
+}
+wheelDom.dispatch('beforeinput', { inputType: 'insertText' });
+if (secondNavigationReveal()) {
+  throw new Error('Beforeinput did not invalidate a delayed navigation reveal');
+}
+const keyNavigationReveal = wheelController.beginNavigationReveal();
+wheelDom.dispatch('keydown', { key: 'ArrowDown', ctrlKey: false, metaKey: false, isComposing: false });
+if (keyNavigationReveal()) {
+  throw new Error('A newer key interaction did not invalidate a delayed navigation reveal');
+}
+const pointerNavigationReveal = wheelController.beginNavigationReveal();
+wheelScrollDOM.dispatch('pointerdown', { button: 0, target: wheelScrollDOM });
+if (pointerNavigationReveal()) {
+  throw new Error('A newer pointer interaction did not invalidate a delayed navigation reveal');
+}
+wheelDocument.dispatch('pointerup', {});
+const wheelNavigationReveal = wheelController.beginNavigationReveal();
+dispatchWheel(-80);
+if (wheelNavigationReveal()) {
+  throw new Error('A newer wheel interaction did not invalidate a delayed navigation reveal');
+}
+
+const revealScrollDOM = Object.assign(new FakeEventTarget(), {
+  ownerDocument: new FakeEventTarget(),
+  scrollTop: 100,
+  scrollLeft: 0,
+  scrollHeight: 2000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
+});
+const revealController = new ViewportController({
+  dom: new FakeEventTarget(),
+  scrollDOM: revealScrollDOM,
+  state: { doc: { length: 1999 } },
+  coordsAtPos: (position: number) => ({
+    top: position - revealScrollDOM.scrollTop,
+    bottom: position - revealScrollDOM.scrollTop + 20
+  }),
+  lineBlockAt: (position: number) => ({ top: position, bottom: position + 20, height: 20 }),
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+} as any, { attachInteractions: false });
+const visibleReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(200, { y: 'nearest' }, visibleReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 100) {
+  throw new Error(`An already-visible target scrolled to ${revealScrollDOM.scrollTop}`);
+}
+const offscreenReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(900, { y: 'nearest' }, offscreenReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 420) {
+  throw new Error(`Nearest reveal reached ${revealScrollDOM.scrollTop} instead of 420`);
+}
+const staleReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(1500, { y: 'nearest', schedule: 'next-frame' }, staleReveal);
+revealController.markInteraction();
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 420) {
+  throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
+}
+const isolatedWheelReveal = wheelController.beginNavigationReveal();
+const isolatedReveal = revealController.beginNavigationReveal();
+wheelController.markInteraction();
+if (isolatedWheelReveal() || !isolatedReveal()) {
+  throw new Error('Navigation reveal currentness leaked across editors');
+}
+revealController.destroy();
+if (isolatedReveal()) {
+  throw new Error('Destroy left a navigation reveal current');
+}
+
 wheelController.lockScrollTop(200);
 dispatchWheel(-80);
 wheelScrollDOM.scrollTop = 0;

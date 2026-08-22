@@ -233,6 +233,7 @@ export class ViewportController {
   private lastTouchMoveAt = Number.NEGATIVE_INFINITY;
   private lastScrollDirection: -1 | 0 | 1 = 0;
   private interactionGeneration = 0;
+  private navigationGeneration = 0;
   private scrollLockGeneration = 0;
   private activeScrollTarget: ActiveScrollTarget | null = null;
   private activeLayoutAnchor: ActiveLayoutAnchor | null = null;
@@ -253,6 +254,7 @@ export class ViewportController {
   private readonly onPointerUp = () => this.finishScrollbarDrag();
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onKeyUp = (event: KeyboardEvent) => this.handleKeyUp(event);
+  private readonly onBeforeInput = () => { this.navigationGeneration += 1; };
   private readonly onTouchStart = (event: TouchEvent) => this.handleTouchStart(event);
   private readonly onTouchMove = (event: TouchEvent) => this.handleTouchMove(event);
   private readonly onTouchEnd = () => this.finishTouchGesture();
@@ -276,6 +278,7 @@ export class ViewportController {
       view.scrollDOM.ownerDocument.addEventListener('pointercancel', this.onPointerUp, true);
       view.dom.addEventListener('keydown', this.onKeyDown, true);
       view.dom.addEventListener('keyup', this.onKeyUp, true);
+      view.dom.addEventListener('beforeinput', this.onBeforeInput, true);
       this.interactionsAttached = true;
     }
   }
@@ -288,6 +291,7 @@ export class ViewportController {
     if (!programmaticCurrentTransaction) {
       this.interactionGeneration += 1;
     }
+    this.navigationGeneration += 1;
     this.scrollLockGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
@@ -548,6 +552,7 @@ export class ViewportController {
   destroy(): void {
     this.destroyed = true;
     this.interactionGeneration += 1;
+    this.navigationGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
@@ -565,6 +570,7 @@ export class ViewportController {
       this.view.scrollDOM.ownerDocument.removeEventListener('pointercancel', this.onPointerUp, true);
       this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
       this.view.dom.removeEventListener('keyup', this.onKeyUp, true);
+      this.view.dom.removeEventListener('beforeinput', this.onBeforeInput, true);
       this.interactionsAttached = false;
     }
   }
@@ -678,6 +684,7 @@ export class ViewportController {
       return;
     }
     this.interactionGeneration += 1;
+    this.navigationGeneration += 1;
     this.generation += 1;
     this.scrollLockGeneration += 1;
     this.activeScrollTarget = null;
@@ -783,6 +790,7 @@ export class ViewportController {
       return;
     }
     this.interactionGeneration += 1;
+    this.navigationGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
@@ -796,6 +804,7 @@ export class ViewportController {
       return;
     }
     this.interactionGeneration += 1;
+    this.navigationGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
@@ -812,6 +821,65 @@ export class ViewportController {
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
     this.lastTouchY = null;
+  }
+
+  /** Starts one user-visible navigation reveal and invalidates every older delayed reveal. */
+  beginNavigationReveal(): () => boolean {
+    this.markInteraction();
+    const navigationGeneration = this.navigationGeneration;
+    return () => !this.destroyed && navigationGeneration === this.navigationGeneration;
+  }
+
+  /** Reveals a document position with the requested alignment while later interaction stays authoritative. */
+  revealPosition(
+    position: number,
+    {
+      y = 'nearest',
+      yMargin = 0,
+      schedule = 'immediate'
+    }: { y?: 'nearest' | 'center' | 'start'; yMargin?: number; schedule?: 'immediate' | 'next-frame' } = {},
+    isCurrent: () => boolean = () => true
+  ): void {
+    if (this.destroyed || !isCurrent()) return;
+    const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
+    const generation = ++this.generation;
+    this.activeScrollTarget = null;
+    this.activeLayoutAnchor = null;
+    this.anchorStabilizationGeneration = null;
+    const measure = () => {
+      if (this.destroyed || generation !== this.generation || !isCurrent()) return;
+      this.view.requestMeasure({
+        read: () => {
+          if (this.destroyed || generation !== this.generation || !isCurrent()) return null;
+          const current = this.readScrollPosition();
+          const block = this.view.lineBlockAt(targetPosition);
+          const viewportHeight = this.view.scrollDOM.clientHeight;
+          if (y === 'center') {
+            return this.resolveScrollTarget({
+              top: block.top - Math.max(0, (viewportHeight - block.height) / 2)
+            }, current);
+          }
+          if (y === 'start') {
+            return this.resolveScrollTarget({ top: block.top - Math.max(0, yMargin) }, current);
+          }
+          const coords = this.view.coordsAtPos(targetPosition);
+          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+          if (coords && coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom) return null;
+          if (block.top < current.top) return this.resolveScrollTarget({ top: block.top }, current);
+          if (block.bottom > current.top + viewportHeight) {
+            return this.resolveScrollTarget({ top: block.bottom - viewportHeight }, current);
+          }
+          return null;
+        },
+        write: (target) => {
+          if (target && !this.destroyed && generation === this.generation && isCurrent()) {
+            this.writeScrollPosition(target);
+          }
+        }
+      });
+    };
+    if (schedule === 'next-frame') requestAnimationFrame(measure);
+    else measure();
   }
 
   captureAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
