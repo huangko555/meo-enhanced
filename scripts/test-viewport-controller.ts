@@ -349,6 +349,131 @@ if (dragScrollDOM.scrollTop !== 2100) {
 dragController.destroy();
 globalThis.requestAnimationFrame = originalDragRequestAnimationFrame;
 
+type NavigationAnchorBoundary = 'schedule' | 'read' | 'write' | 'current';
+
+const runNavigationAnchorStaleBoundary = async (
+  boundary: NavigationAnchorBoundary
+): Promise<{ scrollTop: number; writes: number[] }> => {
+  const frames: FrameRequestCallback[] = [];
+  const measures: Array<{
+    read: () => unknown;
+    write: (value: unknown) => void;
+  }> = [];
+  const previousRequestAnimationFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  };
+
+  const dom = new FakeEventTarget();
+  const ownerDocument = new FakeEventTarget();
+  const writes: number[] = [];
+  let scrollTop = 1000;
+  let anchorTop = 1000;
+  let elementRectReads = 0;
+  const scrollDOM = Object.assign(new FakeEventTarget(), {
+    ownerDocument,
+    scrollLeft: 0,
+    scrollHeight: 5000,
+    scrollWidth: 900,
+    clientHeight: 500,
+    clientWidth: 900,
+    getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
+  });
+  Object.defineProperty(scrollDOM, 'scrollTop', {
+    configurable: true,
+    get: () => scrollTop,
+    set: (value: number) => {
+      scrollTop = value;
+      writes.push(value);
+    }
+  });
+  const navigationElement = {
+    isConnected: true,
+    getBoundingClientRect: () => {
+      elementRectReads += 1;
+      if (boundary === 'read' && elementRectReads === 1) {
+        dom.dispatch('beforeinput', { inputType: 'insertText' });
+      }
+      return {
+        top: 1800 - scrollTop,
+        bottom: 1840 - scrollTop,
+        left: 0,
+        right: 200
+      };
+    }
+  };
+  const view = {
+    dom,
+    scrollDOM,
+    state: { doc: { length: 4999 } },
+    lineBlockAt: () => ({ top: anchorTop }),
+    requestMeasure: (measure?: { read: () => unknown; write: (value: unknown) => void }) => {
+      if (measure) measures.push(measure);
+    }
+  };
+  const controller = new ViewportController(view as any);
+  const flushMeasure = async (
+    beforeWrite?: () => void
+  ): Promise<void> => {
+    const measure = measures.shift();
+    if (!measure) throw new Error(`Missing ${boundary} navigation measure`);
+    const value = measure.read();
+    beforeWrite?.();
+    measure.write(value);
+    await Promise.resolve();
+  };
+  const flushAll = async (): Promise<void> => {
+    while (measures.length > 0 || frames.length > 0) {
+      while (measures.length > 0) await flushMeasure();
+      const frameBatch = frames.splice(0);
+      frameBatch.forEach((frame) => frame(0));
+      await Promise.resolve();
+    }
+  };
+
+  controller.restoreDocumentAnchor({ position: 10, lineOffset: 0 });
+  await flushMeasure();
+  writes.length = 0;
+
+  const isCurrent = controller.beginNavigationReveal();
+  controller.revealElement(navigationElement as any, isCurrent);
+  if (boundary === 'schedule') dom.dispatch('beforeinput', { inputType: 'insertText' });
+  if (boundary === 'read') await flushMeasure();
+  if (boundary === 'write') {
+    await flushMeasure(() => dom.dispatch('beforeinput', { inputType: 'insertText' }));
+  }
+  anchorTop += 100;
+  await flushAll();
+
+  const result = { scrollTop, writes: [...writes] };
+  controller.destroy();
+  globalThis.requestAnimationFrame = previousRequestAnimationFrame;
+  return result;
+};
+
+const navigationAnchorBoundaryFailures: string[] = [];
+for (const boundary of ['schedule', 'read', 'write'] as const) {
+  const result = await runNavigationAnchorStaleBoundary(boundary);
+  if (result.scrollTop !== 1100 || result.writes.some((value) => value > 1100)) {
+    navigationAnchorBoundaryFailures.push(`${boundary}:${JSON.stringify(result)}`);
+  }
+}
+if (navigationAnchorBoundaryFailures.length > 0) {
+  throw new Error(
+    `Stale element reveals cancelled or overrode active anchors: ${navigationAnchorBoundaryFailures.join(', ')}`
+  );
+}
+const currentNavigationAnchorResult = await runNavigationAnchorStaleBoundary('current');
+if (
+  currentNavigationAnchorResult.scrollTop !== 1340 ||
+  currentNavigationAnchorResult.writes.some((value) => value > 1340)
+) {
+  throw new Error(
+    `A current element reveal did not adopt at its first non-zero write: ${JSON.stringify(currentNavigationAnchorResult)}`
+  );
+}
+
 const originalWheelEvent = globalThis.WheelEvent;
 (globalThis as typeof globalThis & { WheelEvent: typeof WheelEvent }).WheelEvent = class {
   static readonly DOM_DELTA_PIXEL = 0;

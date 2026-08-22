@@ -73,10 +73,33 @@ interface ActiveLayoutAnchor extends LayoutAnchor {
 }
 
 interface StabilizeOptions {
-  isCurrent?: () => boolean;
   onSettled?: () => void;
   schedule?: 'immediate' | 'next-frame';
-  tracksDocumentAnchor?: boolean;
+}
+
+type NavigationRevealPhase =
+  | 'reserved'
+  | 'measured'
+  | 'adopted'
+  | 'settling'
+  | 'idle'
+  | 'stale'
+  | 'disposed';
+
+type NavigationRevealMeasurement =
+  | { readonly kind: 'target'; readonly target: ScrollTarget }
+  | { readonly kind: 'stable' }
+  | { readonly kind: 'unavailable' };
+
+interface NavigationRevealState {
+  ownerGeneration: number;
+  phase: NavigationRevealPhase;
+  readonly isCurrent: () => boolean;
+}
+
+interface NavigationRevealOptions {
+  readonly schedule?: 'immediate' | 'next-frame';
+  readonly settle?: boolean;
 }
 
 interface ActiveScrollTarget {
@@ -541,44 +564,48 @@ export class ViewportController {
     });
   }
 
-  /** Reveals through the owned scroller, then keeps the chosen nearest edge while layout settles. */
+  /** Reveals through the owned scroller; pending geometry never displaces the current viewport owner. */
   revealElement(element: HTMLElement, isCurrent: () => boolean = () => true): void {
-    if (this.destroyed || !element.isConnected || !isCurrent()) return;
-    const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-    const before = element.getBoundingClientRect();
-    const nearestEdge = (startDelta: number, endDelta: number): 'start' | 'end' | null => {
-      if (startDelta >= 0 && endDelta <= 0) return null;
-      if (startDelta < 0 && endDelta > 0) {
-        return Math.abs(startDelta) <= endDelta ? 'start' : 'end';
-      }
-      return startDelta < 0 ? 'start' : 'end';
-    };
-    const verticalEdge = nearestEdge(before.top - scrollerRect.top, before.bottom - scrollerRect.bottom);
-    const horizontalEdge = nearestEdge(before.left - scrollerRect.left, before.right - scrollerRect.right);
-    if (!verticalEdge && !horizontalEdge) return;
-
-    this.markNavigationScrollStart();
-    this.stabilize(() => {
-      if (!element.isConnected || !isCurrent()) return null;
-      const currentScroller = this.view.scrollDOM.getBoundingClientRect();
-      const current = element.getBoundingClientRect();
-      return {
-        ...(verticalEdge ? {
-          top: this.view.scrollDOM.scrollTop + (
-            verticalEdge === 'start'
-              ? current.top - currentScroller.top
-              : current.bottom - currentScroller.bottom
-          )
-        } : {}),
-        ...(horizontalEdge ? {
-          left: this.view.scrollDOM.scrollLeft + (
-            horizontalEdge === 'start'
-              ? current.left - currentScroller.left
-              : current.right - currentScroller.right
-          )
-        } : {})
+    this.runNavigationReveal(() => {
+      if (!element.isConnected) return { kind: 'unavailable' };
+      const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      const nearestEdge = (startDelta: number, endDelta: number): 'start' | 'end' | null => {
+        if (startDelta >= 0 && endDelta <= 0) return null;
+        if (startDelta < 0 && endDelta > 0) {
+          return Math.abs(startDelta) <= endDelta ? 'start' : 'end';
+        }
+        return startDelta < 0 ? 'start' : 'end';
       };
-    }, { isCurrent, tracksDocumentAnchor: false });
+      const verticalEdge = nearestEdge(
+        elementRect.top - scrollerRect.top,
+        elementRect.bottom - scrollerRect.bottom
+      );
+      const horizontalEdge = nearestEdge(
+        elementRect.left - scrollerRect.left,
+        elementRect.right - scrollerRect.right
+      );
+      if (!verticalEdge && !horizontalEdge) return { kind: 'stable' };
+      return {
+        kind: 'target',
+        target: {
+          ...(verticalEdge ? {
+            top: this.view.scrollDOM.scrollTop + (
+              verticalEdge === 'start'
+                ? elementRect.top - scrollerRect.top
+                : elementRect.bottom - scrollerRect.bottom
+            )
+          } : {}),
+          ...(horizontalEdge ? {
+            left: this.view.scrollDOM.scrollLeft + (
+              horizontalEdge === 'start'
+                ? elementRect.left - scrollerRect.left
+                : elementRect.right - scrollerRect.right
+            )
+          } : {})
+        }
+      };
+    }, { settle: true }, isCurrent);
   }
 
   destroy(): void {
@@ -608,27 +635,25 @@ export class ViewportController {
   }
 
   private stabilize(readTarget: () => ScrollTarget | null, options: StabilizeOptions = {}): void {
-    const isCurrent = options.isCurrent ?? (() => true);
-    if (this.destroyed || !isCurrent()) return;
+    if (this.destroyed) return;
     const generation = ++this.generation;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
-    const tracksDocumentAnchor = options.tracksDocumentAnchor !== false;
-    if (tracksDocumentAnchor) this.anchorStabilizationGeneration = generation;
+    this.anchorStabilizationGeneration = generation;
     let attempts = 0;
     let stableFrames = 0;
     const finish = () => {
-      if (tracksDocumentAnchor && this.anchorStabilizationGeneration === generation) {
+      if (this.anchorStabilizationGeneration === generation) {
         this.anchorStabilizationGeneration = null;
       }
       if (options.onSettled) requestAnimationFrame(() => {
-        if (!this.destroyed && generation === this.generation && isCurrent()) options.onSettled?.();
+        if (!this.destroyed && generation === this.generation) options.onSettled?.();
       });
     };
 
     const measure = () => {
       if (
-        this.destroyed || generation !== this.generation || !isCurrent() ||
+        this.destroyed || generation !== this.generation ||
         attempts >= MAX_SETTLE_FRAMES
       ) {
         finish();
@@ -637,14 +662,14 @@ export class ViewportController {
       attempts += 1;
       this.view.requestMeasure({
         read: () => {
-          if (this.destroyed || generation !== this.generation || !isCurrent()) return null;
+          if (this.destroyed || generation !== this.generation) return null;
           const requested = readTarget();
           return requested === null
             ? null
             : this.resolveScrollTarget(requested, this.readScrollPosition());
         },
         write: (target) => {
-          if (this.destroyed || generation !== this.generation || !isCurrent()) {
+          if (this.destroyed || generation !== this.generation) {
             finish();
             return;
           }
@@ -653,7 +678,7 @@ export class ViewportController {
             return;
           }
           queueMicrotask(() => {
-            if (this.destroyed || generation !== this.generation || !isCurrent()) {
+            if (this.destroyed || generation !== this.generation) {
               finish();
               return;
             }
@@ -663,13 +688,137 @@ export class ViewportController {
               finish();
               return;
             }
-            if (isCurrent()) requestAnimationFrame(measure);
+            requestAnimationFrame(measure);
           });
         }
       });
     };
 
-    if (options.schedule === 'next-frame' && isCurrent()) requestAnimationFrame(measure);
+    if (options.schedule === 'next-frame') requestAnimationFrame(measure);
+    else measure();
+  }
+
+  /** Schedule/read are reservations; only a current non-zero write atomically adopts viewport ownership. */
+  private runNavigationReveal(
+    readMeasurement: () => NavigationRevealMeasurement,
+    options: NavigationRevealOptions,
+    isCurrent: () => boolean
+  ): void {
+    if (this.destroyed || !isCurrent()) return;
+    const state: NavigationRevealState = {
+      ownerGeneration: this.generation,
+      phase: 'reserved',
+      isCurrent
+    };
+    let attempts = 0;
+    let stableFrames = 0;
+    const isRevealCurrent = (): boolean => (
+      !this.destroyed &&
+      state.ownerGeneration === this.generation &&
+      state.isCurrent()
+    );
+    const finish = (): void => {
+      state.phase = this.destroyed
+        ? 'disposed'
+        : isRevealCurrent()
+          ? 'idle'
+          : 'stale';
+    };
+    const scheduleNextMeasure = (measure: () => void): void => {
+      if (!isRevealCurrent()) {
+        finish();
+        return;
+      }
+      requestAnimationFrame(() => {
+        if (isRevealCurrent()) measure();
+        else finish();
+      });
+    };
+    const completeFrame = (measure: () => void, changed: boolean): void => {
+      stableFrames = changed ? 0 : stableFrames + 1;
+      if (
+        !options.settle ||
+        stableFrames >= REQUIRED_STABLE_FRAMES ||
+        attempts >= MAX_SETTLE_FRAMES
+      ) {
+        finish();
+        return;
+      }
+      state.phase = 'settling';
+      scheduleNextMeasure(measure);
+    };
+    const measure = (): void => {
+      if (!isRevealCurrent() || attempts >= MAX_SETTLE_FRAMES) {
+        finish();
+        return;
+      }
+      attempts += 1;
+      this.view.requestMeasure({
+        read: () => {
+          if (!isRevealCurrent()) return { kind: 'unavailable' } as const;
+          if (state.phase === 'reserved') state.phase = 'measured';
+          try {
+            const measurement = readMeasurement();
+            if (measurement.kind !== 'target') return measurement;
+            return {
+              kind: 'target',
+              target: this.resolveScrollTarget(measurement.target, this.readScrollPosition())
+            } as const;
+          } catch {
+            return { kind: 'unavailable' } as const;
+          }
+        },
+        write: (measurement) => {
+          if (!isRevealCurrent()) {
+            finish();
+            return;
+          }
+          if (measurement.kind === 'unavailable') {
+            finish();
+            return;
+          }
+          if (measurement.kind === 'stable') {
+            if (state.phase === 'measured') finish();
+            else completeFrame(measure, false);
+            return;
+          }
+
+          const current = this.readScrollPosition();
+          const target = this.resolveScrollTarget(measurement.target, current);
+          const differs = (
+            Math.abs(target.top - current.top) > POSITION_EPSILON ||
+            Math.abs(target.left - current.left) > POSITION_EPSILON
+          );
+          if (!differs) {
+            if (state.phase === 'measured') finish();
+            else completeFrame(measure, false);
+            return;
+          }
+
+          if (state.phase === 'measured') {
+            if (!isRevealCurrent()) {
+              finish();
+              return;
+            }
+            this.markNavigationScrollStart();
+            state.ownerGeneration = ++this.generation;
+            this.activeScrollTarget = null;
+            this.activeLayoutAnchor = null;
+            this.anchorStabilizationGeneration = null;
+            state.phase = 'adopted';
+          }
+          if (!isRevealCurrent()) {
+            finish();
+            return;
+          }
+          const changed = this.writeScrollPosition(target);
+          state.phase = 'settling';
+          completeFrame(measure, changed);
+        }
+      });
+    };
+
+    if (options.schedule === 'next-frame') scheduleNextMeasure(measure);
     else measure();
   }
 
@@ -886,67 +1035,58 @@ export class ViewportController {
     }: { y?: 'nearest' | 'center' | 'start'; yMargin?: number; schedule?: 'immediate' | 'next-frame' } = {},
     isCurrent: () => boolean = () => true
   ): void {
-    if (this.destroyed || !isCurrent()) return;
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
-    const requestGeneration = this.generation;
-    const measure = () => {
-      if (this.destroyed || requestGeneration !== this.generation || !isCurrent()) return;
-      this.view.requestMeasure({
-        read: () => {
-          if (this.destroyed || requestGeneration !== this.generation || !isCurrent()) return null;
-          const current = this.readScrollPosition();
-          const coords = this.view.coordsAtPos(targetPosition);
-          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-          if (y === 'center') {
-            if (coords) {
-              return this.resolveScrollTarget({
-                top: current.top + (coords.top + coords.bottom - scrollerRect.top - scrollerRect.bottom) / 2
-              }, current);
+    this.runNavigationReveal(() => {
+      const current = this.readScrollPosition();
+      const coords = this.view.coordsAtPos(targetPosition);
+      const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+      if (y === 'center') {
+        if (coords) {
+          return {
+            kind: 'target',
+            target: {
+              top: current.top + (coords.top + coords.bottom - scrollerRect.top - scrollerRect.bottom) / 2
             }
-            const block = this.view.lineBlockAt(targetPosition);
-            return this.resolveScrollTarget({
-              top: block.top - Math.max(0, (this.view.scrollDOM.clientHeight - block.height) / 2)
-            }, current);
-          }
-          if (y === 'start') {
-            const block = this.view.lineBlockAt(targetPosition);
-            return this.resolveScrollTarget({ top: block.top - Math.max(0, yMargin) }, current);
-          }
-          if (coords) {
-            if (coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom) return null;
-            return this.resolveScrollTarget({
-              top: current.top + (
-                coords.top < scrollerRect.top
-                  ? coords.top - scrollerRect.top
-                  : coords.bottom - scrollerRect.bottom
-              )
-            }, current);
-          }
-          const block = this.view.lineBlockAt(targetPosition);
-          const viewportHeight = this.view.scrollDOM.clientHeight;
-          if (block.top < current.top) return this.resolveScrollTarget({ top: block.top }, current);
-          if (block.bottom > current.top + viewportHeight) {
-            return this.resolveScrollTarget({ top: block.bottom - viewportHeight }, current);
-          }
-          return null;
-        },
-        write: (target) => {
-          if (!target || this.destroyed || requestGeneration !== this.generation || !isCurrent()) return;
-          const current = this.readScrollPosition();
-          if (target.top === current.top && target.left === current.left) return;
-          this.markNavigationScrollStart();
-          const revealGeneration = ++this.generation;
-          this.activeScrollTarget = null;
-          this.activeLayoutAnchor = null;
-          this.anchorStabilizationGeneration = null;
-          if (!this.destroyed && revealGeneration === this.generation && isCurrent()) {
-            this.writeScrollPosition(target);
-          }
+          };
         }
-      });
-    };
-    if (schedule === 'next-frame') requestAnimationFrame(measure);
-    else measure();
+        const block = this.view.lineBlockAt(targetPosition);
+        return {
+          kind: 'target',
+          target: {
+            top: block.top - Math.max(0, (this.view.scrollDOM.clientHeight - block.height) / 2)
+          }
+        };
+      }
+      if (y === 'start') {
+        const block = this.view.lineBlockAt(targetPosition);
+        return {
+          kind: 'target',
+          target: { top: block.top - Math.max(0, yMargin) }
+        };
+      }
+      if (coords) {
+        if (coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom) {
+          return { kind: 'stable' };
+        }
+        return {
+          kind: 'target',
+          target: {
+            top: current.top + (
+              coords.top < scrollerRect.top
+                ? coords.top - scrollerRect.top
+                : coords.bottom - scrollerRect.bottom
+            )
+          }
+        };
+      }
+      const block = this.view.lineBlockAt(targetPosition);
+      const viewportHeight = this.view.scrollDOM.clientHeight;
+      if (block.top < current.top) return { kind: 'target', target: { top: block.top } };
+      if (block.bottom > current.top + viewportHeight) {
+        return { kind: 'target', target: { top: block.bottom - viewportHeight } };
+      }
+      return { kind: 'stable' };
+    }, { schedule }, isCurrent);
   }
 
   captureAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {

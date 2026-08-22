@@ -328,6 +328,86 @@ async function main(): Promise<void> {
       throw new Error(`Rendered table navigation had a second writer or reversal: ${JSON.stringify(renderedTable)}`);
     }
 
+    const renderedTableLayoutOverlap = await page.evaluate(async () => {
+      const editor = (window as any).__inputCursorEditor;
+      const scroller = editor.getScrollElement();
+      const input = document.activeElement instanceof HTMLTextAreaElement
+        ? document.activeElement
+        : null;
+      const row = input?.closest<HTMLElement>('tr') ?? null;
+      if (!input || !row) throw new Error('Rendered table overlap had no real focused row');
+      const beforeScrollTop = scroller.scrollTop;
+      const beforeSelection = [input.selectionStart, input.selectionEnd];
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+      editor.preserveViewport(() => {
+        row.style.transform = 'translateY(700px)';
+        scroller.scrollTop += 100;
+      });
+      const mutatedScrollTop = scroller.scrollTop;
+      input.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: null
+      }));
+      input.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: 'x'
+      }));
+      const frames: Array<{
+        frame: number;
+        scrollTop: number;
+        focused: boolean;
+        connected: boolean;
+        selectionStart: number;
+        selectionEnd: number;
+      }> = [];
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push({
+          frame,
+          scrollTop: scroller.scrollTop,
+          focused: document.activeElement === input,
+          connected: input.isConnected,
+          selectionStart: input.selectionStart,
+          selectionEnd: input.selectionEnd
+        });
+      }
+      return {
+        beforeScrollTop,
+        mutatedScrollTop,
+        finalScrollTop: scroller.scrollTop,
+        beforeSelection,
+        frames
+      };
+    });
+    const overlapLowerBound = Math.min(
+      renderedTableLayoutOverlap.beforeScrollTop,
+      renderedTableLayoutOverlap.mutatedScrollTop
+    ) - 1;
+    const overlapUpperBound = Math.max(
+      renderedTableLayoutOverlap.beforeScrollTop,
+      renderedTableLayoutOverlap.mutatedScrollTop
+    ) + 1;
+    if (
+      Math.abs(
+        renderedTableLayoutOverlap.finalScrollTop - renderedTableLayoutOverlap.beforeScrollTop
+      ) > 1 ||
+      renderedTableLayoutOverlap.frames.some((frame) => (
+        frame.scrollTop < overlapLowerBound ||
+        frame.scrollTop > overlapUpperBound ||
+        !frame.focused ||
+        !frame.connected ||
+        frame.selectionStart !== renderedTableLayoutOverlap.beforeSelection[0] ||
+        frame.selectionEnd !== renderedTableLayoutOverlap.beforeSelection[1]
+      ))
+    ) {
+      throw new Error(
+        `A stale rendered-table element reveal cancelled layout compensation or wrote an intermediate scroll: ${JSON.stringify(renderedTableLayoutOverlap)}`
+      );
+    }
+
     await page.evaluate(() => (window as any).__inputCursorEditor.destroy());
     console.log('input cursor navigation production checks passed');
   } finally {
