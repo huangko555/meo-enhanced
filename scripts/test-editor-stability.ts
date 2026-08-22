@@ -30,12 +30,16 @@ async function assertExternalViewportStability(page: Page): Promise<void> {
     const originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
     const originalCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
     const originalQueueMicrotask = window.queueMicrotask.bind(window);
-    const pendingCallbacks = new Map<number, FrameRequestCallback>();
-    let nextCallbackId = 1;
+    const causalCallbacks = new Map<number, {
+      callback: FrameRequestCallback;
+      state: 'queued' | 'executing' | 'cancelled' | 'complete';
+    }>();
+    const ownedCausalHandles = new Set<number>();
     let nextFrame: number[] = [];
     let causalDepth = 0;
     let pendingMicrotasks = 0;
     let resolveMicrotasks: (() => void) | null = null;
+    let executingSelfCancels = 0;
 
     const runCausal = (callback: () => void) => {
       causalDepth += 1;
@@ -56,14 +60,22 @@ async function assertExternalViewportStability(page: Page): Promise<void> {
 
     window.requestAnimationFrame = (callback: FrameRequestCallback) => {
       if (causalDepth === 0) return originalRequestAnimationFrame(callback);
-      const callbackId = nextCallbackId++;
-      pendingCallbacks.set(callbackId, callback);
-      nextFrame.push(callbackId);
-      return callbackId;
+      const handle = Object.freeze({ valueOf: () => 1 }) as unknown as number;
+      causalCallbacks.set(handle, { callback, state: 'queued' });
+      ownedCausalHandles.add(handle);
+      nextFrame.push(handle);
+      return handle;
     };
-    window.cancelAnimationFrame = (callbackId: number) => {
-      if (pendingCallbacks.delete(callbackId)) return;
-      originalCancelAnimationFrame(callbackId);
+    window.cancelAnimationFrame = (handle: number) => {
+      const record = causalCallbacks.get(handle);
+      if (!record) {
+        if (ownedCausalHandles.has(handle)) return;
+        originalCancelAnimationFrame(handle);
+        return;
+      }
+      const wasExecuting = record.state === 'executing';
+      if (wasExecuting) executingSelfCancels += 1;
+      if (record.state === 'queued' || wasExecuting) record.state = 'cancelled';
     };
     window.queueMicrotask = (callback: VoidFunction) => {
       if (causalDepth === 0) {
@@ -91,17 +103,30 @@ async function assertExternalViewportStability(page: Page): Promise<void> {
       });
       await waitForMicrotasks();
       topTrace.push(readTop());
-      while (nextFrame.some((callbackId) => pendingCallbacks.has(callbackId))) {
-        const currentFrame = nextFrame;
+      while (true) {
+        const currentFrame = nextFrame.filter((handle) => {
+          const record = causalCallbacks.get(handle);
+          if (record?.state === 'cancelled') causalCallbacks.delete(handle);
+          return record?.state === 'queued';
+        });
         nextFrame = [];
-        for (const callbackId of currentFrame) {
-          const callback = pendingCallbacks.get(callbackId);
-          pendingCallbacks.delete(callbackId);
-          if (callback) runCausal(() => callback(performance.now()));
+        if (currentFrame.length === 0) break;
+        for (const handle of currentFrame) {
+          const record = causalCallbacks.get(handle);
+          if (!record) continue;
+          if (record.state !== 'queued') continue;
+          record.state = 'executing';
+          runCausal(() => record.callback(performance.now()));
+          if (record.state === 'executing') record.state = 'complete';
+          causalCallbacks.delete(handle);
         }
         await waitForMicrotasks();
         topTrace.push(readTop());
       }
+      if (causalCallbacks.size !== 0) {
+        throw new Error(`Causal RAF handles remained after completion: ${causalCallbacks.size}`);
+      }
+      ownedCausalHandles.clear();
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -109,11 +134,15 @@ async function assertExternalViewportStability(page: Page): Promise<void> {
     }
     return {
       topTrace,
+      executingSelfCancels,
       text: editor.getText()
     };
   });
   if (!after.text.startsWith('后台新增 1\n后台新增 2\n后台新增 3\n')) {
     throw new Error('External document update was not applied');
+  }
+  if (after.executingSelfCancels < 1) {
+    throw new Error(`External update did not exercise the real CodeMirror RAF self-cancel lifecycle: ${JSON.stringify(after.topTrace)}`);
   }
   const unstableFrame = after.topTrace.findIndex((top) => top === null || Math.abs(top - beforeTop) > 1);
   if (unstableFrame >= 0) {

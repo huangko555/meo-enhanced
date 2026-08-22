@@ -177,8 +177,11 @@ const runCausalFrameTrace = async <T>(root: () => void, sample: () => T): Promis
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
   const originalQueueMicrotask = globalThis.queueMicrotask;
-  const pendingCallbacks = new Map<number, FrameRequestCallback>();
-  let nextCallbackId = 1;
+  const causalCallbacks = new Map<number, {
+    callback: FrameRequestCallback;
+    state: 'queued' | 'executing' | 'cancelled' | 'complete';
+  }>();
+  const ownedCausalHandles = new Set<number>();
   let nextFrame: number[] = [];
   let causalDepth = 0;
   let pendingMicrotasks = 0;
@@ -198,14 +201,20 @@ const runCausalFrameTrace = async <T>(root: () => void, sample: () => T): Promis
 
   globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
     if (causalDepth === 0) return originalRequestAnimationFrame(callback);
-    const callbackId = nextCallbackId++;
-    pendingCallbacks.set(callbackId, callback);
-    nextFrame.push(callbackId);
-    return callbackId;
+    const handle = Object.freeze({ valueOf: () => 1 }) as unknown as number;
+    causalCallbacks.set(handle, { callback, state: 'queued' });
+    ownedCausalHandles.add(handle);
+    nextFrame.push(handle);
+    return handle;
   };
-  globalThis.cancelAnimationFrame = (callbackId: number) => {
-    if (pendingCallbacks.delete(callbackId)) return;
-    originalCancelAnimationFrame(callbackId);
+  globalThis.cancelAnimationFrame = (handle: number) => {
+    const record = causalCallbacks.get(handle);
+    if (!record) {
+      if (ownedCausalHandles.has(handle)) return;
+      originalCancelAnimationFrame(handle);
+      return;
+    }
+    if (record.state === 'queued' || record.state === 'executing') record.state = 'cancelled';
   };
   globalThis.queueMicrotask = (callback: VoidFunction) => {
     if (causalDepth === 0) {
@@ -230,17 +239,30 @@ const runCausalFrameTrace = async <T>(root: () => void, sample: () => T): Promis
     runCausal(root);
     await waitForMicrotasks();
     const trace = [sample()];
-    while (nextFrame.some((callbackId) => pendingCallbacks.has(callbackId))) {
-      const currentFrame = nextFrame;
+    while (true) {
+      const currentFrame = nextFrame.filter((handle) => {
+        const record = causalCallbacks.get(handle);
+        if (record?.state === 'cancelled') causalCallbacks.delete(handle);
+        return record?.state === 'queued';
+      });
       nextFrame = [];
-      for (const callbackId of currentFrame) {
-        const callback = pendingCallbacks.get(callbackId);
-        pendingCallbacks.delete(callbackId);
-        if (callback) runCausal(() => callback(performance.now()));
+      if (currentFrame.length === 0) break;
+      for (const handle of currentFrame) {
+        const record = causalCallbacks.get(handle);
+        if (!record) continue;
+        if (record.state !== 'queued') continue;
+        record.state = 'executing';
+        runCausal(() => record.callback(performance.now()));
+        if (record.state === 'executing') record.state = 'complete';
+        causalCallbacks.delete(handle);
       }
       await waitForMicrotasks();
       trace.push(sample());
     }
+    if (causalCallbacks.size !== 0) {
+      throw new Error(`Causal RAF handles remained after completion: ${causalCallbacks.size}`);
+    }
+    ownedCausalHandles.clear();
     return trace;
   } finally {
     globalThis.requestAnimationFrame = originalRequestAnimationFrame;
@@ -309,6 +331,36 @@ globalThis.requestAnimationFrame = originalUnrelatedRequestAnimationFrame;
 if (JSON.stringify(cancelledTrace) !== '[7]' || unrelatedFrameRequests !== 1) {
   throw new Error(
     `Cancelled or unrelated RAF changed scheduler completion: ${JSON.stringify({ cancelledTrace, unrelatedFrameRequests })}`
+  );
+}
+const originalCollisionRequestAnimationFrame = globalThis.requestAnimationFrame;
+const originalCollisionCancelAnimationFrame = globalThis.cancelAnimationFrame;
+let unrelatedCollisionCancels = 0;
+globalThis.requestAnimationFrame = () => 1;
+globalThis.cancelAnimationFrame = (callbackId: number) => {
+  if (callbackId === 1) unrelatedCollisionCancels += 1;
+};
+const unrelatedNativeHandle = requestAnimationFrame(() => { schedulerValue = -3; });
+let selfCancellingHandle = 0;
+const selfCancellingTrace = await runCausalFrameTrace(() => {
+  schedulerValue = 9;
+  selfCancellingHandle = requestAnimationFrame(() => cancelAnimationFrame(selfCancellingHandle));
+}, () => schedulerValue);
+const collisionCancelsBeforeNativeCancel = unrelatedCollisionCancels;
+cancelAnimationFrame(unrelatedNativeHandle);
+globalThis.requestAnimationFrame = originalCollisionRequestAnimationFrame;
+globalThis.cancelAnimationFrame = originalCollisionCancelAnimationFrame;
+if (
+  JSON.stringify(selfCancellingTrace) !== '[9,9]' ||
+  collisionCancelsBeforeNativeCancel !== 0 ||
+  unrelatedCollisionCancels !== 1
+) {
+  throw new Error(
+    `RAF identity routing failed: ${JSON.stringify({
+      selfCancellingTrace,
+      collisionCancelsBeforeNativeCancel,
+      unrelatedCollisionCancels
+    })}`
   );
 }
 
