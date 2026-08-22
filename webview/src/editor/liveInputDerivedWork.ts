@@ -79,6 +79,7 @@ const supersedeLiveInputDerivedWorkEffect = StateEffect.define<true>();
 const beginLiveInputCompositionEffect = StateEffect.define<true>();
 const changeLiveInputCompositionEffect = StateEffect.define<true>();
 const completeLiveInputCompositionEffect = StateEffect.define<true>();
+const resumeLiveInputAcceptedWorkEffect = StateEffect.define<true>();
 
 type LiveInputDerivedWorkPhase =
   | 'idle'
@@ -138,9 +139,13 @@ const liveInputDerivedWorkPhaseField = StateField.define<LiveInputDerivedWorkPha
       } else if (effect.is(changeLiveInputCompositionEffect)) {
         next = { phase: 'composing-with-pending' };
       } else if (effect.is(completeLiveInputCompositionEffect)) {
-        next = next.phase === 'composing-with-pending'
-          ? { phase: 'pending-input' }
-          : idleLiveInputDerivedWorkPhase;
+        if (next.phase === 'composing-with-pending') {
+          next = { phase: 'pending-input' };
+        } else if (next.phase === 'composing-without-pending') {
+          next = idleLiveInputDerivedWorkPhase;
+        }
+      } else if (effect.is(resumeLiveInputAcceptedWorkEffect)) {
+        next = { phase: 'pending-input' };
       } else if (effect.is(deferLiveInputDerivedWorkEffect)) {
         next = {
           phase: next.phase === 'composing-with-pending' || next.phase === 'composing-without-pending'
@@ -172,14 +177,6 @@ function isLiveInputDerivedWorkPending(state: EditorState): boolean {
   return phase === 'pending-input'
     || phase === 'composing-with-pending'
     || phase === 'composing-without-pending';
-}
-
-export function completeLiveInputComposition(view: EditorView): void {
-  if (view.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'idle') return;
-  view.dispatch({
-    effects: completeLiveInputCompositionEffect.of(true),
-    annotations: Transaction.addToHistory.of(false)
-  });
 }
 
 /**
@@ -222,9 +219,11 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     state: 'accepting' | 'flushing' | 'settled' | 'cancelled';
     records: Map<object, ConsumerRecord>;
   };
+  type FrameConsumerRecordState = 'scheduled-frame' | 'accepted-generation' | 'running';
   type FrameConsumerRecord = {
     operation: () => void;
     frameId: number | null;
+    state: FrameConsumerRecordState;
   };
 
   let consumerGeneration: ConsumerGeneration | null = null;
@@ -296,6 +295,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const consumeFrameConsumer = (key: object, record: FrameConsumerRecord): void => {
     if (frameConsumers.get(key) !== record) return;
     frameConsumers.delete(key);
+    record.state = 'running';
     runningFrameConsumers.add(key);
     try {
       record.operation();
@@ -312,7 +312,15 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       window.cancelAnimationFrame(record.frameId);
       record.frameId = null;
     }
+    record.state = 'accepted-generation';
     queueConsumer(generation, key, () => consumeFrameConsumer(key, record));
+  };
+  const adoptFrameConsumers = (): void => {
+    if (frameConsumers.size === 0) return;
+    const generation = currentConsumerGeneration();
+    for (const [key, record] of frameConsumers) {
+      queueFrameConsumer(generation, key, record);
+    }
   };
   const startConsumerGeneration = (): ConsumerGeneration => {
     cancelConsumerGeneration();
@@ -415,12 +423,13 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       existing.operation = operation;
       return existing;
     }
-    const record: FrameConsumerRecord = { operation, frameId: null };
+    const record: FrameConsumerRecord = { operation, frameId: null, state: 'scheduled-frame' };
     frameConsumers.set(key, record);
     return record;
   };
   const scheduleFrameConsumer = (key: object, record: FrameConsumerRecord): void => {
     if (record.frameId !== null || disposed || frameConsumers.get(key) !== record) return;
+    record.state = 'scheduled-frame';
     const frameId = window.requestAnimationFrame(() => {
       if (frameConsumers.get(key) !== record || record.frameId !== frameId) return;
       record.frameId = null;
@@ -443,6 +452,14 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     }
     scheduleFrameConsumer(key, record);
   };
+  const hasAcceptedConsumerWork = (): boolean => {
+    const generation = consumerGeneration;
+    return Boolean(generation && generation.state !== 'cancelled'
+      && [...generation.records.values()].some((record) => record.state === 'queued'));
+  };
+  const hasAcceptedFrameDesired = (): boolean => (
+    [...frameConsumers.values()].some((record) => record.state === 'accepted-generation')
+  );
   const scheduler = createLiveInputDerivedWorkScheduler({
     requestFrame: (callback) => window.requestAnimationFrame(() => callback()),
     cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
@@ -462,36 +479,50 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     requestOnFrame(key: object, operation: () => void) {
       requestConsumerOnFrame(key, operation);
     },
+    completeComposition() {
+      const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
+      if (phase !== 'composing-with-pending' && phase !== 'composing-without-pending') return;
+      adoptFrameConsumers();
+      const resumeAcceptedWork = phase === 'composing-without-pending'
+        && (hasAcceptedConsumerWork() || hasAcceptedFrameDesired());
+      view.dispatch({
+        effects: [
+          completeLiveInputCompositionEffect.of(true),
+          ...(resumeAcceptedWork ? [resumeLiveInputAcceptedWorkEffect.of(true)] : [])
+        ],
+        annotations: Transaction.addToHistory.of(false)
+      });
+    },
     update(update: { transactions: readonly Transaction[] }) {
       for (const transaction of update.transactions) {
-        if (transaction.effects.some((effect) => effect.is(beginLiveInputCompositionEffect)
-          || effect.is(changeLiveInputCompositionEffect))) {
+        const beginsComposition = transaction.effects.some((effect) => effect.is(beginLiveInputCompositionEffect));
+        const changesComposition = transaction.effects.some((effect) => effect.is(changeLiveInputCompositionEffect));
+        const completesComposition = transaction.effects.some((effect) => effect.is(completeLiveInputCompositionEffect));
+        const defersInput = transaction.effects.some((effect) => effect.is(deferLiveInputDerivedWorkEffect));
+        const resumesAcceptedWork = transaction.effects.some((effect) => effect.is(resumeLiveInputAcceptedWorkEffect));
+        const supersedes = transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect));
+        const cancels = transaction.effects.some((effect) => effect.is(cancelLiveInputDerivedWorkEffect));
+        const refreshes = transaction.effects.some((effect) => effect.is(refreshLiveInputDerivedWorkEffect));
+
+        if (beginsComposition || changesComposition) {
           scheduler.cancelPending();
         }
-        if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) {
+        if (supersedes || cancels) {
           scheduler.cancelPending();
           cancelConsumerGeneration();
           cancelFrameConsumers();
+          continue;
         }
-        if (transaction.effects.some((effect) => effect.is(cancelLiveInputDerivedWorkEffect))) {
-          scheduler.cancelPending();
-          cancelConsumerGeneration();
-          cancelFrameConsumers();
+        if (changesComposition || defersInput) {
+          startConsumerGeneration();
+        } else if (beginsComposition) {
+          adoptFrameConsumers();
         }
-        if (transaction.effects.some((effect) => effect.is(completeLiveInputCompositionEffect))
+        if ((completesComposition || defersInput || resumesAcceptedWork)
           && transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'pending-input') {
           scheduler.documentChanged();
         }
-        if (transaction.effects.some((effect) => effect.is(deferLiveInputDerivedWorkEffect))) {
-          startConsumerGeneration();
-          if (transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'pending-input') {
-            scheduler.documentChanged();
-          }
-        }
-        if (transaction.effects.some((effect) => effect.is(changeLiveInputCompositionEffect))) {
-          startConsumerGeneration();
-        }
-        if (transaction.effects.some((effect) => effect.is(refreshLiveInputDerivedWorkEffect))) {
+        if (refreshes) {
           queueMicrotask(flushConsumers);
         }
       }
@@ -516,6 +547,10 @@ export function beginLiveInputComposition(view: EditorView): void {
     effects: beginLiveInputCompositionEffect.of(true),
     annotations: Transaction.addToHistory.of(false)
   });
+}
+
+export function completeLiveInputComposition(view: EditorView): void {
+  view.plugin(codeMirrorLiveInputDerivedWorkPlugin)?.completeComposition();
 }
 
 /**

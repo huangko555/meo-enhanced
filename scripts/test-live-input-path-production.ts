@@ -412,6 +412,140 @@ async function main(): Promise<void> {
       throw new Error(`Observer chain escaped its live-input generation: ${JSON.stringify(observerQuiescenceFacts)}`);
     }
 
+    const compositionDesiredModuleFacts = await page.evaluate(async () => {
+      const frames = async (count: number) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      const createProbe = () => {
+        const host = document.createElement('div');
+        document.body.append(host);
+        return { host, probe: (window as any).__createLiveInputConsumerProbe(host) };
+      };
+
+      const empty = createProbe();
+      empty.probe.beginComposition();
+      empty.probe.completeComposition();
+      await frames(4);
+      const emptyRefreshes = empty.probe.refreshes();
+      empty.probe.destroy();
+      empty.host.remove();
+
+      const latest = createProbe();
+      const latestKey = {};
+      const latestRuns = { a: 0, b: 0 };
+      latest.probe.beginComposition();
+      latest.probe.requestOnFrame(latestKey, () => { latestRuns.a += 1; });
+      latest.probe.requestOnFrame(latestKey, () => { latestRuns.b += 1; });
+      latest.probe.completeComposition();
+      await frames(6);
+      const latestRefreshes = latest.probe.refreshes();
+      latest.probe.destroy();
+      latest.host.remove();
+
+      const cancelled = createProbe();
+      let cancelRuns = 0;
+      cancelled.probe.beginComposition();
+      cancelled.probe.requestOnFrame({}, () => { cancelRuns += 1; });
+      cancelled.probe.completeComposition();
+      await frames(6);
+      const cancelRefreshes = cancelled.probe.refreshes();
+      cancelled.probe.destroy();
+      cancelled.host.remove();
+
+      const preExisting = createProbe();
+      let preExistingRuns = 0;
+      preExisting.probe.requestOnFrame({}, () => { preExistingRuns += 1; });
+      preExisting.probe.beginComposition();
+      preExisting.probe.completeComposition();
+      await frames(6);
+      const preExistingRefreshes = preExisting.probe.refreshes();
+      preExisting.probe.destroy();
+      preExisting.host.remove();
+
+      const committed = createProbe();
+      const committedKey = {};
+      const committedRuns = { a: 0, b: 0 };
+      committed.probe.input('i');
+      committed.probe.request({}, () => {
+        committed.probe.requestOnFrame(committedKey, () => { committedRuns.b += 1; });
+      });
+      committed.probe.requestOnFrame(committedKey, () => { committedRuns.a += 1; });
+      await frames(6);
+      const committedRefreshes = committed.probe.refreshes();
+      committed.probe.destroy();
+      committed.host.remove();
+
+      const failed = createProbe();
+      let failedRuns = 0;
+      const originalConsoleError = console.error;
+      console.error = () => {};
+      try {
+        failed.probe.failNextRefresh();
+        failed.probe.beginComposition();
+        failed.probe.requestOnFrame({}, () => { failedRuns += 1; });
+        failed.probe.completeComposition();
+        await frames(6);
+        failed.probe.input('n');
+        await frames(6);
+      } finally {
+        console.error = originalConsoleError;
+      }
+      const failedRefreshes = failed.probe.refreshes();
+      failed.probe.destroy();
+      failed.host.remove();
+
+      const first = createProbe();
+      const second = createProbe();
+      let firstRuns = 0;
+      let secondRuns = 0;
+      first.probe.beginComposition();
+      second.probe.beginComposition();
+      first.probe.requestOnFrame({}, () => { firstRuns += 1; });
+      second.probe.requestOnFrame({}, () => { secondRuns += 1; });
+      first.probe.completeComposition();
+      await frames(6);
+      const afterFirst = { firstRuns, secondRuns };
+      second.probe.completeComposition();
+      await frames(6);
+      const afterSecond = { firstRuns, secondRuns };
+      first.probe.destroy();
+      second.probe.destroy();
+      first.host.remove();
+      second.host.remove();
+
+      return {
+        emptyRefreshes,
+        latestRuns,
+        latestRefreshes,
+        cancelRuns,
+        cancelRefreshes,
+        preExistingRuns,
+        preExistingRefreshes,
+        committedRuns,
+        committedRefreshes,
+        failedRuns,
+        failedRefreshes,
+        afterFirst,
+        afterSecond
+      };
+    });
+    if (
+      compositionDesiredModuleFacts.emptyRefreshes !== 0 ||
+      JSON.stringify(compositionDesiredModuleFacts.latestRuns) !== JSON.stringify({ a: 0, b: 1 }) ||
+      compositionDesiredModuleFacts.latestRefreshes !== 1 ||
+      compositionDesiredModuleFacts.cancelRuns !== 1 || compositionDesiredModuleFacts.cancelRefreshes !== 1 ||
+      compositionDesiredModuleFacts.preExistingRuns !== 1 || compositionDesiredModuleFacts.preExistingRefreshes !== 1 ||
+      JSON.stringify(compositionDesiredModuleFacts.committedRuns) !== JSON.stringify({ a: 0, b: 1 }) ||
+      compositionDesiredModuleFacts.committedRefreshes !== 1 ||
+      compositionDesiredModuleFacts.failedRuns !== 0 || compositionDesiredModuleFacts.failedRefreshes !== 2 ||
+      JSON.stringify(compositionDesiredModuleFacts.afterFirst) !== JSON.stringify({ firstRuns: 1, secondRuns: 0 }) ||
+      JSON.stringify(compositionDesiredModuleFacts.afterSecond) !== JSON.stringify({ firstRuns: 1, secondRuns: 1 })
+    ) {
+      throw new Error(`Composition desired Module matrix failed: ${JSON.stringify(compositionDesiredModuleFacts)}`);
+    }
+
     const liveSearchPendingFacts = await page.evaluate(async () => {
       const editor = (window as any).__liveInputEditor;
       const probe = (window as any).__observeLiveSearchRefresh(editor);
@@ -524,6 +658,148 @@ async function main(): Promise<void> {
       liveSearchFrameLifecycleFacts.currentAfterSupersede !== 1
     ) {
       throw new Error(`Live search frame lifecycle escaped Module currentness: ${JSON.stringify(liveSearchFrameLifecycleFacts)}`);
+    }
+
+    const emptyCompositionSearchFacts = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const editor = (window as any).__createInputCursorEditor({
+        parent: host,
+        text: 'empty composition search target',
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      const probe = (window as any).__observeLiveSearchRefresh(editor);
+      const content = editor.view.contentDOM;
+      content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      content.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+      editor.setSearchQuery('search');
+      const found = editor.findNext('target', { focusEditor: false }).found;
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const afterComplete = probe.count();
+      editor.setSearchQuery('composition');
+      for (let index = 0; index < 3; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const afterNewQuery = probe.count();
+      (window as any).__dispatchProductionInput(editor, editor.getText().length, '!');
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const afterNextInput = probe.count();
+      probe.destroy();
+      editor.destroy();
+      host.remove();
+      return { found, afterComplete, afterNewQuery, afterNextInput };
+    });
+    if (
+      emptyCompositionSearchFacts.found !== true || emptyCompositionSearchFacts.afterComplete !== 1 ||
+      emptyCompositionSearchFacts.afterNewQuery !== 2 || emptyCompositionSearchFacts.afterNextInput !== 2
+    ) {
+      throw new Error(`Empty composition did not settle its current search desired once: ${JSON.stringify(emptyCompositionSearchFacts)}`);
+    }
+
+    const compositionSearchCancellationFacts = await page.evaluate(async () => {
+      const frames = async (count: number) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      const create = () => {
+        const host = document.createElement('div');
+        document.body.append(host);
+        const editor = (window as any).__createInputCursorEditor({
+          parent: host,
+          text: 'composition cancellation target',
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+        return { host, editor, probe: (window as any).__observeLiveSearchRefresh(editor) };
+      };
+
+      const external = create();
+      external.editor.view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      external.editor.setSearchQuery('target');
+      external.editor.setText('external wins', true);
+      external.editor.view.contentDOM.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+      await frames(6);
+      const externalEffects = external.probe.count();
+      external.probe.destroy();
+      external.editor.destroy();
+      external.host.remove();
+
+      const mode = create();
+      mode.editor.view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      mode.editor.setSearchQuery('target');
+      mode.editor.setMode('source');
+      mode.editor.view.contentDOM.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+      await frames(6);
+      const modeEffects = mode.probe.count();
+      mode.probe.destroy();
+      mode.editor.destroy();
+      mode.host.remove();
+
+      const destroyed = create();
+      destroyed.editor.view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      destroyed.editor.setSearchQuery('target');
+      destroyed.editor.destroy();
+      await frames(6);
+      const destroyEffects = destroyed.probe.count();
+      destroyed.host.remove();
+
+      return { externalEffects, modeEffects, destroyEffects };
+    });
+    if (
+      compositionSearchCancellationFacts.externalEffects !== 0 ||
+      compositionSearchCancellationFacts.modeEffects !== 0 ||
+      compositionSearchCancellationFacts.destroyEffects !== 0
+    ) {
+      throw new Error(`Composition search desired survived explicit cancellation: ${JSON.stringify(compositionSearchCancellationFacts)}`);
+    }
+
+    const longCompositionSearchFacts = await page.evaluate(async () => {
+      const frames = async (count: number) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      const run = async (cancel: boolean) => {
+        const host = document.createElement('div');
+        document.body.append(host);
+        const editor = (window as any).__createInputCursorEditor({
+          parent: host,
+          text: 'long composition target',
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+        const probe = (window as any).__observeLiveSearchRefresh(editor);
+        const content = editor.view.contentDOM;
+        content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+        const insertion = editor.getText().length;
+        (window as any).__dispatchProductionInput(editor, insertion, 'preedit');
+        editor.setSearchQuery('target');
+        await frames(4);
+        const during = probe.count();
+        if (cancel) {
+          (window as any).__dispatchProductionInput(editor, insertion, '', insertion + 'preedit'.length);
+        }
+        content.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+        await frames(6);
+        const after = probe.count();
+        probe.destroy();
+        editor.destroy();
+        host.remove();
+        return { during, after };
+      };
+      return { commit: await run(false), cancel: await run(true) };
+    });
+    if (
+      longCompositionSearchFacts.commit.during !== 0 || longCompositionSearchFacts.commit.after !== 1 ||
+      longCompositionSearchFacts.cancel.during !== 0 || longCompositionSearchFacts.cancel.after !== 1
+    ) {
+      throw new Error(`Long composition search desired escaped preedit/commit ownership: ${JSON.stringify(longCompositionSearchFacts)}`);
     }
 
     const destroyedLiveSearchFacts = await page.evaluate(async () => {

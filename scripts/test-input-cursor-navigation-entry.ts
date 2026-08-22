@@ -9,9 +9,12 @@ import {
   detailsBlockStateExtensions
 } from '../webview/src/helpers/detailsBlocks';
 import {
+  beginLiveInputComposition,
+  completeLiveInputComposition,
   isLiveInputDerivedWorkRefresh,
   liveInputDerivedWorkExtensions,
-  requestLiveInputDerivedWork
+  requestLiveInputDerivedWork,
+  requestLiveInputDerivedWorkOnFrame
 } from '../webview/src/editor/liveInputDerivedWork';
 import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode';
 
@@ -52,14 +55,17 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
   let throwNextRefresh = false;
   let throwNextSettle = false;
   let refreshAccepted = false;
+  let refreshes = 0;
   const throwingRefreshField = StateField.define<boolean>({
     create: () => false,
     update(value, transaction) {
       if (throwNextRefresh && isLiveInputDerivedWorkRefresh(transaction)) {
         throwNextRefresh = false;
+        refreshes += 1;
         throw new Error('controlled live-input refresh failure');
       }
       if (isLiveInputDerivedWorkRefresh(transaction)) {
+        refreshes += 1;
         refreshAccepted = true;
         return value;
       }
@@ -92,6 +98,16 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
     request(key: object, operation: () => void) {
       requestLiveInputDerivedWork(view, key, operation);
     },
+    requestOnFrame(key: object, operation: () => void) {
+      requestLiveInputDerivedWorkOnFrame(view, key, operation);
+    },
+    beginComposition() {
+      beginLiveInputComposition(view);
+    },
+    completeComposition() {
+      completeLiveInputComposition(view);
+    },
+    refreshes: () => refreshes,
     failNextRefresh() {
       throwNextRefresh = true;
     },
