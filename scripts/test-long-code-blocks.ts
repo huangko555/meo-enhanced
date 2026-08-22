@@ -34,6 +34,42 @@ async function main() {
     await page.addStyleTag({
       content: ':root { --meo-background:#24292e; --meo-foreground:#e6edf3; --meo-code-background:#292d31; --meo-semantic-mutedForeground:#8b949e; --vscode-editor-font-family:monospace; --vscode-editor-font-size:14px; --vscode-editor-line-height:20px; }'
     });
+    await page.evaluate(() => {
+      const nativeAnimationFrame = window.requestAnimationFrame.bind(window);
+      const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+      const heldCallbacks = new Map<number, FrameRequestCallback>();
+      let holding = false;
+      let holdNext = false;
+      let nextHeldId = -1;
+      window.requestAnimationFrame = (callback: FrameRequestCallback) => {
+        if (!holding && !holdNext) return nativeAnimationFrame(callback);
+        holdNext = false;
+        const id = nextHeldId;
+        nextHeldId -= 1;
+        heldCallbacks.set(id, callback);
+        return id;
+      };
+      window.cancelAnimationFrame = (id: number) => {
+        if (!heldCallbacks.delete(id)) nativeCancelAnimationFrame(id);
+      };
+      (window as any).__longCodeFrameGate = {
+        hold() { holding = true; },
+        holdNext() { holdNext = true; },
+        open() { holding = false; holdNext = false; },
+        pending() { return heldCallbacks.size; },
+        takeFrame() {
+          const callbacks = [...heldCallbacks.values()];
+          heldCallbacks.clear();
+          return {
+            count: callbacks.length,
+            run() {
+              const timestamp = performance.now();
+              for (const callback of callbacks) callback(timestamp);
+            }
+          };
+        }
+      };
+    });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await page.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', {
@@ -45,6 +81,221 @@ async function main() {
           }
         }
       });
+    });
+
+    for (const bareOpeningFence of ['```', '```js']) {
+      const bareFenceState = await page.evaluate((content) => {
+        const editor = (window as any).LongCodeBlocksHarness.createEditor({
+          parent: document.getElementById('app')!,
+          text: content,
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+        const state = {
+          text: editor.getText(),
+          placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+          footers: document.querySelectorAll('.meo-md-long-code-footer').length
+        };
+        editor.destroy();
+        document.getElementById('app')!.replaceChildren();
+        return state;
+      }, bareOpeningFence);
+      if (
+        bareFenceState.text !== bareOpeningFence ||
+        bareFenceState.placeholders !== 0 ||
+        bareFenceState.footers !== 0
+      ) {
+        throw new Error(`Bare unclosed opening fence did not degrade safely: ${JSON.stringify({ bareOpeningFence, bareFenceState })}`);
+      }
+    }
+
+    const replacementBlock = (label: string, codeLineCount = 24) => [
+      '```js',
+      ...Array.from({ length: codeLineCount }, (_, index) => `const ${label}${index + 1} = ${index + 1};`),
+      '```',
+      '',
+      ...Array.from({ length: 80 }, (_, index) => `${label} trailing prose ${index + 1}`)
+    ].join('\n');
+    await page.evaluate((content) => {
+      (window as any).__longCodeBlocksEditor = (window as any).LongCodeBlocksHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: content,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, replacementBlock('manualOld'));
+    await waitForFrames(page);
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await waitForFrames(page);
+    await page.evaluate((content) => {
+      (window as any).__longCodeBlocksEditor.setText(content, true);
+    }, replacementBlock('manualNew'));
+    await waitForFrames(page);
+    const manualReplacement = await page.evaluate(() => ({
+      placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+      footers: document.querySelectorAll('.meo-md-long-code-footer').length,
+      text: (window as any).__longCodeBlocksEditor.getText()
+    }));
+    if (
+      manualReplacement.placeholders !== 1 || manualReplacement.footers !== 0 ||
+      !manualReplacement.text.includes('manualNew24')
+    ) {
+      throw new Error(`External replacement inherited manual fold UI: ${JSON.stringify(manualReplacement)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const target = editor.getText().indexOf('manualNew20');
+      editor.revealSelection(target, target, { focusEditor: true, align: 'nearest' });
+    });
+    await waitForFrames(page);
+    await page.evaluate((content) => {
+      (window as any).__longCodeBlocksEditor.setText(content, true);
+    }, replacementBlock('temporaryNew'));
+    await waitForFrames(page);
+    const temporaryReplacement = await page.evaluate(() => ({
+      placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+      footers: document.querySelectorAll('.meo-md-long-code-footer').length,
+      text: (window as any).__longCodeBlocksEditor.getText()
+    }));
+    if (
+      temporaryReplacement.placeholders !== 1 || temporaryReplacement.footers !== 0 ||
+      !temporaryReplacement.text.includes('temporaryNew24')
+    ) {
+      throw new Error(`External replacement inherited temporary fold UI: ${JSON.stringify(temporaryReplacement)}`);
+    }
+
+    await page.evaluate((content) => {
+      (window as any).__longCodeBlocksEditor.setText(content, true);
+    }, replacementBlock('raceOld', 100));
+    await waitForFrames(page);
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await page.evaluate(() => {
+      const scroller = (window as any).__longCodeBlocksEditor.getScrollElement();
+      scroller.scrollTop = scroller.scrollHeight * 0.35;
+    });
+    await waitForFrames(page);
+    const lateMeasureReplacement = await page.evaluate(async (content) => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const floating = document.querySelector<HTMLButtonElement>('.meo-long-code-floating-action');
+      if (!floating || floating.hidden) throw new Error('Missing floating collapse action for replacement race');
+      const frameGate = (window as any).__longCodeFrameGate;
+      frameGate.hold();
+      floating.click();
+      const scroller = editor.getScrollElement();
+      scroller.scrollTop = scroller.scrollHeight;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const oldMeasureFrame = frameGate.takeFrame();
+      frameGate.open();
+      editor.setText(content, true);
+      const target = editor.getText().indexOf('generationNew trailing prose 70');
+      editor.revealSelection(target, target, { focusEditor: true, align: 'nearest' });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const beforeLateCallbacks = editor.getTopVisiblePosition();
+      oldMeasureFrame.run();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const afterLateCallbacks = editor.getTopVisiblePosition();
+      return {
+        oldMeasureFrames: oldMeasureFrame.count,
+        beforeLateCallbacks,
+        afterLateCallbacks,
+        placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+        footers: document.querySelectorAll('.meo-md-long-code-footer').length
+      };
+    }, replacementBlock('generationNew', 100));
+    if (
+      lateMeasureReplacement.oldMeasureFrames === 0 ||
+      lateMeasureReplacement.placeholders !== 1 || lateMeasureReplacement.footers !== 0 ||
+      Math.abs(lateMeasureReplacement.afterLateCallbacks.line - lateMeasureReplacement.beforeLateCallbacks.line) > 1
+    ) {
+      throw new Error(`Late fold measure changed the replacement Document: ${JSON.stringify(lateMeasureReplacement)}`);
+    }
+
+    await page.evaluate((content) => {
+      (window as any).__longCodeBlocksEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__longCodeBlocksEditor = (window as any).LongCodeBlocksHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: content,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, replacementBlock('rafOld', 100));
+    await waitForFrames(page);
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await page.evaluate(() => {
+      const scroller = (window as any).__longCodeBlocksEditor.getScrollElement();
+      scroller.scrollTop = scroller.scrollHeight * 0.35;
+    });
+    await waitForFrames(page);
+    const lateRafReplacement = await page.evaluate(async (content) => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const floating = document.querySelector<HTMLButtonElement>('.meo-long-code-floating-action');
+      if (!floating || floating.hidden) throw new Error('Missing floating collapse action for RAF replacement race');
+      const frameGate = (window as any).__longCodeFrameGate;
+      const scroller = editor.getScrollElement();
+      let descriptorOwner: object | null = scroller;
+      let scrollTopDescriptor: PropertyDescriptor | undefined;
+      while (descriptorOwner && !scrollTopDescriptor) {
+        scrollTopDescriptor = Object.getOwnPropertyDescriptor(descriptorOwner, 'scrollTop');
+        descriptorOwner = Object.getPrototypeOf(descriptorOwner);
+      }
+      if (!scrollTopDescriptor?.get || !scrollTopDescriptor.set) {
+        throw new Error('Browser scrollTop boundary is unavailable');
+      }
+      let scrollJumpCaptured = false;
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTopDescriptor!.get!.call(scroller),
+        set: (value: number) => {
+          const before = scrollTopDescriptor!.get!.call(scroller) as number;
+          scrollTopDescriptor!.set!.call(scroller, value);
+          const after = scrollTopDescriptor!.get!.call(scroller) as number;
+          if (!scrollJumpCaptured && before - after > 100) {
+            scrollJumpCaptured = true;
+            frameGate.holdNext();
+          }
+        }
+      });
+      floating.click();
+      scroller.scrollTop = scroller.scrollHeight;
+      for (let attempt = 0; attempt < 100 && frameGate.pending() === 0; attempt += 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
+      delete (scroller as HTMLElement & { scrollTop?: number }).scrollTop;
+      const lateAnimationFrame = frameGate.takeFrame();
+      const lateAnimationFrames = lateAnimationFrame.count;
+      frameGate.open();
+
+      editor.setText(content, true);
+      const target = editor.getText().indexOf('rafNew trailing prose 70');
+      editor.revealSelection(target, target, { focusEditor: true, align: 'nearest' });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const beforeLateRaf = editor.getTopVisiblePosition();
+      lateAnimationFrame.run();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const afterLateRaf = editor.getTopVisiblePosition();
+      return {
+        scrollJumpCaptured,
+        lateAnimationFrames,
+        beforeLateRaf,
+        afterLateRaf,
+        placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
+        footers: document.querySelectorAll('.meo-md-long-code-footer').length
+      };
+    }, replacementBlock('rafNew', 100));
+    if (
+      !lateRafReplacement.scrollJumpCaptured ||
+      lateRafReplacement.lateAnimationFrames === 0 ||
+      lateRafReplacement.placeholders !== 1 || lateRafReplacement.footers !== 0 ||
+      Math.abs(lateRafReplacement.afterLateRaf.line - lateRafReplacement.beforeLateRaf.line) > 1
+    ) {
+      throw new Error(`Late fold RAF changed the replacement Document: ${JSON.stringify(lateRafReplacement)}`);
+    }
+    await page.evaluate(() => {
+      (window as any).__longCodeBlocksEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      delete (window as any).__longCodeBlocksEditor;
     });
 
     const languageLines = Array.from({ length: 19 }, (_, index) => `const line${index + 1} = ${index + 1};`);

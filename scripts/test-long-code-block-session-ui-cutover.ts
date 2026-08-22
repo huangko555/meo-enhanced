@@ -34,8 +34,6 @@ for (const forbidden of [
 const longCodeModule = read('webview/src/helpers/longCodeBlocks.ts');
 assert.doesNotMatch(longCodeModule, /\benabled\s*:/, 'session folding must always be active in Live mode');
 assert.doesNotMatch(longCodeModule, /setLongCodeBlockFoldingEnabledEffect/);
-assert.match(longCodeModule, /manualCollapsed/);
-assert.match(longCodeModule, /temporaryTarget/);
 assert.deepEqual(
   Array.from(longCodeModule.matchAll(/export\s+(?:const|function|class|type)\s+(\w+)/g), (match) => match[1]),
   ['longCodeBlockSessionUiExtension'],
@@ -49,5 +47,14 @@ const directConsumers = [
 ].filter((file) => fs.existsSync(path.join(repoRoot, file)))
   .filter((file) => read(file).includes("helpers/longCodeBlocks"));
 assert.deepEqual(directConsumers, [], 'only the Live seam may install the Long Code Block Session UI');
+
+const publicBehaviorContract = read('scripts/test-long-code-blocks.ts');
+for (const internalName of ['manualCollapsed', 'temporaryTarget', 'longCodeBlockStateField']) {
+  assert.doesNotMatch(
+    publicBehaviorContract,
+    new RegExp(internalName),
+    `production behavior contract must not inspect ${internalName}`
+  );
+}
 
 console.log('Long code block session UI cutover checks passed');

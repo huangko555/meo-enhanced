@@ -965,6 +965,50 @@ async function main(): Promise<void> {
       throw new Error(`Pending input swallowed or replayed long-code toggle: ${JSON.stringify({ pendingToggle, settledToggle })}`);
     }
 
+    const collisionBlock = (label: string) => [
+      '```js',
+      ...Array.from({ length: 24 }, (_, index) => `const ${label}${index + 1} = ${index + 1};`),
+      '```'
+    ].join('\n');
+    const firstCollisionBlock = collisionBlock('collisionFirst');
+    const collisionText = `${firstCollisionBlock}\n\n${collisionBlock('collisionSecond')}`;
+    const oldSecondAnchor = firstCollisionBlock.length + 2;
+    await page.evaluate((text) => {
+      (window as any).__liveInputEditor.setText(text, true);
+    }, collisionText);
+    await waitForFrames(page, 5);
+    const collisionToggle = await page.evaluate((anchorShift) => {
+      const editor = (window as any).__liveInputEditor;
+      (window as any).__dispatchProductionInput(editor, 0, `${'x'.repeat(anchorShift - 1)}\n`);
+      const actions = document.querySelectorAll<HTMLButtonElement>(
+        '#primary .meo-md-long-code-placeholder .meo-long-code-action'
+      );
+      if (actions.length !== 2) throw new Error(`Expected two pending long-code actions, got ${actions.length}`);
+      actions[1].click();
+      const visibleText = document.querySelector('#primary .cm-content')?.textContent ?? '';
+      return {
+        placeholders: document.querySelectorAll('#primary .meo-md-long-code-placeholder').length,
+        firstHidden: !visibleText.includes('collisionFirst24'),
+        secondVisible: visibleText.includes('collisionSecond24')
+      };
+    }, oldSecondAnchor);
+    await waitForFrames(page, 5);
+    const settledCollisionToggle = await page.evaluate(() => {
+      const visibleText = document.querySelector('#primary .cm-content')?.textContent ?? '';
+      return {
+        placeholders: document.querySelectorAll('#primary .meo-md-long-code-placeholder').length,
+        firstHidden: !visibleText.includes('collisionFirst24'),
+        secondVisible: visibleText.includes('collisionSecond24')
+      };
+    });
+    if (
+      collisionToggle.placeholders !== 1 || !collisionToggle.firstHidden || !collisionToggle.secondVisible ||
+      settledCollisionToggle.placeholders !== 1 || !settledCollisionToggle.firstHidden ||
+      !settledCollisionToggle.secondVisible
+    ) {
+      throw new Error(`Pending input targeted the wrong colliding long-code anchor: ${JSON.stringify({ collisionToggle, settledCollisionToggle })}`);
+    }
+
     await page.evaluate((text) => {
       const editor = (window as any).__liveInputEditor;
       editor.setText(text, true);

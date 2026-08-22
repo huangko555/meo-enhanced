@@ -110,6 +110,7 @@ import {
   shouldDeferLiveInputDerivedWork,
   supersedeLiveInputDerivedWork
 } from './editor/liveInputDerivedWork';
+import { markExternalDocumentPresentation } from './editor/externalDocumentPresentation';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -2592,7 +2593,10 @@ export function createEditor({
               supersedeLiveInputDerivedWork(),
               ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
             ],
-            annotations: Transaction.addToHistory.of(false)
+            annotations: [
+              Transaction.addToHistory.of(false),
+              markExternalDocumentPresentation()
+            ]
           });
           return;
         }
@@ -2613,7 +2617,10 @@ export function createEditor({
               supersedeLiveInputDerivedWork(),
               ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
             ],
-            annotations: Transaction.addToHistory.of(false)
+            annotations: [
+              Transaction.addToHistory.of(false),
+              markExternalDocumentPresentation()
+            ]
           });
         } finally {
           applyingExternal = false;

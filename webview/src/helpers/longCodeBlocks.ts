@@ -7,6 +7,7 @@ import {
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
+import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
@@ -62,6 +63,9 @@ function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescr
 
       const startLine = state.doc.lineAt(node.from);
       const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
+      if (startLine.number >= state.doc.lines) {
+        return false;
+      }
       const contentStartLine = state.doc.line(startLine.number + 1);
       const lastChild = node.node.lastChild;
       const hasClosingFence = lastChild?.name === 'CodeMark' &&
@@ -181,11 +185,26 @@ function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: 
   ensureCollapsedBlockVisible(view, anchor, generation);
 }
 
+function resolveCurrentBlockAnchor(view: EditorView, dom: HTMLElement, fallbackAnchor: number): number {
+  const state = view.state.field(longCodeBlockStateField, false);
+  if (!state) {
+    return fallbackAnchor;
+  }
+  try {
+    const position = view.posAtDOM(dom);
+    return state.blocks.find((block) => position >= block.start && position <= block.end)?.anchor
+      ?? fallbackAnchor;
+  } catch {
+    return fallbackAnchor;
+  }
+}
+
 function makeActionButton(
   view: EditorView,
   action: 'expand' | 'collapse',
   anchor: number,
-  hiddenLineCount = 0
+  hiddenLineCount: number,
+  resolveAnchor: () => number
 ): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
@@ -200,7 +219,7 @@ function makeActionButton(
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    setLongCodeBlockCollapsed(view, anchor, action === 'collapse');
+    setLongCodeBlockCollapsed(view, resolveAnchor(), action === 'collapse');
   });
   return button;
 }
@@ -244,7 +263,13 @@ class LongCodePlaceholderWidget extends WidgetType {
     metadata.className = 'meo-long-code-line-count';
     metadata.textContent = `${this.lineCount} lines`;
     container.append(language, metadata);
-    container.appendChild(makeActionButton(view, 'expand', this.anchor, this.hiddenLineCount));
+    container.appendChild(makeActionButton(
+      view,
+      'expand',
+      this.anchor,
+      this.hiddenLineCount,
+      () => resolveCurrentBlockAnchor(view, container, this.anchor)
+    ));
     return container;
   }
 
@@ -283,7 +308,13 @@ class LongCodeFooterWidget extends WidgetType {
     metadata.className = 'meo-long-code-line-count';
     metadata.textContent = `${this.lineCount} lines`;
     container.append(language, metadata);
-    container.appendChild(makeActionButton(view, 'collapse', this.anchor));
+    container.appendChild(makeActionButton(
+      view,
+      'collapse',
+      this.anchor,
+      0,
+      () => resolveCurrentBlockAnchor(view, container, this.anchor)
+    ));
     return container;
   }
 
@@ -494,6 +525,9 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
     return buildLongCodeState(state);
   },
   update(value, transaction) {
+    if (isExternalDocumentPresentation(transaction)) {
+      return buildLongCodeState(transaction.state);
+    }
     if (shouldDeferLiveInputDerivedWork(transaction)) {
       return updateDeferredLongCodeState(value, transaction);
     }
@@ -551,6 +585,9 @@ class LongCodeFloatingButtonPlugin {
   }
 
   update(update: ViewUpdate): void {
+    if (update.transactions.some(isExternalDocumentPresentation)) {
+      viewportGeneration.set(this.view, (viewportGeneration.get(this.view) ?? 0) + 1);
+    }
     if (update.transactions.some(shouldDeferLiveInputDerivedWork)
       && !update.transactions.some(hasLongCodeImmediateEffect)) return;
     if (update.docChanged || update.viewportChanged || update.selectionSet || update.geometryChanged || update.transactions.some((transaction) => transaction.effects.length > 0)) {
