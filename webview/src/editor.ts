@@ -620,7 +620,11 @@ export function createEditor({
     input.focus({ preventScroll: true });
     const caret = input.value.length;
     input.setSelectionRange(caret, caret);
-    input.closest(tableEntryCellSelector)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    const cell = input.closest<HTMLElement>(tableEntryCellSelector);
+    if (cell) {
+      const isRevealCurrent = viewportController.beginNavigationReveal();
+      viewportController.revealElement(cell, isRevealCurrent);
+    }
     return true;
   };
   const findTableEntryInput = (wrap: HTMLElement, hit: Element, direction: 'up' | 'down') => {
@@ -1539,7 +1543,8 @@ export function createEditor({
           if (!input) return false;
           input.focus({ preventScroll: true });
           input.setSelectionRange(0, 0);
-          input.closest('th, td')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+          const cell = input.closest<HTMLElement>('th, td');
+          if (cell) viewportController.revealElement(cell, isRevealCurrent);
           return true;
         };
         requestAnimationFrame(() => {

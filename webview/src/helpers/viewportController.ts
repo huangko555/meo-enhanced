@@ -73,8 +73,10 @@ interface ActiveLayoutAnchor extends LayoutAnchor {
 }
 
 interface StabilizeOptions {
+  isCurrent?: () => boolean;
   onSettled?: () => void;
   schedule?: 'immediate' | 'next-frame';
+  tracksDocumentAnchor?: boolean;
 }
 
 interface ActiveScrollTarget {
@@ -297,6 +299,20 @@ export class ViewportController {
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
     this.anchorStabilizationGeneration = null;
+    this.lastWheelAt = Number.NEGATIVE_INFINITY;
+    this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
+    this.lastTouchY = null;
+  }
+
+  private markNavigationScrollStart(): void {
+    const scope = this.anchorTransactionScope;
+    const programmaticCurrentTransaction = scope.kind === 'current'
+      && this.isAnchorTokenCurrent(scope.record)
+      && (this.anchorMutationDepth > 0 || this.documentChangeDepth > 0);
+    if (!programmaticCurrentTransaction) {
+      this.interactionGeneration += 1;
+    }
+    this.scrollLockGeneration += 1;
     this.lastWheelAt = Number.NEGATIVE_INFINITY;
     this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
     this.lastTouchY = null;
@@ -525,28 +541,44 @@ export class ViewportController {
     });
   }
 
-  /** Reveals once, then keeps the same element offset while async layout settles. */
-  revealElement(element: HTMLElement): void {
-    if (this.destroyed || !element.isConnected) return;
+  /** Reveals through the owned scroller, then keeps the chosen nearest edge while layout settles. */
+  revealElement(element: HTMLElement, isCurrent: () => boolean = () => true): void {
+    if (this.destroyed || !element.isConnected || !isCurrent()) return;
     const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
     const before = element.getBoundingClientRect();
-    const fullyVisible = before.top >= scrollerRect.top
-      && before.bottom <= scrollerRect.bottom
-      && before.left >= scrollerRect.left
-      && before.right <= scrollerRect.right;
-    if (fullyVisible) return;
+    const nearestEdge = (startDelta: number, endDelta: number): 'start' | 'end' | null => {
+      if (startDelta >= 0 && endDelta <= 0) return null;
+      if (startDelta < 0 && endDelta > 0) {
+        return Math.abs(startDelta) <= endDelta ? 'start' : 'end';
+      }
+      return startDelta < 0 ? 'start' : 'end';
+    };
+    const verticalEdge = nearestEdge(before.top - scrollerRect.top, before.bottom - scrollerRect.bottom);
+    const horizontalEdge = nearestEdge(before.left - scrollerRect.left, before.right - scrollerRect.right);
+    if (!verticalEdge && !horizontalEdge) return;
 
-    element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    const revealed = element.getBoundingClientRect();
-    const viewportOffset = revealed.top - scrollerRect.top;
+    this.markNavigationScrollStart();
     this.stabilize(() => {
-      if (!element.isConnected) return null;
+      if (!element.isConnected || !isCurrent()) return null;
       const currentScroller = this.view.scrollDOM.getBoundingClientRect();
       const current = element.getBoundingClientRect();
       return {
-        top: this.view.scrollDOM.scrollTop + current.top - currentScroller.top - viewportOffset
+        ...(verticalEdge ? {
+          top: this.view.scrollDOM.scrollTop + (
+            verticalEdge === 'start'
+              ? current.top - currentScroller.top
+              : current.bottom - currentScroller.bottom
+          )
+        } : {}),
+        ...(horizontalEdge ? {
+          left: this.view.scrollDOM.scrollLeft + (
+            horizontalEdge === 'start'
+              ? current.left - currentScroller.left
+              : current.right - currentScroller.right
+          )
+        } : {})
       };
-    });
+    }, { isCurrent, tracksDocumentAnchor: false });
   }
 
   destroy(): void {
@@ -576,53 +608,68 @@ export class ViewportController {
   }
 
   private stabilize(readTarget: () => ScrollTarget | null, options: StabilizeOptions = {}): void {
+    const isCurrent = options.isCurrent ?? (() => true);
+    if (this.destroyed || !isCurrent()) return;
     const generation = ++this.generation;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
-    this.anchorStabilizationGeneration = generation;
+    const tracksDocumentAnchor = options.tracksDocumentAnchor !== false;
+    if (tracksDocumentAnchor) this.anchorStabilizationGeneration = generation;
     let attempts = 0;
     let stableFrames = 0;
     const finish = () => {
-      if (this.anchorStabilizationGeneration === generation) {
+      if (tracksDocumentAnchor && this.anchorStabilizationGeneration === generation) {
         this.anchorStabilizationGeneration = null;
       }
       if (options.onSettled) requestAnimationFrame(() => {
-        if (!this.destroyed && generation === this.generation) options.onSettled?.();
+        if (!this.destroyed && generation === this.generation && isCurrent()) options.onSettled?.();
       });
     };
 
     const measure = () => {
-      if (this.destroyed || generation !== this.generation || attempts >= MAX_SETTLE_FRAMES) return;
+      if (
+        this.destroyed || generation !== this.generation || !isCurrent() ||
+        attempts >= MAX_SETTLE_FRAMES
+      ) {
+        finish();
+        return;
+      }
       attempts += 1;
       this.view.requestMeasure({
         read: () => {
-          if (this.destroyed || generation !== this.generation) return null;
+          if (this.destroyed || generation !== this.generation || !isCurrent()) return null;
           const requested = readTarget();
           return requested === null
             ? null
             : this.resolveScrollTarget(requested, this.readScrollPosition());
         },
         write: (target) => {
-          if (this.destroyed || generation !== this.generation) return;
+          if (this.destroyed || generation !== this.generation || !isCurrent()) {
+            finish();
+            return;
+          }
           if (!target) {
             finish();
             return;
           }
           queueMicrotask(() => {
-            if (this.destroyed || generation !== this.generation) return;
+            if (this.destroyed || generation !== this.generation || !isCurrent()) {
+              finish();
+              return;
+            }
             const changed = this.writeScrollPosition(target);
             stableFrames = changed ? 0 : stableFrames + 1;
             if (stableFrames >= REQUIRED_STABLE_FRAMES || attempts >= MAX_SETTLE_FRAMES) {
               finish();
               return;
             }
-            requestAnimationFrame(measure);
+            if (isCurrent()) requestAnimationFrame(measure);
           });
         }
       });
     };
 
-    if (options.schedule === 'next-frame') requestAnimationFrame(measure);
+    if (options.schedule === 'next-frame' && isCurrent()) requestAnimationFrame(measure);
     else measure();
   }
 
@@ -823,14 +870,13 @@ export class ViewportController {
     this.lastTouchY = null;
   }
 
-  /** Starts one user-visible navigation reveal and invalidates every older delayed reveal. */
+  /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
-    this.markInteraction();
-    const navigationGeneration = this.navigationGeneration;
+    const navigationGeneration = ++this.navigationGeneration;
     return () => !this.destroyed && navigationGeneration === this.navigationGeneration;
   }
 
-  /** Reveals a document position with the requested alignment while later interaction stays authoritative. */
+  /** Reveals a document position; viewport ownership changes only when measurement requires a scroll. */
   revealPosition(
     position: number,
     {
@@ -842,29 +888,42 @@ export class ViewportController {
   ): void {
     if (this.destroyed || !isCurrent()) return;
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
-    const generation = ++this.generation;
-    this.activeScrollTarget = null;
-    this.activeLayoutAnchor = null;
-    this.anchorStabilizationGeneration = null;
+    const requestGeneration = this.generation;
     const measure = () => {
-      if (this.destroyed || generation !== this.generation || !isCurrent()) return;
+      if (this.destroyed || requestGeneration !== this.generation || !isCurrent()) return;
       this.view.requestMeasure({
         read: () => {
-          if (this.destroyed || generation !== this.generation || !isCurrent()) return null;
+          if (this.destroyed || requestGeneration !== this.generation || !isCurrent()) return null;
           const current = this.readScrollPosition();
-          const block = this.view.lineBlockAt(targetPosition);
-          const viewportHeight = this.view.scrollDOM.clientHeight;
+          const coords = this.view.coordsAtPos(targetPosition);
+          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
           if (y === 'center') {
+            if (coords) {
+              return this.resolveScrollTarget({
+                top: current.top + (coords.top + coords.bottom - scrollerRect.top - scrollerRect.bottom) / 2
+              }, current);
+            }
+            const block = this.view.lineBlockAt(targetPosition);
             return this.resolveScrollTarget({
-              top: block.top - Math.max(0, (viewportHeight - block.height) / 2)
+              top: block.top - Math.max(0, (this.view.scrollDOM.clientHeight - block.height) / 2)
             }, current);
           }
           if (y === 'start') {
+            const block = this.view.lineBlockAt(targetPosition);
             return this.resolveScrollTarget({ top: block.top - Math.max(0, yMargin) }, current);
           }
-          const coords = this.view.coordsAtPos(targetPosition);
-          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-          if (coords && coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom) return null;
+          if (coords) {
+            if (coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom) return null;
+            return this.resolveScrollTarget({
+              top: current.top + (
+                coords.top < scrollerRect.top
+                  ? coords.top - scrollerRect.top
+                  : coords.bottom - scrollerRect.bottom
+              )
+            }, current);
+          }
+          const block = this.view.lineBlockAt(targetPosition);
+          const viewportHeight = this.view.scrollDOM.clientHeight;
           if (block.top < current.top) return this.resolveScrollTarget({ top: block.top }, current);
           if (block.bottom > current.top + viewportHeight) {
             return this.resolveScrollTarget({ top: block.bottom - viewportHeight }, current);
@@ -872,7 +931,15 @@ export class ViewportController {
           return null;
         },
         write: (target) => {
-          if (target && !this.destroyed && generation === this.generation && isCurrent()) {
+          if (!target || this.destroyed || requestGeneration !== this.generation || !isCurrent()) return;
+          const current = this.readScrollPosition();
+          if (target.top === current.top && target.left === current.left) return;
+          this.markNavigationScrollStart();
+          const revealGeneration = ++this.generation;
+          this.activeScrollTarget = null;
+          this.activeLayoutAnchor = null;
+          this.anchorStabilizationGeneration = null;
+          if (!this.destroyed && revealGeneration === this.generation && isCurrent()) {
             this.writeScrollPosition(target);
           }
         }

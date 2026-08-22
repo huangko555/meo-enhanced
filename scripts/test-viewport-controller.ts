@@ -169,11 +169,17 @@ const documentScrollDOM = {
   scrollHeight: 5000,
   scrollWidth: 900,
   clientHeight: 500,
-  clientWidth: 900
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
 };
 const documentView = {
   dom: {},
   scrollDOM: documentScrollDOM,
+  state: { doc: { length: 4999 } },
+  coordsAtPos: () => ({
+    top: documentBlockTop - documentScrollDOM.scrollTop,
+    bottom: documentBlockTop + 20 - documentScrollDOM.scrollTop
+  }),
   lineBlockAtHeight: () => ({ from: 42, top: documentBlockTop }),
   lineBlockAt: () => ({ from: 42, top: documentBlockTop }),
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
@@ -195,6 +201,31 @@ documentController.preserveDocumentAnchorWhileMutation(() => {
 await flushFrames(documentFrames);
 if (documentScrollDOM.scrollTop !== 1470) {
   throw new Error(`Layout refresh moved the document anchor to ${documentScrollDOM.scrollTop}`);
+}
+documentBlockTop = 1750;
+documentController.restoreDocumentAnchor({ position: 42, lineOffset: 20 });
+const selectionOnlyNavigation = documentController.beginNavigationReveal();
+await flushFrames(documentFrames);
+if (!selectionOnlyNavigation() || documentScrollDOM.scrollTop !== 1770) {
+  throw new Error(
+    `Selection-only navigation cancelled layout settling: ${JSON.stringify({
+      current: selectionOnlyNavigation(),
+      scrollTop: documentScrollDOM.scrollTop
+    })}`
+  );
+}
+documentBlockTop = 1850;
+documentController.restoreDocumentAnchor({ position: 42, lineOffset: 20 });
+const visibleNavigation = documentController.beginNavigationReveal();
+documentController.revealPosition(42, { y: 'nearest' }, visibleNavigation);
+await flushFrames(documentFrames);
+if (!visibleNavigation() || documentScrollDOM.scrollTop !== 1870) {
+  throw new Error(
+    `Visible navigation cancelled layout settling: ${JSON.stringify({
+      current: visibleNavigation(),
+      scrollTop: documentScrollDOM.scrollTop
+    })}`
+  );
 }
 documentController.destroy();
 globalThis.requestAnimationFrame = originalRequestAnimationFrame;
@@ -334,7 +365,8 @@ const wheelScrollDOM = Object.assign(new FakeEventTarget(), {
   scrollHeight: 5000,
   scrollWidth: 2000,
   clientHeight: 500,
-  clientWidth: 900
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900, height: 500, width: 900 })
 });
 const wheelView = {
   dom: wheelDom,
@@ -383,6 +415,51 @@ if (wheelNavigationReveal()) {
   throw new Error('A newer wheel interaction did not invalidate a delayed navigation reveal');
 }
 
+wheelScrollDOM.scrollTop = 1000;
+let elementScrollIntoViewCalls = 0;
+let navigationElementTop = 1800;
+const navigationElement = {
+  isConnected: true,
+  getBoundingClientRect: () => ({
+    top: navigationElementTop - wheelScrollDOM.scrollTop,
+    bottom: navigationElementTop + 40 - wheelScrollDOM.scrollTop,
+    left: 0,
+    right: 200
+  }),
+  scrollIntoView: () => {
+    elementScrollIntoViewCalls += 1;
+    wheelScrollDOM.scrollTop = 1340;
+  }
+};
+const elementReveal = wheelController.beginNavigationReveal();
+wheelController.revealElement(navigationElement as any, elementReveal);
+wheelScrollDOM.scrollTop = 0;
+wheelDom.dispatch('beforeinput', { inputType: 'insertText' });
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (elementScrollIntoViewCalls !== 0 || wheelScrollDOM.scrollTop !== 0) {
+  throw new Error(
+    `Element reveal escaped the Controller or outlived currentness: ${JSON.stringify({
+      elementScrollIntoViewCalls,
+      scrollTop: wheelScrollDOM.scrollTop
+    })}`
+  );
+}
+wheelScrollDOM.scrollTop = 1000;
+const currentElementReveal = wheelController.beginNavigationReveal();
+wheelController.revealElement(navigationElement as any, currentElementReveal);
+navigationElementTop += 100;
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (elementScrollIntoViewCalls !== 0 || wheelScrollDOM.scrollTop !== 1440) {
+  throw new Error(
+    `Current element reveal did not own settled scrolling: ${JSON.stringify({
+      elementScrollIntoViewCalls,
+      scrollTop: wheelScrollDOM.scrollTop
+    })}`
+  );
+}
+
 const revealScrollDOM = Object.assign(new FakeEventTarget(), {
   ownerDocument: new FakeEventTarget(),
   scrollTop: 100,
@@ -426,6 +503,39 @@ await flushFrames(wheelFrames);
 if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
 }
+const tallScrollDOM = Object.assign(new FakeEventTarget(), {
+  ownerDocument: new FakeEventTarget(),
+  scrollTop: 1000,
+  scrollLeft: 0,
+  scrollHeight: 3000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
+});
+const tallController = new ViewportController({
+  dom: new FakeEventTarget(),
+  scrollDOM: tallScrollDOM,
+  state: { doc: { length: 1999 } },
+  coordsAtPos: () => ({
+    top: 1520 - tallScrollDOM.scrollTop,
+    bottom: 1540 - tallScrollDOM.scrollTop
+  }),
+  lineBlockAt: () => ({ top: 600, bottom: 1800, height: 1200 }),
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+} as any, { attachInteractions: false });
+const tallNearestReveal = tallController.beginNavigationReveal();
+tallController.revealPosition(900, { y: 'nearest' }, tallNearestReveal);
+if (tallScrollDOM.scrollTop !== 1040) {
+  throw new Error(`Tall wrapped nearest reveal moved to ${tallScrollDOM.scrollTop} instead of 1040`);
+}
+tallScrollDOM.scrollTop = 1000;
+const tallCenterReveal = tallController.beginNavigationReveal();
+tallController.revealPosition(900, { y: 'center' }, tallCenterReveal);
+if (tallScrollDOM.scrollTop !== 1280) {
+  throw new Error(`Tall wrapped center reveal moved to ${tallScrollDOM.scrollTop} instead of 1280`);
+}
+tallController.destroy();
 const isolatedWheelReveal = wheelController.beginNavigationReveal();
 const isolatedReveal = revealController.beginNavigationReveal();
 wheelController.markInteraction();

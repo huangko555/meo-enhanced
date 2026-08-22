@@ -35,10 +35,17 @@ async function main(): Promise<void> {
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
-    const text = Array.from({ length: 320 }, (_, index) => (
-      index === 279 ? `line ${index + 1} unique-navigation-target` : `line ${index + 1} ordinary content`
-    )).join('\n');
-    const immediate = await page.evaluate((documentText) => {
+    const text = Array.from({ length: 320 }, (_, index) => {
+      if (index === 159) return `line 160 ${'wrapped-segment '.repeat(280)}`;
+      if (index === 219) return '| Rich A | Rich B |';
+      if (index === 220) return '| --- | --- |';
+      if (index === 221) return '| rendered table target | value |';
+      if (index === 222) return '| rendered table next | value |';
+      return index === 279
+        ? `line ${index + 1} unique-navigation-target`
+        : `line ${index + 1} ordinary content`;
+    }).join('\n');
+    const staleTrace = await page.evaluate(async (documentText) => {
       const create = (window as any).__createInputCursorEditor;
       const editor = create({
         parent: document.getElementById('app'),
@@ -56,18 +63,36 @@ async function main(): Promise<void> {
         deltaMode: WheelEvent.DOM_DELTA_PIXEL
       }));
       scroller.scrollTop = 0;
+      const frames: Array<{
+        frame: number;
+        scrollTop: number;
+        focused: boolean;
+        selectionText: string;
+      }> = [];
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push({
+          frame,
+          scrollTop: scroller.scrollTop,
+          focused: editor.hasFocus(),
+          selectionText: document.getSelection()?.toString() ?? ''
+        });
+      }
       return {
         found: result?.found ?? false,
         scrollTop: scroller.scrollTop,
         text: editor.getText(),
-        focused: editor.hasFocus()
+        focused: editor.hasFocus(),
+        frames
       };
     }, text);
-    if (!immediate.found || immediate.scrollTop !== 0 || immediate.text !== text || !immediate.focused) {
-      throw new Error(`Production navigation setup failed: ${JSON.stringify(immediate)}`);
+    if (
+      !staleTrace.found || staleTrace.scrollTop !== 0 || staleTrace.text !== text || !staleTrace.focused ||
+      staleTrace.frames.some((frame) => frame.scrollTop !== 0 || !frame.focused)
+    ) {
+      throw new Error(`Stale navigation wrote during the continuous frame trace: ${JSON.stringify(staleTrace)}`);
     }
 
-    await waitForFrames(page);
     const settled = await page.evaluate(() => {
       const editor = (window as any).__inputCursorEditor;
       const scroller = editor.getScrollElement();
@@ -86,14 +111,59 @@ async function main(): Promise<void> {
     if (settled.scrollTop !== 0 || settled.text !== text || !settled.focused) {
       throw new Error(`A stale command reveal overrode the later wheel interaction: ${JSON.stringify(settled)}`);
     }
+    const searchSelection = await page.evaluate(() => (
+      (window as any).__inputCursorEditor.replaceCurrent(
+        'unique-navigation-target',
+        'unique-navigation-target'
+      )
+    ));
+    if (!searchSelection.replaced) {
+      throw new Error(`Continuous trace lost the search Selection: ${JSON.stringify(searchSelection)}`);
+    }
+
+    await page.evaluate(() => (window as any).__inputCursorEditor.scrollToLine(120, 'top'));
+    await waitForFrames(page, 4);
+    const selectionOnlyLayout = await page.evaluate(async () => {
+      const editor = (window as any).__inputCursorEditor;
+      const scroller = editor.getScrollElement();
+      const before = editor.getTopVisiblePosition();
+      const beforeScrollTop = scroller.scrollTop;
+      const frames: Array<{ frame: number; line: number; scrollTop: number }> = [];
+      editor.preserveViewport(() => { scroller.scrollTop += 240; });
+      editor.revealSelection(editor.getText().length, editor.getText().length, {
+        focusEditor: false,
+        align: 'none'
+      });
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push({
+          frame,
+          line: editor.getTopVisiblePosition().line,
+          scrollTop: scroller.scrollTop
+        });
+      }
+      return { before, beforeScrollTop, after: editor.getTopVisiblePosition(), frames };
+    });
+    if (
+      Math.abs(selectionOnlyLayout.after.line - selectionOnlyLayout.before.line) > 1 ||
+      Math.abs(selectionOnlyLayout.frames.at(-1)!.scrollTop - selectionOnlyLayout.beforeScrollTop) > 1
+    ) {
+      throw new Error(
+        `Selection-only reveal cancelled the active layout owner: ${JSON.stringify(selectionOnlyLayout)}`
+      );
+    }
 
     const replacementPosition = text.indexOf('line 40 ordinary content') + 'line 40 '.length;
-    await page.evaluate((position) => {
-      const editor = (window as any).__inputCursorEditor;
-      editor.setMode('source');
-      editor.revealSelection(position, position, { focusEditor: true, align: 'nearest' });
-    }, replacementPosition);
-    await waitForFrames(page, 2);
+    await page.evaluate(() => (window as any).__inputCursorEditor.setMode('source'));
+    await waitForFrames(page, 4);
+    await page.evaluate((position) => (
+      (window as any).__inputCursorEditor.revealSelection(
+        position,
+        position,
+        { focusEditor: true, align: 'nearest' }
+      )
+    ), replacementPosition);
+    await waitForFrames(page, 4);
     const sourceScrollBeforeInput = await page.evaluate(() => (
       (window as any).__inputCursorEditor.getScrollElement().scrollTop
     ));
@@ -125,6 +195,62 @@ async function main(): Promise<void> {
       throw new Error(`Visible Source replacement moved or lost the caret: ${JSON.stringify(sourceInput)}`);
     }
 
+    const wrappedPosition = text.indexOf('line 160 ') + 'line 160 '.length + 'wrapped-segment '.repeat(270).length;
+    await page.evaluate((position) => {
+      (window as any).__inputCursorEditor.revealSelection(position, position, {
+        focusEditor: true,
+        align: 'center'
+      });
+    }, wrappedPosition);
+    await waitForFrames(page, 4);
+    const tallWrapped = await page.evaluate(async (position) => {
+      const editor = (window as any).__inputCursorEditor;
+      const scroller = editor.getScrollElement();
+      const readCaret = () => {
+        const selection = document.getSelection();
+        return selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+      };
+      const centeredCaret = readCaret();
+      const viewport = scroller.getBoundingClientRect();
+      if (!centeredCaret) throw new Error('Tall wrapped caret had no public DOM range');
+      scroller.scrollTop = Math.max(
+        0,
+        scroller.scrollTop + centeredCaret.bottom - viewport.bottom - 20
+      );
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const initialScrollTop = scroller.scrollTop;
+      const line = (document.getSelection()?.anchorNode instanceof Element
+        ? document.getSelection()?.anchorNode
+        : document.getSelection()?.anchorNode?.parentElement)?.closest<HTMLElement>('.cm-line');
+      const lineTop = line?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
+      editor.revealSelection(position, position, { focusEditor: true, align: 'nearest' });
+      const frames: Array<{ frame: number; scrollTop: number }> = [];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push({ frame, scrollTop: scroller.scrollTop });
+      }
+      const caret = readCaret();
+      const settledViewport = scroller.getBoundingClientRect();
+      return {
+        initialScrollTop,
+        finalScrollTop: scroller.scrollTop,
+        lineStartedAboveViewport: lineTop < viewport.top,
+        caretVisible: Boolean(caret && caret.top >= settledViewport.top && caret.bottom <= settledViewport.bottom),
+        frames
+      };
+    }, wrappedPosition);
+    const wrappedDelta = tallWrapped.finalScrollTop - tallWrapped.initialScrollTop;
+    if (
+      !tallWrapped.lineStartedAboveViewport || !tallWrapped.caretVisible ||
+      wrappedDelta < 15 || wrappedDelta > 30 ||
+      tallWrapped.frames.some((frame, index, frames) => (
+        frame.scrollTop < tallWrapped.initialScrollTop - 1 ||
+        (index > 0 && frame.scrollTop < frames[index - 1].scrollTop - 1)
+      ))
+    ) {
+      throw new Error(`Tall wrapped caret did not use minimal monotonic reveal: ${JSON.stringify(tallWrapped)}`);
+    }
+
     const navigationPosition = text.indexOf('line 120 ordinary content');
     await page.evaluate((position) => {
       const editor = (window as any).__inputCursorEditor;
@@ -152,6 +278,54 @@ async function main(): Promise<void> {
     }, navigationScrollBefore);
     if (navigation.scrollDelta > 40 || !navigation.cursorVisible || !navigation.focused) {
       throw new Error(`Source ArrowDown exceeded nearest caret reveal: ${JSON.stringify(navigation)}`);
+    }
+
+    await page.evaluate(() => (window as any).__inputCursorEditor.setMode('live'));
+    await waitForFrames(page, 8);
+    const renderedTable = await page.evaluate(async () => {
+      const editor = (window as any).__inputCursorEditor;
+      const scroller = editor.getScrollElement();
+      scroller.scrollTop = 0;
+      const originalScrollIntoView = Element.prototype.scrollIntoView;
+      let callerScrollIntoViewCalls = 0;
+      Element.prototype.scrollIntoView = function (...args: Parameters<Element['scrollIntoView']>) {
+        callerScrollIntoViewCalls += 1;
+        return originalScrollIntoView.apply(this, args as [boolean | ScrollIntoViewOptions | undefined]);
+      };
+      const frames: Array<{ frame: number; scrollTop: number }> = [];
+      try {
+        editor.scrollToLine(222, 'upper');
+        for (let frame = 0; frame < 12; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          frames.push({ frame, scrollTop: scroller.scrollTop });
+        }
+      } finally {
+        Element.prototype.scrollIntoView = originalScrollIntoView;
+      }
+      const input = document.activeElement instanceof HTMLTextAreaElement
+        ? document.activeElement
+        : null;
+      const cellRect = input?.closest('th, td')?.getBoundingClientRect() ?? null;
+      const viewport = scroller.getBoundingClientRect();
+      return {
+        callerScrollIntoViewCalls,
+        focusedValue: input?.value ?? null,
+        cellVisible: Boolean(
+          cellRect && cellRect.top >= viewport.top && cellRect.bottom <= viewport.bottom &&
+          cellRect.left >= viewport.left && cellRect.right <= viewport.right
+        ),
+        frames
+      };
+    });
+    if (
+      renderedTable.callerScrollIntoViewCalls !== 0 ||
+      renderedTable.focusedValue !== 'rendered table target' ||
+      !renderedTable.cellVisible ||
+      renderedTable.frames.some((frame, index, frames) => (
+        index > 0 && frame.scrollTop < frames[index - 1].scrollTop - 1
+      ))
+    ) {
+      throw new Error(`Rendered table navigation had a second writer or reversal: ${JSON.stringify(renderedTable)}`);
     }
 
     await page.evaluate(() => (window as any).__inputCursorEditor.destroy());

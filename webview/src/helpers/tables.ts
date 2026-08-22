@@ -382,7 +382,10 @@ export function focusTableHistoryChange(
     );
     if (!isFullyVisible) {
       const viewportController = getViewportController(view);
-      viewportController?.revealElement(cell);
+      const isNavigationCurrent = viewportController?.beginNavigationReveal();
+      if (viewportController && isNavigationCurrent) {
+        viewportController.revealElement(cell, () => isCurrent() && isNavigationCurrent());
+      }
     }
     return true;
   };
@@ -2432,7 +2435,16 @@ class HtmlTableWidget extends WidgetType {
     const nextCaret = Math.min(Math.max(caret ?? input.value.length, 0), input.value.length);
     input.setSelectionRange(nextCaret, nextCaret);
     if (scrollCellIntoView) {
-      input.closest(tableCellSelector)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      const cell = input.closest<HTMLElement>(tableCellSelector);
+      if (cell) {
+        const viewport = this.view ? getViewportController(this.view) : null;
+        if (viewport) {
+          const isRevealCurrent = viewport.beginNavigationReveal();
+          viewport.revealElement(cell, isRevealCurrent);
+        } else {
+          cell.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        }
+      }
     }
     const container = input.closest('.meo-md-html-table-wrap');
     if (container instanceof HTMLElement) {
@@ -3333,7 +3345,7 @@ class HtmlTableWidget extends WidgetType {
       input.setSelectionRange(caret, caret);
       const cell = input.closest<HTMLElement>(tableCellSelector);
       if (cell) {
-        if (viewport) viewport.revealElement(cell);
+        if (viewport) viewport.revealElement(cell, isRevealCurrent);
         else cell.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       }
       return true;
@@ -3750,7 +3762,10 @@ class HtmlTableWidget extends WidgetType {
       };
       resizeAndSchedule();
       const viewport = this.view ? getViewportController(this.view) : null;
-      if (viewport && document.activeElement === input) viewport.revealElement(rowEl);
+      if (viewport && document.activeElement === input) {
+        const isRevealCurrent = viewport.beginNavigationReveal();
+        viewport.revealElement(rowEl, isRevealCurrent);
+      }
       notifySelectionChange();
     });
     input.addEventListener('select', notifySelectionChange);
