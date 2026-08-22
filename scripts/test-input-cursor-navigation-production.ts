@@ -338,23 +338,59 @@ async function main(): Promise<void> {
       if (!input || !row) throw new Error('Rendered table overlap had no real focused row');
       const beforeScrollTop = scroller.scrollTop;
       const beforeSelection = [input.selectionStart, input.selectionEnd];
+      const scrollWrites: Array<{
+        phase: 'layout-mutation' | 'navigation-input' | 'navigation-stale' | 'settling';
+        before: number;
+        requested: number;
+        after: number;
+      }> = [];
+      let scrollWritePhase: (typeof scrollWrites)[number]['phase'] = 'layout-mutation';
+      let descriptorOwner: object | null = scroller;
+      let descriptor: PropertyDescriptor | undefined;
+      while (descriptorOwner && !descriptor) {
+        descriptor = Object.getOwnPropertyDescriptor(descriptorOwner, 'scrollTop');
+        descriptorOwner = Object.getPrototypeOf(descriptorOwner);
+      }
+      if (!descriptor?.get || !descriptor.set) {
+        throw new Error('Rendered table overlap could not instrument the real scroller scrollTop accessor');
+      }
+      const nativeScrollTop = descriptor;
+      const readNativeScrollTop = () => Number(nativeScrollTop.get!.call(scroller));
+      // Preserve the native DOM behavior while observing every synchronous JS write before the first RAF sample.
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get: readNativeScrollTop,
+        set(value: number) {
+          const before = readNativeScrollTop();
+          nativeScrollTop.set!.call(scroller, value);
+          scrollWrites.push({
+            phase: scrollWritePhase,
+            before,
+            requested: value,
+            after: readNativeScrollTop()
+          });
+        }
+      });
       input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
       editor.preserveViewport(() => {
         row.style.transform = 'translateY(700px)';
         scroller.scrollTop += 100;
       });
       const mutatedScrollTop = scroller.scrollTop;
+      scrollWritePhase = 'navigation-input';
       input.dispatchEvent(new InputEvent('input', {
         bubbles: true,
         inputType: 'insertText',
         data: null
       }));
+      scrollWritePhase = 'navigation-stale';
       input.dispatchEvent(new InputEvent('beforeinput', {
         bubbles: true,
         cancelable: true,
         inputType: 'insertText',
         data: 'x'
       }));
+      scrollWritePhase = 'settling';
       const frames: Array<{
         frame: number;
         scrollTop: number;
@@ -374,11 +410,14 @@ async function main(): Promise<void> {
           selectionEnd: input.selectionEnd
         });
       }
+      const finalScrollTop = scroller.scrollTop;
+      Reflect.deleteProperty(scroller, 'scrollTop');
       return {
         beforeScrollTop,
         mutatedScrollTop,
-        finalScrollTop: scroller.scrollTop,
+        finalScrollTop,
         beforeSelection,
+        scrollWrites,
         frames
       };
     });
@@ -390,10 +429,34 @@ async function main(): Promise<void> {
       renderedTableLayoutOverlap.beforeScrollTop,
       renderedTableLayoutOverlap.mutatedScrollTop
     ) + 1;
+    let previousWriteDistance = Math.abs(
+      renderedTableLayoutOverlap.mutatedScrollTop - renderedTableLayoutOverlap.beforeScrollTop
+    );
+    const illegalScrollWrite = renderedTableLayoutOverlap.scrollWrites.find((write) => {
+      if (
+        write.after < overlapLowerBound ||
+        write.after > overlapUpperBound
+      ) return true;
+      if (write.phase === 'layout-mutation') return false;
+      const distance = Math.abs(write.after - renderedTableLayoutOverlap.beforeScrollTop);
+      const movedAwayFromLayoutTarget = distance > previousWriteDistance + 1;
+      previousWriteDistance = distance;
+      return movedAwayFromLayoutTarget;
+    });
     if (
       Math.abs(
         renderedTableLayoutOverlap.finalScrollTop - renderedTableLayoutOverlap.beforeScrollTop
       ) > 1 ||
+      illegalScrollWrite ||
+      !renderedTableLayoutOverlap.scrollWrites.some((write) => (
+        write.phase === 'layout-mutation' &&
+        Math.abs(write.before - renderedTableLayoutOverlap.beforeScrollTop) <= 1 &&
+        Math.abs(write.after - renderedTableLayoutOverlap.mutatedScrollTop) <= 1
+      )) ||
+      !renderedTableLayoutOverlap.scrollWrites.some((write) => (
+        write.phase === 'settling' &&
+        Math.abs(write.after - renderedTableLayoutOverlap.beforeScrollTop) <= 1
+      )) ||
       renderedTableLayoutOverlap.frames.some((frame) => (
         frame.scrollTop < overlapLowerBound ||
         frame.scrollTop > overlapUpperBound ||
