@@ -7,6 +7,14 @@ import { launchTestBrowser } from './browser-test-helpers';
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-list-editing-transaction-'));
 
+async function waitForFrames(page: Page, count = 4): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-list-editing-entry.ts')],
@@ -311,6 +319,141 @@ async function main(): Promise<void> {
     assert.equal(result.secondBefore, '12. external\n48. stays explicit');
     assert.equal(result.secondAfter, result.secondBefore, 'destroyed Editor work must not cross into another Editor');
     assert.equal(result.secondChangeCountAfterDestroyWait, result.secondChangeCountBeforeDestroyWait);
+
+    const nestedDocument = [
+      '```mermaid',
+      'graph TD',
+      'A --> B',
+      '```',
+      '',
+      '1. a',
+      '99. b',
+      'tail'
+    ].join('\n');
+    await page.evaluate((text) => {
+      (window as any).mermaid = {
+        initialize() {},
+        async render(_id: string, source: string) {
+          return { svg: `<svg viewBox="0 0 120 40"><text>${source.length}</text></svg>` };
+        }
+      };
+      const host = document.createElement('div');
+      host.id = 'nested-rich-list';
+      document.body.append(host);
+      (window as any).__nestedRichListEditor = (window as any).ListEditingHarness.createEditor({
+        parent: host,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, nestedDocument);
+    await page.waitForSelector('#nested-rich-list .meo-mermaid-mode-btn');
+    await page.click('#nested-rich-list .meo-mermaid-mode-btn');
+    await page.waitForSelector('#nested-rich-list .meo-mermaid-editing-block.is-split');
+    await page.click('#nested-rich-list .meo-mermaid-source-editor .cm-content');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Control');
+    await waitForFrames(page, 8);
+
+    const nestedBefore = await page.evaluate(() => {
+      const editor = (window as any).__nestedRichListEditor;
+      const block = document.querySelector<HTMLElement>('#nested-rich-list .meo-mermaid-editing-block')!;
+      const innerContent = block.querySelector<HTMLElement>('.meo-mermaid-source-editor .cm-content')!;
+      const outerSelectionLine = editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number;
+      const frames: Array<Record<string, unknown>> = [];
+      (window as any).__nestedRichListFrames = frames;
+      let removedBlocks = 0;
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.removedNodes) {
+            if (node === block || (node instanceof Element && node.contains(block))) removedBlocks += 1;
+          }
+        }
+      });
+      observer.observe(editor.view.contentDOM, { childList: true, subtree: true });
+      const recordFrame = () => {
+        const currentBlock = document.querySelector<HTMLElement>(
+          '#nested-rich-list .meo-mermaid-editing-block'
+        );
+        const visibleOuterSource = Array.from(editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
+          .filter((line) => !line.closest('.meo-mermaid-editing-block'))
+          .filter((line) => {
+            const text = line.textContent ?? '';
+            const rect = line.getBoundingClientRect();
+            return (text.includes('graph TD') || text.includes('A --> B'))
+              && getComputedStyle(line).display !== 'none'
+              && rect.height > 0;
+          })
+          .map((line) => line.textContent ?? '');
+        frames.push({
+          text: editor.getText(),
+          sameBlock: currentBlock === block,
+          visibleOuterSource,
+          innerFocused: innerContent.contains(document.activeElement),
+          outerSelectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number,
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          blockTop: currentBlock?.getBoundingClientRect().top ?? null
+        });
+        if (frames.length < 8) requestAnimationFrame(recordFrame);
+        else {
+          observer.disconnect();
+          (window as any).__nestedRichListRemovedBlocks = removedBlocks;
+        }
+      };
+      requestAnimationFrame(recordFrame);
+      return {
+        text: editor.getText(),
+        history: editor.getHistoryDepth(),
+        outerSelectionLine,
+        scrollTop: editor.view.scrollDOM.scrollTop,
+        blockTop: block.getBoundingClientRect().top
+      };
+    });
+    await page.keyboard.type('X');
+    await waitForFrames(page, 10);
+    const nestedAfter = await page.evaluate(() => {
+      const editor = (window as any).__nestedRichListEditor;
+      return {
+        text: editor.getText(),
+        history: editor.getHistoryDepth(),
+        frames: (window as any).__nestedRichListFrames ?? null,
+        removedBlocks: (window as any).__nestedRichListRemovedBlocks ?? 0,
+        focused: document.querySelector<HTMLElement>(
+          '#nested-rich-list .meo-mermaid-source-editor .cm-content'
+        )?.contains(document.activeElement) ?? false
+      };
+    });
+    const nestedExpected = nestedDocument.replace('99. b', '2. b').replace('A --> B', 'A --> BX');
+    assert.equal(nestedAfter.text, nestedExpected);
+    assert.deepEqual(nestedAfter.history, { undo: 1, redo: 0 });
+    assert.equal(
+      nestedAfter.removedBlocks,
+      0,
+      `nested normalization must not unload the rich block: ${JSON.stringify(nestedAfter.frames)}`
+    );
+    assert.equal(nestedAfter.focused, true, 'nested normalization must keep focus in the rich editor');
+    assert.equal(nestedAfter.frames.length, 8);
+    for (const frame of nestedAfter.frames) {
+      assert.equal(frame.sameBlock, true, 'the rendered block must remain mounted on every frame');
+      assert.deepEqual(frame.visibleOuterSource, [], 'outer Markdown source must remain hidden on every frame');
+      assert.equal(frame.innerFocused, true, 'nested focus must not move during normalization');
+      assert.equal(frame.outerSelectionLine, nestedBefore.outerSelectionLine);
+      assert.ok(Math.abs(Number(frame.scrollTop) - nestedBefore.scrollTop) <= 1);
+      assert.ok(Math.abs(Number(frame.blockTop) - nestedBefore.blockTop) <= 1);
+      assert.ok(frame.text === nestedDocument || frame.text === nestedExpected, 'a frame observed a partial edit');
+    }
+    assert.equal(await page.evaluate(() => (window as any).__nestedRichListEditor.undo()), true);
+    await waitForFrames(page, 4);
+    assert.equal(
+      await page.evaluate(() => (window as any).__nestedRichListEditor.getText()),
+      nestedDocument,
+      'one undo must revert both nested input and numbering'
+    );
+    assert.equal(await page.evaluate(() => (window as any).__nestedRichListEditor.redo()), true);
+    await waitForFrames(page, 4);
+    assert.equal(await page.evaluate(() => (window as any).__nestedRichListEditor.getText()), nestedExpected);
+    await page.evaluate(() => (window as any).__nestedRichListEditor.destroy());
 
     console.log('list editing production transaction checks passed');
   } finally {

@@ -4,12 +4,11 @@ import {
   EditorState,
   Transaction,
   Annotation,
-  type AnnotationType,
   type Extension,
   type Line,
-  type Range
+  type Range,
+  type TransactionSpec
 } from '@codemirror/state';
-import { isolateHistory } from '@codemirror/commands';
 import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemirror/view';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
 
@@ -76,22 +75,6 @@ const FOUR_SPACE_INDENT_COLUMNS = 4;
 const orderedListNormalizationIntent = Annotation.define<{
   resetNestedStartsAtLines: readonly number[];
 }>();
-
-function retainAnnotation<T>(transaction: Transaction, type: AnnotationType<T>): Annotation<T>[] {
-  const value = transaction.annotation(type);
-  return value === undefined ? [] : [type.of(value)];
-}
-
-function retainedOrderedListTransactionAnnotations(transaction: Transaction) {
-  return [
-    ...retainAnnotation(transaction, Transaction.time),
-    ...retainAnnotation(transaction, Transaction.userEvent),
-    ...retainAnnotation(transaction, Transaction.addToHistory),
-    ...retainAnnotation(transaction, Transaction.remote),
-    ...retainAnnotation(transaction, isolateHistory),
-    ...retainAnnotation(transaction, orderedListNormalizationIntent)
-  ];
-}
 
 const listIndentStyle = {
   twoSpaces: {
@@ -970,13 +953,15 @@ export function orderedListRenumberTransactionFilter(
     // A sequential follow-up maps the original effects before consumers see
     // the combined transaction. Rebuilding one spec lets each consumer apply
     // the composed changes exactly once while selection follows normalization.
+    // Forward the original transaction opaquely: annotation ownership remains
+    // with its producer instead of becoming a registry maintained by lists.
     return {
+      ...transaction,
       changes: transaction.changes.compose(normalization),
       selection: transaction.selection?.map(normalization),
       effects: transaction.effects,
-      annotations: retainedOrderedListTransactionAnnotations(transaction),
       scrollIntoView: transaction.scrollIntoView
-    };
+    } satisfies TransactionSpec;
   });
 }
 

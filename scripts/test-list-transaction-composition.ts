@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  Annotation,
   EditorState,
   StateEffect,
   Transaction,
@@ -7,6 +8,12 @@ import {
 } from '@codemirror/state';
 import { isolateHistory } from '@codemirror/commands';
 import { orderedListRenumberTransactionFilter } from '../webview/src/helpers/listMarkers';
+import {
+  isLiveInputNestedProjection,
+  liveInputDerivedWorkExtensions,
+  markLiveInputNestedProjection,
+  shouldDeferLiveInputDerivedWork
+} from '../webview/src/editor/liveInputDerivedWork';
 
 type PositionedEffect = {
   readonly label: 'before' | 'between' | 'after';
@@ -20,6 +27,7 @@ const positionedEffect = StateEffect.define<PositionedEffect>({
   }
 });
 const nonPositionedEffect = StateEffect.define<string>();
+const opaqueConsumerAnnotation = Annotation.define<{ readonly consumer: string }>();
 
 function positionedValues(transaction: CodeMirrorTransaction): PositionedEffect[] {
   return transaction.effects
@@ -109,6 +117,42 @@ assert.equal(two.annotation(Transaction.addToHistory), true);
 assert.equal(two.annotation(Transaction.remote), true);
 assert.equal(two.annotation(Transaction.time), 123_456);
 assert.equal(two.annotation(isolateHistory), 'full');
+
+for (const consumer of ['mermaid', 'latex']) {
+  const nestedState = EditorState.create({
+    doc: '1. a\n99. b',
+    extensions: [
+      orderedListRenumberTransactionFilter(() => true),
+      ...liveInputDerivedWorkExtensions()
+    ]
+  });
+  const nestedProjection = nestedState.update({
+    changes: { from: 4, insert: 'x' },
+    selection: { anchor: 5 },
+    annotations: [
+      Transaction.userEvent.of('input.type'),
+      markLiveInputNestedProjection(),
+      opaqueConsumerAnnotation.of({ consumer })
+    ]
+  });
+  assert.equal(nestedProjection.newDoc.toString(), '1. ax\n2. b');
+  assert.equal(nestedProjection.newSelection.main.head, 5);
+  assert.equal(
+    isLiveInputNestedProjection(nestedProjection),
+    true,
+    `${consumer} nested provenance must survive ordered-list normalization`
+  );
+  assert.equal(
+    shouldDeferLiveInputDerivedWork(nestedProjection),
+    true,
+    `${consumer} nested input must keep the production derived-work barrier`
+  );
+  assert.deepEqual(
+    nestedProjection.annotation(opaqueConsumerAnnotation),
+    { consumer },
+    `${consumer} opaque annotations must survive without a list-owned registry`
+  );
+}
 
 let normalizeExternal = false;
 const external = state('1. a\n99. b', () => normalizeExternal).update({
