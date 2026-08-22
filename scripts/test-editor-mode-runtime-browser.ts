@@ -54,6 +54,35 @@ async function main(): Promise<void> {
     assert.equal(preempted.events.includes('mount-aborted:live'), true);
     await preemptionPage.close();
 
+    const adoptionPage = await createPage();
+    await adoptionPage.evaluate(() => (window as any).__editorModeCandidate.initialize());
+    await adoptionPage.waitForSelector('.cm-editor');
+    const adoptionStart = await adoptionPage.evaluate(() => (
+      (window as any).__editorModeCandidate.snapshot().events.length
+    ));
+    await adoptionPage.evaluate(() => (window as any).__editorModeCandidate.adoptAutomaticSource());
+    const adopted = await adoptionPage.evaluate((start) => {
+      const snapshot = (window as any).__editorModeCandidate.snapshot();
+      return { ...snapshot, adoptionEvents: snapshot.events.slice(start) };
+    }, adoptionStart);
+    assert.equal(adopted.state.mode, 'source');
+    assert.equal(adopted.editorMode, 'source');
+    assert.deepEqual(
+      adopted.adoptionEvents.filter((event: string) => event.startsWith('apply:')),
+      ['apply:source'],
+      'same-tick manual adoption must reuse the queued automatic Source apply'
+    );
+    assert.ok(
+      adopted.adoptionEvents.indexOf('apply:source')
+        < adopted.adoptionEvents.indexOf('persist:source:source')
+    );
+    assert.ok(
+      adopted.adoptionEvents.indexOf('persist:source:source')
+        < adopted.adoptionEvents.indexOf('post:source')
+    );
+    assert.match(adopted.persisted, /"mode":"source"/);
+    await adoptionPage.close();
+
     const page = await createPage();
     await page.evaluate(() => (window as any).__editorModeCandidate.initialize());
     await page.waitForSelector('.cm-editor');

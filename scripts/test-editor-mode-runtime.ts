@@ -114,6 +114,108 @@ assert.equal(events.some((event) => event.startsWith('persist:live')), false, 'l
 await runtime.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
 assert.equal(errors.length, 0);
 
+const adoptedFallbackEvents: string[] = [];
+let releaseFallbackApply: (() => void) | null = null;
+let markFallbackApplyStarted: (() => void) | null = null;
+const fallbackApplyStarted = new Promise<void>((resolve) => { markFallbackApplyStarted = resolve; });
+const adoptedFallbackApplication = createEditorModeApplication();
+const adoptedFallbackAdapter = createEditorModeEffectAdapter({
+  ...capabilities,
+  mountEditor: () => undefined,
+  async applyEditorMode(mode) {
+    adoptedFallbackEvents.push(`apply:${mode}`);
+    if (mode === 'live') throw failure('live-incompatible');
+    markFallbackApplyStarted?.();
+    await new Promise<void>((resolve) => { releaseFallbackApply = resolve; });
+  },
+  persistMode: (mode, lastEditableMode) => {
+    adoptedFallbackEvents.push(`persist:${mode}:${lastEditableMode}`);
+  },
+  postMode: (mode) => adoptedFallbackEvents.push(`post:${mode}`),
+  showNotice: (notice) => adoptedFallbackEvents.push(`notice:${notice}`)
+});
+const adoptedFallbackRuntime = createEditorModeRuntime(
+  adoptedFallbackApplication,
+  adoptedFallbackAdapter,
+  (error) => { throw error; }
+);
+await adoptedFallbackRuntime.dispatch({ type: 'initialize', hostMode: 'source' });
+const automaticFallback = adoptedFallbackRuntime.dispatch({
+  type: 'requestMode', mode: 'live', source: 'user'
+});
+await fallbackApplyStarted;
+const manualFallbackAdoption = adoptedFallbackRuntime.dispatch({
+  type: 'requestMode', mode: 'source', source: 'user'
+});
+assert.ok(releaseFallbackApply);
+releaseFallbackApply();
+await Promise.all([automaticFallback, manualFallbackAdoption]);
+await adoptedFallbackRuntime.whenIdle();
+assert.deepEqual(
+  adoptedFallbackEvents.filter((event) => event.startsWith('apply:')),
+  ['apply:live', 'apply:source'],
+  'manual adoption must not repeat the already-started fallback apply'
+);
+assert.equal(
+  adoptedFallbackEvents.includes('persist:source:source'),
+  true,
+  'a successfully adopted fallback must persist Source as the manual preference'
+);
+assert.equal(adoptedFallbackEvents.at(-1), 'post:source');
+adoptedFallbackRuntime.dispose();
+
+const queuedAdoptionEvents: string[] = [];
+let persistedAdoption: { mode: EditorMode; lastEditableMode: 'live' | 'source' } | null = null;
+const queuedAdoptionApplication = createEditorModeApplication();
+const queuedAdoptionAdapter = createEditorModeEffectAdapter({
+  ...capabilities,
+  mountEditor: () => undefined,
+  applyEditorMode: (mode) => queuedAdoptionEvents.push(`apply:${mode}`),
+  persistMode: (mode, lastEditableMode) => {
+    persistedAdoption = { mode, lastEditableMode };
+    queuedAdoptionEvents.push(`persist:${mode}:${lastEditableMode}`);
+  },
+  postMode: (mode) => queuedAdoptionEvents.push(`post:${mode}`)
+});
+const queuedAdoptionRuntime = createEditorModeRuntime(
+  queuedAdoptionApplication,
+  queuedAdoptionAdapter,
+  (error) => { throw error; }
+);
+await queuedAdoptionRuntime.dispatch({ type: 'initialize', hostMode: 'live' });
+const queuedAutomaticSource = queuedAdoptionRuntime.dispatch({
+  type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId: 0
+});
+const queuedManualSource = queuedAdoptionRuntime.dispatch({
+  type: 'requestMode', mode: 'source', source: 'user'
+});
+await Promise.all([queuedAutomaticSource, queuedManualSource]);
+await queuedAdoptionRuntime.whenIdle();
+assert.deepEqual(
+  queuedAdoptionEvents,
+  ['apply:source', 'persist:source:source', 'post:source'],
+  'same-tick manual Source must upgrade the queued automatic effect without duplicating apply'
+);
+const queuedManualIntentId = queuedAdoptionRuntime.getState().manualIntent?.id;
+assert.ok(queuedManualIntentId);
+await queuedAdoptionRuntime.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
+assert.equal(queuedAdoptionRuntime.getState().manualIntent?.id, queuedManualIntentId);
+assert.deepEqual(queuedAdoptionEvents, ['apply:source', 'persist:source:source', 'post:source']);
+assert.ok(persistedAdoption);
+const restoredAdoption = createEditorModeApplication();
+restoredAdoption.dispatch({
+  type: 'restoreLocal',
+  mode: persistedAdoption.mode,
+  lastEditableMode: persistedAdoption.lastEditableMode
+});
+restoredAdoption.dispatch({ type: 'initialize', hostMode: 'live' });
+assert.equal(
+  restoredAdoption.getState().mode,
+  'source',
+  'the persisted manual adoption must win over a later Host Init during Webview restore'
+);
+queuedAdoptionRuntime.dispose();
+
 const bestEffortErrors: string[] = [];
 const throwingAdapter = createEditorModeEffectAdapter({
   ...capabilities,

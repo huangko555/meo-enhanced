@@ -104,11 +104,21 @@ type PendingTransition = {
   readonly previousMode: EditorMode;
   readonly requestedMode: EditableMode;
   readonly source: EditorModeRequestSource;
+  readonly manualIntentId: number | null;
   readonly viewport: EditorModeViewport | null;
   readonly restoreEditorFocus: boolean;
   readonly persist: boolean;
   readonly post: boolean;
   readonly fallbackToSource: boolean;
+};
+
+type PendingMount = {
+  readonly id: number;
+  readonly mode: EditableMode;
+  readonly requestedMode: EditorMode;
+  readonly manualIntentId: number | null;
+  readonly persist: boolean;
+  readonly post: boolean;
 };
 
 const requestPolicy = (source: EditorModeRequestSource): {
@@ -163,7 +173,7 @@ export function createEditorModeApplication(): EditorModeApplication {
   let manualIntent: EditorModeState['manualIntent'] = null;
   let editorMount: EditorModeState['editorMount'] = 'unmounted';
   let mountSequence = 0;
-  let pendingMount: EditorModeState['pendingMount'] = null;
+  let pendingMount: PendingMount | null = null;
   let mountRecoveryAttempted = false;
   let transitionSequence = 0;
   let pendingTransition: PendingTransition | null = null;
@@ -178,7 +188,7 @@ export function createEditorModeApplication(): EditorModeApplication {
     intentId,
     manualIntent,
     editorMount,
-    pendingMount,
+    pendingMount: pendingMount ? { id: pendingMount.id, mode: pendingMount.mode } : null,
     mountRecoveryAttempted,
     pendingTransition: pendingTransition
       ? {
@@ -212,9 +222,46 @@ export function createEditorModeApplication(): EditorModeApplication {
     }
     const manual = source === 'user' || source === 'host-command';
     if (!options.force && targetMode === requestedMode) {
-      if (manual && manualIntent?.mode !== targetMode) {
-        manualIntent = { id: ++manualIntentSequence, mode: targetMode };
+      const pendingTargetMode = pendingTransition?.fallbackToSource
+        ? 'source'
+        : pendingTransition?.requestedMode;
+      const adoptsPendingTransition = pendingTargetMode === targetMode;
+      const adoptsPendingMount = pendingMount?.requestedMode === targetMode;
+      const transitionAlreadyManual = adoptsPendingTransition
+        && pendingTransition?.manualIntentId !== null
+        && pendingTransition?.manualIntentId === (manualIntent?.id ?? null)
+        && manualIntent?.mode === targetMode;
+      const mountAlreadyManual = adoptsPendingMount
+        && pendingMount?.manualIntentId !== null
+        && pendingMount?.manualIntentId === (manualIntent?.id ?? null)
+        && manualIntent?.mode === targetMode;
+      if (manual
+        && ((adoptsPendingTransition && !transitionAlreadyManual)
+          || (adoptsPendingMount && !mountAlreadyManual))) {
+        const adoptedManualIntent = { id: ++manualIntentSequence, mode: targetMode };
+        manualIntent = adoptedManualIntent;
         hasLocalPreference = true;
+        if (targetMode !== 'preview') lastEditableMode = targetMode;
+        if (adoptsPendingTransition && pendingTransition) {
+          pendingTransition = {
+            ...pendingTransition,
+            requestedMode: pendingTransition.fallbackToSource
+              ? targetMode
+              : pendingTransition.requestedMode,
+            source,
+            manualIntentId: adoptedManualIntent.id,
+            persist: true,
+            post: true
+          };
+        }
+        if (adoptsPendingMount && pendingMount) {
+          pendingMount = {
+            ...pendingMount,
+            manualIntentId: adoptedManualIntent.id,
+            persist: true,
+            post: true
+          };
+        }
       }
       return [];
     }
@@ -247,11 +294,27 @@ export function createEditorModeApplication(): EditorModeApplication {
 
     if (targetMode === 'preview' || editorMount !== 'mounted') {
       if (targetMode !== 'preview' && pendingMount?.mode !== targetMode) {
-        pendingMount = { id: ++mountSequence, mode: targetMode };
+        pendingMount = {
+          id: ++mountSequence,
+          mode: targetMode,
+          requestedMode: targetMode,
+          manualIntentId: manual ? manualIntent?.id ?? null : null,
+          persist: policy.persist,
+          post: policy.post
+        };
         editorMount = 'scheduled';
         effects.unshift({ type: 'scheduleEditorMount', mountId: pendingMount.id, mode: targetMode });
+      } else if (pendingMount) {
+        pendingMount = {
+          ...pendingMount,
+          requestedMode: targetMode,
+          manualIntentId: manual ? manualIntent?.id ?? null : null,
+          persist: policy.persist,
+          post: policy.post
+        };
       }
       if (targetMode !== 'preview') restoreFocusOnPreviewExit = false;
+      if (pendingMount) return effects;
       effects.push(...finalize(targetMode, policy));
       return effects;
     }
@@ -262,6 +325,7 @@ export function createEditorModeApplication(): EditorModeApplication {
       previousMode,
       requestedMode: targetMode,
       source,
+      manualIntentId: manual ? manualIntent?.id ?? null : null,
       viewport,
       restoreEditorFocus: effectiveRestoreEditorFocus,
       persist: policy.persist,
@@ -290,7 +354,15 @@ export function createEditorModeApplication(): EditorModeApplication {
         const source: EditorModeRequestSource = hasLocalPreference ? 'init-local' : 'init-host';
         const targetMode = hasLocalPreference ? mode : input.hostMode;
         if (targetMode === 'preview') {
-          pendingMount = { id: ++mountSequence, mode: lastEditableMode };
+          const policy = requestPolicy(source);
+          pendingMount = {
+            id: ++mountSequence,
+            mode: lastEditableMode,
+            requestedMode: targetMode,
+            manualIntentId: null,
+            persist: policy.persist,
+            post: policy.post
+          };
           editorMount = 'scheduled';
           return [
             { type: 'scheduleEditorMount', mountId: pendingMount.id, mode: pendingMount.mode },
@@ -338,7 +410,13 @@ export function createEditorModeApplication(): EditorModeApplication {
               type: 'presentMode',
               presentation: presentationFor('source', 'live', pending.viewport, pending.restoreEditorFocus)
             },
-            ...(pending.post ? [{ type: 'postMode', mode: 'source' } as const] : [])
+            ...(pending.requestedMode === 'source'
+              ? finalize('source', {
+                  persist: pending.persist,
+                  post: pending.post,
+                  markLocalPreference: false
+                })
+              : pending.post ? [{ type: 'postMode', mode: 'source' } as const] : [])
           ];
         }
         return finalize(pending.requestedMode, {
@@ -393,19 +471,25 @@ export function createEditorModeApplication(): EditorModeApplication {
         if (editorMount !== 'mounting'
           || !pendingMount
           || input.mountId !== pendingMount.id) return [];
+        const completedMount = pendingMount;
         editorMount = 'mounted';
         pendingMount = null;
         mountRecoveryAttempted = false;
-        return [];
+        return finalize(completedMount.requestedMode, {
+          persist: completedMount.persist,
+          post: completedMount.post,
+          markLocalPreference: false
+        });
 
       case 'editorMountFailed': {
         if (editorMount !== 'mounting'
           || !pendingMount
           || input.mountId !== pendingMount.id) return [];
+        const failedMount = pendingMount;
         pendingMount = null;
         if (mode === 'live' && !mountRecoveryAttempted && input.failure === 'transient-live') {
           mountRecoveryAttempted = true;
-          pendingMount = { id: ++mountSequence, mode: 'live' };
+          pendingMount = { ...failedMount, id: ++mountSequence, mode: 'live' };
           editorMount = 'scheduled';
           return [
             { type: 'showNotice', notice: 'mount-retry' },

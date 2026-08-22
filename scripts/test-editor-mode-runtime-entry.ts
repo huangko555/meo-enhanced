@@ -184,6 +184,15 @@ const candidate = {
   request(mode: EditorMode, restoreEditorFocus = false) {
     return runtime.dispatch({ type: 'requestMode', mode, source: 'user', restoreEditorFocus });
   },
+  async adoptAutomaticSource() {
+    const basisManualIntentId = application.getState().manualIntent?.id ?? 0;
+    const automatic = runtime.dispatch({
+      type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId
+    });
+    const manual = runtime.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
+    await Promise.all([automatic, manual]);
+    await runtime.whenIdle();
+  },
   toggle(restoreEditorFocus = false) {
     return runtime.dispatch({ type: 'toggleMode', source: 'user', restoreEditorFocus });
   },

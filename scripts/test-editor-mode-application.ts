@@ -14,10 +14,10 @@ const pendingMountId = (application: ModeApplication): number => {
   assert.ok(mountId);
   return mountId;
 };
-const mountEditor = (application: ModeApplication): void => {
+const mountEditor = (application: ModeApplication): readonly EditorModeEffect[] => {
   const mountId = pendingMountId(application);
   application.dispatch({ type: 'editorMountStarted', mountId });
-  application.dispatch({ type: 'editorMountSucceeded', mountId });
+  return application.dispatch({ type: 'editorMountSucceeded', mountId });
 };
 
 const hostInit = createEditorModeApplication();
@@ -31,6 +31,24 @@ assert.deepEqual(effectTypes(hostInitEffects), ['scheduleEditorMount', 'commitTr
 assert.deepEqual(hostInitEffects[0], { type: 'scheduleEditorMount', mountId: 1, mode: 'source' });
 assert.equal(hostInit.getState().mode, 'source');
 assert.equal(hostInitEffects.some((effect) => effect.type === 'postMode'), false, 'Host Init must not echo mode');
+assert.deepEqual(
+  effectTypes(hostInit.dispatch({ type: 'requestMode', mode: 'source', source: 'user' })),
+  [],
+  'manual adoption of pending Host Init must reuse the pending mount transaction'
+);
+const adoptedHostInitManualId = hostInit.getState().manualIntent?.id;
+assert.ok(adoptedHostInitManualId);
+assert.deepEqual(
+  effectTypes(mountEditor(hostInit)),
+  ['persistMode', 'postMode'],
+  'the adopted Host Init must settle manual policy only after mount success'
+);
+assert.deepEqual(
+  hostInit.dispatch({ type: 'requestMode', mode: 'source', source: 'user' }),
+  [],
+  'stable same-mode manual requests must be idempotent'
+);
+assert.equal(hostInit.getState().manualIntent?.id, adoptedHostInitManualId);
 
 const localInit = createEditorModeApplication();
 localInit.dispatch({ type: 'restoreLocal', mode: 'preview', lastEditableMode: 'source' });
@@ -38,11 +56,21 @@ const localInitEffects = localInit.dispatch({ type: 'initialize', hostMode: 'liv
 assert.equal(localInit.getState().mode, 'preview');
 assert.equal(localInit.getState().lastEditableMode, 'source');
 assert.deepEqual(effectTypes(localInitEffects), [
-  'scheduleEditorMount', 'commitTransientEdits', 'presentMode', 'persistMode', 'postMode'
+  'scheduleEditorMount', 'commitTransientEdits', 'presentMode'
 ]);
 assert.deepEqual(localInitEffects[0], { type: 'scheduleEditorMount', mountId: 1, mode: 'source' });
+assert.deepEqual(
+  localInit.dispatch({ type: 'requestMode', mode: 'preview', source: 'host-command' }),
+  [],
+  'manual adoption of pending local restore must not duplicate its existing persist/post effects'
+);
+assert.ok(localInit.getState().manualIntent?.id);
 
-mountEditor(localInit);
+assert.deepEqual(
+  effectTypes(mountEditor(localInit)),
+  ['persistMode', 'postMode'],
+  'pending local restore policy must settle exactly once after mount success'
+);
 const leavePreview = localInit.dispatch({
   type: 'toggleMode', source: 'host-command',
   viewport: { owner: 'preview', topLine: 70, topLineOffset: 0 }, restoreEditorFocus: true
@@ -192,6 +220,79 @@ assert.deepEqual(effectTypes(manualBeatsAutomatic.dispatch({
   source: 'render-failure',
   basisManualIntentId: currentManualIntentId
 })), ['commitTransientEdits', 'presentMode', 'applyEditorMode']);
+const automaticSourceId = manualBeatsAutomatic.getState().pendingTransition?.id;
+assert.ok(automaticSourceId);
+const automaticManualIntentId = manualBeatsAutomatic.getState().manualIntent?.id;
+assert.ok(automaticManualIntentId);
+assert.deepEqual(
+  manualBeatsAutomatic.dispatch({ type: 'requestMode', mode: 'source', source: 'user' }),
+  [],
+  'manual adoption must reuse the pending same-target concrete transition'
+);
+assert.ok(
+  (manualBeatsAutomatic.getState().manualIntent?.id ?? 0) > automaticManualIntentId,
+  'manual adoption must establish a fresh manual correlation'
+);
+assert.deepEqual(
+  effectTypes(manualBeatsAutomatic.dispatch({
+    type: 'editorModeApplied', transitionId: automaticSourceId
+  })),
+  ['persistMode', 'postMode'],
+  'the adopted automatic transition must settle with manual persistence policy'
+);
+
+const adoptedFailure = createEditorModeApplication();
+adoptedFailure.dispatch({ type: 'initialize', hostMode: 'live' });
+mountEditor(adoptedFailure);
+adoptedFailure.dispatch({
+  type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId: 0
+});
+const adoptedFailureId = adoptedFailure.getState().pendingTransition?.id;
+assert.ok(adoptedFailureId);
+adoptedFailure.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
+assert.deepEqual(effectTypes(adoptedFailure.dispatch({
+  type: 'editorModeFailed', transitionId: adoptedFailureId, failure: 'fatal'
+})), ['showNotice', 'rollbackPresentation']);
+assert.equal(adoptedFailure.getState().mode, 'live', 'adopted transition failure must still roll back');
+const manualIdBeforeReadoption = adoptedFailure.getState().manualIntent?.id;
+assert.ok(manualIdBeforeReadoption);
+adoptedFailure.dispatch({
+  type: 'requestMode',
+  mode: 'source',
+  source: 'render-failure',
+  basisManualIntentId: manualIdBeforeReadoption
+});
+const readoptedFailureId = adoptedFailure.getState().pendingTransition?.id;
+assert.ok(readoptedFailureId);
+adoptedFailure.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
+assert.ok(
+  (adoptedFailure.getState().manualIntent?.id ?? 0) > manualIdBeforeReadoption,
+  'a new automatic transaction must be readopted even when the prior manual mode has the same value'
+);
+assert.deepEqual(effectTypes(adoptedFailure.dispatch({
+  type: 'editorModeApplied', transitionId: readoptedFailureId
+})), ['persistMode', 'postMode']);
+
+const adoptedThenReplaced = createEditorModeApplication();
+adoptedThenReplaced.dispatch({ type: 'initialize', hostMode: 'live' });
+mountEditor(adoptedThenReplaced);
+adoptedThenReplaced.dispatch({
+  type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId: 0
+});
+const adoptedThenStaleId = adoptedThenReplaced.getState().pendingTransition?.id;
+assert.ok(adoptedThenStaleId);
+adoptedThenReplaced.dispatch({ type: 'requestMode', mode: 'source', source: 'user' });
+adoptedThenReplaced.dispatch({ type: 'requestMode', mode: 'live', source: 'user' });
+const adoptedThenCurrentId = adoptedThenReplaced.getState().pendingTransition?.id;
+assert.ok(adoptedThenCurrentId && adoptedThenCurrentId !== adoptedThenStaleId);
+assert.deepEqual(
+  adoptedThenReplaced.dispatch({ type: 'editorModeApplied', transitionId: adoptedThenStaleId }),
+  [],
+  'a rapid different manual mode must invalidate the adopted transition completion'
+);
+assert.deepEqual(effectTypes(adoptedThenReplaced.dispatch({
+  type: 'editorModeApplied', transitionId: adoptedThenCurrentId
+})), ['persistMode', 'postMode']);
 
 const isolatedSource = createEditorModeApplication();
 const isolatedLive = createEditorModeApplication();
@@ -224,9 +325,19 @@ const mountFallbackId = pendingMountId(mountFallback);
 mountFallback.dispatch({ type: 'editorMountStarted', mountId: mountFallbackId });
 assert.deepEqual(effectTypes(mountFallback.dispatch({
   type: 'editorMountFailed', mountId: mountFallbackId, failure: 'live-incompatible'
-})), ['showNotice', 'scheduleEditorMount', 'commitTransientEdits', 'presentMode', 'postMode']);
+})), ['showNotice', 'scheduleEditorMount', 'commitTransientEdits', 'presentMode']);
 assert.equal(mountFallback.getState().mode, 'source');
 assert.equal(mountFallback.getState().lastEditableMode, 'source');
+assert.deepEqual(
+  mountFallback.dispatch({ type: 'requestMode', mode: 'source', source: 'user' }),
+  [],
+  'manual Source must adopt the pending automatic fallback mount without early settlement'
+);
+assert.deepEqual(
+  effectTypes(mountEditor(mountFallback)),
+  ['persistMode', 'postMode'],
+  'adopted fallback mount must persist before posting at its success boundary'
+);
 
 const disposed = createEditorModeApplication();
 disposed.dispatch({ type: 'initialize', hostMode: 'live' });
