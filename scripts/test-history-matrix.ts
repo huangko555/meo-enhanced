@@ -122,19 +122,51 @@ async function editOuterLine(page: any, needle: string, marker: string) {
 
 async function editTableCell(page: any, tableLine: string, before: string, after: string) {
   await scrollToLineContaining(page, tableLine, 'first', before);
-  await page.evaluate((currentValue) => {
+  const tableFrom = await page.evaluate((sourceLine) => {
+    const editor = (window as any).__historyMatrixEditor;
+    const documentLines = editor.view.state.doc.toString().split('\n');
+    const sourceLineIndex = documentLines.findIndex((line: string) => line.includes(sourceLine));
+    if (sourceLineIndex < 0) throw new Error(`Missing table source line: ${sourceLine}`);
+    let tableStartLineIndex = sourceLineIndex;
+    while (tableStartLineIndex > 0 && documentLines[tableStartLineIndex - 1].trim().startsWith('|')) {
+      tableStartLineIndex -= 1;
+    }
+    return editor.view.state.doc.line(tableStartLineIndex + 1).from;
+  }, tableLine);
+  await page.waitForFunction(({ currentValue, currentTableFrom }) => (
+    Array.from(document.querySelectorAll<HTMLTextAreaElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea'
+    )).some((candidate) => (
+      candidate.value === currentValue
+        && Number(candidate.closest<HTMLTableElement>('table')?.dataset.tableFrom) === currentTableFrom
+    ))
+  ), {}, { currentValue: before, currentTableFrom: tableFrom });
+  const settlement = await page.evaluate(({ currentValue, nextValue, currentTableFrom }) => {
+    const editor = (window as any).__historyMatrixEditor;
     const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea'
-    )).find((candidate) => candidate.value === currentValue);
+    )).find((candidate) => (
+      candidate.value === currentValue
+        && Number(candidate.closest<HTMLTableElement>('table')?.dataset.tableFrom) === currentTableFrom
+    ));
     if (!input) throw new Error(`Missing table input: ${currentValue}`);
     input.focus();
-    input.setSelectionRange(0, input.value.length);
-  }, before);
-  await page.keyboard.type(after);
-  await page.evaluate(() => (window as any).__historyMatrixEditor.commitTransientEdits());
-  await page.waitForFunction((expected) => (
-    (window as any).__historyMatrixEditor.getText().includes(expected)
-  ), {}, after);
+    input.value = nextValue;
+    input.setSelectionRange(nextValue.length, nextValue.length);
+    input.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      data: nextValue,
+      inputType: 'insertText'
+    }));
+    return {
+      committed: editor.commitTransientEdits(),
+      text: editor.view.state.doc.toString()
+    };
+  }, { currentValue: before, nextValue: after, currentTableFrom: tableFrom });
+  const expectedLine = tableLine.replace(before, after);
+  if (!settlement.committed || !settlement.text.includes(expectedLine)) {
+    throw new Error(`Table edit did not settle: ${JSON.stringify({ tableLine, before, after, settlement })}`);
+  }
 }
 
 async function editRenderedBlock(
