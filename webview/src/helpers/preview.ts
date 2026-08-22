@@ -18,7 +18,14 @@ type PreviewControllerOptions = {
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   onRendered?: () => void;
   onFindRequested?: () => void;
+  onViewportInteraction?: () => void;
   mermaidRenderResources: MermaidDiagramRenderResources;
+};
+
+type PreviewViewportRestore = {
+  readonly line: number;
+  readonly lineOffset: number;
+  readonly isCurrent: () => boolean;
 };
 
 const previewScrollbarStyles = `
@@ -139,6 +146,7 @@ export function createPreviewController({
   getCodePalette,
   onRendered,
   onFindRequested,
+  onViewportInteraction,
   mermaidRenderResources
 }: PreviewControllerOptions) {
   const host = document.createElement('div');
@@ -204,6 +212,7 @@ export function createPreviewController({
   let activeFrameDocument: Document | null = null;
   let hasPendingRequest = false;
   let pendingRestoreLine: number | null = null;
+  let pendingViewportRestore: PreviewViewportRestore | null = null;
   let pendingText = '';
   let latestRenderedText = '';
   let latestPayload: PreviewRenderValue | null = null;
@@ -343,7 +352,7 @@ export function createPreviewController({
     status.textContent = message ?? '';
   };
 
-  const renderFrame = (restoreLine: number | null = null) => {
+  const renderFrame = (viewportRestore: PreviewViewportRestore | null = null) => {
     if (disposed || !latestPayload) {
       return;
     }
@@ -379,8 +388,14 @@ export function createPreviewController({
       scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
       attachPreviewMathViewports(frameDocument);
-      if (restoreLine !== null) {
-        restoreTopLine(restoreLine);
+      if (viewportRestore?.isCurrent()) {
+        restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
+      }
+      const notifyViewportInteraction = (event: Event) => {
+        if (event.isTrusted) onViewportInteraction?.();
+      };
+      for (const type of ['wheel', 'pointerdown', 'keydown', 'beforeinput', 'selectionchange', 'focusin']) {
+        frameDocument.addEventListener(type, notifyViewportInteraction, true);
       }
       bindPreviewLinks(frameDocument, vscode);
       bindPreviewWheelFallback(frameDocument);
@@ -391,8 +406,8 @@ export function createPreviewController({
           disposed ||
           !isCurrent()
         ) return;
-        if (restoreLine !== null) {
-          restoreTopLine(restoreLine);
+        if (viewportRestore?.isCurrent()) {
+          restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
         }
       };
       const finishRender = () => {
@@ -499,6 +514,7 @@ export function createPreviewController({
     requestGeneration = generation;
     hasPendingRequest = true;
     pendingRestoreLine = restoreLine;
+    pendingViewportRestore = null;
     pendingText = text;
     if (!background) setStatus('正在生成预览…');
     void previewRenderTransport.render({
@@ -509,15 +525,21 @@ export function createPreviewController({
       hasPendingRequest = false;
       if (result.ok === false) {
         pendingRestoreLine = null;
+        pendingViewportRestore = null;
         setStatus(result.error.message || 'Preview 生成失败');
         return;
       }
       latestPayload = result.value;
       latestRenderedText = pendingText;
       setStatus(null);
-      const restoreLine = pendingRestoreLine;
+      const viewportRestore = pendingViewportRestore ?? (
+        pendingRestoreLine === null
+          ? null
+          : { line: pendingRestoreLine, lineOffset: 0, isCurrent: () => true }
+      );
       pendingRestoreLine = null;
-      renderFrame(restoreLine);
+      pendingViewportRestore = null;
+      renderFrame(viewportRestore);
     });
   };
 
@@ -596,7 +618,7 @@ export function createPreviewController({
     }
     return candidate;
   };
-  const restoreTopLine = (line: number): void => {
+  const restoreTopLine = (line: number, lineOffset = 0): void => {
     const source = findSourceElement(line);
     const scrollElement = getFrameDocument()?.scrollingElement;
     if (!source || !scrollElement) {
@@ -605,14 +627,15 @@ export function createPreviewController({
     const lineSpan = Math.max(1, source.end - source.start + 1);
     const ratio = Math.max(0, Math.min(1, (line - source.start) / lineSpan));
     const rect = source.element.getBoundingClientRect();
-    scrollElement.scrollTop += rect.top + rect.height * ratio;
+    const mappedOffset = line >= source.start && line <= source.end ? Math.max(0, lineOffset) : 0;
+    scrollElement.scrollTop += rect.top + rect.height * ratio + mappedOffset;
   };
   const getTopVisiblePosition = (): { topLine: number; topLineOffset: number } | null => {
     const elements = getSourceElements();
     if (elements.length === 0) {
       return null;
     }
-    const viewportAnchor = 8;
+    const viewportAnchor = 0;
     let candidate = elements[0];
     for (const element of elements) {
       if (element.getBoundingClientRect().top > viewportAnchor) {
@@ -627,7 +650,27 @@ export function createPreviewController({
     const rect = candidate.getBoundingClientRect();
     const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (viewportAnchor - rect.top) / rect.height)) : 0;
     const topLine = Math.round(range.start + (range.end - range.start) * ratio);
-    return { topLine, topLineOffset: 0 };
+    const lineSpan = Math.max(1, range.end - range.start + 1);
+    const lineTop = rect.top + rect.height * ((topLine - range.start) / lineSpan);
+    const semanticLineHeight = rect.height / lineSpan;
+    return {
+      topLine,
+      topLineOffset: rect.bottom > viewportAnchor
+        ? Math.max(0, Math.min(semanticLineHeight, viewportAnchor - lineTop))
+        : 0
+    };
+  };
+  const restoreTopVisiblePosition = (
+    position: { line: number; lineOffset: number },
+    isCurrent: () => boolean
+  ): void => {
+    const restore = { ...position, isCurrent };
+    if (hasPendingRequest) {
+      pendingRestoreLine = null;
+      pendingViewportRestore = restore;
+      return;
+    }
+    if (restore.isCurrent()) restoreTopLine(restore.line, restore.lineOffset);
   };
   const getHeadings = (): OutlineHeading[] => {
     const headingElements = Array.from(
@@ -706,6 +749,7 @@ export function createPreviewController({
     },
     getTopVisiblePosition,
     restoreTopLine,
+    restoreTopVisiblePosition,
     getSelectedText: () => frame.contentWindow?.getSelection()?.toString() ?? '',
     getSearchAdapter: () => ({
       setSearchQuery,
@@ -728,6 +772,7 @@ export function createPreviewController({
       activeFrameDocument = null;
       hasPendingRequest = false;
       pendingRestoreLine = null;
+      pendingViewportRestore = null;
       previewRenderTransport.cancelAll('Preview closed');
       appearanceControl.removeEventListener('click', handleAppearanceControlClick);
       sourceColoringControl.removeEventListener('click', handleSourceColoringClick);

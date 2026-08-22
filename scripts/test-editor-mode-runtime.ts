@@ -10,6 +10,7 @@ import { createEditorModeRuntime } from '../webview/src/adapters/editorModeRunti
 
 const events: string[] = [];
 const errors: string[] = [];
+const viewportHandle = Object.freeze({});
 let mountAttempts = 0;
 let failLiveOnce = true;
 let releaseLateApply: (() => void) | null = null;
@@ -34,7 +35,7 @@ const capabilities: EditorModeEffectCapabilities = {
       await new Promise<void>((resolve) => { releaseLateApply = resolve; });
     }
   },
-  setPreviewActive: (active, restoreLine) => events.push(`preview:${active}:${restoreLine ?? 'none'}`),
+  setPreviewActive: (active) => events.push(`preview:${active}`),
   setEditorVisible: (visible) => events.push(`editor:${visible}`),
   presentModeControl: (mode) => events.push(`control:${mode}`),
   closeFind: () => events.push('close-find'),
@@ -42,8 +43,10 @@ const capabilities: EditorModeEffectCapabilities = {
   setOutlineOwner: (owner) => events.push(`outline:${owner}`),
   setReplaceEnabled: (enabled) => events.push(`replace:${enabled}`),
   hideSelectionMenu: () => events.push('hide-selection-menu'),
-  captureViewport: () => ({ owner: 'editor', topLine: 9, topLineOffset: 0.5 }),
-  restoreViewport: (viewport) => events.push(`restore:${viewport.owner}:${viewport.topLine}`),
+  captureViewport: () => viewportHandle,
+  restoreViewport: (handle, owner) => {
+    events.push(`restore:${owner}:${handle === viewportHandle ? 'captured' : 'unknown'}`);
+  },
   focusEditor: () => events.push('focus'),
   persistMode: (mode, lastEditableMode) => events.push(`persist:${mode}:${lastEditableMode}`),
   postMode: (mode) => events.push(`post:${mode}`),
@@ -71,7 +74,11 @@ assert.ok(events.indexOf('notice:mount-retry') < events.indexOf('mount:2:live'))
 events.length = 0;
 await runtime.dispatch({ type: 'requestMode', mode: 'source', source: 'user', restoreEditorFocus: true });
 assert.equal(runtime.getState().mode, 'source');
-assert.equal(events.includes('restore:editor:9'), true, 'runtime must enrich mode requests with captured viewport');
+assert.equal(
+  events.some((event) => event.startsWith('restore:')),
+  false,
+  'Live/Source reconfiguration must remain inside the Editor ViewportController transaction'
+);
 assert.equal(events.includes('focus'), true);
 assert.ok(events.indexOf('apply:source') < events.indexOf('persist:source:source'));
 assert.ok(events.indexOf('persist:source:source') < events.indexOf('post:source'));
@@ -86,7 +93,12 @@ assert.equal(events.at(-1), 'post:source');
 events.length = 0;
 await runtime.dispatch({ type: 'requestMode', mode: 'preview', source: 'user' });
 assert.equal(runtime.getState().mode, 'preview');
-assert.equal(events.some((event) => event.startsWith('preview:true:')), true);
+assert.equal(events.includes('preview:true'), true);
+assert.equal(
+  events.includes('restore:preview:captured'),
+  true,
+  'cross-surface transitions must project the opaque ViewportController token'
+);
 assert.equal(events.includes('editor:false'), true);
 assert.equal(events.includes('search:preview'), true);
 assert.equal(events.includes('outline:preview'), true);

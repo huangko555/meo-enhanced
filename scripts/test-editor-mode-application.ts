@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs';
 import {
   createEditorModeApplication,
   type EditorModeEffect,
-  type EditorModeViewport
+  type EditorModeViewportToken
 } from '../webview/src/application/editorMode';
 
 const effectTypes = (effects: readonly EditorModeEffect[]): string[] => effects.map((effect) => effect.type);
-const viewport: EditorModeViewport = { owner: 'editor', topLine: 42, topLineOffset: 0.25 };
+const viewport = Object.freeze({}) as EditorModeViewportToken;
+const previewViewport = Object.freeze({}) as EditorModeViewportToken;
 type ModeApplication = ReturnType<typeof createEditorModeApplication>;
 const pendingMountId = (application: ModeApplication): number => {
   const mountId = application.getState().pendingMount?.id;
@@ -73,7 +74,7 @@ assert.deepEqual(
 );
 const leavePreview = localInit.dispatch({
   type: 'toggleMode', source: 'host-command',
-  viewport: { owner: 'preview', topLine: 70, topLineOffset: 0 }, restoreEditorFocus: true
+  viewport: previewViewport, restoreEditorFocus: true
 });
 assert.equal(localInit.getState().mode, 'source', 'Preview toggle must restore lastEditableMode');
 assert.deepEqual(effectTypes(leavePreview), ['commitTransientEdits', 'presentMode', 'applyEditorMode']);
@@ -81,7 +82,7 @@ const leavePresentation = leavePreview.find((effect) => effect.type === 'present
 assert.deepEqual(leavePresentation?.type === 'presentMode' ? leavePresentation.presentation : null, {
   mode: 'source', previousMode: 'preview', closeFind: true, previewActive: false, editorVisible: true,
   searchOwner: 'editor', outlineOwner: 'editor', replaceEnabled: true, hideSelectionMenu: false,
-  viewport: { owner: 'preview', topLine: 70, topLineOffset: 0 }, restoreEditorFocus: true
+  viewport: previewViewport, restoreEditorFocus: true
 });
 const leaveId = localInit.getState().pendingTransition?.id;
 assert.ok(leaveId);

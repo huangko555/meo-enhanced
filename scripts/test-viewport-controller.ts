@@ -410,4 +410,102 @@ wheelController.destroy();
 globalThis.requestAnimationFrame = originalWheelRequestAnimationFrame;
 (globalThis as typeof globalThis & { WheelEvent: typeof WheelEvent }).WheelEvent = originalWheelEvent;
 
+const anchorFrames: FrameRequestCallback[] = [];
+const originalAnchorRequestAnimationFrame = globalThis.requestAnimationFrame;
+globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+  anchorFrames.push(callback);
+  return anchorFrames.length;
+};
+const anchorScrollDOM = {
+  scrollTop: 225,
+  scrollLeft: 0,
+  scrollHeight: 5000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900
+};
+const anchorDocument = {
+  length: 999,
+  lines: 10,
+  line: (lineNumber: number) => ({
+    from: (lineNumber - 1) * 100,
+    to: lineNumber * 100 - 1,
+    number: lineNumber
+  }),
+  lineAt: (position: number) => ({
+    from: Math.floor(position / 100) * 100,
+    to: Math.floor(position / 100) * 100 + 99,
+    number: Math.floor(position / 100) + 1
+  })
+};
+const previewProjections: Array<{
+  line: number;
+  lineOffset: number;
+  isCurrent: () => boolean;
+}> = [];
+let previewCapture = { line: 7, lineOffset: 18 };
+const anchorView = {
+  dom: {},
+  scrollDOM: anchorScrollDOM,
+  state: { doc: anchorDocument },
+  lineBlockAtHeight: () => ({ from: 200, top: 200 }),
+  lineBlockAt: (position: number) => ({ from: position, top: position }),
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+};
+const anchorController = new ViewportController(anchorView as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => previewCapture,
+    restoreTopVisiblePosition(position, isCurrent) {
+      previewProjections.push({ ...position, isCurrent });
+    }
+  }
+});
+
+const editorHandle = anchorController.captureAnchorToken('editor');
+if (!editorHandle) throw new Error('Editor semantic anchor token was not captured');
+anchorController.restoreAnchorToken(editorHandle, 'preview');
+anchorController.restoreAnchorToken(editorHandle, 'preview');
+if (
+  previewProjections.length !== 1 ||
+  previewProjections[0]?.line !== 3 ||
+  previewProjections[0]?.lineOffset !== 25 ||
+  !previewProjections[0].isCurrent()
+) {
+  throw new Error(`Editor token was not projected exactly once: ${JSON.stringify(previewProjections)}`);
+}
+
+const stalePreviewHandle = anchorController.captureAnchorToken('preview');
+if (!stalePreviewHandle) throw new Error('Preview semantic anchor token was not captured');
+const currentPreviewHandle = anchorController.captureAnchorToken('preview');
+anchorController.restoreAnchorToken(stalePreviewHandle, 'editor');
+await flushFrames(anchorFrames);
+if (anchorScrollDOM.scrollTop !== 225) {
+  throw new Error(`A replaced Preview token moved the Editor to ${anchorScrollDOM.scrollTop}`);
+}
+
+anchorController.restoreAnchorToken(currentPreviewHandle!, 'editor');
+await flushFrames(anchorFrames);
+if (anchorScrollDOM.scrollTop !== 618) {
+  throw new Error(`The current Preview token restored the Editor to ${anchorScrollDOM.scrollTop}`);
+}
+
+previewCapture = { line: 4, lineOffset: 9 };
+const interactionHandle = anchorController.captureAnchorToken('preview');
+anchorController.markInteraction();
+anchorController.restoreAnchorToken(interactionHandle!, 'editor');
+await flushFrames(anchorFrames);
+if (anchorScrollDOM.scrollTop !== 618) {
+  throw new Error(`A newer interaction allowed stale projection to ${anchorScrollDOM.scrollTop}`);
+}
+
+const disposedHandle = anchorController.captureAnchorToken('preview');
+anchorController.destroy();
+anchorController.restoreAnchorToken(disposedHandle!, 'editor');
+await flushFrames(anchorFrames);
+if (anchorScrollDOM.scrollTop !== 618) {
+  throw new Error(`A disposed Controller projected an anchor to ${anchorScrollDOM.scrollTop}`);
+}
+globalThis.requestAnimationFrame = originalAnchorRequestAnimationFrame;
+
 console.log('viewport controller checks passed');

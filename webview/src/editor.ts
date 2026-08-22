@@ -79,7 +79,12 @@ import { focusMermaidEditingOffset, getMermaidBlockMode, setMermaidBlockModeEffe
 import { focusLatexMathEditingOffset, getLatexMathBlockMode, setLatexMathBlockModeEffect, setLatexMathSearchRevealEffect } from './helpers/latexMathEditing';
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import { setLongCodeBlockFoldingEnabled } from './helpers/longCodeBlocks';
-import { ViewportController } from './helpers/viewportController';
+import {
+  ViewportController,
+  type PreviewViewportSurface,
+  type ViewportAnchorOwner,
+  type ViewportAnchorToken
+} from './helpers/viewportController';
 import { collectRenderableHtmlBlocks, setHtmlEditingRangeEffect } from './helpers/htmlContent';
 import { setEditorHistoryRunner, type EditorHistoryDirection } from './helpers/historyCommands';
 import { createEditorHistoryApplication, type EditorHistoryContext, type EditorHistoryViewport } from './application/editorHistory';
@@ -150,6 +155,7 @@ type CreateEditorOptions = {
   initialGitGutter?: boolean;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
+  previewViewportSurface?: PreviewViewportSurface;
 };
 
 type PointerClickState = { pointerId: number };
@@ -255,7 +261,8 @@ export function createEditor({
   initialMode = 'source',
   initialGitGutter = true,
   initialDiagnostics = [],
-  mermaidDiagramPresentationFactory
+  mermaidDiagramPresentationFactory,
+  previewViewportSurface
 }: CreateEditorOptions) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
@@ -2156,7 +2163,8 @@ export function createEditor({
   view.dom.addEventListener('pointermove', onBlockActionPointerMove);
   view.dom.addEventListener('pointerleave', onBlockActionPointerLeave);
   viewportController = new ViewportController(view, {
-    getMode: () => currentMode === 'live' ? 'live' : 'source'
+    getMode: () => currentMode === 'live' ? 'live' : 'source',
+    previewSurface: previewViewportSurface
   });
   const editorHistoryApplication = createEditorHistoryApplication();
   const editorHistoryEffectAdapter = createEditorHistoryEffectAdapter({
@@ -2515,6 +2523,15 @@ export function createEditor({
     },
     hasFocus() {
       return view.hasFocus;
+    },
+    captureViewportAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
+      return viewportController.captureAnchorToken(owner);
+    },
+    restoreViewportAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
+      viewportController.restoreAnchorToken(handle, owner);
+    },
+    markViewportInteraction(): void {
+      viewportController.markInteraction();
     },
     focus() {
       const activeTableInput = getActiveTableInput();

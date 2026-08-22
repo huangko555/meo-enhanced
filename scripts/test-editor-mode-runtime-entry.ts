@@ -23,6 +23,15 @@ let persistedMode: string | null = null;
 let releaseHeldMount: (() => void) | null = null;
 const editorCreateModes: EditorMode[] = [];
 const legacyModeCoordinatorStarts = 0;
+const previewViewportSurface = {
+  captureTopVisiblePosition: () => ({ line: 27, lineOffset: 0.25 }),
+  restoreTopVisiblePosition(
+    position: { line: number; lineOffset: number },
+    isCurrent: () => boolean
+  ) {
+    if (isCurrent()) events.push(`preview-surface:${position.line}:${position.lineOffset}`);
+  }
+};
 
 const element = (id: string): HTMLElement => {
   const value = document.querySelector<HTMLElement>(`#${id}`);
@@ -54,6 +63,7 @@ const adapter = createEditorModeEffectAdapter({
       text: '# Editor Mode\n\nalpha\nbeta\ngamma',
       initialMode: mode,
       initialGitGutter: false,
+      previewViewportSurface,
       onApplyChanges: () => undefined,
       onOpenLink: () => undefined,
       onSelectionChange: () => undefined,
@@ -68,10 +78,10 @@ const adapter = createEditorModeEffectAdapter({
     if (!editor) throw taggedError('fatal');
     editor.setMode(mode);
   },
-  setPreviewActive(active, restoreLine) {
+  setPreviewActive(active) {
     previewActive = active;
     element('preview').hidden = !active;
-    events.push(`preview:${active}:${restoreLine ?? 'none'}`);
+    events.push(`preview:${active}`);
   },
   setEditorVisible(visible) {
     element('editor').hidden = !visible;
@@ -94,18 +104,11 @@ const adapter = createEditorModeEffectAdapter({
     element('selection-menu').hidden = true;
   },
   captureViewport() {
-    if (previewActive) return { owner: 'preview', topLine: 27, topLineOffset: 0.25 };
-    const position = editor?.getTopVisiblePosition();
-    return position
-      ? { owner: 'editor', topLine: position.line, topLineOffset: position.lineOffset }
-      : null;
+    return editor?.captureViewportAnchorToken(previewActive ? 'preview' : 'editor') ?? null;
   },
-  restoreViewport(viewport) {
-    events.push(`restore:${viewport.owner}:${viewport.topLine}`);
-    if (viewport.owner === 'preview') editor?.restoreTopLine(viewport.topLine, viewport.topLineOffset, {
-      syncCursor: false,
-      force: true
-    });
+  restoreViewport(viewport, owner) {
+    events.push(`restore:${owner}`);
+    editor?.restoreViewportAnchorToken(viewport, owner);
   },
   focusEditor() {
     editor?.focus();

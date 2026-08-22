@@ -1,11 +1,8 @@
 export type EditorMode = 'live' | 'source' | 'preview';
 export type EditableMode = Exclude<EditorMode, 'preview'>;
 
-export type EditorModeViewport = {
-  readonly owner: 'editor' | 'preview';
-  readonly topLine: number;
-  readonly topLineOffset: number;
-};
+/** Opaque handle; only the ViewportController Adapter may interpret its anchor. */
+export type EditorModeViewportToken = object;
 
 export type EditorModeRequestSource = 'user' | 'host-command' | 'init-host' | 'init-local' | 'render-failure';
 
@@ -34,7 +31,7 @@ export type EditorModeInput =
       readonly type: 'requestMode';
       readonly mode: EditorMode;
       readonly source: 'user' | 'host-command';
-      readonly viewport?: EditorModeViewport | null;
+      readonly viewport?: EditorModeViewportToken | null;
       readonly restoreEditorFocus?: boolean;
     }
   | {
@@ -42,13 +39,13 @@ export type EditorModeInput =
       readonly mode: EditableMode;
       readonly source: 'render-failure';
       readonly basisManualIntentId: number;
-      readonly viewport?: EditorModeViewport | null;
+      readonly viewport?: EditorModeViewportToken | null;
       readonly restoreEditorFocus?: boolean;
     }
   | {
       readonly type: 'toggleMode';
       readonly source: 'user' | 'host-command';
-      readonly viewport?: EditorModeViewport | null;
+      readonly viewport?: EditorModeViewportToken | null;
       readonly restoreEditorFocus?: boolean;
     }
   | { readonly type: 'editorModeApplied'; readonly transitionId: number }
@@ -76,14 +73,18 @@ export type EditorModePresentation = {
   readonly outlineOwner: 'editor' | 'preview';
   readonly replaceEnabled: boolean;
   readonly hideSelectionMenu: boolean;
-  readonly viewport: EditorModeViewport | null;
+  readonly viewport: EditorModeViewportToken | null;
   readonly restoreEditorFocus: boolean;
 };
 
 export type EditorModeEffect =
   | { readonly type: 'commitTransientEdits' }
   | { readonly type: 'presentMode'; readonly presentation: EditorModePresentation }
-  | { readonly type: 'rollbackPresentation'; readonly mode: EditorMode }
+  | {
+      readonly type: 'rollbackPresentation';
+      readonly mode: EditorMode;
+      readonly viewport: EditorModeViewportToken | null;
+    }
   | { readonly type: 'applyEditorMode'; readonly transitionId: number; readonly mode: EditableMode }
   | { readonly type: 'persistMode'; readonly mode: EditorMode; readonly lastEditableMode: EditableMode }
   | { readonly type: 'postMode'; readonly mode: EditorMode }
@@ -105,7 +106,7 @@ type PendingTransition = {
   readonly requestedMode: EditableMode;
   readonly source: EditorModeRequestSource;
   readonly manualIntentId: number | null;
-  readonly viewport: EditorModeViewport | null;
+  readonly viewport: EditorModeViewportToken | null;
   readonly restoreEditorFocus: boolean;
   readonly persist: boolean;
   readonly post: boolean;
@@ -141,7 +142,7 @@ const requestPolicy = (source: EditorModeRequestSource): {
 const presentationFor = (
   mode: EditorMode,
   previousMode: EditorMode,
-  viewport: EditorModeViewport | null,
+  viewport: EditorModeViewportToken | null,
   restoreEditorFocus: boolean
 ): EditorModePresentation => ({
   mode,
@@ -212,7 +213,7 @@ export function createEditorModeApplication(): EditorModeApplication {
   const requestMode = (
     targetMode: EditorMode,
     source: EditorModeRequestSource,
-    viewport: EditorModeViewport | null,
+    viewport: EditorModeViewportToken | null,
     restoreEditorFocus: boolean,
     options: { readonly force?: boolean; readonly basisManualIntentId?: number } = {}
   ): EditorModeEffect[] => {
@@ -250,6 +251,7 @@ export function createEditorModeApplication(): EditorModeApplication {
               : pendingTransition.requestedMode,
             source,
             manualIntentId: adoptedManualIntent.id,
+            viewport: viewport ?? pendingTransition.viewport,
             persist: true,
             post: true
           };
@@ -435,7 +437,11 @@ export function createEditorModeApplication(): EditorModeApplication {
           requestedMode = pending.previousMode;
           return [
             { type: 'showNotice', notice: 'editor-failure' },
-            { type: 'rollbackPresentation', mode: pending.previousMode }
+            {
+              type: 'rollbackPresentation',
+              mode: pending.previousMode,
+              viewport: pending.viewport
+            }
           ];
         }
         if (pending.requestedMode === 'live' && input.failure === 'live-incompatible') {
@@ -456,7 +462,11 @@ export function createEditorModeApplication(): EditorModeApplication {
               ? 'transient-live'
               : 'editor-failure'
           },
-          { type: 'rollbackPresentation', mode: pending.previousMode }
+          {
+            type: 'rollbackPresentation',
+            mode: pending.previousMode,
+            viewport: pending.viewport
+          }
         ];
       }
 

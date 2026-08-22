@@ -20,9 +20,24 @@ export interface ViewportLayoutRegion {
   to: number;
 }
 
+export type ViewportAnchorOwner = 'editor' | 'preview';
+
+export type ViewportAnchorToken = object & {
+  readonly __viewportAnchorToken: unique symbol;
+};
+
+export interface PreviewViewportSurface {
+  captureTopVisiblePosition(): { line: number; lineOffset: number } | null;
+  restoreTopVisiblePosition(
+    position: { line: number; lineOffset: number },
+    isCurrent: () => boolean
+  ): void;
+}
+
 interface ViewportControllerOptions {
   attachInteractions?: boolean;
   getMode?: () => 'live' | 'source';
+  previewSurface?: PreviewViewportSurface;
 }
 
 interface ScrollPosition {
@@ -71,6 +86,12 @@ interface ActiveScrollTarget {
   stableFrames: number;
 }
 
+interface ViewportAnchorTokenRecord {
+  readonly anchor: ViewportDocumentAnchor;
+  readonly interactionGeneration: number;
+  readonly projectedOwners: Set<ViewportAnchorOwner>;
+}
+
 
 const MAX_SETTLE_FRAMES = 8;
 const REQUIRED_STABLE_FRAMES = 2;
@@ -98,6 +119,8 @@ export class ViewportController {
   private scrollbarDragActive = false;
   private pendingHistoryShortcutViewport: ViewportHistorySnapshot | null = null;
   private readonly getMode: () => 'live' | 'source';
+  private readonly previewSurface: PreviewViewportSurface | null;
+  private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => this.scheduleActiveScrollFrame();
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
@@ -113,6 +136,7 @@ export class ViewportController {
     options: ViewportControllerOptions = {}
   ) {
     this.getMode = options.getMode ?? (() => 'live');
+    this.previewSurface = options.previewSurface ?? null;
     controllerByDom.set(view.dom, this);
     if (options.attachInteractions !== false) {
       view.scrollDOM.addEventListener('wheel', this.onWheel, { passive: true });
@@ -383,6 +407,7 @@ export class ViewportController {
 
   destroy(): void {
     this.destroyed = true;
+    this.interactionGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.activeLayoutAnchor = null;
@@ -512,6 +537,7 @@ export class ViewportController {
       this.markInteraction();
       return;
     }
+    this.interactionGeneration += 1;
     this.generation += 1;
     this.scrollLockGeneration += 1;
     this.activeScrollTarget = null;
@@ -616,6 +642,7 @@ export class ViewportController {
       this.markInteraction();
       return;
     }
+    this.interactionGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
@@ -628,6 +655,7 @@ export class ViewportController {
       this.markInteraction();
       return;
     }
+    this.interactionGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
@@ -644,6 +672,40 @@ export class ViewportController {
     this.activeScrollTarget = null;
     this.lastTouchMoveAt = performance.now();
     this.lastTouchY = null;
+  }
+
+  captureAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
+    if (this.destroyed) return null;
+    this.markInteraction();
+    const anchor = owner === 'editor'
+      ? this.captureDocumentAnchor()
+      : this.capturePreviewDocumentAnchor();
+    if (!anchor) return null;
+    const handle = Object.freeze({}) as ViewportAnchorToken;
+    this.anchorTokens.set(handle, {
+      anchor,
+      interactionGeneration: this.interactionGeneration,
+      projectedOwners: new Set()
+    });
+    return handle;
+  }
+
+  restoreAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
+    const record = this.anchorTokens.get(handle);
+    if (!record || !this.isAnchorTokenCurrent(record) || record.projectedOwners.has(owner)) return;
+    record.projectedOwners.add(owner);
+    if (owner === 'editor') {
+      this.restoreDocumentAnchor(record.anchor, undefined, { force: true });
+      return;
+    }
+    if (!this.previewSurface) return;
+    const line = this.view.state.doc.lineAt(
+      Math.min(Math.max(0, record.anchor.position), this.view.state.doc.length)
+    );
+    this.previewSurface.restoreTopVisiblePosition({
+      line: line.number,
+      lineOffset: record.anchor.lineOffset
+    }, () => this.isAnchorTokenCurrent(record));
   }
 
   private handleKeyUp(event: KeyboardEvent): void {
@@ -684,6 +746,23 @@ export class ViewportController {
     if (!this.scrollbarDragActive) return;
     this.scrollbarDragActive = false;
     this.markInteraction();
+  }
+
+  private capturePreviewDocumentAnchor(): ViewportDocumentAnchor | null {
+    const position = this.previewSurface?.captureTopVisiblePosition();
+    if (!position) return null;
+    const lineNumber = Math.min(
+      Math.max(1, Math.floor(Number.isFinite(position.line) ? position.line : 1)),
+      this.view.state.doc.lines
+    );
+    return {
+      position: this.view.state.doc.line(lineNumber).from,
+      lineOffset: Number.isFinite(position.lineOffset) ? Math.max(0, position.lineOffset) : 0
+    };
+  }
+
+  private isAnchorTokenCurrent(record: ViewportAnchorTokenRecord): boolean {
+    return !this.destroyed && record.interactionGeneration === this.interactionGeneration;
   }
 
   private readScrollPosition(): ScrollPosition {

@@ -4,7 +4,7 @@ import type {
   EditorModeEffect,
   EditorModeInput,
   EditorModePresentation,
-  EditorModeViewport
+  EditorModeViewportToken
 } from '../application/editorMode';
 
 export type EditorModeFailure = 'transient-live' | 'live-incompatible' | 'fatal';
@@ -24,7 +24,7 @@ export type EditorModeEffectCapabilities = {
   scheduleMount?(run: () => void): () => void;
   mountEditor(mode: EditableMode, signal: AbortSignal): void | Promise<void>;
   applyEditorMode(mode: EditableMode): void | Promise<void>;
-  setPreviewActive(active: boolean, restoreLine: number | null): void;
+  setPreviewActive(active: boolean): void;
   setEditorVisible(visible: boolean): void;
   presentModeControl(mode: EditorMode): void;
   closeFind(): void;
@@ -32,8 +32,8 @@ export type EditorModeEffectCapabilities = {
   setOutlineOwner(owner: 'editor' | 'preview'): void;
   setReplaceEnabled(enabled: boolean): void;
   hideSelectionMenu(): void;
-  captureViewport(): EditorModeViewport | null;
-  restoreViewport(viewport: EditorModeViewport): void;
+  captureViewport(): EditorModeViewportToken | null;
+  restoreViewport(viewport: EditorModeViewportToken, owner: 'editor' | 'preview'): void;
   focusEditor(): void;
   persistMode(mode: EditorMode, lastEditableMode: EditableMode): void | Promise<void>;
   postMode(mode: EditorMode): void | Promise<void>;
@@ -68,31 +68,35 @@ export function createEditorModeEffectAdapter(
 
   const applyPresentation = (presentation: EditorModePresentation): void => {
     if (presentation.closeFind) capabilities.closeFind();
-    capabilities.setPreviewActive(
-      presentation.previewActive,
-      presentation.viewport?.topLine ?? null
-    );
+    capabilities.setPreviewActive(presentation.previewActive);
     capabilities.setEditorVisible(presentation.editorVisible);
     capabilities.presentModeControl(presentation.mode);
     capabilities.setSearchOwner(presentation.searchOwner);
     capabilities.setOutlineOwner(presentation.outlineOwner);
     capabilities.setReplaceEnabled(presentation.replaceEnabled);
     if (presentation.hideSelectionMenu) capabilities.hideSelectionMenu();
-    if (!presentation.previewActive && presentation.viewport) {
-      capabilities.restoreViewport(presentation.viewport);
+    if (presentation.viewport && presentation.previewActive !== (presentation.previousMode === 'preview')) {
+      capabilities.restoreViewport(
+        presentation.viewport,
+        presentation.previewActive ? 'preview' : 'editor'
+      );
     }
     if (presentation.restoreEditorFocus) capabilities.focusEditor();
   };
 
-  const rollbackPresentation = (mode: EditorMode): void => {
+  const rollbackPresentation = (
+    mode: EditorMode,
+    viewport: EditorModeViewportToken | null
+  ): void => {
     const preview = mode === 'preview';
-    capabilities.setPreviewActive(preview, null);
+    capabilities.setPreviewActive(preview);
     capabilities.setEditorVisible(!preview);
     capabilities.presentModeControl(mode);
     capabilities.setSearchOwner(preview ? 'preview' : 'editor');
     capabilities.setOutlineOwner(preview ? 'preview' : 'editor');
     capabilities.setReplaceEnabled(!preview);
     if (preview) capabilities.hideSelectionMenu();
+    if (viewport) capabilities.restoreViewport(viewport, preview ? 'preview' : 'editor');
   };
 
   return {
@@ -112,7 +116,7 @@ export function createEditorModeEffectAdapter(
           applyPresentation(effect.presentation);
           return {};
         case 'rollbackPresentation':
-          rollbackPresentation(effect.mode);
+          rollbackPresentation(effect.mode, effect.viewport);
           return {};
         case 'applyEditorMode': {
           const operation = effect.mode === 'live' ? 'apply-live' : 'apply-source';

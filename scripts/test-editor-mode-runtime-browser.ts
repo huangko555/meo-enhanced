@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     assert.equal(snapshot.state.mode, 'live');
     assert.equal(snapshot.editorVisible, true);
     assert.equal(snapshot.editorFocused, true);
-    assert.equal(snapshot.events.includes('restore:preview:27'), true, 'Preview viewport must cross the Adapter only');
+    assert.equal(snapshot.events.includes('restore:editor'), true, 'opaque viewport token must cross the Adapter only');
 
     await page.evaluate(() => (window as any).__editorModeCandidate.undo());
     snapshot = await page.evaluate(() => (window as any).__editorModeCandidate.snapshot());

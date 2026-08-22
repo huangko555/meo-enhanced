@@ -985,7 +985,8 @@ const previewController = createPreviewController({
     if (outlineController?.isVisible()) {
       outlineController.refresh();
     }
-  }
+  },
+  onViewportInteraction: () => editor?.markViewportInteraction?.()
 });
 const previewAdapter = createPreviewWebviewAdapter(previewController);
 previewAppearanceSlot.replaceWith(previewController.appearanceControl);
@@ -1475,7 +1476,16 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onSelectionChange: (state: any) => selectionMenuController.update(state),
-    mermaidDiagramPresentationFactory
+    mermaidDiagramPresentationFactory,
+    previewViewportSurface: {
+      captureTopVisiblePosition() {
+        const position = previewController.getTopVisiblePosition();
+        return position ? { line: position.topLine, lineOffset: position.topLineOffset } : null;
+      },
+      restoreTopVisiblePosition(position, isCurrent) {
+        previewController.restoreTopVisiblePosition(position, isCurrent);
+      }
+    }
   });
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
   editor.setLongCodeBlockFoldingEnabled(longCodeBlockFoldingEnabled);
@@ -1526,11 +1536,10 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     if (mode === 'live') failureNotice.clearFailureNotice();
     failureNotice.updateEditorNotice();
   },
-  setPreviewActive(active, restoreLine) {
+  setPreviewActive(active) {
     previewAdapter.setActive({
       active,
-      text: getCurrentEditorText(),
-      restoreLine
+      text: getCurrentEditorText()
     });
     if (active && document.activeElement instanceof HTMLElement && editorHost.contains(document.activeElement)) {
       document.activeElement.blur();
@@ -1559,22 +1568,10 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   },
   hideSelectionMenu: () => selectionMenuController.hide(),
   captureViewport() {
-    const position = editorHost.hidden
-      ? previewController.getTopVisiblePosition()
-      : getTopVisiblePosition();
-    if (!position) return null;
-    return {
-      owner: editorHost.hidden ? 'preview' : 'editor',
-      topLine: position.topLine,
-      topLineOffset: position.topLineOffset
-    };
+    return editor?.captureViewportAnchorToken?.(editorHost.hidden ? 'preview' : 'editor') ?? null;
   },
-  restoreViewport(viewport) {
-    if (viewport.owner !== 'preview') return;
-    editor?.restoreTopLine?.(viewport.topLine, viewport.topLineOffset, {
-      syncCursor: false,
-      force: true
-    });
+  restoreViewport(viewport, owner) {
+    editor?.restoreViewportAnchorToken?.(viewport, owner);
   },
   focusEditor: () => editor?.focus(),
   persistMode: (mode, lastEditableMode) => persistUiState(mode, lastEditableMode),
