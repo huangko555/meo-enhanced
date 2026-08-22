@@ -6,8 +6,7 @@ import {
   Annotation,
   type Extension,
   type Line,
-  type Range,
-  type TransactionSpec
+  type Range
 } from '@codemirror/state';
 import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemirror/view';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
@@ -950,18 +949,10 @@ export function orderedListRenumberTransactionFilter(
     if (!changes.length) return transaction;
 
     const normalization = transaction.state.changes(changes);
-    // A sequential follow-up maps the original effects before consumers see
-    // the combined transaction. Rebuilding one spec lets each consumer apply
-    // the composed changes exactly once while selection follows normalization.
-    // Forward the original transaction opaquely: annotation ownership remains
-    // with its producer instead of becoming a registry maintained by lists.
-    return {
-      ...transaction,
-      changes: transaction.changes.compose(normalization),
-      selection: transaction.selection?.map(normalization),
-      effects: transaction.effects,
-      scrollIntoView: transaction.scrollIntoView
-    } satisfies TransactionSpec;
+    // CodeMirror owns composition of the original transaction's opaque
+    // annotations, effects, selection, scroll intent and history semantics.
+    // Keeping the originating Transaction intact avoids a list-owned registry.
+    return [transaction, { changes: normalization, sequential: true }];
   });
 }
 

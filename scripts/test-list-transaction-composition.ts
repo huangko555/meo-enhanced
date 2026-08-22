@@ -4,7 +4,8 @@ import {
   EditorState,
   StateEffect,
   Transaction,
-  type Transaction as CodeMirrorTransaction
+  type Transaction as CodeMirrorTransaction,
+  type TransactionSpec
 } from '@codemirror/state';
 import { isolateHistory } from '@codemirror/commands';
 import { orderedListRenumberTransactionFilter } from '../webview/src/helpers/listMarkers';
@@ -35,12 +36,6 @@ function positionedValues(transaction: CodeMirrorTransaction): PositionedEffect[
     .map((effect) => effect.value);
 }
 
-function consumedPositions(transaction: CodeMirrorTransaction): number[] {
-  return positionedValues(transaction).map((effect) => (
-    transaction.changes.mapPos(effect.at, effect.assoc)
-  ));
-}
-
 function state(text: string, shouldNormalize: () => boolean = () => true): EditorState {
   return EditorState.create({
     doc: text,
@@ -57,7 +52,6 @@ const zero = state('1. a\n2. b').update({
 assert.equal(zero.newDoc.toString(), '1. ax\n2. b');
 assert.equal(zero.newSelection.main.head, 5);
 assert.deepEqual(positionedValues(zero), [{ label: 'after', at: 5, assoc: 1 }]);
-assert.deepEqual(consumedPositions(zero), [6]);
 assert.equal(zero.annotation(isolateHistory), 'before');
 
 const one = state('1. a\n99. b').update({
@@ -73,8 +67,7 @@ const one = state('1. a\n99. b').update({
 });
 assert.equal(one.newDoc.toString(), '1. ax\n2. b');
 assert.equal(one.newSelection.main.head, 10);
-assert.deepEqual(positionedValues(one), [{ label: 'after', at: 10, assoc: 1 }]);
-assert.deepEqual(consumedPositions(one), [10]);
+assert.deepEqual(positionedValues(one), [{ label: 'after', at: 9, assoc: 1 }]);
 assert.equal(one.isUserEvent('input.type'), true);
 assert.equal(one.annotation(Transaction.addToHistory), true);
 assert.equal(one.annotation(isolateHistory), 'after');
@@ -104,10 +97,9 @@ assert.equal(two.newDoc.toString(), '1. ax\n2. b\n3. c\n| - |!');
 assert.equal(two.newSelection.main.head, 22);
 assert.deepEqual(positionedValues(two), [
   { label: 'before', at: 0, assoc: 1 },
-  { label: 'between', at: 10, assoc: 1 },
-  { label: 'after', at: 18, assoc: 1 }
+  { label: 'between', at: 9, assoc: 1 },
+  { label: 'after', at: 15, assoc: 1 }
 ]);
-assert.deepEqual(consumedPositions(two), [0, 10, 16]);
 assert.deepEqual(
   two.effects.filter((effect) => effect.is(nonPositionedEffect)).map((effect) => effect.value),
   ['preserved']
@@ -154,6 +146,76 @@ for (const consumer of ['mermaid', 'latex']) {
   );
 }
 
+const publicOnlyStart = EditorState.create({
+  doc: '1. a\n99. b',
+  extensions: liveInputDerivedWorkExtensions()
+});
+const publicOnlyInput = publicOnlyStart.update({
+  changes: { from: 4, insert: 'x' },
+  annotations: [
+    Transaction.userEvent.of('input.type'),
+    markLiveInputNestedProjection(),
+    opaqueConsumerAnnotation.of({ consumer: 'public-interface' })
+  ]
+});
+const publicTransactionOwnKeys = new Set<PropertyKey>([
+  'startState',
+  'changes',
+  'selection',
+  'effects',
+  'scrollIntoView'
+]);
+const publicOnlyTransaction = new Proxy(publicOnlyInput, {
+  ownKeys(target) {
+    return Reflect.ownKeys(target).filter((key) => publicTransactionOwnKeys.has(key));
+  }
+});
+const filterState = EditorState.create({
+  doc: publicOnlyStart.doc,
+  extensions: orderedListRenumberTransactionFilter(() => true)
+});
+const publicFilter = filterState.facet(EditorState.transactionFilter)[0];
+assert.ok(publicFilter, 'the production ordered-list filter must be installed');
+const publicFilteredSpec = publicFilter(publicOnlyTransaction);
+const publicFilteredSpecs: readonly TransactionSpec[] = Array.isArray(publicFilteredSpec)
+  ? publicFilteredSpec
+  : [publicFilteredSpec];
+const publicFiltered = publicOnlyStart.update(...publicFilteredSpecs);
+assert.equal(publicFiltered.newDoc.toString(), '1. ax\n2. b');
+assert.equal(
+  isLiveInputNestedProjection(publicFiltered),
+  true,
+  'normalization must use only the public Transaction Interface to preserve nested provenance'
+);
+assert.equal(shouldDeferLiveInputDerivedWork(publicFiltered), true);
+assert.deepEqual(
+  publicFiltered.annotation(opaqueConsumerAnnotation),
+  { consumer: 'public-interface' },
+  'opaque annotations must not depend on Transaction own-key enumeration'
+);
+
+const filterDisabled = state('1. a\n99. b').update({
+  changes: { from: 4, insert: 'x' },
+  annotations: opaqueConsumerAnnotation.of({ consumer: 'filter-false' }),
+  filter: false
+});
+assert.equal(filterDisabled.newDoc.toString(), '1. ax\n99. b');
+assert.deepEqual(
+  filterDisabled.annotation(opaqueConsumerAnnotation),
+  { consumer: 'filter-false' },
+  'CodeMirror filter=false must bypass normalization without changing opaque semantics'
+);
+
+const throwingState = state('1. a\n99. b', () => {
+  throw new Error('controlled normalization predicate failure');
+});
+assert.throws(
+  () => throwingState.update({ changes: { from: 4, insert: 'x' } }),
+  /controlled normalization predicate failure/,
+  'a synchronous filter failure must reject the transaction instead of publishing a partial document'
+);
+assert.equal(throwingState.doc.toString(), '1. a\n99. b');
+
 let normalizeExternal = false;
 const external = state('1. a\n99. b', () => normalizeExternal).update({
   changes: { from: 4, insert: 'x' },
@@ -164,7 +226,6 @@ const external = state('1. a\n99. b', () => normalizeExternal).update({
 assert.equal(external.newDoc.toString(), '1. ax\n99. b');
 assert.equal(external.newSelection.main.head, 5);
 assert.deepEqual(positionedValues(external), [{ label: 'after', at: 10, assoc: 1 }]);
-assert.deepEqual(consumedPositions(external), [11]);
 assert.equal(external.annotation(Transaction.addToHistory), false);
 assert.equal(external.annotation(Transaction.remote), true);
 

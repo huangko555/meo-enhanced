@@ -1,6 +1,7 @@
 import { Facet, type EditorState, type Extension, type StateEffect } from '@codemirror/state';
 import type { TableTransactionProvenanceSnapshot } from '../application/tableTransactionProvenance';
 
+/** Positions follow TransactionSpec: they refer to the document after the same spec's changes. */
 export type CodeMirrorTableProvenanceIntent =
   | { readonly type: 'insertedRow'; readonly at: number; readonly assoc: -1 | 1; readonly offset?: number }
   | {

@@ -34,7 +34,8 @@ import {
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
   getTableTransactionProvenance,
-  getTableTransactionProvenanceSnapshot
+  getTableTransactionProvenanceSnapshot,
+  type CodeMirrorTableProvenanceIntent
 } from '../adapters/tableTransactionProvenance';
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import {
@@ -3507,19 +3508,25 @@ class HtmlTableWidget extends WidgetType {
     const blankRow = `${this.tableData.indent}| ${new Array(colCount).fill('').join(' | ')} |`;
     const changes = this.collectPendingCellSourceChanges(view);
     const provenance = getTableTransactionProvenance(view.state);
-    let insertedRowEffect: StateEffect<unknown>;
+    let insertedRowAnchor: number;
+    let insertedRowOffset = 0;
     if (insertAt < this.tableData.rows.length) {
       const line = view.state.doc.line(tableStartLine + 2 + insertAt);
       changes.push({ from: line.from, to: line.from, insert: `${blankRow}\n` });
-      insertedRowEffect = provenance.effect({ type: 'insertedRow', at: line.from, assoc: -1 });
+      insertedRowAnchor = line.from;
     } else {
       const previousLine = view.state.doc.line(tableStartLine + 1 + this.tableData.rows.length);
       changes.push({ from: previousLine.to, to: previousLine.to, insert: `\n${blankRow}` });
-      insertedRowEffect = provenance.effect({
-        type: 'insertedRow', at: previousLine.to, assoc: -1, offset: 1
-      });
+      insertedRowAnchor = previousLine.to;
+      insertedRowOffset = 1;
     }
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
+    const insertedRowEffect = provenance.effect({
+      type: 'insertedRow',
+      at: view.state.changes(changes).mapPos(insertedRowAnchor, -1),
+      assoc: -1,
+      offset: insertedRowOffset
+    });
     this.hasPendingCellEdits = false;
     const focusTarget = { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 };
     return {
@@ -3581,7 +3588,10 @@ class HtmlTableWidget extends WidgetType {
       else groups.push({ from: index, to: index });
     }
 
-    const deletionEffects = groups.flatMap((group) => {
+    const deletionIntents: Array<Extract<
+      CodeMirrorTableProvenanceIntent,
+      { readonly type: 'deletedRows' }
+    >> = groups.flatMap((group) => {
       const baselineLines = sortedIndexes
         .filter((index) => index >= group.from && index <= group.to)
         .map((index) => this.tableData.diffFlagsByLine?.[tableStartLine + 2 + index]?.baselineLineNumber)
@@ -3600,13 +3610,13 @@ class HtmlTableWidget extends WidgetType {
       const anchor = deletionAtEnd
         ? Math.max(0, view.state.doc.line(fromLine).from - 1)
         : view.state.doc.line(fromLine).from;
-      return [getTableTransactionProvenance(view.state).effect({
+      return [{
         type: 'deletedRows',
         at: anchor,
         assoc: deletionAtEnd ? -1 : 1,
         baselineRanges,
         deletionAtEnd
-      })];
+      }];
     });
     const changes: Array<{ from: number; to: number; insert?: string }> = groups.map((group) => {
       const fromLine = tableStartLine + 2 + group.from;
@@ -3622,6 +3632,12 @@ class HtmlTableWidget extends WidgetType {
     });
     changes.push(...this.collectPendingCellSourceChanges(view, removedIndexes));
     changes.sort((left, right) => left.from - right.from || left.to - right.to);
+    const ownChanges = view.state.changes(changes);
+    const provenance = getTableTransactionProvenance(view.state);
+    const deletionEffects = deletionIntents.map((intent) => provenance.effect({
+      ...intent,
+      at: ownChanges.mapPos(intent.at, intent.assoc)
+    }));
     this.hasPendingCellEdits = false;
     return {
       transaction: { changes, effects: deletionEffects },

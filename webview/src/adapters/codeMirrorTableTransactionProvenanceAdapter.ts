@@ -149,10 +149,13 @@ export function createCodeMirrorTableTransactionProvenanceAdapter(
 
     const scope = provenance.snapshot().scope;
     const mutations: TableProvenanceMutation[] = [];
+    // StateEffect values already use the final TransactionSpec coordinates.
+    // Sequential filters map them; remapping the combined changes here would
+    // apply text changes a second time and violate the CodeMirror contract.
     for (const value of effects) {
       if (!('scope' in value) || value.scope !== scope) continue;
       if (value.type === 'markInsertedRow') {
-        const position = transaction.changes.mapPos(value.at, value.assoc) + value.offset;
+        const position = value.at + value.offset;
         const line = transaction.newDoc.lineAt(Math.max(0, Math.min(position, transaction.newDoc.length)));
         mutations.push({ type: 'markInsertedRow', id: value.id, from: line.from, to: line.to });
       } else if (value.type === 'removeInsertedRow') {
@@ -161,14 +164,14 @@ export function createCodeMirrorTableTransactionProvenanceAdapter(
         mutations.push({
           type: 'markDeletedRows',
           id: value.id,
-          at: transaction.changes.mapPos(value.at, value.assoc),
+          at: value.at,
           baselineRanges: value.baselineRanges,
           deletionAtEnd: value.deletionAtEnd
         });
       } else if (value.type === 'removeDeletedRows') {
         mutations.push({ type: 'removeDeletedRows', id: value.id });
       } else if (value.type === 'remapInsertedRows') {
-        const tableFrom = transaction.changes.mapPos(value.tableFrom, -1);
+        const tableFrom = value.tableFrom;
         mutations.push({
           type: 'remapInsertedRows',
           rows: value.rows.map(({ id, newOffset }) => {

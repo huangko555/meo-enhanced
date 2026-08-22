@@ -455,6 +455,63 @@ async function main(): Promise<void> {
     assert.equal(await page.evaluate(() => (window as any).__nestedRichListEditor.getText()), nestedExpected);
     await page.evaluate(() => (window as any).__nestedRichListEditor.destroy());
 
+    const crossDocument = [
+      '```mermaid',
+      'graph TD',
+      'A --> B',
+      '```',
+      '',
+      '1. a',
+      '99. b',
+      '',
+      '| H |',
+      '| --- |',
+      '| - |'
+    ].join('\n');
+    const crossExpected = crossDocument
+      .replace('A --> B', 'A --> BX')
+      .replace('99. b', '2. b')
+      .concat('\n| new |');
+    const cross = await page.evaluate((text) => {
+      const harness = (window as any).ListEditingHarness;
+      const host = document.createElement('div');
+      document.body.append(host);
+      const changes: string[] = [];
+      const editor = harness.createEditor({
+        parent: host,
+        text,
+        initialMode: 'live',
+        onApplyChanges(next: string) { changes.push(next); }
+      });
+      const provenance = harness.getTableTransactionProvenance(editor.view.state);
+      const mermaidInsert = text.indexOf('A --> B') + 'A --> B'.length;
+      const tableEnd = editor.view.state.doc.length;
+      const transactionChanges = [
+        { from: mermaidInsert, insert: 'X' },
+        { from: tableEnd, insert: '\n| new |' }
+      ];
+      const ownChanges = editor.view.state.changes(transactionChanges);
+      const insertedRowFrom = ownChanges.mapPos(tableEnd, -1) + 1;
+      editor.view.dispatch({
+        changes: transactionChanges,
+        effects: provenance.effect({ type: 'insertedRow', at: insertedRowFrom, assoc: -1 }),
+        annotations: harness.userEvent.of('input.type')
+      });
+      const result = {
+        text: editor.getText(),
+        callbackCount: changes.length,
+        history: editor.getHistoryDepth(),
+        snapshot: provenance.snapshot()
+      };
+      editor.destroy();
+      host.remove();
+      return result;
+    }, crossDocument);
+    assert.equal(cross.text, crossExpected);
+    assert.equal(cross.callbackCount, 1, 'Mermaid+Table normalization must publish one Document callback');
+    assert.deepEqual(cross.history, { undo: 1, redo: 0 });
+    assert.deepEqual(cross.snapshot.insertedRows, [{ id: 'row-1', from: 65, to: 72 }]);
+
     console.log('list editing production transaction checks passed');
   } finally {
     await browser.close();
