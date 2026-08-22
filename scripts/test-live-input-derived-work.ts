@@ -1,5 +1,101 @@
 import assert from 'node:assert/strict';
-import { createLiveInputDerivedWorkScheduler } from '../webview/src/editor/liveInputDerivedWork';
+import { EditorState, Transaction } from '@codemirror/state';
+import {
+  createLiveInputDerivedWorkScheduler,
+  isLiveInputNestedProjection,
+  liveInputDerivedWorkExtensions,
+  markLiveInputDerivedWorkFollowUp,
+  markLiveInputNestedProjection,
+  shouldDeferLiveInputDerivedWork,
+  supersedeLiveInputDerivedWork
+} from '../webview/src/editor/liveInputDerivedWork';
+
+const unrelatedState = EditorState.create({ doc: 'source-mode' });
+assert.equal(
+  shouldDeferLiveInputDerivedWork(unrelatedState.update({ changes: { from: 0, insert: '!' } })),
+  false,
+  'states without the Live phase extension must remain outside the deferred path'
+);
+
+const productionState = EditorState.create({
+  doc: 'before',
+  extensions: liveInputDerivedWorkExtensions()
+});
+const productionInput = productionState.update({
+  changes: { from: productionState.doc.length, insert: '!' },
+  annotations: Transaction.userEvent.of('input.type')
+});
+assert.equal(
+  productionInput.effects.length,
+  1,
+  'a real input transaction must carry the production phase effect'
+);
+assert.equal(
+  shouldDeferLiveInputDerivedWork(productionInput),
+  true,
+  'a real input transaction must enter the deferred production path'
+);
+const automaticFollowUp = productionInput.state.update({
+  changes: { from: 0, to: 1, insert: 'B' },
+  annotations: [
+    Transaction.addToHistory.of(false),
+    markLiveInputDerivedWorkFollowUp()
+  ]
+});
+assert.equal(
+  shouldDeferLiveInputDerivedWork(automaticFollowUp),
+  true,
+  'input-owned normalization must remain inside the pending input phase'
+);
+const externalPresentation = automaticFollowUp.state.update({
+  changes: { from: 0, to: 1, insert: 'E' },
+  effects: supersedeLiveInputDerivedWork(),
+  annotations: Transaction.addToHistory.of(false)
+});
+assert.equal(
+  shouldDeferLiveInputDerivedWork(externalPresentation),
+  false,
+  'external presentation must supersede pending input and rebuild current state'
+);
+const nestedInputProjection = externalPresentation.state.update({
+  changes: { from: externalPresentation.state.doc.length, insert: ' nested' },
+  annotations: [
+    Transaction.userEvent.of('input.type'),
+    markLiveInputNestedProjection()
+  ]
+});
+assert.equal(isLiveInputNestedProjection(nestedInputProjection), true);
+assert.equal(
+  shouldDeferLiveInputDerivedWork(nestedInputProjection),
+  true,
+  'a nested rich-block Editor projection must enter the input phase without unloading its widget'
+);
+const nextInput = nestedInputProjection.state.update({
+  changes: { from: nestedInputProjection.state.doc.length, insert: '?' },
+  annotations: Transaction.userEvent.of('input.type')
+});
+const historyReplay = nextInput.state.update({
+  changes: { from: nextInput.state.doc.length - 1, to: nextInput.state.doc.length },
+  annotations: Transaction.userEvent.of('undo')
+});
+assert.equal(
+  shouldDeferLiveInputDerivedWork(historyReplay),
+  false,
+  'History must supersede pending input and rebuild its current document'
+);
+const inputBeforeEqualReload = historyReplay.state.update({
+  changes: { from: historyReplay.state.doc.length, insert: '#' },
+  annotations: Transaction.userEvent.of('input.type')
+});
+const equalReload = inputBeforeEqualReload.state.update({
+  effects: supersedeLiveInputDerivedWork(),
+  annotations: Transaction.addToHistory.of(false)
+});
+assert.equal(
+  shouldDeferLiveInputDerivedWork(equalReload),
+  false,
+  'an equal-text external reload must supersede pending derived work without a document change'
+);
 
 type FrameCallback = () => void;
 

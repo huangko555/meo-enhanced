@@ -93,6 +93,7 @@ import {
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
 import {
   isLiveInputDerivedWorkRefresh,
+  isLiveInputNestedProjection,
   liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork
@@ -189,8 +190,8 @@ type LivePointerSelectionState = {
 
 export const setLivePointerSelectionActiveEffect = StateEffect.define<LivePointerSelectionState>();
 export const setLiveDocumentIdleEffect = StateEffect.define<boolean>();
-export const preserveLiveDecorationsForSearchEffect = StateEffect.define<void>();
-export const refreshLiveDecorationsAfterSearchEffect = StateEffect.define<void>();
+export const preserveLiveDecorationsForSearchEffect = StateEffect.define<true>();
+export const refreshLiveDecorationsAfterSearchEffect = StateEffect.define<true>();
 
 const livePointerSelectionActiveField = StateField.define<LivePointerSelectionState>({
   create() {
@@ -2762,7 +2763,9 @@ const liveDecorationField = StateField.define<DecorationSet>({
     }
     if (shouldDeferLiveInputDerivedWork(transaction)) {
       return transaction.docChanged
-        ? mapLiveInputDerivedDecorations(decorations, transaction)
+        ? isLiveInputNestedProjection(transaction)
+          ? decorations.map(transaction.changes)
+          : mapLiveInputDerivedDecorations(decorations, transaction)
         : decorations;
     }
     // Recompute on every transaction so live mode stays in sync with parser updates

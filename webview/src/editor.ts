@@ -102,9 +102,14 @@ import {
   type MermaidDiagramPresentationFactory
 } from './editor/mermaidDiagramPresentation';
 import {
+  beginLiveInputComposition,
+  completeLiveInputComposition,
+  isLiveInputDerivedWorkPending,
   isLiveInputDerivedWorkRefresh,
+  markLiveInputDerivedWorkFollowUp,
   mapLiveInputDerivedDecorations,
-  shouldDeferLiveInputDerivedWork
+  shouldDeferLiveInputDerivedWork,
+  supersedeLiveInputDerivedWork
 } from './editor/liveInputDerivedWork';
 
 declare module '@codemirror/view' {
@@ -356,7 +361,10 @@ export function createEditor({
       try {
         view.dispatch({
           changes: renumberChanges,
-          annotations: Transaction.addToHistory.of(false)
+          annotations: [
+            Transaction.addToHistory.of(false),
+            markLiveInputDerivedWorkFollowUp()
+          ]
         });
       } finally {
         applyingRenumber = false;
@@ -370,11 +378,16 @@ export function createEditor({
     }
     imeCompositionFlushTimer = window.setTimeout(() => {
       imeCompositionFlushTimer = null;
-      if (!imeCompositionChanged || imeCompositionActive) {
+      if (imeCompositionActive) {
+        return;
+      }
+      if (!imeCompositionChanged) {
+        completeLiveInputComposition(view);
         return;
       }
       imeCompositionChanged = false;
       publishComposedDocumentChange();
+      completeLiveInputComposition(view);
     }, 20);
   };
   const initialCursorPos = (() => {
@@ -1336,7 +1349,7 @@ export function createEditor({
       if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
         forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
       }
-      view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(undefined) });
+      view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) });
     });
   };
 
@@ -1352,7 +1365,7 @@ export function createEditor({
         setMermaidSearchRevealEffect.of({ from, to }),
         setLatexMathSearchRevealEffect.of({ from, to }),
         ...(htmlBlock ? [setHtmlEditingRangeEffect.of({ from: htmlBlock.from, to: htmlBlock.to })] : []),
-        preserveLiveDecorationsForSearchEffect.of(undefined)
+        preserveLiveDecorationsForSearchEffect.of(true)
       ]
     });
     scheduleLiveSearchDecorationRefresh(to);
@@ -1833,6 +1846,7 @@ export function createEditor({
         },
         compositionstart() {
           imeCompositionActive = true;
+          beginLiveInputComposition(view);
           if (imeCompositionFlushTimer !== null) {
             window.clearTimeout(imeCompositionFlushTimer);
             imeCompositionFlushTimer = null;
@@ -2041,13 +2055,18 @@ export function createEditor({
         return suppressHistoryAutoScrollAt(range.head);
       }),
       EditorView.updateListener.of((update) => {
-        scheduleBlockActionToolbarReconcile();
+        const derivedPresentationDeferred = isLiveInputDerivedWorkPending(update.state);
+        if (!derivedPresentationDeferred) {
+          scheduleBlockActionToolbarReconcile();
+        }
         viewportController?.reconcileAfterEditorUpdate(
           update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
         );
 
         syncModeClasses();
-        syncGitGutterVisibility();
+        if (!derivedPresentationDeferred) {
+          syncGitGutterVisibility();
+        }
         const searchQueryChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => effect.is(setSearchQueryEffect))
         ));
@@ -2089,9 +2108,11 @@ export function createEditor({
 
         // Search indicators consume accepted Document/Selection and must not
         // stand between the public change callback and its owner.
-        emitSearchStateChange();
-        if (update.docChanged || update.selectionSet || searchQueryChanged) {
-          searchOverviewRuler?.refresh({ positionsChanged: update.docChanged || searchQueryChanged });
+        if (!derivedPresentationDeferred) {
+          emitSearchStateChange();
+          if (update.docChanged || update.selectionSet || searchQueryChanged) {
+            searchOverviewRuler?.refresh({ positionsChanged: update.docChanged || searchQueryChanged });
+          }
         }
       })
     ]
@@ -2462,7 +2483,7 @@ export function createEditor({
           setLongCodeBlockSearchRevealEffect.of(null),
           setMermaidSearchRevealEffect.of(null),
           setLatexMathSearchRevealEffect.of(null),
-          preserveLiveDecorationsForSearchEffect.of(undefined)
+          preserveLiveDecorationsForSearchEffect.of(true)
         ]
       });
       scheduleLiveSearchDecorationRefresh();
@@ -2592,6 +2613,7 @@ export function createEditor({
           view.dispatch({
             effects: [
               tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+              supersedeLiveInputDerivedWork(),
               ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
             ],
             annotations: Transaction.addToHistory.of(false)
@@ -2612,6 +2634,7 @@ export function createEditor({
             selection: { anchor: mappedAnchor, head: mappedHead },
             effects: [
               tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+              supersedeLiveInputDerivedWork(),
               ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
             ],
             annotations: Transaction.addToHistory.of(false)

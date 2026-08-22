@@ -66,7 +66,20 @@ const detailsBlockStateField = StateField.define<ReadonlyMap<number, boolean>>({
   update(overrides, transaction) {
     const toggleEffects = transaction.effects.filter((effect) => effect.is(toggleDetailsBlockEffect));
     if (shouldDeferLiveInputDerivedWork(transaction)) {
-      return transaction.docChanged ? mapDetailsOverrides(overrides, transaction) : overrides;
+      const next = transaction.docChanged ? mapDetailsOverrides(overrides, transaction) : new Map(overrides);
+      if (toggleEffects.length === 0) return next;
+      const blocks = new Map(
+        extractDetailsBlocks(transaction.state, currentSyntaxTree(transaction.state))
+          .map((block) => [block.anchorFrom, block] as const)
+      );
+      for (const effect of toggleEffects) {
+        const block = blocks.get(effect.value);
+        if (!block) continue;
+        const collapsed = !(next.get(block.anchorFrom) ?? block.defaultCollapsed);
+        if (collapsed === block.defaultCollapsed) next.delete(block.anchorFrom);
+        else next.set(block.anchorFrom, collapsed);
+      }
+      return overridesEqual(next, overrides) ? overrides : next;
     }
     if (!transaction.docChanged
       && !isLiveInputDerivedWorkRefresh(transaction)
@@ -113,6 +126,7 @@ export function toggleDetailsBlock(view: EditorView, anchor: number): boolean {
 
   const collapsed = getDetailsBlocks(view.state)
     .find((candidate) => candidate.anchorFrom === anchor)?.collapsed ?? block.defaultCollapsed;
+  const nextCollapsed = !collapsed;
   const selectionTouchesBody = view.state.selection.ranges.some((range) => (
     range.empty
       ? range.from > block.bodyFrom && range.from < block.bodyTo
@@ -126,6 +140,12 @@ export function toggleDetailsBlock(view: EditorView, anchor: number): boolean {
 
   const mutate = () => {
     view.dispatch(transaction);
+    const renderedBlock = Array.from(view.dom.querySelectorAll<HTMLElement>('.meo-md-html-block'))
+      .find((candidate) => view.posAtDOM(candidate) === block.anchorFrom);
+    const rendered = renderedBlock?.querySelector<HTMLDetailsElement>(
+      ':scope > .meo-md-html-content > details'
+    );
+    if (rendered) rendered.open = !nextCollapsed;
     view.focus();
   };
   const viewportController = getViewportController(view);
@@ -135,7 +155,6 @@ export function toggleDetailsBlock(view: EditorView, anchor: number): boolean {
 }
 
 const detailsBlockAutoExpandSelectionExtension = EditorView.updateListener.of((update) => {
-  if (update.transactions.some(shouldDeferLiveInputDerivedWork)) return;
   if (!update.state.field(detailsBlockLiveActiveField, false)) return;
   if (update.transactions.some((transaction) => (
     transaction.effects.some((effect) => effect.is(toggleDetailsBlockEffect))

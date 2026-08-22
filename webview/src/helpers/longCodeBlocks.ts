@@ -385,28 +385,101 @@ function buildLongCodeState(
   };
 }
 
+function hasLongCodeImmediateEffect(transaction: Transaction): boolean {
+  return transaction.effects.some((effect) => (
+    effect.is(setLongCodeBlockFoldingEnabledEffect)
+    || effect.is(setLongCodeBlockSearchRevealEffect)
+    || effect.is(toggleLongCodeBlockEffect)
+    || effect.is(setLongCodeBlockPointerInteractionEffect)
+  ));
+}
+
+function updateDeferredLongCodeState(
+  value: LongCodeBlockState,
+  transaction: Transaction
+): LongCodeBlockState {
+  let enabled = value.enabled;
+  const map = (position: number, assoc: -1 | 1 = 1) => transaction.changes.mapPos(position, assoc);
+  const blocks = value.blocks.map((block) => transaction.docChanged
+    ? {
+        ...block,
+        anchor: map(block.anchor),
+        start: map(block.start),
+        end: map(block.end, -1),
+        endLineFrom: map(block.endLineFrom),
+        contentFrom: map(block.contentFrom),
+        contentTo: map(block.contentTo, -1),
+        collapsedFrom: map(block.collapsedFrom)
+      }
+    : { ...block });
+
+  for (const effect of transaction.effects) {
+    if (effect.is(setLongCodeBlockFoldingEnabledEffect)) enabled = effect.value;
+  }
+  let searchReveal: { from: number; to: number } | null | undefined;
+  for (const effect of transaction.effects) {
+    if (effect.is(setLongCodeBlockSearchRevealEffect)) searchReveal = effect.value;
+  }
+  if (searchReveal !== undefined) {
+    const target = searchReveal
+      ? findBlockContainingPosition(blocks, searchReveal.from, searchReveal.to)
+      : null;
+    for (const block of blocks) {
+      if (block.searchTemporary && !block.userExpanded && block !== target) {
+        block.collapsed = true;
+        block.searchTemporary = false;
+      }
+    }
+    if (target?.isLong && target.collapsed) {
+      target.collapsed = false;
+      target.searchTemporary = true;
+    }
+  }
+  for (const effect of transaction.effects) {
+    if (effect.is(toggleLongCodeBlockEffect)) {
+      const target = blocks.find((block) => block.anchor === effect.value.anchor);
+      if (target?.isLong) {
+        target.collapsed = effect.value.collapsed;
+        target.userExpanded = !effect.value.collapsed;
+        target.searchTemporary = false;
+      }
+    } else if (effect.is(setLongCodeBlockPointerInteractionEffect)) {
+      const target = findBlockContainingPosition(blocks, effect.value.position);
+      if (target?.isLong) {
+        target.collapsed = false;
+        target.userExpanded = true;
+        target.searchTemporary = false;
+      }
+    }
+  }
+  const searchEffectPresent = transaction.effects.some((effect) => effect.is(setLongCodeBlockSearchRevealEffect));
+  const toggleEffectPresent = transaction.effects.some((effect) => effect.is(toggleLongCodeBlockEffect));
+  if (!transaction.docChanged && transaction.selection && !searchEffectPresent && !toggleEffectPresent) {
+    const selection = transaction.state.selection.main;
+    const target = findBlockContainingPosition(blocks, selection.from, selection.to);
+    if (target?.isLong) {
+      target.collapsed = false;
+      target.userExpanded = true;
+      target.searchTemporary = false;
+    }
+  }
+
+  return {
+    enabled,
+    blocks,
+    decorations: hasLongCodeImmediateEffect(transaction) || !transaction.docChanged
+      ? buildLongCodeDecorations(blocks, enabled)
+      : mapLiveInputDerivedDecorations(value.decorations, transaction)
+  };
+}
+
 const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
   create(state) {
     return buildLongCodeState(state);
   },
   update(value, transaction) {
     if (shouldDeferLiveInputDerivedWork(transaction)) {
-      if (!transaction.docChanged) return value;
-      const map = (position: number, assoc: -1 | 1 = 1) => transaction.changes.mapPos(position, assoc);
-      return {
-        enabled: value.enabled,
-        blocks: value.blocks.map((block) => ({
-          ...block,
-          anchor: map(block.anchor),
-          start: map(block.start),
-          end: map(block.end, -1),
-          endLineFrom: map(block.endLineFrom),
-          contentFrom: map(block.contentFrom),
-          contentTo: map(block.contentTo, -1),
-          collapsedFrom: map(block.collapsedFrom)
-        })),
-        decorations: mapLiveInputDerivedDecorations(value.decorations, transaction)
-      };
+      return updateDeferredLongCodeState(value, transaction);
     }
     return buildLongCodeState(transaction.state, value, transaction);
   },
@@ -462,7 +535,8 @@ class LongCodeFloatingButtonPlugin {
   }
 
   update(update: ViewUpdate): void {
-    if (update.transactions.some(shouldDeferLiveInputDerivedWork)) return;
+    if (update.transactions.some(shouldDeferLiveInputDerivedWork)
+      && !update.transactions.some(hasLongCodeImmediateEffect)) return;
     if (update.docChanged || update.viewportChanged || update.selectionSet || update.geometryChanged || update.transactions.some((transaction) => transaction.effects.length > 0)) {
       this.refresh();
     }

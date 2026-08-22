@@ -14,6 +14,7 @@ import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockCont
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
+import { markLiveInputNestedProjection } from '../editor/liveInputDerivedWork';
 
 export type MermaidBlockMode = 'preview' | 'split' | 'source';
 
@@ -428,7 +429,10 @@ class MermaidEditingController {
             };
             this.outerView.dispatch({
               changes: { from: contentFrom, to: contentTo, insert: outerSourceText },
-              annotations: Transaction.userEvent.of(userEvent)
+              annotations: [
+                Transaction.userEvent.of(userEvent),
+                markLiveInputNestedProjection()
+              ]
             });
           })
         ]

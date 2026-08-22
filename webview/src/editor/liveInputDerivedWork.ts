@@ -1,5 +1,5 @@
-import { EditorState, StateEffect, StateField, type Extension, type Transaction } from '@codemirror/state';
-import { ViewPlugin, type DecorationSet, type EditorView } from '@codemirror/view';
+import { Annotation, EditorState, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
+import { EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view';
 
 export type LiveInputDerivedWorkScheduler = {
   documentChanged(): void;
@@ -69,23 +69,64 @@ export function createLiveInputDerivedWorkScheduler(
   };
 }
 
-const deferLiveInputDerivedWorkEffect = StateEffect.define<void>();
-const refreshLiveInputDerivedWorkEffect = StateEffect.define<void>();
-const cancelLiveInputDerivedWorkEffect = StateEffect.define<void>();
-const supersedeLiveInputDerivedWorkEffect = StateEffect.define<void>();
+// `undefined` is CodeMirror's signal to remove a StateEffect. A literal true
+// is the domain sentinel that keeps phase transitions present in transactions.
+const deferLiveInputDerivedWorkEffect = StateEffect.define<true>();
+const refreshLiveInputDerivedWorkEffect = StateEffect.define<true>();
+const cancelLiveInputDerivedWorkEffect = StateEffect.define<true>();
+const supersedeLiveInputDerivedWorkEffect = StateEffect.define<true>();
+const changeLiveInputCompositionEffect = StateEffect.define<true>();
+const completeLiveInputCompositionEffect = StateEffect.define<true>();
 
-const liveInputDerivedWorkPendingField = StateField.define<boolean>({
-  create: () => false,
-  update(pending, transaction) {
-    if (transaction.effects.some((effect) => effect.is(refreshLiveInputDerivedWorkEffect)
-      || effect.is(cancelLiveInputDerivedWorkEffect)
-      || effect.is(supersedeLiveInputDerivedWorkEffect))) {
-      return false;
+type LiveInputDerivedWorkPhase = 'idle' | 'composing' | 'pending-input';
+type LiveInputDerivedWorkPhaseState = {
+  readonly phase: LiveInputDerivedWorkPhase;
+  readonly compositionChanged: boolean;
+};
+
+const idleLiveInputDerivedWorkPhase: LiveInputDerivedWorkPhaseState = Object.freeze({
+  phase: 'idle',
+  compositionChanged: false
+});
+type LiveInputDerivedWorkProvenance = 'automatic-normalization' | 'nested-input-projection';
+const liveInputDerivedWorkProvenance = Annotation.define<LiveInputDerivedWorkProvenance>();
+
+export function markLiveInputDerivedWorkFollowUp(): Annotation<LiveInputDerivedWorkProvenance> {
+  return liveInputDerivedWorkProvenance.of('automatic-normalization');
+}
+
+export function markLiveInputNestedProjection(): Annotation<LiveInputDerivedWorkProvenance> {
+  return liveInputDerivedWorkProvenance.of('nested-input-projection');
+}
+
+export function isLiveInputNestedProjection(transaction: Transaction): boolean {
+  return transaction.annotation(liveInputDerivedWorkProvenance) === 'nested-input-projection';
+}
+
+export function supersedeLiveInputDerivedWork(): StateEffect<true> {
+  return supersedeLiveInputDerivedWorkEffect.of(true);
+}
+
+const liveInputDerivedWorkPhaseField = StateField.define<LiveInputDerivedWorkPhaseState>({
+  create: () => idleLiveInputDerivedWorkPhase,
+  update(previous, transaction) {
+    let next = previous;
+    for (const effect of transaction.effects) {
+      if (effect.is(refreshLiveInputDerivedWorkEffect)
+        || effect.is(cancelLiveInputDerivedWorkEffect)
+        || effect.is(supersedeLiveInputDerivedWorkEffect)) {
+        next = idleLiveInputDerivedWorkPhase;
+      } else if (effect.is(changeLiveInputCompositionEffect)) {
+        next = { phase: 'composing', compositionChanged: true };
+      } else if (effect.is(completeLiveInputCompositionEffect)) {
+        next = next.compositionChanged
+          ? { phase: 'pending-input', compositionChanged: false }
+          : idleLiveInputDerivedWorkPhase;
+      } else if (effect.is(deferLiveInputDerivedWorkEffect)) {
+        next = { phase: 'pending-input', compositionChanged: false };
+      }
     }
-    if (transaction.effects.some((effect) => effect.is(deferLiveInputDerivedWorkEffect))) {
-      return true;
-    }
-    return pending;
+    return next;
   }
 });
 
@@ -96,8 +137,22 @@ export function isLiveInputDerivedWorkRefresh(transaction: Transaction): boolean
 export function shouldDeferLiveInputDerivedWork(transaction: Transaction): boolean {
   if (isLiveInputDerivedWorkRefresh(transaction)) return false;
   if (transaction.effects.some((effect) => effect.is(cancelLiveInputDerivedWorkEffect))) return true;
-  return transaction.effects.some((effect) => effect.is(deferLiveInputDerivedWorkEffect))
-    || transaction.state.field(liveInputDerivedWorkPendingField, false) === true;
+  if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) return false;
+  const phase = transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
+  return phase !== undefined && phase !== 'idle';
+}
+
+export function isLiveInputDerivedWorkPending(state: EditorState): boolean {
+  const phase = state.field(liveInputDerivedWorkPhaseField, false)?.phase;
+  return phase !== undefined && phase !== 'idle';
+}
+
+export function completeLiveInputComposition(view: EditorView): void {
+  if (view.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'idle') return;
+  view.dispatch({
+    effects: completeLiveInputCompositionEffect.of(true),
+    annotations: Transaction.addToHistory.of(false)
+  });
 }
 
 /**
@@ -136,10 +191,10 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
     apply() {
       try {
-        view.dispatch({ effects: refreshLiveInputDerivedWorkEffect.of(undefined) });
+        view.dispatch({ effects: refreshLiveInputDerivedWorkEffect.of(true) });
       } catch (error) {
         try {
-          view.dispatch({ effects: cancelLiveInputDerivedWorkEffect.of(undefined) });
+          view.dispatch({ effects: cancelLiveInputDerivedWorkEffect.of(true) });
         } catch (cleanupError) {
           throw new AggregateError([error, cleanupError], 'Live derived refresh and cleanup failed');
         }
@@ -151,10 +206,20 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     }
   });
   return {
+    compositionStarted() {
+      scheduler.cancelPending();
+    },
     update(update: { transactions: readonly Transaction[] }) {
       for (const transaction of update.transactions) {
+        if (transaction.effects.some((effect) => effect.is(changeLiveInputCompositionEffect))) {
+          scheduler.cancelPending();
+        }
         if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) {
           scheduler.cancelPending();
+        }
+        if (transaction.effects.some((effect) => effect.is(completeLiveInputCompositionEffect))
+          && transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'pending-input') {
+          scheduler.documentChanged();
         }
         if (transaction.effects.some((effect) => effect.is(deferLiveInputDerivedWorkEffect))) {
           scheduler.documentChanged();
@@ -171,16 +236,47 @@ const codeMirrorLiveInputDerivedWorkPlugin = ViewPlugin.define(
   createCodeMirrorLiveInputDerivedWorkPlugin
 );
 
+export function beginLiveInputComposition(view: EditorView): void {
+  view.plugin(codeMirrorLiveInputDerivedWorkPlugin)?.compositionStarted();
+}
+
+function isHistoryTransaction(transaction: Transaction): boolean {
+  const userEvent = transaction.annotation(Transaction.userEvent);
+  return typeof userEvent === 'string'
+    && (userEvent === 'undo' || userEvent === 'redo'
+      || userEvent.startsWith('undo.') || userEvent.startsWith('redo.'));
+}
+
 export function liveInputDerivedWorkExtensions(): Extension[] {
   return [
-    EditorState.transactionExtender.of((transaction) => (
-      transaction.docChanged && transaction.isUserEvent('input')
-        ? { effects: deferLiveInputDerivedWorkEffect.of(undefined) }
-        : transaction.docChanged && transaction.startState.field(liveInputDerivedWorkPendingField, false)
-          ? { effects: supersedeLiveInputDerivedWorkEffect.of(undefined) }
-          : null
-    )),
-    liveInputDerivedWorkPendingField,
+    EditorState.transactionExtender.of((transaction) => {
+      if (!transaction.docChanged) return null;
+      const phase = transaction.startState.field(liveInputDerivedWorkPhaseField, false)?.phase ?? 'idle';
+      const provenance = transaction.annotation(liveInputDerivedWorkProvenance);
+      if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) {
+        return null;
+      }
+      if (isHistoryTransaction(transaction) && phase !== 'idle') {
+        return { effects: supersedeLiveInputDerivedWorkEffect.of(true) };
+      }
+      if (transaction.isUserEvent('input.type.compose')) {
+        return { effects: changeLiveInputCompositionEffect.of(true) };
+      }
+      if (provenance !== undefined) {
+        return { effects: deferLiveInputDerivedWorkEffect.of(true) };
+      }
+      if (phase === 'composing') {
+        return { effects: changeLiveInputCompositionEffect.of(true) };
+      }
+      if (transaction.isUserEvent('input')) {
+        return { effects: deferLiveInputDerivedWorkEffect.of(true) };
+      }
+      if (phase === 'pending-input') {
+        return { effects: supersedeLiveInputDerivedWorkEffect.of(true) };
+      }
+      return null;
+    }),
+    liveInputDerivedWorkPhaseField,
     codeMirrorLiveInputDerivedWorkPlugin
   ];
 }

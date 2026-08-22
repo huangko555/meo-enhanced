@@ -276,7 +276,9 @@ class HtmlBlockWidget extends WidgetType {
     if (details && this.block.detailsCollapsed !== null) {
       details.open = !this.block.detailsCollapsed;
       details.addEventListener('toggle', () => {
-        if (details.open === !this.block.detailsCollapsed) return;
+        const collapsed = getDetailsBlocks(view.state)
+          .find((block) => block.anchorFrom === this.block.from)?.collapsed;
+        if (collapsed === undefined || details.open === !collapsed) return;
         toggleDetailsBlock(view, this.block.from);
       });
     }

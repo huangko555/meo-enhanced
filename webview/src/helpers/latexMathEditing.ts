@@ -8,6 +8,7 @@ import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
+import { markLiveInputNestedProjection } from '../editor/liveInputDerivedWork';
 
 export type LatexMathBlockMode = 'preview' | 'split' | 'source';
 
@@ -384,7 +385,10 @@ class LatexMathEditingController {
             this.block = { ...this.block, contentTo: contentFrom + sourceText.length, sourceText };
             this.outerView.dispatch({
               changes: { from: contentFrom, to: contentTo, insert: sourceText },
-              annotations: Transaction.userEvent.of(userEvent)
+              annotations: [
+                Transaction.userEvent.of(userEvent),
+                markLiveInputNestedProjection()
+              ]
             });
             this.schedulePreviewRender();
           })
