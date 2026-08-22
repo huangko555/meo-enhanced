@@ -69,14 +69,14 @@ const adapter = createEditorModeEffectAdapter({
       onSelectionChange: () => undefined,
     });
   },
-  applyEditorMode(mode) {
-    events.push(`apply:${mode}`);
+  applyEditorMode(mode, viewport) {
+    events.push(`apply:${mode}:${viewport ? 'captured' : 'missing'}`);
     if (mode === 'live' && failNextLive) {
       failNextLive = false;
       throw taggedError('live-incompatible');
     }
     if (!editor) throw taggedError('fatal');
-    editor.setMode(mode);
+    editor.setMode(mode, viewport);
   },
   setPreviewActive(active) {
     previewActive = active;

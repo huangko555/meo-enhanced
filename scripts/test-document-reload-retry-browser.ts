@@ -36,7 +36,7 @@ async function main(): Promise<void> {
             export function createEditor(options: Parameters<typeof createRealEditor>[0]) {
               const editor = createRealEditor(options);
               const originalSetText = editor.setText.bind(editor);
-              const originalRestoreTopLine = editor.restoreTopLine?.bind(editor);
+              const originalViewportTransaction = editor.runViewportAnchorTransaction.bind(editor);
               let failuresRemaining = 0;
               let injectedFailures = 0;
               let reloadRestoreCalls = 0;
@@ -50,12 +50,12 @@ async function main(): Promise<void> {
                 }
                 return originalSetText(text, resetHistory);
               };
-              if (originalRestoreTopLine) {
-                editor.restoreTopLine = (...args: Parameters<typeof originalRestoreTopLine>) => {
-                  reloadRestoreCalls += 1;
-                  return originalRestoreTopLine(...args);
-                };
-              }
+              editor.runViewportAnchorTransaction = async (
+                ...args: Parameters<typeof originalViewportTransaction>
+              ) => {
+                await originalViewportTransaction(...args);
+                reloadRestoreCalls += 1;
+              };
               (window as any).__documentReloadRetry = {
                 editor,
                 resetHistoryCalls,
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
     assert.equal(result.historyDepth.undo, 0, 'a successful retry must reset native Editor History');
     assert.equal(result.undoApplied, false, 'normal undo must not recover discarded pre-reload text');
     assert.ok(Math.abs(result.position.line - position.topLine) <= 1, 'reload retry must restore the viewport');
-    assert.equal(result.reloadRestoreCalls, 1, 'the successful final presentation must restore exactly once');
+    assert.equal(result.reloadRestoreCalls, 1, 'the successful final presentation must use one viewport transaction');
 
     await page.click('.mode-button[data-mode="live"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');

@@ -2530,6 +2530,13 @@ export function createEditor({
     restoreViewportAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
       viewportController.restoreAnchorToken(handle, owner);
     },
+    runViewportAnchorTransaction(
+      handle: ViewportAnchorToken | null,
+      owner: ViewportAnchorOwner,
+      mutate: (isCurrent: () => boolean) => void | Promise<void>
+    ): void | Promise<void> {
+      return viewportController.runAnchorTransaction(handle, owner, mutate);
+    },
     markViewportInteraction(): void {
       viewportController.markInteraction();
     },
@@ -2631,6 +2638,7 @@ export function createEditor({
       imagePresentationResourcePool.dispose();
     },
     setText(textValue: string, resetHistory = false) {
+      viewportController.markInteraction();
       tableCommandRuntime.externalDocumentPresented();
       imagePresentationFactory.externalDocumentPresented();
       void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
@@ -2674,73 +2682,85 @@ export function createEditor({
       } finally {
         applyingExternal = false;
       }
-      restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
+      const mappedActiveTransaction = viewportController.mapActiveAnchorPosition(mappedViewportAnchor);
+      if (!mappedActiveTransaction) {
+        restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
+      }
       syncSelectionClass();
       emitSelectionChange();
     },
-    setMode(mode: EditableEditorMode) {
-      commitActiveTableInput();
-      const nextMode = mode === 'live' ? 'live' : 'source';
-      if (nextMode === currentMode) {
-        return;
-      }
+    setMode(mode: EditableEditorMode, viewport: ViewportAnchorToken | null = null) {
+      const applyMode = (isTransactionCurrent: () => boolean): void => {
+        commitActiveTableInput();
+        const nextMode = mode === 'live' ? 'live' : 'source';
+        if (nextMode === currentMode) {
+          return;
+        }
 
-      void editorHistoryRuntime?.dispatch({ type: 'presentationChanged' });
-      recentRenderedReplayPresentation = null;
+        void editorHistoryRuntime?.dispatch({ type: 'presentationChanged' });
+        recentRenderedReplayPresentation = null;
 
-      const topPosition = computeTopVisiblePosition();
-      viewportController.markInteraction();
+        const topPosition = isTransactionCurrent() ? null : computeTopVisiblePosition();
+        viewportController.markInteraction();
 
-      const previousMode = currentMode;
-      currentMode = nextMode;
-      let acquiredImagePresentationResources: (() => void) | null = null;
-      let acquiredMermaidPresentationResources: (() => void) | null = null;
-      if (nextMode === 'source') {
-        tableColumnWidthAdapter.adapter.release();
-      } else {
-        acquiredImagePresentationResources = imagePresentationFactory.acquire();
-        acquiredMermaidPresentationResources = mermaidDiagramPresentationConsumer.acquire();
-      }
-      try {
-        view.dispatch({
-          effects: [
-            modeCompartment.reconfigure(nextMode === 'live' ? liveModeExtensions() : sourceMode()),
-            gitGutterCompartment.reconfigure(
-              nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
-            )
-          ]
-        });
-      } catch (error) {
-        currentMode = previousMode;
-        if (previousMode === 'live') {
-          tableColumnWidthAdapter.adapter.acquire();
+        const previousMode = currentMode;
+        currentMode = nextMode;
+        let acquiredImagePresentationResources: (() => void) | null = null;
+        let acquiredMermaidPresentationResources: (() => void) | null = null;
+        if (nextMode === 'source') {
+          tableColumnWidthAdapter.adapter.release();
         } else {
-          acquiredImagePresentationResources?.();
-          acquiredMermaidPresentationResources?.();
+          acquiredImagePresentationResources = imagePresentationFactory.acquire();
+          acquiredMermaidPresentationResources = mermaidDiagramPresentationConsumer.acquire();
+        }
+        try {
+          view.dispatch({
+            effects: [
+              modeCompartment.reconfigure(nextMode === 'live' ? liveModeExtensions() : sourceMode()),
+              gitGutterCompartment.reconfigure(
+                nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
+              )
+            ]
+          });
+        } catch (error) {
+          currentMode = previousMode;
+          if (previousMode === 'live') {
+            tableColumnWidthAdapter.adapter.acquire();
+          } else {
+            acquiredImagePresentationResources?.();
+            acquiredMermaidPresentationResources?.();
+          }
+          syncModeClasses();
+          throw error;
+        }
+        if (nextMode === 'source') {
+          releaseImagePresentationResources?.();
+          releaseImagePresentationResources = null;
+          releaseMermaidPresentationResources?.();
+          releaseMermaidPresentationResources = null;
+        } else {
+          releaseImagePresentationResources = acquiredImagePresentationResources;
+          releaseMermaidPresentationResources = acquiredMermaidPresentationResources;
+        }
+        if (nextMode === 'live') {
+          // Live decorations consume the full Markdown tree. Bound the synchronous
+          // attempt; a false result keeps the published partial tree, and the Live
+          // field refreshes when CodeMirror publishes later parser transactions.
+          forceParsing(view, view.state.doc.length, 500);
+          tableColumnWidthAdapter.adapter.acquire();
         }
         syncModeClasses();
-        throw error;
-      }
-      if (nextMode === 'source') {
-        releaseImagePresentationResources?.();
-        releaseImagePresentationResources = null;
-        releaseMermaidPresentationResources?.();
-        releaseMermaidPresentationResources = null;
-      } else {
-        releaseImagePresentationResources = acquiredImagePresentationResources;
-        releaseMermaidPresentationResources = acquiredMermaidPresentationResources;
-      }
-      if (nextMode === 'live') {
-        // Live decorations consume the full Markdown tree. Bound the synchronous
-        // attempt; a false result keeps the published partial tree, and the Live
-        // field refreshes when CodeMirror publishes later parser transactions.
-        forceParsing(view, view.state.doc.length, 500);
-        tableColumnWidthAdapter.adapter.acquire();
-      }
-      syncModeClasses();
-      syncGitGutterVisibility();
+        syncGitGutterVisibility();
 
-      restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, { syncCursor: false, force: true });
+        if (topPosition) {
+          restoreTopVisibleLine(topPosition.lineNumber, topPosition.lineOffset, {
+            syncCursor: false,
+            force: true
+          });
+        }
+      };
+
+      viewportController.runAnchorTransaction(viewport, 'editor', applyMode);
     },
     setLongCodeBlockFoldingEnabled(enabled: boolean) {
       setLongCodeBlockFoldingEnabled(view, enabled === true);

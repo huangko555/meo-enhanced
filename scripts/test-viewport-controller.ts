@@ -198,6 +198,38 @@ if (documentScrollDOM.scrollTop !== 1470) {
 documentController.destroy();
 globalThis.requestAnimationFrame = originalRequestAnimationFrame;
 
+const renderedDocument = {
+  length: 999,
+  lines: 10,
+  line: (lineNumber: number) => ({
+    from: (lineNumber - 1) * 100,
+    to: lineNumber * 100 - 1,
+    number: lineNumber
+  })
+};
+const renderedBlock = {
+  dataset: {
+    meoRenderedBlockStartLine: '5',
+    meoRenderedBlockEndLine: '8'
+  },
+  getBoundingClientRect: () => ({ top: 40, bottom: 360 })
+};
+const renderedController = new ViewportController({
+  dom: {},
+  state: { doc: renderedDocument },
+  scrollDOM: {
+    scrollTop: 1000,
+    getBoundingClientRect: () => ({ top: 100, bottom: 600, height: 500 })
+  },
+  contentDOM: { querySelectorAll: () => [renderedBlock] },
+  lineBlockAtHeight: () => ({ from: 300, top: 980 })
+} as any, { attachInteractions: false });
+const renderedAnchor = renderedController.captureDocumentAnchor();
+if (renderedAnchor.position !== 400 || renderedAnchor.lineOffset !== 60) {
+  throw new Error(`Rendered block anchor lost source position or visual offset: ${JSON.stringify(renderedAnchor)}`);
+}
+renderedController.destroy();
+
 const wheelFrames: FrameRequestCallback[] = [];
 const originalWheelRequestAnimationFrame = globalThis.requestAnimationFrame;
 globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
@@ -491,19 +523,94 @@ if (anchorScrollDOM.scrollTop !== 618) {
 }
 
 previewCapture = { line: 4, lineOffset: 9 };
+const transactionHandle = anchorController.captureAnchorToken('preview');
+if (!transactionHandle) throw new Error('Preview transaction token was not captured');
+let transactionWasCurrent = false;
+anchorController.runAnchorTransaction(transactionHandle, 'editor', (isCurrent) => {
+  transactionWasCurrent = isCurrent();
+  anchorController.markInteraction();
+});
+await flushFrames(anchorFrames);
+if (!transactionWasCurrent || anchorScrollDOM.scrollTop !== 309) {
+  throw new Error(`The programmatic transaction invalidated itself at ${anchorScrollDOM.scrollTop}`);
+}
+
 const interactionHandle = anchorController.captureAnchorToken('preview');
 anchorController.markInteraction();
 anchorController.restoreAnchorToken(interactionHandle!, 'editor');
 await flushFrames(anchorFrames);
-if (anchorScrollDOM.scrollTop !== 618) {
+if (anchorScrollDOM.scrollTop !== 309) {
   throw new Error(`A newer interaction allowed stale projection to ${anchorScrollDOM.scrollTop}`);
 }
+
+let crossControllerPreviewWrites = 0;
+const crossScrollDOM = {
+  ...anchorScrollDOM,
+  scrollTop: 111
+};
+const crossController = new ViewportController({
+  ...anchorView,
+  dom: {},
+  scrollDOM: crossScrollDOM
+} as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => ({ line: 2, lineOffset: 3 }),
+    restoreTopVisiblePosition: () => { crossControllerPreviewWrites += 1; }
+  }
+});
+const foreignHandle = anchorController.captureAnchorToken('preview');
+let crossTokenWasCurrent = true;
+crossController.runAnchorTransaction(foreignHandle, 'preview', (isCurrent) => {
+  crossTokenWasCurrent = isCurrent();
+});
+if (crossTokenWasCurrent || crossControllerPreviewWrites !== 0 || crossScrollDOM.scrollTop !== 111) {
+  throw new Error('A cross-Controller token produced a viewport write');
+}
+
+let nullTokenWasCurrent = true;
+crossController.runAnchorTransaction(null, 'editor', (isCurrent) => {
+  nullTokenWasCurrent = isCurrent();
+});
+if (nullTokenWasCurrent || crossScrollDOM.scrollTop !== 111) {
+  throw new Error('A null token produced a viewport write');
+}
+
+const failedTargetHandle = crossController.captureAnchorToken('editor');
+let failedTargetThrew = false;
+try {
+  crossController.runAnchorTransaction(failedTargetHandle, 'preview', () => {
+    throw new Error('target mutation failed');
+  });
+} catch {
+  failedTargetThrew = true;
+}
+if (!failedTargetThrew || crossControllerPreviewWrites !== 0) {
+  throw new Error('A failed target projected an anchor');
+}
+crossController.destroy();
+
+const unavailableScrollDOM = { ...anchorScrollDOM, scrollTop: 222 };
+const unavailableController = new ViewportController({
+  ...anchorView,
+  dom: {},
+  scrollDOM: unavailableScrollDOM
+} as any, { attachInteractions: false });
+const unavailableHandle = unavailableController.captureAnchorToken('editor');
+let unavailableWasCurrent = true;
+unavailableController.runAnchorTransaction(unavailableHandle, 'preview', (isCurrent) => {
+  unavailableWasCurrent = isCurrent();
+});
+if (unavailableWasCurrent || unavailableScrollDOM.scrollTop !== 222) {
+  throw new Error('An unavailable Preview target produced a viewport write');
+}
+unavailableController.destroy();
 
 const disposedHandle = anchorController.captureAnchorToken('preview');
 anchorController.destroy();
 anchorController.restoreAnchorToken(disposedHandle!, 'editor');
 await flushFrames(anchorFrames);
-if (anchorScrollDOM.scrollTop !== 618) {
+if (anchorScrollDOM.scrollTop !== 309) {
   throw new Error(`A disposed Controller projected an anchor to ${anchorScrollDOM.scrollTop}`);
 }
 globalThis.requestAnimationFrame = originalAnchorRequestAnimationFrame;

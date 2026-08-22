@@ -69,11 +69,11 @@ async function main(): Promise<void> {
     assert.equal(adopted.editorMode, 'source');
     assert.deepEqual(
       adopted.adoptionEvents.filter((event: string) => event.startsWith('apply:')),
-      ['apply:source'],
+      ['apply:source:captured'],
       'same-tick manual adoption must reuse the queued automatic Source apply'
     );
     assert.ok(
-      adopted.adoptionEvents.indexOf('apply:source')
+      adopted.adoptionEvents.indexOf('apply:source:captured')
         < adopted.adoptionEvents.indexOf('persist:source:source')
     );
     assert.ok(
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     assert.equal(snapshot.state.mode, 'source', 'incompatible Live must fall back to Source');
     assert.equal(snapshot.notices.includes('live-fallback'), true);
     assert.deepEqual(snapshot.events.filter((event: string) => event.startsWith('apply:')).slice(-2), [
-      'apply:live', 'apply:source'
+      'apply:live:captured', 'apply:source:captured'
     ]);
 
     await page.evaluate(() => (window as any).__editorModeCandidate.request('live'));
@@ -145,7 +145,11 @@ async function main(): Promise<void> {
     assert.equal(snapshot.state.mode, 'live');
     assert.equal(snapshot.editorVisible, true);
     assert.equal(snapshot.editorFocused, true);
-    assert.equal(snapshot.events.includes('restore:editor'), true, 'opaque viewport token must cross the Adapter only');
+    assert.equal(
+      snapshot.events.includes('apply:live:captured'),
+      true,
+      'opaque viewport token must share the editable-mode transaction'
+    );
 
     await page.evaluate(() => (window as any).__editorModeCandidate.undo());
     snapshot = await page.evaluate(() => (window as any).__editorModeCandidate.snapshot());

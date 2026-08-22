@@ -87,7 +87,7 @@ interface ActiveScrollTarget {
 }
 
 interface ViewportAnchorTokenRecord {
-  readonly anchor: ViewportDocumentAnchor;
+  anchor: ViewportDocumentAnchor;
   readonly interactionGeneration: number;
   readonly projectedOwners: Set<ViewportAnchorOwner>;
 }
@@ -121,6 +121,7 @@ export class ViewportController {
   private readonly getMode: () => 'live' | 'source';
   private readonly previewSurface: PreviewViewportSurface | null;
   private readonly anchorTokens = new WeakMap<ViewportAnchorToken, ViewportAnchorTokenRecord>();
+  private activeAnchorTransaction: ViewportAnchorTokenRecord | null = null;
   private readonly onWheel = (event: WheelEvent) => this.handleWheel(event);
   private readonly onScroll = () => this.scheduleActiveScrollFrame();
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
@@ -155,7 +156,9 @@ export class ViewportController {
   }
 
   markInteraction(): void {
-    this.interactionGeneration += 1;
+    if (!this.activeAnchorTransaction || !this.isAnchorTokenCurrent(this.activeAnchorTransaction)) {
+      this.interactionGeneration += 1;
+    }
     this.scrollLockGeneration += 1;
     this.generation += 1;
     this.activeScrollTarget = null;
@@ -295,9 +298,17 @@ export class ViewportController {
         return rect.top <= scrollerRect.top && rect.bottom > scrollerRect.top;
       });
       const renderedBlockStartLine = Number(renderedBlock?.dataset.meoRenderedBlockStartLine);
-      if (Number.isFinite(renderedBlockStartLine) && renderedBlockStartLine > 0) {
-        const contextLine = this.view.state.doc.line(Math.max(1, Math.floor(renderedBlockStartLine) - 1));
-        return { position: contextLine.from, lineOffset: 0 };
+      if (
+        renderedBlock &&
+        Number.isInteger(renderedBlockStartLine) &&
+        renderedBlockStartLine > 0 &&
+        renderedBlockStartLine <= this.view.state.doc.lines
+      ) {
+        const rect = renderedBlock.getBoundingClientRect();
+        return {
+          position: this.view.state.doc.line(renderedBlockStartLine).from,
+          lineOffset: Math.max(0, scrollerRect.top - rect.top)
+        };
       }
     }
     const lineBlock = this.view.lineBlockAtHeight(scrollTop);
@@ -691,21 +702,77 @@ export class ViewportController {
   }
 
   restoreAnchorToken(handle: ViewportAnchorToken, owner: ViewportAnchorOwner): void {
-    const record = this.anchorTokens.get(handle);
-    if (!record || !this.isAnchorTokenCurrent(record) || record.projectedOwners.has(owner)) return;
-    record.projectedOwners.add(owner);
+    this.runAnchorTransaction(handle, owner, () => undefined);
+  }
+
+  /**
+   * Runs one programmatic surface mutation and then projects the Controller-bound token.
+   * Null, foreign, stale, duplicate and unavailable targets still run the mutation with a
+   * false current predicate but never write a viewport. Rejected mutations never project.
+   * Synchronous markInteraction calls belong to this transaction; later real interactions
+   * invalidate the predicate and every delayed projection.
+   */
+  runAnchorTransaction(
+    handle: ViewportAnchorToken | null,
+    owner: ViewportAnchorOwner,
+    mutate: (isCurrent: () => boolean) => void | Promise<void>
+  ): void | Promise<void> {
+    const record = handle ? this.anchorTokens.get(handle) : undefined;
+    const targetAvailable = owner === 'editor' || this.previewSurface !== null;
+    const current = Boolean(
+      record &&
+      targetAvailable &&
+      this.isAnchorTokenCurrent(record) &&
+      !record.projectedOwners.has(owner)
+    );
+    const previousTransaction = this.activeAnchorTransaction;
+    this.activeAnchorTransaction = current && record ? record : null;
+    const isCurrent = () => Boolean(current && record && this.isAnchorTokenCurrent(record));
+    let result: void | Promise<void>;
+    try {
+      result = mutate(isCurrent);
+    } finally {
+      this.activeAnchorTransaction = previousTransaction;
+    }
+    const project = (): void => {
+      if (!isCurrent() || !record) return;
+      this.projectAnchorRecord(record, owner);
+    };
+    if (result && typeof result.then === 'function') {
+      return result.then(project);
+    }
+    project();
+  }
+
+  /** Maps the owned semantic anchor during the synchronous part of a document transaction. */
+  mapActiveAnchorPosition(position: number): boolean {
+    const record = this.activeAnchorTransaction;
+    if (!record || !this.isAnchorTokenCurrent(record)) return false;
+    record.anchor = {
+      ...record.anchor,
+      position: Math.min(Math.max(0, position), this.view.state.doc.length)
+    };
+    return true;
+  }
+
+  private projectAnchorRecord(
+    record: ViewportAnchorTokenRecord,
+    owner: ViewportAnchorOwner
+  ): void {
+    if (record.projectedOwners.has(owner)) return;
     if (owner === 'editor') {
       this.restoreDocumentAnchor(record.anchor, undefined, { force: true });
+      record.projectedOwners.add(owner);
       return;
     }
-    if (!this.previewSurface) return;
     const line = this.view.state.doc.lineAt(
       Math.min(Math.max(0, record.anchor.position), this.view.state.doc.length)
     );
-    this.previewSurface.restoreTopVisiblePosition({
+    this.previewSurface?.restoreTopVisiblePosition({
       line: line.number,
       lineOffset: record.anchor.lineOffset
     }, () => this.isAnchorTokenCurrent(record));
+    record.projectedOwners.add(owner);
   }
 
   private handleKeyUp(event: KeyboardEvent): void {

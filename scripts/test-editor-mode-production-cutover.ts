@@ -40,9 +40,9 @@ assert.equal((source.match(/editorModeRuntime = createEditorModeRuntime\(/g) ?? 
 assert.equal(source.includes('editorModeApplication.dispatch('), false);
 assert.equal(source.includes('editorModeEffectAdapter.execute('), false);
 assert.equal(
-  (source.match(/editor\.setMode\(mode\)/g) ?? []).length,
+  (source.match(/editor\.setMode\(mode, viewport\)/g) ?? []).length,
   1,
-  'Editor mode application may only occur inside the injected Effect capability'
+  'Editor mode application and viewport restore must share the injected Effect capability'
 );
 assert.equal(
   (source.match(/type: 'setMode'/g) ?? []).length,

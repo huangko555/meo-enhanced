@@ -22,8 +22,13 @@ const surface = {
   preload(text: string) {
     calls.push({ type: 'preload', text });
   },
-  requestRender(text: string, options: { restoreLine?: number | null; force?: boolean } = {}) {
-    calls.push({ type: 'render', text, restoreLine: options.restoreLine ?? null, force: options.force === true });
+  requestRender(text: string, options: { force?: boolean; preserveViewport?: boolean } = {}) {
+    calls.push({
+      type: 'render',
+      text,
+      force: options.force === true,
+      preserveViewport: options.preserveViewport === true
+    });
   },
   acceptRenderResponse(message: PreviewRenderResponse) {
     calls.push({ type: 'response', requestId: message.requestId });
@@ -43,20 +48,24 @@ assert.deepEqual(calls, [
   { type: 'preload', text: 'hidden' }
 ]);
 
-adapter.setActive({ active: true, text: 'visible', restoreLine: 3 });
+adapter.setActive({ active: true, text: 'visible' });
 assert.deepEqual(calls.slice(3), [
   { type: 'visible', visible: true },
-  { type: 'render', text: 'visible', restoreLine: 3, force: false }
+  { type: 'render', text: 'visible', force: false, preserveViewport: false }
 ]);
 
-adapter.setActive({ active: true, text: 'updated', restoreLine: null });
+adapter.setActive({ active: true, text: 'updated' });
 assert.deepEqual(calls.filter(call => call.type === 'appearance'), [
   { type: 'appearance', appearance: 'auto' }
 ]);
 adapter.refreshVisible('theme refresh');
-assert.deepEqual(calls.at(-1), { type: 'render', text: 'theme refresh', restoreLine: 6, force: true });
-adapter.refreshVisible('explicit restore', { restoreLine: 9 });
-assert.deepEqual(calls.at(-1), { type: 'render', text: 'explicit restore', restoreLine: 9, force: true });
+assert.deepEqual(calls.at(-1), {
+  type: 'render', text: 'theme refresh', force: true, preserveViewport: true
+});
+adapter.refreshVisible('external transaction', { preserveViewport: false });
+assert.deepEqual(calls.at(-1), {
+  type: 'render', text: 'external transaction', force: true, preserveViewport: false
+});
 
 const response: PreviewRenderResponse = {
   type: 'previewRenderResult',

@@ -17,15 +17,26 @@ const waitForFrames = async (page: Page, count = 2): Promise<void> => {
 };
 
 const fixtureLines = Array.from({ length: 180 }, (_, index) => `semantic line ${index + 1}`);
+fixtureLines[19] = '| column A | column B |';
+fixtureLines[20] = '| --- | --- |';
+for (let line = 21; line <= 35; line += 1) {
+  fixtureLines[line] = `| rendered row ${line - 20} | value ${line - 20} |`;
+}
 fixtureLines[119] = 'semantic anchor selection';
 const fixture = fixtureLines.join('\n');
 const selectionStart = fixture.indexOf('semantic anchor selection');
 const selectionEnd = selectionStart + 'semantic anchor'.length;
+const renderedBlockStart = fixture.indexOf('| column A | column B |');
 
 const previewHtml = [
-  ...Array.from({ length: 180 }, (_, index) => (
-    `<p data-source-line="${index + 1}" style="height:28px;margin:0">semantic line ${index + 1}</p>`
-  )),
+  ...Array.from({ length: 180 }, (_, index) => {
+    const line = index + 1;
+    if (line === 20) {
+      return '<table data-source-line="20" data-source-end-line="36" style="display:block;height:520px;margin:0"><tbody><tr><td>rendered table block</td></tr></tbody></table>';
+    }
+    if (line > 20 && line <= 36) return '';
+    return `<p data-source-line="${line}" style="height:28px;margin:0">semantic line ${line}</p>`;
+  }),
   '<div class="meo-export-mermaid" data-source-line="150" data-source-b64="Zmxvd2NoYXJ0IFREO0EtLT5C"></div>'
 ].join('');
 
@@ -57,6 +68,7 @@ async function main(): Promise<void> {
       window.mermaid = {
         initialize() {},
         async render() {
+          window.parent.__viewportAnchorMermaidRenderCount = (window.parent.__viewportAnchorMermaidRenderCount || 0) + 1;
           await new Promise((resolve) => { window.parent.__releaseViewportAnchorMermaid = resolve; });
           return { svg: '<svg width="800" height="1200" viewBox="0 0 800 1200"><rect width="200" height="100"></rect></svg>' };
         }
@@ -68,6 +80,7 @@ async function main(): Promise<void> {
       window.mermaid = {
         initialize() {},
         async render() {
+          window.__viewportAnchorMermaidRenderCount = (window.__viewportAnchorMermaidRenderCount || 0) + 1;
           await new Promise((resolve) => { window.__releaseViewportAnchorMermaid = resolve; });
           return { svg: '<svg width="800" height="1200" viewBox="0 0 800 1200"><rect width="200" height="100"></rect></svg>' };
         }
@@ -128,11 +141,30 @@ async function main(): Promise<void> {
     ).__releaseViewportAnchorMermaid === 'function');
     await waitForFrames(page, 2);
 
-    const frameBox = await page.$eval<HTMLIFrameElement, { x: number; y: number }>('.preview-frame', (frame) => {
-      const rect = frame.getBoundingClientRect();
-      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    await page.click('.preview-appearance-button[data-appearance="dark"]');
+    await page.evaluate(() => (
+      window as typeof window & { __releaseViewportAnchorMermaid?: () => void }
+    ).__releaseViewportAnchorMermaid?.());
+    await page.waitForFunction(() => (
+      (window as typeof window & { __viewportAnchorMermaidRenderCount?: number })
+        .__viewportAnchorMermaidRenderCount ?? 0
+    ) >= 2);
+
+    const frameSelectionPoint = await page.$eval<HTMLIFrameElement, { x: number; y: number }>('.preview-frame', (frame) => {
+      const frameRect = frame.getBoundingClientRect();
+      const line = Array.from(frame.contentDocument?.querySelectorAll<HTMLElement>('p[data-source-line]') ?? [])
+        .find((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.top >= 40 && rect.bottom <= frameRect.height - 40;
+        });
+      if (!line) throw new Error('Missing selectable Preview line');
+      const lineRect = line.getBoundingClientRect();
+      return { x: frameRect.left + 8, y: frameRect.top + lineRect.top + lineRect.height / 2 };
     });
-    await page.mouse.move(frameBox.x, frameBox.y);
+    await page.mouse.move(frameSelectionPoint.x, frameSelectionPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(frameSelectionPoint.x + 140, frameSelectionPoint.y, { steps: 8 });
+    await page.mouse.up();
     await page.mouse.wheel({ deltaY: -900 });
     await waitForFrames(page, 2);
 
@@ -164,7 +196,7 @@ async function main(): Promise<void> {
             scrollTop: scroller.scrollTop,
             rendered: frameDocument.querySelector('.meo-export-mermaid svg') ? 1 : 0,
             mode: document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview' ? 1 : 0,
-            selectionLength: window.getSelection()?.toString().length ?? 0,
+            selectionLength: frameDocument.getSelection()?.toString().length ?? 0,
             focusOwner: document.activeElement === frame
               ? 2
               : editorContent && document.activeElement && editorContent.contains(document.activeElement) ? 1 : 0,
@@ -197,6 +229,8 @@ async function main(): Promise<void> {
     });
     const scrollValues = traceResult.samples.map((sample) => sample.scrollTop);
     assert.equal(traceResult.samples.at(-1)?.rendered, 1, 'trace must include the settled Preview Mermaid');
+    assert.ok(traceResult.before.metrics.selectionLength > 0, 'trace must include a real Preview selection');
+    assert.equal(traceResult.before.metrics.focusOwner, 2, 'trace must include focus inside the Preview iframe');
     assert.ok(
       scrollValues.every((value) => Math.abs(value - traceResult.before.metrics.scrollTop) <= 1),
       `stale Preview restore overrode the wheel interaction: ${JSON.stringify(traceResult)}`
@@ -211,25 +245,88 @@ async function main(): Promise<void> {
       `Preview settle changed mode/selection/focus/text: ${JSON.stringify(traceResult)}`
     );
 
-    await page.click('[data-mode="source"]');
-    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+    await page.click('[data-mode="live"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+    await waitForFrames(page, 4);
     const finalState = await page.evaluate(() => {
       const selection = window.getSelection();
       const editorContent = document.querySelector<HTMLElement>('.editor-host .cm-content');
+      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller');
+      const scrollerTop = scroller?.getBoundingClientRect().top ?? 0;
+      const topLine = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+        .find((line) => line.getBoundingClientRect().bottom > scrollerTop);
+      const topLineNumber = Number(topLine?.textContent?.match(/semantic line (\d+)/)?.[1] ?? 0);
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
         selection: selection?.toString() ?? '',
         focusInEditor: Boolean(editorContent && document.activeElement && editorContent.contains(document.activeElement)),
-        textVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .some((line) => line.textContent === 'semantic anchor selection')
+        topLineNumber,
+        topLineOffset: topLine ? scrollerTop - topLine.getBoundingClientRect().top : null
       };
     });
-    assert.deepEqual(finalState, {
-      mode: 'source',
-      selection: 'semantic anchor',
-      focusInEditor: true,
-      textVisible: true
+    assert.equal(finalState.mode, 'live');
+    assert.equal(finalState.selection, 'semantic anchor');
+    assert.equal(finalState.focusInEditor, true);
+    assert.ok(
+      finalState.topLineNumber >= 75 && finalState.topLineNumber <= 77,
+      `Preview to different editable mode lost its semantic anchor: ${JSON.stringify(finalState)}`
+    );
+    assert.ok(Math.abs(finalState.topLineOffset ?? 99) <= 2, JSON.stringify(finalState));
+
+    await page.evaluate((anchor) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor, head: anchor, focus: false
+      }}));
+    }, renderedBlockStart);
+    await waitForFrames(page, 6);
+    const liveRenderedAnchor = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      const block = document.querySelector<HTMLElement>(
+        '.editor-host [data-meo-rendered-block-start-line="20"]'
+      )!;
+      if (!block) throw new Error('Missing production Live rendered block');
+      const scrollerTop = scroller.getBoundingClientRect().top;
+      scroller.scrollTop += block.getBoundingClientRect().top - scrollerTop + 90;
+      return Number(block.dataset.meoRenderedBlockStartLine);
     });
+    assert.equal(liveRenderedAnchor, 20);
+    await waitForFrames(page, 3);
+    const liveOffset = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      const block = document.querySelector<HTMLElement>(
+        '.editor-host [data-meo-rendered-block-start-line="20"]'
+      )!;
+      return scroller.getBoundingClientRect().top - block.getBoundingClientRect().top;
+    });
+    assert.ok(Math.abs(liveOffset - 90) <= 2, `Live block offset was ${liveOffset}`);
+
+    await page.click('[data-mode="preview"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+    await waitForFrames(page, 3);
+    const previewRenderedOffset = await page.$eval<HTMLIFrameElement, number>('.preview-frame', (previewFrame) => {
+      const block = previewFrame.contentDocument?.querySelector<HTMLElement>('[data-source-line="20"]');
+      if (!block) throw new Error('Missing Preview rendered block');
+      return -block.getBoundingClientRect().top;
+    });
+    assert.ok(
+      Math.abs(previewRenderedOffset - liveOffset) <= 2,
+      `Live to Preview lost rendered-block offset: ${liveOffset} -> ${previewRenderedOffset}`
+    );
+
+    await page.click('[data-mode="source"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'source');
+    await waitForFrames(page, 3);
+    const sourceRenderedOffset = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      const sourceLine = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+        .find((line) => line.textContent === '| rendered row 2 | value 2 |');
+      if (!sourceLine) throw new Error('Missing Source line for rendered block');
+      return scroller.getBoundingClientRect().top - sourceLine.getBoundingClientRect().top;
+    });
+    assert.ok(
+      Math.abs(sourceRenderedOffset) <= 2,
+      `Preview to Source lost the worked semantic line 23 / offset 0: ${sourceRenderedOffset}`
+    );
     console.log(`Viewport Anchor production Chromium trace passed: ${JSON.stringify(traceResult.samples)}`);
   } finally {
     await browser.close();

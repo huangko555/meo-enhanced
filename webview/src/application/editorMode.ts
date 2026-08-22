@@ -85,7 +85,12 @@ export type EditorModeEffect =
       readonly mode: EditorMode;
       readonly viewport: EditorModeViewportToken | null;
     }
-  | { readonly type: 'applyEditorMode'; readonly transitionId: number; readonly mode: EditableMode }
+  | {
+      readonly type: 'applyEditorMode';
+      readonly transitionId: number;
+      readonly mode: EditableMode;
+      readonly viewport: EditorModeViewportToken | null;
+    }
   | { readonly type: 'persistMode'; readonly mode: EditorMode; readonly lastEditableMode: EditableMode }
   | { readonly type: 'postMode'; readonly mode: EditorMode }
   | {
@@ -334,7 +339,7 @@ export function createEditorModeApplication(): EditorModeApplication {
       post: policy.post,
       fallbackToSource: false
     };
-    effects.push({ type: 'applyEditorMode', transitionId, mode: targetMode });
+    effects.push({ type: 'applyEditorMode', transitionId, mode: targetMode, viewport });
     return effects;
   };
 
@@ -449,7 +454,12 @@ export function createEditorModeApplication(): EditorModeApplication {
           requestedMode = 'source';
           return [
             { type: 'showNotice', notice: 'live-fallback' },
-            { type: 'applyEditorMode', transitionId: pending.id, mode: 'source' }
+            {
+              type: 'applyEditorMode',
+              transitionId: pending.id,
+              mode: 'source',
+              viewport: pending.viewport
+            }
           ];
         }
         pendingTransition = null;

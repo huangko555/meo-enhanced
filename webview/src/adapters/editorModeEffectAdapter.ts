@@ -23,7 +23,10 @@ export type EditorModeEffectCapabilities = {
   commitTransientEdits(): void;
   scheduleMount?(run: () => void): () => void;
   mountEditor(mode: EditableMode, signal: AbortSignal): void | Promise<void>;
-  applyEditorMode(mode: EditableMode): void | Promise<void>;
+  applyEditorMode(
+    mode: EditableMode,
+    viewport: EditorModeViewportToken | null
+  ): void | Promise<void>;
   setPreviewActive(active: boolean): void;
   setEditorVisible(visible: boolean): void;
   presentModeControl(mode: EditorMode): void;
@@ -75,7 +78,11 @@ export function createEditorModeEffectAdapter(
     capabilities.setOutlineOwner(presentation.outlineOwner);
     capabilities.setReplaceEnabled(presentation.replaceEnabled);
     if (presentation.hideSelectionMenu) capabilities.hideSelectionMenu();
-    if (presentation.viewport && presentation.previewActive !== (presentation.previousMode === 'preview')) {
+    if (
+      presentation.viewport &&
+      presentation.previewActive &&
+      presentation.previousMode !== 'preview'
+    ) {
       capabilities.restoreViewport(
         presentation.viewport,
         presentation.previewActive ? 'preview' : 'editor'
@@ -122,7 +129,7 @@ export function createEditorModeEffectAdapter(
           const operation = effect.mode === 'live' ? 'apply-live' : 'apply-source';
           return {
             completion: Promise.resolve()
-              .then(() => capabilities.applyEditorMode(effect.mode))
+              .then(() => capabilities.applyEditorMode(effect.mode, effect.viewport))
               .then<EditorModeInput>(() => ({
                 type: 'editorModeApplied', transitionId: effect.transitionId
               }))

@@ -19,6 +19,7 @@ type PreviewControllerOptions = {
   onRendered?: () => void;
   onFindRequested?: () => void;
   onViewportInteraction?: () => void;
+  runViewportTransaction?: (mutate: () => void) => void;
   mermaidRenderResources: MermaidDiagramRenderResources;
 };
 
@@ -26,6 +27,10 @@ type PreviewViewportRestore = {
   readonly line: number;
   readonly lineOffset: number;
   readonly isCurrent: () => boolean;
+};
+
+type PreviewViewportProjectionSlot = {
+  restore: PreviewViewportRestore | null;
 };
 
 const previewScrollbarStyles = `
@@ -147,6 +152,7 @@ export function createPreviewController({
   onRendered,
   onFindRequested,
   onViewportInteraction,
+  runViewportTransaction,
   mermaidRenderResources
 }: PreviewControllerOptions) {
   const host = document.createElement('div');
@@ -211,8 +217,8 @@ export function createPreviewController({
   let mermaidPresentationGeneration = 0;
   let activeFrameDocument: Document | null = null;
   let hasPendingRequest = false;
-  let pendingRestoreLine: number | null = null;
   let pendingViewportRestore: PreviewViewportRestore | null = null;
+  let acceptingViewportProjection: PreviewViewportProjectionSlot | null = null;
   let pendingText = '';
   let latestRenderedText = '';
   let latestPayload: PreviewRenderValue | null = null;
@@ -227,6 +233,20 @@ export function createPreviewController({
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
   let disposed = false;
+
+  const withViewportTransaction = (
+    mutate: (slot: PreviewViewportProjectionSlot) => void
+  ): void => {
+    const slot: PreviewViewportProjectionSlot = { restore: null };
+    const previousSlot = acceptingViewportProjection;
+    acceptingViewportProjection = slot;
+    try {
+      if (runViewportTransaction) runViewportTransaction(() => mutate(slot));
+      else mutate(slot);
+    } finally {
+      acceptingViewportProjection = previousSlot;
+    }
+  };
 
   const disposePreviewMathViewports = () => {
     for (const viewport of previewMathViewports) {
@@ -432,32 +452,27 @@ export function createPreviewController({
     if (!latestPayload || !frameDocument || !styleElement) {
       return;
     }
-    const presentationGeneration = mermaidPresentationGeneration + 1;
-    mermaidPresentationGeneration = presentationGeneration;
-    const isCurrent = () => (
-      !disposed &&
-      presentationGeneration === mermaidPresentationGeneration &&
-      activeFrameDocument === frameDocument &&
-      frame.contentDocument === frameDocument
-    );
-    const scrollTop = Number(frameDocument.scrollingElement?.scrollTop ?? 0);
-    styleElement.textContent = latestPayload.styles[appearance];
-    const keepPosition = () => {
-      if (
-        !isCurrent()
-      ) return;
-      if (frameDocument.scrollingElement) {
-        frameDocument.scrollingElement.scrollTop = scrollTop;
-      }
-    };
-    const finish = () => {
-      keepPosition();
+    const payload = latestPayload;
+    withViewportTransaction((slot) => {
+      const presentationGeneration = mermaidPresentationGeneration + 1;
+      mermaidPresentationGeneration = presentationGeneration;
+      const isCurrent = () => (
+        !disposed &&
+        presentationGeneration === mermaidPresentationGeneration &&
+        activeFrameDocument === frameDocument &&
+        frame.contentDocument === frameDocument
+      );
+      styleElement.textContent = payload.styles[appearance];
+      const keepPosition = () => {
+        const restore = slot.restore;
+        if (!isCurrent() || !restore?.isCurrent()) return;
+        restoreTopLine(restore.line, restore.lineOffset);
+      };
       onRendered?.();
-    };
-    finish();
-    if (latestPayload.hasMermaid) {
-      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
-    }
+      if (payload.hasMermaid) {
+        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
+      }
+    });
   };
 
   const setAppearance = (
@@ -488,10 +503,9 @@ export function createPreviewController({
     }
   });
 
-  const requestRender = (
+  const performRequestRender = (
     text: string,
-    { restoreLine = null, background = false, force = false }: {
-      restoreLine?: number | null;
+    { background = false, force = false }: {
       background?: boolean;
       force?: boolean;
     } = {}
@@ -499,21 +513,16 @@ export function createPreviewController({
     if (disposed) return;
     if (!force && latestPayload && text === latestRenderedText && frame.contentDocument?.querySelector('.meo-export-doc')) {
       setStatus(null);
-      if (restoreLine !== null) {
-        restoreTopLine(restoreLine);
-      }
       onRendered?.();
       return;
     }
     if (hasPendingRequest && text === pendingText) {
-      if (restoreLine !== null) pendingRestoreLine = restoreLine;
       if (!background) setStatus('正在生成预览…');
       return;
     }
     const generation = requestGeneration + 1;
     requestGeneration = generation;
     hasPendingRequest = true;
-    pendingRestoreLine = restoreLine;
     pendingViewportRestore = null;
     pendingText = text;
     if (!background) setStatus('正在生成预览…');
@@ -524,7 +533,6 @@ export function createPreviewController({
       if (generation !== requestGeneration) return;
       hasPendingRequest = false;
       if (result.ok === false) {
-        pendingRestoreLine = null;
         pendingViewportRestore = null;
         setStatus(result.error.message || 'Preview 生成失败');
         return;
@@ -532,15 +540,23 @@ export function createPreviewController({
       latestPayload = result.value;
       latestRenderedText = pendingText;
       setStatus(null);
-      const viewportRestore = pendingViewportRestore ?? (
-        pendingRestoreLine === null
-          ? null
-          : { line: pendingRestoreLine, lineOffset: 0, isCurrent: () => true }
-      );
-      pendingRestoreLine = null;
+      const viewportRestore = pendingViewportRestore;
       pendingViewportRestore = null;
       renderFrame(viewportRestore);
     });
+  };
+
+  const requestRender = (
+    text: string,
+    { background = false, force = false, preserveViewport = false }: {
+      background?: boolean;
+      force?: boolean;
+      preserveViewport?: boolean;
+    } = {}
+  ): void => {
+    const mutate = () => performRequestRender(text, { background, force });
+    if (preserveViewport) withViewportTransaction(() => mutate());
+    else mutate();
   };
 
   const acceptRenderResponse = (message: PreviewRenderResponse) => (
@@ -565,7 +581,7 @@ export function createPreviewController({
     if (latestPayload) {
       const text = latestRenderedText;
       latestRenderedText = '';
-      requestRender(text, { restoreLine: getTopVisiblePosition()?.topLine ?? null });
+      requestRender(text, { force: true, preserveViewport: true });
     }
     if (post) vscode.postMessage({ type: 'setPreviewSourceColoring', enabled });
   };
@@ -665,8 +681,8 @@ export function createPreviewController({
     isCurrent: () => boolean
   ): void => {
     const restore = { ...position, isCurrent };
+    if (acceptingViewportProjection) acceptingViewportProjection.restore = restore;
     if (hasPendingRequest) {
-      pendingRestoreLine = null;
       pendingViewportRestore = restore;
       return;
     }
@@ -771,7 +787,6 @@ export function createPreviewController({
       previewMermaidRenderer.dispose();
       activeFrameDocument = null;
       hasPendingRequest = false;
-      pendingRestoreLine = null;
       pendingViewportRestore = null;
       previewRenderTransport.cancelAll('Preview closed');
       appearanceControl.removeEventListener('click', handleAppearanceControlClick);

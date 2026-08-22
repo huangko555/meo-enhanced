@@ -24,6 +24,7 @@ import { createMermaidDiagramPresentationFactory } from './editor/mermaidDiagram
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
+import type { ViewportAnchorToken } from './helpers/viewportController';
 import { createDocumentScrollToTopController } from './helpers/scrollToTop';
 import { createSegmentedControl } from './helpers/segmentedControl';
 import { createCodePaletteWebviewAdapter } from './adapters/codePaletteWebviewAdapter';
@@ -986,7 +987,15 @@ const previewController = createPreviewController({
       outlineController.refresh();
     }
   },
-  onViewportInteraction: () => editor?.markViewportInteraction?.()
+  onViewportInteraction: () => editor?.markViewportInteraction?.(),
+  runViewportTransaction: (mutate) => {
+    const viewport = editor?.captureViewportAnchorToken?.('preview') ?? null;
+    if (!editor?.runViewportAnchorTransaction) {
+      mutate();
+      return;
+    }
+    editor.runViewportAnchorTransaction(viewport, 'preview', mutate);
+  }
 });
 const previewAdapter = createPreviewWebviewAdapter(previewController);
 previewAppearanceSlot.replaceWith(previewController.appearanceControl);
@@ -1297,6 +1306,7 @@ gitClient = createGitClient();
 
 const discardConfirmationWindowMs = 500;
 let discardConfirmationTimer: number | null = null;
+let pendingReloadViewport: { handle: ViewportAnchorToken; owner: 'editor' | 'preview' } | null = null;
 
 const clearDiscardConfirmation = () => {
   if (discardConfirmationTimer !== null) {
@@ -1307,9 +1317,14 @@ const clearDiscardConfirmation = () => {
 };
 
 const discardUnsavedChanges = () => {
-  const position = getActiveEditorMode() === 'preview'
+  const previewActive = getActiveEditorMode() === 'preview';
+  const position = previewActive
     ? previewController.getTopVisiblePosition()
     : getTopVisiblePosition();
+  const viewportHandle = editor?.captureViewportAnchorToken?.(previewActive ? 'preview' : 'editor') ?? null;
+  pendingReloadViewport = viewportHandle
+    ? { handle: viewportHandle, owner: previewActive ? 'preview' : 'editor' }
+    : null;
   commitEditorTransientEdits();
   documentSessionAdapter.requestReloadFromDisk({
     topLine: position?.topLine ?? 1,
@@ -1376,6 +1391,8 @@ const setEditorTextSafely = async (
   }
 };
 
+const viewportPresentationFailed = Object.freeze({});
+
 const presentDocumentText = async (
   text: string,
   source: DocumentPresentationSource
@@ -1385,14 +1402,28 @@ const presentDocumentText = async (
     return true;
   }
 
-  const previewRestoreLine = getActiveEditorMode() === 'preview'
-    ? previewController.getTopVisiblePosition()?.topLine ?? null
-    : null;
-  if (!await setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload')) {
-    return false;
-  }
-  if (getActiveEditorMode() === 'preview') {
-    previewAdapter.refreshVisible(text, { restoreLine: previewRestoreLine });
+  const previewActive = getActiveEditorMode() === 'preview';
+  const owner = previewActive ? 'preview' : 'editor';
+  const viewport = source === 'disk-reload' && pendingReloadViewport?.owner === owner
+    ? pendingReloadViewport.handle
+    : editor.captureViewportAnchorToken?.(owner) ?? null;
+  let presented = false;
+  const present = async (isViewportCurrent: () => boolean): Promise<void> => {
+    presented = await setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload');
+    if (!presented) throw viewportPresentationFailed;
+    if (previewActive) {
+      previewAdapter.refreshVisible(text, { preserveViewport: !isViewportCurrent() });
+    }
+  };
+  try {
+    if (editor.runViewportAnchorTransaction) {
+      await editor.runViewportAnchorTransaction(viewport, owner, present);
+    } else {
+      await present(() => false);
+    }
+  } catch (error) {
+    if (error === viewportPresentationFailed) return false;
+    throw error;
   }
   if (outlineController.isVisible()) {
     outlineController.refresh();
@@ -1407,15 +1438,8 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
   postMessage: (message) => vscode.postMessage(message),
   presentText: presentDocumentText,
   restoreReloadedView: (message) => {
-    if (getActiveEditorMode() === 'preview') {
-      previewAdapter.refreshVisible(getCurrentEditorText(), { restoreLine: message.topLine });
-    } else {
-      editor?.restoreTopLine?.(
-        message.topLine,
-        message.topLineOffset,
-        { syncCursor: false }
-      );
-    }
+    void message;
+    pendingReloadViewport = null;
   },
   showFailureNotice: (message) => failureNotice.setFailureNotice(message, 'warning'),
   reportUnexpectedError: (context, error) => {
@@ -1528,9 +1552,9 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     };
   },
   mountEditor: mountEditorForMode,
-  applyEditorMode(mode) {
+  applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
-    editor.setMode(mode);
+    editor.setMode(mode, viewport);
     syncGitDiffLineHighlights();
     if (outlineController.isVisible()) outlineController.refresh();
     if (mode === 'live') failureNotice.clearFailureNotice();

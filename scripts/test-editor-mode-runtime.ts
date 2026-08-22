@@ -25,8 +25,8 @@ const capabilities: EditorModeEffectCapabilities = {
     events.push(`mount:${mountAttempts}:${mode}`);
     if (mountAttempts === 1) throw failure('transient-live');
   },
-  async applyEditorMode(mode) {
-    events.push(`apply:${mode}`);
+  async applyEditorMode(mode, viewport) {
+    events.push(`apply:${mode}:${viewport === viewportHandle ? 'captured' : 'missing'}`);
     if (mode === 'live' && failLiveOnce) {
       failLiveOnce = false;
       throw failure('live-incompatible');
@@ -79,14 +79,22 @@ assert.equal(
   false,
   'Live/Source reconfiguration must remain inside the Editor ViewportController transaction'
 );
+assert.equal(
+  events.includes('apply:source:captured'),
+  true,
+  'the opaque viewport token must reach the same editable-mode transaction'
+);
 assert.equal(events.includes('focus'), true);
-assert.ok(events.indexOf('apply:source') < events.indexOf('persist:source:source'));
+assert.ok(events.indexOf('apply:source:captured') < events.indexOf('persist:source:source'));
 assert.ok(events.indexOf('persist:source:source') < events.indexOf('post:source'));
 
 events.length = 0;
 await runtime.dispatch({ type: 'requestMode', mode: 'live', source: 'user' });
 assert.equal(runtime.getState().mode, 'source', 'incompatible Live must use the Application fallback');
-assert.deepEqual(events.filter((event) => event.startsWith('apply:')), ['apply:live', 'apply:source']);
+assert.deepEqual(
+  events.filter((event) => event.startsWith('apply:')),
+  ['apply:live:captured', 'apply:source:captured']
+);
 assert.equal(events.includes('notice:live-fallback'), true);
 assert.equal(events.at(-1), 'post:source');
 
