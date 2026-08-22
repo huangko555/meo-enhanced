@@ -222,10 +222,16 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     state: 'accepting' | 'flushing' | 'settled' | 'cancelled';
     records: Map<object, ConsumerRecord>;
   };
+  type FrameConsumerRecord = {
+    operation: () => void;
+    frameId: number | null;
+  };
 
   let consumerGeneration: ConsumerGeneration | null = null;
   let settleGenerationToken = 0;
   const immediateConsumers = new Set<object>();
+  const runningFrameConsumers = new Set<object>();
+  const frameConsumers = new Map<object, FrameConsumerRecord>();
   let disposed = false;
   const reportError = (error: unknown): void => {
     console.error('[MEO live input] derived refresh failed', error);
@@ -245,20 +251,33 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     for (const record of generation.records.values()) record.state = 'cancelled';
     generation.records.clear();
   };
-  const startConsumerGeneration = (): ConsumerGeneration => {
-    cancelConsumerGeneration();
-    consumerGeneration = {
-      state: 'accepting',
-      records: new Map()
-    };
-    return consumerGeneration;
-  };
-  const currentConsumerGeneration = (): ConsumerGeneration => {
-    if (!consumerGeneration || consumerGeneration.state === 'cancelled'
-      || consumerGeneration.state === 'settled') {
-      return startConsumerGeneration();
+  const cancelFrameConsumers = (): void => {
+    for (const record of frameConsumers.values()) {
+      if (record.frameId !== null) window.cancelAnimationFrame(record.frameId);
     }
-    return consumerGeneration;
+    frameConsumers.clear();
+    runningFrameConsumers.clear();
+  };
+  const closeConsumerGenerationAfterTransactionFailure = (error: unknown): unknown => {
+    let failure = error;
+    try {
+      view.dispatch({
+        effects: cancelLiveInputDerivedWorkEffect.of(true),
+        annotations: Transaction.addToHistory.of(false)
+      });
+    } catch (cleanupError) {
+      failure = new AggregateError(
+        [error, cleanupError],
+        'Live derived transaction and cleanup failed'
+      );
+    } finally {
+      // The cancel transaction normally reaches the plugin update above. Keep
+      // local closure unconditional so a second StateField failure cannot
+      // retain records or a late observer checkpoint.
+      cancelConsumerGeneration();
+      cancelFrameConsumers();
+    }
+    return failure;
   };
   const queueConsumer = (
     generation: ConsumerGeneration,
@@ -273,6 +292,45 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     if (existing.state === 'queued') existing.operation = operation;
     // A stable key already running or settled represents this generation's
     // invalidation. Recursive requests cannot create a retained ghost record.
+  };
+  const consumeFrameConsumer = (key: object, record: FrameConsumerRecord): void => {
+    if (frameConsumers.get(key) !== record) return;
+    frameConsumers.delete(key);
+    runningFrameConsumers.add(key);
+    try {
+      record.operation();
+    } finally {
+      runningFrameConsumers.delete(key);
+    }
+  };
+  const queueFrameConsumer = (
+    generation: ConsumerGeneration,
+    key: object,
+    record: FrameConsumerRecord
+  ): void => {
+    if (record.frameId !== null) {
+      window.cancelAnimationFrame(record.frameId);
+      record.frameId = null;
+    }
+    queueConsumer(generation, key, () => consumeFrameConsumer(key, record));
+  };
+  const startConsumerGeneration = (): ConsumerGeneration => {
+    cancelConsumerGeneration();
+    consumerGeneration = {
+      state: 'accepting',
+      records: new Map()
+    };
+    for (const [key, record] of frameConsumers) {
+      queueFrameConsumer(consumerGeneration, key, record);
+    }
+    return consumerGeneration;
+  };
+  const currentConsumerGeneration = (): ConsumerGeneration => {
+    if (!consumerGeneration || consumerGeneration.state === 'cancelled'
+      || consumerGeneration.state === 'settled') {
+      return startConsumerGeneration();
+    }
+    return consumerGeneration;
   };
   const drainConsumerGeneration = (generation: ConsumerGeneration): number => {
     let ran = 0;
@@ -324,8 +382,9 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
           effects: settleLiveInputDerivedWorkEffect.of(true),
           annotations: Transaction.addToHistory.of(false)
         });
+        scheduleOutstandingFrameConsumers();
       } catch (error) {
-        reportError(error);
+        reportError(closeConsumerGenerationAfterTransactionFailure(error));
       }
     });
   };
@@ -335,6 +394,55 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     const ran = drainConsumerGeneration(generation);
     scheduleConsumerCheckpoint(generation, ran === 0);
   };
+  const requestConsumer = (key: object, operation: () => void): void => {
+    if (disposed) return;
+    const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
+    if (isLiveInputDerivedWorkPending(view.state) || phase === 'committed-refresh') {
+      queueConsumer(currentConsumerGeneration(), key, operation);
+      return;
+    }
+    if (immediateConsumers.has(key)) return;
+    immediateConsumers.add(key);
+    try {
+      run(operation);
+    } finally {
+      immediateConsumers.delete(key);
+    }
+  };
+  const getDesiredFrameConsumer = (key: object, operation: () => void): FrameConsumerRecord => {
+    const existing = frameConsumers.get(key);
+    if (existing) {
+      existing.operation = operation;
+      return existing;
+    }
+    const record: FrameConsumerRecord = { operation, frameId: null };
+    frameConsumers.set(key, record);
+    return record;
+  };
+  const scheduleFrameConsumer = (key: object, record: FrameConsumerRecord): void => {
+    if (record.frameId !== null || disposed || frameConsumers.get(key) !== record) return;
+    const frameId = window.requestAnimationFrame(() => {
+      if (frameConsumers.get(key) !== record || record.frameId !== frameId) return;
+      record.frameId = null;
+      requestConsumer(key, () => consumeFrameConsumer(key, record));
+    });
+    record.frameId = frameId;
+  };
+  function scheduleOutstandingFrameConsumers(): void {
+    if (disposed || isLiveInputDerivedWorkPending(view.state)
+      || view.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'committed-refresh') return;
+    for (const [key, record] of frameConsumers) scheduleFrameConsumer(key, record);
+  }
+  const requestConsumerOnFrame = (key: object, operation: () => void): void => {
+    if (disposed || immediateConsumers.has(key) || runningFrameConsumers.has(key)) return;
+    const record = getDesiredFrameConsumer(key, operation);
+    const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
+    if (isLiveInputDerivedWorkPending(view.state) || phase === 'committed-refresh') {
+      queueFrameConsumer(currentConsumerGeneration(), key, record);
+      return;
+    }
+    scheduleFrameConsumer(key, record);
+  };
   const scheduler = createLiveInputDerivedWorkScheduler({
     requestFrame: (callback) => window.requestAnimationFrame(() => callback()),
     cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
@@ -342,31 +450,17 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       try {
         view.dispatch({ effects: refreshLiveInputDerivedWorkEffect.of(true) });
       } catch (error) {
-        try {
-          view.dispatch({ effects: cancelLiveInputDerivedWorkEffect.of(true) });
-        } catch (cleanupError) {
-          throw new AggregateError([error, cleanupError], 'Live derived refresh and cleanup failed');
-        }
-        throw error;
+        throw closeConsumerGenerationAfterTransactionFailure(error);
       }
     },
     reportError
   });
   return {
     request(key: object, operation: () => void) {
-      if (disposed) return;
-      const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
-      if (isLiveInputDerivedWorkPending(view.state) || phase === 'committed-refresh') {
-        queueConsumer(currentConsumerGeneration(), key, operation);
-        return;
-      }
-      if (immediateConsumers.has(key)) return;
-      immediateConsumers.add(key);
-      try {
-        run(operation);
-      } finally {
-        immediateConsumers.delete(key);
-      }
+      requestConsumer(key, operation);
+    },
+    requestOnFrame(key: object, operation: () => void) {
+      requestConsumerOnFrame(key, operation);
     },
     update(update: { transactions: readonly Transaction[] }) {
       for (const transaction of update.transactions) {
@@ -377,10 +471,12 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
         if (transaction.effects.some((effect) => effect.is(supersedeLiveInputDerivedWorkEffect))) {
           scheduler.cancelPending();
           cancelConsumerGeneration();
+          cancelFrameConsumers();
         }
         if (transaction.effects.some((effect) => effect.is(cancelLiveInputDerivedWorkEffect))) {
           scheduler.cancelPending();
           cancelConsumerGeneration();
+          cancelFrameConsumers();
         }
         if (transaction.effects.some((effect) => effect.is(completeLiveInputCompositionEffect))
           && transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'pending-input') {
@@ -404,6 +500,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       disposed = true;
       scheduler.dispose();
       cancelConsumerGeneration();
+      cancelFrameConsumers();
       immediateConsumers.clear();
     }
   };
@@ -433,6 +530,20 @@ export function requestLiveInputDerivedWork(
   const plugin = view.plugin(codeMirrorLiveInputDerivedWorkPlugin);
   if (plugin) plugin.request(consumerKey, operation);
   else operation();
+}
+
+/**
+ * Coalesces a stable consumer's latest invalidation through the Editor's frame
+ * and input-generation currentness. Callers do not own a frame or generation.
+ */
+export function requestLiveInputDerivedWorkOnFrame(
+  view: EditorView,
+  consumerKey: object,
+  operation: () => void
+): void {
+  const plugin = view.plugin(codeMirrorLiveInputDerivedWorkPlugin);
+  if (plugin) plugin.requestOnFrame(consumerKey, operation);
+  else window.requestAnimationFrame(operation);
 }
 
 function isHistoryTransaction(transaction: Transaction): boolean {

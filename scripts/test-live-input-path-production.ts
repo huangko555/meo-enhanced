@@ -239,6 +239,48 @@ async function main(): Promise<void> {
       throw new Error(`Failed refresh replayed an old consumer generation: ${JSON.stringify(failedGenerationConsumerFacts)}`);
     }
 
+    const failedSettleConsumerFacts = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const probe = (window as any).__createLiveInputConsumerProbe(host);
+      const keyA = {};
+      const keyB = {};
+      const facts = { a: 0, afterFailureB: 0, currentB: 0, reports: 0, primaryError: '' };
+      const originalConsoleError = console.error;
+      console.error = (...args: unknown[]) => {
+        if (args[0] === '[MEO live input] derived refresh failed') {
+          facts.reports += 1;
+          facts.primaryError = args[1] instanceof Error ? args[1].message : String(args[1]);
+        }
+      };
+      try {
+        probe.failNextSettle();
+        probe.input('a');
+        probe.request(keyA, () => { facts.a += 1; });
+        for (let index = 0; index < 6; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        probe.request(keyB, () => { facts.afterFailureB += 1; });
+        probe.input('b');
+        probe.request(keyB, () => { facts.currentB += 1; });
+        for (let index = 0; index < 6; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      } finally {
+        console.error = originalConsoleError;
+        probe.destroy();
+        host.remove();
+      }
+      return facts;
+    });
+    if (
+      failedSettleConsumerFacts.a !== 1 || failedSettleConsumerFacts.afterFailureB !== 1 ||
+      failedSettleConsumerFacts.currentB !== 1 || failedSettleConsumerFacts.reports !== 1 ||
+      failedSettleConsumerFacts.primaryError !== 'controlled live-input settle failure'
+    ) {
+      throw new Error(`Failed settle did not atomically recover consumer currentness: ${JSON.stringify(failedSettleConsumerFacts)}`);
+    }
+
     const reentrantConsumerFacts = await page.evaluate(async () => {
       const host = document.createElement('div');
       document.body.append(host);
@@ -393,6 +435,97 @@ async function main(): Promise<void> {
       throw new Error(`Live search did not submit one current leaf after the barrier: ${JSON.stringify(liveSearchPendingFacts)}`);
     }
 
+    const liveSearchCrossFrameFacts = await page.evaluate(async () => {
+      const editor = (window as any).__liveInputEditor;
+      const probe = (window as any).__observeLiveSearchRefresh(editor);
+      probe.reset();
+      (window as any).__dispatchProductionInput(editor, editor.getText().length, 'x');
+      editor.setSearchQuery('value');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      editor.setSearchQuery('marked');
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const effects = probe.count();
+      probe.destroy();
+      return { effects };
+    });
+    if (liveSearchCrossFrameFacts.effects !== 1) {
+      throw new Error(`Live search cross-frame replacement did not execute latest once: ${JSON.stringify(liveSearchCrossFrameFacts)}`);
+    }
+
+    const liveSearchFrameLifecycleFacts = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const editor = (window as any).__createInputCursorEditor({
+        parent: host,
+        text: 'alpha beta gamma delta epsilon',
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      const probe = (window as any).__observeLiveSearchRefresh(editor);
+      const frames = async (count: number) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      editor.setSearchQuery('alpha');
+      editor.setSearchQuery('beta');
+      await frames(2);
+      const idleLatest = probe.count();
+
+      probe.reset();
+      editor.setSearchQuery('gamma');
+      (window as any).__dispatchProductionInput(editor, editor.getText().length, '!');
+      editor.setSearchQuery('delta');
+      await frames(1);
+      const adoptedFirstFrame = probe.count();
+      await frames(5);
+      const adoptedSettled = probe.count();
+
+      probe.reset();
+      editor.setSearchQuery('alpha');
+      (window as any).__dispatchProductionInput(editor, editor.getText().length, '1');
+      (window as any).__dispatchProductionInput(editor, editor.getText().length, '2');
+      await frames(1);
+      const replacedInputFirstFrame = probe.count();
+      await frames(5);
+      const replacedInputSettled = probe.count();
+
+      probe.reset();
+      editor.setSearchQuery('epsilon');
+      editor.setText('external document', true);
+      await frames(3);
+      const superseded = probe.count();
+      editor.setSearchQuery('document');
+      await frames(2);
+      const currentAfterSupersede = probe.count();
+
+      probe.destroy();
+      editor.destroy();
+      host.remove();
+      return {
+        idleLatest,
+        adoptedFirstFrame,
+        adoptedSettled,
+        replacedInputFirstFrame,
+        replacedInputSettled,
+        superseded,
+        currentAfterSupersede
+      };
+    });
+    if (
+      liveSearchFrameLifecycleFacts.idleLatest !== 1 ||
+      liveSearchFrameLifecycleFacts.adoptedFirstFrame !== 0 ||
+      liveSearchFrameLifecycleFacts.adoptedSettled !== 1 ||
+      liveSearchFrameLifecycleFacts.replacedInputFirstFrame !== 0 ||
+      liveSearchFrameLifecycleFacts.replacedInputSettled !== 1 ||
+      liveSearchFrameLifecycleFacts.superseded !== 0 ||
+      liveSearchFrameLifecycleFacts.currentAfterSupersede !== 1
+    ) {
+      throw new Error(`Live search frame lifecycle escaped Module currentness: ${JSON.stringify(liveSearchFrameLifecycleFacts)}`);
+    }
+
     const destroyedLiveSearchFacts = await page.evaluate(async () => {
       const host = document.createElement('div');
       document.body.append(host);
@@ -502,6 +635,9 @@ async function main(): Promise<void> {
     await waitForFrames(page, 5);
     const pendingSearchReveal = await page.evaluate(() => {
       const editor = (window as any).__liveInputEditor;
+      const refreshProbe = (window as any).__observeLiveSearchRefresh(editor);
+      refreshProbe.reset();
+      (window as any).__pendingSearchRevealRefreshProbe = refreshProbe;
       (window as any).__dispatchProductionInput(editor, 'plain'.length, 'S');
       const result = editor.findNext('const liveLine19 = 19;', { focusEditor: false });
       return {
@@ -510,10 +646,20 @@ async function main(): Promise<void> {
       };
     });
     await waitForFrames(page, 5);
-    const settledSearchReveal = await page.evaluate(() => (
-      document.querySelectorAll('#primary .meo-md-long-code-placeholder').length
-    ));
-    if (pendingSearchReveal.found !== true || pendingSearchReveal.placeholders !== 0 || settledSearchReveal !== 0) {
+    const settledSearchReveal = await page.evaluate(() => {
+      const refreshProbe = (window as any).__pendingSearchRevealRefreshProbe;
+      const result = {
+        placeholders: document.querySelectorAll('#primary .meo-md-long-code-placeholder').length,
+        refreshEffects: refreshProbe.count()
+      };
+      refreshProbe.destroy();
+      delete (window as any).__pendingSearchRevealRefreshProbe;
+      return result;
+    });
+    if (
+      pendingSearchReveal.found !== true || pendingSearchReveal.placeholders !== 0 ||
+      settledSearchReveal.placeholders !== 0 || settledSearchReveal.refreshEffects !== 1
+    ) {
       throw new Error(`Pending input swallowed or replayed search reveal: ${JSON.stringify({ pendingSearchReveal, settledSearchReveal })}`);
     }
 

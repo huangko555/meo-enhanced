@@ -50,12 +50,23 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
 
 (window as any).__createLiveInputConsumerProbe = (parent: HTMLElement) => {
   let throwNextRefresh = false;
+  let throwNextSettle = false;
+  let refreshAccepted = false;
   const throwingRefreshField = StateField.define<boolean>({
     create: () => false,
     update(value, transaction) {
       if (throwNextRefresh && isLiveInputDerivedWorkRefresh(transaction)) {
         throwNextRefresh = false;
         throw new Error('controlled live-input refresh failure');
+      }
+      if (isLiveInputDerivedWorkRefresh(transaction)) {
+        refreshAccepted = true;
+        return value;
+      }
+      if (throwNextSettle && refreshAccepted && !transaction.docChanged) {
+        throwNextSettle = false;
+        refreshAccepted = false;
+        throw new Error('controlled live-input settle failure');
       }
       return value;
     }
@@ -83,6 +94,9 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
     },
     failNextRefresh() {
       throwNextRefresh = true;
+    },
+    failNextSettle() {
+      throwNextSettle = true;
     },
     destroy() {
       view.destroy();

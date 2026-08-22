@@ -10,32 +10,6 @@ import {
   supersedeLiveInputDerivedWork
 } from '../webview/src/editor/liveInputDerivedWork';
 
-const editorSource = await Bun.file(new URL('../webview/src/editor.ts', import.meta.url)).text();
-assert.equal(
-  editorSource.includes('pendingLiveSearchDecorationRefreshGeneration'),
-  false,
-  'Live search currentness must remain inside LiveInputDerivedWork'
-);
-const liveSearchScheduleStart = editorSource.indexOf('const scheduleLiveSearchDecorationRefresh');
-const liveSearchScheduleEnd = editorSource.indexOf('const selectSearchMatch', liveSearchScheduleStart);
-assert.ok(liveSearchScheduleStart >= 0 && liveSearchScheduleEnd > liveSearchScheduleStart);
-const liveSearchScheduleSource = editorSource.slice(liveSearchScheduleStart, liveSearchScheduleEnd);
-assert.equal(
-  /generation/i.test(liveSearchScheduleSource),
-  false,
-  'Live search scheduling must not own a generation under another name'
-);
-assert.equal(
-  liveSearchScheduleSource.match(/requestLiveInputDerivedWork/g)?.length ?? 0,
-  1,
-  'Live search RAF must submit exactly one actual leaf request to the Module'
-);
-assert.ok(
-  liveSearchScheduleSource.indexOf('requestAnimationFrame')
-    < liveSearchScheduleSource.indexOf('requestLiveInputDerivedWork'),
-  'Live search must coalesce its invalidation before requesting the derived leaf'
-);
-
 const unrelatedState = EditorState.create({ doc: 'source-mode' });
 assert.equal(
   shouldDeferLiveInputDerivedWork(unrelatedState.update({ changes: { from: 0, insert: '!' } })),

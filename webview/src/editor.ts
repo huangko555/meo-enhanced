@@ -108,6 +108,7 @@ import {
   markLiveInputDerivedWorkFollowUp,
   mapLiveInputDerivedDecorations,
   requestLiveInputDerivedWork,
+  requestLiveInputDerivedWorkOnFrame,
   shouldDeferLiveInputDerivedWork,
   supersedeLiveInputDerivedWork
 } from './editor/liveInputDerivedWork';
@@ -341,7 +342,6 @@ export function createEditor({
   let onHistoryWheel: (() => void) | null = null;
   let onHistoryBlur: ((event: FocusEvent) => void) | null = null;
   let blockActionToolbarReconcileFrame: number | null = null;
-  let pendingLiveSearchDecorationRefreshFrame: number | null = null;
   let gitDiffContentHover: ReturnType<typeof createGitDiffContentHoverController> | null = null;
   let gitDiffOverviewRuler: ReturnType<typeof createGitDiffOverviewRulerController> | null = null;
   let searchOverviewRuler: ReturnType<typeof createSearchOverviewRulerController> | null = null;
@@ -1340,24 +1340,15 @@ export function createEditor({
   };
 
   const scheduleLiveSearchDecorationRefresh = (targetPosition: number | null = null) => {
-    if (pendingLiveSearchDecorationRefreshFrame !== null) {
-      window.cancelAnimationFrame(pendingLiveSearchDecorationRefreshFrame);
-    }
     if (currentMode !== 'live') {
-      pendingLiveSearchDecorationRefreshFrame = null;
       return;
     }
-
-    pendingLiveSearchDecorationRefreshFrame = window.requestAnimationFrame(() => {
-      pendingLiveSearchDecorationRefreshFrame = null;
+    requestLiveInputDerivedWorkOnFrame(view, liveSearchDecorationDerivedConsumer, () => {
       if (editorDestroyed || currentMode !== 'live') return;
-      requestLiveInputDerivedWork(view, liveSearchDecorationDerivedConsumer, () => {
-        if (editorDestroyed || currentMode !== 'live') return;
-        if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
-          forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
-        }
-        view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) });
-      });
+      if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
+        forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
+      }
+      view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) });
     });
   };
 
@@ -2549,10 +2540,6 @@ export function createEditor({
       gitDiffOverviewRuler = null;
       searchOverviewRuler?.destroy();
       searchOverviewRuler = null;
-      if (pendingLiveSearchDecorationRefreshFrame !== null) {
-        cancelAnimationFrame(pendingLiveSearchDecorationRefreshFrame);
-        pendingLiveSearchDecorationRefreshFrame = null;
-      }
       if (onScroll) {
         view.scrollDOM.removeEventListener('scroll', onScroll);
         onScroll = null;
