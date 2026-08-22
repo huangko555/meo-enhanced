@@ -2638,56 +2638,49 @@ export function createEditor({
       imagePresentationResourcePool.dispose();
     },
     setText(textValue: string, resetHistory = false) {
-      viewportController.markInteraction();
-      tableCommandRuntime.externalDocumentPresented();
-      imagePresentationFactory.externalDocumentPresented();
-      void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
-      recentRenderedReplayPresentation = null;
-      mermaidDiagramPresentationConsumer.externalDocumentPresented();
-      const currentText = view.state.doc.toString();
-      const syncChange = findSyncChange(currentText, textValue);
-      if (!syncChange) {
-        view.dispatch({
-          effects: [
-            tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
-            ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
-          ],
-          annotations: Transaction.addToHistory.of(false)
-        });
-        return;
-      }
+      viewportController.runDocumentChange(() => {
+        viewportController.markInteraction();
+        tableCommandRuntime.externalDocumentPresented();
+        imagePresentationFactory.externalDocumentPresented();
+        void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
+        recentRenderedReplayPresentation = null;
+        mermaidDiagramPresentationConsumer.externalDocumentPresented();
+        const currentText = view.state.doc.toString();
+        const syncChange = findSyncChange(currentText, textValue);
+        if (!syncChange) {
+          view.dispatch({
+            effects: [
+              tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+              ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
+            ],
+            annotations: Transaction.addToHistory.of(false)
+          });
+          return;
+        }
 
-      const viewportAnchor = captureViewportAnchor();
-      const { anchor, head } = view.state.selection.main;
-      const newLength = textValue.length;
-      const mappedAnchor = Math.min(mapPositionThroughTextChange(anchor, currentText, textValue, syncChange), newLength);
-      const mappedHead = Math.min(mapPositionThroughTextChange(head, currentText, textValue, syncChange), newLength);
-      const mappedViewportAnchor = Math.min(
-        mapPositionThroughTextChange(viewportAnchor.position, currentText, textValue, syncChange),
-        newLength
-      );
-      clearLivePointerSelection();
-      setTableInteractionActive(false);
-      applyingExternal = true;
-      try {
-        view.dispatch({
-          changes: syncChange,
-          selection: { anchor: mappedAnchor, head: mappedHead },
-          effects: [
-            tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
-            ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
-          ],
-          annotations: Transaction.addToHistory.of(false)
-        });
-      } finally {
-        applyingExternal = false;
-      }
-      const mappedActiveTransaction = viewportController.mapActiveAnchorPosition(mappedViewportAnchor);
-      if (!mappedActiveTransaction) {
-        restoreViewportAnchor(mappedViewportAnchor, viewportAnchor.lineOffset);
-      }
-      syncSelectionClass();
-      emitSelectionChange();
+        const { anchor, head } = view.state.selection.main;
+        const newLength = textValue.length;
+        const mappedAnchor = Math.min(mapPositionThroughTextChange(anchor, currentText, textValue, syncChange), newLength);
+        const mappedHead = Math.min(mapPositionThroughTextChange(head, currentText, textValue, syncChange), newLength);
+        clearLivePointerSelection();
+        setTableInteractionActive(false);
+        applyingExternal = true;
+        try {
+          view.dispatch({
+            changes: syncChange,
+            selection: { anchor: mappedAnchor, head: mappedHead },
+            effects: [
+              tableTransactionProvenanceAdapter.effect({ type: 'externalDocumentPresented' }),
+              ...(resetHistory ? [historyCompartment.reconfigure(history())] : [])
+            ],
+            annotations: Transaction.addToHistory.of(false)
+          });
+        } finally {
+          applyingExternal = false;
+        }
+        syncSelectionClass();
+        emitSelectionChange();
+      });
     },
     setMode(mode: EditableEditorMode, viewport: ViewportAnchorToken | null = null) {
       const applyMode = (isTransactionCurrent: () => boolean): void => {

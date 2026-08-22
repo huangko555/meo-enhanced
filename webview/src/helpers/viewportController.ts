@@ -92,6 +92,91 @@ interface ViewportAnchorTokenRecord {
   readonly projectedOwners: Set<ViewportAnchorOwner>;
 }
 
+interface ChangedDocumentRange {
+  readonly from: number;
+  readonly previousTo: number;
+  readonly insertedText: string;
+}
+
+function findChangedDocumentRange(previousText: string, nextText: string): ChangedDocumentRange | null {
+  if (previousText === nextText) return null;
+
+  let from = 0;
+  const sharedLength = Math.min(previousText.length, nextText.length);
+  while (from < sharedLength && previousText.charCodeAt(from) === nextText.charCodeAt(from)) {
+    from += 1;
+  }
+
+  let previousTo = previousText.length;
+  let nextTo = nextText.length;
+  while (
+    previousTo > from &&
+    nextTo > from &&
+    previousText.charCodeAt(previousTo - 1) === nextText.charCodeAt(nextTo - 1)
+  ) {
+    previousTo -= 1;
+    nextTo -= 1;
+  }
+  return { from, previousTo, insertedText: nextText.slice(from, nextTo) };
+}
+
+function mapPositionThroughDocumentChange(
+  position: number,
+  previousText: string,
+  nextText: string,
+  change: ChangedDocumentRange
+): number {
+  const mapThroughReplacement = (): number => {
+    const delta = change.insertedText.length - (change.previousTo - change.from);
+    if (position <= change.from) return position;
+    if (position >= change.previousTo) return position + delta;
+    return change.from + change.insertedText.length;
+  };
+  if (position <= change.from || position >= change.previousTo) return mapThroughReplacement();
+
+  const contextRadius = 80;
+  const contextFrom = Math.max(change.from, position - contextRadius);
+  const contextTo = Math.min(change.previousTo, position + contextRadius);
+  const context = previousText.slice(contextFrom, contextTo);
+  if (context.length >= 16) {
+    const contextIndex = nextText.indexOf(context);
+    if (contextIndex >= 0 && nextText.indexOf(context, contextIndex + 1) < 0) {
+      return contextIndex + (position - contextFrom);
+    }
+  }
+
+  const lineFrom = previousText.lastIndexOf('\n', Math.max(0, position - 1)) + 1;
+  const lineBreak = previousText.indexOf('\n', position);
+  const lineTo = lineBreak < 0 ? previousText.length : lineBreak;
+  const lineText = previousText.slice(lineFrom, lineTo);
+  if (lineText.trim()) {
+    const expected = mapThroughReplacement();
+    let bestLineFrom = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let searchFrom = 0;
+    while (searchFrom <= nextText.length) {
+      const match = nextText.indexOf(lineText, searchFrom);
+      if (match < 0) break;
+      const distance = Math.abs(match - expected);
+      if (distance < bestDistance) {
+        bestLineFrom = match;
+        bestDistance = distance;
+      }
+      searchFrom = match + Math.max(1, lineText.length);
+    }
+    if (bestLineFrom >= 0) {
+      return bestLineFrom + Math.min(position - lineFrom, lineText.length);
+    }
+  }
+
+  const replacedLength = change.previousTo - change.from;
+  if (replacedLength > 0 && change.insertedText.length > 0) {
+    const relativeOffset = (position - change.from) / replacedLength;
+    return change.from + Math.round(relativeOffset * change.insertedText.length);
+  }
+  return mapThroughReplacement();
+}
+
 
 const MAX_SETTLE_FRAMES = 8;
 const REQUIRED_STABLE_FRAMES = 2;
@@ -728,6 +813,7 @@ export class ViewportController {
     const previousTransaction = this.activeAnchorTransaction;
     this.activeAnchorTransaction = current && record ? record : null;
     const isCurrent = () => Boolean(current && record && this.isAnchorTokenCurrent(record));
+    const previousDocumentText = current && record ? this.view.state.doc.toString() : null;
     let result: void | Promise<void>;
     try {
       result = mutate(isCurrent);
@@ -736,7 +822,16 @@ export class ViewportController {
     }
     const project = (): void => {
       if (!isCurrent() || !record) return;
-      this.projectAnchorRecord(record, owner);
+      const anchor = previousDocumentText === null
+        ? record.anchor
+        : this.mapAnchorThroughDocumentChange(
+            record.anchor,
+            previousDocumentText,
+            this.view.state.doc.toString()
+          );
+      if (!anchor) return;
+      this.projectAnchorRecord(record, owner, anchor);
+      record.anchor = anchor;
     };
     if (result && typeof result.then === 'function') {
       return result.then(project);
@@ -744,35 +839,55 @@ export class ViewportController {
     project();
   }
 
-  /** Maps the owned semantic anchor during the synchronous part of a document transaction. */
-  mapActiveAnchorPosition(position: number): boolean {
-    const record = this.activeAnchorTransaction;
-    if (!record || !this.isAnchorTokenCurrent(record)) return false;
-    record.anchor = {
-      ...record.anchor,
-      position: Math.min(Math.max(0, position), this.view.state.doc.length)
-    };
-    return true;
+  /** Uses the active token, or captures the Editor surface for a standalone Document change. */
+  runDocumentChange(mutate: () => void): void {
+    if (this.activeAnchorTransaction && this.isAnchorTokenCurrent(this.activeAnchorTransaction)) {
+      mutate();
+      return;
+    }
+    const handle = this.captureAnchorToken('editor');
+    this.runAnchorTransaction(handle, 'editor', () => mutate());
   }
 
   private projectAnchorRecord(
     record: ViewportAnchorTokenRecord,
-    owner: ViewportAnchorOwner
+    owner: ViewportAnchorOwner,
+    anchor: ViewportDocumentAnchor
   ): void {
     if (record.projectedOwners.has(owner)) return;
     if (owner === 'editor') {
-      this.restoreDocumentAnchor(record.anchor, undefined, { force: true });
+      this.restoreDocumentAnchor(anchor, undefined, { force: true });
       record.projectedOwners.add(owner);
       return;
     }
     const line = this.view.state.doc.lineAt(
-      Math.min(Math.max(0, record.anchor.position), this.view.state.doc.length)
+      Math.min(Math.max(0, anchor.position), this.view.state.doc.length)
     );
     this.previewSurface?.restoreTopVisiblePosition({
       line: line.number,
-      lineOffset: record.anchor.lineOffset
+      lineOffset: anchor.lineOffset
     }, () => this.isAnchorTokenCurrent(record));
     record.projectedOwners.add(owner);
+  }
+
+  private mapAnchorThroughDocumentChange(
+    anchor: ViewportDocumentAnchor,
+    previousText: string,
+    nextText: string
+  ): ViewportDocumentAnchor | null {
+    try {
+      const change = findChangedDocumentRange(previousText, nextText);
+      if (!change) return anchor;
+      return {
+        ...anchor,
+        position: Math.min(
+          Math.max(0, mapPositionThroughDocumentChange(anchor.position, previousText, nextText, change)),
+          nextText.length
+        )
+      };
+    } catch {
+      return null;
+    }
   }
 
   private handleKeyUp(event: KeyboardEvent): void {

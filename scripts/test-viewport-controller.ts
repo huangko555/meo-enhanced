@@ -1,3 +1,4 @@
+import { Text } from '@codemirror/state';
 import { ViewportController } from '../webview/src/helpers/viewportController';
 
 const flushFrames = async (animationFrames: FrameRequestCallback[]): Promise<void> => {
@@ -493,6 +494,92 @@ const anchorController = new ViewportController(anchorView as any, {
     }
   }
 });
+
+const oldDocument = Text.of([
+  'old-1',
+  'old-2',
+  'old-3',
+  'old-4',
+  'old-5',
+  'old-6',
+  'semantic seventh line remains visible',
+  'old-8'
+]);
+const changedDocument = Text.of([
+  'expanded-header-1',
+  'expanded-header-2',
+  'new-3',
+  'new-4',
+  'new-5',
+  'new-6',
+  'semantic seventh line remains visible',
+  'old-8'
+]);
+const documentChangeProjections: Array<{ line: number; lineOffset: number }> = [];
+const documentChangeView = {
+  ...anchorView,
+  dom: {},
+  state: { doc: oldDocument },
+  lineBlockAtHeight: () => ({ from: changedDocument.line(3).from, top: 200 })
+};
+const documentChangeController = new ViewportController(documentChangeView as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => ({ line: 7, lineOffset: 18 }),
+    restoreTopVisiblePosition(position) {
+      documentChangeProjections.push(position);
+    }
+  }
+});
+const documentChangeHandle = documentChangeController.captureAnchorToken('preview');
+documentChangeController.runAnchorTransaction(documentChangeHandle, 'preview', () => {
+  documentChangeView.state.doc = changedDocument;
+});
+if (
+  documentChangeProjections.length !== 1 ||
+  documentChangeProjections[0]?.line !== 7 ||
+  documentChangeProjections[0]?.lineOffset !== 18
+) {
+  throw new Error(
+    `A Preview token was remapped from its hidden Editor anchor: ${JSON.stringify(documentChangeProjections)}`
+  );
+}
+documentChangeController.destroy();
+
+const delayedDocumentChangeProjections: Array<{ line: number; lineOffset: number }> = [];
+const delayedDocumentChangeView = {
+  ...anchorView,
+  dom: {},
+  state: { doc: oldDocument }
+};
+const delayedDocumentChangeController = new ViewportController(delayedDocumentChangeView as any, {
+  attachInteractions: false,
+  previewSurface: {
+    captureTopVisiblePosition: () => ({ line: 7, lineOffset: 18 }),
+    restoreTopVisiblePosition(position) {
+      delayedDocumentChangeProjections.push(position);
+    }
+  }
+});
+const delayedDocumentChangeHandle = delayedDocumentChangeController.captureAnchorToken('preview');
+let finishDelayedDocumentChange!: () => void;
+const delayedDocumentChange = delayedDocumentChangeController.runAnchorTransaction(
+  delayedDocumentChangeHandle,
+  'preview',
+  async () => {
+    delayedDocumentChangeView.state.doc = changedDocument;
+    await new Promise<void>((resolve) => { finishDelayedDocumentChange = resolve; });
+  }
+);
+delayedDocumentChangeController.markInteraction();
+finishDelayedDocumentChange();
+await delayedDocumentChange;
+if (delayedDocumentChangeProjections.length !== 0) {
+  throw new Error(
+    `A newer interaction allowed a delayed Document projection: ${JSON.stringify(delayedDocumentChangeProjections)}`
+  );
+}
+delayedDocumentChangeController.destroy();
 
 const editorHandle = anchorController.captureAnchorToken('editor');
 if (!editorHandle) throw new Error('Editor semantic anchor token was not captured');

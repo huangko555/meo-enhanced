@@ -28,17 +28,18 @@ const selectionStart = fixture.indexOf('semantic anchor selection');
 const selectionEnd = selectionStart + 'semantic anchor'.length;
 const renderedBlockStart = fixture.indexOf('| column A | column B |');
 
-const previewHtml = [
-  ...Array.from({ length: 180 }, (_, index) => {
+const createPreviewHtml = (lines: readonly string[]): string => [
+  ...lines.map((text, index) => {
     const line = index + 1;
     if (line === 20) {
       return '<table data-source-line="20" data-source-end-line="36" style="display:block;height:520px;margin:0"><tbody><tr><td>rendered table block</td></tr></tbody></table>';
     }
     if (line > 20 && line <= 36) return '';
-    return `<p data-source-line="${line}" style="height:28px;margin:0">semantic line ${line}</p>`;
+    return `<p data-source-line="${line}" style="height:28px;margin:0">${text}</p>`;
   }),
   '<div class="meo-export-mermaid" data-source-line="150" data-source-b64="Zmxvd2NoYXJ0IFREO0EtLT5C"></div>'
 ].join('');
+const previewHtml = createPreviewHtml(fixtureLines);
 
 async function main(): Promise<void> {
   const build = await Bun.build({
@@ -327,6 +328,159 @@ async function main(): Promise<void> {
       Math.abs(sourceRenderedOffset) <= 2,
       `Preview to Source lost the worked semantic line 23 / offset 0: ${sourceRenderedOffset}`
     );
+
+    const moveHiddenEditorAndPreview = async (
+      documentText: string,
+      hiddenLine: number,
+      previewLine: number,
+      previewOffset: number
+    ) => {
+      const lines = documentText.split('\n');
+      const hiddenPosition = lines.slice(0, hiddenLine - 1).reduce((length, line) => length + line.length + 1, 0);
+      await page.evaluate((position) => {
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'revealSelection', anchor: position, head: position, focus: false, preserveViewport: false
+        }}));
+      }, hiddenPosition);
+      await waitForFrames(page, 3);
+      await page.evaluate(({ line, offset }) => {
+        const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+        const target = frame.contentDocument?.querySelector<HTMLElement>(`[data-source-line="${line}"]`);
+        if (!target) throw new Error(`Missing Preview line ${line}`);
+        const scroller = frame.contentDocument!.scrollingElement!;
+        scroller.scrollTop += target.getBoundingClientRect().top + offset;
+        const selection = frame.contentDocument!.getSelection()!;
+        const range = frame.contentDocument!.createRange();
+        range.selectNodeContents(target);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        frame.contentDocument!.body.tabIndex = -1;
+        frame.contentDocument!.body.focus({ preventScroll: true });
+      }, { line: previewLine, offset: previewOffset });
+      await waitForFrames(page, 2);
+    };
+    const readPreviewTrace = async () => page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const frameDocument = frame.contentDocument!;
+      const visible = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
+        .find((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.top <= 0 && rect.bottom > 0;
+        });
+      const editorScroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+      const editorTop = editorScroller.getBoundingClientRect().top;
+      const hiddenEditorLine = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+        .findIndex((line) => line.getBoundingClientRect().bottom > editorTop) + 1;
+      const hiddenSelectionText = document.querySelector<HTMLElement>('.editor-host .cm-activeLine')?.textContent ?? '';
+      return {
+        line: Number(visible?.dataset.sourceLine ?? 0),
+        offset: visible ? -visible.getBoundingClientRect().top : null,
+        hiddenEditorLine,
+        hiddenSelectionText,
+        focusInPreview: document.activeElement === frame,
+        focusInEditor: Boolean(document.activeElement && document.querySelector('.editor-host')?.contains(document.activeElement)),
+        selectionLength: frameDocument.getSelection()?.toString().length ?? 0,
+        text: Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+          .map((line) => line.textContent ?? '').join('\n')
+      };
+    });
+    const fulfillNextPreviewRender = async (
+      previousRequestId: string,
+      html: string,
+      firstLine: string
+    ): Promise<string> => {
+      const nextRequestId = await page.waitForFunction((previous) => (
+        (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> })
+          .__hostMessages?.findLast((message) => (
+            message.type === 'requestPreviewRender' && message.requestId !== previous
+          ))?.requestId ?? ''
+      ), {}, previousRequestId).then((handle) => handle.jsonValue() as Promise<string>);
+      await page.evaluate(({ id, nextHtml }) => {
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'previewRenderResult', requestId: id,
+          result: { ok: true, value: {
+            html: nextHtml,
+            hasMermaid: false,
+            styles: {
+              light: 'html,body{margin:0}.meo-export-doc{padding:0}',
+              dark: 'html,body{margin:0}.meo-export-doc{padding:0}'
+            }
+          } }
+        }}));
+      }, { id: nextRequestId, nextHtml: html });
+      await page.waitForFunction((expected) => (
+        document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+          ?.querySelector<HTMLElement>('[data-source-line="1"]')?.textContent === expected
+      ), {}, firstLine);
+      await waitForFrames(page, 6);
+      return nextRequestId;
+    };
+
+    await page.click('[data-mode="preview"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
+    await moveHiddenEditorAndPreview(fixture, 3, 76, 18);
+    const externalBefore = await readPreviewTrace();
+    assert.ok(
+      externalBefore.hiddenSelectionText === 'semantic line 3' && externalBefore.line === 76,
+      `external trace did not separate hidden Editor and Preview: ${JSON.stringify(externalBefore)}`
+    );
+    const externalLines = [...fixtureLines];
+    externalLines[0] = 'clean external revision expanded semantic line 1';
+    const externalText = externalLines.join('\n');
+    const requestBeforeExternal = await page.evaluate(() => (
+      (window as any).__hostMessages.findLast((message: any) => message.type === 'requestPreviewRender')?.requestId ?? ''
+    ));
+    await page.evaluate((text) => {
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 2 } }));
+    }, externalText);
+    const externalRequestId = await fulfillNextPreviewRender(
+      requestBeforeExternal,
+      createPreviewHtml(externalLines),
+      externalLines[0]
+    );
+    const externalAfter = await readPreviewTrace();
+    assert.equal(externalAfter.line, 76, JSON.stringify({ externalBefore, externalAfter }));
+    assert.ok(Math.abs((externalAfter.offset ?? 99) - 18) <= 2, JSON.stringify(externalAfter));
+    assert.ok(externalAfter.text.includes(externalLines[0]), 'clean external revision did not update the production Editor');
+    assert.equal(externalAfter.focusInEditor, false, 'clean external revision stole focus into the hidden Editor');
+
+    await moveHiddenEditorAndPreview(externalText, 4, 100, 12);
+    const reloadBefore = await readPreviewTrace();
+    assert.ok(
+      reloadBefore.hiddenSelectionText === 'semantic line 4' && reloadBefore.line === 100,
+      `reload trace did not separate hidden Editor and Preview: ${JSON.stringify(reloadBefore)}`
+    );
+    const reloadLines = [...externalLines];
+    reloadLines[0] = 'disk reload expanded semantic line 1 again';
+    const reloadText = reloadLines.join('\n');
+    const reloadRequestsBefore = await page.evaluate(() => (
+      (window as any).__hostMessages.filter((message: any) => message.type === 'reloadDocumentFromDisk').length
+    ));
+    await page.$eval<HTMLButtonElement>('[data-action="discard"]', (button) => {
+      button.click();
+      button.click();
+    });
+    await page.waitForFunction((count) => (
+      (window as any).__hostMessages.filter((message: any) => message.type === 'reloadDocumentFromDisk').length > count
+    ), {}, reloadRequestsBefore);
+    await page.evaluate((text) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'documentReloadedFromDisk', reloadId: 1, version: 3, text,
+        topLine: 3, topLineOffset: 25
+      }}));
+    }, reloadText);
+    await fulfillNextPreviewRender(externalRequestId, createPreviewHtml(reloadLines), reloadLines[0]);
+    const reloadAfter = await readPreviewTrace();
+    assert.equal(reloadAfter.line, 100, JSON.stringify({ reloadBefore, reloadAfter }));
+    assert.ok(Math.abs((reloadAfter.offset ?? 99) - 12) <= 2, JSON.stringify(reloadAfter));
+    assert.ok(reloadAfter.text.includes(reloadLines[0]), 'disk reload did not update the production Editor');
+    assert.equal(reloadAfter.focusInEditor, false, 'disk reload stole focus into the hidden Editor');
+    const reloadReceipt = await page.waitForFunction(() => (
+      (window as any).__hostMessages.findLast((message: any) => (
+        message.type === 'documentReloadPresentationCompleted' && message.reloadId === 1
+      )) ?? null
+    )).then((handle) => handle.jsonValue() as Promise<{ presented: boolean }>);
+    assert.equal(reloadReceipt.presented, true, 'disk reload presentation was not accepted');
     console.log(`Viewport Anchor production Chromium trace passed: ${JSON.stringify(traceResult.samples)}`);
   } finally {
     await browser.close();
