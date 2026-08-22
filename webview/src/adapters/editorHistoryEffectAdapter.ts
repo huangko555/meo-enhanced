@@ -24,8 +24,11 @@ export type EditorHistoryEffectCapabilities = {
   runNativeHistory(
     direction: EditorHistoryDirection
   ): EditorHistoryNativeResult | Promise<EditorHistoryNativeResult>;
-  attemptBoundaryRestore(request: EditorHistoryRestoreRequest): EditorHistoryRestoreAttempt;
-  restoreEditorInteraction(request: EditorHistoryRestoreRequest): void;
+  attemptBoundaryRestore(
+    request: EditorHistoryRestoreRequest,
+    isCurrent: () => boolean
+  ): EditorHistoryRestoreAttempt;
+  restoreEditorInteraction(request: EditorHistoryRestoreRequest, isCurrent: () => boolean): void;
   scheduleFocusRetry(run: () => void): () => void;
   reportError(operation: 'native-history' | 'restore-history-interaction', error: unknown): void;
   dispose(): void;
@@ -53,6 +56,7 @@ export function createEditorHistoryEffectAdapter(
   const restoreInteraction = (request: EditorHistoryRestoreRequest): Promise<EditorHistoryInput | null> => {
     cancelPendingRestore();
     const generation = restoreGeneration;
+    const isCurrent = (): boolean => generation === restoreGeneration;
 
     return new Promise<EditorHistoryInput | null>((resolve) => {
       settleRestore = resolve;
@@ -68,13 +72,13 @@ export function createEditorHistoryEffectAdapter(
       const attempt = (): void => {
         if (generation !== restoreGeneration || settleRestore !== resolve) return;
         try {
-          const result = capabilities.attemptBoundaryRestore(request);
+          const result = capabilities.attemptBoundaryRestore(request, isCurrent);
           if (result === 'restored') {
             finish({ type: 'interactionRestored', replayId: request.replayId });
             return;
           }
           if (result === 'not-rendered') {
-            capabilities.restoreEditorInteraction(request);
+            capabilities.restoreEditorInteraction(request, isCurrent);
             finish({ type: 'interactionRestored', replayId: request.replayId });
             return;
           }
@@ -92,6 +96,10 @@ export function createEditorHistoryEffectAdapter(
 
   return {
     prepareInput(input) {
+      // Delayed DOM/layout work can outlive the Application's restoring phase.
+      // Every newer public input invalidates that work even when the replay has
+      // already reported its immediate interaction restore as complete.
+      cancelPendingRestore();
       if (input.type !== 'requestReplay') return input;
       return {
         type: 'requestReplay',

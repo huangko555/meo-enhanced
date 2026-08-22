@@ -399,6 +399,7 @@ export function focusHistoryChange(
   targetPosition?: number,
   isCurrent: () => boolean = () => true
 ) {
+  if (!isCurrent()) return;
   const target = targetPosition ?? changed?.to;
   if (typeof target === 'number' && view.state.selection.main.head !== target) {
     view.dispatch({ selection: { anchor: target } });

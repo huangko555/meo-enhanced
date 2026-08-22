@@ -309,6 +309,7 @@ export function createEditor({
   let onHistoryKeyDown: ((event: KeyboardEvent) => void) | null = null;
   let onHistoryBeforeInput: ((event: InputEvent) => void) | null = null;
   let onHistoryPointerDown: (() => void) | null = null;
+  let onHistoryWheel: (() => void) | null = null;
   let onHistoryBlur: ((event: FocusEvent) => void) | null = null;
   let blockActionToolbarReconcileFrame: number | null = null;
   let pendingLiveSearchRevealFrame: number | null = null;
@@ -2182,7 +2183,8 @@ export function createEditor({
         });
       }
     },
-    attemptBoundaryRestore(request: EditorHistoryRestoreRequest) {
+    attemptBoundaryRestore(request: EditorHistoryRestoreRequest, isCurrent) {
+      if (!isCurrent()) return 'not-rendered';
       const changedRangeIsTable = request.changedRange
         ? isTableHistoryRange(view.state, request.changedRange)
         : false;
@@ -2193,7 +2195,8 @@ export function createEditor({
           view,
           request.changedRange,
           request.previousViewport.scrollTop,
-          request.targetPosition ?? undefined
+          request.targetPosition ?? undefined,
+          isCurrent
         )) return 'restored';
         focusHistoryChange(
           view,
@@ -2201,7 +2204,8 @@ export function createEditor({
           request.previousViewport.scrollTop,
           (anchor, head) => applyRevealSelection(anchor, head, { focusEditor: true, align: 'nearest' }),
           request.previousViewport.selection,
-          request.targetPosition ?? undefined
+          request.targetPosition ?? undefined,
+          isCurrent
         );
         return 'retry';
       }
@@ -2219,7 +2223,7 @@ export function createEditor({
       pendingRenderedHistoryFocus = null;
       return 'restored';
     },
-    restoreEditorInteraction(request) {
+    restoreEditorInteraction(request, isCurrent) {
       recentRenderedReplayPresentation = null;
       focusHistoryChange(
         view,
@@ -2227,7 +2231,8 @@ export function createEditor({
         request.previousViewport.scrollTop,
         (anchor, head) => applyRevealSelection(anchor, head, { focusEditor: true, align: 'nearest' }),
         request.previousViewport.selection,
-        request.targetPosition ?? undefined
+        request.targetPosition ?? undefined,
+        isCurrent
       );
     },
     scheduleFocusRetry(run) {
@@ -2263,10 +2268,12 @@ export function createEditor({
       if (onHistoryKeyDown) view.dom.removeEventListener('keydown', onHistoryKeyDown, true);
       if (onHistoryBeforeInput) view.dom.removeEventListener('beforeinput', onHistoryBeforeInput, true);
       if (onHistoryPointerDown) view.dom.removeEventListener('pointerdown', onHistoryPointerDown, true);
+      if (onHistoryWheel) view.dom.removeEventListener('wheel', onHistoryWheel, true);
       if (onHistoryBlur) view.dom.removeEventListener('blur', onHistoryBlur, true);
       onHistoryKeyDown = null;
       onHistoryBeforeInput = null;
       onHistoryPointerDown = null;
+      onHistoryWheel = null;
       onHistoryBlur = null;
     }
   });
@@ -2297,11 +2304,16 @@ export function createEditor({
     }
   };
   onHistoryPointerDown = () => { void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' }); };
+  onHistoryWheel = () => { void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' }); };
   onHistoryBlur = (event) => {
     const next = event.relatedTarget;
     if (next instanceof Node && view.dom.contains(next)) return;
     queueMicrotask(() => {
       if (!view.dom.contains(view.dom.ownerDocument.activeElement)) {
+        // Native history can remove the focused embedded editor before its
+        // correlated interaction restore has started. That replay-owned blur
+        // must not invalidate the restore that will focus the new target.
+        if (editorHistoryRuntime?.getState().pendingReplay?.phase === 'running-native-history') return;
         void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
       }
     });
@@ -2309,6 +2321,7 @@ export function createEditor({
   view.dom.addEventListener('keydown', onHistoryKeyDown, true);
   view.dom.addEventListener('beforeinput', onHistoryBeforeInput, true);
   view.dom.addEventListener('pointerdown', onHistoryPointerDown, true);
+  view.dom.addEventListener('wheel', onHistoryWheel, { capture: true, passive: true });
   view.dom.addEventListener('blur', onHistoryBlur, true);
   onTableInteraction = (event) => {
     const detail: unknown = event instanceof CustomEvent ? event.detail : null;

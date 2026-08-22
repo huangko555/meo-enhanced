@@ -18,6 +18,7 @@ let nativeResult: { applied: boolean; changedRange: { from: number; to: number }
   changedRange: { from: 16, to: 16 }
 };
 let releaseNative: (() => void) | null = null;
+let latestRestoreIsCurrent: (() => boolean) | null = null;
 
 const capabilities: EditorHistoryEffectCapabilities = {
   captureContext: () => ({
@@ -34,7 +35,8 @@ const capabilities: EditorHistoryEffectCapabilities = {
     }
     return nativeResult;
   },
-  attemptBoundaryRestore(request) {
+  attemptBoundaryRestore(request, isCurrent) {
+    latestRestoreIsCurrent = isCurrent;
     events.push(`boundary:${request.replayId}`);
     return restoreResult;
   },
@@ -61,6 +63,13 @@ assert.equal(await runtime.dispatch({ type: 'requestReplay', direction: 'undo' }
 await runtime.whenIdle();
 assert.deepEqual(events, ['commit', 'native:undo', 'boundary:1', 'editor:1:16:120']);
 assert.equal(runtime.getState().pendingReplay, null);
+assert.equal(latestRestoreIsCurrent?.(), true);
+await runtime.dispatch({ type: 'cancelRestore' });
+assert.equal(
+  latestRestoreIsCurrent?.(),
+  false,
+  'new user interaction must invalidate delayed restore work after the Application has returned to idle'
+);
 
 events.length = 0;
 nativeResult = { applied: false, changedRange: null };
