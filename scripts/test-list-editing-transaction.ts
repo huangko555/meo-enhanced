@@ -93,6 +93,89 @@ async function main(): Promise<void> {
       const afterExternal = second.getText();
       const externalUndoApplied = await second.undo();
 
+      const tableSource = '1. a\n99. b\n\n| H |\n| --- |\n| - |';
+      second.setText(tableSource, true);
+      const tableProvenance = harness.getTableTransactionProvenance(second.view.state);
+      const previousTableRow = second.view.state.doc.line(6);
+      second.view.dispatch({
+        changes: { from: previousTableRow.to, insert: '\n| new |' },
+        effects: tableProvenance.effect({
+          type: 'insertedRow',
+          at: previousTableRow.to,
+          assoc: -1,
+          offset: 1
+        }),
+        annotations: [
+          harness.userEvent.of('input.table.insert-row'),
+          harness.isolateHistory.of('full')
+        ]
+      });
+      const tableAfterInsert = second.getText();
+      const insertedRowSnapshot = tableProvenance.snapshot().insertedRows[0] ?? null;
+      const insertedRowText = insertedRowSnapshot
+        ? second.view.state.doc.sliceString(insertedRowSnapshot.from, insertedRowSnapshot.to)
+        : null;
+      const tableHistoryAfterInsert = second.getHistoryDepth();
+      const tableUndoApplied = await second.undo();
+      const tableAfterUndo = second.getText();
+      const insertedRowsAfterUndo = tableProvenance.snapshot().insertedRows;
+      const tableRedoApplied = await second.redo();
+      const tableAfterRedo = second.getText();
+      const insertedRowsAfterRedo = tableProvenance.snapshot().insertedRows;
+
+      second.setText('1. a\n99. b\n\n| H |\n| --- |\n| first |\n| second |', true);
+      const firstTableRow = second.view.state.doc.line(6);
+      second.view.dispatch({
+        changes: { from: firstTableRow.from, to: second.view.state.doc.line(7).from },
+        effects: tableProvenance.effect({
+          type: 'deletedRows',
+          at: firstTableRow.from,
+          assoc: 1,
+          baselineRanges: [[3, 3]],
+          deletionAtEnd: false
+        }),
+        annotations: [
+          harness.userEvent.of('delete.table.rows'),
+          harness.isolateHistory.of('full')
+        ]
+      });
+      const tableAfterDelete = second.getText();
+      const deletedRowSnapshot = tableProvenance.snapshot().deletedRows[0] ?? null;
+      const deletedRowAnchorText = deletedRowSnapshot
+        ? second.view.state.doc.lineAt(deletedRowSnapshot.at).text
+        : null;
+
+      second.setText('1. a\n99. b\n\n| H |\n| --- |\n| tracked |', true);
+      const trackedTableRow = second.view.state.doc.line(6);
+      second.view.dispatch({
+        effects: tableProvenance.effect({ type: 'insertedRow', at: trackedTableRow.from, assoc: -1 }),
+        annotations: harness.addToHistory.of(false)
+      });
+      const trackedRow = tableProvenance.snapshot().insertedRows[0]!;
+      const tableFrom = second.view.state.doc.line(4).from;
+      second.view.dispatch({
+        changes: {
+          from: tableFrom,
+          to: trackedTableRow.to,
+          insert: '| H |\n| --- |\n| remapped |'
+        },
+        effects: tableProvenance.effect({
+          type: 'remapInsertedRows',
+          tableFrom,
+          rows: [{ id: trackedRow.id, oldOffset: 14, newOffset: 14 }]
+        }),
+        annotations: [
+          harness.userEvent.of('input.table.remap'),
+          harness.isolateHistory.of('full')
+        ]
+      });
+      const tableAfterRemap = second.getText();
+      const remappedRowSnapshot = tableProvenance.snapshot().insertedRows[0] ?? null;
+      const remappedRowText = remappedRowSnapshot
+        ? second.view.state.doc.sliceString(remappedRowSnapshot.from, remappedRowSnapshot.to)
+        : null;
+      second.setText('12. external\n48. stays explicit', true);
+
       const nested = '7. top\n  4. nested explicit\n  5. nested next\n8. tail';
       first.setText(nested, true);
       const nestedLineEnd = first.view.state.doc.line(2).to;
@@ -142,6 +225,22 @@ async function main(): Promise<void> {
         oneFollowUpPublishCount,
         afterExternal,
         externalUndoApplied,
+        tableAfterInsert,
+        insertedRowSnapshot,
+        insertedRowText,
+        tableHistoryAfterInsert,
+        tableUndoApplied,
+        tableAfterUndo,
+        insertedRowsAfterUndo,
+        tableRedoApplied,
+        tableAfterRedo,
+        insertedRowsAfterRedo,
+        tableAfterDelete,
+        deletedRowSnapshot,
+        deletedRowAnchorText,
+        tableAfterRemap,
+        remappedRowSnapshot,
+        remappedRowText,
         nestedAfterPaste,
         nestedUndoApplied,
         nestedAfterUndo,
@@ -171,6 +270,35 @@ async function main(): Promise<void> {
     assert.equal(result.oneFollowUpPublishCount, 1);
     assert.equal(result.afterExternal, '12. external\n48. stays explicit');
     assert.equal(result.externalUndoApplied, false, 'external reload on a fresh Editor must not enter history');
+    assert.equal(result.tableAfterInsert, '1. a\n2. b\n\n| H |\n| --- |\n| - |\n| new |');
+    assert.deepEqual(result.insertedRowSnapshot, { id: 'row-1', from: 31, to: 38 });
+    assert.equal(result.insertedRowText, '| new |');
+    assert.deepEqual(result.tableHistoryAfterInsert, { undo: 1, redo: 0 });
+    assert.equal(result.tableUndoApplied, true);
+    assert.equal(result.tableAfterUndo, '1. a\n99. b\n\n| H |\n| --- |\n| - |');
+    assert.deepEqual(result.insertedRowsAfterUndo, []);
+    assert.equal(result.tableRedoApplied, true);
+    assert.equal(result.tableAfterRedo, result.tableAfterInsert);
+    assert.deepEqual(result.insertedRowsAfterRedo, [result.insertedRowSnapshot]);
+    assert.equal(result.tableAfterDelete, '1. a\n2. b\n\n| H |\n| --- |\n| second |');
+    assert.deepEqual(
+      result.deletedRowSnapshot && {
+        at: result.deletedRowSnapshot.at,
+        baselineRanges: result.deletedRowSnapshot.baselineRanges,
+        deletionAtEnd: result.deletedRowSnapshot.deletionAtEnd
+      },
+      { at: 25, baselineRanges: [[3, 3]], deletionAtEnd: false }
+    );
+    assert.equal(result.deletedRowAnchorText, '| second |');
+    assert.equal(result.tableAfterRemap, '1. a\n2. b\n\n| H |\n| --- |\n| remapped |');
+    assert.deepEqual(
+      result.remappedRowSnapshot && {
+        from: result.remappedRowSnapshot.from,
+        to: result.remappedRowSnapshot.to
+      },
+      { from: 25, to: 37 }
+    );
+    assert.equal(result.remappedRowText, '| remapped |');
     assert.equal(
       result.nestedAfterPaste,
       '7. top\n  4. nested explicit\n  5. nested pasted\n  6. nested next\n8. tail'
