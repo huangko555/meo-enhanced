@@ -328,7 +328,9 @@ async function main(): Promise<void> {
       throw new Error(`Rendered table navigation had a second writer or reversal: ${JSON.stringify(renderedTable)}`);
     }
 
-    const renderedTableLayoutOverlap = await page.evaluate(async () => {
+    const collectRenderedTableLayoutOverlap = (forceFailureAfterInstall: boolean) => page.evaluate(async (
+      shouldFailAfterInstall
+    ) => {
       const editor = (window as any).__inputCursorEditor;
       const scroller = editor.getScrollElement();
       const input = document.activeElement instanceof HTMLTextAreaElement
@@ -371,26 +373,6 @@ async function main(): Promise<void> {
           });
         }
       });
-      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
-      editor.preserveViewport(() => {
-        row.style.transform = 'translateY(700px)';
-        scroller.scrollTop += 100;
-      });
-      const mutatedScrollTop = scroller.scrollTop;
-      scrollWritePhase = 'navigation-input';
-      input.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        inputType: 'insertText',
-        data: null
-      }));
-      scrollWritePhase = 'navigation-stale';
-      input.dispatchEvent(new InputEvent('beforeinput', {
-        bubbles: true,
-        cancelable: true,
-        inputType: 'insertText',
-        data: 'x'
-      }));
-      scrollWritePhase = 'settling';
       const frames: Array<{
         frame: number;
         scrollTop: number;
@@ -399,28 +381,117 @@ async function main(): Promise<void> {
         selectionStart: number;
         selectionEnd: number;
       }> = [];
-      for (let frame = 0; frame < 12; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        frames.push({
-          frame,
-          scrollTop: scroller.scrollTop,
-          focused: document.activeElement === input,
-          connected: input.isConnected,
-          selectionStart: input.selectionStart,
-          selectionEnd: input.selectionEnd
+      let result: {
+        beforeScrollTop: number;
+        mutatedScrollTop: number;
+        finalScrollTop: number;
+        beforeSelection: Array<number | null>;
+        scrollWrites: typeof scrollWrites;
+        frames: typeof frames;
+      } | null = null;
+      let primaryFailed = false;
+      let primaryFailure: unknown;
+      let cleanupFailure: Error | null = null;
+      try {
+        if (shouldFailAfterInstall) throw new Error('controlled scroll trace failure');
+        input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+        editor.preserveViewport(() => {
+          row.style.transform = 'translateY(700px)';
+          scroller.scrollTop += 100;
         });
+        const mutatedScrollTop = scroller.scrollTop;
+        scrollWritePhase = 'navigation-input';
+        input.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          inputType: 'insertText',
+          data: null
+        }));
+        scrollWritePhase = 'navigation-stale';
+        input.dispatchEvent(new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data: 'x'
+        }));
+        scrollWritePhase = 'settling';
+        for (let frame = 0; frame < 12; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          frames.push({
+            frame,
+            scrollTop: scroller.scrollTop,
+            focused: document.activeElement === input,
+            connected: input.isConnected,
+            selectionStart: input.selectionStart,
+            selectionEnd: input.selectionEnd
+          });
+        }
+        result = {
+          beforeScrollTop,
+          mutatedScrollTop,
+          finalScrollTop: scroller.scrollTop,
+          beforeSelection,
+          scrollWrites,
+          frames
+        };
+      } catch (error) {
+        primaryFailed = true;
+        primaryFailure = error;
+      } finally {
+        try {
+          const deleted = Reflect.deleteProperty(scroller, 'scrollTop');
+          let restoredOwner: object | null = Object.getPrototypeOf(scroller);
+          let restoredDescriptor: PropertyDescriptor | undefined;
+          while (restoredOwner && !restoredDescriptor) {
+            restoredDescriptor = Object.getOwnPropertyDescriptor(restoredOwner, 'scrollTop');
+            restoredOwner = Object.getPrototypeOf(restoredOwner);
+          }
+          if (
+            !deleted ||
+            Object.prototype.hasOwnProperty.call(scroller, 'scrollTop') ||
+            restoredDescriptor?.get !== nativeScrollTop.get ||
+            restoredDescriptor?.set !== nativeScrollTop.set
+          ) {
+            throw new Error('Rendered table overlap did not restore the inherited scrollTop accessor');
+          }
+        } catch (error) {
+          cleanupFailure = error instanceof Error ? error : new Error(String(error));
+        }
       }
-      const finalScrollTop = scroller.scrollTop;
-      Reflect.deleteProperty(scroller, 'scrollTop');
-      return {
-        beforeScrollTop,
-        mutatedScrollTop,
-        finalScrollTop,
-        beforeSelection,
-        scrollWrites,
-        frames
-      };
+      if (primaryFailed) {
+        if (cleanupFailure) {
+          throw new AggregateError(
+            [primaryFailure, cleanupFailure],
+            'Rendered table overlap acquisition and cleanup both failed'
+          );
+        }
+        throw primaryFailure;
+      }
+      if (cleanupFailure) throw cleanupFailure;
+      if (!result) throw new Error('Rendered table overlap produced no trace');
+      return result;
+    }, forceFailureAfterInstall);
+    let controlledFailureMessage = '';
+    try {
+      await collectRenderedTableLayoutOverlap(true);
+    } catch (error) {
+      controlledFailureMessage = error instanceof Error ? error.message : String(error);
+    }
+    const controlledFailureLeftOwnDescriptor = await page.evaluate(() => {
+      const editor = (window as any).__inputCursorEditor;
+      return Object.prototype.hasOwnProperty.call(editor.getScrollElement(), 'scrollTop');
     });
+    if (
+      controlledFailureMessage !== 'controlled scroll trace failure' ||
+      controlledFailureLeftOwnDescriptor
+    ) {
+      throw new Error(
+        `Rendered table trace cleanup lost the primary failure or leaked its descriptor: ${JSON.stringify({
+          controlledFailureMessage,
+          controlledFailureLeftOwnDescriptor
+        })}`
+      );
+    }
+    const renderedTableLayoutOverlap = await collectRenderedTableLayoutOverlap(false);
     const overlapLowerBound = Math.min(
       renderedTableLayoutOverlap.beforeScrollTop,
       renderedTableLayoutOverlap.mutatedScrollTop
