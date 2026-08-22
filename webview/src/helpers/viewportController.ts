@@ -512,14 +512,21 @@ export class ViewportController {
     const viewportOffset = Number.isFinite(anchor.viewportOffset)
       ? Math.max(0, anchor.viewportOffset ?? 0)
       : null;
-    this.stabilize(
-      () => ({
-        top: Math.max(0, this.view.lineBlockAt(position).top + (
-          viewportOffset === null ? lineOffset : -viewportOffset
-        ))
-      }),
-      { onSettled }
-    );
+    this.stabilize(() => {
+      if (viewportOffset !== null) {
+        const coords = this.view.coordsAtPos(position);
+        if (coords) {
+          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+          return {
+            top: Math.max(
+              0,
+              this.view.scrollDOM.scrollTop + coords.top - scrollerRect.top - viewportOffset
+            )
+          };
+        }
+      }
+      return { top: Math.max(0, this.view.lineBlockAt(position).top + lineOffset) };
+    }, { onSettled });
   }
 
   restoreTopVisibleLine(

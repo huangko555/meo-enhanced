@@ -606,6 +606,44 @@ const revealController = new ViewportController({
   lineBlockAt: (position: number) => ({ top: position, bottom: position + 20, height: 20 }),
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
 } as any, { attachInteractions: false });
+
+let navigationAnchorTop = 1816.390625;
+const navigationAnchorScrollDOM = Object.assign(new FakeEventTarget(), {
+  ownerDocument: new FakeEventTarget(),
+  scrollTop: 1816,
+  scrollLeft: 0,
+  scrollHeight: 3000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
+});
+const navigationAnchorController = new ViewportController({
+  dom: new FakeEventTarget(),
+  scrollDOM: navigationAnchorScrollDOM,
+  state: { doc: { length: 1999 } },
+  coordsAtPos: () => ({
+    top: navigationAnchorTop - navigationAnchorScrollDOM.scrollTop + 3,
+    bottom: navigationAnchorTop - navigationAnchorScrollDOM.scrollTop + 23
+  }),
+  lineBlockAt: () => ({ top: navigationAnchorTop, bottom: navigationAnchorTop + 24, height: 24 }),
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+} as any, { attachInteractions: false });
+const exactNavigationAnchor = navigationAnchorController.beginNavigationReveal();
+navigationAnchorController.revealPosition(760, { y: 'nearest' }, exactNavigationAnchor);
+const navigationAnchorHandle = navigationAnchorController.captureAnchorToken('editor');
+if (!navigationAnchorHandle) throw new Error('Visible navigation target did not produce an Editor anchor');
+navigationAnchorTop = 1888.390625;
+navigationAnchorController.restoreAnchorToken(navigationAnchorHandle, 'editor');
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (navigationAnchorScrollDOM.scrollTop !== 1888) {
+  throw new Error(
+    `Navigation target mixed text and line-box offsets: ${navigationAnchorScrollDOM.scrollTop}`
+  );
+}
+navigationAnchorController.destroy();
+
 const visibleReveal = revealController.beginNavigationReveal();
 revealController.revealPosition(200, { y: 'nearest' }, visibleReveal);
 await Promise.resolve();

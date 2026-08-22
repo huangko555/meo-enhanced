@@ -15,6 +15,84 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function assertExternalViewportStability(page: Page): Promise<void> {
+  await page.evaluate(() => (window as any).__editor.scrollToLine(76, 'top'));
+  await waitForFrames(page);
+  const beforeTop = await page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+    return line?.getBoundingClientRect().top ?? null;
+  });
+  if (beforeTop === null) throw new Error('Could not locate viewport anchor before external update');
+
+  await page.evaluate(() => {
+    const editor = (window as any).__editor;
+    editor.setText(['后台新增 1', '后台新增 2', '后台新增 3', editor.getText()].join('\n'));
+  });
+  await waitForFrames(page);
+  const after = await page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+    return {
+      top: line?.getBoundingClientRect().top ?? null,
+      text: (window as any).__editor.getText()
+    };
+  });
+  if (!after.text.startsWith('后台新增 1\n后台新增 2\n后台新增 3\n')) {
+    throw new Error('External document update was not applied');
+  }
+  if (after.top === null || Math.abs(after.top - beforeTop) > 1) {
+    throw new Error(`External update moved the viewport anchor: ${beforeTop} -> ${after.top}`);
+  }
+
+  await page.evaluate(() => {
+    const editor = (window as any).__editor;
+    editor.setText(editor.getText()
+      .replace('稳定锚点 10', '后台改写锚点 10')
+      .replace('稳定锚点 90', '后台改写锚点 90'));
+  });
+  await waitForFrames(page);
+  const afterDisjointEdits = await page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+      .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
+    const editor = (window as any).__editor;
+    const position = editor.getText().indexOf('稳定锚点 70');
+    return {
+      top: line?.getBoundingClientRect().top ?? null,
+      position,
+      blockTop: editor.view.lineBlockAt(position).top,
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      topVisible: editor.getTopVisiblePosition()
+    };
+  });
+  if (afterDisjointEdits.top === null || Math.abs(afterDisjointEdits.top - beforeTop) > 1) {
+    throw new Error(`Disjoint external edits moved unchanged viewport content: ${beforeTop} -> ${JSON.stringify(afterDisjointEdits)}`);
+  }
+
+  const replacementFixture = Array.from({ length: 120 }, (_, index) => `replacement line ${index + 1}`).join('\n');
+  await page.evaluate((text) => {
+    (window as any).__editor.setText(text);
+  }, replacementFixture);
+  await waitForFrames(page);
+  const replacementPosition = await page.evaluate(() => (window as any).__editor.getTopVisiblePosition());
+  if (replacementPosition.line < 65 || replacementPosition.line > 85) {
+    throw new Error(`Whole-document external update lost the nearby viewport: ${JSON.stringify(replacementPosition)}`);
+  }
+
+  await page.evaluate(() => {
+    const editor = (window as any).__editor;
+    editor.revealSelection(editor.getText().length, editor.getText().length, {
+      focusEditor: false,
+      align: 'none'
+    });
+  });
+  await waitForFrames(page);
+  const afterPreservedReveal = await page.evaluate(() => (window as any).__editor.getTopVisiblePosition());
+  if (Math.abs(afterPreservedReveal.line - replacementPosition.line) > 1) {
+    throw new Error(`Background selection reveal moved the viewport: ${JSON.stringify({ before: replacementPosition, after: afterPreservedReveal })}`);
+  }
+}
+
 async function countRenderedHeadingStrikePixels(page: Page): Promise<{ heading: number; foreground: number }> {
   const rect = await page.evaluate(() => {
     const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -107,6 +185,11 @@ async function main() {
         onApplyChanges() {}
       });
     }, source);
+    if (process.env.MEO_TEST_VIEWPORT_ONLY === '1') {
+      await assertExternalViewportStability(page);
+      console.log('external update viewport stability checks passed');
+      return;
+    }
     const frontmatterProperties = await page.evaluate(() => {
       const host = document.createElement('div');
       host.style.width = '760px';
@@ -427,86 +510,7 @@ async function main() {
       }
     }
 
-    await page.evaluate(() => (window as any).__editor.scrollToLine(76, 'top'));
-    await waitForFrames(page);
-    const beforeTop = await page.evaluate(() => {
-      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
-      return line?.getBoundingClientRect().top ?? null;
-    });
-    if (beforeTop === null) throw new Error('Could not locate viewport anchor before external update');
-
-    await page.evaluate(() => {
-      const editor = (window as any).__editor;
-      editor.setText(['后台新增 1', '后台新增 2', '后台新增 3', editor.getText()].join('\n'));
-    });
-    await waitForFrames(page);
-    const after = await page.evaluate(() => {
-      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
-      return {
-        top: line?.getBoundingClientRect().top ?? null,
-        text: (window as any).__editor.getText()
-      };
-    });
-    if (!after.text.startsWith('后台新增 1\n后台新增 2\n后台新增 3\n')) {
-      throw new Error('External document update was not applied');
-    }
-    if (after.top === null || Math.abs(after.top - beforeTop) > 1) {
-      throw new Error(`External update moved the viewport anchor: ${beforeTop} -> ${after.top}`);
-    }
-
-    await page.evaluate(() => {
-      const editor = (window as any).__editor;
-      editor.setText(editor.getText()
-        .replace('稳定锚点 10', '后台改写锚点 10')
-        .replace('稳定锚点 90', '后台改写锚点 90'));
-    });
-    await waitForFrames(page);
-    const afterDisjointEdits = await page.evaluate(() => {
-      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((candidate) => candidate.textContent?.includes('稳定锚点 70'));
-      const editor = (window as any).__editor;
-      const position = editor.getText().indexOf('稳定锚点 70');
-      return {
-        top: line?.getBoundingClientRect().top ?? null,
-        position,
-        blockTop: editor.view.lineBlockAt(position).top,
-        scrollTop: editor.view.scrollDOM.scrollTop,
-        topVisible: editor.getTopVisiblePosition()
-      };
-    });
-    if (afterDisjointEdits.top === null || Math.abs(afterDisjointEdits.top - beforeTop) > 1) {
-      throw new Error(`Disjoint external edits moved unchanged viewport content: ${beforeTop} -> ${JSON.stringify(afterDisjointEdits)}`);
-    }
-
-    const replacementFixture = Array.from({ length: 120 }, (_, index) => `replacement line ${index + 1}`).join('\n');
-    await page.evaluate((text) => {
-      (window as any).__editor.setText(text);
-    }, replacementFixture);
-    await waitForFrames(page);
-    const replacementPosition = await page.evaluate(() => (window as any).__editor.getTopVisiblePosition());
-    if (replacementPosition.line < 65 || replacementPosition.line > 85) {
-      throw new Error(`Whole-document external update lost the nearby viewport: ${JSON.stringify(replacementPosition)}`);
-    }
-
-    await page.evaluate(() => {
-      const editor = (window as any).__editor;
-      editor.revealSelection(editor.getText().length, editor.getText().length, {
-        focusEditor: false,
-        align: 'none'
-      });
-    });
-    await waitForFrames(page);
-    const afterPreservedReveal = await page.evaluate(() => (window as any).__editor.getTopVisiblePosition());
-    if (Math.abs(afterPreservedReveal.line - replacementPosition.line) > 1) {
-      throw new Error(`Background selection reveal moved the viewport: ${JSON.stringify({ before: replacementPosition, after: afterPreservedReveal })}`);
-    }
-
-    if (process.env.MEO_TEST_VIEWPORT_ONLY === '1') {
-      console.log('external update viewport stability checks passed');
-      return;
-    }
+    await assertExternalViewportStability(page);
 
     const lineJumpFixture = Array.from({ length: 400 }, (_, index) => `line ${index + 1}`);
     lineJumpFixture[124] = '| A | B |';
