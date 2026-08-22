@@ -21,6 +21,7 @@ import { createMermaidDiagramPresentationApplication } from './application/merma
 import { createMermaidDiagramPresentationRuntime } from './adapters/mermaidDiagramPresentationRuntime';
 import { createMermaidDiagramPresentationEffectAdapter } from './editor/mermaidDiagramPresentationAdapter';
 import { createMermaidDiagramPresentationFactory } from './editor/mermaidDiagramPresentation';
+import { createLiveInputDerivedWorkScheduler } from './editor/liveInputDerivedWork';
 import { isAcceptedLineJumpInput, parseLineJumpTarget } from './helpers/lineJump';
 import { createEditorNoticeController } from './helpers/notices';
 import { createPreviewController } from './helpers/preview';
@@ -1392,6 +1393,31 @@ const setEditorTextSafely = async (
 };
 
 const viewportPresentationFailed = Object.freeze({});
+let pendingDocumentDerivedText = '';
+const documentDerivedUiScheduler = createLiveInputDerivedWorkScheduler({
+  requestFrame: (callback) => window.requestAnimationFrame(() => callback()),
+  cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
+  apply() {
+    const operations: ReadonlyArray<readonly [string, () => void]> = [
+      ['outline', () => { if (outlineController.isVisible()) outlineController.refresh(); }],
+      ['wikiLinks', () => scheduleWikiLinkStatusRefresh(pendingDocumentDerivedText)],
+      ['localLinks', () => scheduleLocalLinkStatusRefresh(pendingDocumentDerivedText)],
+      ['findSummary', () => findPanelController.updateFindStatusSummary()]
+    ];
+    for (const [name, run] of operations) {
+      try {
+        run();
+      } catch (error) {
+        logWebviewRenderError(`documentDerived.${name}`, error);
+      }
+    }
+  },
+  reportError: (error) => logWebviewRenderError('documentDerived.scheduler', error)
+});
+const scheduleDocumentDerivedUiRefresh = (text: string): void => {
+  pendingDocumentDerivedText = text;
+  documentDerivedUiScheduler.documentChanged();
+};
 
 const presentDocumentText = async (
   text: string,
@@ -1425,12 +1451,7 @@ const presentDocumentText = async (
     if (error === viewportPresentationFailed) return false;
     throw error;
   }
-  if (outlineController.isVisible()) {
-    outlineController.refresh();
-  }
-  scheduleWikiLinkStatusRefresh(text);
-  scheduleLocalLinkStatusRefresh(text);
-  findPanelController.updateFindStatusSummary();
+  scheduleDocumentDerivedUiRefresh(text);
   return true;
 };
 
@@ -1475,13 +1496,7 @@ const shortcutHandlerContext: ShortcutHandlerContext = {
 
 const handleLocalEditorChange = (nextText: string) => {
   documentSessionAdapter.localDraftChanged(nextText);
-
-  if (outlineController.isVisible()) {
-    outlineController.refresh();
-  }
-  scheduleWikiLinkStatusRefresh(nextText);
-  scheduleLocalLinkStatusRefresh(nextText);
-  findPanelController.updateFindStatusSummary();
+  scheduleDocumentDerivedUiRefresh(nextText);
 };
 
 const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal): Promise<void> => {
@@ -1919,6 +1934,7 @@ window.addEventListener('beforeunload', () => {
   clearReadyRetryTimers();
   cancelPendingWikiStatusRefresh();
   cancelPendingLocalLinkStatusRefresh();
+  documentDerivedUiScheduler.dispose();
   documentSessionAdapter.dispose();
   documentSaveFlushAdapter.dispose();
   previewAdapter.dispose();

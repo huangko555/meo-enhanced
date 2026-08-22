@@ -7,6 +7,10 @@ import {
   type DetailsBlockInfo
 } from './markdownSyntax';
 import { getViewportController } from './viewportController';
+import {
+  isLiveInputDerivedWorkRefresh,
+  shouldDeferLiveInputDerivedWork
+} from '../editor/liveInputDerivedWork';
 
 const toggleDetailsBlockEffect = StateEffect.define<number>();
 const emptyDetailsOverrides = Object.freeze(new Map<number, boolean>());
@@ -61,7 +65,12 @@ const detailsBlockStateField = StateField.define<ReadonlyMap<number, boolean>>({
   create: () => emptyDetailsOverrides,
   update(overrides, transaction) {
     const toggleEffects = transaction.effects.filter((effect) => effect.is(toggleDetailsBlockEffect));
-    if (!transaction.docChanged && toggleEffects.length === 0) return overrides;
+    if (shouldDeferLiveInputDerivedWork(transaction)) {
+      return transaction.docChanged ? mapDetailsOverrides(overrides, transaction) : overrides;
+    }
+    if (!transaction.docChanged
+      && !isLiveInputDerivedWorkRefresh(transaction)
+      && toggleEffects.length === 0) return overrides;
 
     const next = mapDetailsOverrides(overrides, transaction);
     if (!transaction.state.field(detailsBlockLiveActiveField, false) && toggleEffects.length === 0) {
@@ -126,6 +135,7 @@ export function toggleDetailsBlock(view: EditorView, anchor: number): boolean {
 }
 
 const detailsBlockAutoExpandSelectionExtension = EditorView.updateListener.of((update) => {
+  if (update.transactions.some(shouldDeferLiveInputDerivedWork)) return;
   if (!update.state.field(detailsBlockLiveActiveField, false)) return;
   if (update.transactions.some((transaction) => (
     transaction.effects.some((effect) => effect.is(toggleDetailsBlockEffect))

@@ -3,6 +3,11 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { collectHexColorRangesFromText } from '../../../src/shared/hexColorSwatches';
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
+import {
+  isLiveInputDerivedWorkRefresh,
+  mapLiveInputDerivedDecorations,
+  shouldDeferLiveInputDerivedWork
+} from '../editor/liveInputDerivedWork';
 
 const markdownTagDeco = Decoration.mark({ class: 'meo-md-tag' });
 const markdownTagRegex = /(^|[^\p{L}\p{N}_/-])#([\p{L}\p{N}_][\p{L}\p{N}_/-]*)/gu;
@@ -88,7 +93,14 @@ export const markdownTagField = StateField.define<DecorationSet>({
     return buildMarkdownTagDecorations(state);
   },
   update(value, transaction) {
-    if (!transaction.docChanged && !syntaxTreeChanged(transaction)) {
+    if (shouldDeferLiveInputDerivedWork(transaction)) {
+      return transaction.docChanged
+        ? mapLiveInputDerivedDecorations(value, transaction)
+        : value;
+    }
+    if (!transaction.docChanged
+      && !isLiveInputDerivedWorkRefresh(transaction)
+      && !syntaxTreeChanged(transaction)) {
       return value;
     }
     return buildMarkdownTagDecorations(transaction.state);

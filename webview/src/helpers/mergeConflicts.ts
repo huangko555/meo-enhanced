@@ -1,5 +1,10 @@
 import { RangeSetBuilder, StateField, EditorState } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import {
+  isLiveInputDerivedWorkRefresh,
+  mapLiveInputDerivedDecorations,
+  shouldDeferLiveInputDerivedWork
+} from '../editor/liveInputDerivedWork';
 
 const lineDecos = {
   currentHeader: Decoration.line({ class: 'meo-merge-line meo-merge-current-header' }),
@@ -250,7 +255,12 @@ const mergeConflictField = StateField.define<MergeConflictState>({
     return buildMergeConflictState(state);
   },
   update(value: MergeConflictState, tr: any): MergeConflictState {
-    if (!tr.docChanged) {
+    if (shouldDeferLiveInputDerivedWork(tr)) {
+      return tr.docChanged
+        ? { ...value, decorations: mapLiveInputDerivedDecorations(value.decorations, tr) }
+        : value;
+    }
+    if (!tr.docChanged && !isLiveInputDerivedWorkRefresh(tr)) {
       return value;
     }
     return buildMergeConflictState(tr.state);

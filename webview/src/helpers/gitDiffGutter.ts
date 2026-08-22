@@ -13,6 +13,10 @@ import { createGitDiffMarkerElement } from './gitDiffMarkerDom';
 import {
   getTableTransactionProvenanceSnapshot
 } from '../adapters/tableTransactionProvenance';
+import {
+  isLiveInputDerivedWorkRefresh,
+  shouldDeferLiveInputDerivedWork
+} from '../editor/liveInputDerivedWork';
 
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
 const MAX_DIFF_COMPUTATION_TIME_MS = 50;
@@ -628,7 +632,10 @@ export const gitDiffLineFlagsField = StateField.define<(MarkerFlags | undefined)
         break;
       }
     }
-    if (!tr.docChanged && !baselineChanged) {
+    if (shouldDeferLiveInputDerivedWork(tr)) {
+      return value;
+    }
+    if (!tr.docChanged && !baselineChanged && !isLiveInputDerivedWorkRefresh(tr)) {
       return value;
     }
     const baseline = tr.state.field(gitBaselineField);
@@ -655,6 +662,28 @@ const gitDiffGutterField = StateField.define<any>({
   }
 });
 
+const gitDiffLiveGutterField = StateField.define<any>({
+  create(state: EditorState): any {
+    return buildLiveGitGutterMarkersFromLineFlags(
+      state,
+      state.field(gitDiffLineFlagsField, false) ?? null
+    );
+  },
+  update(value: any, tr: Transaction): any {
+    const baselineChanged = tr.effects.some((effect) => effect.is(setGitBaselineEffect));
+    if (shouldDeferLiveInputDerivedWork(tr)) {
+      return tr.docChanged ? value.map(tr.changes) : value;
+    }
+    if (!tr.docChanged && !baselineChanged && !isLiveInputDerivedWorkRefresh(tr)) {
+      return value;
+    }
+    return buildLiveGitGutterMarkersFromLineFlags(
+      tr.state,
+      tr.state.field(gitDiffLineFlagsField, false) ?? null
+    );
+  }
+});
+
 const gitDiffGutterExtension = gutter({
   class: 'meo-git-gutter',
   renderEmptyElements: true,
@@ -676,7 +705,7 @@ const gitDiffGutterLiveExtension = gutter({
     return spacerMarker;
   },
   markers(view: EditorView) {
-    return buildLiveGitGutterMarkersFromLineFlags(view.state, view.state.field(gitDiffLineFlagsField, false) ?? null);
+    return view.state.field(gitDiffLiveGutterField);
   },
   widgetMarker(view: EditorView, _widget: any, block: any) {
     return liveCollapsedBlockMarkerAtPos(view.state, view.state.field(gitDiffLineFlagsField, false) ?? null, block.from);
@@ -695,7 +724,7 @@ export function gitDiffGutterRenderExtensions(): any[] {
 }
 
 export function gitDiffGutterLiveRenderExtensions(): any[] {
-  return [gitDiffGutterLiveExtension];
+  return [gitDiffLiveGutterField, gitDiffGutterLiveExtension];
 }
 
 interface DiffSegment {

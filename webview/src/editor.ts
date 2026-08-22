@@ -101,6 +101,11 @@ import {
   mermaidDiagramPresentationFactoryFacet,
   type MermaidDiagramPresentationFactory
 } from './editor/mermaidDiagramPresentation';
+import {
+  isLiveInputDerivedWorkRefresh,
+  mapLiveInputDerivedDecorations,
+  shouldDeferLiveInputDerivedWork
+} from './editor/liveInputDerivedWork';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -227,7 +232,19 @@ const searchMatchField = StateField.define<SearchMatchFieldValue>({
       }
     }
 
-    if (tr.docChanged || changedQuery) {
+    if (shouldDeferLiveInputDerivedWork(tr)) {
+      if (!tr.docChanged) return value;
+      const matches = value.matches.map((match) => ({
+        start: tr.changes.mapPos(match.start, 1),
+        end: tr.changes.mapPos(match.end, -1)
+      })).filter((match) => match.end > match.start);
+      return {
+        matches,
+        decorations: mapLiveInputDerivedDecorations(value.decorations, tr)
+      };
+    }
+
+    if (tr.docChanged || changedQuery || isLiveInputDerivedWorkRefresh(tr)) {
       const searchQuery = changedQuery ?? tr.state.field(searchQueryField);
       const matches = searchQuery.text
         ? findSearchMatchRanges(tr.state.doc.toString(), searchQuery.text, searchQuery)
@@ -2028,9 +2045,9 @@ export function createEditor({
         viewportController?.reconcileAfterEditorUpdate(
           update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
         );
+
         syncModeClasses();
         syncGitGutterVisibility();
-        emitSearchStateChange();
         const searchQueryChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => effect.is(setSearchQueryEffect))
         ));
@@ -2042,10 +2059,6 @@ export function createEditor({
         if (renderedPresentationChanged) {
           recentRenderedReplayPresentation = null;
         }
-        if (update.docChanged || update.selectionSet || searchQueryChanged) {
-          searchOverviewRuler?.refresh({ positionsChanged: update.docChanged || searchQueryChanged });
-        }
-
         if (update.selectionSet) {
           suppressSelectionMenuForNativeHtml = false;
           syncSelectionClass();
@@ -2061,23 +2074,25 @@ export function createEditor({
           }
         }
 
-        if (!update.docChanged || applyingExternal || applyingRenumber) {
-          return;
+        if (update.docChanged && !applyingExternal && !applyingRenumber) {
+          if (imeCompositionActive) {
+            imeCompositionChanged = true;
+          } else {
+            imeCompositionChanged = false;
+            if (isHistoryReplayUpdate(update)) {
+              onApplyChanges(update.state.doc.toString());
+            } else {
+              publishComposedDocumentChange();
+            }
+          }
         }
 
-        if (imeCompositionActive) {
-          imeCompositionChanged = true;
-          return;
+        // Search indicators consume accepted Document/Selection and must not
+        // stand between the public change callback and its owner.
+        emitSearchStateChange();
+        if (update.docChanged || update.selectionSet || searchQueryChanged) {
+          searchOverviewRuler?.refresh({ positionsChanged: update.docChanged || searchQueryChanged });
         }
-
-        imeCompositionChanged = false;
-
-        if (isHistoryReplayUpdate(update)) {
-          onApplyChanges(update.state.doc.toString());
-          return;
-        }
-
-        publishComposedDocumentChange();
       })
     ]
   });

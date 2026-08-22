@@ -91,6 +91,12 @@ import {
   latexMathEditingStateField
 } from './helpers/latexMathEditing';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
+import {
+  isLiveInputDerivedWorkRefresh,
+  liveInputDerivedWorkExtensions,
+  mapLiveInputDerivedDecorations,
+  shouldDeferLiveInputDerivedWork
+} from './editor/liveInputDerivedWork';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
@@ -2754,6 +2760,11 @@ const liveDecorationField = StateField.define<DecorationSet>({
     ) {
       return decorations;
     }
+    if (shouldDeferLiveInputDerivedWork(transaction)) {
+      return transaction.docChanged
+        ? mapLiveInputDerivedDecorations(decorations, transaction)
+        : decorations;
+    }
     // Recompute on every transaction so live mode stays in sync with parser updates
     // that may arrive without direct doc/selection changes.
     const next = safeBuildDecorations(transaction.state, decorations, 'update', {
@@ -2928,7 +2939,12 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
     return buildLiveLineNumberMarkers(state);
   },
   update(markers: RangeSet<GutterMarker>, transaction: Transaction): RangeSet<GutterMarker> {
-    if (!transaction.docChanged && transaction.startState.selection.eq(transaction.state.selection)) {
+    if (shouldDeferLiveInputDerivedWork(transaction)) {
+      return transaction.docChanged ? markers.map(transaction.changes) : markers;
+    }
+    if (!transaction.docChanged
+      && !isLiveInputDerivedWorkRefresh(transaction)
+      && transaction.startState.selection.eq(transaction.state.selection)) {
       return markers;
     }
     return buildLiveLineNumberMarkers(transaction.state);
@@ -2938,6 +2954,7 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
 
 export function liveModeExtensions(): Extension[] {
   return [
+    ...liveInputDerivedWorkExtensions(),
     markdown({
       base: markdownLanguage,
       addKeymap: false,

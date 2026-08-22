@@ -3,6 +3,10 @@ import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, typ
 import { syntaxTree } from '@codemirror/language';
 import { getFencedCodeInfo } from './codeBlocks';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns } from './blockIndent';
+import {
+  mapLiveInputDerivedDecorations,
+  shouldDeferLiveInputDerivedWork
+} from '../editor/liveInputDerivedWork';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
@@ -386,6 +390,24 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
     return buildLongCodeState(state);
   },
   update(value, transaction) {
+    if (shouldDeferLiveInputDerivedWork(transaction)) {
+      if (!transaction.docChanged) return value;
+      const map = (position: number, assoc: -1 | 1 = 1) => transaction.changes.mapPos(position, assoc);
+      return {
+        enabled: value.enabled,
+        blocks: value.blocks.map((block) => ({
+          ...block,
+          anchor: map(block.anchor),
+          start: map(block.start),
+          end: map(block.end, -1),
+          endLineFrom: map(block.endLineFrom),
+          contentFrom: map(block.contentFrom),
+          contentTo: map(block.contentTo, -1),
+          collapsedFrom: map(block.collapsedFrom)
+        })),
+        decorations: mapLiveInputDerivedDecorations(value.decorations, transaction)
+      };
+    }
     return buildLongCodeState(transaction.state, value, transaction);
   },
   provide(field) {
@@ -440,6 +462,7 @@ class LongCodeFloatingButtonPlugin {
   }
 
   update(update: ViewUpdate): void {
+    if (update.transactions.some(shouldDeferLiveInputDerivedWork)) return;
     if (update.docChanged || update.viewportChanged || update.selectionSet || update.geometryChanged || update.transactions.some((transaction) => transaction.effects.length > 0)) {
       this.refresh();
     }

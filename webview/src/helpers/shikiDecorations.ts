@@ -12,6 +12,11 @@ import {
   getShikiThemeMeta,
   type ShikiToken
 } from './shikiHighlighter';
+import {
+  isLiveInputDerivedWorkRefresh,
+  mapLiveInputDerivedDecorations,
+  shouldDeferLiveInputDerivedWork
+} from '../editor/liveInputDerivedWork';
 
 const shikiRefreshEffect = StateEffect.define<null>();
 
@@ -172,8 +177,19 @@ const shikiPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate): void {
+      if (update.transactions.some(shouldDeferLiveInputDerivedWork)) {
+        if (update.docChanged) {
+          for (const transaction of update.transactions) {
+            if (transaction.docChanged) {
+              this.decorations = mapLiveInputDerivedDecorations(this.decorations, transaction);
+            }
+          }
+        }
+        return;
+      }
       const refreshed = update.transactions.some((transaction) =>
         transaction.effects.some((effect) => effect.is(shikiRefreshEffect))
+          || isLiveInputDerivedWorkRefresh(transaction)
       );
       if (update.docChanged || refreshed) {
         this.decorations = buildDecorations(update.view);
