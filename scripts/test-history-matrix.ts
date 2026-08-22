@@ -352,21 +352,39 @@ async function assertHistoryTarget(
 
   const markerExpected = direction === 'redo';
   await page.waitForFunction(({ kind, marker, mode, expected }) => {
-    const selector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
+    const kindLabel = kind === 'mermaid' ? 'Mermaid' : 'Formula';
     const active = document.activeElement;
-    const block = active instanceof HTMLElement ? active.closest<HTMLElement>(selector) : null;
-    const content = block?.querySelector<HTMLElement>('.cm-content');
-    const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
-    if (!block || !content || !scroller) return false;
+    const block = active instanceof HTMLElement
+      ? active.closest<HTMLElement>(`[role="region"][aria-label^="${kindLabel} editor at line "]`)
+      : null;
+    if (!block) return false;
+    const lineNumber = block.getAttribute('aria-label')?.match(/ at line (\d+)$/)?.[1] ?? null;
+    const labels = kind === 'mermaid'
+      ? {
+          preview: 'Edit Mermaid in split view',
+          split: 'Show Mermaid code only',
+          source: 'Show Mermaid preview'
+        }
+      : {
+          preview: 'Edit formula in split view',
+          split: 'Show formula source only',
+          source: 'Show formula preview'
+        };
+    const buttonLabel = lineNumber
+      ? Array.from(document.querySelector<HTMLElement>(
+          `[role="group"][aria-label="${kindLabel} block controls at line ${lineNumber}"]`
+        )?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+          .map((button) => button.getAttribute('aria-label'))
+          .find((label) => label === labels.preview || label === labels.split || label === labels.source) ?? null
+      : null;
     const rect = block.getBoundingClientRect();
-    const viewport = scroller.getBoundingClientRect();
-    const actualMode = block.classList.contains('is-source')
+    const actualMode = buttonLabel === labels.source
       ? 'source'
-      : block.classList.contains('is-split') ? 'split' : null;
+      : buttonLabel === labels.split ? 'split' : buttonLabel === labels.preview ? 'preview' : null;
     return actualMode === mode
-      && content.textContent?.includes(marker) === expected
-      && rect.bottom > viewport.top
-      && rect.top < viewport.bottom;
+      && (window as any).__historyMatrixEditor.getText().includes(marker) === expected
+      && rect.bottom > 0
+      && rect.top < window.innerHeight;
   }, {}, {
     kind: target.kind,
     marker: target.marker,
@@ -374,11 +392,13 @@ async function assertHistoryTarget(
     expected: markerExpected
   }).catch(async (error: unknown) => {
     const state = await page.evaluate(({ kind, marker }) => {
-      const selector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
-      return Array.from(document.querySelectorAll<HTMLElement>(selector)).map((block) => ({
+      const kindLabel = kind === 'mermaid' ? 'Mermaid' : 'Formula';
+      return Array.from(document.querySelectorAll<HTMLElement>(
+        `[role="region"][aria-label^="${kindLabel} editor at line "]`
+      )).map((block) => ({
         active: block.contains(document.activeElement),
-        mode: block.classList.contains('is-source') ? 'source' : block.classList.contains('is-split') ? 'split' : 'preview',
-        containsMarker: block.querySelector<HTMLElement>('.cm-content')?.textContent?.includes(marker) ?? false,
+        label: block.getAttribute('aria-label'),
+        documentContainsMarker: (window as any).__historyMatrixEditor.getText().includes(marker),
         rect: block.getBoundingClientRect().toJSON()
       }));
     }, { kind: target.kind, marker: target.marker });
