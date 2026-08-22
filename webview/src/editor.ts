@@ -342,7 +342,6 @@ export function createEditor({
   let onHistoryBlur: ((event: FocusEvent) => void) | null = null;
   let blockActionToolbarReconcileFrame: number | null = null;
   let pendingLiveSearchDecorationRefreshFrame: number | null = null;
-  let pendingLiveSearchDecorationRefreshGeneration = 0;
   let gitDiffContentHover: ReturnType<typeof createGitDiffContentHoverController> | null = null;
   let gitDiffOverviewRuler: ReturnType<typeof createGitDiffOverviewRulerController> | null = null;
   let searchOverviewRuler: ReturnType<typeof createSearchOverviewRulerController> | null = null;
@@ -1341,8 +1340,6 @@ export function createEditor({
   };
 
   const scheduleLiveSearchDecorationRefresh = (targetPosition: number | null = null) => {
-    pendingLiveSearchDecorationRefreshGeneration += 1;
-    const refreshGeneration = pendingLiveSearchDecorationRefreshGeneration;
     if (pendingLiveSearchDecorationRefreshFrame !== null) {
       window.cancelAnimationFrame(pendingLiveSearchDecorationRefreshFrame);
     }
@@ -1351,18 +1348,15 @@ export function createEditor({
       return;
     }
 
-    requestLiveInputDerivedWork(view, liveSearchDecorationDerivedConsumer, () => {
-      pendingLiveSearchDecorationRefreshFrame = window.requestAnimationFrame(() => {
-        pendingLiveSearchDecorationRefreshFrame = null;
-        requestLiveInputDerivedWork(view, liveSearchDecorationDerivedConsumer, () => {
-          if (!view || currentMode !== 'live' || refreshGeneration !== pendingLiveSearchDecorationRefreshGeneration) {
-            return;
-          }
-          if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
-            forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
-          }
-          view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) });
-        });
+    pendingLiveSearchDecorationRefreshFrame = window.requestAnimationFrame(() => {
+      pendingLiveSearchDecorationRefreshFrame = null;
+      if (editorDestroyed || currentMode !== 'live') return;
+      requestLiveInputDerivedWork(view, liveSearchDecorationDerivedConsumer, () => {
+        if (editorDestroyed || currentMode !== 'live') return;
+        if (typeof targetPosition === 'number' && Number.isFinite(targetPosition)) {
+          forceParsing(view, Math.min(view.state.doc.length, Math.max(0, targetPosition) + 2_000), 100);
+        }
+        view.dispatch({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) });
       });
     });
   };

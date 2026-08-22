@@ -1,5 +1,5 @@
 import { createEditor } from './test-editor-factory';
-import { EditorState, StateField, Transaction } from '@codemirror/state';
+import { Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
@@ -13,6 +13,7 @@ import {
   liveInputDerivedWorkExtensions,
   requestLiveInputDerivedWork
 } from '../webview/src/editor/liveInputDerivedWork';
+import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode';
 
 (window as typeof window & {
   __createInputCursorEditor?: typeof createEditor;
@@ -27,6 +28,25 @@ import {
     destroy(): void;
   };
 }).__createInputCursorEditor = createEditor;
+
+(window as any).__observeLiveSearchRefresh = (editor: ReturnType<typeof createEditor>) => {
+  const compartment = new Compartment();
+  let refreshes = 0;
+  editor.view.dispatch({
+    effects: StateEffect.appendConfig.of(compartment.of(EditorView.updateListener.of((update) => {
+      for (const transaction of update.transactions) {
+        if (transaction.effects.some((effect) => effect.is(refreshLiveDecorationsAfterSearchEffect))) {
+          refreshes += 1;
+        }
+      }
+    })))
+  });
+  return {
+    count: () => refreshes,
+    reset: () => { refreshes = 0; },
+    destroy: () => editor.view.dispatch({ effects: compartment.reconfigure([]) })
+  };
+};
 
 (window as any).__createLiveInputConsumerProbe = (parent: HTMLElement) => {
   let throwNextRefresh = false;

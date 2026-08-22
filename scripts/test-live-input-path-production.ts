@@ -290,6 +290,132 @@ async function main(): Promise<void> {
       throw new Error(`Reentrant consumer generation was not drained exactly once: ${JSON.stringify(reentrantConsumerFacts)}`);
     }
 
+    const observerQuiescenceFacts = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      const target = document.createElement('div');
+      host.append(target);
+      document.body.append(host);
+      const probe = (window as any).__createLiveInputConsumerProbe(host);
+      const keyA = {};
+      const keyB = {};
+      const keyC = {};
+      const facts = { a: 0, b: 0, c: 0, echoB: 0, echoC: 0, immediateEscapes: 0 };
+      let inObserver = false;
+      const observer = new MutationObserver((records) => {
+        inObserver = true;
+        try {
+          for (const record of records) {
+            if (record.attributeName === 'data-a') {
+              probe.request(keyB, () => {
+                facts.b += 1;
+                if (inObserver) facts.immediateEscapes += 1;
+                target.dataset.b = String(facts.b);
+              });
+            }
+            if (record.attributeName === 'data-b') {
+              probe.request(keyB, () => {
+                facts.echoB += 1;
+                if (inObserver) facts.immediateEscapes += 1;
+              });
+              probe.request(keyC, () => {
+                facts.c += 1;
+                if (inObserver) facts.immediateEscapes += 1;
+                target.dataset.c = String(facts.c);
+              });
+            }
+            if (record.attributeName === 'data-c') {
+              probe.request(keyC, () => {
+                facts.echoC += 1;
+                if (inObserver) facts.immediateEscapes += 1;
+              });
+            }
+          }
+        } finally {
+          inObserver = false;
+        }
+      });
+      observer.observe(target, { attributes: true });
+      probe.input('q');
+      probe.request(keyA, () => {
+        facts.a += 1;
+        target.dataset.a = String(facts.a);
+      });
+      const frames = async (count: number) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      await frames(6);
+      const settled = { ...facts };
+      probe.input('r');
+      await frames(4);
+      const afterNextGeneration = { ...facts };
+      observer.disconnect();
+      probe.destroy();
+      host.remove();
+      return { settled, afterNextGeneration };
+    });
+    const expectedObserverQuiescence = {
+      a: 1,
+      b: 1,
+      c: 1,
+      echoB: 0,
+      echoC: 0,
+      immediateEscapes: 0
+    };
+    if (
+      JSON.stringify(observerQuiescenceFacts.settled) !== JSON.stringify(expectedObserverQuiescence) ||
+      JSON.stringify(observerQuiescenceFacts.afterNextGeneration) !== JSON.stringify(expectedObserverQuiescence)
+    ) {
+      throw new Error(`Observer chain escaped its live-input generation: ${JSON.stringify(observerQuiescenceFacts)}`);
+    }
+
+    const liveSearchPendingFacts = await page.evaluate(async () => {
+      const editor = (window as any).__liveInputEditor;
+      const probe = (window as any).__observeLiveSearchRefresh(editor);
+      editor.setSearchQuery('cell');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      probe.reset();
+      (window as any).__dispatchProductionInput(editor, editor.getText().length, 's');
+      editor.setSearchQuery('value');
+      editor.setSearchQuery('marked');
+      const firstFrame = await new Promise<number>((resolve) => {
+        requestAnimationFrame(() => setTimeout(() => resolve(probe.count()), 0));
+      });
+      for (let index = 0; index < 5; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const settled = probe.count();
+      probe.destroy();
+      return { firstFrame, settled };
+    });
+    if (liveSearchPendingFacts.firstFrame !== 0 || liveSearchPendingFacts.settled !== 1) {
+      throw new Error(`Live search did not submit one current leaf after the barrier: ${JSON.stringify(liveSearchPendingFacts)}`);
+    }
+
+    const destroyedLiveSearchFacts = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const editor = (window as any).__createInputCursorEditor({
+        parent: host,
+        text: 'destroyed search target',
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      const probe = (window as any).__observeLiveSearchRefresh(editor);
+      editor.setSearchQuery('target');
+      editor.destroy();
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const refreshes = probe.count();
+      host.remove();
+      return refreshes;
+    });
+    if (destroyedLiveSearchFacts !== 0) {
+      throw new Error(`Destroyed Live search applied a stale refresh effect: ${destroyedLiveSearchFacts}`);
+    }
+
     const initialTableCount = await page.evaluate(() => (
       document.querySelectorAll('#primary .meo-md-html-table-shell').length
     ));

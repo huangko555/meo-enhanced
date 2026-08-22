@@ -219,12 +219,10 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     state: ConsumerRecordState;
   };
   type ConsumerGeneration = {
-    id: number;
     state: 'accepting' | 'flushing' | 'settled' | 'cancelled';
     records: Map<object, ConsumerRecord>;
   };
 
-  let nextConsumerGeneration = 0;
   let consumerGeneration: ConsumerGeneration | null = null;
   let settleGenerationToken = 0;
   const immediateConsumers = new Set<object>();
@@ -250,7 +248,6 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const startConsumerGeneration = (): ConsumerGeneration => {
     cancelConsumerGeneration();
     consumerGeneration = {
-      id: nextConsumerGeneration += 1,
       state: 'accepting',
       records: new Map()
     };
@@ -277,7 +274,8 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     // A stable key already running or settled represents this generation's
     // invalidation. Recursive requests cannot create a retained ghost record.
   };
-  const drainConsumerGeneration = (generation: ConsumerGeneration): void => {
+  const drainConsumerGeneration = (generation: ConsumerGeneration): number => {
+    let ran = 0;
     generation.state = 'flushing';
     // Consumer keys are stable, caller-owned identities. Draining queued
     // records dynamically includes cross-key requests while each key can run
@@ -286,33 +284,40 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       const next = [...generation.records.values()].find((record) => record.state === 'queued');
       if (!next) break;
       next.state = 'running';
+      ran += 1;
       run(next.operation);
       if (generation === consumerGeneration && next.state === 'running') {
         next.state = 'settled';
       }
     }
+    return ran;
   };
   const isCurrentConsumerGeneration = (generation: ConsumerGeneration): boolean => (
     generation === consumerGeneration && generation.state !== 'cancelled'
   );
-  const settleConsumers = (generation: ConsumerGeneration | null): void => {
+  const scheduleConsumerCheckpoint = (
+    generation: ConsumerGeneration,
+    quietCandidate: boolean
+  ): void => {
     const settleToken = settleGenerationToken += 1;
-    // Mutation/Resize observers caused by a leaf are delivered at the same
-    // microtask checkpoint. Keep committed-refresh open through that delivery
-    // so a settled key absorbs its own DOM echo and cross-key work is drained.
+    // Each callback runs after observer delivery for the preceding drain.
+    // A zero-work round becomes a quiet candidate and must survive one more
+    // checkpoint before committed-refresh may settle.
     queueMicrotask(() => {
       if (settleToken !== settleGenerationToken
         || disposed || isLiveInputDerivedWorkPending(view.state)
-        || generation !== consumerGeneration || generation?.state === 'cancelled') return;
-      if (generation) {
-        drainConsumerGeneration(generation);
-        if (!isCurrentConsumerGeneration(generation)) return;
-        if ([...generation.records.values()].some((record) => record.state === 'queued')) {
-          settleConsumers(generation);
-          return;
-        }
-        generation.state = 'settled';
+        || !isCurrentConsumerGeneration(generation)) return;
+      const ran = drainConsumerGeneration(generation);
+      if (!isCurrentConsumerGeneration(generation)) return;
+      if (ran > 0) {
+        scheduleConsumerCheckpoint(generation, false);
+        return;
       }
+      if (!quietCandidate) {
+        scheduleConsumerCheckpoint(generation, true);
+        return;
+      }
+      generation.state = 'settled';
       if (view.state.field(liveInputDerivedWorkPhaseField, false)?.phase !== 'committed-refresh') return;
       try {
         view.dispatch({
@@ -326,9 +331,9 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   };
   const flushConsumers = (): void => {
     if (disposed || isLiveInputDerivedWorkPending(view.state)) return;
-    const generation = consumerGeneration;
-    if (generation && generation.state !== 'cancelled') drainConsumerGeneration(generation);
-    settleConsumers(generation);
+    const generation = currentConsumerGeneration();
+    const ran = drainConsumerGeneration(generation);
+    scheduleConsumerCheckpoint(generation, ran === 0);
   };
   const scheduler = createLiveInputDerivedWorkScheduler({
     requestFrame: (callback) => window.requestAnimationFrame(() => callback()),
