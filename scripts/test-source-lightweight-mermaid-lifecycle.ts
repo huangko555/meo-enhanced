@@ -184,6 +184,7 @@ async function main(): Promise<void> {
       }).__resolveMermaid?.(source, 'stale-live');
       if (!resolved) throw new Error('Pending Live Mermaid render was not found');
     }, initialSource);
+    await page.waitForSelector('#app2 .cm-editor svg[data-marker="stale-live"]');
     await page.waitForFunction((source) => (
       (window as typeof window & { __mermaidCalls?: string[] }).__mermaidCalls?.includes(source)
     ), {}, previewSource);
