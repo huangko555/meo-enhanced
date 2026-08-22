@@ -17,6 +17,37 @@ const waitForFrames = async (page: Page, count = 2): Promise<void> => {
   }, count);
 };
 
+const scrollLiveRenderedBlockToOffset = async (
+  page: Page,
+  startLine: number,
+  offset: number
+): Promise<number> => {
+  const scroll = await page.evaluate(({ line, targetOffset }) => {
+    const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+    const block = document.querySelector<HTMLElement>(
+      `.editor-host [data-meo-rendered-block-start-line="${line}"]`
+    );
+    if (!block) throw new Error(`Missing production Live rendered block at line ${line}`);
+    const scrollerRect = scroller.getBoundingClientRect();
+    return {
+      deltaY: block.getBoundingClientRect().top - scrollerRect.top + targetOffset,
+      x: scrollerRect.left + scrollerRect.width / 2,
+      y: scrollerRect.top + scrollerRect.height / 2
+    };
+  }, { line: startLine, targetOffset: offset });
+  await page.mouse.move(scroll.x, scroll.y);
+  await page.mouse.wheel({ deltaY: scroll.deltaY });
+  await waitForFrames(page, 3);
+  return page.evaluate((line) => {
+    const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
+    const block = document.querySelector<HTMLElement>(
+      `.editor-host [data-meo-rendered-block-start-line="${line}"]`
+    );
+    if (!block) throw new Error(`Missing production Live rendered block at line ${line}`);
+    return scroller.getBoundingClientRect().top - block.getBoundingClientRect().top;
+  }, startLine);
+};
+
 const fixtureLines = Array.from({ length: 180 }, (_, index) => `semantic line ${index + 1}`);
 fixtureLines[19] = '| column A | column B |';
 fixtureLines[20] = '| --- | --- |';
@@ -151,6 +182,54 @@ async function main(): Promise<void> {
       }}));
     }, fixture);
     await page.waitForSelector('.editor-host > .cm-editor');
+    if (process.argv.includes('--rendered-block-preview-only')) {
+      await page.click('[data-mode="live"]');
+      await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+      await page.evaluate((anchor) => {
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'revealSelection', anchor, head: anchor, focus: false
+        }}));
+      }, renderedBlockStart);
+      await waitForFrames(page, 6);
+      const liveOffset = await scrollLiveRenderedBlockToOffset(page, 20, 90);
+      assert.ok(Math.abs(liveOffset - 90) <= 2, `Live block offset was ${liveOffset}`);
+
+      await page.click('[data-mode="preview"]');
+      const requestId = await page.waitForFunction(() => (
+        (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> })
+          .__hostMessages?.findLast((message) => message.type === 'requestPreviewRender')?.requestId ?? ''
+      )).then((handle) => handle.jsonValue() as Promise<string>);
+      await page.evaluate(({ id, html }) => {
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'previewRenderResult', requestId: id,
+          result: { ok: true, value: {
+            html,
+            hasMermaid: false,
+            styles: {
+              light: 'html,body{margin:0}.meo-export-doc{padding:0}',
+              dark: 'html,body{margin:0}.meo-export-doc{padding:0}'
+            }
+          } }
+        }}));
+      }, { id: requestId, html: previewHtml });
+      await page.waitForFunction(() => (
+        document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview' &&
+        document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+          ?.querySelector('[data-source-line="20"]')
+      ));
+      await waitForFrames(page, 3);
+      const previewOffset = await page.$eval<HTMLIFrameElement, number>('.preview-frame', (frame) => {
+        const block = frame.contentDocument?.querySelector<HTMLElement>('[data-source-line="20"]');
+        if (!block) throw new Error('Missing Preview rendered block');
+        return -block.getBoundingClientRect().top;
+      });
+      assert.ok(
+        Math.abs(previewOffset - liveOffset) <= 2,
+        `Live to Preview lost rendered-block offset: ${liveOffset} -> ${previewOffset}`
+      );
+      console.log(`Live rendered block to Preview offset passed: ${liveOffset} -> ${previewOffset}`);
+      return;
+    }
     await page.evaluate(({ anchor, head }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'revealSelection', anchor, head, focus: true
@@ -415,24 +494,14 @@ async function main(): Promise<void> {
     }, renderedBlockStart);
     await waitForFrames(page, 6);
     const liveRenderedAnchor = await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
       const block = document.querySelector<HTMLElement>(
         '.editor-host [data-meo-rendered-block-start-line="20"]'
       )!;
       if (!block) throw new Error('Missing production Live rendered block');
-      const scrollerTop = scroller.getBoundingClientRect().top;
-      scroller.scrollTop += block.getBoundingClientRect().top - scrollerTop + 90;
       return Number(block.dataset.meoRenderedBlockStartLine);
     });
     assert.equal(liveRenderedAnchor, 20);
-    await waitForFrames(page, 3);
-    const liveOffset = await page.evaluate(() => {
-      const scroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
-      const block = document.querySelector<HTMLElement>(
-        '.editor-host [data-meo-rendered-block-start-line="20"]'
-      )!;
-      return scroller.getBoundingClientRect().top - block.getBoundingClientRect().top;
-    });
+    const liveOffset = await scrollLiveRenderedBlockToOffset(page, 20, 90);
     assert.ok(Math.abs(liveOffset - 90) <= 2, `Live block offset was ${liveOffset}`);
 
     await page.click('[data-mode="preview"]');
