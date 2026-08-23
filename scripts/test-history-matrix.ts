@@ -566,13 +566,8 @@ async function editRenderedBlock(
         }
       });
     } catch (error) {
-      let cleanupError: unknown = null;
-      try {
-        await disposePreDownReplacementListeners();
-      } catch (cleanupFailure) {
-        cleanupError = cleanupFailure;
-      }
-      if (injectPreDownReplacement && error instanceof HistoryModePointerTransactionError) {
+      const primaryError = error instanceof AggregateError ? error.errors[0] : error;
+      if (injectPreDownReplacement && primaryError instanceof HistoryModePointerTransactionError) {
         const evidence = await page.evaluate(() => (
           document.querySelector<HTMLOutputElement>(
             'output[aria-label="History pointer pre-down replacement evidence"]'
@@ -580,17 +575,11 @@ async function editRenderedBlock(
         ));
         const primary = new Error(`Pre-down replacement evidence: ${JSON.stringify({
           evidence: evidence ? JSON.parse(evidence) : null,
-          physicalPointer: error.state.physicalPointer,
-          stages: error.state.stages
+          physicalPointer: primaryError.state.physicalPointer,
+          stages: primaryError.state.stages
         })}`, { cause: error });
-        if (cleanupError) {
-          throw new AggregateError([primary, cleanupError], 'Pre-down replacement failed with listener cleanup failure', {
-            cause: primary
-          });
-        }
         throw primary;
       }
-      if (cleanupError) throw new AggregateError([error, cleanupError], 'History pointer transaction failed with listener cleanup failure', { cause: error });
       throw error;
     }
   };

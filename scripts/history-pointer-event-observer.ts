@@ -116,25 +116,29 @@ export async function runHistoryPointerEventObserverLifecycle(operations: {
   execute(): Promise<void>;
   cleanup(): Promise<void>;
 }) {
-  let primary: unknown = null;
+  let primary: unknown;
+  let hasPrimary = false;
   try {
     await operations.setup();
     await operations.execute();
   } catch (error) {
     primary = error;
+    hasPrimary = true;
   }
 
-  let cleanup: unknown = null;
+  let cleanup: unknown;
+  let hasCleanup = false;
   try {
     await operations.cleanup();
   } catch (error) {
     cleanup = error;
+    hasCleanup = true;
   }
 
-  if (primary && cleanup) {
+  if (hasPrimary && hasCleanup) {
     const cleanupErrors = cleanup instanceof AggregateError ? [...cleanup.errors] : [cleanup];
     throw new AggregateError([primary, ...cleanupErrors], "History pointer observer lifecycle failed", { cause: primary });
   }
-  if (primary) throw primary;
-  if (cleanup) throw cleanup;
+  if (hasPrimary) throw primary;
+  if (hasCleanup) throw cleanup;
 }

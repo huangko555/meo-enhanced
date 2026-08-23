@@ -83,6 +83,15 @@ async function expectFailure(action: () => Promise<void>) {
   throw new Error("expected lifecycle failure");
 }
 
+async function captureOutcome(action: () => Promise<void>) {
+  try {
+    await action();
+    return { threw: false as const };
+  } catch (error) {
+    return { threw: true as const, error };
+  }
+}
+
 const tests: Array<[string, () => Promise<void>]> = [
   ["zero-event success", async () => {
     const fixture = createFixture();
@@ -149,6 +158,29 @@ const tests: Array<[string, () => Promise<void>]> = [
     assert(String(error.errors[1]).includes("old:pointerdown") && String(error.errors[2]).includes("old:pointerup"), "cleanup order changed");
     assert(error.cause === error.errors[0], "aggregate cause was not primary");
     assertSentinelDoesNotWrite(fixture);
+  }],
+  ["falsy setup execute and cleanup failures survive", async () => {
+    const values: Array<[string, unknown]> = [["undefined", undefined], ["null", null], ["zero", 0], ["false", false], ["empty", ""]];
+    for (const [name, value] of values) {
+      for (const phase of ["setup", "execute", "cleanup"] as const) {
+        const outcome = await captureOutcome(() => runHistoryPointerEventObserverLifecycle({
+          setup: async () => { if (phase === "setup") throw value; },
+          execute: async () => { if (phase === "execute") throw value; },
+          cleanup: async () => { if (phase === "cleanup") throw value; }
+        }));
+        assert(outcome.threw && Object.is(outcome.error, value), `${phase} ${name} failure was swallowed`);
+      }
+    }
+  }],
+  ["undefined primary remains first with falsy cleanup", async () => {
+    const outcome = await captureOutcome(() => runHistoryPointerEventObserverLifecycle({
+      setup: async () => { throw undefined; },
+      execute: async () => {},
+      cleanup: async () => { throw false; }
+    }));
+    assert(outcome.threw && outcome.error instanceof AggregateError, "falsy primary plus cleanup was not aggregated");
+    assert(outcome.error.errors[0] === undefined && outcome.error.errors[1] === false, "falsy aggregate order changed");
+    assert(outcome.error.cause === undefined, "falsy aggregate cause changed");
   }],
   ["duplicate cleanup", async () => {
     const fixture = createFixture();
