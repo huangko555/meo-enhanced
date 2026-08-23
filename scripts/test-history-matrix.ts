@@ -192,7 +192,8 @@ async function editRenderedBlock(
   finalMode: BlockMode,
   occurrence: NeedleOccurrence = 'first',
   stopAfterModeSettlement = false,
-  stopBeforeFinalPreviewPointer = false
+  stopBeforeFinalPreviewPointer = false,
+  stopAfterFinalPreviewClick = false
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
@@ -200,6 +201,7 @@ async function editRenderedBlock(
   const editorRegionLabel = () => kind === 'mermaid'
     ? `Mermaid editor at line ${targetLineNumber}`
     : `Formula editor at line ${targetLineNumber}`;
+  let modeClickSequence = 0;
   const settleTargetModeControl = async () => {
     targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
     const scrollSettlementKey = '__historyMatrixRenderedBlockScroll';
@@ -233,6 +235,7 @@ async function editRenderedBlock(
     }, {}, { blockKind: kind, lineNumber: targetLineNumber });
   };
   const clickTargetModeButton = async () => {
+    modeClickSequence += 1;
     await settleTargetModeControl();
     const transition = await page.evaluate(({ blockKind, needle, lineNumber }) => {
       const labels = blockKind === 'mermaid'
@@ -263,11 +266,48 @@ async function editRenderedBlock(
       const rect = button.getBoundingClientRect();
       return {
         controlsLabel: labels.controls,
+        currentLabel,
         expectedLabel,
         hitPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
       };
     }, { blockKind: kind, needle: lineNeedle, lineNumber: targetLineNumber });
-    await page.mouse.click(transition.hitPoint.x, transition.hitPoint.y);
+    const currentModeButtonHitPoint = () => page.evaluate(({ controlsLabel, currentLabel }) => {
+      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+      const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+        .find((candidate) => candidate.getAttribute('aria-label') === currentLabel);
+      if (!button?.isConnected) throw new Error(`Missing current mode button before pointer delivery: ${controlsLabel}`);
+      const rect = button.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }, transition);
+    await page.mouse.move(transition.hitPoint.x, transition.hitPoint.y);
+    const exposeFinalPreviewMovement = stopAfterFinalPreviewClick && modeClickSequence === 3;
+    if (exposeFinalPreviewMovement) {
+      await page.evaluate((lineNumber) => {
+        (window as any).__historyMatrixEditor.scrollToLine(lineNumber, 'top');
+      }, targetLineNumber);
+      await page.waitForFunction(({ controlsLabel, currentLabel, hitPoint }) => {
+        const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
+        const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+        const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+          .find((candidate) => candidate.getAttribute('aria-label') === currentLabel);
+        const hit = document.elementFromPoint(hitPoint.x, hitPoint.y);
+        const rect = button?.getBoundingClientRect();
+        return Boolean(
+          viewport && button?.isConnected && rect
+          && rect.top >= viewport.top && rect.bottom <= viewport.bottom
+          && hit?.closest('button[aria-label]') !== button
+        );
+      }, {}, transition);
+    }
+    const downPoint = await currentModeButtonHitPoint();
+    await page.mouse.move(downPoint.x, downPoint.y);
+    await page.mouse.down();
+    try {
+      const upPoint = await currentModeButtonHitPoint();
+      await page.mouse.move(upPoint.x, upPoint.y);
+    } finally {
+      await page.mouse.up();
+    }
     await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
       document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
         ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
@@ -342,6 +382,7 @@ async function editRenderedBlock(
       return;
     }
     await clickTargetModeButton();
+    if (stopAfterFinalPreviewClick) return;
   }
   const desiredMode = finalMode === 'preview' ? 'split' : finalMode;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -549,6 +590,9 @@ async function main() {
   const firstDefaultMermaidClickOnly = process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_CLICK_ONLY === '1';
   const firstDefaultMermaidFinalPreviewSettlementOnly = (
     process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_FINAL_PREVIEW_SETTLEMENT_ONLY === '1'
+  );
+  const firstDefaultMermaidFinalPreviewClickOnly = (
+    process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_FINAL_PREVIEW_CLICK_ONLY === '1'
   );
   const realFixtureText = realFixturePath ? fs.readFileSync(realFixturePath, 'utf8') : null;
   if (firstMermaidClickOnly && realFixtureText) {
@@ -835,7 +879,8 @@ async function main() {
       'preview',
       'first',
       firstDefaultMermaidClickOnly,
-      firstDefaultMermaidFinalPreviewSettlementOnly
+      firstDefaultMermaidFinalPreviewSettlementOnly,
+      firstDefaultMermaidFinalPreviewClickOnly
     );
     if (firstDefaultMermaidClickOnly) {
       console.log('suite-prefix first default Mermaid click checks passed');
@@ -843,6 +888,10 @@ async function main() {
     }
     if (firstDefaultMermaidFinalPreviewSettlementOnly) {
       console.log('suite-prefix first default Mermaid final preview settlement checks passed');
+      return;
+    }
+    if (firstDefaultMermaidFinalPreviewClickOnly) {
+      console.log('suite-prefix first default Mermaid final preview click checks passed');
       return;
     }
     await record({ kind: 'mermaid', marker: 'M_PREVIEW_EDIT', mode: 'split' });
