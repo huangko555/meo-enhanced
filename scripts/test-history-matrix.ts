@@ -186,7 +186,8 @@ async function editRenderedBlock(
   lineNeedle: string,
   marker: string,
   finalMode: BlockMode,
-  occurrence: NeedleOccurrence = 'first'
+  occurrence: NeedleOccurrence = 'first',
+  stopAfterModeSettlement = false
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
@@ -196,6 +197,24 @@ async function editRenderedBlock(
     : `Formula editor at line ${targetLineNumber}`;
   const clickTargetModeButton = async () => {
     targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
+    await page.evaluate(async (lineNumber) => {
+      const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+      if (!scroller) throw new Error('Missing editor scroller');
+      const settled = new Promise<void>((resolve) => {
+        scroller.addEventListener('scrollend', () => resolve(), { once: true });
+      });
+      (window as any).__historyMatrixEditor.scrollToLine(lineNumber, 'center');
+      await settled;
+    }, targetLineNumber);
+    await page.waitForFunction(({ blockKind, lineNumber }) => {
+      const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
+      const controlsLabel = blockKind === 'mermaid'
+        ? `Mermaid block controls at line ${lineNumber}`
+        : `Formula block controls at line ${lineNumber}`;
+      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
+        ?.getBoundingClientRect();
+      return Boolean(viewport && group && group.top >= viewport.top && group.bottom <= viewport.bottom);
+    }, {}, { blockKind: kind, lineNumber: targetLineNumber });
     const transition = await page.evaluate(({ blockKind, needle, lineNumber }) => {
       const labels = blockKind === 'mermaid'
         ? {
@@ -222,9 +241,14 @@ async function editRenderedBlock(
       const expectedLabel = currentLabel === labels.preview
         ? labels.split
         : currentLabel === labels.split ? labels.source : labels.preview;
-      button.click();
-      return { controlsLabel: labels.controls, expectedLabel };
+      const rect = button.getBoundingClientRect();
+      return {
+        controlsLabel: labels.controls,
+        expectedLabel,
+        hitPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      };
     }, { blockKind: kind, needle: lineNeedle, lineNumber: targetLineNumber });
+    await page.mouse.click(transition.hitPoint.x, transition.hitPoint.y);
     await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
       document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
         ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
@@ -235,6 +259,7 @@ async function editRenderedBlock(
   if (finalMode === 'source') {
     await clickTargetModeButton();
   }
+  if (stopAfterModeSettlement) return;
   await page.waitForFunction(({ selector, regionLabel }) => {
     const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
     const block = document.querySelector<HTMLElement>(`${selector}[role="region"][aria-label="${regionLabel}"]`);
@@ -488,6 +513,7 @@ async function assertHistoryTarget(
 async function main() {
   const realFixturePath = process.env.MEO_HISTORY_REAL_FIXTURE?.trim() || null;
   const firstMermaidClickOnly = process.env.MEO_HISTORY_FIRST_MERMAID_CLICK_ONLY === '1';
+  const firstDefaultMermaidClickOnly = process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_CLICK_ONLY === '1';
   const realFixtureText = realFixturePath ? fs.readFileSync(realFixturePath, 'utf8') : null;
   if (firstMermaidClickOnly && realFixtureText) {
     throw new Error('The focused first-Mermaid click path requires the synthetic History fixture');
@@ -765,7 +791,19 @@ async function main() {
     await editOuterLine(page, fixture.code, ' // CODE_EDIT');
     await record({ kind: 'outer', lineNeedle: fixture.code });
 
-    await editRenderedBlock(page, 'mermaid', fixture.mermaidPreview, ' M_PREVIEW_EDIT', 'preview');
+    await editRenderedBlock(
+      page,
+      'mermaid',
+      fixture.mermaidPreview,
+      ' M_PREVIEW_EDIT',
+      'preview',
+      'first',
+      firstDefaultMermaidClickOnly
+    );
+    if (firstDefaultMermaidClickOnly) {
+      console.log('suite-prefix first default Mermaid click checks passed');
+      return;
+    }
     await record({ kind: 'mermaid', marker: 'M_PREVIEW_EDIT', mode: 'split' });
     await editRenderedBlock(page, 'mermaid', fixture.mermaidSplit, ' M_SPLIT_EDIT', 'split');
     await record({ kind: 'mermaid', marker: 'M_SPLIT_EDIT', mode: 'split' });
