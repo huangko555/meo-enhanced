@@ -588,14 +588,20 @@ async function main(): Promise<void> {
       scroller.scrollTop += row.getBoundingClientRect().bottom - scrollerRect.bottom + 12;
       (window as any).__tableWrapFrames = [];
       (window as any).__focusedTableInputCollapsed = false;
-      new MutationObserver(() => {
+      new MutationObserver((records) => {
         const currentInput = currentElements().input;
-        if (currentInput.style.height === '0px' || currentInput.clientHeight <= 0) {
+        if (
+          currentInput.style.height === '0px' || currentInput.clientHeight <= 0 ||
+          records.some((record) => (
+            record.target === currentInput && record.oldValue?.includes('height: 0px')
+          ))
+        ) {
           (window as any).__focusedTableInputCollapsed = true;
         }
-      }).observe(shell, {
+      }).observe(scroller, {
         attributes: true,
         attributeFilter: ['style'],
+        attributeOldValue: true,
         childList: true,
         subtree: true
       });
@@ -673,25 +679,42 @@ async function main(): Promise<void> {
     }
     if (tableWrapCounterexample === 'replacement') {
       const observation = await page.evaluate(async () => {
-        const oldInput = document.querySelector<HTMLTextAreaElement>(
-          '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea'
+        const editor = (window as any).__editor;
+        const scroller = editor.view.scrollDOM as HTMLElement;
+        const oldShell = document.querySelector<HTMLElement>('.meo-md-html-table-shell')!;
+        const oldInput = oldShell.querySelector<HTMLTextAreaElement>(
+          'tbody tr:nth-child(2) td:nth-child(2) textarea'
         )!;
-        let oldNodeObservedCollapse = false;
-        new MutationObserver(() => { oldNodeObservedCollapse = true; }).observe(oldInput, {
-          attributes: true,
-          attributeFilter: ['style']
+        const replacementReady = new Promise<HTMLTextAreaElement>((resolve) => {
+          const observer = new MutationObserver(() => {
+            const currentShell = document.querySelector<HTMLElement>('.meo-md-html-table-shell');
+            const currentInput = currentShell?.querySelector<HTMLTextAreaElement>(
+              'tbody tr:nth-child(2) td:nth-child(2) textarea'
+            );
+            if (currentShell === oldShell || !currentInput || currentInput === oldInput) return;
+            observer.disconnect();
+            resolve(currentInput);
+          });
+          observer.observe(scroller, { childList: true, subtree: true });
         });
-        const replacement = oldInput.cloneNode(false) as HTMLTextAreaElement;
-        replacement.value = oldInput.value;
-        replacement.style.height = '0px';
-        oldInput.replaceWith(replacement);
+        editor.setText(editor.getText().replace('| Beta | Short |', '| Beta | Replacement |'));
+        const currentReplacement = await replacementReady;
+        await Promise.resolve();
+        const detectedAfterNonCollapsedReplacement = Boolean((window as any).__focusedTableInputCollapsed);
+        (window as any).__focusedTableInputCollapsed = false;
+        currentReplacement.style.height = '0px';
+        currentReplacement.style.height = 'auto';
         await Promise.resolve();
         return {
-          oldNodeObservedCollapse,
+          inputWasReplaced: currentReplacement !== oldInput,
+          detectedAfterNonCollapsedReplacement,
           currentObserverDetectedCollapse: Boolean((window as any).__focusedTableInputCollapsed)
         };
       });
-      if (observation.oldNodeObservedCollapse || !observation.currentObserverDetectedCollapse) {
+      if (
+        !observation.inputWasReplaced || observation.detectedAfterNonCollapsedReplacement ||
+        !observation.currentObserverDetectedCollapse
+      ) {
         throw new Error(`Replacement textarea collapse counterexample was not distinguished: ${JSON.stringify(observation)}`);
       }
       console.log('replacement textarea collapse counterexample passed');
