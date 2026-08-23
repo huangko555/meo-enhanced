@@ -302,13 +302,14 @@ async function editRenderedBlock(
       }, {}, transition);
     }
     let pointerDownRect: { top: number; bottom: number } | null = null;
+    const safeReleaseLabel = 'History pointer safe release target';
     await runHistoryModePointerTransaction({
       acquire: () => page.evaluateHandle(({ controlsLabel, currentLabel }) => {
         const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
         return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
           .find((candidate) => candidate.getAttribute('aria-label') === currentLabel) ?? null;
       }, transition),
-      validate: async (modeButtonHandle: any, phase: 'pointerdown' | 'pointerup') => {
+      validateSameIdentity: async (modeButtonHandle: any, phase: 'pointerdown' | 'pointerup') => {
         const stableModeButton = modeButtonHandle.asElement();
         if (!stableModeButton) {
           throw new Error(`Missing stable mode button before ${phase}: ${transition.controlsLabel}`);
@@ -368,13 +369,23 @@ async function editRenderedBlock(
         const stableModeButton = modeButtonHandle.asElement();
         if (!stableModeButton) throw new Error(`Missing stable mode button after pointerdown: ${transition.controlsLabel}`);
         if (expectFinalPreviewReplacementFailure && modeClickSequence === 3) {
-          await stableModeButton.evaluate((button: HTMLButtonElement, expectedLabel: string) => {
+          await stableModeButton.evaluate((button: HTMLButtonElement) => {
+            const evidence = document.createElement('output');
+            evidence.setAttribute('aria-label', 'History pointer replacement release evidence');
+            document.body.append(evidence);
             const replacement = button.cloneNode(true) as HTMLButtonElement;
+            document.addEventListener('pointerup', (event) => {
+              const eventTarget = event.target instanceof Element ? event.target : null;
+              const category = eventTarget?.closest('[aria-label="History pointer safe release target"]')
+                ? 'safe'
+                : eventTarget === replacement ? 'replacement' : 'other';
+              evidence.append(`document:${category}\n`);
+            }, { capture: true, once: true });
             replacement.addEventListener('pointerup', () => {
-              replacement.setAttribute('aria-label', expectedLabel);
+              evidence.append('replacement:pointerup\n');
             }, { once: true });
             button.replaceWith(replacement);
-          }, transition.expectedLabel);
+          });
         } else if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) {
           if (!pointerDownRect) throw new Error('Missing pointerdown geometry before stable movement');
           await stableModeButton.evaluate((button: HTMLButtonElement) => {
@@ -407,7 +418,38 @@ async function editRenderedBlock(
           throw new Error(`Mode button label did not settle: ${transition.controlsLabel}`, { cause: error });
         }
       ),
-      releaseMouse: () => page.mouse.up(),
+      async moveToSafeReleaseTarget() {
+        const safePoint = await page.evaluate((ariaLabel) => {
+          const existing = document.querySelector(`[aria-label="${ariaLabel}"]`);
+          existing?.remove();
+          const target = document.createElement('div');
+          target.setAttribute('aria-label', ariaLabel);
+          Object.assign(target.style, {
+            position: 'fixed',
+            inset: '0',
+            zIndex: '2147483647',
+            pointerEvents: 'auto'
+          });
+          document.body.append(target);
+          const rect = target.getBoundingClientRect();
+          const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+          const hit = document.elementFromPoint(point.x, point.y);
+          const interactive = target.closest(
+            'button, a, input, textarea, select, [role="button"], [role="group"], [contenteditable="true"]'
+          );
+          if (hit !== target || interactive) {
+            target.remove();
+            throw new Error('Could not establish a public non-control pointer release target');
+          }
+          return point;
+        }, safeReleaseLabel);
+        await page.mouse.move(safePoint.x, safePoint.y);
+        return { ...safePoint, category: 'safe' as const };
+      },
+      cancelRelease: () => page.mouse.up(),
+      disposeSafeReleaseTarget: () => page.evaluate((ariaLabel) => {
+        document.querySelector(`[aria-label="${ariaLabel}"]`)?.remove();
+      }, safeReleaseLabel),
       async cancelAnimation(modeButtonHandle: any) {
         if (!stopAfterFinalPreviewStableMovement || modeClickSequence !== 3) return;
         const stableModeButton = modeButtonHandle.asElement();
@@ -693,6 +735,54 @@ async function assertHistoryTarget(
     }, { kind: target.kind, marker: target.marker });
     throw new Error(`${direction} step ${step} missed rendered-block target: ${JSON.stringify({ target, state })}`, { cause: error });
   });
+}
+
+async function assertReplacementSafeReleaseAndRecovery(page: any) {
+  const evidence = await page.evaluate(() => {
+    const output = document.querySelector<HTMLOutputElement>(
+      'output[aria-label="History pointer replacement release evidence"]'
+    );
+    const safeTarget = document.querySelector('[aria-label="History pointer safe release target"]');
+    return {
+      events: output?.textContent?.split('\n').filter(Boolean) ?? [],
+      safeTargetConnected: Boolean(safeTarget?.isConnected)
+    };
+  });
+  if (JSON.stringify(evidence.events) !== JSON.stringify(['document:safe'])) {
+    throw new Error(`Replacement release was not isolated to the safe target: ${JSON.stringify(evidence)}`);
+  }
+  if (evidence.safeTargetConnected) throw new Error('Safe pointer release target was not disposed');
+
+  const recovery = await page.evaluate(() => {
+    const button = document.createElement('button');
+    button.setAttribute('aria-label', 'History pointer recovery probe');
+    Object.assign(button.style, {
+      position: 'fixed',
+      left: '50%',
+      top: '50%',
+      transform: 'translate(-50%, -50%)',
+      zIndex: '2147483647'
+    });
+    button.addEventListener('click', () => {
+      button.setAttribute('aria-label', 'History pointer recovery complete');
+    }, { once: true });
+    document.body.append(button);
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  try {
+    await page.mouse.move(recovery.x, recovery.y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.waitForFunction(() => Boolean(document.querySelector(
+      'button[aria-label="History pointer recovery complete"]'
+    )));
+  } finally {
+    await page.evaluate(() => {
+      document.querySelector('button[aria-label^="History pointer recovery"]')?.remove();
+      document.querySelector('output[aria-label="History pointer replacement release evidence"]')?.remove();
+    });
+  }
 }
 
 async function main() {
@@ -1026,6 +1116,7 @@ async function main() {
     }
     if (firstDefaultMermaidFinalPreviewReplacementOnly) {
       if (!rejectedReplacement) throw new Error('Final preview mode button replacement was not rejected');
+      await assertReplacementSafeReleaseAndRecovery(page);
       console.log('suite-prefix first default Mermaid final preview replacement checks passed');
       return;
     }
