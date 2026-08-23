@@ -7,33 +7,58 @@ import {
 
 type Scenario = {
   name: string;
-  centered: boolean;
+  controls: { top: number; bottom: number };
   supportsScrollEnd: boolean;
   outcome: 'event' | 'none' | 'throw';
   expectedStatus: HistoryScrollSettlementResult['status'] | 'throws';
   expectedTriggerCount: number;
+  expectedError?: string;
 };
 
 const scenarios: Scenario[] = [
   {
-    name: 'scrollend', centered: false, supportsScrollEnd: true, outcome: 'event',
+    name: 'scrollend', controls: { top: 350, bottom: 370 }, supportsScrollEnd: true, outcome: 'event',
     expectedStatus: 'settled', expectedTriggerCount: 1
   },
   {
-    name: 'no-op', centered: true, supportsScrollEnd: true, outcome: 'none',
+    name: 'center-crossing-no-op', controls: { top: 194, bottom: 214 }, supportsScrollEnd: true, outcome: 'none',
     expectedStatus: 'settled', expectedTriggerCount: 0
   },
   {
-    name: 'unsupported', centered: false, supportsScrollEnd: false, outcome: 'none',
+    name: 'center-on-top-boundary', controls: { top: 200, bottom: 220 }, supportsScrollEnd: true, outcome: 'none',
+    expectedStatus: 'settled', expectedTriggerCount: 0
+  },
+  {
+    name: 'center-on-bottom-boundary', controls: { top: 180, bottom: 200 }, supportsScrollEnd: true, outcome: 'none',
+    expectedStatus: 'settled', expectedTriggerCount: 0
+  },
+  {
+    name: 'controls-above-center', controls: { top: 150, bottom: 170 }, supportsScrollEnd: true, outcome: 'event',
+    expectedStatus: 'settled', expectedTriggerCount: 1
+  },
+  {
+    name: 'controls-below-center', controls: { top: 230, bottom: 250 }, supportsScrollEnd: true, outcome: 'event',
+    expectedStatus: 'settled', expectedTriggerCount: 1
+  },
+  {
+    name: 'zero-height', controls: { top: 200, bottom: 200 }, supportsScrollEnd: true, outcome: 'none',
+    expectedStatus: 'throws', expectedTriggerCount: 0, expectedError: 'Invalid rendered block geometry'
+  },
+  {
+    name: 'inverted-geometry', controls: { top: 210, bottom: 190 }, supportsScrollEnd: true, outcome: 'none',
+    expectedStatus: 'throws', expectedTriggerCount: 0, expectedError: 'Invalid rendered block geometry'
+  },
+  {
+    name: 'unsupported', controls: { top: 350, bottom: 370 }, supportsScrollEnd: false, outcome: 'none',
     expectedStatus: 'unsupported', expectedTriggerCount: 0
   },
   {
-    name: 'missing-event', centered: false, supportsScrollEnd: true, outcome: 'none',
+    name: 'missing-event', controls: { top: 350, bottom: 370 }, supportsScrollEnd: true, outcome: 'none',
     expectedStatus: 'pending', expectedTriggerCount: 1
   },
   {
-    name: 'trigger-error', centered: false, supportsScrollEnd: true, outcome: 'throw',
-    expectedStatus: 'throws', expectedTriggerCount: 1
+    name: 'trigger-error', controls: { top: 350, bottom: 370 }, supportsScrollEnd: true, outcome: 'throw',
+    expectedStatus: 'throws', expectedTriggerCount: 1, expectedError: 'synthetic scroll failure'
   }
 ];
 
@@ -47,7 +72,7 @@ async function main() {
         <div role="group" aria-label="Mermaid block controls at line 130"></div>
       `);
       const registryKey = `__historyScrollSettlement_${scenario.name}`;
-      await page.evaluate(({ centered, outcome, key }) => {
+      await page.evaluate(({ controls, outcome, key }) => {
         const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
         const group = document.querySelector<HTMLElement>('[role="group"]')!;
         const originalAddEventListener = scroller.addEventListener.bind(scroller);
@@ -62,10 +87,7 @@ async function main() {
           originalRemoveEventListener(type, listener, options);
         }) as typeof scroller.removeEventListener;
         scroller.getBoundingClientRect = () => ({ top: 0, bottom: 400 } as DOMRect);
-        group.getBoundingClientRect = () => ({
-          top: centered ? 190 : 350,
-          bottom: centered ? 210 : 370
-        } as DOMRect);
+        group.getBoundingClientRect = () => ({ top: controls.top, bottom: controls.bottom } as DOMRect);
         (window as any).__historyMatrixEditor = {
           scrollToLine() {
             (window as any)[`${key}_triggerCount`] = ((window as any)[`${key}_triggerCount`] ?? 0) + 1;
@@ -74,7 +96,7 @@ async function main() {
             if (outcome === 'event') scroller.dispatchEvent(new Event('scrollend'));
           }
         };
-      }, { centered: scenario.centered, outcome: scenario.outcome, key: registryKey });
+      }, { controls: scenario.controls, outcome: scenario.outcome, key: registryKey });
 
       let result: HistoryScrollSettlementResult | null = null;
       let thrown = false;
@@ -87,7 +109,7 @@ async function main() {
         });
       } catch (error) {
         thrown = true;
-        if (scenario.expectedStatus !== 'throws' || !String(error).includes('synthetic scroll failure')) throw error;
+        if (scenario.expectedStatus !== 'throws' || !String(error).includes(scenario.expectedError ?? '')) throw error;
       }
       if (scenario.expectedStatus === 'throws' ? !thrown : result?.status !== scenario.expectedStatus) {
         throw new Error(`${scenario.name}: expected ${scenario.expectedStatus}, received ${result?.status ?? 'throws'}`);

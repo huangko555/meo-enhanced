@@ -28,9 +28,17 @@ export function beginHistoryScrollSettlement({
   if (!group) throw new Error(`Missing rendered block controls: ${controlsLabel}`);
   const viewport = scroller.getBoundingClientRect();
   const controls = group.getBoundingClientRect();
-  const alreadyCentered = Math.abs(
-    (controls.top + controls.bottom - viewport.top - viewport.bottom) / 2
-  ) <= 1;
+  const validGeometry = [viewport.top, viewport.bottom, controls.top, controls.bottom].every(Number.isFinite)
+    && viewport.bottom > viewport.top
+    && controls.bottom > controls.top;
+  if (!validGeometry) {
+    throw new Error(`Invalid rendered block geometry: ${JSON.stringify({
+      viewport: { top: viewport.top, bottom: viewport.bottom },
+      controls: { top: controls.top, bottom: controls.bottom }
+    })}`);
+  }
+  const viewportCenter = (viewport.top + viewport.bottom) / 2;
+  const alreadyCentered = controls.top <= viewportCenter && controls.bottom >= viewportCenter;
   if (alreadyCentered) return { status: 'settled', listenerCount: 0 };
   const supportsScrollEnd = supportsScrollEndOverride ?? ('onscrollend' in scroller);
   if (!supportsScrollEnd) return { status: 'unsupported', listenerCount: 0 };

@@ -191,7 +191,8 @@ async function editRenderedBlock(
   marker: string,
   finalMode: BlockMode,
   occurrence: NeedleOccurrence = 'first',
-  stopAfterModeSettlement = false
+  stopAfterModeSettlement = false,
+  stopBeforeFinalPreviewPointer = false
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
@@ -199,7 +200,7 @@ async function editRenderedBlock(
   const editorRegionLabel = () => kind === 'mermaid'
     ? `Mermaid editor at line ${targetLineNumber}`
     : `Formula editor at line ${targetLineNumber}`;
-  const clickTargetModeButton = async () => {
+  const settleTargetModeControl = async () => {
     targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
     const scrollSettlementKey = '__historyMatrixRenderedBlockScroll';
     const scrollSettlement = await page.evaluate(beginHistoryScrollSettlement, {
@@ -230,6 +231,9 @@ async function editRenderedBlock(
         ?.getBoundingClientRect();
       return Boolean(viewport && group && group.top >= viewport.top && group.bottom <= viewport.bottom);
     }, {}, { blockKind: kind, lineNumber: targetLineNumber });
+  };
+  const clickTargetModeButton = async () => {
+    await settleTargetModeControl();
     const transition = await page.evaluate(({ blockKind, needle, lineNumber }) => {
       const labels = blockKind === 'mermaid'
         ? {
@@ -323,6 +327,20 @@ async function editRenderedBlock(
   }, {}, { selector: blockSelector, expected: marker });
   if (finalMode === 'preview') {
     await clickTargetModeButton();
+    if (stopBeforeFinalPreviewPointer) {
+      await settleTargetModeControl();
+      await page.evaluate(({ blockKind, lineNumber }) => {
+        const controlsLabel = blockKind === 'mermaid'
+          ? `Mermaid block controls at line ${lineNumber}`
+          : `Formula block controls at line ${lineNumber}`;
+        const expectedLabel = blockKind === 'mermaid' ? 'Show Mermaid preview' : 'Show formula preview';
+        const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+        const settledBeforePointer = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+          .some((button) => button.getAttribute('aria-label') === expectedLabel);
+        if (!settledBeforePointer) throw new Error(`Final preview settlement crossed its pointer boundary: ${controlsLabel}`);
+      }, { blockKind: kind, lineNumber: targetLineNumber });
+      return;
+    }
     await clickTargetModeButton();
   }
   const desiredMode = finalMode === 'preview' ? 'split' : finalMode;
@@ -529,6 +547,9 @@ async function main() {
   const realFixturePath = process.env.MEO_HISTORY_REAL_FIXTURE?.trim() || null;
   const firstMermaidClickOnly = process.env.MEO_HISTORY_FIRST_MERMAID_CLICK_ONLY === '1';
   const firstDefaultMermaidClickOnly = process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_CLICK_ONLY === '1';
+  const firstDefaultMermaidFinalPreviewSettlementOnly = (
+    process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_FINAL_PREVIEW_SETTLEMENT_ONLY === '1'
+  );
   const realFixtureText = realFixturePath ? fs.readFileSync(realFixturePath, 'utf8') : null;
   if (firstMermaidClickOnly && realFixtureText) {
     throw new Error('The focused first-Mermaid click path requires the synthetic History fixture');
@@ -813,10 +834,15 @@ async function main() {
       ' M_PREVIEW_EDIT',
       'preview',
       'first',
-      firstDefaultMermaidClickOnly
+      firstDefaultMermaidClickOnly,
+      firstDefaultMermaidFinalPreviewSettlementOnly
     );
     if (firstDefaultMermaidClickOnly) {
       console.log('suite-prefix first default Mermaid click checks passed');
+      return;
+    }
+    if (firstDefaultMermaidFinalPreviewSettlementOnly) {
+      console.log('suite-prefix first default Mermaid final preview settlement checks passed');
       return;
     }
     await record({ kind: 'mermaid', marker: 'M_PREVIEW_EDIT', mode: 'split' });
