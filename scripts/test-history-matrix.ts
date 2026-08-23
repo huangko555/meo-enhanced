@@ -335,6 +335,7 @@ async function editRenderedBlock(
     let pointerDownRect: { top: number; bottom: number } | null = null;
     let acquiredModeButtonHandle: any;
     let pointerObserverHandle: any;
+    let pointerObserverEvidence: any = null;
     const safeReleaseLabel = 'History pointer safe release target';
     try {
       const targetMode: HistoryRenderedBlockTargetMode = transition.expectedLabel === (
@@ -436,13 +437,37 @@ async function editRenderedBlock(
               const replacementButton = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
                 .find((candidate) => candidate.getAttribute('aria-label') === contract.currentLabel) ?? null;
               if (!replacementButton) throw new Error('Missing pre-down replacement observer target');
-              const registrations: Array<{ target: EventTarget; type: string; listener: EventListener }> = [];
-              const direct = { old: 0, replacement: 0, document: 0 };
-              const observe = (target: EventTarget, role: keyof typeof direct) => {
+              const registrations: Array<{ role: 'old' | 'replacement' | 'document'; target: EventTarget; type: string; listener: EventListener }> = [];
+              const events: string[] = [];
+              const registrationIdentity: string[] = [];
+              const direct = { old: { pointerdown: 0, pointerup: 0, click: 0 }, replacement: { pointerdown: 0, pointerup: 0, click: 0 } };
+              const documentEvents: string[] = [];
+              let cleaned = false;
+              let sentinelRejected = false;
+              const snapshot = () => ({
+                events: [...events], direct: { old: { ...direct.old }, replacement: { ...direct.replacement } },
+                documentEvents: [...documentEvents], registrationIdentity: [...registrationIdentity],
+                registrations: registrations.length, cleaned, sentinelRejected, sentinelVerified: sentinelRejected
+              });
+              const publish = () => {
+                const output = document.querySelector<HTMLOutputElement>('output[aria-label="History pointer pre-down replacement evidence"]');
+                if (output) output.dataset.historyPointerObserver = JSON.stringify(snapshot());
+              };
+              const observe = (target: EventTarget, role: 'old' | 'replacement' | 'document') => {
                 for (const type of ['pointerdown', 'pointerup', 'click']) {
-                  const listener = () => { direct[role] += 1; };
+                  const listener = (event: Event) => {
+                    const category = role === 'document'
+                      ? (event.target instanceof Element && event.target.closest('button') === replacementButton) ? 'current'
+                        : (event.target instanceof Element && event.target.closest('button') === oldButton) ? 'old' : 'other'
+                      : role;
+                    events.push(`${role}:${type}:${category}`);
+                    if (role === 'document') documentEvents.push(`${type}:${category === 'current' ? 'replacement' : category}`);
+                    else direct[role][type] += 1;
+                    publish();
+                  };
                   target.addEventListener(type, listener, true);
-                  registrations.push({ target, type, listener });
+                  registrations.push({ role, target, type, listener });
+                  registrationIdentity.push(`${role}:${type}`);
                 }
               };
               observe(oldButton, 'old');
@@ -457,8 +482,17 @@ async function editRenderedBlock(
                     catch (error) { errors.push(error); }
                   }
                   if (errors.length) throw new AggregateError(errors, 'History pointer observer cleanup failed');
+                  cleaned = true;
+                  publish();
                 },
-                snapshot() { return { direct: { ...direct }, registrations: registrations.length }; }
+                verifySentinel() {
+                  const before = events.length;
+                  for (const target of [oldButton, replacementButton, document]) target.dispatchEvent(new Event('click'));
+                  sentinelRejected = events.length === before;
+                  publish();
+                  return sentinelRejected;
+                },
+                snapshot
               };
             }, transition);
           } finally {
@@ -578,19 +612,32 @@ async function editRenderedBlock(
         }
       },
       disposeHandle: (modeButtonHandle: any) => modeButtonHandle.dispose(),
-      openObserver: async () => ({ cleanup: async () => {
+      openObserver: async () => ({
+        cleanup: async () => {
           if (!pointerObserverHandle) return;
           try {
-            const snapshot = await pointerObserverHandle.evaluate((registry: { cleanup(): void; snapshot(): { registrations: number } }) => {
+            pointerObserverEvidence = await pointerObserverHandle.evaluate((registry: { cleanup(): void; snapshot(): { registrations: number } }) => {
               registry.cleanup();
               return registry.snapshot();
             });
-            if (snapshot.registrations !== 0) throw new Error('History pointer observer registry leaked after cleanup');
+            if (pointerObserverEvidence.registrations !== 0) throw new Error('History pointer observer registry leaked after cleanup');
+          } catch (error) { throw error; }
+        },
+        snapshot: async () => pointerObserverEvidence ?? { events: [], registrations: 0, cleaned: true, sentinelRejected: true },
+        verifySentinel: async () => {
+          if (!pointerObserverHandle) return true;
+          try {
+            const verified = await pointerObserverHandle.evaluate((registry: { verifySentinel(): boolean; snapshot(): unknown }) => ({
+              verified: registry.verifySentinel(), evidence: registry.snapshot()
+            }));
+            pointerObserverEvidence = verified.evidence;
+            return verified.verified;
           } finally {
             await pointerObserverHandle.dispose();
             pointerObserverHandle = null;
           }
-      }})
+        }
+      })
       });
     } catch (error) {
       const primaryError = error instanceof HistoryRenderedBlockInteractionError ? error.primary : error;
@@ -1306,12 +1353,17 @@ async function main() {
         || details.replacement?.connected !== true
         || !sameAccessibleControl
         || JSON.stringify(observer?.direct) !== JSON.stringify({
-          old: { pointerdown: 0, pointerup: 0, click: 0 },
+          old: firstDefaultMermaidPreDownDetachedOldEventsOnly
+            ? { pointerdown: 1, pointerup: 1, click: 1 }
+            : { pointerdown: 0, pointerup: 0, click: 0 },
           replacement: { pointerdown: 1, pointerup: 1, click: 1 }
         })
         || observer?.cleaned !== true
         || observer?.registrations !== 0
         || observer?.sentinelVerified !== true
+        || observer?.sentinelRejected !== true
+        || observer?.registrationIdentity?.length !== 9
+        || !observer?.events?.some((event: string) => event === 'document:pointerdown:current')
         || JSON.stringify(observer?.documentEvents) !== JSON.stringify([
           'pointerdown:replacement', 'pointerup:replacement', 'click:replacement'
         ])

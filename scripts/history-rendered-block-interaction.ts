@@ -10,10 +10,20 @@ export type HistoryRenderedBlockInteraction = {
 export type HistoryRenderedBlockInteractionResult = {
   readonly status: 'completed' | 'noop' | 'unsupported';
   readonly releasedSafely: boolean;
+  readonly evidence: HistoryRenderedBlockObserverEvidence | null;
+};
+
+export type HistoryRenderedBlockObserverEvidence = {
+  readonly events: readonly string[];
+  readonly registrations: number;
+  readonly cleaned: boolean;
+  readonly sentinelRejected: boolean;
 };
 
 export type HistoryRenderedBlockObserver = {
   cleanup(): Promise<void>;
+  snapshot(): Promise<HistoryRenderedBlockObserverEvidence>;
+  verifySentinel(): Promise<boolean>;
 };
 
 /**
@@ -43,8 +53,9 @@ export type HistoryRenderedBlockInteractionAdapter<Handle, Point = { x: number; 
 export class HistoryRenderedBlockInteractionError extends AggregateError {
   readonly hasPrimary: boolean;
   readonly primary: unknown;
+  readonly evidence: HistoryRenderedBlockObserverEvidence | null;
 
-  constructor(hasPrimary: boolean, primary: unknown, cleanup: readonly unknown[]) {
+  constructor(hasPrimary: boolean, primary: unknown, cleanup: readonly unknown[], evidence: HistoryRenderedBlockObserverEvidence | null) {
     super(
       hasPrimary ? [primary, ...cleanup] : cleanup,
       hasPrimary
@@ -55,6 +66,7 @@ export class HistoryRenderedBlockInteractionError extends AggregateError {
     this.name = 'HistoryRenderedBlockInteractionError';
     this.hasPrimary = hasPrimary;
     this.primary = primary;
+    this.evidence = evidence;
   }
 }
 
@@ -75,6 +87,7 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
   let hasPrimary = false;
   let primary: unknown;
   const cleanup: unknown[] = [];
+  let evidence: HistoryRenderedBlockObserverEvidence | null = null;
 
   const collectCleanup = async (operation: string, action: () => Promise<void>) => {
     try {
@@ -96,8 +109,8 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
 
   try {
     const scroll = await adapter.settleScroll(interaction);
-    if (scroll === 'unsupported') return { status: 'unsupported', releasedSafely: false };
-    if (await adapter.isTargetSettled(interaction)) return { status: 'noop', releasedSafely: false };
+    if (scroll === 'unsupported') return { status: 'unsupported', releasedSafely: false, evidence: null };
+    if (await adapter.isTargetSettled(interaction)) return { status: 'noop', releasedSafely: false, evidence: null };
     observer = await adapter.openObserver?.(interaction);
 
     const supersededHandle = await adapter.acquireCurrentHandle(interaction);
@@ -140,11 +153,24 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
       if (adapter.cancelAnimation) await collectCleanup('animationCancel', () => adapter.cancelAnimation!(handle));
       await disposeOnce(handle, 'handleDispose');
     }
-    if (observer) await collectCleanup('observerCleanup', () => observer!.cleanup());
+    if (observer) {
+      await collectCleanup('observerCleanup', () => observer!.cleanup());
+      await collectCleanup('observerSentinel', async () => {
+        if (!await observer!.verifySentinel()) throw new Error('History rendered-block observer accepted a late event');
+      });
+      try {
+        evidence = await observer.snapshot();
+        if (evidence.registrations !== 0 || !evidence.cleaned || !evidence.sentinelRejected) {
+          cleanup.push(new Error('History rendered-block observer evidence did not close its registry'));
+        }
+      } catch (error) {
+        cleanup.push(new Error('History rendered-block interaction cleanup failed during observerEvidence', { cause: error }));
+      }
+    }
   }
 
   if (hasPrimary || cleanup.length > 0) {
-    throw new HistoryRenderedBlockInteractionError(hasPrimary, primary, cleanup);
+    throw new HistoryRenderedBlockInteractionError(hasPrimary, primary, cleanup, evidence);
   }
-  return { status: 'completed', releasedSafely: false };
+  return { status: 'completed', releasedSafely: false, evidence };
 }

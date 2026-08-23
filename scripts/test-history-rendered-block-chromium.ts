@@ -45,7 +45,11 @@ async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean) {
       cancelPointer: async () => { await page.mouse.up(); },
       disposeSafeReleaseTarget: async () => {},
       disposeHandle: async (handle) => handle.dispose(),
-      openObserver: async () => ({ cleanup: async () => {} })
+      openObserver: async () => ({
+        cleanup: async () => {},
+        snapshot: async () => ({ events: ['current:pointerdown'], registrations: 0, cleaned: true, sentinelRejected: true }),
+        verifySentinel: async () => true
+      })
     };
     const result = await Promise.allSettled([runHistoryRenderedBlockInteraction({ kind: 'mermaid', lineNumber: 1, targetMode: 'split' }, adapter)]);
     const succeeded = result[0].status === 'fulfilled';

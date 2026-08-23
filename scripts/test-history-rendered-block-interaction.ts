@@ -27,7 +27,11 @@ const adapter: HistoryRenderedBlockInteractionAdapter<Handle> = {
   moveToSafeReleaseTarget: async () => { calls.push('safe-target'); },
   cancelPointer: async () => { calls.push('cancel-pointer'); },
   disposeSafeReleaseTarget: async () => { calls.push('dispose-safe-target'); },
-  openObserver: async () => ({ cleanup: async () => { calls.push('observer-cleanup'); } })
+  openObserver: async () => ({
+    cleanup: async () => { calls.push('observer-cleanup'); },
+    snapshot: async () => ({ events: [], registrations: 0, cleaned: true, sentinelRejected: true }),
+    verifySentinel: async () => true
+  })
 };
 
 const result = await runHistoryRenderedBlockInteraction({
@@ -47,7 +51,7 @@ if (JSON.stringify(calls) !== JSON.stringify(expected)) {
 }
 console.log('history rendered-block interaction module first tracer passed');
 
-type Failure = 'scroll' | 'prepare-down' | 'down' | 'prepare-up' | 'up' | 'settle' | 'validate-down' | 'validate-up';
+type Failure = 'acquire-1' | 'acquire-2' | 'scroll' | 'prepare-down' | 'down' | 'prepare-up' | 'up' | 'settle' | 'validate-down' | 'validate-up';
 type FixtureOptions = {
   readonly replacement?: 0 | 1 | 2;
   readonly noOp?: boolean;
@@ -76,6 +80,7 @@ function fixture(options: FixtureOptions = {}) {
     isTargetSettled: async () => Boolean(options.noOp),
     acquireCurrentHandle: async () => {
       trace.push('acquire');
+      fail(trace.filter((entry) => entry === 'acquire').length === 1 ? 'acquire-1' : 'acquire-2');
       return trace.filter((entry) => entry === 'acquire').length === 1 || options.replacement === 0 ? first : replacement;
     },
     validateCurrentHandle: async (handle, phase) => {
@@ -106,7 +111,14 @@ function fixture(options: FixtureOptions = {}) {
           observed.cleanup += 1;
           observed.registries -= 1;
           if (Object.hasOwn(options, 'cleanupFailure')) throw options.cleanupFailure;
-        }
+        },
+        snapshot: async () => ({
+          events: ['old:pointerdown', 'replacement:pointerup', 'document:click'],
+          registrations: observed.registries,
+          cleaned: observed.cleanup > 0,
+          sentinelRejected: observed.cleanup > 0
+        }),
+        verifySentinel: async () => observed.cleanup > 0
       };
     }
   };
@@ -146,6 +158,13 @@ const matrix: Array<[string, () => Promise<void>]> = [
     check(error instanceof Error && String(error).includes('continuous replacement'), 'continuous replacement was not primary');
     check(subject.trace.filter((entry) => entry === 'acquire').length === 2, 'replacement retried acquisition');
     check(subject.observed.registries === 0, 'continuous replacement leaked observer');
+  }],
+  ['second acquire failure disposes the first handle exactly once', async () => {
+    const subject = fixture({ failure: 'acquire-2' });
+    const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 3, targetMode: 'source' }, subject.adapter));
+    check(String(error).includes('synthetic acquire-2'), 'second acquire failure was not primary');
+    check(subject.trace.filter((entry) => entry === 'dispose-handle:1').length === 1, 'first handle leaked or was double-disposed after second acquire failure');
+    check(subject.observed.registries === 0, 'second acquire failure leaked observer registry');
   }],
   ['same-node movement recomputes pointerup hit target', async () => {
     const subject = fixture({ replacement: 0, sameNodeMoves: true });
