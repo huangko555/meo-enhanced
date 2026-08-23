@@ -6,6 +6,7 @@ import {
   beginHistoryScrollSettlement,
   disposeHistoryScrollSettlement
 } from './history-scroll-settlement';
+import { runHistoryModePointerTransaction } from './history-mode-pointer-transaction';
 
 type BlockMode = 'preview' | 'split' | 'source';
 type NeedleOccurrence = 'first' | 'last';
@@ -300,114 +301,123 @@ async function editRenderedBlock(
         );
       }, {}, transition);
     }
-    const modeButtonHandle = await page.evaluateHandle(({ controlsLabel, currentLabel }) => {
-      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
-      return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-        .find((candidate) => candidate.getAttribute('aria-label') === currentLabel) ?? null;
-    }, transition);
-    const stableModeButton = modeButtonHandle.asElement();
-    if (!stableModeButton) {
-      await modeButtonHandle.dispose();
-      throw new Error(`Missing stable mode button before pointer delivery: ${transition.controlsLabel}`);
-    }
-    const stableModeButtonHitPoint = (phase: 'pointerdown' | 'pointerup') => stableModeButton.evaluate(
-      (button, contract) => {
-        const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
-        const expectedGroup = document.querySelector<HTMLElement>(
-          `[role="group"][aria-label="${contract.controlsLabel}"]`
+    let pointerDownRect: { top: number; bottom: number } | null = null;
+    await runHistoryModePointerTransaction({
+      acquire: () => page.evaluateHandle(({ controlsLabel, currentLabel }) => {
+        const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+        return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+          .find((candidate) => candidate.getAttribute('aria-label') === currentLabel) ?? null;
+      }, transition),
+      validate: async (modeButtonHandle: any, phase: 'pointerdown' | 'pointerup') => {
+        const stableModeButton = modeButtonHandle.asElement();
+        if (!stableModeButton) {
+          throw new Error(`Missing stable mode button before ${phase}: ${transition.controlsLabel}`);
+        }
+        const point = await stableModeButton.evaluate(
+          (button: HTMLButtonElement, contract: typeof transition & { phase: string }) => {
+            const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+            const expectedGroup = document.querySelector<HTMLElement>(
+              `[role="group"][aria-label="${contract.controlsLabel}"]`
+            );
+            const actualGroup = button.closest<HTMLElement>('[role="group"][aria-label]');
+            const currentButton = Array.from(
+              expectedGroup?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
+            ).find((candidate) => candidate.getAttribute('aria-label') === contract.currentLabel);
+            if (
+              !button.isConnected
+              || actualGroup !== expectedGroup
+              || currentButton !== button
+              || actualGroup?.getAttribute('aria-label') !== contract.controlsLabel
+              || button.getAttribute('aria-label') !== contract.currentLabel
+            ) {
+              throw new Error(`Mode button identity changed before ${contract.phase}: ${contract.controlsLabel}`);
+            }
+            if (contract.phase === 'pointerup' && !button.matches(':active')) {
+              throw new Error(`Mode button did not receive pointerdown: ${contract.controlsLabel}`);
+            }
+            if (!scroller || !actualGroup || !scroller.contains(actualGroup) || !actualGroup.contains(button)) {
+              throw new Error(`Mode button left its editor scroller before ${contract.phase}: ${contract.controlsLabel}`);
+            }
+            const viewport = scroller.getBoundingClientRect();
+            const groupRect = actualGroup.getBoundingClientRect();
+            const buttonRect = button.getBoundingClientRect();
+            const fullyVisible = [groupRect, buttonRect].every((rect) => (
+              rect.top >= viewport.top && rect.bottom <= viewport.bottom
+              && rect.left >= viewport.left && rect.right <= viewport.right
+            ));
+            if (!fullyVisible) {
+              throw new Error(`Mode button is not fully visible before ${contract.phase}: ${contract.controlsLabel}`);
+            }
+            return {
+              x: buttonRect.left + buttonRect.width / 2,
+              y: buttonRect.top + buttonRect.height / 2,
+              rect: buttonRect.toJSON()
+            };
+          },
+          { ...transition, phase }
         );
-        const actualGroup = button.closest<HTMLElement>('[role="group"][aria-label]');
-        const currentButton = Array.from(
-          expectedGroup?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-        ).find((candidate) => candidate.getAttribute('aria-label') === contract.currentLabel);
-        if (
-          !button.isConnected
-          || actualGroup !== expectedGroup
-          || currentButton !== button
-          || actualGroup?.getAttribute('aria-label') !== contract.controlsLabel
-          || button.getAttribute('aria-label') !== contract.currentLabel
-        ) {
-          throw new Error(
-            `Mode button identity changed before ${contract.phase}: ${contract.controlsLabel}`
-          );
-        }
-        if (!scroller || !actualGroup || !scroller.contains(actualGroup) || !actualGroup.contains(button)) {
-          throw new Error(`Mode button left its editor scroller before ${contract.phase}: ${contract.controlsLabel}`);
-        }
-        const viewport = scroller.getBoundingClientRect();
-        const groupRect = actualGroup.getBoundingClientRect();
-        const buttonRect = button.getBoundingClientRect();
-        const fullyVisible = [groupRect, buttonRect].every((rect) => (
-          rect.top >= viewport.top && rect.bottom <= viewport.bottom
-          && rect.left >= viewport.left && rect.right <= viewport.right
-        ));
-        if (!fullyVisible) {
-          throw new Error(`Mode button is not fully visible before ${contract.phase}: ${contract.controlsLabel}`);
-        }
-        return {
-          x: buttonRect.left + buttonRect.width / 2,
-          y: buttonRect.top + buttonRect.height / 2,
-          rect: buttonRect.toJSON()
-        };
+        if (phase === 'pointerdown') pointerDownRect = point.rect;
+        return point;
       },
-      { ...transition, phase }
-    );
-    let pointerDown = false;
-    try {
-      const downPoint = await stableModeButtonHitPoint('pointerdown');
-      await page.mouse.move(downPoint.x, downPoint.y);
-      await page.mouse.down();
-      pointerDown = true;
-      if (expectFinalPreviewReplacementFailure && modeClickSequence === 3) {
-        await stableModeButton.evaluate((button, expectedLabel) => {
-          const replacement = button.cloneNode(true) as HTMLButtonElement;
-          replacement.addEventListener('pointerup', () => {
-            replacement.setAttribute('aria-label', expectedLabel);
-          }, { once: true });
-          button.replaceWith(replacement);
-        }, transition.expectedLabel);
-      } else if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) {
-        await stableModeButton.evaluate((button) => {
-          const movement = button.animate(
-            [{ transform: 'translateY(0)' }, { transform: 'translateY(50%)' }],
-            { duration: 1, fill: 'both' }
-          );
-          movement.pause();
-          movement.currentTime = 1;
-        });
-        await page.waitForFunction((button, previousRect) => {
-          if (!(button instanceof HTMLElement) || !button.isConnected) return false;
-          const rect = button.getBoundingClientRect();
-          return rect.top !== previousRect.top || rect.bottom !== previousRect.bottom;
-        }, {}, stableModeButton, downPoint.rect).catch((error: unknown) => {
-          throw new Error('Stable mode button did not move between pointerdown and pointerup', { cause: error });
-        });
-      }
-      const upPoint = await stableModeButtonHitPoint('pointerup');
-      await page.mouse.move(upPoint.x, upPoint.y);
-      await page.mouse.up();
-      pointerDown = false;
-    } finally {
-      try {
-        if (pointerDown) await page.mouse.up();
-      } finally {
-        try {
-          if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) {
-            await stableModeButton.evaluate((button) => {
-              button.getAnimations().forEach((animation) => animation.cancel());
-            });
-          }
-        } finally {
-          await modeButtonHandle.dispose();
+      prepareDown: (point: { x: number; y: number }) => page.mouse.move(point.x, point.y),
+      async deliverDown(point: { x: number; y: number }) {
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.down();
+      },
+      async afterDown(modeButtonHandle: any) {
+        const stableModeButton = modeButtonHandle.asElement();
+        if (!stableModeButton) throw new Error(`Missing stable mode button after pointerdown: ${transition.controlsLabel}`);
+        if (expectFinalPreviewReplacementFailure && modeClickSequence === 3) {
+          await stableModeButton.evaluate((button: HTMLButtonElement, expectedLabel: string) => {
+            const replacement = button.cloneNode(true) as HTMLButtonElement;
+            replacement.addEventListener('pointerup', () => {
+              replacement.setAttribute('aria-label', expectedLabel);
+            }, { once: true });
+            button.replaceWith(replacement);
+          }, transition.expectedLabel);
+        } else if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) {
+          if (!pointerDownRect) throw new Error('Missing pointerdown geometry before stable movement');
+          await stableModeButton.evaluate((button: HTMLButtonElement) => {
+            const movement = button.animate(
+              [{ transform: 'translateY(0)' }, { transform: 'translateY(50%)' }],
+              { duration: 1, fill: 'both' }
+            );
+            movement.pause();
+            movement.currentTime = 1;
+          });
+          await page.waitForFunction((button: HTMLElement, previousRect: DOMRect) => {
+            if (!button.isConnected) return false;
+            const rect = button.getBoundingClientRect();
+            return rect.top !== previousRect.top || rect.bottom !== previousRect.bottom;
+          }, {}, stableModeButton, pointerDownRect).catch((error: unknown) => {
+            throw new Error('Stable mode button did not move between pointerdown and pointerup', { cause: error });
+          });
         }
-      }
-    }
-    if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) return;
-    await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
-      document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
-        ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-    ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition).catch((error: unknown) => {
-      throw new Error(`Mode button label did not settle: ${transition.controlsLabel}`, { cause: error });
+      },
+      prepareUp: (point: { x: number; y: number }) => page.mouse.move(point.x, point.y),
+      async deliverUp(point: { x: number; y: number }) {
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.up();
+      },
+      settleLabel: () => page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
+        document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
+          ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
+      ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition).catch(
+        (error: unknown) => {
+          throw new Error(`Mode button label did not settle: ${transition.controlsLabel}`, { cause: error });
+        }
+      ),
+      releaseMouse: () => page.mouse.up(),
+      async cancelAnimation(modeButtonHandle: any) {
+        if (!stopAfterFinalPreviewStableMovement || modeClickSequence !== 3) return;
+        const stableModeButton = modeButtonHandle.asElement();
+        if (stableModeButton) {
+          await stableModeButton.evaluate((button: HTMLButtonElement) => {
+            button.getAnimations().forEach((animation) => animation.cancel());
+          });
+        }
+      },
+      disposeHandle: (modeButtonHandle: any) => modeButtonHandle.dispose()
     });
   };
   targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
