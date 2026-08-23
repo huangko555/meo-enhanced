@@ -36,7 +36,26 @@ async function main(): Promise<void> {
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
-    const source = [
+    const tableSource = [
+      ...Array.from({ length: 80 }, (_, index) => `before table ${index + 1}`),
+      '| Name | Description |',
+      '| --- | --- |',
+      `| Alpha | ${'long table content '.repeat(8)} |`,
+      '| Beta | Short |',
+      ...Array.from({ length: 60 }, (_, index) => `table anchor ${index + 1}`)
+    ].join('\n');
+    const tableWrapOnly = process.argv.includes('--table-wrap');
+    if (tableWrapOnly) {
+      await page.evaluate(() => {
+        (window as any).__editor = (window as any).LiveLayoutStabilityHarness.createEditor({
+          parent: document.getElementById('app')!,
+          text: '',
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+      });
+    } else {
+      const source = [
       ...Array.from({ length: 80 }, (_, index) => `before ${index + 1}`),
       '<details>',
       '<summary>Visible summary</summary>',
@@ -482,45 +501,47 @@ async function main(): Promise<void> {
       throw new Error(`Removing a blockquote marker moved unchanged viewport content: ${quoteAnchorBeforeTop} -> ${quoteAfter.top}; frames=${JSON.stringify(quoteAfter.tops)}`);
     }
 
-    const tableSource = [
-      ...Array.from({ length: 80 }, (_, index) => `before table ${index + 1}`),
-      '| Name | Description |',
-      '| --- | --- |',
-      `| Alpha | ${'long table content '.repeat(8)} |`,
-      '| Beta | Short |',
-      ...Array.from({ length: 60 }, (_, index) => `table anchor ${index + 1}`)
-    ].join('\n');
-    await page.evaluate((text) => {
+    }
+    await page.evaluate(({ text, focused }) => {
       const editor = (window as any).__editor;
       editor.setText(text);
       editor.view.dispatch({ selection: { anchor: editor.getText().length } });
+      if (focused) {
+        editor.scrollToLine(81, 'top');
+        return;
+      }
       const tablePosition = editor.getText().indexOf('| Name |');
       editor.view.scrollDOM.scrollTop = editor.view.lineBlockAt(tablePosition).top + 8;
-    }, tableSource);
+    }, { text: tableSource, focused: tableWrapOnly });
     await waitForFrames(page);
-    const tableBefore = await page.evaluate(() => ({
-      shellTop: document.querySelector('.meo-md-html-table-shell')?.getBoundingClientRect().top ?? null,
-      followingTop: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('table anchor 1'))?.getBoundingClientRect().top ?? null
-    }));
-    if (tableBefore.shellTop === null || tableBefore.followingTop === null) {
-      throw new Error('Could not locate the table and its following viewport content');
+    if (tableWrapOnly) {
+      await page.waitForSelector('.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea');
     }
-    const firstTableInput = await page.$('.meo-md-html-table-shell tbody textarea');
-    if (!firstTableInput) throw new Error('Could not locate an editable Live table cell');
-    await firstTableInput.click();
-    await firstTableInput.type(' edited');
-    await waitForFrames(page);
-    const tableAfter = await page.evaluate(() => ({
-      shellTop: document.querySelector('.meo-md-html-table-shell')?.getBoundingClientRect().top ?? null,
-      followingTop: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find((line) => line.textContent?.includes('table anchor 1'))?.getBoundingClientRect().top ?? null
-    }));
-    if (
-      tableAfter.shellTop === null || Math.abs(tableAfter.shellTop - tableBefore.shellTop) > 1 ||
-      tableAfter.followingTop === null || tableAfter.followingTop < tableBefore.followingTop
-    ) {
-      throw new Error(`Editing a table did not grow downward in place: ${JSON.stringify({ tableBefore, tableAfter })}`);
+    if (!tableWrapOnly) {
+      const tableBefore = await page.evaluate(() => ({
+        shellTop: document.querySelector('.meo-md-html-table-shell')?.getBoundingClientRect().top ?? null,
+        followingTop: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((line) => line.textContent?.includes('table anchor 1'))?.getBoundingClientRect().top ?? null
+      }));
+      if (tableBefore.shellTop === null || tableBefore.followingTop === null) {
+        throw new Error('Could not locate the table and its following viewport content');
+      }
+      const firstTableInput = await page.$('.meo-md-html-table-shell tbody textarea');
+      if (!firstTableInput) throw new Error('Could not locate an editable Live table cell');
+      await firstTableInput.click();
+      await firstTableInput.type(' edited');
+      await waitForFrames(page);
+      const tableAfter = await page.evaluate(() => ({
+        shellTop: document.querySelector('.meo-md-html-table-shell')?.getBoundingClientRect().top ?? null,
+        followingTop: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((line) => line.textContent?.includes('table anchor 1'))?.getBoundingClientRect().top ?? null
+      }));
+      if (
+        tableAfter.shellTop === null || Math.abs(tableAfter.shellTop - tableBefore.shellTop) > 1 ||
+        tableAfter.followingTop === null || tableAfter.followingTop < tableBefore.followingTop
+      ) {
+        throw new Error(`Editing a table did not grow downward in place: ${JSON.stringify({ tableBefore, tableAfter })}`);
+      }
     }
 
     const wrappingTableInput = await page.$(
@@ -557,7 +578,12 @@ async function main(): Promise<void> {
           scrollTop: scroller.scrollTop,
           shellTop: shell.getBoundingClientRect().top,
           rowHeight: row.getBoundingClientRect().height,
-          inputScrollTop: input.scrollTop
+          inputScrollTop: input.scrollTop,
+          caretVisible: (() => {
+            const scrollerRect = scroller.getBoundingClientRect();
+            const cellRect = input.closest('td')!.getBoundingClientRect();
+            return cellRect.bottom > scrollerRect.top && cellRect.top < scrollerRect.bottom;
+          })()
         });
       };
       document.addEventListener('input', (event) => {
@@ -577,24 +603,28 @@ async function main(): Promise<void> {
       '.meo-md-html-table-shell tbody tr:nth-child(2)',
       (row) => row.getBoundingClientRect().height
     );
-    let crossedWrapThreshold = false;
-    for (let index = 0; index < 120; index += 1) {
-      await page.type(
-        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
-        'w',
-        { delay: 12 }
-      );
-      await waitForFrames(page, 1);
-      const rowHeight = await page.$eval(
-        '.meo-md-html-table-shell tbody tr:nth-child(2)',
-        (row) => row.getBoundingClientRect().height
-      );
-      if (rowHeight > initialWrapRowHeight + 1) {
-        crossedWrapThreshold = true;
-        break;
-      }
-    }
-    await waitForFrames(page, 12);
+    const initialWrapInputScrollHeight = await page.$eval(
+      '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+      (input: HTMLTextAreaElement) => input.scrollHeight
+    );
+    await wrappingTableInput.type(' wrapping table cell content'.repeat(16));
+    const crossedWrapThreshold = await page.waitForFunction(
+      (initialHeight) => (
+        ((window as any).__tableWrapFrames as Array<{
+          stage: string;
+          scrollTop: number;
+          shellTop: number;
+          rowHeight: number;
+        }>).filter((frame) => frame.stage === 'frame').slice(-3).every((frame, _index, frames) => (
+          frames.length === 3 && frame.rowHeight > initialHeight &&
+          frame.rowHeight === frames[0].rowHeight &&
+          frame.scrollTop === frames[0].scrollTop &&
+          frame.shellTop === frames[0].shellTop
+        ))
+      ),
+      { timeout: 1_000 },
+      initialWrapRowHeight
+    ).then(() => true, () => false);
     const tableWrapFrames = await page.evaluate(() => (
       (window as any).__tableWrapFrames as Array<{
         stage: string;
@@ -602,6 +632,7 @@ async function main(): Promise<void> {
         shellTop: number;
         rowHeight: number | null;
         inputScrollTop: number;
+        caretVisible: boolean;
       }>
     ));
     const focusedTableInputCollapsed = await page.evaluate(() => (
@@ -612,16 +643,20 @@ async function main(): Promise<void> {
       .filter((height): height is number => height !== null);
     const wrapScrollTops = tableWrapFrames.map((frame) => frame.scrollTop);
     const wrapShellTops = tableWrapFrames.map((frame) => frame.shellTop);
-    if (!crossedWrapThreshold || Math.max(...wrapHeights) <= Math.min(...wrapHeights) + 1) {
-      const inputGeometry = await page.$eval(
-        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
-        (input: HTMLTextAreaElement) => ({
-          valueLength: input.value.length,
-          scrollHeight: input.scrollHeight,
-          clientHeight: input.clientHeight,
-          clientWidth: input.clientWidth
-        })
-      );
+    const inputGeometry = await page.$eval(
+      '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+      (input: HTMLTextAreaElement) => ({
+        valueIncludesFixture: input.value.includes('wrapping table cell content'),
+        scrollHeight: input.scrollHeight,
+        clientHeight: input.clientHeight,
+        clientWidth: input.clientWidth
+      })
+    );
+    if (
+      !crossedWrapThreshold || !inputGeometry.valueIncludesFixture ||
+      inputGeometry.scrollHeight <= initialWrapInputScrollHeight ||
+      Math.max(...wrapHeights) <= Math.min(...wrapHeights)
+    ) {
       throw new Error(`Table wrap fixture did not grow a row: ${JSON.stringify({ inputGeometry, tableWrapFrames })}`);
     }
     const scrollDirections = wrapScrollTops.slice(1)
@@ -645,6 +680,7 @@ async function main(): Promise<void> {
       shellDirections.some((direction, index) => index > 0 && direction !== shellDirections[index - 1]) ||
       focusedTableInputCollapsed ||
       tableWrapFrames.some((frame) => frame.inputScrollTop > 1) ||
+      tableWrapFrames.some((frame) => !frame.caretVisible) ||
       !caretVisible
     ) {
       throw new Error(`Wrapping a focused table cell moved the viewport between frames: ${JSON.stringify(tableWrapFrames)}`);
