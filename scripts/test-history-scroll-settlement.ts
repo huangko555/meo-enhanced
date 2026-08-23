@@ -7,13 +7,16 @@ import {
 
 type Scenario = {
   name: string;
-  controls: { top: number; bottom: number };
+  controls: { top: Coordinate; bottom: Coordinate };
+  viewport?: { top: Coordinate; bottom: Coordinate };
   supportsScrollEnd: boolean;
   outcome: 'event' | 'none' | 'throw';
   expectedStatus: HistoryScrollSettlementResult['status'] | 'throws';
   expectedTriggerCount: number;
   expectedError?: string;
 };
+
+type Coordinate = number | 'nan' | 'positive-infinity' | 'negative-infinity';
 
 const scenarios: Scenario[] = [
   {
@@ -49,6 +52,35 @@ const scenarios: Scenario[] = [
     expectedStatus: 'throws', expectedTriggerCount: 0, expectedError: 'Invalid rendered block geometry'
   },
   {
+    name: 'controls-nan', controls: { top: 'nan', bottom: 210 }, supportsScrollEnd: true, outcome: 'none',
+    expectedStatus: 'throws', expectedTriggerCount: 0, expectedError: 'Invalid rendered block geometry'
+  },
+  {
+    name: 'controls-positive-infinity', controls: { top: 190, bottom: 'positive-infinity' },
+    supportsScrollEnd: true, outcome: 'none', expectedStatus: 'throws', expectedTriggerCount: 0,
+    expectedError: 'Invalid rendered block geometry'
+  },
+  {
+    name: 'controls-negative-infinity', controls: { top: 'negative-infinity', bottom: 210 },
+    supportsScrollEnd: true, outcome: 'none', expectedStatus: 'throws', expectedTriggerCount: 0,
+    expectedError: 'Invalid rendered block geometry'
+  },
+  {
+    name: 'viewport-nan', controls: { top: 190, bottom: 210 }, viewport: { top: 'nan', bottom: 400 },
+    supportsScrollEnd: true, outcome: 'none', expectedStatus: 'throws', expectedTriggerCount: 0,
+    expectedError: 'Invalid rendered block geometry'
+  },
+  {
+    name: 'viewport-positive-infinity', controls: { top: 190, bottom: 210 },
+    viewport: { top: 0, bottom: 'positive-infinity' }, supportsScrollEnd: true, outcome: 'none',
+    expectedStatus: 'throws', expectedTriggerCount: 0, expectedError: 'Invalid rendered block geometry'
+  },
+  {
+    name: 'viewport-negative-infinity', controls: { top: 190, bottom: 210 },
+    viewport: { top: 'negative-infinity', bottom: 400 }, supportsScrollEnd: true, outcome: 'none',
+    expectedStatus: 'throws', expectedTriggerCount: 0, expectedError: 'Invalid rendered block geometry'
+  },
+  {
     name: 'unsupported', controls: { top: 350, bottom: 370 }, supportsScrollEnd: false, outcome: 'none',
     expectedStatus: 'unsupported', expectedTriggerCount: 0
   },
@@ -72,9 +104,14 @@ async function main() {
         <div role="group" aria-label="Mermaid block controls at line 130"></div>
       `);
       const registryKey = `__historyScrollSettlement_${scenario.name}`;
-      await page.evaluate(({ controls, outcome, key }) => {
+      await page.evaluate(({ controls, viewport, outcome, key }) => {
         const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
         const group = document.querySelector<HTMLElement>('[role="group"]')!;
+        const coordinate = (value: Coordinate): number => {
+          if (typeof value === 'number') return value;
+          if (value === 'nan') return Number.NaN;
+          return value === 'positive-infinity' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+        };
         const originalAddEventListener = scroller.addEventListener.bind(scroller);
         const originalRemoveEventListener = scroller.removeEventListener.bind(scroller);
         (window as any)[`${key}_activeListeners`] = 0;
@@ -86,8 +123,14 @@ async function main() {
           if (type === 'scrollend') (window as any)[`${key}_activeListeners`] -= 1;
           originalRemoveEventListener(type, listener, options);
         }) as typeof scroller.removeEventListener;
-        scroller.getBoundingClientRect = () => ({ top: 0, bottom: 400 } as DOMRect);
-        group.getBoundingClientRect = () => ({ top: controls.top, bottom: controls.bottom } as DOMRect);
+        scroller.getBoundingClientRect = () => ({
+          top: coordinate(viewport.top),
+          bottom: coordinate(viewport.bottom)
+        } as DOMRect);
+        group.getBoundingClientRect = () => ({
+          top: coordinate(controls.top),
+          bottom: coordinate(controls.bottom)
+        } as DOMRect);
         (window as any).__historyMatrixEditor = {
           scrollToLine() {
             (window as any)[`${key}_triggerCount`] = ((window as any)[`${key}_triggerCount`] ?? 0) + 1;
@@ -96,7 +139,12 @@ async function main() {
             if (outcome === 'event') scroller.dispatchEvent(new Event('scrollend'));
           }
         };
-      }, { controls: scenario.controls, outcome: scenario.outcome, key: registryKey });
+      }, {
+        controls: scenario.controls,
+        viewport: scenario.viewport ?? { top: 0, bottom: 400 },
+        outcome: scenario.outcome,
+        key: registryKey
+      });
 
       let result: HistoryScrollSettlementResult | null = null;
       let thrown = false;
