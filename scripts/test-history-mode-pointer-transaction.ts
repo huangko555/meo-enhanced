@@ -12,6 +12,7 @@ type PrimaryFailure =
   | "prepareDown"
   | "down"
   | "identity"
+  | "disposeSuperseded"
   | "prepareUp"
   | "up"
   | "label";
@@ -24,6 +25,9 @@ type Scenario = {
   readonly primary?: PrimaryFailure;
   readonly cleanupFailures?: readonly HistoryModePointerCleanupOperation[];
   readonly moveSameNode?: boolean;
+  readonly replaceBeforeDown?: boolean;
+  readonly replaceAfterReacquire?: boolean;
+  readonly failReacquire?: boolean;
   readonly replaceAfterDown?: boolean;
   readonly expectedPrimary?: PrimaryFailure;
   readonly expectedCleanupErrors?: readonly HistoryModePointerCleanupOperation[];
@@ -34,11 +38,14 @@ type Scenario = {
   readonly expectedCancel: number;
   readonly expectedLabelCalls: number;
   readonly expectedUpPoint?: number;
+  readonly expectedAcquireCalls?: number;
+  readonly expectedSupersededDisposals?: number;
 };
 
 const normalStages = [
   "acquired",
   "downPrepared",
+  "downTargetReacquired",
   "downDelivered",
   "upPrepared",
   "sameIdentityValidated",
@@ -59,6 +66,62 @@ const scenarios: readonly Scenario[] = [
     expectedCancel: 0,
     expectedLabelCalls: 1,
     expectedUpPoint: 0,
+    expectedAcquireCalls: 2,
+    expectedSupersededDisposals: 1,
+  },
+  {
+    name: "reacquire-failure-cleans-original-target",
+    failReacquire: true,
+    expectedPrimary: "acquire",
+    expectedStages: ["acquired", "downPrepared", "cleanupComplete"],
+    expectedPhysical: "notPressed",
+    expectedCleanupAttempts: noCancel,
+    expectedNormalUp: 0,
+    expectedCancel: 0,
+    expectedLabelCalls: 0,
+    expectedAcquireCalls: 2,
+    expectedSupersededDisposals: 0,
+  },
+  {
+    name: "superseded-handle-disposal-failure-cleans-current-target",
+    replaceBeforeDown: true,
+    primary: "disposeSuperseded",
+    expectedPrimary: "disposeSuperseded",
+    expectedStages: ["acquired", "downPrepared", "cleanupComplete"],
+    expectedPhysical: "notPressed",
+    expectedCleanupAttempts: noCancel,
+    expectedNormalUp: 0,
+    expectedCancel: 0,
+    expectedLabelCalls: 0,
+    expectedAcquireCalls: 2,
+    expectedSupersededDisposals: 1,
+  },
+  {
+    name: "pre-down-replacement-reacquires-current-target",
+    replaceBeforeDown: true,
+    expectedStages: [...normalStages, "cleanupComplete"],
+    expectedPhysical: "released",
+    expectedCleanupAttempts: noCancel,
+    expectedNormalUp: 1,
+    expectedCancel: 0,
+    expectedLabelCalls: 1,
+    expectedUpPoint: 2,
+    expectedAcquireCalls: 2,
+    expectedSupersededDisposals: 1,
+  },
+  {
+    name: "continuous-pre-down-replacement-fails-without-retry",
+    replaceBeforeDown: true,
+    replaceAfterReacquire: true,
+    expectedPrimary: "identity",
+    expectedStages: ["acquired", "downPrepared", "downTargetReacquired", "cleanupComplete"],
+    expectedPhysical: "notPressed",
+    expectedCleanupAttempts: noCancel,
+    expectedNormalUp: 0,
+    expectedCancel: 0,
+    expectedLabelCalls: 0,
+    expectedAcquireCalls: 2,
+    expectedSupersededDisposals: 1,
   },
   {
     name: "acquire-primary",
@@ -81,12 +144,14 @@ const scenarios: readonly Scenario[] = [
     expectedNormalUp: 0,
     expectedCancel: 0,
     expectedLabelCalls: 0,
+    expectedAcquireCalls: 1,
+    expectedSupersededDisposals: 0,
   },
   {
     name: "deliver-down-unknown-cancelled",
     primary: "down",
     expectedPrimary: "down",
-    expectedStages: ["acquired", "downPrepared", ...cancelled],
+    expectedStages: ["acquired", "downPrepared", "downTargetReacquired", ...cancelled],
     expectedPhysical: "released",
     expectedCleanupAttempts: withCancel,
     expectedNormalUp: 0,
@@ -97,7 +162,7 @@ const scenarios: readonly Scenario[] = [
     name: "prepare-up-pressed-cancelled",
     primary: "prepareUp",
     expectedPrimary: "prepareUp",
-    expectedStages: ["acquired", "downPrepared", "downDelivered", ...cancelled],
+    expectedStages: ["acquired", "downPrepared", "downTargetReacquired", "downDelivered", ...cancelled],
     expectedPhysical: "released",
     expectedCleanupAttempts: withCancel,
     expectedNormalUp: 0,
@@ -108,7 +173,7 @@ const scenarios: readonly Scenario[] = [
     name: "replacement-safe-cancel",
     replaceAfterDown: true,
     expectedPrimary: "identity",
-    expectedStages: ["acquired", "downPrepared", "downDelivered", ...cancelled],
+    expectedStages: ["acquired", "downPrepared", "downTargetReacquired", "downDelivered", ...cancelled],
     expectedPhysical: "released",
     expectedCleanupAttempts: withCancel,
     expectedNormalUp: 0,
@@ -122,6 +187,7 @@ const scenarios: readonly Scenario[] = [
     expectedStages: [
       "acquired",
       "downPrepared",
+      "downTargetReacquired",
       "downDelivered",
       "upPrepared",
       "sameIdentityValidated",
@@ -150,7 +216,7 @@ const scenarios: readonly Scenario[] = [
     cleanupFailures: ["safeReleaseMove"],
     expectedPrimary: "identity",
     expectedCleanupErrors: ["safeReleaseMove"],
-    expectedStages: ["acquired", "downPrepared", "downDelivered", "cleanupComplete"],
+    expectedStages: ["acquired", "downPrepared", "downTargetReacquired", "downDelivered", "cleanupComplete"],
     expectedPhysical: "pressed",
     expectedCleanupAttempts: [1, 0, 1, 1, 1],
     expectedNormalUp: 0,
@@ -166,6 +232,7 @@ const scenarios: readonly Scenario[] = [
     expectedStages: [
       "acquired",
       "downPrepared",
+      "downTargetReacquired",
       "downDelivered",
       "upPrepared",
       "sameIdentityValidated",
@@ -187,6 +254,7 @@ const scenarios: readonly Scenario[] = [
     expectedStages: [
       "acquired",
       "downPrepared",
+      "downTargetReacquired",
       "downDelivered",
       "upPrepared",
       "sameIdentityValidated",
@@ -227,11 +295,13 @@ const failure = (point: FailurePoint) => new Error(`synthetic ${point} failure`)
 
 async function runScenario(scenario: Scenario) {
   const calls = {
+    acquire: 0,
     label: 0,
     normalUp: 0,
     cancel: 0,
     upPoint: null as number | null,
     releaseTargets: [] as Array<"normal-target" | "safe">,
+    supersededDisposals: 0,
     cleanup: {
       safeReleaseMove: 0,
       cancelRelease: 0,
@@ -253,7 +323,14 @@ async function runScenario(scenario: Scenario) {
   const operations: HistoryModePointerOperations<Target, number, SafeTarget> = {
     async acquire() {
       fail("acquire");
-      return originalTarget;
+      calls.acquire += 1;
+      if (calls.acquire === 2 && scenario.failReacquire) throw failure("acquire");
+      const acquired = currentTarget;
+      if (calls.acquire === 2 && scenario.replaceAfterReacquire) {
+        acquired.connected = false;
+        currentTarget = { id: 3, connected: true, position: 3 };
+      }
+      return acquired;
     },
     async validateSameIdentity(target, phase) {
       if (phase === "pointerup") fail("identity");
@@ -262,6 +339,14 @@ async function runScenario(scenario: Scenario) {
     },
     async prepareDown() {
       fail("prepareDown");
+      if (scenario.replaceBeforeDown) {
+        originalTarget.connected = false;
+        currentTarget = { id: 2, connected: true, position: 2 };
+      }
+    },
+    async disposeSupersededHandle() {
+      calls.supersededDisposals += 1;
+      fail("disposeSuperseded");
     },
     async deliverDown() {
       fail("down");
@@ -356,6 +441,15 @@ async function runScenario(scenario: Scenario) {
   }
   if (scenario.expectedUpPoint !== undefined && calls.upPoint !== scenario.expectedUpPoint) {
     throw new Error(`${scenario.name}: unexpected up point ${calls.upPoint}`);
+  }
+  if (scenario.expectedAcquireCalls !== undefined && calls.acquire !== scenario.expectedAcquireCalls) {
+    throw new Error(`${scenario.name}: unexpected acquire count ${calls.acquire}`);
+  }
+  if (
+    scenario.expectedSupersededDisposals !== undefined
+    && calls.supersededDisposals !== scenario.expectedSupersededDisposals
+  ) {
+    throw new Error(`${scenario.name}: unexpected superseded disposal count ${calls.supersededDisposals}`);
   }
   if (scenario.expectedPrimary) {
     if (!String(thrown?.primary).includes(`synthetic ${scenario.expectedPrimary} failure`)) {

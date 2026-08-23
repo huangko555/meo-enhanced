@@ -1,6 +1,7 @@
 export type HistoryModePointerStage =
   | "acquired"
   | "downPrepared"
+  | "downTargetReacquired"
   | "downDelivered"
   | "upPrepared"
   | "sameIdentityValidated"
@@ -36,6 +37,7 @@ export interface HistoryModePointerOperations<Target, Point, SafeTarget> {
     phase: "pointerdown" | "pointerup",
   ): Promise<Point>;
   prepareDown(point: Point): Promise<void>;
+  disposeSupersededHandle(target: Target): Promise<void>;
   deliverDown(point: Point): Promise<void>;
   afterDown?(target: Target): Promise<void>;
   prepareUp(point: Point): Promise<void>;
@@ -121,6 +123,10 @@ export async function runHistoryModePointerTransaction<Target, Point, SafeTarget
     let point = await operations.validateSameIdentity(target, "pointerdown");
     await operations.prepareDown(point);
     state.stages.push("downPrepared");
+    const previousTarget = target;
+    target = await operations.acquire();
+    await operations.disposeSupersededHandle(previousTarget);
+    state.stages.push("downTargetReacquired");
     point = await operations.validateSameIdentity(target, "pointerdown");
     try {
       await operations.deliverDown(point);

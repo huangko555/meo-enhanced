@@ -6,7 +6,10 @@ import {
   beginHistoryScrollSettlement,
   disposeHistoryScrollSettlement
 } from './history-scroll-settlement';
-import { runHistoryModePointerTransaction } from './history-mode-pointer-transaction';
+import {
+  HistoryModePointerTransactionError,
+  runHistoryModePointerTransaction
+} from './history-mode-pointer-transaction';
 
 type BlockMode = 'preview' | 'split' | 'source';
 type NeedleOccurrence = 'first' | 'last';
@@ -196,7 +199,8 @@ async function editRenderedBlock(
   stopBeforeFinalPreviewPointer = false,
   stopAfterFinalPreviewClick = false,
   expectFinalPreviewReplacementFailure = false,
-  stopAfterFinalPreviewStableMovement = false
+  stopAfterFinalPreviewStableMovement = false,
+  injectPreDownReplacement = false
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
@@ -302,13 +306,18 @@ async function editRenderedBlock(
       }, {}, transition);
     }
     let pointerDownRect: { top: number; bottom: number } | null = null;
+    let acquiredModeButtonHandle: any;
     const safeReleaseLabel = 'History pointer safe release target';
-    await runHistoryModePointerTransaction({
-      acquire: () => page.evaluateHandle(({ controlsLabel, currentLabel }) => {
+    try {
+      await runHistoryModePointerTransaction({
+      async acquire() {
+        acquiredModeButtonHandle = await page.evaluateHandle(({ controlsLabel, currentLabel }) => {
         const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
         return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
           .find((candidate) => candidate.getAttribute('aria-label') === currentLabel) ?? null;
-      }, transition),
+        }, transition);
+        return acquiredModeButtonHandle;
+      },
       validateSameIdentity: async (modeButtonHandle: any, phase: 'pointerdown' | 'pointerup') => {
         const stableModeButton = modeButtonHandle.asElement();
         if (!stableModeButton) {
@@ -360,7 +369,47 @@ async function editRenderedBlock(
         if (phase === 'pointerdown') pointerDownRect = point.rect;
         return point;
       },
-      prepareDown: (point: { x: number; y: number }) => page.mouse.move(point.x, point.y),
+      async prepareDown(point: { x: number; y: number }) {
+        if (injectPreDownReplacement && modeClickSequence === 1) {
+          const stableModeButton = acquiredModeButtonHandle?.asElement();
+          if (!stableModeButton) throw new Error(`Missing stable mode button before injected replacement: ${transition.controlsLabel}`);
+          await stableModeButton.evaluate((button: HTMLButtonElement) => {
+            const evidence = document.createElement('output');
+            evidence.setAttribute('aria-label', 'History pointer pre-down replacement evidence');
+            document.body.append(evidence);
+            const count = { pointerdown: 0, pointerup: 0, click: 0 };
+            const events: string[] = [];
+            let replacement: HTMLButtonElement | null = null;
+            for (const eventName of Object.keys(count) as Array<keyof typeof count>) {
+              document.addEventListener(eventName, (event) => {
+                count[eventName] += 1;
+                const target = event.target instanceof Element ? event.target : null;
+                events.push(`${eventName}:${target?.closest('button') === replacement ? 'replacement' : 'other'}`);
+                evidence.dataset.pointerEvents = JSON.stringify(events);
+              }, { capture: true });
+            }
+            const snapshot = (candidate: HTMLButtonElement) => ({
+              connected: candidate.isConnected,
+              label: candidate.getAttribute('aria-label'),
+              group: candidate.closest('[role="group"]')?.getAttribute('aria-label') ?? null,
+              line: candidate.closest('.cm-line')?.textContent ?? null,
+              rect: candidate.getBoundingClientRect().toJSON()
+            });
+            const oldBefore = snapshot(button);
+            replacement = button.cloneNode(true) as HTMLButtonElement;
+            button.replaceWith(replacement);
+            evidence.textContent = JSON.stringify({
+              oldBefore,
+              oldAfter: snapshot(button),
+              replacement: snapshot(replacement),
+              sameNode: button === replacement,
+              count
+            });
+          });
+        }
+        await page.mouse.move(point.x, point.y);
+      },
+      disposeSupersededHandle: (modeButtonHandle: any) => modeButtonHandle.dispose(),
       async deliverDown(point: { x: number; y: number }) {
         await page.mouse.move(point.x, point.y);
         await page.mouse.down();
@@ -410,7 +459,7 @@ async function editRenderedBlock(
         await page.mouse.move(point.x, point.y);
         await page.mouse.up();
       },
-      settleLabel: () => page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
+      settleLabel: () => injectPreDownReplacement ? Promise.resolve() : page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
         document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
           ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
       ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition).catch(
@@ -459,8 +508,23 @@ async function editRenderedBlock(
           });
         }
       },
-      disposeHandle: (modeButtonHandle: any) => modeButtonHandle.dispose()
-    });
+        disposeHandle: (modeButtonHandle: any) => modeButtonHandle.dispose()
+      });
+    } catch (error) {
+      if (injectPreDownReplacement && error instanceof HistoryModePointerTransactionError) {
+        const evidence = await page.evaluate(() => (
+          document.querySelector<HTMLOutputElement>(
+            'output[aria-label="History pointer pre-down replacement evidence"]'
+          )?.textContent ?? null
+        ));
+        throw new Error(`Pre-down replacement evidence: ${JSON.stringify({
+          evidence: evidence ? JSON.parse(evidence) : null,
+          physicalPointer: error.state.physicalPointer,
+          stages: error.state.stages
+        })}`, { cause: error });
+      }
+      throw error;
+    }
   };
   targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
   await clickTargetModeButton();
@@ -801,6 +865,9 @@ async function main() {
   const firstDefaultMermaidFinalPreviewStableMovementOnly = (
     process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_FINAL_PREVIEW_STABLE_MOVEMENT_ONLY === '1'
   );
+  const firstDefaultMermaidPreDownReplacementOnly = (
+    process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_PRE_DOWN_REPLACEMENT_ONLY === '1'
+  );
   const realFixtureText = realFixturePath ? fs.readFileSync(realFixturePath, 'utf8') : null;
   if (firstMermaidClickOnly && realFixtureText) {
     throw new Error('The focused first-Mermaid click path requires the synthetic History fixture');
@@ -1087,11 +1154,12 @@ async function main() {
         ' M_PREVIEW_EDIT',
         'preview',
         'first',
-        firstDefaultMermaidClickOnly,
+        firstDefaultMermaidClickOnly || firstDefaultMermaidPreDownReplacementOnly,
         firstDefaultMermaidFinalPreviewSettlementOnly,
         firstDefaultMermaidFinalPreviewClickOnly,
         firstDefaultMermaidFinalPreviewReplacementOnly,
-        firstDefaultMermaidFinalPreviewStableMovementOnly
+        firstDefaultMermaidFinalPreviewStableMovementOnly,
+        firstDefaultMermaidPreDownReplacementOnly
       );
     } catch (error) {
       const expectedReplacementError = (
@@ -1122,6 +1190,41 @@ async function main() {
     }
     if (firstDefaultMermaidFinalPreviewStableMovementOnly) {
       console.log('suite-prefix first default Mermaid final preview stable movement checks passed');
+      return;
+    }
+    if (firstDefaultMermaidPreDownReplacementOnly) {
+      const evidence = await page.evaluate(() => {
+        const output = document.querySelector<HTMLOutputElement>(
+          'output[aria-label="History pointer pre-down replacement evidence"]'
+        );
+        return {
+          details: output?.textContent ?? null,
+          pointerEvents: output?.dataset.pointerEvents ?? null
+        };
+      });
+      const details = evidence.details ? JSON.parse(evidence.details) : null;
+      const pointerEvents = evidence.pointerEvents ? JSON.parse(evidence.pointerEvents) : null;
+      const sameAccessibleControl = (
+        details?.oldBefore?.label === details?.replacement?.label
+        && details?.oldBefore?.group === details?.replacement?.group
+        && details?.oldBefore?.line === details?.replacement?.line
+        && JSON.stringify(details?.oldBefore?.rect) === JSON.stringify(details?.replacement?.rect)
+      );
+      if (
+        !details
+        || details.sameNode !== false
+        || details.oldAfter?.connected !== false
+        || details.replacement?.connected !== true
+        || !sameAccessibleControl
+        || JSON.stringify(pointerEvents) !== JSON.stringify([
+          'pointerdown:replacement', 'pointerup:replacement', 'click:replacement'
+        ])
+      ) {
+        throw new Error(`Pre-down replacement did not reacquire the current public control: ${JSON.stringify({
+          details, pointerEvents
+        })}`);
+      }
+      console.log('suite-prefix first default Mermaid pre-down replacement checks passed');
       return;
     }
     await record({ kind: 'mermaid', marker: 'M_PREVIEW_EDIT', mode: 'split' });
