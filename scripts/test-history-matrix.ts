@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
+import {
+  beginHistoryScrollSettlement,
+  disposeHistoryScrollSettlement
+} from './history-scroll-settlement';
 
 type BlockMode = 'preview' | 'split' | 'source';
 type NeedleOccurrence = 'first' | 'last';
@@ -197,15 +201,26 @@ async function editRenderedBlock(
     : `Formula editor at line ${targetLineNumber}`;
   const clickTargetModeButton = async () => {
     targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
-    await page.evaluate(async (lineNumber) => {
-      const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
-      if (!scroller) throw new Error('Missing editor scroller');
-      const settled = new Promise<void>((resolve) => {
-        scroller.addEventListener('scrollend', () => resolve(), { once: true });
-      });
-      (window as any).__historyMatrixEditor.scrollToLine(lineNumber, 'center');
-      await settled;
-    }, targetLineNumber);
+    const scrollSettlementKey = '__historyMatrixRenderedBlockScroll';
+    const scrollSettlement = await page.evaluate(beginHistoryScrollSettlement, {
+      lineNumber: targetLineNumber,
+      controlsLabel: kind === 'mermaid'
+        ? `Mermaid block controls at line ${targetLineNumber}`
+        : `Formula block controls at line ${targetLineNumber}`,
+      registryKey: scrollSettlementKey
+    });
+    if (scrollSettlement.status === 'unsupported') {
+      throw new Error('Browser does not expose scrollend for a required rendered-block center transaction');
+    }
+    try {
+      if (scrollSettlement.status === 'pending') {
+        await page.waitForFunction((registryKey) => (
+          (window as any)[registryKey]?.settled === true
+        ), {}, scrollSettlementKey);
+      }
+    } finally {
+      await page.evaluate(disposeHistoryScrollSettlement, scrollSettlementKey);
+    }
     await page.waitForFunction(({ blockKind, lineNumber }) => {
       const viewport = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
       const controlsLabel = blockKind === 'mermaid'
