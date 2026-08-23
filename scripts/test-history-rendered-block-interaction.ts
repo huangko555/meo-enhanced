@@ -74,6 +74,7 @@ type CleanupOp =
   | 'observerCleanup'
   | 'observerSentinel'
   | 'observerSnapshot';
+type PhysicalPointer = 'notPressed' | 'pressed' | 'released' | 'unknown';
 type FixtureOptions = {
   readonly replacement?: 0 | 1 | 2;
   readonly noOp?: boolean;
@@ -91,12 +92,14 @@ function fixture(options: FixtureOptions = {}) {
   const stageTrace: PrimaryStage[] = [];
   const cleanupCounts = new Map<CleanupOp, number>();
   const disposeCounts = new Map<number, number>();
+  const activeHandles = new Set<typeof first>();
   const observed = { old: 0, replacement: 0, document: 0, registries: 0, cleanup: 0 };
   const first = { id: 1 };
   const replacement = { id: 2 };
   const modeCalls: Array<'preview' | 'split' | 'source'> = [];
   let acquires = 0;
   let secondAcquireCompleted = false;
+  let physicalPointer: PhysicalPointer = 'notPressed';
   const failPrimary = (stage: Exclude<PrimaryStage, 'success'>) => {
     stageTrace.push(stage);
     if (options.primaryFailure === stage) throw new Error(`synthetic ${stage}`);
@@ -119,7 +122,9 @@ function fixture(options: FixtureOptions = {}) {
       const stage = acquires++ === 0 ? 'acquire1' : 'reacquire2';
       failPrimary(stage);
       if (stage === 'reacquire2') secondAcquireCompleted = true;
-      return stage === 'acquire1' || options.replacement === 0 ? first : replacement;
+      const handle = stage === 'acquire1' || options.replacement === 0 ? first : replacement;
+      activeHandles.add(handle);
+      return handle;
     },
     validateCurrentHandle: async (handle, phase) => {
       trace.push(`validate:${handle.id}:${phase}`);
@@ -133,22 +138,49 @@ function fixture(options: FixtureOptions = {}) {
       return phase === 'pointerup' && options.sameNodeMoves ? { x: 20, y: 20 } : { x: 10, y: 10 };
     },
     preparePointerDown: async () => { trace.push('prepare-down'); failPrimary('prepareDown'); },
-    deliverPointerDown: async () => { trace.push('down'); failPrimary('deliverDown'); },
+    deliverPointerDown: async () => {
+      trace.push('down');
+      failPrimary('deliverDown');
+      physicalPointer = 'pressed';
+    },
     preparePointerUp: async () => { trace.push('prepare-up'); failPrimary('prepareUp'); },
-    deliverPointerUp: async () => { trace.push('up'); failPrimary('deliverUp'); },
+    deliverPointerUp: async () => {
+      trace.push('up');
+      failPrimary('deliverUp');
+      physicalPointer = 'released';
+    },
     settleTarget: async (interaction) => { trace.push(`settle:${interaction.targetMode}`); modeCalls.push(interaction.targetMode); failPrimary('settleTarget'); },
     disposeSupersededHandle: async (handle) => {
       trace.push(`dispose-superseded:${handle.id}`);
       disposeCounts.set(handle.id, (disposeCounts.get(handle.id) ?? 0) + 1);
       failCleanup('supersededHandleDispose');
+      activeHandles.delete(handle);
     },
     disposeHandle: async (handle) => {
       trace.push(`dispose-handle:${handle.id}`);
       disposeCounts.set(handle.id, (disposeCounts.get(handle.id) ?? 0) + 1);
       failCleanup(secondAcquireCompleted ? 'currentHandleDispose' : 'initialHandleDispose');
+      activeHandles.delete(handle);
     },
-    moveToSafeReleaseTarget: async () => { trace.push('safe-target'); failCleanup('safeReleaseMove'); },
-    cancelPointer: async () => { trace.push('cancel-pointer'); failCleanup('cancelPointer'); },
+    moveToSafeReleaseTarget: async () => {
+      trace.push('safe-target');
+      try {
+        failCleanup('safeReleaseMove');
+      } catch (error) {
+        physicalPointer = 'unknown';
+        throw error;
+      }
+    },
+    cancelPointer: async () => {
+      trace.push('cancel-pointer');
+      try {
+        failCleanup('cancelPointer');
+      } catch (error) {
+        physicalPointer = 'unknown';
+        throw error;
+      }
+      physicalPointer = 'released';
+    },
     disposeSafeReleaseTarget: async () => { trace.push('dispose-safe-target'); failCleanup('safeTargetDispose'); },
     cancelAnimation: async () => { failCleanup('animationCancel'); },
     openObserver: async () => {
@@ -178,7 +210,10 @@ function fixture(options: FixtureOptions = {}) {
       };
     }
   };
-  return { adapter, trace, stageTrace, cleanupCounts, disposeCounts, observed, modeCalls };
+  return {
+    adapter, trace, stageTrace, cleanupCounts, disposeCounts, activeHandles, observed, modeCalls,
+    physicalPointer: () => physicalPointer
+  };
 }
 
 function check(value: unknown, message: string): asserts value {
@@ -198,10 +233,32 @@ function cleanupCount(subject: ReturnType<typeof fixture>, operation: CleanupOp)
   return subject.cleanupCounts.get(operation) ?? 0;
 }
 
-function assertClosed(subject: ReturnType<typeof fixture>) {
+function assertTerminal(subject: ReturnType<typeof fixture>, activeIds: readonly number[] = [], pointer: PhysicalPointer = 'released') {
   check(subject.observed.registries === 0 && subject.observed.cleanup === 1, 'observer registry did not close exactly once');
   for (const [handle, count] of subject.disposeCounts) {
     check(count <= 1, `handle ${handle} was disposed more than once`);
+  }
+  const actualActive = [...subject.activeHandles].map((handle) => handle.id).sort((left, right) => left - right);
+  check(JSON.stringify(actualActive) === JSON.stringify([...activeIds].sort((left, right) => left - right)), `active handle terminal state differs: ${JSON.stringify(actualActive)}`);
+  check(subject.physicalPointer() === pointer, `physical pointer terminal state differs: ${subject.physicalPointer()}`);
+}
+
+function assertCleanupTrace(subject: ReturnType<typeof fixture>, expected: readonly CleanupOp[]) {
+  const actual = subject.trace
+    .filter((entry) => entry.startsWith('cleanup:'))
+    .map((entry) => entry.slice('cleanup:'.length));
+  check(JSON.stringify(actual) === JSON.stringify(expected), `cleanup operation order differs: ${JSON.stringify(actual)}`);
+}
+
+function assertAggregateSequence(error: unknown, expected: readonly string[]) {
+  check(error instanceof AggregateError, 'expected aggregate error');
+  const actual = error.errors.map((entry) => {
+    if (entry instanceof Error) return `${entry.message} cause=${String(entry.cause)}`;
+    return String(entry);
+  });
+  check(actual.length === expected.length, `aggregate length differs: ${JSON.stringify(actual)}`);
+  for (const [index, fragment] of expected.entries()) {
+    check(actual[index].includes(fragment), `aggregate entry ${index} differs: ${actual[index]}`);
   }
 }
 
@@ -211,7 +268,7 @@ const matrix: Array<[string, () => Promise<void>]> = [
     const result = await runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 1, targetMode: 'preview' }, subject.adapter);
     check(result.status === 'completed', 'zero replacement did not complete');
     check(!subject.trace.some((entry) => entry.startsWith('dispose-superseded')), 'same handle was disposed as superseded');
-    assertClosed(subject);
+    assertTerminal(subject);
   }],
   ['one replacement reacquires before down', async () => {
     const subject = fixture({ replacement: 1 });
@@ -224,14 +281,14 @@ const matrix: Array<[string, () => Promise<void>]> = [
     const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 3, targetMode: 'source' }, subject.adapter));
     check(error instanceof Error && String(error).includes('continuous replacement'), 'continuous replacement was not primary');
     check(subject.trace.filter((entry) => entry === 'acquire').length === 2, 'replacement retried acquisition');
-    assertClosed(subject);
+    assertTerminal(subject, [], 'notPressed');
   }],
   ['second acquire failure disposes the first handle exactly once', async () => {
     const subject = fixture({ primaryFailure: 'reacquire2' });
     const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 3, targetMode: 'source' }, subject.adapter));
     check(String(error).includes('synthetic reacquire2'), 'second acquire failure was not primary');
     check(subject.trace.filter((entry) => entry === 'dispose-handle:1').length === 1, 'first handle leaked or was double-disposed after second acquire failure');
-    assertClosed(subject);
+    assertTerminal(subject, [], 'notPressed');
   }],
   ['same-node movement recomputes pointerup hit target', async () => {
     const subject = fixture({ replacement: 0, sameNodeMoves: true });
@@ -281,7 +338,10 @@ const matrix: Array<[string, () => Promise<void>]> = [
       const expectedRelease = releaseStages.has(primaryFailure) ? 1 : 0;
       check(cleanupCount(subject, 'cancelPointer') === expectedRelease, `${primaryFailure} safe cancel state differs`);
       check(cleanupCount(subject, 'safeTargetDispose') === expectedRelease, `${primaryFailure} safe target disposal differs`);
-      assertClosed(subject);
+      const expectedPointer: PhysicalPointer = releaseStages.has(primaryFailure)
+        ? 'released'
+        : primaryFailure === 'settleTarget' ? 'released' : 'notPressed';
+      assertTerminal(subject, [], expectedPointer);
     }
   }],
   ['every cleanup operation remains ordered and observable under a single fault', async () => {
@@ -293,13 +353,18 @@ const matrix: Array<[string, () => Promise<void>]> = [
       check(error instanceof AggregateError && error.hasPrimary, `${operation} changed cleanup-only fault into another result`);
       check(String(error.errors[0]).includes('synthetic upValidate'), `${operation} masked the primary failure`);
       check(cleanupCount(subject, operation) === 1, `${operation} was not attempted exactly once`);
-      assertClosed(subject);
+      const expectedPointer: PhysicalPointer = operation === 'safeReleaseMove' || operation === 'cancelPointer'
+        ? 'unknown'
+        : 'released';
+      const expectedActive = operation === 'supersededHandleDispose' ? [1]
+        : operation === 'currentHandleDispose' ? [2] : [];
+      assertTerminal(subject, expectedActive, expectedPointer);
     }
     const initial = fixture({ primaryFailure: 'reacquire2', cleanupFailures: ['initialHandleDispose'] });
     const initialError = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 11, targetMode: 'source' }, initial.adapter));
     check(initialError instanceof AggregateError && String(initialError.errors[0]).includes('synthetic reacquire2'), 'initial disposal masked its primary');
     check(cleanupCount(initial, 'initialHandleDispose') === 1, 'initial handle disposal was not attempted exactly once');
-    assertClosed(initial);
+    assertTerminal(initial, [1], 'notPressed');
   }],
   ['multiple and falsy cleanup faults preserve primary-first and continue later cleanup', async () => {
     const subject = fixture({
@@ -310,17 +375,24 @@ const matrix: Array<[string, () => Promise<void>]> = [
     });
     const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 12, targetMode: 'source' }, subject.adapter));
     check(error instanceof AggregateError && error.hasPrimary, 'combined cleanup faults lost the primary state');
-    check(String(error.errors[0]).includes('synthetic upValidate'), 'primary failure was not first in aggregate');
+    assertAggregateSequence(error, [
+      'synthetic upValidate', 'safeReleaseMove', 'safeTargetDispose', 'handleDispose',
+      'observerCleanup', 'observerSentinel', 'observerEvidence'
+    ]);
+    assertCleanupTrace(subject, [
+      'supersededHandleDispose', 'safeReleaseMove', 'safeTargetDispose', 'animationCancel',
+      'currentHandleDispose', 'observerCleanup', 'observerSentinel', 'observerSnapshot'
+    ]);
     for (const operation of ['safeReleaseMove', 'safeTargetDispose', 'currentHandleDispose', 'observerCleanup', 'observerSentinel', 'observerSnapshot'] as const) {
       check(cleanupCount(subject, operation) === 1, `${operation} was skipped after an earlier cleanup fault`);
     }
-    assertClosed(subject);
+    assertTerminal(subject, [2], 'unknown');
     for (const falsy of [undefined, null, 0, false, ''] as const) {
       const falsySubject = fixture({ primaryFailure: 'upValidate', cleanupValues: { currentHandleDispose: falsy } });
       const falsyError = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 13, targetMode: 'source' }, falsySubject.adapter));
       check(falsyError instanceof AggregateError && falsyError.errors.length === 2, `falsy cleanup ${String(falsy)} was swallowed`);
       check(String(falsyError.errors[0]).includes('synthetic upValidate'), 'falsy cleanup displaced primary');
-      assertClosed(falsySubject);
+      assertTerminal(falsySubject, [2]);
     }
   }],
   ['cleanup-only aggregate retains all later cleanup work without a primary', async () => {
@@ -330,10 +402,17 @@ const matrix: Array<[string, () => Promise<void>]> = [
     });
     const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'mermaid', lineNumber: 14, targetMode: 'split' }, subject.adapter));
     check(error instanceof AggregateError && !error.hasPrimary, 'cleanup-only aggregate incorrectly has a primary');
+    assertAggregateSequence(error, [
+      'supersededHandleDispose', 'handleDispose', 'observerCleanup', 'observerSentinel', 'observerEvidence'
+    ]);
+    assertCleanupTrace(subject, [
+      'supersededHandleDispose', 'animationCancel', 'currentHandleDispose', 'observerCleanup',
+      'observerSentinel', 'observerSnapshot'
+    ]);
     for (const operation of ['supersededHandleDispose', 'currentHandleDispose', 'observerCleanup', 'observerSentinel', 'observerSnapshot'] as const) {
       check(cleanupCount(subject, operation) === 1, `${operation} did not run after another cleanup fault`);
     }
-    assertClosed(subject);
+    assertTerminal(subject, [1, 2]);
   }],
   ['mutation guards require safe cancel after pointerup validation and primary-first disposal errors', async () => {
     const safeCancel = fixture({ primaryFailure: 'upValidate' });
@@ -342,7 +421,7 @@ const matrix: Array<[string, () => Promise<void>]> = [
     const primaryFirst = fixture({ primaryFailure: 'upValidate', cleanupFailures: ['currentHandleDispose'] });
     const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 16, targetMode: 'preview' }, primaryFirst.adapter));
     check(error instanceof AggregateError && String(error.errors[0]).includes('synthetic upValidate'), 'removing primary-first aggregation would stay green');
-    assertClosed(primaryFirst);
+    assertTerminal(primaryFirst, [2]);
   }]
 ];
 
