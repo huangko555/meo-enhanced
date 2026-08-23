@@ -105,7 +105,37 @@ async function assertBlockAreaClickKeepsViewport(
     };
   }, { blockQuery: blockSelector, selector: targetSelector, ratio: verticalRatio });
   await waitForFrames(page, 2);
-  await page.mouse.move(before.x, before.y);
+  const settledBefore = await page.evaluate((blockQuery) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(blockQuery)!;
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      blockTop: block.getBoundingClientRect().top,
+      selectionHead: editor.view.state.selection.main.head,
+      innerFocused: Boolean(
+        (block as any).__meoMermaidEditingController?.innerView?.hasFocus
+        || (block as any).__meoLatexMathEditingController?.innerView?.hasFocus
+      )
+    };
+  }, blockSelector);
+  const point = await page.evaluate(({ blockQuery, selector, ratio }) => {
+    const editor = (window as any).__mermaidEditingEditor;
+    const block = document.querySelector<HTMLElement>(blockQuery);
+    const target = document.querySelector<HTMLElement>(selector);
+    if (!block || !target || !block.contains(target)) {
+      throw new Error(`Rendered-block click target is not inside its block: ${selector}`);
+    }
+    const viewport = editor.view.scrollDOM.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    if (targetRect.width <= 0 || targetRect.height <= 0) {
+      throw new Error(`Rendered-block click target has empty geometry: ${selector}`);
+    }
+    return {
+      x: targetRect.left + targetRect.width / 2,
+      y: Math.max(viewport.top + 24, Math.min(viewport.bottom - 24, targetRect.top + targetRect.height * ratio))
+    };
+  }, { blockQuery: blockSelector, selector: targetSelector, ratio: verticalRatio });
+  await page.mouse.move(point.x, point.y);
   await page.mouse.down();
   await waitForFrames(page, 2);
   const afterDown = await page.evaluate(() => {
@@ -133,12 +163,12 @@ async function assertBlockAreaClickKeepsViewport(
     };
   }, blockSelector);
   if (
-    Math.abs(after.scrollTop - before.scrollTop) > 1 ||
-    Math.abs(after.blockTop - before.blockTop) > 1 ||
-    (preserveOuterSelection && after.selectionHead !== before.selectionHead) ||
-    (preserveOuterSelection && before.innerFocused && !after.innerFocused)
+    Math.abs(after.scrollTop - settledBefore.scrollTop) > 1 ||
+    Math.abs(after.blockTop - settledBefore.blockTop) > 1 ||
+    (preserveOuterSelection && after.selectionHead !== settledBefore.selectionHead) ||
+    (preserveOuterSelection && settledBefore.innerFocused && !after.innerFocused)
   ) {
-    throw new Error(`Clicking ${targetSelector} moved the Mermaid block: ${JSON.stringify({ before, afterDown, after })}`);
+    throw new Error(`Clicking ${targetSelector} moved the Mermaid block: ${JSON.stringify({ before, settledBefore, afterDown, after })}`);
   }
 }
 
