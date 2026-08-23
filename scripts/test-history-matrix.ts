@@ -321,19 +321,63 @@ async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedl
   if (targetLineNumber !== 130) {
     throw new Error(`Expected first Mermaid control at line 130, received line ${targetLineNumber}`);
   }
-  const transition = await page.evaluate((lineNumber) => {
-    const controlsLabel = `Mermaid block controls at line ${lineNumber}`;
-    const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+  const controlsLabel = `Mermaid block controls at line ${targetLineNumber}`;
+  await page.evaluate((lineNumber) => {
+    (window as any).__historyMatrixEditor.scrollToLine(lineNumber, 'center');
+  }, targetLineNumber);
+  await page.waitForFunction((label) => {
+    const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
+    const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${label}"]`)
+      ?.getBoundingClientRect();
+    return Boolean(scroller && group && group.top >= scroller.top && group.bottom <= scroller.bottom);
+  }, {}, controlsLabel);
+  const hitPoint = await page.evaluate((label) => {
+    const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${label}"]`);
     const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
       .find((candidate) => candidate.getAttribute('aria-label') === 'Edit Mermaid in split view');
-    if (!button) throw new Error(`Missing preview mode control: ${controlsLabel}`);
-    button.click();
-    return controlsLabel;
-  }, targetLineNumber);
+    if (!button) throw new Error(`Missing preview mode control: ${label}`);
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }, controlsLabel);
+  await page.mouse.click(hitPoint.x, hitPoint.y);
   await page.waitForFunction((controlsLabel) => Array.from(
     document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
       ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-  ).some((candidate) => candidate.getAttribute('aria-label') === 'Show Mermaid code only'), {}, transition);
+  ).some((candidate) => candidate.getAttribute('aria-label') === 'Show Mermaid code only'), {}, controlsLabel);
+
+  const regionLabel = `Mermaid editor at line ${targetLineNumber}`;
+  await page.waitForFunction((label) => {
+    const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller')?.getBoundingClientRect();
+    const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${label}"]`)
+      ?.getBoundingClientRect();
+    return Boolean(scroller && region && region.bottom > scroller.top && region.top < scroller.bottom);
+  }, { timeout: 5000 }, regionLabel).catch(async (error: unknown) => {
+    const state = await page.evaluate(({ controlsLabel, editorLabel }) => {
+      const scrollerElement = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+      const scroller = scrollerElement?.getBoundingClientRect();
+      const toolbar = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+      const region = document.querySelector<HTMLElement>(`[role="region"][aria-label="${editorLabel}"]`);
+      const active = document.activeElement as HTMLElement | null;
+      const visibleLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).filter((line) => {
+        const rect = line.getBoundingClientRect();
+        return Boolean(scroller && rect.bottom > scroller.top && rect.top < scroller.bottom);
+      });
+      return {
+        scroller: scroller?.toJSON() ?? null,
+        toolbar: toolbar?.getBoundingClientRect().toJSON() ?? null,
+        region: region?.getBoundingClientRect().toJSON() ?? null,
+        active: active ? {
+          tag: active.tagName,
+          role: active.getAttribute('role'),
+          label: active.getAttribute('aria-label'),
+          className: active.className
+        } : null,
+        regionFocused: Boolean(region?.contains(active)),
+        viewportAnchor: visibleLines[0]?.textContent ?? null
+      };
+    }, { controlsLabel, editorLabel: regionLabel });
+    throw new Error(`First Mermaid editing region is not visible: ${JSON.stringify(state)}`, { cause: error });
+  });
 
   const repeatedLineNumber = await scrollToLineContaining(page, lineNeedle, 'last', null, 'mermaid');
   if (repeatedLineNumber === targetLineNumber) {
