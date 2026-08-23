@@ -175,7 +175,7 @@ type PointerPosition = { x: number; y: number };
 type TableTextTransform = (value: string, start: number, end: number) => boolean;
 type TableFormatAction = 'inlineCode' | 'kbd' | 'underline' | 'bold' | 'italic' | 'lineover' | 'strike' | 'highlight' | 'link' | 'wikiLink';
 type SyncChange = { from: number; to: number; insert: string };
-type RevealOptions = { focusEditor?: boolean; align?: 'center' | 'upper' | 'top' | 'nearest' | 'none' };
+type RevealOptions = { focusEditor?: boolean; align?: 'center' | 'upper' | 'top' | 'nearest' | 'none'; settle?: boolean };
 type EditorFormatAction = TableFormatAction | 'heading' | 'bulletList' | 'numberedList' | 'task' | 'codeBlock' | 'quote' | 'hr' | 'table' | 'image';
 type EditorFormatLevel = number | { cols: number; rows: number };
 
@@ -1337,7 +1337,7 @@ export function createEditor({
     }
   };
 
-  const applyRevealSelection = (anchor: number, head = anchor, { focusEditor = true, align = 'center' }: RevealOptions = {}) => {
+  const applyRevealSelection = (anchor: number, head = anchor, { focusEditor = true, align = 'center', settle = false }: RevealOptions = {}) => {
     const max = view.state.doc.length;
     const nextAnchor = Math.max(0, Math.min(anchor, max));
     const nextHead = Math.max(0, Math.min(head, max));
@@ -1352,8 +1352,8 @@ export function createEditor({
     }
     if (align === 'none') return;
     viewportController.revealPosition(nextAnchor, align === 'upper'
-      ? { y: 'start', yMargin: Math.round(view.scrollDOM.clientHeight * 0.3) }
-      : { y: align === 'top' ? 'start' : align === 'nearest' ? 'nearest' : 'center' }, isRevealCurrent);
+      ? { y: 'start', yMargin: Math.round(view.scrollDOM.clientHeight * 0.3), settle }
+      : { y: align === 'top' ? 'start' : align === 'nearest' ? 'nearest' : 'center', settle }, isRevealCurrent);
   };
 
   const isPositionVisible = (position: number) => {
@@ -2831,7 +2831,7 @@ export function createEditor({
       }
       const targetIsVisible = align === 'upper' && isPositionVisible(line.from);
       const effectiveAlign = targetIsVisible ? 'nearest' : align;
-      applyRevealSelection(line.from, line.from, { focusEditor: true, align: effectiveAlign });
+      applyRevealSelection(line.from, line.from, { focusEditor: true, align: effectiveAlign, settle: true });
       if (align === 'top') {
         // Outline navigation must survive delayed block-widget measurements.
         restoreTopVisibleLine(line.number, 0, { syncCursor: false });

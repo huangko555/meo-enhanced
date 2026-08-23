@@ -1049,8 +1049,9 @@ export class ViewportController {
     {
       y = 'nearest',
       yMargin = 0,
-      schedule = 'immediate'
-    }: { y?: 'nearest' | 'center' | 'start'; yMargin?: number; schedule?: 'immediate' | 'next-frame' } = {},
+      schedule = 'immediate',
+      settle = false
+    }: { y?: 'nearest' | 'center' | 'start'; yMargin?: number; schedule?: 'immediate' | 'next-frame'; settle?: boolean } = {},
     isCurrent: () => boolean = () => true
   ): void {
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
@@ -1110,7 +1111,7 @@ export class ViewportController {
         return { kind: 'target', target: { top: block.bottom - viewportHeight } };
       }
       return { kind: 'stable' };
-    }, { schedule }, isCurrent);
+    }, { schedule, settle }, isCurrent);
   }
 
   captureAnchorToken(owner: ViewportAnchorOwner): ViewportAnchorToken | null {
