@@ -1,9 +1,12 @@
 import {
   createHistoryPointerEventObserverRegistry,
+  HistoryPointerEventObserverLifecycleError,
   historyPointerEventTypes,
   runHistoryPointerEventObserverLifecycle,
   type HistoryPointerEventType
 } from "./history-pointer-event-observer";
+import { HistoryModePointerTransactionError } from "./history-mode-pointer-transaction";
+import { historyPointerObserverPrimary } from "./history-pointer-observer-failure";
 
 type Listener = EventListenerOrEventListenerObject;
 type Registration = { type: string; listener: Listener; options?: AddEventListenerOptions | boolean };
@@ -41,6 +44,16 @@ class FakeTarget extends EventTarget {
 
 const types = historyPointerEventTypes;
 const empty = { pointerdown: 0, pointerup: 0, click: 0 };
+const transactionPrimary = (identity: Error) => new HistoryModePointerTransactionError(
+  true,
+  identity,
+  [],
+  {
+    stages: ["acquired", "cleanupComplete"],
+    physicalPointer: "notPressed",
+    cleanupAttempts: { safeReleaseMove: 0, cancelRelease: 0, safeTargetDispose: 0, animationCancel: 0, handleDispose: 0 }
+  }
+);
 
 function createFixture(options: { old?: ConstructorParameters<typeof FakeTarget>[0]; replacement?: ConstructorParameters<typeof FakeTarget>[0] } = {}) {
   const evidence = { dataset: {} as Record<string, string | undefined> };
@@ -181,6 +194,20 @@ const tests: Array<[string, () => Promise<void>]> = [
     assert(outcome.threw && outcome.error instanceof AggregateError, "falsy primary plus cleanup was not aggregated");
     assert(outcome.error.errors[0] === undefined && outcome.error.errors[1] === false, "falsy aggregate order changed");
     assert(outcome.error.cause === undefined, "falsy aggregate cause changed");
+  }],
+  ["observer primary classification preserves transaction error", async () => {
+    const identity = new Error("synthetic identity");
+    const direct = transactionPrimary(identity);
+    const cleanup = new Error("synthetic cleanup");
+    const lifecycle = new HistoryPointerEventObserverLifecycleError(direct, [cleanup]);
+    const ordinary = new Error("ordinary");
+    const cleanupOnly = new AggregateError([new Error("cleanup")], "History pointer observer cleanup failed");
+    assert(historyPointerObserverPrimary(direct) === direct, "direct transaction primary was unwrapped");
+    assert(historyPointerObserverPrimary(lifecycle) === direct, "lifecycle transaction primary was lost");
+    assert(historyPointerObserverPrimary(lifecycle) instanceof HistoryModePointerTransactionError, "transaction public state was not retained");
+    assert(direct.cause === identity && lifecycle.cause === direct && lifecycle.errors[1] === cleanup, "identity or cleanup cause was lost");
+    assert(historyPointerObserverPrimary(ordinary) === ordinary, "ordinary error was guessed as lifecycle error");
+    assert(historyPointerObserverPrimary(cleanupOnly) === cleanupOnly, "cleanup-only error was guessed as primary");
   }],
   ["duplicate cleanup", async () => {
     const fixture = createFixture();

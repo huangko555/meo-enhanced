@@ -14,6 +14,7 @@ import {
   createHistoryPointerEventObserverRegistry,
   runHistoryPointerEventObserverLifecycle
 } from './history-pointer-event-observer';
+import { historyPointerObserverPrimary } from './history-pointer-observer-failure';
 
 type BlockMode = 'preview' | 'split' | 'source';
 type NeedleOccurrence = 'first' | 'last';
@@ -566,7 +567,7 @@ async function editRenderedBlock(
         }
       });
     } catch (error) {
-      const primaryError = error instanceof AggregateError ? error.errors[0] : error;
+      const primaryError = historyPointerObserverPrimary(error);
       if (injectPreDownReplacement && primaryError instanceof HistoryModePointerTransactionError) {
         const evidence = await page.evaluate(() => (
           document.querySelector<HTMLOutputElement>(

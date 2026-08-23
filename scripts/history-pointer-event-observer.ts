@@ -3,6 +3,13 @@ export const historyPointerEventTypes = ["pointerdown", "pointerup", "click"] as
 export type HistoryPointerEventType = typeof historyPointerEventTypes[number];
 export type HistoryPointerEventRole = "old" | "replacement" | "document";
 
+export class HistoryPointerEventObserverLifecycleError extends AggregateError {
+  constructor(primary: unknown, cleanupErrors: unknown[]) {
+    super([primary, ...cleanupErrors], "History pointer observer lifecycle failed", { cause: primary });
+    this.name = "HistoryPointerEventObserverLifecycleError";
+  }
+}
+
 type ListenerTarget = Pick<EventTarget, "addEventListener" | "removeEventListener" | "dispatchEvent">;
 type EvidenceTarget = { dataset: Record<string, string | undefined> };
 
@@ -137,7 +144,7 @@ export async function runHistoryPointerEventObserverLifecycle(operations: {
 
   if (hasPrimary && hasCleanup) {
     const cleanupErrors = cleanup instanceof AggregateError ? [...cleanup.errors] : [cleanup];
-    throw new AggregateError([primary, ...cleanupErrors], "History pointer observer lifecycle failed", { cause: primary });
+    throw new HistoryPointerEventObserverLifecycleError(primary, cleanupErrors);
   }
   if (hasPrimary) throw primary;
   if (hasCleanup) throw cleanup;
