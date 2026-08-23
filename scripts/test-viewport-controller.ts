@@ -865,6 +865,109 @@ await flushFrames(wheelFrames);
 if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`A stale reveal moved the viewport to ${revealScrollDOM.scrollTop}`);
 }
+
+type GeometryShiftInterruption = 'none' | 'stale-frame' | 'destroy' | 'late-measure';
+
+const runGeometryShiftReveal = async (
+  kind: 'ordinary' | 'settled',
+  interruption: GeometryShiftInterruption = 'none'
+) => {
+  const frames: FrameRequestCallback[] = [];
+  const measures: Array<{
+    read: () => unknown;
+    write: (value: unknown) => void;
+  }> = [];
+  const previousRequestAnimationFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  };
+
+  let targetTop = 1600;
+  let scrollTop = 1000;
+  const writes: number[] = [];
+  const scrollDOM = {
+    get scrollTop() { return scrollTop; },
+    set scrollTop(value: number) {
+      scrollTop = value;
+      writes.push(value);
+    },
+    scrollLeft: 0,
+    scrollHeight: 5000,
+    scrollWidth: 900,
+    clientHeight: 500,
+    clientWidth: 900,
+    getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
+  };
+  const controller = new ViewportController({
+    dom: new FakeEventTarget(),
+    scrollDOM,
+    state: { doc: { length: 4999 } },
+    coordsAtPos: () => ({
+      top: targetTop - scrollTop,
+      bottom: targetTop + 20 - scrollTop
+    }),
+    lineBlockAt: () => ({ top: targetTop, bottom: targetTop + 20, height: 20 }),
+    requestMeasure: (measure: { read: () => unknown; write: (value: unknown) => void }) => measures.push(measure)
+  } as any, { attachInteractions: false });
+  const flushMeasure = (beforeWrite?: () => void) => {
+    const batch = measures.splice(0);
+    const results = batch.map((measure) => measure.read());
+    beforeWrite?.();
+    batch.forEach((measure, index) => measure.write(results[index]));
+  };
+  const flushAll = async () => {
+    while (measures.length > 0 || frames.length > 0) {
+      while (measures.length > 0) flushMeasure();
+      frames.splice(0).forEach((frame) => frame(0));
+      await Promise.resolve();
+    }
+  };
+
+  try {
+    const isCurrent = controller.beginNavigationReveal();
+    if (kind === 'ordinary') controller.revealPosition(1600, { y: 'center' }, isCurrent);
+    else controller.revealPositionUntilStable(1600, { y: 'center' }, isCurrent);
+
+    if (interruption === 'late-measure') {
+      flushMeasure(() => { controller.beginNavigationReveal(); });
+    } else {
+      flushMeasure();
+      targetTop += 600;
+      if (interruption === 'stale-frame') controller.beginNavigationReveal();
+      if (interruption === 'destroy') controller.destroy();
+      await flushAll();
+    }
+
+    const targetVisible = targetTop >= scrollTop && targetTop + 20 <= scrollTop + 500;
+    return { scrollTop, writes, targetVisible };
+  } finally {
+    controller.destroy();
+    globalThis.requestAnimationFrame = previousRequestAnimationFrame;
+  }
+};
+
+const ordinaryGeometryReveal = await runGeometryShiftReveal('ordinary');
+if (
+  ordinaryGeometryReveal.targetVisible ||
+  JSON.stringify(ordinaryGeometryReveal.writes) !== '[1360]'
+) {
+  throw new Error(`One-shot reveal did not expose the layout overwrite: ${JSON.stringify(ordinaryGeometryReveal)}`);
+}
+const settledGeometryReveal = await runGeometryShiftReveal('settled');
+if (
+  !settledGeometryReveal.targetVisible ||
+  JSON.stringify(settledGeometryReveal.writes) !== '[1360,1960]'
+) {
+  throw new Error(`Settled reveal did not restore the shifted target: ${JSON.stringify(settledGeometryReveal)}`);
+}
+for (const interruption of ['stale-frame', 'destroy', 'late-measure'] as const) {
+  const interruptedReveal = await runGeometryShiftReveal('settled', interruption);
+  const expectedWrites = interruption === 'late-measure' ? '[]' : '[1360]';
+  if (JSON.stringify(interruptedReveal.writes) !== expectedWrites) {
+    throw new Error(`A ${interruption} settled reveal wrote after invalidation: ${JSON.stringify(interruptedReveal)}`);
+  }
+}
 const tallScrollDOM = Object.assign(new FakeEventTarget(), {
   ownerDocument: new FakeEventTarget(),
   scrollTop: 1000,

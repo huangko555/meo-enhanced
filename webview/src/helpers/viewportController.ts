@@ -103,6 +103,12 @@ interface NavigationRevealOptions {
   readonly settle?: boolean;
 }
 
+interface RevealPositionOptions {
+  readonly y?: 'nearest' | 'center' | 'start';
+  readonly yMargin?: number;
+  readonly schedule?: 'immediate' | 'next-frame';
+}
+
 interface ActiveScrollTarget {
   changedSinceFrame: boolean;
   frameScheduled: boolean;
@@ -1046,13 +1052,30 @@ export class ViewportController {
   /** Reveals a document position; viewport ownership changes only when measurement requires a scroll. */
   revealPosition(
     position: number,
+    options: RevealPositionOptions = {},
+    isCurrent: () => boolean = () => true
+  ): void {
+    this.revealPositionInternal(position, options, isCurrent, false);
+  }
+
+  /** Reveals a document position through the finite layout-settlement window. */
+  revealPositionUntilStable(
+    position: number,
+    options: RevealPositionOptions = {},
+    isCurrent: () => boolean = () => true
+  ): void {
+    this.revealPositionInternal(position, options, isCurrent, true);
+  }
+
+  private revealPositionInternal(
+    position: number,
     {
       y = 'nearest',
       yMargin = 0,
-      schedule = 'immediate',
-      settle = false
-    }: { y?: 'nearest' | 'center' | 'start'; yMargin?: number; schedule?: 'immediate' | 'next-frame'; settle?: boolean } = {},
-    isCurrent: () => boolean = () => true
+      schedule = 'immediate'
+    }: RevealPositionOptions = {},
+    isCurrent: () => boolean,
+    settle: boolean
   ): void {
     const targetPosition = Math.max(0, Math.min(position, this.view.state.doc.length));
     if (isCurrent()) {
