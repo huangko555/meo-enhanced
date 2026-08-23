@@ -189,6 +189,9 @@ const matrix: Array<[string, () => Promise<void>]> = [
       const shouldRelease = failure === 'down' || failure === 'prepare-up' || failure === 'up';
       check(released === (shouldRelease ? 1 : 0), `${failure} safe release count differs`);
       check(subject.observed.registries === 0 && subject.observed.cleanup === 1, `${failure} cleanup leaked registry`);
+      if (failure === 'prepare-down') {
+        check(subject.trace.filter((entry) => entry === 'dispose-handle:1').length === 1, 'prepare-down leaked or double-disposed the initial handle');
+      }
     }
   }],
   ['primary-first and falsy observer cleanup failures survive', async () => {

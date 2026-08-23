@@ -69,6 +69,8 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
 ): Promise<HistoryRenderedBlockInteractionResult> {
   let observer: HistoryRenderedBlockObserver | undefined;
   let currentHandle: Handle | undefined;
+  const acquiredHandles = new Map<Handle, 'owned'>();
+  const disposedHandles = new Set<Handle>();
   let pointerNeedsRelease = false;
   let hasPrimary = false;
   let primary: unknown;
@@ -81,6 +83,16 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
       cleanup.push(new Error(`History rendered-block interaction cleanup failed during ${operation}`, { cause: error }));
     }
   };
+  const disposeOnce = async (handle: Handle, operation: 'supersededHandleDispose' | 'handleDispose') => {
+    if (disposedHandles.has(handle)) return;
+    disposedHandles.add(handle);
+    acquiredHandles.delete(handle);
+    await collectCleanup(operation, () => (
+      operation === 'supersededHandleDispose'
+        ? adapter.disposeSupersededHandle(handle)
+        : adapter.disposeHandle(handle)
+    ));
+  };
 
   try {
     const scroll = await adapter.settleScroll(interaction);
@@ -89,11 +101,13 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
     observer = await adapter.openObserver?.(interaction);
 
     const supersededHandle = await adapter.acquireCurrentHandle(interaction);
+    acquiredHandles.set(supersededHandle, 'owned');
     const initialPoint = await adapter.validateCurrentHandle(supersededHandle, 'pointerdown');
     await adapter.preparePointerDown(initialPoint);
     currentHandle = await adapter.acquireCurrentHandle(interaction);
+    acquiredHandles.set(currentHandle, 'owned');
     if (!Object.is(currentHandle, supersededHandle)) {
-      await adapter.disposeSupersededHandle(supersededHandle);
+      await disposeOnce(supersededHandle, 'supersededHandleDispose');
     }
 
     const downPoint = await adapter.validateCurrentHandle(currentHandle, 'pointerdown');
@@ -122,9 +136,9 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
       });
       await collectCleanup('safeTargetDispose', () => adapter.disposeSafeReleaseTarget());
     }
-    if (currentHandle !== undefined) {
-      if (adapter.cancelAnimation) await collectCleanup('animationCancel', () => adapter.cancelAnimation!(currentHandle as Handle));
-      await collectCleanup('handleDispose', () => adapter.disposeHandle(currentHandle as Handle));
+    for (const handle of [...acquiredHandles.keys()]) {
+      if (adapter.cancelAnimation) await collectCleanup('animationCancel', () => adapter.cancelAnimation!(handle));
+      await disposeOnce(handle, 'handleDispose');
     }
     if (observer) await collectCleanup('observerCleanup', () => observer!.cleanup());
   }
