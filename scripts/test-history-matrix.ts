@@ -10,6 +10,10 @@ import {
   HistoryModePointerTransactionError,
   runHistoryModePointerTransaction
 } from './history-mode-pointer-transaction';
+import {
+  createHistoryPointerEventObserverRegistry,
+  runHistoryPointerEventObserverLifecycle
+} from './history-pointer-event-observer';
 
 type BlockMode = 'preview' | 'split' | 'source';
 type NeedleOccurrence = 'first' | 'last';
@@ -308,23 +312,12 @@ async function editRenderedBlock(
     }
     let pointerDownRect: { top: number; bottom: number } | null = null;
     let acquiredModeButtonHandle: any;
+    let pointerObserverHandle: any;
     const safeReleaseLabel = 'History pointer safe release target';
-    const disposePreDownReplacementListeners = async () => {
-      if (!injectPreDownReplacement) return;
-      await page.evaluate(() => {
-        const output = document.querySelector<HTMLOutputElement>(
-          'output[aria-label="History pointer pre-down replacement evidence"]'
-        ) as (HTMLOutputElement & { __historyPointerListenerAbort?: AbortController }) | null;
-        if (output?.dataset.directPointerListenersCleaned === 'true') return;
-        const listenerAbort = output?.__historyPointerListenerAbort;
-        if (!listenerAbort) throw new Error('Missing pre-down replacement listener cleanup handle');
-        listenerAbort.abort();
-        delete output.__historyPointerListenerAbort;
-        output.dataset.directPointerListenersCleaned = 'true';
-      });
-    };
     try {
-      await runHistoryModePointerTransaction({
+      await runHistoryPointerEventObserverLifecycle({
+        setup: async () => {},
+        execute: async () => runHistoryModePointerTransaction({
       async acquire() {
         acquiredModeButtonHandle = await page.evaluateHandle(({ controlsLabel, currentLabel }) => {
         const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
@@ -388,40 +381,10 @@ async function editRenderedBlock(
         if (injectPreDownReplacement && modeClickSequence === 1) {
           const stableModeButton = acquiredModeButtonHandle?.asElement();
           if (!stableModeButton) throw new Error(`Missing stable mode button before injected replacement: ${transition.controlsLabel}`);
-          await stableModeButton.evaluate((button: HTMLButtonElement) => {
+          const evidenceHandle = await stableModeButton.evaluateHandle((button: HTMLButtonElement) => {
             const evidence = document.createElement('output');
             evidence.setAttribute('aria-label', 'History pointer pre-down replacement evidence');
             document.body.append(evidence);
-            const count = { pointerdown: 0, pointerup: 0, click: 0 };
-            const directCount = {
-              old: { pointerdown: 0, pointerup: 0, click: 0 },
-              replacement: { pointerdown: 0, pointerup: 0, click: 0 }
-            };
-            const listenerAbort = new AbortController();
-            const publishDirectCount = () => {
-              evidence.dataset.directPointerEvents = JSON.stringify(directCount);
-            };
-            const observeDirect = (
-              role: keyof typeof directCount,
-              candidate: HTMLButtonElement
-            ) => {
-              for (const eventName of Object.keys(count) as Array<keyof typeof count>) {
-                candidate.addEventListener(eventName, () => {
-                  directCount[role][eventName] += 1;
-                  publishDirectCount();
-                }, { capture: true, signal: listenerAbort.signal });
-              }
-            };
-            const events: string[] = [];
-            let replacement: HTMLButtonElement | null = null;
-            for (const eventName of Object.keys(count) as Array<keyof typeof count>) {
-              document.addEventListener(eventName, (event) => {
-                count[eventName] += 1;
-                const target = event.target instanceof Element ? event.target : null;
-                events.push(`${eventName}:${target?.closest('button') === replacement ? 'replacement' : 'other'}`);
-                evidence.dataset.pointerEvents = JSON.stringify(events);
-              }, { capture: true });
-            }
             const snapshot = (candidate: HTMLButtonElement) => ({
               connected: candidate.isConnected,
               label: candidate.getAttribute('aria-label'),
@@ -430,23 +393,49 @@ async function editRenderedBlock(
               rect: candidate.getBoundingClientRect().toJSON()
             });
             const oldBefore = snapshot(button);
-            observeDirect('old', button);
-            replacement = button.cloneNode(true) as HTMLButtonElement;
+            const replacement = button.cloneNode(true) as HTMLButtonElement;
             button.replaceWith(replacement);
-            observeDirect('replacement', replacement);
-            Object.defineProperty(evidence, '__historyPointerListenerAbort', {
-              value: listenerAbort,
-              configurable: true
-            });
-            publishDirectCount();
             evidence.textContent = JSON.stringify({
               oldBefore,
               oldAfter: snapshot(button),
               replacement: snapshot(replacement),
-              sameNode: button === replacement,
-              count
+              sameNode: button === replacement
             });
+            return evidence;
           });
+          try {
+            pointerObserverHandle = await page.evaluateHandle(
+              createHistoryPointerEventObserverRegistry,
+              evidenceHandle
+            );
+            const replacementHandle = await page.evaluateHandle(({ controlsLabel, currentLabel }) => {
+              const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+              return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+                .find((candidate) => candidate.getAttribute('aria-label') === currentLabel) ?? null;
+            }, transition);
+            const documentHandle = await page.evaluateHandle(() => document);
+            try {
+              await pointerObserverHandle.evaluate(
+                (registry: ReturnType<typeof createHistoryPointerEventObserverRegistry>, oldButton, replacementButton, documentTarget) => {
+                  if (!(oldButton instanceof HTMLButtonElement) || !(replacementButton instanceof HTMLButtonElement)) {
+                    throw new Error('Missing pre-down replacement observer target');
+                  }
+                  registry.setReplacement(replacementButton);
+                  registry.observe('old', oldButton);
+                  registry.observe('replacement', replacementButton);
+                  registry.observe('document', documentTarget);
+                },
+                stableModeButton,
+                replacementHandle,
+                documentHandle
+              );
+            } finally {
+              await replacementHandle.dispose();
+              await documentHandle.dispose();
+            }
+          } finally {
+            await evidenceHandle.dispose();
+          }
           if (injectDetachedOldEvents) {
             await stableModeButton.evaluate((button: HTMLButtonElement) => {
               for (const eventName of ['pointerdown', 'pointerup', 'click'] as const) {
@@ -561,8 +550,21 @@ async function editRenderedBlock(
         }
       },
         disposeHandle: (modeButtonHandle: any) => modeButtonHandle.dispose()
+        }),
+        cleanup: async () => {
+          if (!pointerObserverHandle) return;
+          try {
+            const sentinelVerified = await pointerObserverHandle.evaluate((registry: ReturnType<typeof createHistoryPointerEventObserverRegistry>) => {
+              registry.cleanup();
+              return registry.verifySentinel();
+            });
+            if (!sentinelVerified) throw new Error('History pointer observer sentinel wrote after cleanup');
+          } finally {
+            await pointerObserverHandle.dispose();
+            pointerObserverHandle = null;
+          }
+        }
       });
-      await disposePreDownReplacementListeners();
     } catch (error) {
       let cleanupError: unknown = null;
       try {
@@ -1271,14 +1273,11 @@ async function main() {
         );
         return {
           details: output?.textContent ?? null,
-          pointerEvents: output?.dataset.pointerEvents ?? null,
-          directPointerEvents: output?.dataset.directPointerEvents ?? null,
-          listenersCleaned: output?.dataset.directPointerListenersCleaned ?? null
+          observer: output?.dataset.historyPointerObserver ?? null
         };
       });
       const details = evidence.details ? JSON.parse(evidence.details) : null;
-      const pointerEvents = evidence.pointerEvents ? JSON.parse(evidence.pointerEvents) : null;
-      const directPointerEvents = evidence.directPointerEvents ? JSON.parse(evidence.directPointerEvents) : null;
+      const observer = evidence.observer ? JSON.parse(evidence.observer) : null;
       const sameAccessibleControl = (
         details?.oldBefore?.label === details?.replacement?.label
         && details?.oldBefore?.group === details?.replacement?.group
@@ -1291,17 +1290,19 @@ async function main() {
         || details.oldAfter?.connected !== false
         || details.replacement?.connected !== true
         || !sameAccessibleControl
-        || JSON.stringify(directPointerEvents) !== JSON.stringify({
+        || JSON.stringify(observer?.direct) !== JSON.stringify({
           old: { pointerdown: 0, pointerup: 0, click: 0 },
           replacement: { pointerdown: 1, pointerup: 1, click: 1 }
         })
-        || evidence.listenersCleaned !== 'true'
-        || JSON.stringify(pointerEvents) !== JSON.stringify([
+        || observer?.cleaned !== true
+        || observer?.registrations !== 0
+        || observer?.sentinelVerified !== true
+        || JSON.stringify(observer?.documentEvents) !== JSON.stringify([
           'pointerdown:replacement', 'pointerup:replacement', 'click:replacement'
         ])
       ) {
         throw new Error(`Pre-down replacement did not reacquire the current public control: ${JSON.stringify({
-          details, directPointerEvents, listenersCleaned: evidence.listenersCleaned, pointerEvents
+          details, observer
         })}`);
       }
       console.log('suite-prefix first default Mermaid pre-down replacement checks passed');
