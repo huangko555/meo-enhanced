@@ -162,7 +162,9 @@ function anchorsAreEquivalent(
 }
 
 function nextFrame(requestFrame: (callback: FrameRequestCallback) => number): Promise<number> {
-  return new Promise((resolve) => requestFrame(resolve));
+  // A RAF callback timestamp describes the frame boundary and can precede the
+  // synchronous baseline sample. Record when this callback actually observes state.
+  return new Promise((resolve) => requestFrame(() => resolve(performance.now())));
 }
 
 function selectedFiniteValue(
