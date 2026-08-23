@@ -6,6 +6,26 @@ import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-live-layout-stability-'));
+const tableWrapFixture = ' wrapping table cell content'.repeat(8);
+
+type EndCaretObservation = {
+  isActive: boolean;
+  selectionEnd: number | null;
+  valueLength: number;
+  inputBottom: number;
+  cellBottom: number;
+  scrollerBottom: number;
+};
+
+function hasCompleteAppendedInput(value: string, initialLength: number): boolean {
+  return value.length === initialLength + tableWrapFixture.length && value.endsWith(tableWrapFixture);
+}
+
+function hasVisibleEndCaret(observation: EndCaretObservation): boolean {
+  return observation.isActive && observation.selectionEnd === observation.valueLength &&
+    observation.inputBottom <= observation.scrollerBottom &&
+    observation.cellBottom <= observation.scrollerBottom;
+}
 
 async function waitForFrames(page: Page, count = 10): Promise<void> {
   await page.evaluate(async (frameCount) => {
@@ -44,7 +64,10 @@ async function main(): Promise<void> {
       '| Beta | Short |',
       ...Array.from({ length: 60 }, (_, index) => `table anchor ${index + 1}`)
     ].join('\n');
-    const tableWrapOnly = process.argv.includes('--table-wrap');
+    const tableWrapCounterexample = process.argv.find((argument) => (
+      argument.startsWith('--table-wrap-counterexample=')
+    ))?.split('=')[1] ?? null;
+    const tableWrapOnly = process.argv.includes('--table-wrap') || tableWrapCounterexample !== null;
     if (tableWrapOnly) {
       await page.evaluate(() => {
         (window as any).__editor = (window as any).LiveLayoutStabilityHarness.createEditor({
@@ -565,25 +588,30 @@ async function main(): Promise<void> {
       scroller.scrollTop += row.getBoundingClientRect().bottom - scrollerRect.bottom + 12;
       (window as any).__tableWrapFrames = [];
       (window as any).__focusedTableInputCollapsed = false;
-      const focusedInput = currentElements().input;
-      new MutationObserver((records) => {
-        if (records.some((record) => record.oldValue?.includes('height: 0px'))) {
+      new MutationObserver(() => {
+        const currentInput = currentElements().input;
+        if (currentInput.style.height === '0px' || currentInput.clientHeight <= 0) {
           (window as any).__focusedTableInputCollapsed = true;
         }
-      }).observe(focusedInput, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+      }).observe(shell, {
+        attributes: true,
+        attributeFilter: ['style'],
+        childList: true,
+        subtree: true
+      });
       const capture = (stage: string) => {
         const { shell, row, input } = currentElements();
+        const currentScrollerRect = scroller.getBoundingClientRect();
+        const cellRect = input.closest('td')!.getBoundingClientRect();
         (window as any).__tableWrapFrames.push({
           stage,
           scrollTop: scroller.scrollTop,
           shellTop: shell.getBoundingClientRect().top,
           rowHeight: row.getBoundingClientRect().height,
           inputScrollTop: input.scrollTop,
-          caretVisible: (() => {
-            const scrollerRect = scroller.getBoundingClientRect();
-            const cellRect = input.closest('td')!.getBoundingClientRect();
-            return cellRect.bottom > scrollerRect.top && cellRect.top < scrollerRect.bottom;
-          })()
+          inputClientHeight: input.clientHeight,
+          inputEndVisible: input.getBoundingClientRect().bottom <= currentScrollerRect.bottom &&
+            cellRect.bottom <= currentScrollerRect.bottom
         });
       };
       document.addEventListener('input', (event) => {
@@ -599,6 +627,76 @@ async function main(): Promise<void> {
       };
       requestAnimationFrame(sample);
     });
+    if (tableWrapCounterexample === 'incomplete') {
+      const initialLength = await wrappingTableInput.evaluate((input) => input.value.length);
+      await wrappingTableInput.type(tableWrapFixture.slice(0, -Math.floor(tableWrapFixture.length / 2)));
+      const value = await page.$eval(
+        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+        (input: HTMLTextAreaElement) => input.value
+      );
+      if (
+        !value.includes('wrapping table cell content') ||
+        hasCompleteAppendedInput(value, initialLength)
+      ) {
+        throw new Error('Incomplete table input did not distinguish the exact append contract');
+      }
+      console.log('incomplete table input counterexample passed');
+      return;
+    }
+    if (tableWrapCounterexample === 'caret') {
+      const observation = await page.$eval(
+        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+        (input: HTMLTextAreaElement) => {
+          const cell = input.closest<HTMLTableCellElement>('td')!;
+          const scroller = input.closest<HTMLElement>('.cm-scroller')!;
+          const cellRect = cell.getBoundingClientRect();
+          const scrollerRect = scroller.getBoundingClientRect();
+          scroller.scrollTop += cellRect.top - scrollerRect.bottom + cellRect.height / 2;
+          const movedCellRect = cell.getBoundingClientRect();
+          const inputRect = input.getBoundingClientRect();
+          return {
+            legacyIntersects: movedCellRect.bottom > scrollerRect.top && movedCellRect.top < scrollerRect.bottom,
+            isActive: document.activeElement === input,
+            selectionEnd: input.selectionEnd,
+            valueLength: input.value.length,
+            inputBottom: inputRect.bottom,
+            cellBottom: movedCellRect.bottom,
+            scrollerBottom: scrollerRect.bottom
+          };
+        }
+      );
+      if (!observation.legacyIntersects || hasVisibleEndCaret(observation)) {
+        throw new Error(`Table end-caret counterexample did not cross the viewport boundary: ${JSON.stringify(observation)}`);
+      }
+      console.log('table end-caret counterexample passed');
+      return;
+    }
+    if (tableWrapCounterexample === 'replacement') {
+      const observation = await page.evaluate(async () => {
+        const oldInput = document.querySelector<HTMLTextAreaElement>(
+          '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea'
+        )!;
+        let oldNodeObservedCollapse = false;
+        new MutationObserver(() => { oldNodeObservedCollapse = true; }).observe(oldInput, {
+          attributes: true,
+          attributeFilter: ['style']
+        });
+        const replacement = oldInput.cloneNode(false) as HTMLTextAreaElement;
+        replacement.value = oldInput.value;
+        replacement.style.height = '0px';
+        oldInput.replaceWith(replacement);
+        await Promise.resolve();
+        return {
+          oldNodeObservedCollapse,
+          currentObserverDetectedCollapse: Boolean((window as any).__focusedTableInputCollapsed)
+        };
+      });
+      if (observation.oldNodeObservedCollapse || !observation.currentObserverDetectedCollapse) {
+        throw new Error(`Replacement textarea collapse counterexample was not distinguished: ${JSON.stringify(observation)}`);
+      }
+      console.log('replacement textarea collapse counterexample passed');
+      return;
+    }
     const initialWrapRowHeight = await page.$eval(
       '.meo-md-html-table-shell tbody tr:nth-child(2)',
       (row) => row.getBoundingClientRect().height
@@ -607,7 +705,8 @@ async function main(): Promise<void> {
       '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
       (input: HTMLTextAreaElement) => input.scrollHeight
     );
-    await wrappingTableInput.type(' wrapping table cell content'.repeat(16));
+    const initialWrapInputLength = await wrappingTableInput.evaluate((input) => input.value.length);
+    await wrappingTableInput.type(tableWrapFixture);
     const crossedWrapThreshold = await page.waitForFunction(
       (initialHeight) => (
         ((window as any).__tableWrapFrames as Array<{
@@ -632,7 +731,8 @@ async function main(): Promise<void> {
         shellTop: number;
         rowHeight: number | null;
         inputScrollTop: number;
-        caretVisible: boolean;
+        inputClientHeight: number;
+        inputEndVisible: boolean;
       }>
     ));
     const focusedTableInputCollapsed = await page.evaluate(() => (
@@ -645,15 +745,26 @@ async function main(): Promise<void> {
     const wrapShellTops = tableWrapFrames.map((frame) => frame.shellTop);
     const inputGeometry = await page.$eval(
       '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
-      (input: HTMLTextAreaElement) => ({
-        valueIncludesFixture: input.value.includes('wrapping table cell content'),
-        scrollHeight: input.scrollHeight,
-        clientHeight: input.clientHeight,
-        clientWidth: input.clientWidth
-      })
+      (input: HTMLTextAreaElement) => {
+        const inputRect = input.getBoundingClientRect();
+        const cellRect = input.closest('td')!.getBoundingClientRect();
+        const scrollerRect = input.closest('.cm-scroller')!.getBoundingClientRect();
+        return {
+          value: input.value,
+          isActive: document.activeElement === input,
+          selectionEnd: input.selectionEnd,
+          valueLength: input.value.length,
+          inputBottom: inputRect.bottom,
+          cellBottom: cellRect.bottom,
+          scrollerBottom: scrollerRect.bottom,
+          scrollHeight: input.scrollHeight,
+          clientHeight: input.clientHeight,
+          clientWidth: input.clientWidth
+        };
+      }
     );
     if (
-      !crossedWrapThreshold || !inputGeometry.valueIncludesFixture ||
+      !crossedWrapThreshold || !hasCompleteAppendedInput(inputGeometry.value, initialWrapInputLength) ||
       inputGeometry.scrollHeight <= initialWrapInputScrollHeight ||
       Math.max(...wrapHeights) <= Math.min(...wrapHeights)
     ) {
@@ -667,23 +778,25 @@ async function main(): Promise<void> {
       .map((top, index) => top - wrapShellTops[index])
       .filter((delta) => Math.abs(delta) > 1)
       .map((delta) => Math.sign(delta));
-    const caretVisible = await page.$eval(
-      '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2)',
-      (cell) => {
-        const scroller = cell.closest('.cm-scroller')!.getBoundingClientRect();
-        const rect = cell.getBoundingClientRect();
-        return rect.bottom > scroller.top && rect.top < scroller.bottom;
-      }
-    );
     if (
       scrollDirections.some((direction, index) => index > 0 && direction !== scrollDirections[index - 1]) ||
       shellDirections.some((direction, index) => index > 0 && direction !== shellDirections[index - 1]) ||
       focusedTableInputCollapsed ||
       tableWrapFrames.some((frame) => frame.inputScrollTop > 1) ||
-      tableWrapFrames.some((frame) => !frame.caretVisible) ||
-      !caretVisible
+      tableWrapFrames.some((frame) => (
+        frame.inputClientHeight <= 0 || (frame.stage === 'frame' && !frame.inputEndVisible)
+      )) ||
+      inputGeometry.clientHeight <= 0 || !hasVisibleEndCaret(inputGeometry)
     ) {
-      throw new Error(`Wrapping a focused table cell moved the viewport between frames: ${JSON.stringify(tableWrapFrames)}`);
+      throw new Error(`Wrapping a focused table cell moved the viewport between frames: ${JSON.stringify({
+        focusedTableInputCollapsed,
+        invalidFrame: tableWrapFrames.find((frame) => (
+          frame.inputScrollTop > 1 || frame.inputClientHeight <= 0 ||
+          (frame.stage === 'frame' && !frame.inputEndVisible)
+        )) ?? null,
+        inputGeometry,
+        tableWrapFrames
+      })}`);
     }
 
     const hiddenToolbarHitTest = await page.evaluate(async () => {
