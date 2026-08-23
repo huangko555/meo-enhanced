@@ -193,7 +193,9 @@ async function editRenderedBlock(
   occurrence: NeedleOccurrence = 'first',
   stopAfterModeSettlement = false,
   stopBeforeFinalPreviewPointer = false,
-  stopAfterFinalPreviewClick = false
+  stopAfterFinalPreviewClick = false,
+  expectFinalPreviewReplacementFailure = false,
+  stopAfterFinalPreviewStableMovement = false
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
@@ -271,17 +273,16 @@ async function editRenderedBlock(
         hitPoint: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
       };
     }, { blockKind: kind, needle: lineNeedle, lineNumber: targetLineNumber });
-    const currentModeButtonHitPoint = () => page.evaluate(({ controlsLabel, currentLabel }) => {
-      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
-      const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-        .find((candidate) => candidate.getAttribute('aria-label') === currentLabel);
-      if (!button?.isConnected) throw new Error(`Missing current mode button before pointer delivery: ${controlsLabel}`);
-      const rect = button.getBoundingClientRect();
-      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    }, transition);
     await page.mouse.move(transition.hitPoint.x, transition.hitPoint.y);
-    const exposeFinalPreviewMovement = stopAfterFinalPreviewClick && modeClickSequence === 3;
-    if (exposeFinalPreviewMovement) {
+    const exerciseFinalPreviewPointerSeam = (
+      (
+        stopAfterFinalPreviewClick
+        || expectFinalPreviewReplacementFailure
+        || stopAfterFinalPreviewStableMovement
+      )
+      && modeClickSequence === 3
+    );
+    if (exerciseFinalPreviewPointerSeam) {
       await page.evaluate((lineNumber) => {
         (window as any).__historyMatrixEditor.scrollToLine(lineNumber, 'top');
       }, targetLineNumber);
@@ -299,19 +300,115 @@ async function editRenderedBlock(
         );
       }, {}, transition);
     }
-    const downPoint = await currentModeButtonHitPoint();
-    await page.mouse.move(downPoint.x, downPoint.y);
-    await page.mouse.down();
-    try {
-      const upPoint = await currentModeButtonHitPoint();
-      await page.mouse.move(upPoint.x, upPoint.y);
-    } finally {
-      await page.mouse.up();
+    const modeButtonHandle = await page.evaluateHandle(({ controlsLabel, currentLabel }) => {
+      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+      return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+        .find((candidate) => candidate.getAttribute('aria-label') === currentLabel) ?? null;
+    }, transition);
+    const stableModeButton = modeButtonHandle.asElement();
+    if (!stableModeButton) {
+      await modeButtonHandle.dispose();
+      throw new Error(`Missing stable mode button before pointer delivery: ${transition.controlsLabel}`);
     }
+    const stableModeButtonHitPoint = (phase: 'pointerdown' | 'pointerup') => stableModeButton.evaluate(
+      (button, contract) => {
+        const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+        const expectedGroup = document.querySelector<HTMLElement>(
+          `[role="group"][aria-label="${contract.controlsLabel}"]`
+        );
+        const actualGroup = button.closest<HTMLElement>('[role="group"][aria-label]');
+        const currentButton = Array.from(
+          expectedGroup?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
+        ).find((candidate) => candidate.getAttribute('aria-label') === contract.currentLabel);
+        if (
+          !button.isConnected
+          || actualGroup !== expectedGroup
+          || currentButton !== button
+          || actualGroup?.getAttribute('aria-label') !== contract.controlsLabel
+          || button.getAttribute('aria-label') !== contract.currentLabel
+        ) {
+          throw new Error(
+            `Mode button identity changed before ${contract.phase}: ${contract.controlsLabel}`
+          );
+        }
+        if (!scroller || !actualGroup || !scroller.contains(actualGroup) || !actualGroup.contains(button)) {
+          throw new Error(`Mode button left its editor scroller before ${contract.phase}: ${contract.controlsLabel}`);
+        }
+        const viewport = scroller.getBoundingClientRect();
+        const groupRect = actualGroup.getBoundingClientRect();
+        const buttonRect = button.getBoundingClientRect();
+        const fullyVisible = [groupRect, buttonRect].every((rect) => (
+          rect.top >= viewport.top && rect.bottom <= viewport.bottom
+          && rect.left >= viewport.left && rect.right <= viewport.right
+        ));
+        if (!fullyVisible) {
+          throw new Error(`Mode button is not fully visible before ${contract.phase}: ${contract.controlsLabel}`);
+        }
+        return {
+          x: buttonRect.left + buttonRect.width / 2,
+          y: buttonRect.top + buttonRect.height / 2,
+          rect: buttonRect.toJSON()
+        };
+      },
+      { ...transition, phase }
+    );
+    let pointerDown = false;
+    try {
+      const downPoint = await stableModeButtonHitPoint('pointerdown');
+      await page.mouse.move(downPoint.x, downPoint.y);
+      await page.mouse.down();
+      pointerDown = true;
+      if (expectFinalPreviewReplacementFailure && modeClickSequence === 3) {
+        await stableModeButton.evaluate((button, expectedLabel) => {
+          const replacement = button.cloneNode(true) as HTMLButtonElement;
+          replacement.addEventListener('pointerup', () => {
+            replacement.setAttribute('aria-label', expectedLabel);
+          }, { once: true });
+          button.replaceWith(replacement);
+        }, transition.expectedLabel);
+      } else if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) {
+        await stableModeButton.evaluate((button) => {
+          const movement = button.animate(
+            [{ transform: 'translateY(0)' }, { transform: 'translateY(50%)' }],
+            { duration: 1, fill: 'both' }
+          );
+          movement.pause();
+          movement.currentTime = 1;
+        });
+        await page.waitForFunction((button, previousRect) => {
+          if (!(button instanceof HTMLElement) || !button.isConnected) return false;
+          const rect = button.getBoundingClientRect();
+          return rect.top !== previousRect.top || rect.bottom !== previousRect.bottom;
+        }, {}, stableModeButton, downPoint.rect).catch((error: unknown) => {
+          throw new Error('Stable mode button did not move between pointerdown and pointerup', { cause: error });
+        });
+      }
+      const upPoint = await stableModeButtonHitPoint('pointerup');
+      await page.mouse.move(upPoint.x, upPoint.y);
+      await page.mouse.up();
+      pointerDown = false;
+    } finally {
+      try {
+        if (pointerDown) await page.mouse.up();
+      } finally {
+        try {
+          if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) {
+            await stableModeButton.evaluate((button) => {
+              button.getAnimations().forEach((animation) => animation.cancel());
+            });
+          }
+        } finally {
+          await modeButtonHandle.dispose();
+        }
+      }
+    }
+    if (stopAfterFinalPreviewStableMovement && modeClickSequence === 3) return;
     await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
       document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
         ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-    ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition);
+    ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition).catch((error: unknown) => {
+      throw new Error(`Mode button label did not settle: ${transition.controlsLabel}`, { cause: error });
+    });
   };
   targetLineNumber = await scrollToLineContaining(page, lineNeedle, occurrence, null, kind);
   await clickTargetModeButton();
@@ -382,7 +479,11 @@ async function editRenderedBlock(
       return;
     }
     await clickTargetModeButton();
-    if (stopAfterFinalPreviewClick) return;
+    if (
+      stopAfterFinalPreviewClick
+      || expectFinalPreviewReplacementFailure
+      || stopAfterFinalPreviewStableMovement
+    ) return;
   }
   const desiredMode = finalMode === 'preview' ? 'split' : finalMode;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -593,6 +694,12 @@ async function main() {
   );
   const firstDefaultMermaidFinalPreviewClickOnly = (
     process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_FINAL_PREVIEW_CLICK_ONLY === '1'
+  );
+  const firstDefaultMermaidFinalPreviewReplacementOnly = (
+    process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_FINAL_PREVIEW_REPLACEMENT_ONLY === '1'
+  );
+  const firstDefaultMermaidFinalPreviewStableMovementOnly = (
+    process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_FINAL_PREVIEW_STABLE_MOVEMENT_ONLY === '1'
   );
   const realFixtureText = realFixturePath ? fs.readFileSync(realFixturePath, 'utf8') : null;
   if (firstMermaidClickOnly && realFixtureText) {
@@ -871,17 +978,30 @@ async function main() {
     await editOuterLine(page, fixture.code, ' // CODE_EDIT');
     await record({ kind: 'outer', lineNeedle: fixture.code });
 
-    await editRenderedBlock(
-      page,
-      'mermaid',
-      fixture.mermaidPreview,
-      ' M_PREVIEW_EDIT',
-      'preview',
-      'first',
-      firstDefaultMermaidClickOnly,
-      firstDefaultMermaidFinalPreviewSettlementOnly,
-      firstDefaultMermaidFinalPreviewClickOnly
-    );
+    let rejectedReplacement = false;
+    try {
+      await editRenderedBlock(
+        page,
+        'mermaid',
+        fixture.mermaidPreview,
+        ' M_PREVIEW_EDIT',
+        'preview',
+        'first',
+        firstDefaultMermaidClickOnly,
+        firstDefaultMermaidFinalPreviewSettlementOnly,
+        firstDefaultMermaidFinalPreviewClickOnly,
+        firstDefaultMermaidFinalPreviewReplacementOnly,
+        firstDefaultMermaidFinalPreviewStableMovementOnly
+      );
+    } catch (error) {
+      const expectedReplacementError = (
+        'Mode button identity changed before pointerup: Mermaid block controls at line 130'
+      );
+      if (!firstDefaultMermaidFinalPreviewReplacementOnly || !String(error).includes(expectedReplacementError)) {
+        throw error;
+      }
+      rejectedReplacement = true;
+    }
     if (firstDefaultMermaidClickOnly) {
       console.log('suite-prefix first default Mermaid click checks passed');
       return;
@@ -892,6 +1012,15 @@ async function main() {
     }
     if (firstDefaultMermaidFinalPreviewClickOnly) {
       console.log('suite-prefix first default Mermaid final preview click checks passed');
+      return;
+    }
+    if (firstDefaultMermaidFinalPreviewReplacementOnly) {
+      if (!rejectedReplacement) throw new Error('Final preview mode button replacement was not rejected');
+      console.log('suite-prefix first default Mermaid final preview replacement checks passed');
+      return;
+    }
+    if (firstDefaultMermaidFinalPreviewStableMovementOnly) {
+      console.log('suite-prefix first default Mermaid final preview stable movement checks passed');
       return;
     }
     await record({ kind: 'mermaid', marker: 'M_PREVIEW_EDIT', mode: 'split' });
