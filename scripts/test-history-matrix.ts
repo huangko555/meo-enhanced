@@ -82,6 +82,10 @@ async function scrollToLineContaining(
     const block = targetRenderedKind
       ? document.querySelector<HTMLElement>(`[role="group"][aria-label="${blockLabel}"]`)
       : null;
+    if (targetRenderedKind && !block) {
+      editor.scrollToLine(targetLineNumber, 'center');
+      return false;
+    }
     const target = expectedTableCell ? table : block ?? line;
     if (!scroller || !target) return false;
     const targetViewport = scroller.getBoundingClientRect();
