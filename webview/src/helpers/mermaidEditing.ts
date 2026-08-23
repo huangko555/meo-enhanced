@@ -80,6 +80,14 @@ function isMermaidAnchor(state: EditorState, anchor: number): boolean {
   return line.from === anchor && mermaidOpeningLineRegex.test(line.text);
 }
 
+function resolveMermaidAnchorAtLine(state: EditorState, lineNumber: number): number | null {
+  if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > state.doc.lines) {
+    return null;
+  }
+  const anchor = state.doc.line(lineNumber).from;
+  return isMermaidAnchor(state, anchor) ? anchor : null;
+}
+
 export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
   create() {
     return { modes: new Map(), searchReveal: null };
@@ -226,13 +234,15 @@ class MermaidToolbarWidget extends WidgetType {
     const changeMode = (event: Event) => {
       event.preventDefault();
       event.stopPropagation();
+      const currentAnchor = resolveMermaidAnchorAtLine(view.state, this.lineNumber);
+      if (currentAnchor === null) return;
       const currentMode = toolbar.dataset.meoMermaidMode as MermaidBlockMode;
       const nextMode = nextMermaidMode(currentMode);
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
-        this.anchor,
-        setMermaidBlockModeEffect.of({ anchor: this.anchor, mode: nextMode })
+        currentAnchor,
+        setMermaidBlockModeEffect.of({ anchor: currentAnchor, mode: nextMode })
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
@@ -241,7 +251,7 @@ class MermaidToolbarWidget extends WidgetType {
           return;
         }
         const editingBlock = view.dom.querySelector<HTMLElement>(
-          `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${this.anchor}"]`
+          `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${currentAnchor}"]`
         );
         (editingBlock as MermaidEditingBlockElement | null)?.__meoMermaidEditingController?.focus();
       });

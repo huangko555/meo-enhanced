@@ -315,6 +315,37 @@ async function editRenderedBlock(
   }
 }
 
+async function assertFirstMermaidModeClickAfterAdjacentEdit(page: any, lineNeedle: string) {
+  await editOuterLine(page, 'CODE_TARGET', ' // CODE_EDIT');
+  const targetLineNumber = await scrollToLineContaining(page, lineNeedle, 'first', null, 'mermaid');
+  if (targetLineNumber !== 130) {
+    throw new Error(`Expected first Mermaid control at line 130, received line ${targetLineNumber}`);
+  }
+  const transition = await page.evaluate((lineNumber) => {
+    const controlsLabel = `Mermaid block controls at line ${lineNumber}`;
+    const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`);
+    const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+      .find((candidate) => candidate.getAttribute('aria-label') === 'Edit Mermaid in split view');
+    if (!button) throw new Error(`Missing preview mode control: ${controlsLabel}`);
+    button.click();
+    return controlsLabel;
+  }, targetLineNumber);
+  await page.waitForFunction((controlsLabel) => Array.from(
+    document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
+      ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
+  ).some((candidate) => candidate.getAttribute('aria-label') === 'Show Mermaid code only'), {}, transition);
+
+  const repeatedLineNumber = await scrollToLineContaining(page, lineNeedle, 'last', null, 'mermaid');
+  if (repeatedLineNumber === targetLineNumber) {
+    throw new Error('Expected a distinct repeated Mermaid block');
+  }
+  await page.waitForFunction((lineNumber) => Array.from(
+    document.querySelector<HTMLElement>(
+      `[role="group"][aria-label="Mermaid block controls at line ${lineNumber}"]`
+    )?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
+  ).some((candidate) => candidate.getAttribute('aria-label') === 'Edit Mermaid in split view'), {}, repeatedLineNumber);
+}
+
 async function assertHistoryTarget(
   page: any,
   target: HistoryTarget,
@@ -412,7 +443,11 @@ async function assertHistoryTarget(
 
 async function main() {
   const realFixturePath = process.env.MEO_HISTORY_REAL_FIXTURE?.trim() || null;
+  const firstMermaidClickOnly = process.env.MEO_HISTORY_FIRST_MERMAID_CLICK_ONLY === '1';
   const realFixtureText = realFixturePath ? fs.readFileSync(realFixturePath, 'utf8') : null;
+  if (firstMermaidClickOnly && realFixtureText) {
+    throw new Error('The focused first-Mermaid click path requires the synthetic History fixture');
+  }
   const fixture = realFixtureText
     ? {
         outerTop: 'represents the pro',
@@ -576,6 +611,12 @@ async function main() {
       && document.querySelector('.cm-editor > .cm-scroller')
       && document.querySelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')
     ));
+
+    if (firstMermaidClickOnly) {
+      await assertFirstMermaidModeClickAfterAdjacentEdit(page, fixture.mermaidPreview);
+      console.log('focused first Mermaid mode click checks passed');
+      return;
+    }
 
     const externalSyncDepth = await page.evaluate(() => {
       const editor = (window as any).__historyMatrixEditor;
