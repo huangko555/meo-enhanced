@@ -200,7 +200,8 @@ async function editRenderedBlock(
   stopAfterFinalPreviewClick = false,
   expectFinalPreviewReplacementFailure = false,
   stopAfterFinalPreviewStableMovement = false,
-  injectPreDownReplacement = false
+  injectPreDownReplacement = false,
+  injectDetachedOldEvents = false
 ) {
   const modeButton = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
   const blockSelector = kind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
@@ -308,6 +309,20 @@ async function editRenderedBlock(
     let pointerDownRect: { top: number; bottom: number } | null = null;
     let acquiredModeButtonHandle: any;
     const safeReleaseLabel = 'History pointer safe release target';
+    const disposePreDownReplacementListeners = async () => {
+      if (!injectPreDownReplacement) return;
+      await page.evaluate(() => {
+        const output = document.querySelector<HTMLOutputElement>(
+          'output[aria-label="History pointer pre-down replacement evidence"]'
+        ) as (HTMLOutputElement & { __historyPointerListenerAbort?: AbortController }) | null;
+        if (output?.dataset.directPointerListenersCleaned === 'true') return;
+        const listenerAbort = output?.__historyPointerListenerAbort;
+        if (!listenerAbort) throw new Error('Missing pre-down replacement listener cleanup handle');
+        listenerAbort.abort();
+        delete output.__historyPointerListenerAbort;
+        output.dataset.directPointerListenersCleaned = 'true';
+      });
+    };
     try {
       await runHistoryModePointerTransaction({
       async acquire() {
@@ -378,6 +393,25 @@ async function editRenderedBlock(
             evidence.setAttribute('aria-label', 'History pointer pre-down replacement evidence');
             document.body.append(evidence);
             const count = { pointerdown: 0, pointerup: 0, click: 0 };
+            const directCount = {
+              old: { pointerdown: 0, pointerup: 0, click: 0 },
+              replacement: { pointerdown: 0, pointerup: 0, click: 0 }
+            };
+            const listenerAbort = new AbortController();
+            const publishDirectCount = () => {
+              evidence.dataset.directPointerEvents = JSON.stringify(directCount);
+            };
+            const observeDirect = (
+              role: keyof typeof directCount,
+              candidate: HTMLButtonElement
+            ) => {
+              for (const eventName of Object.keys(count) as Array<keyof typeof count>) {
+                candidate.addEventListener(eventName, () => {
+                  directCount[role][eventName] += 1;
+                  publishDirectCount();
+                }, { capture: true, signal: listenerAbort.signal });
+              }
+            };
             const events: string[] = [];
             let replacement: HTMLButtonElement | null = null;
             for (const eventName of Object.keys(count) as Array<keyof typeof count>) {
@@ -396,8 +430,15 @@ async function editRenderedBlock(
               rect: candidate.getBoundingClientRect().toJSON()
             });
             const oldBefore = snapshot(button);
+            observeDirect('old', button);
             replacement = button.cloneNode(true) as HTMLButtonElement;
             button.replaceWith(replacement);
+            observeDirect('replacement', replacement);
+            Object.defineProperty(evidence, '__historyPointerListenerAbort', {
+              value: listenerAbort,
+              configurable: true
+            });
+            publishDirectCount();
             evidence.textContent = JSON.stringify({
               oldBefore,
               oldAfter: snapshot(button),
@@ -406,6 +447,17 @@ async function editRenderedBlock(
               count
             });
           });
+          if (injectDetachedOldEvents) {
+            await stableModeButton.evaluate((button: HTMLButtonElement) => {
+              for (const eventName of ['pointerdown', 'pointerup', 'click'] as const) {
+                button.addEventListener(eventName, (event) => event.stopImmediatePropagation(), {
+                  capture: true,
+                  once: true
+                });
+                button.dispatchEvent(new Event(eventName, { bubbles: true }));
+              }
+            });
+          }
         }
         await page.mouse.move(point.x, point.y);
       },
@@ -510,19 +562,33 @@ async function editRenderedBlock(
       },
         disposeHandle: (modeButtonHandle: any) => modeButtonHandle.dispose()
       });
+      await disposePreDownReplacementListeners();
     } catch (error) {
+      let cleanupError: unknown = null;
+      try {
+        await disposePreDownReplacementListeners();
+      } catch (cleanupFailure) {
+        cleanupError = cleanupFailure;
+      }
       if (injectPreDownReplacement && error instanceof HistoryModePointerTransactionError) {
         const evidence = await page.evaluate(() => (
           document.querySelector<HTMLOutputElement>(
             'output[aria-label="History pointer pre-down replacement evidence"]'
           )?.textContent ?? null
         ));
-        throw new Error(`Pre-down replacement evidence: ${JSON.stringify({
+        const primary = new Error(`Pre-down replacement evidence: ${JSON.stringify({
           evidence: evidence ? JSON.parse(evidence) : null,
           physicalPointer: error.state.physicalPointer,
           stages: error.state.stages
         })}`, { cause: error });
+        if (cleanupError) {
+          throw new AggregateError([primary, cleanupError], 'Pre-down replacement failed with listener cleanup failure', {
+            cause: primary
+          });
+        }
+        throw primary;
       }
+      if (cleanupError) throw new AggregateError([error, cleanupError], 'History pointer transaction failed with listener cleanup failure', { cause: error });
       throw error;
     }
   };
@@ -868,6 +934,9 @@ async function main() {
   const firstDefaultMermaidPreDownReplacementOnly = (
     process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_PRE_DOWN_REPLACEMENT_ONLY === '1'
   );
+  const firstDefaultMermaidPreDownDetachedOldEventsOnly = (
+    process.env.MEO_HISTORY_FIRST_DEFAULT_MERMAID_PRE_DOWN_DETACHED_OLD_EVENTS_ONLY === '1'
+  );
   const realFixtureText = realFixturePath ? fs.readFileSync(realFixturePath, 'utf8') : null;
   if (firstMermaidClickOnly && realFixtureText) {
     throw new Error('The focused first-Mermaid click path requires the synthetic History fixture');
@@ -1154,12 +1223,15 @@ async function main() {
         ' M_PREVIEW_EDIT',
         'preview',
         'first',
-        firstDefaultMermaidClickOnly || firstDefaultMermaidPreDownReplacementOnly,
+        firstDefaultMermaidClickOnly
+          || firstDefaultMermaidPreDownReplacementOnly
+          || firstDefaultMermaidPreDownDetachedOldEventsOnly,
         firstDefaultMermaidFinalPreviewSettlementOnly,
         firstDefaultMermaidFinalPreviewClickOnly,
         firstDefaultMermaidFinalPreviewReplacementOnly,
         firstDefaultMermaidFinalPreviewStableMovementOnly,
-        firstDefaultMermaidPreDownReplacementOnly
+        firstDefaultMermaidPreDownReplacementOnly || firstDefaultMermaidPreDownDetachedOldEventsOnly,
+        firstDefaultMermaidPreDownDetachedOldEventsOnly
       );
     } catch (error) {
       const expectedReplacementError = (
@@ -1192,18 +1264,21 @@ async function main() {
       console.log('suite-prefix first default Mermaid final preview stable movement checks passed');
       return;
     }
-    if (firstDefaultMermaidPreDownReplacementOnly) {
+    if (firstDefaultMermaidPreDownReplacementOnly || firstDefaultMermaidPreDownDetachedOldEventsOnly) {
       const evidence = await page.evaluate(() => {
         const output = document.querySelector<HTMLOutputElement>(
           'output[aria-label="History pointer pre-down replacement evidence"]'
         );
         return {
           details: output?.textContent ?? null,
-          pointerEvents: output?.dataset.pointerEvents ?? null
+          pointerEvents: output?.dataset.pointerEvents ?? null,
+          directPointerEvents: output?.dataset.directPointerEvents ?? null,
+          listenersCleaned: output?.dataset.directPointerListenersCleaned ?? null
         };
       });
       const details = evidence.details ? JSON.parse(evidence.details) : null;
       const pointerEvents = evidence.pointerEvents ? JSON.parse(evidence.pointerEvents) : null;
+      const directPointerEvents = evidence.directPointerEvents ? JSON.parse(evidence.directPointerEvents) : null;
       const sameAccessibleControl = (
         details?.oldBefore?.label === details?.replacement?.label
         && details?.oldBefore?.group === details?.replacement?.group
@@ -1216,12 +1291,17 @@ async function main() {
         || details.oldAfter?.connected !== false
         || details.replacement?.connected !== true
         || !sameAccessibleControl
+        || JSON.stringify(directPointerEvents) !== JSON.stringify({
+          old: { pointerdown: 0, pointerup: 0, click: 0 },
+          replacement: { pointerdown: 1, pointerup: 1, click: 1 }
+        })
+        || evidence.listenersCleaned !== 'true'
         || JSON.stringify(pointerEvents) !== JSON.stringify([
           'pointerdown:replacement', 'pointerup:replacement', 'click:replacement'
         ])
       ) {
         throw new Error(`Pre-down replacement did not reacquire the current public control: ${JSON.stringify({
-          details, pointerEvents
+          details, directPointerEvents, listenersCleaned: evidence.listenersCleaned, pointerEvents
         })}`);
       }
       console.log('suite-prefix first default Mermaid pre-down replacement checks passed');
