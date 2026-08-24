@@ -1,6 +1,19 @@
 export type HistoryRenderedBlockKind = 'mermaid' | 'math';
 export type HistoryRenderedBlockTargetMode = 'preview' | 'split' | 'source';
 
+/**
+ * Every async boundary that can be followed by another foreground operation.
+ * Terminal finally-only cleanup is intentionally excluded: it cannot resume
+ * the interaction and must still run after currentness has been lost.
+ */
+export const HISTORY_RENDERED_BLOCK_ASYNC_BOUNDARIES = [
+  'scroll', 'targetInspection', 'observerOpening', 'acquire1', 'initialValidate',
+  'prepareDown', 'reacquire2', 'supersededHandleDispose', 'downValidate',
+  'deliverDown', 'afterPointerDown', 'prepareUp', 'upValidate', 'deliverUp',
+  'settleTarget'
+] as const;
+export type HistoryRenderedBlockAsyncBoundary = (typeof HISTORY_RENDERED_BLOCK_ASYNC_BOUNDARIES)[number];
+
 export type HistoryRenderedBlockInteraction = {
   readonly kind: HistoryRenderedBlockKind;
   readonly lineNumber: number;
@@ -94,14 +107,14 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
   const cleanup: unknown[] = [];
   let evidence: HistoryRenderedBlockObserverEvidence | null = null;
 
-  const assertCurrent = async (stage: string) => {
+  const assertCurrent = async (stage: HistoryRenderedBlockAsyncBoundary | 'start') => {
     if (!await adapter.isCurrent(interaction)) {
       throw new Error(`History rendered-block interaction was disposed after ${stage}`);
     }
   };
   /** One guard shape for every foreground await; cleanup deliberately bypasses it. */
   const foreground = async <Value>(
-    stage: string,
+    stage: HistoryRenderedBlockAsyncBoundary,
     operation: () => Promise<Value>,
     claim?: (value: Value) => void
   ): Promise<Value> => {
@@ -147,7 +160,7 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
       'reacquire2', () => adapter.acquireCurrentHandle(interaction), (handle) => acquiredHandles.set(handle, 'owned')
     );
     if (!Object.is(currentHandle, supersededHandle)) {
-      await disposeOnce(supersededHandle, 'supersededHandleDispose');
+      await foreground('supersededHandleDispose', () => disposeOnce(supersededHandle, 'supersededHandleDispose'));
     }
 
     const downPoint = await foreground('downValidate', () => adapter.validateCurrentHandle(currentHandle, 'pointerdown'));

@@ -1,5 +1,7 @@
 import {
+  HISTORY_RENDERED_BLOCK_ASYNC_BOUNDARIES,
   runHistoryRenderedBlockInteraction,
+  type HistoryRenderedBlockAsyncBoundary,
   type HistoryRenderedBlockInteractionAdapter
 } from './history-rendered-block-interaction';
 
@@ -52,21 +54,7 @@ if (JSON.stringify(calls) !== JSON.stringify(expected)) {
 }
 console.log('history rendered-block interaction module first tracer passed');
 
-type PrimaryStage =
-  | 'scroll'
-  | 'targetInspection'
-  | 'observerOpening'
-  | 'acquire1'
-  | 'initialValidate'
-  | 'prepareDown'
-  | 'reacquire2'
-  | 'downValidate'
-  | 'deliverDown'
-  | 'afterPointerDown'
-  | 'prepareUp'
-  | 'upValidate'
-  | 'deliverUp'
-  | 'settleTarget';
+type PrimaryStage = HistoryRenderedBlockAsyncBoundary;
 type CleanupOp =
   | 'safeReleaseMove'
   | 'cancelPointer'
@@ -165,6 +153,7 @@ function fixture(options: FixtureOptions = {}) {
     settleTarget: async (interaction) => { trace.push(`settle:${interaction.targetMode}`); modeCalls.push(interaction.targetMode); completeForeground('settleTarget'); },
     disposeSupersededHandle: async (handle) => {
       trace.push(`dispose-superseded:${handle.id}`);
+      completeForeground('supersededHandleDispose');
       disposeCounts.set(handle.id, (disposeCounts.get(handle.id) ?? 0) + 1);
       failCleanup('supersededHandleDispose');
       activeHandles.delete(handle);
@@ -360,15 +349,27 @@ const matrix: Array<[string, () => Promise<void>]> = [
     await observer.cleanup();
     assertTerminal(legacy, [], 'notPressed');
 
-    const foregroundStages: readonly PrimaryStage[] = [
-      'scroll', 'targetInspection', 'observerOpening', 'acquire1', 'initialValidate', 'prepareDown',
-      'reacquire2', 'downValidate', 'deliverDown', 'afterPointerDown', 'prepareUp', 'upValidate',
-      'deliverUp', 'settleTarget'
-    ];
+    const legacyTransfer = fixture({ disposedAfter: 'supersededHandleDispose', replacement: 1 });
+    const transferObserver = await legacyTransfer.adapter.openObserver!(intent);
+    const oldHandle = await legacyTransfer.adapter.acquireCurrentHandle(intent);
+    const oldPoint = await legacyTransfer.adapter.validateCurrentHandle(oldHandle, 'pointerdown');
+    await legacyTransfer.adapter.preparePointerDown(oldPoint);
+    const newHandle = await legacyTransfer.adapter.acquireCurrentHandle(intent);
+    await legacyTransfer.adapter.disposeSupersededHandle(oldHandle);
+    await legacyTransfer.adapter.validateCurrentHandle(newHandle, 'pointerdown');
+    check(
+      legacyTransfer.foregroundTrace.join(',').endsWith('supersededHandleDispose,downValidate'),
+      'legacy superseded-dispose trace did not reach the old false green'
+    );
+    await legacyTransfer.adapter.disposeHandle(newHandle);
+    await transferObserver.cleanup();
+    assertTerminal(legacyTransfer, [], 'notPressed');
+
+    const foregroundStages = HISTORY_RENDERED_BLOCK_ASYNC_BOUNDARIES;
     const safeReleaseStages = new Set<PrimaryStage>(['deliverDown', 'afterPointerDown', 'prepareUp', 'upValidate']);
     const observerlessStages = new Set<PrimaryStage>(['scroll', 'targetInspection']);
     for (const disposedAfter of foregroundStages) {
-      const subject = fixture({ disposedAfter });
+      const subject = fixture({ disposedAfter, replacement: 1 });
       const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction(
         { kind: 'math', lineNumber: 18, targetMode: 'source' }, subject.adapter
       ));
