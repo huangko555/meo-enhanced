@@ -6,7 +6,11 @@ import {
 } from '../webview/src/editor/internal/codeMirrorTableCommandEffectAdapter';
 import type { TableCommandEditorTarget } from '../webview/src/editor/tableCommandAdapter';
 
-const dispatched: TransactionSpec[] = [];
+const atomicTransactions: TransactionSpec[] = [
+  { changes: { from: 0, to: 5, insert: '| A |\n| --- |\n| edited |\n|  |' }, effects: [] },
+  { changes: { from: 0, to: 5, insert: '| A |\n| --- |\n| edited again |\n|  |' }, effects: [] }
+];
+const atomicDispatches: TransactionSpec[] = [];
 const restored: string[] = [];
 const errors: unknown[] = [];
 let atomicBuilds = 0;
@@ -14,7 +18,7 @@ let disposed = 0;
 
 const view = {
   state: { doc: { toString: () => '| A |' } },
-  dispatch(spec: TransactionSpec) { dispatched.push(spec); }
+  dispatch(spec: TransactionSpec) { atomicDispatches.push(spec); }
 } as unknown as EditorView;
 
 const target: TableCommandEditorTarget = {
@@ -27,10 +31,7 @@ const target: TableCommandEditorTarget = {
     assert.equal(request.command, 'insert-row-below');
     assert.deepEqual(request.target, { tableId: 'table-1', row: 1, column: 0, selection: null });
     return {
-      transaction: {
-        changes: { from: 0, to: 5, insert: '| A |\n| --- |\n| edited |\n|  |' },
-        effects: []
-      },
+      transaction: atomicTransactions[atomicBuilds - 1],
       outcome: 'changed',
       restoreInteraction: () => restored.push('changed')
     };
@@ -52,7 +53,8 @@ const atomic = await adapter.execute({
 }).completion;
 assert.deepEqual(atomic, { type: 'commandCompleted', commandId: 1, outcome: 'changed' });
 assert.equal(atomicBuilds, 1);
-assert.equal(dispatched.length, 1, 'pending edits and structure must share one transaction dispatch');
+assert.equal(atomicDispatches.length, 1, 'one atomic effect must dispatch exactly once');
+assert.equal(atomicDispatches[0], atomicTransactions[0], 'dispatch must receive the one transaction built by the plan');
 
 assert.deepEqual(await adapter.execute({
   type: 'executeCommand', commandId: 3, command: 'delete-row',
@@ -69,6 +71,8 @@ await adapter.execute({
   type: 'executeCommand', commandId: 6, command: 'insert-row-below',
   target: { tableId: 'table-1', row: 1, column: 0, selection: null }
 }).completion;
+assert.equal(atomicDispatches.length, 2, 'each atomic effect must add exactly one dispatch');
+assert.equal(atomicDispatches[1], atomicTransactions[1], 'each dispatch must receive its plan transaction unchanged');
 adapter.externalDocumentPresented();
 await adapter.execute({
   type: 'restoreInteraction', commandId: 6,
@@ -96,6 +100,6 @@ assert.equal(await adapter.execute({
   type: 'executeCommand', commandId: 5, command: 'align-right',
   target: { tableId: 'table-1', row: 1, column: 0, selection: null }
 }).completion, null);
-assert.equal(dispatched.length, 2);
+assert.equal(atomicDispatches.length, 2);
 
 console.log('table command effect adapter contracts passed');

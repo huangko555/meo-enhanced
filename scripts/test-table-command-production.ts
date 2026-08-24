@@ -388,19 +388,10 @@ async function main() {
       await page.click(editSelector);
       await page.keyboard.press('End');
       await page.keyboard.type('!');
-      await page.evaluate((target) => {
+      const beforeCommand = await page.evaluate((target) => {
         const editor = (window as any).__tableCommandMatrixEditor;
         const view = editor.view;
-        const originalDispatch = view.dispatch.bind(view);
-        (window as any).__tableCommandDispatchCount = 0;
-        view.dispatch = (...transactions: unknown[]) => {
-          const flattened = transactions.flatMap((transaction) => Array.isArray(transaction) ? transaction : [transaction]);
-          if (flattened.some((transaction: any) => transaction?.docChanged === true || transaction?.changes)) {
-            (window as any).__tableCommandDispatchCount += 1;
-          }
-          return originalDispatch(...transactions);
-        };
-        (window as any).__tableCommandBefore = {
+        const before = {
           history: editor.getHistoryDepth(),
           scrollTop: view.scrollDOM.scrollTop
         };
@@ -413,6 +404,7 @@ async function main() {
           cancelable: true,
           pointerId: 101
         }));
+        return before;
       }, matrixCase.target);
       await page.click(`button[title="${matrixCase.title}"]`);
       await page.waitForFunction((expected) => (
@@ -424,9 +416,7 @@ async function main() {
         const active = document.activeElement;
         return {
           markdown: editor.view.state.doc.toString(),
-          dispatches: (window as any).__tableCommandDispatchCount,
           history: editor.getHistoryDepth(),
-          before: (window as any).__tableCommandBefore,
           focus: active instanceof HTMLTextAreaElement ? {
             row: Number(active.dataset.tableRow),
             col: Number(active.dataset.tableCol),
@@ -437,11 +427,10 @@ async function main() {
         };
       });
       assert.equal(afterCommand.markdown, matrixCase.expected, `${matrixCase.name}: exact Markdown`);
-      assert.equal(afterCommand.dispatches, 1, `${matrixCase.name}: pending edit and command use one document dispatch`);
-      assert.deepEqual(afterCommand.before.history, { undo: 0, redo: 0 }, `${matrixCase.name}: clean history baseline`);
+      assert.deepEqual(beforeCommand.history, { undo: 0, redo: 0 }, `${matrixCase.name}: clean history baseline`);
       assert.deepEqual(afterCommand.history, { undo: 1, redo: 0 }, `${matrixCase.name}: one Editor History item`);
       assert.deepEqual(afterCommand.focus, { ...matrixCase.focus, start: 0, end: 0 }, `${matrixCase.name}: focus/caret`);
-      assert.equal(afterCommand.scrollTop, afterCommand.before.scrollTop, `${matrixCase.name}: scroll continuity`);
+      assert.equal(afterCommand.scrollTop, beforeCommand.scrollTop, `${matrixCase.name}: scroll continuity`);
 
       assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.undo()), true, `${matrixCase.name}: undo accepted`);
       await page.waitForFunction((expected) => (
@@ -453,7 +442,7 @@ async function main() {
       });
       assert.equal(afterUndo.markdown, matrixOriginal, `${matrixCase.name}: exact undo Markdown`);
       assert.deepEqual(afterUndo.history, { undo: 0, redo: 1 }, `${matrixCase.name}: undo history depth`);
-      assert.equal(afterUndo.scrollTop, afterCommand.before.scrollTop, `${matrixCase.name}: undo scroll continuity`);
+      assert.equal(afterUndo.scrollTop, beforeCommand.scrollTop, `${matrixCase.name}: undo scroll continuity`);
 
       assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.redo()), true, `${matrixCase.name}: redo accepted`);
       await page.waitForFunction((expected) => (
@@ -465,7 +454,7 @@ async function main() {
       });
       assert.equal(afterRedo.markdown, matrixCase.expected, `${matrixCase.name}: exact redo Markdown`);
       assert.deepEqual(afterRedo.history, { undo: 1, redo: 0 }, `${matrixCase.name}: redo history depth`);
-      assert.equal(afterRedo.scrollTop, afterCommand.before.scrollTop, `${matrixCase.name}: redo scroll continuity`);
+      assert.equal(afterRedo.scrollTop, beforeCommand.scrollTop, `${matrixCase.name}: redo scroll continuity`);
     }
   } finally {
     await browser.close();
