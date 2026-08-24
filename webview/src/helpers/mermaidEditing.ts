@@ -72,12 +72,16 @@ const innerMermaidSearchField = StateField.define<DecorationSet>({
 
 const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b/i;
 
+export function isMermaidOpeningLine(lineText: string): boolean {
+  return mermaidOpeningLineRegex.test(lineText);
+}
+
 function isMermaidAnchor(state: EditorState, anchor: number): boolean {
   if (anchor < 0 || anchor > state.doc.length) {
     return false;
   }
   const line = state.doc.lineAt(anchor);
-  return line.from === anchor && mermaidOpeningLineRegex.test(line.text);
+  return line.from === anchor && isMermaidOpeningLine(line.text);
 }
 
 function resolveMermaidAnchorAtLine(state: EditorState, lineNumber: number): number | null {

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
+import { isMermaidOpeningLine } from '../webview/src/helpers/mermaidEditing';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
@@ -33,22 +34,35 @@ const standardMermaidDocument = [
   '~~~'
 ].join('\n');
 
-function assertMermaidEditingDoesNotRecognizeColonAnchors(): void {
-  const source = fs.readFileSync(
-    path.join(repoRoot, 'webview', 'src', 'helpers', 'mermaidEditing.ts'),
-    'utf8'
-  );
-  const declaration = source.match(/const mermaidOpeningLineRegex = [^;]+;/)?.[0] ?? '';
-  assert.notEqual(declaration, '', 'Mermaid editing opening-line resolver must remain explicit');
-  assert.equal(
-    declaration.includes(':{3,}'),
-    false,
-    'Mermaid editing resolver must not retain the removed :::mermaid anchor syntax'
-  );
+function assertMermaidOpeningLineSemantics(): void {
+  const cases: Array<[string, boolean]> = [
+    ['```mermaid', true],
+    ['~~~mermaid', true],
+    ['  ``` MERMAID   ', true],
+    ['\t~~~\tMeRmAiD\t', true],
+    ['   ```mermaid extra', true],
+    ['    ```mermaid', false],
+    ['```markdown', false],
+    ['``` mermaidish', false],
+    ['```', false],
+    [':::mermaid', false],
+    [' ::: MERMAID ', false],
+    ['::::mermaid', false],
+    ['::: mermaid', false],
+    [':::\tmermaid', false],
+    [':::mermaid extra', false]
+  ];
+  for (const [line, expected] of cases) {
+    assert.equal(
+      isMermaidOpeningLine(line),
+      expected,
+      `Unexpected Mermaid opening classification for ${JSON.stringify(line)}`
+    );
+  }
 }
 
 async function main(): Promise<void> {
-  assertMermaidEditingDoesNotRecognizeColonAnchors();
+  assertMermaidOpeningLineSemantics();
   const colonRendered = renderMarkdownToHtml({
     markdownText: colonDocument,
     markdownFilePath: 'C:/tmp/mermaid-colon.md',
