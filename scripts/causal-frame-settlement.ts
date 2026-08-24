@@ -19,6 +19,15 @@ type CausalMicrotaskRecord = {
   state: 'queued' | 'executing' | 'cancelled' | 'complete';
 };
 
+type CompletionLedger = {
+  hasPrimary: boolean;
+  primary: unknown;
+  cleanupErrors: unknown[];
+  lateCleanupErrors: unknown[];
+  finalized: boolean;
+  lateFinalized: boolean;
+};
+
 export type CausalSettlementDiagnostics = {
   readonly phase: CausalSettlementPhase;
   readonly rootReturned: boolean;
@@ -65,7 +74,14 @@ export function installCausalFrameSettlement<T>(
   let restored = false;
   let generation = 0;
   let failure: string | null = null;
-  let deferredCleanupErrors: unknown[] = [];
+  const completion: CompletionLedger = {
+    hasPrimary: false,
+    primary: undefined,
+    cleanupErrors: [],
+    lateCleanupErrors: [],
+    finalized: false,
+    lateFinalized: false
+  };
 
   const phase = (): CausalSettlementPhase => {
     if (disposed) return 'disposed';
@@ -85,28 +101,53 @@ export function installCausalFrameSettlement<T>(
   const maybeRestore = () => {
     if (disposed && causalDepth === 0) restoreEnvironment();
   };
+  const recordPrimary = (error: unknown) => {
+    if (!completion.hasPrimary) {
+      completion.hasPrimary = true;
+      completion.primary = error;
+    }
+  };
+  const recordCleanup = (error: unknown) => {
+    if (completion.finalized) {
+      completion.lateCleanupErrors.push(error);
+      completion.lateFinalized = false;
+      return;
+    }
+    completion.cleanupErrors.push(error);
+  };
+  const throwCleanupErrors = (errors: readonly unknown[], message: string): never => {
+    throw errors.length === 1 ? errors[0] : new AggregateError(errors, message);
+  };
+  const finalizeCompletion = () => {
+    if (causalDepth !== 0 || roots !== 0) return;
+    maybeRestore();
+    if (completion.finalized) {
+      if (completion.lateFinalized || completion.lateCleanupErrors.length === 0) return;
+      completion.lateFinalized = true;
+      throwCleanupErrors(completion.lateCleanupErrors, 'Causal settlement cleanup failed after completion');
+    }
+    if (!completion.hasPrimary && completion.cleanupErrors.length === 0) return;
+    completion.finalized = true;
+    if (completion.hasPrimary && completion.cleanupErrors.length) {
+      throw new AggregateError(
+        [completion.primary, ...completion.cleanupErrors],
+        'Causal callback and cleanup failed'
+      );
+    }
+    if (completion.hasPrimary) throw completion.primary;
+    throwCleanupErrors(completion.cleanupErrors, 'Causal settlement cleanup failed');
+  };
   const runCausal = (callback: () => void) => {
     causalDepth += 1;
-    let primaryError: unknown = null;
     try {
       callback();
     } catch (error) {
-      primaryError = error;
-      throw error;
+      if (completion.finalized) throw error;
+      recordPrimary(error);
     } finally {
       causalDepth -= 1;
-      if (causalDepth === 0 && deferredCleanupErrors.length) {
-        const cleanupErrors = deferredCleanupErrors;
-        deferredCleanupErrors = [];
-        maybeRestore();
-        if (primaryError !== null) {
-          throw new AggregateError([primaryError, ...cleanupErrors], 'Causal callback and cleanup failed');
-        }
-        throw cleanupErrors.length === 1
-          ? cleanupErrors[0]
-          : new AggregateError(cleanupErrors, 'Causal settlement cleanup failed');
-      }
       maybeRestore();
+      finalizeCompletion();
     }
   };
   const completeRoot = () => {
@@ -116,6 +157,7 @@ export function installCausalFrameSettlement<T>(
       capture();
     }
     maybeRestore();
+    finalizeCompletion();
   };
   const beginExternalRoot = (): (() => void) => {
     if (disposed) throw new Error('Cannot start a disposed causal settlement');
@@ -128,7 +170,6 @@ export function installCausalFrameSettlement<T>(
       ended = true;
       causalDepth -= 1;
       completeRoot();
-      maybeRestore();
     };
   };
   const scheduleMicrotask = (callback: VoidFunction, onCancel?: () => void) => {
@@ -216,6 +257,8 @@ export function installCausalFrameSettlement<T>(
       const endRoot = beginExternalRoot();
       try {
         root();
+      } catch (error) {
+        recordPrimary(error);
       } finally {
         endRoot();
       }
@@ -255,7 +298,6 @@ export function installCausalFrameSettlement<T>(
     },
     dispose() {
       if (disposed) return;
-      const cleanupErrors: unknown[] = [];
       generation += 1;
       for (const [handle, record] of microtasks) {
         if (record.state === 'queued') {
@@ -263,7 +305,7 @@ export function installCausalFrameSettlement<T>(
           try {
             record.onCancel?.();
           } catch (error) {
-            cleanupErrors.push(error);
+            recordCleanup(error);
           }
         }
         microtasks.delete(handle);
@@ -273,20 +315,16 @@ export function installCausalFrameSettlement<T>(
           try {
             originalCancelAnimationFrame(record.nativeHandle);
           } catch (error) {
-            cleanupErrors.push(error);
+            recordCleanup(error);
           }
         }
         record.state = 'cancelled';
         callbacks.delete(handle);
       }
       disposed = true;
-      if (causalDepth > 0) {
-        deferredCleanupErrors.push(...cleanupErrors);
-        return;
-      }
+      if (causalDepth !== 0 || roots !== 0) return;
       restoreEnvironment();
-      if (cleanupErrors.length === 1) throw cleanupErrors[0];
-      if (cleanupErrors.length > 1) throw new AggregateError(cleanupErrors, 'Causal settlement cleanup failed');
+      finalizeCompletion();
     }
   };
 }

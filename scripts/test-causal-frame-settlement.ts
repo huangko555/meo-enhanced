@@ -5,11 +5,15 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { installCausalFrameSettlement } from './causal-frame-settlement';
 
-function createFakeEnvironment({ throwOnCancel = false } = {}) {
+function createFakeEnvironment({
+  throwOnCancel = false,
+  cancelErrors = [] as readonly unknown[]
+}: { throwOnCancel?: boolean; cancelErrors?: readonly unknown[] } = {}) {
   let nextHandle = 1;
   const frames = new Map<number, FrameRequestCallback>();
   const microtasks: VoidFunction[] = [];
   let nativeCancels = 0;
+  let cancellationErrorIndex = 0;
   const environment = {
     requestAnimationFrame(callback: FrameRequestCallback) {
       const handle = nextHandle++;
@@ -18,6 +22,9 @@ function createFakeEnvironment({ throwOnCancel = false } = {}) {
     },
     cancelAnimationFrame(handle: number) {
       nativeCancels += 1;
+      if (cancellationErrorIndex < cancelErrors.length) {
+        throw cancelErrors[cancellationErrorIndex++];
+      }
       if (throwOnCancel) throw new Error(`native cancel ${handle} failed`);
       frames.delete(handle);
     },
@@ -33,6 +40,23 @@ function createFakeEnvironment({ throwOnCancel = false } = {}) {
   };
   return { environment, drain, nativeCancels: () => nativeCancels };
 }
+
+const thrown = (callback: () => void): unknown => {
+  try {
+    callback();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('Expected callback to throw');
+};
+const captured = (callback: () => void): { threw: boolean; error?: unknown } => {
+  try {
+    callback();
+    return { threw: false };
+  } catch (error) {
+    return { threw: true, error };
+  }
+};
 
 const complete = (settlement: ReturnType<typeof installCausalFrameSettlement>) => {
   assert.deepEqual(settlement.diagnostics(), {
@@ -123,6 +147,118 @@ const stable = (values: readonly number[]) => {
   assert.equal((observed as AggregateError).errors[0] instanceof Error && (observed as AggregateError).errors[0].message, 'primary microtask failure');
   assert.equal((observed as AggregateError).errors[1] instanceof Error && (observed as AggregateError).errors[1].message, 'native cancel 1 failed');
   assert.equal(settlement.diagnostics().phase, 'disposed');
+}
+
+for (const primary of [null, undefined, 0, false, ''] as const) {
+  const fake = createFakeEnvironment({ throwOnCancel: true });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  settlement.runRoot(() => {});
+  settlement.accept();
+  fake.environment.requestAnimationFrame(() => {});
+  fake.environment.queueMicrotask(() => {
+    try {
+      throw primary;
+    } finally {
+      settlement.dispose();
+    }
+  });
+  const observed = thrown(fake.drain);
+  assert.ok(observed instanceof AggregateError, `falsy primary ${String(primary)} must remain the first completion error`);
+  assert.deepEqual(
+    (observed as AggregateError).errors,
+    [primary, new Error('native cancel 1 failed')],
+    `falsy primary ${String(primary)} must survive cleanup aggregation`
+  );
+}
+
+{
+  const fake = createFakeEnvironment({ throwOnCancel: true });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  const endRoot = settlement.beginExternalRoot();
+  fake.environment.requestAnimationFrame(() => {});
+  settlement.dispose();
+  const observed = thrown(endRoot);
+  assert.ok(observed instanceof Error);
+  assert.equal(observed.message, 'native cancel 1 failed', 'external-root completion must flush deferred cleanup failures');
+  endRoot();
+}
+
+for (const cleanup of [null, undefined, 0, false, ''] as const) {
+  const fake = createFakeEnvironment({ cancelErrors: [cleanup] });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  const endRoot = settlement.beginExternalRoot();
+  fake.environment.requestAnimationFrame(() => {});
+  settlement.dispose();
+  assert.equal(
+    thrown(endRoot),
+    cleanup,
+    `cleanup value ${String(cleanup)} must remain observable when it is the only completion failure`
+  );
+}
+
+{
+  const primary = new Error('root primary');
+  const firstCleanup = new Error('first cleanup');
+  const secondCleanup = new Error('second cleanup');
+  const fake = createFakeEnvironment({ cancelErrors: [firstCleanup, secondCleanup] });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  const observed = thrown(() => settlement.runRoot(() => {
+    fake.environment.requestAnimationFrame(() => {});
+    fake.environment.requestAnimationFrame(() => {});
+    try {
+      throw primary;
+    } finally {
+      settlement.dispose();
+    }
+  }));
+  assert.ok(observed instanceof AggregateError, 'root primary and cleanup failures must be reported together');
+  assert.deepEqual((observed as AggregateError).errors, [primary, firstCleanup, secondCleanup]);
+}
+
+{
+  const firstCleanup = new Error('cleanup one');
+  const secondCleanup = new Error('cleanup two');
+  const fake = createFakeEnvironment({ cancelErrors: [firstCleanup, secondCleanup] });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  const endRoot = settlement.beginExternalRoot();
+  fake.environment.requestAnimationFrame(() => {});
+  fake.environment.requestAnimationFrame(() => {});
+  settlement.dispose();
+  const observed = thrown(endRoot);
+  assert.ok(observed instanceof AggregateError, 'multiple cleanup-only failures must remain grouped');
+  assert.deepEqual((observed as AggregateError).errors, [firstCleanup, secondCleanup]);
+}
+
+{
+  const cleanup = new Error('nested external cleanup');
+  const fake = createFakeEnvironment({ cancelErrors: [cleanup] });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  const endOuterRoot = settlement.beginExternalRoot();
+  const endInnerRoot = settlement.beginExternalRoot();
+  fake.environment.requestAnimationFrame(() => {});
+  settlement.dispose();
+  endInnerRoot();
+  assert.equal(settlement.diagnostics().rootReturned, false, 'inner external completion must retain outer ownership');
+  assert.equal(thrown(endOuterRoot), cleanup, 'depth reaching zero must flush deferred cleanup exactly once');
+  endOuterRoot();
+}
+
+{
+  const primary = new Error('already reported primary');
+  const lateCleanup = new Error('late disposal cleanup');
+  const fake = createFakeEnvironment({ cancelErrors: [lateCleanup] });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  const primaryOutcome = captured(() => settlement.runRoot(() => {
+    fake.environment.requestAnimationFrame(() => {});
+    throw primary;
+  }));
+  assert.deepEqual(primaryOutcome, { threw: true, error: primary }, 'primary completion must remain a standalone first failure');
+  assert.deepEqual(
+    captured(() => settlement.dispose()),
+    { threw: true, error: lateCleanup },
+    'cleanup after an already-reported primary must surface as an explicit late cleanup failure'
+  );
+  assert.deepEqual(captured(() => settlement.dispose()), { threw: false }, 'repeated finalization must not rethrow the same late cleanup');
 }
 
 {
@@ -306,5 +442,55 @@ async function assertGenerationGuardMutantIsRed(): Promise<void> {
 }
 
 await assertGenerationGuardMutantIsRed();
+
+async function assertCompletionLedgerMutantsAreRed(): Promise<void> {
+  const sourcePath = path.join(import.meta.dir, 'causal-frame-settlement.ts');
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-causal-completion-mutant-'));
+  const importMutant = async (name: string, mutate: (current: string) => string) => {
+    const mutant = mutate(source);
+    assert.notEqual(mutant, source, `${name} mutation must target the live scheduler source`);
+    const mutantPath = path.join(tempDir, `${name}.ts`);
+    fs.writeFileSync(mutantPath, mutant);
+    return import(`${pathToFileURL(mutantPath).href}?${name}`);
+  };
+  try {
+    const nullSentinel = await importMutant('null-sentinel', (current) => current.replace(
+      'if (completion.hasPrimary && completion.cleanupErrors.length)',
+      'if (completion.primary !== null && completion.cleanupErrors.length)'
+    ));
+    {
+      const fake = createFakeEnvironment({ throwOnCancel: true });
+      const settlement = nullSentinel.installCausalFrameSettlement(fake.environment, () => 0);
+      settlement.runRoot(() => {});
+      settlement.accept();
+      fake.environment.requestAnimationFrame(() => {});
+      fake.environment.queueMicrotask(() => {
+        try {
+          throw null;
+        } finally {
+          settlement.dispose();
+        }
+      });
+      assert.equal(thrown(fake.drain), null, 'the null-sentinel mutant must lose the cleanup cause');
+    }
+    const skipExternalFlush = await importMutant('skip-external-flush', (current) => current.replace(
+      '    maybeRestore();\n    finalizeCompletion();\n  };\n  const beginExternalRoot',
+      '    maybeRestore();\n  };\n  const beginExternalRoot'
+    ));
+    {
+      const fake = createFakeEnvironment({ throwOnCancel: true });
+      const settlement = skipExternalFlush.installCausalFrameSettlement(fake.environment, () => 0);
+      const endRoot = settlement.beginExternalRoot();
+      fake.environment.requestAnimationFrame(() => {});
+      settlement.dispose();
+      assert.deepEqual(captured(endRoot), { threw: false }, 'skipping external completion flush must hide the cleanup failure');
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+await assertCompletionLedgerMutantsAreRed();
 
 console.log('causal frame settlement matrix checks passed');
