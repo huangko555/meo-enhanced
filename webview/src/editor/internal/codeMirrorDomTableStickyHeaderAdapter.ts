@@ -230,12 +230,10 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       const passiveEvents = ['pointerdown', 'click', 'dblclick'] as const;
       for (const eventName of passiveEvents) {
         elements.stickyHeaderViewport.addEventListener(eventName, suppressStickyInteraction, true);
-      }
-      cleanup.push(() => {
-        for (const eventName of passiveEvents) {
+        cleanup.push(() => {
           elements.stickyHeaderViewport.removeEventListener(eventName, suppressStickyInteraction, true);
-        }
-      });
+        });
+      }
 
       makeStickyContentPassive(elements.stickyHeaderViewport);
       elements.stickyHeaderRow.replaceChildren(...nextCells);
@@ -274,19 +272,13 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     } catch (error) {
       primary = error;
     }
-    const cleanupErrors = phase === 'mounted' ? releaseCurrent() : [];
-    phase = 'unmounted';
     if (primary !== noPrimaryError || !elements) {
+      phase = 'unmounted';
+      const cleanupErrors = releaseCurrent();
       throwLifecycleErrors(primary, cleanupErrors);
       return;
     }
-    try {
-      installGeneration(elements);
-    } catch (error) {
-      if (cleanupErrors.length === 0) throw error;
-      throwLifecycleErrors(error, cleanupErrors);
-    }
-    throwLifecycleErrors(noPrimaryError, cleanupErrors);
+    installGeneration(elements);
   };
 
   const update = (): void => {

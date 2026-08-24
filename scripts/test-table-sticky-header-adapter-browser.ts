@@ -434,6 +434,114 @@ async function main(): Promise<void> {
       elements(2).stickyHeaderViewport.removeEventListener = originalViewportRemove;
       elements(2).horizontalScroller.removeEventListener = originalHorizontalRemove;
       cleanupAdapter.dispose();
+
+      const remountPrimary = new Error('remount install failure');
+      const remountCleanupErrors = new Map<string, Error>();
+      for (const generation of ['old', 'new']) {
+        for (const resource of ['dblclick', 'click', 'pointerdown', 'horizontal']) {
+          const label = `${generation}:${resource}`;
+          remountCleanupErrors.set(label, new Error(label));
+        }
+      }
+      const remountAdapter = candidate.createAdapter({
+        policy: candidate.policy,
+        scheduler,
+        resolveElements: () => elements(2),
+        controlsHeight: () => 0
+      });
+      await settle(() => remountAdapter.mount());
+      const originalReplaceChildren = elements(2).stickyHeaderRow.replaceChildren;
+      const remountCleanupCalls: string[] = [];
+      let cleaningNewGeneration = false;
+      elements(2).stickyHeaderViewport.removeEventListener = function (...args: Parameters<typeof originalViewportRemove>) {
+        originalViewportRemove.apply(this, args);
+        const label = `${cleaningNewGeneration ? 'new' : 'old'}:${String(args[0])}`;
+        remountCleanupCalls.push(label);
+        throw remountCleanupErrors.get(label);
+      };
+      elements(2).horizontalScroller.removeEventListener = function (...args: Parameters<typeof originalHorizontalRemove>) {
+        originalHorizontalRemove.apply(this, args);
+        const label = `${cleaningNewGeneration ? 'new' : 'old'}:horizontal`;
+        remountCleanupCalls.push(label);
+        cleaningNewGeneration = true;
+        throw remountCleanupErrors.get(label);
+      };
+      elements(2).stickyHeaderRow.replaceChildren = () => { throw remountPrimary; };
+      const remountError = await settleError(() => remountAdapter.mount());
+      elements(2).stickyHeaderViewport.removeEventListener = originalViewportRemove;
+      elements(2).horizontalScroller.removeEventListener = originalHorizontalRemove;
+      elements(2).stickyHeaderRow.replaceChildren = originalReplaceChildren;
+      remountAdapter.dispose();
+
+      const resolvePrimary = new Error('resolve failure');
+      const resolveCleanupPassive = new Error('resolve passive cleanup failure');
+      const resolveCleanupHorizontal = new Error('resolve horizontal cleanup failure');
+      let rejectResolve = false;
+      const resolveFailureAdapter = candidate.createAdapter({
+        policy: candidate.policy,
+        scheduler,
+        resolveElements: () => {
+          if (rejectResolve) throw resolvePrimary;
+          return elements(2);
+        },
+        controlsHeight: () => 0
+      });
+      await settle(() => resolveFailureAdapter.mount());
+      elements(2).stickyHeaderViewport.removeEventListener = function (...args: Parameters<typeof originalViewportRemove>) {
+        originalViewportRemove.apply(this, args);
+        throw resolveCleanupPassive;
+      };
+      elements(2).horizontalScroller.removeEventListener = function (...args: Parameters<typeof originalHorizontalRemove>) {
+        originalHorizontalRemove.apply(this, args);
+        throw resolveCleanupHorizontal;
+      };
+      rejectResolve = true;
+      const resolveFailureError = await settleError(() => resolveFailureAdapter.mount());
+      elements(2).stickyHeaderViewport.removeEventListener = originalViewportRemove;
+      elements(2).horizontalScroller.removeEventListener = originalHorizontalRemove;
+      resolveFailureAdapter.dispose();
+
+      const nullCleanupSingle = new Error('null single cleanup failure');
+      let resolveNull = false;
+      const nullSingleAdapter = candidate.createAdapter({
+        policy: candidate.policy,
+        scheduler,
+        resolveElements: () => resolveNull ? null : elements(2),
+        controlsHeight: () => 0
+      });
+      await settle(() => nullSingleAdapter.mount());
+      elements(2).horizontalScroller.removeEventListener = function (...args: Parameters<typeof originalHorizontalRemove>) {
+        originalHorizontalRemove.apply(this, args);
+        throw nullCleanupSingle;
+      };
+      resolveNull = true;
+      const nullSingleError = await settleError(() => nullSingleAdapter.mount());
+      elements(2).horizontalScroller.removeEventListener = originalHorizontalRemove;
+      nullSingleAdapter.dispose();
+
+      const nullCleanupPassive = new Error('null passive cleanup failure');
+      const nullCleanupHorizontal = new Error('null horizontal cleanup failure');
+      resolveNull = false;
+      const nullMultiAdapter = candidate.createAdapter({
+        policy: candidate.policy,
+        scheduler,
+        resolveElements: () => resolveNull ? null : elements(2),
+        controlsHeight: () => 0
+      });
+      await settle(() => nullMultiAdapter.mount());
+      elements(2).stickyHeaderViewport.removeEventListener = function (...args: Parameters<typeof originalViewportRemove>) {
+        originalViewportRemove.apply(this, args);
+        throw nullCleanupPassive;
+      };
+      elements(2).horizontalScroller.removeEventListener = function (...args: Parameters<typeof originalHorizontalRemove>) {
+        originalHorizontalRemove.apply(this, args);
+        throw nullCleanupHorizontal;
+      };
+      resolveNull = true;
+      const nullMultiError = await settleError(() => nullMultiAdapter.mount());
+      elements(2).stickyHeaderViewport.removeEventListener = originalViewportRemove;
+      elements(2).horizontalScroller.removeEventListener = originalHorizontalRemove;
+      nullMultiAdapter.dispose();
       adapter1.dispose();
       await scheduler.whenEmpty();
 
@@ -471,6 +579,26 @@ async function main(): Promise<void> {
         cleanupOnlyError: cleanupOnlyError instanceof AggregateError ? {
           cause: cleanupOnlyError.cause === cleanupFirst,
           errors: cleanupOnlyError.errors.map((error) => (error as Error).message)
+        } : null,
+        remountError: remountError instanceof AggregateError ? {
+          cause: remountError.cause === remountPrimary,
+          errors: remountError.errors.map((error) => {
+            if (error === remountPrimary) return 'primary';
+            for (const [label, cleanupError] of remountCleanupErrors) {
+              if (error === cleanupError) return label;
+            }
+            return error instanceof AggregateError ? 'nested-aggregate' : 'unknown';
+          })
+        } : null,
+        remountCleanupCalls,
+        resolveFailureError: resolveFailureError instanceof AggregateError ? {
+          cause: resolveFailureError.cause === resolvePrimary,
+          errors: resolveFailureError.errors.map((error) => (error as Error).message)
+        } : null,
+        nullSingleError: nullSingleError === nullCleanupSingle,
+        nullMultiError: nullMultiError instanceof AggregateError ? {
+          cause: nullMultiError.cause === nullCleanupPassive,
+          errors: nullMultiError.errors.map((error) => (error as Error).message)
         } : null,
         causalQueueEmpty: scheduler.empty,
         sourceUnchangedByMount,
@@ -517,11 +645,54 @@ async function main(): Promise<void> {
     assert.equal(result.mountedDisposeLateWrites, 0);
     assert.deepEqual(result.primaryCleanupError, {
       cause: true,
-      errors: ['primary clone failure', 'passive listener cleanup failure', 'horizontal listener cleanup failure']
+      errors: [
+        'primary clone failure',
+        'passive listener cleanup failure',
+        'passive listener cleanup failure',
+        'passive listener cleanup failure',
+        'horizontal listener cleanup failure'
+      ]
     });
     assert.deepEqual(result.cleanupOnlyError, {
       cause: true,
-      errors: ['passive listener cleanup failure', 'horizontal listener cleanup failure']
+      errors: [
+        'passive listener cleanup failure',
+        'passive listener cleanup failure',
+        'passive listener cleanup failure',
+        'horizontal listener cleanup failure'
+      ]
+    });
+    assert.deepEqual(result.remountError, {
+      cause: true,
+      errors: [
+        'primary',
+        'old:dblclick', 'old:click', 'old:pointerdown', 'old:horizontal',
+        'new:dblclick', 'new:click', 'new:pointerdown', 'new:horizontal'
+      ]
+    });
+    assert.deepEqual(result.remountCleanupCalls, [
+      'old:dblclick', 'old:click', 'old:pointerdown', 'old:horizontal',
+      'new:dblclick', 'new:click', 'new:pointerdown', 'new:horizontal'
+    ]);
+    assert.deepEqual(result.resolveFailureError, {
+      cause: true,
+      errors: [
+        'resolve failure',
+        'resolve passive cleanup failure',
+        'resolve passive cleanup failure',
+        'resolve passive cleanup failure',
+        'resolve horizontal cleanup failure'
+      ]
+    });
+    assert.equal(result.nullSingleError, true);
+    assert.deepEqual(result.nullMultiError, {
+      cause: true,
+      errors: [
+        'null passive cleanup failure',
+        'null passive cleanup failure',
+        'null passive cleanup failure',
+        'null horizontal cleanup failure'
+      ]
     });
     assert.equal(result.causalQueueEmpty, true);
     assert.equal(result.sourceUnchangedByMount, true);
