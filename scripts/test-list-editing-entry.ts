@@ -1,6 +1,7 @@
 import { Transaction } from '@codemirror/state';
 import { isolateHistory } from '@codemirror/commands';
 import { createEditor } from './test-editor-factory';
+import { installCausalFrameSettlement } from './causal-frame-settlement';
 import {
   getTableTransactionProvenance
 } from '../webview/src/adapters/tableTransactionProvenance';
@@ -12,11 +13,13 @@ import {
     addToHistory: typeof Transaction.addToHistory;
     isolateHistory: typeof isolateHistory;
     getTableTransactionProvenance: typeof getTableTransactionProvenance;
+    installCausalFrameSettlement: typeof installCausalFrameSettlement;
   };
 }).ListEditingHarness = {
   createEditor,
   userEvent: Transaction.userEvent,
   addToHistory: Transaction.addToHistory,
   isolateHistory,
-  getTableTransactionProvenance
+  getTableTransactionProvenance,
+  installCausalFrameSettlement
 };
