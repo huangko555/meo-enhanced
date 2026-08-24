@@ -1,534 +1,188 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
 
-const repoRoot = path.resolve(import.meta.dir, '..');
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-sticky-header-'));
+const root = path.resolve(import.meta.dir, '..');
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-sticky-production-'));
 
-async function main() {
+async function main(): Promise<void> {
   const build = await Bun.build({
-    entrypoints: [path.join(repoRoot, 'scripts', 'test-table-stability-entry.ts')],
-    outdir: tempDir,
-    target: 'browser',
-    format: 'iife',
-    naming: 'bundle.js'
+    entrypoints: [path.join(root, 'scripts', 'test-table-sticky-header-production-entry.ts')],
+    outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js'
   });
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
-
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: 960, height: 360 });
-    await page.setContent('<!doctype html><div id="app"></div>');
-    await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    await page.setViewport({ width: 960, height: 430 });
+    await page.setContent('<!doctype html><div id="outer"><div class="spacer"></div><div id="host"></div><div class="tail"></div></div>');
+    await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({ content: `
-      :root {
-        --meo-background: #24292e;
-        --meo-inset-background: #2a2d2f;
-        --meo-foreground: #e6edf3;
-        --meo-semantic-tableBorder: #474b50;
-        --vscode-editorStickyScroll-border: transparent;
-      }
-      html, body, #app { height: 100%; margin: 0; }
+      :root{--meo-background:#24292e;--meo-inset-background:#2a2d2f;--meo-foreground:#e6edf3;--meo-semantic-tableBorder:#474b50}
+      html,body{height:100%;margin:0}#outer{height:390px;overflow-y:auto}#host{height:330px;width:360px}#host .meo-md-html-table{min-width:520px}.spacer{height:70px}.tail{height:260px}
     ` });
-    await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
-
+    await page.addScriptTag({ path: path.join(temp, 'bundle.js') });
     const result = await page.evaluate(async () => {
-      const harness = (window as any).TableStabilityHarness;
-      const app = document.getElementById('app')!;
-      const waitFrames = async (count = 4) => {
-        for (let index = 0; index < count; index += 1) {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        }
+      const harness = (window as any).TableStickyHeaderProductionHarness;
+      const outer = document.getElementById('outer')!;
+      const host = document.getElementById('host')!;
+      const nativeFrame = window.requestAnimationFrame.bind(window);
+      let editor: any;
+      const state = () => {
+        const scroller = editor?.view.scrollDOM as HTMLElement | undefined;
+        const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
+        const stickyTable = chrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-table');
+        return {
+          visible: Boolean(chrome && getComputedStyle(chrome).display !== 'none'),
+          chromeTop: chrome?.getBoundingClientRect().top ?? null,
+          scrollerTop: scroller?.getBoundingClientRect().top ?? null,
+          transform: stickyTable?.style.transform ?? '',
+          count: document.querySelectorAll('.meo-md-html-table-sticky-chrome').length
+        };
       };
-      const create = async (text: string) => {
-        app.replaceChildren();
-        const editor = harness.createEditor({
-          parent: app,
-          text,
-          initialMode: 'live',
-          onApplyChanges() {}
+      const settle = async (action: () => void, accepted: () => boolean, returnIsAcceptance = false) => {
+        const tracker = harness.installCausalFrameSettlement(window, state);
+        let published = false;
+        const publish = () => {
+          if (!published && accepted()) { published = true; tracker.accept(); }
+        };
+        const observer = new MutationObserver(publish);
+        observer.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
+        tracker.runRoot(() => { action(); if (returnIsAcceptance) publish(); });
+        publish();
+        await new Promise<void>((resolve, reject) => {
+          const poll = () => {
+            try {
+              publish();
+              const diagnostics = tracker.diagnostics();
+              if (diagnostics.failure) throw new Error(diagnostics.failure);
+              if (diagnostics.phase === 'complete') return resolve();
+              nativeFrame(poll);
+            } catch (error) { reject(error); }
+          };
+          nativeFrame(poll);
         });
-        await waitFrames();
-        return editor;
+        observer.disconnect();
+        const outcome = { trace: tracker.trace(), diagnostics: tracker.diagnostics() };
+        tracker.dispose();
+        return outcome;
       };
-      const scrollPastHeader = async (editor: any) => {
-        const scroller = editor.view.scrollDOM as HTMLElement;
-        const header = document.querySelector<HTMLElement>('.meo-md-html-table thead')!;
-        const delta = header.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top + 8;
-        scroller.scrollTop += Math.max(1, delta);
+      const transactions: any[] = [];
+      const rows = Array.from({ length: 32 }, (_, i) => `| ${i + 1} | row ${i + 1} wrapping content |`);
+      const after = Array.from({ length: 20 }, (_, i) => `after table ${i + 1}`);
+      const text = ['before', '', '| Number | Content |', '| ---: | :--- |', ...rows, '', ...after].join('\n');
+      transactions.push(await settle(() => {
+        editor = harness.createEditor({ parent: host, text, initialMode: 'live', onApplyChanges() {} });
+      }, () => Boolean(document.querySelector('.meo-md-html-table'))));
+      const initialHidden = !state().visible;
+      const scroller = editor.view.scrollDOM as HTMLElement;
+      const header = document.querySelector<HTMLElement>('.meo-md-html-table thead')!;
+      transactions.push(await settle(() => {
+        scroller.scrollTop += Math.max(1, header.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top + 8);
         scroller.dispatchEvent(new Event('scroll'));
-        await waitFrames();
-      };
+      }, () => state().visible));
+      const appeared = state();
 
-      const longRows = Array.from({ length: 28 }, (_, index) => `| ${index + 1} | row ${index + 1} |`);
-      const beforeLongTable = Array.from({ length: 6 }, (_, index) => `before long table ${index + 1}`);
-      const afterLongTable = Array.from({ length: 24 }, (_, index) => `after long table ${index + 1}`);
-      const longEditor = await create([
-        ...beforeLongTable,
-        '',
-        '| 编号 | 内容 |',
-        '| ---: | :--- |',
-        ...longRows,
-        '',
-        ...afterLongTable
-      ].join('\n'));
-      const longChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const longInitiallyHidden = !longChrome || getComputedStyle(longChrome).display === 'none';
-      const longScroller = longEditor.view.scrollDOM as HTMLElement;
-      const originalTable = document.querySelector<HTMLElement>('.meo-md-html-table')!;
-      const originalHeader = originalTable.querySelector<HTMLElement>('thead')!;
-      const originalHeaderInput = originalHeader.querySelector<HTMLTextAreaElement>('textarea')!;
-      originalHeaderInput.focus({ preventScroll: true });
-      const initialScrollerRect = longScroller.getBoundingClientRect();
-      const activeStickyTop = initialScrollerRect.top + 24;
-      longScroller.scrollTop += Math.max(1, originalHeader.getBoundingClientRect().top - activeStickyTop - 2);
-      longScroller.dispatchEvent(new Event('scroll'));
-      await waitFrames();
-      const beforeThresholdChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const beforeThresholdState = {
-        stickyVisible: Boolean(beforeThresholdChrome && getComputedStyle(beforeThresholdChrome).display !== 'none'),
-        originalHeaderTop: originalHeader.getBoundingClientRect().top,
-        stickyTop: activeStickyTop
-      };
-      longScroller.scrollTop += Math.max(1, originalHeader.getBoundingClientRect().top - activeStickyTop + 1);
-      longScroller.dispatchEvent(new Event('scroll'));
-      await waitFrames();
-      const atThresholdChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const atThresholdState = {
-        stickyVisible: Boolean(atThresholdChrome && getComputedStyle(atThresholdChrome).display !== 'none'),
-        originalHeaderTop: originalHeader.getBoundingClientRect().top,
-        stickyTop: activeStickyTop
-      };
-      originalHeaderInput.blur();
-      longScroller.scrollTop = 0;
-      longScroller.dispatchEvent(new Event('scroll'));
-      await waitFrames();
-      await scrollPastHeader(longEditor);
-      const scrollerRect = longEditor.view.scrollDOM.getBoundingClientRect();
-      const visibleChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const visibleHeader = visibleChrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-header');
-      const originalHeaderCells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table thead th'));
-      const stickyHeaderCells = Array.from(visibleHeader?.querySelectorAll<HTMLElement>('th') ?? []);
-      const visibleHeaderRect = visibleHeader?.getBoundingClientRect();
-      const separatorStyle = visibleChrome ? getComputedStyle(visibleChrome, '::after') : null;
-      const hitElement = visibleHeaderRect
-        ? document.elementFromPoint(visibleHeaderRect.left + 4, visibleHeaderRect.top + visibleHeaderRect.height / 2)
-        : null;
-      const passiveState = {
-        initiallyHidden: longInitiallyHidden,
-        visible: Boolean(visibleChrome && getComputedStyle(visibleChrome).display !== 'none'),
-        top: visibleChrome?.getBoundingClientRect().top ?? null,
-        scrollerTop: scrollerRect.top,
-        text: stickyHeaderCells.map((cell) => cell.textContent?.trim() ?? ''),
-        interactiveCount: visibleChrome?.querySelectorAll('textarea, input, select, button, a[href]').length ?? -1,
-        cursor: visibleHeader ? getComputedStyle(visibleHeader).cursor : '',
-        hitCursor: hitElement ? getComputedStyle(hitElement).cursor : '',
-        hitElement: hitElement instanceof Element ? `${hitElement.tagName}.${hitElement.className}` : '',
-        shadow: visibleHeader ? getComputedStyle(visibleHeader).boxShadow : '',
-        separatorHeight: separatorStyle ? Number.parseFloat(separatorStyle.height) : 0,
-        separatorColor: separatorStyle?.backgroundColor ?? '',
-        separatorSpace: visibleChrome && visibleHeader
-          ? visibleChrome.getBoundingClientRect().height - visibleHeader.getBoundingClientRect().height
-          : 0,
-        widthDeltas: stickyHeaderCells.map((cell, index) => (
-          Math.abs(cell.getBoundingClientRect().width - originalHeaderCells[index].getBoundingClientRect().width)
-        ))
-      };
-      app.style.width = '720px';
-      window.dispatchEvent(new Event('resize'));
-      await waitFrames();
-      const resizedOriginalCells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table thead th'));
-      const resizedStickyCells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-header th'));
-      const resizedChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const resizeState = {
-        visible: Boolean(resizedChrome && getComputedStyle(resizedChrome).display !== 'none'),
-        widthDeltas: resizedStickyCells.map((cell, index) => (
-          Math.abs(cell.getBoundingClientRect().width - resizedOriginalCells[index].getBoundingClientRect().width)
-        )),
-        withinEditor: (resizedChrome?.getBoundingClientRect().right ?? Number.POSITIVE_INFINITY) <= app.getBoundingClientRect().right + 1
-      };
-      app.style.removeProperty('width');
-      window.dispatchEvent(new Event('resize'));
-      await waitFrames();
-
-      const bodyInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
-      bodyInput.focus({ preventScroll: true });
-      await waitFrames();
-      const activeChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const toolbarBand = activeChrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-toolbar-band');
-      const stickyHeader = activeChrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-header');
+      const input = document.querySelector<HTMLTextAreaElement>('.meo-md-html-table tbody textarea')!;
+      transactions.push(await settle(() => input.focus({ preventScroll: true }), () => (
+        document.querySelector('.meo-md-html-table-sticky-chrome')?.classList.contains('has-sticky-controls') ?? false
+      )));
+      const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome')!;
       const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
-      const activeState = {
-        hasToolbarBand: activeChrome?.classList.contains('has-sticky-controls') ?? false,
-        bandHeight: toolbarBand?.getBoundingClientRect().height ?? 0,
-        bandBackground: toolbarBand ? getComputedStyle(toolbarBand).backgroundColor : '',
-        documentBackground: getComputedStyle(document.documentElement).getPropertyValue('--meo-background').trim(),
-        toolbarTop: toolbar.getBoundingClientRect().top,
-        chromeTop: activeChrome?.getBoundingClientRect().top ?? null,
-        headerTop: stickyHeader?.getBoundingClientRect().top ?? null,
-        bandWidth: toolbarBand?.getBoundingClientRect().width ?? 0,
-        chromeWidth: activeChrome?.getBoundingClientRect().width ?? 0
-      };
-      bodyInput.blur();
-      await waitFrames();
-      const inactiveChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const inactiveHeader = inactiveChrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-header');
-      const inactiveState = {
-        hasToolbarBand: inactiveChrome?.classList.contains('has-sticky-controls') ?? true,
-        chromeTop: inactiveChrome?.getBoundingClientRect().top ?? null,
-        headerTop: inactiveHeader?.getBoundingClientRect().top ?? null
-      };
-      const headerInput = document.querySelector<HTMLTextAreaElement>('thead textarea[data-table-col="0"]')!;
-      headerInput.value = '新编号';
-      headerInput.dispatchEvent(new Event('input', { bubbles: true }));
-      await waitFrames();
-      const syncedHeaderText = document.querySelector<HTMLElement>(
-        '.meo-md-html-table-sticky-header th:first-child'
-      )?.textContent?.trim() ?? '';
-      longScroller.scrollTop = longScroller.scrollHeight - longScroller.clientHeight;
-      longScroller.dispatchEvent(new Event('scroll'));
-      await waitFrames();
-      const hiddenAtTableEnd = getComputedStyle(activeChrome!).display === 'none';
-      longEditor.destroy();
+      const stickyHeader = chrome.querySelector<HTMLElement>('.meo-md-html-table-sticky-header')!;
+      const controls = [toolbar.getBoundingClientRect().top, chrome.getBoundingClientRect().top,
+        stickyHeader.getBoundingClientRect().top, toolbar.getBoundingClientRect().height];
+      input.blur();
 
-      const trailingLines = Array.from({ length: 40 }, (_, index) => `after ${index}`).join('\n');
-      const shortEditor = await create([
-        '| A | B |',
-        '| --- | --- |',
-        '| 1 | 2 |',
-        '| 3 | 4 |',
-        '',
-        trailingLines
-      ].join('\n'));
-      await scrollPastHeader(shortEditor);
-      const shortChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const shortState = {
-        visible: Boolean(shortChrome && getComputedStyle(shortChrome).display !== 'none')
+      transactions.push(await settle(() => {
+        outer.scrollTop = 28; outer.dispatchEvent(new Event('scroll'));
+      }, () => state().visible && Math.abs(state().chromeTop! - state().scrollerTop!) <= 1));
+      const outerAligned = state();
+      const wrap = document.querySelector<HTMLElement>('.meo-md-html-table-wrap')!;
+      transactions.push(await settle(() => {
+        wrap.scrollLeft = 42; wrap.dispatchEvent(new Event('scroll'));
+      }, () => true, true));
+      const colWidths = (selector: string) => Array.from(document.querySelectorAll<HTMLElement>(selector))
+        .map((col) => col.getBoundingClientRect().width);
+      const domContract = {
+        normalCols: colWidths('.meo-md-html-table:not(.meo-md-html-table-sticky-table) colgroup col'),
+        stickyCols: colWidths('.meo-md-html-table-sticky-table colgroup col'),
+        normalHandles: document.querySelectorAll('.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead .meo-md-html-table-column-resize-handle').length,
+        stickyHandles: document.querySelectorAll('.meo-md-html-table-sticky-table thead .meo-md-html-table-column-resize-handle').length,
+        interactive: document.querySelectorAll('.meo-md-html-table-sticky-header textarea, .meo-md-html-table-sticky-header input, .meo-md-html-table-sticky-header button, .meo-md-html-table-sticky-header a[href], .meo-md-html-table-sticky-header [contenteditable]:not([contenteditable="false"])').length,
+        wrapOverflow: getComputedStyle(wrap).overflowX,
+        lineNumbers: Boolean(document.querySelector('.meo-md-html-table-line-numbers')),
+        horizontalScroll: wrap.scrollLeft,
+        firstColumnDelta: Math.abs(
+          document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th')!.getBoundingClientRect().left -
+          document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table thead th')!.getBoundingClientRect().left
+        )
       };
-      shortEditor.destroy();
+      transactions.push(await settle(() => {
+        scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+        scroller.dispatchEvent(new Event('scroll'));
+      }, () => true, true));
+      const hiddenAtTail = !state().visible;
+      const tailState = { ...state(), scrollTop: scroller.scrollTop, maxScroll: scroller.scrollHeight - scroller.clientHeight };
 
-      const tallTailEditor = await create([
-        '| Tall A | Tall B |',
-        '| --- | --- |',
-        ...Array.from({ length: 10 }, (_, index) => `| ${index + 1} | tall row ${index + 1} |`),
-        '',
-        trailingLines
-      ].join('\n'));
-      const tallTailScroller = tallTailEditor.view.scrollDOM as HTMLElement;
-      const tallTailRows = Array.from(document.querySelectorAll<HTMLTableRowElement>(
-        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr'
-      ));
-      const tallSecondLastRow = tallTailRows.at(-2)!;
-      tallSecondLastRow.style.height = '280px';
-      window.dispatchEvent(new Event('resize'));
-      await waitFrames();
-      const tallTailScrollerRect = tallTailScroller.getBoundingClientRect();
-      const tallSecondLastRect = tallSecondLastRow.getBoundingClientRect();
-      tallTailScroller.scrollTop += tallSecondLastRect.top - tallTailScrollerRect.top + 12;
-      tallTailScroller.dispatchEvent(new Event('scroll'));
-      await waitFrames();
-      const tallTailChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const tallTailTable = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
-      const tallTailState = {
-        visible: Boolean(tallTailChrome && getComputedStyle(tallTailChrome).display !== 'none'),
-        remainingPixels: tallTailTable.getBoundingClientRect().bottom - tallTailScrollerRect.top
-      };
-      tallTailEditor.destroy();
+      transactions.push(await settle(() => editor.setText(editor.getText()), () => true, true));
+      const equalExternalCount = state().count;
+      transactions.push(await settle(() => editor.setText(`prefix\n\n${editor.getText()}`), () => true, true));
+      const changedExternal = { count: state().count, text: editor.getText() };
+      transactions.push(await settle(() => editor.setMode('source'), () => true, true));
+      const sourceCount = state().count;
+      transactions.push(await settle(() => editor.setMode('live'), () => true, true));
+      const liveCount = state().count;
+      transactions.push(await settle(() => { host.hidden = true; window.dispatchEvent(new Event('resize')); }, () => !state().visible));
+      const previewVisible = state().visible;
+      host.hidden = false;
 
-      const toolbarEditor = await create('| A | B |\n| --- | --- |\n| one | two |\n| three | four |');
-      const toolbarInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
-      toolbarInput.focus();
-      await waitFrames();
-      const toolbarElement = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
-      const toolbarButton = toolbarElement.querySelector<HTMLElement>('.meo-md-html-table-toolbar-btn')!;
-      const deleteButton = toolbarElement.querySelector<HTMLElement>('[aria-label="Delete row"]')!;
-      const toolbarSizeState = {
-        toolbarHeight: toolbarElement.getBoundingClientRect().height,
-        buttonHeight: toolbarButton.getBoundingClientRect().height,
-        usesSharedSurface: toolbarElement.classList.contains('meo-visual-surface'),
-        usesSharedButtons: toolbarButton.classList.contains('meo-visual-control-btn'),
-        toolbarBackground: getComputedStyle(toolbarElement).backgroundColor,
-        toolbarShadow: getComputedStyle(toolbarElement).boxShadow,
-        toolbarOutlineStyle: getComputedStyle(toolbarElement).outlineStyle,
-        toolbarOutlineWidth: getComputedStyle(toolbarElement).outlineWidth,
-        deleteColor: getComputedStyle(deleteButton).color,
-        regularColor: getComputedStyle(toolbarButton).color
-      };
-      toolbarEditor.destroy();
-
-      const fittingRows = Array.from({ length: 7 }, (_, index) => `| ${index + 1} | fitting row ${index + 1} |`);
-      const fittingEditor = await create([
-        '| Fit A | Fit B |',
-        '| --- | --- |',
-        ...fittingRows,
-        '',
-        trailingLines
-      ].join('\n'));
-      const fittingTable = document.querySelector<HTMLElement>('.meo-md-html-table')!;
-      const fittingScroller = fittingEditor.view.scrollDOM as HTMLElement;
-      const fittingTableFitsViewport = fittingTable.getBoundingClientRect().height <= fittingScroller.getBoundingClientRect().height;
-      await scrollPastHeader(fittingEditor);
-      const fittingChrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-      const fittingState = {
-        fitsViewport: fittingTableFitsViewport,
-        visible: Boolean(fittingChrome && getComputedStyle(fittingChrome).display !== 'none')
-      };
-      fittingEditor.destroy();
-
-      const spacerLines = Array.from({ length: 18 }, (_, index) => `between tables ${index + 1}`);
-      const multiEditor = await create([
-        '| Short A | Short B |',
-        '| --- | --- |',
-        '| 1 | 2 |',
-        '',
-        ...spacerLines,
-        '',
-        '| Long A | Long B |',
-        '| --- | --- |',
-        ...longRows,
-        '',
-        ...afterLongTable
-      ].join('\n'));
-      const tableShells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-shell'));
-      const secondHeader = tableShells[1]?.querySelector<HTMLElement>('thead');
-      const multiScroller = multiEditor.view.scrollDOM as HTMLElement;
-      if (secondHeader) {
-        multiScroller.scrollTop += Math.max(
-          1,
-          secondHeader.getBoundingClientRect().bottom - multiScroller.getBoundingClientRect().top + 8
-        );
-        multiScroller.dispatchEvent(new Event('scroll'));
-        await waitFrames();
-      }
-      const multiState = tableShells.map((shell) => {
-        const chrome = shell.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
-        return Boolean(chrome && getComputedStyle(chrome).display !== 'none');
-      });
-      const productionOwners = () => ({
-        shells: document.querySelectorAll('.meo-md-html-table-shell').length,
-        adapters: document.querySelectorAll('[data-table-sticky-header-owner="adapter"]').length,
-        toolbars: document.querySelectorAll('.meo-md-html-table-toolbar').length
-      });
-      const ownersBeforeLifecycle = productionOwners();
-      const textBeforeProjection = multiEditor.getText();
-      const projectionInput = document.querySelector<HTMLTextAreaElement>(
-        '.meo-md-html-table-shell tbody textarea'
-      )!;
-      projectionInput.focus({ preventScroll: true });
-      projectionInput.setSelectionRange(0, Math.min(1, projectionInput.value.length));
-      const selectionBeforeProjection = {
-        start: projectionInput.selectionStart,
-        end: projectionInput.selectionEnd
-      };
-      app.style.width = '260px';
-      window.dispatchEvent(new Event('resize'));
-      await waitFrames();
-      multiScroller.scrollLeft = 40;
-      multiScroller.dispatchEvent(new Event('scroll'));
-      await waitFrames();
-      const viewportBeforeProjection = {
-        top: multiScroller.scrollTop,
-        left: multiScroller.scrollLeft
-      };
-      window.dispatchEvent(new Event('resize'));
-      await waitFrames();
-      const projectionState = {
-        markdownUnchanged: multiEditor.getText() === textBeforeProjection,
-        focusAndSelectionPreserved: document.activeElement === projectionInput &&
-          projectionInput.selectionStart === selectionBeforeProjection.start &&
-          projectionInput.selectionEnd === selectionBeforeProjection.end,
-        viewportPreserved: multiScroller.scrollTop === viewportBeforeProjection.top &&
-          multiScroller.scrollLeft === viewportBeforeProjection.left,
-        horizontalViewportExercised: viewportBeforeProjection.left > 0,
-        toolbarUsable: !document.querySelector<HTMLButtonElement>(
-          '.meo-md-html-table-toolbar-btn'
-        )!.disabled
-      };
-
-      multiEditor.setMode('source');
-      await waitFrames();
-      const ownersInSource = productionOwners();
-      multiEditor.setMode('live');
-      await waitFrames();
-      const ownersAfterModeRestore = productionOwners();
-
-      multiEditor.setText(multiEditor.getText());
-      multiEditor.setText(`prefix\n\n${multiEditor.getText()}`);
-      await waitFrames();
-      const ownersAfterExternalPresentation = productionOwners();
-
-      const lifecycleInput = document.querySelector<HTMLTextAreaElement>('.meo-md-html-table-shell tbody textarea')!;
-      lifecycleInput.focus({ preventScroll: true });
-      lifecycleInput.value = `${lifecycleInput.value} changed`;
-      lifecycleInput.dispatchEvent(new Event('input', { bubbles: true }));
-      multiEditor.commitTransientEdits();
-      await waitFrames();
-      await multiEditor.undo();
-      await waitFrames();
-      const ownersAfterUndo = productionOwners();
-      await multiEditor.redo();
-      await waitFrames();
-      const ownersAfterRedo = productionOwners();
-
-      const lateScroller = multiEditor.view.scrollDOM as HTMLElement;
-      const lateStickyNodes = Array.from(document.querySelectorAll<HTMLElement>(
-        '.meo-md-html-table-sticky-chrome'
-      ));
-      multiEditor.destroy();
-      let lateDomWrites = 0;
-      const lateWriteObserver = new MutationObserver((records) => {
-        lateDomWrites += records.length;
-      });
-      for (const node of lateStickyNodes) {
-        lateWriteObserver.observe(node, { attributes: true, childList: true, subtree: true });
-      }
-      lateScroller.dispatchEvent(new Event('scroll'));
-      window.dispatchEvent(new Event('resize'));
-      await waitFrames();
-      lateWriteObserver.disconnect();
-      const ownersAfterDestroy = productionOwners();
-
-      const lifecycleState = {
-        ownersBeforeLifecycle,
-        ownersInSource,
-        ownersAfterModeRestore,
-        ownersAfterExternalPresentation,
-        ownersAfterUndo,
-        ownersAfterRedo,
-        ownersAfterDestroy,
-        projectionState,
-        lateDomWrites
-      };
-
-      return {
-        passiveState,
-        resizeState,
-        activeState,
-        beforeThresholdState,
-        atThresholdState,
-        inactiveState,
-        syncedHeaderText,
-        hiddenAtTableEnd,
-        shortState,
-        tallTailState,
-        toolbarSizeState,
-        fittingState,
-        multiState,
-        lifecycleState
-      };
+      const oldScroller = editor.view.scrollDOM as HTMLElement;
+      const detached = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-chrome'));
+      transactions.push(await settle(() => editor.destroy(), () => true, true));
+      let lateWrites = 0;
+      const lateObserver = new MutationObserver((records) => { lateWrites += records.length; });
+      detached.forEach((node) => lateObserver.observe(node, { attributes: true, childList: true, subtree: true }));
+      transactions.push(await settle(() => {
+        oldScroller.dispatchEvent(new Event('scroll')); outer.dispatchEvent(new Event('scroll')); window.dispatchEvent(new Event('resize'));
+      }, () => true, true));
+      lateObserver.disconnect();
+      return { transactions, initialHidden, appeared, controls, outerAligned, domContract,
+        hiddenAtTail, tailState, equalExternalCount, changedExternal, sourceCount, liveCount, previewVisible,
+        afterDispose: state().count, lateWrites };
     });
 
-    const failures: string[] = [];
-    if (
-      result.beforeThresholdState.stickyVisible ||
-      result.beforeThresholdState.originalHeaderTop <= result.beforeThresholdState.stickyTop ||
-      !result.atThresholdState.stickyVisible ||
-      result.atThresholdState.originalHeaderTop > result.atThresholdState.stickyTop + 1
-    ) {
-      failures.push(`sticky header did not take over at the header top edge: ${JSON.stringify({
-        before: result.beforeThresholdState,
-        at: result.atThresholdState
-      })}`);
-    }
-    if (
-      !result.passiveState.initiallyHidden ||
-      !result.passiveState.visible ||
-      result.passiveState.top === null ||
-      Math.abs(result.passiveState.top - result.passiveState.scrollerTop) > 1 ||
-      JSON.stringify(result.passiveState.text) !== JSON.stringify(['编号', '内容']) ||
-      result.passiveState.interactiveCount !== 0 ||
-      result.passiveState.cursor !== 'default' ||
-      result.passiveState.hitCursor !== 'default' ||
-      !result.passiveState.shadow.includes('inset') ||
-      Math.abs(result.passiveState.separatorHeight - 1) > 0.5 ||
-      result.passiveState.separatorColor === 'rgba(0, 0, 0, 0)' ||
-      result.passiveState.separatorSpace < 2.5 ||
-      result.passiveState.widthDeltas.some((delta: number) => delta > 1)
-    ) {
-      failures.push(`long table sticky header was incorrect: ${JSON.stringify(result.passiveState)}`);
-    }
-    if (
-      !result.resizeState.visible ||
-      !result.resizeState.withinEditor ||
-      result.resizeState.widthDeltas.some((delta: number) => delta > 1)
-    ) {
-      failures.push(`sticky header did not track editor resize: ${JSON.stringify(result.resizeState)}`);
-    }
-    if (
-      !result.activeState.hasToolbarBand ||
-      result.activeState.chromeTop === null ||
-      Math.abs(result.activeState.bandHeight - 24) > 1 ||
-      result.activeState.bandBackground !== 'rgb(36, 41, 46)' ||
-      Math.abs(result.activeState.toolbarTop - result.activeState.chromeTop) > 1 ||
-      result.activeState.headerTop === null ||
-      Math.abs(result.activeState.headerTop - result.activeState.chromeTop - 24) > 1 ||
-      Math.abs(result.activeState.bandWidth - result.activeState.chromeWidth) > 1
-    ) {
-      failures.push(`sticky toolbar stack was incorrect: ${JSON.stringify(result.activeState)}`);
-    }
-    if (
-      result.inactiveState.hasToolbarBand ||
-      result.inactiveState.chromeTop === null ||
-      result.inactiveState.headerTop === null ||
-      Math.abs(result.inactiveState.headerTop - result.inactiveState.chromeTop) > 1
-    ) {
-      failures.push(`sticky toolbar band did not clear after blur: ${JSON.stringify(result.inactiveState)}`);
-    }
-    if (result.syncedHeaderText !== '新编号') failures.push(`sticky header content stayed ${JSON.stringify(result.syncedHeaderText)}`);
-    if (!result.hiddenAtTableEnd) failures.push('sticky header remained visible after the table body ended');
-    if (result.shortState.visible) failures.push('short table unexpectedly enabled its sticky header');
-    if (!result.tallTailState.visible || result.tallTailState.remainingPixels < 200) {
-      failures.push(`sticky header disappeared while a tall trailing row remained: ${JSON.stringify(result.tallTailState)}`);
-    }
-    if (
-      !result.toolbarSizeState.usesSharedSurface ||
-      !result.toolbarSizeState.usesSharedButtons ||
-      result.toolbarSizeState.toolbarBackground !== 'rgb(20, 24, 28)' ||
-      result.toolbarSizeState.toolbarShadow !== 'none' ||
-      result.toolbarSizeState.toolbarOutlineStyle !== 'solid' ||
-      Number.parseFloat(result.toolbarSizeState.toolbarOutlineWidth) < 1 ||
-      result.toolbarSizeState.deleteColor === result.toolbarSizeState.regularColor ||
-      result.toolbarSizeState.toolbarHeight < 24 ||
-      result.toolbarSizeState.buttonHeight < 20
-    ) {
-      failures.push(`table controls remained too small: ${JSON.stringify(result.toolbarSizeState)}`);
-    }
-    if (!result.fittingState.fitsViewport || !result.fittingState.visible) {
-      failures.push(`viewport-fitting long table did not enable its sticky header: ${JSON.stringify(result.fittingState)}`);
-    }
-    if (JSON.stringify(result.multiState) !== JSON.stringify([false, true])) {
-      failures.push(`multiple table sticky headers were not isolated: ${JSON.stringify(result.multiState)}`);
-    }
-    const expectedTwoTableOwners = { shells: 2, adapters: 2, toolbars: 2 };
-    if (
-      JSON.stringify(result.lifecycleState.ownersBeforeLifecycle) !== JSON.stringify(expectedTwoTableOwners) ||
-      JSON.stringify(result.lifecycleState.ownersInSource) !== JSON.stringify({ shells: 0, adapters: 0, toolbars: 0 }) ||
-      JSON.stringify(result.lifecycleState.ownersAfterModeRestore) !== JSON.stringify(expectedTwoTableOwners) ||
-      JSON.stringify(result.lifecycleState.ownersAfterExternalPresentation) !== JSON.stringify(expectedTwoTableOwners) ||
-      JSON.stringify(result.lifecycleState.ownersAfterUndo) !== JSON.stringify(expectedTwoTableOwners) ||
-      JSON.stringify(result.lifecycleState.ownersAfterRedo) !== JSON.stringify(expectedTwoTableOwners) ||
-      JSON.stringify(result.lifecycleState.ownersAfterDestroy) !== JSON.stringify({ shells: 0, adapters: 0, toolbars: 0 }) ||
-      !result.lifecycleState.projectionState.markdownUnchanged ||
-      !result.lifecycleState.projectionState.focusAndSelectionPreserved ||
-      !result.lifecycleState.projectionState.viewportPreserved ||
-      !result.lifecycleState.projectionState.horizontalViewportExercised ||
-      !result.lifecycleState.projectionState.toolbarUsable ||
-      result.lifecycleState.lateDomWrites !== 0
-    ) {
-      failures.push(`production Sticky ownership lifecycle was incorrect: ${JSON.stringify(result.lifecycleState)}`);
-    }
-    if (failures.length) throw new Error(failures.join('\n'));
-    console.log('table sticky header production checks passed');
+    result.transactions.forEach((transaction: any) => {
+      assert.deepEqual(transaction.diagnostics, { phase:'complete', rootReturned:true, acceptances:1,
+        pendingMicrotasks:0, pendingFrames:0, failure:null });
+      assert.ok(transaction.trace.length >= 2);
+    });
+    assert.equal(result.initialHidden, true);
+    assert.equal(result.appeared.visible, true);
+    assert.ok(Math.abs(result.appeared.chromeTop - result.appeared.scrollerTop) <= 1);
+    assert.ok(Math.abs(result.controls[0] - result.controls[1]) <= 1);
+    assert.ok(Math.abs(result.controls[2] - result.controls[1] - result.controls[3]) <= 1);
+    assert.ok(Math.abs(result.outerAligned.chromeTop - result.outerAligned.scrollerTop) <= 1);
+    assert.deepEqual(result.domContract.stickyCols, result.domContract.normalCols);
+    assert.deepEqual([result.domContract.normalHandles, result.domContract.stickyHandles], [2, 2]);
+    assert.equal(result.domContract.interactive, 0);
+    assert.ok(result.domContract.horizontalScroll > 0);
+    assert.ok(result.domContract.firstColumnDelta <= 1);
+    assert.match(result.domContract.wrapOverflow, /auto|scroll/);
+    assert.equal(result.domContract.lineNumbers, true);
+    assert.equal(result.hiddenAtTail, true, JSON.stringify(result.tailState));
+    assert.equal(result.equalExternalCount, 1);
+    assert.equal(result.changedExternal.count, 1);
+    assert.match(result.changedExternal.text, /^prefix/);
+    assert.deepEqual([result.sourceCount, result.liveCount, result.previewVisible], [0, 1, false]);
+    assert.deepEqual([result.afterDispose, result.lateWrites], [0, 0]);
   } finally {
     await browser.close();
+    fs.rmSync(temp, { recursive: true, force: true });
   }
 }
 
-main()
-  .finally(() => fs.rmSync(tempDir, { recursive: true, force: true }))
-  .catch((error) => {
-    console.error(error instanceof Error ? error.stack : error);
-    process.exitCode = 1;
-  });
+await main();
+console.log('table sticky header production Chromium contract passed');

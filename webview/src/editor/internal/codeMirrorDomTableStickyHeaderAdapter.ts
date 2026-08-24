@@ -11,14 +11,20 @@ export type CodeMirrorDomTableStickyHeaderAdapterOptions = TableStickyHeaderAdap
 
 function makeStickyContentPassive(root: HTMLElement): void {
   root.setAttribute('aria-hidden', 'true');
+  root.setAttribute('contenteditable', 'false');
   for (const interactive of Array.from(root.querySelectorAll(
-    'button, textarea, input, select, [contenteditable="true"]'
+    'button, textarea, input, select'
   ))) {
     interactive.remove();
   }
-  for (const link of Array.from(root.querySelectorAll('a[href], [tabindex]'))) {
-    link.removeAttribute('href');
-    link.removeAttribute('tabindex');
+  for (const editable of Array.from(root.querySelectorAll<HTMLElement>('[contenteditable]'))) {
+    editable.setAttribute('contenteditable', 'false');
+  }
+  for (const link of Array.from(root.querySelectorAll('a[href]'))) {
+    link.replaceWith(...Array.from(link.childNodes));
+  }
+  for (const focusable of Array.from(root.querySelectorAll('[tabindex]'))) {
+    focusable.removeAttribute('tabindex');
   }
 }
 
@@ -151,6 +157,14 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
 
     window.addEventListener('resize', requestIfActive);
     cleanup.push(() => window.removeEventListener('resize', requestIfActive));
+
+    const ownerDocument = elements.scroller.ownerDocument;
+    const onVerticalScroll = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof Node && target.contains(elements.scroller)) requestIfActive();
+    };
+    ownerDocument.addEventListener('scroll', onVerticalScroll, true);
+    cleanup.push(() => ownerDocument.removeEventListener('scroll', onVerticalScroll, true));
 
     elements.horizontalScroller.addEventListener('scroll', requestIfActive);
     cleanup.push(() => elements.horizontalScroller.removeEventListener('scroll', requestIfActive));

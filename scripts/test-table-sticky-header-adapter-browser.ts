@@ -31,6 +31,7 @@ async function main(): Promise<void> {
     await page.setContent(`<!doctype html>
       <style>
         .shell { position: relative; margin: 8px; }
+        .outer { height: 260px; overflow-y: auto; }
         .scroller { position: relative; width: 320px; height: 210px; overflow-x: hidden; overflow-y: auto; }
         .content { width: 320px; }
         .horizontal { width: 320px; overflow-x: auto; }
@@ -41,17 +42,21 @@ async function main(): Promise<void> {
         .sticky.is-visible { visibility: visible; }
         .sticky-viewport { overflow: hidden; }
       </style>
-      ${[1, 2].map((id) => `<section class="shell" id="shell-${id}">
+      <main class="outer" id="outer">${[1, 2].map((id) => `<section class="shell" id="shell-${id}">
         <div class="scroller" id="scroller-${id}"><div class="content"><div class="spacer"></div>
           <div class="horizontal" id="horizontal-${id}"><table class="source" id="table-${id}"><colgroup><col style="width:180px"><col style="width:340px"></colgroup>
-            <thead><tr><th><a href="#x">Header ${id}</a><input value="interactive"></th><th>Value</th></tr></thead>
+            <thead><tr><th><a href="#x" tabindex="2">Header ${id}</a><input value="interactive"><button>Command</button>
+              <span contenteditable>empty editable</span><span contenteditable="plaintext-only">plain editable</span>
+              <span contenteditable="TrUe"><span>inherited editable</span></span><span contenteditable="false" tabindex="0">false editable</span>
+              <span role="button" tabindex="0">role command</span><span class="meo-md-html-table-column-resize-handle" aria-hidden="true"></span>
+            </th><th>Value<span class="meo-md-html-table-column-resize-handle" aria-hidden="true"></span></th></tr></thead>
             <tbody>${Array.from({ length: 12 }, (_, row) => `<tr><td>${id}-${row}</td><td>row</td></tr>`).join('')}</tbody>
           </table></div><div style="height:220px"></div>
         </div></div>
         <div class="sticky" id="sticky-${id}"><button class="sticky-toolbar-button">Toolbar</button><div class="sticky-viewport" id="viewport-${id}">
           <table id="sticky-table-${id}"><thead><tr id="sticky-row-${id}"></tr></thead></table>
         </div></div>
-      </section>`).join('')}`);
+      </section>`).join('')}</main>`);
     await page.addScriptTag({ path: path.join(tempDir, 'candidate.js') });
 
     const result = await page.evaluate(async () => {
@@ -144,6 +149,14 @@ async function main(): Promise<void> {
         ariaHidden: elements(1).stickyHeaderViewport.getAttribute('aria-hidden'),
         inputs: elements(1).stickyHeaderRow.querySelectorAll('input,button,textarea,select').length,
         href: elements(1).stickyHeaderRow.querySelector('a')?.getAttribute('href') ?? null,
+        editableCount: Array.from(elements(1).stickyHeaderRow.querySelectorAll<HTMLElement>('*'))
+          .filter((element) => element.isContentEditable).length,
+        focusableCount: Array.from(elements(1).stickyHeaderRow.querySelectorAll<HTMLElement>('*'))
+          .filter((element) => element.tabIndex >= 0).length,
+        focusable: Array.from(elements(1).stickyHeaderRow.querySelectorAll<HTMLElement>('*'))
+          .filter((element) => element.tabIndex >= 0)
+          .map((element) => `${element.tagName}:${element.outerHTML}`),
+        resizeHandles: elements(1).stickyHeaderRow.querySelectorAll('.meo-md-html-table-column-resize-handle').length,
         toolbarButtons: elements(1).stickyChrome.querySelectorAll('.sticky-toolbar-button').length
       };
 
@@ -153,10 +166,17 @@ async function main(): Promise<void> {
         elements(id).scroller.dispatchEvent(new Event('scroll'));
         elements(id).scroller.dispatchEvent(new Event('scroll'));
       }
-      window.dispatchEvent(new Event('resize'));
       const stormFrames = scheduler.frames - framesBeforeStorm;
       const stormTasks = scheduler.flush();
       const visible = elements(1).stickyChrome.classList.contains('is-visible');
+      const outer = document.getElementById('outer')!;
+      outer.scrollTop = 24;
+      outer.dispatchEvent(new Event('scroll'));
+      const outerScrollTasks = scheduler.flush();
+      const outerScrollAligned = [1, 2].every((id) => (
+        Number.parseFloat(elements(id).stickyChrome.style.top) ===
+        Math.round(elements(id).scroller.getBoundingClientRect().top)
+      ));
       const framesBeforeHorizontalScroll = scheduler.frames;
       elements(1).horizontalScroller.scrollLeft = 45;
       elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
@@ -265,6 +285,8 @@ async function main(): Promise<void> {
         passive,
         stormFrames,
         stormTasks,
+        outerScrollTasks,
+        outerScrollAligned,
         horizontalScrollFrames,
         horizontalScrollTasks,
         visible,
@@ -302,10 +324,13 @@ async function main(): Promise<void> {
     assert.equal(result.reentryPending, 1, 'invalidation during refresh must schedule the next shared tick');
     assert.equal(result.initiallyHidden, true);
     assert.deepEqual(result.passive, {
-      ariaHidden: 'true', inputs: 0, href: null, toolbarButtons: 1
+      ariaHidden: 'true', inputs: 0, href: null, editableCount: 0, focusableCount: 0, focusable: [],
+      resizeHandles: 2, toolbarButtons: 1
     });
-    assert.equal(result.stormFrames, 1, 'multiple adapters and event storms share one scheduled tick');
-    assert.equal(result.stormTasks, 2);
+    assert.equal(result.stormFrames, 1, 'vertical scroll storms share one scheduled tick');
+    assert.equal(result.stormTasks, 2, 'each vertical scroller invalidates its current Sticky adapter');
+    assert.equal(result.outerScrollTasks, 2, 'an outer vertical scroller invalidates each nested Sticky adapter');
+    assert.equal(result.outerScrollAligned, true, 'outer scrolling keeps Sticky geometry aligned to public scroller bounds');
     assert.equal(result.horizontalScrollFrames, 1, 'horizontal scroll storms share the existing scheduler tick');
     assert.equal(result.horizontalScrollTasks, 1, 'horizontal scroll invalidates only its current Sticky adapter');
     assert.equal(result.visible, true);

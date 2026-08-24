@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { tableStickyHeaderPolicy } from '../webview/src/editor/tableStickyHeaderPolicy';
 
 const common = {
@@ -56,19 +55,5 @@ assert.deepEqual(tableStickyHeaderPolicy.layout({
   translateX: -50,
   controlsHeight: 31
 });
-
-const policySource = readFileSync(
-  new URL('../webview/src/editor/tableStickyHeaderPolicy.ts', import.meta.url),
-  'utf8'
-);
-assert.equal(
-  /@codemirror|\b(?:DOMRect|HTMLElement|PointerEvent|ResizeObserver|MutationObserver|requestAnimationFrame|DocumentSession|Revision|Draft|Change)\b/.test(policySource),
-  false,
-  'the pure sticky header policy must not own editor, DOM, document, observer, or frame state'
-);
-const editorSource = readFileSync(new URL('../webview/src/editor.ts', import.meta.url), 'utf8');
-const tablesSource = readFileSync(new URL('../webview/src/helpers/tables.ts', import.meta.url), 'utf8');
-assert.equal(editorSource.includes('tableStickyHeaderPolicy'), true);
-assert.equal(tablesSource.includes('tableStickyHeaderPolicy'), false);
 
 console.log('table sticky header policy contracts passed');

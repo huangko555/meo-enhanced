@@ -4658,15 +4658,12 @@ class HtmlTableWidget extends WidgetType {
     this.pendingResizeRows = true;
     this.scheduleLayout({ resizeRows: true });
 
-    const onEditorScroll = () => this.stickyHeaderAdapter.invalidate();
     const onSearchStateChange = (event: Event) => {
       const detail: unknown = event instanceof CustomEvent ? event.detail : null;
       this.setSearchState(isTableSearchState(detail) ? detail : null);
     };
-    view.scrollDOM.addEventListener('scroll', onEditorScroll);
     view.dom.addEventListener(tableSearchStateEventName, onSearchStateChange);
     this.cleanupFns.push(() => {
-      view.scrollDOM.removeEventListener('scroll', onEditorScroll);
       view.dom.removeEventListener(tableSearchStateEventName, onSearchStateChange);
     });
     return shell;
