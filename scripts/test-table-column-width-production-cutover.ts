@@ -253,6 +253,88 @@ async function dragAcrossWrapperResize(
   }, { delta, wrapperWidth: nextWrapperWidth });
 }
 
+async function noMoveAcrossWrapperResize(
+  page: any,
+  selector: string,
+  nextWrapperWidth: number,
+  terminal: 'pointerup' | 'pointercancel' | 'lostpointercapture'
+): Promise<{
+  readonly before: Awaited<ReturnType<typeof tablePresentationWidths>>;
+  readonly afterObserver: Awaited<ReturnType<typeof tablePresentationWidths>>;
+  readonly eventSamples: readonly Awaited<ReturnType<typeof tablePresentationWidths>>[];
+  readonly settled: Awaited<ReturnType<typeof tablePresentationWidths>>;
+}> {
+  const observed = await page.$eval(
+    selector,
+    async (handle: Element, options: { wrapperWidth: number; terminal: string }) => {
+      const table = document.querySelector<HTMLTableElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type'
+      )!;
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      const presentation = () => {
+        const stickyTable = table.closest('.meo-md-html-table-shell')!
+          .querySelector<HTMLElement>('.meo-md-html-table-sticky-table')!;
+        return {
+          primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+            .map((cell) => cell.getBoundingClientRect().width),
+          stickyWidths: Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+            .map((column) => Number.parseFloat(column.style.width)),
+          primaryTableWidth: table.getBoundingClientRect().width,
+          stickyTableWidth: stickyTable.getBoundingClientRect().width
+        };
+      };
+      const before = presentation();
+      let resolveObserverConsumed!: () => void;
+      const observerConsumed = new Promise<void>((resolve) => { resolveObserverConsumed = resolve; });
+      const samples: ReturnType<typeof presentation>[] = [];
+      const onProjected = () => {
+        samples.push(presentation());
+        resolveObserverConsumed();
+      };
+      table.addEventListener('meo-table-column-width-projected', onProjected);
+      const rect = handle.getBoundingClientRect();
+      const pointerId = ((window as any).__columnWidthTransactionPointerId ?? 290) + 1;
+      (window as any).__columnWidthTransactionPointerId = pointerId;
+      const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      handle.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, cancelable: true, button: 0, buttons: 1,
+        pointerId, pointerType: 'mouse', clientX: point.x, clientY: point.y
+      }));
+      wrap.style.maxWidth = 'none';
+      wrap.style.width = `${options.wrapperWidth}px`;
+      await observerConsumed;
+      const afterObserver = presentation();
+      samples.splice(0, samples.length);
+      const target = options.terminal === 'lostpointercapture'
+        ? handle.closest<HTMLElement>('.cm-editor')!
+        : window;
+      target.dispatchEvent(new PointerEvent(options.terminal, {
+        bubbles: true, cancelable: true, buttons: 0,
+        pointerId, pointerType: 'mouse', clientX: point.x, clientY: point.y
+      }));
+      (window as any).__columnWidthNoMoveTrace = {
+        table, onProjected, samples, beforeTotal: before.primaryTableWidth
+      };
+      return { before, afterObserver };
+    },
+    { wrapperWidth: nextWrapperWidth, terminal }
+  );
+  await page.waitForFunction(() => {
+    const trace = (window as any).__columnWidthNoMoveTrace;
+    return trace.samples.some((sample: { primaryTableWidth: number }) => (
+      Math.abs(sample.primaryTableWidth - trace.beforeTotal) >= 1
+    ));
+  }, { polling: 'mutation', timeout: 5000 });
+  const eventSamples = await page.evaluate(() => {
+    const trace = (window as any).__columnWidthNoMoveTrace;
+    trace.table.removeEventListener('meo-table-column-width-projected', trace.onProjected);
+    delete (window as any).__columnWidthNoMoveTrace;
+    return trace.samples;
+  });
+  const settled = eventSamples[eventSamples.length - 1];
+  return { ...observed, eventSamples, settled };
+}
+
 async function tablePresentationWidths(
   page: any,
   selector: string
@@ -1139,6 +1221,28 @@ async function main(): Promise<void> {
         );
       }
       assert.ok(direction === 'grow' ? changedTotals[0] > previewTotal : changedTotals[0] < previewTotal);
+    }
+    for (const [terminal, width] of [
+      ['pointerup', 500],
+      ['pointercancel', 300],
+      ['lostpointercapture', 500]
+    ] as const) {
+      const trace = await noMoveAcrossWrapperResize(page, currentnessHandle, width, terminal);
+      assert.deepEqual(
+        trace.afterObserver.primaryWidths.map(Math.round),
+        trace.before.primaryWidths.map(Math.round),
+        `${terminal} no-move observer consumption must preserve committed geometry until terminal`
+      );
+      assert.deepEqual(trace.settled.stickyWidths.map(Math.round), trace.settled.primaryWidths.map(Math.round));
+      const changedTotals = trace.eventSamples
+        .map((sample) => Math.round(sample.primaryTableWidth))
+        .filter((total) => total !== Math.round(trace.before.primaryTableWidth));
+      assert.equal(
+        changedTotals.length,
+        1,
+        `${terminal} no-move terminal must expose exactly one causal changed projection: ${JSON.stringify(trace)}`
+      );
+      assert.equal(new Set(changedTotals).size, 1, `${terminal} must not repeat the changed geometry value`);
     }
     await page.evaluate(() => (window as any).__columnWidthCurrentness.destroy());
     assert.equal(await page.$$('[data-table-column-width-owner="adapter"]').then((items) => items.length), 0);

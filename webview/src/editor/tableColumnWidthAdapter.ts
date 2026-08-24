@@ -234,6 +234,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     const lifecycle = { alive: true };
     let dragCleanup: (() => void) | null = null;
     let dragPreviewActive = false;
+    let dragLayoutFactsDirty = false;
     let initialResizePending = true;
     let projectedContainerWidth: number | null = null;
     table.dataset.tableColumnWidthOwner = 'adapter';
@@ -280,6 +281,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       let lastPreview: PreviewSnapshot | null = null;
       let latestClientX = startX;
       const pointerBoundary = table.closest<HTMLElement>('.cm-editor') ?? options.root;
+      dragLayoutFactsDirty = false;
 
       const renderDragPreview = (): void => {
         if (!isCurrentBinding()) return;
@@ -330,14 +332,20 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         if (finishEvent && finishEvent.pointerId !== event.pointerId) return;
         removeDragListeners();
         if (!isCurrentBinding() || !table.isConnected) return;
-        if (!lastPreview) return;
-        storeIntent(table, {
-          snapshot: lastPreview,
-          initialTotalWidth,
-          defaultWidthWasCapped
-        });
-        table.dispatchEvent(new CustomEvent(projectionEventName));
-        if (!sameLayoutFacts(lastPreview, layoutFacts(table))) {
+        const committedSnapshot = lastPreview ?? stored?.snapshot ?? null;
+        if (lastPreview) {
+          storeIntent(table, {
+            snapshot: lastPreview,
+            initialTotalWidth,
+            defaultWidthWasCapped
+          });
+          table.dispatchEvent(new CustomEvent(projectionEventName));
+        }
+        const currentFacts = layoutFacts(table);
+        const needsReconcile = committedSnapshot !== null
+          && (dragLayoutFactsDirty || !sameLayoutFacts(committedSnapshot, currentFacts));
+        dragLayoutFactsDirty = needsReconcile;
+        if (needsReconcile) {
           requestCurrentProjectionOnFrame(epoch);
         }
       };
@@ -382,10 +390,15 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       project() {
         const previousContainerWidth = projectedContainerWidth;
         if (dragPreviewActive) {
+          const intent = findIntent(table);
+          if (intent && !sameLayoutFacts(intent.snapshot, layoutFacts(table))) {
+            dragLayoutFactsDirty = true;
+          }
           projectedContainerWidth = (table.parentElement ?? options.root).clientWidth;
           return false;
         }
         project(table, epoch);
+        dragLayoutFactsDirty = false;
         projectedContainerWidth = (table.parentElement ?? options.root).clientWidth;
         return previousContainerWidth === null
           || Math.round(previousContainerWidth) !== Math.round(projectedContainerWidth);

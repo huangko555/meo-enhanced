@@ -303,6 +303,91 @@ async function main(): Promise<void> {
           observerCallbacks, terminalCallbacks, lateCallbacks, pendingCallbacks, releases, resizing, requests
         };
       };
+      const runNoMove = (options: {
+        id: string;
+        initialWidth: number;
+        nextWidth: number;
+        minimums: readonly number[];
+        nextMinimums?: readonly number[];
+        terminal: 'pointerup' | 'pointercancel' | 'lostpointercapture';
+      }) => {
+        const host = document.createElement('div');
+        document.body.append(host);
+        const runtime = window.TableColumnWidthAdapterCandidate!.createControlled(host);
+        const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+        root.style.width = `${options.initialWidth}px`;
+        const table = document.createElement('table');
+        table.style.width = `${options.initialWidth}px`;
+        table.dataset.tableColumnWidth = options.id;
+        table.dataset.tableFrom = '0';
+        table.dataset.tableTo = String(options.id.length);
+        const colgroup = document.createElement('colgroup');
+        const head = document.createElement('thead');
+        const row = document.createElement('tr');
+        for (const [index, minimum] of options.minimums.entries()) {
+          colgroup.append(document.createElement('col'));
+          const cell = document.createElement('th');
+          cell.style.fontSize = '10px';
+          cell.style.paddingLeft = `${minimum - 10}px`;
+          const handle = document.createElement('span');
+          handle.dataset.tableResizeColumn = String(index);
+          cell.append(handle);
+          row.append(cell);
+        }
+        head.append(row);
+        table.append(colgroup, head);
+        root.append(table);
+        runtime.adapter.acquire();
+        runtime.notifyResize();
+        runtime.drainScheduler();
+        const read = () => Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+          .map((column) => Number.parseFloat(column.style.width));
+        const handle = table.querySelector<HTMLElement>('[data-table-resize-column="0"]')!;
+        const dispatch = (type: string, pointerId: number, clientX: number, buttons: number) => {
+          const target = type === 'lostpointercapture' ? root : type === 'pointerdown' ? handle : window;
+          target.dispatchEvent(new PointerEvent(type, {
+            bubbles: true, cancelable: true, button: type === 'pointerdown' ? 0 : -1,
+            buttons, pointerId, pointerType: 'mouse', clientX
+          }));
+        };
+
+        // Establish the committed WidthIntent through the same public pointer seam.
+        dispatch('pointerdown', 401, 100, 1);
+        dispatch('pointermove', 401, 130, 1);
+        dispatch('pointerup', 401, 130, 0);
+        runtime.drainScheduler();
+        const committed = read();
+        runtime.resetProjectCalls();
+
+        dispatch('pointerdown', 402, 100, 1);
+        root.style.width = `${options.nextWidth}px`;
+        if (options.nextMinimums) {
+          Array.from(table.querySelectorAll<HTMLElement>('thead th')).forEach((cell, index) => {
+            cell.style.paddingLeft = `${options.nextMinimums![index] - 10}px`;
+          });
+        }
+        runtime.notifyResize();
+        const observerCallbacks = runtime.drainScheduler();
+        const afterObserver = read();
+        dispatch(options.terminal, 402, 100, 0);
+        const terminalCallbacks = runtime.drainScheduler();
+        const reconciled = read();
+        dispatch(options.terminal, 402, 100, 0);
+        const lateCallbacks = runtime.drainScheduler();
+        const requests = runtime.projectRequests() as Array<{
+          availableWidth: number;
+          minimumWidths: number[];
+          preserveWidthIntent: boolean;
+        }>;
+        const pendingCallbacks = runtime.pendingCallbacks();
+        runtime.destroy();
+        host.remove();
+        return {
+          id: options.id, committed, afterObserver, reconciled, observerCallbacks, terminalCallbacks,
+          lateCallbacks, pendingCallbacks, requests
+        };
+      };
+      const terminals = ['pointerup', 'pointercancel', 'lostpointercapture'] as const;
       return {
         pointerup: run({ id: 'pointerup', initialWidth: 300, nextWidth: 500, minimums: [20, 20, 20] }),
         pointercancel: run({
@@ -323,7 +408,31 @@ async function main(): Promise<void> {
         infeasibleMinimums: run({
           id: 'infeasible-minimums', initialWidth: 500, nextWidth: 300,
           minimums: [180, 100, 50]
-        })
+        }),
+        noMove: terminals.flatMap((terminal) => [
+          runNoMove({ id: `${terminal}-grow`, initialWidth: 300, nextWidth: 500, minimums: [20, 20, 20], terminal }),
+          runNoMove({ id: `${terminal}-shrink`, initialWidth: 500, nextWidth: 300, minimums: [20, 20, 20], terminal }),
+          runNoMove({
+            id: `${terminal}-minimum`, initialWidth: 300, nextWidth: 300,
+            minimums: [20, 20, 20], nextMinimums: [140, 100, 80], terminal
+          }),
+          runNoMove({
+            id: `${terminal}-both-grow`, initialWidth: 300, nextWidth: 500,
+            minimums: [20, 20, 20], nextMinimums: [140, 100, 80], terminal
+          }),
+          runNoMove({
+            id: `${terminal}-both-shrink`, initialWidth: 500, nextWidth: 300,
+            minimums: [20, 20, 20], nextMinimums: [180, 100, 50], terminal
+          })
+        ]),
+        noMoveNoChange: runNoMove({
+          id: 'no-change', initialWidth: 300, nextWidth: 300,
+          minimums: [20, 20, 20], terminal: 'pointerup'
+        }),
+        noMoveTolerance: [300.4, 301, 302].map((nextWidth) => runNoMove({
+          id: `tolerance-${nextWidth}`, initialWidth: 300, nextWidth,
+          minimums: [20, 20, 20], terminal: 'pointerup'
+        }))
       };
     });
     for (const result of [
@@ -371,6 +480,25 @@ async function main(): Promise<void> {
     assert.ok(currentnessMatrix.infeasibleMinimums.reconciled[0] >= 180);
     assert.ok(currentnessMatrix.infeasibleMinimums.reconciled[1] >= 100);
     assert.ok(currentnessMatrix.infeasibleMinimums.reconciled[2] >= 50);
+    for (const result of currentnessMatrix.noMove) {
+      assert.deepEqual(result.afterObserver, result.committed, 'active-drag observer work must not project early');
+      assert.equal(
+        result.observerCallbacks,
+        1,
+        `the active-drag invalidation must be consumed before terminal: ${result.id}`
+      );
+      assert.equal(result.requests.length, 1, 'every no-move terminal must cause one ordinary current-facts projection');
+      assert.equal(result.requests[0].preserveWidthIntent, false);
+      assert.equal(result.terminalCallbacks, 1);
+      assert.equal(result.lateCallbacks, 0, 'duplicate terminal must be effect-free');
+      assert.equal(result.pendingCallbacks, 0, 'the no-move causal scheduler must be queue-empty');
+    }
+    assert.equal(currentnessMatrix.noMoveNoChange.requests.length, 0, 'no facts change must not project');
+    assert.deepEqual(
+      currentnessMatrix.noMoveTolerance.map((result) => result.requests.length),
+      [0, 1, 1],
+      'no-move terminal currentness must retain the existing <1/=1/>1 tolerance'
+    );
 
     await drag(page, handle, 90);
     const resizedFirst = await widths('first');
@@ -691,7 +819,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse', buttons: 0 }));
     });
     await page.mouse.up();
-    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 12);
+    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 31);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.legacyInstances), 0);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.policyInstances), 1);
   } finally {
