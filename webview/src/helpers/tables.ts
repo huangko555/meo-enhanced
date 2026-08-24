@@ -53,6 +53,11 @@ import {
   type TableCommandTransactionPlan
 } from '../editor/tableCommandAdapter';
 import type { TableCommand, TableCommandTarget } from '../application/tableCommand';
+import {
+  createTableCellInteraction,
+  type TableCellEditIntent,
+  type TableCellInteraction
+} from '../editor/tableCellInteraction';
 
 interface TableData {
   rows: string[][];
@@ -166,13 +171,6 @@ interface PendingCellFocus {
   row: number;
   col: number;
   caret?: number;
-}
-
-interface PendingCellEdit {
-  row: number;
-  col: number;
-  value: string;
-  sequence: number;
 }
 
 interface PendingTableTransactionBuilder {
@@ -2101,8 +2099,7 @@ class HtmlTableWidget extends WidgetType {
   selectionRange: SelectionRange | null;
   selectionPointerId: number | null;
   isDraggingSelection: boolean;
-  hasPendingCellEdits: boolean;
-  pendingCellEdits: PendingCellEdit[];
+  cellInteraction: TableCellInteraction;
   pendingCellAutoCommitTimer: number | null;
   pendingCellSwitchCommit: boolean;
   activeTarget: TableActionTarget;
@@ -2131,8 +2128,7 @@ class HtmlTableWidget extends WidgetType {
     this.selectionRange = null;
     this.selectionPointerId = null;
     this.isDraggingSelection = false;
-    this.hasPendingCellEdits = false;
-    this.pendingCellEdits = [];
+    this.cellInteraction = createTableCellInteraction();
     this.pendingCellAutoCommitTimer = null;
     this.pendingCellSwitchCommit = false;
     this.activeTarget = { row: this.tableData.rows.length > 0 ? 1 : 0, col: 0 };
@@ -2177,6 +2173,15 @@ class HtmlTableWidget extends WidgetType {
       other.tableData.endLine === this.tableData.endLine
       && other.stickyHeaderAdapterFactory === this.stickyHeaderAdapterFactory
     );
+  }
+
+  get hasPendingCellEdits() {
+    return this.cellInteraction.snapshot().pending.length > 0;
+  }
+
+  discardPendingCellEdits() {
+    this.cellInteraction.accept({ type: 'invalidate', reason: 'replacement' });
+    this.cancelPendingCellAutoCommit();
   }
 
   resolveStickyHeaderElements(): TableStickyHeaderElements | null {
@@ -3042,16 +3047,20 @@ class HtmlTableWidget extends WidgetType {
     view: EditorView;
     builders: PendingTableTransactionBuilder[];
   } | null {
-    if (!this.hasPendingCellEdits) return null;
+    const commit = this.cellInteraction.accept({ type: 'commit', reason: 'command' }).commit;
+    if (!commit) return null;
     const view = this.getEditorView(dom);
-    if (!view) return null;
-    const pendingCellEdits = this.pendingCellEdits;
-    this.pendingCellEdits = [];
-    this.hasPendingCellEdits = false;
+    if (!view) {
+      this.cellInteraction.accept({ type: 'commit-result', generation: commit.generation, outcome: 'failed' });
+      return null;
+    }
+    const pendingCellEdits = commit.edits;
+    this.cancelPendingCellAutoCommit();
     if (pendingCellEdits.length) {
       const tableStartLine = view.state.doc.lineAt(
         Math.max(0, Math.min(this.tableData.from ?? 0, view.state.doc.length))
       ).number;
+      this.cellInteraction.accept({ type: 'commit-result', generation: commit.generation, outcome: 'applied' });
       return {
         view,
         builders: pendingCellEdits.map((edit) => ({
@@ -3066,6 +3075,7 @@ class HtmlTableWidget extends WidgetType {
       };
     }
     const changes = this.collectPendingCellSourceChanges(view);
+    this.cellInteraction.accept({ type: 'commit-result', generation: commit.generation, outcome: changes.length ? 'applied' : 'no-op' });
     return {
       view,
       builders: changes.length ? [{
@@ -3166,10 +3176,12 @@ class HtmlTableWidget extends WidgetType {
   }
 
   recordPendingCellEdit(row: number, col: number, value: string) {
-    const last = this.pendingCellEdits[this.pendingCellEdits.length - 1];
-    if (last?.row === row && last.col === col) last.value = value;
-    else this.pendingCellEdits.push({ row, col, value, sequence: ++nextTableCellEditSequence });
-    this.hasPendingCellEdits = true;
+    return this.cellInteraction.accept({
+      type: 'input',
+      target: { row, col },
+      value,
+      sequence: ++nextTableCellEditSequence
+    }).scheduleAutoCommit?.generation ?? null;
   }
 
   cancelPendingCellAutoCommit() {
@@ -3178,12 +3190,13 @@ class HtmlTableWidget extends WidgetType {
     this.pendingCellAutoCommitTimer = null;
   }
 
-  schedulePendingCellAutoCommit(input: HTMLTextAreaElement, row: number, col: number) {
+  schedulePendingCellAutoCommit(input: HTMLTextAreaElement, row: number, col: number, generation: number | null) {
+    if (generation === null) return;
     this.cancelPendingCellAutoCommit();
     this.pendingCellAutoCommitTimer = window.setTimeout(() => {
       this.pendingCellAutoCommitTimer = null;
       const view = this.view;
-      if (!view || !this.hasPendingCellEdits || document.activeElement !== input) return;
+      if (!view || !this.cellInteraction.accept({ type: 'timer', generation }).timerCurrent || document.activeElement !== input) return;
       const tableStartLine = view.state.doc.lineAt(
         Math.max(0, Math.min(this.tableData.from, view.state.doc.length))
       ).number;
@@ -3196,7 +3209,7 @@ class HtmlTableWidget extends WidgetType {
     }, tableCellAutoCommitDelayMs);
   }
 
-  pendingCellSourceChange(state: EditorState, edit: PendingCellEdit, tableStartLine: number) {
+  pendingCellSourceChange(state: EditorState, edit: TableCellEditIntent, tableStartLine: number) {
     const lineNumber = tableStartLine + (edit.row === 0 ? 0 : edit.row + 1);
     if (lineNumber > state.doc.lines) return null;
     const line = state.doc.line(lineNumber);
@@ -3398,7 +3411,7 @@ class HtmlTableWidget extends WidgetType {
           })
         ];
     if (current === markdown) {
-      this.hasPendingCellEdits = false;
+      this.discardPendingCellEdits();
       if (commandEffects.length) {
         return {
           transaction: { effects: commandEffects },
@@ -3444,7 +3457,7 @@ class HtmlTableWidget extends WidgetType {
       tableFrom: range.from,
       rows: trackedRowMappings
     });
-    this.hasPendingCellEdits = false;
+    this.discardPendingCellEdits();
     return {
       transaction: {
         changes: { from: range.from, to: range.to, insert: markdown },
@@ -3527,7 +3540,7 @@ class HtmlTableWidget extends WidgetType {
       assoc: -1,
       offset: insertedRowOffset
     });
-    this.hasPendingCellEdits = false;
+    this.discardPendingCellEdits();
     const focusTarget = { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 };
     return {
       transaction: { changes, effects: insertedRowEffect },
@@ -3638,7 +3651,7 @@ class HtmlTableWidget extends WidgetType {
       ...intent,
       at: ownChanges.mapPos(intent.at, intent.assoc)
     }));
-    this.hasPendingCellEdits = false;
+    this.discardPendingCellEdits();
     return {
       transaction: { changes, effects: deletionEffects },
       outcome: 'changed',
@@ -3721,48 +3734,10 @@ class HtmlTableWidget extends WidgetType {
     const notifySelectionChange = () => {
       this.emitTableSelectionChange(container);
     };
-    const getCollapsedCaretLineInfo = () => {
-      const start = input.selectionStart ?? 0;
-      const end = input.selectionEnd ?? start;
-      if (start !== end) return null;
-      const value = input.value ?? '';
-      const prevNl = value.lastIndexOf('\n', Math.max(0, start - 1));
-      const nextNl = value.indexOf('\n', start);
-      const lineStart = prevNl + 1;
-      return {
-        column: start - lineStart,
-        isFirstLine: lineStart === 0,
-        isLastLine: nextNl < 0
-      };
-    };
-    const onArrowVertical = (event: KeyboardEvent, direction: 'up' | 'down') => {
-      if (event.defaultPrevented) return false;
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
-      if (direction !== 'up' && direction !== 'down') return false;
-
-      const caretInfo = getCollapsedCaretLineInfo();
-      if (!caretInfo) return false;
-
-      const atBoundary = direction === 'up' ? caretInfo.isFirstLine : caretInfo.isLastLine;
-      if (!atBoundary) return false;
-
-      const nextRow = direction === 'up' ? rowIndex - 1 : rowIndex + 1;
-      event.preventDefault();
-      event.stopPropagation();
-
-      const nextInput = this.domRefs?.allRowInputs?.[nextRow]?.[colIndex];
-      if (nextInput instanceof HTMLTextAreaElement) {
-        const nextCaret = Math.min(caretInfo.column, nextInput.value.length);
-        return this.focusTableInput(nextInput, nextCaret);
-      }
-
-      return this.moveVerticalOutOfTable(container, direction, caretInfo.column);
-    };
-
     input.addEventListener('input', () => {
       normalizeTableCellEditorInput(input);
-      this.recordPendingCellEdit(rowIndex, colIndex, input.value);
-      if (!compositionActive) this.schedulePendingCellAutoCommit(input, rowIndex, colIndex);
+      const autoCommitGeneration = this.recordPendingCellEdit(rowIndex, colIndex, input.value);
+      if (!compositionActive) this.schedulePendingCellAutoCommit(input, rowIndex, colIndex, autoCommitGeneration);
       const hadSearchMatch = input.parentElement?.classList.contains('has-search-match') ?? false;
       const sourceValue = tableCellEditorValueToSource(input.value);
       if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(sourceValue, this.searchState))) {
@@ -3795,20 +3770,66 @@ class HtmlTableWidget extends WidgetType {
     input.addEventListener('compositionend', () => {
       compositionActive = false;
       compositionEndedAt = performance.now();
-      this.schedulePendingCellAutoCommit(input, rowIndex, colIndex);
+      this.schedulePendingCellAutoCommit(
+        input,
+        rowIndex,
+        colIndex,
+        this.recordPendingCellEdit(rowIndex, colIndex, input.value)
+      );
     });
     input.addEventListener('keydown', (event) => {
       const followsCompositionEnd = performance.now() - compositionEndedAt < 100;
       if (compositionActive || event.isComposing || event.keyCode === 229 || (
         followsCompositionEnd && (event.key === 'Enter' || event.key === ' ')
       )) return;
-      if (event.key === 'Enter') {
-        if ((event.shiftKey || event.ctrlKey) && !event.altKey && !event.metaKey) {
-          event.preventDefault();
-          event.stopPropagation();
-          if (!continueTableCellList(input)) replaceTableCellEditorSelection(input, '<br>\n');
-          return;
+      const keyboard = this.cellInteraction.accept({
+        type: 'keyboard',
+        input: {
+          key: event.key,
+          shiftKey: event.shiftKey,
+          ctrlKey: event.ctrlKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+          row: rowIndex,
+          col: colIndex,
+          rowCount: this.tableData.rows.length + 1,
+          colCount: this.tableData.colCount,
+          selectionStart: input.selectionStart ?? 0,
+          selectionEnd: input.selectionEnd ?? input.selectionStart ?? 0,
+          value: input.value,
+          composing: event.isComposing || event.keyCode === 229
         }
+      }).keyboard;
+      if (keyboard?.type === 'insert-line-break') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!continueTableCellList(input)) replaceTableCellEditorSelection(input, '<br>\n');
+        return;
+      }
+      if (keyboard?.type === 'commit-and-exit') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.cancelPendingCellAutoCommit();
+        const view = this.view;
+        if (view) commitPendingTableEdits(view);
+        input.blur();
+        this.exitTableInteraction(container);
+        return;
+      }
+      if (keyboard?.type === 'focus-cell') {
+        event.preventDefault();
+        event.stopPropagation();
+        const target = this.domRefs?.allRowInputs?.[keyboard.target.row]?.[keyboard.target.col];
+        if (target) this.focusTableInput(target, Math.min(keyboard.caretColumn, target.value.length));
+        return;
+      }
+      if (keyboard?.type === 'move-out-of-table') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.moveVerticalOutOfTable(container, keyboard.direction, keyboard.column);
+        return;
+      }
+      if (event.key === 'Enter') {
         if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault();
           event.stopPropagation();
@@ -3840,11 +3861,11 @@ class HtmlTableWidget extends WidgetType {
           return;
         }
       }
-      const direction = event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : null;
-      if (direction) onArrowVertical(event, direction);
     });
     input.addEventListener('focus', () => {
-      const lastPendingEdit = this.pendingCellEdits[this.pendingCellEdits.length - 1];
+      this.cellInteraction.accept({ type: 'focus', target: { row: rowIndex, col: colIndex } });
+      const pending = this.cellInteraction.snapshot().pending;
+      const lastPendingEdit = pending[pending.length - 1];
       if (
         lastPendingEdit &&
         (lastPendingEdit.row !== rowIndex || lastPendingEdit.col !== colIndex) &&
@@ -4532,8 +4553,7 @@ class HtmlTableWidget extends WidgetType {
     this.selectionRange = null;
     this.selectionPointerId = null;
     this.isDraggingSelection = false;
-    this.hasPendingCellEdits = false;
-    this.pendingCellEdits = [];
+    this.cellInteraction.accept({ type: 'dispose' });
     this.cancelPendingCellAutoCommit();
     this.pendingCellSwitchCommit = false;
   }
