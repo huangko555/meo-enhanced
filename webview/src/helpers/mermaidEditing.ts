@@ -70,7 +70,7 @@ const innerMermaidSearchField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field)
 });
 
-const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b|^[ \t]{0,3}:{3,}\s*mermaid\s*$/i;
+const mermaidOpeningLineRegex = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*mermaid\b/i;
 
 function isMermaidAnchor(state: EditorState, anchor: number): boolean {
   if (anchor < 0 || anchor > state.doc.length) {

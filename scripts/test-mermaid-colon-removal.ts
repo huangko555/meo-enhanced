@@ -33,7 +33,22 @@ const standardMermaidDocument = [
   '~~~'
 ].join('\n');
 
+function assertMermaidEditingDoesNotRecognizeColonAnchors(): void {
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'webview', 'src', 'helpers', 'mermaidEditing.ts'),
+    'utf8'
+  );
+  const declaration = source.match(/const mermaidOpeningLineRegex = [^;]+;/)?.[0] ?? '';
+  assert.notEqual(declaration, '', 'Mermaid editing opening-line resolver must remain explicit');
+  assert.equal(
+    declaration.includes(':{3,}'),
+    false,
+    'Mermaid editing resolver must not retain the removed :::mermaid anchor syntax'
+  );
+}
+
 async function main(): Promise<void> {
+  assertMermaidEditingDoesNotRecognizeColonAnchors();
   const colonRendered = renderMarkdownToHtml({
     markdownText: colonDocument,
     markdownFilePath: 'C:/tmp/mermaid-colon.md',
