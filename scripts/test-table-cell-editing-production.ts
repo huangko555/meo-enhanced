@@ -5,7 +5,8 @@ import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-cell-editing-'));
-const source = '| A | B |\n| --- | --- |\n| one | two |\n| three | four |';
+const wrappedCell = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const source = `| A | B |\n| --- | --- |\n| ${wrappedCell} | two |\n| three | four |`;
 
 async function waitForTable(page: any) {
   await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-shell tbody textarea').length === 4);
@@ -28,6 +29,7 @@ async function main() {
     await page.setContent('<!doctype html><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({ content: ':root { --meo-background:#24292e; --meo-foreground:#e6edf3; --meo-caret:#e6edf3; --meo-semantic-tableBorder:#474b50; --meo-semantic-tableSelectionBorder:#79b8ff; }' });
+    await page.addStyleTag({ content: '.cm-editor .meo-md-html-table { width: 240px !important; table-layout: fixed !important; } .cm-editor .meo-md-html-table :is(th, td) { width: 120px !important; max-width: 120px !important; }' });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await page.evaluate((text) => {
       (window as any).__tableCellEditor = (window as any).TableStabilityHarness.createEditor({
@@ -39,6 +41,42 @@ async function main() {
     const first = 'tbody tr:first-child td:first-child textarea';
     const second = 'tbody tr:first-child td:nth-child(2) textarea';
     const last = 'tbody tr:nth-child(2) td:nth-child(2) textarea';
+    const wrappedMetrics = await page.evaluate((selector) => {
+      const input = document.querySelector<HTMLTextAreaElement>(selector)!;
+      const rect = input.getBoundingClientRect();
+      return { height: rect.height, lineHeight: Number.parseFloat(getComputedStyle(input).lineHeight) };
+    }, first);
+    if (wrappedMetrics.height < wrappedMetrics.lineHeight * 2.5) {
+      throw new Error(`Narrow production cell did not wrap onto visual lines: ${JSON.stringify(wrappedMetrics)}`);
+    }
+    await page.click(first, { offset: { x: 18, y: wrappedMetrics.lineHeight * 1.5 } });
+    await page.keyboard.press('ArrowUp');
+    const wrappedArrowUp = await page.evaluate(() => {
+      const active = document.activeElement as HTMLTextAreaElement | null;
+      return { row: active?.dataset.tableRow, col: active?.dataset.tableCol };
+    });
+    if (wrappedArrowUp.row !== '1' || wrappedArrowUp.col !== '0') {
+      throw new Error(`ArrowUp escaped from the second visual line: ${JSON.stringify(wrappedArrowUp)}`);
+    }
+    await page.click(first, { offset: { x: 18, y: wrappedMetrics.lineHeight * 0.5 } });
+    await page.keyboard.press('ArrowUp');
+    const firstVisualLineTarget = await page.evaluate(() => {
+      const active = document.activeElement as HTMLTextAreaElement | null;
+      return { row: active?.dataset.tableRow, col: active?.dataset.tableCol };
+    });
+    if (firstVisualLineTarget.row !== '0' || firstVisualLineTarget.col !== '0') {
+      throw new Error(`ArrowUp did not cross from the first visual line: ${JSON.stringify(firstVisualLineTarget)}`);
+    }
+    await page.click(first, { offset: { x: 18, y: wrappedMetrics.height - wrappedMetrics.lineHeight * 0.5 } });
+    await page.keyboard.press('ArrowDown');
+    const lastVisualLineTarget = await page.evaluate(() => {
+      const active = document.activeElement as HTMLTextAreaElement | null;
+      return { row: active?.dataset.tableRow, col: active?.dataset.tableCol };
+    });
+    if (lastVisualLineTarget.row !== '2' || lastVisualLineTarget.col !== '0') {
+      throw new Error(`ArrowDown did not cross from the last visual line: ${JSON.stringify(lastVisualLineTarget)}`);
+    }
+
     await page.click(first);
     await page.keyboard.press('Tab');
     const tabTarget = await page.evaluate(() => {

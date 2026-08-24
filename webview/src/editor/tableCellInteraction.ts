@@ -27,11 +27,13 @@ export type TableCellKeyboardInput = Readonly<{
   selectionStart: number;
   selectionEnd: number;
   value: string;
+  visualLine?: Readonly<{ atFirst: boolean; atLast: boolean; caretColumn: number }>;
 }>;
 
 export type TableCellKeyboardDecision =
   | { readonly type: 'pass-through' }
   | { readonly type: 'insert-line-break' }
+  | { readonly type: 'insert-row-below' }
   | { readonly type: 'commit-and-exit' }
   | { readonly type: 'focus-cell'; readonly target: TableCellCoordinates; readonly caretColumn: number }
   | { readonly type: 'move-out-of-table'; readonly direction: 'up' | 'down'; readonly column: number };
@@ -49,6 +51,11 @@ export type TableCellInteraction = Readonly<{
   accept(input: TableCellInteractionInput): TableCellInteractionResult;
 }>;
 
+export type TableCellCommitConfirmation = {
+  applied: boolean;
+  settle(outcome: 'applied' | 'no-op' | 'failed'): void;
+};
+
 export type TableCellInteractionInput =
   | { readonly type: 'focus'; readonly target: TableCellCoordinates }
   | { readonly type: 'input'; readonly target: TableCellCoordinates; readonly value: string; readonly sequence?: number }
@@ -63,13 +70,47 @@ function sameCell(left: TableCellCoordinates, right: TableCellCoordinates) {
   return left.row === right.row && left.col === right.col;
 }
 
+export function createTableCellCommitConfirmation(
+  interaction: TableCellInteraction,
+  generation: number
+): TableCellCommitConfirmation {
+  let settled = false;
+  return {
+    applied: false,
+    settle(outcome) {
+      if (settled) return;
+      settled = true;
+      interaction.accept({ type: 'commit-result', generation, outcome });
+    }
+  };
+}
+
+export function executeTableCellCommitBoundary<T>(
+  confirmations: readonly TableCellCommitConfirmation[],
+  buildAndDispatch: () => T
+): T {
+  try {
+    const result = buildAndDispatch();
+    for (const confirmation of confirmations) {
+      confirmation.settle(confirmation.applied ? 'applied' : 'no-op');
+    }
+    return result;
+  } catch (error) {
+    for (const confirmation of confirmations) confirmation.settle('failed');
+    throw error;
+  }
+}
+
 function decideKeyboard(input: TableCellKeyboardInput): TableCellKeyboardDecision {
   if (input.composing || input.altKey || input.metaKey) return { type: 'pass-through' };
   const primaryModifier = Boolean(input.ctrlKey);
   if (input.key === 'Escape' && !input.shiftKey && !primaryModifier) return { type: 'commit-and-exit' };
   if (input.key === 'Enter') {
     if ((input.shiftKey || primaryModifier) && !input.altKey && !input.metaKey) return { type: 'insert-line-break' };
-    return { type: 'pass-through' };
+    if (input.row + 1 < input.rowCount) {
+      return { type: 'focus-cell', target: { row: input.row + 1, col: input.col }, caretColumn: 0 };
+    }
+    return { type: 'insert-row-below' };
   }
   if (input.key === 'Tab' && !primaryModifier && !input.altKey && !input.metaKey) {
     const direction = input.shiftKey ? -1 : 1;
@@ -83,12 +124,12 @@ function decideKeyboard(input: TableCellKeyboardInput): TableCellKeyboardDecisio
   }
   if ((input.key === 'ArrowUp' || input.key === 'ArrowDown') && !input.shiftKey && !primaryModifier) {
     if (input.selectionStart !== input.selectionEnd) return { type: 'pass-through' };
-    const previousNewline = input.value.lastIndexOf('\n', Math.max(0, input.selectionStart - 1));
-    const nextNewline = input.value.indexOf('\n', input.selectionStart);
-    const atBoundary = input.key === 'ArrowUp' ? previousNewline < 0 : nextNewline < 0;
+    const visualLine = input.visualLine;
+    if (!visualLine) return { type: 'pass-through' };
+    const atBoundary = input.key === 'ArrowUp' ? visualLine.atFirst : visualLine.atLast;
     if (!atBoundary) return { type: 'pass-through' };
     const targetRow = input.row + (input.key === 'ArrowUp' ? -1 : 1);
-    const column = input.selectionStart - (previousNewline + 1);
+    const column = visualLine.caretColumn;
     if (targetRow >= 0 && targetRow < input.rowCount) {
       return { type: 'focus-cell', target: { row: targetRow, col: input.col }, caretColumn: column };
     }
@@ -160,8 +201,7 @@ export function createTableCellInteraction(): TableCellInteraction {
           sequence = Math.max(sequence, nextSequence);
           pending.push({ ...input.target, value: input.value, sequence: nextSequence });
         }
-        inFlight = [];
-        phase = 'pending';
+        if (phase !== 'committing') phase = 'pending';
         timerGeneration += 1;
         return result({ scheduleAutoCommit: { generation: timerGeneration } });
       }
@@ -172,14 +212,16 @@ export function createTableCellInteraction(): TableCellInteraction {
       if (input.type === 'commit-result') {
         if (phase !== 'committing' || input.generation !== generation) return result();
         if (input.outcome === 'failed') {
-          pending = inFlight;
+          const newerPending = pending;
+          pending = inFlight.filter((edit) => !newerPending.some((newer) => sameCell(edit, newer)));
+          pending.push(...newerPending);
           inFlight = [];
           phase = 'pending';
           timerGeneration += 1;
           return result({ scheduleAutoCommit: { generation: timerGeneration } });
         }
         inFlight = [];
-        phase = 'idle';
+        phase = pending.length ? 'pending' : 'idle';
         return result();
       }
       const keyboard = decideKeyboard(input.input);

@@ -1,4 +1,8 @@
-import { createTableCellInteraction } from '../webview/src/editor/tableCellInteraction';
+import {
+  createTableCellCommitConfirmation,
+  createTableCellInteraction,
+  executeTableCellCommitBoundary
+} from '../webview/src/editor/tableCellInteraction';
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
@@ -26,6 +30,49 @@ const retry = interaction.accept({ type: 'commit', reason: 'history' });
 assert(retry.commit?.edits[0]?.value === 'merged', 'Retry did not retain pending value');
 assert(interaction.accept({ type: 'commit-result', generation: retry.commit!.generation, outcome: 'applied' }).snapshot.phase === 'idle', 'Successful commit did not return idle');
 
+const retryAfterFailure = createTableCellInteraction();
+retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'first cell' });
+const failedCommit = retryAfterFailure.accept({ type: 'commit', reason: 'history' }).commit!;
+retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 1 }, value: 'second cell' });
+const builderConfirmation = createTableCellCommitConfirmation(retryAfterFailure, failedCommit.generation);
+let builderThrew = false;
+try {
+  executeTableCellCommitBoundary([builderConfirmation], () => {
+    throw new Error('builder failed');
+  });
+} catch {
+  builderThrew = true;
+}
+assert(builderThrew, 'Builder exception did not escape the commit boundary');
+const failedWithNewInput = retryAfterFailure.snapshot();
+assert(
+  failedWithNewInput.pending.map((edit) => edit.value).join(',') === 'first cell,second cell',
+  `Failed builder lost input received while commit was in progress: ${JSON.stringify(failedWithNewInput)}`
+);
+const dispatchRetry = retryAfterFailure.accept({ type: 'commit', reason: 'history' });
+assert(dispatchRetry.commit?.edits.length === 2, 'Retry did not include both retained intents');
+const dispatchConfirmation = createTableCellCommitConfirmation(retryAfterFailure, dispatchRetry.commit!.generation);
+dispatchConfirmation.applied = true;
+let dispatchThrew = false;
+try {
+  executeTableCellCommitBoundary([dispatchConfirmation], () => {
+    throw new Error('dispatch failed');
+  });
+} catch {
+  dispatchThrew = true;
+}
+assert(dispatchThrew && retryAfterFailure.snapshot().pending.length === 2, 'Dispatch exception did not retain retryable intents');
+const combinedRetry = retryAfterFailure.accept({ type: 'commit', reason: 'history' });
+const appliedConfirmation = createTableCellCommitConfirmation(retryAfterFailure, combinedRetry.commit!.generation);
+appliedConfirmation.applied = true;
+executeTableCellCommitBoundary([appliedConfirmation], () => undefined);
+retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'after success' });
+appliedConfirmation.settle('applied');
+assert(
+  retryAfterFailure.snapshot().pending[0]?.value === 'after success',
+  'A duplicate success confirmation cleared a later intent'
+);
+
 const key = (value: Partial<Parameters<typeof interaction.accept>[0]> & { type: 'keyboard'; input: Record<string, unknown> }) => (
   interaction.accept(value as Parameters<typeof interaction.accept>[0]).keyboard
 );
@@ -36,10 +83,30 @@ assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Tab' } })?.type 
 assert(key({ type: 'keyboard', input: { ...keyboardInput, row: 2, col: 1, key: 'Tab' } })?.type === 'pass-through', 'Last Tab tried to add or wrap a row');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, row: 0, col: 0, key: 'Tab', shiftKey: true } })?.type === 'pass-through', 'First Shift+Tab moved outside explicitly');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Enter', shiftKey: true } })?.type === 'insert-line-break', 'Shift+Enter did not insert a line break');
+const enterNextRow = key({ type: 'keyboard', input: { ...keyboardInput, key: 'Enter' } });
+assert(
+  enterNextRow?.type === 'focus-cell' && enterNextRow.target.row === 2 && enterNextRow.target.col === 0,
+  `Ordinary Enter did not explicitly choose the next row: ${JSON.stringify(enterNextRow)}`
+);
+assert(
+  key({ type: 'keyboard', input: { ...keyboardInput, row: 2, key: 'Enter' } })?.type === 'insert-row-below',
+  'Last-row Enter did not explicitly choose row insertion'
+);
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Escape' } })?.type === 'commit-and-exit', 'Escape did not request one commit and exit');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowLeft' } })?.type === 'pass-through', 'Ordinary horizontal navigation was stolen');
-assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowDown', value: 'a\nb', selectionStart: 0, selectionEnd: 0 } })?.type === 'pass-through', 'In-cell vertical navigation was stolen');
-assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowDown' } })?.type === 'focus-cell', 'Boundary ArrowDown did not move cell focus');
+assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowDown', value: 'a\nb', selectionStart: 0, selectionEnd: 0, visualLine: { atFirst: true, atLast: false, caretColumn: 0 } } })?.type === 'pass-through', 'In-cell vertical navigation was stolen');
+assert(key({
+  type: 'keyboard',
+  input: {
+    ...keyboardInput,
+    key: 'ArrowUp',
+    value: 'abcdefghijklmnopqrstuvwxyz',
+    selectionStart: 14,
+    selectionEnd: 14,
+    visualLine: { atFirst: false, atLast: false, caretColumn: 4 }
+  }
+})?.type === 'pass-through', 'ArrowUp escaped from a soft-wrapped visual line');
+assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowDown', visualLine: { atFirst: true, atLast: true, caretColumn: 2 } } })?.type === 'focus-cell', 'Boundary ArrowDown did not move cell focus');
 
 const staleTimer = interaction.accept({ type: 'input', target: { row: 1, col: 1 }, value: 'late' }).scheduleAutoCommit!.generation;
 for (const reason of ['replacement', 'external', 'mode'] as const) {

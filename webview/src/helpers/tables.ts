@@ -54,7 +54,10 @@ import {
 } from '../editor/tableCommandAdapter';
 import type { TableCommand, TableCommandTarget } from '../application/tableCommand';
 import {
+  createTableCellCommitConfirmation,
   createTableCellInteraction,
+  executeTableCellCommitBoundary,
+  type TableCellCommitConfirmation,
   type TableCellEditIntent,
   type TableCellInteraction
 } from '../editor/tableCellInteraction';
@@ -175,12 +178,14 @@ interface PendingCellFocus {
 
 interface PendingTableTransactionBuilder {
   sequence: number;
+  confirmation: TableCellCommitConfirmation;
   build: (state: EditorState) => Transaction | null;
 }
 
 interface PendingTableCommitDetail {
   committed: boolean;
   transactionBuilders: PendingTableTransactionBuilder[];
+  confirmations: TableCellCommitConfirmation[];
 }
 
 function isPendingTableCommitDetail(value: unknown): value is PendingTableCommitDetail {
@@ -190,7 +195,9 @@ function isPendingTableCommitDetail(value: unknown): value is PendingTableCommit
     'committed' in value &&
     typeof value.committed === 'boolean' &&
     'transactionBuilders' in value &&
-    Array.isArray(value.transactionBuilders)
+    Array.isArray(value.transactionBuilders) &&
+    'confirmations' in value &&
+    Array.isArray(value.confirmations)
   );
 }
 
@@ -233,19 +240,23 @@ let nextTableCellEditSequence = 0;
 export function commitPendingTableEdits(view: EditorView): boolean {
   const detail: PendingTableCommitDetail = {
     committed: false,
-    transactionBuilders: []
+    transactionBuilders: [],
+    confirmations: []
   };
   document.dispatchEvent(new CustomEvent('meo-commit-table-edits', { detail }));
 
-  let state = view.state;
-  const transactions: Transaction[] = [];
-  for (const pending of detail.transactionBuilders.sort((left, right) => left.sequence - right.sequence)) {
-    const transaction = pending.build(state);
-    if (!transaction) continue;
-    transactions.push(transaction);
-    state = transaction.state;
-  }
-  if (transactions.length) view.dispatch(transactions);
+  executeTableCellCommitBoundary(detail.confirmations, () => {
+    let state = view.state;
+    const transactions: Transaction[] = [];
+    for (const pending of detail.transactionBuilders.sort((left, right) => left.sequence - right.sequence)) {
+      const transaction = pending.build(state);
+      if (!transaction) continue;
+      pending.confirmation.applied = true;
+      transactions.push(transaction);
+      state = transaction.state;
+    }
+    if (transactions.length) view.dispatch(transactions);
+  });
   return detail.committed;
 }
 
@@ -821,6 +832,60 @@ export function tableCellEditorOffsetToSourceOffset(value: string, offset: numbe
 export function tableCellSourceOffsetToEditorOffset(value: string, offset: number): number {
   const source = tableCellEditorValueToSource(value);
   return tableCellSourceToEditorValue(source.slice(0, Math.max(0, offset))).length;
+}
+
+export function tableCellVisualLineBoundary(input: HTMLTextAreaElement): {
+  atFirst: boolean;
+  atLast: boolean;
+  caretColumn: number;
+} {
+  const value = input.value;
+  const caret = Math.max(0, Math.min(input.selectionStart ?? 0, value.length));
+  const computed = getComputedStyle(input);
+  const mirror = document.createElement('div');
+  const copiedProperties = [
+    'box-sizing', 'border-left-width', 'border-right-width', 'border-top-width', 'border-bottom-width',
+    'padding-left', 'padding-right', 'padding-top', 'padding-bottom', 'font-family', 'font-size',
+    'font-style', 'font-variant', 'font-weight', 'font-stretch', 'line-height', 'letter-spacing',
+    'text-align', 'text-indent', 'text-transform', 'white-space', 'word-break', 'overflow-wrap',
+    'tab-size'
+  ];
+  for (const property of copiedProperties) mirror.style.setProperty(property, computed.getPropertyValue(property));
+  mirror.style.position = 'fixed';
+  mirror.style.left = '-10000px';
+  mirror.style.top = '0';
+  mirror.style.width = `${input.getBoundingClientRect().width}px`;
+  mirror.style.height = 'auto';
+  mirror.style.minHeight = '0';
+  mirror.style.visibility = 'hidden';
+  mirror.style.pointerEvents = 'none';
+  mirror.style.overflow = 'visible';
+  document.body.appendChild(mirror);
+
+  const lineTopAt = (offset: number) => {
+    const marker = document.createElement('span');
+    mirror.replaceChildren(document.createTextNode(value.slice(0, offset)), marker);
+    marker.textContent = value.slice(offset) || '.';
+    return marker.offsetTop;
+  };
+  try {
+    const caretTop = lineTopAt(caret);
+    const sameLine = (offset: number) => Math.abs(lineTopAt(offset) - caretTop) < 1;
+    let low = 0;
+    let high = caret;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (lineTopAt(middle) < caretTop - 0.5) low = middle + 1;
+      else high = middle;
+    }
+    return {
+      atFirst: sameLine(0),
+      atLast: sameLine(value.length),
+      caretColumn: caret - low
+    };
+  } finally {
+    mirror.remove();
+  }
 }
 
 function normalizeTableCellEditorInput(input: HTMLTextAreaElement) {
@@ -3014,6 +3079,7 @@ class HtmlTableWidget extends WidgetType {
         const pending = this.takePendingTransactionBuilders(getWrap());
         if (pending) {
           detail.transactionBuilders.push(...pending.builders);
+          detail.confirmations.push(pending.confirmation);
         }
         detail.committed = Boolean(detail.committed || hadPendingEdits);
       }
@@ -3046,6 +3112,7 @@ class HtmlTableWidget extends WidgetType {
   takePendingTransactionBuilders(dom: HTMLElement | undefined): {
     view: EditorView;
     builders: PendingTableTransactionBuilder[];
+    confirmation: TableCellCommitConfirmation;
   } | null {
     const commit = this.cellInteraction.accept({ type: 'commit', reason: 'command' }).commit;
     if (!commit) return null;
@@ -3055,16 +3122,18 @@ class HtmlTableWidget extends WidgetType {
       return null;
     }
     const pendingCellEdits = commit.edits;
+    const confirmation = createTableCellCommitConfirmation(this.cellInteraction, commit.generation);
     this.cancelPendingCellAutoCommit();
     if (pendingCellEdits.length) {
       const tableStartLine = view.state.doc.lineAt(
         Math.max(0, Math.min(this.tableData.from ?? 0, view.state.doc.length))
       ).number;
-      this.cellInteraction.accept({ type: 'commit-result', generation: commit.generation, outcome: 'applied' });
       return {
         view,
+        confirmation,
         builders: pendingCellEdits.map((edit) => ({
           sequence: edit.sequence,
+          confirmation,
           build: (state) => {
             const change = this.pendingCellSourceChange(state, edit, tableStartLine);
             return change
@@ -3075,11 +3144,12 @@ class HtmlTableWidget extends WidgetType {
       };
     }
     const changes = this.collectPendingCellSourceChanges(view);
-    this.cellInteraction.accept({ type: 'commit-result', generation: commit.generation, outcome: changes.length ? 'applied' : 'no-op' });
     return {
       view,
+      confirmation,
       builders: changes.length ? [{
         sequence: ++nextTableCellEditSequence,
+        confirmation,
         build: (state) => state.update({ changes, annotations: isolateHistory.of('full') })
       }] : []
     };
@@ -3797,6 +3867,9 @@ class HtmlTableWidget extends WidgetType {
           selectionStart: input.selectionStart ?? 0,
           selectionEnd: input.selectionEnd ?? input.selectionStart ?? 0,
           value: input.value,
+          visualLine: (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+            ? tableCellVisualLineBoundary(input)
+            : undefined,
           composing: event.isComposing || event.keyCode === 229
         }
       }).keyboard;
@@ -3829,17 +3902,11 @@ class HtmlTableWidget extends WidgetType {
         this.moveVerticalOutOfTable(container, keyboard.direction, keyboard.column);
         return;
       }
-      if (event.key === 'Enter') {
-        if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-          event.preventDefault();
-          event.stopPropagation();
-          if (rowIndex < this.tableData.rows.length) {
-            this.focusCellInputAt(rowIndex + 1, colIndex, 0);
-          } else {
-            this.setActionTarget({ row: rowIndex, col: colIndex });
-            this.requestTableCommand('insert-row-below', true);
-          }
-        }
+      if (keyboard?.type === 'insert-row-below') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setActionTarget({ row: rowIndex, col: colIndex });
+        this.requestTableCommand('insert-row-below', true);
         return;
       }
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === ']' || event.key === '[')) {
