@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Page } from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-basic-capability-production-'));
+const indexTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-basic-capability-index-'));
 const target = 'format target';
 
 const formats = [
@@ -266,6 +267,102 @@ async function assertMenuSafetyMatrix(page: Page): Promise<void> {
   assert.deepEqual(late, { text: 'next session', history: { undo: 0, redo: 0 } }, 'late menu actions must not write a replacement session');
 }
 
+async function assertIndexBootstrapBoundaries(browser: Browser): Promise<void> {
+  const build = await Bun.build({
+    entrypoints: [path.join(repoRoot, 'scripts', 'test-basic-capability-index-entry.ts')],
+    outdir: indexTempDir, target: 'browser', format: 'iife', naming: 'bundle.js'
+  });
+  if (!build.success) throw new Error(build.logs.map(String).join('\n'));
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
+    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
+    await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    await page.addScriptTag({ content: 'window.__hostMessages=[];window.acquireVsCodeApi=()=>({postMessage(message){window.__hostMessages.push(message)},getState(){return undefined},setState(){}})' });
+    await page.addScriptTag({ path: path.join(indexTempDir, 'bundle.js') });
+    const text = '> [!NOTE]\n> note body\n\n> [!UNKNOWN]\n> unknown body\n\nformat target';
+    await page.evaluate((documentText) => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'init', documentId: 'file:///basic.md', text: documentText, version: 1,
+      savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live',
+      previewAppearance: 'light', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false,
+      gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
+      contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null
+    }})), text);
+    await page.waitForSelector('.editor-host > .cm-editor');
+    const ordinaryQuote = await pointForVisibleLine(page, '> unknown body');
+    await page.mouse.click(ordinaryQuote.x, ordinaryQuote.y);
+    await page.waitForFunction(() => document.querySelectorAll('.meo-md-alert-icon').length === 1);
+    const alertState = await page.evaluate(() => ({
+      known: Boolean(document.querySelector('.meo-md-alert-note .meo-md-alert-icon')),
+      unknownClass: Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).find((line) => line.textContent?.includes('unknown body'))?.classList.contains('meo-md-alert') ?? false,
+      unknownText: Array.from(document.querySelectorAll<HTMLElement>('.cm-line')).find((line) => line.textContent?.includes('unknown body'))?.textContent ?? ''
+    }));
+    assert.deepEqual(alertState, { known: true, unknownClass: false, unknownText: '> unknown body' });
+    await selectVisibleTextWithMouse(page);
+    await waitForMenu(page);
+    await page.click('.selection-inline-button[data-action="bold"]');
+    await page.waitForFunction(() => (window as any).__hostMessages.some((message: any) => message.type === 'draftChanged' && message.text.includes('**format target**')));
+    const beforePreview = await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').length);
+    await page.click('[data-mode="preview"]');
+    await page.waitForSelector('.preview-host:not([hidden]) .preview-frame');
+    const previewState = await page.evaluate((before) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const documentAfter = frame.contentDocument!;
+      return {
+        selectionMenu: documentAfter.querySelector('.selection-inline-menu') !== null,
+        formattingEntry: documentAfter.querySelector('[data-action="bold"], [data-action="italic"], button') !== null,
+        drafts: (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').length,
+        before
+      };
+    }, beforePreview);
+    assert.deepEqual(previewState, { selectionMenu: false, formattingEntry: false, drafts: beforePreview, before: beforePreview });
+    const oldButton = await page.$('.selection-inline-button[data-action="bold"]');
+    await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
+    await oldButton?.click();
+    const afterDispose = await page.evaluate((before) => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').length, beforePreview);
+    assert.equal(afterDispose, beforePreview, 'disposed production controller must ignore a late toolbar click');
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertIndexSelectionActionMatrix(browser: Browser): Promise<void> {
+  for (const mode of ['source', 'live'] as const) {
+    for (const [action, expected] of formats) {
+      const page = await browser.newPage();
+      try {
+        await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
+        await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
+        await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+        await page.addScriptTag({ content: 'window.__hostMessages=[];window.acquireVsCodeApi=()=>({postMessage(message){window.__hostMessages.push(message)},getState(){return undefined},setState(){}})' });
+        await page.addScriptTag({ path: path.join(indexTempDir, 'bundle.js') });
+        await page.evaluate(({ documentText, initialMode }) => window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'init', documentId: `file:///basic-${initialMode}.md`, text: documentText, version: 1,
+          savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: initialMode,
+          previewAppearance: 'light', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false,
+          gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
+          contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null
+        }})), { documentText: target, initialMode: mode });
+        await page.waitForSelector('.editor-host > .cm-editor');
+        await selectVisibleTextWithMouse(page);
+        await waitForMenu(page);
+        await page.click(`.selection-inline-button[data-action="${action}"]`);
+        await page.waitForFunction((wanted) => (window as any).__hostMessages.some((message: any) => message.type === 'draftChanged' && message.text === wanted), {}, expected);
+        const first = await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').map((message: any) => message.text));
+        assert.deepEqual(first, [expected], `${mode}/${action} must publish one accepted production Document change`);
+        await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+        await page.waitForFunction((original) => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').at(-1)?.text === original, {}, target);
+        await page.keyboard.down('Control'); await page.keyboard.press('y'); await page.keyboard.up('Control');
+        await page.waitForFunction((wanted) => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').at(-1)?.text === wanted, {}, expected);
+        const history = await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').map((message: any) => message.text));
+        assert.deepEqual(history, [expected, target, expected], `${mode}/${action} must replay exactly one production History entry`);
+      } finally {
+        await page.close();
+      }
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-basic-capability-production-entry.ts')],
@@ -289,6 +386,8 @@ async function main(): Promise<void> {
     }
     await assertPreviewHidesMenu(page);
     await assertMenuSafetyMatrix(page);
+    await assertIndexBootstrapBoundaries(browser);
+    await assertIndexSelectionActionMatrix(browser);
     await page.evaluate(() => (window as any).__basicCapabilityCase?.dispose());
   } finally {
     await browser.close();
@@ -297,5 +396,8 @@ async function main(): Promise<void> {
 }
 
 main()
-  .finally(() => fs.rmSync(tempDir, { recursive: true, force: true }))
+  .finally(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(indexTempDir, { recursive: true, force: true });
+  })
   .catch((error) => { console.error(error instanceof Error ? error.stack : error); process.exitCode = 1; });
