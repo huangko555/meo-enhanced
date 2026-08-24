@@ -40,8 +40,22 @@ const blockedByRightMinimums = tableColumnWidthPolicy.resize({
 });
 assert.deepEqual(blockedByRightMinimums.widths.map(Math.round), [190, 55, 55]);
 
+const resizedInsideInfeasibleContainer = tableColumnWidthPolicy.resize({
+  widths: [180, 100, 50],
+  minimumWidths: [180, 100, 50],
+  column: 2,
+  requestedDelta: 24,
+  maximumTotalWidth: 300
+});
+assert.deepEqual(
+  resizedInsideInfeasibleContainer.widths,
+  [180, 100, 74],
+  'an accessible overflow table keeps every minimum and lets the active column grow'
+);
+
 const projectedNarrow = tableColumnWidthPolicy.project({
   widths: [240, 120],
+  minimumWidths: [0, 0],
   initialTotalWidth: 480,
   elastic: true,
   defaultWidthWasCapped: true,
@@ -51,8 +65,117 @@ assert.deepEqual(projectedNarrow.widths.map(Math.round), [200, 100]);
 assert.equal(Math.round(projectedNarrow.totalWidth), 300);
 assert.equal(projectedNarrow.reachedAvailableWidth, true);
 
+const projectedBelowReadableMinimums = tableColumnWidthPolicy.project({
+  widths: [240, 120, 60],
+  minimumWidths: [180, 100, 50],
+  initialTotalWidth: 420,
+  elastic: true,
+  defaultWidthWasCapped: true,
+  availableWidth: 300
+});
+assert.deepEqual(
+  projectedBelowReadableMinimums.widths.map(Math.round),
+  [180, 100, 50],
+  'readable per-column minimums take priority over an infeasible container width'
+);
+assert.equal(Math.round(projectedBelowReadableMinimums.totalWidth), 330);
+assert.equal(projectedBelowReadableMinimums.reachedAvailableWidth, true);
+
+const projectedWithHeterogeneousMinimums = tableColumnWidthPolicy.project({
+  widths: [200, 160, 100],
+  minimumWidths: [120, 80, 60],
+  initialTotalWidth: 460,
+  elastic: true,
+  defaultWidthWasCapped: true,
+  availableWidth: 360
+});
+assert.deepEqual(
+  projectedWithHeterogeneousMinimums.widths.map(Math.round),
+  [160, 120, 80],
+  'remaining width is distributed in proportion to each column\'s elasticity above its own minimum'
+);
+assert.equal(Math.round(projectedWithHeterogeneousMinimums.totalWidth), 360);
+
+const projectedFromZeroElasticity = tableColumnWidthPolicy.project({
+  widths: [100, 50],
+  minimumWidths: [100, 50],
+  initialTotalWidth: 300,
+  elastic: true,
+  defaultWidthWasCapped: true,
+  availableWidth: 300
+});
+assert.deepEqual(
+  projectedFromZeroElasticity.widths.map(Math.round),
+  [200, 100],
+  'an elastic table with no remaining headroom expands by its readable-width proportions'
+);
+
+for (const [label, minimumWidths, expectedError] of [
+  ['length mismatch', [20], RangeError],
+  ['NaN', [20, Number.NaN], TypeError],
+  ['Infinity', [20, Number.POSITIVE_INFINITY], TypeError],
+  ['negative', [20, -1], TypeError]
+] as const) {
+  assert.throws(() => tableColumnWidthPolicy.project({
+    widths: [120, 80],
+    minimumWidths,
+    initialTotalWidth: 200,
+    elastic: true,
+    defaultWidthWasCapped: true,
+    availableWidth: 160
+  }), expectedError, `project rejects ${label} minimumWidths`);
+}
+
+const roundTripStart = [240, 160, 100];
+const roundTripMinimums = [120, 60, 40];
+const roundTripNarrow = tableColumnWidthPolicy.project({
+  widths: roundTripStart,
+  minimumWidths: roundTripMinimums,
+  initialTotalWidth: 500,
+  elastic: true,
+  defaultWidthWasCapped: true,
+  availableWidth: 360
+});
+const roundTripWide = tableColumnWidthPolicy.project({
+  widths: roundTripNarrow.widths,
+  minimumWidths: roundTripMinimums,
+  initialTotalWidth: 500,
+  elastic: true,
+  defaultWidthWasCapped: true,
+  availableWidth: 500
+});
+assert.deepEqual(roundTripWide.widths.map(Math.round), roundTripStart);
+
+const projectedSingleColumn = tableColumnWidthPolicy.project({
+  widths: [160],
+  minimumWidths: [110],
+  initialTotalWidth: 160,
+  elastic: true,
+  defaultWidthWasCapped: true,
+  availableWidth: 90
+});
+assert.deepEqual(projectedSingleColumn.widths, [110]);
+assert.equal(projectedSingleColumn.totalWidth, 110);
+
+for (const [label, widths, minimumWidths, expected] of [
+  ['first', [120, 160, 100], [120, 60, 40], [120, 123, 78]],
+  ['middle', [200, 60, 100], [120, 60, 40], [177, 60, 83]],
+  ['last', [200, 140, 40], [120, 60, 40], [170, 110, 40]]
+] as const) {
+  const result = tableColumnWidthPolicy.project({
+    widths,
+    minimumWidths,
+    initialTotalWidth: widths.reduce((sum, width) => sum + width, 0),
+    elastic: true,
+    defaultWidthWasCapped: true,
+    availableWidth: 320
+  });
+  assert.deepEqual(result.widths.map(Math.round), expected, `${label} column keeps its own readable minimum`);
+}
+
 const projectedWide = tableColumnWidthPolicy.project({
   widths: [240, 120],
+  minimumWidths: [0, 0],
   initialTotalWidth: 480,
   elastic: true,
   defaultWidthWasCapped: false,
@@ -63,6 +186,7 @@ assert.equal(Math.round(projectedWide.totalWidth), 420);
 
 const fixed = tableColumnWidthPolicy.project({
   widths: [120, 80],
+  minimumWidths: [20, 20],
   initialTotalWidth: 300,
   elastic: false,
   defaultWidthWasCapped: false,

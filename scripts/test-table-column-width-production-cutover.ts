@@ -169,18 +169,28 @@ async function tablePresentationWidths(
   });
 }
 
-async function dragPath(page: any, selector: string, deltas: readonly number[]): Promise<number[]> {
+async function dragPath(
+  page: any,
+  selector: string,
+  deltas: readonly number[],
+  column = 0
+): Promise<number[]> {
   const point = await page.$eval(selector, (handle: Element) => {
     const rect = handle.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
   const samples: number[] = [];
   await page.mouse.move(point.x, point.y);
+  const hitCurrentHandle = await page.evaluate(({ x, y, handleSelector }) => {
+    const expected = document.querySelector(handleSelector);
+    return document.elementFromPoint(x, y)?.closest('[data-table-resize-column]') === expected;
+  }, { ...point, handleSelector: selector });
+  assert.equal(hitCurrentHandle, true, `pointer must hit the current visible resize handle: ${selector}`);
   await page.mouse.down();
   for (const delta of deltas) {
     await page.mouse.move(point.x + delta, point.y);
     samples.push(await page.$eval(
-      '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th:first-child',
+      `.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th:nth-child(${column + 1})`,
       (cell) => cell.getBoundingClientRect().width
     ));
   }
@@ -336,27 +346,260 @@ async function main(): Promise<void> {
     const restoredViewport = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
     assert.deepEqual(restoredViewport.stickyWidths.map(Math.round), restoredViewport.primaryWidths.map(Math.round));
 
+    await page.setViewport({ width: 680, height: 440 });
+    await page.waitForFunction((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector);
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      const primary = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? [])
+        .map((cell) => cell.getBoundingClientRect().width);
+      const sticky = Array.from(table?.closest('.meo-md-html-table-shell')
+        ?.querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table thead th') ?? [])
+        .map((cell) => cell.getBoundingClientRect().width);
+      return Boolean(table && scroller && primary.length === 3 && sticky.length === 3
+        && table.getBoundingClientRect().width <= scroller.clientWidth + 1
+        && primary.every((width, index) => Math.abs(width - sticky[index]) < 1));
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    const narrowedAgain = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    assert.ok(
+      narrowedAgain.primaryWidths.every((width, index) => Math.abs(width - narrowViewport.primaryWidths[index]) < 2),
+      `narrow-expand-narrow must restore the same constrained projection: ${JSON.stringify({ narrowViewport, narrowedAgain })}`
+    );
+    assert.deepEqual(narrowedAgain.stickyWidths.map(Math.round), narrowedAgain.primaryWidths.map(Math.round));
+    await page.setViewport({ width: 900, height: 440 });
+    await page.waitForFunction((selector, expected) => {
+      const cell = document.querySelector<HTMLElement>(`${selector} thead th:first-child`);
+      return Boolean(cell && Math.abs(cell.getBoundingClientRect().width - expected) < 2);
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`, resized.primaryWidths[0]);
+
+    const cssPixelWidths = await page.$$eval(
+      `${tableSelector}:first-of-type colgroup > col`,
+      (columns) => columns.map((column) => Number.parseFloat((column as HTMLElement).style.width))
+    );
+    await page.setViewport({ width: 900, height: 440, deviceScaleFactor: 2 });
+    await page.waitForFunction(() => window.devicePixelRatio === 2, { timeout: 5000 });
+    await page.waitForFunction((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector);
+      const primary = Array.from(table?.querySelectorAll<HTMLTableColElement>('colgroup > col') ?? [])
+        .map((column) => Number.parseFloat(column.style.width));
+      const sticky = Array.from(table?.closest('.meo-md-html-table-shell')
+        ?.querySelectorAll<HTMLTableColElement>('.meo-md-html-table-sticky-table colgroup > col') ?? [])
+        .map((column) => Number.parseFloat(column.style.width));
+      return primary.length === 3 && sticky.length === 3
+        && primary.every((width, index) => Math.abs(width - sticky[index]) < 1);
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    const highDprCssPixelWidths = await page.$$eval(
+      `${tableSelector}:first-of-type colgroup > col`,
+      (columns) => columns.map((column) => Number.parseFloat((column as HTMLElement).style.width))
+    );
+    assert.ok(
+      highDprCssPixelWidths.every((width, index) => Math.abs(width - cssPixelWidths[index]) < 2),
+      `DPR must not convert CSS-pixel width intent into physical pixels: ${JSON.stringify({ cssPixelWidths, highDprCssPixelWidths })}`
+    );
+    const cssZoomSession = await page.createCDPSession();
+    await cssZoomSession.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1.25 });
+    const zoomedMiddleBefore = (await widths(page, tableSelector))[1];
+    await drag(page, `${tableSelector}:first-of-type th:nth-child(2) .meo-md-html-table-column-resize-handle`, 24);
+    const zoomedMiddleAfter = (await widths(page, tableSelector))[1];
+    assert.ok(
+      Math.abs(zoomedMiddleAfter - zoomedMiddleBefore - 24) < 2,
+      `zoomed pointer delta must remain a CSS-pixel delta: ${JSON.stringify({ zoomedMiddleBefore, zoomedMiddleAfter })}`
+    );
+    await cssZoomSession.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await cssZoomSession.detach();
+    await page.setViewport({ width: 900, height: 440, deviceScaleFactor: 1 });
+
+    await page.evaluate(() => {
+      const style = document.createElement('style');
+      style.id = 'column-width-readable-minimums';
+      style.textContent = [
+        '#app .meo-md-html-table:not(.meo-md-html-table-sticky-table)',
+        '.meo-md-html-table-cell-preview {',
+        'font-size: 36px !important;',
+        'padding-left: 52px !important;',
+        'padding-right: 36px !important;',
+        '}'
+      ].join(' ');
+      document.head.append(style);
+    });
+    await page.setViewport({ width: 360, height: 440 });
+    await page.waitForFunction((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector);
+      const cells = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? []);
+      if (!table || cells.length !== 3) return false;
+      const numeric = (value: string) => Number.parseFloat(value) || 0;
+      return cells.every((cell) => {
+        const cellStyle = getComputedStyle(cell);
+        const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+        const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
+        const minimumWidth = numeric(previewStyle.fontSize)
+          + numeric(previewStyle.paddingLeft)
+          + numeric(previewStyle.paddingRight)
+          + numeric(cellStyle.borderLeftWidth)
+          + numeric(cellStyle.borderRightWidth);
+        return cell.getBoundingClientRect().width >= minimumWidth - 1;
+      });
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    const readableMinimumProjection = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    assert.deepEqual(
+      readableMinimumProjection.stickyWidths.map(Math.round),
+      readableMinimumProjection.primaryWidths.map(Math.round),
+      'current main-table minimums must produce one shared primary/Sticky projection'
+    );
+    const horizontalScrollBefore = await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      const firstHandle = table.querySelector<HTMLElement>('th:first-child .meo-md-html-table-column-resize-handle')!;
+      const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      wrap.scrollLeft = 0;
+      wrap.dispatchEvent(new Event('scroll'));
+      input.focus();
+      input.setSelectionRange(1, 1);
+      const wrapRect = wrap.getBoundingClientRect();
+      const firstRect = firstHandle.getBoundingClientRect();
+      return {
+        overflowX: getComputedStyle(wrap).overflowX,
+        clientWidth: wrap.clientWidth,
+        scrollWidth: wrap.scrollWidth,
+        firstAccessible: firstRect.left >= wrapRect.left - 1 && firstRect.right <= wrapRect.right + 1,
+        colWidths: Array.from(table.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+          .map((column) => Number.parseFloat(column.style.width)),
+        rowHeight: table.querySelector<HTMLElement>('tbody tr')!.getBoundingClientRect().height
+      };
+    });
+    assert.equal(horizontalScrollBefore.overflowX, 'auto', 'infeasible readable minimums require on-demand Live overflow');
+    assert.ok(horizontalScrollBefore.scrollWidth > horizontalScrollBefore.clientWidth + 1);
+    assert.equal(horizontalScrollBefore.firstAccessible, true, 'the first-column content and handle must be reachable at scrollLeft=0');
+    await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
+      wrap.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForFunction((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector);
+      const wrap = table?.closest<HTMLElement>('.meo-md-html-table-wrap');
+      const handle = table?.querySelector<HTMLElement>('th:last-child .meo-md-html-table-column-resize-handle');
+      if (!table || !wrap || !handle || wrap.scrollLeft <= 0) return false;
+      const wrapRect = wrap.getBoundingClientRect();
+      const handleRect = handle.getBoundingClientRect();
+      const sticky = table.closest('.meo-md-html-table-shell')
+        ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table');
+      const mainCells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
+      const stickyCells = Array.from(sticky?.querySelectorAll<HTMLElement>('thead th') ?? []);
+      return handleRect.left >= wrapRect.left - 1 && handleRect.right <= wrapRect.right + 1
+        && stickyCells.length === mainCells.length
+        && mainCells.every((cell, index) => (
+          Math.abs(cell.getBoundingClientRect().left - stickyCells[index].getBoundingClientRect().left) < 1
+          && Math.abs(cell.getBoundingClientRect().right - stickyCells[index].getBoundingClientRect().right) < 1
+        ));
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    const horizontalScrollAfter = await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      const sticky = table.closest('.meo-md-html-table-shell')!
+        .querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table')!;
+      const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      const mainCells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
+      const stickyCells = Array.from(sticky.querySelectorAll<HTMLElement>('thead th'));
+      return {
+        scrollLeft: wrap.scrollLeft,
+        colWidths: Array.from(table.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+          .map((column) => Number.parseFloat(column.style.width)),
+        rowHeight: table.querySelector<HTMLElement>('tbody tr')!.getBoundingClientRect().height,
+        focused: document.activeElement === input,
+        selectionStart: input.selectionStart,
+        aligned: mainCells.every((cell, index) => (
+          Math.abs(cell.getBoundingClientRect().left - stickyCells[index].getBoundingClientRect().left) < 1
+          && Math.abs(cell.getBoundingClientRect().right - stickyCells[index].getBoundingClientRect().right) < 1
+        ))
+      };
+    });
+    assert.ok(horizontalScrollAfter.scrollLeft > 0);
+    assert.deepEqual(horizontalScrollAfter.colWidths, horizontalScrollBefore.colWidths);
+    assert.ok(Math.abs(horizontalScrollAfter.rowHeight - horizontalScrollBefore.rowHeight) < 1);
+    assert.equal(horizontalScrollAfter.focused, true);
+    assert.equal(horizontalScrollAfter.selectionStart, 1);
+    assert.equal(horizontalScrollAfter.aligned, true, 'horizontal scroll must keep main and Sticky column boundaries aligned');
+    const scrolledStickySamples = await dragPath(
+      page,
+      '.meo-md-html-table-sticky-table th:nth-child(2) .meo-md-html-table-column-resize-handle',
+      [8, 16, 24],
+      1
+    );
+    assert.ok(
+      scrolledStickySamples.every((width, index) => index === 0 || width > scrolledStickySamples[index - 1] + 5),
+      `a visible handle at non-zero scrollLeft must resize continuously: ${JSON.stringify(scrolledStickySamples)}`
+    );
+    const scrolledDragProjection = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    assert.deepEqual(scrolledDragProjection.stickyWidths.map(Math.round), scrolledDragProjection.primaryWidths.map(Math.round));
+    await page.evaluate(() => {
+      const editor = (window as any).__columnWidthProduction;
+      editor.setMode('source');
+      editor.setMode('live');
+    });
+    await page.waitForFunction((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector);
+      const cells = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? []);
+      if (!table || cells.length !== 3) return false;
+      const numeric = (value: string) => Number.parseFloat(value) || 0;
+      return cells.every((cell) => {
+        const cellStyle = getComputedStyle(cell);
+        const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+        const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
+        return cell.getBoundingClientRect().width >= numeric(previewStyle.fontSize)
+          + numeric(previewStyle.paddingLeft)
+          + numeric(previewStyle.paddingRight)
+          + numeric(cellStyle.borderLeftWidth)
+          + numeric(cellStyle.borderRightWidth) - 1;
+      });
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    const replacementMinimumProjection = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    assert.deepEqual(
+      replacementMinimumProjection.stickyWidths.map(Math.round),
+      replacementMinimumProjection.primaryWidths.map(Math.round),
+      'replacement main table and rebuilt Sticky must measure and share the current minimums'
+    );
+    await page.evaluate(() => document.getElementById('column-width-readable-minimums')?.remove());
+    await page.setViewport({ width: 900, height: 440 });
+    await page.waitForFunction((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector);
+      const wrap = table?.closest<HTMLElement>('.meo-md-html-table-wrap');
+      const sticky = table?.closest('.meo-md-html-table-shell')
+        ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table');
+      const mainCells = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? []);
+      const stickyCells = Array.from(sticky?.querySelectorAll<HTMLElement>('thead th') ?? []);
+      return Boolean(table && wrap && mainCells.length === 3 && stickyCells.length === 3
+        && wrap.scrollWidth <= wrap.clientWidth + 1
+        && mainCells.every((cell, index) => (
+          Math.abs(cell.getBoundingClientRect().left - stickyCells[index].getBoundingClientRect().left) < 1
+          && Math.abs(cell.getBoundingClientRect().right - stickyCells[index].getBoundingClientRect().right) < 1
+        )));
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+    const afterAccessibleRoundTrip = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    assert.deepEqual(
+      afterAccessibleRoundTrip.stickyWidths.map(Math.round),
+      afterAccessibleRoundTrip.primaryWidths.map(Math.round)
+    );
+    const accessibleRoundTripFirstWidth = afterAccessibleRoundTrip.primaryWidths[0];
+
     await page.evaluate(() => {
       const editor = (window as any).__columnWidthProduction;
       editor.setText(editor.getText());
       editor.setText(`prefix\n\n${editor.getText()}`);
     });
-    await waitForTableWidth(page, tableSelector, 'near', resized.primaryWidths[0]);
+    await waitForTableWidth(page, tableSelector, 'near', accessibleRoundTripFirstWidth);
     const afterPrefix = await page.$eval(`${tableSelector} thead th:first-child`, (cell) => (
       cell.getBoundingClientRect().width
     ));
-    assert.ok(Math.abs(afterPrefix - resized.primaryWidths[0]) < 2);
+    assert.ok(Math.abs(afterPrefix - accessibleRoundTripFirstWidth) < 2);
 
     await page.evaluate(() => (window as any).__columnWidthProduction.setMode('source'));
     await page.waitForFunction(() => (
       document.querySelectorAll('.meo-md-html-table, .meo-md-html-table-column-resize-handle').length === 0
     ), { polling: 'mutation', timeout: 5000 });
     await page.evaluate(() => (window as any).__columnWidthProduction.setMode('live'));
-    await waitForTableWidth(page, tableSelector, 'near', resized.primaryWidths[0]);
+    await waitForTableWidth(page, tableSelector, 'near', accessibleRoundTripFirstWidth);
     const afterModeRoundTrip = await page.$eval(`${tableSelector} thead th:first-child`, (cell) => (
       cell.getBoundingClientRect().width
     ));
-    assert.ok(Math.abs(afterModeRoundTrip - resized.primaryWidths[0]) < 2);
+    assert.ok(Math.abs(afterModeRoundTrip - accessibleRoundTripFirstWidth) < 2);
 
     const beforePointerCancel = await page.evaluate((selector) => {
       const table = document.querySelector<HTMLTableElement>(selector)!;
@@ -528,6 +771,60 @@ async function main(): Promise<void> {
     assert.equal(terminalEvents.includes('pointercancel'), false);
     assert.ok(terminalEvents.includes('pointerup'));
     assert.ok(afterWindowBlur[0] > afterRedo[0] + 20);
+
+    const richTable = [
+      '| Kind | Rich content | Tail |',
+      '| --- | --- | --- |',
+      `| mixed | **bold** ${'wrapping words '.repeat(18)} | final |`,
+      '| breaks | first<br>second<br>third | ![fixture](fixture.png) |',
+      ...Array.from({ length: 18 }, (_, index) => `| row ${index + 1} | ${'more wrapping content '.repeat(8)} | end ${index + 1} |`)
+    ].join('\n');
+    await page.evaluate((markdown) => {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="red"/></svg>';
+      (window as any).TableStabilityHarness.setImageSrcResolver(
+        () => `data:image/svg+xml,${encodeURIComponent(svg)}`
+      );
+      (window as any).__columnWidthProduction.setText(markdown);
+    }, richTable);
+    await waitForTableLayout(page, tableSelector, 1, 3);
+    await page.waitForSelector(`${tableSelector} tbody .meo-md-image-img`);
+    const richRowHeightBefore = await page.$eval(
+      `${tableSelector} tbody tr:first-child`,
+      (row) => row.getBoundingClientRect().height
+    );
+    const richWidthsBefore = await widths(page, tableSelector);
+    await drag(
+      page,
+      `${tableSelector} th:nth-child(2) .meo-md-html-table-column-resize-handle`,
+      -70
+    );
+    await page.waitForFunction((selector, previousHeight) => {
+      const row = document.querySelector<HTMLElement>(`${selector} tbody tr:first-child`);
+      return Boolean(row && row.getBoundingClientRect().height > previousHeight + 1);
+    }, { timeout: 5000 }, tableSelector, richRowHeightBefore);
+    const richWidthsAfterMiddle = await widths(page, tableSelector);
+    assert.ok(richWidthsAfterMiddle[1] < richWidthsBefore[1] - 60);
+    assert.equal(await page.evaluate(() => (window as any).__columnWidthProduction.getText()), richTable);
+
+    await page.evaluate(() => {
+      (window as any).__columnWidthProduction.scrollToLine(3, 'top');
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      scroller.scrollTop += 32;
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForSelector('.meo-md-html-table-sticky-chrome.is-visible');
+    await drag(
+      page,
+      '.meo-md-html-table-sticky-table th:last-child .meo-md-html-table-column-resize-handle',
+      -30
+    );
+    const richLastProjection = await tablePresentationWidths(page, tableSelector);
+    assert.ok(richLastProjection.primaryWidths[2] < richWidthsAfterMiddle[2] - 20);
+    assert.deepEqual(
+      richLastProjection.stickyWidths.map(Math.round),
+      richLastProjection.primaryWidths.map(Math.round),
+      'rich-content last-column resize must use the same main/Sticky projection'
+    );
 
     const disposePoint = await page.$eval(firstHandle, (handle: Element) => {
       const rect = handle.getBoundingClientRect();

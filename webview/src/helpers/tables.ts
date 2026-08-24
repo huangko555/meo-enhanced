@@ -2248,6 +2248,7 @@ class HtmlTableWidget extends WidgetType {
   resolveStickyHeaderElements(): TableStickyHeaderElements | null {
     if (!this.domRefs || !this.view) return null;
     const {
+      wrap,
       table,
       stickyChrome,
       stickyHeaderViewport,
@@ -2256,6 +2257,7 @@ class HtmlTableWidget extends WidgetType {
     } = this.domRefs;
     return {
       scroller: this.view.scrollDOM,
+      horizontalScroller: wrap,
       table,
       stickyChrome,
       stickyHeaderViewport,

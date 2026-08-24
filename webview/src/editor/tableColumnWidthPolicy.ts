@@ -8,6 +8,7 @@ export type TableColumnResizeRequest = {
 
 export type TableColumnWidthProjectionRequest = {
   readonly widths: readonly number[];
+  readonly minimumWidths: readonly number[];
   readonly initialTotalWidth: number;
   readonly elastic: boolean;
   readonly defaultWidthWasCapped: boolean;
@@ -31,11 +32,15 @@ function total(widths: readonly number[]): number {
 
 function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
   const maximumTotalWidth = Math.max(0, request.maximumTotalWidth);
+  const minimumTotalWidth = total(request.minimumWidths);
+  const infeasibleMaximum = maximumTotalWidth < minimumTotalWidth;
   const startTotalWidth = total(request.widths);
-  const baseScale = startTotalWidth > maximumTotalWidth && maximumTotalWidth > 0
+  const baseScale = !infeasibleMaximum && startTotalWidth > maximumTotalWidth && maximumTotalWidth > 0
     ? maximumTotalWidth / startTotalWidth
     : 1;
-  const baseWidths = request.widths.map((width) => width * baseScale);
+  const baseWidths = request.widths.map((width, index) => (
+    Math.max(infeasibleMaximum ? request.minimumWidths[index] : 0, width * baseScale)
+  ));
   const baseTotalWidth = total(baseWidths);
   const baseColumnWidth = baseWidths[request.column];
   const minimumColumnWidth = request.minimumWidths[request.column];
@@ -46,12 +51,14 @@ function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
   const availableRightCompression = rightWidths.reduce((sum, width, index) => (
     sum + Math.max(0, width - rightMinimumWidths[index])
   ), 0);
-  const maximumDelta = availableTotalGrowth + availableRightCompression;
+  const maximumDelta = infeasibleMaximum
+    ? Number.POSITIVE_INFINITY
+    : availableTotalGrowth + availableRightCompression;
   const delta = Math.min(maximumDelta, Math.max(minimumDelta, request.requestedDelta));
   const widths = [...baseWidths];
   widths[request.column] = baseColumnWidth + delta;
 
-  const compression = Math.max(0, delta - availableTotalGrowth);
+  const compression = infeasibleMaximum ? 0 : Math.max(0, delta - availableTotalGrowth);
   if (compression > 0 && rightWidths.length) {
     const targetRightTotal = total(rightWidths) - compression;
     let low = 0;
@@ -81,6 +88,12 @@ function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
 }
 
 function project(request: TableColumnWidthProjectionRequest): TableColumnWidthResult {
+  if (request.minimumWidths.length !== request.widths.length) {
+    throw new RangeError('minimumWidths must have the same length as widths');
+  }
+  if (request.minimumWidths.some((width) => !Number.isFinite(width) || width < 0)) {
+    throw new TypeError('minimumWidths must contain only finite non-negative values');
+  }
   const requestedTotalWidth = total(request.widths);
   const availableWidth = Math.max(0, request.availableWidth);
   const elasticLimit = request.defaultWidthWasCapped
@@ -90,8 +103,21 @@ function project(request: TableColumnWidthProjectionRequest): TableColumnWidthRe
     availableWidth || requestedTotalWidth,
     request.elastic ? elasticLimit : requestedTotalWidth
   );
-  const scale = requestedTotalWidth > 0 ? targetTotalWidth / requestedTotalWidth : 1;
-  const widths = request.widths.map((width) => width * scale);
+  const minimumTotalWidth = total(request.minimumWidths);
+  const constrainedTargetWidth = Math.max(targetTotalWidth, minimumTotalWidth);
+  const elasticities = request.widths.map((width, index) => (
+    Math.max(0, width - request.minimumWidths[index])
+  ));
+  const totalElasticity = total(elasticities);
+  const distributableWidth = constrainedTargetWidth - minimumTotalWidth;
+  const fallbackWeightTotal = total(request.widths);
+  const widths = request.minimumWidths.map((minimumWidth, index) => (
+    minimumWidth + distributableWidth * (totalElasticity > 0
+      ? elasticities[index] / totalElasticity
+      : fallbackWeightTotal > 0
+        ? request.widths[index] / fallbackWeightTotal
+        : 1 / request.widths.length)
+  ));
   const totalWidth = total(widths);
   return {
     widths,

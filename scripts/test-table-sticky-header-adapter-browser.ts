@@ -31,8 +31,9 @@ async function main(): Promise<void> {
     await page.setContent(`<!doctype html>
       <style>
         .shell { position: relative; margin: 8px; }
-        .scroller { position: relative; width: 320px; height: 210px; overflow: auto; }
-        .content { width: 560px; }
+        .scroller { position: relative; width: 320px; height: 210px; overflow-x: hidden; overflow-y: auto; }
+        .content { width: 320px; }
+        .horizontal { width: 320px; overflow-x: auto; }
         .spacer { height: 64px; }
         table.source { width: 520px; height: 380px; border-collapse: collapse; }
         table.source thead { height: 34px; }
@@ -42,10 +43,10 @@ async function main(): Promise<void> {
       </style>
       ${[1, 2].map((id) => `<section class="shell" id="shell-${id}">
         <div class="scroller" id="scroller-${id}"><div class="content"><div class="spacer"></div>
-          <table class="source" id="table-${id}"><colgroup><col style="width:180px"><col style="width:340px"></colgroup>
+          <div class="horizontal" id="horizontal-${id}"><table class="source" id="table-${id}"><colgroup><col style="width:180px"><col style="width:340px"></colgroup>
             <thead><tr><th><a href="#x">Header ${id}</a><input value="interactive"></th><th>Value</th></tr></thead>
             <tbody>${Array.from({ length: 12 }, (_, row) => `<tr><td>${id}-${row}</td><td>row</td></tr>`).join('')}</tbody>
-          </table><div style="height:220px"></div>
+          </table></div><div style="height:220px"></div>
         </div></div>
         <div class="sticky" id="sticky-${id}"><button class="sticky-toolbar-button">Toolbar</button><div class="sticky-viewport" id="viewport-${id}">
           <table id="sticky-table-${id}"><thead><tr id="sticky-row-${id}"></tr></thead></table>
@@ -90,6 +91,7 @@ async function main(): Promise<void> {
       const elements = (id: number) => ({
         shell: document.getElementById(`shell-${id}`)!,
         scroller: document.getElementById(`scroller-${id}`)!,
+        horizontalScroller: document.getElementById(`horizontal-${id}`)!,
         table: document.getElementById(`table-${id}`) as HTMLTableElement,
         stickyChrome: document.getElementById(`sticky-${id}`)!,
         stickyHeaderViewport: document.getElementById(`viewport-${id}`)!,
@@ -148,7 +150,6 @@ async function main(): Promise<void> {
       const framesBeforeStorm = scheduler.frames;
       for (const id of [1, 2]) {
         elements(id).scroller.scrollTop = 90;
-        elements(id).scroller.scrollLeft = 45;
         elements(id).scroller.dispatchEvent(new Event('scroll'));
         elements(id).scroller.dispatchEvent(new Event('scroll'));
       }
@@ -156,6 +157,12 @@ async function main(): Promise<void> {
       const stormFrames = scheduler.frames - framesBeforeStorm;
       const stormTasks = scheduler.flush();
       const visible = elements(1).stickyChrome.classList.contains('is-visible');
+      const framesBeforeHorizontalScroll = scheduler.frames;
+      elements(1).horizontalScroller.scrollLeft = 45;
+      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+      const horizontalScrollFrames = scheduler.frames - framesBeforeHorizontalScroll;
+      const horizontalScrollTasks = scheduler.flush();
       const transform = elements(1).stickyTable.style.transform;
       const visibleHeight = Number.parseFloat(elements(1).stickyChrome.style.height);
 
@@ -211,10 +218,31 @@ async function main(): Promise<void> {
       scheduler.flush();
       const headerAfterRebuiltMutation = elements(1).stickyHeaderRow.textContent;
 
+      const oldHorizontalScroller = elements(1).horizontalScroller;
+      const replacementHorizontalScroller = document.createElement('div');
+      replacementHorizontalScroller.id = 'horizontal-1';
+      replacementHorizontalScroller.className = 'horizontal';
+      oldHorizontalScroller.before(replacementHorizontalScroller);
+      replacementHorizontalScroller.append(elements(1).table);
+      oldHorizontalScroller.remove();
+      adapter1.update();
+      scheduler.flush();
+      const framesBeforeReplacedScroll = scheduler.frames;
+      oldHorizontalScroller.dispatchEvent(new Event('scroll'));
+      const staleHorizontalScrollPending = scheduler.pending;
+      elements(1).horizontalScroller.scrollLeft = 35;
+      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+      const currentHorizontalScrollPending = scheduler.pending;
+      const replacedHorizontalScrollFrames = scheduler.frames - framesBeforeReplacedScroll;
+      scheduler.flush();
+      const transformAfterHorizontalReplacement = elements(1).stickyTable.style.transform;
+
       const styleBeforeUnmount = elements(1).stickyTable.style.width;
       adapter1.unmount();
       elements(1).table.style.width = '440px';
       elements(1).scroller.dispatchEvent(new Event('scroll'));
+      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+      const horizontalScrollPendingAfterUnmount = scheduler.pending;
       window.dispatchEvent(new Event('resize'));
       scheduler.flush();
       const styleAfterUnmount = elements(1).stickyTable.style.width;
@@ -237,6 +265,8 @@ async function main(): Promise<void> {
         passive,
         stormFrames,
         stormTasks,
+        horizontalScrollFrames,
+        horizontalScrollTasks,
         visible,
         transform,
         visibleHeight,
@@ -248,13 +278,20 @@ async function main(): Promise<void> {
         visibleAfterRebuild,
         headerAfterDetachedMutation,
         headerAfterRebuiltMutation,
+        staleHorizontalScrollPending,
+        currentHorizontalScrollPending,
+        replacedHorizontalScrollFrames,
+        transformAfterHorizontalReplacement,
         styleBeforeUnmount,
         styleAfterUnmount,
         hiddenAfterUnmount,
+        horizontalScrollPendingAfterUnmount,
         otherSurvivedDispose,
         registrationsAfterFirstDispose,
         sourceUnchanged: elements(1).table.textContent?.replace('Rebuilt header', 'Header 1') === sourceText,
-        scrollUnchangedByProjection: elements(1).scroller.scrollTop === 90 && initialScroll === 0,
+        scrollUnchangedByProjection: elements(1).scroller.scrollTop === 90
+          && elements(1).horizontalScroller.scrollLeft === 35
+          && initialScroll === 0,
         internalRafCalls: 0
       };
     });
@@ -269,6 +306,8 @@ async function main(): Promise<void> {
     });
     assert.equal(result.stormFrames, 1, 'multiple adapters and event storms share one scheduled tick');
     assert.equal(result.stormTasks, 2);
+    assert.equal(result.horizontalScrollFrames, 1, 'horizontal scroll storms share the existing scheduler tick');
+    assert.equal(result.horizontalScrollTasks, 1, 'horizontal scroll invalidates only its current Sticky adapter');
     assert.equal(result.visible, true);
     assert.equal(result.transform, 'translateX(-45px)');
     assert.equal(result.controls.className, true);
@@ -280,8 +319,13 @@ async function main(): Promise<void> {
     assert.equal(result.visibleAfterRebuild, true);
     assert.doesNotMatch(result.headerAfterDetachedMutation ?? '', /Detached header/);
     assert.match(result.headerAfterRebuiltMutation ?? '', /Rebuilt header/);
+    assert.equal(result.staleHorizontalScrollPending, 0, 'a replaced horizontal scroller must become a bounded no-op');
+    assert.equal(result.currentHorizontalScrollPending, 1, 'the replacement horizontal scroller must own invalidation');
+    assert.equal(result.replacedHorizontalScrollFrames, 1);
+    assert.equal(result.transformAfterHorizontalReplacement, 'translateX(-35px)');
     assert.equal(result.styleAfterUnmount, result.styleBeforeUnmount);
     assert.equal(result.hiddenAfterUnmount, true);
+    assert.equal(result.horizontalScrollPendingAfterUnmount, 0);
     assert.equal(result.otherSurvivedDispose, true);
     assert.equal(result.registrationsAfterFirstDispose, 2, 'disposing sticky removes only its own registration');
     assert.equal(result.sourceUnchanged, true);

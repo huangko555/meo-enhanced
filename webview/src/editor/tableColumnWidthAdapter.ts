@@ -114,6 +114,20 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     return Math.max(0, container.clientWidth - tableCollapsedOuterBorderWidth(table));
   };
 
+  const minimumWidths = (table: HTMLTableElement): readonly number[] => (
+    Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => {
+      const cellStyle = getComputedStyle(cell);
+      const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+      const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
+      const numeric = (value: string) => Number.parseFloat(value) || 0;
+      return numeric(previewStyle.fontSize)
+        + numeric(previewStyle.paddingLeft)
+        + numeric(previewStyle.paddingRight)
+        + numeric(cellStyle.borderLeftWidth)
+        + numeric(cellStyle.borderRightWidth);
+    })
+  );
+
   const stickyTableFor = (table: HTMLTableElement): HTMLTableElement | null => (
     table.closest('.meo-md-html-table-shell')
       ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table') ?? null
@@ -164,6 +178,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     }
     const result = policy.project({
       widths: intent.widths,
+      minimumWidths: minimumWidths(table),
       initialTotalWidth: intent.initialTotalWidth,
       elastic: intent.elastic,
       defaultWidthWasCapped: intent.defaultWidthWasCapped,
@@ -230,17 +245,6 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const defaultWidthWasCapped = stored?.defaultWidthWasCapped ?? (
         initialTotalWidth >= startMaximumTotalWidth - 1
       );
-      const minimumWidths = cells.map((cell) => {
-        const cellStyle = getComputedStyle(cell);
-        const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
-        const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
-        const numeric = (value: string) => Number.parseFloat(value) || 0;
-        return numeric(previewStyle.fontSize)
-          + numeric(previewStyle.paddingLeft)
-          + numeric(previewStyle.paddingRight)
-          + numeric(cellStyle.borderLeftWidth)
-          + numeric(cellStyle.borderRightWidth);
-      });
       const startX = event.clientX;
       let nextWidths: readonly number[] = startWidths;
       let latestClientX = startX;
@@ -251,7 +255,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         const maximumTotalWidth = availableWidth(table);
         const result = policy.resize({
           widths: startWidths,
-          minimumWidths,
+          minimumWidths: minimumWidths(table),
           column,
           requestedDelta: latestClientX - startX,
           maximumTotalWidth

@@ -11,6 +11,7 @@ export type TableWidgetLayoutScheduler = {
 
 export type TableStickyHeaderElements = {
   readonly scroller: HTMLElement;
+  readonly horizontalScroller: HTMLElement;
   readonly table: HTMLTableElement;
   readonly stickyChrome: HTMLElement;
   readonly stickyHeaderViewport: HTMLElement;

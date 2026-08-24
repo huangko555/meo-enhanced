@@ -152,6 +152,9 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     window.addEventListener('resize', requestIfActive);
     cleanup.push(() => window.removeEventListener('resize', requestIfActive));
 
+    elements.horizontalScroller.addEventListener('scroll', requestIfActive);
+    cleanup.push(() => elements.horizontalScroller.removeEventListener('scroll', requestIfActive));
+
     const resizeObserver = new ResizeObserver(requestIfActive);
     resizeObserver.observe(elements.scroller);
     cleanup.push(() => resizeObserver.disconnect());
@@ -178,6 +181,7 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     const currentElements = mountedElements;
     const elementsChanged = !currentElements ||
       currentElements.scroller !== nextElements.scroller ||
+      currentElements.horizontalScroller !== nextElements.horizontalScroller ||
       currentElements.table !== nextElements.table ||
       currentElements.stickyChrome !== nextElements.stickyChrome ||
       currentElements.stickyHeaderViewport !== nextElements.stickyHeaderViewport ||
