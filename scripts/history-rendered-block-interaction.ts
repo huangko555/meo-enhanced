@@ -96,8 +96,21 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
 
   const assertCurrent = async (stage: string) => {
     if (!await adapter.isCurrent(interaction)) {
-      throw new Error(`History rendered-block interaction was disposed before ${stage}`);
+      throw new Error(`History rendered-block interaction was disposed after ${stage}`);
     }
+  };
+  /** One guard shape for every foreground await; cleanup deliberately bypasses it. */
+  const foreground = async <Value>(
+    stage: string,
+    operation: () => Promise<Value>,
+    claim?: (value: Value) => void
+  ): Promise<Value> => {
+    const value = await operation();
+    // A completed acquire/open can itself race disposal. Claim the resource
+    // before checking currentness so finally owns its terminal cleanup.
+    claim?.(value);
+    await assertCurrent(stage);
+    return value;
   };
 
   const collectCleanup = async (operation: string, action: () => Promise<void>) => {
@@ -119,43 +132,33 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
   };
 
   try {
-    await assertCurrent('scroll settlement');
-    const scroll = await adapter.settleScroll(interaction);
-    await assertCurrent('scroll settlement');
+    await assertCurrent('start');
+    const scroll = await foreground('scroll', () => adapter.settleScroll(interaction));
     if (scroll === 'unsupported') return { status: 'unsupported', evidence: null };
-    if (await adapter.isTargetSettled(interaction)) return { status: 'noop', evidence: null };
-    await assertCurrent('target inspection');
-    observer = await adapter.openObserver?.(interaction);
-    await assertCurrent('observer opening');
+    if (await foreground('targetInspection', () => adapter.isTargetSettled(interaction))) return { status: 'noop', evidence: null };
+    await foreground('observerOpening', async () => adapter.openObserver?.(interaction), (value) => { observer = value; });
 
-    const supersededHandle = await adapter.acquireCurrentHandle(interaction);
-    acquiredHandles.set(supersededHandle, 'owned');
-    const initialPoint = await adapter.validateCurrentHandle(supersededHandle, 'pointerdown');
-    await adapter.preparePointerDown(initialPoint);
-    await assertCurrent('pointerdown preparation');
-    currentHandle = await adapter.acquireCurrentHandle(interaction);
-    acquiredHandles.set(currentHandle, 'owned');
+    const supersededHandle = await foreground(
+      'acquire1', () => adapter.acquireCurrentHandle(interaction), (handle) => acquiredHandles.set(handle, 'owned')
+    );
+    const initialPoint = await foreground('initialValidate', () => adapter.validateCurrentHandle(supersededHandle, 'pointerdown'));
+    await foreground('prepareDown', () => adapter.preparePointerDown(initialPoint));
+    currentHandle = await foreground(
+      'reacquire2', () => adapter.acquireCurrentHandle(interaction), (handle) => acquiredHandles.set(handle, 'owned')
+    );
     if (!Object.is(currentHandle, supersededHandle)) {
       await disposeOnce(supersededHandle, 'supersededHandleDispose');
     }
 
-    const downPoint = await adapter.validateCurrentHandle(currentHandle, 'pointerdown');
-    await assertCurrent('pointerdown validation');
+    const downPoint = await foreground('downValidate', () => adapter.validateCurrentHandle(currentHandle, 'pointerdown'));
     pointerNeedsRelease = true;
-    await adapter.deliverPointerDown(downPoint);
-    await assertCurrent('pointerdown delivery');
-    await adapter.afterPointerDown?.(currentHandle);
-    await assertCurrent('post-pointerdown transition');
+    await foreground('deliverDown', () => adapter.deliverPointerDown(downPoint));
+    await foreground('afterPointerDown', async () => adapter.afterPointerDown?.(currentHandle));
 
-    await adapter.preparePointerUp(downPoint);
-    await assertCurrent('pointerup preparation');
-    const upPoint = await adapter.validateCurrentHandle(currentHandle, 'pointerup');
-    await assertCurrent('pointerup validation');
-    await adapter.deliverPointerUp(upPoint);
-    pointerNeedsRelease = false;
-    await assertCurrent('pointerup delivery');
-    await adapter.settleTarget(interaction);
-    await assertCurrent('target settlement');
+    await foreground('prepareUp', () => adapter.preparePointerUp(downPoint));
+    const upPoint = await foreground('upValidate', () => adapter.validateCurrentHandle(currentHandle, 'pointerup'));
+    await foreground('deliverUp', () => adapter.deliverPointerUp(upPoint), () => { pointerNeedsRelease = false; });
+    await foreground('settleTarget', () => adapter.settleTarget(interaction));
   } catch (error) {
     hasPrimary = true;
     primary = error;

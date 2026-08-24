@@ -53,17 +53,20 @@ if (JSON.stringify(calls) !== JSON.stringify(expected)) {
 console.log('history rendered-block interaction module first tracer passed');
 
 type PrimaryStage =
+  | 'scroll'
+  | 'targetInspection'
+  | 'observerOpening'
   | 'acquire1'
   | 'initialValidate'
   | 'prepareDown'
   | 'reacquire2'
   | 'downValidate'
   | 'deliverDown'
+  | 'afterPointerDown'
   | 'prepareUp'
   | 'upValidate'
   | 'deliverUp'
-  | 'settleTarget'
-  | 'success';
+  | 'settleTarget';
 type CleanupOp =
   | 'safeReleaseMove'
   | 'cancelPointer'
@@ -80,12 +83,12 @@ type FixtureOptions = {
   readonly replacement?: 0 | 1 | 2;
   readonly noOp?: boolean;
   readonly unsupported?: boolean;
-  readonly primaryFailure?: Exclude<PrimaryStage, 'success'> | 'scroll';
+  readonly primaryFailure?: PrimaryStage;
   readonly cleanupFailures?: readonly CleanupOp[];
   readonly cleanupValues?: Readonly<Partial<Record<CleanupOp, unknown>>>;
   readonly sameNodeMoves?: boolean;
   readonly scroll?: Promise<'settled' | 'unsupported'>;
-  readonly disposedAfter?: PrimaryStage | 'scroll';
+  readonly disposedAfter?: PrimaryStage;
 };
 
 /** The deterministic Adapter records the Module's public effects by identity. */
@@ -103,9 +106,12 @@ function fixture(options: FixtureOptions = {}) {
   let secondAcquireCompleted = false;
   let physicalPointer: PhysicalPointer = 'notPressed';
   let current = true;
-  const failPrimary = (stage: Exclude<PrimaryStage, 'success'>) => {
+  const foregroundTrace: PrimaryStage[] = [];
+  const completeForeground = (stage: PrimaryStage) => {
     stageTrace.push(stage);
+    foregroundTrace.push(stage);
     if (options.primaryFailure === stage) throw new Error(`synthetic ${stage}`);
+    if (options.disposedAfter === stage) current = false;
   };
   const failCleanup = (operation: CleanupOp) => {
     cleanupCounts.set(operation, (cleanupCounts.get(operation) ?? 0) + 1);
@@ -117,20 +123,18 @@ function fixture(options: FixtureOptions = {}) {
     isCurrent: async () => current,
     settleScroll: async () => {
       trace.push('scroll');
-      if (options.primaryFailure === 'scroll') throw new Error('synthetic scroll');
+      completeForeground('scroll');
       const result = options.scroll ? await options.scroll : options.unsupported ? 'unsupported' : 'settled';
-      if (options.disposedAfter === 'scroll') current = false;
       return result;
     },
-    isTargetSettled: async () => Boolean(options.noOp),
+    isTargetSettled: async () => { completeForeground('targetInspection'); return Boolean(options.noOp); },
     acquireCurrentHandle: async () => {
       trace.push('acquire');
       const stage = acquires++ === 0 ? 'acquire1' : 'reacquire2';
-      failPrimary(stage);
+      completeForeground(stage);
       if (stage === 'reacquire2') secondAcquireCompleted = true;
       const handle = stage === 'acquire1' || options.replacement === 0 ? first : replacement;
       activeHandles.add(handle);
-      if (options.disposedAfter === stage) current = false;
       return handle;
     },
     validateCurrentHandle: async (handle, phase) => {
@@ -141,26 +145,24 @@ function fixture(options: FixtureOptions = {}) {
       const stage = phase === 'pointerup'
         ? 'upValidate'
         : secondAcquireCompleted ? 'downValidate' : 'initialValidate';
-      failPrimary(stage);
+      completeForeground(stage);
       const point = phase === 'pointerup' && options.sameNodeMoves ? { x: 20, y: 20 } : { x: 10, y: 10 };
-      if (options.disposedAfter === stage) current = false;
       return point;
     },
-    preparePointerDown: async () => { trace.push('prepare-down'); failPrimary('prepareDown'); if (options.disposedAfter === 'prepareDown') current = false; },
+    preparePointerDown: async () => { trace.push('prepare-down'); completeForeground('prepareDown'); },
     deliverPointerDown: async () => {
       trace.push('down');
-      failPrimary('deliverDown');
+      completeForeground('deliverDown');
       physicalPointer = 'pressed';
-      if (options.disposedAfter === 'deliverDown') current = false;
     },
-    preparePointerUp: async () => { trace.push('prepare-up'); failPrimary('prepareUp'); if (options.disposedAfter === 'prepareUp') current = false; },
+    afterPointerDown: async () => { trace.push('after-down'); completeForeground('afterPointerDown'); },
+    preparePointerUp: async () => { trace.push('prepare-up'); completeForeground('prepareUp'); },
     deliverPointerUp: async () => {
       trace.push('up');
-      failPrimary('deliverUp');
+      completeForeground('deliverUp');
       physicalPointer = 'released';
-      if (options.disposedAfter === 'deliverUp') current = false;
     },
-    settleTarget: async (interaction) => { trace.push(`settle:${interaction.targetMode}`); modeCalls.push(interaction.targetMode); failPrimary('settleTarget'); if (options.disposedAfter === 'settleTarget') current = false; },
+    settleTarget: async (interaction) => { trace.push(`settle:${interaction.targetMode}`); modeCalls.push(interaction.targetMode); completeForeground('settleTarget'); },
     disposeSupersededHandle: async (handle) => {
       trace.push(`dispose-superseded:${handle.id}`);
       disposeCounts.set(handle.id, (disposeCounts.get(handle.id) ?? 0) + 1);
@@ -195,6 +197,7 @@ function fixture(options: FixtureOptions = {}) {
     disposeSafeReleaseTarget: async () => { trace.push('dispose-safe-target'); failCleanup('safeTargetDispose'); },
     cancelAnimation: async () => { failCleanup('animationCancel'); },
     openObserver: async () => {
+      completeForeground('observerOpening');
       observed.registries += 1;
       observed.old += 1;
       observed.replacement += 1;
@@ -223,7 +226,7 @@ function fixture(options: FixtureOptions = {}) {
   };
   return {
     adapter, trace, stageTrace, cleanupCounts, disposeCounts, activeHandles, observed, modeCalls,
-    physicalPointer: () => physicalPointer
+    foregroundTrace, physicalPointer: () => physicalPointer
   };
 }
 
@@ -252,7 +255,7 @@ function assertTerminal(
 ) {
   check(
     subject.observed.registries === 0 && subject.observed.cleanup === observerCleanup,
-    'observer registry terminal state differs'
+    `observer registry terminal state differs: ${JSON.stringify(subject.observed)}`
   );
   for (const [handle, count] of subject.disposeCounts) {
     check(count <= 1, `handle ${handle} was disposed more than once`);
@@ -343,27 +346,50 @@ const matrix: Array<[string, () => Promise<void>]> = [
     const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction({ kind: 'math', lineNumber: 8, targetMode: 'split' }, failed.adapter));
     check(error instanceof Error && String(error).includes('synthetic scroll'), 'scroll error was changed');
   }],
-  ['disposed generations stop at awaited boundaries and still close owned resources', async () => {
-    const beforeObserver = fixture({ disposedAfter: 'scroll' });
-    const beforeError = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction(
-      { kind: 'mermaid', lineNumber: 17, targetMode: 'split' }, beforeObserver.adapter
-    ));
-    check(String(beforeError).includes('disposed before scroll settlement'), 'scroll disposal was not primary');
-    check(!beforeObserver.trace.includes('acquire'), 'disposed scroll still acquired a handle');
-    assertTerminal(beforeObserver, [], 'notPressed', 0);
+  ['legacy validate disposal trace is red while the unified foreground guard matrix closes every await boundary', async () => {
+    const legacy = fixture({ disposedAfter: 'initialValidate' });
+    const intent = { kind: 'mermaid' as const, lineNumber: 17, targetMode: 'split' as const };
+    const observer = await legacy.adapter.openObserver!(intent);
+    const handle = await legacy.adapter.acquireCurrentHandle(intent);
+    const point = await legacy.adapter.validateCurrentHandle(handle, 'pointerdown');
+    // This is the retained old-model red trace: without the common guard,
+    // prepare-down is still sent after validation made the generation stale.
+    await legacy.adapter.preparePointerDown(point);
+    check(legacy.foregroundTrace.join(',').endsWith('initialValidate,prepareDown'), 'legacy validate-dispose trace did not reach the old false green');
+    await legacy.adapter.disposeHandle(handle);
+    await observer.cleanup();
+    assertTerminal(legacy, [], 'notPressed');
 
-    const afterDown = fixture({ disposedAfter: 'deliverDown' });
-    const afterDownError = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction(
-      { kind: 'math', lineNumber: 18, targetMode: 'source' }, afterDown.adapter
-    ));
-    check(String(afterDownError).includes('disposed before pointerdown delivery'), 'post-down disposal was not primary');
-    check(!afterDown.trace.some((entry) => entry.startsWith('settle:')), 'disposed generation settled a target');
-    check(cleanupCount(afterDown, 'cancelPointer') === 1, 'disposed pressed pointer was not safely cancelled');
-    assertTerminal(afterDown, [], 'released');
+    const foregroundStages: readonly PrimaryStage[] = [
+      'scroll', 'targetInspection', 'observerOpening', 'acquire1', 'initialValidate', 'prepareDown',
+      'reacquire2', 'downValidate', 'deliverDown', 'afterPointerDown', 'prepareUp', 'upValidate',
+      'deliverUp', 'settleTarget'
+    ];
+    const safeReleaseStages = new Set<PrimaryStage>(['deliverDown', 'afterPointerDown', 'prepareUp', 'upValidate']);
+    const observerlessStages = new Set<PrimaryStage>(['scroll', 'targetInspection']);
+    for (const disposedAfter of foregroundStages) {
+      const subject = fixture({ disposedAfter });
+      const error = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction(
+        { kind: 'math', lineNumber: 18, targetMode: 'source' }, subject.adapter
+      ));
+      check(String(error).includes(`disposed after ${disposedAfter}`), `${disposedAfter} disposal was not primary`);
+      const index = foregroundStages.indexOf(disposedAfter);
+      check(
+        JSON.stringify(subject.foregroundTrace) === JSON.stringify(foregroundStages.slice(0, index + 1)),
+        `${disposedAfter} allowed a later foreground operation: ${JSON.stringify(subject.foregroundTrace)}`
+      );
+      const pointer: PhysicalPointer = safeReleaseStages.has(disposedAfter)
+        ? 'released'
+        : ['deliverUp', 'settleTarget'].includes(disposedAfter) ? 'released' : 'notPressed';
+      const releaseCount = safeReleaseStages.has(disposedAfter) ? 1 : 0;
+      check(cleanupCount(subject, 'cancelPointer') === releaseCount, `${disposedAfter} safe-release count differs`);
+      check(cleanupCount(subject, 'safeTargetDispose') === releaseCount, `${disposedAfter} safe target terminal differs`);
+      assertTerminal(subject, [], pointer, observerlessStages.has(disposedAfter) ? 0 : 1);
+    }
   }],
   ['table-driven primary stages preserve ownership and physical pointer safety', async () => {
     const releaseStages = new Set<PrimaryStage>(['deliverDown', 'prepareUp', 'upValidate', 'deliverUp']);
-    const stages: readonly Exclude<PrimaryStage, 'success'>[] = [
+    const stages: readonly PrimaryStage[] = [
       'acquire1', 'initialValidate', 'prepareDown', 'reacquire2', 'downValidate',
       'deliverDown', 'prepareUp', 'upValidate', 'deliverUp', 'settleTarget'
     ];
