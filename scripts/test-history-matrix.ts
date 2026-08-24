@@ -8,6 +8,7 @@ import {
   type HistoryRenderedBlockInteractionAdapter,
   type HistoryRenderedBlockTargetMode
 } from './history-rendered-block-interaction';
+import { runHistoryRenderedBlockChromiumInteraction } from './history-rendered-block-interaction-chromium';
 
 type BlockMode = 'preview' | 'split' | 'source';
 type NeedleOccurrence = 'first' | 'last';
@@ -344,6 +345,7 @@ async function editRenderedBlock(
         kind === 'mermaid' ? 'Show Mermaid code only' : 'Show formula source only'
       ) ? 'source' : 'preview';
       await runHistoryRenderedBlockInteraction({ kind, lineNumber: targetLineNumber, targetMode }, {
+      isCurrent: async () => true,
       settleScroll: async () => {
         await settleTargetModeControl();
         return 'settled';
@@ -1525,26 +1527,19 @@ async function main() {
       return { mermaidLine, formulaLine };
     });
     await page.keyboard.press('Enter');
-    const revealAndOpenSemanticBlock = async (kind: 'Mermaid' | 'Formula', lineNumber: number) => {
-      await page.evaluate((line) => (window as any).__historyMatrixEditor.scrollToLine(line, 'center'), lineNumber);
-      const groupLabel = `${kind} block controls at line ${lineNumber}`;
-      const regionLabel = `${kind} editor at line ${lineNumber}`;
-      await page.waitForFunction((label) => Boolean(
-        document.querySelector(`[role="group"][aria-label="${label}"]`)
-      ), {}, groupLabel);
-      await page.evaluate(({ groupLabel, regionLabel }) => {
-        if (document.querySelector(`[role="region"][aria-label="${regionLabel}"]`)) return;
-        const button = document.querySelector<HTMLElement>(`[role="group"][aria-label="${groupLabel}"]`)
-          ?.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn, .meo-latex-math-mode-btn');
-        if (!button) throw new Error(`Missing semantic mode control: ${groupLabel}`);
-        button.click();
-      }, { groupLabel, regionLabel });
-      await page.waitForFunction((label) => Boolean(
-        document.querySelector(`[role="region"][aria-label="${label}"]`)
-      ), {}, regionLabel);
-    };
-    await revealAndOpenSemanticBlock('Mermaid', semanticLines.mermaidLine + 1);
-    await revealAndOpenSemanticBlock('Formula', semanticLines.formulaLine + 1);
+    // This intentionally uses the shared public Chromium Adapter. A direct DOM
+    // click can appear green while its detached/offscreen control never
+    // receives the real pointer transaction.
+    await runHistoryRenderedBlockChromiumInteraction(
+      page,
+      { kind: 'mermaid', lineNumber: semanticLines.mermaidLine + 1, targetMode: 'split' },
+      '__historyMatrixEditor'
+    );
+    await runHistoryRenderedBlockChromiumInteraction(
+      page,
+      { kind: 'math', lineNumber: semanticLines.formulaLine + 1, targetMode: 'split' },
+      '__historyMatrixEditor'
+    );
     await page.evaluate(async () => {
       const applied = await (window as any).__historyMatrixEditor.undo();
       if (!applied) throw new Error('Equal-length line shift undo was not applied');

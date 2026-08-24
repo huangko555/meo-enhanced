@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
+import { runHistoryRenderedBlockChromiumInteraction } from './history-rendered-block-interaction-chromium';
 
 type BlockKind = 'mermaid' | 'math';
 type BlockMode = 'preview' | 'split' | 'source';
@@ -103,51 +104,13 @@ async function editorOwnsFocus(page: any): Promise<boolean> {
   });
 }
 
-async function scrollToNeedle(page: any, needle: string, occurrence: NeedleOccurrence = 'first') {
-  await page.evaluate(({ lineNeedle, targetOccurrence }) => {
-    const editor = (window as any).__renderedHistoryStressEditor;
-    let targetLine = 0;
-    for (let lineNumber = 1; lineNumber <= editor.view.state.doc.lines; lineNumber += 1) {
-      if (editor.view.state.doc.line(lineNumber).text.includes(lineNeedle)) {
-        targetLine = lineNumber;
-        if (targetOccurrence === 'first') break;
-      }
-    }
-    if (!targetLine) throw new Error(`Missing rendered-block line: ${lineNeedle}`);
-    for (let lineNumber = targetLine; lineNumber >= 1; lineNumber -= 1) {
-      const line = editor.view.state.doc.line(lineNumber).text;
-      if (line.trimStart().startsWith('```mermaid') || line.trim() === '$$') {
-        editor.scrollToLine(lineNumber, 'center');
-        return;
-      }
-    }
-    throw new Error(`Missing rendered-block opening line: ${lineNeedle}`);
-  }, { lineNeedle: needle, targetOccurrence: occurrence });
-  await waitForFrames(page, 16);
-  await page.evaluate(({ lineNeedle, targetOccurrence }) => {
-    const editor = (window as any).__renderedHistoryStressEditor;
-    const view = editor.view;
-    let targetLine = 0;
-    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-      if (!view.state.doc.line(lineNumber).text.includes(lineNeedle)) continue;
-      targetLine = lineNumber;
-      if (targetOccurrence === 'first') break;
-    }
-    if (targetLine < view.state.doc.lineAt(view.viewport.from).number || targetLine > view.state.doc.lineAt(view.viewport.to).number) {
-      const block = view.lineBlockAt(view.state.doc.line(targetLine).from);
-      view.scrollDOM.scrollTop = Math.max(0, block.top - 80);
-    }
-  }, { lineNeedle: needle, targetOccurrence: occurrence });
-  await waitForFrames(page, 8);
-}
-
-async function clickModeButton(
+async function renderedBlockControlLine(
   page: any,
   kind: BlockKind,
   needle: string,
   occurrence: NeedleOccurrence = 'first'
-) {
-  const transition = await page.evaluate(({ blockKind, lineNeedle, targetOccurrence }) => {
+): Promise<number> {
+  return page.evaluate(({ blockKind, lineNeedle, targetOccurrence }) => {
     const editor = (window as any).__renderedHistoryStressEditor;
     const view = editor.view;
     let targetLine = 0;
@@ -163,40 +126,10 @@ async function clickModeButton(
         ? line.text.trimStart().startsWith('```mermaid')
         : line.text.trim() === '$$';
       if (!opening) continue;
-      const labels = blockKind === 'mermaid'
-        ? {
-            controls: `Mermaid block controls at line ${lineNumber}`,
-            preview: 'Edit Mermaid in split view',
-            split: 'Show Mermaid code only',
-            source: 'Show Mermaid preview'
-          }
-        : {
-            controls: `Formula block controls at line ${lineNumber}`,
-            preview: 'Edit formula in split view',
-            split: 'Show formula source only',
-            source: 'Show formula preview'
-          };
-      const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${labels.controls}"]`);
-      const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-        .find((candidate) => (
-          candidate.getAttribute('aria-label') === labels.preview
-          || candidate.getAttribute('aria-label') === labels.split
-          || candidate.getAttribute('aria-label') === labels.source
-        )) ?? null;
-      if (!button) throw new Error(`Missing ${blockKind} mode button for ${lineNeedle}`);
-      const currentLabel = button.getAttribute('aria-label');
-      const expectedLabel = currentLabel === labels.preview
-        ? labels.split
-        : currentLabel === labels.split ? labels.source : labels.preview;
-      button.click();
-      return { controlsLabel: labels.controls, expectedLabel };
+      return lineNumber;
     }
     throw new Error(`Missing ${blockKind} opening line for ${lineNeedle}`);
   }, { blockKind: kind, lineNeedle: needle, targetOccurrence: occurrence });
-  await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
-    document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
-      ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-  ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition);
 }
 
 async function setMode(
@@ -206,52 +139,12 @@ async function setMode(
   targetMode: BlockMode,
   occurrence: NeedleOccurrence = 'first'
 ) {
-  await scrollToNeedle(page, needle, occurrence);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const mode = await page.evaluate(({ blockKind, lineNeedle, targetOccurrence }) => {
-      const editor = (window as any).__renderedHistoryStressEditor;
-      const view = editor.view;
-      let targetLine = 0;
-      for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
-        if (view.state.doc.line(lineNumber).text.includes(lineNeedle)) {
-          targetLine = lineNumber;
-          if (targetOccurrence === 'first') break;
-        }
-      }
-      for (let lineNumber = targetLine; lineNumber >= 1; lineNumber -= 1) {
-        const line = view.state.doc.line(lineNumber);
-        const opening = blockKind === 'mermaid'
-          ? line.text.trimStart().startsWith('```mermaid')
-          : line.text.trim() === '$$';
-        if (!opening) continue;
-        const labels = blockKind === 'mermaid'
-          ? {
-              controls: `Mermaid block controls at line ${lineNumber}`,
-              preview: 'Edit Mermaid in split view',
-              split: 'Show Mermaid code only',
-              source: 'Show Mermaid preview'
-            }
-          : {
-              controls: `Formula block controls at line ${lineNumber}`,
-              preview: 'Edit formula in split view',
-              split: 'Show formula source only',
-              source: 'Show formula preview'
-            };
-        const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${labels.controls}"]`);
-        const currentLabel = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-          .map((candidate) => candidate.getAttribute('aria-label'))
-          .find((label) => label === labels.preview || label === labels.split || label === labels.source);
-        if (currentLabel === labels.preview) return 'preview';
-        if (currentLabel === labels.split) return 'split';
-        if (currentLabel === labels.source) return 'source';
-        return null;
-      }
-      throw new Error(`Missing ${blockKind} block for ${lineNeedle}`);
-    }, { blockKind: kind, lineNeedle: needle, targetOccurrence: occurrence });
-    if (mode === targetMode) return;
-    await clickModeButton(page, kind, needle, occurrence);
-  }
-  throw new Error(`Could not set ${kind} block ${needle} to ${targetMode}`);
+  const lineNumber = await renderedBlockControlLine(page, kind, needle, occurrence);
+  await runHistoryRenderedBlockChromiumInteraction(
+    page,
+    { kind, lineNumber, targetMode },
+    '__renderedHistoryStressEditor'
+  );
 }
 
 async function editBlock(page: any, target: EditTarget, mode: Exclude<BlockMode, 'preview'>) {

@@ -4,14 +4,31 @@ import {
   type HistoryRenderedBlockInteractionAdapter
 } from './history-rendered-block-interaction';
 
-async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean) {
+async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean, disposeAfterDown = false, offscreen = false) {
   const browser = await launchTestBrowser();
   try {
     const page: any = await browser.newPage();
-    await page.setContent('<div class="cm-editor"><div class="cm-scroller"><button aria-label="Edit Mermaid in split view">Split</button></div></div>');
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
+        <button aria-label="Edit Mermaid in split view" style="${offscreen ? 'margin-top:80px' : ''}">Split</button>
+      </div></div>
+    `);
     let acquires = 0;
     let first: any;
+    let current = true;
+    let safeReleases = 0;
+    if (offscreen) {
+      const oldDirectClick = await page.evaluate(() => {
+        let clicks = 0;
+        const button = document.querySelector('button')!;
+        button.addEventListener('click', () => { clicks += 1; });
+        button.click();
+        return clicks;
+      });
+      if (oldDirectClick !== 1) throw new Error('old direct click red control did not deliver offscreen activation');
+    }
     const adapter: HistoryRenderedBlockInteractionAdapter<any> = {
+      isCurrent: async () => current,
       settleScroll: async () => 'settled',
       isTargetSettled: async () => false,
       acquireCurrentHandle: async () => {
@@ -26,6 +43,10 @@ async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean) {
         return element.evaluate((button: HTMLButtonElement, expectedPhase) => {
           if (!button.isConnected || document.querySelector('button') !== button) throw new Error(`replacement before ${expectedPhase}`);
           const rect = button.getBoundingClientRect();
+          const viewport = button.closest<HTMLElement>('.cm-scroller')?.getBoundingClientRect();
+          if (!viewport || rect.top < viewport.top || rect.bottom > viewport.bottom) {
+            throw new Error(`offscreen control before ${expectedPhase}`);
+          }
           return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
         }, phase);
       },
@@ -33,7 +54,11 @@ async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean) {
         if (replacement > 0) await first.evaluate((button: HTMLButtonElement) => button.replaceWith(button.cloneNode(true)));
       },
       disposeSupersededHandle: async (handle) => handle.dispose(),
-      deliverPointerDown: async (point) => { await page.mouse.move(point.x, point.y); await page.mouse.down(); },
+      deliverPointerDown: async (point) => {
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.down();
+        if (disposeAfterDown) current = false;
+      },
       afterPointerDown: async (handle) => {
         if (replacement === 2) await handle.evaluate((button: HTMLButtonElement) => button.replaceWith(button.cloneNode(true)));
         if (moveSameNode) await handle.evaluate((button: HTMLButtonElement) => { button.style.transform = 'translateY(8px)'; });
@@ -42,7 +67,7 @@ async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean) {
       deliverPointerUp: async (point) => { await page.mouse.move(point.x, point.y); await page.mouse.up(); },
       settleTarget: async () => {},
       moveToSafeReleaseTarget: async () => { await page.mouse.move(1, 1); },
-      cancelPointer: async () => { await page.mouse.up(); },
+      cancelPointer: async () => { safeReleases += 1; await page.mouse.up(); },
       disposeSafeReleaseTarget: async () => {},
       disposeHandle: async (handle) => handle.dispose(),
       openObserver: async () => ({
@@ -53,11 +78,14 @@ async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean) {
     };
     const result = await Promise.allSettled([runHistoryRenderedBlockInteraction({ kind: 'mermaid', lineNumber: 1, targetMode: 'split' }, adapter)]);
     const succeeded = result[0].status === 'fulfilled';
-    if (succeeded !== (replacement !== 2) || acquires !== 2) throw new Error(`replacement ${replacement} result differs`);
+    if (succeeded !== (replacement !== 2 && !disposeAfterDown && !offscreen) || acquires !== (offscreen ? 1 : 2)) {
+      throw new Error(`replacement ${replacement} result differs`);
+    }
+    if (disposeAfterDown && safeReleases !== 1) throw new Error('disposed Chromium interaction did not safely release its pointer');
   } finally { await browser.close(); }
 }
 
-for (const scenario of [[0, false], [1, false], [0, true], [2, false]] as const) {
+for (const scenario of [[0, false], [1, false], [0, true], [2, false], [0, false, true], [0, false, false, true]] as const) {
   await runCase(...scenario);
 }
 console.log('history rendered-block synthetic Chromium matrix passed');

@@ -9,7 +9,6 @@ export type HistoryRenderedBlockInteraction = {
 
 export type HistoryRenderedBlockInteractionResult = {
   readonly status: 'completed' | 'noop' | 'unsupported';
-  readonly releasedSafely: boolean;
   readonly evidence: HistoryRenderedBlockObserverEvidence | null;
 };
 
@@ -31,6 +30,12 @@ export type HistoryRenderedBlockObserver = {
  * interaction order; adapters only locate semantic controls and perform I/O.
  */
 export type HistoryRenderedBlockInteractionAdapter<Handle, Point = { x: number; y: number }> = {
+  /**
+   * Returns whether the caller generation still owns this interaction. The
+   * Module checks it after every awaited foreground stage; cleanup still runs
+   * when ownership was lost so a pressed pointer cannot leak into a successor.
+   */
+  isCurrent(interaction: HistoryRenderedBlockInteraction): Promise<boolean>;
   settleScroll(interaction: HistoryRenderedBlockInteraction): Promise<'settled' | 'unsupported'>;
   isTargetSettled(interaction: HistoryRenderedBlockInteraction): Promise<boolean>;
   acquireCurrentHandle(interaction: HistoryRenderedBlockInteraction): Promise<Handle>;
@@ -89,6 +94,12 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
   const cleanup: unknown[] = [];
   let evidence: HistoryRenderedBlockObserverEvidence | null = null;
 
+  const assertCurrent = async (stage: string) => {
+    if (!await adapter.isCurrent(interaction)) {
+      throw new Error(`History rendered-block interaction was disposed before ${stage}`);
+    }
+  };
+
   const collectCleanup = async (operation: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -108,15 +119,20 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
   };
 
   try {
+    await assertCurrent('scroll settlement');
     const scroll = await adapter.settleScroll(interaction);
-    if (scroll === 'unsupported') return { status: 'unsupported', releasedSafely: false, evidence: null };
-    if (await adapter.isTargetSettled(interaction)) return { status: 'noop', releasedSafely: false, evidence: null };
+    await assertCurrent('scroll settlement');
+    if (scroll === 'unsupported') return { status: 'unsupported', evidence: null };
+    if (await adapter.isTargetSettled(interaction)) return { status: 'noop', evidence: null };
+    await assertCurrent('target inspection');
     observer = await adapter.openObserver?.(interaction);
+    await assertCurrent('observer opening');
 
     const supersededHandle = await adapter.acquireCurrentHandle(interaction);
     acquiredHandles.set(supersededHandle, 'owned');
     const initialPoint = await adapter.validateCurrentHandle(supersededHandle, 'pointerdown');
     await adapter.preparePointerDown(initialPoint);
+    await assertCurrent('pointerdown preparation');
     currentHandle = await adapter.acquireCurrentHandle(interaction);
     acquiredHandles.set(currentHandle, 'owned');
     if (!Object.is(currentHandle, supersededHandle)) {
@@ -124,15 +140,22 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
     }
 
     const downPoint = await adapter.validateCurrentHandle(currentHandle, 'pointerdown');
+    await assertCurrent('pointerdown validation');
     pointerNeedsRelease = true;
     await adapter.deliverPointerDown(downPoint);
+    await assertCurrent('pointerdown delivery');
     await adapter.afterPointerDown?.(currentHandle);
+    await assertCurrent('post-pointerdown transition');
 
     await adapter.preparePointerUp(downPoint);
+    await assertCurrent('pointerup preparation');
     const upPoint = await adapter.validateCurrentHandle(currentHandle, 'pointerup');
+    await assertCurrent('pointerup validation');
     await adapter.deliverPointerUp(upPoint);
     pointerNeedsRelease = false;
+    await assertCurrent('pointerup delivery');
     await adapter.settleTarget(interaction);
+    await assertCurrent('target settlement');
   } catch (error) {
     hasPrimary = true;
     primary = error;
@@ -172,5 +195,5 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
   if (hasPrimary || cleanup.length > 0) {
     throw new HistoryRenderedBlockInteractionError(hasPrimary, primary, cleanup, evidence);
   }
-  return { status: 'completed', releasedSafely: false, evidence };
+  return { status: 'completed', evidence };
 }
