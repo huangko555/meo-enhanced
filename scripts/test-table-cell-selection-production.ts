@@ -8,7 +8,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-cell-selection-
 const source = [
   '| A&B | <tag> |',
   '| --- | --- |',
-  '| "quoted" | apostrophe\'s |',
+  '| **bold &** <img src=x onerror=alert(1)> | apostrophe\'s |',
   '| r2a | r2b |',
   '',
   'outside',
@@ -61,7 +61,8 @@ async function main() {
       await page.mouse.move(start.x, start.y);
       await page.mouse.down();
       await page.mouse.move(end.x, end.y, { steps: 4 });
-      await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-cell-selected').length > 1);
+      const selected = await page.$$eval('.meo-md-html-table-cell-selected', (elements) => elements.length);
+      if (selected <= 1) throw new Error(`drag ${from} -> ${to} selected ${selected} cells`);
       if (!hold) await page.mouse.up();
     };
 
@@ -90,8 +91,8 @@ async function main() {
     await page.keyboard.press('KeyC');
     await page.keyboard.up('Control');
     const copied = await page.evaluate(() => (window as any).__selectionClipboard);
-    const expectedPlain = '"quoted"\tapostrophe\'s\nr2a\tr2b';
-    const expectedHtml = '<table><tr><td>&quot;quoted&quot;</td><td>apostrophe&#39;s</td></tr><tr><td>r2a</td><td>r2b</td></tr></table>';
+    const expectedPlain = '**bold &** <img src=x onerror=alert(1)>\tapostrophe\'s\nr2a\tr2b';
+    const expectedHtml = '<table><tr><td><strong>bold &amp;</strong> &lt;img src=x onerror=alert(1)&gt;</td><td>apostrophe&#39;s</td></tr><tr><td>r2a</td><td>r2b</td></tr></table>';
     if (copied?.plain !== expectedPlain || copied?.html !== expectedHtml || !copied.types.includes('text/plain') || !copied.types.includes('text/html')) {
       throw new Error(`Ctrl+C clipboard payload was incomplete: ${JSON.stringify(copied)}`);
     }
@@ -121,6 +122,10 @@ async function main() {
     if (reverseCount !== 4) throw new Error(`reverse drag selected ${reverseCount} cells`);
     await page.click('#outside');
     await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-cell-selected').length === 0);
+    await page.waitForFunction((selector) => {
+      const preview = document.querySelector<HTMLElement>(selector);
+      return preview?.isConnected && getComputedStyle(preview).visibility === 'visible';
+    }, {}, first);
 
     const secondFirst = '.meo-md-html-table-shell[data-test-table="1"] tbody tr:first-child td:first-child .meo-md-html-table-cell-preview';
     const secondLast = '.meo-md-html-table-shell[data-test-table="1"] tbody tr:nth-child(2) td:nth-child(2) .meo-md-html-table-cell-preview';
@@ -136,6 +141,21 @@ async function main() {
       await drag(first, last, true);
       await page.evaluate((eventType) => {
         document.querySelector('.meo-md-html-table-shell table')!.dispatchEvent(new PointerEvent(eventType, {
+          pointerId: 2, bubbles: true, cancelable: true
+        }));
+      }, type);
+      const afterForeignBoundary = await page.$$eval('.meo-md-html-table-cell-selected', (elements) => elements.length);
+      if (afterForeignBoundary !== 4) {
+        throw new Error(`${type} from a non-owner cleared ${afterForeignBoundary} selected cells`);
+      }
+      await page.mouse.up();
+      const afterOwnerUp = await page.$$eval('.meo-md-html-table-cell-selected', (elements) => elements.length);
+      if (afterOwnerUp !== 4) throw new Error(`${type} from a non-owner prevented owner pointerup persistence`);
+
+      await page.keyboard.press('Escape');
+      await drag(first, last, true);
+      await page.evaluate((eventType) => {
+        document.querySelector('.meo-md-html-table-shell table')!.dispatchEvent(new PointerEvent(eventType, {
           pointerId: 1, bubbles: true, cancelable: true
         }));
       }, type);
@@ -145,9 +165,33 @@ async function main() {
     }
 
     await drag(first, last);
-    await page.evaluate(() => (window as any).__selectionEditor.setText('| X | Y |\n| --- | --- |\n| one | two |'));
+    await page.evaluate((text) => {
+      (window as any).__externalTable = document.querySelector('.meo-md-html-table-shell[data-test-table="0"] table');
+      (window as any).__selectionEditor.setText(text);
+    }, source);
+    await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-cell-selected').length === 0);
+    const externalPresentation = await page.evaluate(() => ({
+      sameTable: (window as any).__externalTable === document.querySelector('.meo-md-html-table-shell[data-test-table="0"] table'),
+      connected: Boolean((window as any).__externalTable?.isConnected)
+    }));
+    if (!externalPresentation.sameTable || !externalPresentation.connected) {
+      throw new Error(`same-text external presentation replaced table DOM: ${JSON.stringify(externalPresentation)}`);
+    }
+
+    await drag(first, last);
+    await page.evaluate(() => {
+      (window as any).__replacementTable = document.querySelector('.meo-md-html-table-shell[data-test-table="0"] table');
+      (window as any).__selectionEditor.setText('| X | Y |\n| --- | --- |\n| one | two |');
+    });
     await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-cell-selected').length === 0);
     await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('tbody textarea')?.value === 'one');
+    const replacement = await page.evaluate(() => ({
+      oldConnected: Boolean((window as any).__replacementTable?.isConnected),
+      replaced: (window as any).__replacementTable !== document.querySelector('.meo-md-html-table-shell table')
+    }));
+    if (replacement.oldConnected || !replacement.replaced) {
+      throw new Error(`replacement lifecycle was not distinct: ${JSON.stringify(replacement)}`);
+    }
 
     await drag(
       '.meo-md-html-table-shell tbody tr:first-child td:first-child .meo-md-html-table-cell-preview',
@@ -160,7 +204,35 @@ async function main() {
     const afterMode = await page.$$eval('.meo-md-html-table-cell-selected', (elements) => elements.length);
     if (afterMode !== 0) throw new Error(`mode replacement restored ${afterMode} stale selected cells`);
 
-    await page.evaluate(() => (window as any).__selectionEditor.destroy());
+    await drag(
+      '.meo-md-html-table-shell tbody tr:first-child td:first-child .meo-md-html-table-cell-preview',
+      '.meo-md-html-table-shell tbody tr:first-child td:nth-child(2) .meo-md-html-table-cell-preview',
+      true
+    );
+    const afterDestroy = await page.evaluate(() => {
+      const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell table')!;
+      (window as any).__lateTable = table;
+      (window as any).__selectionEditor.destroy();
+      const before = table.outerHTML;
+      const clipboard = new DataTransfer();
+      const copy = new ClipboardEvent('copy', { clipboardData: clipboard, bubbles: true, cancelable: true });
+      document.dispatchEvent(copy);
+      for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        table.dispatchEvent(new PointerEvent(type, { pointerId: 1, bubbles: true, cancelable: true }));
+      }
+      return {
+        connected: table.isConnected,
+        selected: table.querySelectorAll('.meo-md-html-table-cell-selected').length,
+        unchanged: table.outerHTML === before,
+        copyPrevented: copy.defaultPrevented,
+        clipboardTypes: Array.from(clipboard.types),
+        retainedCapture: table.hasPointerCapture?.(1) ?? false
+      };
+    });
+    await page.mouse.up();
+    if (afterDestroy.connected || afterDestroy.selected || !afterDestroy.unchanged || afterDestroy.copyPrevented || afterDestroy.clipboardTypes.length || afterDestroy.retainedCapture) {
+      throw new Error(`destroy leaked late pointer/copy effects: ${JSON.stringify(afterDestroy)}`);
+    }
     console.log('table cell selection production checks passed');
   } finally {
     await browser.close();

@@ -1,86 +1,129 @@
 import assert from 'node:assert/strict';
-import { TableCellSelection } from '../webview/src/editor/tableCellSelection';
+import {
+  TableCellSelection,
+  type TableCellCopyValue,
+  type TableCellSelectionEvent
+} from '../webview/src/editor/tableCellSelection';
 
 const cell = (row: number, col: number) => ({ row, col });
+const range = (fromRow: number, toRow: number, fromCol: number, toCol: number) => ({
+  fromRow, toRow, fromCol, toCol
+});
+const value = (plain: string): TableCellCopyValue => ({ plain, inline: [plain] });
 
 {
   const selection = new TableCellSelection();
   assert.deepEqual(selection.snapshot(), { phase: 'idle', anchor: null, range: null });
-
-  selection.begin(7, cell(2, 3), 4);
-  assert.deepEqual(selection.snapshot(), {
-    phase: 'text-candidate',
-    anchor: cell(2, 3),
-    range: { fromRow: 2, toRow: 2, fromCol: 3, toCol: 3 }
+  assert.deepEqual(selection.accept({ type: 'begin', pointerId: 1, cell: cell(2, 3), caret: 4 }), {
+    handled: true,
+    effect: { kind: 'text', phase: 'preview', cell: cell(2, 3), anchorCaret: 4, headCaret: 4 }
   });
-  assert.deepEqual(selection.move(7, cell(2, 3), 1), { kind: 'text', anchorCaret: 4, headCaret: 1 });
-  assert.deepEqual(selection.end(7, cell(2, 3), 1), { kind: 'text', anchorCaret: 4, headCaret: 1 });
+  assert.deepEqual(selection.accept({ type: 'move', pointerId: 1, cell: cell(2, 3), caret: 1 }), {
+    handled: true,
+    effect: { kind: 'text', phase: 'preview', cell: cell(2, 3), anchorCaret: 4, headCaret: 1 }
+  });
+  assert.deepEqual(selection.accept({
+    type: 'end', pointerId: 1, cell: cell(2, 3), caret: 1, insideTable: true
+  }), {
+    handled: true,
+    effect: { kind: 'text', phase: 'commit', cell: cell(2, 3), anchorCaret: 4, headCaret: 1 }
+  });
   assert.deepEqual(selection.snapshot(), { phase: 'idle', anchor: null, range: null });
 }
 
-for (const [from, to, expected] of [
-  [cell(1, 0), cell(3, 2), { fromRow: 1, toRow: 3, fromCol: 0, toCol: 2 }],
-  [cell(3, 2), cell(1, 0), { fromRow: 1, toRow: 3, fromCol: 0, toCol: 2 }]
-] as const) {
+for (const [from, to] of [[cell(1, 0), cell(3, 2)], [cell(3, 2), cell(1, 0)]] as const) {
   const selection = new TableCellSelection();
-  selection.begin(8, from, 0);
-  assert.deepEqual(selection.move(8, to, 0), { kind: 'cells', range: expected });
-  assert.equal(selection.snapshot().phase, 'dragging');
-  assert.deepEqual(selection.end(8, to, 0), { kind: 'cells', range: expected });
-  assert.deepEqual(selection.snapshot(), { phase: 'persisted', anchor: from, range: expected });
-}
-
-{
-  const selection = new TableCellSelection();
-  selection.begin(81, cell(0, 0), 0);
-  selection.move(81, cell(1, 1), 0);
-  assert.deepEqual(selection.end(81), {
-    kind: 'cells',
-    range: { fromRow: 0, toRow: 1, fromCol: 0, toCol: 1 }
-  }, 'dragging can finish from its last normalized range');
+  selection.accept({ type: 'begin', pointerId: 8, cell: from, caret: 0 });
+  assert.deepEqual(selection.accept({ type: 'move', pointerId: 8, cell: to, caret: null }), {
+    handled: true, effect: { kind: 'cells', range: range(1, 3, 0, 2) }
+  });
+  assert.deepEqual(selection.accept({ type: 'end', pointerId: 8, cell: null, caret: null, insideTable: true }), {
+    handled: true, effect: { kind: 'cells', range: range(1, 3, 0, 2) }
+  }, 'pointerup persists the last normalized dragging range');
   assert.equal(selection.snapshot().phase, 'persisted');
 }
 
-for (const abort of ['pointercancel', 'lostcapture'] as const) {
+for (const reason of ['pointercancel', 'lostcapture'] as const) {
   const selection = new TableCellSelection();
-  selection.begin(9, cell(0, 0), 0);
-  selection.move(9, cell(1, 1), 0);
-  assert.equal(selection.abort(9, abort), true);
-  assert.deepEqual(selection.snapshot(), { phase: 'idle', anchor: null, range: null });
-  assert.equal(selection.end(9, cell(1, 1), 0), null, `${abort} ignores late pointerup`);
-}
+  selection.accept({ type: 'begin', pointerId: 3, cell: cell(0, 0), caret: 0 });
+  assert.deepEqual(selection.accept({ type: 'begin', pointerId: 4, cell: cell(2, 2), caret: 9 }), {
+    handled: false, effect: null
+  }, 'a second pointer cannot replace the active owner');
+  selection.accept({ type: 'move', pointerId: 3, cell: cell(1, 1), caret: null });
+  assert.deepEqual(selection.accept({ type: 'abort', pointerId: 4, reason }), {
+    handled: false, effect: null
+  }, 'a non-owner boundary cannot produce Adapter effects');
+  assert.deepEqual(selection.accept({ type: 'end', pointerId: 3, cell: cell(1, 1), caret: null, insideTable: true }), {
+    handled: true, effect: { kind: 'cells', range: range(0, 1, 0, 1) }
+  }, 'the owner remains live after a non-owner boundary');
 
-{
-  const selection = new TableCellSelection();
-  selection.begin(10, cell(0, 0), 0);
-  selection.move(10, cell(1, 1), 0);
-  selection.end(10, cell(1, 1), 0);
-  assert.equal(selection.clear(), true);
-  assert.equal(selection.clear(), false, 'outside/Escape clear is idempotent');
-  selection.begin(11, cell(0, 1), 0);
-  selection.move(11, cell(1, 1), 0);
-  selection.end(11, cell(1, 1), 0);
-  assert.equal(selection.clear(), true, 'cross-table transfer clears the previous owner');
-  selection.dispose();
-  assert.deepEqual(selection.snapshot(), { phase: 'disposed', anchor: null, range: null });
-  assert.equal(selection.begin(12, cell(0, 0), 0), null);
-  assert.equal(selection.move(12, cell(1, 1), 0), null);
-  assert.equal(selection.end(12, cell(1, 1), 0), null);
-}
-
-{
-  const selection = new TableCellSelection();
-  assert.equal(selection.copy([['one']]), null, 'zero cells pass through copy');
-  selection.select(cell(0, 0), cell(0, 0));
-  assert.equal(selection.copy([['one']]), null, 'one cell passes through copy');
-  selection.select(cell(0, 0), cell(1, 1));
-  assert.deepEqual(selection.copy([
-    ['A&B', '<tag>'],
-    ['"quoted"', "apostrophe's"]
-  ]), {
-    plain: 'A&B\t<tag>\n"quoted"\tapostrophe\'s',
-    html: '<table><tr><td>A&amp;B</td><td>&lt;tag&gt;</td></tr><tr><td>&quot;quoted&quot;</td><td>apostrophe&#39;s</td></tr></table>'
+  selection.accept({ type: 'begin', pointerId: 5, cell: cell(2, 2), caret: 4 });
+  assert.deepEqual(selection.accept({ type: 'move', pointerId: 5, cell: null, caret: null }), {
+    handled: true, effect: { kind: 'clear-text' }
   });
+  assert.deepEqual(selection.accept({ type: 'move', pointerId: 5, cell: cell(2, 2), caret: 6 }), {
+    handled: true, effect: { kind: 'cells', range: range(2, 2, 2, 2) }
+  }, 'same-cell text does not resume after a cross-cell/outside transition');
+  assert.deepEqual(selection.accept({ type: 'abort', pointerId: 5, reason }), {
+    handled: true, effect: { kind: 'clear' }
+  });
+  assert.deepEqual(selection.snapshot(), { phase: 'idle', anchor: null, range: null });
+}
+
+{
+  const selection = new TableCellSelection();
+  selection.accept({ type: 'begin', pointerId: 9, cell: cell(0, 0), caret: 0 });
+  selection.accept({ type: 'move', pointerId: 9, cell: cell(1, 1), caret: null });
+  assert.deepEqual(selection.accept({ type: 'end', pointerId: 9, cell: null, caret: null, insideTable: false }), {
+    handled: true, effect: { kind: 'clear' }
+  }, 'outside release aborts the pointer owner');
+
+  for (const reason of ['outside', 'escape', 'cross-table', 'external', 'replacement'] as const) {
+    selection.accept({ type: 'select', anchor: cell(0, 0), head: cell(1, 1) });
+    assert.deepEqual(selection.accept({ type: 'clear', reason }), {
+      handled: true, effect: { kind: 'clear' }
+    });
+    assert.deepEqual(selection.accept({ type: 'clear', reason }), { handled: false, effect: null });
+  }
+}
+
+{
+  const selection = new TableCellSelection();
+  assert.equal(selection.copy([[value('one')]]), null, 'zero cells pass through native copy');
+  selection.accept({ type: 'select', anchor: cell(0, 0), head: cell(0, 0) });
+  assert.equal(selection.copy([[value('one')]]), null, 'one cell passes through native copy');
+  selection.accept({ type: 'select', anchor: cell(0, 0), head: cell(1, 1) });
+  assert.deepEqual(selection.copy([
+    [
+      { plain: '**bold** <img src=x onerror=alert(1)> &', inline: [
+        { kind: 'strong', children: ['bold'] }, ' <img src=x onerror=alert(1)> &'
+      ] },
+      value('<tag>')
+    ],
+    [value('"quoted"'), value("apostrophe's")]
+  ]), {
+    plain: '**bold** <img src=x onerror=alert(1)> &\t<tag>\n"quoted"\tapostrophe\'s',
+    html: '<table><tr><td><strong>bold</strong> &lt;img src=x onerror=alert(1)&gt; &amp;</td><td>&lt;tag&gt;</td></tr><tr><td>&quot;quoted&quot;</td><td>apostrophe&#39;s</td></tr></table>'
+  });
+}
+
+{
+  const selection = new TableCellSelection();
+  selection.accept({ type: 'begin', pointerId: 12, cell: cell(0, 0), caret: 0 });
+  assert.deepEqual(selection.accept({ type: 'dispose' }), { handled: true, effect: { kind: 'clear' } });
+  assert.deepEqual(selection.snapshot(), { phase: 'disposed', anchor: null, range: null });
+  for (const event of [
+    { type: 'begin', pointerId: 12, cell: cell(0, 0), caret: 0 },
+    { type: 'move', pointerId: 12, cell: cell(1, 1), caret: null },
+    { type: 'end', pointerId: 12, cell: cell(1, 1), caret: null, insideTable: true },
+    { type: 'abort', pointerId: 12, reason: 'pointercancel' },
+    { type: 'clear', reason: 'escape' },
+    { type: 'select', anchor: cell(0, 0), head: cell(1, 1) },
+    { type: 'dispose' }
+  ] as readonly TableCellSelectionEvent[]) {
+    assert.deepEqual(selection.accept(event), { handled: false, effect: null }, `disposed rejects late ${event.type}`);
+  }
+  assert.equal(selection.copy([[value('a'), value('b')]]), null, 'disposed rejects late copy');
 }
 
 console.log('table cell selection module checks passed');
