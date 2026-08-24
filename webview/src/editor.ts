@@ -2579,6 +2579,9 @@ export function createEditor({
       imagePresentationResourcePool.dispose();
     },
     setText(textValue: string, resetHistory = false) {
+      document.dispatchEvent(new CustomEvent('meo-table-selection-external-presentation', {
+        detail: { owner: view.dom }
+      }));
       viewportController.runDocumentChange(() => {
         viewportController.markInteraction();
         tableCommandRuntime.externalDocumentPresented();

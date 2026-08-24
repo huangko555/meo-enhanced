@@ -61,6 +61,10 @@ import {
   type TableCellEditIntent,
   type TableCellInteraction
 } from '../editor/tableCellInteraction';
+import {
+  TableCellSelection,
+  type TableCellRange as TableSelectionRange
+} from '../editor/tableCellSelection';
 
 interface TableData {
   rows: string[][];
@@ -130,13 +134,6 @@ interface DomRefs {
 interface CellCoords {
   row: number;
   col: number;
-}
-
-interface SelectionRange {
-  fromRow: number;
-  toRow: number;
-  fromCol: number;
-  toCol: number;
 }
 
 interface CellMatrix {
@@ -2160,10 +2157,7 @@ class HtmlTableWidget extends WidgetType {
   pendingResizeRows: boolean;
   domRefs: DomRefs | null;
   cleanupFns: (() => void)[];
-  selectionAnchor: CellCoords | null;
-  selectionRange: SelectionRange | null;
-  selectionPointerId: number | null;
-  isDraggingSelection: boolean;
+  cellSelection: TableCellSelection;
   cellInteraction: TableCellInteraction;
   pendingCellAutoCommitTimer: number | null;
   pendingCellSwitchCommit: boolean;
@@ -2189,10 +2183,7 @@ class HtmlTableWidget extends WidgetType {
     this.pendingResizeRows = false;
     this.domRefs = null;
     this.cleanupFns = [];
-    this.selectionAnchor = null;
-    this.selectionRange = null;
-    this.selectionPointerId = null;
-    this.isDraggingSelection = false;
+    this.cellSelection = new TableCellSelection();
     this.cellInteraction = createTableCellInteraction();
     this.pendingCellAutoCommitTimer = null;
     this.pendingCellSwitchCommit = false;
@@ -2416,6 +2407,7 @@ class HtmlTableWidget extends WidgetType {
   }
 
   requestTableCommand(command: TableCommand, enabled = true) {
+    const selectionRange = this.cellSelection.snapshot().range;
     void this.tableCommandEnvironment.dispatch({
       type: 'request',
       command,
@@ -2423,11 +2415,11 @@ class HtmlTableWidget extends WidgetType {
         tableId: this.tableCommandTargetId,
         row: this.activeTarget.row,
         column: this.activeTarget.col,
-        selection: this.selectionRange ? {
-          fromRow: this.selectionRange.fromRow,
-          toRow: this.selectionRange.toRow,
-          fromColumn: this.selectionRange.fromCol,
-          toColumn: this.selectionRange.toCol
+        selection: selectionRange ? {
+          fromRow: selectionRange.fromRow,
+          toRow: selectionRange.toRow,
+          fromColumn: selectionRange.fromCol,
+          toColumn: selectionRange.toCol
         } : null
       },
       enabled
@@ -2597,23 +2589,13 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  normalizeSelectionRange(a: CellCoords, b: CellCoords): SelectionRange {
-    return {
-      fromRow: Math.min(a.row, b.row),
-      toRow: Math.max(a.row, b.row),
-      fromCol: Math.min(a.col, b.col),
-      toCol: Math.max(a.col, b.col)
-    };
-  }
-
-  isCellSelected(row: number, col: number, range: SelectionRange | null): boolean {
+  isCellSelected(row: number, col: number, range: TableSelectionRange | null): boolean {
     if (!range) return false;
     return row >= range.fromRow && row <= range.toRow && col >= range.fromCol && col <= range.toCol;
   }
 
-  applySelection(range: SelectionRange | null) {
+  applySelection(range: TableSelectionRange | null) {
     if (!this.domRefs) return;
-    this.selectionRange = range;
     const showSelectionStyle = Boolean(
       range && (range.fromRow !== range.toRow || range.fromCol !== range.toCol)
     );
@@ -2638,13 +2620,13 @@ class HtmlTableWidget extends WidgetType {
   }
 
   setSingleCellSelection(coords: CellCoords) {
-    this.selectionAnchor = coords;
+    this.cellSelection.select(coords, coords);
     this.setActionTarget(coords);
-    this.applySelection(this.normalizeSelectionRange(coords, coords));
+    this.applySelection(this.cellSelection.snapshot().range);
   }
 
   clearSelection() {
-    this.selectionAnchor = null;
+    this.cellSelection.clear();
     this.applySelection(null);
     this.syncTableLineNumbers();
   }
@@ -2692,23 +2674,11 @@ class HtmlTableWidget extends WidgetType {
   }
 
   selectedCellCount() {
-    if (!this.selectionRange) return 0;
-    const rowCount = this.selectionRange.toRow - this.selectionRange.fromRow + 1;
-    const colCount = this.selectionRange.toCol - this.selectionRange.fromCol + 1;
+    const range = this.cellSelection.snapshot().range;
+    if (!range) return 0;
+    const rowCount = range.toRow - range.fromRow + 1;
+    const colCount = range.toCol - range.fromCol + 1;
     return rowCount * colCount;
-  }
-
-  selectedTextAsTsv() {
-    if (!this.selectionRange || !this.domRefs) return '';
-    const lines = [];
-    for (let row = this.selectionRange.fromRow; row <= this.selectionRange.toRow; row++) {
-      const values = [];
-      for (let col = this.selectionRange.fromCol; col <= this.selectionRange.toCol; col++) {
-        values.push(tableCellEditorValueToSource(this.domRefs.allRowInputs[row][col].value).trim());
-      }
-      lines.push(values.join('\t'));
-    }
-    return lines.join('\n');
   }
 
   handleHistoryShortcut(event: KeyboardEvent, table: HTMLTableElement) {
@@ -2787,9 +2757,7 @@ class HtmlTableWidget extends WidgetType {
       const current = this.coordsFromCell(cell);
       if (!current) return;
       if (event.target instanceof HTMLTextAreaElement) {
-        this.selectionAnchor = current;
-        this.setActionTarget(current);
-        this.applySelection(this.normalizeSelectionRange(current, current));
+        this.setSingleCellSelection(current);
         return;
       }
       // Preview text selection is owned by this pointer pipeline. Preventing the
@@ -2799,15 +2767,13 @@ class HtmlTableWidget extends WidgetType {
       event.preventDefault();
       document.getSelection()?.removeAllRanges();
       const anchor = current;
-      this.selectionAnchor = anchor;
       this.setActionTarget(anchor);
-      this.applySelection(this.normalizeSelectionRange(anchor, current));
-      this.selectionPointerId = event.pointerId;
-      this.isDraggingSelection = true;
 
       const input = cell.querySelector('textarea');
       const pointerCaret = this.pointerCaretForCell(cell, event.clientX, event.clientY);
       const caret = pointerCaret.editorOffset;
+      this.cellSelection.begin(event.pointerId, anchor, caret ?? 0);
+      this.applySelection(this.cellSelection.snapshot().range);
       if (input instanceof HTMLTextAreaElement) {
         textSelectionInput = input;
         textSelectionAnchorCaret = caret ?? input.value.length;
@@ -2825,10 +2791,11 @@ class HtmlTableWidget extends WidgetType {
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      if (!this.isDraggingSelection || this.selectionPointerId !== event.pointerId) return;
+      const phase = this.cellSelection.snapshot().phase;
+      if (phase !== 'text-candidate' && phase !== 'dragging') return;
       const el = document.elementFromPoint(event.clientX, event.clientY);
       const cell = this.findCellElement(el);
-      if (!cell || !this.selectionAnchor) {
+      if (!cell) {
         if (!cell) markTextSelectionCrossedCell();
         return;
       }
@@ -2864,24 +2831,29 @@ class HtmlTableWidget extends WidgetType {
         return;
       }
       markTextSelectionCrossedCell();
+      const effect = this.cellSelection.move(event.pointerId, current, 0);
+      if (effect?.kind !== 'cells') return;
       this.setTableInteractionActive(getWrap(), true);
-      this.applySelection(this.normalizeSelectionRange(this.selectionAnchor, current));
+      this.applySelection(effect.range);
       table.focus({ preventScroll: true });
     };
 
     const endPointerSelection = (event: PointerEvent) => {
-      if (this.selectionPointerId !== event.pointerId) return;
+      const phase = this.cellSelection.snapshot().phase;
+      if (phase !== 'text-candidate' && phase !== 'dragging') return;
       const pendingInput = textSelectionInput;
       const anchorCaret = textSelectionAnchorCaret;
       let currentCaret = textSelectionCurrentCaret;
+      const releaseCell = event.type === 'pointerup'
+        ? this.findCellElement(document.elementFromPoint(event.clientX, event.clientY))
+        : null;
+      const releaseCoords = releaseCell ? this.coordsFromCell(releaseCell) : null;
       if (
         event.type === 'pointerup' &&
         !textSelectionCrossedCell &&
         pendingInput instanceof HTMLTextAreaElement &&
         textSelectionCell
       ) {
-        const releaseCell = this.findCellElement(document.elementFromPoint(event.clientX, event.clientY));
-        const releaseCoords = releaseCell ? this.coordsFromCell(releaseCell) : null;
         if (
           releaseCell &&
           releaseCoords?.row === textSelectionCell.row &&
@@ -2904,8 +2876,13 @@ class HtmlTableWidget extends WidgetType {
         anchorCaret !== null &&
         currentCaret !== null
       );
-      this.isDraggingSelection = false;
-      this.selectionPointerId = null;
+      const endedInsideTable = event.target instanceof Node && table.contains(event.target);
+      const selectionEffect = event.type === 'pointerup' && (releaseCoords || endedInsideTable)
+        ? this.cellSelection.end(event.pointerId, releaseCoords ?? undefined, currentCaret ?? 0)
+        : (this.cellSelection.abort(
+            event.pointerId,
+            event.type === 'lostpointercapture' ? 'lostcapture' : 'pointercancel'
+          ), null);
       textSelectionInput = null;
       textSelectionAnchorCaret = null;
       textSelectionCurrentCaret = null;
@@ -2917,6 +2894,7 @@ class HtmlTableWidget extends WidgetType {
       }
       if (event.type !== 'pointerup') {
         document.getSelection()?.removeAllRanges();
+        this.applySelection(null);
       }
       if (shouldEnterTextEditing && pendingInput && anchorCaret !== null && currentCaret !== null) {
         event.preventDefault();
@@ -2928,16 +2906,22 @@ class HtmlTableWidget extends WidgetType {
           currentCaret < anchorCaret ? 'backward' : 'forward'
         );
         this.emitTableSelectionChange(getWrap());
+      } else if (selectionEffect?.kind === 'cells') {
+        this.applySelection(selectionEffect.range);
       }
     };
 
     const onCopy = (event: ClipboardEvent) => {
-      if (this.selectedCellCount() <= 1) return;
-      const text = this.selectedTextAsTsv();
-      if (!text) return;
+      if (!this.domRefs) return;
+      const values = this.domRefs.allRowInputs.map((row) => row.map((input) => (
+        tableCellEditorValueToSource(input.value).trim()
+      )));
+      const serialized = this.cellSelection.copy(values);
+      if (!serialized) return;
       event.preventDefault();
       event.stopPropagation();
-      event.clipboardData?.setData('text/plain', text);
+      event.clipboardData?.setData('text/plain', serialized.plain);
+      event.clipboardData?.setData('text/html', serialized.html);
     };
 
     const onDragStart = (event: DragEvent) => {
@@ -2951,12 +2935,18 @@ class HtmlTableWidget extends WidgetType {
         return;
       }
 
+      if (event.key === 'Escape' && this.selectedCellCount() > 1) {
+        event.preventDefault();
+        this.exitTableInteraction(getWrap());
+        return;
+      }
       if (this.selectedCellCount() <= 1) return;
       if (event.key !== 'Backspace' && event.key !== 'Delete') return;
-      if (!this.selectionRange || !this.domRefs) return;
+      const range = this.cellSelection.snapshot().range;
+      if (!range || !this.domRefs) return;
       event.preventDefault();
-      for (let row = this.selectionRange.fromRow; row <= this.selectionRange.toRow; row++) {
-        for (let col = this.selectionRange.fromCol; col <= this.selectionRange.toCol; col++) {
+      for (let row = range.fromRow; row <= range.toRow; row++) {
+        for (let col = range.fromCol; col <= range.toCol; col++) {
           const input = this.domRefs.allRowInputs[row][col];
           if (input.value !== '') {
             input.value = '';
@@ -3028,7 +3018,8 @@ class HtmlTableWidget extends WidgetType {
     };
 
     const onDocumentPointerMove = (event: PointerEvent) => {
-      if (this.selectionPointerId !== event.pointerId) return;
+      const phase = this.cellSelection.snapshot().phase;
+      if (phase !== 'text-candidate' && phase !== 'dragging') return;
       if (table.hasPointerCapture?.(event.pointerId)) return;
       if (event.target instanceof Node && table.contains(event.target)) return;
       markTextSelectionCrossedCell();
@@ -3041,7 +3032,8 @@ class HtmlTableWidget extends WidgetType {
           if (pendingTableSwitchPointerId === pointerId) pendingTableSwitchPointerId = null;
         }, 0);
       }
-      if (this.selectionPointerId === event.pointerId) {
+      const phase = this.cellSelection.snapshot().phase;
+      if (phase === 'text-candidate' || phase === 'dragging') {
         const targetInsideTable = event.target instanceof Node && table.contains(event.target);
         if (!targetInsideTable) markTextSelectionCrossedCell();
         if (!table.hasPointerCapture?.(event.pointerId) || !targetInsideTable) {
@@ -3072,6 +3064,11 @@ class HtmlTableWidget extends WidgetType {
     document.addEventListener('pointermove', onDocumentPointerMove, true);
     document.addEventListener('pointerup', onDocumentPointerEnd, true);
     document.addEventListener('pointercancel', onDocumentPointerEnd, true);
+    const onExternalPresentation = (event: Event) => {
+      if (!(event instanceof CustomEvent) || event.detail?.owner !== this.view?.dom) return;
+      this.exitTableInteraction(getWrap());
+    };
+    document.addEventListener('meo-table-selection-external-presentation', onExternalPresentation);
     const onCommitTableEdits = (event: Event) => {
       const hadPendingEdits = this.hasPendingCellEdits;
       const detail: unknown = event instanceof CustomEvent ? event.detail : null;
@@ -3099,6 +3096,7 @@ class HtmlTableWidget extends WidgetType {
       document.removeEventListener('pointermove', onDocumentPointerMove, true);
       document.removeEventListener('pointerup', onDocumentPointerEnd, true);
       document.removeEventListener('pointercancel', onDocumentPointerEnd, true);
+      document.removeEventListener('meo-table-selection-external-presentation', onExternalPresentation);
       document.removeEventListener('meo-commit-table-edits', onCommitTableEdits);
       pendingOutsidePointerId = null;
       pendingTableSwitchPointerId = null;
@@ -4036,7 +4034,7 @@ class HtmlTableWidget extends WidgetType {
     lineNumberLayer.style.left = '0';
     lineNumberLayer.style.width = `${gutterRect.width}px`;
 
-    const activeRow = this.selectionAnchor?.row;
+    const activeRow = this.cellSelection.snapshot().anchor?.row;
     let itemIndex = 0;
     for (const [rowIndex, row] of (Array.from(table.querySelectorAll('thead tr, tbody tr')) as HTMLTableRowElement[]).entries()) {
       const lineNumber = row.dataset.sourceLineNumber;
@@ -4612,10 +4610,7 @@ class HtmlTableWidget extends WidgetType {
     this.layoutTasks.clear();
     this.domRefs = null;
     this.view = null;
-    this.selectionAnchor = null;
-    this.selectionRange = null;
-    this.selectionPointerId = null;
-    this.isDraggingSelection = false;
+    this.cellSelection.dispose();
     this.cellInteraction.accept({ type: 'dispose' });
     this.cancelPendingCellAutoCommit();
     this.pendingCellSwitchCommit = false;

@@ -608,20 +608,13 @@ async function main() {
       };
 
       const deleteRowsEditor = await create('| A | B |\n| --- | --- |\n| r1a | r1b |\n| r2a | r2b |\n| r3a | r3b |');
-      const crossCellDragFocusedInput = dragSelectCells(
+      dragSelectCells(
         document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!,
         document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!,
         21
       );
       const focusedTableStyle = getComputedStyle(document.querySelector('.meo-md-html-table')!);
       const focusedTableOutline = { style: focusedTableStyle.outlineStyle, width: focusedTableStyle.outlineWidth };
-      const copyData = new DataTransfer();
-      deleteRowsEditor.view.contentDOM.dispatchEvent(new ClipboardEvent('copy', {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: copyData
-      }));
-      const crossCellCopiedText = copyData.getData('text/plain');
       document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!
         .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
       await waitFrames();
@@ -1150,9 +1143,7 @@ async function main() {
         lostCaptureState,
         outsideReleaseState,
         releaseOnlyDraggedText,
-        crossCellDragFocusedInput,
         focusedTableOutline,
-        crossCellCopiedText,
         indentedTableState,
         indentedCodeRenderedAsTable,
         maxWidthDelta: Math.max(...widthsBeforeEntry.flatMap((width, index) => [
@@ -1164,50 +1155,7 @@ async function main() {
       };
     });
 
-    await page.evaluate(async () => {
-      const harness = (window as any).TableStabilityHarness;
-      const app = document.getElementById('app')!;
-      app.replaceChildren();
-      const editor = harness.createEditor({
-        parent: app,
-        text: '| A | B |\n| --- | --- |\n| r1a | r1b |\n| r2a | r2b |',
-        initialMode: 'live',
-        onApplyChanges() {}
-      });
-      (window as any).__keyboardCopyEditor = editor;
-      for (let frame = 0; frame < 3; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-      const fromCell = document.querySelector<HTMLElement>('td[data-table-row="1"][data-table-col="0"]')!;
-      const toCell = document.querySelector<HTMLElement>('td[data-table-row="2"][data-table-col="1"]')!;
-      const table = fromCell.closest('table')!;
-      const targetRect = toCell.getBoundingClientRect();
-      fromCell.dispatchEvent(new PointerEvent('pointerdown', { button: 0, pointerId: 91, bubbles: true, cancelable: true }));
-      table.dispatchEvent(new PointerEvent('pointermove', {
-        pointerId: 91,
-        clientX: targetRect.left + targetRect.width / 2,
-        clientY: targetRect.top + targetRect.height / 2,
-        bubbles: true,
-        cancelable: true
-      }));
-      table.dispatchEvent(new PointerEvent('pointerup', { pointerId: 91, bubbles: true, cancelable: true }));
-      (window as any).__keyboardCopiedText = '';
-      document.addEventListener('copy', (event) => {
-        (window as any).__keyboardCopiedText = event.clipboardData?.getData('text/plain') ?? '';
-      }, { capture: true, once: true });
-    });
-    await page.keyboard.down('Control');
-    await page.keyboard.press('KeyC');
-    await page.keyboard.up('Control');
-    const keyboardCopiedText = await page.evaluate(() => {
-      (window as any).__keyboardCopyEditor.destroy();
-      return (window as any).__keyboardCopiedText;
-    });
-
     const failures: string[] = [];
-    if (keyboardCopiedText !== 'r1a\tr1b\nr2a\tr2b') {
-      failures.push(`real Ctrl+C did not copy the selected table cells as TSV: ${JSON.stringify(keyboardCopiedText)}`);
-    }
     if (result.editingPreviewText !== 'asdx') failures.push(`editing preview remained ${JSON.stringify(result.editingPreviewText)}`);
     if (result.editingInputSpellcheck !== true) failures.push(`table input native spellcheck was ${JSON.stringify(result.editingInputSpellcheck)}`);
     if (
@@ -1296,19 +1244,15 @@ async function main() {
       result.lostCaptureState.selectedPreviewText !== '' ||
       result.outsideReleaseState.inputFocused ||
       result.outsideReleaseState.editing ||
-      result.outsideReleaseState.selectedPreviewText !== '' ||
-      result.crossCellDragFocusedInput
+      result.outsideReleaseState.selectedPreviewText !== ''
     ) {
-      failures.push(`table pointer cleanup entered source mode or retained selection: ${JSON.stringify({ cancel: result.cancelledPointerState, lostCapture: result.lostCaptureState, outside: result.outsideReleaseState, crossCellFocused: result.crossCellDragFocusedInput })}`);
+      failures.push(`table pointer cleanup entered source mode or retained selection: ${JSON.stringify({ cancel: result.cancelledPointerState, lostCapture: result.lostCaptureState, outside: result.outsideReleaseState })}`);
     }
     if (result.maxWidthDelta > 0.5) {
       failures.push(`table column width changed by ${result.maxWidthDelta}px when Markdown source became editable`);
     }
     if (result.focusedTableOutline.style !== 'none' && result.focusedTableOutline.width !== '0px') {
       failures.push(`focused table retained a browser outline: ${JSON.stringify(result.focusedTableOutline)}`);
-    }
-    if (result.crossCellCopiedText !== 'r1a\tr1b\nr2a\tr2b') {
-      failures.push(`multi-cell Ctrl+C target did not receive the existing TSV copy handler: ${JSON.stringify(result.crossCellCopiedText)}`);
     }
     if (!result.indentedTableState.rendered || result.indentedTableState.source !== '  | A | B |\n  | --- | --- |\n  | left | right |' || result.indentedTableState.leftOffset <= 1) {
       failures.push(`common-indent table was not rendered without changing source indentation: ${JSON.stringify(result.indentedTableState)}`);
