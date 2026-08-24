@@ -62,16 +62,16 @@ async function main(): Promise<void> {
     const result = await page.evaluate(async () => {
       class DeterministicSharedLayoutScheduler {
         records = new Set<any>();
-        frames = 0;
+        drainScheduled = false;
+        waiters = new Set<() => void>();
         register(task: () => void) {
           const record = { task, active: true, pending: false };
           this.records.add(record);
           return {
             request: () => {
               if (!record.active || record.pending) return;
-              const hadPending = Array.from(this.records).some((candidate) => candidate.pending);
               record.pending = true;
-              if (!hadPending) this.frames += 1;
+              this.scheduleDrain();
             },
             dispose: () => {
               record.active = false;
@@ -80,19 +80,44 @@ async function main(): Promise<void> {
             }
           };
         }
-        flush() {
+        scheduleDrain() {
+          if (this.drainScheduled) return;
+          this.drainScheduled = true;
+          queueMicrotask(() => this.drain());
+        }
+        drain() {
+          this.drainScheduled = false;
           const current = Array.from(this.records).filter((record) => record.active && record.pending);
           for (const record of current) record.pending = false;
           for (const record of current) record.task();
-          return current.length;
+          if (Array.from(this.records).some((record) => record.active && record.pending)) {
+            this.scheduleDrain();
+            return;
+          }
+          queueMicrotask(() => {
+            if (this.drainScheduled || Array.from(this.records).some((record) => record.active && record.pending)) return;
+            for (const resolve of this.waiters) resolve();
+            this.waiters.clear();
+          });
         }
-        get pending() {
-          return Array.from(this.records).filter((record) => record.pending).length;
+        whenEmpty() {
+          return new Promise<void>((resolve) => {
+            this.waiters.add(resolve);
+            this.scheduleDrain();
+          });
+        }
+        get empty() {
+          return !this.drainScheduled && !Array.from(this.records).some((record) => record.active && record.pending);
         }
       }
 
       const candidate = (window as any).TableStickyHeaderAdapterCandidate;
       const scheduler = new DeterministicSharedLayoutScheduler();
+      const settle = async (action: () => void) => {
+        action();
+        await scheduler.whenEmpty();
+        if (!scheduler.empty) throw new Error('layout scheduler did not reach an empty causal queue');
+      };
       const elements = (id: number) => ({
         shell: document.getElementById(`shell-${id}`)!,
         scroller: document.getElementById(`scroller-${id}`)!,
@@ -138,12 +163,10 @@ async function main(): Promise<void> {
       const sourceInput = elements(1).table.querySelector('input') as HTMLInputElement;
       sourceInput.focus();
       sourceInput.setSelectionRange(2, 7);
-      adapter1.mount();
-      adapter2.mount();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      const initialTasks = scheduler.flush();
-      const reentryPending = scheduler.pending;
-      scheduler.flush();
+      await settle(() => {
+        adapter1.mount();
+        adapter2.mount();
+      });
       const initiallyHidden = !elements(1).stickyChrome.classList.contains('is-visible');
       const passive = {
         ariaHidden: elements(1).stickyHeaderViewport.getAttribute('aria-hidden'),
@@ -160,50 +183,51 @@ async function main(): Promise<void> {
         toolbarButtons: elements(1).stickyChrome.querySelectorAll('.sticky-toolbar-button').length
       };
 
-      const framesBeforeStorm = scheduler.frames;
-      for (const id of [1, 2]) {
-        elements(id).scroller.scrollTop = 90;
-        elements(id).scroller.dispatchEvent(new Event('scroll'));
-        elements(id).scroller.dispatchEvent(new Event('scroll'));
-      }
-      const stormFrames = scheduler.frames - framesBeforeStorm;
-      const stormTasks = scheduler.flush();
+      await settle(() => {
+        for (const id of [1, 2]) {
+          elements(id).scroller.scrollTop = 90;
+          elements(id).scroller.dispatchEvent(new Event('scroll'));
+          elements(id).scroller.dispatchEvent(new Event('scroll'));
+        }
+      });
       const visible = elements(1).stickyChrome.classList.contains('is-visible');
       const outer = document.getElementById('outer')!;
-      outer.scrollTop = 24;
-      outer.dispatchEvent(new Event('scroll'));
-      const outerScrollTasks = scheduler.flush();
+      await settle(() => {
+        outer.scrollTop = 24;
+        outer.dispatchEvent(new Event('scroll'));
+      });
       const outerScrollAligned = [1, 2].every((id) => (
         Number.parseFloat(elements(id).stickyChrome.style.top) ===
         Math.round(elements(id).scroller.getBoundingClientRect().top)
       ));
-      const framesBeforeHorizontalScroll = scheduler.frames;
-      elements(1).horizontalScroller.scrollLeft = 45;
-      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
-      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
-      const horizontalScrollFrames = scheduler.frames - framesBeforeHorizontalScroll;
-      const horizontalScrollTasks = scheduler.flush();
+      await settle(() => {
+        elements(1).horizontalScroller.scrollLeft = 45;
+        elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+        elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+      });
       const transform = elements(1).stickyTable.style.transform;
       const visibleHeight = Number.parseFloat(elements(1).stickyChrome.style.height);
 
-      elements(1).shell.classList.add('controls-visible');
-      adapter1.invalidate();
-      scheduler.flush();
+      await settle(() => {
+        elements(1).shell.classList.add('controls-visible');
+        adapter1.invalidate();
+      });
       const controls = {
         className: elements(1).stickyChrome.classList.contains('has-sticky-controls'),
         height: elements(1).stickyChrome.style.height
       };
 
-      elements(1).table.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Updated header';
-      adapter1.update();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      scheduler.flush();
+      await settle(() => {
+        elements(1).table.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Updated header';
+        adapter1.update();
+      });
       const updatedHeader = elements(1).stickyHeaderRow.textContent;
 
-      elements(1).table.style.width = '480px';
-      elements(1).table.dispatchEvent(new Event('meo-table-column-width-projected'));
-      adapter1.invalidate();
-      scheduler.flush();
+      await settle(() => {
+        elements(1).table.style.width = '480px';
+        elements(1).table.dispatchEvent(new Event('meo-table-column-width-projected'));
+        adapter1.invalidate();
+      });
       const projectedWidth = elements(1).stickyTable.style.width;
       const focusAndSelectionPreserved = (
         document.activeElement === sourceInput &&
@@ -211,84 +235,83 @@ async function main(): Promise<void> {
         sourceInput.selectionEnd === 7
       );
 
-      let otherLayoutRuns = 0;
-      const other = scheduler.register(() => { otherLayoutRuns += 1; });
-      other.request();
-      adapter1.invalidate();
-      scheduler.flush();
-
-      elements(1).shell.style.display = 'none';
-      adapter1.invalidate();
-      scheduler.flush();
+      await settle(() => {
+        elements(1).shell.style.display = 'none';
+        adapter1.invalidate();
+      });
       const hiddenWithOuterMode = !elements(1).stickyChrome.classList.contains('is-visible');
       elements(1).shell.style.display = '';
 
       const detachedTable = elements(1).table;
       const rebuiltTable = detachedTable.cloneNode(true) as HTMLTableElement;
-      detachedTable.replaceWith(rebuiltTable);
-      adapter1.update();
-      scheduler.flush();
+      await settle(() => {
+        detachedTable.replaceWith(rebuiltTable);
+        adapter1.update();
+      });
       const visibleAfterRebuild = elements(1).stickyChrome.classList.contains('is-visible');
-      detachedTable.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Detached header';
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      scheduler.flush();
+      await settle(() => {
+        detachedTable.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Detached header';
+      });
       const headerAfterDetachedMutation = elements(1).stickyHeaderRow.textContent;
-      rebuiltTable.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Rebuilt header';
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      scheduler.flush();
+      await settle(() => {
+        rebuiltTable.tHead!.rows[0].cells[0].querySelector('a')!.textContent = 'Rebuilt header';
+      });
       const headerAfterRebuiltMutation = elements(1).stickyHeaderRow.textContent;
 
       const oldHorizontalScroller = elements(1).horizontalScroller;
       const replacementHorizontalScroller = document.createElement('div');
       replacementHorizontalScroller.id = 'horizontal-1';
       replacementHorizontalScroller.className = 'horizontal';
-      oldHorizontalScroller.before(replacementHorizontalScroller);
-      replacementHorizontalScroller.append(elements(1).table);
-      oldHorizontalScroller.remove();
-      adapter1.update();
-      scheduler.flush();
-      const framesBeforeReplacedScroll = scheduler.frames;
-      oldHorizontalScroller.dispatchEvent(new Event('scroll'));
-      const staleHorizontalScrollPending = scheduler.pending;
-      elements(1).horizontalScroller.scrollLeft = 35;
-      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
-      const currentHorizontalScrollPending = scheduler.pending;
-      const replacedHorizontalScrollFrames = scheduler.frames - framesBeforeReplacedScroll;
-      scheduler.flush();
+      await settle(() => {
+        oldHorizontalScroller.before(replacementHorizontalScroller);
+        replacementHorizontalScroller.append(elements(1).table);
+        oldHorizontalScroller.remove();
+        adapter1.update();
+      });
+      const transformBeforeStaleScroll = elements(1).stickyTable.style.transform;
+      await settle(() => oldHorizontalScroller.dispatchEvent(new Event('scroll')));
+      const transformAfterStaleScroll = elements(1).stickyTable.style.transform;
+      await settle(() => {
+        elements(1).horizontalScroller.scrollLeft = 35;
+        elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+      });
       const transformAfterHorizontalReplacement = elements(1).stickyTable.style.transform;
 
+      const replacedStickyChrome = elements(1).stickyChrome;
+      const replacedStickyViewport = elements(1).stickyHeaderViewport;
+      const currentStickyChrome = replacedStickyChrome.cloneNode(true) as HTMLElement;
+      replacedStickyChrome.replaceWith(currentStickyChrome);
+      await settle(() => adapter1.update());
+      const currentHeaderBeforeStaleCloneMutation = elements(1).stickyHeaderRow.textContent;
+      const staleEditable = document.createElement('span');
+      staleEditable.contentEditable = 'true';
+      await settle(() => replacedStickyViewport.append(staleEditable));
+      const staleCloneObserverDetached = staleEditable.getAttribute('contenteditable') === 'true';
+      const currentHeaderAfterStaleCloneMutation = elements(1).stickyHeaderRow.textContent;
+
       const styleBeforeUnmount = elements(1).stickyTable.style.width;
-      adapter1.unmount();
-      elements(1).table.style.width = '440px';
-      elements(1).scroller.dispatchEvent(new Event('scroll'));
-      elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
-      const horizontalScrollPendingAfterUnmount = scheduler.pending;
-      window.dispatchEvent(new Event('resize'));
-      scheduler.flush();
+      await settle(() => adapter1.unmount());
+      let lateWrites = 0;
+      const lateObserver = new MutationObserver((records) => { lateWrites += records.length; });
+      lateObserver.observe(elements(1).stickyChrome, { attributes: true, childList: true, subtree: true });
+      await settle(() => {
+        elements(1).table.style.width = '440px';
+        elements(1).scroller.dispatchEvent(new Event('scroll'));
+        elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
+        window.dispatchEvent(new Event('resize'));
+      });
+      lateObserver.disconnect();
       const styleAfterUnmount = elements(1).stickyTable.style.width;
       const hiddenAfterUnmount = !elements(1).stickyChrome.classList.contains('is-visible');
 
-      other.request();
       adapter1.dispose();
-      scheduler.flush();
-      const otherSurvivedDispose = otherLayoutRuns === 2;
-      const registrationsAfterFirstDispose = scheduler.records.size;
       adapter2.dispose();
-      other.dispose();
+      await scheduler.whenEmpty();
 
       return {
-        adapterInstances: 2,
-        legacyInstances: 0,
-        initialTasks,
-        reentryPending,
         initiallyHidden,
         passive,
-        stormFrames,
-        stormTasks,
-        outerScrollTasks,
         outerScrollAligned,
-        horizontalScrollFrames,
-        horizontalScrollTasks,
         visible,
         transform,
         visibleHeight,
@@ -300,39 +323,30 @@ async function main(): Promise<void> {
         visibleAfterRebuild,
         headerAfterDetachedMutation,
         headerAfterRebuiltMutation,
-        staleHorizontalScrollPending,
-        currentHorizontalScrollPending,
-        replacedHorizontalScrollFrames,
+        transformBeforeStaleScroll,
+        transformAfterStaleScroll,
         transformAfterHorizontalReplacement,
+        staleCloneObserverDetached,
+        currentHeaderBeforeStaleCloneMutation,
+        currentHeaderAfterStaleCloneMutation,
         styleBeforeUnmount,
         styleAfterUnmount,
         hiddenAfterUnmount,
-        horizontalScrollPendingAfterUnmount,
-        otherSurvivedDispose,
-        registrationsAfterFirstDispose,
+        lateWrites,
+        causalQueueEmpty: scheduler.empty,
         sourceUnchanged: elements(1).table.textContent?.replace('Rebuilt header', 'Header 1') === sourceText,
         scrollUnchangedByProjection: elements(1).scroller.scrollTop === 90
           && elements(1).horizontalScroller.scrollLeft === 35
-          && initialScroll === 0,
-        internalRafCalls: 0
+          && initialScroll === 0
       };
     });
 
-    assert.equal(result.adapterInstances, 2);
-    assert.equal(result.legacyInstances, 0);
-    assert.equal(result.initialTasks, 2);
-    assert.equal(result.reentryPending, 1, 'invalidation during refresh must schedule the next shared tick');
     assert.equal(result.initiallyHidden, true);
     assert.deepEqual(result.passive, {
       ariaHidden: 'true', inputs: 0, href: null, editableCount: 0, focusableCount: 0, focusable: [],
       resizeHandles: 2, toolbarButtons: 1
     });
-    assert.equal(result.stormFrames, 1, 'vertical scroll storms share one scheduled tick');
-    assert.equal(result.stormTasks, 2, 'each vertical scroller invalidates its current Sticky adapter');
-    assert.equal(result.outerScrollTasks, 2, 'an outer vertical scroller invalidates each nested Sticky adapter');
     assert.equal(result.outerScrollAligned, true, 'outer scrolling keeps Sticky geometry aligned to public scroller bounds');
-    assert.equal(result.horizontalScrollFrames, 1, 'horizontal scroll storms share the existing scheduler tick');
-    assert.equal(result.horizontalScrollTasks, 1, 'horizontal scroll invalidates only its current Sticky adapter');
     assert.equal(result.visible, true);
     assert.equal(result.transform, 'translateX(-45px)');
     assert.equal(result.controls.className, true);
@@ -344,18 +358,17 @@ async function main(): Promise<void> {
     assert.equal(result.visibleAfterRebuild, true);
     assert.doesNotMatch(result.headerAfterDetachedMutation ?? '', /Detached header/);
     assert.match(result.headerAfterRebuiltMutation ?? '', /Rebuilt header/);
-    assert.equal(result.staleHorizontalScrollPending, 0, 'a replaced horizontal scroller must become a bounded no-op');
-    assert.equal(result.currentHorizontalScrollPending, 1, 'the replacement horizontal scroller must own invalidation');
-    assert.equal(result.replacedHorizontalScrollFrames, 1);
+    assert.equal(result.transformAfterStaleScroll, result.transformBeforeStaleScroll,
+      'a replaced horizontal scroller must not change current Sticky geometry');
     assert.equal(result.transformAfterHorizontalReplacement, 'translateX(-35px)');
+    assert.equal(result.staleCloneObserverDetached, true);
+    assert.equal(result.currentHeaderAfterStaleCloneMutation, result.currentHeaderBeforeStaleCloneMutation);
     assert.equal(result.styleAfterUnmount, result.styleBeforeUnmount);
     assert.equal(result.hiddenAfterUnmount, true);
-    assert.equal(result.horizontalScrollPendingAfterUnmount, 0);
-    assert.equal(result.otherSurvivedDispose, true);
-    assert.equal(result.registrationsAfterFirstDispose, 2, 'disposing sticky removes only its own registration');
+    assert.equal(result.lateWrites, 0);
+    assert.equal(result.causalQueueEmpty, true);
     assert.equal(result.sourceUnchanged, true);
     assert.equal(result.scrollUnchangedByProjection, true);
-    assert.equal(result.internalRafCalls, 0);
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

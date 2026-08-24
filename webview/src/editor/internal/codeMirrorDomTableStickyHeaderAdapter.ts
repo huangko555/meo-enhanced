@@ -10,15 +10,17 @@ export type CodeMirrorDomTableStickyHeaderAdapterOptions = TableStickyHeaderAdap
 };
 
 function makeStickyContentPassive(root: HTMLElement): void {
-  root.setAttribute('aria-hidden', 'true');
-  root.setAttribute('contenteditable', 'false');
+  if (root.getAttribute('aria-hidden') !== 'true') root.setAttribute('aria-hidden', 'true');
+  if (root.getAttribute('contenteditable') !== 'false') root.setAttribute('contenteditable', 'false');
   for (const interactive of Array.from(root.querySelectorAll(
     'button, textarea, input, select'
   ))) {
     interactive.remove();
   }
   for (const editable of Array.from(root.querySelectorAll<HTMLElement>('[contenteditable]'))) {
-    editable.setAttribute('contenteditable', 'false');
+    if (editable.getAttribute('contenteditable') !== 'false') {
+      editable.setAttribute('contenteditable', 'false');
+    }
   }
   for (const link of Array.from(root.querySelectorAll('a[href]'))) {
     link.replaceWith(...Array.from(link.childNodes));
@@ -26,6 +28,15 @@ function makeStickyContentPassive(root: HTMLElement): void {
   for (const focusable of Array.from(root.querySelectorAll('[tabindex]'))) {
     focusable.removeAttribute('tabindex');
   }
+}
+
+function suppressStickyInteraction(event: Event): void {
+  if (
+    event.target instanceof Element &&
+    event.target.closest('.meo-md-html-table-column-resize-handle')
+  ) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
 }
 
 function hide(elements: TableStickyHeaderElements): void {
@@ -180,6 +191,27 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       subtree: true
     });
     cleanup.push(() => mutationObserver.disconnect());
+
+    const passiveMutationObserver = new MutationObserver(() => {
+      if (active()) makeStickyContentPassive(elements.stickyHeaderViewport);
+    });
+    passiveMutationObserver.observe(elements.stickyHeaderViewport, {
+      attributes: true,
+      attributeFilter: ['contenteditable', 'href', 'tabindex'],
+      childList: true,
+      subtree: true
+    });
+    cleanup.push(() => passiveMutationObserver.disconnect());
+
+    const passiveEvents = ['pointerdown', 'click', 'dblclick'] as const;
+    for (const eventName of passiveEvents) {
+      elements.stickyHeaderViewport.addEventListener(eventName, suppressStickyInteraction, true);
+    }
+    cleanup.push(() => {
+      for (const eventName of passiveEvents) {
+        elements.stickyHeaderViewport.removeEventListener(eventName, suppressStickyInteraction, true);
+      }
+    });
 
     elements.stickyChrome.dataset.tableStickyHeaderOwner = 'adapter';
     refreshContent();

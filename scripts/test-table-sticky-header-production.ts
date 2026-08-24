@@ -70,6 +70,27 @@ async function main(): Promise<void> {
         return outcome;
       };
       const transactions: any[] = [];
+      let probeLateStickyControls = false;
+      let lateStickyControlAttempts = 0;
+      const lateStickyControlObserver = new MutationObserver((records) => {
+        if (!probeLateStickyControls) return;
+        for (const record of records) {
+          for (const added of Array.from(record.addedNodes)) {
+            if (!(added instanceof Element)) continue;
+            const buttons = added.matches('.meo-md-html-table-sticky-header .meo-md-image-controls button')
+              ? [added]
+              : Array.from(added.querySelectorAll(
+                '.meo-md-html-table-sticky-header .meo-md-image-controls button'
+              ));
+            for (const button of buttons) {
+              if (!button.isConnected) continue;
+              lateStickyControlAttempts += 1;
+              button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+            }
+          }
+        }
+      });
+      lateStickyControlObserver.observe(document.documentElement, { childList: true, subtree: true });
       const rows = Array.from({ length: 32 }, (_, i) => `| ${i + 1} | row ${i + 1} wrapping content |`);
       const after = Array.from({ length: 20 }, (_, i) => `after table ${i + 1}`);
       const text = ['before', '', '| Number | Content |', '| ---: | :--- |', ...rows, '', ...after].join('\n');
@@ -139,6 +160,64 @@ async function main(): Promise<void> {
       const previewVisible = state().visible;
       host.hidden = false;
 
+      const delayedResolvers: Array<(value: string) => void> = [];
+      const resolvedImage = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>'
+      );
+      let delayedImageReady = false;
+      harness.setImageSrcResolver((url: string) => url === 'late-sticky.png'
+        ? delayedImageReady
+          ? resolvedImage
+          : new Promise<string>((resolve) => delayedResolvers.push(resolve))
+        : url);
+      const delayedRows = Array.from({ length: 32 }, (_, i) => `| ${i + 1} | delayed row ${i + 1} |`);
+      const delayedText = [
+        'before', '', '| ![slow](late-sticky.png) | Content |', '| --- | --- |',
+        ...delayedRows, '', ...after
+      ].join('\n');
+      transactions.push(await settle(() => editor.setText(delayedText), () => delayedResolvers.length > 0));
+      const delayedScroller = editor.view.scrollDOM as HTMLElement;
+      transactions.push(await settle(() => {
+        probeLateStickyControls = true;
+        delayedScroller.scrollTop = Math.min(100, delayedScroller.scrollHeight - delayedScroller.clientHeight);
+        delayedScroller.dispatchEvent(new Event('scroll'));
+        delayedImageReady = true;
+        for (const resolve of delayedResolvers.splice(0)) resolve(resolvedImage);
+      }, () => state().visible && Boolean(
+        document.querySelector('.meo-md-html-table-sticky-header .meo-md-image-img')
+      )));
+      probeLateStickyControls = false;
+      const lateStickyButton = document.querySelector<HTMLButtonElement>(
+        '.meo-md-html-table-sticky-header .meo-md-image-controls button'
+      );
+      lateStickyButton?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      const delayedImageContract = {
+        stickyControls: document.querySelectorAll(
+          '.meo-md-html-table-sticky-header .meo-md-image-controls button'
+        ).length,
+        commandExecuted: Boolean(document.querySelector('.meo-md-image-fullscreen-scrim')),
+        commandAttempts: lateStickyControlAttempts,
+        stickyHandles: document.querySelectorAll(
+          '.meo-md-html-table-sticky-table thead .meo-md-html-table-column-resize-handle'
+        ).length,
+        sourcePresented: Boolean(document.querySelector(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) .meo-md-image-img'
+        ))
+      };
+
+      const disposeResolvers: Array<(value: string) => void> = [];
+      let disposeImageReady = false;
+      harness.setImageSrcResolver((url: string) => url === 'dispose-sticky.png'
+        ? disposeImageReady
+          ? resolvedImage
+          : new Promise<string>((resolve) => disposeResolvers.push(resolve))
+        : url);
+      const disposeText = [
+        'before', '', '| ![dispose](dispose-sticky.png) | Content |', '| --- | --- |',
+        ...delayedRows, '', ...after
+      ].join('\n');
+      transactions.push(await settle(() => editor.setText(disposeText), () => disposeResolvers.length > 0));
+
       const oldScroller = editor.view.scrollDOM as HTMLElement;
       const detached = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-chrome'));
       transactions.push(await settle(() => editor.destroy(), () => true, true));
@@ -146,12 +225,15 @@ async function main(): Promise<void> {
       const lateObserver = new MutationObserver((records) => { lateWrites += records.length; });
       detached.forEach((node) => lateObserver.observe(node, { attributes: true, childList: true, subtree: true }));
       transactions.push(await settle(() => {
+        disposeImageReady = true;
+        for (const resolve of disposeResolvers.splice(0)) resolve(resolvedImage);
         oldScroller.dispatchEvent(new Event('scroll')); outer.dispatchEvent(new Event('scroll')); window.dispatchEvent(new Event('resize'));
       }, () => true, true));
       lateObserver.disconnect();
+      lateStickyControlObserver.disconnect();
       return { transactions, initialHidden, appeared, controls, outerAligned, domContract,
         hiddenAtTail, tailState, equalExternalCount, changedExternal, sourceCount, liveCount, previewVisible,
-        afterDispose: state().count, lateWrites };
+        delayedImageContract, afterDispose: state().count, lateWrites };
     });
 
     result.transactions.forEach((transaction: any) => {
@@ -177,6 +259,11 @@ async function main(): Promise<void> {
     assert.equal(result.changedExternal.count, 1);
     assert.match(result.changedExternal.text, /^prefix/);
     assert.deepEqual([result.sourceCount, result.liveCount, result.previewVisible], [0, 1, false]);
+    assert.equal(result.delayedImageContract.stickyControls, 0);
+    assert.equal(result.delayedImageContract.commandExecuted, false);
+    assert.ok(result.delayedImageContract.commandAttempts > 0);
+    assert.equal(result.delayedImageContract.stickyHandles, 2);
+    assert.equal(result.delayedImageContract.sourcePresented, true);
     assert.deepEqual([result.afterDispose, result.lateWrites], [0, 0]);
   } finally {
     await browser.close();
