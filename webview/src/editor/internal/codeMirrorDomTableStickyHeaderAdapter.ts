@@ -9,18 +9,24 @@ export type CodeMirrorDomTableStickyHeaderAdapterOptions = TableStickyHeaderAdap
   readonly policy: TableStickyHeaderPolicy;
 };
 
+type LifecyclePhase = 'unmounted' | 'mounted' | 'disposed';
+
+type StickyGeneration = {
+  readonly id: number;
+  readonly elements: TableStickyHeaderElements;
+  readonly cleanup: Array<() => void>;
+};
+
+const noPrimaryError = Symbol('no-primary-error');
+
 function makeStickyContentPassive(root: HTMLElement): void {
   if (root.getAttribute('aria-hidden') !== 'true') root.setAttribute('aria-hidden', 'true');
   if (root.getAttribute('contenteditable') !== 'false') root.setAttribute('contenteditable', 'false');
-  for (const interactive of Array.from(root.querySelectorAll(
-    'button, textarea, input, select'
-  ))) {
+  for (const interactive of Array.from(root.querySelectorAll('button, textarea, input, select'))) {
     interactive.remove();
   }
   for (const editable of Array.from(root.querySelectorAll<HTMLElement>('[contenteditable]'))) {
-    if (editable.getAttribute('contenteditable') !== 'false') {
-      editable.setAttribute('contenteditable', 'false');
-    }
+    if (editable.getAttribute('contenteditable') !== 'false') editable.setAttribute('contenteditable', 'false');
   }
   for (const link of Array.from(root.querySelectorAll('a[href]'))) {
     link.replaceWith(...Array.from(link.childNodes));
@@ -31,10 +37,8 @@ function makeStickyContentPassive(root: HTMLElement): void {
 }
 
 function suppressStickyInteraction(event: Event): void {
-  if (
-    event.target instanceof Element &&
-    event.target.closest('.meo-md-html-table-column-resize-handle')
-  ) return;
+  if (event.target instanceof Element &&
+    event.target.closest('.meo-md-html-table-column-resize-handle')) return;
   event.preventDefault();
   event.stopImmediatePropagation();
 }
@@ -65,27 +69,76 @@ function applyLayout(
   elements.stickyTable.style.transform = `translateX(${layout.translateX}px)`;
 }
 
+function throwLifecycleErrors(
+  primary: unknown | typeof noPrimaryError,
+  cleanupErrors: readonly unknown[]
+): void {
+  if (primary !== noPrimaryError) {
+    if (cleanupErrors.length === 0) throw primary;
+    throw new AggregateError([primary, ...cleanupErrors],
+      'Table Sticky Header action and cleanup failed', { cause: primary });
+  }
+  if (cleanupErrors.length === 1) throw cleanupErrors[0];
+  if (cleanupErrors.length > 1) {
+    throw new AggregateError(cleanupErrors, 'Table Sticky Header cleanup failed', {
+      cause: cleanupErrors[0]
+    });
+  }
+}
+
+function runCleanupInReverse(cleanup: Array<() => void>): unknown[] {
+  const errors: unknown[] = [];
+  for (let index = cleanup.length - 1; index >= 0; index -= 1) {
+    try {
+      cleanup[index]();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  cleanup.length = 0;
+  return errors;
+}
+
+function clonePassiveHeader(source: HTMLTableRowElement): HTMLTableCellElement[] {
+  return Array.from(source.cells, (cell) => {
+    const clone = cell.cloneNode(true) as HTMLTableCellElement;
+    makeStickyContentPassive(clone);
+    return clone;
+  });
+}
+
+function areSameElements(
+  left: TableStickyHeaderElements,
+  right: TableStickyHeaderElements
+): boolean {
+  return left.scroller === right.scroller &&
+    left.horizontalScroller === right.horizontalScroller &&
+    left.table === right.table &&
+    left.stickyChrome === right.stickyChrome &&
+    left.stickyHeaderViewport === right.stickyHeaderViewport &&
+    left.stickyTable === right.stickyTable &&
+    left.stickyHeaderRow === right.stickyHeaderRow;
+}
+
 export function createCodeMirrorDomTableStickyHeaderAdapter(
   options: CodeMirrorDomTableStickyHeaderAdapterOptions
 ): TableStickyHeaderAdapter {
-  let disposed = false;
-  let mounted = false;
+  let phase: LifecyclePhase = 'unmounted';
+  let nextGeneration = 0;
+  let current: StickyGeneration | null = null;
   let dirty = false;
   let refreshing = false;
-  let generation = 0;
-  let cleanup: (() => void)[] = [];
-  let mountedElements: TableStickyHeaderElements | null = null;
 
   const registration = options.scheduler.register(() => {
-    if (disposed || !mounted || refreshing) return;
+    if (phase !== 'mounted' || !current || refreshing) return;
     dirty = false;
     refreshing = true;
     try {
-      const elements = mountedElements;
-      const header = elements?.table.tHead?.rows[0];
-      const bodyRows = elements?.table.tBodies[0]?.rows.length ?? 0;
-      if (!elements || !header || bodyRows === 0) {
-        if (elements) hide(elements);
+      const elements = current.elements;
+      const header = elements.table.tHead?.rows[0];
+      const bodyRows = elements.table.tBodies[0]?.rows.length ?? 0;
+      if (!header || bodyRows === 0) {
+        hide(elements);
         return;
       }
       const scrollerRect = elements.scroller.getBoundingClientRect();
@@ -93,151 +146,164 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
       const headerRect = header.getBoundingClientRect();
       applyLayout(elements, options.policy.layout({
         scroller: {
-          top: scrollerRect.top,
-          left: scrollerRect.left,
-          right: scrollerRect.right,
-          height: scrollerRect.height
+          top: scrollerRect.top, left: scrollerRect.left,
+          right: scrollerRect.right, height: scrollerRect.height
         },
         table: {
-          left: tableRect.left,
-          right: tableRect.right,
-          bottom: tableRect.bottom,
-          height: tableRect.height,
-          width: tableRect.width
+          left: tableRect.left, right: tableRect.right, bottom: tableRect.bottom,
+          height: tableRect.height, width: tableRect.width
         },
         header: { top: headerRect.top, height: headerRect.height },
         controlsHeight: options.controlsHeight()
       }));
     } finally {
       refreshing = false;
-      if (dirty && mounted && !disposed) registration.request();
+      if (dirty && phase === 'mounted') registration.request();
     }
   });
 
   const invalidate = (): void => {
-    if (disposed || !mounted) return;
+    if (phase !== 'mounted') return;
     dirty = true;
     registration.request();
   };
 
-  const refreshContent = (): void => {
-    if (disposed || !mounted) return;
-    const elements = mountedElements;
-    const sourceCells = Array.from(elements?.table.tHead?.rows[0]?.cells ?? []);
-    if (!elements) return;
-    const nextCells = sourceCells.map((_sourceCell, column) => {
-      const cell = options.renderHeaderCell(column);
-      makeStickyContentPassive(cell);
-      return cell;
-    });
-    elements.stickyHeaderRow.replaceChildren(...nextCells);
-    makeStickyContentPassive(elements.stickyHeaderViewport);
-    invalidate();
+  const releaseCurrent = (hideReleased = true): unknown[] => {
+    const previous = current;
+    current = null;
+    dirty = false;
+    nextGeneration += 1;
+    if (!previous) return [];
+    const errors = runCleanupInReverse(previous.cleanup);
+    if (hideReleased) {
+      try {
+        delete previous.elements.stickyChrome.dataset.tableStickyHeaderOwner;
+        hide(previous.elements);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    return errors;
+  };
+
+  const installGeneration = (elements: TableStickyHeaderElements): void => {
+    const previousElements = current?.elements;
+    const cleanupErrors = releaseCurrent(
+      previousElements ? !areSameElements(previousElements, elements) : false
+    );
+    const id = ++nextGeneration;
+    const cleanup: Array<() => void> = [];
+    let primary: unknown | typeof noPrimaryError = noPrimaryError;
+    try {
+      const sourceHeader = elements.table.tHead?.rows[0];
+      const nextCells = sourceHeader ? clonePassiveHeader(sourceHeader) : [];
+      const active = (): boolean => phase === 'mounted' && current?.id === id;
+      const requestIfActive = (): void => {
+        if (active()) invalidate();
+      };
+      const replaceIfActive = (): void => {
+        if (active()) installGeneration(elements);
+      };
+
+      window.addEventListener('resize', requestIfActive);
+      cleanup.push(() => window.removeEventListener('resize', requestIfActive));
+      const ownerDocument = elements.scroller.ownerDocument;
+      const onVerticalScroll = (event: Event): void => {
+        const target = event.target;
+        if (target instanceof Node && target.contains(elements.scroller)) requestIfActive();
+      };
+      ownerDocument.addEventListener('scroll', onVerticalScroll, true);
+      cleanup.push(() => ownerDocument.removeEventListener('scroll', onVerticalScroll, true));
+      elements.horizontalScroller.addEventListener('scroll', requestIfActive);
+      cleanup.push(() => elements.horizontalScroller.removeEventListener('scroll', requestIfActive));
+      const resizeObserver = new ResizeObserver(requestIfActive);
+      resizeObserver.observe(elements.scroller);
+      cleanup.push(() => resizeObserver.disconnect());
+      const mutationObserver = new MutationObserver(replaceIfActive);
+      mutationObserver.observe(elements.table, {
+        attributes: true,
+        childList: true,
+        characterData: true,
+        subtree: true
+      });
+      cleanup.push(() => mutationObserver.disconnect());
+      const passiveEvents = ['pointerdown', 'click', 'dblclick'] as const;
+      for (const eventName of passiveEvents) {
+        elements.stickyHeaderViewport.addEventListener(eventName, suppressStickyInteraction, true);
+      }
+      cleanup.push(() => {
+        for (const eventName of passiveEvents) {
+          elements.stickyHeaderViewport.removeEventListener(eventName, suppressStickyInteraction, true);
+        }
+      });
+
+      makeStickyContentPassive(elements.stickyHeaderViewport);
+      elements.stickyHeaderRow.replaceChildren(...nextCells);
+      elements.stickyChrome.dataset.tableStickyHeaderOwner = 'adapter';
+      current = { id, elements, cleanup };
+      phase = 'mounted';
+      invalidate();
+    } catch (error) {
+      primary = error;
+      nextGeneration += 1;
+      cleanupErrors.push(...runCleanupInReverse(cleanup));
+      current = null;
+      phase = 'unmounted';
+      try {
+        delete elements.stickyChrome.dataset.tableStickyHeaderOwner;
+        hide(elements);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+    }
+    throwLifecycleErrors(primary, cleanupErrors);
   };
 
   const unmount = (): void => {
-    if (!mounted) return;
-    mounted = false;
-    dirty = false;
-    generation += 1;
-    for (const dispose of cleanup.splice(0)) dispose();
-    const elements = mountedElements;
-    mountedElements = null;
-    if (elements) {
-      delete elements.stickyChrome.dataset.tableStickyHeaderOwner;
-      hide(elements);
-    }
+    if (phase !== 'mounted') return;
+    phase = 'unmounted';
+    throwLifecycleErrors(noPrimaryError, releaseCurrent());
   };
 
   const mount = (): void => {
-    if (disposed) return;
-    unmount();
-    const elements = options.resolveElements();
-    if (!elements) return;
-    mountedElements = elements;
-    mounted = true;
-    const mountedGeneration = ++generation;
-    const active = (): boolean => mounted && !disposed && generation === mountedGeneration;
-    const requestIfActive = (): void => {
-      if (active()) invalidate();
-    };
-    const refreshIfActive = (): void => {
-      if (!active()) return;
-      refreshContent();
-    };
-
-    window.addEventListener('resize', requestIfActive);
-    cleanup.push(() => window.removeEventListener('resize', requestIfActive));
-
-    const ownerDocument = elements.scroller.ownerDocument;
-    const onVerticalScroll = (event: Event): void => {
-      const target = event.target;
-      if (target instanceof Node && target.contains(elements.scroller)) requestIfActive();
-    };
-    ownerDocument.addEventListener('scroll', onVerticalScroll, true);
-    cleanup.push(() => ownerDocument.removeEventListener('scroll', onVerticalScroll, true));
-
-    elements.horizontalScroller.addEventListener('scroll', requestIfActive);
-    cleanup.push(() => elements.horizontalScroller.removeEventListener('scroll', requestIfActive));
-
-    const resizeObserver = new ResizeObserver(requestIfActive);
-    resizeObserver.observe(elements.scroller);
-    cleanup.push(() => resizeObserver.disconnect());
-
-    const mutationObserver = new MutationObserver(refreshIfActive);
-    mutationObserver.observe(elements.table, {
-      childList: true,
-      characterData: true,
-      subtree: true
-    });
-    cleanup.push(() => mutationObserver.disconnect());
-
-    const passiveMutationObserver = new MutationObserver(() => {
-      if (active()) makeStickyContentPassive(elements.stickyHeaderViewport);
-    });
-    passiveMutationObserver.observe(elements.stickyHeaderViewport, {
-      attributes: true,
-      attributeFilter: ['contenteditable', 'href', 'tabindex'],
-      childList: true,
-      subtree: true
-    });
-    cleanup.push(() => passiveMutationObserver.disconnect());
-
-    const passiveEvents = ['pointerdown', 'click', 'dblclick'] as const;
-    for (const eventName of passiveEvents) {
-      elements.stickyHeaderViewport.addEventListener(eventName, suppressStickyInteraction, true);
+    if (phase === 'disposed') return;
+    let elements: TableStickyHeaderElements | null = null;
+    let primary: unknown | typeof noPrimaryError = noPrimaryError;
+    try {
+      elements = options.resolveElements();
+    } catch (error) {
+      primary = error;
     }
-    cleanup.push(() => {
-      for (const eventName of passiveEvents) {
-        elements.stickyHeaderViewport.removeEventListener(eventName, suppressStickyInteraction, true);
-      }
-    });
-
-    elements.stickyChrome.dataset.tableStickyHeaderOwner = 'adapter';
-    refreshContent();
+    const cleanupErrors = phase === 'mounted' ? releaseCurrent() : [];
+    phase = 'unmounted';
+    if (primary !== noPrimaryError || !elements) {
+      throwLifecycleErrors(primary, cleanupErrors);
+      return;
+    }
+    try {
+      installGeneration(elements);
+    } catch (error) {
+      if (cleanupErrors.length === 0) throw error;
+      throwLifecycleErrors(error, cleanupErrors);
+    }
+    throwLifecycleErrors(noPrimaryError, cleanupErrors);
   };
 
   const update = (): void => {
-    if (disposed) return;
-    const nextElements = options.resolveElements();
-    if (!nextElements) {
+    if (phase === 'disposed') return;
+    let elements: TableStickyHeaderElements | null = null;
+    let primary: unknown | typeof noPrimaryError = noPrimaryError;
+    try {
+      elements = options.resolveElements();
+    } catch (error) {
+      primary = error;
+    }
+    if (primary !== noPrimaryError) throwLifecycleErrors(primary, []);
+    if (!elements) {
       unmount();
       return;
     }
-    const currentElements = mountedElements;
-    const elementsChanged = !currentElements ||
-      currentElements.scroller !== nextElements.scroller ||
-      currentElements.horizontalScroller !== nextElements.horizontalScroller ||
-      currentElements.table !== nextElements.table ||
-      currentElements.stickyChrome !== nextElements.stickyChrome ||
-      currentElements.stickyHeaderViewport !== nextElements.stickyHeaderViewport ||
-      currentElements.stickyTable !== nextElements.stickyTable ||
-      currentElements.stickyHeaderRow !== nextElements.stickyHeaderRow;
-    if (elementsChanged) {
-      mount();
-      return;
-    }
-    refreshContent();
+    installGeneration(elements);
   };
 
   return {
@@ -246,10 +312,15 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
     invalidate,
     unmount,
     dispose() {
-      if (disposed) return;
-      unmount();
-      disposed = true;
-      registration.dispose();
+      if (phase === 'disposed') return;
+      phase = 'disposed';
+      const cleanupErrors = releaseCurrent();
+      try {
+        registration.dispose();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+      throwLifecycleErrors(noPrimaryError, cleanupErrors);
     }
   };
 }

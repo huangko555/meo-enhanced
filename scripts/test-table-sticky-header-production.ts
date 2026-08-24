@@ -26,6 +26,8 @@ async function main(): Promise<void> {
     await page.addScriptTag({ path: path.join(temp, 'bundle.js') });
     const result = await page.evaluate(async () => {
       const harness = (window as any).TableStickyHeaderProductionHarness;
+      const postMessages: unknown[] = [];
+      harness.initializeImageHandling({ postMessage: (message: unknown) => postMessages.push(message) });
       const outer = document.getElementById('outer')!;
       const host = document.getElementById('host')!;
       const nativeFrame = window.requestAnimationFrame.bind(window);
@@ -70,27 +72,6 @@ async function main(): Promise<void> {
         return outcome;
       };
       const transactions: any[] = [];
-      let probeLateStickyControls = false;
-      let lateStickyControlAttempts = 0;
-      const lateStickyControlObserver = new MutationObserver((records) => {
-        if (!probeLateStickyControls) return;
-        for (const record of records) {
-          for (const added of Array.from(record.addedNodes)) {
-            if (!(added instanceof Element)) continue;
-            const buttons = added.matches('.meo-md-html-table-sticky-header .meo-md-image-controls button')
-              ? [added]
-              : Array.from(added.querySelectorAll(
-                '.meo-md-html-table-sticky-header .meo-md-image-controls button'
-              ));
-            for (const button of buttons) {
-              if (!button.isConnected) continue;
-              lateStickyControlAttempts += 1;
-              button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
-            }
-          }
-        }
-      });
-      lateStickyControlObserver.observe(document.documentElement, { childList: true, subtree: true });
       const rows = Array.from({ length: 32 }, (_, i) => `| ${i + 1} | row ${i + 1} wrapping content |`);
       const after = Array.from({ length: 20 }, (_, i) => `after table ${i + 1}`);
       const text = ['before', '', '| Number | Content |', '| ---: | :--- |', ...rows, '', ...after].join('\n');
@@ -176,17 +157,71 @@ async function main(): Promise<void> {
         ...delayedRows, '', ...after
       ].join('\n');
       transactions.push(await settle(() => editor.setText(delayedText), () => delayedResolvers.length > 0));
+      const pendingBeforeReplacement = delayedResolvers.length;
       const delayedScroller = editor.view.scrollDOM as HTMLElement;
       transactions.push(await settle(() => {
-        probeLateStickyControls = true;
-        delayedScroller.scrollTop = Math.min(100, delayedScroller.scrollHeight - delayedScroller.clientHeight);
+        delayedScroller.scrollTop = 0;
+        const delayedHeader = document.querySelector<HTMLElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead'
+        )!;
+        delayedScroller.scrollTop = Math.max(
+          1,
+          delayedHeader.getBoundingClientRect().bottom - delayedScroller.getBoundingClientRect().top + 8
+        );
         delayedScroller.dispatchEvent(new Event('scroll'));
+      }, () => true, true));
+      const detachedStickyCell = document.querySelector<HTMLElement>(
+        '.meo-md-html-table-sticky-table thead th'
+      )!;
+      let detachedCloneMutated = false;
+      const detachedCloneObserver = new MutationObserver((records) => {
+        detachedCloneMutated = true;
+        for (const record of records) {
+          for (const added of Array.from(record.addedNodes)) {
+            if (!(added instanceof Element)) continue;
+            const buttons = added.matches('.meo-md-image-controls button')
+              ? [added]
+              : Array.from(added.querySelectorAll('.meo-md-image-controls button'));
+            for (const button of buttons) {
+              button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+            }
+          }
+        }
+      });
+      detachedCloneObserver.observe(detachedStickyCell, { attributes: true, childList: true, subtree: true });
+      const replacementText = delayedText.replace('Content |', 'Content updated |');
+      transactions.push(await settle(() => editor.setText(replacementText), () => (
+        editor.getText() === replacementText && !detachedStickyCell.isConnected
+      )));
+      const pendingAfterReplacement = delayedResolvers.length;
+      const detachedAfterReplacement = !detachedStickyCell.isConnected;
+      transactions.push(await settle(() => {
         delayedImageReady = true;
         for (const resolve of delayedResolvers.splice(0)) resolve(resolvedImage);
-      }, () => state().visible && Boolean(
+      }, () => Boolean(
         document.querySelector('.meo-md-html-table-sticky-header .meo-md-image-img')
       )));
-      probeLateStickyControls = false;
+      detachedCloneObserver.disconnect();
+      const detachedCloneBehavior = {
+        detachedAfterReplacement,
+        mutated: detachedCloneMutated,
+        openPosted: postMessages.some((message: any) => message?.type === 'openImageExternally'),
+        fullscreenOpened: Boolean(document.querySelector('.meo-md-image-fullscreen-scrim'))
+      };
+      document.querySelector<HTMLElement>('.meo-md-image-fullscreen-scrim')?.remove();
+      postMessages.length = 0;
+
+      const mainControls = document.querySelector<HTMLElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table) .meo-md-image-controls'
+      )!;
+      mainControls.querySelector<HTMLButtonElement>('[aria-label="Open with system app"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      const mainOpenPosted = postMessages.some((message: any) => message?.type === 'openImageExternally');
+      mainControls.querySelector<HTMLButtonElement>('[aria-label="Fullscreen image"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      const mainFullscreenOpened = Boolean(document.querySelector('.meo-md-image-fullscreen-scrim'));
+      document.querySelector<HTMLElement>('.meo-md-image-fullscreen-scrim')?.remove();
+      const stickyPostCountBefore = postMessages.length;
       const lateStickyButton = document.querySelector<HTMLButtonElement>(
         '.meo-md-html-table-sticky-header .meo-md-image-controls button'
       );
@@ -196,7 +231,10 @@ async function main(): Promise<void> {
           '.meo-md-html-table-sticky-header .meo-md-image-controls button'
         ).length,
         commandExecuted: Boolean(document.querySelector('.meo-md-image-fullscreen-scrim')),
-        commandAttempts: lateStickyControlAttempts,
+        openPosted: postMessages.length > stickyPostCountBefore,
+        fullscreenOpened: Boolean(document.querySelector('.meo-md-image-fullscreen-scrim')),
+        mainOpenPosted,
+        mainFullscreenOpened,
         stickyHandles: document.querySelectorAll(
           '.meo-md-html-table-sticky-table thead .meo-md-html-table-column-resize-handle'
         ).length,
@@ -230,10 +268,10 @@ async function main(): Promise<void> {
         oldScroller.dispatchEvent(new Event('scroll')); outer.dispatchEvent(new Event('scroll')); window.dispatchEvent(new Event('resize'));
       }, () => true, true));
       lateObserver.disconnect();
-      lateStickyControlObserver.disconnect();
       return { transactions, initialHidden, appeared, controls, outerAligned, domContract,
         hiddenAtTail, tailState, equalExternalCount, changedExternal, sourceCount, liveCount, previewVisible,
-        delayedImageContract, afterDispose: state().count, lateWrites };
+        pendingBeforeReplacement, pendingAfterReplacement, delayedImageContract, detachedCloneBehavior,
+        afterDispose: state().count, lateWrites };
     });
 
     result.transactions.forEach((transaction: any) => {
@@ -260,10 +298,22 @@ async function main(): Promise<void> {
     assert.match(result.changedExternal.text, /^prefix/);
     assert.deepEqual([result.sourceCount, result.liveCount, result.previewVisible], [0, 1, false]);
     assert.equal(result.delayedImageContract.stickyControls, 0);
+    assert.deepEqual([result.pendingBeforeReplacement, result.pendingAfterReplacement], [1, 2]);
     assert.equal(result.delayedImageContract.commandExecuted, false);
-    assert.ok(result.delayedImageContract.commandAttempts > 0);
+    assert.deepEqual([
+      result.delayedImageContract.openPosted,
+      result.delayedImageContract.fullscreenOpened,
+      result.delayedImageContract.mainOpenPosted,
+      result.delayedImageContract.mainFullscreenOpened
+    ], [false, false, true, true]);
     assert.equal(result.delayedImageContract.stickyHandles, 2);
     assert.equal(result.delayedImageContract.sourcePresented, true);
+    assert.deepEqual(result.detachedCloneBehavior, {
+      detachedAfterReplacement: true,
+      mutated: false,
+      openPosted: false,
+      fullscreenOpened: false
+    });
     assert.deepEqual([result.afterDispose, result.lateWrites], [0, 0]);
   } finally {
     await browser.close();

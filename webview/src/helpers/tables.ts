@@ -2218,8 +2218,7 @@ class HtmlTableWidget extends WidgetType {
     this.stickyHeaderAdapter = stickyHeaderAdapterFactory.create({
       scheduler: this.layoutScheduler,
       resolveElements: () => this.resolveStickyHeaderElements(),
-      controlsHeight: () => this.stickyControlsHeight(),
-      renderHeaderCell: (column) => this.renderStickyHeaderCell(column)
+      controlsHeight: () => this.stickyControlsHeight()
     });
   }
 
@@ -2271,25 +2270,6 @@ class HtmlTableWidget extends WidgetType {
     if (!shell || !shell.classList.contains('is-controls-sticky')) return 0;
     const visible = shell.matches(':focus-within') || shell.classList.contains('is-interacting');
     return visible ? tableToolbarHeight : 0;
-  }
-
-  renderStickyHeaderCell(column: number): HTMLTableCellElement {
-    const cell = document.createElement('th');
-    const sourceCell = this.domRefs?.table.tHead?.rows[0]?.cells[column];
-    const headerInput = this.domRefs?.headerInputs[column];
-    cell.style.textAlign = sourceCell?.style.textAlign ?? '';
-    const preview = document.createElement('div');
-    preview.className = 'meo-md-html-table-cell-preview';
-    renderTableCellInlinePreview(
-      preview,
-      tableCellEditorValueToSource(headerInput?.value ?? ''),
-      this.cellDiagnostics(0, column),
-      this.searchState,
-      this.cellSourceRange(0, column),
-      getImagePresentationFactory(this.view!.state)
-    );
-    cell.append(preview, this.createColumnResizeHandle(column));
-    return cell;
   }
 
   getEditorView(dom?: HTMLElement): EditorView | null {

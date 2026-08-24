@@ -114,9 +114,41 @@ async function main(): Promise<void> {
       const candidate = (window as any).TableStickyHeaderAdapterCandidate;
       const scheduler = new DeterministicSharedLayoutScheduler();
       const settle = async (action: () => void) => {
-        action();
-        await scheduler.whenEmpty();
-        if (!scheduler.empty) throw new Error('layout scheduler did not reach an empty causal queue');
+        const originalFrame = window.requestAnimationFrame;
+        window.requestAnimationFrame = () => {
+          throw new Error('Table Sticky Header Adapter must use the injected scheduler');
+        };
+        try {
+          action();
+          await scheduler.whenEmpty();
+          if (!scheduler.empty) throw new Error('layout scheduler did not reach an empty causal queue');
+        } finally {
+          window.requestAnimationFrame = originalFrame;
+        }
+        if (window.requestAnimationFrame !== originalFrame) {
+          throw new Error('requestAnimationFrame capability was not restored');
+        }
+      };
+      const settleError = async (action: () => void) => {
+        const originalFrame = window.requestAnimationFrame;
+        window.requestAnimationFrame = () => {
+          throw new Error('Table Sticky Header Adapter must use the injected scheduler');
+        };
+        let error: unknown = null;
+        try {
+          action();
+        } catch (caught) {
+          error = caught;
+        }
+        try {
+          await scheduler.whenEmpty();
+        } finally {
+          window.requestAnimationFrame = originalFrame;
+        }
+        if (window.requestAnimationFrame !== originalFrame) {
+          throw new Error('requestAnimationFrame capability was not restored after failure');
+        }
+        return error;
       };
       const elements = (id: number) => ({
         shell: document.getElementById(`shell-${id}`)!,
@@ -143,19 +175,13 @@ async function main(): Promise<void> {
         policy: policyWithReentry,
         scheduler,
         resolveElements: () => elements(1),
-        controlsHeight: () => elements(1).shell.classList.contains('controls-visible') ? 24 : 0,
-        renderHeaderCell: (column: number) => (
-          elements(1).table.tHead!.rows[0].cells[column].cloneNode(true) as HTMLTableCellElement
-        )
+        controlsHeight: () => elements(1).shell.classList.contains('controls-visible') ? 24 : 0
       });
       const adapter2 = candidate.createAdapter({
         policy: candidate.policy,
         scheduler,
         resolveElements: () => elements(2),
-        controlsHeight: () => 0,
-        renderHeaderCell: (column: number) => (
-          elements(2).table.tHead!.rows[0].cells[column].cloneNode(true) as HTMLTableCellElement
-        )
+        controlsHeight: () => 0
       });
 
       const sourceText = elements(1).table.textContent;
@@ -182,6 +208,7 @@ async function main(): Promise<void> {
         resizeHandles: elements(1).stickyHeaderRow.querySelectorAll('.meo-md-html-table-column-resize-handle').length,
         toolbarButtons: elements(1).stickyChrome.querySelectorAll('.sticky-toolbar-button').length
       };
+      const sourceUnchangedByMount = elements(1).table.textContent === sourceText;
 
       await settle(() => {
         for (const id of [1, 2]) {
@@ -222,6 +249,40 @@ async function main(): Promise<void> {
         adapter1.update();
       });
       const updatedHeader = elements(1).stickyHeaderRow.textContent;
+      const pendingZeroClone = elements(1).stickyHeaderRow.firstElementChild!;
+      const pendingOne = Object.assign(document.createElement('span'), {
+        className: 'pending-image', textContent: 'pending-1'
+      });
+      const pendingTwo = Object.assign(document.createElement('span'), {
+        className: 'pending-image', textContent: 'pending-2'
+      });
+      await settle(() => {
+        elements(1).table.tHead!.rows[0].cells[0].append(pendingOne, pendingTwo);
+      });
+      const pendingTwoProjected = elements(1).stickyHeaderRow.querySelectorAll('.pending-image').length;
+      await settle(() => {
+        pendingOne.className = 'resolved-image';
+        pendingOne.replaceChildren(Object.assign(document.createElement('img'), { alt: 'resolved-1' }));
+      });
+      const pendingOneProjected = elements(1).stickyHeaderRow.querySelectorAll('.pending-image').length;
+      await settle(() => {
+        pendingTwo.className = 'rejected-image';
+        pendingTwo.textContent = 'rejected-2';
+      });
+      const pendingImageGeneration = {
+        oldDetached: !pendingZeroClone.isConnected,
+        pendingTwoProjected,
+        pendingOneProjected,
+        pendingZeroProjected: elements(1).stickyHeaderRow.querySelectorAll('.pending-image').length,
+        resolved: elements(1).stickyHeaderRow.querySelectorAll('.resolved-image img').length,
+        rejected: elements(1).stickyHeaderRow.querySelectorAll('.rejected-image').length,
+        currentLate: 0
+      };
+      await settle(() => pendingZeroClone.append(
+        Object.assign(document.createElement('span'), { className: 'late-old-generation', textContent: 'late' })
+      ));
+      pendingImageGeneration.currentLate = elements(1).stickyHeaderRow
+        .querySelectorAll('.late-old-generation').length;
 
       await settle(() => {
         elements(1).table.style.width = '480px';
@@ -304,8 +365,76 @@ async function main(): Promise<void> {
       const styleAfterUnmount = elements(1).stickyTable.style.width;
       const hiddenAfterUnmount = !elements(1).stickyChrome.classList.contains('is-visible');
 
+      const mountedDisposeNode = elements(2).stickyChrome;
+      let mountedDisposeLateWrites = 0;
+      const mountedDisposeObserver = new MutationObserver((records) => { mountedDisposeLateWrites += records.length; });
+      mountedDisposeObserver.observe(mountedDisposeNode, { attributes: true, childList: true, subtree: true });
+      await settle(() => adapter2.dispose());
+      mountedDisposeLateWrites = 0;
+      await settle(() => {
+        adapter2.mount();
+        adapter2.update();
+        adapter2.invalidate();
+        adapter2.unmount();
+        adapter2.dispose();
+        elements(2).scroller.dispatchEvent(new Event('scroll'));
+        elements(2).horizontalScroller.dispatchEvent(new Event('scroll'));
+        window.dispatchEvent(new Event('resize'));
+        elements(2).table.tHead!.rows[0].cells[0].append('late source mutation');
+      });
+      mountedDisposeObserver.disconnect();
+
+      const primaryError = new Error('primary clone failure');
+      const cleanupFirst = new Error('passive listener cleanup failure');
+      const cleanupSecond = new Error('horizontal listener cleanup failure');
+      const errorAdapter = candidate.createAdapter({
+        policy: candidate.policy,
+        scheduler,
+        resolveElements: () => elements(2),
+        controlsHeight: () => 0
+      });
+      await settle(() => errorAdapter.mount());
+      const sourceCell = elements(2).table.tHead!.rows[0].cells[0] as HTMLTableCellElement & {
+        cloneNode: (deep?: boolean) => Node;
+      };
+      const originalCloneNode = sourceCell.cloneNode;
+      const originalViewportRemove = elements(2).stickyHeaderViewport.removeEventListener;
+      const originalHorizontalRemove = elements(2).horizontalScroller.removeEventListener;
+      sourceCell.cloneNode = () => { throw primaryError; };
+      elements(2).stickyHeaderViewport.removeEventListener = function (...args: Parameters<typeof originalViewportRemove>) {
+        originalViewportRemove.apply(this, args);
+        throw cleanupFirst;
+      };
+      elements(2).horizontalScroller.removeEventListener = function (...args: Parameters<typeof originalHorizontalRemove>) {
+        originalHorizontalRemove.apply(this, args);
+        throw cleanupSecond;
+      };
+      const primaryCleanupError = await settleError(() => errorAdapter.update());
+      sourceCell.cloneNode = originalCloneNode;
+      elements(2).stickyHeaderViewport.removeEventListener = originalViewportRemove;
+      elements(2).horizontalScroller.removeEventListener = originalHorizontalRemove;
+      errorAdapter.dispose();
+
+      const cleanupAdapter = candidate.createAdapter({
+        policy: candidate.policy,
+        scheduler,
+        resolveElements: () => elements(2),
+        controlsHeight: () => 0
+      });
+      await settle(() => cleanupAdapter.mount());
+      elements(2).stickyHeaderViewport.removeEventListener = function (...args: Parameters<typeof originalViewportRemove>) {
+        originalViewportRemove.apply(this, args);
+        throw cleanupFirst;
+      };
+      elements(2).horizontalScroller.removeEventListener = function (...args: Parameters<typeof originalHorizontalRemove>) {
+        originalHorizontalRemove.apply(this, args);
+        throw cleanupSecond;
+      };
+      const cleanupOnlyError = await settleError(() => cleanupAdapter.unmount());
+      elements(2).stickyHeaderViewport.removeEventListener = originalViewportRemove;
+      elements(2).horizontalScroller.removeEventListener = originalHorizontalRemove;
+      cleanupAdapter.dispose();
       adapter1.dispose();
-      adapter2.dispose();
       await scheduler.whenEmpty();
 
       return {
@@ -317,6 +446,7 @@ async function main(): Promise<void> {
         visibleHeight,
         controls,
         updatedHeader,
+        pendingImageGeneration,
         projectedWidth,
         focusAndSelectionPreserved,
         hiddenWithOuterMode,
@@ -333,8 +463,17 @@ async function main(): Promise<void> {
         styleAfterUnmount,
         hiddenAfterUnmount,
         lateWrites,
+        mountedDisposeLateWrites,
+        primaryCleanupError: primaryCleanupError instanceof AggregateError ? {
+          cause: primaryCleanupError.cause === primaryError,
+          errors: primaryCleanupError.errors.map((error) => (error as Error).message)
+        } : null,
+        cleanupOnlyError: cleanupOnlyError instanceof AggregateError ? {
+          cause: cleanupOnlyError.cause === cleanupFirst,
+          errors: cleanupOnlyError.errors.map((error) => (error as Error).message)
+        } : null,
         causalQueueEmpty: scheduler.empty,
-        sourceUnchanged: elements(1).table.textContent?.replace('Rebuilt header', 'Header 1') === sourceText,
+        sourceUnchangedByMount,
         scrollUnchangedByProjection: elements(1).scroller.scrollTop === 90
           && elements(1).horizontalScroller.scrollLeft === 35
           && initialScroll === 0
@@ -352,6 +491,15 @@ async function main(): Promise<void> {
     assert.equal(result.controls.className, true);
     assert.equal(Number.parseFloat(result.controls.height) - result.visibleHeight, 24);
     assert.match(result.updatedHeader ?? '', /Updated header/);
+    assert.deepEqual(result.pendingImageGeneration, {
+      oldDetached: true,
+      pendingTwoProjected: 2,
+      pendingOneProjected: 1,
+      pendingZeroProjected: 0,
+      resolved: 1,
+      rejected: 1,
+      currentLate: 0
+    });
     assert.equal(result.projectedWidth, '480px');
     assert.equal(result.focusAndSelectionPreserved, true);
     assert.equal(result.hiddenWithOuterMode, true);
@@ -366,8 +514,17 @@ async function main(): Promise<void> {
     assert.equal(result.styleAfterUnmount, result.styleBeforeUnmount);
     assert.equal(result.hiddenAfterUnmount, true);
     assert.equal(result.lateWrites, 0);
+    assert.equal(result.mountedDisposeLateWrites, 0);
+    assert.deepEqual(result.primaryCleanupError, {
+      cause: true,
+      errors: ['primary clone failure', 'passive listener cleanup failure', 'horizontal listener cleanup failure']
+    });
+    assert.deepEqual(result.cleanupOnlyError, {
+      cause: true,
+      errors: ['passive listener cleanup failure', 'horizontal listener cleanup failure']
+    });
     assert.equal(result.causalQueueEmpty, true);
-    assert.equal(result.sourceUnchanged, true);
+    assert.equal(result.sourceUnchangedByMount, true);
     assert.equal(result.scrollUnchangedByProjection, true);
   } finally {
     await browser.close();

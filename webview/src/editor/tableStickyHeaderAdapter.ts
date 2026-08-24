@@ -23,7 +23,6 @@ export type TableStickyHeaderAdapterOptions = {
   readonly scheduler: TableWidgetLayoutScheduler;
   readonly resolveElements: () => TableStickyHeaderElements | null;
   readonly controlsHeight: () => number;
-  readonly renderHeaderCell: (column: number) => HTMLTableCellElement;
 };
 
 /** Editor-internal lifecycle seam. DOM and scheduling details stay in the concrete adapter. */
