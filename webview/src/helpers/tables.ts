@@ -2629,13 +2629,14 @@ class HtmlTableWidget extends WidgetType {
     context: {
       event?: Event;
       domCaret?: { node: Node; offset: number } | null;
+      primaryError?: unknown;
     } = {}
   ) {
     if (!transition.accepted) return false;
     const table = this.domRefs?.table;
     const wrap = this.domRefs?.wrap ?? table;
-    let hasPrimaryError = false;
-    let primaryError: unknown;
+    let hasPrimaryError = Object.prototype.hasOwnProperty.call(context, 'primaryError');
+    let primaryError: unknown = context.primaryError;
     const cleanupErrors: unknown[] = [];
     const runPrimary = (operation: () => void) => {
       try {
@@ -2884,9 +2885,19 @@ class HtmlTableWidget extends WidgetType {
         return this.applyCellSelectionTransition(transition, { event });
       }
       if (!caretCell) return false;
-      const pointerCaret = this.pointerCaretForCell(caretCell, event.clientX, event.clientY, {
-        nearestFallback: request.nearestFallback
-      });
+      let pointerCaret: TablePointerCaret;
+      try {
+        pointerCaret = this.pointerCaretForCell(caretCell, event.clientX, event.clientY, {
+          nearestFallback: request.nearestFallback
+        });
+      } catch (primaryError) {
+        const failed = this.cellSelection.accept({
+          type: 'caret-failed',
+          requestId: request.requestId
+        });
+        if (!failed.accepted) throw primaryError;
+        return this.applyCellSelectionTransition(failed, { event, primaryError });
+      }
       const completed = this.cellSelection.accept({
         type: 'caret-resolved',
         requestId: request.requestId,

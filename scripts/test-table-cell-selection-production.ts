@@ -887,6 +887,161 @@ async function main() {
     } finally {
       await framePage.close();
     }
+
+    for (const phase of ['begin', 'move', 'end'] as const) {
+      const mapperPage = await browser.newPage();
+      try {
+        await mapperPage.setViewport({ width: 800, height: 500 });
+        await mapperPage.setContent('<!doctype html><div id="app"></div>');
+        await mapperPage.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+        await mapperPage.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+        await mapperPage.evaluate(() => {
+          (window as any).__selectionEditor = (window as any).TableStabilityHarness.createEditor({
+            parent: document.getElementById('app')!,
+            text: '| A | B |\n| --- | --- |\n| one | two |',
+            initialMode: 'live',
+            onApplyChanges() {}
+          });
+        });
+        await mapperPage.waitForFunction(() => document.querySelector('.meo-md-html-table-shell table'));
+        const pageError = new Promise<Error>((resolve) => mapperPage.once('pageerror', resolve));
+        const failure = await mapperPage.evaluate((mapperPhase) => {
+          const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell table')!;
+          const first = table.querySelector<HTMLTableCellElement>('tbody tr:first-child td:first-child')!;
+          const preview = first.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+          const input = first.querySelector<HTMLTextAreaElement>('textarea')!;
+          const box = preview.getBoundingClientRect();
+          const point = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+          const documentWithCaret = document as Document & {
+            caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+          };
+          const ownCaretPosition = Object.getOwnPropertyDescriptor(documentWithCaret, 'caretPositionFromPoint');
+          const nativeHasCapture = table.hasPointerCapture.bind(table);
+          const nativeRelease = table.releasePointerCapture.bind(table);
+          const nativeRemoveAllRanges = Selection.prototype.removeAllRanges;
+          const NativeAggregateError = AggregateError;
+          let aggregateDetails: { errors: string[]; cause: string } | null = null;
+          (window as any).AggregateError = class extends NativeAggregateError {
+            constructor(errors: Iterable<unknown>, message?: string, options?: ErrorOptions) {
+              const entries = Array.from(errors);
+              aggregateDetails = {
+                errors: entries.map((item) => item instanceof Error ? item.message : String(item)),
+                cause: options?.cause instanceof Error ? options.cause.message : String(options?.cause ?? '')
+              };
+              super(entries, message, options);
+            }
+          };
+          const dispatch = (type: 'pointerdown' | 'pointermove' | 'pointerup') => {
+            preview.dispatchEvent(new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              button: type === 'pointerdown' ? 0 : -1,
+              buttons: type === 'pointerup' ? 0 : 1,
+              pointerId: 88,
+              clientX: point.x,
+              clientY: point.y
+            }));
+          };
+          let mapperCalls = 0;
+          let releaseCalls = 0;
+          let removeAllRangesCalls = 0;
+          try {
+            if (mapperPhase !== 'begin') dispatch('pointerdown');
+            Object.defineProperty(documentWithCaret, 'caretPositionFromPoint', {
+              configurable: true,
+              value: () => {
+                mapperCalls += 1;
+                throw new Error(`controlled ${mapperPhase} mapper failure`);
+              }
+            });
+            if (mapperPhase === 'move') {
+              table.hasPointerCapture = () => true;
+              table.releasePointerCapture = () => {
+                releaseCalls += 1;
+                throw new Error('controlled mapper release cleanup failure');
+              };
+              Selection.prototype.removeAllRanges = function () {
+                nativeRemoveAllRanges.call(this);
+                removeAllRangesCalls += 1;
+                if (removeAllRangesCalls === 1) {
+                  throw new Error('controlled mapper DOM cleanup failure');
+                }
+              };
+            }
+            dispatch(mapperPhase === 'begin' ? 'pointerdown' : mapperPhase === 'move' ? 'pointermove' : 'pointerup');
+          } finally {
+            if (ownCaretPosition) {
+              Object.defineProperty(documentWithCaret, 'caretPositionFromPoint', ownCaretPosition);
+            } else {
+              delete documentWithCaret.caretPositionFromPoint;
+            }
+            table.hasPointerCapture = nativeHasCapture;
+            table.releasePointerCapture = nativeRelease;
+            Selection.prototype.removeAllRanges = nativeRemoveAllRanges;
+            (window as any).AggregateError = NativeAggregateError;
+          }
+          return {
+            errors: aggregateDetails?.errors ?? [],
+            cause: aggregateDetails?.cause ?? '',
+            mapperCalls,
+            releaseCalls,
+            removeAllRangesCalls,
+            selected: table.querySelectorAll('.meo-md-html-table-cell-selected').length,
+            interacting: Boolean(table.closest('.meo-md-html-table-shell')?.classList.contains('is-interacting')),
+            nativeText: document.getSelection()?.toString() ?? '',
+            pointerEvents: input.style.pointerEvents,
+            previewVisibility: preview.style.visibility
+          };
+        }, phase);
+        const thrown = await pageError;
+        const expectedPrimary = `controlled ${phase} mapper failure`;
+        if (
+          failure.selected || failure.interacting || failure.nativeText ||
+          failure.pointerEvents || failure.previewVisibility ||
+          (phase === 'move'
+            ? !thrown.message.includes('Table cell selection effect cleanup failed') ||
+              JSON.stringify(failure.errors) !== JSON.stringify([
+                expectedPrimary,
+                'controlled mapper release cleanup failure',
+                'controlled mapper DOM cleanup failure'
+              ]) ||
+              failure.cause !== expectedPrimary || failure.releaseCalls !== 1 || failure.removeAllRangesCalls < 1
+            : !thrown.message.endsWith(expectedPrimary))
+        ) {
+          throw new Error(`${phase} mapper failure did not reach the cleanup terminal: ${JSON.stringify({
+            ...failure, thrown: { name: thrown.name, message: thrown.message }
+          })}`);
+        }
+
+        const retryFrom = await mapperPage.$eval(
+          '.meo-md-html-table-shell tbody tr:first-child td:first-child .meo-md-html-table-cell-preview',
+          (element) => {
+            const box = element.getBoundingClientRect();
+            return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+          }
+        );
+        const retryTo = await mapperPage.$eval(
+          '.meo-md-html-table-shell tbody tr:first-child td:nth-child(2) .meo-md-html-table-cell-preview',
+          (element) => {
+            const box = element.getBoundingClientRect();
+            return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+          }
+        );
+        await mapperPage.mouse.move(retryFrom.x, retryFrom.y);
+        await mapperPage.mouse.down();
+        await mapperPage.mouse.move(retryTo.x, retryTo.y, { steps: 4 });
+        await mapperPage.mouse.up();
+        const retrySelection = await mapperPage.$$eval(
+          '.meo-md-html-table-cell-selected',
+          (elements) => elements.length
+        );
+        if (retrySelection !== 2) {
+          throw new Error(`${phase} mapper failure blocked the next real drag: selected=${retrySelection}`);
+        }
+      } finally {
+        await mapperPage.close();
+      }
+    }
     console.log('table cell selection production checks passed');
   } finally {
     await browser.close();

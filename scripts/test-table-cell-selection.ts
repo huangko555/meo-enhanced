@@ -25,6 +25,13 @@ const begin = (selection: TableCellSelection, pointerId: number, target: ReturnT
     type: 'begin', pointerId, cell: target, fallbackOffset: caret
   }), caret)
 );
+const failCaret = (selection: TableCellSelection, transition: ReturnType<TableCellSelection['accept']>) => {
+  const request = transition.effects[0];
+  assert.equal(request?.kind, 'caret-request');
+  return selection.accept({
+    type: 'caret-failed', requestId: request.kind === 'caret-request' ? request.requestId : -1
+  });
+};
 
 {
   const selection = new TableCellSelection();
@@ -56,6 +63,84 @@ const begin = (selection: TableCellSelection, pointerId: number, target: ReturnT
   assert.deepEqual(late.accept({
     type: 'caret-resolved', requestId: lateRequest.kind === 'caret-request' ? lateRequest.requestId : -1, numericOffset: 1
   }), rejected, 'dispose rejects a late caret resolution');
+}
+
+for (const phase of ['begin', 'move', 'end'] as const) {
+  const selection = new TableCellSelection();
+  let pending = selection.accept({
+    type: 'begin', pointerId: 73, cell: cell(0, 0), fallbackOffset: 0
+  });
+  if (phase !== 'begin') {
+    resolveCaret(selection, pending, 0);
+    pending = selection.accept(phase === 'move'
+      ? { type: 'move', pointerId: 73, cell: cell(0, 0) }
+      : { type: 'end', pointerId: 73, cell: cell(0, 0), insideTable: true });
+  }
+  const request = pending.effects[0];
+  assert.equal(request?.kind, 'caret-request');
+  const requestId = request.kind === 'caret-request' ? request.requestId : -1;
+  assert.deepEqual(selection.accept({ type: 'caret-failed', requestId: requestId + 1 }), rejected,
+    `${phase} rejects a wrong caret failure without disturbing the current request`);
+  assert.deepEqual(failCaret(selection, pending), accepted(
+    ...(phase === 'begin' ? [] : [{ kind: 'release-pointer', pointerId: 73 } as const]),
+    { kind: 'clear', pointerId: 73, reason: 'caret-failed' }
+  ), `${phase} mapper failure terminates the admitted request`);
+  assert.deepEqual(selection.snapshot(), { phase: 'idle', anchor: null, range: null });
+  assert.deepEqual(selection.accept({ type: 'caret-failed', requestId }), rejected,
+    `${phase} rejects a duplicate caret failure`);
+  assert.equal(selection.accept({
+    type: 'begin', pointerId: 73, cell: cell(1, 1), fallbackOffset: 0
+  }).accepted, true, `${phase} mapper failure releases the same pointer for a new transaction`);
+}
+
+{
+  const selection = new TableCellSelection();
+  const first = selection.accept({ type: 'begin', pointerId: 74, cell: cell(0, 0), fallbackOffset: 0 });
+  const firstRequest = first.effects[0];
+  assert.equal(firstRequest?.kind, 'caret-request');
+  const firstRequestId = firstRequest.kind === 'caret-request' ? firstRequest.requestId : -1;
+  failCaret(selection, first);
+  const current = selection.accept({ type: 'begin', pointerId: 75, cell: cell(1, 1), fallbackOffset: 0 });
+  assert.deepEqual(selection.accept({ type: 'caret-failed', requestId: firstRequestId }), rejected,
+    'a stale failure cannot release a newer pointer owner');
+  assert.deepEqual(resolveCaret(selection, current, 1), accepted(
+    { kind: 'prevent-default', pointerId: 75 },
+    { kind: 'set-action-target', pointerId: 75, cell: cell(1, 1) },
+    { kind: 'text', phase: 'begin', pointerId: 75, cell: cell(1, 1), anchorCaret: 1, headCaret: 1 },
+    { kind: 'capture-pointer', pointerId: 75 }
+  ));
+}
+
+for (const reason of ['pointercancel', 'lostcapture'] as const) {
+  for (const phase of ['begin', 'move', 'end'] as const) {
+    const selection = new TableCellSelection();
+    let pending = selection.accept({
+      type: 'begin', pointerId: 76, cell: cell(0, 0), fallbackOffset: 0
+    });
+    if (phase !== 'begin') {
+      resolveCaret(selection, pending, 0);
+      pending = selection.accept(phase === 'move'
+        ? { type: 'move', pointerId: 76, cell: cell(0, 0) }
+        : { type: 'end', pointerId: 76, cell: cell(0, 0), insideTable: true });
+    }
+    assert.equal(pending.effects[0]?.kind, 'caret-request');
+    assert.deepEqual(selection.accept({ type: 'abort', pointerId: 76, reason }), accepted(
+      ...(phase === 'begin' ? [] : [{ kind: 'release-pointer', pointerId: 76 } as const]),
+      { kind: 'clear', pointerId: 76, reason }
+    ), `${reason} terminates a pending ${phase} caret request`);
+    assert.deepEqual(selection.snapshot(), { phase: 'idle', anchor: null, range: null });
+  }
+}
+
+{
+  const selection = new TableCellSelection();
+  const pending = selection.accept({ type: 'begin', pointerId: 77, cell: cell(0, 0), fallbackOffset: 0 });
+  const request = pending.effects[0];
+  assert.equal(request?.kind, 'caret-request');
+  selection.accept({ type: 'dispose' });
+  assert.deepEqual(selection.accept({
+    type: 'caret-failed', requestId: request.kind === 'caret-request' ? request.requestId : -1
+  }), rejected, 'dispose rejects a late caret failure');
 }
 
 {

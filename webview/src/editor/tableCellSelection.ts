@@ -20,6 +20,7 @@ export type TableCellSelectionClearReason =
   | 'cross-table'
   | 'external'
   | 'replacement'
+  | 'caret-failed'
   | 'dispose';
 
 export type TableCellSelectionEffect =
@@ -79,6 +80,7 @@ export type TableCellSelectionEvent =
       readonly insideTable: boolean;
     }
   | { readonly type: 'caret-resolved'; readonly requestId: number; readonly numericOffset: number }
+  | { readonly type: 'caret-failed'; readonly requestId: number }
   | { readonly type: 'delete' }
   | { readonly type: 'abort'; readonly pointerId: number; readonly reason: 'pointercancel' | 'lostcapture' }
   | {
@@ -209,6 +211,17 @@ export class TableCellSelection {
         { kind: 'cells', pointerId: null, range: this.range, focus: 'retain' }
       );
     }
+    if (event.type === 'caret-failed') {
+      const request = this.pendingCaret;
+      if (!request || request.requestId !== event.requestId || this.pointerId !== request.pointerId) return rejected();
+      const pointerId = request.pointerId;
+      const captured = this.captured;
+      this.reset();
+      return accepted(
+        ...(captured ? [{ kind: 'release-pointer', pointerId } as const] : []),
+        { kind: 'clear', pointerId, reason: 'caret-failed' }
+      );
+    }
     if (event.type === 'caret-resolved') {
       const request = this.pendingCaret;
       if (!request || request.requestId !== event.requestId || this.pointerId !== request.pointerId) return rejected();
@@ -273,6 +286,14 @@ export class TableCellSelection {
     }
     if (this.pointerId !== event.pointerId || !this.anchor) {
       return rejected();
+    }
+    if (event.type === 'abort') {
+      const captured = this.captured;
+      this.reset();
+      return accepted(
+        ...(captured ? [{ kind: 'release-pointer', pointerId: event.pointerId } as const] : []),
+        { kind: 'clear', pointerId: event.pointerId, reason: event.reason }
+      );
     }
     if (this.pendingCaret) return rejected();
     if (event.type === 'move') {
@@ -347,11 +368,7 @@ export class TableCellSelection {
         { kind: 'cells', pointerId: event.pointerId, range: this.range, focus: 'table' }
       );
     }
-    this.reset();
-    return accepted(
-      { kind: 'release-pointer', pointerId: event.pointerId },
-      { kind: 'clear', pointerId: event.pointerId, reason: event.reason }
-    );
+    return rejected();
   }
 
   snapshot(): {
