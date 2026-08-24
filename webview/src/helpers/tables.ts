@@ -3624,7 +3624,9 @@ class HtmlTableWidget extends WidgetType {
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     const matrix = this.readCellMatrix();
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.rows.length);
-    if (!validIndexes.length) return { transaction: null, outcome: 'no-op' };
+    if (!validIndexes.length || validIndexes.length >= matrix.rows.length) {
+      return { transaction: null, outcome: 'no-op' };
+    }
     const firstRemoved = Math.min(...validIndexes);
     if (validIndexes.length < matrix.rows.length) {
       const focusRow = Math.min(firstRemoved, matrix.rows.length - validIndexes.length - 1) + 1;
@@ -3636,9 +3638,6 @@ class HtmlTableWidget extends WidgetType {
       if (sourcePlan) return sourcePlan;
     }
     for (const index of validIndexes) matrix.rows.splice(index, 1);
-    if (matrix.rows.length === 0) {
-      matrix.rows.push(new Array(matrix.headerCells.length).fill(''));
-    }
     const focusRow = Math.min(firstRemoved, matrix.rows.length - 1) + 1;
     const sourceRowOrder = this.tableData.rows
       .map((_row, index) => index)
@@ -3766,7 +3765,9 @@ class HtmlTableWidget extends WidgetType {
     if (!uniqueIndexes.length) return { transaction: null, outcome: 'no-op' };
     const matrix = this.readCellMatrix();
     const validIndexes = uniqueIndexes.filter((index) => index >= 0 && index < matrix.headerCells.length);
-    if (!validIndexes.length) return { transaction: null, outcome: 'no-op' };
+    if (!validIndexes.length || validIndexes.length >= matrix.headerCells.length) {
+      return { transaction: null, outcome: 'no-op' };
+    }
     const firstRemoved = Math.min(...validIndexes);
     for (const index of validIndexes) matrix.headerCells.splice(index, 1);
     matrix.rows = matrix.rows.map((row) => {
@@ -3776,11 +3777,6 @@ class HtmlTableWidget extends WidgetType {
     });
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length + validIndexes.length, '').map((value) => value ?? null);
     for (const index of validIndexes) alignments.splice(index, 1);
-    if (matrix.headerCells.length === 0) {
-      matrix.headerCells.push('');
-      matrix.rows = matrix.rows.map(() => ['']);
-      alignments.push(null);
-    }
     matrix.alignments = alignments;
     const focusCol = Math.min(firstRemoved, matrix.headerCells.length - 1);
     return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: focusCol });

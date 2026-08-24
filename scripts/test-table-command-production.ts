@@ -55,10 +55,26 @@ async function main() {
     const result = await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;
       const app = document.getElementById('app')!;
-      const waitFrames = async (count = 4) => {
-        for (let index = 0; index < count; index += 1) {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        }
+      const waitUntil = async (predicate: () => boolean, label: string) => {
+        if (predicate()) return;
+        await new Promise<void>((resolve, reject) => {
+          const observer = new MutationObserver(check);
+          const timeout = window.setTimeout(() => finish(() => reject(new Error(`Timed out waiting for ${label}`))), 5_000);
+          const finish = (complete: () => void) => {
+            observer.disconnect();
+            document.removeEventListener('focusin', check, true);
+            document.removeEventListener('scroll', check, true);
+            window.clearTimeout(timeout);
+            complete();
+          };
+          function check() {
+            if (predicate()) finish(resolve);
+          }
+          observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+          document.addEventListener('focusin', check, true);
+          document.addEventListener('scroll', check, true);
+          queueMicrotask(check);
+        });
       };
       const pointer = (button: HTMLButtonElement) => button.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0,
@@ -80,26 +96,26 @@ async function main() {
         initialMode: 'live',
         onApplyChanges() {}
       });
-      await waitFrames();
+      await waitUntil(() => document.querySelectorAll('.meo-md-html-table-shell').length === 2, 'two production tables');
 
       const original = editor.view.state.doc.toString();
       const firstInput = document.querySelector<HTMLTextAreaElement>(
         '.meo-md-html-table-shell:first-of-type tbody textarea'
       )!;
       firstInput.focus();
-      firstInput.value = 'edited';
-      firstInput.dispatchEvent(new Event('input', { bubbles: true }));
+      firstInput.select();
+      document.execCommand('insertText', false, 'edited');
       const insert = document.querySelector<HTMLButtonElement>(
         '.meo-md-html-table-shell:first-of-type button[title="Insert row below"]'
       )!;
       const consumed = !pointer(insert);
-      await waitFrames();
+      await waitUntil(() => editor.view.state.doc.toString().includes('edited'), 'atomic insert');
       const afterAtomicInsert = editor.view.state.doc.toString();
       const undoApplied = await editor.undo();
-      await waitFrames();
+      await waitUntil(() => editor.view.state.doc.toString() === original, 'atomic undo');
       const afterAtomicUndo = editor.view.state.doc.toString();
       const redoApplied = await editor.redo();
-      await waitFrames();
+      await waitUntil(() => editor.view.state.doc.toString() === afterAtomicInsert, 'atomic redo');
       const afterAtomicRedo = editor.view.state.doc.toString();
 
       const shells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-shell'));
@@ -120,7 +136,7 @@ async function main() {
       secondInput?.focus();
       pointer(shells[0].querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
       pointer(shells[1].querySelector<HTMLButtonElement>('button[title="Align selected column right"]')!);
-      await waitFrames();
+      await waitUntil(() => /\| C\s+\| D\s+\|\n\| ---:\s+\| ---\s+\|/.test(editor.view.state.doc.toString()), 'multi-table queue');
       const afterRapidMultiTable = editor.view.state.doc.toString();
       const toolbarCount = document.querySelectorAll('.meo-md-html-table-toolbar').length;
       const resizeHandleCount = document.querySelectorAll('.meo-md-html-table-column-resize-handle').length;
@@ -136,7 +152,7 @@ async function main() {
         initialMode: 'live',
         onApplyChanges() {}
       });
-      await waitFrames();
+      await waitUntil(() => document.querySelectorAll('tbody textarea').length === 4, 'race table');
       pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
       const inputsAfterInsert = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'));
       inputsAfterInsert.find((input) => input.value === 'two')!.dispatchEvent(new PointerEvent('pointerdown', {
@@ -146,16 +162,85 @@ async function main() {
       inputsAfterInsert.find((input) => input.value === 'one')!.dispatchEvent(new PointerEvent('pointerdown', {
         button: 0, bubbles: true, cancelable: true
       }));
-      await waitFrames();
+      await waitUntil(() => !raceEditor.view.state.doc.toString().includes('| two | 2 |'), 'queued coordinate command');
       const afterQueuedCoordinateChange = raceEditor.view.state.doc.toString();
 
       pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
       pointer(document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!);
       const externalText = ['| A | B |', '| --- | --- |', '| external | stable |'].join('\n');
       raceEditor.setText(externalText);
-      await waitFrames();
+      await waitUntil(() => raceEditor.view.state.doc.toString() === externalText, 'external presentation');
       const afterExternalPresentation = raceEditor.view.state.doc.toString();
       raceEditor.destroy();
+
+      const selectCells = (first: Element, last: Element, pointerId: number) => {
+        const firstRect = first.getBoundingClientRect();
+        const lastRect = last.getBoundingClientRect();
+        first.dispatchEvent(new PointerEvent('pointerdown', {
+          button: 0, bubbles: true, cancelable: true, pointerId,
+          clientX: firstRect.left + firstRect.width / 2,
+          clientY: firstRect.top + firstRect.height / 2
+        }));
+        last.dispatchEvent(new PointerEvent('pointermove', {
+          button: 0, buttons: 1, bubbles: true, cancelable: true, pointerId,
+          clientX: lastRect.left + lastRect.width / 2,
+          clientY: lastRect.top + lastRect.height / 2
+        }));
+        last.dispatchEvent(new PointerEvent('pointerup', {
+          button: 0, bubbles: true, cancelable: true, pointerId,
+          clientX: lastRect.left + lastRect.width / 2,
+          clientY: lastRect.top + lastRect.height / 2
+        }));
+      };
+
+      app.replaceChildren();
+      const rowGuardText = ['| A |', '| --- |', '| one |', '| two |'].join('\n');
+      const rowGuardEditor = harness.createEditor({
+        parent: app,
+        text: rowGuardText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await waitUntil(() => document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview').length === 2, 'row guard table');
+      const rowPreviews = Array.from(document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview'));
+      selectCells(rowPreviews[0], rowPreviews[1], 91);
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!);
+      const afterFullRangeRowDelete = rowGuardEditor.view.state.doc.toString();
+      rowGuardEditor.destroy();
+
+      app.replaceChildren();
+      const columnGuardText = ['| A | B |', '| --- | --- |', '| one | two |'].join('\n');
+      const columnGuardEditor = harness.createEditor({
+        parent: app,
+        text: columnGuardText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await waitUntil(() => document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview').length === 2, 'column guard table');
+      const columnPreviews = Array.from(document.querySelectorAll('.meo-md-html-table tbody .meo-md-html-table-cell-preview'));
+      selectCells(columnPreviews[0], columnPreviews[1], 92);
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!);
+      const afterFullRangeColumnDelete = columnGuardEditor.view.state.doc.toString();
+      columnGuardEditor.destroy();
+
+      app.replaceChildren();
+      const queuedGuardEditor = harness.createEditor({
+        parent: app,
+        text: rowGuardText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await waitUntil(() => document.querySelectorAll('tbody textarea').length === 2, 'queued guard table');
+      document.querySelector<HTMLTextAreaElement>('tbody textarea')!.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0, bubbles: true, cancelable: true, pointerId: 93
+      }));
+      const queuedDelete = document.querySelector<HTMLButtonElement>('button[title="Delete row"]')!;
+      pointer(queuedDelete);
+      pointer(queuedDelete);
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Align selected column left"]')!);
+      await waitUntil(() => queuedGuardEditor.view.state.doc.toString().includes('| :--- |'), 'queued double-delete drain');
+      const afterQueuedDoubleDelete = queuedGuardEditor.view.state.doc.toString();
+      queuedGuardEditor.destroy();
       return {
         original,
         consumed,
@@ -173,7 +258,12 @@ async function main() {
         detachedConsumed,
         afterQueuedCoordinateChange,
         externalText,
-        afterExternalPresentation
+        afterExternalPresentation,
+        rowGuardText,
+        afterFullRangeRowDelete,
+        columnGuardText,
+        afterFullRangeColumnDelete,
+        afterQueuedDoubleDelete
       };
     });
 
@@ -212,6 +302,171 @@ async function main() {
       result.externalText,
       'external presentation must invalidate queued commands from the previous document scope'
     );
+    assert.equal(result.afterFullRangeRowDelete, result.rowGuardText, 'deleting every body row must be a strict no-op');
+    assert.equal(result.afterFullRangeColumnDelete, result.columnGuardText, 'deleting every column must be a strict no-op');
+    assert.match(result.afterQueuedDoubleDelete, /\| two\s+\|/, 'queued deletion must not remove the last body row');
+
+    type MatrixCase = {
+      name: string;
+      title: string;
+      edit: { row: number; col: number };
+      target: { row: number; col: number };
+      expected: string;
+      focus: { row: number; col: number };
+    };
+    const matrixOriginal = [
+      '| A | B |',
+      '| --- | --- |',
+      '| one | two |',
+      '| three | four |'
+    ].join('\n');
+    const matrixCases: MatrixCase[] = [
+      {
+        name: 'insert row above', title: 'Insert row above', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
+        expected: ['| A | B |', '| --- | --- |', '|  |  |', '| one! | two |', '| three | four |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      },
+      {
+        name: 'insert row below', title: 'Insert row below', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
+        expected: ['| A | B |', '| --- | --- |', '| one! | two |', '|  |  |', '| three | four |'].join('\n'),
+        focus: { row: 2, col: 0 }
+      },
+      {
+        name: 'delete row', title: 'Delete row', edit: { row: 1, col: 0 }, target: { row: 2, col: 0 },
+        expected: ['| A | B |', '| --- | --- |', '| one! | two |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      },
+      {
+        name: 'insert column left', title: 'Insert column left', edit: { row: 1, col: 1 }, target: { row: 1, col: 1 },
+        expected: ['| A |  | B |', '| --- | --- | --- |', '| one |  | two! |', '| three |  | four |'].join('\n'),
+        focus: { row: 1, col: 1 }
+      },
+      {
+        name: 'insert column right', title: 'Insert column right', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
+        expected: ['| A |  | B |', '| --- | --- | --- |', '| one! |  | two |', '| three |  | four |'].join('\n'),
+        focus: { row: 1, col: 1 }
+      },
+      {
+        name: 'delete column', title: 'Delete column', edit: { row: 1, col: 0 }, target: { row: 1, col: 1 },
+        expected: ['| A |', '| --- |', '| one! |', '| three |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      },
+      {
+        name: 'align left', title: 'Align selected column left', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
+        expected: ['| A | B |', '| :--- | --- |', '| one! | two |', '| three | four |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      },
+      {
+        name: 'align center', title: 'Align selected column center', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
+        expected: ['| A | B |', '| :---: | --- |', '| one! | two |', '| three | four |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      },
+      {
+        name: 'align right', title: 'Align selected column right', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
+        expected: ['| A | B |', '| ---: | --- |', '| one! | two |', '| three | four |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      }
+    ];
+
+    for (const matrixCase of matrixCases) {
+      await page.evaluate((text) => {
+        const candidate = window as typeof window & { __tableCommandMatrixEditor?: any };
+        candidate.__tableCommandMatrixEditor?.destroy();
+        const app = document.getElementById('app')!;
+        app.replaceChildren();
+        const editor = (window as any).TableStabilityHarness.createEditor({
+          parent: app,
+          text,
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+        candidate.__tableCommandMatrixEditor = editor;
+      }, matrixOriginal);
+      await page.waitForSelector('.meo-md-html-table-shell tbody textarea');
+
+      const editSelector = `textarea[data-table-row="${matrixCase.edit.row}"][data-table-col="${matrixCase.edit.col}"]`;
+      await page.click(editSelector);
+      await page.keyboard.press('End');
+      await page.keyboard.type('!');
+      await page.evaluate((target) => {
+        const editor = (window as any).__tableCommandMatrixEditor;
+        const view = editor.view;
+        const originalDispatch = view.dispatch.bind(view);
+        (window as any).__tableCommandDispatchCount = 0;
+        view.dispatch = (...transactions: unknown[]) => {
+          const flattened = transactions.flatMap((transaction) => Array.isArray(transaction) ? transaction : [transaction]);
+          if (flattened.some((transaction: any) => transaction?.docChanged === true || transaction?.changes)) {
+            (window as any).__tableCommandDispatchCount += 1;
+          }
+          return originalDispatch(...transactions);
+        };
+        (window as any).__tableCommandBefore = {
+          history: editor.getHistoryDepth(),
+          scrollTop: view.scrollDOM.scrollTop
+        };
+        const input = document.querySelector<HTMLTextAreaElement>(
+          `textarea[data-table-row="${target.row}"][data-table-col="${target.col}"]`
+        )!;
+        input.dispatchEvent(new PointerEvent('pointerdown', {
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+          pointerId: 101
+        }));
+      }, matrixCase.target);
+      await page.click(`button[title="${matrixCase.title}"]`);
+      await page.waitForFunction((expected) => (
+        (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected
+      ), {}, matrixCase.expected);
+
+      const afterCommand = await page.evaluate(() => {
+        const editor = (window as any).__tableCommandMatrixEditor;
+        const active = document.activeElement;
+        return {
+          markdown: editor.view.state.doc.toString(),
+          dispatches: (window as any).__tableCommandDispatchCount,
+          history: editor.getHistoryDepth(),
+          before: (window as any).__tableCommandBefore,
+          focus: active instanceof HTMLTextAreaElement ? {
+            row: Number(active.dataset.tableRow),
+            col: Number(active.dataset.tableCol),
+            start: active.selectionStart,
+            end: active.selectionEnd
+          } : null,
+          scrollTop: editor.view.scrollDOM.scrollTop
+        };
+      });
+      assert.equal(afterCommand.markdown, matrixCase.expected, `${matrixCase.name}: exact Markdown`);
+      assert.equal(afterCommand.dispatches, 1, `${matrixCase.name}: pending edit and command use one document dispatch`);
+      assert.deepEqual(afterCommand.before.history, { undo: 0, redo: 0 }, `${matrixCase.name}: clean history baseline`);
+      assert.deepEqual(afterCommand.history, { undo: 1, redo: 0 }, `${matrixCase.name}: one Editor History item`);
+      assert.deepEqual(afterCommand.focus, { ...matrixCase.focus, start: 0, end: 0 }, `${matrixCase.name}: focus/caret`);
+      assert.equal(afterCommand.scrollTop, afterCommand.before.scrollTop, `${matrixCase.name}: scroll continuity`);
+
+      assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.undo()), true, `${matrixCase.name}: undo accepted`);
+      await page.waitForFunction((expected) => (
+        (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected
+      ), {}, matrixOriginal);
+      const afterUndo = await page.evaluate(() => {
+        const editor = (window as any).__tableCommandMatrixEditor;
+        return { markdown: editor.view.state.doc.toString(), history: editor.getHistoryDepth(), scrollTop: editor.view.scrollDOM.scrollTop };
+      });
+      assert.equal(afterUndo.markdown, matrixOriginal, `${matrixCase.name}: exact undo Markdown`);
+      assert.deepEqual(afterUndo.history, { undo: 0, redo: 1 }, `${matrixCase.name}: undo history depth`);
+      assert.equal(afterUndo.scrollTop, afterCommand.before.scrollTop, `${matrixCase.name}: undo scroll continuity`);
+
+      assert.equal(await page.evaluate(() => (window as any).__tableCommandMatrixEditor.redo()), true, `${matrixCase.name}: redo accepted`);
+      await page.waitForFunction((expected) => (
+        (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected
+      ), {}, matrixCase.expected);
+      const afterRedo = await page.evaluate(() => {
+        const editor = (window as any).__tableCommandMatrixEditor;
+        return { markdown: editor.view.state.doc.toString(), history: editor.getHistoryDepth(), scrollTop: editor.view.scrollDOM.scrollTop };
+      });
+      assert.equal(afterRedo.markdown, matrixCase.expected, `${matrixCase.name}: exact redo Markdown`);
+      assert.deepEqual(afterRedo.history, { undo: 1, redo: 0 }, `${matrixCase.name}: redo history depth`);
+      assert.equal(afterRedo.scrollTop, afterCommand.before.scrollTop, `${matrixCase.name}: redo scroll continuity`);
+    }
   } finally {
     await browser.close();
   }
