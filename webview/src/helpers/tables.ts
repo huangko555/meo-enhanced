@@ -65,7 +65,7 @@ import {
   TableCellSelection,
   type TableCellCopyInline,
   type TableCellCopyValue,
-  type TableCellSelectionEffect,
+  type TableCellSelectionTransition,
   type TableCellRange as TableSelectionRange
 } from '../editor/tableCellSelection';
 
@@ -2173,6 +2173,7 @@ class HtmlTableWidget extends WidgetType {
   tableCommandEnvironment: TableCommandEnvironment;
   tableCommandTargetId: string;
   tableCommandTargetRegistration: TableCommandTargetRegistration | null;
+  selectionDomAnchor: { node: Node; offset: number } | null;
 
   constructor(
     tableData: WidgetTableData,
@@ -2195,6 +2196,7 @@ class HtmlTableWidget extends WidgetType {
     this.tableCommandEnvironment = tableCommandEnvironment;
     this.tableCommandTargetId = '';
     this.tableCommandTargetRegistration = null;
+    this.selectionDomAnchor = null;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -2622,30 +2624,164 @@ class HtmlTableWidget extends WidgetType {
     }
   }
 
+  applyCellSelectionTransition(
+    transition: TableCellSelectionTransition,
+    context: {
+      event?: Event;
+      domCaret?: { node: Node; offset: number } | null;
+    } = {}
+  ) {
+    if (!transition.accepted) return false;
+    const table = this.domRefs?.table;
+    const wrap = this.domRefs?.wrap ?? table;
+    let hasPrimaryError = false;
+    let primaryError: unknown;
+    const cleanupErrors: unknown[] = [];
+    const runPrimary = (operation: () => void) => {
+      try {
+        operation();
+      } catch (error) {
+        if (!hasPrimaryError) {
+          hasPrimaryError = true;
+          primaryError = error;
+        } else {
+          cleanupErrors.push(error);
+        }
+      }
+    };
+    const runCleanup = (operation: () => void) => {
+      try {
+        operation();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    };
+    const clearNativeTextSelection = () => {
+      this.selectionDomAnchor = null;
+      document.getSelection()?.removeAllRanges();
+    };
+    const projectNativeTextSelection = (domHead: { node: Node; offset: number } | null | undefined) => {
+      if (!this.selectionDomAnchor || !domHead) return;
+      const selection = document.getSelection();
+      try {
+        selection?.setBaseAndExtent(
+          this.selectionDomAnchor.node,
+          this.selectionDomAnchor.offset,
+          domHead.node,
+          domHead.offset
+        );
+      } catch {
+        selection?.removeAllRanges();
+      }
+    };
+
+    for (const effect of transition.effects) {
+      if (effect.kind === 'prevent-default') {
+        runPrimary(() => context.event?.preventDefault());
+        continue;
+      }
+      if (effect.kind === 'set-action-target') {
+        runPrimary(() => this.setActionTarget(effect.cell));
+        continue;
+      }
+      if (effect.kind === 'capture-pointer') {
+        try {
+          table?.setPointerCapture?.(effect.pointerId);
+        } catch {
+          // Synthetic pointer events and already-released pointers cannot be captured.
+        }
+        continue;
+      }
+      if (effect.kind === 'release-pointer') {
+        runCleanup(() => {
+          if (table?.hasPointerCapture?.(effect.pointerId)) table.releasePointerCapture?.(effect.pointerId);
+        });
+        continue;
+      }
+      if (effect.kind === 'clear-text') {
+        runPrimary(clearNativeTextSelection);
+        continue;
+      }
+      if (effect.kind === 'clear') {
+        runPrimary(clearNativeTextSelection);
+        runPrimary(() => this.applySelection(null));
+        if (wrap && effect.reason === 'cross-table') {
+          runPrimary(() => {
+            const shell = wrap.closest('.meo-md-html-table-shell');
+            if (shell instanceof HTMLElement) shell.classList.remove('is-interacting');
+          });
+          runPrimary(() => this.updateStickyControls());
+          runPrimary(() => this.stickyHeaderAdapter.invalidate());
+        } else if (wrap && effect.reason !== 'pointercancel' && effect.reason !== 'lostcapture') {
+          runPrimary(() => this.setTableInteractionActive(wrap, false));
+        }
+        runPrimary(() => this.syncTableLineNumbers());
+        continue;
+      }
+      if (effect.kind === 'cells') {
+        runPrimary(clearNativeTextSelection);
+        if (wrap) runPrimary(() => this.setTableInteractionActive(wrap, true));
+        runPrimary(() => this.applySelection(effect.range));
+        if (effect.focus === 'table') runPrimary(() => table?.focus({ preventScroll: true }));
+        continue;
+      }
+      if (effect.phase === 'begin') {
+        runPrimary(clearNativeTextSelection);
+        runPrimary(() => this.applySelection(null));
+        runPrimary(() => {
+          this.selectionDomAnchor = context.domCaret ?? null;
+        });
+        runPrimary(() => projectNativeTextSelection(context.domCaret));
+        continue;
+      }
+      if (effect.phase === 'preview') {
+        runPrimary(() => this.applySelection(null));
+        runPrimary(() => projectNativeTextSelection(context.domCaret));
+        continue;
+      }
+      runPrimary(clearNativeTextSelection);
+      const input = this.domRefs?.allRowInputs[effect.cell.row]?.[effect.cell.col];
+      if (!(input instanceof HTMLTextAreaElement)) continue;
+      runPrimary(() => this.focusTableInput(input, effect.anchorCaret, { scrollCellIntoView: false }));
+      runPrimary(() => input.setSelectionRange(
+        Math.min(effect.anchorCaret, effect.headCaret),
+        Math.max(effect.anchorCaret, effect.headCaret),
+        effect.headCaret < effect.anchorCaret ? 'backward' : 'forward'
+      ));
+      if (wrap) runPrimary(() => this.emitTableSelectionChange(wrap));
+    }
+    if (hasPrimaryError && cleanupErrors.length) {
+      throw new AggregateError(
+        [primaryError, ...cleanupErrors],
+        'Table cell selection effect cleanup failed',
+        { cause: primaryError }
+      );
+    }
+    if (hasPrimaryError) throw primaryError;
+    if (cleanupErrors.length === 1) throw cleanupErrors[0];
+    if (cleanupErrors.length > 1) {
+      throw new AggregateError(cleanupErrors, 'Table cell selection cleanup failed', { cause: cleanupErrors[0] });
+    }
+    return true;
+  }
+
   setSingleCellSelection(coords: CellCoords) {
     const transition = this.cellSelection.accept({ type: 'select', anchor: coords, head: coords });
-    this.setActionTarget(coords);
-    if (transition.effect?.kind === 'cells') this.applySelection(transition.effect.range);
+    if (!transition.accepted) return false;
+    this.applyCellSelectionTransition(transition);
+    return true;
   }
 
   clearSelection(reason: 'outside' | 'escape' | 'cross-table' | 'external' | 'replacement' = 'external') {
     const transition = this.cellSelection.accept({ type: 'clear', reason });
-    if (transition.effect?.kind === 'clear') this.applySelection(null);
-    this.syncTableLineNumbers();
+    this.applyCellSelectionTransition(transition);
   }
 
   exitTableInteraction(container: HTMLElement, reason: 'outside' | 'escape' | 'external' | 'replacement' = 'external') {
-    this.setTableInteractionActive(container, false);
     this.clearSelection(reason);
   }
 
   transferTableInteraction(container: HTMLElement) {
-    const shell = container?.closest?.('.meo-md-html-table-shell');
-    if (shell instanceof HTMLElement) {
-      shell.classList.remove('is-interacting');
-    }
-    this.updateStickyControls();
-    this.stickyHeaderAdapter.invalidate();
     this.clearSelection('cross-table');
   }
 
@@ -2729,61 +2865,6 @@ class HtmlTableWidget extends WidgetType {
     let pendingOutsidePointerId: number | null = null;
     let pendingTableSwitchPointerId: number | null = null;
     let outsidePointerExitTimer: number | null = null;
-    let textSelectionDomAnchor: { node: Node; offset: number } | null = null;
-
-    const clearNativeTextSelection = () => {
-      textSelectionDomAnchor = null;
-      document.getSelection()?.removeAllRanges();
-    };
-
-    const applyPointerSelectionEffect = (
-      effect: TableCellSelectionEffect | null,
-      domHead: { node: Node; offset: number } | null = null
-    ) => {
-      if (!effect) return;
-      if (effect.kind === 'clear-text') {
-        clearNativeTextSelection();
-        return;
-      }
-      if (effect.kind === 'clear') {
-        clearNativeTextSelection();
-        this.applySelection(null);
-        return;
-      }
-      if (effect.kind === 'cells') {
-        clearNativeTextSelection();
-        this.setTableInteractionActive(getWrap(), true);
-        this.applySelection(effect.range);
-        table.focus({ preventScroll: true });
-        return;
-      }
-      if (effect.phase === 'preview') {
-        this.applySelection(null);
-        if (!textSelectionDomAnchor || !domHead) return;
-        const selection = document.getSelection();
-        try {
-          selection?.setBaseAndExtent(
-            textSelectionDomAnchor.node,
-            textSelectionDomAnchor.offset,
-            domHead.node,
-            domHead.offset
-          );
-        } catch {
-          selection?.removeAllRanges();
-        }
-        return;
-      }
-      clearNativeTextSelection();
-      const input = this.domRefs?.allRowInputs[effect.cell.row]?.[effect.cell.col];
-      if (!(input instanceof HTMLTextAreaElement)) return;
-      this.focusTableInput(input, effect.anchorCaret, { scrollCellIntoView: false });
-      input.setSelectionRange(
-        Math.min(effect.anchorCaret, effect.headCaret),
-        Math.max(effect.anchorCaret, effect.headCaret),
-        effect.headCaret < effect.anchorCaret ? 'backward' : 'forward'
-      );
-      this.emitTableSelectionChange(getWrap());
-    };
 
     const hasActiveTableInteraction = () => {
       const active = document.activeElement;
@@ -2812,11 +2893,6 @@ class HtmlTableWidget extends WidgetType {
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
-      pendingOutsidePointerId = null;
-      if (outsidePointerExitTimer !== null) {
-        window.clearTimeout(outsidePointerExitTimer);
-        outsidePointerExitTimer = null;
-      }
       const modifierHref = getModifierLinkActivationHref(event);
       if (modifierHref) {
         event.preventDefault();
@@ -2833,18 +2909,15 @@ class HtmlTableWidget extends WidgetType {
       const current = this.coordsFromCell(cell);
       if (!current) return;
       if (event.target instanceof HTMLTextAreaElement) {
-        this.setSingleCellSelection(current);
+        if (!this.setSingleCellSelection(current)) return;
+        pendingOutsidePointerId = null;
+        if (outsidePointerExitTimer !== null) {
+          window.clearTimeout(outsidePointerExitTimer);
+          outsidePointerExitTimer = null;
+        }
         return;
       }
-      // Preview text selection is owned by this pointer pipeline. Preventing the
-      // browser's default pointer action keeps the active textarea alive until
-      // pointerup and prevents native text/image drag sessions from competing
-      // with the DOM Selection that pointermove updates below.
-      event.preventDefault();
-      document.getSelection()?.removeAllRanges();
       const anchor = current;
-      this.setActionTarget(anchor);
-
       const input = cell.querySelector('textarea');
       const pointerCaret = this.pointerCaretForCell(cell, event.clientX, event.clientY);
       const caret = pointerCaret.editorOffset;
@@ -2854,15 +2927,13 @@ class HtmlTableWidget extends WidgetType {
         cell: anchor,
         caret: caret ?? (input instanceof HTMLTextAreaElement ? input.value.length : 0)
       });
-      if (!transition.handled) return;
-      textSelectionDomAnchor = pointerCaret.domCaret;
-      applyPointerSelectionEffect(transition.effect, pointerCaret.domCaret);
-      try {
-        table.setPointerCapture?.(event.pointerId);
-      } catch {
-        // Synthetic pointer events and already-released pointers cannot be
-        // captured. Selection still works through the table listeners.
+      if (!transition.accepted) return;
+      pendingOutsidePointerId = null;
+      if (outsidePointerExitTimer !== null) {
+        window.clearTimeout(outsidePointerExitTimer);
+        outsidePointerExitTimer = null;
       }
+      this.applyCellSelectionTransition(transition, { event, domCaret: pointerCaret.domCaret });
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -2872,7 +2943,7 @@ class HtmlTableWidget extends WidgetType {
         const transition = this.cellSelection.accept({
           type: 'move', pointerId: event.pointerId, cell: null, caret: null
         });
-        if (transition.handled) applyPointerSelectionEffect(transition.effect);
+        this.applyCellSelectionTransition(transition, { event });
         return;
       }
       const current = this.coordsFromCell(cell);
@@ -2884,7 +2955,7 @@ class HtmlTableWidget extends WidgetType {
         cell: current,
         caret: pointerCaret.editorOffset
       });
-      if (transition.handled) applyPointerSelectionEffect(transition.effect, pointerCaret.domCaret);
+      this.applyCellSelectionTransition(transition, { event, domCaret: pointerCaret.domCaret });
     };
 
     const endPointerSelection = (event: PointerEvent) => {
@@ -2912,10 +2983,7 @@ class HtmlTableWidget extends WidgetType {
             pointerId: event.pointerId,
             reason: event.type === 'lostpointercapture' ? 'lostcapture' : 'pointercancel'
           });
-      if (!transition.handled) return;
-      if (table.hasPointerCapture?.(event.pointerId)) table.releasePointerCapture?.(event.pointerId);
-      if (transition.effect?.kind === 'text' && transition.effect.phase === 'commit') event.preventDefault();
-      applyPointerSelectionEffect(transition.effect);
+      this.applyCellSelectionTransition(transition, { event });
     };
 
     const onCopy = (event: ClipboardEvent) => {
@@ -3030,7 +3098,7 @@ class HtmlTableWidget extends WidgetType {
       const transition = this.cellSelection.accept({
         type: 'move', pointerId: event.pointerId, cell: null, caret: null
       });
-      if (transition.handled) applyPointerSelectionEffect(transition.effect);
+      this.applyCellSelectionTransition(transition, { event });
     };
 
     const onDocumentPointerEnd = (event: PointerEvent) => {
@@ -4599,26 +4667,39 @@ class HtmlTableWidget extends WidgetType {
   }
 
   destroy(dom: HTMLElement) {
-    const selectionDisposal = this.cellSelection.accept({ type: 'dispose' });
-    if (selectionDisposal.effect?.kind === 'clear') this.applySelection(null);
-    this.setTableInteractionActive(dom, false);
-    disposeImagePresentations(dom);
-    this.tableCommandTargetRegistration?.dispose();
+    const errors: unknown[] = [];
+    const cleanup = (operation: () => void) => {
+      try {
+        operation();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
+    cleanup(() => {
+      const selectionDisposal = this.cellSelection.accept({ type: 'dispose' });
+      this.applyCellSelectionTransition(selectionDisposal);
+    });
+    cleanup(() => disposeImagePresentations(dom));
+    cleanup(() => this.tableCommandTargetRegistration?.dispose());
     this.tableCommandTargetRegistration = null;
-    this.stickyHeaderAdapter.unmount();
-    this.stickyHeaderAdapter.dispose();
-    for (const cleanup of this.cleanupFns) cleanup();
+    cleanup(() => this.stickyHeaderAdapter.unmount());
+    cleanup(() => this.stickyHeaderAdapter.dispose());
+    for (const dispose of this.cleanupFns) cleanup(dispose);
     this.cleanupFns = [];
     if (this.layoutFrame) {
-      cancelAnimationFrame(this.layoutFrame);
+      cleanup(() => cancelAnimationFrame(this.layoutFrame));
       this.layoutFrame = 0;
     }
     this.layoutTasks.clear();
     this.domRefs = null;
     this.view = null;
-    this.cellInteraction.accept({ type: 'dispose' });
-    this.cancelPendingCellAutoCommit();
+    cleanup(() => this.cellInteraction.accept({ type: 'dispose' }));
+    cleanup(() => this.cancelPendingCellAutoCommit());
     this.pendingCellSwitchCommit = false;
+    if (!errors.length) return;
+    cleanup(() => dom.remove());
+    if (errors.length === 1) throw errors[0];
+    throw new AggregateError(errors, 'Table widget cleanup failed', { cause: errors[0] });
   }
 }
 

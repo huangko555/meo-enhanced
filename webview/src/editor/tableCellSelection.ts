@@ -12,17 +12,41 @@ export interface TableCellRange {
 
 export type TableCellSelectionPhase = 'idle' | 'text-candidate' | 'dragging' | 'persisted' | 'disposed';
 
+export type TableCellSelectionClearReason =
+  | 'pointercancel'
+  | 'lostcapture'
+  | 'outside'
+  | 'escape'
+  | 'cross-table'
+  | 'external'
+  | 'replacement'
+  | 'dispose';
+
 export type TableCellSelectionEffect =
+  | { readonly kind: 'prevent-default'; readonly pointerId: number }
+  | { readonly kind: 'set-action-target'; readonly pointerId: number | null; readonly cell: TableCellCoordinates }
   | {
       readonly kind: 'text';
-      readonly phase: 'preview' | 'commit';
+      readonly phase: 'begin' | 'preview' | 'commit';
+      readonly pointerId: number;
       readonly cell: TableCellCoordinates;
       readonly anchorCaret: number;
       readonly headCaret: number;
     }
-  | { readonly kind: 'cells'; readonly range: TableCellRange }
-  | { readonly kind: 'clear-text' }
-  | { readonly kind: 'clear' };
+  | {
+      readonly kind: 'cells';
+      readonly pointerId: number | null;
+      readonly range: TableCellRange;
+      readonly focus: 'retain' | 'table';
+    }
+  | { readonly kind: 'clear-text'; readonly pointerId: number }
+  | { readonly kind: 'capture-pointer'; readonly pointerId: number }
+  | { readonly kind: 'release-pointer'; readonly pointerId: number }
+  | {
+      readonly kind: 'clear';
+      readonly pointerId: number | null;
+      readonly reason: TableCellSelectionClearReason;
+    };
 
 export type TableCellSelectionEvent =
   | { readonly type: 'begin'; readonly pointerId: number; readonly cell: TableCellCoordinates; readonly caret: number }
@@ -40,8 +64,8 @@ export type TableCellSelectionEvent =
   | { readonly type: 'dispose' };
 
 export interface TableCellSelectionTransition {
-  readonly handled: boolean;
-  readonly effect: TableCellSelectionEffect | null;
+  readonly accepted: boolean;
+  readonly effects: readonly TableCellSelectionEffect[];
 }
 
 export interface SerializedTableCellSelection {
@@ -94,76 +118,98 @@ export class TableCellSelection {
   private headCaret = 0;
 
   accept(event: TableCellSelectionEvent): TableCellSelectionTransition {
+    const accepted = (...effects: readonly TableCellSelectionEffect[]): TableCellSelectionTransition => ({
+      accepted: true,
+      effects
+    });
+    const rejected = (): TableCellSelectionTransition => ({ accepted: false, effects: [] });
     if (event.type === 'dispose') {
-      if (this.phase === 'disposed') return { handled: false, effect: null };
+      if (this.phase === 'disposed') return rejected();
+      const pointerId = this.pointerId;
       this.reset();
       this.phase = 'disposed';
-      return { handled: true, effect: { kind: 'clear' } };
+      return accepted(
+        ...(pointerId === null ? [] : [{ kind: 'release-pointer', pointerId } as const]),
+        { kind: 'clear', pointerId, reason: 'dispose' }
+      );
     }
-    if (this.phase === 'disposed') return { handled: false, effect: null };
+    if (this.phase === 'disposed') return rejected();
     if (event.type === 'clear') {
-      if (this.phase === 'idle') return { handled: false, effect: null };
+      if (this.phase === 'idle') return rejected();
+      const pointerId = this.pointerId;
       this.reset();
-      return { handled: true, effect: { kind: 'clear' } };
+      return accepted(
+        ...(pointerId === null ? [] : [{ kind: 'release-pointer', pointerId } as const]),
+        { kind: 'clear', pointerId, reason: event.reason }
+      );
     }
     if (event.type === 'select') {
+      const pointerId = this.pointerId;
       this.anchor = event.anchor;
       this.range = normalizeRange(event.anchor, event.head);
       this.pointerId = null;
       this.phase = 'persisted';
-      return { handled: true, effect: { kind: 'cells', range: this.range } };
+      return accepted(
+        ...(pointerId === null ? [] : [{ kind: 'release-pointer', pointerId } as const]),
+        { kind: 'set-action-target', pointerId: null, cell: event.anchor },
+        { kind: 'cells', pointerId: null, range: this.range, focus: 'retain' }
+      );
     }
     if (event.type === 'begin') {
-      if (this.pointerId !== null) return { handled: false, effect: null };
+      if (this.pointerId !== null) return rejected();
       this.phase = 'text-candidate';
       this.pointerId = event.pointerId;
       this.anchor = event.cell;
       this.anchorCaret = event.caret;
       this.headCaret = event.caret;
       this.range = normalizeRange(event.cell, event.cell);
-      return {
-        handled: true,
-        effect: {
+      return accepted(
+        { kind: 'prevent-default', pointerId: event.pointerId },
+        { kind: 'set-action-target', pointerId: event.pointerId, cell: event.cell },
+        {
           kind: 'text',
-          phase: 'preview',
+          phase: 'begin',
+          pointerId: event.pointerId,
           cell: event.cell,
           anchorCaret: event.caret,
           headCaret: event.caret
-        }
-      };
+        },
+        { kind: 'capture-pointer', pointerId: event.pointerId }
+      );
     }
     if (this.pointerId !== event.pointerId || !this.anchor) {
-      return { handled: false, effect: null };
+      return rejected();
     }
     if (event.type === 'move') {
       if (event.cell === null) {
         if (this.phase === 'text-candidate') {
           this.phase = 'dragging';
-          return { handled: true, effect: { kind: 'clear-text' } };
+          return accepted({ kind: 'clear-text', pointerId: event.pointerId });
         }
-        return { handled: true, effect: null };
+        return accepted();
       }
       if (this.phase === 'text-candidate' && event.cell.row === this.anchor.row && event.cell.col === this.anchor.col) {
         if (event.caret !== null) this.headCaret = event.caret;
-        return {
-          handled: true,
-          effect: {
+        return accepted({
             kind: 'text',
             phase: 'preview',
+            pointerId: event.pointerId,
             cell: this.anchor,
             anchorCaret: this.anchorCaret,
             headCaret: this.headCaret
-          }
-        };
+        });
       }
       this.phase = 'dragging';
       this.range = normalizeRange(this.anchor, event.cell);
-      return { handled: true, effect: { kind: 'cells', range: this.range } };
+      return accepted({ kind: 'cells', pointerId: event.pointerId, range: this.range, focus: 'table' });
     }
     if (event.type === 'end') {
       if (!event.insideTable) {
         this.reset();
-        return { handled: true, effect: { kind: 'clear' } };
+        return accepted(
+          { kind: 'release-pointer', pointerId: event.pointerId },
+          { kind: 'clear', pointerId: event.pointerId, reason: 'outside' }
+        );
       }
       if (this.phase === 'text-candidate' && (!event.cell || (
         event.cell.row === this.anchor.row && event.cell.col === this.anchor.col
@@ -172,24 +218,38 @@ export class TableCellSelection {
         const effect: TableCellSelectionEffect = {
           kind: 'text',
           phase: 'commit',
+          pointerId: event.pointerId,
           cell: this.anchor,
           anchorCaret: this.anchorCaret,
           headCaret: this.headCaret
         };
         this.reset();
-        return { handled: true, effect };
+        return accepted(
+          { kind: 'release-pointer', pointerId: event.pointerId },
+          { kind: 'prevent-default', pointerId: event.pointerId },
+          effect
+        );
       }
       if (event.cell) this.range = normalizeRange(this.anchor, event.cell);
       if (!this.range) {
         this.reset();
-        return { handled: true, effect: { kind: 'clear' } };
+        return accepted(
+          { kind: 'release-pointer', pointerId: event.pointerId },
+          { kind: 'clear', pointerId: event.pointerId, reason: 'outside' }
+        );
       }
       this.pointerId = null;
       this.phase = 'persisted';
-      return { handled: true, effect: { kind: 'cells', range: this.range } };
+      return accepted(
+        { kind: 'release-pointer', pointerId: event.pointerId },
+        { kind: 'cells', pointerId: event.pointerId, range: this.range, focus: 'table' }
+      );
     }
     this.reset();
-    return { handled: true, effect: { kind: 'clear' } };
+    return accepted(
+      { kind: 'release-pointer', pointerId: event.pointerId },
+      { kind: 'clear', pointerId: event.pointerId, reason: event.reason }
+    );
   }
 
   snapshot(): {
