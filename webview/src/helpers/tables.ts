@@ -2529,7 +2529,7 @@ class HtmlTableWidget extends WidgetType {
     if (!updateSelection) return true;
     const coords = this.coordsFromCell(cell);
     if (coords) {
-      this.setSingleCellSelection(coords);
+      this.setSingleCellSelection(coords, 'command');
     }
     return true;
   }
@@ -2676,6 +2676,7 @@ class HtmlTableWidget extends WidgetType {
     };
 
     for (const effect of transition.effects) {
+      if (effect.kind === 'caret-request') continue;
       if (effect.kind === 'prevent-default') {
         runPrimary(() => context.event?.preventDefault());
         continue;
@@ -2725,6 +2726,20 @@ class HtmlTableWidget extends WidgetType {
         if (effect.focus === 'table') runPrimary(() => table?.focus({ preventScroll: true }));
         continue;
       }
+      if (effect.kind === 'delete-cells') {
+        if (!this.domRefs) continue;
+        for (let row = effect.range.fromRow; row <= effect.range.toRow; row++) {
+          for (let col = effect.range.fromCol; col <= effect.range.toCol; col++) {
+            const input = this.domRefs.allRowInputs[row]?.[col];
+            if (!input || input.value === '') continue;
+            input.value = '';
+            this.refreshCellPreviewFromInput(input);
+            this.recordPendingCellEdit(row, col, input.value);
+          }
+        }
+        this.scheduleLayout({ resizeRows: true });
+        continue;
+      }
       if (effect.phase === 'begin') {
         runPrimary(clearNativeTextSelection);
         runPrimary(() => this.applySelection(null));
@@ -2765,8 +2780,8 @@ class HtmlTableWidget extends WidgetType {
     return true;
   }
 
-  setSingleCellSelection(coords: CellCoords) {
-    const transition = this.cellSelection.accept({ type: 'select', anchor: coords, head: coords });
+  setSingleCellSelection(coords: CellCoords, origin: 'focus' | 'command') {
+    const transition = this.cellSelection.accept({ type: 'select', anchor: coords, head: coords, origin });
     if (!transition.accepted) return false;
     this.applyCellSelectionTransition(transition);
     return true;
@@ -2810,14 +2825,6 @@ class HtmlTableWidget extends WidgetType {
     if (!(active instanceof Element)) return false;
     if (!view.dom.contains(active)) return false;
     return active.closest('.meo-md-html-table-wrap') !== null;
-  }
-
-  selectedCellCount() {
-    const range = this.cellSelection.snapshot().range;
-    if (!range) return 0;
-    const rowCount = range.toRow - range.fromRow + 1;
-    const colCount = range.toCol - range.fromCol + 1;
-    return rowCount * colCount;
   }
 
   tableCellCopyValue(row: number, col: number): TableCellCopyValue {
@@ -2866,29 +2873,35 @@ class HtmlTableWidget extends WidgetType {
     let pendingTableSwitchPointerId: number | null = null;
     let outsidePointerExitTimer: number | null = null;
 
-    const hasActiveTableInteraction = () => {
-      const active = document.activeElement;
-      const shell = getContainer().closest('.meo-md-html-table-shell');
-      return (
-        (active instanceof HTMLElement && table.contains(active)) ||
-        this.selectedCellCount() > 0 ||
-        Boolean(shell?.classList.contains('is-interacting'))
-      );
+    const applyPointerTransition = (
+      transition: TableCellSelectionTransition,
+      event: PointerEvent,
+      caretCell: HTMLTableCellElement | null
+    ) => {
+      if (!transition.accepted) return false;
+      const request = transition.effects.find((effect) => effect.kind === 'caret-request');
+      if (!request || request.kind !== 'caret-request') {
+        return this.applyCellSelectionTransition(transition, { event });
+      }
+      if (!caretCell) return false;
+      const pointerCaret = this.pointerCaretForCell(caretCell, event.clientX, event.clientY, {
+        nearestFallback: request.nearestFallback
+      });
+      const completed = this.cellSelection.accept({
+        type: 'caret-resolved',
+        requestId: request.requestId,
+        numericOffset: pointerCaret.editorOffset ?? request.fallbackOffset
+      });
+      return this.applyCellSelectionTransition(completed, { event, domCaret: pointerCaret.domCaret });
     };
 
     const exitAfterOutsidePointer = () => {
       const wrap = getWrap();
-      if (this.selectedCellCount() > 1) {
-        this.exitTableInteraction(wrap, 'outside');
-        return;
-      }
-
       const active = document.activeElement;
+      this.exitTableInteraction(wrap, 'outside');
       if (active instanceof HTMLElement && table.contains(active)) {
         active.blur();
-        return;
       }
-      this.exitTableInteraction(wrap, 'outside');
     };
 
     const onPointerDown = (event: PointerEvent) => {
@@ -2909,23 +2922,25 @@ class HtmlTableWidget extends WidgetType {
       const current = this.coordsFromCell(cell);
       if (!current) return;
       if (event.target instanceof HTMLTextAreaElement) {
-        if (!this.setSingleCellSelection(current)) return;
+        const transition = this.cellSelection.accept({
+          type: 'activate', pointerId: event.pointerId, cell: current, origin: 'textarea'
+        });
+        if (!transition.accepted) return;
         pendingOutsidePointerId = null;
         if (outsidePointerExitTimer !== null) {
           window.clearTimeout(outsidePointerExitTimer);
           outsidePointerExitTimer = null;
         }
+        this.applyCellSelectionTransition(transition, { event });
         return;
       }
       const anchor = current;
       const input = cell.querySelector('textarea');
-      const pointerCaret = this.pointerCaretForCell(cell, event.clientX, event.clientY);
-      const caret = pointerCaret.editorOffset;
       const transition = this.cellSelection.accept({
         type: 'begin',
         pointerId: event.pointerId,
         cell: anchor,
-        caret: caret ?? (input instanceof HTMLTextAreaElement ? input.value.length : 0)
+        fallbackOffset: input instanceof HTMLTextAreaElement ? input.value.length : 0
       });
       if (!transition.accepted) return;
       pendingOutsidePointerId = null;
@@ -2933,7 +2948,7 @@ class HtmlTableWidget extends WidgetType {
         window.clearTimeout(outsidePointerExitTimer);
         outsidePointerExitTimer = null;
       }
-      this.applyCellSelectionTransition(transition, { event, domCaret: pointerCaret.domCaret });
+      applyPointerTransition(transition, event, cell);
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -2941,21 +2956,19 @@ class HtmlTableWidget extends WidgetType {
       const cell = this.findCellElement(el);
       if (!cell) {
         const transition = this.cellSelection.accept({
-          type: 'move', pointerId: event.pointerId, cell: null, caret: null
+          type: 'move', pointerId: event.pointerId, cell: null
         });
         this.applyCellSelectionTransition(transition, { event });
         return;
       }
       const current = this.coordsFromCell(cell);
       if (!current) return;
-      const pointerCaret = this.pointerCaretForCell(cell, event.clientX, event.clientY, { nearestFallback: false });
       const transition = this.cellSelection.accept({
         type: 'move',
         pointerId: event.pointerId,
-        cell: current,
-        caret: pointerCaret.editorOffset
+        cell: current
       });
-      this.applyCellSelectionTransition(transition, { event, domCaret: pointerCaret.domCaret });
+      applyPointerTransition(transition, event, cell);
     };
 
     const endPointerSelection = (event: PointerEvent) => {
@@ -2963,9 +2976,6 @@ class HtmlTableWidget extends WidgetType {
         ? this.findCellElement(document.elementFromPoint(event.clientX, event.clientY))
         : null;
       const releaseCoords = releaseCell ? this.coordsFromCell(releaseCell) : null;
-      const releaseCaret = releaseCell
-        ? this.pointerCaretForCell(releaseCell, event.clientX, event.clientY).editorOffset
-        : null;
       const hit = event.type === 'pointerup' ? document.elementFromPoint(event.clientX, event.clientY) : null;
       const endedInsideTable = (hit instanceof Node && table.contains(hit)) || (
         !event.isTrusted && event.target instanceof Node && table.contains(event.target)
@@ -2975,7 +2985,6 @@ class HtmlTableWidget extends WidgetType {
             type: 'end',
             pointerId: event.pointerId,
             cell: releaseCoords,
-            caret: releaseCaret,
             insideTable: endedInsideTable
           })
         : this.cellSelection.accept({
@@ -2983,7 +2992,7 @@ class HtmlTableWidget extends WidgetType {
             pointerId: event.pointerId,
             reason: event.type === 'lostpointercapture' ? 'lostcapture' : 'pointercancel'
           });
-      this.applyCellSelectionTransition(transition, { event });
+      applyPointerTransition(transition, event, releaseCell);
     };
 
     const onCopy = (event: ClipboardEvent) => {
@@ -3009,28 +3018,15 @@ class HtmlTableWidget extends WidgetType {
       if (this.handleHistoryShortcut(event, table)) {
         return;
       }
-
-      if (event.key === 'Escape' && this.selectedCellCount() > 1) {
-        event.preventDefault();
-        this.exitTableInteraction(getWrap(), 'escape');
-        return;
-      }
-      if (this.selectedCellCount() <= 1) return;
       if (event.key !== 'Backspace' && event.key !== 'Delete') return;
-      const range = this.cellSelection.snapshot().range;
-      if (!range || !this.domRefs) return;
-      event.preventDefault();
-      for (let row = range.fromRow; row <= range.toRow; row++) {
-        for (let col = range.fromCol; col <= range.toCol; col++) {
-          const input = this.domRefs.allRowInputs[row][col];
-          if (input.value !== '') {
-            input.value = '';
-            this.refreshCellPreviewFromInput(input);
-            this.recordPendingCellEdit(row, col, input.value);
-          }
-        }
-      }
-      this.scheduleLayout({ resizeRows: true });
+      const transition = this.cellSelection.accept({ type: 'delete' });
+      this.applyCellSelectionTransition(transition, { event });
+    };
+
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const transition = this.cellSelection.accept({ type: 'clear', reason: 'escape' });
+      this.applyCellSelectionTransition(transition, { event });
     };
 
     const onFocusOut = (event: FocusEvent) => {
@@ -3076,7 +3072,6 @@ class HtmlTableWidget extends WidgetType {
       }
       const active = document.activeElement;
       if (isOutsideTable) {
-        if (!hasActiveTableInteraction()) return;
         pendingOutsidePointerId = event.pointerId;
         return;
       }
@@ -3096,7 +3091,7 @@ class HtmlTableWidget extends WidgetType {
       if (table.hasPointerCapture?.(event.pointerId)) return;
       if (event.target instanceof Node && table.contains(event.target)) return;
       const transition = this.cellSelection.accept({
-        type: 'move', pointerId: event.pointerId, cell: null, caret: null
+        type: 'move', pointerId: event.pointerId, cell: null
       });
       this.applyCellSelectionTransition(transition, { event });
     };
@@ -3131,6 +3126,7 @@ class HtmlTableWidget extends WidgetType {
     document.addEventListener('copy', onCopy, true);
     table.addEventListener('dragstart', onDragStart);
     table.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('keydown', onDocumentKeyDown, true);
     table.addEventListener('focusout', onFocusOut);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
     document.addEventListener('pointermove', onDocumentPointerMove, true);
@@ -3163,6 +3159,7 @@ class HtmlTableWidget extends WidgetType {
       document.removeEventListener('copy', onCopy, true);
       table.removeEventListener('dragstart', onDragStart);
       table.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('keydown', onDocumentKeyDown, true);
       table.removeEventListener('focusout', onFocusOut);
       document.removeEventListener('pointerdown', onDocumentPointerDown, true);
       document.removeEventListener('pointermove', onDocumentPointerMove, true);
@@ -4025,7 +4022,7 @@ class HtmlTableWidget extends WidgetType {
       }
       this.setCellEditingState(input, true);
       this.setTableInteractionActive(container, true);
-      this.setSingleCellSelection({ row: rowIndex, col: colIndex });
+      this.setSingleCellSelection({ row: rowIndex, col: colIndex }, 'focus');
       notifySelectionChange();
     });
     input.addEventListener('blur', (event) => {
@@ -4667,39 +4664,25 @@ class HtmlTableWidget extends WidgetType {
   }
 
   destroy(dom: HTMLElement) {
-    const errors: unknown[] = [];
-    const cleanup = (operation: () => void) => {
-      try {
-        operation();
-      } catch (error) {
-        errors.push(error);
-      }
-    };
-    cleanup(() => {
-      const selectionDisposal = this.cellSelection.accept({ type: 'dispose' });
-      this.applyCellSelectionTransition(selectionDisposal);
-    });
-    cleanup(() => disposeImagePresentations(dom));
-    cleanup(() => this.tableCommandTargetRegistration?.dispose());
+    const selectionDisposal = this.cellSelection.accept({ type: 'dispose' });
+    this.applyCellSelectionTransition(selectionDisposal);
+    disposeImagePresentations(dom);
+    this.tableCommandTargetRegistration?.dispose();
     this.tableCommandTargetRegistration = null;
-    cleanup(() => this.stickyHeaderAdapter.unmount());
-    cleanup(() => this.stickyHeaderAdapter.dispose());
-    for (const dispose of this.cleanupFns) cleanup(dispose);
+    this.stickyHeaderAdapter.unmount();
+    this.stickyHeaderAdapter.dispose();
+    for (const dispose of this.cleanupFns) dispose();
     this.cleanupFns = [];
     if (this.layoutFrame) {
-      cleanup(() => cancelAnimationFrame(this.layoutFrame));
+      cancelAnimationFrame(this.layoutFrame);
       this.layoutFrame = 0;
     }
     this.layoutTasks.clear();
     this.domRefs = null;
     this.view = null;
-    cleanup(() => this.cellInteraction.accept({ type: 'dispose' }));
-    cleanup(() => this.cancelPendingCellAutoCommit());
+    this.cellInteraction.accept({ type: 'dispose' });
+    this.cancelPendingCellAutoCommit();
     this.pendingCellSwitchCommit = false;
-    if (!errors.length) return;
-    cleanup(() => dom.remove());
-    if (errors.length === 1) throw errors[0];
-    throw new AggregateError(errors, 'Table widget cleanup failed', { cause: errors[0] });
   }
 }
 

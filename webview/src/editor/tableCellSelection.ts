@@ -23,7 +23,16 @@ export type TableCellSelectionClearReason =
   | 'dispose';
 
 export type TableCellSelectionEffect =
-  | { readonly kind: 'prevent-default'; readonly pointerId: number }
+  | {
+      readonly kind: 'caret-request';
+      readonly requestId: number;
+      readonly phase: 'begin' | 'move' | 'end';
+      readonly pointerId: number;
+      readonly cell: TableCellCoordinates;
+      readonly fallbackOffset: number;
+      readonly nearestFallback: boolean;
+    }
+  | { readonly kind: 'prevent-default'; readonly pointerId: number | null }
   | { readonly kind: 'set-action-target'; readonly pointerId: number | null; readonly cell: TableCellCoordinates }
   | {
       readonly kind: 'text';
@@ -39,6 +48,7 @@ export type TableCellSelectionEffect =
       readonly range: TableCellRange;
       readonly focus: 'retain' | 'table';
     }
+  | { readonly kind: 'delete-cells'; readonly range: TableCellRange }
   | { readonly kind: 'clear-text'; readonly pointerId: number }
   | { readonly kind: 'capture-pointer'; readonly pointerId: number }
   | { readonly kind: 'release-pointer'; readonly pointerId: number }
@@ -49,17 +59,34 @@ export type TableCellSelectionEffect =
     };
 
 export type TableCellSelectionEvent =
-  | { readonly type: 'begin'; readonly pointerId: number; readonly cell: TableCellCoordinates; readonly caret: number }
-  | { readonly type: 'move'; readonly pointerId: number; readonly cell: TableCellCoordinates | null; readonly caret: number | null }
+  | {
+      readonly type: 'begin';
+      readonly pointerId: number;
+      readonly cell: TableCellCoordinates;
+      readonly fallbackOffset: number;
+    }
+  | {
+      readonly type: 'activate';
+      readonly pointerId: number;
+      readonly cell: TableCellCoordinates;
+      readonly origin: 'textarea';
+    }
+  | { readonly type: 'move'; readonly pointerId: number; readonly cell: TableCellCoordinates | null }
   | {
       readonly type: 'end';
       readonly pointerId: number;
       readonly cell: TableCellCoordinates | null;
-      readonly caret: number | null;
       readonly insideTable: boolean;
     }
+  | { readonly type: 'caret-resolved'; readonly requestId: number; readonly numericOffset: number }
+  | { readonly type: 'delete' }
   | { readonly type: 'abort'; readonly pointerId: number; readonly reason: 'pointercancel' | 'lostcapture' }
-  | { readonly type: 'select'; readonly anchor: TableCellCoordinates; readonly head: TableCellCoordinates }
+  | {
+      readonly type: 'select';
+      readonly anchor: TableCellCoordinates;
+      readonly head: TableCellCoordinates;
+      readonly origin: 'focus' | 'command';
+    }
   | { readonly type: 'clear'; readonly reason: 'outside' | 'escape' | 'cross-table' | 'external' | 'replacement' }
   | { readonly type: 'dispose' };
 
@@ -116,6 +143,16 @@ export class TableCellSelection {
   private pointerId: number | null = null;
   private anchorCaret = 0;
   private headCaret = 0;
+  private captured = false;
+  private nextCaretRequestId = 1;
+  private pendingCaret: {
+    readonly requestId: number;
+    readonly phase: 'begin' | 'move' | 'end';
+    readonly pointerId: number;
+    readonly cell: TableCellCoordinates;
+    readonly fallbackOffset: number;
+    readonly nearestFallback: boolean;
+  } | null = null;
 
   accept(event: TableCellSelectionEvent): TableCellSelectionTransition {
     const accepted = (...effects: readonly TableCellSelectionEffect[]): TableCellSelectionTransition => ({
@@ -126,10 +163,11 @@ export class TableCellSelection {
     if (event.type === 'dispose') {
       if (this.phase === 'disposed') return rejected();
       const pointerId = this.pointerId;
+      const captured = this.captured;
       this.reset();
       this.phase = 'disposed';
       return accepted(
-        ...(pointerId === null ? [] : [{ kind: 'release-pointer', pointerId } as const]),
+        ...(pointerId === null || !captured ? [] : [{ kind: 'release-pointer', pointerId } as const]),
         { kind: 'clear', pointerId, reason: 'dispose' }
       );
     }
@@ -137,22 +175,86 @@ export class TableCellSelection {
     if (event.type === 'clear') {
       if (this.phase === 'idle') return rejected();
       const pointerId = this.pointerId;
+      const captured = this.captured;
       this.reset();
       return accepted(
-        ...(pointerId === null ? [] : [{ kind: 'release-pointer', pointerId } as const]),
+        ...(event.reason === 'escape' ? [{ kind: 'prevent-default', pointerId: null } as const] : []),
+        ...(pointerId === null || !captured ? [] : [{ kind: 'release-pointer', pointerId } as const]),
         { kind: 'clear', pointerId, reason: event.reason }
       );
     }
+    if (event.type === 'activate') {
+      if (this.pointerId !== null) return rejected();
+      this.anchor = event.cell;
+      this.range = normalizeRange(event.cell, event.cell);
+      this.phase = 'persisted';
+      return accepted(
+        { kind: 'set-action-target', pointerId: event.pointerId, cell: event.cell },
+        { kind: 'cells', pointerId: event.pointerId, range: this.range, focus: 'retain' }
+      );
+    }
     if (event.type === 'select') {
+      if (event.origin === 'focus' && this.pointerId !== null) return rejected();
       const pointerId = this.pointerId;
+      const captured = this.captured;
       this.anchor = event.anchor;
       this.range = normalizeRange(event.anchor, event.head);
       this.pointerId = null;
+      this.captured = false;
+      this.pendingCaret = null;
       this.phase = 'persisted';
       return accepted(
-        ...(pointerId === null ? [] : [{ kind: 'release-pointer', pointerId } as const]),
+        ...(pointerId === null || !captured ? [] : [{ kind: 'release-pointer', pointerId } as const]),
         { kind: 'set-action-target', pointerId: null, cell: event.anchor },
         { kind: 'cells', pointerId: null, range: this.range, focus: 'retain' }
+      );
+    }
+    if (event.type === 'caret-resolved') {
+      const request = this.pendingCaret;
+      if (!request || request.requestId !== event.requestId || this.pointerId !== request.pointerId) return rejected();
+      this.pendingCaret = null;
+      if (request.phase === 'begin') {
+        this.anchorCaret = event.numericOffset;
+        this.headCaret = event.numericOffset;
+        this.captured = true;
+        return accepted(
+          { kind: 'prevent-default', pointerId: request.pointerId },
+          { kind: 'set-action-target', pointerId: request.pointerId, cell: request.cell },
+          {
+            kind: 'text', phase: 'begin', pointerId: request.pointerId, cell: request.cell,
+            anchorCaret: event.numericOffset, headCaret: event.numericOffset
+          },
+          { kind: 'capture-pointer', pointerId: request.pointerId }
+        );
+      }
+      if (request.phase === 'move') {
+        this.headCaret = event.numericOffset;
+        return accepted({
+          kind: 'text', phase: 'preview', pointerId: request.pointerId, cell: request.cell,
+          anchorCaret: this.anchorCaret, headCaret: this.headCaret
+        });
+      }
+      this.headCaret = event.numericOffset;
+      const effect: TableCellSelectionEffect = {
+        kind: 'text', phase: 'commit', pointerId: request.pointerId, cell: request.cell,
+        anchorCaret: this.anchorCaret, headCaret: this.headCaret
+      };
+      this.reset();
+      return accepted(
+        { kind: 'release-pointer', pointerId: request.pointerId },
+        { kind: 'prevent-default', pointerId: request.pointerId },
+        effect
+      );
+    }
+    if (event.type === 'delete') {
+      if (!this.range) return rejected();
+      const cellCount = (this.range.toRow - this.range.fromRow + 1) * (
+        this.range.toCol - this.range.fromCol + 1
+      );
+      if (cellCount <= 1) return rejected();
+      return accepted(
+        { kind: 'prevent-default', pointerId: null },
+        { kind: 'delete-cells', range: this.range }
       );
     }
     if (event.type === 'begin') {
@@ -160,26 +262,19 @@ export class TableCellSelection {
       this.phase = 'text-candidate';
       this.pointerId = event.pointerId;
       this.anchor = event.cell;
-      this.anchorCaret = event.caret;
-      this.headCaret = event.caret;
       this.range = normalizeRange(event.cell, event.cell);
-      return accepted(
-        { kind: 'prevent-default', pointerId: event.pointerId },
-        { kind: 'set-action-target', pointerId: event.pointerId, cell: event.cell },
-        {
-          kind: 'text',
-          phase: 'begin',
-          pointerId: event.pointerId,
-          cell: event.cell,
-          anchorCaret: event.caret,
-          headCaret: event.caret
-        },
-        { kind: 'capture-pointer', pointerId: event.pointerId }
-      );
+      const request = {
+        kind: 'caret-request', requestId: this.nextCaretRequestId++, phase: 'begin',
+        pointerId: event.pointerId, cell: event.cell, fallbackOffset: event.fallbackOffset,
+        nearestFallback: true
+      } as const;
+      this.pendingCaret = request;
+      return accepted(request);
     }
     if (this.pointerId !== event.pointerId || !this.anchor) {
       return rejected();
     }
+    if (this.pendingCaret) return rejected();
     if (event.type === 'move') {
       if (event.cell === null) {
         if (this.phase === 'text-candidate') {
@@ -189,15 +284,13 @@ export class TableCellSelection {
         return accepted();
       }
       if (this.phase === 'text-candidate' && event.cell.row === this.anchor.row && event.cell.col === this.anchor.col) {
-        if (event.caret !== null) this.headCaret = event.caret;
-        return accepted({
-            kind: 'text',
-            phase: 'preview',
-            pointerId: event.pointerId,
-            cell: this.anchor,
-            anchorCaret: this.anchorCaret,
-            headCaret: this.headCaret
-        });
+        const request = {
+          kind: 'caret-request', requestId: this.nextCaretRequestId++, phase: 'move',
+          pointerId: event.pointerId, cell: this.anchor, fallbackOffset: this.headCaret,
+          nearestFallback: false
+        } as const;
+        this.pendingCaret = request;
+        return accepted(request);
       }
       this.phase = 'dragging';
       this.range = normalizeRange(this.anchor, event.cell);
@@ -214,7 +307,15 @@ export class TableCellSelection {
       if (this.phase === 'text-candidate' && (!event.cell || (
         event.cell.row === this.anchor.row && event.cell.col === this.anchor.col
       ))) {
-        if (event.caret !== null) this.headCaret = event.caret;
+        if (event.cell) {
+          const request = {
+            kind: 'caret-request', requestId: this.nextCaretRequestId++, phase: 'end',
+            pointerId: event.pointerId, cell: this.anchor, fallbackOffset: this.headCaret,
+            nearestFallback: true
+          } as const;
+          this.pendingCaret = request;
+          return accepted(request);
+        }
         const effect: TableCellSelectionEffect = {
           kind: 'text',
           phase: 'commit',
@@ -239,6 +340,7 @@ export class TableCellSelection {
         );
       }
       this.pointerId = null;
+      this.captured = false;
       this.phase = 'persisted';
       return accepted(
         { kind: 'release-pointer', pointerId: event.pointerId },
@@ -287,5 +389,7 @@ export class TableCellSelection {
     this.pointerId = null;
     this.anchorCaret = 0;
     this.headCaret = 0;
+    this.captured = false;
+    this.pendingCaret = null;
   }
 }

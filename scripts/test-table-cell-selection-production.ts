@@ -112,6 +112,71 @@ async function main() {
       throw new Error(`same-cell drag did not prefer ordinary text: ${JSON.stringify(textSelection)}`);
     }
 
+    await page.evaluate(() => {
+      (window as any).__selectionEscapePrevented = null;
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          (window as any).__selectionEscapePrevented = event.defaultPrevented;
+        }
+      }, { capture: true, once: true });
+    });
+    await page.keyboard.press('Escape');
+    const persistedSingleEscape = await page.evaluate(() => ({
+      prevented: (window as any).__selectionEscapePrevented,
+      interacting: Boolean(document.querySelector('.meo-md-html-table-shell[data-test-table="0"]')?.classList.contains('is-interacting')),
+      nativeText: document.getSelection()?.toString() ?? ''
+    }));
+    if (!persistedSingleEscape.prevented || persistedSingleEscape.interacting || persistedSingleEscape.nativeText) {
+      throw new Error(`persisted same-cell Escape was not Module-owned: ${JSON.stringify(persistedSingleEscape)}`);
+    }
+
+    await page.click('#outside');
+    await page.waitForFunction((selector) => {
+      const preview = document.querySelector<HTMLElement>(selector);
+      return preview?.isConnected && getComputedStyle(preview).visibility === 'visible';
+    }, {}, first);
+    await page.evaluate(() => {
+      const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell[data-test-table="0"] table')!;
+      const nativeRelease = table.releasePointerCapture.bind(table);
+      (window as any).__sameCellEscape = { released: [] as number[], nativeRelease };
+      table.releasePointerCapture = (pointerId: number) => {
+        (window as any).__sameCellEscape.released.push(pointerId);
+        nativeRelease(pointerId);
+      };
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          (window as any).__sameCellEscape.prevented = event.defaultPrevented;
+        }
+      }, { capture: true, once: true });
+    });
+    const activeEscapeStart = await rect(`${first} [data-meo-source-from]`);
+    await page.mouse.move(activeEscapeStart.x - 8, activeEscapeStart.y);
+    await page.mouse.down();
+    await page.mouse.move(activeEscapeStart.x + 8, activeEscapeStart.y, { steps: 4 });
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    const activeSameCellEscape = await page.evaluate(() => {
+      const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell[data-test-table="0"] table')!;
+      const facts = (window as any).__sameCellEscape;
+      table.releasePointerCapture = facts.nativeRelease;
+      return {
+        released: facts.released,
+        prevented: facts.prevented,
+        captured: table.hasPointerCapture?.(1) ?? false,
+        interacting: Boolean(table.closest('.meo-md-html-table-shell')?.classList.contains('is-interacting')),
+        nativeText: document.getSelection()?.toString() ?? ''
+      };
+    });
+    if (
+      JSON.stringify(activeSameCellEscape.released) !== JSON.stringify([1]) ||
+      !activeSameCellEscape.prevented ||
+      activeSameCellEscape.captured ||
+      activeSameCellEscape.interacting ||
+      activeSameCellEscape.nativeText
+    ) {
+      throw new Error(`active same-cell Escape cleanup failed: ${JSON.stringify(activeSameCellEscape)}`);
+    }
+
     await page.click('#outside');
     await page.waitForFunction((selector) => {
       const preview = document.querySelector<HTMLElement>(selector);
@@ -121,11 +186,13 @@ async function main() {
     await page.mouse.move(ownerStart.x - 8, ownerStart.y);
     await page.mouse.down();
     await page.mouse.move(ownerStart.x + 8, ownerStart.y, { steps: 4 });
-    const secondPointer = await page.evaluate(() => {
-      const target = document.querySelector<HTMLElement>(
+    const secondPointer = await page.evaluate(async () => {
+      const cell = document.querySelector<HTMLTableCellElement>(
         '.meo-md-html-table-shell[data-test-table="0"] tbody tr:first-child td:nth-child(2)'
       )!;
-      const box = target.getBoundingClientRect();
+      const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview')!;
+      const input = cell.querySelector<HTMLTextAreaElement>('textarea')!;
+      const box = preview.getBoundingClientRect();
       const selection = document.getSelection();
       const ranges = Array.from({ length: selection?.rangeCount ?? 0 }, (_value, index) => (
         selection!.getRangeAt(index).cloneRange()
@@ -140,19 +207,39 @@ async function main() {
         text: selection?.toString() ?? '',
         selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length
       };
-      const event = new PointerEvent('pointerdown', {
-        pointerId: 2,
-        pointerType: 'touch',
-        isPrimary: false,
-        button: 0,
-        bubbles: true,
-        cancelable: true,
-        clientX: box.left + box.width / 2,
-        clientY: box.top + box.height / 2
+      const styleMutations: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          styleMutations.push(`${(record.target as Element).className}:${record.attributeName}`);
+        }
       });
-      try {
+      observer.observe(input, { attributes: true, attributeFilter: ['style'] });
+      observer.observe(preview, { attributes: true, attributeFilter: ['style'] });
+      const dispatch = (target: Element, type: 'pointerdown' | 'pointermove' | 'pointerup', pointerId: number) => {
+        const event = new PointerEvent(type, {
+          pointerId,
+          pointerType: 'touch',
+          isPrimary: false,
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+          clientX: box.left + box.width / 2,
+          clientY: box.top + box.height / 2
+        });
         target.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      let defaultPrevented: boolean[] = [];
+      try {
+        defaultPrevented = [
+          dispatch(preview, 'pointerdown', 2),
+          dispatch(preview, 'pointermove', 2),
+          dispatch(preview, 'pointerup', 2),
+          dispatch(input, 'pointerdown', 3)
+        ];
+        await Promise.resolve();
       } finally {
+        observer.disconnect();
         Selection.prototype.removeAllRanges = originalRemoveAllRanges;
       }
       // Synthetic pointerdown performs a browser default selection collapse that
@@ -168,10 +255,13 @@ async function main() {
           selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length
         },
         removeAllRangesCalls,
-        defaultPrevented: event.defaultPrevented,
+        defaultPrevented,
+        styleMutations,
         capturedSecondPointer: document.querySelector<HTMLTableElement>(
           '.meo-md-html-table-shell[data-test-table="0"] table'
-        )!.hasPointerCapture?.(2) ?? false
+        )!.hasPointerCapture?.(2) || document.querySelector<HTMLTableElement>(
+          '.meo-md-html-table-shell[data-test-table="0"] table'
+        )!.hasPointerCapture?.(3) || false
       };
     });
     if (
@@ -179,7 +269,8 @@ async function main() {
       secondPointer.after.text !== secondPointer.before.text ||
       secondPointer.after.selected !== secondPointer.before.selected ||
       secondPointer.removeAllRangesCalls !== 0 ||
-      secondPointer.defaultPrevented ||
+      secondPointer.defaultPrevented.some(Boolean) ||
+      secondPointer.styleMutations.length !== 0 ||
       secondPointer.capturedSecondPointer
     ) {
       throw new Error(`second pointer changed the active pointer transaction: ${JSON.stringify(secondPointer)}`);
@@ -441,6 +532,11 @@ async function main() {
     );
     const faultedDestroy = await page.evaluate(() => {
       const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell table')!;
+      const laterImageOwner = document.createElement('span');
+      laterImageOwner.className = 'meo-md-image';
+      let laterImageOwnerRuns = 0;
+      laterImageOwner.addEventListener('meo-dispose-image-presentation', () => { laterImageOwnerRuns += 1; });
+      table.append(laterImageOwner);
       const nativeRemoveAllRanges = Selection.prototype.removeAllRanges;
       const nativeRelease = table.releasePointerCapture.bind(table);
       let removeAllRangesCalls = 0;
@@ -471,6 +567,7 @@ async function main() {
         errorName: observed instanceof Error ? observed.name : typeof observed,
         errors: aggregate?.errors.map((error) => error instanceof Error ? error.message : String(error)) ?? [],
         cause: aggregate?.cause instanceof Error ? aggregate.cause.message : String(aggregate?.cause ?? ''),
+        laterImageOwnerRuns,
         connected: table.isConnected,
         selected: table.querySelectorAll('.meo-md-html-table-cell-selected').length,
         interacting: Boolean(table.closest('.meo-md-html-table-shell')?.classList.contains('is-interacting')),
@@ -487,7 +584,8 @@ async function main() {
         'controlled release failure'
       ]) ||
       faultedDestroy.cause !== 'controlled primary cleanup failure' ||
-      faultedDestroy.connected ||
+      faultedDestroy.laterImageOwnerRuns !== 0 ||
+      !faultedDestroy.connected ||
       faultedDestroy.selected ||
       faultedDestroy.interacting ||
       faultedDestroy.removeAllRangesCalls < 1 ||
@@ -495,6 +593,299 @@ async function main() {
       faultedDestroy.clipboardTypes.length
     ) {
       throw new Error(`release failure masked primary or skipped cleanup: ${JSON.stringify(faultedDestroy)}`);
+    }
+
+    for (const fault of ['image', 'sticky', 'listeners', 'interaction'] as const) {
+      await page.evaluate((text) => {
+        document.getElementById('app')!.replaceChildren();
+        const nativeQueueMicrotask = window.queueMicrotask.bind(window);
+        const harness = {
+          active: false,
+          queueCalls: 0,
+          nativeQueueMicrotask
+        };
+        (window as any).__destroyOwnerFault = harness;
+        window.queueMicrotask = (callback) => {
+          if (harness.active) {
+            harness.queueCalls += 1;
+            if ((window as any).__destroyOwnerFaultKind === 'command') {
+              throw new Error('controlled command owner failure');
+            }
+          }
+          return nativeQueueMicrotask(callback);
+        };
+        (window as any).__selectionEditor = (window as any).TableStabilityHarness.createEditor({
+          parent: document.getElementById('app')!,
+          text,
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+      }, '| A | B |\n| --- | --- |\n| one | two |');
+      await page.waitForFunction(() => document.querySelector('.meo-md-html-table-shell table'));
+      const ownerFault = await page.evaluate((faultKind) => {
+        const editor = (window as any).__selectionEditor;
+        const harness = (window as any).__destroyOwnerFault;
+        const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell table')!;
+        const input = table.querySelector<HTMLTextAreaElement>('textarea')!;
+        const nativeWindowRemove = window.removeEventListener.bind(window);
+        const nativeRemove = EventTarget.prototype.removeEventListener;
+        const nativeDispatch = EventTarget.prototype.dispatchEvent;
+        const nativeMapGet = Map.prototype.get;
+        const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+        const nativeClearTimeout = window.clearTimeout.bind(window);
+        const nativeSetTimeout = window.setTimeout.bind(window);
+        const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+        const counters = { sticky: 0, listeners: 0, frame: 0, interaction: 0 };
+        let interactionTimer: number | undefined;
+
+        window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions) => {
+          if (harness.active && type === 'resize') {
+            counters.sticky += 1;
+            if (faultKind === 'sticky') throw new Error('controlled sticky owner failure');
+          }
+          nativeWindowRemove(type, listener, options);
+        }) as typeof window.removeEventListener;
+        EventTarget.prototype.removeEventListener = function (type, listener, options) {
+          if (harness.active && this === table) {
+            counters.listeners += 1;
+            if (faultKind === 'listeners') throw new Error('controlled listeners owner failure');
+          }
+          return nativeRemove.call(this, type, listener, options);
+        };
+        EventTarget.prototype.dispatchEvent = function (event) {
+          if (
+            harness.active &&
+            faultKind === 'image' &&
+            event.type === 'meo-dispose-image-presentation' &&
+            this instanceof Element &&
+            this.classList.contains('meo-md-image')
+          ) {
+            throw new Error('controlled image owner failure');
+          }
+          return nativeDispatch.call(this, event);
+        };
+        Map.prototype.get = function (key) {
+          if (harness.active && typeof key === 'string' && key.startsWith('table-command-target-')) {
+            harness.queueCalls += 1;
+            if (faultKind === 'command') throw new Error('controlled command owner failure');
+          }
+          return nativeMapGet.call(this, key);
+        };
+        window.cancelAnimationFrame = (handle) => {
+          if (harness.active && handle === 4242) {
+            counters.frame += 1;
+            if (faultKind === 'frame') throw new Error('controlled frame owner failure');
+          }
+          nativeCancelAnimationFrame(handle);
+        };
+        window.clearTimeout = ((handle?: number) => {
+          if (harness.active && handle === interactionTimer) {
+            counters.interaction += 1;
+            if (faultKind === 'interaction') throw new Error('controlled interaction owner failure');
+          }
+          nativeClearTimeout(handle);
+        }) as typeof window.clearTimeout;
+
+        window.requestAnimationFrame = () => 4242;
+        window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+          interactionTimer = nativeSetTimeout(handler, timeout, ...args);
+          return interactionTimer;
+        }) as typeof window.setTimeout;
+        input.value = 'changed';
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'd' }));
+        window.setTimeout = nativeSetTimeout;
+        window.requestAnimationFrame = nativeRequestAnimationFrame;
+
+        if (faultKind === 'image') {
+          const image = document.createElement('span');
+          image.className = 'meo-md-image';
+          image.addEventListener('meo-dispose-image-presentation', () => {
+            throw new Error('controlled image owner failure');
+          });
+          table.append(image);
+        }
+        (window as any).__destroyOwnerFaultKind = faultKind;
+        harness.active = true;
+        let observed: unknown = null;
+        try {
+          editor.destroy();
+        } catch (error) {
+          observed = error;
+        } finally {
+          harness.active = false;
+          window.queueMicrotask = harness.nativeQueueMicrotask;
+          window.removeEventListener = nativeWindowRemove;
+          EventTarget.prototype.removeEventListener = nativeRemove;
+          EventTarget.prototype.dispatchEvent = nativeDispatch;
+          Map.prototype.get = nativeMapGet;
+          window.cancelAnimationFrame = nativeCancelAnimationFrame;
+          window.clearTimeout = nativeClearTimeout;
+          window.setTimeout = nativeSetTimeout;
+          window.requestAnimationFrame = nativeRequestAnimationFrame;
+        }
+        return {
+          message: observed instanceof Error ? observed.message : String(observed),
+          connected: table.isConnected,
+          queueCalls: harness.queueCalls,
+          ...counters
+        };
+      }, fault);
+      const expectedMessage = `controlled ${fault} owner failure`;
+      if (ownerFault.message !== expectedMessage || !ownerFault.connected) {
+        throw new Error(`${fault} owner did not preserve first-error DOM semantics: ${JSON.stringify(ownerFault)}`);
+      }
+      if (
+        (fault === 'image' && (ownerFault.queueCalls || ownerFault.sticky || ownerFault.listeners || ownerFault.frame || ownerFault.interaction)) ||
+        (fault === 'sticky' && (ownerFault.listeners || ownerFault.frame || ownerFault.interaction)) ||
+        (fault === 'listeners' && (ownerFault.frame || ownerFault.interaction)) ||
+        (fault === 'interaction' && ownerFault.interaction !== 1)
+      ) {
+        throw new Error(`${fault} owner ran a later destroy owner: ${JSON.stringify(ownerFault)}`);
+      }
+    }
+
+    const commandPage = await browser.newPage();
+    try {
+      await commandPage.setContent('<!doctype html><div id="app"></div>');
+      await commandPage.evaluate(() => {
+        const nativeQueueMicrotask = window.queueMicrotask.bind(window);
+        (window as any).__commandDestroyFault = { active: false, calls: 0, nativeQueueMicrotask };
+        window.queueMicrotask = (callback) => {
+          const harness = (window as any).__commandDestroyFault;
+          if (harness.active) {
+            harness.calls += 1;
+            throw new Error('controlled command owner failure');
+          }
+          return nativeQueueMicrotask(callback);
+        };
+      });
+      await commandPage.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+      await commandPage.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+      await commandPage.evaluate(() => {
+        (window as any).__selectionEditor = (window as any).TableStabilityHarness.createEditor({
+          parent: document.getElementById('app')!,
+          text: '| A | B |\n| --- | --- |\n| one | two |',
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+      });
+      await commandPage.waitForFunction(() => document.querySelector('.meo-md-html-table-shell table'));
+      const commandFault = await commandPage.evaluate(() => {
+        const harness = (window as any).__commandDestroyFault;
+        const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell table')!;
+        const nativeWindowRemove = window.removeEventListener.bind(window);
+        let laterStickyOwnerRuns = 0;
+        window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions) => {
+          if (harness.active && type === 'resize') laterStickyOwnerRuns += 1;
+          nativeWindowRemove(type, listener, options);
+        }) as typeof window.removeEventListener;
+        harness.active = true;
+        let observed: unknown = null;
+        try {
+          (window as any).__selectionEditor.setText('replacement');
+        } catch (error) {
+          observed = error;
+        } finally {
+          harness.active = false;
+          window.queueMicrotask = harness.nativeQueueMicrotask;
+          window.removeEventListener = nativeWindowRemove;
+        }
+        return {
+          message: observed instanceof Error ? observed.message : String(observed),
+          connected: table.isConnected,
+          calls: harness.calls,
+          laterStickyOwnerRuns
+        };
+      });
+      if (
+        commandFault.message !== 'controlled command owner failure' ||
+        !commandFault.connected ||
+        commandFault.calls !== 1 ||
+        commandFault.laterStickyOwnerRuns !== 0
+      ) {
+        throw new Error(`command owner did not short-circuit later destroy owners: ${JSON.stringify(commandFault)}`);
+      }
+    } finally {
+      await commandPage.close();
+    }
+
+    const framePage = await browser.newPage();
+    try {
+      await framePage.setContent('<!doctype html><div id="app"></div>');
+      await framePage.evaluate(() => {
+        const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+        const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+        (window as any).__frameDestroyFault = {
+          active: false,
+          requests: 0,
+          cancels: 0,
+          nativeRequestAnimationFrame,
+          nativeCancelAnimationFrame
+        };
+        window.requestAnimationFrame = () => {
+          (window as any).__frameDestroyFault.requests += 1;
+          return 4242;
+        };
+        window.cancelAnimationFrame = (handle) => {
+          const harness = (window as any).__frameDestroyFault;
+          if (harness.active && handle === 4242) {
+            harness.cancels += 1;
+            throw new Error('controlled frame owner failure');
+          }
+          nativeCancelAnimationFrame(handle);
+        };
+      });
+      await framePage.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+      await framePage.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+      await framePage.evaluate(() => {
+        (window as any).__selectionEditor = (window as any).TableStabilityHarness.createEditor({
+          parent: document.getElementById('app')!,
+          text: '| A | B |\n| --- | --- |\n| one | two |',
+          initialMode: 'live',
+          onApplyChanges() {}
+        });
+      });
+      await framePage.waitForFunction(() => document.querySelector('.meo-md-html-table-shell table'));
+      const frameFault = await framePage.evaluate(() => {
+        const harness = (window as any).__frameDestroyFault;
+        const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell table')!;
+        const nativeClearTimeout = window.clearTimeout.bind(window);
+        let laterInteractionOwnerRuns = 0;
+        window.clearTimeout = ((handle?: number) => {
+          if (harness.active) laterInteractionOwnerRuns += 1;
+          nativeClearTimeout(handle);
+        }) as typeof window.clearTimeout;
+        harness.active = true;
+        let observed: unknown = null;
+        try {
+          (window as any).__selectionEditor.destroy();
+        } catch (error) {
+          observed = error;
+        } finally {
+          harness.active = false;
+          window.requestAnimationFrame = harness.nativeRequestAnimationFrame;
+          window.cancelAnimationFrame = harness.nativeCancelAnimationFrame;
+          window.clearTimeout = nativeClearTimeout;
+        }
+        return {
+          message: observed instanceof Error ? observed.message : String(observed),
+          connected: table.isConnected,
+          requests: harness.requests,
+          cancels: harness.cancels,
+          laterInteractionOwnerRuns
+        };
+      });
+      if (
+        frameFault.message !== 'controlled frame owner failure' ||
+        !frameFault.connected ||
+        frameFault.requests < 1 ||
+        frameFault.cancels !== 1 ||
+        frameFault.laterInteractionOwnerRuns !== 0
+      ) {
+        throw new Error(`frame owner did not short-circuit interaction owner: ${JSON.stringify(frameFault)}`);
+      }
+    } finally {
+      await framePage.close();
     }
     console.log('table cell selection production checks passed');
   } finally {
