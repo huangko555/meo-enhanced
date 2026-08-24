@@ -47,6 +47,7 @@ async function main(): Promise<void> {
       const resized = candidate.policy.resize({
         widths: measured,
         minimumWidths: [20, 20, 20],
+        elastic: true,
         column: 0,
         requestedDelta: 150,
         maximumTotalWidth: document.getElementById('wrap')!.clientWidth
@@ -61,6 +62,7 @@ async function main(): Promise<void> {
       const projected = candidate.policy.project({
         widths: resized.widths,
         minimumWidths: [20, 20, 20],
+        preserveWidthIntent: false,
         initialTotalWidth: 360,
         elastic: true,
         defaultWidthWasCapped: false,

@@ -98,6 +98,96 @@ async function main(): Promise<void> {
     );
     const initialFirst = await widths('first');
     const initialSecond = await widths('second');
+
+    const infeasibleTransaction = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const runtime = window.TableColumnWidthAdapterCandidate!.create(host, 'infeasible');
+      const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+      root.style.width = '300px';
+      const table = document.createElement('table');
+      table.style.width = '330px';
+      table.dataset.tableColumnWidth = 'infeasible';
+      table.dataset.tableFrom = '0';
+      table.dataset.tableTo = '10';
+      const colgroup = document.createElement('colgroup');
+      const head = document.createElement('thead');
+      const row = document.createElement('tr');
+      for (const [index, minimumWidth] of [180, 100, 50].entries()) {
+        const column = document.createElement('col');
+        column.style.width = `${minimumWidth}px`;
+        colgroup.append(column);
+        const cell = document.createElement('th');
+        cell.style.fontSize = '10px';
+        cell.style.paddingLeft = `${minimumWidth - 10}px`;
+        const handle = document.createElement('span');
+        handle.dataset.tableResizeColumn = String(index);
+        cell.append(handle);
+        row.append(cell);
+      }
+      head.append(row);
+      table.append(colgroup, head);
+      root.append(table);
+      const projected = new Promise<void>((resolve) => {
+        table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+      });
+      runtime.adapter.acquire();
+      await projected;
+      table.style.width = '330px';
+      Array.from(table.querySelectorAll<HTMLTableColElement>('col')).forEach((column, index) => {
+        column.style.width = `${[180, 100, 50][index]}px`;
+      });
+
+      let pointerId = 80;
+      const readWidths = () => Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+        .map((column) => Math.round(Number.parseFloat(column.style.width)));
+      const drag = (column: number, delta: number, terminal = 'pointerup') => {
+        pointerId += 1;
+        const handle = table.querySelector<HTMLElement>(`[data-table-resize-column="${column}"]`)!;
+        handle.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0, buttons: 1,
+          pointerId, pointerType: 'mouse', clientX: 100
+        }));
+        window.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, buttons: 1, pointerId, pointerType: 'mouse', clientX: 100 + delta
+        }));
+        const preview = readWidths();
+        window.dispatchEvent(new PointerEvent(terminal, {
+          bubbles: true, buttons: 0, pointerId, pointerType: 'mouse', clientX: 100 + delta
+        }));
+        return { preview, committed: readWidths() };
+      };
+
+      const grown = drag(2, 24);
+      const cancelled = drag(2, 8, 'pointercancel');
+      const narrowed = drag(2, -12);
+      const noChange = drag(2, 0);
+      const expandedProjection = new Promise<void>((resolve) => {
+        table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+      });
+      root.style.width = '500px';
+      await expandedProjection;
+      const expanded = readWidths();
+      runtime.destroy();
+      host.remove();
+      return { grown, narrowed, noChange, cancelled, expanded };
+    });
+    assert.deepEqual(infeasibleTransaction.grown.preview, [180, 100, 74]);
+    assert.deepEqual(
+      infeasibleTransaction.grown.committed,
+      infeasibleTransaction.grown.preview,
+      'finish must commit the last valid infeasible-container preview without reprojecting it'
+    );
+    assert.deepEqual(infeasibleTransaction.cancelled.committed, [180, 100, 82]);
+    assert.deepEqual(infeasibleTransaction.narrowed.preview, [180, 100, 70]);
+    assert.deepEqual(infeasibleTransaction.narrowed.committed, [180, 100, 70]);
+    assert.deepEqual(infeasibleTransaction.noChange.committed, [180, 100, 70]);
+    assert.deepEqual(
+      infeasibleTransaction.expanded,
+      [180, 100, 70],
+      'an active shrink exits elastic behavior, so later container growth cannot expand or reverse it'
+    );
+
     await drag(page, handle, 90);
     const resizedFirst = await widths('first');
     assert.ok(resizedFirst[0] > initialFirst[0] + 80);
@@ -142,6 +232,7 @@ async function main(): Promise<void> {
       };
       await frames(4);
       const handle = table.querySelector<HTMLElement>('[data-table-resize-column="0"]')!;
+      const initialFirstWidth = table.querySelector<HTMLElement>('th')!.getBoundingClientRect().width;
       handle.dispatchEvent(new PointerEvent('pointerdown', {
         bubbles: true,
         cancelable: true,
@@ -166,7 +257,8 @@ async function main(): Promise<void> {
         clientX: 120
       }));
       await frames(3);
-      const intentEstablished = runtime.projectCalls() > 0;
+      const intentEstablished = table.querySelector<HTMLElement>('th')!.getBoundingClientRect().width
+        > initialFirstWidth + 10;
       runtime.resetProjectCalls();
       events = 0;
       runtime.failNextRefresh();
@@ -185,7 +277,7 @@ async function main(): Promise<void> {
       host.remove();
       return { intentEstablished, afterFailure, afterRecovery };
     });
-    assert.equal(failedTableGeneration.intentEstablished, true, 'failure fixture must own a projected width intent');
+    assert.equal(failedTableGeneration.intentEstablished, true, 'failure fixture must own a committed width intent');
     assert.deepEqual(failedTableGeneration.afterFailure, { projects: 0, events: 0 });
     assert.deepEqual(
       failedTableGeneration.afterRecovery,
@@ -412,7 +504,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse', buttons: 0 }));
     });
     await page.mouse.up();
-    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 2);
+    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 3);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.legacyInstances), 0);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.policyInstances), 1);
   } finally {

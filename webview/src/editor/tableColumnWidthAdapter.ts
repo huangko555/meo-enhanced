@@ -33,6 +33,7 @@ type WidthIntent = {
   initialTotalWidth: number;
   elastic: boolean;
   defaultWidthWasCapped: boolean;
+  availableWidth: number;
 };
 
 type TableBinding = {
@@ -50,10 +51,6 @@ const tableSelector = 'table[data-table-column-width]';
 const handleSelector = '[data-table-resize-column]';
 const projectionEventName = 'meo-table-column-width-projected';
 const resizingClassName = 'meo-table-column-resizing';
-
-function sum(widths: readonly number[]): number {
-  return widths.reduce((total, width) => total + width, 0);
-}
 
 function numberFromDataset(element: HTMLElement, key: 'tableFrom' | 'tableTo'): number | null {
   const value = Number(element.dataset[key]);
@@ -176,15 +173,16 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       reset(table);
       return;
     }
+    const currentAvailableWidth = availableWidth(table);
     const result = policy.project({
       widths: intent.widths,
       minimumWidths: minimumWidths(table),
       initialTotalWidth: intent.initialTotalWidth,
       elastic: intent.elastic,
       defaultWidthWasCapped: intent.defaultWidthWasCapped,
-      availableWidth: availableWidth(table)
+      availableWidth: currentAvailableWidth,
+      preserveWidthIntent: Math.abs(currentAvailableWidth - intent.availableWidth) < 1
     });
-    if (result.reachedAvailableWidth && !intent.elastic) intent.elastic = true;
     render(table, result.widths, result.totalWidth);
   };
 
@@ -247,6 +245,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       );
       const startX = event.clientX;
       let nextWidths: readonly number[] = startWidths;
+      let nextElastic = stored?.elastic ?? defaultWidthWasCapped;
       let latestClientX = startX;
       const pointerBoundary = table.closest<HTMLElement>('.cm-editor') ?? options.root;
 
@@ -256,18 +255,21 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         const result = policy.resize({
           widths: startWidths,
           minimumWidths: minimumWidths(table),
+          elastic: stored?.elastic ?? defaultWidthWasCapped,
           column,
           requestedDelta: latestClientX - startX,
           maximumTotalWidth
         });
         nextWidths = result.widths;
+        nextElastic = result.elastic;
         // Keep the live drag intent available to a replacement widget. A DOM rebuild
         // may otherwise project the last committed width over the active pointer preview.
         storeIntent(table, {
-          widths: [...result.widths],
-          initialTotalWidth,
-          elastic: sum(result.widths) >= maximumTotalWidth - 1,
-          defaultWidthWasCapped
+            widths: [...result.widths],
+            initialTotalWidth,
+          elastic: result.elastic,
+          defaultWidthWasCapped,
+          availableWidth: maximumTotalWidth
         });
         render(table, result.widths, result.totalWidth);
         table.dispatchEvent(
@@ -294,15 +296,14 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         if (finishEvent && finishEvent.pointerId !== event.pointerId) return;
         removeDragListeners();
         if (!isCurrentBinding() || !table.isConnected) return;
-        const maximumTotalWidth = availableWidth(table);
         storeIntent(table, {
           widths: [...nextWidths],
           initialTotalWidth,
-          elastic: sum(nextWidths) >= maximumTotalWidth - 1,
-          defaultWidthWasCapped
+          elastic: nextElastic,
+          defaultWidthWasCapped,
+          availableWidth: availableWidth(table)
         });
         table.dispatchEvent(new CustomEvent(projectionEventName));
-        requestCurrentProjection(epoch);
       };
       const move = (moveEvent: PointerEvent) => {
         if (!isCurrentBinding() || moveEvent.pointerId !== event.pointerId) return;

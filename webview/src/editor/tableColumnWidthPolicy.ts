@@ -1,6 +1,7 @@
 export type TableColumnResizeRequest = {
   readonly widths: readonly number[];
   readonly minimumWidths: readonly number[];
+  readonly elastic: boolean;
   readonly column: number;
   readonly requestedDelta: number;
   readonly maximumTotalWidth: number;
@@ -13,12 +14,14 @@ export type TableColumnWidthProjectionRequest = {
   readonly elastic: boolean;
   readonly defaultWidthWasCapped: boolean;
   readonly availableWidth: number;
+  readonly preserveWidthIntent: boolean;
 };
 
 export type TableColumnWidthResult = {
   readonly widths: readonly number[];
   readonly totalWidth: number;
   readonly reachedAvailableWidth: boolean;
+  readonly elastic: boolean;
 };
 
 export type TableColumnWidthPolicy = {
@@ -80,10 +83,15 @@ function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
   }
 
   const totalWidth = total(widths);
+  const reachedAvailableWidth = maximumTotalWidth > 0 && totalWidth >= maximumTotalWidth - 1;
+  const activeWidthDelta = widths[request.column] - request.widths[request.column];
   return {
     widths,
     totalWidth,
-    reachedAvailableWidth: maximumTotalWidth > 0 && totalWidth >= maximumTotalWidth - 1
+    reachedAvailableWidth,
+    elastic: activeWidthDelta < -1
+      ? false
+      : request.elastic || (activeWidthDelta > 1 && reachedAvailableWidth)
   };
 }
 
@@ -93,6 +101,17 @@ function project(request: TableColumnWidthProjectionRequest): TableColumnWidthRe
   }
   if (request.minimumWidths.some((width) => !Number.isFinite(width) || width < 0)) {
     throw new TypeError('minimumWidths must contain only finite non-negative values');
+  }
+  if (request.preserveWidthIntent) {
+    const widths = request.widths.map((width, index) => Math.max(width, request.minimumWidths[index]));
+    const totalWidth = total(widths);
+    const availableWidth = Math.max(0, request.availableWidth);
+    return {
+      widths,
+      totalWidth,
+      reachedAvailableWidth: availableWidth > 0 && totalWidth >= availableWidth - 1,
+      elastic: request.elastic
+    };
   }
   const requestedTotalWidth = total(request.widths);
   const availableWidth = Math.max(0, request.availableWidth);
@@ -122,7 +141,8 @@ function project(request: TableColumnWidthProjectionRequest): TableColumnWidthRe
   return {
     widths,
     totalWidth,
-    reachedAvailableWidth: availableWidth > 0 && totalWidth >= availableWidth - 1
+    reachedAvailableWidth: availableWidth > 0 && totalWidth >= availableWidth - 1,
+    elastic: request.elastic
   };
 }
 

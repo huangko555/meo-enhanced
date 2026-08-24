@@ -146,6 +146,47 @@ async function dragWithPresentationSamples(
   return samples;
 }
 
+async function dragWithCommittedSamples(
+  page: any,
+  selector: string,
+  delta: number
+): Promise<{
+  readonly preview: Awaited<ReturnType<typeof tablePresentationWidths>>;
+  readonly committed: readonly Awaited<ReturnType<typeof tablePresentationWidths>>[];
+}> {
+  const pointer = await page.$eval(selector, (handle: Element) => {
+    const rect = handle.getBoundingClientRect();
+    const pointerId = ((window as any).__columnWidthTransactionPointerId ?? 90) + 1;
+    (window as any).__columnWidthTransactionPointerId = pointerId;
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, pointerId };
+    handle.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, button: 0, buttons: 1,
+      pointerId, pointerType: 'mouse', clientX: point.x, clientY: point.y
+    }));
+    return point;
+  });
+  await page.evaluate(({ x, y, pointerId, requestedDelta }) => {
+    window.dispatchEvent(new PointerEvent('pointermove', {
+      bubbles: true, cancelable: true, buttons: 1,
+      pointerId, pointerType: 'mouse', clientX: x + requestedDelta, clientY: y
+    }));
+  }, { ...pointer, requestedDelta: delta });
+  const tableSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type';
+  const preview = await tablePresentationWidths(page, tableSelector);
+  await page.evaluate(({ x, y, pointerId, requestedDelta }) => {
+    window.dispatchEvent(new PointerEvent('pointerup', {
+      bubbles: true, cancelable: true, buttons: 0,
+      pointerId, pointerType: 'mouse', clientX: x + requestedDelta, clientY: y
+    }));
+  }, { ...pointer, requestedDelta: delta });
+  const committed = [
+    await tablePresentationWidths(page, tableSelector),
+    await tablePresentationWidths(page, tableSelector),
+    await tablePresentationWidths(page, tableSelector)
+  ];
+  return { preview, committed };
+}
+
 async function tablePresentationWidths(
   page: any,
   selector: string
@@ -517,6 +558,122 @@ async function main(): Promise<void> {
     assert.equal(horizontalScrollAfter.focused, true);
     assert.equal(horizontalScrollAfter.selectionStart, 1);
     assert.equal(horizontalScrollAfter.aligned, true, 'horizontal scroll must keep main and Sticky column boundaries aligned');
+
+    const transactionStateBefore = await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      wrap.scrollLeft = 0;
+      wrap.dispatchEvent(new Event('scroll'));
+      return {
+        rowHeight: table.querySelector<HTMLElement>('tbody tr')!.getBoundingClientRect().height,
+        focused: document.activeElement === input,
+        selectionStart: input.selectionStart,
+        selectionEnd: input.selectionEnd
+      };
+    });
+    const firstGrow = await dragWithCommittedSamples(page, firstHandle, 24);
+    for (const [index, sample] of firstGrow.committed.entries()) {
+      assert.deepEqual(
+        sample.primaryWidths.map(Math.round),
+        firstGrow.preview.primaryWidths.map(Math.round),
+        `infeasible first-column finish sample ${index} reversed the last valid preview`
+      );
+      assert.deepEqual(sample.stickyWidths.map(Math.round), sample.primaryWidths.map(Math.round));
+    }
+    await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
+      wrap.dispatchEvent(new Event('scroll'));
+    });
+    const lastHandle = '.meo-md-html-table-sticky-table th:last-child .meo-md-html-table-column-resize-handle';
+    const lastGrow = await dragWithCommittedSamples(page, lastHandle, 24);
+    for (const [index, sample] of lastGrow.committed.entries()) {
+      assert.deepEqual(
+        sample.primaryWidths.map(Math.round),
+        lastGrow.preview.primaryWidths.map(Math.round),
+        `infeasible last-column finish sample ${index} reversed the last valid preview`
+      );
+      assert.deepEqual(sample.stickyWidths.map(Math.round), sample.primaryWidths.map(Math.round));
+    }
+    await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
+      wrap.dispatchEvent(new Event('scroll'));
+    });
+    const lastShrink = await dragWithCommittedSamples(page, lastHandle, -12);
+    assert.ok(
+      lastShrink.preview.primaryWidths[2] < lastGrow.preview.primaryWidths[2] - 10,
+      JSON.stringify({ lastGrow: lastGrow.preview.primaryWidths, lastShrink: lastShrink.preview.primaryWidths })
+    );
+    assert.deepEqual(
+      lastShrink.committed.at(-1)!.primaryWidths.map(Math.round),
+      lastShrink.preview.primaryWidths.map(Math.round)
+    );
+    const expandedAfterShrink = await page.$eval(
+      `${tableSelector}:first-of-type`,
+      async (table: HTMLTableElement) => {
+        const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+        const projected = new Promise<void>((resolve) => {
+          table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+        });
+        wrap.style.maxWidth = 'none';
+        wrap.style.width = '500px';
+        await projected;
+        const sticky = table.closest('.meo-md-html-table-shell')!
+          .querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table')!;
+        return {
+          primary: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+            .map((cell) => cell.getBoundingClientRect().width),
+          sticky: Array.from(sticky.querySelectorAll<HTMLElement>('thead th'))
+            .map((cell) => cell.getBoundingClientRect().width)
+        };
+      }
+    );
+    assert.deepEqual(
+      expandedAfterShrink.primary.map(Math.round),
+      lastShrink.preview.primaryWidths.map(Math.round),
+      'container expansion after an active shrink must not expand or reverse the committed intent'
+    );
+    assert.deepEqual(expandedAfterShrink.sticky.map(Math.round), expandedAfterShrink.primary.map(Math.round));
+    const transactionStateAfter = await page.$eval(`${tableSelector}:first-of-type`, async (table: HTMLTableElement) => {
+      const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+      const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      const lastHandle = table.querySelector<HTMLElement>('th:last-child .meo-md-html-table-column-resize-handle')!;
+      const projected = new Promise<void>((resolve) => {
+        table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+      });
+      wrap.style.width = '';
+      wrap.style.maxWidth = '';
+      await projected;
+      wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
+      wrap.dispatchEvent(new Event('scroll'));
+      const wrapRect = wrap.getBoundingClientRect();
+      const handleRect = lastHandle.getBoundingClientRect();
+      return {
+        rowHeight: table.querySelector<HTMLElement>('tbody tr')!.getBoundingClientRect().height,
+        focused: document.activeElement === input,
+        selectionStart: input.selectionStart,
+        selectionEnd: input.selectionEnd,
+        lastReachable: handleRect.left >= wrapRect.left - 1 && handleRect.right <= wrapRect.right + 1
+      };
+    });
+    assert.ok(Math.abs(transactionStateAfter.rowHeight - transactionStateBefore.rowHeight) < 1);
+    assert.equal(transactionStateAfter.focused, transactionStateBefore.focused);
+    assert.equal(transactionStateAfter.selectionStart, transactionStateBefore.selectionStart);
+    assert.equal(transactionStateAfter.selectionEnd, transactionStateBefore.selectionEnd);
+    assert.equal(transactionStateAfter.lastReachable, true);
+    await page.waitForFunction((selector) => {
+      const table = document.querySelector<HTMLTableElement>(selector);
+      const sticky = table?.closest('.meo-md-html-table-shell')
+        ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table');
+      const primary = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? []);
+      const projected = Array.from(sticky?.querySelectorAll<HTMLElement>('thead th') ?? []);
+      return primary.length === 3 && projected.length === 3 && primary.every((cell, index) => (
+        Math.abs(cell.getBoundingClientRect().left - projected[index].getBoundingClientRect().left) < 1
+        && Math.abs(cell.getBoundingClientRect().right - projected[index].getBoundingClientRect().right) < 1
+      ));
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
+
     const scrolledStickySamples = await dragPath(
       page,
       '.meo-md-html-table-sticky-table th:nth-child(2) .meo-md-html-table-column-resize-handle',
