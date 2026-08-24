@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,37 @@ import { launchTestBrowser } from './browser-test-helpers';
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-list-work-bound-production-'));
 const LONG_LINE_COUNT = 5_000;
+
+type Frame = { accepted: boolean; text: string; visible: string; caretVisible: boolean; scrollTop: number };
+
+function assertSettledTrace(frames: readonly Frame[], expectedSuffix: string): void {
+  const accepted = frames.filter((frame) => frame.accepted);
+  assert.ok(accepted.length > 0, 'the trace must contain an observable frame after Document acceptance');
+  const referenceScroll = accepted[0].scrollTop;
+  for (const frame of accepted) {
+    assert.ok(frame.text.endsWith(expectedSuffix), `accepted frame retained stale text: ${JSON.stringify(frame)}`);
+    assert.ok(frame.visible.includes(expectedSuffix), `accepted frame hid current text: ${JSON.stringify(frame)}`);
+    assert.equal(frame.caretVisible, true, `accepted frame hid the caret: ${JSON.stringify(frame)}`);
+    assert.ok(Math.abs(frame.scrollTop - referenceScroll) <= 1, `accepted frame drifted or rolled back scroll: ${JSON.stringify({ referenceScroll, frame })}`);
+  }
+}
+
+assert.throws(
+  () => assertSettledTrace([
+    { accepted: false, text: 'old', visible: 'old', caretVisible: true, scrollTop: 90 },
+    { accepted: true, text: 'old', visible: 'old', caretVisible: false, scrollTop: 0 },
+    { accepted: true, text: 'current', visible: 'current', caretVisible: true, scrollTop: 90 }
+  ], 'current'),
+  /stale text|hid current text|hid the caret|drifted or rolled back/
+);
+assert.throws(
+  () => assertSettledTrace([
+    { accepted: true, text: 'current', visible: 'current', caretVisible: true, scrollTop: 120 },
+    { accepted: true, text: 'current', visible: 'current', caretVisible: true, scrollTop: 116 },
+    { accepted: true, text: 'current', visible: 'current', caretVisible: true, scrollTop: 120 }
+  ], 'current'),
+  /drifted or rolled back/
+);
 
 async function main(): Promise<void> {
   const build = await Bun.build({
@@ -31,14 +63,12 @@ async function main(): Promise<void> {
     await page.evaluate(({ plainText, orderedText }) => {
       const harness = (window as any).ListEditingHarness;
       const makeEditor = (parent: string, text: string) => {
-        const changes: string[] = [];
+        const publishes: string[] = [];
         const editor = harness.createEditor({
-          parent: document.getElementById(parent)!,
-          text,
-          initialMode: 'live',
-          onApplyChanges(nextText: string) { changes.push(nextText); }
+          parent: document.getElementById(parent)!, text, initialMode: 'live',
+          onApplyChanges(nextText: string) { publishes.push(nextText); }
         });
-        return { editor, changes };
+        return { editor, publishes, stopTrace: null as null | (() => Frame[]) };
       };
       (window as any).__listWorkBound = {
         plain: makeEditor('plain', plainText),
@@ -47,119 +77,131 @@ async function main(): Promise<void> {
     }, { plainText, orderedText });
     await page.waitForSelector('#ordered .cm-editor');
 
-    const session = await page.createCDPSession();
-    const prepareEnd = async (name: 'plain' | 'ordered') => {
-      const point = await page.evaluate((editorName) => {
-        const target = (window as any).__listWorkBound[editorName].editor;
-        target.view.dispatch({ selection: { anchor: target.view.state.doc.length }, scrollIntoView: true });
-        target.focus();
-        const caret = target.view.coordsAtPos(target.view.state.doc.length);
+    const startTraceAtEnd = async (name: 'plain' | 'ordered', beforePublishes: number) => {
+      const point = await page.evaluate(({ editorName, before }) => {
+        const current = (window as any).__listWorkBound[editorName];
+        const editor = current.editor;
+        editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length }, scrollIntoView: true });
+        editor.focus();
+        const caret = editor.view.coordsAtPos(editor.view.state.doc.length);
         if (!caret) throw new Error(`End caret was not mounted for ${editorName}`);
-        const frames: Array<Record<string, unknown>> = [];
+        const frames: Frame[] = [];
         let recording = true;
         const record = () => {
           if (!recording) return;
-          const position = target.view.state.selection.main.head;
-          const caret = target.view.coordsAtPos(position);
-          const viewport = target.view.scrollDOM.getBoundingClientRect();
+          const position = editor.view.state.selection.main.head;
+          const currentCaret = editor.view.coordsAtPos(position);
+          const viewport = editor.view.scrollDOM.getBoundingClientRect();
           frames.push({
-            text: target.getText(),
-            visible: Array.from(target.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
+            accepted: current.publishes.length > before,
+            text: editor.getText(),
+            visible: Array.from(editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line'))
               .map((line) => line.textContent ?? '')
               .join('\n'),
-            caretVisible: Boolean(caret && caret.top >= viewport.top && caret.bottom <= viewport.bottom),
-            scrollTop: target.view.scrollDOM.scrollTop
+            caretVisible: Boolean(currentCaret && currentCaret.top >= viewport.top && currentCaret.bottom <= viewport.bottom),
+            scrollTop: editor.view.scrollDOM.scrollTop
           });
           requestAnimationFrame(record);
         };
         requestAnimationFrame(record);
-        (window as any).__listWorkBound[editorName].stopFrames = () => { recording = false; return frames; };
+        current.stopTrace = () => { recording = false; return frames; };
         return { x: caret.left + 1, y: caret.top + Math.max(1, caret.bottom - caret.top) / 2 };
-      }, name);
+      }, { editorName: name, before: beforePublishes });
       await page.mouse.click(point.x, point.y);
       await page.keyboard.press('End');
     };
 
-    const finish = async (name: 'plain' | 'ordered', beforeChanges: number, suffix: string) => {
-      await page.waitForFunction(({ editorName, before, expectedSuffix }) => {
+    const finish = async (name: 'plain' | 'ordered', beforePublishes: number, expectedSuffix: string) => {
+      await page.waitForFunction(({ editorName, before, suffix }) => {
         const current = (window as any).__listWorkBound[editorName];
-        return current.editor.getText().endsWith(expectedSuffix);
-      }, {}, { editorName: name, before: beforeChanges, expectedSuffix: suffix });
-      return page.evaluate(({ editorName, before }) => {
+        return current.publishes.length === before + 1 && current.editor.getText().endsWith(suffix);
+      }, {}, { editorName: name, before: beforePublishes, suffix: expectedSuffix });
+      return page.evaluate((editorName) => {
         const current = (window as any).__listWorkBound[editorName];
         return {
           text: current.editor.getText(),
           history: current.editor.getHistoryDepth(),
-          frames: current.stopFrames(),
-          changes: current.changes.length,
-          expectedChanges: before + 1
+          frames: current.stopTrace!(),
+          publishes: current.publishes.length
         };
-      }, { editorName: name, before: beforeChanges });
+      }, name);
     };
 
-    await prepareEnd('plain');
-    const plainBefore = await page.evaluate(() => (window as any).__listWorkBound.plain.changes.length as number);
+    await startTraceAtEnd('plain', 0);
     await page.keyboard.type('x');
-    const plainTyped = await finish('plain', plainBefore, `plain ${LONG_LINE_COUNT}x`);
-    if (plainTyped.changes !== plainTyped.expectedChanges) {
-      throw new Error(`Long plain key input published ${plainTyped.changes - plainBefore} document changes`);
-    }
-    if (!plainTyped.frames.some((frame: any) => frame.visible.includes(`plain ${LONG_LINE_COUNT}x`) && frame.caretVisible)) {
-      throw new Error(`Long plain key input was not continuously visible: ${JSON.stringify(plainTyped.frames)}`);
-    }
+    const plainTyped = await finish('plain', 0, `plain ${LONG_LINE_COUNT}x`);
+    assert.equal(plainTyped.publishes, 1, 'keyboard input must publish exactly once');
+    assert.deepEqual(plainTyped.history, { undo: 1, redo: 0 }, 'keyboard input must create one native history entry');
+    assertSettledTrace(plainTyped.frames, `plain ${LONG_LINE_COUNT}x`);
+    const plainUndoRedo = await page.evaluate(async () => {
+      const editor = (window as any).__listWorkBound.plain.editor;
+      const undo = await editor.undo();
+      const afterUndo = editor.getText();
+      const redo = await editor.redo();
+      return { undo, redo, afterUndo, afterRedo: editor.getText(), history: editor.getHistoryDepth() };
+    });
+    assert.ok(plainUndoRedo.undo && plainUndoRedo.redo, 'keyboard history must support undo and redo');
+    assert.equal(plainUndoRedo.afterUndo, plainText);
+    assert.equal(plainUndoRedo.afterRedo, `${plainText}x`);
+    assert.deepEqual(plainUndoRedo.history, { undo: 1, redo: 0 });
 
-    await prepareEnd('plain');
-    const plainPasteBefore = await page.evaluate(() => (window as any).__listWorkBound.plain.changes.length as number);
+    const plainPasteBefore = await page.evaluate(() => (window as any).__listWorkBound.plain.publishes.length as number);
+    await startTraceAtEnd('plain', plainPasteBefore);
     const pasted = await page.evaluate(() => {
-      const target = (window as any).__listWorkBound.plain.editor;
+      const editor = (window as any).__listWorkBound.plain.editor;
       const data = new DataTransfer();
       data.setData('text/plain', ' pasted');
-      return target.view.contentDOM.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
+      return editor.view.contentDOM.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
     });
-    if (pasted) throw new Error('Long plain paste escaped the production editor');
+    assert.equal(pasted, false, 'paste must be accepted by the production editor');
     const plainPasted = await finish('plain', plainPasteBefore, `plain ${LONG_LINE_COUNT}x pasted`);
-    if (plainPasted.changes !== plainPasted.expectedChanges) {
-      throw new Error(`Long plain paste published ${plainPasted.changes - plainPasteBefore} document changes`);
-    }
-    if (!plainPasted.frames.some((frame: any) => frame.visible.includes(`plain ${LONG_LINE_COUNT}x pasted`) && frame.caretVisible)) {
-      throw new Error(`Long plain paste was not continuously visible: ${JSON.stringify(plainPasted.frames)}`);
-    }
+    assert.equal(plainPasted.publishes, plainPasteBefore + 1, 'paste must publish exactly once');
+    assert.deepEqual(plainPasted.history, { undo: 2, redo: 0 }, 'paste must create one native history entry');
+    assertSettledTrace(plainPasted.frames, `plain ${LONG_LINE_COUNT}x pasted`);
 
-    await prepareEnd('ordered');
-    const orderedBefore = await page.evaluate(() => (window as any).__listWorkBound.ordered.changes.length as number);
+    await startTraceAtEnd('ordered', 0);
     await page.keyboard.type('x');
-    const orderedTyped = await finish('ordered', orderedBefore, `${LONG_LINE_COUNT}. item ${LONG_LINE_COUNT}x`);
-    if (orderedTyped.changes !== orderedTyped.expectedChanges) {
-      throw new Error(`Long ordered key input published ${orderedTyped.changes - orderedBefore} document changes`);
-    }
-    if (!orderedTyped.frames.some((frame: any) => frame.visible.includes(`${LONG_LINE_COUNT}. item ${LONG_LINE_COUNT}x`) && frame.caretVisible)) {
-      throw new Error(`Long ordered key input was not continuously visible: ${JSON.stringify(orderedTyped.frames)}`);
-    }
-    if (orderedTyped.history.undo !== 1) {
-      throw new Error(`Ordered typing must remain one native history transaction: ${JSON.stringify(orderedTyped.history)}`);
-    }
-
-    await prepareEnd('ordered');
-    const imeBefore = await page.evaluate(() => (window as any).__listWorkBound.ordered.changes.length as number);
-    await session.send('Input.imeSetComposition', { text: 'pin', selectionStart: 3, selectionEnd: 3 });
-    const preeditChanges = await page.evaluate(() => (window as any).__listWorkBound.ordered.changes.length as number);
-    if (preeditChanges !== imeBefore) throw new Error(`IME preedit published ${preeditChanges - imeBefore} document changes`);
-    await session.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 });
-    await page.evaluate(() => {
-      const target = (window as any).__listWorkBound.ordered.editor;
-      target.view.contentDOM.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+    const orderedTyped = await finish('ordered', 0, `${LONG_LINE_COUNT}. item ${LONG_LINE_COUNT}x`);
+    assert.equal(orderedTyped.publishes, 1, 'ordered keyboard input must publish exactly once');
+    assert.deepEqual(orderedTyped.history, { undo: 1, redo: 0 }, 'ordered keyboard input and normalization must share one history entry');
+    assertSettledTrace(orderedTyped.frames, `${LONG_LINE_COUNT}. item ${LONG_LINE_COUNT}x`);
+    const orderedUndoRedo = await page.evaluate(async () => {
+      const editor = (window as any).__listWorkBound.ordered.editor;
+      const undo = await editor.undo();
+      const afterUndo = editor.getText();
+      const redo = await editor.redo();
+      return { undo, redo, afterUndo, afterRedo: editor.getText(), history: editor.getHistoryDepth() };
     });
+    assert.ok(orderedUndoRedo.undo && orderedUndoRedo.redo, 'ordered keyboard history must support undo and redo');
+    assert.equal(orderedUndoRedo.afterUndo, orderedText);
+    assert.equal(orderedUndoRedo.afterRedo, `${orderedText}x`);
+    assert.deepEqual(orderedUndoRedo.history, { undo: 1, redo: 0 });
+
+    const imeBefore = await page.evaluate(() => (window as any).__listWorkBound.ordered.publishes.length as number);
+    await startTraceAtEnd('ordered', imeBefore);
+    const session = await page.createCDPSession();
+    await session.send('Input.imeSetComposition', { text: 'pin', selectionStart: 3, selectionEnd: 3 });
+    assert.equal(
+      await page.evaluate(() => (window as any).__listWorkBound.ordered.publishes.length as number),
+      imeBefore,
+      'IME preedit must not publish a partial Document'
+    );
     await session.send('Input.insertText', { text: '还' });
     const orderedIme = await finish('ordered', imeBefore, `${LONG_LINE_COUNT}. item ${LONG_LINE_COUNT}x还`);
-    if (orderedIme.changes < orderedIme.expectedChanges) {
-      throw new Error('Long ordered IME commit did not publish the committed document');
-    }
-    if (!orderedIme.frames.some((frame: any) => frame.visible.includes(`${LONG_LINE_COUNT}. item ${LONG_LINE_COUNT}x还`) && frame.caretVisible)) {
-      throw new Error(`Long ordered IME commit was not continuously visible: ${JSON.stringify(orderedIme.frames)}`);
-    }
-    if (orderedIme.history.undo < 2) {
-      throw new Error(`Ordered IME commit did not enter native history: ${JSON.stringify(orderedIme.history)}`);
-    }
+    assert.equal(orderedIme.publishes, imeBefore + 1, 'IME commit must publish exactly once');
+    assert.deepEqual(orderedIme.history, { undo: 2, redo: 0 }, 'IME commit must create one native history entry');
+    assertSettledTrace(orderedIme.frames, `${LONG_LINE_COUNT}. item ${LONG_LINE_COUNT}x还`);
+    const imeUndoRedo = await page.evaluate(async () => {
+      const editor = (window as any).__listWorkBound.ordered.editor;
+      const undo = await editor.undo();
+      const afterUndo = editor.getText();
+      const redo = await editor.redo();
+      return { undo, redo, afterUndo, afterRedo: editor.getText(), history: editor.getHistoryDepth() };
+    });
+    assert.ok(imeUndoRedo.undo && imeUndoRedo.redo, 'IME history must support undo and redo');
+    assert.equal(imeUndoRedo.afterUndo, `${orderedText}x`);
+    assert.equal(imeUndoRedo.afterRedo, `${orderedText}x还`);
+    assert.deepEqual(imeUndoRedo.history, { undo: 2, redo: 0 });
 
     console.log('ordered-list production work-bound checks passed');
   } finally {

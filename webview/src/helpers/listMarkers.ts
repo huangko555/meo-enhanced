@@ -880,49 +880,6 @@ export function handleEnterBeforeNestedList(view: EditorView): boolean {
   return true;
 }
 
-export function collectOrderedListRenumberChanges(
-  state: EditorState,
-  resetNestedStartsAtLines: ReadonlySet<number> = new Set()
-): ListTextChange[] {
-  const changes: ListTextChange[] = [];
-  const stylesByLine = detectListIndentStylesByLine(state);
-  const orderedCountsByLevel: Array<number | null> = [];
-
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo += 1) {
-    const line = state.doc.line(lineNo);
-    const lineText = state.doc.sliceString(line.from, line.to);
-    const style = lineIndentStyle(lineNo, stylesByLine);
-    const marker = listMarkerData(lineText, null, style);
-
-    if (!marker) {
-      orderedCountsByLevel.length = 0;
-      continue;
-    }
-
-    const level = marker.indentLevel;
-    const { expected, isAnchor } = nextOrderedSequenceNumber(
-      orderedCountsByLevel,
-      level,
-      marker.orderedNumber,
-      !resetNestedStartsAtLines.has(lineNo)
-    );
-    if (expected === null || isAnchor || marker.orderedNumber === undefined) {
-      continue;
-    }
-    const expectedText = String(expected);
-    if (marker.orderedNumber !== expectedText) {
-      const from = line.from + marker.leadingWhitespace.length;
-      changes.push({
-        from,
-        to: from + marker.orderedNumber.length,
-        insert: expectedText
-      });
-    }
-  }
-
-  return changes;
-}
-
 interface ListLineRecord {
   readonly line: Line;
   readonly text: string;
@@ -942,21 +899,20 @@ function collectContiguousListLines(
     return null;
   }
 
-  const before: ListLineRecord[] = [];
+  const lines: ListLineRecord[] = [];
   for (let previousLine = lineNumber - 1; previousLine >= 1; previousLine -= 1) {
     const previous = readListLine(state, previousLine);
     if (!isListLine(previous.text)) break;
-    before.unshift(previous);
+    lines.push(previous);
   }
-
-  const after: ListLineRecord[] = [];
+  lines.reverse();
+  lines.push(current);
   for (let nextLine = lineNumber + 1; nextLine <= state.doc.lines; nextLine += 1) {
     const next = readListLine(state, nextLine);
     if (!isListLine(next.text)) break;
-    after.push(next);
+    lines.push(next);
   }
-
-  return [...before, current, ...after];
+  return lines;
 }
 
 function collectOrderedListRenumberChangesInLines(
