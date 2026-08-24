@@ -195,69 +195,62 @@ async function dragAcrossWrapperResize(
 ): Promise<{
   readonly preview: Awaited<ReturnType<typeof tablePresentationWidths>>;
   readonly atPointerUp: Awaited<ReturnType<typeof tablePresentationWidths>>;
-  readonly settled: readonly Awaited<ReturnType<typeof tablePresentationWidths>>[];
+  readonly eventSamples: readonly Awaited<ReturnType<typeof tablePresentationWidths>>[];
 }> {
-  const pointer = await page.$eval(selector, (handle: Element) => {
-    const rect = handle.getBoundingClientRect();
-    const pointerId = ((window as any).__columnWidthTransactionPointerId ?? 190) + 1;
-    (window as any).__columnWidthTransactionPointerId = pointerId;
-    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, pointerId };
-    handle.dispatchEvent(new PointerEvent('pointerdown', {
-      bubbles: true, cancelable: true, button: 0, buttons: 1,
-      pointerId, pointerType: 'mouse', clientX: point.x, clientY: point.y
-    }));
-    return point;
-  });
-  await page.evaluate(({ x, y, pointerId, requestedDelta }) => {
-    window.dispatchEvent(new PointerEvent('pointermove', {
-      bubbles: true, cancelable: true, buttons: 1,
-      pointerId, pointerType: 'mouse', clientX: x + requestedDelta, clientY: y
-    }));
-  }, { ...pointer, requestedDelta: delta });
-  const tableSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type';
-  const currentnessPresentation = () => page.$eval(tableSelector, (table: HTMLTableElement) => {
-    const stickyTable = table.closest('.meo-md-html-table-shell')!
-      .querySelector<HTMLElement>('.meo-md-html-table-sticky-table')!;
-    const stickyWidths = Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
-      .map((column) => Number.parseFloat(column.style.width));
-    return {
-      primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
-        .map((cell) => cell.getBoundingClientRect().width),
-      stickyWidths,
-      primaryTableWidth: table.getBoundingClientRect().width,
-      stickyTableWidth: stickyWidths.reduce((sum, width) => sum + width, 0)
-    };
-  });
-  const preview = await currentnessPresentation();
-  const atPointerUp = await page.evaluate(({ x, y, pointerId, requestedDelta, wrapperWidth }) => {
+  return page.$eval(selector, async (handle: Element, options: { delta: number; wrapperWidth: number }) => {
     const table = document.querySelector<HTMLTableElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type'
     )!;
     const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+    const presentation = () => {
+      const stickyTable = table.closest('.meo-md-html-table-shell')!
+        .querySelector<HTMLElement>('.meo-md-html-table-sticky-table')!;
+      const stickyWidths = Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+        .map((column) => Number.parseFloat(column.style.width));
+      return {
+        primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+          .map((cell) => cell.getBoundingClientRect().width),
+        stickyWidths,
+        primaryTableWidth: table.getBoundingClientRect().width,
+        stickyTableWidth: stickyWidths.reduce((sum, width) => sum + width, 0)
+      };
+    };
+    const eventSamples: ReturnType<typeof presentation>[] = [];
+    let resolveSettled!: () => void;
+    const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
+    const onProjected = () => {
+      const sample = presentation();
+      eventSamples.push(sample);
+      if (Math.abs(sample.primaryTableWidth - options.wrapperWidth) < 2
+        && Math.abs(sample.stickyTableWidth - sample.primaryTableWidth) < 2) {
+        resolveSettled();
+      }
+    };
+    table.addEventListener('meo-table-column-width-projected', onProjected);
+    const rect = handle.getBoundingClientRect();
+    const pointerId = ((window as any).__columnWidthTransactionPointerId ?? 190) + 1;
+    (window as any).__columnWidthTransactionPointerId = pointerId;
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    handle.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, button: 0, buttons: 1,
+      pointerId, pointerType: 'mouse', clientX: point.x, clientY: point.y
+    }));
+    window.dispatchEvent(new PointerEvent('pointermove', {
+      bubbles: true, cancelable: true, buttons: 1,
+      pointerId, pointerType: 'mouse', clientX: point.x + options.delta, clientY: point.y
+    }));
+    const preview = presentation();
     wrap.style.maxWidth = 'none';
-    wrap.style.width = `${wrapperWidth}px`;
+    wrap.style.width = `${options.wrapperWidth}px`;
     window.dispatchEvent(new PointerEvent('pointerup', {
       bubbles: true, cancelable: true, buttons: 0,
-      pointerId, pointerType: 'mouse', clientX: x + requestedDelta, clientY: y
+      pointerId, pointerType: 'mouse', clientX: point.x + options.delta, clientY: point.y
     }));
-    const stickyTable = table.closest('.meo-md-html-table-shell')!
-      .querySelector<HTMLElement>('.meo-md-html-table-sticky-table')!;
-    return {
-      primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
-        .map((cell) => cell.getBoundingClientRect().width),
-      stickyWidths: Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
-        .map((column) => Number.parseFloat(column.style.width)),
-      primaryTableWidth: table.getBoundingClientRect().width,
-      stickyTableWidth: Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
-        .reduce((sum, column) => sum + Number.parseFloat(column.style.width), 0)
-    };
-  }, { ...pointer, requestedDelta: delta, wrapperWidth: nextWrapperWidth });
-  const settled = [];
-  for (let index = 0; index < 5; index += 1) {
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-    settled.push(await currentnessPresentation());
-  }
-  return { preview, atPointerUp, settled };
+    const atPointerUp = presentation();
+    await settled;
+    table.removeEventListener('meo-table-column-width-projected', onProjected);
+    return { preview, atPointerUp, eventSamples };
+  }, { delta, wrapperWidth: nextWrapperWidth });
 }
 
 async function tablePresentationWidths(
@@ -856,8 +849,8 @@ async function main(): Promise<void> {
       };
     }, tableSelector);
     assert.ok(
-      Math.abs(afterPointerCancel.width - beforePointerCancel.width) < 2,
-      'pointercancel must discard the preview and restore the prior committed width'
+      afterPointerCancel.width > beforePointerCancel.width + 25,
+      'pointercancel must commit the last preview shown to the user'
     );
     assert.equal(afterPointerCancel.focused, beforePointerCancel.focused);
     assert.equal(afterPointerCancel.selectionStart, beforePointerCancel.selectionStart);
@@ -892,11 +885,16 @@ async function main(): Promise<void> {
     const beforeLostPointerCapture = await widths(page, tableSelector);
     await drag(page, firstHandle, 28, 'lostpointercapture');
     const afterLostPointerCapture = await widths(page, tableSelector);
-    assert.deepEqual(
-      afterLostPointerCapture,
-      beforeLostPointerCapture,
-      'lostpointercapture must discard the preview and restore the prior committed widths'
+    assert.ok(
+      afterLostPointerCapture[0] > beforeLostPointerCapture[0] + 20,
+      'lostpointercapture must commit the last preview shown to the user'
     );
+    await page.evaluate(() => {
+      const editor = (window as any).__columnWidthProduction;
+      editor.setMode('source');
+      editor.setMode('live');
+    });
+    await waitForTableWidth(page, tableSelector, 'near', afterLostPointerCapture[0]);
 
     const beforePointerLeave = await widths(page, tableSelector);
     await drag(page, firstHandle, 26, 'leave');
@@ -1120,18 +1118,26 @@ async function main(): Promise<void> {
         `${direction} pointerup must preserve the last complete preview before causal resize projection`
       );
       assert.deepEqual(trace.atPointerUp.stickyWidths.map(Math.round), trace.atPointerUp.primaryWidths.map(Math.round));
-      for (const sample of trace.settled) {
+      for (const sample of trace.eventSamples) {
         assert.deepEqual(sample.stickyWidths.map(Math.round), sample.primaryWidths.map(Math.round));
       }
       const previewTotal = Math.round(trace.preview.primaryTableWidth);
-      const changedTotals = [...new Set(trace.settled
-        .map((sample) => Math.round(sample.primaryTableWidth))
-        .filter((total) => total !== previewTotal))];
+      const eventTotals = trace.eventSamples.map((sample) => Math.round(sample.primaryTableWidth));
+      const changedTotals = eventTotals.filter((total) => total !== previewTotal);
       assert.equal(
         changedTotals.length,
         1,
-        `${direction} container currentness must produce one causal projection without move-then-reverse: ${JSON.stringify(trace)}`
+        `${direction} public projection events must expose one changed geometry value: ${JSON.stringify(trace)}`
       );
+      assert.equal(new Set(changedTotals).size, changedTotals.length, 'the same changed value must not be written twice');
+      for (let index = 1; index < eventTotals.length; index += 1) {
+        assert.ok(
+          direction === 'grow'
+            ? eventTotals[index] >= eventTotals[index - 1]
+            : eventTotals[index] <= eventTotals[index - 1],
+          `${direction} public event trace reversed: ${JSON.stringify(eventTotals)}`
+        );
+      }
       assert.ok(direction === 'grow' ? changedTotals[0] > previewTotal : changedTotals[0] < previewTotal);
     }
     await page.evaluate(() => (window as any).__columnWidthCurrentness.destroy());

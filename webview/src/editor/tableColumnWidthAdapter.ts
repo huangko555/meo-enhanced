@@ -229,20 +229,6 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     else intents.push(value);
   };
 
-  const restoreIntent = (table: HTMLTableElement, previous: WidthIntent | null): void => {
-    const from = numberFromDataset(table, 'tableFrom');
-    const to = numberFromDataset(table, 'tableTo');
-    if (from === null || to === null || disposed) return;
-    const existing = intents.findIndex((intent) => intent.from === from && intent.to === to);
-    if (previous) {
-      const restored = { ...previous, from, to };
-      if (existing >= 0) intents[existing] = restored;
-      else intents.push(restored);
-    } else if (existing >= 0) {
-      intents.splice(existing, 1);
-    }
-  };
-
   const bind = (table: HTMLTableElement, epoch: LifecycleEpoch): TableBinding => {
     const cleanups: Array<() => void> = [];
     const lifecycle = { alive: true };
@@ -342,15 +328,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       };
       const finish = (finishEvent?: PointerEvent) => {
         if (finishEvent && finishEvent.pointerId !== event.pointerId) return;
-        const cancelled = finishEvent?.type === 'pointercancel'
-          || finishEvent?.type === 'lostpointercapture';
         removeDragListeners();
         if (!isCurrentBinding() || !table.isConnected) return;
-        if (cancelled) {
-          restoreIntent(table, stored);
-          requestCurrentProjection(epoch);
-          return;
-        }
         if (!lastPreview) return;
         storeIntent(table, {
           snapshot: lastPreview,
