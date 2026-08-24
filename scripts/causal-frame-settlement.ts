@@ -12,6 +12,13 @@ type CausalFrameRecord = {
   state: 'queued' | 'executing' | 'cancelled' | 'complete';
 };
 
+type CausalMicrotaskRecord = {
+  readonly callback: VoidFunction;
+  readonly generation: number;
+  readonly onCancel: (() => void) | undefined;
+  state: 'queued' | 'executing' | 'cancelled' | 'complete';
+};
+
 export type CausalSettlementDiagnostics = {
   readonly phase: CausalSettlementPhase;
   readonly rootReturned: boolean;
@@ -46,6 +53,7 @@ export function installCausalFrameSettlement<T>(
   const originalCancelAnimationFrame = environment.cancelAnimationFrame.bind(environment);
   const originalQueueMicrotask = environment.queueMicrotask.bind(environment);
   const callbacks = new Map<object, CausalFrameRecord>();
+  const microtasks = new Map<object, CausalMicrotaskRecord>();
   const ownedHandles = new Set<object>();
   const frames: T[] = [];
   let causalDepth = 0;
@@ -53,23 +61,52 @@ export function installCausalFrameSettlement<T>(
   let rootReturned = false;
   let accepted = false;
   let acceptances = 0;
-  let pendingMicrotasks = 0;
   let disposed = false;
+  let restored = false;
+  let generation = 0;
   let failure: string | null = null;
+  let deferredCleanupErrors: unknown[] = [];
 
   const phase = (): CausalSettlementPhase => {
     if (disposed) return 'disposed';
-    if (accepted && rootReturned && pendingMicrotasks === 0 && callbacks.size === 0) return 'complete';
+    if (accepted && rootReturned && microtasks.size === 0 && callbacks.size === 0) return 'complete';
     if (accepted) return 'accepted';
     return rootReturned ? 'awaitingAcceptance' : 'scheduling';
   };
-  const capture = () => { if (accepted) frames.push(sample()); };
+  const capture = () => { if (!disposed && accepted) frames.push(sample()); };
+  const restoreEnvironment = () => {
+    if (restored) return;
+    environment.requestAnimationFrame = originalRequestAnimationFrame as typeof requestAnimationFrame;
+    environment.cancelAnimationFrame = originalCancelAnimationFrame as typeof cancelAnimationFrame;
+    environment.queueMicrotask = originalQueueMicrotask as typeof queueMicrotask;
+    ownedHandles.clear();
+    restored = true;
+  };
+  const maybeRestore = () => {
+    if (disposed && causalDepth === 0) restoreEnvironment();
+  };
   const runCausal = (callback: () => void) => {
     causalDepth += 1;
+    let primaryError: unknown = null;
     try {
       callback();
+    } catch (error) {
+      primaryError = error;
+      throw error;
     } finally {
       causalDepth -= 1;
+      if (causalDepth === 0 && deferredCleanupErrors.length) {
+        const cleanupErrors = deferredCleanupErrors;
+        deferredCleanupErrors = [];
+        maybeRestore();
+        if (primaryError !== null) {
+          throw new AggregateError([primaryError, ...cleanupErrors], 'Causal callback and cleanup failed');
+        }
+        throw cleanupErrors.length === 1
+          ? cleanupErrors[0]
+          : new AggregateError(cleanupErrors, 'Causal settlement cleanup failed');
+      }
+      maybeRestore();
     }
   };
   const completeRoot = () => {
@@ -78,6 +115,7 @@ export function installCausalFrameSettlement<T>(
       rootReturned = true;
       capture();
     }
+    maybeRestore();
   };
   const beginExternalRoot = (): (() => void) => {
     if (disposed) throw new Error('Cannot start a disposed causal settlement');
@@ -90,10 +128,36 @@ export function installCausalFrameSettlement<T>(
       ended = true;
       causalDepth -= 1;
       completeRoot();
+      maybeRestore();
     };
+  };
+  const scheduleMicrotask = (callback: VoidFunction, onCancel?: () => void) => {
+    const handle = Object.freeze({});
+    const record: CausalMicrotaskRecord = { callback, onCancel, generation, state: 'queued' };
+    microtasks.set(handle, record);
+    originalQueueMicrotask(() => {
+      // The wrapper keeps its opaque record after dispose clears the public
+      // registry, so generation is the non-revivable ownership boundary.
+      if (record.generation !== generation) return;
+      record.state = 'executing';
+      try {
+        runCausal(record.callback);
+      } finally {
+        if (record.state === 'executing') record.state = 'complete';
+        microtasks.delete(handle);
+        capture();
+        maybeRestore();
+      }
+    });
   };
 
   environment.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+    if (disposed) {
+      if (causalDepth === 0) return originalRequestAnimationFrame(callback);
+      const inertHandle = Object.freeze({ valueOf: () => 1 });
+      ownedHandles.add(inertHandle);
+      return inertHandle as unknown as number;
+    }
     if (causalDepth === 0) return originalRequestAnimationFrame(callback);
     // CodeMirror compares its scheduled handle to -1, so the opaque object must
     // remain positive when coerced while identity routing stays non-numeric.
@@ -111,6 +175,7 @@ export function installCausalFrameSettlement<T>(
         if (current.state === 'executing') current.state = 'complete';
         callbacks.delete(handle);
         capture();
+        maybeRestore();
       }
     });
     return handle as unknown as number;
@@ -135,19 +200,15 @@ export function installCausalFrameSettlement<T>(
   }) as typeof cancelAnimationFrame;
 
   environment.queueMicrotask = ((callback: VoidFunction) => {
+    if (disposed) {
+      if (causalDepth === 0) originalQueueMicrotask(callback);
+      return;
+    }
     if (causalDepth === 0) {
       originalQueueMicrotask(callback);
       return;
     }
-    pendingMicrotasks += 1;
-    originalQueueMicrotask(() => {
-      try {
-        runCausal(callback);
-      } finally {
-        pendingMicrotasks -= 1;
-        capture();
-      }
-    });
+    scheduleMicrotask(callback);
   }) as typeof queueMicrotask;
 
   return {
@@ -164,7 +225,7 @@ export function installCausalFrameSettlement<T>(
       const endRoot = beginExternalRoot();
       // The native completion microtask follows event propagation. Production
       // microtasks queued during propagation retain causal wrapping above.
-      originalQueueMicrotask(endRoot);
+      scheduleMicrotask(endRoot, endRoot);
     },
     accept() {
       if (disposed) throw new Error('Cannot accept a disposed causal settlement');
@@ -174,13 +235,9 @@ export function installCausalFrameSettlement<T>(
       // The callback is public; retain causal ownership through the rest of its
       // current task, then begin post-acceptance sampling after that task returns.
       causalDepth += 1;
-      pendingMicrotasks += 1;
       capture();
-      originalQueueMicrotask(() => {
-        causalDepth -= 1;
-        pendingMicrotasks -= 1;
-        capture();
-      });
+      const releaseAcceptance = () => { causalDepth -= 1; };
+      scheduleMicrotask(releaseAcceptance, releaseAcceptance);
     },
     reject(message) {
       if (failure === null) failure = message;
@@ -191,7 +248,7 @@ export function installCausalFrameSettlement<T>(
         phase: phase(),
         rootReturned,
         acceptances,
-        pendingMicrotasks,
+        pendingMicrotasks: microtasks.size,
         pendingFrames: callbacks.size,
         failure
       };
@@ -199,6 +256,18 @@ export function installCausalFrameSettlement<T>(
     dispose() {
       if (disposed) return;
       const cleanupErrors: unknown[] = [];
+      generation += 1;
+      for (const [handle, record] of microtasks) {
+        if (record.state === 'queued') {
+          record.state = 'cancelled';
+          try {
+            record.onCancel?.();
+          } catch (error) {
+            cleanupErrors.push(error);
+          }
+        }
+        microtasks.delete(handle);
+      }
       for (const [handle, record] of callbacks) {
         if (record.state === 'queued' && record.nativeHandle !== null) {
           try {
@@ -210,11 +279,12 @@ export function installCausalFrameSettlement<T>(
         record.state = 'cancelled';
         callbacks.delete(handle);
       }
-      ownedHandles.clear();
-      environment.requestAnimationFrame = originalRequestAnimationFrame as typeof requestAnimationFrame;
-      environment.cancelAnimationFrame = originalCancelAnimationFrame as typeof cancelAnimationFrame;
-      environment.queueMicrotask = originalQueueMicrotask as typeof queueMicrotask;
       disposed = true;
+      if (causalDepth > 0) {
+        deferredCleanupErrors.push(...cleanupErrors);
+        return;
+      }
+      restoreEnvironment();
       if (cleanupErrors.length === 1) throw cleanupErrors[0];
       if (cleanupErrors.length > 1) throw new AggregateError(cleanupErrors, 'Causal settlement cleanup failed');
     }

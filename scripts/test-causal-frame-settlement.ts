@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { installCausalFrameSettlement } from './causal-frame-settlement';
 
 function createFakeEnvironment({ throwOnCancel = false } = {}) {
@@ -55,6 +59,74 @@ const stable = (values: readonly number[]) => {
 
 {
   const fake = createFakeEnvironment();
+  let first = 0;
+  let second = 0;
+  const settlement = installCausalFrameSettlement(fake.environment, () => first + second);
+  settlement.runRoot(() => {});
+  settlement.accept();
+  fake.environment.queueMicrotask(() => { first += 1; });
+  fake.environment.queueMicrotask(() => { second += 1; });
+  settlement.dispose();
+  fake.drain();
+  assert.deepEqual([first, second], [0, 0], 'dispose must invalidate every queued causal microtask, not only the first');
+  assert.equal(settlement.diagnostics().pendingMicrotasks, 0);
+}
+
+{
+  const fake = createFakeEnvironment();
+  let executing = 0;
+  let chainedMicrotasks = 0;
+  let chainedRafs = 0;
+  const settlement = installCausalFrameSettlement(fake.environment, () => executing + chainedMicrotasks + chainedRafs);
+  settlement.runRoot(() => {});
+  settlement.accept();
+  const cancelledDuringDispose = fake.environment.requestAnimationFrame(() => {});
+  let traceAtExecutingDispose: readonly number[] = [];
+  fake.environment.queueMicrotask(() => {
+    executing += 1;
+    traceAtExecutingDispose = settlement.trace();
+    settlement.dispose();
+    fake.environment.cancelAnimationFrame(cancelledDuringDispose);
+    fake.environment.queueMicrotask(() => { chainedMicrotasks += 1; });
+    fake.environment.requestAnimationFrame(() => { chainedRafs += 1; });
+  });
+  fake.drain();
+  assert.deepEqual([executing, chainedMicrotasks, chainedRafs], [1, 0, 0], 'executing disposal may finish current work but must reject all successors');
+  assert.equal(fake.nativeCancels(), 1, 'post-dispose cancellation of an owned opaque handle must not reach native routing');
+  assert.deepEqual(settlement.trace(), traceAtExecutingDispose, 'executing disposal must not append a late capture');
+  assert.deepEqual(
+    settlement.diagnostics(),
+    { phase: 'disposed', rootReturned: true, acceptances: 1, pendingMicrotasks: 0, pendingFrames: 0, failure: null }
+  );
+}
+
+{
+  const fake = createFakeEnvironment({ throwOnCancel: true });
+  const settlement = installCausalFrameSettlement(fake.environment, () => 0);
+  settlement.runRoot(() => {});
+  settlement.accept();
+  fake.environment.requestAnimationFrame(() => {});
+  fake.environment.queueMicrotask(() => {
+    try {
+      throw new Error('primary microtask failure');
+    } finally {
+      settlement.dispose();
+    }
+  });
+  let observed: unknown = null;
+  try {
+    fake.drain();
+  } catch (error) {
+    observed = error;
+  }
+  assert.ok(observed instanceof AggregateError, 'cleanup failure must preserve the executing callback primary error');
+  assert.equal((observed as AggregateError).errors[0] instanceof Error && (observed as AggregateError).errors[0].message, 'primary microtask failure');
+  assert.equal((observed as AggregateError).errors[1] instanceof Error && (observed as AggregateError).errors[1].message, 'native cancel 1 failed');
+  assert.equal(settlement.diagnostics().phase, 'disposed');
+}
+
+{
+  const fake = createFakeEnvironment();
   let value = 0;
   const settlement = installCausalFrameSettlement(fake.environment, () => value);
   settlement.runRoot(() => { value = 1; });
@@ -63,6 +135,30 @@ const stable = (values: readonly number[]) => {
   fake.drain();
   complete(settlement);
   assert.deepEqual(settlement.trace(), [1, 1, 2], 'synchronous post-acceptance RAF must remain in the trace');
+  settlement.dispose();
+}
+
+{
+  const fake = createFakeEnvironment();
+  let callbackRuns = 0;
+  let successorRafs = 0;
+  const settlement = installCausalFrameSettlement(fake.environment, () => callbackRuns + successorRafs);
+  settlement.runRoot(() => {});
+  settlement.accept();
+  fake.environment.queueMicrotask(() => {
+    callbackRuns += 1;
+    fake.environment.requestAnimationFrame(() => { successorRafs += 1; });
+  });
+  const traceBeforeDispose = settlement.trace();
+  settlement.dispose();
+  fake.drain();
+  assert.equal(callbackRuns, 0, 'disposed queued causal microtask must not execute its callback');
+  assert.equal(successorRafs, 0, 'disposed queued causal microtask must not schedule successor RAF');
+  assert.deepEqual(settlement.trace(), traceBeforeDispose, 'dispose must freeze the acceptance trace');
+  assert.deepEqual(
+    settlement.diagnostics(),
+    { phase: 'disposed', rootReturned: true, acceptances: 1, pendingMicrotasks: 0, pendingFrames: 0, failure: null }
+  );
   settlement.dispose();
 }
 
@@ -184,5 +280,31 @@ const stable = (values: readonly number[]) => {
   assert.throws(() => settlement.dispose(), /native cancel 1 failed/);
   assert.equal(settlement.diagnostics().phase, 'disposed', 'cleanup error must still restore an explicit disposed state');
 }
+
+async function assertGenerationGuardMutantIsRed(): Promise<void> {
+  const sourcePath = path.join(import.meta.dir, 'causal-frame-settlement.ts');
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const mutant = source.replace('record.generation !== generation', 'false');
+  assert.notEqual(mutant, source, 'generation guard mutation must target the live scheduler source');
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-causal-generation-mutant-'));
+  const mutantPath = path.join(tempDir, 'causal-frame-settlement-mutant.ts');
+  fs.writeFileSync(mutantPath, mutant);
+  try {
+    const imported = await import(`${pathToFileURL(mutantPath).href}?generation-guard-mutant`);
+    const fake = createFakeEnvironment();
+    let callbackRuns = 0;
+    const settlement = imported.installCausalFrameSettlement(fake.environment, () => callbackRuns);
+    settlement.runRoot(() => {});
+    settlement.accept();
+    fake.environment.queueMicrotask(() => { callbackRuns += 1; });
+    settlement.dispose();
+    fake.drain();
+    assert.equal(callbackRuns, 1, 'removing the generation guard must revive a disposed queued callback');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+await assertGenerationGuardMutantIsRed();
 
 console.log('causal frame settlement matrix checks passed');
