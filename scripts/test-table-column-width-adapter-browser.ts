@@ -178,15 +178,201 @@ async function main(): Promise<void> {
       infeasibleTransaction.grown.preview,
       'finish must commit the last valid infeasible-container preview without reprojecting it'
     );
-    assert.deepEqual(infeasibleTransaction.cancelled.committed, [180, 100, 82]);
-    assert.deepEqual(infeasibleTransaction.narrowed.preview, [180, 100, 70]);
-    assert.deepEqual(infeasibleTransaction.narrowed.committed, [180, 100, 70]);
-    assert.deepEqual(infeasibleTransaction.noChange.committed, [180, 100, 70]);
+    assert.deepEqual(
+      infeasibleTransaction.cancelled.committed,
+      infeasibleTransaction.grown.committed,
+      'pointercancel must restore the last committed intent instead of committing its preview'
+    );
+    assert.deepEqual(infeasibleTransaction.narrowed.preview, [180, 100, 62]);
+    assert.deepEqual(infeasibleTransaction.narrowed.committed, [180, 100, 62]);
+    assert.deepEqual(infeasibleTransaction.noChange.committed, [180, 100, 62]);
     assert.deepEqual(
       infeasibleTransaction.expanded,
-      [180, 100, 70],
+      [180, 100, 62],
       'an active shrink exits elastic behavior, so later container growth cannot expand or reverse it'
     );
+
+    const growingContainerDuringFinish = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const runtime = window.TableColumnWidthAdapterCandidate!.create(host, 'grow-currentness');
+      const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+      root.style.width = '300px';
+      const table = (window as any).__makeWidthTable.call(null, 'currentness-grow', 0, 16, 3) as HTMLTableElement;
+      root.append(table);
+      table.style.width = '300px';
+      const projected = new Promise<void>((resolve) => {
+        table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+      });
+      runtime.adapter.acquire();
+      await projected;
+      runtime.resetProjectCalls();
+      const read = () => Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+        .map((column) => Math.round(Number.parseFloat(column.style.width)));
+      const handle = table.querySelector<HTMLElement>('[data-table-resize-column="0"]')!;
+      handle.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, cancelable: true, button: 0, buttons: 1,
+        pointerId: 191, pointerType: 'mouse', clientX: 100
+      }));
+      window.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true, cancelable: true, buttons: 1,
+        pointerId: 191, pointerType: 'mouse', clientX: 130
+      }));
+      const preview = read();
+      root.style.width = '500px';
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const afterResizeObserver = read();
+      window.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true, cancelable: true, buttons: 0,
+        pointerId: 191, pointerType: 'mouse', clientX: 130
+      }));
+      const atPointerUp = read();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const reconciled = read();
+      const requests = runtime.projectRequests() as Array<{ availableWidth: number; preserveWidthIntent: boolean }>;
+      runtime.destroy();
+      host.remove();
+      return { preview, afterResizeObserver, atPointerUp, reconciled, requests };
+    });
+    assert.deepEqual(
+      growingContainerDuringFinish.afterResizeObserver,
+      growingContainerDuringFinish.preview,
+      'a resize observer consumed during drag must not replace the last pointer preview'
+    );
+    assert.deepEqual(
+      growingContainerDuringFinish.atPointerUp,
+      growingContainerDuringFinish.preview,
+      'pointerup must first commit the complete preview snapshot'
+    );
+    assert.equal(growingContainerDuringFinish.requests.length, 1);
+    assert.equal(growingContainerDuringFinish.requests[0].availableWidth, 500);
+    assert.equal(growingContainerDuringFinish.requests[0].preserveWidthIntent, false);
+    assert.ok(
+      growingContainerDuringFinish.reconciled.reduce((sum, width) => sum + width, 0)
+        > growingContainerDuringFinish.preview.reduce((sum, width) => sum + width, 0) + 100,
+      JSON.stringify(growingContainerDuringFinish)
+    );
+
+    const currentnessMatrix = await page.evaluate(async () => {
+      const run = async (options: {
+        id: string;
+        initialWidth: number;
+        nextWidth: number;
+        minimums: readonly number[];
+        nextMinimums?: readonly number[];
+      }) => {
+        const host = document.createElement('div');
+        document.body.append(host);
+        const runtime = window.TableColumnWidthAdapterCandidate!.create(host, options.id);
+        const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+        root.style.width = `${options.initialWidth}px`;
+        const table = document.createElement('table');
+        table.style.width = `${Math.max(options.initialWidth, options.minimums.reduce((sum, value) => sum + value, 0))}px`;
+        table.dataset.tableColumnWidth = options.id;
+        table.dataset.tableFrom = '0';
+        table.dataset.tableTo = String(options.id.length);
+        const colgroup = document.createElement('colgroup');
+        const head = document.createElement('thead');
+        const row = document.createElement('tr');
+        for (const [index, minimum] of options.minimums.entries()) {
+          colgroup.append(document.createElement('col'));
+          const cell = document.createElement('th');
+          cell.style.fontSize = '10px';
+          cell.style.paddingLeft = `${minimum - 10}px`;
+          const handle = document.createElement('span');
+          handle.dataset.tableResizeColumn = String(index);
+          cell.append(handle);
+          row.append(cell);
+        }
+        head.append(row);
+        table.append(colgroup, head);
+        root.append(table);
+        const firstProjection = new Promise<void>((resolve) => {
+          table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+        });
+        runtime.adapter.acquire();
+        await firstProjection;
+        table.style.width = `${options.initialWidth}px`;
+        Array.from(table.querySelectorAll<HTMLTableColElement>('col')).forEach((column) => {
+          column.style.width = `${options.initialWidth / options.minimums.length}px`;
+        });
+        runtime.resetProjectCalls();
+        const read = () => Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+          .map((column) => Number.parseFloat(column.style.width));
+        const pointerId = 220 + options.id.length;
+        table.querySelector<HTMLElement>('[data-table-resize-column="0"]')!.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true, cancelable: true, button: 0, buttons: 1,
+            pointerId, pointerType: 'mouse', clientX: 100
+          })
+        );
+        window.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true, buttons: 1,
+          pointerId, pointerType: 'mouse', clientX: 130
+        }));
+        const preview = read();
+        root.style.width = `${options.nextWidth}px`;
+        if (options.nextMinimums) {
+          Array.from(table.querySelectorAll<HTMLElement>('thead th')).forEach((cell, index) => {
+            cell.style.paddingLeft = `${options.nextMinimums![index] - 10}px`;
+          });
+        }
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        window.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, buttons: 0,
+          pointerId, pointerType: 'mouse', clientX: 130
+        }));
+        const atPointerUp = read();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        const reconciled = read();
+        const requests = runtime.projectRequests() as Array<{
+          availableWidth: number;
+          minimumWidths: number[];
+          preserveWidthIntent: boolean;
+        }>;
+        runtime.destroy();
+        host.remove();
+        return { preview, atPointerUp, reconciled, requests };
+      };
+      return {
+        shrink: await run({ id: 'shrink', initialWidth: 500, nextWidth: 300, minimums: [20, 20, 20] }),
+        subPixel: await run({ id: 'sub-pixel', initialWidth: 300, nextWidth: 300.4, minimums: [20, 20, 20] }),
+        exactPixel: await run({ id: 'exact-pixel', initialWidth: 300, nextWidth: 301, minimums: [20, 20, 20] }),
+        overPixel: await run({ id: 'over-pixel', initialWidth: 300, nextWidth: 302, minimums: [20, 20, 20] }),
+        currentMinimums: await run({
+          id: 'minimums', initialWidth: 300, nextWidth: 300,
+          minimums: [20, 20, 20], nextMinimums: [140, 100, 80]
+        }),
+        infeasibleMinimums: await run({
+          id: 'infeasible-minimums', initialWidth: 500, nextWidth: 300,
+          minimums: [180, 100, 50]
+        })
+      };
+    });
+    assert.deepEqual(currentnessMatrix.shrink.atPointerUp, currentnessMatrix.shrink.preview);
+    assert.equal(currentnessMatrix.shrink.requests.length, 1);
+    assert.equal(currentnessMatrix.shrink.requests[0].availableWidth, 300);
+    assert.equal(currentnessMatrix.shrink.requests[0].preserveWidthIntent, false);
+    assert.ok(
+      currentnessMatrix.shrink.reconciled.reduce((sum, width) => sum + width, 0)
+        < currentnessMatrix.shrink.preview.reduce((sum, width) => sum + width, 0) - 100,
+      JSON.stringify(currentnessMatrix.shrink)
+    );
+    assert.equal(currentnessMatrix.subPixel.requests.length, 0, 'available delta below 1px stays within tolerance');
+    for (const result of [currentnessMatrix.exactPixel, currentnessMatrix.overPixel]) {
+      assert.equal(result.requests.length, 1);
+      assert.equal(result.requests[0].preserveWidthIntent, false);
+    }
+    assert.deepEqual(currentnessMatrix.currentMinimums.atPointerUp, currentnessMatrix.currentMinimums.preview);
+    assert.equal(currentnessMatrix.currentMinimums.requests.length, 1);
+    assert.deepEqual(currentnessMatrix.currentMinimums.requests[0].minimumWidths, [140, 100, 80]);
+    assert.equal(currentnessMatrix.currentMinimums.requests[0].preserveWidthIntent, false);
+    assert.ok(currentnessMatrix.currentMinimums.reconciled[0] >= 140);
+    assert.ok(currentnessMatrix.currentMinimums.reconciled[1] >= 100);
+    assert.ok(currentnessMatrix.currentMinimums.reconciled[2] >= 80);
+    assert.ok(currentnessMatrix.infeasibleMinimums.reconciled[0] >= 180);
+    assert.ok(currentnessMatrix.infeasibleMinimums.reconciled[1] >= 100);
+    assert.ok(currentnessMatrix.infeasibleMinimums.reconciled[2] >= 50);
 
     await drag(page, handle, 90);
     const resizedFirst = await widths('first');
@@ -429,7 +615,10 @@ async function main(): Promise<void> {
 
     await drag(page, handle, 45, 'pointercancel');
     const cancelled = await widths('first');
-    assert.ok(cancelled[0] > initialFirst[0] + 35);
+    assert.ok(
+      Math.abs(cancelled[0] - initialFirst[0]) < 2,
+      'pointercancel must discard the active preview when no prior committed intent exists'
+    );
 
     await page.evaluate(() => {
       const runtime = (window as any).__widthCandidate;
@@ -504,7 +693,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse', buttons: 0 }));
     });
     await page.mouse.up();
-    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 3);
+    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 10);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.legacyInstances), 0);
     assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.policyInstances), 1);
   } finally {

@@ -187,6 +187,79 @@ async function dragWithCommittedSamples(
   return { preview, committed };
 }
 
+async function dragAcrossWrapperResize(
+  page: any,
+  selector: string,
+  delta: number,
+  nextWrapperWidth: number
+): Promise<{
+  readonly preview: Awaited<ReturnType<typeof tablePresentationWidths>>;
+  readonly atPointerUp: Awaited<ReturnType<typeof tablePresentationWidths>>;
+  readonly settled: readonly Awaited<ReturnType<typeof tablePresentationWidths>>[];
+}> {
+  const pointer = await page.$eval(selector, (handle: Element) => {
+    const rect = handle.getBoundingClientRect();
+    const pointerId = ((window as any).__columnWidthTransactionPointerId ?? 190) + 1;
+    (window as any).__columnWidthTransactionPointerId = pointerId;
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, pointerId };
+    handle.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, button: 0, buttons: 1,
+      pointerId, pointerType: 'mouse', clientX: point.x, clientY: point.y
+    }));
+    return point;
+  });
+  await page.evaluate(({ x, y, pointerId, requestedDelta }) => {
+    window.dispatchEvent(new PointerEvent('pointermove', {
+      bubbles: true, cancelable: true, buttons: 1,
+      pointerId, pointerType: 'mouse', clientX: x + requestedDelta, clientY: y
+    }));
+  }, { ...pointer, requestedDelta: delta });
+  const tableSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type';
+  const currentnessPresentation = () => page.$eval(tableSelector, (table: HTMLTableElement) => {
+    const stickyTable = table.closest('.meo-md-html-table-shell')!
+      .querySelector<HTMLElement>('.meo-md-html-table-sticky-table')!;
+    const stickyWidths = Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+      .map((column) => Number.parseFloat(column.style.width));
+    return {
+      primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+        .map((cell) => cell.getBoundingClientRect().width),
+      stickyWidths,
+      primaryTableWidth: table.getBoundingClientRect().width,
+      stickyTableWidth: stickyWidths.reduce((sum, width) => sum + width, 0)
+    };
+  });
+  const preview = await currentnessPresentation();
+  const atPointerUp = await page.evaluate(({ x, y, pointerId, requestedDelta, wrapperWidth }) => {
+    const table = document.querySelector<HTMLTableElement>(
+      '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type'
+    )!;
+    const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+    wrap.style.maxWidth = 'none';
+    wrap.style.width = `${wrapperWidth}px`;
+    window.dispatchEvent(new PointerEvent('pointerup', {
+      bubbles: true, cancelable: true, buttons: 0,
+      pointerId, pointerType: 'mouse', clientX: x + requestedDelta, clientY: y
+    }));
+    const stickyTable = table.closest('.meo-md-html-table-shell')!
+      .querySelector<HTMLElement>('.meo-md-html-table-sticky-table')!;
+    return {
+      primaryWidths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+        .map((cell) => cell.getBoundingClientRect().width),
+      stickyWidths: Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+        .map((column) => Number.parseFloat(column.style.width)),
+      primaryTableWidth: table.getBoundingClientRect().width,
+      stickyTableWidth: Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+        .reduce((sum, column) => sum + Number.parseFloat(column.style.width), 0)
+    };
+  }, { ...pointer, requestedDelta: delta, wrapperWidth: nextWrapperWidth });
+  const settled = [];
+  for (let index = 0; index < 5; index += 1) {
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    settled.push(await currentnessPresentation());
+  }
+  return { preview, atPointerUp, settled };
+}
+
 async function tablePresentationWidths(
   page: any,
   selector: string
@@ -782,7 +855,10 @@ async function main(): Promise<void> {
         scrollTop: document.querySelector<HTMLElement>('.cm-scroller')!.scrollTop
       };
     }, tableSelector);
-    assert.ok(afterPointerCancel.width > beforePointerCancel.width + 25);
+    assert.ok(
+      Math.abs(afterPointerCancel.width - beforePointerCancel.width) < 2,
+      'pointercancel must discard the preview and restore the prior committed width'
+    );
     assert.equal(afterPointerCancel.focused, beforePointerCancel.focused);
     assert.equal(afterPointerCancel.selectionStart, beforePointerCancel.selectionStart);
     assert.ok(Math.abs(afterPointerCancel.scrollTop - beforePointerCancel.scrollTop) < 2);
@@ -816,7 +892,11 @@ async function main(): Promise<void> {
     const beforeLostPointerCapture = await widths(page, tableSelector);
     await drag(page, firstHandle, 28, 'lostpointercapture');
     const afterLostPointerCapture = await widths(page, tableSelector);
-    assert.ok(afterLostPointerCapture[0] > beforeLostPointerCapture[0] + 20);
+    assert.deepEqual(
+      afterLostPointerCapture,
+      beforeLostPointerCapture,
+      'lostpointercapture must discard the preview and restore the prior committed widths'
+    );
 
     const beforePointerLeave = await widths(page, tableSelector);
     await drag(page, firstHandle, 26, 'leave');
@@ -997,6 +1077,64 @@ async function main(): Promise<void> {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse', buttons: 0 }));
     });
     await page.mouse.up();
+    assert.equal(await page.$$('[data-table-column-width-owner="adapter"]').then((items) => items.length), 0);
+
+    const currentnessMarkdown = [
+      ...Array.from({ length: 24 }, (_, index) => `currentness prefix ${index + 1}`),
+      '',
+      threeColumns,
+      ...Array.from({ length: 12 }, (_, index) => `| currentness ${index + 2} | two | three |`),
+      '',
+      'currentness tail'
+    ].join('\n');
+    await page.evaluate((text) => {
+      const app = document.getElementById('app')!;
+      app.replaceChildren();
+      (window as any).__columnWidthCurrentness = (window as any).TableStabilityHarness.createEditor({
+        parent: app, text, initialMode: 'live', onApplyChanges() {}
+      });
+    }, currentnessMarkdown);
+    await waitForTableLayout(page, tableSelector, 1, 3);
+    const currentnessHandle = `${tableSelector}:first-of-type th:first-child .meo-md-html-table-column-resize-handle`;
+    const setCurrentnessWrapperWidth = async (width: number) => {
+      await page.$eval(`${tableSelector}:first-of-type`, async (table: HTMLTableElement, nextWidth: number) => {
+        const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
+        const projected = new Promise<void>((resolve) => {
+          table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+        });
+        wrap.style.maxWidth = 'none';
+        wrap.style.width = `${nextWidth}px`;
+        await projected;
+      }, width);
+    };
+    await setCurrentnessWrapperWidth(300);
+    const growCurrentness = await dragAcrossWrapperResize(page, currentnessHandle, 30, 500);
+    const shrinkCurrentness = await dragAcrossWrapperResize(page, currentnessHandle, 30, 300);
+    for (const [direction, trace] of [
+      ['grow', growCurrentness],
+      ['shrink', shrinkCurrentness]
+    ] as const) {
+      assert.deepEqual(
+        trace.atPointerUp.primaryWidths.map(Math.round),
+        trace.preview.primaryWidths.map(Math.round),
+        `${direction} pointerup must preserve the last complete preview before causal resize projection`
+      );
+      assert.deepEqual(trace.atPointerUp.stickyWidths.map(Math.round), trace.atPointerUp.primaryWidths.map(Math.round));
+      for (const sample of trace.settled) {
+        assert.deepEqual(sample.stickyWidths.map(Math.round), sample.primaryWidths.map(Math.round));
+      }
+      const previewTotal = Math.round(trace.preview.primaryTableWidth);
+      const changedTotals = [...new Set(trace.settled
+        .map((sample) => Math.round(sample.primaryTableWidth))
+        .filter((total) => total !== previewTotal))];
+      assert.equal(
+        changedTotals.length,
+        1,
+        `${direction} container currentness must produce one causal projection without move-then-reverse: ${JSON.stringify(trace)}`
+      );
+      assert.ok(direction === 'grow' ? changedTotals[0] > previewTotal : changedTotals[0] < previewTotal);
+    }
+    await page.evaluate(() => (window as any).__columnWidthCurrentness.destroy());
     assert.equal(await page.$$('[data-table-column-width-owner="adapter"]').then((items) => items.length), 0);
   } finally {
     await browser.close();

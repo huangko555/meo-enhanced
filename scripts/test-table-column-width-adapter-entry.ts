@@ -20,6 +20,7 @@ declare global {
         failNextRefresh(): void;
         resetProjectCalls(): void;
         projectCalls(): number;
+        projectRequests(): readonly unknown[];
         destroy(): void;
       };
       instances: number;
@@ -37,6 +38,7 @@ window.TableColumnWidthAdapterCandidate = {
     adapterRoot.className = 'table-column-width-candidate-root';
     parent.append(adapterRoot);
     let projectCalls = 0;
+    const projectRequests: unknown[] = [];
     let throwNextRefresh = false;
     const throwingRefreshField = StateField.define<boolean>({
       create: () => false,
@@ -54,6 +56,7 @@ window.TableColumnWidthAdapterCandidate = {
         resize: (request) => tableColumnWidthPolicy.resize(request),
         project(request) {
           projectCalls += 1;
+          projectRequests.push(structuredClone(request));
           return tableColumnWidthPolicy.project(request);
         }
       }
@@ -83,8 +86,12 @@ window.TableColumnWidthAdapterCandidate = {
         });
       },
       failNextRefresh() { throwNextRefresh = true; },
-      resetProjectCalls() { projectCalls = 0; },
+      resetProjectCalls() {
+        projectCalls = 0;
+        projectRequests.splice(0, projectRequests.length);
+      },
       projectCalls: () => projectCalls,
+      projectRequests: () => structuredClone(projectRequests),
       destroy() {
         candidate.adapter.dispose();
         view.destroy();
