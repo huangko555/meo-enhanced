@@ -923,6 +923,109 @@ export function collectOrderedListRenumberChanges(
   return changes;
 }
 
+interface ListLineRecord {
+  readonly line: Line;
+  readonly text: string;
+}
+
+function readListLine(state: EditorState, lineNumber: number): ListLineRecord {
+  const line = state.doc.line(lineNumber);
+  return { line, text: state.doc.sliceString(line.from, line.to) };
+}
+
+function collectContiguousListLines(
+  state: EditorState,
+  lineNumber: number
+): ListLineRecord[] | null {
+  const current = readListLine(state, lineNumber);
+  if (!isListLine(current.text)) {
+    return null;
+  }
+
+  const before: ListLineRecord[] = [];
+  for (let previousLine = lineNumber - 1; previousLine >= 1; previousLine -= 1) {
+    const previous = readListLine(state, previousLine);
+    if (!isListLine(previous.text)) break;
+    before.unshift(previous);
+  }
+
+  const after: ListLineRecord[] = [];
+  for (let nextLine = lineNumber + 1; nextLine <= state.doc.lines; nextLine += 1) {
+    const next = readListLine(state, nextLine);
+    if (!isListLine(next.text)) break;
+    after.push(next);
+  }
+
+  return [...before, current, ...after];
+}
+
+function collectOrderedListRenumberChangesInLines(
+  lines: readonly ListLineRecord[],
+  resetNestedStartsAtLines: ReadonlySet<number>
+): ListTextChange[] {
+  const changes: ListTextChange[] = [];
+  const style = inferListIndentStyle(lines.map(({ text }) => text));
+  const orderedCountsByLevel: Array<number | null> = [];
+
+  for (const { line, text } of lines) {
+    const marker = listMarkerData(text, null, style);
+    if (!marker) {
+      orderedCountsByLevel.length = 0;
+      continue;
+    }
+
+    const { expected, isAnchor } = nextOrderedSequenceNumber(
+      orderedCountsByLevel,
+      marker.indentLevel,
+      marker.orderedNumber,
+      !resetNestedStartsAtLines.has(line.number)
+    );
+    if (expected === null || isAnchor || marker.orderedNumber === undefined) continue;
+
+    const expectedText = String(expected);
+    if (marker.orderedNumber !== expectedText) {
+      const from = line.from + marker.leadingWhitespace.length;
+      changes.push({ from, to: from + marker.orderedNumber.length, insert: expectedText });
+    }
+  }
+
+  return changes;
+}
+
+/**
+ * Computes ordered-marker repairs only for list runs adjacent to a changed range.
+ * A run is scanned as one unit because indentation style and numbering both depend
+ * on its contiguous list context; ordinary text never enters that scan.
+ */
+function collectOrderedListRenumberChangesForTransaction(
+  transaction: Transaction,
+  resetNestedStartsAtLines: ReadonlySet<number> = new Set()
+): ListTextChange[] {
+  const state = transaction.state;
+  const candidateLines = new Set<number>();
+  transaction.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+    const from = Math.min(state.doc.length, fromB);
+    const to = Math.min(state.doc.length, toB);
+    const first = state.doc.lineAt(from).number;
+    const last = state.doc.lineAt(to).number;
+    for (let lineNumber = Math.max(1, first - 1); lineNumber <= Math.min(state.doc.lines, last + 1); lineNumber += 1) {
+      candidateLines.add(lineNumber);
+    }
+  });
+
+  const handledLines = new Set<number>();
+  const changes: ListTextChange[] = [];
+  for (const lineNumber of [...candidateLines].sort((left, right) => left - right)) {
+    if (handledLines.has(lineNumber)) continue;
+    const lines = collectContiguousListLines(state, lineNumber);
+    if (!lines) continue;
+    for (const { line } of lines) handledLines.add(line.number);
+    changes.push(...collectOrderedListRenumberChangesInLines(lines, resetNestedStartsAtLines));
+  }
+
+  return changes;
+}
+
 /**
  * Keeps ordered-list normalization inside the originating CodeMirror transaction.
  * External Document presentation and native history replay remain authoritative.
@@ -942,8 +1045,8 @@ export function orderedListRenumberTransactionFilter(
     }
 
     const intent = transaction.annotation(orderedListNormalizationIntent);
-    const changes = collectOrderedListRenumberChanges(
-      transaction.state,
+    const changes = collectOrderedListRenumberChangesForTransaction(
+      transaction,
       new Set(intent?.resetNestedStartsAtLines ?? [])
     );
     if (!changes.length) return transaction;

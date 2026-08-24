@@ -278,8 +278,8 @@ async function main(): Promise<void> {
     assert.equal(result.oneFollowUpPublishCount, 1);
     assert.equal(result.afterExternal, '12. external\n48. stays explicit');
     assert.equal(result.externalUndoApplied, false, 'external reload on a fresh Editor must not enter history');
-    assert.equal(result.tableAfterInsert, '1. a\n2. b\n\n| H |\n| --- |\n| - |\n| new |');
-    assert.deepEqual(result.insertedRowSnapshot, { id: 'row-1', from: 31, to: 38 });
+    assert.equal(result.tableAfterInsert, '1. a\n99. b\n\n| H |\n| --- |\n| - |\n| new |');
+    assert.deepEqual(result.insertedRowSnapshot, { id: 'row-1', from: 32, to: 39 });
     assert.equal(result.insertedRowText, '| new |');
     assert.deepEqual(result.tableHistoryAfterInsert, { undo: 1, redo: 0 });
     assert.equal(result.tableUndoApplied, true);
@@ -288,23 +288,23 @@ async function main(): Promise<void> {
     assert.equal(result.tableRedoApplied, true);
     assert.equal(result.tableAfterRedo, result.tableAfterInsert);
     assert.deepEqual(result.insertedRowsAfterRedo, [result.insertedRowSnapshot]);
-    assert.equal(result.tableAfterDelete, '1. a\n2. b\n\n| H |\n| --- |\n| second |');
+    assert.equal(result.tableAfterDelete, '1. a\n99. b\n\n| H |\n| --- |\n| second |');
     assert.deepEqual(
       result.deletedRowSnapshot && {
         at: result.deletedRowSnapshot.at,
         baselineRanges: result.deletedRowSnapshot.baselineRanges,
         deletionAtEnd: result.deletedRowSnapshot.deletionAtEnd
       },
-      { at: 25, baselineRanges: [[3, 3]], deletionAtEnd: false }
+      { at: 26, baselineRanges: [[3, 3]], deletionAtEnd: false }
     );
     assert.equal(result.deletedRowAnchorText, '| second |');
-    assert.equal(result.tableAfterRemap, '1. a\n2. b\n\n| H |\n| --- |\n| remapped |');
+    assert.equal(result.tableAfterRemap, '1. a\n99. b\n\n| H |\n| --- |\n| remapped |');
     assert.deepEqual(
       result.remappedRowSnapshot && {
         from: result.remappedRowSnapshot.from,
         to: result.remappedRowSnapshot.to
       },
-      { from: 25, to: 37 }
+      { from: 26, to: 38 }
     );
     assert.equal(result.remappedRowText, '| remapped |');
     assert.equal(
@@ -424,7 +424,7 @@ async function main(): Promise<void> {
         )?.contains(document.activeElement) ?? false
       };
     });
-    const nestedExpected = nestedDocument.replace('99. b', '2. b').replace('A --> B', 'A --> BX');
+    const nestedExpected = nestedDocument.replace('A --> B', 'A --> BX');
     assert.equal(nestedAfter.text, nestedExpected);
     assert.deepEqual(nestedAfter.history, { undo: 1, redo: 0 });
     assert.equal(
@@ -448,7 +448,7 @@ async function main(): Promise<void> {
     assert.equal(
       await page.evaluate(() => (window as any).__nestedRichListEditor.getText()),
       nestedDocument,
-      'one undo must revert both nested input and numbering'
+      'one undo must revert the nested input without touching an unrelated list'
     );
     assert.equal(await page.evaluate(() => (window as any).__nestedRichListEditor.redo()), true);
     await waitForFrames(page, 4);
@@ -468,10 +468,7 @@ async function main(): Promise<void> {
       '| --- |',
       '| - |'
     ].join('\n');
-    const crossExpected = crossDocument
-      .replace('A --> B', 'A --> BX')
-      .replace('99. b', '2. b')
-      .concat('\n| new |');
+    const crossExpected = crossDocument.replace('A --> B', 'A --> BX').concat('\n| new |');
     const cross = await page.evaluate((text) => {
       const harness = (window as any).ListEditingHarness;
       const host = document.createElement('div');
@@ -508,9 +505,9 @@ async function main(): Promise<void> {
       return result;
     }, crossDocument);
     assert.equal(cross.text, crossExpected);
-    assert.equal(cross.callbackCount, 1, 'Mermaid+Table normalization must publish one Document callback');
+    assert.equal(cross.callbackCount, 1, 'Mermaid+Table transaction must publish one Document callback');
     assert.deepEqual(cross.history, { undo: 1, redo: 0 });
-    assert.deepEqual(cross.snapshot.insertedRows, [{ id: 'row-1', from: 65, to: 72 }]);
+    assert.deepEqual(cross.snapshot.insertedRows, [{ id: 'row-1', from: 66, to: 73 }]);
 
     console.log('list editing production transaction checks passed');
   } finally {
