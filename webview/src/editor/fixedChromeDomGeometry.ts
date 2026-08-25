@@ -1,7 +1,7 @@
 import {
   fixedChromeAffineMappingFromSamples,
   type FixedChromeAffineMapping
-} from '../fixedChromeGeometry';
+} from './fixedChromeGeometry';
 
 const sampleDistance = 100;
 

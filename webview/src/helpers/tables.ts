@@ -71,7 +71,7 @@ import {
 import {
   projectFixedChromeGeometry
 } from '../editor/fixedChromeGeometry';
-import { measureFixedContainingBlockMapping } from '../editor/internal/fixedChromeDomGeometry';
+import { measureFixedContainingBlockMapping } from '../editor/fixedChromeDomGeometry';
 
 interface TableData {
   rows: string[][];

@@ -7,7 +7,7 @@ import type { TableStickyHeaderPolicy } from '../tableStickyHeaderPolicy';
 import {
   projectFixedChromeGeometry
 } from '../fixedChromeGeometry';
-import { measureFixedContainingBlockMapping } from './fixedChromeDomGeometry';
+import { measureFixedContainingBlockMapping } from '../fixedChromeDomGeometry';
 
 export type CodeMirrorDomTableStickyHeaderAdapterOptions = TableStickyHeaderAdapterOptions & {
   readonly policy: TableStickyHeaderPolicy;
