@@ -74,8 +74,6 @@ async function main(): Promise<void> {
         const publish = () => {
           if (!published && accepted()) { published = true; tracker.accept(); }
         };
-        const observer = new MutationObserver(publish);
-        observer.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
         tracker.runRoot(() => { action(); publish(); });
         await new Promise<void>((resolve, reject) => {
           const poll = () => {
@@ -89,7 +87,6 @@ async function main(): Promise<void> {
           };
           nativeFrame(poll);
         });
-        observer.disconnect();
         tracker.dispose();
       };
       const rows = Array.from({ length: 32 }, (_, i) => `| ${i + 1} | zoom row ${i + 1} |`);
@@ -119,26 +116,33 @@ async function main(): Promise<void> {
       if (!scenarioInput.expectFailure) {
         const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
         const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
-        const moveTableToThresholdOffset = (offset: number) => {
-          for (let attempt = 0; attempt < 12; attempt += 1) {
-            const target = scroller.getBoundingClientRect().top + toolbar.getBoundingClientRect().height + offset;
-            const delta = table.getBoundingClientRect().top - target;
-            if (Math.abs(delta) <= 0.25) break;
-            scroller.scrollTop += delta;
-          }
-          scroller.dispatchEvent(new Event('scroll'));
-        };
-        await settle(() => moveTableToThresholdOffset(2), () => true);
         const beforeGap = table.getBoundingClientRect().top - scroller.getBoundingClientRect().top -
           toolbar.getBoundingClientRect().height;
         const beforeSticky = geometry().controlsSticky;
-        await settle(() => moveTableToThresholdOffset(-2), () => true);
+        if (!(beforeGap > 0) || beforeSticky) {
+          throw new Error(`threshold fixture did not start before takeover: ${JSON.stringify({
+            beforeGap,
+            beforeSticky
+          })}`);
+        }
+        await settle(() => {
+          scroller.scrollTop = 160;
+          scroller.dispatchEvent(new Event('scroll'));
+        }, () => true);
         const afterGeometry = geometry();
+        const afterGap = table.getBoundingClientRect().top - scroller.getBoundingClientRect().top -
+          toolbar.getBoundingClientRect().height;
+        if (!(afterGap <= 0) || !afterGeometry.controlsSticky) {
+          throw new Error(`single threshold scroll did not cross takeover: ${JSON.stringify({
+            afterGap,
+            afterSticky: afterGeometry.controlsSticky,
+            scrollTop: scroller.scrollTop
+          })}`);
+        }
         threshold = {
           beforeGap,
           beforeSticky,
-          afterGap: table.getBoundingClientRect().top - scroller.getBoundingClientRect().top -
-            toolbar.getBoundingClientRect().height,
+          afterGap,
           afterSticky: afterGeometry.controlsSticky,
           takeoverDelta: Math.abs(afterGeometry.toolbarTop! - afterGeometry.scrollerTop!)
         };
@@ -287,8 +291,6 @@ async function main(): Promise<void> {
         const publish = () => {
           if (!published && accepted()) { published = true; tracker.accept(); }
         };
-        const observer = new MutationObserver(publish);
-        observer.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
         tracker.runRoot(() => { action(); if (returnIsAcceptance) publish(); });
         publish();
         await new Promise<void>((resolve, reject) => {
@@ -303,7 +305,6 @@ async function main(): Promise<void> {
           };
           nativeFrame(poll);
         });
-        observer.disconnect();
         const outcome = { trace: tracker.trace(), diagnostics: tracker.diagnostics() };
         tracker.dispose();
         return outcome;
@@ -410,38 +411,35 @@ async function main(): Promise<void> {
       const detachedStickyCell = document.querySelector<HTMLElement>(
         '.meo-md-html-table-sticky-table thead th'
       )!;
-      let detachedCloneMutated = false;
-      const detachedCloneObserver = new MutationObserver((records) => {
-        detachedCloneMutated = true;
-        for (const record of records) {
-          for (const added of Array.from(record.addedNodes)) {
-            if (!(added instanceof Element)) continue;
-            const buttons = added.matches('.meo-md-image-controls button')
-              ? [added]
-              : Array.from(added.querySelectorAll('.meo-md-image-controls button'));
-            for (const button of buttons) {
-              button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
-            }
-          }
-        }
-      });
-      detachedCloneObserver.observe(detachedStickyCell, { attributes: true, childList: true, subtree: true });
       const replacementText = delayedText.replace('Content |', 'Content updated |');
       transactions.push(await settle(() => editor.setText(replacementText), () => (
         editor.getText() === replacementText && !detachedStickyCell.isConnected
       )));
       const pendingAfterReplacement = delayedResolvers.length;
       const detachedAfterReplacement = !detachedStickyCell.isConnected;
+      const publicNodeSnapshot = (node: HTMLElement) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          connected: node.isConnected,
+          className: node.className,
+          style: node.getAttribute('style') ?? '',
+          html: node.outerHTML,
+          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+        };
+      };
+      const detachedBeforeLateResolution = publicNodeSnapshot(detachedStickyCell);
       transactions.push(await settle(() => {
         delayedImageReady = true;
         for (const resolve of delayedResolvers.splice(0)) resolve(resolvedImage);
       }, () => Boolean(
         document.querySelector('.meo-md-html-table-sticky-header .meo-md-image-img')
       )));
-      detachedCloneObserver.disconnect();
+      const detachedAfterLateResolution = publicNodeSnapshot(detachedStickyCell);
       const detachedCloneBehavior = {
         detachedAfterReplacement,
-        mutated: detachedCloneMutated,
+        detachedBeforeLateResolution,
+        detachedAfterLateResolution,
+        controls: detachedStickyCell.querySelectorAll('.meo-md-image-controls button').length,
         openPosted: postMessages.some((message: any) => message?.type === 'openImageExternally'),
         fullscreenOpened: Boolean(document.querySelector('.meo-md-image-fullscreen-scrim'))
       };
@@ -496,19 +494,17 @@ async function main(): Promise<void> {
       const oldScroller = editor.view.scrollDOM as HTMLElement;
       const detached = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-chrome'));
       transactions.push(await settle(() => editor.destroy(), () => true, true));
-      let lateWrites = 0;
-      const lateObserver = new MutationObserver((records) => { lateWrites += records.length; });
-      detached.forEach((node) => lateObserver.observe(node, { attributes: true, childList: true, subtree: true }));
+      const disposedBeforeLateEvents = detached.map(publicNodeSnapshot);
       transactions.push(await settle(() => {
         disposeImageReady = true;
         for (const resolve of disposeResolvers.splice(0)) resolve(resolvedImage);
         oldScroller.dispatchEvent(new Event('scroll')); outer.dispatchEvent(new Event('scroll')); window.dispatchEvent(new Event('resize'));
       }, () => true, true));
-      lateObserver.disconnect();
+      const disposedAfterLateEvents = detached.map(publicNodeSnapshot);
       return { transactions, initialHidden, appeared, controls, outerAligned, domContract,
         hiddenAtTail, tailState, equalExternalCount, changedExternal, sourceCount, liveCount, previewVisible,
         pendingBeforeReplacement, pendingAfterReplacement, delayedImageContract, detachedCloneBehavior,
-        afterDispose: state().count, lateWrites };
+        afterDispose: state().count, disposedBeforeLateEvents, disposedAfterLateEvents };
     });
 
     result.transactions.forEach((transaction: any) => {
@@ -545,13 +541,18 @@ async function main(): Promise<void> {
     ], [false, false, true, true]);
     assert.equal(result.delayedImageContract.stickyHandles, 2);
     assert.equal(result.delayedImageContract.sourcePresented, true);
-    assert.deepEqual(result.detachedCloneBehavior, {
-      detachedAfterReplacement: true,
-      mutated: false,
-      openPosted: false,
-      fullscreenOpened: false
-    });
-    assert.deepEqual([result.afterDispose, result.lateWrites], [0, 0]);
+    assert.equal(result.detachedCloneBehavior.detachedAfterReplacement, true);
+    assert.deepEqual(
+      result.detachedCloneBehavior.detachedAfterLateResolution,
+      result.detachedCloneBehavior.detachedBeforeLateResolution
+    );
+    assert.deepEqual([
+      result.detachedCloneBehavior.controls,
+      result.detachedCloneBehavior.openPosted,
+      result.detachedCloneBehavior.fullscreenOpened
+    ], [0, false, false]);
+    assert.equal(result.afterDispose, 0);
+    assert.deepEqual(result.disposedAfterLateEvents, result.disposedBeforeLateEvents);
   } finally {
     await browser.close();
     fs.rmSync(temp, { recursive: true, force: true });

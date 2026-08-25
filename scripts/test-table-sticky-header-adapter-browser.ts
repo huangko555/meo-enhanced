@@ -352,9 +352,15 @@ async function main(): Promise<void> {
 
       const styleBeforeUnmount = elements(1).stickyTable.style.width;
       await settle(() => adapter1.unmount());
-      let lateWrites = 0;
-      const lateObserver = new MutationObserver((records) => { lateWrites += records.length; });
-      lateObserver.observe(elements(1).stickyChrome, { attributes: true, childList: true, subtree: true });
+      const publicChromeSnapshot = (chrome: HTMLElement) => {
+        const rect = chrome.getBoundingClientRect();
+        return {
+          className: chrome.className,
+          style: chrome.getAttribute('style') ?? '',
+          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+        };
+      };
+      const unmountedBeforeLateEvents = publicChromeSnapshot(elements(1).stickyChrome);
       await settle(() => {
         elements(1).table.style.width = '440px';
         elements(1).scroller.dispatchEvent(new Event('scroll'));
@@ -362,16 +368,12 @@ async function main(): Promise<void> {
         window.dispatchEvent(new Event('resize'));
         outer.classList.add('late-unmounted-ancestor-change');
       });
-      lateObserver.disconnect();
+      const unmountedAfterLateEvents = publicChromeSnapshot(elements(1).stickyChrome);
       const styleAfterUnmount = elements(1).stickyTable.style.width;
       const hiddenAfterUnmount = !elements(1).stickyChrome.classList.contains('is-visible');
 
-      const mountedDisposeNode = elements(2).stickyChrome;
-      let mountedDisposeLateWrites = 0;
-      const mountedDisposeObserver = new MutationObserver((records) => { mountedDisposeLateWrites += records.length; });
-      mountedDisposeObserver.observe(mountedDisposeNode, { attributes: true, childList: true, subtree: true });
       await settle(() => adapter2.dispose());
-      mountedDisposeLateWrites = 0;
+      const disposedBeforeLateEvents = publicChromeSnapshot(elements(2).stickyChrome);
       await settle(() => {
         adapter2.mount();
         adapter2.update();
@@ -384,7 +386,7 @@ async function main(): Promise<void> {
         outer.classList.add('late-disposed-ancestor-change');
         elements(2).table.tHead!.rows[0].cells[0].append('late source mutation');
       });
-      mountedDisposeObserver.disconnect();
+      const disposedAfterLateEvents = publicChromeSnapshot(elements(2).stickyChrome);
 
       const primaryError = new Error('primary clone failure');
       const cleanupFirst = new Error('passive listener cleanup failure');
@@ -572,8 +574,10 @@ async function main(): Promise<void> {
         styleBeforeUnmount,
         styleAfterUnmount,
         hiddenAfterUnmount,
-        lateWrites,
-        mountedDisposeLateWrites,
+        unmountedBeforeLateEvents,
+        unmountedAfterLateEvents,
+        disposedBeforeLateEvents,
+        disposedAfterLateEvents,
         primaryCleanupError: primaryCleanupError instanceof AggregateError ? {
           cause: primaryCleanupError.cause === primaryError,
           errors: primaryCleanupError.errors.map((error) => (error as Error).message)
@@ -643,8 +647,8 @@ async function main(): Promise<void> {
     assert.equal(result.currentHeaderAfterStaleCloneMutation, result.currentHeaderBeforeStaleCloneMutation);
     assert.equal(result.styleAfterUnmount, result.styleBeforeUnmount);
     assert.equal(result.hiddenAfterUnmount, true);
-    assert.equal(result.lateWrites, 0);
-    assert.equal(result.mountedDisposeLateWrites, 0);
+    assert.deepEqual(result.unmountedAfterLateEvents, result.unmountedBeforeLateEvents);
+    assert.deepEqual(result.disposedAfterLateEvents, result.disposedBeforeLateEvents);
     assert.deepEqual(result.primaryCleanupError, {
       cause: true,
       errors: [

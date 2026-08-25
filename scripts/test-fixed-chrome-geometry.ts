@@ -1,10 +1,41 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   fixedChromeAffineMappingFromSamples,
   projectFixedChromeGeometry,
   type FixedChromeAffineMapping,
   type FixedChromeGeometry
 } from '../webview/src/editor/fixedChromeGeometry';
+
+const root = path.resolve(import.meta.dir, '..');
+const samplerPath = path.join(
+  root,
+  'webview',
+  'src',
+  'editor',
+  'internal',
+  'fixedChromeDomGeometry.ts'
+);
+const callerSources = [
+  path.join(root, 'webview', 'src', 'helpers', 'tables.ts'),
+  path.join(root, 'webview', 'src', 'editor', 'internal', 'codeMirrorDomTableStickyHeaderAdapter.ts')
+].map((file) => fs.readFileSync(file, 'utf8'));
+const samplerSource = fs.existsSync(samplerPath) ? fs.readFileSync(samplerPath, 'utf8') : '';
+const probeImplementation = 'position:fixed;inset:auto;left:';
+assert.equal(
+  callerSources.reduce((count, source) => count + source.split(probeImplementation).length - 1, 0),
+  0,
+  'Toolbar and Sticky callers must not duplicate fixed containing-block DOM probes'
+);
+assert.equal(
+  samplerSource.split(probeImplementation).length - 1,
+  1,
+  'the editor-owned DOM sampler must be the unique fixed containing-block probe implementation'
+);
+for (const source of callerSources) {
+  assert.match(source, /fixedChromeDomGeometry/, 'both callers must use the shared DOM sampler');
+}
 
 assert.deepEqual(fixedChromeAffineMappingFromSamples(
   { x: 40, y: 12 },

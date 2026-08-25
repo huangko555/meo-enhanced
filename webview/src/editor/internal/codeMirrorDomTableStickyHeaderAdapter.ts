@@ -5,10 +5,9 @@ import type {
 } from '../tableStickyHeaderAdapter';
 import type { TableStickyHeaderPolicy } from '../tableStickyHeaderPolicy';
 import {
-  fixedChromeAffineMappingFromSamples,
-  projectFixedChromeGeometry,
-  type FixedChromeAffineMapping
+  projectFixedChromeGeometry
 } from '../fixedChromeGeometry';
+import { measureFixedContainingBlockMapping } from './fixedChromeDomGeometry';
 
 export type CodeMirrorDomTableStickyHeaderAdapterOptions = TableStickyHeaderAdapterOptions & {
   readonly policy: TableStickyHeaderPolicy;
@@ -52,40 +51,6 @@ function hide(elements: TableStickyHeaderElements): void {
   elements.stickyChrome.classList.remove('is-visible', 'has-sticky-controls');
   for (const property of ['top', 'left', 'width', 'height']) {
     elements.stickyChrome.style.removeProperty(property);
-  }
-}
-
-function measureFixedContainingBlockMapping(element: HTMLElement): FixedChromeAffineMapping | null {
-  const parent = element.parentElement;
-  if (!parent) return null;
-  const sampleDistance = 100;
-  const probe = (left: number, top: number): HTMLSpanElement => {
-    const element = parent.ownerDocument.createElement('span');
-    element.setAttribute('aria-hidden', 'true');
-    element.style.cssText = `position:fixed;inset:auto;left:${left}px;top:${top}px;` +
-      'display:block;width:0;height:0;margin:0;padding:0;border:0;visibility:hidden;pointer-events:none;';
-    return element;
-  };
-  const origin = probe(0, 0);
-  const horizontal = probe(sampleDistance, 0);
-  const vertical = probe(0, sampleDistance);
-  try {
-    parent.append(origin, horizontal, vertical);
-    const originRect = origin.getBoundingClientRect();
-    const horizontalRect = horizontal.getBoundingClientRect();
-    const verticalRect = vertical.getBoundingClientRect();
-    return fixedChromeAffineMappingFromSamples(
-      { x: originRect.left, y: originRect.top },
-      { x: horizontalRect.left, y: horizontalRect.top },
-      { x: verticalRect.left, y: verticalRect.top },
-      sampleDistance
-    );
-  } catch {
-    return null;
-  } finally {
-    origin.remove();
-    horizontal.remove();
-    vertical.remove();
   }
 }
 
