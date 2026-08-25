@@ -75,9 +75,110 @@ async function main(): Promise<void> {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
-    await page.setContent('<!doctype html><div id="app"></div>');
+    await page.setContent('<!doctype html><div id="app"></div><button id="keyboard-end">Keyboard end</button>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    await page.evaluate(() => {
+      const harness = (window as any).TableStabilityHarness;
+      const svg = (label: string, color: string) => (
+        `data:image/svg+xml,${encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><rect width="160" height="80" fill="${color}"/><text x="8" y="42">${label}</text></svg>`
+        )}`
+      );
+      harness.setImageSrcResolver((url: string) => svg(url, '#68a'));
+      (window as any).__imageHoverEditor = harness.createEditor({
+        parent: document.getElementById('app')!,
+        text: '![first](first.png) ![second](second.png)',
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await page.waitForSelector('.meo-md-image-controls');
+
+    const readHoverState = () => page.$$eval('.meo-md-image', (images) => images.map((image) => {
+      const controls = image.querySelector<HTMLElement>('.meo-md-image-controls');
+      return {
+        hovered: image.matches(':hover'),
+        opacity: Number.parseFloat(getComputedStyle(controls!).opacity)
+      };
+    }));
+    const settleControlAnimations = () => page.$$eval('.meo-md-image-controls', async (controls) => {
+      const animations = controls.flatMap((control) => control.getAnimations({ subtree: true }));
+      await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+    });
+    const hoverPoints = await page.$$eval('.meo-md-image', (images) => images.map((image) => {
+      const imageRect = image.querySelector<HTMLElement>('.meo-md-image-img')!.getBoundingClientRect();
+      const controlsRect = image.querySelector<HTMLElement>('.meo-md-image-controls')!.getBoundingClientRect();
+      return {
+        image: { x: imageRect.left + 8, y: imageRect.bottom - 8 },
+        controls: { x: controlsRect.left + controlsRect.width / 2, y: controlsRect.top + controlsRect.height / 2 }
+      };
+    }));
+    const readImagePoint = (index: number) => page.$$eval('.meo-md-image-img', (images, targetIndex) => {
+      const rect = images[targetIndex]!.getBoundingClientRect();
+      return { x: rect.left + 8, y: rect.bottom - 8 };
+    }, index);
+
+    assert.deepEqual(await readHoverState(), [
+      { hovered: false, opacity: 0 },
+      { hovered: false, opacity: 0 }
+    ], 'loaded Live image controls should start hidden');
+
+    await page.mouse.move(hoverPoints[0].image.x, hoverPoints[0].image.y);
+    await settleControlAnimations();
+    assert.deepEqual(await readHoverState(), [
+      { hovered: true, opacity: 1 },
+      { hovered: false, opacity: 0 }
+    ], 'only the currently hovered image should expose controls');
+
+    await page.mouse.move(hoverPoints[0].controls.x, hoverPoints[0].controls.y);
+    await settleControlAnimations();
+    assert.deepEqual(await readHoverState(), [
+      { hovered: true, opacity: 1 },
+      { hovered: false, opacity: 0 }
+    ], 'moving from an image into its controls should keep that toolbar visible');
+
+    await page.focus('#keyboard-end');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('Tab');
+    await page.keyboard.up('Shift');
+    const keyboardFocusedControl = await page.evaluate(() => ({
+      label: document.activeElement?.getAttribute('aria-label') ?? '',
+      isImageControl: document.activeElement?.classList.contains('meo-md-image-control-btn') ?? false
+    }));
+    assert.deepEqual(keyboardFocusedControl, {
+      label: 'Fullscreen image',
+      isImageControl: true
+    }, 'Shift+Tab should reach the last image control through the browser focus order');
+
+    const focusedImagePoint = await readImagePoint(1);
+    await page.mouse.move(focusedImagePoint.x, focusedImagePoint.y);
+    await settleControlAnimations();
+    assert.deepEqual(await readHoverState(), [
+      { hovered: false, opacity: 0 },
+      { hovered: true, opacity: 1 }
+    ], 'keyboard focus should not change the toolbar shown by a real image Hover');
+
+    await page.mouse.move(1, 1);
+    await settleControlAnimations();
+    assert.deepEqual(await readHoverState(), [
+      { hovered: false, opacity: 0 },
+      { hovered: false, opacity: 0 }
+    ], 'leaving the image and controls should hide the toolbar even while its control retains focus');
+
+    const competingImagePoint = await readImagePoint(0);
+    await page.mouse.move(competingImagePoint.x, competingImagePoint.y);
+    await settleControlAnimations();
+    assert.deepEqual(await readHoverState(), [
+      { hovered: true, opacity: 1 },
+      { hovered: false, opacity: 0 }
+    ], 'keyboard focus on another image must not compete with the current mouse Hover owner');
+
+    await page.evaluate(() => {
+      (window as any).__imageHoverEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+    });
 
     const result = await page.evaluate(async () => {
       const harness = (window as any).TableStabilityHarness;

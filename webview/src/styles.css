@@ -2940,8 +2940,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   transition: opacity 0.15s ease;
 }
 
-.cm-editor .meo-md-image:hover .meo-md-image-controls,
-.cm-editor .meo-md-image:focus-within .meo-md-image-controls {
+.cm-editor .meo-md-image:hover .meo-md-image-controls {
   opacity: 1;
 }
 

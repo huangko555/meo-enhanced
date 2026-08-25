@@ -50,6 +50,9 @@ try {
     if (!html.includes('alt="missing fallback"')) {
       throw new Error(`${surface} dropped fallback alt text for an unreadable local image`);
     }
+    if (html.includes('meo-md-image-controls')) {
+      throw new Error(`${surface} exposed Live image controls in the reading surface`);
+    }
   }
   if (!pdf.htmlDocument.includes(pathToFileURL(localImagePath).toString())) {
     throw new Error('PDF export did not convert a Windows absolute-path image to a file URL');
