@@ -1,4 +1,5 @@
 import { decodeEditorStyleEnvironment, type EditorStyleEnvironment } from './editorStyleEnvironment';
+import type { PreviewAppearance } from './previewRender';
 import { decodeRequestResult, type RequestResult } from './requestResult';
 
 export const EXPORT_SNAPSHOT_TIMEOUT_MS = 20_000;
@@ -8,10 +9,14 @@ export type ExportSnapshotRequest = {
   readonly requestId: string;
 };
 
-export type ExportSnapshotValue = {
+export type ReadingSnapshot = {
+  readonly snapshotId: string;
   readonly text: string;
-  readonly environment?: EditorStyleEnvironment;
+  readonly appearance: PreviewAppearance;
+  readonly environment: EditorStyleEnvironment;
 };
+
+export type ExportSnapshotValue = ReadingSnapshot;
 
 export type ExportSnapshotResolution = RequestResult<ExportSnapshotValue>;
 
@@ -37,17 +42,24 @@ export function decodeExportSnapshotRequest(value: unknown): ExportSnapshotReque
 export function decodeExportSnapshotResponse(value: unknown): ExportSnapshotResponse | null {
   const result = isRecord(value)
     ? decodeRequestResult(value.result, (candidate): ExportSnapshotValue | null => {
-        if (!isRecord(candidate) || typeof candidate.text !== 'string') return null;
-        const environment = candidate.environment === undefined
-          ? undefined
-          : decodeEditorStyleEnvironment(candidate.environment);
-        if (candidate.environment !== undefined && environment === null) return null;
-        return environment ? { text: candidate.text, environment } : { text: candidate.text };
+        if (!isRecord(candidate)
+          || !isNonEmptyString(candidate.snapshotId)
+          || typeof candidate.text !== 'string'
+          || (candidate.appearance !== 'dark' && candidate.appearance !== 'light')) return null;
+        const environment = decodeEditorStyleEnvironment(candidate.environment);
+        if (environment === null) return null;
+        return {
+          snapshotId: candidate.snapshotId,
+          text: candidate.text,
+          appearance: candidate.appearance,
+          environment
+        };
       })
     : null;
   if (!isRecord(value)
     || value.type !== 'exportSnapshotResult'
     || !isNonEmptyString(value.requestId)
-    || result === null) return null;
+    || result === null
+    || (result.ok && result.value.snapshotId !== value.requestId)) return null;
   return { type: 'exportSnapshotResult', requestId: value.requestId, result };
 }

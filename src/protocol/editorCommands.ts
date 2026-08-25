@@ -22,7 +22,7 @@ export type EditorCommand =
   | { readonly type: 'openLink'; readonly href: string; readonly source?: 'preview' }
   | { readonly type: 'openImageExternally'; readonly url: string }
   | { readonly type: 'reloadDocumentFromDisk'; readonly topLine: number; readonly topLineOffset?: number }
-  | { readonly type: 'exportDocument'; readonly format: 'html' | 'pdf'; readonly appearance: EditorAppearance }
+  | { readonly type: 'exportDocument'; readonly format: 'html' | 'pdf' }
   | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
   | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
   | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance };
@@ -83,8 +83,9 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
     case 'openImageExternally':
       return typeof value.url === 'string' && value.url.length > 0 ? value as EditorCommand : null;
     case 'exportDocument':
-      return (value.format === 'html' || value.format === 'pdf')
-        && (value.appearance === 'dark' || value.appearance === 'light') ? value as EditorCommand : null;
+      return (value.format === 'html' || value.format === 'pdf') && value.appearance === undefined
+        ? value as EditorCommand
+        : null;
     case 'setPreviewAppearance':
     case 'setEditorAppearance':
       return value.appearance === 'auto' || value.appearance === 'dark' || value.appearance === 'light'

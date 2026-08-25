@@ -456,13 +456,19 @@ assert.deepEqual(decodeExportSnapshotRequest({ type: 'requestExportSnapshot', re
   type: 'requestExportSnapshot', requestId: 'export-1'
 });
 assert.equal(decodeExportSnapshotRequest({ type: 'requestExportSnapshot', requestId: '' }), null);
+const protocolReadingSnapshot = {
+  snapshotId: 'export-1',
+  text: '# Export',
+  appearance: 'dark' as const,
+  environment: { editorFontFamily: 'sans-serif' }
+};
 assert.deepEqual(decodeExportSnapshotResponse({
   type: 'exportSnapshotResult', requestId: 'export-1', result: {
-    ok: true, value: { text: '# Export', environment: { editorFontFamily: 'sans-serif' } }
+    ok: true, value: protocolReadingSnapshot
   }
 }), {
   type: 'exportSnapshotResult', requestId: 'export-1', result: {
-    ok: true, value: { text: '# Export', environment: { editorFontFamily: 'sans-serif' } }
+    ok: true, value: protocolReadingSnapshot
   }
 });
 assert.deepEqual(decodeExportSnapshotResponse({
@@ -476,7 +482,7 @@ assert.deepEqual(decodeExportSnapshotResponse({
 });
 assert.equal(decodeExportSnapshotResponse({
   type: 'exportSnapshotResult', requestId: 'export-1', result: {
-    ok: true, value: { text: '# Export', environment: { liveLineHeight: '1.5' } }
+    ok: true, value: { ...protocolReadingSnapshot, environment: { liveLineHeight: '1.5' } }
   }
 }), null);
 let postedExportRequest: unknown;
@@ -501,9 +507,12 @@ const exportRequestId = (postedExportRequest as { requestId: string }).requestId
 assert.match(exportRequestId, /^export-\d+-0$/);
 assert.equal(exportTransport.accept({
   type: 'exportSnapshotResult', requestId: exportRequestId,
-  result: { ok: true, value: { text: '# Export' } }
+  result: { ok: true, value: { ...protocolReadingSnapshot, snapshotId: exportRequestId } }
 }), true);
-assert.deepEqual(await exportSnapshot, { ok: true, value: { text: '# Export' } });
+assert.deepEqual(await exportSnapshot, {
+  ok: true,
+  value: { ...protocolReadingSnapshot, snapshotId: exportRequestId }
+});
 assert.equal(canceledExportTimeouts, 1);
 const timedOutExport = exportTransport.request();
 await Promise.resolve();
@@ -516,7 +525,10 @@ assert.deepEqual(await timedOutExport, {
 });
 assert.equal(exportTransport.accept({
   type: 'exportSnapshotResult', requestId: timedOutExportRequestId,
-  result: { ok: true, value: { text: '# Late' } }
+  result: {
+    ok: true,
+    value: { ...protocolReadingSnapshot, snapshotId: timedOutExportRequestId, text: '# Late' }
+  }
 }), false);
 const closedExport = exportTransport.request();
 exportTransport.close('editor closed');
@@ -529,11 +541,15 @@ assert.deepEqual(await unavailableExportTransport.request(), {
 });
 let postedExportResponse: unknown;
 createExportSnapshotResponder((message) => { postedExportResponse = message; }).respond('export-response-1', {
-  ok: true, value: { text: '# Response' }
+  ok: true,
+  value: { ...protocolReadingSnapshot, snapshotId: 'export-response-1', text: '# Response' }
 });
 assert.deepEqual(postedExportResponse, {
   type: 'exportSnapshotResult', requestId: 'export-response-1',
-  result: { ok: true, value: { text: '# Response' } }
+  result: {
+    ok: true,
+    value: { ...protocolReadingSnapshot, snapshotId: 'export-response-1', text: '# Response' }
+  }
 });
 assert.deepEqual(decodeGitBaselineChangedEvent({
   type: 'gitBaselineChanged', version: 4,
@@ -559,7 +575,7 @@ for (const command of [
   { type: 'openLink', href: 'docs/readme.md', source: 'preview' },
   { type: 'openImageExternally', url: 'file:///image.png' },
   { type: 'reloadDocumentFromDisk', topLine: 1 },
-{ type: 'exportDocument', format: 'pdf', appearance: 'dark' },
+{ type: 'exportDocument', format: 'pdf' },
 { type: 'setPreviewAppearance', appearance: 'auto' },
 { type: 'setPreviewSourceColoring', enabled: false },
 { type: 'setEditorAppearance', appearance: 'auto' }

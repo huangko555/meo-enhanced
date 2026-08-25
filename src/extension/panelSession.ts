@@ -62,6 +62,7 @@ import type { ResolvedWikiLinksResponse } from '../protocol/wikiLinkResolution';
 import type { ResolvedLocalLinksResponse } from '../protocol/localLinkResolution';
 import type { SaveImageFromClipboardRequest, SavedImagePathResponse } from '../protocol/clipboardImageSave';
 import type { PreviewRenderResponse } from '../protocol/previewRender';
+import type { ReadingSnapshot } from '../protocol/exportSnapshot';
 import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
 import { createVscodeDocumentReloadAdapter } from '../host/vscodeDocumentReloadAdapter';
@@ -104,7 +105,7 @@ type PanelSessionControllerParams = {
   diffBaselineOutput: DiffBaselineOutput<GitBaselinePayload>;
   viewNavigation: HostViewNavigationPort<vscode.TextEditor>;
   saveDocument: () => Promise<boolean>;
-  onExportDocument: (session: PanelSession, format: ExportFormat, appearance: PreviewAppearance) => Promise<void>;
+  onExportDocument: (session: PanelSession, format: ExportFormat) => Promise<void>;
   renderPreview: (options: {
     markdownText: string;
     sourceDocumentPath: string;
@@ -130,7 +131,7 @@ export type PanelSession = {
   documentUri: vscode.Uri;
   gitDocumentState: GitDocumentState;
   ensureInitDelivered: () => Promise<void>;
-  requestExportSnapshot: () => Promise<{ text: string; environment?: ExportStyleEnvironment }>;
+  requestExportSnapshot: () => Promise<ReadingSnapshot>;
   refreshGitBaseline: (options?: GitBaselineRefreshOptions) => void;
   getGitRepoRoot: () => string | null;
 };
@@ -411,7 +412,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     }
   };
 
-  const requestExportSnapshot = async (): Promise<{ text: string; environment?: ExportStyleEnvironment }> => {
+  const requestExportSnapshot = async (): Promise<ReadingSnapshot> => {
     await ensureInitDelivered();
     if (disposed) {
       throw new Error('The editor was closed before export completed.');
@@ -532,7 +533,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       }
       case 'exportDocument':
-        await onExportDocument(session, raw.format, raw.appearance);
+        await onExportDocument(session, raw.format);
         return;
       case 'setPreviewAppearance':
         await setPreviewAppearance(raw.appearance);

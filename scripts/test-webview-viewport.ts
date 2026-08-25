@@ -775,14 +775,13 @@ async function main() {
     await page.click('.preview-toolbar-action[data-format="html"]');
     await page.click('.preview-toolbar-action[data-format="pdf"]');
     const previewExportRequests = await page.evaluate(() => (
-      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string; appearance?: string }> }).__hostMessages ?? []
+      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string }> }).__hostMessages ?? []
     ).filter((message) => message.type === 'exportDocument').map((message) => ({
-      format: message.format,
-      appearance: message.appearance
+      format: message.format
     })));
     if (JSON.stringify(previewExportRequests) !== JSON.stringify([
-      { format: 'html', appearance: 'dark' },
-      { format: 'pdf', appearance: 'dark' }
+      { format: 'html' },
+      { format: 'pdf' }
     ])) {
       throw new Error(`Preview export buttons did not request both formats with the current appearance: ${JSON.stringify(previewExportRequests)}`);
     }
@@ -1226,13 +1225,6 @@ async function main() {
     });
     if (!mermaidThemeIsolation.previewSawDark || !mermaidThemeIsolation.previewSawLight || !mermaidThemeIsolation.editorEndedDark) {
       throw new Error(`Preview Mermaid theme was not isolated: ${JSON.stringify(mermaidThemeIsolation)}`);
-    }
-    await page.click('.preview-toolbar-action[data-format="html"]');
-    const lightExportAppearance = await page.evaluate(() => (
-      (window as typeof window & { __hostMessages?: Array<{ type?: string; appearance?: string }> }).__hostMessages ?? []
-    ).filter((message) => message.type === 'exportDocument').at(-1)?.appearance);
-    if (lightExportAppearance !== 'light') {
-      throw new Error(`Light Preview export did not keep the active appearance: ${lightExportAppearance}`);
     }
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 2);

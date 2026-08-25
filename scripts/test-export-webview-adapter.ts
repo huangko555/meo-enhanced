@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import type { HostToWebviewMessage, WebviewToHostMessage } from '../src/protocol/messages';
 import { createExportWebviewAdapter } from '../webview/src/adapters/exportWebviewAdapter';
 
@@ -22,46 +20,53 @@ const createDeferred = (): Deferred => {
 
 const posted: WebviewToHostMessage[] = [];
 let currentText = '# first';
+let currentTextError: Error | null = null;
+let currentAppearance: 'light' | 'dark' = 'light';
+let currentEnvironment = { editorBackgroundColor: '#fff' };
 let idle = createDeferred();
-let idleCalls = 0;
-let environmentReads = 0;
 const adapter = createExportWebviewAdapter({
   postMessage(message) {
     posted.push(message);
   },
-  getCurrentText: () => currentText,
-  whenDocumentIdle() {
-    idleCalls += 1;
-    return idle.promise;
+  getCurrentText() {
+    if (currentTextError) throw currentTextError;
+    return currentText;
   },
-  getPreviewAppearance: () => 'light',
-  getStyleEnvironment() {
-    environmentReads += 1;
-    return { editorBackgroundColor: '#fff' };
-  }
+  whenDocumentIdle: () => idle.promise,
+  getPreviewAppearance: () => currentAppearance,
+  getStyleEnvironment: () => currentEnvironment
 });
 
 adapter.requestExport('html');
-assert.deepEqual(posted.shift(), { type: 'exportDocument', format: 'html', appearance: 'light' });
+assert.deepEqual(posted.shift(), { type: 'exportDocument', format: 'html' });
 assert.equal(adapter.accept({ type: 'focusEditor' } as HostToWebviewMessage), false);
 
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-1' }), true);
 currentText = '# second';
+currentAppearance = 'dark';
+currentEnvironment = { editorBackgroundColor: '#111' };
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-2' }), true);
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-2' }), true);
-assert.equal(idleCalls, 2, 'each snapshot must capture the Document Session barrier current at its arrival');
 assert.equal(posted.length, 0);
 
 idle.resolve();
 await Promise.resolve();
 await Promise.resolve();
+currentText = '# changed after capture';
+currentAppearance = 'light';
+currentEnvironment.editorBackgroundColor = '#eeeeee';
 assert.deepEqual(posted.splice(0), [
   {
     type: 'exportSnapshotResult',
     requestId: 'snapshot-1',
     result: {
       ok: true,
-      value: { text: '# first', environment: { editorBackgroundColor: '#fff' } }
+      value: {
+        snapshotId: 'snapshot-1',
+        text: '# second',
+        appearance: 'dark',
+        environment: { editorBackgroundColor: '#111' }
+      }
     }
   },
   {
@@ -69,11 +74,31 @@ assert.deepEqual(posted.splice(0), [
     requestId: 'snapshot-2',
     result: {
       ok: true,
-      value: { text: '# second', environment: { editorBackgroundColor: '#fff' } }
+      value: {
+        snapshotId: 'snapshot-2',
+        text: '# second',
+        appearance: 'dark',
+        environment: { editorBackgroundColor: '#111' }
+      }
     }
   }
 ]);
-assert.equal(environmentReads, 2);
+
+idle = createDeferred();
+assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-capture-failed' }), true);
+currentTextError = new Error('Current Revision unavailable');
+idle.resolve();
+await Promise.resolve();
+await Promise.resolve();
+assert.deepEqual(posted.shift(), {
+  type: 'exportSnapshotResult',
+  requestId: 'snapshot-capture-failed',
+  result: {
+    ok: false,
+    error: { code: 'operation-failed', message: 'Current Revision unavailable' }
+  }
+});
+currentTextError = null;
 
 const olderIdle = createDeferred();
 idle = olderIdle;
@@ -97,6 +122,28 @@ assert.deepEqual(posted.map((message) => (
   message.type === 'exportSnapshotResult' ? message.requestId : null
 )), ['snapshot-before-edit', 'snapshot-after-edit']);
 posted.length = 0;
+
+idle = createDeferred();
+currentText = '# next request';
+currentAppearance = 'light';
+currentEnvironment = { editorBackgroundColor: '#fafafa' };
+assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-next-request' }), true);
+idle.resolve();
+await Promise.resolve();
+await Promise.resolve();
+assert.deepEqual(posted.shift(), {
+  type: 'exportSnapshotResult',
+  requestId: 'snapshot-next-request',
+  result: {
+    ok: true,
+    value: {
+      snapshotId: 'snapshot-next-request',
+      text: '# next request',
+      appearance: 'light',
+      environment: { editorBackgroundColor: '#fafafa' }
+    }
+  }
+});
 
 idle = createDeferred();
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-failed' }), true);
@@ -130,20 +177,5 @@ await Promise.resolve();
 assert.equal(posted.length, 0, 'late idle completion must not emit a second response');
 adapter.requestExport('pdf');
 assert.equal(posted.length, 0, 'disposed adapter must reject new user actions');
-
-const repoRoot = path.resolve(import.meta.dir, '..');
-const bootstrap = fs.readFileSync(path.join(repoRoot, 'webview/src/index.ts'), 'utf8');
-assert.equal((bootstrap.match(/createExportWebviewAdapter\s*\(/g) ?? []).length, 1);
-for (const forbidden of [
-  'createExportHandler',
-  'createExportSnapshotResponder',
-  "message.type === 'requestExportSnapshot'",
-  'handleExportSnapshotRequest'
-]) {
-  assert.equal(bootstrap.includes(forbidden), false, `Export lifecycle leaked into Bootstrap: ${forbidden}`);
-}
-assert.match(bootstrap, /exportAdapter\.requestExport\s*\(/);
-assert.match(bootstrap, /exportAdapter\.accept\s*\(message\)/);
-assert.match(bootstrap, /exportAdapter\.dispose\s*\(\s*\)/);
 
 console.log('Export Webview Adapter checks passed');

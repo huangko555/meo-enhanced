@@ -12,11 +12,6 @@ export type ExportRuntimeBuildHtmlOptions = {
   target: 'html' | 'pdf';
   appearance: PreviewAppearance;
   styleEnvironment?: ExportStyleEnvironment;
-  editorFontEnvironment?: {
-    editorFontFamily?: string;
-    editorFontWeight?: string;
-    editorFontSizePx?: number;
-  };
   mermaidRuntimeSrc: string;
   katexStylesHref?: string;
   baseHref: string;
@@ -33,13 +28,7 @@ function renderExportHtmlDocument(
     target: options.target
   });
 
-  const stylesCss = buildExportStyles(
-    {
-      ...(options.editorFontEnvironment ?? {}),
-      ...(options.styleEnvironment ?? {})
-    },
-    options.appearance
-  );
+  const stylesCss = buildExportStyles(options.styleEnvironment, options.appearance);
 
   const htmlDocument = buildStandaloneExportHtmlDocument({
     title: options.title,

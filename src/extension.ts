@@ -33,7 +33,6 @@ import {
   OUTLINE_VISIBLE_KEY,
   getCurrentVscodeCodeTheme,
   syncEditorAssociations,
-  getExportEditorFontEnvironment,
   getGitChangesGutterEnabled,
   getOutlineVisible,
   getContentMaxWidthEnabled,
@@ -92,11 +91,6 @@ type ExportRuntimeModule = {
     target: ExportFormat;
     appearance: PreviewAppearance;
     styleEnvironment?: ExportStyleEnvironment;
-    editorFontEnvironment?: {
-      editorFontFamily?: string;
-      editorFontWeight?: string;
-      editorFontSizePx?: number;
-    };
     mermaidRuntimeSrc: string;
     katexStylesHref: string;
     baseHref: string;
@@ -479,7 +473,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         }
       }),
       saveDocument: async () => document.save(),
-      onExportDocument: (session, format, appearance) => this.exportSessionDocument(session, format, appearance),
+      onExportDocument: (session, format) => this.exportSessionDocument(session, format),
       renderPreview: async (options) => {
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
         return exportRuntime.renderPreviewDocument({
@@ -614,8 +608,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
   private async exportSessionDocument(
     session: PanelSession,
-    format: ExportFormat,
-    appearance: PreviewAppearance = this.getPreviewAppearance()
+    format: ExportFormat
   ): Promise<void> {
     this.lastActivePanel = session.panel;
 
@@ -649,7 +642,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
               outputFileUri: saveUri,
               target: format,
               styleEnvironment: snapshot.environment,
-              appearance
+              appearance: snapshot.appearance
             });
 
             if (format === 'html') {
@@ -722,7 +715,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       target: params.target,
       appearance: params.appearance,
       styleEnvironment: params.styleEnvironment,
-      editorFontEnvironment: getExportEditorFontEnvironment(),
       mermaidRuntimeSrc,
       katexStylesHref,
       baseHref,

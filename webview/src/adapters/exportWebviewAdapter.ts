@@ -18,10 +18,6 @@ export type ExportWebviewAdapter = {
   dispose(): void;
 };
 
-type PendingSnapshot = {
-  readonly text: string;
-};
-
 const closedResult = (): ExportSnapshotResolution => ({
   ok: false,
   error: {
@@ -35,7 +31,7 @@ export function createExportWebviewAdapter(
   dependencies: ExportWebviewAdapterDependencies
 ): ExportWebviewAdapter {
   const responder = createExportSnapshotResponder(dependencies.postMessage);
-  const pendingSnapshots = new Map<string, PendingSnapshot>();
+  const pendingSnapshots = new Set<string>();
   const seenRequestIds = new Set<string>();
   let disposed = false;
 
@@ -60,32 +56,20 @@ export function createExportWebviewAdapter(
       return;
     }
 
-    let text: string;
-    try {
-      text = dependencies.getCurrentText();
-    } catch (error) {
-      responder.respond(requestId, {
-        ok: false,
-        error: {
-          code: 'operation-failed',
-          message: error instanceof Error ? error.message : 'Failed to collect export snapshot'
-        }
-      });
-      return;
-    }
-
-    pendingSnapshots.set(requestId, { text });
+    pendingSnapshots.add(requestId);
     void getIdleBarrier().then(
       () => {
-        const pending = pendingSnapshots.get(requestId);
-        if (!pending || disposed) return;
+        if (!pendingSnapshots.has(requestId) || disposed) return;
         try {
+          const environment = structuredClone(dependencies.getStyleEnvironment());
           settle(requestId, {
             ok: true,
-            value: {
-              text: pending.text,
-              environment: dependencies.getStyleEnvironment()
-            }
+            value: Object.freeze({
+              snapshotId: requestId,
+              text: dependencies.getCurrentText(),
+              appearance: dependencies.getPreviewAppearance(),
+              environment: Object.freeze(environment)
+            })
           });
         } catch (error) {
           settle(requestId, {
@@ -114,8 +98,7 @@ export function createExportWebviewAdapter(
       if (disposed) return;
       dependencies.postMessage({
         type: 'exportDocument',
-        format,
-        appearance: dependencies.getPreviewAppearance()
+        format
       });
     },
     accept(message) {
@@ -126,7 +109,7 @@ export function createExportWebviewAdapter(
     dispose() {
       if (disposed) return;
       disposed = true;
-      for (const requestId of Array.from(pendingSnapshots.keys())) {
+      for (const requestId of Array.from(pendingSnapshots)) {
         settle(requestId, closedResult());
       }
     }
