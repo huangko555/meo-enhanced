@@ -12,6 +12,7 @@ import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlineP
 import {
   getTableTransactionProvenanceSnapshot
 } from '../webview/src/adapters/tableTransactionProvenance';
+import { installCausalFrameSettlement } from './causal-frame-settlement';
 
 const getTableProvenanceSnapshot = () => {
   const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!);
@@ -35,6 +36,7 @@ const getTableProvenanceSnapshot = () => {
     resolveInlineSourceOffsetAtPoint: typeof resolveInlineSourceOffsetAtPoint;
     addToHistoryAnnotation: (value: boolean) => ReturnType<typeof Transaction.addToHistory.of>;
     getTableProvenanceSnapshot: typeof getTableProvenanceSnapshot;
+    installCausalFrameSettlement: typeof installCausalFrameSettlement;
   };
 }).TableStabilityHarness = {
   createEditor,
@@ -46,5 +48,6 @@ const getTableProvenanceSnapshot = () => {
   getLocalLinkStatus,
   resolveInlineSourceOffsetAtPoint,
   addToHistoryAnnotation: (value: boolean) => Transaction.addToHistory.of(value),
-  getTableProvenanceSnapshot
+  getTableProvenanceSnapshot,
+  installCausalFrameSettlement
 };

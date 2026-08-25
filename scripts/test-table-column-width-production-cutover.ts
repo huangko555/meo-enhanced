@@ -8,6 +8,7 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-column-width-production-cutover-'));
 const threeColumns = ['| A | B | C |', '| --- | --- | --- |', '| one | two | three |'].join('\n');
 const twoColumns = ['| A | B |', '| --- | --- |', '| one | two |'].join('\n');
+const focusedCase = process.argv.includes('--case=sticky-width-pointer');
 
 async function waitForTableLayout(
   page: any,
@@ -364,26 +365,115 @@ async function dragPath(
   deltas: readonly number[],
   column = 0
 ): Promise<number[]> {
-  const point = await page.$eval(selector, (handle: Element) => {
-    const rect = handle.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  });
-  const samples: number[] = [];
-  await page.mouse.move(point.x, point.y);
-  const hitCurrentHandle = await page.evaluate(({ x, y, handleSelector }) => {
-    const expected = document.querySelector(handleSelector);
-    return document.elementFromPoint(x, y)?.closest('[data-table-resize-column]') === expected;
-  }, { ...point, handleSelector: selector });
-  assert.equal(hitCurrentHandle, true, `pointer must hit the current visible resize handle: ${selector}`);
-  await page.mouse.down();
-  for (const delta of deltas) {
-    await page.mouse.move(point.x + delta, point.y);
-    samples.push(await page.$eval(
-      `.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th:nth-child(${column + 1})`,
-      (cell) => cell.getBoundingClientRect().width
-    ));
+  if (!selector.startsWith('.meo-md-html-table-sticky-table')) {
+    const point = await page.$eval(selector, (handle: Element) => {
+      const rect = handle.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    const samples: number[] = [];
+    await page.mouse.move(point.x, point.y);
+    let pointerDown = false;
+    try {
+      await page.mouse.down();
+      pointerDown = true;
+      for (const delta of deltas) {
+        await page.mouse.move(point.x + delta, point.y);
+        samples.push(await page.$eval(
+          `.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th:nth-child(${column + 1})`,
+          (cell) => cell.getBoundingClientRect().width
+        ));
+      }
+    } finally {
+      if (pointerDown) await page.mouse.up();
+    }
+    return samples;
   }
-  await page.mouse.up();
+  const acquisition = await page.evaluate(({ handleSelector, expectedColumn }) => {
+    const matches = Array.from(document.querySelectorAll<HTMLElement>(handleSelector));
+    if (matches.length !== 1) {
+      throw new Error(`resize handle acquisition requires one current match, received ${matches.length}: ${handleSelector}`);
+    }
+    const handle = matches[0];
+    const stickyTable = handle.closest<HTMLTableElement>('.meo-md-html-table-sticky-table');
+    const headerCell = handle.closest<HTMLTableCellElement>('th');
+    const shell = stickyTable?.closest<HTMLElement>('.meo-md-html-table-shell');
+    const mainTable = shell?.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+    const expectedMainTable = (window as any).__columnWidthStickyPointerExpectedTable;
+    const rect = handle.getBoundingClientRect();
+    const style = getComputedStyle(handle);
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    if (!handle.isConnected || !stickyTable || !headerCell || !mainTable || !mainTable.isConnected) {
+      throw new Error(`resize handle acquisition found a detached or ownerless current handle: ${handleSelector}`);
+    }
+    if (mainTable !== expectedMainTable) {
+      throw new Error(`resize handle acquisition selected the wrong current table: ${handleSelector}`);
+    }
+    if (headerCell.cellIndex !== expectedColumn || handle.dataset.tableResizeColumn !== String(expectedColumn)) {
+      throw new Error(`resize handle acquisition selected the wrong Sticky column: ${handleSelector}`);
+    }
+    if (!(rect.width > 0 && rect.height > 0) || !Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error(`current visible resize handle acquisition returned zero geometry: ${JSON.stringify({
+        selector: handleSelector, width: rect.width, height: rect.height, x, y
+      })}`);
+    }
+    if (rect.left < 0 || rect.top < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight ||
+      style.display === 'none' || style.visibility !== 'visible' || style.pointerEvents === 'none') {
+      throw new Error(`resize handle acquisition requires a fully visible pointer target: ${handleSelector}`);
+    }
+    if (!(hit === handle || (hit instanceof Node && handle.contains(hit)))) {
+      throw new Error(`current visible resize handle acquisition returned non-hit point: ${JSON.stringify({
+        selector: handleSelector, x, y, hit: hit instanceof Element ? hit.tagName : null
+      })}`);
+    }
+    (window as any).__columnWidthPointerTransaction = {
+      handle,
+      stickyTable,
+      mainTable,
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+    };
+    return { x, y };
+  }, { handleSelector: selector, expectedColumn: column });
+  const samples: number[] = [];
+  await page.mouse.move(acquisition.x, acquisition.y);
+  const preDown = await page.evaluate(({ handleSelector, expectedColumn }) => {
+    const transaction = (window as any).__columnWidthPointerTransaction;
+    delete (window as any).__columnWidthPointerTransaction;
+    delete (window as any).__columnWidthStickyPointerExpectedTable;
+    const current = document.querySelector<HTMLElement>(handleSelector);
+    if (!transaction?.handle?.isConnected || current !== transaction.handle) return 'replacement-or-detach';
+    const handle = transaction.handle as HTMLElement;
+    const rect = handle.getBoundingClientRect();
+    if (handle.closest('.meo-md-html-table-sticky-table') !== transaction.stickyTable ||
+      transaction.stickyTable.closest('.meo-md-html-table-shell')
+        ?.querySelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)') !== transaction.mainTable ||
+      handle.closest<HTMLTableCellElement>('th')?.cellIndex !== expectedColumn) return 'wrong-table-or-column';
+    if (Math.abs(rect.left - transaction.rect.left) >= 0.5 || Math.abs(rect.top - transaction.rect.top) >= 0.5 ||
+      Math.abs(rect.width - transaction.rect.width) >= 0.5 || Math.abs(rect.height - transaction.rect.height) >= 0.5) {
+      return 'moved-after-acquisition';
+    }
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    if (!(hit === handle || (hit instanceof Node && handle.contains(hit)))) return 'non-hit-before-pointerdown';
+    return 'current';
+  }, { handleSelector: selector, expectedColumn: column });
+  assert.equal(preDown, 'current', `resize handle changed before pointerdown: ${preDown}: ${selector}`);
+  let pointerDown = false;
+  try {
+    await page.mouse.down();
+    pointerDown = true;
+    for (const delta of deltas) {
+      await page.mouse.move(acquisition.x + delta, acquisition.y);
+      samples.push(await page.$eval(
+        `.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th:nth-child(${column + 1})`,
+        (cell) => cell.getBoundingClientRect().width
+      ));
+    }
+  } finally {
+    if (pointerDown) await page.mouse.up();
+  }
   return samples;
 }
 
@@ -787,14 +877,36 @@ async function main(): Promise<void> {
       const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
       const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
       const lastHandle = table.querySelector<HTMLElement>('th:last-child .meo-md-html-table-column-resize-handle')!;
+      const nativeFrame = window.requestAnimationFrame.bind(window);
+      const tracker = (window as any).TableStabilityHarness.installCausalFrameSettlement(window, () => null);
       const projected = new Promise<void>((resolve) => {
-        table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+        table.addEventListener('meo-table-column-width-projected', () => tracker.beginEventRoot(), {
+          capture: true,
+          once: true
+        });
+        table.addEventListener('meo-table-column-width-projected', () => {
+          wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
+          wrap.dispatchEvent(new Event('scroll'));
+          tracker.accept();
+          resolve();
+        }, { once: true });
       });
-      wrap.style.width = '';
-      wrap.style.maxWidth = '';
+      tracker.runRoot(() => {
+        wrap.style.width = '';
+        wrap.style.maxWidth = '';
+      });
       await projected;
-      wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
-      wrap.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve, reject) => {
+        const inspect = () => {
+          const diagnostics = tracker.diagnostics();
+          if (diagnostics.failure) return reject(new Error(diagnostics.failure));
+          if (diagnostics.phase === 'complete') return resolve();
+          nativeFrame(inspect);
+        };
+        nativeFrame(inspect);
+      });
+      tracker.dispose();
+      (window as any).__columnWidthStickyPointerExpectedTable = table;
       const wrapRect = wrap.getBoundingClientRect();
       const handleRect = lastHandle.getBoundingClientRect();
       return {
@@ -834,6 +946,10 @@ async function main(): Promise<void> {
     );
     const scrolledDragProjection = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
     assert.deepEqual(scrolledDragProjection.stickyWidths.map(Math.round), scrolledDragProjection.primaryWidths.map(Math.round));
+    if (focusedCase) {
+      await page.evaluate(() => (window as any).__columnWidthProduction.destroy());
+      return;
+    }
     await page.evaluate(() => {
       const editor = (window as any).__columnWidthProduction;
       editor.setMode('source');
