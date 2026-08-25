@@ -97,8 +97,8 @@ async function main(): Promise<void> {
     });
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
     await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
+    await page.addScriptTag({ url: failingMermaidRuntimeSrc });
     await page.addScriptTag({ content: `
-      document.body.dataset.meoMermaidSrc = ${JSON.stringify(failingMermaidRuntimeSrc)};
       window.acquireVsCodeApi=()=>(
         {
           postMessage(message) {
@@ -123,6 +123,10 @@ async function main(): Promise<void> {
         ?.contentDocument?.querySelectorAll('.meo-export-code-line').length ?? 0
     ));
     assert.equal(initialRows, 3, 'Preview must expose one independent row per fenced source line');
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')
+        ?.contentDocument?.querySelector('.meo-export-mermaid.is-error code') !== null
+    ));
 
     for (const width of [420, 1200]) {
       await page.setViewport({ width, height: 700, deviceScaleFactor: 1 });
