@@ -1,11 +1,49 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { tableColumnWidthPolicy } from '../webview/src/editor/tableColumnWidthPolicy';
+import {
+  tableColumnWidthPolicy,
+  type TableColumnResizeRequest,
+  type TableColumnWidthProjectionRequest
+} from '../webview/src/editor/tableColumnWidthPolicy';
+
+// @ts-expect-error tracksAvailableWidth is part of the required elastic-state contract.
+const missingResizeTrackingState: TableColumnResizeRequest = {
+  widths: [100, 100], minimumWidths: [20, 20], elastic: false,
+  column: 0, requestedDelta: 0, maximumTotalWidth: 200
+};
+// @ts-expect-error tracksAvailableWidth is part of the required elastic-state contract.
+const missingProjectionTrackingState: TableColumnWidthProjectionRequest = {
+  widths: [100, 100], minimumWidths: [20, 20], initialTotalWidth: 200,
+  elastic: false, defaultWidthWasCapped: false, availableWidth: 200,
+  preserveWidthIntent: false
+};
+// @ts-expect-error fixed width and container tracking are mutually exclusive.
+const inconsistentTrackingState: TableColumnWidthProjectionRequest = {
+  widths: [100, 100], minimumWidths: [20, 20], initialTotalWidth: 200,
+  elastic: false, tracksAvailableWidth: true, defaultWidthWasCapped: false,
+  availableWidth: 300, preserveWidthIntent: false
+};
+void missingResizeTrackingState;
+void missingProjectionTrackingState;
+void inconsistentTrackingState;
+
+assert.throws(() => tableColumnWidthPolicy.project({
+  widths: [100, 100],
+  minimumWidths: [20, 20],
+  preserveWidthIntent: false,
+  initialTotalWidth: 200,
+  elastic: false,
+  tracksAvailableWidth: true,
+  defaultWidthWasCapped: false,
+  availableWidth: 300
+} as unknown as TableColumnWidthProjectionRequest), TypeError,
+'fixed width state cannot also track the available container width');
 
 const unconstrained = tableColumnWidthPolicy.resize({
   widths: [100, 100, 100],
   minimumWidths: [20, 20, 20],
   elastic: false,
+  tracksAvailableWidth: false,
   column: 0,
   requestedDelta: 50,
   maximumTotalWidth: 400
@@ -17,6 +55,7 @@ const compressed = tableColumnWidthPolicy.resize({
   widths: [100, 100, 100],
   minimumWidths: [20, 20, 20],
   elastic: true,
+  tracksAvailableWidth: false,
   column: 0,
   requestedDelta: 150,
   maximumTotalWidth: 400
@@ -28,6 +67,7 @@ const clamped = tableColumnWidthPolicy.resize({
   widths: [100, 100, 100],
   minimumWidths: [24, 20, 20],
   elastic: true,
+  tracksAvailableWidth: false,
   column: 0,
   requestedDelta: -200,
   maximumTotalWidth: 400
@@ -38,6 +78,7 @@ const blockedByRightMinimums = tableColumnWidthPolicy.resize({
   widths: [180, 60, 60],
   minimumWidths: [20, 55, 55],
   elastic: true,
+  tracksAvailableWidth: false,
   column: 0,
   requestedDelta: 100,
   maximumTotalWidth: 300
@@ -48,6 +89,7 @@ const resizedInsideInfeasibleContainer = tableColumnWidthPolicy.resize({
   widths: [180, 100, 50],
   minimumWidths: [180, 100, 50],
   elastic: true,
+  tracksAvailableWidth: false,
   column: 2,
   requestedDelta: 24,
   maximumTotalWidth: 300
@@ -67,6 +109,7 @@ const narrowedInsideInfeasibleContainer = tableColumnWidthPolicy.resize({
   widths: resizedInsideInfeasibleContainer.widths,
   minimumWidths: [180, 100, 50],
   elastic: resizedInsideInfeasibleContainer.elastic,
+  tracksAvailableWidth: resizedInsideInfeasibleContainer.tracksAvailableWidth,
   column: 2,
   requestedDelta: -12,
   maximumTotalWidth: 300
@@ -87,6 +130,7 @@ for (const [label, requestedDelta, expectedElastic] of [
     widths: [180, 100, 74],
     minimumWidths: [180, 100, 50],
     elastic: true,
+    tracksAvailableWidth: false,
     column: 2,
     requestedDelta,
     maximumTotalWidth: 300
@@ -98,6 +142,7 @@ const fixedNoChange = tableColumnWidthPolicy.resize({
   widths: [180, 100, 70],
   minimumWidths: [180, 100, 50],
   elastic: false,
+  tracksAvailableWidth: false,
   column: 2,
   requestedDelta: 0,
   maximumTotalWidth: 300
@@ -107,6 +152,7 @@ const fixedExplicitGrowth = tableColumnWidthPolicy.resize({
   widths: [180, 100, 70],
   minimumWidths: [180, 100, 50],
   elastic: false,
+  tracksAvailableWidth: false,
   column: 2,
   requestedDelta: 12,
   maximumTotalWidth: 300
@@ -172,6 +218,7 @@ const preservedCommittedPreview = tableColumnWidthPolicy.project({
   preserveWidthIntent: true,
   initialTotalWidth: 330,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 300
 });
@@ -188,6 +235,7 @@ const projectedNarrow = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 480,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 300
 });
@@ -201,6 +249,7 @@ const projectedBelowReadableMinimums = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 420,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 300
 });
@@ -218,6 +267,7 @@ const projectedWithHeterogeneousMinimums = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 460,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 360
 });
@@ -234,6 +284,7 @@ const projectedFromZeroElasticity = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 300,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 300
 });
@@ -255,6 +306,7 @@ for (const [label, minimumWidths, expectedError] of [
     preserveWidthIntent: false,
     initialTotalWidth: 200,
     elastic: true,
+    tracksAvailableWidth: false,
     defaultWidthWasCapped: true,
     availableWidth: 160
   }), expectedError, `project rejects ${label} minimumWidths`);
@@ -268,6 +320,7 @@ const roundTripNarrow = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 500,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 360
 });
@@ -277,6 +330,7 @@ const roundTripWide = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 500,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 500
 });
@@ -288,6 +342,7 @@ const projectedSingleColumn = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 160,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: true,
   availableWidth: 90
 });
@@ -305,6 +360,7 @@ for (const [label, widths, minimumWidths, expected] of [
     preserveWidthIntent: false,
     initialTotalWidth: widths.reduce((sum, width) => sum + width, 0),
     elastic: true,
+    tracksAvailableWidth: false,
     defaultWidthWasCapped: true,
     availableWidth: 320
   });
@@ -317,6 +373,7 @@ const projectedWide = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 480,
   elastic: true,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: false,
   availableWidth: 420
 });
@@ -329,6 +386,7 @@ const fixed = tableColumnWidthPolicy.project({
   preserveWidthIntent: false,
   initialTotalWidth: 300,
   elastic: false,
+  tracksAvailableWidth: false,
   defaultWidthWasCapped: false,
   availableWidth: 500
 });

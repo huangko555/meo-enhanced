@@ -1,31 +1,29 @@
+export type TableColumnWidthElasticState =
+  | { readonly elastic: false; readonly tracksAvailableWidth: false }
+  | { readonly elastic: true; readonly tracksAvailableWidth: boolean };
+
 export type TableColumnResizeRequest = {
   readonly widths: readonly number[];
   readonly minimumWidths: readonly number[];
-  readonly elastic: boolean;
-  readonly tracksAvailableWidth?: boolean;
   readonly column: number;
   readonly requestedDelta: number;
   readonly maximumTotalWidth: number;
-};
+} & TableColumnWidthElasticState;
 
 export type TableColumnWidthProjectionRequest = {
   readonly widths: readonly number[];
   readonly minimumWidths: readonly number[];
   readonly initialTotalWidth: number;
-  readonly elastic: boolean;
-  readonly tracksAvailableWidth?: boolean;
   readonly defaultWidthWasCapped: boolean;
   readonly availableWidth: number;
   readonly preserveWidthIntent: boolean;
-};
+} & TableColumnWidthElasticState;
 
 export type TableColumnWidthResult = {
   readonly widths: readonly number[];
   readonly totalWidth: number;
   readonly reachedAvailableWidth: boolean;
-  readonly elastic: boolean;
-  readonly tracksAvailableWidth: boolean;
-};
+} & TableColumnWidthElasticState;
 
 export type TableColumnWidthPolicy = {
   resize(request: TableColumnResizeRequest): TableColumnWidthResult;
@@ -36,7 +34,25 @@ function total(widths: readonly number[]): number {
   return widths.reduce((sum, width) => sum + width, 0);
 }
 
+function requireElasticState(request: {
+  readonly elastic: boolean;
+  readonly tracksAvailableWidth: boolean;
+}): void {
+  if (typeof request.elastic !== 'boolean' || typeof request.tracksAvailableWidth !== 'boolean') {
+    throw new TypeError('elastic and tracksAvailableWidth must be explicit booleans');
+  }
+  if (!request.elastic && request.tracksAvailableWidth) {
+    throw new TypeError('a fixed width cannot track the available container width');
+  }
+}
+
+function elasticState(elastic: boolean, tracksAvailableWidth: boolean): TableColumnWidthElasticState {
+  if (!elastic) return { elastic: false, tracksAvailableWidth: false };
+  return { elastic: true, tracksAvailableWidth };
+}
+
 function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
+  requireElasticState(request);
   const maximumTotalWidth = Math.max(0, request.maximumTotalWidth);
   const minimumTotalWidth = total(request.minimumWidths);
   const infeasibleMaximum = maximumTotalWidth < minimumTotalWidth;
@@ -91,21 +107,22 @@ function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
   const enteredAvailableWidth = activeWidthDelta > 1
     && reachedAvailableWidth
     && startTotalWidth <= maximumTotalWidth + 1;
-  const tracksAvailableWidth = activeWidthDelta < -1
+  const nextTracksAvailableWidth = activeWidthDelta < -1
     ? false
-    : Boolean(request.tracksAvailableWidth) || enteredAvailableWidth;
+    : request.tracksAvailableWidth || enteredAvailableWidth;
+  const nextElastic = activeWidthDelta < -1
+    ? false
+    : request.elastic || (activeWidthDelta > 1 && reachedAvailableWidth);
   return {
     widths,
     totalWidth,
     reachedAvailableWidth,
-    elastic: activeWidthDelta < -1
-      ? false
-      : request.elastic || (activeWidthDelta > 1 && reachedAvailableWidth),
-    tracksAvailableWidth
+    ...elasticState(nextElastic, nextTracksAvailableWidth)
   };
 }
 
 function project(request: TableColumnWidthProjectionRequest): TableColumnWidthResult {
+  requireElasticState(request);
   if (request.minimumWidths.length !== request.widths.length) {
     throw new RangeError('minimumWidths must have the same length as widths');
   }
@@ -120,8 +137,7 @@ function project(request: TableColumnWidthProjectionRequest): TableColumnWidthRe
       widths,
       totalWidth,
       reachedAvailableWidth: availableWidth > 0 && totalWidth >= availableWidth - 1,
-      elastic: request.elastic,
-      tracksAvailableWidth: Boolean(request.tracksAvailableWidth)
+      ...elasticState(request.elastic, request.tracksAvailableWidth)
     };
   }
   const requestedTotalWidth = total(request.widths);
@@ -153,8 +169,7 @@ function project(request: TableColumnWidthProjectionRequest): TableColumnWidthRe
     widths,
     totalWidth,
     reachedAvailableWidth: availableWidth > 0 && totalWidth >= availableWidth - 1,
-    elastic: request.elastic,
-    tracksAvailableWidth: Boolean(request.tracksAvailableWidth)
+    ...elasticState(request.elastic, request.tracksAvailableWidth)
   };
 }
 

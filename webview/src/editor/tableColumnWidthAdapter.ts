@@ -2,6 +2,7 @@ import type { Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import {
   tableColumnWidthPolicy,
+  type TableColumnWidthElasticState,
   type TableColumnWidthPolicy
 } from './tableColumnWidthPolicy';
 import {
@@ -33,9 +34,7 @@ type TableLayoutFacts = {
 
 type PreviewSnapshot = TableLayoutFacts & {
   widths: readonly number[];
-  elastic: boolean;
-  tracksAvailableWidth: boolean;
-};
+} & TableColumnWidthElasticState;
 
 type WidthIntent = {
   from: number;
@@ -195,11 +194,9 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     }
     const currentFacts = layoutFacts(table);
     const result = policy.project({
-      widths: intent.snapshot.widths,
+      ...intent.snapshot,
       minimumWidths: currentFacts.minimumWidths,
       initialTotalWidth: intent.initialTotalWidth,
-      elastic: intent.snapshot.elastic,
-      tracksAvailableWidth: intent.snapshot.tracksAvailableWidth,
       defaultWidthWasCapped: intent.defaultWidthWasCapped,
       availableWidth: currentFacts.availableWidth,
       preserveWidthIntent: sameLayoutFacts(intent.snapshot, currentFacts)
@@ -207,9 +204,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     render(table, result.widths, result.totalWidth);
     storeIntent(table, {
       snapshot: {
+        ...result,
         widths: [...result.widths],
-        elastic: result.elastic,
-        tracksAvailableWidth: result.tracksAvailableWidth,
         ...currentFacts
       },
       initialTotalWidth: intent.snapshot.elastic
@@ -280,6 +276,10 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const defaultWidthWasCapped = stored?.defaultWidthWasCapped ?? (
         initialTotalWidth >= startMaximumTotalWidth - 1
       );
+      let startElasticState: TableColumnWidthElasticState;
+      if (stored) startElasticState = stored.snapshot;
+      else if (defaultWidthWasCapped) startElasticState = { elastic: true, tracksAvailableWidth: true };
+      else startElasticState = { elastic: false, tracksAvailableWidth: false };
       const startX = event.clientX;
       let lastPreview: PreviewSnapshot | null = null;
       let latestClientX = startX;
@@ -292,16 +292,14 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         const result = policy.resize({
           widths: startWidths,
           minimumWidths: facts.minimumWidths,
-          elastic: stored?.snapshot.elastic ?? defaultWidthWasCapped,
-          tracksAvailableWidth: stored?.snapshot.tracksAvailableWidth ?? defaultWidthWasCapped,
+          ...startElasticState,
           column,
           requestedDelta: latestClientX - startX,
           maximumTotalWidth: facts.availableWidth
         });
         const snapshot: PreviewSnapshot = {
+          ...result,
           widths: [...result.widths],
-          elastic: result.elastic,
-          tracksAvailableWidth: result.tracksAvailableWidth,
           ...facts
         };
         lastPreview = snapshot;

@@ -48,6 +48,7 @@ async function main(): Promise<void> {
         widths: measured,
         minimumWidths: [20, 20, 20],
         elastic: true,
+        tracksAvailableWidth: false,
         column: 0,
         requestedDelta: 150,
         maximumTotalWidth: document.getElementById('wrap')!.clientWidth
@@ -65,6 +66,7 @@ async function main(): Promise<void> {
         preserveWidthIntent: false,
         initialTotalWidth: 360,
         elastic: true,
+        tracksAvailableWidth: false,
         defaultWidthWasCapped: false,
         availableWidth: 240
       });
