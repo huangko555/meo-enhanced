@@ -35,18 +35,6 @@ export function renderMathToHtml(content: string): string | null {
 }
 `;
 
-const entryHarnessModule = String.raw`
-import { createEditor } from './test-editor-factory';
-import { setMathRendererProbe } from '../src/shared/mathRenderer';
-
-(globalThis as typeof globalThis & {
-  RenderedBlockModeShellProductionHarness?: {
-    createEditor: typeof createEditor;
-    setMathRendererProbe: typeof setMathRendererProbe;
-  };
-}).RenderedBlockModeShellProductionHarness = { createEditor, setMathRendererProbe };
-`;
-
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-rendered-block-mode-shell-production-entry.ts')],
@@ -57,10 +45,6 @@ async function main(): Promise<void> {
     plugins: [{
       name: 'controlled-math-renderer',
       setup(builder) {
-        builder.onLoad({ filter: /test-rendered-block-mode-shell-production-entry\.ts$/ }, () => ({
-          contents: entryHarnessModule,
-          loader: 'ts'
-        }));
         builder.onLoad({ filter: /[\\/]src[\\/]shared[\\/]mathRenderer\.ts$/ }, () => ({
           contents: rendererProbeModule,
           loader: 'ts'

@@ -532,7 +532,11 @@ async function settleStickyPointerMove(
     }
   }
   if (hasPrimary && cleanupErrors.length) {
-    throw new AggregateError([primary, ...cleanupErrors], 'Sticky pointer move settlement and cleanup failed');
+    throw new AggregateError(
+      [primary, ...cleanupErrors],
+      'Sticky pointer move settlement and cleanup failed',
+      { cause: primary }
+    );
   }
   if (hasPrimary) throw primary;
   if (cleanupErrors.length === 1) throw cleanupErrors[0];
@@ -1849,6 +1853,38 @@ async function main(): Promise<void> {
 }
 
 if (cleanupContractCase) {
+  const settlementPrimaryFailure = new Error('synthetic pointer settlement primary failure');
+  const settlementCleanupFailure = new Error('synthetic pointer settlement cleanup failure');
+  let settlementMoves = 0;
+  let settlementCleanups = 0;
+  let settlementEvaluations = 0;
+  const settlementPage = {
+    async evaluate() {
+      settlementEvaluations += 1;
+      if (settlementEvaluations === 1) return { x: 20, y: 30 };
+      settlementCleanups += 1;
+      throw settlementCleanupFailure;
+    },
+    mouse: {
+      async move() {
+        settlementMoves += 1;
+        throw settlementPrimaryFailure;
+      }
+    }
+  };
+  let settlementObserved: unknown = null;
+  try {
+    await settleStickyPointerMove(settlementPage, '.sticky-table-handle', 1);
+  } catch (error) {
+    settlementObserved = error;
+  }
+  assert.ok(settlementObserved instanceof AggregateError,
+    'pointer settlement cleanup must not replace the primary error');
+  assert.deepEqual(settlementObserved.errors, [settlementPrimaryFailure, settlementCleanupFailure]);
+  assert.equal(settlementObserved.cause, settlementPrimaryFailure);
+  assert.equal(settlementMoves, 1, 'pointer settlement primary action must run once');
+  assert.equal(settlementCleanups, 1, 'pointer settlement cleanup must run once');
+
   const moveFailure = new Error('synthetic pointer move failure');
   const releaseFailure = new Error('synthetic pointer release failure');
   let moves = 0;
