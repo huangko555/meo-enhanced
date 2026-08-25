@@ -9,6 +9,8 @@ import exportRuntime from '../src/export/runtime';
 const root = path.resolve(import.meta.dir, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-reading-surface-'));
 const longToken = 'wrappable'.repeat(90);
+const longKbdToken = 'K'.repeat(500);
+const longLinkToken = 'linked'.repeat(80);
 const codeSource = `/* comment\n${longToken}\ncontinues */\n`;
 const mermaidFallbackSource = `invalid ${longToken}\n`;
 const wideImage = Buffer.from(
@@ -32,9 +34,14 @@ const markdown = [
   `invalid ${longToken}`,
   '```',
   '',
-  '| Column |',
-  '| --- |',
-  `| ${longToken} |`,
+  '| Key | Link | Code | Four | Five | Six | Seven | Eight |',
+  '| --- | --- | --- | --- | --- | --- | --- | --- |',
+  `| <kbd>${longKbdToken}</kbd> | [${longLinkToken}](https://example.com/table) | \`${longToken}\` | <ul><li>Apple</li><li>Banana</li></ul> | five | six | seven | eight |`,
+  '| | | | | | | | |',
+  '',
+  `<table><thead><tr><th>Safe HTML</th><th>Value</th></tr></thead><tbody><tr><td><kbd>${longKbdToken}</kbd></td><td>reachable</td></tr></tbody></table>`,
+  '',
+  'Prose shortcut: <kbd>Ctrl+Shift+P</kbd>',
   '',
   `<img alt="wide" width="1600" height="120" src="data:image/svg+xml;base64,${wideImage}">`,
   '',
@@ -128,11 +135,46 @@ async function main(): Promise<void> {
         ?.contentDocument?.querySelector('.meo-export-mermaid.is-error code') !== null
     ));
 
-    for (const width of [420, 1200]) {
-      await page.setViewport({ width, height: 700, deviceScaleFactor: 1 });
+    await page.setViewport({ width: 420, height: 700, deviceScaleFactor: 1 });
+    await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const kbd = doc.querySelector<HTMLElement>('table kbd')!;
+      const link = doc.querySelector<HTMLAnchorElement>('table a')!;
+      const selection = doc.defaultView!.getSelection()!;
+      const range = doc.createRange();
+      range.selectNodeContents(kbd);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      link.focus();
+    });
+
+    const layoutCases = [1, 2].flatMap((deviceScaleFactor) => (
+      [420, 1200].flatMap((width) => (
+        [0.8, 1.25].map((zoom) => ({ deviceScaleFactor, width, zoom }))
+      ))
+    ));
+    for (const { deviceScaleFactor, width, zoom } of layoutCases) {
+      await page.setViewport({ width, height: 700, deviceScaleFactor });
+      await page.evaluate((value) => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        doc.documentElement.style.zoom = String(value);
+      }, zoom);
       const result = await page.evaluate(() => {
         const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
         const doc = frame.contentDocument!;
+        const tables = Array.from(doc.querySelectorAll<HTMLTableElement>('table'));
+        const tableContainers = tables.map((item) => item.closest<HTMLElement>('.meo-table-scroll') ?? item);
+        const table = tables[0];
+        const tableCells = tables.flatMap((item) => Array.from(item.querySelectorAll<HTMLElement>('th, td')));
+        const tableKbds = tables.flatMap((item) => Array.from(item.querySelectorAll<HTMLElement>('kbd')));
+        const emptyCells = Array.from(table.rows[2]?.cells ?? []);
+        const tableList = table.querySelector<HTMLUListElement>('ul')!;
+        const listCell = tableList.closest<HTMLTableCellElement>('td')!;
+        const kbd = table.querySelector<HTMLElement>('kbd')!;
+        const tableLink = table.querySelector<HTMLAnchorElement>('a')!;
+        const proseKbd = Array.from(doc.querySelectorAll<HTMLElement>('kbd')).find((item) => !item.closest('table'))!;
+        const preservedSelection = doc.defaultView!.getSelection()!.toString();
+        const preservedFocus = doc.activeElement === tableLink;
         const code = doc.querySelector<HTMLElement>('pre.meo-export-code-block code')!;
         const pre = code.closest<HTMLElement>('pre')!;
         const pageRoot = doc.querySelector<HTMLElement>('.meo-export-doc')!;
@@ -153,6 +195,13 @@ async function main(): Promise<void> {
         const bodyRect = sources[1].getBoundingClientRect();
         const fragments = Array.from(longRange.getClientRects());
         const adjacent = Array.from(doc.querySelectorAll<HTMLElement>('.meo-table-scroll, img, .meo-export-math'));
+        const kbdRange = doc.createRange();
+        kbdRange.selectNodeContents(kbd);
+        selection.removeAllRanges();
+        selection.addRange(kbdRange);
+        tableLink.focus();
+        const tableSelectionText = selection.toString();
+        const tableCopied = doc.execCommand('copy');
         const mermaidFallback = doc.querySelector<HTMLElement>('.meo-export-mermaid code')!;
         const mermaidRange = doc.createRange();
         mermaidRange.selectNodeContents(mermaidFallback);
@@ -186,6 +235,47 @@ async function main(): Promise<void> {
             media: Boolean(doc.querySelector('img')),
             math: Boolean(doc.querySelector('.meo-export-math'))
           },
+          table: {
+            semanticCounts: {
+              table: tables.length,
+              thead: tables.reduce((count, item) => count + item.querySelectorAll('thead').length, 0),
+              tbody: tables.reduce((count, item) => count + item.querySelectorAll('tbody').length, 0),
+              tr: tables.reduce((count, item) => count + item.querySelectorAll('tr').length, 0),
+              th: tables.reduce((count, item) => count + item.querySelectorAll('th').length, 0),
+              td: tables.reduce((count, item) => count + item.querySelectorAll('td').length, 0)
+            },
+            resizeHandleCount: doc.querySelectorAll('.meo-md-html-table-column-resize-handle').length,
+            listPadding: Number.parseFloat(getComputedStyle(tableList).paddingInlineStart),
+            listCellPadding: Number.parseFloat(getComputedStyle(listCell).paddingInlineStart),
+            emptyCellsWithoutOverflow: emptyCells.every((cell) => cell.scrollWidth <= cell.clientWidth + 1),
+            documentOverflow: doc.documentElement.scrollWidth - doc.documentElement.clientWidth,
+            bodyOverflow: doc.body.scrollWidth - doc.body.clientWidth,
+            pageOverflow: pageRoot.scrollWidth - pageRoot.clientWidth,
+            wrapperOverflows: tableContainers.map((container) => container.scrollWidth - container.clientWidth),
+            tableOverflows: tables.map((item) => item.scrollWidth - item.clientWidth),
+            wrapperOverflowX: tableContainers.map((container) => getComputedStyle(container).overflowX),
+            rectsWithinPage: [...tableContainers, ...tables, ...tableCells, ...tableKbds, tableLink].every((element) => {
+              const rect = element.getBoundingClientRect();
+              return rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1;
+            }),
+            kbdFragments: tableKbds.map((item) => {
+              const range = doc.createRange();
+              range.selectNodeContents(item);
+              return range.getClientRects().length;
+            }),
+            preservedSelection,
+            preservedFocus,
+            selectionText: tableSelectionText,
+            copied: tableCopied,
+            focusedLink: doc.activeElement === tableLink,
+            linkTabIndex: tableLink.tabIndex,
+            proseKbdWhiteSpace: getComputedStyle(proseKbd).whiteSpace,
+            proseKbdFragments: (() => {
+              const range = doc.createRange();
+              range.selectNodeContents(proseKbd);
+              return range.getClientRects().length;
+            })()
+          },
           mermaidFallback: {
             source: mermaidFallback.textContent,
             fontSize: Number.parseFloat(mermaidStyle.fontSize),
@@ -201,7 +291,12 @@ async function main(): Promise<void> {
       assert.ok(result.documentOverflow <= 1 && result.bodyOverflow <= 1 && result.pageOverflow <= 1 && result.preOverflow <= 1, JSON.stringify(result));
       assert.notEqual(result.preOverflowX, 'auto');
       assert.notEqual(result.preOverflowX, 'scroll');
-      assert.ok(result.rootRect.left >= -1 && result.rootRect.right <= width + 1 && result.rootRect.width <= 900 + 1, JSON.stringify(result));
+      assert.ok(
+        result.rootRect.left >= -1 &&
+        result.rootRect.right <= width + 1 &&
+        result.rootRect.width <= (900 * zoom) + 1,
+        JSON.stringify(result)
+      );
       assert.ok(result.preRect.left >= result.rootRect.left - 1 && result.preRect.right <= result.rootRect.right + 1, JSON.stringify(result));
       assert.ok(result.fragmentCount > 1, JSON.stringify(result));
       assert.ok(result.continuationLefts.every((left) => Math.abs(left - result.bodyLeft) <= 1), JSON.stringify(result));
@@ -216,6 +311,29 @@ async function main(): Promise<void> {
       assert.equal(result.mermaidFallback.source, mermaidFallbackSource);
       assert.ok(result.mermaidFallback.fontSize > 0 && result.mermaidFallback.lineHeight > 0, JSON.stringify(result));
       assert.ok(result.mermaidFallback.fragments > 1, JSON.stringify(result));
+      assert.deepEqual(result.table.semanticCounts, { table: 2, thead: 2, tbody: 2, tr: 5, th: 10, td: 18 });
+      assert.equal(result.table.resizeHandleCount, 0);
+      assert.ok(result.table.listPadding >= 24 && result.table.listCellPadding >= 12, JSON.stringify(result.table));
+      assert.equal(result.table.emptyCellsWithoutOverflow, true);
+      assert.ok(
+        result.table.documentOverflow <= 1 &&
+        result.table.bodyOverflow <= 1 &&
+        result.table.pageOverflow <= 1 &&
+        result.table.wrapperOverflows.every((value) => value <= 1) &&
+        result.table.tableOverflows.every((value) => value <= 1),
+        JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table })
+      );
+      assert.ok(result.table.wrapperOverflowX.every((value) => value !== 'auto' && value !== 'scroll'));
+      assert.equal(result.table.rectsWithinPage, true, JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
+      assert.ok(result.table.kbdFragments.every((count) => count > 1), JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
+      assert.equal(result.table.preservedSelection, longKbdToken);
+      assert.equal(result.table.preservedFocus, true);
+      assert.equal(result.table.selectionText, longKbdToken);
+      assert.equal(result.table.copied, true);
+      assert.equal(result.table.focusedLink, true);
+      assert.equal(result.table.linkTabIndex, 0);
+      assert.equal(result.table.proseKbdWhiteSpace, 'nowrap');
+      assert.equal(result.table.proseKbdFragments, 1);
     }
 
     const exportedFallback = exportRuntime.renderExportHtmlDocument({

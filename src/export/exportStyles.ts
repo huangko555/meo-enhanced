@@ -763,7 +763,7 @@ img {
 table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: auto;
+  table-layout: fixed;
   background: transparent;
 }
 th, td {
@@ -792,10 +792,17 @@ th {
   width: 100%;
   margin: 0;
 }
-.meo-table-scroll th,
-.meo-table-scroll td {
+table th,
+table td {
   overflow-wrap: anywhere;
   word-break: normal;
+}
+table kbd {
+  display: inline;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .meo-table-scroll ul,
 .meo-table-scroll ol {
