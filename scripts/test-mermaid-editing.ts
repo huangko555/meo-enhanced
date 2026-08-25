@@ -15,6 +15,272 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function assertEmbeddedMermaidUsesButtonOnlyNavigation(page: Page): Promise<void> {
+  const wrapperSelector = '.meo-mermaid-block .meo-mermaid-svg-wrapper';
+  await page.waitForFunction((selector) => {
+    const wrapper = document.querySelector<HTMLElement>(selector);
+    const rect = wrapper?.getBoundingClientRect();
+    return Boolean(wrapper?.querySelector('svg') && rect && rect.width > 0 && rect.height > 0);
+  }, {}, wrapperSelector);
+
+  const initial = await page.$eval(wrapperSelector, (wrapper) => ({
+    transform: (() => {
+      const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
+      return { scale: matrix.a, x: matrix.e, y: matrix.f };
+    })(),
+    rect: wrapper.getBoundingClientRect().toJSON()
+  }));
+  const dragPoint = await page.$eval(wrapperSelector, (wrapper) => {
+    const rect = wrapper.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(dragPoint.x, dragPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(dragPoint.x + 48, dragPoint.y + 32);
+  await page.mouse.up();
+
+  const afterDrag = await page.$eval(wrapperSelector, (wrapper) => ({
+    transform: (() => {
+      const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
+      return { scale: matrix.a, x: matrix.e, y: matrix.f };
+    })(),
+    rect: wrapper.getBoundingClientRect().toJSON()
+  }));
+  if (
+    Math.abs(afterDrag.transform.scale - initial.transform.scale) > 0.001 ||
+    Math.abs(afterDrag.transform.x - initial.transform.x) > 1 ||
+    Math.abs(afterDrag.transform.y - initial.transform.y) > 1 ||
+    Math.abs(afterDrag.rect.x - initial.rect.x) > 1 ||
+    Math.abs(afterDrag.rect.y - initial.rect.y) > 1
+  ) {
+    throw new Error(`Embedded Mermaid drag changed its public transform: ${JSON.stringify({ initial, afterDrag })}`);
+  }
+
+  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
+  await page.waitForFunction(
+    ({ selector, scale }) => {
+      const wrapper = document.querySelector<HTMLElement>(selector);
+      return Boolean(wrapper && Math.abs(new DOMMatrix(getComputedStyle(wrapper).transform).a - scale) > 0.001);
+    },
+    {},
+    { selector: wrapperSelector, scale: initial.transform.scale }
+  );
+  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+  await page.waitForFunction(
+    ({ selector, transform }) => {
+      const wrapper = document.querySelector<HTMLElement>(selector);
+      if (!wrapper) return false;
+      const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
+      return Math.abs(matrix.a - transform.scale) <= 0.001
+        && Math.abs(matrix.e - transform.x) <= 1
+        && Math.abs(matrix.f - transform.y) <= 1;
+    },
+    {},
+    { selector: wrapperSelector, transform: initial.transform }
+  );
+}
+
+async function enterMermaidFullscreen(page: Page): Promise<void> {
+  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Fullscreen"]');
+  await page.waitForFunction(() => {
+    const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen');
+    const wrapper = fullscreen?.querySelector<HTMLElement>('.meo-mermaid-svg-wrapper');
+    const svg = wrapper?.querySelector<SVGSVGElement>('svg');
+    const rect = svg?.getBoundingClientRect();
+    return Boolean(
+      fullscreen && wrapper && wrapper.style.transform
+      && svg?.getScreenCTM() && rect && rect.width > 0 && rect.height > 0
+    );
+  });
+}
+
+async function assertFullscreenWheelKeepsPointerAnchored(page: Page): Promise<void> {
+  await enterMermaidFullscreen(page);
+  const before = await page.evaluate(() => {
+    const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
+    const wrapper = fullscreen.querySelector<HTMLElement>('.meo-mermaid-svg-wrapper')!;
+    const svg = wrapper.querySelector<SVGSVGElement>('svg')!;
+    const rect = fullscreen.getBoundingClientRect();
+    const pointer = {
+      x: rect.left + rect.width * 0.31,
+      y: rect.top + rect.height * 0.63
+    };
+    const diagramPoint = new DOMPoint(pointer.x, pointer.y).matrixTransform(svg.getScreenCTM()!.inverse());
+    const scale = new DOMMatrix(getComputedStyle(wrapper).transform).a;
+    return { pointer, diagramPoint: { x: diagramPoint.x, y: diagramPoint.y }, scale };
+  });
+
+  await page.mouse.move(before.pointer.x, before.pointer.y);
+  await page.mouse.wheel({ deltaY: -120 });
+  await page.waitForFunction((previousScale) => {
+    const wrapper = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper');
+    return Boolean(wrapper && Math.abs(new DOMMatrix(getComputedStyle(wrapper).transform).a - previousScale) > 0.001);
+  }, {}, before.scale);
+
+  const after = await page.evaluate(({ pointer, diagramPoint }) => {
+    const svg = document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg')!;
+    const projected = new DOMPoint(diagramPoint.x, diagramPoint.y).matrixTransform(svg.getScreenCTM()!);
+    return {
+      projected: { x: projected.x, y: projected.y },
+      distance: Math.hypot(projected.x - pointer.x, projected.y - pointer.y)
+    };
+  }, { pointer: before.pointer, diagramPoint: before.diagramPoint });
+  if (after.distance > 1) {
+    throw new Error(`Fullscreen Mermaid wheel moved the diagram point under the pointer: ${JSON.stringify({ before, after })}`);
+  }
+  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
+  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+}
+
+async function assertFullscreenPanStaysWithinDiagramBounds(page: Page): Promise<void> {
+  await enterMermaidFullscreen(page);
+  const fitted = await page.$eval('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg', (svg) => (
+    svg.getBoundingClientRect().toJSON()
+  ));
+  for (let index = 0; index < 3; index += 1) {
+    await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
+  }
+  await page.waitForFunction((fittedWidth) => {
+    const svg = document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg');
+    return Boolean(svg && svg.getBoundingClientRect().width > fittedWidth * 2);
+  }, {}, fitted.width);
+
+  const assertCoversViewport = async (direction: string) => {
+    const geometry = await page.evaluate(() => ({
+      viewport: document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!.getBoundingClientRect().toJSON(),
+      svg: document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg')!
+        .getBoundingClientRect().toJSON()
+    }));
+    if (
+      geometry.svg.left > geometry.viewport.left + 1 ||
+      geometry.svg.top > geometry.viewport.top + 1 ||
+      geometry.svg.right < geometry.viewport.right - 1 ||
+      geometry.svg.bottom < geometry.viewport.bottom - 1
+    ) {
+      throw new Error(`Fullscreen Mermaid pan exposed blank viewport space after ${direction}: ${JSON.stringify(geometry)}`);
+    }
+  };
+
+  await page.mouse.move(100, 100);
+  await page.mouse.down();
+  await page.mouse.move(1090, 710);
+  await page.mouse.up();
+  await assertCoversViewport('positive drag');
+
+  await page.mouse.move(1000, 650);
+  await page.mouse.down();
+  await page.mouse.move(10, 10);
+  await page.mouse.up();
+  await assertCoversViewport('negative drag');
+
+  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+  await page.waitForFunction((expected) => {
+    const svg = document.querySelector<SVGSVGElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper svg');
+    if (!svg) return false;
+    const rect = svg.getBoundingClientRect();
+    return Math.abs(rect.left - expected.left) <= 1
+      && Math.abs(rect.top - expected.top) <= 1
+      && Math.abs(rect.width - expected.width) <= 1
+      && Math.abs(rect.height - expected.height) <= 1;
+  }, {}, fitted);
+  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
+  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+}
+
+async function assertFullscreenExitRestoresReadingContext(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as any).__mermaidEditingEditor.destroy();
+    document.getElementById('app')!.replaceChildren();
+    const text = [
+      ...Array.from({ length: 80 }, (_, index) => `before ${index + 1}`),
+      '```mermaid',
+      'graph TD',
+      'A --> B',
+      '```',
+      ...Array.from({ length: 80 }, (_, index) => `after ${index + 1}`)
+    ].join('\n');
+    (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+      parent: document.getElementById('app')!,
+      text,
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+  });
+  await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(80, 'center'));
+  await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
+  await page.waitForFunction(() => {
+    const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+    const block = document.querySelector<HTMLElement>('.meo-mermaid-block');
+    if (!scroller || !block || scroller.scrollTop <= 0) return false;
+    const viewport = scroller.getBoundingClientRect();
+    const rect = block.getBoundingClientRect();
+    return rect.bottom > viewport.top && rect.top < viewport.bottom;
+  });
+  await page.$eval('.cm-content', (content) => (content as HTMLElement).focus());
+
+  for (const mechanism of ['escape', 'close'] as const) {
+    const before = await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-block')!;
+      return {
+        scrollTop: scroller.scrollTop,
+        blockTop: block.getBoundingClientRect().top,
+        contentFocused: document.activeElement === document.querySelector('.cm-content'),
+        live: Boolean(document.querySelector('.cm-editor.meo-mode-live'))
+      };
+    });
+    await enterMermaidFullscreen(page);
+    await page.$eval(
+      '.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Zoom in"]',
+      (button) => (button as HTMLButtonElement).focus()
+    );
+
+    const observation = page.evaluate(() => new Promise<{
+      scrollTrace: number[];
+      scrollTop: number;
+      blockTop: number;
+      contentFocused: boolean;
+      live: boolean;
+    }>((resolve) => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      const scrollTrace: number[] = [];
+      const onScroll = () => scrollTrace.push(scroller.scrollTop);
+      scroller.addEventListener('scroll', onScroll);
+      const observer = new MutationObserver(() => {
+        if (document.querySelector('.meo-mermaid-fullscreen-scrim')) return;
+        observer.disconnect();
+        scroller.removeEventListener('scroll', onScroll);
+        document.body.removeAttribute('data-mermaid-exit-observer');
+        resolve({
+          scrollTrace,
+          scrollTop: scroller.scrollTop,
+          blockTop: document.querySelector<HTMLElement>('.meo-mermaid-block')!.getBoundingClientRect().top,
+          contentFocused: document.activeElement === document.querySelector('.cm-content'),
+          live: Boolean(document.querySelector('.cm-editor.meo-mode-live'))
+        });
+      });
+      observer.observe(document.body, { childList: true });
+      document.body.setAttribute('data-mermaid-exit-observer', 'ready');
+    }));
+    await page.waitForFunction(() => document.body.getAttribute('data-mermaid-exit-observer') === 'ready');
+    if (mechanism === 'escape') {
+      await page.keyboard.press('Escape');
+    } else {
+      await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
+    }
+    const after = await observation;
+    if (
+      !before.contentFocused || !before.live || !after.contentFocused || !after.live ||
+      Math.abs(after.scrollTop - before.scrollTop) > 1 ||
+      Math.abs(after.blockTop - before.blockTop) > 1 ||
+      after.scrollTrace.some((value) => Math.abs(value - before.scrollTop) > 1)
+    ) {
+      throw new Error(`Fullscreen Mermaid ${mechanism} did not restore its reading context: ${JSON.stringify({ before, after })}`);
+    }
+  }
+}
+
 async function assertSourceClickKeepsViewport(
   page: Page,
   blockSelector: string,
@@ -423,6 +689,9 @@ async function main() {
     if (hiddenToolbarState.mermaid !== '0' || hiddenToolbarState.latex !== '0') {
       throw new Error(`Block toolbars were visible before hover: ${JSON.stringify(hiddenToolbarState)}`);
     }
+    await assertEmbeddedMermaidUsesButtonOnlyNavigation(page);
+    await assertFullscreenWheelKeepsPointerAnchored(page);
+    await assertFullscreenPanStaysWithinDiagramBounds(page);
 
     const previewClickBefore = await page.evaluate(() => {
       const editor = (window as any).__mermaidEditingEditor;
@@ -1553,6 +1822,8 @@ async function main() {
       controllerProperty: '__meoLatexMathEditingController',
       insert: '\ny = 2'
     });
+
+    await assertFullscreenExitRestoresReadingContext(page);
 
     console.log('Mermaid editing checks passed');
   } finally {

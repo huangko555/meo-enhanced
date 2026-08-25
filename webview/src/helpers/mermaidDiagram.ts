@@ -480,17 +480,14 @@ export class MermaidDiagramWidget extends WidgetType {
   zoom: number;
   panX: number;
   panY: number;
-  isDragging: boolean;
-  lastMouseX: number;
-  lastMouseY: number;
   isFullscreen: boolean;
   fullscreenOverlay: HTMLElement | null;
   svgContent: string | null;
   fullscreenBaseScale: number;
-  inlineCleanup: (() => void) | null;
   fullscreenSvgWrapper: HTMLElement | null;
   fullscreenCleanup: (() => void) | null;
   exitFullscreenHandler: ((e: KeyboardEvent) => void) | null;
+  fullscreenReturnFocus: HTMLElement | null;
   themeSignature: string;
   cachePreviewHeight: boolean;
   previewResizeObserver: ResizeObserver | null;
@@ -517,17 +514,14 @@ export class MermaidDiagramWidget extends WidgetType {
     this.zoom = 1;
     this.panX = 0;
     this.panY = 0;
-    this.isDragging = false;
-    this.lastMouseX = 0;
-    this.lastMouseY = 0;
     this.isFullscreen = false;
     this.fullscreenOverlay = null;
     this.svgContent = null;
     this.fullscreenBaseScale = 1;
-    this.inlineCleanup = null;
     this.fullscreenSvgWrapper = null;
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
+    this.fullscreenReturnFocus = null;
     this.themeSignature = getMermaidEditorPresentationIdentity().themeKey;
     this.presentationFactory = options.presentationFactory;
     this.presentationHandle = null;
@@ -677,7 +671,6 @@ export class MermaidDiagramWidget extends WidgetType {
     const controls = this.createZoomControls(svgWrapper);
     container.appendChild(controls);
 
-    this.attachInteractions(svgWrapper, container);
   }
 
   trimDisplayMathSvg(svgWrapper: HTMLElement): void {
@@ -917,6 +910,9 @@ export class MermaidDiagramWidget extends WidgetType {
       return;
     }
     this.isFullscreen = true;
+    this.fullscreenReturnFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     const svgContent = svgContainer.innerHTML;
     this.svgContent = svgContent;
 
@@ -960,7 +956,7 @@ export class MermaidDiagramWidget extends WidgetType {
           this.fullscreenBaseScale = 1;
         }
 
-        svgWrapper.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.fullscreenBaseScale * this.zoom})`;
+        this.applyFullscreenTransform(svgWrapper, fullscreenContainer);
       }
     });
 
@@ -1008,16 +1004,16 @@ export class MermaidDiagramWidget extends WidgetType {
       e.preventDefault();
       e.stopPropagation();
       this.zoom = Math.min(4, this.zoom + 0.5);
-      const scale = (this.fullscreenBaseScale || 1) * this.zoom;
-      svgContainer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${scale})`;
+      const container = svgContainer.parentElement;
+      if (container) this.applyFullscreenTransform(svgContainer, container);
     });
 
     zoomOut.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.zoom = Math.max(0.25, this.zoom - 0.5);
-      const scale = (this.fullscreenBaseScale || 1) * this.zoom;
-      svgContainer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${scale})`;
+      const container = svgContainer.parentElement;
+      if (container) this.applyFullscreenTransform(svgContainer, container);
     });
 
     reset.addEventListener('pointerdown', (e) => {
@@ -1026,8 +1022,8 @@ export class MermaidDiagramWidget extends WidgetType {
       this.zoom = 1;
       this.panX = 0;
       this.panY = 0;
-      const scale = (this.fullscreenBaseScale || 1) * this.zoom;
-      svgContainer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${scale})`;
+      const container = svgContainer.parentElement;
+      if (container) this.applyFullscreenTransform(svgContainer, container);
     });
 
     exitBtn.addEventListener('pointerdown', (e) => {
@@ -1042,6 +1038,39 @@ export class MermaidDiagramWidget extends WidgetType {
     controls.appendChild(exitBtn);
 
     return controls;
+  }
+
+  applyFullscreenTransform(svgWrapper: HTMLElement, container: HTMLElement): void {
+    const scale = (this.fullscreenBaseScale || 1) * this.zoom;
+    svgWrapper.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${scale})`;
+
+    const svg = svgWrapper.querySelector<SVGSVGElement>('svg');
+    if (!svg) return;
+    const viewport = container.getBoundingClientRect();
+    const diagram = svg.getBoundingClientRect();
+    let correctionX = 0;
+    let correctionY = 0;
+
+    if (diagram.width >= viewport.width) {
+      if (diagram.left > viewport.left) correctionX = viewport.left - diagram.left;
+      else if (diagram.right < viewport.right) correctionX = viewport.right - diagram.right;
+    } else {
+      if (diagram.left < viewport.left) correctionX = viewport.left - diagram.left;
+      else if (diagram.right > viewport.right) correctionX = viewport.right - diagram.right;
+    }
+    if (diagram.height >= viewport.height) {
+      if (diagram.top > viewport.top) correctionY = viewport.top - diagram.top;
+      else if (diagram.bottom < viewport.bottom) correctionY = viewport.bottom - diagram.bottom;
+    } else {
+      if (diagram.top < viewport.top) correctionY = viewport.top - diagram.top;
+      else if (diagram.bottom > viewport.bottom) correctionY = viewport.bottom - diagram.bottom;
+    }
+
+    if (correctionX !== 0 || correctionY !== 0) {
+      this.panX += correctionX;
+      this.panY += correctionY;
+      svgWrapper.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${scale})`;
+    }
   }
 
   attachFullscreenInteractions(svgWrapper: HTMLElement, container: HTMLElement): void {
@@ -1071,8 +1100,7 @@ export class MermaidDiagramWidget extends WidgetType {
       this.panY += dy;
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
-      const scale = (this.fullscreenBaseScale || 1) * this.zoom;
-      svgWrapper.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${scale})`;
+      this.applyFullscreenTransform(svgWrapper, container);
     };
 
     const onMouseUp = () => {
@@ -1083,9 +1111,15 @@ export class MermaidDiagramWidget extends WidgetType {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? -0.25 : 0.25;
-      this.zoom = Math.max(0.25, Math.min(4, this.zoom + delta));
-      const scale = (this.fullscreenBaseScale || 1) * this.zoom;
-      svgWrapper.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${scale})`;
+      const newZoom = Math.max(0.25, Math.min(4, this.zoom + delta));
+      const scaleRatio = newZoom / this.zoom;
+      const rect = container.getBoundingClientRect();
+      const pointX = e.clientX - (rect.left + rect.width / 2);
+      const pointY = e.clientY - (rect.top + rect.height / 2);
+      this.panX = pointX - (pointX - this.panX) * scaleRatio;
+      this.panY = pointY - (pointY - this.panY) * scaleRatio;
+      this.zoom = newZoom;
+      this.applyFullscreenTransform(svgWrapper, container);
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -1104,6 +1138,8 @@ export class MermaidDiagramWidget extends WidgetType {
       return;
     }
     this.isFullscreen = false;
+    const returnFocus = this.fullscreenReturnFocus;
+    this.fullscreenReturnFocus = null;
 
     if (this.fullscreenCleanup) {
       this.fullscreenCleanup();
@@ -1119,6 +1155,10 @@ export class MermaidDiagramWidget extends WidgetType {
     if (this.exitFullscreenHandler) {
       document.removeEventListener('keydown', this.exitFullscreenHandler);
       this.exitFullscreenHandler = null;
+    }
+
+    if (returnFocus?.isConnected) {
+      returnFocus.focus({ preventScroll: true });
     }
   }
 
@@ -1152,55 +1192,6 @@ export class MermaidDiagramWidget extends WidgetType {
     svgContainer.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
   }
 
-  attachInteractions(svgWrapper: HTMLElement, container: HTMLElement): void {
-    if (this.inlineCleanup) {
-      this.inlineCleanup();
-      this.inlineCleanup = null;
-    }
-
-    const onMouseDown = (e: PointerEvent) => {
-      const target = e.target instanceof Element ? e.target : null;
-      if (target?.closest('.meo-mermaid-zoom-controls')) return;
-      if (target?.closest('.meo-mermaid-zoom-btn')) return;
-      if (e.button !== 0) return;
-
-      container.style.cursor = 'grabbing';
-      container.classList.add('meo-mermaid-dragging');
-      this.isDragging = true;
-      this.lastMouseX = e.clientX;
-      this.lastMouseY = e.clientY;
-    };
-
-    const onMouseMove = (e: PointerEvent) => {
-      if (!this.isDragging) {
-        return;
-      }
-      const dx = e.clientX - this.lastMouseX;
-      const dy = e.clientY - this.lastMouseY;
-      this.panX += dx;
-      this.panY += dy;
-      this.lastMouseX = e.clientX;
-      this.lastMouseY = e.clientY;
-      this.applyTransform(svgWrapper);
-    };
-
-    const onMouseUp = () => {
-      this.isDragging = false;
-      container.style.cursor = 'grab';
-      container.classList.remove('meo-mermaid-dragging');
-    };
-
-    container.addEventListener('pointerdown', onMouseDown);
-    document.addEventListener('pointermove', onMouseMove);
-    document.addEventListener('pointerup', onMouseUp);
-
-    this.inlineCleanup = () => {
-      container.removeEventListener('pointerdown', onMouseDown);
-      document.removeEventListener('pointermove', onMouseMove);
-      document.removeEventListener('pointerup', onMouseUp);
-    };
-  }
-
   renderError(container: HTMLElement, errorMsg: string): void {
     const fallback = document.createElement('pre');
     fallback.className = 'meo-mermaid-fallback';
@@ -1225,10 +1216,6 @@ export class MermaidDiagramWidget extends WidgetType {
     this.presentationHandle = null;
     this.previewResizeObserver?.disconnect();
     this.previewResizeObserver = null;
-    if (this.inlineCleanup) {
-      this.inlineCleanup();
-      this.inlineCleanup = null;
-    }
     this.exitFullscreen();
   }
 }
