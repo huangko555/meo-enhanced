@@ -15,24 +15,23 @@ fs.writeFileSync(localImagePath, pngBytes);
 const remoteImageUrl = 'https://i2.hdslb.com/bfs/banner/example.jpg@976w_550h_!web-home-carousel-cover.avif';
 const markdownText = `![local](${localImagePath} "title")\n\n![remote](${remoteImageUrl})\n\n![missing fallback](missing-image.png)`;
 const baseOptions = {
-  markdownText,
   sourceDocumentPath: path.join(tempDir, 'document.md'),
-  appearance: 'dark' as const,
-  styleEnvironment: {},
   mermaidRuntimeSrc: 'mermaid.min.js',
   baseHref: `file:///${tempDir.replace(/\\/g, '/')}/`,
   title: 'Image coverage'
 };
 
 try {
-  const preview = exportRuntime.renderPreviewDocument(baseOptions);
+  const preview = exportRuntime.renderPreviewDocument({ ...baseOptions, markdownText, styleEnvironment: {} });
   const exported = exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
+    readingSnapshot: { snapshotId: 'images-html', text: markdownText, appearance: 'dark', environment: {} },
     outputFilePath: path.join(tempDir, 'export.html'),
     target: 'html' as const
   });
   const pdf = exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
+    readingSnapshot: { snapshotId: 'images-pdf', text: markdownText, appearance: 'dark', environment: {} },
     outputFilePath: path.join(tempDir, 'export.pdf'),
     target: 'pdf' as const
   });

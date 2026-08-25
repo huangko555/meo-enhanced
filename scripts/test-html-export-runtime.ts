@@ -9,12 +9,15 @@ const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-html-export-runti
 try {
   const outputHtmlPath = path.join(fixtureRoot, 'diagram.html');
   const rendered = exportRuntime.renderExportHtmlDocument({
-    markdownText: '```mermaid\ngraph TD\n  A --> B\n```',
+    readingSnapshot: {
+      snapshotId: 'html-runtime',
+      text: '```mermaid\ngraph TD\n  A --> B\n```',
+      appearance: 'light',
+      environment: {}
+    },
     sourceDocumentPath: path.join(fixtureRoot, 'diagram.md'),
     outputFilePath: outputHtmlPath,
     target: 'html',
-    appearance: 'light',
-    styleEnvironment: {},
     mermaidRuntimeSrc: 'file:///missing-mermaid-runtime.js',
     baseHref: 'file:///',
     title: 'Mermaid export'

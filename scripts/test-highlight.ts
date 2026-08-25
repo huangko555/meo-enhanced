@@ -10,18 +10,21 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-highlight-'));
 const richHighlight = '==高亮 **粗体** *斜体* ~~删除~~ [链接](https://example.com) `代码`==';
 
 const rendered = exportRuntime.renderExportHtmlDocument({
-  markdownText: [richHighlight, '', '**粗体里的 ==高亮==**', '', '====', '', '\\==不高亮=='].join('\n'),
+  readingSnapshot: {
+    snapshotId: 'highlight',
+    text: [richHighlight, '', '**粗体里的 ==高亮==**', '', '====', '', '\\==不高亮=='].join('\n'),
+    appearance: 'dark',
+    environment: {
+      editorBackgroundColor: '#20252b',
+      editorForegroundColor: '#d8dee9',
+      codeBlockBackgroundColor: '#171b20',
+      sideBarBackgroundColor: '#252b32',
+      panelBorderColor: '#474b50'
+    }
+  },
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
   target: 'html',
-  appearance: 'dark',
-  styleEnvironment: {
-    editorBackgroundColor: '#20252b',
-    editorForegroundColor: '#d8dee9',
-    codeBlockBackgroundColor: '#171b20',
-    sideBarBackgroundColor: '#252b32',
-    panelBorderColor: '#474b50'
-  },
   mermaidRuntimeSrc: 'mermaid.min.js',
   baseHref: 'file:///C:/tmp/',
   title: 'Highlight test'

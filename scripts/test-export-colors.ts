@@ -2,18 +2,21 @@ import exportRuntime from '../src/export/runtime';
 import { launchTestBrowser } from './browser-test-helpers';
 
 const rendered = exportRuntime.renderExportHtmlDocument({
-  markdownText: '# Heading\n\n**Bold**\n\n*Italic*\n\n~~Deleted~~\n\n`Code`',
+  readingSnapshot: {
+    snapshotId: 'export-colors',
+    text: '# Heading\n\n**Bold**\n\n*Italic*\n\n~~Deleted~~\n\n`Code`',
+    appearance: 'dark',
+    environment: {
+      editorBackgroundColor: '#20252b',
+      editorForegroundColor: '#d8dee9',
+      codeBlockBackgroundColor: '#171b20',
+      sideBarBackgroundColor: '#252b32',
+      panelBorderColor: '#474b50'
+    }
+  },
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
   target: 'html',
-  appearance: 'dark',
-  styleEnvironment: {
-    editorBackgroundColor: '#20252b',
-    editorForegroundColor: '#d8dee9',
-    codeBlockBackgroundColor: '#171b20',
-    sideBarBackgroundColor: '#252b32',
-    panelBorderColor: '#474b50'
-  },
   mermaidRuntimeSrc: 'mermaid.min.js',
   baseHref: 'file:///C:/tmp/',
   title: 'Dark export colors'

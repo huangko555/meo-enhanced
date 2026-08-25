@@ -1,24 +1,31 @@
 import exportRuntime from '../src/export/runtime';
 
 const baseOptions = {
-  markdownText: '# Export appearance\n\n```mermaid\nflowchart LR\nA --> B\n```',
+  readingSnapshot: {
+    snapshotId: 'appearance',
+    text: '# Export appearance\n\n```mermaid\nflowchart LR\nA --> B\n```',
+    appearance: 'light' as const,
+    environment: {
+      editorBackgroundColor: '#20252b',
+      editorForegroundColor: '#d8dee9',
+      codeBlockBackgroundColor: '#171b20',
+      sideBarBackgroundColor: '#252b32',
+      panelBorderColor: '#474b50'
+    }
+  },
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
   target: 'html' as const,
-  styleEnvironment: {
-    editorBackgroundColor: '#20252b',
-    editorForegroundColor: '#d8dee9',
-    codeBlockBackgroundColor: '#171b20',
-    sideBarBackgroundColor: '#252b32',
-    panelBorderColor: '#474b50'
-  },
   mermaidRuntimeSrc: 'mermaid.min.js',
   baseHref: 'file:///C:/tmp/',
   title: 'Export appearance'
 };
 
-const light = exportRuntime.renderExportHtmlDocument({ ...baseOptions, appearance: 'light' });
-const dark = exportRuntime.renderExportHtmlDocument({ ...baseOptions, appearance: 'dark' });
+const light = exportRuntime.renderExportHtmlDocument(baseOptions);
+const dark = exportRuntime.renderExportHtmlDocument({
+  ...baseOptions,
+  readingSnapshot: { ...baseOptions.readingSnapshot, snapshotId: 'appearance-dark', appearance: 'dark' }
+});
 
 if (!light.htmlDocument.includes('--meo-bg: #ffffff')) {
   throw new Error('Light export did not build a white reading document');

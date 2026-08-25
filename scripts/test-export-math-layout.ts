@@ -16,17 +16,20 @@ const katexStylesHref = `data:text/css;base64,${Buffer.from(
   fs.readFileSync(path.resolve('node_modules/katex/dist/katex.min.css'), 'utf8')
 ).toString('base64')}`;
 const baseOptions = {
-  markdownText: `$$\n${wideFormula} = 0\n$$`,
+  readingSnapshot: {
+    snapshotId: 'math-layout',
+    text: `$$\n${wideFormula} = 0\n$$`,
+    appearance: 'dark' as const,
+    environment: {
+      editorBackgroundColor: '#20252b',
+      editorForegroundColor: '#d8dee9',
+      codeBlockBackgroundColor: '#171b20',
+      sideBarBackgroundColor: '#252b32',
+      panelBorderColor: '#474b50'
+    }
+  },
   sourceDocumentPath: 'C:/tmp/source.md',
   outputFilePath: 'C:/tmp/export.html',
-  appearance: 'dark' as const,
-  styleEnvironment: {
-    editorBackgroundColor: '#20252b',
-    editorForegroundColor: '#d8dee9',
-    codeBlockBackgroundColor: '#171b20',
-    sideBarBackgroundColor: '#252b32',
-    panelBorderColor: '#474b50'
-  },
   mermaidRuntimeSrc: 'mermaid.min.js',
   katexStylesHref,
   baseHref: 'file:///C:/tmp/',

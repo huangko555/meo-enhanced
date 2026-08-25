@@ -72,6 +72,7 @@ import {
   showTimedWarningMessage,
 } from './shared/timedUi';
 import type { ExportStyleEnvironment } from './export/runtime';
+import type { ReadingSnapshot } from './protocol/exportSnapshot';
 import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents';
 
 const VIEW_TYPE = 'meoEnhanced.editor';
@@ -85,12 +86,10 @@ type FindOptionsState = {
 
 type ExportRuntimeModule = {
   renderExportHtmlDocument: (options: {
-    markdownText: string;
+    readingSnapshot: ReadingSnapshot;
     sourceDocumentPath: string;
     outputFilePath: string;
     target: ExportFormat;
-    appearance: PreviewAppearance;
-    styleEnvironment?: ExportStyleEnvironment;
     mermaidRuntimeSrc: string;
     katexStylesHref: string;
     baseHref: string;
@@ -637,12 +636,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
             progress.report({ message: 'Rendering export document…' });
             const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
             const exportRender = await this.buildExportHtmlDocument(exportRuntime, {
-              markdownText: snapshot.text,
+              readingSnapshot: snapshot,
               sourceDocumentUri: session.documentUri,
               outputFileUri: saveUri,
-              target: format,
-              styleEnvironment: snapshot.environment,
-              appearance: snapshot.appearance
+              target: format
             });
 
             if (format === 'html') {
@@ -693,12 +690,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   private async buildExportHtmlDocument(
     exportRuntime: ExportRuntimeModule,
     params: {
-      markdownText: string;
+      readingSnapshot: ReadingSnapshot;
       sourceDocumentUri: vscode.Uri;
       outputFileUri: vscode.Uri;
       target: ExportFormat;
-      styleEnvironment?: ExportStyleEnvironment;
-      appearance: PreviewAppearance;
     }
   ): Promise<{ htmlDocument: string; hasMermaid: boolean; hasMath: boolean }> {
     const mermaidRuntimeSrc = pathToFileURL(
@@ -709,12 +704,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     ).toString();
     const baseHref = pathToFileURL(`${path.dirname(params.outputFileUri.fsPath)}${path.sep}`).toString();
     return exportRuntime.renderExportHtmlDocument({
-      markdownText: params.markdownText,
+      readingSnapshot: params.readingSnapshot,
       sourceDocumentPath: params.sourceDocumentUri.fsPath,
       outputFilePath: params.outputFileUri.fsPath,
       target: params.target,
-      appearance: params.appearance,
-      styleEnvironment: params.styleEnvironment,
       mermaidRuntimeSrc,
       katexStylesHref,
       baseHref,

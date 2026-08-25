@@ -93,9 +93,7 @@ const commonOutput = {
 };
 for (const target of ['html', 'pdf'] as const) {
   const rendered = exportRuntime.renderExportHtmlDocument({
-    markdownText: firstSnapshot.text,
-    appearance: firstSnapshot.appearance,
-    styleEnvironment: firstSnapshot.environment,
+    readingSnapshot: firstSnapshot,
     target,
     ...commonOutput
   });

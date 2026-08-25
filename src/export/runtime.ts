@@ -4,14 +4,13 @@ import { buildExportStyles, buildPreviewStyles, type ExportStyleEnvironment } fr
 import { writeHtmlExport } from './htmlExport';
 import { renderPdfFromHtmlExport } from './pdfRenderer';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
+import type { ReadingSnapshot } from '../protocol/exportSnapshot';
 
 export type ExportRuntimeBuildHtmlOptions = {
-  markdownText: string;
+  readingSnapshot: ReadingSnapshot;
   sourceDocumentPath: string;
   outputFilePath: string;
   target: 'html' | 'pdf';
-  appearance: PreviewAppearance;
-  styleEnvironment?: ExportStyleEnvironment;
   mermaidRuntimeSrc: string;
   katexStylesHref?: string;
   baseHref: string;
@@ -21,14 +20,15 @@ export type ExportRuntimeBuildHtmlOptions = {
 function renderExportHtmlDocument(
   options: ExportRuntimeBuildHtmlOptions
 ): { htmlDocument: string; hasMermaid: boolean; hasMath: boolean } {
+  const snapshot = options.readingSnapshot;
   const { html: bodyHtml, hasMermaid, hasMath } = renderMarkdownToHtml({
-    markdownText: options.markdownText,
+    markdownText: snapshot.text,
     markdownFilePath: options.sourceDocumentPath,
     outputFilePath: options.outputFilePath,
     target: options.target
   });
 
-  const stylesCss = buildExportStyles(options.styleEnvironment, options.appearance);
+  const stylesCss = buildExportStyles(snapshot.environment, snapshot.appearance);
 
   const htmlDocument = buildStandaloneExportHtmlDocument({
     title: options.title,
