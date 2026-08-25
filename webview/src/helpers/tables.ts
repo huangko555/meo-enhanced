@@ -3254,6 +3254,29 @@ class HtmlTableWidget extends WidgetType {
     command: TableCommand,
     target: TableCommandTarget
   ): TableCommandTransactionPlan {
+    const commit = this.cellInteraction.accept({ type: 'commit', reason: 'command' }).commit;
+    const confirmation = commit
+      ? createTableCellCommitConfirmation(this.cellInteraction, commit.generation)
+      : null;
+    if (confirmation) this.cancelPendingCellAutoCommit();
+    try {
+      const plan = this.buildTableCommandTransactionPlan(command, target);
+      if (!confirmation) return plan;
+      if (!plan.transaction) {
+        confirmation.settle('failed');
+        return plan;
+      }
+      return { ...plan, confirmations: [confirmation] };
+    } catch (error) {
+      confirmation?.settle('failed');
+      throw error;
+    }
+  }
+
+  buildTableCommandTransactionPlan(
+    command: TableCommand,
+    target: TableCommandTarget
+  ): TableCommandTransactionPlan {
     const dom = this.domRefs?.wrap;
     if (!dom) return { transaction: null, outcome: 'no-op' };
     const bodyRow = this.bodyRowIndexFor(target.row);
@@ -3551,7 +3574,6 @@ class HtmlTableWidget extends WidgetType {
           })
         ];
     if (current === markdown) {
-      this.discardPendingCellEdits();
       if (commandEffects.length) {
         return {
           transaction: { effects: commandEffects },
@@ -3597,7 +3619,6 @@ class HtmlTableWidget extends WidgetType {
       tableFrom: range.from,
       rows: trackedRowMappings
     });
-    this.discardPendingCellEdits();
     return {
       transaction: {
         changes: { from: range.from, to: range.to, insert: markdown },
@@ -3680,7 +3701,6 @@ class HtmlTableWidget extends WidgetType {
       assoc: -1,
       offset: insertedRowOffset
     });
-    this.discardPendingCellEdits();
     const focusTarget = { row: insertAt + 1, col: this.activeColumnIndex() ?? 0 };
     return {
       transaction: { changes, effects: insertedRowEffect },
@@ -3790,7 +3810,6 @@ class HtmlTableWidget extends WidgetType {
       ...intent,
       at: ownChanges.mapPos(intent.at, intent.assoc)
     }));
-    this.discardPendingCellEdits();
     return {
       transaction: { changes, effects: deletionEffects },
       outcome: 'changed',

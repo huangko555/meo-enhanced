@@ -7,6 +7,7 @@ import type {
   TableCommandEditorTarget,
   TableCommandTransactionPlan
 } from '../tableCommandAdapter';
+import { executeTableCellCommitBoundary } from '../tableCellInteraction';
 
 type ExecuteCommandEffect = Extract<TableCommandEffect, { readonly type: 'executeCommand' }>;
 type RestoreInteractionEffect = Extract<TableCommandEffect, { readonly type: 'restoreInteraction' }>;
@@ -45,12 +46,14 @@ export function createCodeMirrorTableCommandEffectAdapter(
 
     const plan = target.buildAtomicCommandTransaction({ command: effect.command, target: effect.target });
     if (plan.restoreInteraction) pendingRestores.set(effect.commandId, plan.restoreInteraction);
-    if (plan.transaction) {
+    executeTableCellCommitBoundary(plan.confirmations ?? [], () => {
+      if (!plan.transaction) return;
+      for (const confirmation of plan.confirmations ?? []) confirmation.applied = true;
       const dispatch = () => target.view.dispatch(plan.transaction!);
       if (plan.preserveViewport) target.preserveViewport(dispatch);
       else dispatch();
       plan.afterDispatch?.();
-    }
+    });
     return { type: 'commandCompleted', commandId: effect.commandId, outcome: plan.outcome };
   };
 

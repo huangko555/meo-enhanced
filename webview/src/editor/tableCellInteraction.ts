@@ -58,7 +58,7 @@ export type TableCellCommitConfirmation = {
 
 export type TableCellInteractionInput =
   | { readonly type: 'focus'; readonly target: TableCellCoordinates }
-  | { readonly type: 'input'; readonly target: TableCellCoordinates; readonly value: string; readonly sequence?: number }
+  | { readonly type: 'input'; readonly target: TableCellCoordinates; readonly value: string; readonly sequence: number }
   | { readonly type: 'timer'; readonly generation: number }
   | { readonly type: 'commit'; readonly reason: 'escape' | 'switch' | 'outside' | 'history' | 'command' }
   | { readonly type: 'commit-result'; readonly generation: number; readonly outcome: 'applied' | 'no-op' | 'failed' }
@@ -146,7 +146,6 @@ export function createTableCellInteraction(): TableCellInteraction {
   let phase: TableCellInteractionPhase = 'idle';
   let generation = 0;
   let timerGeneration = 0;
-  let sequence = 0;
   let pending: Array<{ row: number; col: number; value: string; sequence: number }> = [];
   let inFlight: Array<{ row: number; col: number; value: string; sequence: number }> = [];
 
@@ -194,13 +193,12 @@ export function createTableCellInteraction(): TableCellInteraction {
         return result();
       }
       if (input.type === 'input') {
+        if (!Number.isSafeInteger(input.sequence)) {
+          throw new TypeError('Table cell edit sequence must be a caller-owned safe integer');
+        }
         const existing = pending.find((edit) => sameCell(edit, input.target));
         if (existing) existing.value = input.value;
-        else {
-          const nextSequence = input.sequence ?? (sequence + 1);
-          sequence = Math.max(sequence, nextSequence);
-          pending.push({ ...input.target, value: input.value, sequence: nextSequence });
-        }
+        else pending.push({ ...input.target, value: input.value, sequence: input.sequence });
         if (phase !== 'committing') phase = 'pending';
         timerGeneration += 1;
         return result({ scheduleAutoCommit: { generation: timerGeneration } });

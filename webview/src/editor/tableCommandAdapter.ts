@@ -5,6 +5,7 @@ import type {
   TableCommandInput,
   TableCommandTarget
 } from '../application/tableCommand';
+import type { TableCellCommitConfirmation } from './tableCellInteraction';
 
 export type TableCommandRuntimeRequest = {
   dispatch(input: Extract<TableCommandInput, { readonly type: 'request' }>): Promise<unknown>;
@@ -14,6 +15,7 @@ export type TableCommandTransactionPlan = {
   readonly transaction: TransactionSpec | null;
   readonly outcome: 'changed' | 'no-op';
   readonly preserveViewport?: boolean;
+  readonly confirmations?: readonly TableCellCommitConfirmation[];
   readonly afterDispatch?: () => void;
   readonly restoreInteraction?: () => void;
 };

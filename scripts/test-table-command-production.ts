@@ -241,6 +241,110 @@ async function main() {
       await waitUntil(() => queuedGuardEditor.view.state.doc.toString().includes('| :--- |'), 'queued double-delete drain');
       const afterQueuedDoubleDelete = queuedGuardEditor.view.state.doc.toString();
       queuedGuardEditor.destroy();
+
+      app.replaceChildren();
+      const dispatchFailureText = ['| A |', '| --- |', '| original |'].join('\n');
+      const retryAfterDispatchFailureEditor = harness.createEditor({
+        parent: app,
+        text: dispatchFailureText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await waitUntil(() => document.querySelectorAll('tbody textarea').length === 1, 'dispatch failure retry table');
+      const retryInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      retryInput.focus();
+      retryInput.value = 'retry kept';
+      retryInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const retryView = retryAfterDispatchFailureEditor.view;
+      const retryDispatch = retryView.dispatch.bind(retryView);
+      let retryDispatchFailed = false;
+      (retryView as any).dispatch = (...transactions: any[]) => {
+        if (!retryDispatchFailed) {
+          retryDispatchFailed = true;
+          throw new Error('expected production dispatch failure');
+        }
+        return retryDispatch(...transactions);
+      };
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      await Promise.resolve();
+      await Promise.resolve();
+      const afterFailedDispatch = retryView.state.doc.toString();
+      const retainedAfterFailedDispatch = document.querySelector<HTMLTextAreaElement>('tbody textarea')?.value;
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      await waitUntil(() => retryView.state.doc.toString().includes('retry kept'), 'dispatch failure command retry');
+      const afterDispatchRetry = retryView.state.doc.toString();
+      const retryHistory = retryAfterDispatchFailureEditor.getHistoryDepth();
+      const retryUndo = await retryAfterDispatchFailureEditor.undo();
+      await waitUntil(() => retryView.state.doc.toString() === dispatchFailureText, 'dispatch retry undo');
+      const retryRedo = await retryAfterDispatchFailureEditor.redo();
+      await waitUntil(() => retryView.state.doc.toString() === afterDispatchRetry, 'dispatch retry redo');
+      retryAfterDispatchFailureEditor.destroy();
+
+      app.replaceChildren();
+      const blurAfterDispatchFailureEditor = harness.createEditor({
+        parent: app,
+        text: dispatchFailureText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await waitUntil(() => document.querySelectorAll('tbody textarea').length === 1, 'dispatch failure blur table');
+      const blurInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      blurInput.focus();
+      blurInput.value = 'blur kept';
+      blurInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const blurView = blurAfterDispatchFailureEditor.view;
+      const blurDispatch = blurView.dispatch.bind(blurView);
+      let blurDispatchFailed = false;
+      (blurView as any).dispatch = (...transactions: any[]) => {
+        if (!blurDispatchFailed) {
+          blurDispatchFailed = true;
+          throw new Error('expected production dispatch failure before blur');
+        }
+        return blurDispatch(...transactions);
+      };
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
+      await Promise.resolve();
+      await Promise.resolve();
+      blurInput.blur();
+      await waitUntil(() => blurView.state.doc.toString().includes('blur kept'), 'dispatch failure blur recovery');
+      const afterBlurRecovery = blurView.state.doc.toString();
+      const blurHistory = blurAfterDispatchFailureEditor.getHistoryDepth();
+      blurAfterDispatchFailureEditor.destroy();
+
+      app.replaceChildren();
+      const saveAfterDispatchFailureEditor = harness.createEditor({
+        parent: app,
+        text: dispatchFailureText,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await waitUntil(() => document.querySelectorAll('tbody textarea').length === 1, 'dispatch failure save table');
+      const saveInput = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
+      saveInput.focus();
+      saveInput.value = 'save kept';
+      saveInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const saveView = saveAfterDispatchFailureEditor.view;
+      const saveDispatch = saveView.dispatch.bind(saveView);
+      let saveDispatchFailed = false;
+      (saveView as any).dispatch = (...transactions: any[]) => {
+        if (!saveDispatchFailed) {
+          saveDispatchFailed = true;
+          throw new Error('expected production dispatch failure before save');
+        }
+        return saveDispatch(...transactions);
+      };
+      pointer(document.querySelector<HTMLButtonElement>('button[title="Align selected column right"]')!);
+      await Promise.resolve();
+      await Promise.resolve();
+      const saveCommitted = saveAfterDispatchFailureEditor.commitTransientEdits();
+      await waitUntil(() => saveView.state.doc.toString().includes('save kept'), 'dispatch failure save recovery');
+      const afterSaveRecovery = saveView.state.doc.toString();
+      const saveHistory = saveAfterDispatchFailureEditor.getHistoryDepth();
+      const saveUndo = await saveAfterDispatchFailureEditor.undo();
+      await waitUntil(() => saveView.state.doc.toString() === dispatchFailureText, 'save recovery undo');
+      const saveRedo = await saveAfterDispatchFailureEditor.redo();
+      await waitUntil(() => saveView.state.doc.toString() === afterSaveRecovery, 'save recovery redo');
+      saveAfterDispatchFailureEditor.destroy();
       return {
         original,
         consumed,
@@ -263,7 +367,21 @@ async function main() {
         afterFullRangeRowDelete,
         columnGuardText,
         afterFullRangeColumnDelete,
-        afterQueuedDoubleDelete
+        afterQueuedDoubleDelete,
+        dispatchFailureText,
+        afterFailedDispatch,
+        retainedAfterFailedDispatch,
+        afterDispatchRetry,
+        retryHistory,
+        retryUndo,
+        retryRedo,
+        afterBlurRecovery,
+        blurHistory,
+        saveCommitted,
+        afterSaveRecovery,
+        saveHistory,
+        saveUndo,
+        saveRedo
       };
     });
 
@@ -305,6 +423,20 @@ async function main() {
     assert.equal(result.afterFullRangeRowDelete, result.rowGuardText, 'deleting every body row must be a strict no-op');
     assert.equal(result.afterFullRangeColumnDelete, result.columnGuardText, 'deleting every column must be a strict no-op');
     assert.match(result.afterQueuedDoubleDelete, /\| two\s+\|/, 'queued deletion must not remove the last body row');
+    assert.equal(result.afterFailedDispatch, result.dispatchFailureText, 'failed structure dispatch must not change Markdown');
+    assert.equal(result.retainedAfterFailedDispatch, 'retry kept', 'failed structure dispatch must retain the visible pending edit');
+    assert.match(result.afterDispatchRetry, /\| retry kept\s+\|\n\|\s+\|/, 'retry must atomically apply the retained edit and command');
+    assert.deepEqual(result.retryHistory, { undo: 1, redo: 0 }, 'dispatch retry must create one history item');
+    assert.equal(result.retryUndo, true, 'dispatch retry undo must be accepted');
+    assert.equal(result.retryRedo, true, 'dispatch retry redo must be accepted');
+    assert.match(result.afterBlurRecovery, /\| blur kept\s+\|/, 'blur boundary must persist the edit retained after dispatch failure');
+    assert.deepEqual(result.blurHistory, { undo: 1, redo: 0 }, 'blur recovery must create one history item');
+    assert.equal(result.saveCommitted, true, 'save boundary must collect the edit retained after dispatch failure');
+    assert.match(result.afterSaveRecovery, /\| save kept\s+\|/, 'save boundary must persist the retained edit');
+    assert.doesNotMatch(result.afterSaveRecovery, /:---/, 'failed alignment must not leak into save recovery');
+    assert.deepEqual(result.saveHistory, { undo: 1, redo: 0 }, 'save recovery must create one history item');
+    assert.equal(result.saveUndo, true, 'save recovery undo must be accepted');
+    assert.equal(result.saveRedo, true, 'save recovery redo must be accepted');
 
     type MatrixCase = {
       name: string;

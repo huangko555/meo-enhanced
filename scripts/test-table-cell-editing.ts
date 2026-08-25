@@ -1,23 +1,45 @@
 import {
   createTableCellCommitConfirmation,
   createTableCellInteraction,
-  executeTableCellCommitBoundary
+  executeTableCellCommitBoundary,
+  type TableCellInteractionInput
 } from '../webview/src/editor/tableCellInteraction';
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
 }
 
+type TableCellInput = Extract<TableCellInteractionInput, { readonly type: 'input' }>;
+type CallerOwnsSequence = TableCellInput extends { readonly sequence: number } ? true : false;
+const callerOwnsSequence: CallerOwnsSequence = true;
+assert(callerOwnsSequence, 'Table cell edit sequence must be a required caller-owned value');
+
 const interaction = createTableCellInteraction();
 const snapshot = interaction.snapshot();
+
+const firstInstance = createTableCellInteraction();
+const secondInstance = createTableCellInteraction();
+firstInstance.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'first table', sequence: 41 });
+secondInstance.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'second table', sequence: 42 });
+assert(
+  firstInstance.snapshot().pending[0]?.sequence === 41 && secondInstance.snapshot().pending[0]?.sequence === 42,
+  'Independent table interactions did not preserve the caller-owned global edit sequence'
+);
+let missingSequenceRejected = false;
+try {
+  firstInstance.accept({ type: 'input', target: { row: 1, col: 1 }, value: 'unordered' } as TableCellInteractionInput);
+} catch {
+  missingSequenceRejected = true;
+}
+assert(missingSequenceRejected, 'Table interaction invented a local fallback for a missing caller-owned sequence');
 
 assert(snapshot.phase === 'idle' && snapshot.pending.length === 0, `New interaction was not idle: ${JSON.stringify(snapshot)}`);
 
 interaction.accept({ type: 'focus', target: { row: 1, col: 0 } });
-const firstInput = interaction.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'first' });
+const firstInput = interaction.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'first', sequence: 1 });
 const firstTimer = firstInput.scheduleAutoCommit?.generation;
 assert(firstInput.snapshot.phase === 'pending' && typeof firstTimer === 'number', 'Input did not become pending');
-const mergedInput = interaction.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'merged' });
+const mergedInput = interaction.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'merged', sequence: 2 });
 assert(mergedInput.snapshot.pending.length === 1 && mergedInput.snapshot.pending[0]?.value === 'merged', 'Same-cell input did not merge');
 assert(interaction.accept({ type: 'timer', generation: firstTimer! }).snapshot.phase === 'pending', 'Stale timer committed current input');
 assert(!interaction.accept({ type: 'timer', generation: firstTimer! }).timerCurrent, 'Stale timer remained current');
@@ -31,9 +53,9 @@ assert(retry.commit?.edits[0]?.value === 'merged', 'Retry did not retain pending
 assert(interaction.accept({ type: 'commit-result', generation: retry.commit!.generation, outcome: 'applied' }).snapshot.phase === 'idle', 'Successful commit did not return idle');
 
 const retryAfterFailure = createTableCellInteraction();
-retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'first cell' });
+retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'first cell', sequence: 3 });
 const failedCommit = retryAfterFailure.accept({ type: 'commit', reason: 'history' }).commit!;
-retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 1 }, value: 'second cell' });
+retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 1 }, value: 'second cell', sequence: 4 });
 const builderConfirmation = createTableCellCommitConfirmation(retryAfterFailure, failedCommit.generation);
 let builderThrew = false;
 try {
@@ -66,7 +88,7 @@ const combinedRetry = retryAfterFailure.accept({ type: 'commit', reason: 'histor
 const appliedConfirmation = createTableCellCommitConfirmation(retryAfterFailure, combinedRetry.commit!.generation);
 appliedConfirmation.applied = true;
 executeTableCellCommitBoundary([appliedConfirmation], () => undefined);
-retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'after success' });
+retryAfterFailure.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'after success', sequence: 5 });
 appliedConfirmation.settle('applied');
 assert(
   retryAfterFailure.snapshot().pending[0]?.value === 'after success',
@@ -108,13 +130,13 @@ assert(key({
 })?.type === 'pass-through', 'ArrowUp escaped from a soft-wrapped visual line');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'ArrowDown', visualLine: { atFirst: true, atLast: true, caretColumn: 2 } } })?.type === 'focus-cell', 'Boundary ArrowDown did not move cell focus');
 
-const staleTimer = interaction.accept({ type: 'input', target: { row: 1, col: 1 }, value: 'late' }).scheduleAutoCommit!.generation;
+const staleTimer = interaction.accept({ type: 'input', target: { row: 1, col: 1 }, value: 'late', sequence: 6 }).scheduleAutoCommit!.generation;
 for (const reason of ['replacement', 'external', 'mode'] as const) {
   interaction.accept({ type: 'invalidate', reason });
   assert(interaction.accept({ type: 'timer', generation: staleTimer }).snapshot.pending.length === 0, `${reason} accepted a stale timer`);
 }
 interaction.accept({ type: 'dispose' });
 assert(interaction.snapshot().phase === 'disposed', 'Dispose did not become terminal');
-assert(interaction.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'ignored' }).snapshot.phase === 'disposed', 'Disposed interaction accepted input');
+assert(interaction.accept({ type: 'input', target: { row: 1, col: 0 }, value: 'ignored', sequence: 7 }).snapshot.phase === 'disposed', 'Disposed interaction accepted input');
 
 console.log('table cell interaction checks passed');
