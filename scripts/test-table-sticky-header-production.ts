@@ -15,6 +15,243 @@ async function main(): Promise<void> {
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
   const browser = await launchTestBrowser();
   try {
+    const runGeometryScenario = async (scenario: {
+      dpr: number;
+      zoom: number;
+      transform?: string;
+      dynamicZoom?: number;
+      dynamicTransform?: string;
+      dynamicShellTransform?: string;
+      dynamicRootTransform?: string;
+      expectFailure?: boolean;
+    }) => {
+      const geometryPage = await browser.newPage();
+      await geometryPage.setViewport({ width: 960, height: 430, deviceScaleFactor: scenario.dpr });
+      await geometryPage.setContent('<!doctype html><div id="outer"><div class="spacer"></div><div id="ancestor"><div id="host"></div></div><div class="tail"></div></div>');
+      await geometryPage.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
+      await geometryPage.addStyleTag({ content: `
+        :root{--meo-background:#24292e;--meo-inset-background:#2a2d2f;--meo-foreground:#e6edf3;--meo-semantic-tableBorder:#474b50}
+        html,body{height:100%;margin:0}#outer{height:390px;overflow-y:auto}#ancestor{transform:${scenario.transform ?? 'none'};transform-origin:0 0}
+        #host{height:330px;width:360px;zoom:${scenario.zoom}}#host .meo-md-html-table{min-width:520px}.spacer{height:70px}.tail{height:260px}
+      ` });
+      await geometryPage.addScriptTag({ path: path.join(temp, 'bundle.js') });
+      const result = await geometryPage.evaluate(async (scenarioInput) => {
+      const harness = (window as any).TableStickyHeaderProductionHarness;
+      harness.initializeImageHandling({ postMessage() {} });
+      const outer = document.getElementById('outer')!;
+      const host = document.getElementById('host')!;
+      const ancestor = document.getElementById('ancestor')!;
+      const nativeFrame = window.requestAnimationFrame.bind(window);
+      let editor: any;
+      const geometry = () => {
+        const scroller = editor?.view.scrollDOM as HTMLElement | undefined;
+        const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar');
+        const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
+        const stickyHeader = chrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-header');
+        const mainCell = document.querySelector<HTMLElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th'
+        );
+        const stickyCell = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table thead th');
+        const shell = document.querySelector<HTMLElement>('.meo-md-html-table-shell');
+        return {
+          scrollerTop: scroller?.getBoundingClientRect().top ?? null,
+          toolbarTop: toolbar?.getBoundingClientRect().top ?? null,
+          toolbarHeight: toolbar?.getBoundingClientRect().height ?? null,
+          toolbarLeft: toolbar?.getBoundingClientRect().left ?? null,
+          shellLeft: shell?.getBoundingClientRect().left ?? null,
+          chromeTop: chrome?.getBoundingClientRect().top ?? null,
+          stickyHeaderTop: stickyHeader?.getBoundingClientRect().top ?? null,
+          firstColumnDelta: mainCell && stickyCell
+            ? Math.abs(mainCell.getBoundingClientRect().left - stickyCell.getBoundingClientRect().left)
+            : null,
+          controlsSticky: shell?.classList.contains('is-controls-sticky') ?? false,
+          visible: Boolean(chrome && getComputedStyle(chrome).display !== 'none')
+        };
+      };
+      const settle = async (action: () => void, accepted: () => boolean) => {
+        const tracker = harness.installCausalFrameSettlement(window, geometry);
+        let published = false;
+        const publish = () => {
+          if (!published && accepted()) { published = true; tracker.accept(); }
+        };
+        const observer = new MutationObserver(publish);
+        observer.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
+        tracker.runRoot(() => { action(); publish(); });
+        await new Promise<void>((resolve, reject) => {
+          const poll = () => {
+            try {
+              publish();
+              const diagnostics = tracker.diagnostics();
+              if (diagnostics.failure) throw new Error(diagnostics.failure);
+              if (diagnostics.phase === 'complete') return resolve();
+              nativeFrame(poll);
+            } catch (error) { reject(error); }
+          };
+          nativeFrame(poll);
+        });
+        observer.disconnect();
+        tracker.dispose();
+      };
+      const rows = Array.from({ length: 32 }, (_, i) => `| ${i + 1} | zoom row ${i + 1} |`);
+      const text = [...Array.from({ length: 6 }, (_, index) => `before ${index + 1}`), '',
+        '| Number | Content |', '| ---: | :--- |', ...rows,
+        '', ...Array.from({ length: 20 }, (_, i) => `after table ${i + 1}`)].join('\n');
+      await settle(() => {
+        editor = harness.createEditor({ parent: host, text, initialMode: 'live', onApplyChanges() {} });
+      }, () => Boolean(document.querySelector('.meo-md-html-table')));
+      const scroller = editor.view.scrollDOM as HTMLElement;
+      const header = document.querySelector<HTMLElement>('.meo-md-html-table thead')!;
+      const input = document.querySelector<HTMLTextAreaElement>('.meo-md-html-table tbody textarea')!;
+      await settle(() => {
+        outer.scrollTop = 17.5;
+        outer.dispatchEvent(new Event('scroll'));
+      }, () => true);
+      await settle(() => input.focus({ preventScroll: true }), () => (
+        document.querySelector('.meo-md-html-table-shell')?.classList.contains('is-interacting') ?? false
+      ));
+      let threshold: null | {
+        beforeGap: number;
+        beforeSticky: boolean;
+        afterGap: number;
+        afterSticky: boolean;
+        takeoverDelta: number;
+      } = null;
+      if (!scenarioInput.expectFailure) {
+        const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
+        const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
+        const moveTableToThresholdOffset = (offset: number) => {
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            const target = scroller.getBoundingClientRect().top + toolbar.getBoundingClientRect().height + offset;
+            const delta = table.getBoundingClientRect().top - target;
+            if (Math.abs(delta) <= 0.25) break;
+            scroller.scrollTop += delta;
+          }
+          scroller.dispatchEvent(new Event('scroll'));
+        };
+        await settle(() => moveTableToThresholdOffset(2), () => true);
+        const beforeGap = table.getBoundingClientRect().top - scroller.getBoundingClientRect().top -
+          toolbar.getBoundingClientRect().height;
+        const beforeSticky = geometry().controlsSticky;
+        await settle(() => moveTableToThresholdOffset(-2), () => true);
+        const afterGeometry = geometry();
+        threshold = {
+          beforeGap,
+          beforeSticky,
+          afterGap: table.getBoundingClientRect().top - scroller.getBoundingClientRect().top -
+            toolbar.getBoundingClientRect().height,
+          afterSticky: afterGeometry.controlsSticky,
+          takeoverDelta: Math.abs(afterGeometry.toolbarTop! - afterGeometry.scrollerTop!)
+        };
+      }
+      await settle(() => {
+        scroller.scrollTop += Math.max(1,
+          header.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top + 8);
+        scroller.dispatchEvent(new Event('scroll'));
+      }, () => scenarioInput.expectFailure || geometry().visible);
+      const wrap = document.querySelector<HTMLElement>('.meo-md-html-table-wrap')!;
+      await settle(() => {
+        wrap.scrollLeft = 42;
+        wrap.dispatchEvent(new Event('scroll'));
+      }, () => true);
+      const before = geometry();
+      let after: ReturnType<typeof geometry> | null = null;
+      if (scenarioInput.dynamicZoom !== undefined || scenarioInput.dynamicTransform !== undefined ||
+        scenarioInput.dynamicShellTransform !== undefined || scenarioInput.dynamicRootTransform !== undefined) {
+        await settle(() => {
+          if (scenarioInput.dynamicZoom !== undefined) host.style.zoom = String(scenarioInput.dynamicZoom);
+          if (scenarioInput.dynamicTransform !== undefined) ancestor.style.transform = scenarioInput.dynamicTransform;
+          if (scenarioInput.dynamicShellTransform !== undefined) {
+            document.querySelector<HTMLElement>('.meo-md-html-table-shell')!.style.transform =
+              scenarioInput.dynamicShellTransform;
+          }
+          if (scenarioInput.dynamicRootTransform !== undefined) {
+            document.documentElement.style.transform = scenarioInput.dynamicRootTransform;
+            document.documentElement.style.transformOrigin = '0 0';
+          }
+        }, () => true);
+        after = geometry();
+      }
+      editor.destroy();
+      return { before, after, threshold };
+      }, scenario);
+      await geometryPage.close();
+      return result;
+    };
+    const assertAlignedGeometry = (geometry: Awaited<ReturnType<typeof runGeometryScenario>>['before']) => {
+      assert.equal(geometry.visible, true, JSON.stringify(geometry));
+      assert.ok(Math.abs(geometry.toolbarTop! - geometry.scrollerTop!) <= 1, JSON.stringify(geometry));
+      assert.ok(Math.abs(geometry.chromeTop! - geometry.scrollerTop!) <= 1, JSON.stringify(geometry));
+      assert.ok(Math.abs(geometry.toolbarLeft! - geometry.shellLeft!) <= 1, JSON.stringify(geometry));
+      assert.ok(Math.abs(
+        geometry.stickyHeaderTop! - geometry.chromeTop! - geometry.toolbarHeight!
+      ) <= 1, JSON.stringify(geometry));
+      assert.ok(geometry.firstColumnDelta! <= 1, JSON.stringify(geometry));
+    };
+    for (const dpr of [1, 1.5, 2]) {
+      for (const zoom of [0.8, 1, 1.25]) {
+        const geometryResult = await runGeometryScenario({ dpr, zoom });
+        assert.ok(geometryResult.threshold);
+        assert.ok(geometryResult.threshold!.beforeGap > 0, JSON.stringify(geometryResult.threshold));
+        assert.equal(geometryResult.threshold!.beforeSticky, false);
+        assert.ok(geometryResult.threshold!.afterGap <= 0, JSON.stringify(geometryResult.threshold));
+        assert.equal(geometryResult.threshold!.afterSticky, true);
+        assert.ok(geometryResult.threshold!.takeoverDelta <= 1, JSON.stringify(geometryResult.threshold));
+        assertAlignedGeometry(geometryResult.before);
+        if (dpr === 1.5 && zoom === 1.25) {
+          assert.ok(Math.abs(geometryResult.before.scrollerTop! - 52.5) <= 1,
+            JSON.stringify(geometryResult.before));
+        }
+      }
+    }
+    const nestedResult = await runGeometryScenario({
+      dpr: 1.5,
+      zoom: 0.8,
+      transform: 'translate(13px, 7px) scale(1.25, 0.9)'
+    });
+    assertAlignedGeometry(nestedResult.before);
+    const dynamicZoomResult = await runGeometryScenario({
+      dpr: 2,
+      zoom: 1,
+      transform: 'translate(4px, 3px) scale(1.1)',
+      dynamicZoom: 1.25
+    });
+    assertAlignedGeometry(dynamicZoomResult.before);
+    assert.ok(dynamicZoomResult.after);
+    assertAlignedGeometry(dynamicZoomResult.after!);
+    const dynamicTransformResult = await runGeometryScenario({
+      dpr: 1.5,
+      zoom: 1.25,
+      transform: 'translate(4px, 3px) scale(1.1)',
+      dynamicTransform: 'translate(17px, 9px) scale(0.85, 1.2)'
+    });
+    assertAlignedGeometry(dynamicTransformResult.before);
+    assert.ok(dynamicTransformResult.after);
+    assertAlignedGeometry(dynamicTransformResult.after!);
+    const dynamicShellResult = await runGeometryScenario({
+      dpr: 1,
+      zoom: 1.25,
+      dynamicShellTransform: 'translate(11px, 6px) scale(0.9, 1.1)'
+    });
+    assert.ok(dynamicShellResult.after);
+    assertAlignedGeometry(dynamicShellResult.after!);
+    const dynamicRootResult = await runGeometryScenario({
+      dpr: 2,
+      zoom: 0.8,
+      dynamicRootTransform: 'translate(7px, 5px) scale(1.15, 0.95)'
+    });
+    assert.ok(dynamicRootResult.after);
+    assertAlignedGeometry(dynamicRootResult.after!);
+    for (const transform of ['rotate(5deg)', 'scale(-1, 1)', 'scale(0, 1)']) {
+      const failedResult = await runGeometryScenario({
+        dpr: 1.5,
+        zoom: 1.25,
+        transform,
+        expectFailure: true
+      });
+      assert.equal(failedResult.before.controlsSticky, false, JSON.stringify(failedResult.before));
+      assert.equal(failedResult.before.visible, false, JSON.stringify(failedResult.before));
+    }
+
     const page = await browser.newPage();
     await page.setViewport({ width: 960, height: 430 });
     await page.setContent('<!doctype html><div id="outer"><div class="spacer"></div><div id="host"></div><div class="tail"></div></div>');

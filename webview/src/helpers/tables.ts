@@ -68,6 +68,11 @@ import {
   type TableCellSelectionTransition,
   type TableCellRange as TableSelectionRange
 } from '../editor/tableCellSelection';
+import {
+  fixedChromeAffineMappingFromSamples,
+  projectFixedChromeGeometry,
+  type FixedChromeAffineMapping
+} from '../editor/fixedChromeGeometry';
 
 interface TableData {
   rows: string[][];
@@ -236,6 +241,40 @@ const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-too
 const tableToolbarHeight = 24;
 const tableCellAutoCommitDelayMs = 250;
 let nextTableCellEditSequence = 0;
+
+function measureFixedContainingBlockMapping(element: HTMLElement): FixedChromeAffineMapping | null {
+  const parent = element.parentElement;
+  if (!parent) return null;
+  const sampleDistance = 100;
+  const probe = (left: number, top: number): HTMLSpanElement => {
+    const element = parent.ownerDocument.createElement('span');
+    element.setAttribute('aria-hidden', 'true');
+    element.style.cssText = `position:fixed;inset:auto;left:${left}px;top:${top}px;` +
+      'display:block;width:0;height:0;margin:0;padding:0;border:0;visibility:hidden;pointer-events:none;';
+    return element;
+  };
+  const origin = probe(0, 0);
+  const horizontal = probe(sampleDistance, 0);
+  const vertical = probe(0, sampleDistance);
+  try {
+    parent.append(origin, horizontal, vertical);
+    const originRect = origin.getBoundingClientRect();
+    const horizontalRect = horizontal.getBoundingClientRect();
+    const verticalRect = vertical.getBoundingClientRect();
+    return fixedChromeAffineMappingFromSamples(
+      { x: originRect.left, y: originRect.top },
+      { x: horizontalRect.left, y: horizontalRect.top },
+      { x: verticalRect.left, y: verticalRect.top },
+      sampleDistance
+    );
+  } catch {
+    return null;
+  } finally {
+    origin.remove();
+    horizontal.remove();
+    vertical.remove();
+  }
+}
 
 export function commitPendingTableEdits(view: EditorView): boolean {
   const detail: PendingTableCommitDetail = {
@@ -486,8 +525,12 @@ export function focusHistoryChange(
 
 }
 
-function tableHasReachedStickyThreshold(tableRect: DOMRect, scrollerRect: DOMRect) {
-  const stickyBottom = scrollerRect.top + tableToolbarHeight;
+function tableHasReachedStickyThreshold(
+  tableRect: DOMRect,
+  scrollerRect: DOMRect,
+  toolbarViewportHeight: number
+) {
+  const stickyBottom = scrollerRect.top + toolbarViewportHeight;
   return tableRect.top <= stickyBottom && tableRect.bottom > stickyBottom;
 }
 
@@ -2269,7 +2312,9 @@ class HtmlTableWidget extends WidgetType {
     const shell = this.domRefs?.shell;
     if (!shell || !shell.classList.contains('is-controls-sticky')) return 0;
     const visible = shell.matches(':focus-within') || shell.classList.contains('is-interacting');
-    return visible ? tableToolbarHeight : 0;
+    if (!visible) return 0;
+    const toolbar = shell.querySelector<HTMLElement>('.meo-md-html-table-toolbar');
+    return toolbar?.getBoundingClientRect().height ?? 0;
   }
 
   getEditorView(dom?: HTMLElement): EditorView | null {
@@ -4135,12 +4180,30 @@ class HtmlTableWidget extends WidgetType {
     const scrollerRect = scroller.getBoundingClientRect();
     const tableRect = table.getBoundingClientRect();
     const shellRect = shell.getBoundingClientRect();
-    const shouldStick = tableHasReachedStickyThreshold(tableRect, scrollerRect);
-    shell.classList.toggle('is-controls-sticky', shouldStick);
+    const toolbar = shell.querySelector<HTMLElement>('.meo-md-html-table-toolbar');
+    const toolbarViewportHeight = toolbar?.getBoundingClientRect().height ?? 0;
+    const shouldStick = tableHasReachedStickyThreshold(
+      tableRect,
+      scrollerRect,
+      toolbarViewportHeight
+    );
     if (shouldStick) {
-      shell.style.setProperty('--meo-html-table-sticky-top', `${Math.round(scrollerRect.top)}px`);
-      shell.style.setProperty('--meo-html-table-sticky-left', `${Math.round(shellRect.left)}px`);
+      const mapping = toolbar ? measureFixedContainingBlockMapping(toolbar) : null;
+      const projection = mapping ? projectFixedChromeGeometry(mapping, {
+        rect: { left: shellRect.left, top: scrollerRect.top, width: 0, height: 0 },
+        vectors: []
+      }) : null;
+      if (projection?.ok) {
+        shell.style.setProperty('--meo-html-table-sticky-top', `${projection.geometry.rect.top}px`);
+        shell.style.setProperty('--meo-html-table-sticky-left', `${projection.geometry.rect.left}px`);
+        shell.classList.add('is-controls-sticky');
+        return;
+      }
+      shell.classList.remove('is-controls-sticky');
+      shell.style.removeProperty('--meo-html-table-sticky-top');
+      shell.style.removeProperty('--meo-html-table-sticky-left');
     } else {
+      shell.classList.remove('is-controls-sticky');
       shell.style.removeProperty('--meo-html-table-sticky-top');
       shell.style.removeProperty('--meo-html-table-sticky-left');
     }

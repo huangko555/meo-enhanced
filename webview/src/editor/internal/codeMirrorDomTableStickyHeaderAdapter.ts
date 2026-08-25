@@ -4,6 +4,11 @@ import type {
   TableStickyHeaderAdapter
 } from '../tableStickyHeaderAdapter';
 import type { TableStickyHeaderPolicy } from '../tableStickyHeaderPolicy';
+import {
+  fixedChromeAffineMappingFromSamples,
+  projectFixedChromeGeometry,
+  type FixedChromeAffineMapping
+} from '../fixedChromeGeometry';
 
 export type CodeMirrorDomTableStickyHeaderAdapterOptions = TableStickyHeaderAdapterOptions & {
   readonly policy: TableStickyHeaderPolicy;
@@ -50,6 +55,40 @@ function hide(elements: TableStickyHeaderElements): void {
   }
 }
 
+function measureFixedContainingBlockMapping(element: HTMLElement): FixedChromeAffineMapping | null {
+  const parent = element.parentElement;
+  if (!parent) return null;
+  const sampleDistance = 100;
+  const probe = (left: number, top: number): HTMLSpanElement => {
+    const element = parent.ownerDocument.createElement('span');
+    element.setAttribute('aria-hidden', 'true');
+    element.style.cssText = `position:fixed;inset:auto;left:${left}px;top:${top}px;` +
+      'display:block;width:0;height:0;margin:0;padding:0;border:0;visibility:hidden;pointer-events:none;';
+    return element;
+  };
+  const origin = probe(0, 0);
+  const horizontal = probe(sampleDistance, 0);
+  const vertical = probe(0, sampleDistance);
+  try {
+    parent.append(origin, horizontal, vertical);
+    const originRect = origin.getBoundingClientRect();
+    const horizontalRect = horizontal.getBoundingClientRect();
+    const verticalRect = vertical.getBoundingClientRect();
+    return fixedChromeAffineMappingFromSamples(
+      { x: originRect.left, y: originRect.top },
+      { x: horizontalRect.left, y: horizontalRect.top },
+      { x: verticalRect.left, y: verticalRect.top },
+      sampleDistance
+    );
+  } catch {
+    return null;
+  } finally {
+    origin.remove();
+    horizontal.remove();
+    vertical.remove();
+  }
+}
+
 function applyLayout(
   elements: TableStickyHeaderElements,
   layout: ReturnType<TableStickyHeaderPolicy['layout']>
@@ -58,15 +97,38 @@ function applyLayout(
     hide(elements);
     return;
   }
+  const mapping = measureFixedContainingBlockMapping(elements.stickyChrome);
+  if (!mapping) {
+    hide(elements);
+    return;
+  }
+  const projection = projectFixedChromeGeometry(mapping, {
+    rect: {
+      left: layout.left,
+      top: layout.top,
+      width: layout.width,
+      height: layout.height
+    },
+    vectors: [
+      { x: layout.tableWidth, y: 0 },
+      { x: layout.translateX, y: 0 },
+      { x: 0, y: layout.headerHeight }
+    ]
+  });
+  if (!projection.ok) {
+    hide(elements);
+    return;
+  }
+  const [tableWidth, translate, headerHeight] = projection.geometry.vectors;
   elements.stickyChrome.classList.add('is-visible');
   elements.stickyChrome.classList.toggle('has-sticky-controls', layout.controlsHeight > 0);
-  elements.stickyChrome.style.top = `${layout.top}px`;
-  elements.stickyChrome.style.left = `${layout.left}px`;
-  elements.stickyChrome.style.width = `${layout.width}px`;
-  elements.stickyChrome.style.height = `${layout.height}px`;
-  elements.stickyHeaderViewport.style.height = `${layout.headerHeight}px`;
-  elements.stickyTable.style.width = `${layout.tableWidth}px`;
-  elements.stickyTable.style.transform = `translateX(${layout.translateX}px)`;
+  elements.stickyChrome.style.top = `${projection.geometry.rect.top}px`;
+  elements.stickyChrome.style.left = `${projection.geometry.rect.left}px`;
+  elements.stickyChrome.style.width = `${projection.geometry.rect.width}px`;
+  elements.stickyChrome.style.height = `${projection.geometry.rect.height}px`;
+  elements.stickyHeaderViewport.style.height = `${headerHeight.y}px`;
+  elements.stickyTable.style.width = `${tableWidth.x}px`;
+  elements.stickyTable.style.transform = `translateX(${translate.x}px)`;
 }
 
 function throwLifecycleErrors(
@@ -227,6 +289,43 @@ export function createCodeMirrorDomTableStickyHeaderAdapter(
         subtree: true
       });
       cleanup.push(() => mutationObserver.disconnect());
+      const shell = elements.stickyChrome.parentElement;
+      const normalizeShellClass = (value: string | null): string => (value ?? '')
+        .split(/\s+/)
+        .filter((name) => name && name !== 'is-controls-sticky')
+        .sort()
+        .join(' ');
+      const normalizeShellStyle = (value: string | null): string => (value ?? '')
+        .split(';')
+        .map((declaration) => declaration.trim())
+        .filter((declaration) => declaration &&
+          !declaration.startsWith('--meo-html-table-sticky-top:') &&
+          !declaration.startsWith('--meo-html-table-sticky-left:'))
+        .sort()
+        .join(';');
+      const ancestorObserver = new MutationObserver((records) => {
+        const externallyChanged = records.some((record) => {
+          if (record.target !== shell) return true;
+          if (record.attributeName === 'class') {
+            return normalizeShellClass(record.oldValue) !== normalizeShellClass(shell.getAttribute('class'));
+          }
+          if (record.attributeName === 'style') {
+            return normalizeShellStyle(record.oldValue) !== normalizeShellStyle(shell.getAttribute('style'));
+          }
+          return true;
+        });
+        if (externallyChanged) requestIfActive();
+      });
+      let ancestor: HTMLElement | null = shell;
+      while (ancestor) {
+        ancestorObserver.observe(ancestor, {
+          attributes: true,
+          attributeFilter: ['class', 'style'],
+          attributeOldValue: true
+        });
+        ancestor = ancestor.parentElement;
+      }
+      cleanup.push(() => ancestorObserver.disconnect());
       const passiveEvents = ['pointerdown', 'click', 'dblclick'] as const;
       for (const eventName of passiveEvents) {
         elements.stickyHeaderViewport.addEventListener(eventName, suppressStickyInteraction, true);

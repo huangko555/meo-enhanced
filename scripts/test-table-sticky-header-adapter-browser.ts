@@ -360,6 +360,7 @@ async function main(): Promise<void> {
         elements(1).scroller.dispatchEvent(new Event('scroll'));
         elements(1).horizontalScroller.dispatchEvent(new Event('scroll'));
         window.dispatchEvent(new Event('resize'));
+        outer.classList.add('late-unmounted-ancestor-change');
       });
       lateObserver.disconnect();
       const styleAfterUnmount = elements(1).stickyTable.style.width;
@@ -380,6 +381,7 @@ async function main(): Promise<void> {
         elements(2).scroller.dispatchEvent(new Event('scroll'));
         elements(2).horizontalScroller.dispatchEvent(new Event('scroll'));
         window.dispatchEvent(new Event('resize'));
+        outer.classList.add('late-disposed-ancestor-change');
         elements(2).table.tHead!.rows[0].cells[0].append('late source mutation');
       });
       mountedDisposeObserver.disconnect();
