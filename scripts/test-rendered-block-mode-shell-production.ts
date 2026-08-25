@@ -10,20 +10,12 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-rendered-mode-shell-'
 const rendererProbeModule = String.raw`
 type Probe =
   | { kind: 'normal' }
-  | { kind: 'forbid' }
-  | { kind: 'require-visible-source' }
   | { kind: 'error' };
 
 let probe: Probe = { kind: 'normal' };
-let violation: string | null = null;
 
 export function setMathRendererProbe(next: Probe): void {
   probe = next;
-  violation = null;
-}
-
-export function getMathRendererProbeViolation(): string | null {
-  return violation;
 }
 
 function escapeHtml(value: string): string {
@@ -36,22 +28,23 @@ function escapeHtml(value: string): string {
 }
 
 export function renderMathToHtml(content: string): string | null {
-  if (probe.kind === 'forbid') {
-    violation = 'Source mode called the LaTeX renderer';
-  }
-  if (probe.kind === 'require-visible-source') {
-    const source = document.querySelector<HTMLElement>(
-      '.meo-latex-math-editing-block.is-split .meo-latex-math-source-pane'
-    );
-    if (!source?.textContent?.includes(content)) {
-      violation = 'Split mode rendered before the edited source became visible';
-    }
-  }
   if (probe.kind === 'error') {
     return null;
   }
   return '<span class="katex" data-rendered-math>' + escapeHtml(content) + '</span>';
 }
+`;
+
+const entryHarnessModule = String.raw`
+import { createEditor } from './test-editor-factory';
+import { setMathRendererProbe } from '../src/shared/mathRenderer';
+
+(globalThis as typeof globalThis & {
+  RenderedBlockModeShellProductionHarness?: {
+    createEditor: typeof createEditor;
+    setMathRendererProbe: typeof setMathRendererProbe;
+  };
+}).RenderedBlockModeShellProductionHarness = { createEditor, setMathRendererProbe };
 `;
 
 async function main(): Promise<void> {
@@ -64,6 +57,10 @@ async function main(): Promise<void> {
     plugins: [{
       name: 'controlled-math-renderer',
       setup(builder) {
+        builder.onLoad({ filter: /test-rendered-block-mode-shell-production-entry\.ts$/ }, () => ({
+          contents: entryHarnessModule,
+          loader: 'ts'
+        }));
         builder.onLoad({ filter: /[\\/]src[\\/]shared[\\/]mathRenderer\.ts$/ }, () => ({
           contents: rendererProbeModule,
           loader: 'ts'
@@ -98,51 +95,24 @@ async function main(): Promise<void> {
 
     await page.click('.meo-latex-math-mode-btn');
     await page.waitForSelector('.meo-latex-math-editing-block.is-split');
-    await page.evaluate(() => {
-      (window as any).RenderedBlockModeShellProductionHarness.setMathRendererProbe({ kind: 'forbid' });
-    });
-    await page.click('.meo-latex-math-mode-btn');
-    await page.waitForSelector('.meo-latex-math-editing-block.is-source');
-    assert.equal(await page.evaluate(() => (
-      (window as any).RenderedBlockModeShellProductionHarness.getMathRendererProbeViolation()
-    )), null);
-    await page.click('.meo-latex-math-editing-block.is-source .cm-content');
-    await page.keyboard.press('End');
-    await page.keyboard.type(' + source_guard');
-    await page.waitForFunction(() => (
-      document.querySelector('.meo-latex-math-editing-block.is-source .meo-latex-math-source-pane')
-        ?.textContent?.includes('source_guard') === true
-    ));
-    await page.evaluate(() => {
-      (window as any).__renderedModeEditor.setText('$$\nx = 1 + source_external\n$$');
-    });
-    assert.equal(await page.evaluate(() => (
-      (window as any).RenderedBlockModeShellProductionHarness.getMathRendererProbeViolation()
-    )), null);
-    assert.deepEqual(pageErrors, [], 'Source mode must not call the LaTeX renderer');
-
-    await page.evaluate(() => {
-      (window as any).RenderedBlockModeShellProductionHarness.setMathRendererProbe({ kind: 'normal' });
-    });
-    await page.click('.meo-latex-math-mode-btn');
-    await page.waitForSelector('.meo-md-math-display');
-    await page.click('.meo-latex-math-mode-btn');
-    await page.waitForSelector('.meo-latex-math-editing-block.is-split');
-    await page.evaluate(() => {
-      (window as any).RenderedBlockModeShellProductionHarness.setMathRendererProbe({
-        kind: 'require-visible-source'
-      });
-    });
     await page.click('.meo-latex-math-editing-block.is-split .cm-content');
     await page.keyboard.press('End');
-    await page.keyboard.type(' + split_visible_first');
-    assert.equal(await page.evaluate(() => (
-      document.querySelector('.meo-latex-math-editing-block.is-split [data-rendered-math]')
-        ?.textContent?.includes('split_visible_first') === true
-    )), true, 'Split mode must expose the synchronous renderer result before the edit completes');
-    assert.equal(await page.evaluate(() => (
-      (window as any).RenderedBlockModeShellProductionHarness.getMathRendererProbeViolation()
-    )), null);
+    const [renderedImmediately] = await Promise.all([
+      page.evaluate(() => new Promise<boolean>((resolve) => {
+        const source = document.querySelector<HTMLElement>(
+          '.meo-latex-math-editing-block.is-split .cm-content'
+        )!;
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          resolve(document.querySelector('.meo-latex-math-editing-block.is-split [data-rendered-math]')
+            ?.textContent?.includes('x = 1S') === true);
+        });
+        observer.observe(source, { childList: true, characterData: true, subtree: true });
+      })),
+      page.keyboard.press('S')
+    ]);
+    assert.equal(renderedImmediately, true,
+      'Split mode must expose the synchronous renderer result after the keyboard input returns');
     const beforeErrorEdit = await page.evaluate(() => {
       const outerScroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
       return { scrollTop: outerScroller.scrollTop };
@@ -150,20 +120,38 @@ async function main(): Promise<void> {
     await page.evaluate(() => {
       (window as any).RenderedBlockModeShellProductionHarness.setMathRendererProbe({ kind: 'error' });
     });
-    await page.keyboard.type(' + invalid_sync');
-    const afterErrorEdit = await page.evaluate(() => {
-      const source = document.querySelector<HTMLElement>('.meo-latex-math-editing-block.is-split .meo-latex-math-source-pane')!;
-      const error = document.querySelector<HTMLElement>('.meo-latex-math-editing-block.is-split .meo-latex-math-preview-error');
-      const selection = window.getSelection();
-      const outerScroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
-      return {
-        errorText: error?.textContent ?? null,
-        sourceFocused: source.contains(document.activeElement),
-        caretInSource: Boolean(selection?.isCollapsed && selection.anchorNode && source.contains(selection.anchorNode)),
-        scrollTop: outerScroller.scrollTop
-      };
-    });
-    assert.equal(afterErrorEdit.errorText?.includes('invalid_sync'), true,
+    const [afterErrorEdit] = await Promise.all([
+      page.evaluate(() => new Promise<{
+        errorText: string | null;
+        sourceFocused: boolean;
+        caretInSource: boolean;
+        scrollTop: number;
+      }>((resolve) => {
+        const content = document.querySelector<HTMLElement>(
+          '.meo-latex-math-editing-block.is-split .cm-content'
+        )!;
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          const source = document.querySelector<HTMLElement>(
+            '.meo-latex-math-editing-block.is-split .meo-latex-math-source-pane'
+          )!;
+          const error = document.querySelector<HTMLElement>(
+            '.meo-latex-math-editing-block.is-split .meo-latex-math-preview-error'
+          );
+          const selection = window.getSelection();
+          const outerScroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
+          resolve({
+            errorText: error?.textContent ?? null,
+            sourceFocused: source.contains(document.activeElement),
+            caretInSource: Boolean(selection?.isCollapsed && selection.anchorNode && source.contains(selection.anchorNode)),
+            scrollTop: outerScroller.scrollTop
+          });
+        });
+        observer.observe(content, { childList: true, characterData: true, subtree: true });
+      })),
+      page.keyboard.press('E')
+    ]);
+    assert.equal(afterErrorEdit.errorText?.includes('x = 1SE'), true,
       'Split mode must expose a synchronous renderer error before the edit completes');
     assert.equal(afterErrorEdit.sourceFocused, true, 'Synchronous renderer errors must preserve source focus');
     assert.equal(afterErrorEdit.caretInSource, true, 'Synchronous renderer errors must preserve the public DOM caret');

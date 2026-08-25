@@ -1898,7 +1898,7 @@ async function main() {
         controls: viewport.querySelectorAll('.meo-latex-math-zoom-controls button').length,
         presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
         canvasRect: canvas.getBoundingClientRect().toJSON(),
-        scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop,
+        scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop,
         fits: canvasRect.left >= viewportRect.left - 1 && canvasRect.right <= viewportRect.right + 1,
         center: {
           x: viewportRect.left + viewportRect.width / 2,
@@ -1919,7 +1919,7 @@ async function main() {
         return {
           presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
           canvasRect: canvas.getBoundingClientRect().toJSON(),
-          scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop
+          scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop
         };
       }
     );
@@ -1959,7 +1959,7 @@ async function main() {
         return {
           presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
           canvasRect: canvas.getBoundingClientRect().toJSON(),
-          scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop
+          scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop
         };
       }
     );
