@@ -99,6 +99,123 @@ const initMessage = {
   vscodeTheme: null
 } as const;
 
+type PreviewOpenLink = { readonly type: 'openLink'; readonly href: string; readonly source: 'preview' };
+type OpenLinkWaiterState = 'idle' | 'pending' | 'resolved' | 'rejected' | 'disposed';
+
+function createOpenLinkWaiter(options: {
+  readonly timeoutMs: number;
+  readonly scheduleTimeout: (callback: () => void, timeoutMs: number) => unknown;
+  readonly cancelTimeout: (handle: unknown) => void;
+}) {
+  let state: OpenLinkWaiterState = 'idle';
+  let accept: ((message: PreviewOpenLink) => void) | null = null;
+  let reject: ((error: Error) => void) | null = null;
+  let timeoutHandle: unknown = null;
+
+  const clearPending = () => {
+    if (timeoutHandle !== null) options.cancelTimeout(timeoutHandle);
+    timeoutHandle = null;
+    accept = null;
+    reject = null;
+  };
+  const settleResolved = (message: PreviewOpenLink) => {
+    if (state !== 'pending' || !accept) return false;
+    const acceptPending = accept;
+    clearPending();
+    state = 'resolved';
+    acceptPending(message);
+    return true;
+  };
+  const settleRejected = (error: Error, nextState: 'rejected' | 'disposed') => {
+    if (state !== 'pending' || !reject) return false;
+    const rejectPending = reject;
+    clearPending();
+    state = nextState;
+    rejectPending(error);
+    return true;
+  };
+
+  return {
+    wait: () => {
+      assert.notEqual(state, 'pending', 'Only one linked-image activation may be pending');
+      assert.notEqual(state, 'disposed', 'Disposed linked-image activation waiter cannot be reused');
+      state = 'pending';
+      return new Promise<PreviewOpenLink>((resolve, rejectPromise) => {
+        accept = resolve;
+        reject = rejectPromise;
+        timeoutHandle = options.scheduleTimeout(() => {
+          settleRejected(
+            new Error('Preview openLink was not delivered before the default browser-test timeout'),
+            'rejected'
+          );
+        }, options.timeoutMs);
+      });
+    },
+    resolve: (message: PreviewOpenLink) => settleResolved(message),
+    reject: (error: Error) => settleRejected(error, 'rejected'),
+    dispose: (error: Error) => {
+      if (state === 'disposed') return;
+      if (!settleRejected(error, 'disposed')) {
+        clearPending();
+        state = 'disposed';
+      }
+    },
+    getState: () => state
+  };
+}
+
+async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<void> {
+  let scheduled: { callback: () => void; timeoutMs: number } | null = null;
+  const createWaiter = () => createOpenLinkWaiter({
+    timeoutMs: defaultTimeoutMs,
+    scheduleTimeout: (callback, timeoutMs) => {
+      assert.equal(scheduled, null, 'Waiter must own at most one timeout');
+      scheduled = { callback, timeoutMs };
+      return scheduled;
+    },
+    cancelTimeout: (handle) => {
+      if (scheduled === handle) scheduled = null;
+    }
+  });
+  const message: PreviewOpenLink = {
+    type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
+  };
+
+  const success = createWaiter();
+  const successResult = success.wait();
+  assert.equal(success.getState(), 'pending');
+  assert.equal(success.resolve(message), true);
+  assert.deepEqual(await successResult, message);
+  assert.equal(success.getState(), 'resolved');
+  assert.equal(scheduled, null);
+
+  const missing = createWaiter();
+  const missingResult = missing.wait();
+  assert.equal(scheduled?.timeoutMs, defaultTimeoutMs);
+  scheduled?.callback();
+  await assert.rejects(missingResult, /default browser-test timeout/);
+  assert.equal(missing.getState(), 'rejected');
+  assert.equal(scheduled, null);
+
+  const decoderError = createWaiter();
+  const decoderResult = decoderError.wait();
+  const primaryDecoderError = new Error('openLink Protocol decoding failed');
+  assert.equal(decoderError.reject(primaryDecoderError), true);
+  await assert.rejects(decoderResult, (error) => error === primaryDecoderError);
+  assert.equal(decoderError.getState(), 'rejected');
+  assert.equal(scheduled, null);
+
+  const disposed = createWaiter();
+  const disposedResult = disposed.wait();
+  const primaryDisposeError = new Error('Preview page closed before openLink delivery');
+  disposed.dispose(primaryDisposeError);
+  await assert.rejects(disposedResult, (error) => error === primaryDisposeError);
+  assert.equal(disposed.getState(), 'disposed');
+  assert.equal(scheduled, null);
+  disposed.dispose(new Error('duplicate dispose must be ignored'));
+  assert.equal(disposed.getState(), 'disposed');
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(root, 'scripts', 'test-preview-reading-surface-production-entry.ts')],
@@ -110,26 +227,35 @@ async function main(): Promise<void> {
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
   const browser = await launchTestBrowser();
+  let openLinkWaiter: ReturnType<typeof createOpenLinkWaiter> | null = null;
   try {
     const page = await browser.newPage();
-    type PreviewOpenLink = { readonly type: 'openLink'; readonly href: string; readonly source: 'preview' };
-    let acceptOpenLink: ((message: PreviewOpenLink) => void) | null = null;
-    const waitForOpenLink = () => {
-      assert.equal(acceptOpenLink, null, 'Only one linked-image activation may be pending');
-      return new Promise<PreviewOpenLink>((resolve) => {
-        acceptOpenLink = resolve;
-      });
-    };
+    await assertOpenLinkWaiterLifecycle(page.getDefaultTimeout());
+    openLinkWaiter = createOpenLinkWaiter({
+      timeoutMs: page.getDefaultTimeout(),
+      scheduleTimeout: (callback, timeoutMs) => setTimeout(callback, timeoutMs),
+      cancelTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
+    });
     await browser.defaultBrowserContext().overridePermissions('http://localhost', ['clipboard-read', 'clipboard-write']);
     await page.exposeFunction('__deliverWebviewMessageToHost', (raw: unknown) => {
-      const message = decodeWebviewToHostMessage(raw);
-      assert.ok(message, 'Webview message failed Protocol decoding');
+      let message;
+      try {
+        message = decodeWebviewToHostMessage(raw);
+        assert.ok(message, 'Webview message failed Protocol decoding');
+      } catch (error) {
+        const primaryError = error instanceof Error ? error : new Error(String(error));
+        openLinkWaiter?.reject(primaryError);
+        throw primaryError;
+      }
       if (message.type === 'openLink') {
-        assert.equal(message.source, 'preview');
-        assert.ok(acceptOpenLink, 'Unexpected linked-image activation');
-        const accept = acceptOpenLink;
-        acceptOpenLink = null;
-        accept(message as PreviewOpenLink);
+        try {
+          assert.equal(message.source, 'preview');
+          assert.equal(openLinkWaiter?.resolve(message as PreviewOpenLink), true, 'Unexpected linked-image activation');
+        } catch (error) {
+          const primaryError = error instanceof Error ? error : new Error(String(error));
+          openLinkWaiter?.reject(primaryError);
+          throw primaryError;
+        }
         return null;
       }
       if (message.type !== 'requestPreviewRender') return null;
@@ -232,7 +358,7 @@ async function main(): Promise<void> {
         doc.documentElement.style.zoom = String(probe);
         doc.documentElement.style.zoom = String(target);
       }, { probe: zoom === 0.8 ? 0.81 : 1.24, target: zoom });
-      const enterActivationPromise = waitForOpenLink();
+      const enterActivationPromise = openLinkWaiter.wait();
       await page.keyboard.press('Enter');
       const enterActivation = await enterActivationPromise;
       assert.deepEqual(enterActivation, {
@@ -242,7 +368,7 @@ async function main(): Promise<void> {
       assert.ok(previewFrame, 'Preview iframe must remain attached for linked-image activation');
       const linkedImageHandle = await previewFrame.$('img[alt="Linked alt"]');
       assert.ok(linkedImageHandle, 'Linked Markdown image must remain reachable in the Preview iframe');
-      const clickActivationPromise = waitForOpenLink();
+      const clickActivationPromise = openLinkWaiter.wait();
       await linkedImageHandle.click();
       const clickActivation = await clickActivationPromise;
       assert.deepEqual(clickActivation, {
@@ -632,6 +758,7 @@ async function main(): Promise<void> {
       await exportPage.close();
     }
   } finally {
+    openLinkWaiter?.dispose(new Error('Preview test ended before openLink delivery'));
     await browser.close();
     fs.rmSync(temp, { recursive: true, force: true });
   }
