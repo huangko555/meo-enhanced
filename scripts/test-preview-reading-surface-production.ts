@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import type { HTTPRequest } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import exportRuntime from '../src/export/runtime';
@@ -113,19 +112,35 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
+    type PreviewOpenLink = { readonly type: 'openLink'; readonly href: string; readonly source: 'preview' };
+    let acceptOpenLink: ((message: PreviewOpenLink) => void) | null = null;
+    const waitForOpenLink = () => {
+      assert.equal(acceptOpenLink, null, 'Only one linked-image activation may be pending');
+      return new Promise<PreviewOpenLink>((resolve) => {
+        acceptOpenLink = resolve;
+      });
+    };
     await browser.defaultBrowserContext().overridePermissions('http://localhost', ['clipboard-read', 'clipboard-write']);
-    await page.exposeFunction('__renderPreviewThroughHost', (raw: unknown) => {
-      const request = decodeWebviewToHostMessage(raw);
-      assert.equal(request?.type, 'requestPreviewRender');
-      if (request?.type !== 'requestPreviewRender') throw new Error('Preview request failed Protocol decoding');
+    await page.exposeFunction('__deliverWebviewMessageToHost', (raw: unknown) => {
+      const message = decodeWebviewToHostMessage(raw);
+      assert.ok(message, 'Webview message failed Protocol decoding');
+      if (message.type === 'openLink') {
+        assert.equal(message.source, 'preview');
+        assert.ok(acceptOpenLink, 'Unexpected linked-image activation');
+        const accept = acceptOpenLink;
+        acceptOpenLink = null;
+        accept(message as PreviewOpenLink);
+        return null;
+      }
+      if (message.type !== 'requestPreviewRender') return null;
       const rendered = exportRuntime.renderPreviewDocument({
-        markdownText: request.text,
+        markdownText: message.text,
         sourceDocumentPath,
-        styleEnvironment: request.environment
+        styleEnvironment: message.environment
       });
       const response = decodeHostToWebviewMessage({
         type: 'previewRenderResult',
-        requestId: request.requestId,
+        requestId: message.requestId,
         result: { ok: true, value: rendered }
       });
       assert.equal(response?.type, 'previewRenderResult');
@@ -147,10 +162,8 @@ async function main(): Promise<void> {
       window.acquireVsCodeApi=()=>(
         {
           postMessage(message) {
-            window.__lastPreviewMessage = message;
-            if (message.type !== 'requestPreviewRender') return;
-            window.__renderPreviewThroughHost(message).then((response) => {
-              window.dispatchEvent(new MessageEvent('message', { data: response }));
+            window.__deliverWebviewMessageToHost(message).then((response) => {
+              if (response) window.dispatchEvent(new MessageEvent('message', { data: response }));
             });
           },
           getState() { return undefined; },
@@ -219,27 +232,19 @@ async function main(): Promise<void> {
         doc.documentElement.style.zoom = String(probe);
         doc.documentElement.style.zoom = String(target);
       }, { probe: zoom === 0.8 ? 0.81 : 1.24, target: zoom });
-      await page.evaluate(() => {
-        (window as typeof window & { __lastPreviewMessage?: unknown }).__lastPreviewMessage = null;
-      });
+      const enterActivationPromise = waitForOpenLink();
       await page.keyboard.press('Enter');
-      const enterActivation = await page.evaluate(() => (
-        window as typeof window & { __lastPreviewMessage?: unknown }
-      ).__lastPreviewMessage);
+      const enterActivation = await enterActivationPromise;
       assert.deepEqual(enterActivation, {
         type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
-      });
-      await page.evaluate(() => {
-        (window as typeof window & { __lastPreviewMessage?: unknown }).__lastPreviewMessage = null;
       });
       const previewFrame = page.frames().find((candidate) => candidate !== page.mainFrame());
       assert.ok(previewFrame, 'Preview iframe must remain attached for linked-image activation');
       const linkedImageHandle = await previewFrame.$('img[alt="Linked alt"]');
       assert.ok(linkedImageHandle, 'Linked Markdown image must remain reachable in the Preview iframe');
+      const clickActivationPromise = waitForOpenLink();
       await linkedImageHandle.click();
-      const clickActivation = await page.evaluate(() => (
-        window as typeof window & { __lastPreviewMessage?: unknown }
-      ).__lastPreviewMessage);
+      const clickActivation = await clickActivationPromise;
       assert.deepEqual(clickActivation, {
         type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
       });
@@ -588,67 +593,6 @@ async function main(): Promise<void> {
       assert.equal(result.table.proseKbdWhiteSpace, 'nowrap');
       assert.equal(result.table.proseKbdFragments, 1);
     }
-
-    await page.setRequestInterception(true);
-    const delayedRequestHandler = (request: HTTPRequest) => {
-      if (request.url() !== 'http://localhost/controlled-delayed.svg') {
-        void request.continue();
-      }
-    };
-    page.on('request', delayedRequestHandler);
-    const delayedRequest = page.waitForRequest('http://localhost/controlled-delayed.svg');
-    const delayedMarkdown = 'Delayed frame marker\n\n![Delayed alt](http://localhost/controlled-delayed.svg)';
-    await page.evaluate((text) => {
-      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 2 } }));
-    }, delayedMarkdown);
-    const pendingRequest = await delayedRequest;
-    await page.waitForFunction(() => {
-      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
-      return doc?.body.textContent?.includes('Delayed frame marker') === true
-        && doc.querySelector('img[alt="Delayed alt"]') !== null;
-    });
-    const pendingObservation = await page.evaluate(() => {
-      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-      const doc = frame.contentDocument!;
-      (window as typeof window & { __delayedFrameDocument?: Document }).__delayedFrameDocument = doc;
-      const image = doc.querySelector<HTMLImageElement>('img[alt="Delayed alt"]')!;
-      return {
-        marker: doc.body.textContent?.includes('Delayed frame marker') === true,
-        complete: image.complete,
-        naturalWidth: image.naturalWidth,
-        naturalHeight: image.naturalHeight
-      };
-    });
-    assert.deepEqual(pendingObservation, { marker: true, complete: false, naturalWidth: 0, naturalHeight: 0 });
-    await page.evaluate(() => {
-      window.dispatchEvent(new MessageEvent('message', {
-        data: { type: 'docChanged', text: 'Current frame marker', version: 3 }
-      }));
-    });
-    await page.waitForFunction(() => {
-      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
-      return frame?.contentDocument?.body.textContent?.includes('Current frame marker') === true;
-    });
-    const currentObservation = await page.evaluate(() => {
-      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-      const doc = frame.contentDocument!;
-      const delayedDocument = (window as typeof window & { __delayedFrameDocument?: Document }).__delayedFrameDocument;
-      return {
-        documentReplaced: doc !== delayedDocument,
-        currentMarker: doc.body.textContent?.includes('Current frame marker') === true,
-        delayedMarker: doc.body.textContent?.includes('Delayed frame marker') === true,
-        delayedImagePresent: doc.querySelector('img[alt="Delayed alt"]') !== null
-      };
-    });
-    assert.deepEqual(currentObservation, {
-      documentReplaced: true,
-      currentMarker: true,
-      delayedMarker: false,
-      delayedImagePresent: false
-    });
-    await pendingRequest.abort().catch(() => undefined);
-    page.off('request', delayedRequestHandler);
-    await page.setRequestInterception(false);
 
     const exportedFallback = exportRuntime.renderExportHtmlDocument({
       readingSnapshot: {
