@@ -164,8 +164,25 @@ function createOpenLinkWaiter(options: {
   };
 }
 
+async function activateAndWaitForOpenLink(
+  waiter: ReturnType<typeof createOpenLinkWaiter>,
+  action: () => Promise<void>
+): Promise<PreviewOpenLink> {
+  const result = waiter.wait();
+  try {
+    await action();
+  } catch (error) {
+    const primaryError = error instanceof Error ? error : new Error(String(error));
+    waiter.reject(primaryError);
+    await result.catch(() => undefined);
+    throw primaryError;
+  }
+  return result;
+}
+
 async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<void> {
   let scheduled: { callback: () => void; timeoutMs: number } | null = null;
+  let cancellationCount = 0;
   const createWaiter = () => createOpenLinkWaiter({
     timeoutMs: defaultTimeoutMs,
     scheduleTimeout: (callback, timeoutMs) => {
@@ -174,7 +191,10 @@ async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<
       return scheduled;
     },
     cancelTimeout: (handle) => {
-      if (scheduled === handle) scheduled = null;
+      if (scheduled === handle) {
+        cancellationCount += 1;
+        scheduled = null;
+      }
     }
   });
   const message: PreviewOpenLink = {
@@ -182,38 +202,63 @@ async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<
   };
 
   const success = createWaiter();
+  assert.equal(success.getState(), 'idle');
   const successResult = success.wait();
   assert.equal(success.getState(), 'pending');
   assert.equal(success.resolve(message), true);
   assert.deepEqual(await successResult, message);
   assert.equal(success.getState(), 'resolved');
   assert.equal(scheduled, null);
+  assert.equal(cancellationCount, 1);
+  assert.equal(success.resolve(message), false);
+  assert.equal(success.reject(new Error('duplicate settle must be ignored')), false);
+  assert.equal(cancellationCount, 1);
 
   const missing = createWaiter();
+  assert.equal(missing.getState(), 'idle');
   const missingResult = missing.wait();
   assert.equal(scheduled?.timeoutMs, defaultTimeoutMs);
   scheduled?.callback();
   await assert.rejects(missingResult, /default browser-test timeout/);
   assert.equal(missing.getState(), 'rejected');
   assert.equal(scheduled, null);
+  assert.equal(cancellationCount, 2);
+  assert.equal(missing.reject(new Error('duplicate rejection must be ignored')), false);
+  assert.equal(cancellationCount, 2);
 
   const decoderError = createWaiter();
+  assert.equal(decoderError.getState(), 'idle');
   const decoderResult = decoderError.wait();
   const primaryDecoderError = new Error('openLink Protocol decoding failed');
   assert.equal(decoderError.reject(primaryDecoderError), true);
   await assert.rejects(decoderResult, (error) => error === primaryDecoderError);
   assert.equal(decoderError.getState(), 'rejected');
   assert.equal(scheduled, null);
+  assert.equal(cancellationCount, 3);
+
+  const actionError = createWaiter();
+  assert.equal(actionError.getState(), 'idle');
+  const primaryActionError = new Error('Preview activation action failed');
+  await assert.rejects(
+    activateAndWaitForOpenLink(actionError, async () => { throw primaryActionError; }),
+    (error) => error === primaryActionError
+  );
+  assert.equal(actionError.getState(), 'rejected');
+  assert.equal(scheduled, null);
+  assert.equal(cancellationCount, 4);
 
   const disposed = createWaiter();
+  assert.equal(disposed.getState(), 'idle');
   const disposedResult = disposed.wait();
   const primaryDisposeError = new Error('Preview page closed before openLink delivery');
   disposed.dispose(primaryDisposeError);
   await assert.rejects(disposedResult, (error) => error === primaryDisposeError);
   assert.equal(disposed.getState(), 'disposed');
   assert.equal(scheduled, null);
+  assert.equal(cancellationCount, 5);
   disposed.dispose(new Error('duplicate dispose must be ignored'));
   assert.equal(disposed.getState(), 'disposed');
+  assert.equal(cancellationCount, 5);
 }
 
 async function main(): Promise<void> {
@@ -358,9 +403,10 @@ async function main(): Promise<void> {
         doc.documentElement.style.zoom = String(probe);
         doc.documentElement.style.zoom = String(target);
       }, { probe: zoom === 0.8 ? 0.81 : 1.24, target: zoom });
-      const enterActivationPromise = openLinkWaiter.wait();
-      await page.keyboard.press('Enter');
-      const enterActivation = await enterActivationPromise;
+      const enterActivation = await activateAndWaitForOpenLink(
+        openLinkWaiter,
+        () => page.keyboard.press('Enter')
+      );
       assert.deepEqual(enterActivation, {
         type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
       });
@@ -368,9 +414,10 @@ async function main(): Promise<void> {
       assert.ok(previewFrame, 'Preview iframe must remain attached for linked-image activation');
       const linkedImageHandle = await previewFrame.$('img[alt="Linked alt"]');
       assert.ok(linkedImageHandle, 'Linked Markdown image must remain reachable in the Preview iframe');
-      const clickActivationPromise = openLinkWaiter.wait();
-      await linkedImageHandle.click();
-      const clickActivation = await clickActivationPromise;
+      const clickActivation = await activateAndWaitForOpenLink(
+        openLinkWaiter,
+        () => linkedImageHandle.click()
+      );
       assert.deepEqual(clickActivation, {
         type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
       });
