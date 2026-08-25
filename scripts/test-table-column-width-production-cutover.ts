@@ -434,6 +434,113 @@ async function runStickyPointerIdentityTransaction<T>(
   return result as T;
 }
 
+async function settleStickyPointerMove(
+  page: any,
+  selector: string,
+  column: number
+): Promise<void> {
+  let installed = false;
+  let hasPrimary = false;
+  let primary: unknown;
+  const cleanupErrors: unknown[] = [];
+  try {
+    const point = await page.evaluate(({ handleSelector, expectedColumn }) => {
+      const lease = (window as any).__columnWidthStickyPointerExpectedTable;
+      if (lease?.state !== 'published' || lease.moveSettlement) {
+        throw new Error('Sticky pointer move settlement requires one published identity lease');
+      }
+      const matches = Array.from(document.querySelectorAll<HTMLElement>(handleSelector));
+      if (matches.length !== 1) {
+        throw new Error(`pointer move settlement requires one current match, received ${matches.length}: ${handleSelector}`);
+      }
+      const handle = matches[0];
+      const stickyTable = handle.closest<HTMLTableElement>('.meo-md-html-table-sticky-table');
+      const headerCell = handle.closest<HTMLTableCellElement>('th');
+      const shell = stickyTable?.closest<HTMLElement>('.meo-md-html-table-shell');
+      const mainTable = shell?.querySelector<HTMLTableElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
+      );
+      const rect = handle.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      if (!handle.isConnected || !stickyTable || !mainTable?.isConnected || mainTable !== lease.table ||
+        headerCell?.cellIndex !== expectedColumn || handle.dataset.tableResizeColumn !== String(expectedColumn) ||
+        !(rect.width > 0 && rect.height > 0) || document.elementFromPoint(x, y) !== handle) {
+        throw new Error(`pointer move settlement found no visible current target: ${handleSelector}`);
+      }
+      const nativeFrame = window.requestAnimationFrame.bind(window);
+      const tracker = (window as any).TableStabilityHarness.installCausalFrameSettlement(window, () => null);
+      const onPointerMoveRoot = () => tracker.beginEventRoot();
+      window.addEventListener('pointermove', onPointerMoveRoot, { capture: true, once: true });
+      lease.moveSettlement = { tracker, nativeFrame, onPointerMoveRoot };
+      return { x, y };
+    }, { handleSelector: selector, expectedColumn: column });
+    installed = true;
+    await page.mouse.move(point.x, point.y);
+    await page.evaluate(async ({ handleSelector, expectedColumn }) => {
+      const lease = (window as any).__columnWidthStickyPointerExpectedTable;
+      const settlement = lease?.moveSettlement;
+      const matches = Array.from(document.querySelectorAll<HTMLElement>(handleSelector));
+      if (lease?.state !== 'published' || !settlement || matches.length !== 1) {
+        throw new Error(`pointer move did not settle to one current handle: ${handleSelector}`);
+      }
+      const handle = matches[0];
+      const stickyTable = handle.closest<HTMLTableElement>('.meo-md-html-table-sticky-table');
+      const headerCell = handle.closest<HTMLTableCellElement>('th');
+      const shell = stickyTable?.closest<HTMLElement>('.meo-md-html-table-shell');
+      const mainTable = shell?.querySelector<HTMLTableElement>(
+        '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
+      );
+      const rect = handle.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!handle.isConnected || !stickyTable || !mainTable?.isConnected || mainTable !== lease.table ||
+        headerCell?.cellIndex !== expectedColumn || handle.dataset.tableResizeColumn !== String(expectedColumn) ||
+        !(rect.width > 0 && rect.height > 0) || !(hit === handle || (hit instanceof Node && handle.contains(hit)))) {
+        throw new Error(`pointer move settled on the wrong current target: ${handleSelector}`);
+      }
+      settlement.tracker.accept();
+      await new Promise<void>((resolve, reject) => {
+        const inspect = () => {
+          const diagnostics = settlement.tracker.diagnostics();
+          if (diagnostics.failure) return reject(new Error(diagnostics.failure));
+          if (diagnostics.phase === 'complete') return resolve();
+          settlement.nativeFrame(inspect);
+        };
+        settlement.nativeFrame(inspect);
+      });
+    }, { handleSelector: selector, expectedColumn: column });
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
+  } finally {
+    if (installed) {
+      try {
+        await page.evaluate(() => {
+          const lease = (window as any).__columnWidthStickyPointerExpectedTable;
+          const settlement = lease?.moveSettlement;
+          if (!settlement) throw new Error('Sticky pointer move settlement was not available for cleanup');
+          window.removeEventListener('pointermove', settlement.onPointerMoveRoot, { capture: true });
+          settlement.tracker.dispose();
+          delete lease.moveSettlement;
+          if (lease.moveSettlement) throw new Error('Sticky pointer move settlement remained published after cleanup');
+        });
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+  }
+  if (hasPrimary && cleanupErrors.length) {
+    throw new AggregateError([primary, ...cleanupErrors], 'Sticky pointer move settlement and cleanup failed');
+  }
+  if (hasPrimary) throw primary;
+  if (cleanupErrors.length === 1) throw cleanupErrors[0];
+  if (cleanupErrors.length > 1) {
+    throw new AggregateError(cleanupErrors, 'Sticky pointer move settlement cleanup failed');
+  }
+}
+
 async function dragPath(
   page: any,
   selector: string,
@@ -485,6 +592,7 @@ async function dragPath(
   let primary: unknown;
   const cleanupErrors: unknown[] = [];
   try {
+    await settleStickyPointerMove(page, selector, column);
     const acquisition = await page.evaluate(({ handleSelector, expectedColumn }) => {
       const matches = Array.from(document.querySelectorAll<HTMLElement>(handleSelector));
       if (matches.length !== 1) {
@@ -535,7 +643,6 @@ async function dragPath(
       lease.rect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
       return { x, y };
     }, { handleSelector: selector, expectedColumn: column });
-    await page.mouse.move(acquisition.x, acquisition.y);
     const preDown = await page.evaluate(({ handleSelector, expectedColumn }) => {
       const transaction = (window as any).__columnWidthStickyPointerExpectedTable;
       const current = document.querySelector<HTMLElement>(handleSelector);
