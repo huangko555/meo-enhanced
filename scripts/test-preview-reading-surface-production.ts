@@ -168,16 +168,21 @@ async function activateAndWaitForOpenLink(
   waiter: ReturnType<typeof createOpenLinkWaiter>,
   action: () => Promise<void>
 ): Promise<PreviewOpenLink> {
-  const result = waiter.wait();
+  const observedResult = waiter.wait().then(
+    (value) => ({ status: 'fulfilled', value } as const),
+    (error: unknown) => ({ status: 'rejected', error } as const)
+  );
   try {
     await action();
   } catch (error) {
     const primaryError = error instanceof Error ? error : new Error(String(error));
     waiter.reject(primaryError);
-    await result.catch(() => undefined);
+    await observedResult;
     throw primaryError;
   }
-  return result;
+  const outcome = await observedResult;
+  if (outcome.status === 'rejected') throw outcome.error;
+  return outcome.value;
 }
 
 async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<void> {
@@ -247,6 +252,22 @@ async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<
   assert.equal(scheduled, null);
   assert.equal(cancellationCount, 4);
 
+  const decoderFirst = createWaiter();
+  assert.equal(decoderFirst.getState(), 'idle');
+  let finishPendingAction: () => void = () => assert.fail('Pending action resolver was not installed');
+  const decoderFirstResult = activateAndWaitForOpenLink(
+    decoderFirst,
+    () => new Promise<void>((resolve) => { finishPendingAction = resolve; })
+  );
+  assert.equal(decoderFirst.getState(), 'pending');
+  const primaryEarlyDecoderError = new Error('openLink decoder failed while activation remained pending');
+  assert.equal(decoderFirst.reject(primaryEarlyDecoderError), true);
+  finishPendingAction();
+  await assert.rejects(decoderFirstResult, (error) => error === primaryEarlyDecoderError);
+  assert.equal(decoderFirst.getState(), 'rejected');
+  assert.equal(scheduled, null);
+  assert.equal(cancellationCount, 5);
+
   const disposed = createWaiter();
   assert.equal(disposed.getState(), 'idle');
   const disposedResult = disposed.wait();
@@ -255,10 +276,10 @@ async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<
   await assert.rejects(disposedResult, (error) => error === primaryDisposeError);
   assert.equal(disposed.getState(), 'disposed');
   assert.equal(scheduled, null);
-  assert.equal(cancellationCount, 5);
+  assert.equal(cancellationCount, 6);
   disposed.dispose(new Error('duplicate dispose must be ignored'));
   assert.equal(disposed.getState(), 'disposed');
-  assert.equal(cancellationCount, 5);
+  assert.equal(cancellationCount, 6);
 }
 
 async function main(): Promise<void> {
