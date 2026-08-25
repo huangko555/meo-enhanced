@@ -94,6 +94,55 @@ async function enterMermaidFullscreen(page: Page): Promise<void> {
   });
 }
 
+async function assertFullscreenNavigationIsSessionLocal(page: Page): Promise<void> {
+  const embeddedSelector = '.meo-mermaid-block .meo-mermaid-svg-wrapper';
+  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+  const embeddedBefore = await page.$eval(embeddedSelector, (wrapper) => {
+    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
+    return { scale: matrix.a, x: matrix.e, y: matrix.f };
+  });
+
+  await enterMermaidFullscreen(page);
+  const point = await page.$eval('.meo-mermaid-fullscreen', (fullscreen) => {
+    const rect = fullscreen.getBoundingClientRect();
+    return { x: rect.left + rect.width * 0.34, y: rect.top + rect.height * 0.61 };
+  });
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.wheel({ deltaY: -120 });
+  await page.mouse.wheel({ deltaY: -120 });
+  await page.mouse.move(100, 100);
+  await page.mouse.down();
+  await page.mouse.move(260, 220);
+  await page.mouse.up();
+  await page.click('.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Exit fullscreen"]');
+  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+
+  const embeddedAfterExit = await page.$eval(embeddedSelector, (wrapper) => {
+    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
+    return { scale: matrix.a, x: matrix.e, y: matrix.f };
+  });
+  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
+  const embeddedAfterZoom = await page.$eval(embeddedSelector, (wrapper) => {
+    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
+    return { scale: matrix.a, x: matrix.e, y: matrix.f };
+  });
+  if (
+    Math.abs(embeddedAfterExit.scale - embeddedBefore.scale) > 0.001 ||
+    Math.abs(embeddedAfterExit.x - embeddedBefore.x) > 1 ||
+    Math.abs(embeddedAfterExit.y - embeddedBefore.y) > 1 ||
+    Math.abs(embeddedAfterZoom.scale - 1.5) > 0.001 ||
+    Math.abs(embeddedAfterZoom.x) > 1 ||
+    Math.abs(embeddedAfterZoom.y) > 1
+  ) {
+    throw new Error(`Fullscreen navigation leaked into embedded Mermaid: ${JSON.stringify({
+      embeddedBefore,
+      embeddedAfterExit,
+      embeddedAfterZoom
+    })}`);
+  }
+  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Reset zoom"]');
+}
+
 async function assertFullscreenWheelKeepsPointerAnchored(page: Page): Promise<void> {
   await enterMermaidFullscreen(page);
   const before = await page.evaluate(() => {
@@ -278,6 +327,204 @@ async function assertFullscreenExitRestoresReadingContext(page: Page): Promise<v
     ) {
       throw new Error(`Fullscreen Mermaid ${mechanism} did not restore its reading context: ${JSON.stringify({ before, after })}`);
     }
+  }
+
+  const lifecycleFocus = await page.evaluate(() => {
+    const oldTarget = document.createElement('button');
+    oldTarget.type = 'button';
+    oldTarget.textContent = 'Fullscreen lifecycle old focus';
+    const newTarget = document.createElement('button');
+    newTarget.type = 'button';
+    newTarget.textContent = 'Fullscreen lifecycle new focus';
+    document.body.append(oldTarget, newTarget);
+    return { oldTarget: oldTarget.textContent, newTarget: newTarget.textContent };
+  });
+  for (const cause of ['mode', 'replacement', 'destroy'] as const) {
+    await page.evaluate((targetText) => {
+      Array.from(document.querySelectorAll<HTMLButtonElement>('body > button'))
+        .find((button) => button.textContent === targetText)!.focus();
+    }, lifecycleFocus.oldTarget);
+    await enterMermaidFullscreen(page);
+    const before = await page.evaluate(() => {
+      const target = Array.from(document.querySelectorAll<HTMLButtonElement>('body > button'))
+        .find((button) => button.textContent === 'Fullscreen lifecycle new focus')!;
+      target.focus();
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      scroller.scrollTop += 37;
+      return {
+        scrollTop: scroller.scrollTop,
+        targetFocused: document.activeElement === target
+      };
+    });
+    await page.evaluate((lifecycleCause) => {
+      const editor = (window as any).__mermaidEditingEditor;
+      if (lifecycleCause === 'mode') editor.setMode('source');
+      else if (lifecycleCause === 'replacement') editor.setText(editor.getText().replace('A --> B', 'A --> C'));
+      else editor.destroy();
+    }, cause);
+    await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+    const after = await page.evaluate((targetText) => {
+      const target = Array.from(document.querySelectorAll<HTMLButtonElement>('body > button'))
+        .find((button) => button.textContent === targetText)!;
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      return {
+        scrollTop: scroller?.scrollTop ?? null,
+        targetFocused: document.activeElement === target,
+        fullscreen: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim'))
+      };
+    }, lifecycleFocus.newTarget);
+    if (
+      !before.targetFocused || !after.targetFocused || after.fullscreen ||
+      (after.scrollTop !== null && cause === 'destroy' && Math.abs(after.scrollTop - before.scrollTop) > 1)
+    ) {
+      throw new Error(`Fullscreen Mermaid ${cause} cleanup restored stale context: ${JSON.stringify({ before, after })}`);
+    }
+    if (cause === 'mode') {
+      await page.evaluate(() => (window as any).__mermaidEditingEditor.setMode('live'));
+      await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(80, 'center'));
+      await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
+    } else if (cause === 'replacement') {
+      await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(80, 'center'));
+      await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
+    }
+  }
+}
+
+async function assertLateFullscreenExitCannotCloseReplacementSession(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.getElementById('app')!.replaceChildren();
+    (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+      parent: document.getElementById('app')!,
+      text: ['```mermaid', 'graph TD', 'A --> B', '```', '', 'after'].join('\n'),
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+  });
+  await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
+  await enterMermaidFullscreen(page);
+  await page.evaluate(() => {
+    const staleExit = document.querySelector<HTMLButtonElement>(
+      '.meo-mermaid-fullscreen .meo-mermaid-exit-btn'
+    )!;
+    staleExit.setAttribute('aria-label', 'Exit stale Mermaid fullscreen');
+    Object.assign(staleExit.style, {
+      position: 'fixed',
+      left: '8px',
+      top: '48px',
+      zIndex: '10001',
+      opacity: '1'
+    });
+    document.body.appendChild(staleExit);
+  });
+  await page.mouse.move(320, 260);
+  await page.mouse.down();
+  await page.mouse.move(380, 310);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+  await enterMermaidFullscreen(page);
+  await page.$eval(
+    '.meo-mermaid-fullscreen .meo-mermaid-zoom-btn[aria-label="Zoom in"]',
+    (button) => (button as HTMLButtonElement).focus()
+  );
+  const before = await page.evaluate(() => {
+    const wrapper = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper')!;
+    const matrix = new DOMMatrix(getComputedStyle(wrapper).transform);
+    return {
+      transform: { scale: matrix.a, x: matrix.e, y: matrix.f },
+      focusedLabel: document.activeElement?.getAttribute('aria-label') ?? null
+    };
+  });
+  await page.click('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]');
+  const afterLateClose = await page.evaluate(() => {
+    const wrapper = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen .meo-mermaid-svg-wrapper');
+    const matrix = wrapper ? new DOMMatrix(getComputedStyle(wrapper).transform) : null;
+    return {
+      fullscreen: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim')),
+      transform: matrix ? { scale: matrix.a, x: matrix.e, y: matrix.f } : null,
+      focusedLabel: document.activeElement?.getAttribute('aria-label') ?? null
+    };
+  });
+  if (
+    !afterLateClose.fullscreen || !afterLateClose.transform ||
+    Math.abs(afterLateClose.transform.scale - before.transform.scale) > 0.001 ||
+    Math.abs(afterLateClose.transform.x - before.transform.x) > 1 ||
+    Math.abs(afterLateClose.transform.y - before.transform.y) > 1 ||
+    afterLateClose.focusedLabel !== before.focusedLabel
+  ) {
+    throw new Error(`Late Mermaid close changed the replacement session: ${JSON.stringify({ before, afterLateClose })}`);
+  }
+
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.meo-mermaid-fullscreen-scrim'));
+  await page.click('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]');
+  await page.click('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]');
+  const afterRepeatedExit = await page.evaluate(() => ({
+    fullscreen: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim')),
+    staleConnected: Boolean(document.querySelector('body > .meo-mermaid-exit-btn[aria-label="Exit stale Mermaid fullscreen"]'))
+  }));
+  if (afterRepeatedExit.fullscreen || !afterRepeatedExit.staleConnected) {
+    throw new Error(`Repeated stale Mermaid exit was not idempotent: ${JSON.stringify(afterRepeatedExit)}`);
+  }
+}
+
+async function assertFullscreenCleanupPreservesPrimaryCause(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as any).__mermaidEditingEditor.destroy();
+    document.querySelectorAll('body > button').forEach((button) => button.remove());
+    document.getElementById('app')!.replaceChildren();
+    (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
+      parent: document.getElementById('app')!,
+      text: ['```mermaid', 'graph TD', 'A --> B', '```'].join('\n'),
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+  });
+  await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
+  await enterMermaidFullscreen(page);
+  await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
+    const overlay = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen-scrim')!;
+    container.releasePointerCapture = () => { throw new Error('primary pointer capture cleanup failed'); };
+    overlay.remove = () => { throw new Error('secondary overlay cleanup failed'); };
+  });
+  await page.mouse.move(320, 260);
+  await page.mouse.down();
+  await page.mouse.move(360, 300);
+  const failure = await page.evaluate(() => {
+    try {
+      (window as any).__mermaidEditingEditor.destroy();
+      return null;
+    } catch (error) {
+      const aggregate = error as AggregateError;
+      return {
+        name: aggregate.name,
+        message: aggregate.message,
+        cause: aggregate.cause instanceof Error ? aggregate.cause.message : String(aggregate.cause),
+        errors: Array.from(aggregate.errors ?? [], (item) => item instanceof Error ? item.message : String(item)),
+        overlayConnected: Boolean(document.querySelector('.meo-mermaid-fullscreen-scrim'))
+      };
+    }
+  });
+  await page.mouse.up();
+  await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
+    const overlay = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen-scrim')!;
+    delete (container as any).releasePointerCapture;
+    delete (overlay as any).remove;
+    overlay.remove();
+  });
+  if (
+    !failure || failure.name !== 'AggregateError' ||
+    failure.message !== 'Mermaid fullscreen dispose cleanup failed' ||
+    failure.cause !== 'primary pointer capture cleanup failed' ||
+    JSON.stringify(failure.errors) !== JSON.stringify([
+      'primary pointer capture cleanup failed',
+      'secondary overlay cleanup failed'
+    ]) ||
+    !failure.overlayConnected
+  ) {
+    throw new Error(`Fullscreen cleanup did not preserve its primary cause: ${JSON.stringify(failure)}`);
   }
 }
 
@@ -690,6 +937,7 @@ async function main() {
       throw new Error(`Block toolbars were visible before hover: ${JSON.stringify(hiddenToolbarState)}`);
     }
     await assertEmbeddedMermaidUsesButtonOnlyNavigation(page);
+    await assertFullscreenNavigationIsSessionLocal(page);
     await assertFullscreenWheelKeepsPointerAnchored(page);
     await assertFullscreenPanStaysWithinDiagramBounds(page);
 
@@ -1824,6 +2072,8 @@ async function main() {
     });
 
     await assertFullscreenExitRestoresReadingContext(page);
+    await assertLateFullscreenExitCannotCloseReplacementSession(page);
+    await assertFullscreenCleanupPreservesPrimaryCause(page);
 
     console.log('Mermaid editing checks passed');
   } finally {
