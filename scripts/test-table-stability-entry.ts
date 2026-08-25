@@ -12,6 +12,7 @@ import { resolveInlineSourceOffsetAtPoint } from '../webview/src/helpers/inlineP
 import {
   getTableTransactionProvenanceSnapshot
 } from '../webview/src/adapters/tableTransactionProvenance';
+import { createTableCommandTargetRegistry } from '../webview/src/editor/tableCommandTargetRegistry';
 import { installCausalFrameSettlement } from './causal-frame-settlement';
 
 const getTableProvenanceSnapshot = () => {
@@ -37,6 +38,7 @@ const getTableProvenanceSnapshot = () => {
     addToHistoryAnnotation: (value: boolean) => ReturnType<typeof Transaction.addToHistory.of>;
     getTableProvenanceSnapshot: typeof getTableProvenanceSnapshot;
     installCausalFrameSettlement: typeof installCausalFrameSettlement;
+    createTableCommandTargetRegistry: typeof createTableCommandTargetRegistry;
   };
 }).TableStabilityHarness = {
   createEditor,
@@ -49,5 +51,6 @@ const getTableProvenanceSnapshot = () => {
   resolveInlineSourceOffsetAtPoint,
   addToHistoryAnnotation: (value: boolean) => Transaction.addToHistory.of(value),
   getTableProvenanceSnapshot,
-  installCausalFrameSettlement
+  installCausalFrameSettlement,
+  createTableCommandTargetRegistry
 };

@@ -77,6 +77,34 @@ async function main() {
       throw new Error(`pointerup did not persist the visible rectangle: ${JSON.stringify(persisted)}`);
     }
 
+    const beforeDeleteKeys = await page.evaluate(() => ({
+      text: (window as any).__selectionEditor.view.state.doc.toString(),
+      values: Array.from(
+        document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] textarea')
+      ).map((input) => input.value)
+    }));
+    await page.keyboard.press('Delete');
+    await page.keyboard.press('Backspace');
+    const afterDeleteKeys = await page.evaluate(() => ({
+      committed: (window as any).__selectionEditor.commitTransientEdits(),
+      text: (window as any).__selectionEditor.view.state.doc.toString(),
+      values: Array.from(
+        document.querySelectorAll<HTMLTextAreaElement>('.meo-md-html-table-shell[data-test-table="0"] textarea')
+      ).map((input) => input.value),
+      selected: document.querySelectorAll('.meo-md-html-table-cell-selected').length
+    }));
+    if (
+      afterDeleteKeys.committed ||
+      afterDeleteKeys.text !== beforeDeleteKeys.text ||
+      JSON.stringify(afterDeleteKeys.values) !== JSON.stringify(beforeDeleteKeys.values) ||
+      afterDeleteKeys.selected !== 4
+    ) {
+      throw new Error(`Delete/Backspace changed the rectangular selection document: ${JSON.stringify({
+        beforeDeleteKeys,
+        afterDeleteKeys
+      })}`);
+    }
+
     await page.evaluate(() => {
       (window as any).__selectionClipboard = null;
       document.addEventListener('copy', (event) => {
@@ -598,22 +626,8 @@ async function main() {
     for (const fault of ['image', 'sticky', 'listeners', 'interaction'] as const) {
       await page.evaluate((text) => {
         document.getElementById('app')!.replaceChildren();
-        const nativeQueueMicrotask = window.queueMicrotask.bind(window);
-        const harness = {
-          active: false,
-          queueCalls: 0,
-          nativeQueueMicrotask
-        };
+        const harness = { active: false };
         (window as any).__destroyOwnerFault = harness;
-        window.queueMicrotask = (callback) => {
-          if (harness.active) {
-            harness.queueCalls += 1;
-            if ((window as any).__destroyOwnerFaultKind === 'command') {
-              throw new Error('controlled command owner failure');
-            }
-          }
-          return nativeQueueMicrotask(callback);
-        };
         (window as any).__selectionEditor = (window as any).TableStabilityHarness.createEditor({
           parent: document.getElementById('app')!,
           text,
@@ -630,24 +644,23 @@ async function main() {
         const nativeWindowRemove = window.removeEventListener.bind(window);
         const nativeRemove = EventTarget.prototype.removeEventListener;
         const nativeDispatch = EventTarget.prototype.dispatchEvent;
-        const nativeMapGet = Map.prototype.get;
         const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
         const nativeClearTimeout = window.clearTimeout.bind(window);
         const nativeSetTimeout = window.setTimeout.bind(window);
         const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
-        const counters = { sticky: 0, listeners: 0, frame: 0, interaction: 0 };
+        const laterOwnerRan = { sticky: false, listeners: false, frame: false, interaction: false };
         let interactionTimer: number | undefined;
 
         window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions) => {
           if (harness.active && type === 'resize') {
-            counters.sticky += 1;
+            laterOwnerRan.sticky = true;
             if (faultKind === 'sticky') throw new Error('controlled sticky owner failure');
           }
           nativeWindowRemove(type, listener, options);
         }) as typeof window.removeEventListener;
         EventTarget.prototype.removeEventListener = function (type, listener, options) {
           if (harness.active && this === table) {
-            counters.listeners += 1;
+            laterOwnerRan.listeners = true;
             if (faultKind === 'listeners') throw new Error('controlled listeners owner failure');
           }
           return nativeRemove.call(this, type, listener, options);
@@ -664,23 +677,16 @@ async function main() {
           }
           return nativeDispatch.call(this, event);
         };
-        Map.prototype.get = function (key) {
-          if (harness.active && typeof key === 'string' && key.startsWith('table-command-target-')) {
-            harness.queueCalls += 1;
-            if (faultKind === 'command') throw new Error('controlled command owner failure');
-          }
-          return nativeMapGet.call(this, key);
-        };
         window.cancelAnimationFrame = (handle) => {
           if (harness.active && handle === 4242) {
-            counters.frame += 1;
+            laterOwnerRan.frame = true;
             if (faultKind === 'frame') throw new Error('controlled frame owner failure');
           }
           nativeCancelAnimationFrame(handle);
         };
         window.clearTimeout = ((handle?: number) => {
           if (harness.active && handle === interactionTimer) {
-            counters.interaction += 1;
+            laterOwnerRan.interaction = true;
             if (faultKind === 'interaction') throw new Error('controlled interaction owner failure');
           }
           nativeClearTimeout(handle);
@@ -704,7 +710,6 @@ async function main() {
           });
           table.append(image);
         }
-        (window as any).__destroyOwnerFaultKind = faultKind;
         harness.active = true;
         let observed: unknown = null;
         try {
@@ -713,11 +718,9 @@ async function main() {
           observed = error;
         } finally {
           harness.active = false;
-          window.queueMicrotask = harness.nativeQueueMicrotask;
           window.removeEventListener = nativeWindowRemove;
           EventTarget.prototype.removeEventListener = nativeRemove;
           EventTarget.prototype.dispatchEvent = nativeDispatch;
-          Map.prototype.get = nativeMapGet;
           window.cancelAnimationFrame = nativeCancelAnimationFrame;
           window.clearTimeout = nativeClearTimeout;
           window.setTimeout = nativeSetTimeout;
@@ -726,8 +729,7 @@ async function main() {
         return {
           message: observed instanceof Error ? observed.message : String(observed),
           connected: table.isConnected,
-          queueCalls: harness.queueCalls,
-          ...counters
+          laterOwnerRan
         };
       }, fault);
       const expectedMessage = `controlled ${fault} owner failure`;
@@ -735,78 +737,58 @@ async function main() {
         throw new Error(`${fault} owner did not preserve first-error DOM semantics: ${JSON.stringify(ownerFault)}`);
       }
       if (
-        (fault === 'image' && (ownerFault.queueCalls || ownerFault.sticky || ownerFault.listeners || ownerFault.frame || ownerFault.interaction)) ||
-        (fault === 'sticky' && (ownerFault.listeners || ownerFault.frame || ownerFault.interaction)) ||
-        (fault === 'listeners' && (ownerFault.frame || ownerFault.interaction)) ||
-        (fault === 'interaction' && ownerFault.interaction !== 1)
+        (fault === 'image' && Object.values(ownerFault.laterOwnerRan).some(Boolean)) ||
+        (fault === 'sticky' && (
+          ownerFault.laterOwnerRan.listeners || ownerFault.laterOwnerRan.frame || ownerFault.laterOwnerRan.interaction
+        )) ||
+        (fault === 'listeners' && (ownerFault.laterOwnerRan.frame || ownerFault.laterOwnerRan.interaction))
       ) {
         throw new Error(`${fault} owner ran a later destroy owner: ${JSON.stringify(ownerFault)}`);
       }
     }
 
-    const commandPage = await browser.newPage();
-    try {
-      await commandPage.setContent('<!doctype html><div id="app"></div>');
-      await commandPage.evaluate(() => {
-        const nativeQueueMicrotask = window.queueMicrotask.bind(window);
-        (window as any).__commandDestroyFault = { active: false, calls: 0, nativeQueueMicrotask };
-        window.queueMicrotask = (callback) => {
-          const harness = (window as any).__commandDestroyFault;
-          if (harness.active) {
-            harness.calls += 1;
-            throw new Error('controlled command owner failure');
-          }
-          return nativeQueueMicrotask(callback);
-        };
+    const commandFault = await page.evaluate(() => {
+      const primaryCause = new Error('controlled target disposal cause');
+      const primary = new Error('controlled target disposal failure', { cause: primaryCause });
+      let lateCleanup: (() => void) | null = null;
+      const registry = (window as any).TableStabilityHarness.createTableCommandTargetRegistry((cleanup: () => void) => {
+        lateCleanup = cleanup;
+        throw primary;
       });
-      await commandPage.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
-      await commandPage.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
-      await commandPage.evaluate(() => {
-        (window as any).__selectionEditor = (window as any).TableStabilityHarness.createEditor({
-          parent: document.getElementById('app')!,
-          text: '| A | B |\n| --- | --- |\n| one | two |',
-          initialMode: 'live',
-          onApplyChanges() {}
-        });
-      });
-      await commandPage.waitForFunction(() => document.querySelector('.meo-md-html-table-shell table'));
-      const commandFault = await commandPage.evaluate(() => {
-        const harness = (window as any).__commandDestroyFault;
-        const table = document.querySelector<HTMLTableElement>('.meo-md-html-table-shell table')!;
-        const nativeWindowRemove = window.removeEventListener.bind(window);
-        let laterStickyOwnerRuns = 0;
-        window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions) => {
-          if (harness.active && type === 'resize') laterStickyOwnerRuns += 1;
-          nativeWindowRemove(type, listener, options);
-        }) as typeof window.removeEventListener;
-        harness.active = true;
-        let observed: unknown = null;
-        try {
-          (window as any).__selectionEditor.setText('replacement');
-        } catch (error) {
-          observed = error;
-        } finally {
-          harness.active = false;
-          window.queueMicrotask = harness.nativeQueueMicrotask;
-          window.removeEventListener = nativeWindowRemove;
-        }
-        return {
-          message: observed instanceof Error ? observed.message : String(observed),
-          connected: table.isConnected,
-          calls: harness.calls,
-          laterStickyOwnerRuns
-        };
-      });
-      if (
-        commandFault.message !== 'controlled command owner failure' ||
-        !commandFault.connected ||
-        commandFault.calls !== 1 ||
-        commandFault.laterStickyOwnerRuns !== 0
-      ) {
-        throw new Error(`command owner did not short-circuit later destroy owners: ${JSON.stringify(commandFault)}`);
+      const target = {
+        view: {}, identityKey: 'same-table', from: 0, isConnected: () => true,
+        buildAtomicCommandTransaction: () => ({ transaction: null, outcome: 'no-op' }),
+        preserveViewport: (run: () => void) => run()
+      };
+      const registration = registry.register(target);
+      let observed: unknown = null;
+      try {
+        registration.dispose();
+      } catch (error) {
+        observed = error;
       }
-    } finally {
-      await commandPage.close();
+      const cleanupVisible = registry.resolve(registration.id) === null;
+      const replacement = { ...target, from: 1 };
+      const replacementRegistration = registry.register(replacement);
+      lateCleanup?.();
+      const lateRejected = registry.resolve(replacementRegistration.id) === replacement;
+      registry.dispose();
+      return {
+        message: observed instanceof Error ? observed.message : String(observed),
+        cause: observed instanceof Error && observed.cause instanceof Error ? observed.cause.message : '',
+        cleanupVisible,
+        lateRejected,
+        disposed: registry.resolve(replacementRegistration.id) === null
+      };
+    });
+    if (
+      commandFault.message !== 'controlled target disposal failure' ||
+      commandFault.cause !== 'controlled target disposal cause' ||
+      !commandFault.cleanupVisible ||
+      !commandFault.lateRejected ||
+      !commandFault.disposed
+    ) {
+      throw new Error(`target disposal did not preserve primary/cause or reject late cleanup: ${JSON.stringify(commandFault)}`);
     }
 
     const framePage = await browser.newPage();

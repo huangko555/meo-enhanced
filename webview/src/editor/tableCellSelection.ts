@@ -49,7 +49,6 @@ export type TableCellSelectionEffect =
       readonly range: TableCellRange;
       readonly focus: 'retain' | 'table';
     }
-  | { readonly kind: 'delete-cells'; readonly range: TableCellRange }
   | { readonly kind: 'clear-text'; readonly pointerId: number }
   | { readonly kind: 'capture-pointer'; readonly pointerId: number }
   | { readonly kind: 'release-pointer'; readonly pointerId: number }
@@ -81,7 +80,6 @@ export type TableCellSelectionEvent =
     }
   | { readonly type: 'caret-resolved'; readonly requestId: number; readonly numericOffset: number }
   | { readonly type: 'caret-failed'; readonly requestId: number }
-  | { readonly type: 'delete' }
   | { readonly type: 'abort'; readonly pointerId: number; readonly reason: 'pointercancel' | 'lostcapture' }
   | {
       readonly type: 'select';
@@ -257,17 +255,6 @@ export class TableCellSelection {
         { kind: 'release-pointer', pointerId: request.pointerId },
         { kind: 'prevent-default', pointerId: request.pointerId },
         effect
-      );
-    }
-    if (event.type === 'delete') {
-      if (!this.range) return rejected();
-      const cellCount = (this.range.toRow - this.range.fromRow + 1) * (
-        this.range.toCol - this.range.fromCol + 1
-      );
-      if (cellCount <= 1) return rejected();
-      return accepted(
-        { kind: 'prevent-default', pointerId: null },
-        { kind: 'delete-cells', range: this.range }
       );
     }
     if (event.type === 'begin') {

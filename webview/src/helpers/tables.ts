@@ -2719,20 +2719,6 @@ class HtmlTableWidget extends WidgetType {
         if (effect.focus === 'table') runPrimary(() => table?.focus({ preventScroll: true }));
         continue;
       }
-      if (effect.kind === 'delete-cells') {
-        if (!this.domRefs) continue;
-        for (let row = effect.range.fromRow; row <= effect.range.toRow; row++) {
-          for (let col = effect.range.fromCol; col <= effect.range.toCol; col++) {
-            const input = this.domRefs.allRowInputs[row]?.[col];
-            if (!input || input.value === '') continue;
-            input.value = '';
-            this.refreshCellPreviewFromInput(input);
-            this.recordPendingCellEdit(row, col, input.value);
-          }
-        }
-        this.scheduleLayout({ resizeRows: true });
-        continue;
-      }
       if (effect.phase === 'begin') {
         runPrimary(clearNativeTextSelection);
         runPrimary(() => this.applySelection(null));
@@ -3021,9 +3007,6 @@ class HtmlTableWidget extends WidgetType {
       if (this.handleHistoryShortcut(event, table)) {
         return;
       }
-      if (event.key !== 'Backspace' && event.key !== 'Delete') return;
-      const transition = this.cellSelection.accept({ type: 'delete' });
-      this.applyCellSelectionTransition(transition, { event });
     };
 
     const onDocumentKeyDown = (event: KeyboardEvent) => {

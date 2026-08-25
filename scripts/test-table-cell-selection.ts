@@ -267,18 +267,6 @@ for (const head of [cell(0, 0), cell(1, 1)] as const) {
 
 {
   const selection = new TableCellSelection();
-  assert.deepEqual(selection.accept({ type: 'delete' }), rejected, 'idle Delete remains native');
-  selection.accept({ type: 'select', anchor: cell(0, 0), head: cell(0, 0), origin: 'command' });
-  assert.deepEqual(selection.accept({ type: 'delete' }), rejected, 'single-cell Delete remains native');
-  selection.accept({ type: 'select', anchor: cell(0, 0), head: cell(1, 1), origin: 'command' });
-  assert.deepEqual(selection.accept({ type: 'delete' }), accepted(
-    { kind: 'prevent-default', pointerId: null },
-    { kind: 'delete-cells', range: range(0, 1, 0, 1) }
-  ), 'multi-cell Delete is decided at the Module seam');
-}
-
-{
-  const selection = new TableCellSelection();
   begin(selection, 31, cell(0, 0), 0);
   assert.deepEqual(selection.accept({
     type: 'activate', pointerId: 32, cell: cell(1, 1), origin: 'textarea'
