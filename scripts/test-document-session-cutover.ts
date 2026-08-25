@@ -135,28 +135,44 @@ async function main(): Promise<void> {
     assert.equal(snapshot.legacyCoordinatorStarts, 0);
 
     await page.evaluate(() => {
-      const pending = new Map<string, {
+      type PendingRender = {
         resolve(value: { svg: string }): void;
         reject(error: Error): void;
-      }>();
+      };
+      const pending = new Map<string, PendingRender[]>();
+      const waiting = new Map<string, Array<(render: PendingRender) => void>>();
+      const takeNext = (source: string): Promise<PendingRender> => {
+        const queued = pending.get(source)?.shift();
+        if (queued) return Promise.resolve(queued);
+        return new Promise((resolve) => {
+          const sourceWaiters = waiting.get(source) ?? [];
+          sourceWaiters.push(resolve);
+          waiting.set(source, sourceWaiters);
+        });
+      };
       (window as any).mermaid = {
         initialize() {},
         render(_renderId: string, source: string) {
           return new Promise<{ svg: string }>((resolve, reject) => {
-            pending.set(source, { resolve, reject });
+            const sourceWaiters = waiting.get(source);
+            const waiter = sourceWaiters?.shift();
+            if (waiter) {
+              if (sourceWaiters?.length === 0) waiting.delete(source);
+              waiter({ resolve, reject });
+              return;
+            }
+            const queued = pending.get(source) ?? [];
+            queued.push({ resolve, reject });
+            pending.set(source, queued);
           });
         }
       };
-      (window as any).__completeDocumentSessionMermaid = (source: string, marker: string) => {
-        const render = pending.get(source);
-        if (!render) throw new Error(`No pending Mermaid render for ${source}`);
-        pending.delete(source);
+      (window as any).__completeDocumentSessionMermaid = async (source: string, marker: string) => {
+        const render = await takeNext(source);
         render.resolve({ svg: `<svg data-marker="${marker}" width="160" height="80"></svg>` });
       };
-      (window as any).__failDocumentSessionMermaid = (source: string, message: string) => {
-        const render = pending.get(source);
-        if (!render) throw new Error(`No pending Mermaid render for ${source}`);
-        pending.delete(source);
+      (window as any).__failDocumentSessionMermaid = async (source: string, message: string) => {
+        const render = await takeNext(source);
         render.reject(new Error(message));
       };
     });
@@ -268,11 +284,13 @@ async function main(): Promise<void> {
       return {
         snapshot: (window as any).__documentSessionCandidate.snapshot(),
         liveMode: document.querySelector('.cm-editor')?.classList.contains('meo-mode-live') ?? false,
+        focusInEditor: document.activeElement?.closest('.cm-editor') === document.querySelector('.cm-editor'),
         selection: document.getSelection()?.toString() ?? '',
         scrollTop: document.querySelector<HTMLElement>('.cm-scroller')?.scrollTop ?? -1
       };
     });
     assert.equal(beforeEqualExternal.liveMode, true);
+    assert.equal(beforeEqualExternal.focusInEditor, true);
     assert.equal(beforeEqualExternal.selection, 'edit');
     assert.ok(beforeEqualExternal.scrollTop > 0);
 
@@ -280,30 +298,64 @@ async function main(): Promise<void> {
       const candidate = (window as any).__documentSessionCandidate;
       await candidate.externalChange(text);
       await candidate.externalChange(text);
-      (window as any).__completeDocumentSessionMermaid('SLOW_OLD', 'stale-old');
-    }, equalExternalText);
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    const afterEqualExternal = await page.evaluate(async () => {
-      for (let index = 0; index < 6; index += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const mermaidBlock = document.querySelector('.meo-mermaid-block');
+      if (!mermaidBlock) throw new Error('Missing public Mermaid block');
+      if (mermaidBlock.querySelector('.meo-mermaid-error-badge')) {
+        throw new Error('External Mermaid replacement was not started');
       }
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      if (!scroller) throw new Error('Missing public CodeMirror scroller');
+      const viewportSettled = new Promise<void>((resolve) => {
+        scroller.addEventListener('scrollend', () => resolve(), { once: true });
+      });
+      let errorObserver!: MutationObserver;
+      const unexpectedError = new Promise<never>((_resolve, reject) => {
+        errorObserver = new MutationObserver(() => {
+          if (mermaidBlock.querySelector('.meo-mermaid-error-badge')) {
+            reject(new Error('External Mermaid replacement was not started'));
+          }
+        });
+        errorObserver.observe(mermaidBlock, { childList: true, subtree: true });
+      });
+      await (window as any).__completeDocumentSessionMermaid('SLOW_OLD', 'stale-old');
+      try {
+        await Promise.race([
+          (window as any).__completeDocumentSessionMermaid('SLOW_OLD', 'current-external'),
+          unexpectedError
+        ]);
+      } finally {
+        errorObserver.disconnect();
+      }
+      await viewportSettled;
+    }, equalExternalText);
+    await page.waitForSelector('svg[data-marker="current-external"]');
+    await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());
+    const afterEqualExternal = await page.evaluate(() => {
       return {
         snapshot: (window as any).__documentSessionCandidate.snapshot(),
         sameEditorDom: (window as any).__equalTextEditorDom === document.querySelector('.cm-editor'),
         liveMode: document.querySelector('.cm-editor')?.classList.contains('meo-mode-live') ?? false,
+        focusInEditor: document.activeElement?.closest('.cm-editor') === document.querySelector('.cm-editor'),
         selection: document.getSelection()?.toString() ?? '',
         scrollTop: document.querySelector<HTMLElement>('.cm-scroller')?.scrollTop ?? -1,
-        staleDiagramVisible: Boolean(document.querySelector('svg[data-marker="stale-old"]'))
+        staleDiagramVisible: Boolean(document.querySelector('svg[data-marker="stale-old"]')),
+        currentDiagramVisible: Boolean(document.querySelector('svg[data-marker="current-external"]'))
       };
     });
     assert.equal(afterEqualExternal.sameEditorDom, true);
     assert.equal(afterEqualExternal.snapshot.editorText, equalExternalText);
     assert.equal(afterEqualExternal.liveMode, true);
+    assert.equal(afterEqualExternal.focusInEditor, beforeEqualExternal.focusInEditor);
     assert.equal(afterEqualExternal.selection, beforeEqualExternal.selection);
     assert.equal(
       afterEqualExternal.staleDiagramVisible,
       false,
       'equal-text external presentation must reject the prior Mermaid completion'
+    );
+    assert.equal(
+      afterEqualExternal.currentDiagramVisible,
+      true,
+      'equal-text external presentation must complete its replacement Mermaid generation'
     );
     assert.equal(afterEqualExternal.snapshot.viewport.line, beforeEqualExternal.snapshot.viewport.line);
     assert.ok(

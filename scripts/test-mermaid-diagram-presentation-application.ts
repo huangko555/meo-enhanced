@@ -90,14 +90,52 @@ invalidated.dispatch({ type: 'present', source: 'external', themeKey: 'light', c
 const invalidatedId = invalidated.getState().presentationId;
 assert.ok(invalidatedId);
 assert.deepEqual(effectTypes(invalidated.dispatch({ type: 'externalDocumentPresented' })), [
-  'clearPresentation'
+  'clearPresentation', 'showPending', 'renderDiagram'
 ]);
+const replacementId = invalidated.getState().presentationId;
+assert.ok(replacementId && replacementId !== invalidatedId);
 assert.deepEqual(invalidated.getState(), {
-  phase: 'idle', presentationId: null, source: null, themeKey: null, configKey: null
+  phase: 'pending',
+  presentationId: replacementId,
+  source: 'external',
+  themeKey: 'light',
+  configKey: 'default'
 });
 assert.deepEqual(invalidated.dispatch({
   type: 'renderSucceeded', presentationId: invalidatedId, svg: '<svg></svg>'
 }), []);
+assert.deepEqual(invalidated.dispatch({
+  type: 'renderFailed', presentationId: invalidatedId, error: 'late old error'
+}), []);
+assert.deepEqual(invalidated.dispatch({
+  type: 'renderSucceeded', presentationId: replacementId, svg: '<svg data-generation="replacement"></svg>'
+}), [{
+  type: 'showDiagram',
+  presentationId: replacementId,
+  svg: '<svg data-generation="replacement"></svg>'
+}]);
+assert.equal(invalidated.getState().phase, 'ready');
+
+const invalidatedToError = createMermaidDiagramPresentationApplication();
+invalidatedToError.dispatch({
+  type: 'present', source: 'still-invalid', themeKey: 'dark', configKey: 'strict'
+});
+const invalidatedErrorId = invalidatedToError.getState().presentationId;
+assert.ok(invalidatedErrorId);
+assert.deepEqual(effectTypes(invalidatedToError.dispatch({ type: 'externalDocumentPresented' })), [
+  'clearPresentation', 'showPending', 'renderDiagram'
+]);
+const replacementErrorId = invalidatedToError.getState().presentationId;
+assert.ok(replacementErrorId && replacementErrorId !== invalidatedErrorId);
+assert.deepEqual(invalidatedToError.dispatch({
+  type: 'renderFailed', presentationId: replacementErrorId, error: 'replacement parse error'
+}), [{
+  type: 'showError',
+  presentationId: replacementErrorId,
+  source: 'still-invalid',
+  error: 'replacement parse error'
+}]);
+assert.equal(invalidatedToError.getState().phase, 'error');
 
 const disposed = createMermaidDiagramPresentationApplication();
 disposed.dispatch({ type: 'present', source: 'disposed', themeKey: 'light', configKey: 'default' });

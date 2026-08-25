@@ -113,8 +113,8 @@ export function createMermaidDiagramPresentationFactory(
         rememberHeight: (key, height) => options.resources.rememberHeight(key, height),
         subscribeThemeRefresh: (listener) => options.resources.subscribeThemeRefresh(listener),
         externalDocumentPresented() {
-          for (const handle of [...handles]) handle.externalDocumentPresented();
           activeGroup?.replaceForExternalDocument();
+          for (const handle of [...handles]) handle.externalDocumentPresented();
         },
         dispose() {
           if (consumerDisposed) return;

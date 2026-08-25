@@ -93,11 +93,18 @@ runtime.dispatch({ type: 'present', source: 'external', themeKey: 'light', confi
 const externalId = application.getState().presentationId;
 assert.ok(externalId);
 runtime.dispatch({ type: 'externalDocumentPresented' });
+const externalReplacementId = application.getState().presentationId;
+assert.ok(externalReplacementId && externalReplacementId !== externalId);
 renders.get(externalId)?.resolve({
   type: 'renderFailed', presentationId: externalId, error: 'late external error'
 });
 await Promise.resolve();
-assert.equal(application.getState().phase, 'idle');
+assert.equal(application.getState().phase, 'pending');
+renders.get(externalReplacementId)?.resolve({
+  type: 'renderFailed', presentationId: externalReplacementId, error: 'replacement error'
+});
+await runtime.whenCurrentPresentationSettles();
+assert.equal(application.getState().phase, 'error');
 
 runtime.dispose();
 assert.equal(disposed, true);

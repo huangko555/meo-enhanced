@@ -122,10 +122,21 @@ export function createMermaidDiagramPresentationApplication(): MermaidDiagramPre
           error: input.error
         }];
       case 'externalDocumentPresented':
-        if (phase !== 'pending' || presentationId === null) return [];
+        if (
+          phase !== 'pending'
+          || presentationId === null
+          || source === null
+          || themeKey === null
+          || configKey === null
+        ) return [];
         const invalidatedPresentationId = presentationId;
-        clear('idle');
-        return [{ type: 'clearPresentation', presentationId: invalidatedPresentationId }];
+        presentationId = ++sequence;
+        phase = 'pending';
+        return [
+          { type: 'clearPresentation', presentationId: invalidatedPresentationId },
+          { type: 'showPending', presentationId },
+          { type: 'renderDiagram', presentationId, source, themeKey, configKey }
+        ];
       case 'dispose':
         clear('disposed');
         return [];

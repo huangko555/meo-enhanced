@@ -433,6 +433,71 @@ abandonedFactory.dispose();
 abandonedFactory.dispose();
 abandonedPool.dispose();
 
+const externalReplacementGates: Deferred<string>[] = [];
+const externalReplacementPool = createMermaidDiagramRenderPool({
+  initialize() {},
+  render() {
+    const gate = deferred<string>();
+    externalReplacementGates.push(gate);
+    return gate.promise;
+  }
+});
+const externalReplacementFactory = createMermaidDiagramPresentationFactory({
+  resources: externalReplacementPool,
+  createHandle(view, resources) {
+    const application = createMermaidDiagramPresentationApplication();
+    const executor = createMermaidDiagramPresentationEffectAdapter({
+      view,
+      resources,
+      normalizeSource: (source) => source.trim()
+    });
+    const runtime = createMermaidDiagramPresentationRuntime({ application, executor });
+    return {
+      present(source, themeKey, configKey) {
+        runtime.dispatch({ type: 'present', source, themeKey, configKey });
+      },
+      externalDocumentPresented() {
+        runtime.dispatch({ type: 'externalDocumentPresented' });
+      },
+      whenIdle: () => runtime.whenCurrentPresentationSettles(),
+      dispose: () => runtime.dispose()
+    };
+  }
+});
+const externalReplacementConsumer = externalReplacementFactory.createConsumer();
+const releaseExternalReplacementConsumer = externalReplacementConsumer.acquire();
+const externalReplacementEvents: string[] = [];
+const externalReplacementHandle = externalReplacementConsumer.create(
+  createView(externalReplacementEvents)
+);
+externalReplacementHandle.present(
+  sharedRequest.rawSource,
+  sharedRequest.themeKey,
+  sharedRequest.configKey
+);
+await waitFor(() => externalReplacementGates.length === 1);
+externalReplacementConsumer.externalDocumentPresented();
+externalReplacementGates[0]!.resolve('<svg data-generation="stale-external"></svg>');
+await waitFor(() => externalReplacementGates.length === 2);
+assert.equal(
+  externalReplacementEvents.some((event) => event.includes('stale-external')),
+  false,
+  'the invalidated external generation must have zero presentation effect'
+);
+externalReplacementGates[1]!.resolve('<svg data-generation="current-external"></svg>');
+await externalReplacementHandle.whenIdle();
+assert.equal(externalReplacementGates.length, 2, 'external presentation must create exactly one replacement');
+assert.equal(
+  externalReplacementEvents.filter((event) => event.includes('current-external')).length,
+  1,
+  'the replacement generation must reach ready exactly once'
+);
+externalReplacementHandle.dispose();
+releaseExternalReplacementConsumer();
+externalReplacementConsumer.dispose();
+externalReplacementFactory.dispose();
+externalReplacementPool.dispose();
+
 const orphanGate = deferred<string>();
 let orphanStarted = false;
 const orphanPool = createMermaidDiagramRenderPool({
