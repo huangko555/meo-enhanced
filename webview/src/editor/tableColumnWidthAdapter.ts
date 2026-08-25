@@ -2,7 +2,7 @@ import type { Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import {
   tableColumnWidthPolicy,
-  type TableColumnWidthElasticState,
+  type TableColumnWidthPolicyState,
   type TableColumnWidthPolicy
 } from './tableColumnWidthPolicy';
 import {
@@ -28,20 +28,22 @@ export type CodeMirrorDomTableColumnWidthAdapterOptions = {
 };
 
 type TableLayoutFacts = {
+  readonly widths: readonly number[];
   readonly availableWidth: number;
   readonly minimumWidths: readonly number[];
 };
 
-type PreviewSnapshot = TableLayoutFacts & {
-  widths: readonly number[];
-} & TableColumnWidthElasticState;
+type PreviewSnapshot = {
+  readonly widths: readonly number[];
+  readonly minimumWidths: readonly number[];
+  readonly availableWidth: number;
+  readonly policyState: TableColumnWidthPolicyState;
+};
 
 type WidthIntent = {
   from: number;
   to: number;
   snapshot: PreviewSnapshot;
-  initialTotalWidth: number;
-  defaultWidthWasCapped: boolean;
 };
 
 type TableBinding = {
@@ -134,12 +136,16 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   );
 
   const layoutFacts = (table: HTMLTableElement): TableLayoutFacts => ({
+    widths: Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+      .map((cell) => cell.getBoundingClientRect().width),
     availableWidth: availableWidth(table),
     minimumWidths: minimumWidths(table)
   });
 
   const sameLayoutFacts = (left: TableLayoutFacts, right: TableLayoutFacts): boolean => (
-    Math.abs(left.availableWidth - right.availableWidth) < 1
+    left.widths.length === right.widths.length
+    && left.widths.every((width, index) => Math.abs(width - right.widths[index]) < 1)
+    && Math.abs(left.availableWidth - right.availableWidth) < 1
     && left.minimumWidths.length === right.minimumWidths.length
     && left.minimumWidths.every((width, index) => width === right.minimumWidths[index])
   );
@@ -193,28 +199,34 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       return;
     }
     const currentFacts = layoutFacts(table);
+    const currentPolicyState: TableColumnWidthPolicyState = intent.snapshot.policyState.elastic
+      ? {
+          elastic: true,
+          tracksAvailableWidth: intent.snapshot.policyState.tracksAvailableWidth
+        }
+      : { elastic: false, tracksAvailableWidth: false };
     const result = policy.project({
-      ...intent.snapshot,
+      widths: currentFacts.widths,
       minimumWidths: currentFacts.minimumWidths,
-      initialTotalWidth: intent.initialTotalWidth,
-      defaultWidthWasCapped: intent.defaultWidthWasCapped,
+      initialTotalWidth: currentFacts.widths.reduce((sum, width) => sum + width, 0),
+      defaultWidthWasCapped: false,
       availableWidth: currentFacts.availableWidth,
-      preserveWidthIntent: sameLayoutFacts(intent.snapshot, currentFacts)
+      preserveWidthIntent: sameLayoutFacts(intent.snapshot, currentFacts),
+      ...currentPolicyState
     });
     render(table, result.widths, result.totalWidth);
     storeIntent(table, {
       snapshot: {
-        ...result,
         widths: [...result.widths],
-        ...currentFacts
-      },
-      initialTotalWidth: intent.snapshot.elastic
-        ? Math.max(
-            intent.initialTotalWidth,
-            intent.snapshot.widths.reduce((sum, width) => sum + width, 0)
-          )
-        : intent.initialTotalWidth,
-      defaultWidthWasCapped: intent.defaultWidthWasCapped
+        minimumWidths: [...currentFacts.minimumWidths],
+        availableWidth: currentFacts.availableWidth,
+        policyState: result.elastic
+          ? {
+              elastic: true,
+              tracksAvailableWidth: result.tracksAvailableWidth
+            }
+          : { elastic: false, tracksAvailableWidth: false }
+      }
     });
   };
 
@@ -237,6 +249,16 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     let initialResizePending = true;
     let projectedContainerWidth: number | null = null;
     table.dataset.tableColumnWidthOwner = 'adapter';
+    const committedIntent = findIntent(table);
+    if (committedIntent) {
+      // A replacement first restores the committed presentation. Policy then
+      // receives freshly measured DOM facts; stored layout fields never enter its request.
+      render(
+        table,
+        committedIntent.snapshot.widths,
+        committedIntent.snapshot.widths.reduce((sum, width) => sum + width, 0)
+      );
+    }
 
     const isCurrentBinding = () => lifecycle.alive
       && isCurrentEpoch(epoch)
@@ -270,16 +292,19 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       dragCleanup?.();
 
       const stored = findIntent(table);
-      const startWidths = cells.map((cell) => cell.getBoundingClientRect().width);
-      const initialTotalWidth = stored?.initialTotalWidth ?? table.getBoundingClientRect().width;
+      const startFacts = layoutFacts(table);
+      const initialTotalWidth = table.getBoundingClientRect().width;
       const startMaximumTotalWidth = availableWidth(table);
-      const defaultWidthWasCapped = stored?.defaultWidthWasCapped ?? (
-        initialTotalWidth >= startMaximumTotalWidth - 1
-      );
-      let startElasticState: TableColumnWidthElasticState;
-      if (stored) startElasticState = stored.snapshot;
-      else if (defaultWidthWasCapped) startElasticState = { elastic: true, tracksAvailableWidth: true };
-      else startElasticState = { elastic: false, tracksAvailableWidth: false };
+      const defaultWidthWasCapped = initialTotalWidth >= startMaximumTotalWidth - 1;
+      let startPolicyState: TableColumnWidthPolicyState;
+      if (stored?.snapshot.policyState.elastic) {
+        startPolicyState = {
+          elastic: true,
+          tracksAvailableWidth: stored.snapshot.policyState.tracksAvailableWidth
+        };
+      } else if (stored) startPolicyState = { elastic: false, tracksAvailableWidth: false };
+      else if (defaultWidthWasCapped) startPolicyState = { elastic: true, tracksAvailableWidth: true };
+      else startPolicyState = { elastic: false, tracksAvailableWidth: false };
       const startX = event.clientX;
       let lastPreview: PreviewSnapshot | null = null;
       let latestClientX = startX;
@@ -290,25 +315,29 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         if (!isCurrentBinding()) return;
         const facts = layoutFacts(table);
         const result = policy.resize({
-          widths: startWidths,
+          widths: startFacts.widths,
           minimumWidths: facts.minimumWidths,
-          ...startElasticState,
           column,
           requestedDelta: latestClientX - startX,
-          maximumTotalWidth: facts.availableWidth
+          maximumTotalWidth: facts.availableWidth,
+          ...startPolicyState
         });
         const snapshot: PreviewSnapshot = {
-          ...result,
           widths: [...result.widths],
-          ...facts
+          minimumWidths: [...facts.minimumWidths],
+          availableWidth: facts.availableWidth,
+          policyState: result.elastic
+            ? {
+                elastic: true,
+                tracksAvailableWidth: result.tracksAvailableWidth
+              }
+            : { elastic: false, tracksAvailableWidth: false }
         };
         lastPreview = snapshot;
         // Keep the live drag intent available to a replacement widget. A DOM rebuild
         // may otherwise project the last committed width over the active pointer preview.
         storeIntent(table, {
-          snapshot,
-          initialTotalWidth,
-          defaultWidthWasCapped
+          snapshot
         });
         render(table, result.widths, result.totalWidth);
         table.dispatchEvent(
@@ -338,9 +367,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         const committedSnapshot = lastPreview ?? stored?.snapshot ?? null;
         if (lastPreview) {
           storeIntent(table, {
-            snapshot: lastPreview,
-            initialTotalWidth,
-            defaultWidthWasCapped
+            snapshot: lastPreview
           });
           table.dispatchEvent(new CustomEvent(projectionEventName));
         }

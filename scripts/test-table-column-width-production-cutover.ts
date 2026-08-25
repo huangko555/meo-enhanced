@@ -834,6 +834,44 @@ async function main(): Promise<void> {
       readableMinimumProjection.primaryWidths.map(Math.round),
       'current main-table minimums must produce one shared primary/Sticky projection'
     );
+    const currentMinimums = await page.$eval(
+      `${tableSelector}:first-of-type`,
+      (table: HTMLTableElement) => Array.from(table.querySelectorAll<HTMLElement>('thead th')).map((cell) => {
+        const cellStyle = getComputedStyle(cell);
+        const preview = cell.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+        const previewStyle = preview ? getComputedStyle(preview) : cellStyle;
+        const numeric = (value: string) => Number.parseFloat(value) || 0;
+        return numeric(previewStyle.fontSize)
+          + numeric(previewStyle.paddingLeft)
+          + numeric(previewStyle.paddingRight)
+          + numeric(cellStyle.borderLeftWidth)
+          + numeric(cellStyle.borderRightWidth);
+      })
+    );
+    const secondDragSamples = await dragWithPresentationSamples(page, firstStickyHandle, 40);
+    for (let index = 0; index < secondDragSamples.length; index += 1) {
+      const sample = secondDragSamples[index];
+      assert.ok(
+        sample.primaryWidths.every((width, column) => width >= currentMinimums[column] - 1),
+        `second drag must honor current readable minimums: ${JSON.stringify({ currentMinimums, sample })}`
+      );
+      assert.deepEqual(sample.stickyWidths.map(Math.round), sample.primaryWidths.map(Math.round));
+      if (index > 0) {
+        assert.ok(
+          sample.primaryWidths[0] > secondDragSamples[index - 1].primaryWidths[0] + 3,
+          `second drag Main/Sticky trajectory reversed: ${JSON.stringify(secondDragSamples)}`
+        );
+      }
+    }
+    const secondDragCommitted = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    assert.ok(
+      secondDragCommitted.primaryWidths[0] >= secondDragSamples.at(-1)!.primaryWidths[0] - 1,
+      'second drag terminal reconciliation must not reverse the last visible preview'
+    );
+    assert.deepEqual(
+      secondDragCommitted.stickyWidths.map(Math.round),
+      secondDragCommitted.primaryWidths.map(Math.round)
+    );
     const horizontalScrollBefore = await page.$eval(`${tableSelector}:first-of-type`, (table: HTMLTableElement) => {
       const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
       const firstHandle = table.querySelector<HTMLElement>('th:first-child .meo-md-html-table-column-resize-handle')!;

@@ -25,14 +25,9 @@ declare global {
         drainScheduler(): void;
         destroy(): void;
       };
-      instances: number;
-      legacyInstances: number;
-      policyInstances: number;
     };
   }
 }
-
-let instances = 0;
 
 window.TableColumnWidthAdapterCandidate = {
   create(parent, text) {
@@ -63,7 +58,6 @@ window.TableColumnWidthAdapterCandidate = {
         ]
       })
     });
-    instances += 1;
     return {
       adapter: candidate.adapter,
       view,
@@ -125,7 +119,6 @@ window.TableColumnWidthAdapterCandidate = {
       window.cancelAnimationFrame = originalCancelAnimationFrame;
       window.ResizeObserver = originalResizeObserver;
     };
-    instances += 1;
     return {
       adapter: candidate.adapter,
       notifyResize() {
@@ -156,10 +149,5 @@ window.TableColumnWidthAdapterCandidate = {
         }
       }
     };
-  },
-  get instances() {
-    return instances;
-  },
-  legacyInstances: 0,
-  policyInstances: 1
+  }
 };

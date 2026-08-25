@@ -372,8 +372,129 @@ async function main(): Promise<void> {
           id: options.id, committed, afterObserver, reconciled
         };
       };
+      const runSecondDragCurrentFacts = (options: {
+        id: string;
+        currentWidths: readonly number[];
+        currentMinimums: readonly number[];
+        currentAvailableWidth: number;
+        delta: number;
+        terminal?: 'pointerup' | 'pointercancel' | 'lostpointercapture';
+        duringDrag?: {
+          availableWidth: number;
+          minimums: readonly number[];
+        };
+      }) => {
+        const host = document.createElement('div');
+        document.body.append(host);
+        const runtime = window.TableColumnWidthAdapterCandidate!.createControlled(host);
+        const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+        root.style.width = '200px';
+        const table = document.createElement('table');
+        table.dataset.tableColumnWidth = options.id;
+        table.dataset.tableFrom = '0';
+        table.dataset.tableTo = '25';
+        const colgroup = document.createElement('colgroup');
+        const head = document.createElement('thead');
+        const row = document.createElement('tr');
+        for (let index = 0; index < 2; index += 1) {
+          colgroup.append(document.createElement('col'));
+          const cell = document.createElement('th');
+          cell.style.fontSize = '10px';
+          cell.style.paddingLeft = '10px';
+          const handle = document.createElement('span');
+          handle.dataset.tableResizeColumn = String(index);
+          cell.append(handle);
+          row.append(cell);
+        }
+        head.append(row);
+        table.append(colgroup, head);
+        root.append(table);
+        runtime.adapter.acquire();
+        runtime.drainScheduler();
+        const columns = Array.from(table.querySelectorAll<HTMLTableColElement>('col'));
+        const cells = Array.from(table.querySelectorAll<HTMLElement>('th'));
+        const handle = cells[0].querySelector<HTMLElement>('[data-table-resize-column="0"]')!;
+        const dispatch = (type: string, pointerId: number, clientX: number, buttons: number) => {
+          const target = type === 'pointerdown'
+            ? handle
+            : type === 'lostpointercapture'
+              ? root
+              : window;
+          target.dispatchEvent(new PointerEvent(type, {
+            bubbles: true, cancelable: true, button: type === 'pointerdown' ? 0 : -1,
+            buttons, pointerId, pointerType: 'mouse', clientX
+          }));
+        };
+        const setCurrentLayout = (widths: readonly number[], minimums: readonly number[]) => {
+          table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+          table.style.tableLayout = 'fixed';
+          widths.forEach((width, index) => { columns[index].style.width = `${width}px`; });
+          minimums.forEach((minimum, index) => { cells[index].style.paddingLeft = `${minimum - 10}px`; });
+        };
+
+        setCurrentLayout([100, 100], [20, 20]);
+        dispatch('pointerdown', 501, 100, 1);
+        dispatch('pointermove', 501, 100, 1);
+        dispatch('pointerup', 501, 100, 0);
+        runtime.drainScheduler();
+
+        root.style.width = `${options.currentAvailableWidth}px`;
+        setCurrentLayout(options.currentWidths, options.currentMinimums);
+        dispatch('pointerdown', 502, 100, 1);
+        if (options.duringDrag) {
+          root.style.width = `${options.duringDrag.availableWidth}px`;
+          options.duringDrag.minimums.forEach((minimum, index) => {
+            cells[index].style.paddingLeft = `${minimum - 10}px`;
+          });
+          runtime.notifyResize();
+          runtime.drainScheduler();
+        }
+        dispatch('pointermove', 502, 100 + options.delta, 1);
+        const preview = columns.map((column) => Number.parseFloat(column.style.width));
+        dispatch(options.terminal ?? 'pointerup', 502, 100 + options.delta, 0);
+        const atTerminal = columns.map((column) => Number.parseFloat(column.style.width));
+        runtime.drainScheduler();
+        const reconciled = columns.map((column) => Number.parseFloat(column.style.width));
+        dispatch(options.terminal ?? 'pointerup', 502, 100 + options.delta, 0);
+        runtime.drainScheduler();
+        const afterLateTerminal = columns.map((column) => Number.parseFloat(column.style.width));
+        runtime.destroy();
+        host.remove();
+        return { id: options.id, preview, atTerminal, reconciled, afterLateTerminal };
+      };
       const terminals = ['pointerup', 'pointercancel', 'lostpointercapture'] as const;
       return {
+        secondDragCurrentFacts: [
+          runSecondDragCurrentFacts({
+            id: 'second-shrink-up', currentWidths: [140, 60], currentMinimums: [80, 20],
+            currentAvailableWidth: 200, delta: -50
+          }),
+          runSecondDragCurrentFacts({
+            id: 'second-shrink-cancel', currentWidths: [140, 60], currentMinimums: [80, 20],
+            currentAvailableWidth: 200, delta: -50, terminal: 'pointercancel'
+          }),
+          runSecondDragCurrentFacts({
+            id: 'second-shrink-lost', currentWidths: [140, 60], currentMinimums: [80, 20],
+            currentAvailableWidth: 200, delta: -50, terminal: 'lostpointercapture'
+          }),
+          runSecondDragCurrentFacts({
+            id: 'second-grow', currentWidths: [90, 60], currentMinimums: [80, 20],
+            currentAvailableWidth: 200, delta: 50
+          }),
+          runSecondDragCurrentFacts({
+            id: 'second-no-change', currentWidths: [140, 60], currentMinimums: [80, 20],
+            currentAvailableWidth: 200, delta: 0
+          }),
+          runSecondDragCurrentFacts({
+            id: 'second-facts-change', currentWidths: [140, 60], currentMinimums: [20, 20],
+            currentAvailableWidth: 200, delta: -50,
+            duringDrag: { availableWidth: 300, minimums: [80, 20] }
+          }),
+          runSecondDragCurrentFacts({
+            id: 'second-infeasible', currentWidths: [180, 100], currentMinimums: [180, 100],
+            currentAvailableWidth: 200, delta: 24
+          })
+        ],
         pointerup: run({ id: 'pointerup', initialWidth: 300, nextWidth: 500, minimums: [20, 20, 20] }),
         pointercancel: run({
           id: 'pointercancel', initialWidth: 300, nextWidth: 500, minimums: [20, 20, 20], terminal: 'pointercancel'
@@ -598,6 +719,23 @@ async function main(): Promise<void> {
         currentWidths
       };
     });
+    for (const result of currentnessMatrix.secondDragCurrentFacts.slice(0, 3)) {
+      assert.deepEqual(result.preview, [90, 60], `${result.id} must use current DOM widths and minimums`);
+      assert.deepEqual(result.atTerminal, result.preview, `${result.id} must commit this transaction preview`);
+      assert.deepEqual(result.reconciled, result.preview, `${result.id} must not reverse after reconciliation`);
+      assert.deepEqual(result.afterLateTerminal, result.reconciled, `${result.id} late terminal must be effect-free`);
+    }
+    for (const [result, expected] of [
+      [currentnessMatrix.secondDragCurrentFacts[3], [140, 60]],
+      [currentnessMatrix.secondDragCurrentFacts[4], [140, 60]],
+      [currentnessMatrix.secondDragCurrentFacts[5], [90, 60]],
+      [currentnessMatrix.secondDragCurrentFacts[6], [204, 100]]
+    ] as const) {
+      assert.deepEqual(result.preview, expected, `${result.id} must use current feasible/infeasible facts`);
+      assert.deepEqual(result.atTerminal, expected);
+      assert.deepEqual(result.reconciled, expected);
+      assert.deepEqual(result.afterLateTerminal, expected);
+    }
     assert.equal(replacementSettlement.oldConnected, false);
     assert.deepEqual(replacementSettlement.lateOldWidths, replacementSettlement.oldWidths);
     assert.equal(replacementSettlement.detachedProjected, false, 'detached binding must remain a bounded no-op');
@@ -756,9 +894,6 @@ async function main(): Promise<void> {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, pointerType: 'mouse', buttons: 0 }));
     });
     await page.mouse.up();
-    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.instances), 31);
-    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.legacyInstances), 0);
-    assert.equal(await page.evaluate(() => window.TableColumnWidthAdapterCandidate!.policyInstances), 1);
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
