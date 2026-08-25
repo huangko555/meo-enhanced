@@ -85,6 +85,7 @@ async function main(): Promise<void> {
   const browser = await launchTestBrowser();
   try {
     const page = await browser.newPage();
+    await browser.defaultBrowserContext().overridePermissions('http://localhost', ['clipboard-read', 'clipboard-write']);
     await page.exposeFunction('__renderPreviewThroughHost', (raw: unknown) => {
       const request = decodeWebviewToHostMessage(raw);
       assert.equal(request?.type, 'requestPreviewRender');
@@ -102,7 +103,16 @@ async function main(): Promise<void> {
       assert.equal(response?.type, 'previewRenderResult');
       return response;
     });
-    await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
+    await page.setRequestInterception(true);
+    page.once('request', (request) => {
+      void request.respond({
+        status: 200,
+        contentType: 'text/html',
+        body: '<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>'
+      });
+    });
+    await page.goto('http://localhost');
+    await page.setRequestInterception(false);
     await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ url: failingMermaidRuntimeSrc });
     await page.addScriptTag({ content: `
@@ -159,7 +169,7 @@ async function main(): Promise<void> {
         const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
         doc.documentElement.style.zoom = String(value);
       }, zoom);
-      const result = await page.evaluate(() => {
+      const result = await page.evaluate(async () => {
         const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
         const doc = frame.contentDocument!;
         const tables = Array.from(doc.querySelectorAll<HTMLTableElement>('table'));
@@ -202,6 +212,7 @@ async function main(): Promise<void> {
         tableLink.focus();
         const tableSelectionText = selection.toString();
         const tableCopied = doc.execCommand('copy');
+        const tableClipboardText = await doc.defaultView!.navigator.clipboard.readText();
         const mermaidFallback = doc.querySelector<HTMLElement>('.meo-export-mermaid code')!;
         const mermaidRange = doc.createRange();
         mermaidRange.selectNodeContents(mermaidFallback);
@@ -254,6 +265,16 @@ async function main(): Promise<void> {
             wrapperOverflows: tableContainers.map((container) => container.scrollWidth - container.clientWidth),
             tableOverflows: tables.map((item) => item.scrollWidth - item.clientWidth),
             wrapperOverflowX: tableContainers.map((container) => getComputedStyle(container).overflowX),
+            clippingAncestors: [...tableContainers, ...tables, ...tableCells, ...tableKbds].flatMap((element) => {
+              const clipping: string[] = [];
+              for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+                const overflowX = getComputedStyle(current).overflowX;
+                if (overflowX === 'hidden' || overflowX === 'clip') {
+                  clipping.push(`${current.tagName.toLowerCase()}.${current.className}:${overflowX}`);
+                }
+              }
+              return clipping;
+            }),
             rectsWithinPage: [...tableContainers, ...tables, ...tableCells, ...tableKbds, tableLink].every((element) => {
               const rect = element.getBoundingClientRect();
               return rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1;
@@ -267,6 +288,7 @@ async function main(): Promise<void> {
             preservedFocus,
             selectionText: tableSelectionText,
             copied: tableCopied,
+            clipboardText: tableClipboardText,
             focusedLink: doc.activeElement === tableLink,
             linkTabIndex: tableLink.tabIndex,
             proseKbdWhiteSpace: getComputedStyle(proseKbd).whiteSpace,
@@ -324,12 +346,14 @@ async function main(): Promise<void> {
         JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table })
       );
       assert.ok(result.table.wrapperOverflowX.every((value) => value !== 'auto' && value !== 'scroll'));
+      assert.deepEqual(result.table.clippingAncestors, []);
       assert.equal(result.table.rectsWithinPage, true, JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
       assert.ok(result.table.kbdFragments.every((count) => count > 1), JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
       assert.equal(result.table.preservedSelection, longKbdToken);
       assert.equal(result.table.preservedFocus, true);
       assert.equal(result.table.selectionText, longKbdToken);
       assert.equal(result.table.copied, true);
+      assert.equal(result.table.clipboardText, longKbdToken);
       assert.equal(result.table.focusedLink, true);
       assert.equal(result.table.linkTabIndex, 0);
       assert.equal(result.table.proseKbdWhiteSpace, 'nowrap');
