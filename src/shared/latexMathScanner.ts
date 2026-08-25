@@ -100,7 +100,7 @@ function findInlineMathClose(text: string, start: number, excludedRanges: Readon
     if (character === '\n' || character === '\r') {
       return -1;
     }
-    if (character === '$' && !isEscaped(text, index) && braceLevel === 0 && !isWhitespace(text[index - 1])) {
+    if (character === '$' && !isEscaped(text, index) && braceLevel === 0) {
       return index;
     }
     if (character === '\\') {

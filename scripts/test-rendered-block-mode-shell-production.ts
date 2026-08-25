@@ -11,7 +11,8 @@ const rendererProbeModule = String.raw`
 type Probe =
   | { kind: 'normal' }
   | { kind: 'forbid' }
-  | { kind: 'require-visible-source'; text: string };
+  | { kind: 'require-visible-source' }
+  | { kind: 'error' };
 
 let probe: Probe = { kind: 'normal' };
 let violation: string | null = null;
@@ -34,7 +35,7 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-export function renderMathToHtml(content: string): string {
+export function renderMathToHtml(content: string): string | null {
   if (probe.kind === 'forbid') {
     violation = 'Source mode called the LaTeX renderer';
   }
@@ -42,9 +43,12 @@ export function renderMathToHtml(content: string): string {
     const source = document.querySelector<HTMLElement>(
       '.meo-latex-math-editing-block.is-split .meo-latex-math-source-pane'
     );
-    if (!source?.textContent?.includes(probe.text)) {
+    if (!source?.textContent?.includes(content)) {
       violation = 'Split mode rendered before the edited source became visible';
     }
+  }
+  if (probe.kind === 'error') {
+    return null;
   }
   return '<span class="katex" data-rendered-math>' + escapeHtml(content) + '</span>';
 }
@@ -126,20 +130,45 @@ async function main(): Promise<void> {
     await page.waitForSelector('.meo-latex-math-editing-block.is-split');
     await page.evaluate(() => {
       (window as any).RenderedBlockModeShellProductionHarness.setMathRendererProbe({
-        kind: 'require-visible-source',
-        text: 'split_visible_first'
+        kind: 'require-visible-source'
       });
     });
     await page.click('.meo-latex-math-editing-block.is-split .cm-content');
     await page.keyboard.press('End');
     await page.keyboard.type(' + split_visible_first');
-    await page.waitForFunction(() => (
+    assert.equal(await page.evaluate(() => (
       document.querySelector('.meo-latex-math-editing-block.is-split [data-rendered-math]')
         ?.textContent?.includes('split_visible_first') === true
-    ));
+    )), true, 'Split mode must expose the synchronous renderer result before the edit completes');
     assert.equal(await page.evaluate(() => (
       (window as any).RenderedBlockModeShellProductionHarness.getMathRendererProbeViolation()
     )), null);
+    const beforeErrorEdit = await page.evaluate(() => {
+      const outerScroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
+      return { scrollTop: outerScroller.scrollTop };
+    });
+    await page.evaluate(() => {
+      (window as any).RenderedBlockModeShellProductionHarness.setMathRendererProbe({ kind: 'error' });
+    });
+    await page.keyboard.type(' + invalid_sync');
+    const afterErrorEdit = await page.evaluate(() => {
+      const source = document.querySelector<HTMLElement>('.meo-latex-math-editing-block.is-split .meo-latex-math-source-pane')!;
+      const error = document.querySelector<HTMLElement>('.meo-latex-math-editing-block.is-split .meo-latex-math-preview-error');
+      const selection = window.getSelection();
+      const outerScroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
+      return {
+        errorText: error?.textContent ?? null,
+        sourceFocused: source.contains(document.activeElement),
+        caretInSource: Boolean(selection?.isCollapsed && selection.anchorNode && source.contains(selection.anchorNode)),
+        scrollTop: outerScroller.scrollTop
+      };
+    });
+    assert.equal(afterErrorEdit.errorText?.includes('invalid_sync'), true,
+      'Split mode must expose a synchronous renderer error before the edit completes');
+    assert.equal(afterErrorEdit.sourceFocused, true, 'Synchronous renderer errors must preserve source focus');
+    assert.equal(afterErrorEdit.caretInSource, true, 'Synchronous renderer errors must preserve the public DOM caret');
+    assert.ok(Math.abs(afterErrorEdit.scrollTop - beforeErrorEdit.scrollTop) <= 1,
+      'Synchronous renderer errors must not move the outer viewport');
     assert.deepEqual(pageErrors, [], 'Split mode must expose source text before rendering');
   } finally {
     await browser.close();

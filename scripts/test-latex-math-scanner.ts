@@ -78,4 +78,65 @@ assert.deepEqual(scanLatexMathAt('prefix\n$$\nx\n$$', 7), {
 });
 assert.equal(scanLatexMathAt('prefix $$\nx\n$$', 7), null);
 
+const scannerContractCases: ReadonlyArray<Readonly<{
+  label: string;
+  text: string;
+  options?: Parameters<typeof scanLatexMath>[1];
+  expected: ReturnType<typeof scanLatexMath>;
+}>> = [
+  {
+    label: 'inline, display, and later prose remain independently bounded',
+    text: 'lead $x^2$ middle $$y_1$$ tail',
+    expected: [
+      { from: 5, to: 10, mode: 'inline', content: 'x^2', raw: '$x^2$' },
+      { from: 18, to: 25, mode: 'display', content: 'y_1', raw: '$$y_1$$', fencedDisplay: false }
+    ]
+  },
+  ...[0, 1, 2, 3].map((indent): Readonly<{
+    label: string;
+    text: string;
+    expected: ReturnType<typeof scanLatexMath>;
+  }> => {
+    const spaces = ' '.repeat(indent);
+    const text = `${spaces}$$\n${spaces}x^2\n${spaces}$$`;
+    return {
+      label: `fenced display math preserves the ${indent}-space source boundary`,
+      text,
+      expected: [{
+        from: indent,
+        to: text.length,
+        mode: 'display',
+        content: 'x^2',
+        raw: `$$\n${spaces}x^2\n${spaces}$$`,
+        fencedDisplay: true
+      }]
+    };
+  }),
+  {
+    label: 'currency and ordinary prose do not consume a later formula',
+    text: 'Pay $12.50 and save $5 today; use $x^2$ after $hello world$.',
+    expected: [{ from: 34, to: 39, mode: 'inline', content: 'x^2', raw: '$x^2$' }]
+  },
+  {
+    label: 'escaped dollars and an unclosed line do not consume later content',
+    text: 'literal \\$not-math\\$ and $unfinished\nthen $z_3$ tail',
+    expected: [{ from: 42, to: 47, mode: 'inline', content: 'z_3', raw: '$z_3$' }]
+  },
+  {
+    label: 'code-like ranges are excluded without hiding following math',
+    text: '`$code$` then $a+b$',
+    options: { excludedRanges: [{ from: 0, to: 8 }] },
+    expected: [{ from: 14, to: 19, mode: 'inline', content: 'a+b', raw: '$a+b$' }]
+  },
+  {
+    label: 'brace errors recover at a later independent formula',
+    text: '$\\frac{a}{b$ prose then $c^2$ tail',
+    expected: [{ from: 24, to: 29, mode: 'inline', content: 'c^2', raw: '$c^2$' }]
+  }
+];
+
+for (const { label, text, options, expected } of scannerContractCases) {
+  assert.deepEqual(scanLatexMath(text, options), expected, label);
+}
+
 console.log('Shared LaTeX math scanner checks passed');

@@ -353,7 +353,6 @@ class LatexMathEditingController {
   private previewShell: HTMLElement | null = null;
   private previewHost: HTMLElement | null = null;
   private previewViewport: LatexMathViewportController | null = null;
-  private previewTimer: number | null = null;
   private syncingFromOuter = false;
 
   constructor(
@@ -421,7 +420,7 @@ class LatexMathEditingController {
                 markLiveInputNestedProjection()
               ]
             });
-            this.schedulePreviewRender();
+            this.renderPreview();
           })
         ]
       }),
@@ -499,7 +498,7 @@ class LatexMathEditingController {
     this.setMode(mode, false);
     this.setSearchReveal(searchReveal);
     if (mode === 'split') {
-      this.schedulePreviewRender();
+      this.renderPreview();
     }
     return true;
   }
@@ -557,21 +556,8 @@ class LatexMathEditingController {
     });
   }
 
-  private schedulePreviewRender(): void {
-    if (this.mode !== 'split') {
-      return;
-    }
-    if (this.previewTimer !== null) {
-      window.clearTimeout(this.previewTimer);
-    }
-    this.previewTimer = window.setTimeout(() => {
-      this.previewTimer = null;
-      this.renderPreview();
-    }, 100);
-  }
-
   private renderPreview(): void {
-    if (!this.previewHost) {
+    if (this.mode !== 'split' || !this.previewHost) {
       return;
     }
     const preview = document.createElement('div');
@@ -596,9 +582,6 @@ class LatexMathEditingController {
   }
 
   destroy(): void {
-    if (this.previewTimer !== null) {
-      window.clearTimeout(this.previewTimer);
-    }
     this.previewViewport?.destroy();
     this.previewViewport = null;
     this.innerView.destroy();

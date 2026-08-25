@@ -54,13 +54,8 @@ export function attachLatexMathViewport(
 
   let fitScale = 1;
   let userZoom = 1;
-  let panX = 0;
-  let panY = 0;
   let renderedScale = 1;
   let naturalWidth = 0;
-  let dragging = false;
-  let lastPointerX = 0;
-  let lastPointerY = 0;
   let measureFrame = 0;
   let destroyed = false;
 
@@ -68,8 +63,6 @@ export function attachLatexMathViewport(
     renderedScale = fitScale * userZoom;
     canvas.style.zoom = '1';
     canvas.style.fontSize = `${renderedScale}em`;
-    canvas.style.left = `${panX}px`;
-    canvas.style.top = `${panY}px`;
 
     // Chromium enforces a minimum rendered font size in some hosts. Font-size
     // scaling remains sharp above that floor; zoom only supplies the residual
@@ -88,8 +81,6 @@ export function attachLatexMathViewport(
 
   const reset = () => {
     userZoom = 1;
-    panX = 0;
-    panY = 0;
     applyTransform();
   };
 
@@ -126,34 +117,6 @@ export function attachLatexMathViewport(
   }
 
   let controls: HTMLElement | null = null;
-  const onPointerMove = (event: PointerEvent) => {
-    if (!dragging) {
-      return;
-    }
-    panX += event.clientX - lastPointerX;
-    panY += event.clientY - lastPointerY;
-    lastPointerX = event.clientX;
-    lastPointerY = event.clientY;
-    applyTransform();
-  };
-  const onPointerUp = () => {
-    if (!dragging) {
-      return;
-    }
-    dragging = false;
-    root.classList.remove('is-dragging');
-  };
-  const onPointerDown = (event: PointerEvent) => {
-    if (!interactive || event.button !== 0 || (event.target as Element | null)?.closest('.meo-latex-math-zoom-controls')) {
-      return;
-    }
-    event.preventDefault();
-    dragging = true;
-    lastPointerX = event.clientX;
-    lastPointerY = event.clientY;
-    root.classList.add('is-dragging');
-  };
-
   if (interactive) {
     controls = ownerDocument.createElement('div');
     controls.className = 'meo-visual-controls meo-latex-math-zoom-controls';
@@ -169,10 +132,6 @@ export function attachLatexMathViewport(
       createControlButton(ownerDocument, RotateCcw, 'Reset zoom', reset)
     );
     root.appendChild(controls);
-    root.addEventListener('pointerdown', onPointerDown);
-    ownerDocument.addEventListener('pointermove', onPointerMove);
-    ownerDocument.addEventListener('pointerup', onPointerUp);
-    ownerDocument.addEventListener('pointercancel', onPointerUp);
   }
 
   scheduleMeasure();
@@ -188,10 +147,6 @@ export function attachLatexMathViewport(
       if (!resizeObserver) {
         ownerWindow.removeEventListener('resize', scheduleMeasure);
       }
-      root.removeEventListener('pointerdown', onPointerDown);
-      ownerDocument.removeEventListener('pointermove', onPointerMove);
-      ownerDocument.removeEventListener('pointerup', onPointerUp);
-      ownerDocument.removeEventListener('pointercancel', onPointerUp);
       controls?.remove();
     }
   };

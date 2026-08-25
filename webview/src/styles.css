@@ -2059,12 +2059,7 @@ body {
 .cm-editor .meo-latex-math-viewport.is-interactive {
   align-self: stretch;
   min-height: inherit;
-  cursor: grab;
   user-select: none;
-}
-
-.cm-editor .meo-latex-math-viewport.is-interactive.is-dragging {
-  cursor: grabbing;
 }
 
 .cm-editor .meo-md-code-block .meo-md-inline-code,
@@ -2777,8 +2772,7 @@ body {
 
 .cm-editor .meo-mermaid-block:hover .meo-mermaid-zoom-controls,
 .cm-editor .meo-mermaid-dragging .meo-mermaid-zoom-controls,
-.cm-editor .meo-latex-math-viewport:hover .meo-latex-math-zoom-controls,
-.cm-editor .meo-latex-math-viewport.is-dragging .meo-latex-math-zoom-controls {
+.cm-editor .meo-latex-math-viewport:hover .meo-latex-math-zoom-controls {
   opacity: 1;
 }
 

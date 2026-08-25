@@ -1829,13 +1829,22 @@ async function main() {
         text: [
           '$$',
           String.raw`\operatorname{veryLongFormulaMetric}=\frac{\alpha_1+\beta_2+\gamma_3+\delta_4}{\epsilon_5+\zeta_6}+\sum_{i=1}^{n}\left(x_i+y_i+z_i\right)+\prod_{j=1}^{m}\left(a_j+b_j+c_j\right)`,
-          '$$'
+          '$$',
+          '',
+          'inline $x^2$ has no block controls'
         ].join('\n'),
         initialMode: 'live',
         onApplyChanges() {}
       });
     });
     await waitForFrames(page);
+    const inlineLatexControls = await page.evaluate(() => ({
+      inlineRendered: Boolean(document.querySelector('.meo-md-math-inline')),
+      blockToolbars: document.querySelectorAll('.meo-latex-math-toolbar').length
+    }));
+    if (!inlineLatexControls.inlineRendered || inlineLatexControls.blockToolbars !== 1) {
+      throw new Error(`Inline LaTeX exposed block controls: ${JSON.stringify(inlineLatexControls)}`);
+    }
     const collectLatexViewport = () => page.evaluate(() => {
       const viewport = document.querySelector<HTMLElement>('.meo-md-math-fenced-display')!;
       const canvas = viewport?.querySelector<HTMLElement>('.meo-latex-math-canvas')!;
@@ -1888,6 +1897,8 @@ async function main() {
       return {
         controls: viewport.querySelectorAll('.meo-latex-math-zoom-controls button').length,
         presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
+        canvasRect: canvas.getBoundingClientRect().toJSON(),
+        scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop,
         fits: canvasRect.left >= viewportRect.left - 1 && canvasRect.right <= viewportRect.right + 1,
         center: {
           x: viewportRect.left + viewportRect.width / 2,
@@ -1901,14 +1912,18 @@ async function main() {
 
     await page.click('.meo-latex-math-zoom-btn[aria-label="Zoom in"]');
     await waitForFrames(page, 2);
-    const zoomedPresentation = await page.$eval(
+    const zoomedState = await page.$eval(
       '.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas',
       (element) => {
         const canvas = element as HTMLElement;
-        return `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`;
+        return {
+          presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
+          canvasRect: canvas.getBoundingClientRect().toJSON(),
+          scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop
+        };
       }
     );
-    if (zoomedPresentation === splitInitial.presentation) {
+    if (zoomedState.presentation === splitInitial.presentation) {
       const zoomDiagnostics = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll<HTMLElement>('.meo-latex-math-zoom-btn'));
         return {
@@ -1927,7 +1942,7 @@ async function main() {
       });
       throw new Error(`LaTeX split zoom button did not change the canvas transform: ${JSON.stringify({
         initial: splitInitial.presentation,
-        zoomedPresentation,
+        zoomedPresentation: zoomedState.presentation,
         zoomDiagnostics
       })}`);
     }
@@ -1937,15 +1952,27 @@ async function main() {
     await page.mouse.move(splitInitial.center.x + 24, splitInitial.center.y + 16, { steps: 3 });
     await page.mouse.up();
     await waitForFrames(page, 2);
-    const draggedPresentation = await page.$eval(
+    const afterDrag = await page.$eval(
       '.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas',
       (element) => {
         const canvas = element as HTMLElement;
-        return `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`;
+        return {
+          presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
+          canvasRect: canvas.getBoundingClientRect().toJSON(),
+          scrollTop: (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop
+        };
       }
     );
-    if (draggedPresentation === zoomedPresentation) {
-      throw new Error('Dragging the LaTeX split preview did not pan the canvas');
+    if (
+      afterDrag.presentation !== zoomedState.presentation ||
+      Math.abs(afterDrag.canvasRect.x - zoomedState.canvasRect.x) > 1 ||
+      Math.abs(afterDrag.canvasRect.y - zoomedState.canvasRect.y) > 1 ||
+      Math.abs(afterDrag.scrollTop - zoomedState.scrollTop) > 1
+    ) {
+      throw new Error(`Dragging the LaTeX split preview changed its public presentation or viewport: ${JSON.stringify({
+        before: zoomedState,
+        after: afterDrag
+      })}`);
     }
 
     await page.click('.meo-latex-math-zoom-btn[aria-label="Reset zoom"]');
