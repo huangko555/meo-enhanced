@@ -2512,8 +2512,17 @@ function addMathDecorations(
       const mode = renderSpan
         ? getLatexMathBlockMode(state, anchor, renderSpan.innerFrom, renderSpan.innerTo)
         : null;
-      if (copyContent && mode) {
-        addLatexMathToolbar(builder, openingLine.to, anchor, openingLine.number, mode.effective, copyContent, mathRange.to);
+      const decision = mode?.decision ?? null;
+      if (copyContent && decision) {
+        addLatexMathToolbar(
+          builder,
+          openingLine.to,
+          anchor,
+          openingLine.number,
+          decision.effectiveMode,
+          copyContent,
+          mathRange.to
+        );
       }
 
       addRange(
@@ -2529,31 +2538,36 @@ function addMathDecorations(
         activeLines.has(closingLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
       );
 
-      if (editingBoundary && mode?.effective === 'preview') {
+      if (editingBoundary && decision?.effectiveMode === 'preview') {
         continue;
       }
 
-      const html = renderLatexMathToHtml(mathRange.content, mathRange.mode);
-      if (!html && mode?.effective === 'preview') {
+      if (!renderSpan || !mode || !decision) {
         continue;
       }
 
-      if (!renderSpan || !mode) {
-        continue;
-      }
-
-      builder.push(
-        Decoration.replace({
-          widget: mode.effective === 'preview'
-            ? getMathWidget(html!, mathRange.mode, true, startLineNo, endLineNo, indentColumns)
-            : new LatexMathEditingWidget({
+      if (decision.effectiveMode !== 'preview') {
+        builder.push(
+          Decoration.replace({
+            widget: new LatexMathEditingWidget({
               anchor,
               lineNumber: openingLine.number,
               contentFrom: renderSpan.innerFrom,
               contentTo: renderSpan.innerTo,
               sourceText: copyContent,
               indentColumns
-            }, mode.effective, mode.searchReveal),
+            }, decision.effectiveMode, mode.searchReveal),
+            block: true
+          }).range(renderSpan.innerFrom, renderSpan.innerTo)
+        );
+        continue;
+      }
+
+      const html = renderLatexMathToHtml(mathRange.content, mathRange.mode);
+      if (!html) continue;
+      builder.push(
+        Decoration.replace({
+          widget: getMathWidget(html, mathRange.mode, true, startLineNo, endLineNo, indentColumns),
           block: true
         }).range(renderSpan.innerFrom, renderSpan.innerTo)
       );

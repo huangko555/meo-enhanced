@@ -17,7 +17,8 @@ import { consumeEditorHistoryCommand } from './historyCommands';
 import { markLiveInputNestedProjection } from '../editor/liveInputDerivedWork';
 import {
   decideRenderedBlockModeShell,
-  type RenderedBlockMode
+  type RenderedBlockMode,
+  type RenderedBlockModeShellDecision
 } from '../editor/renderedBlockModeShell';
 
 export type MermaidBlockMode = RenderedBlockMode;
@@ -150,7 +151,11 @@ export function getMermaidBlockMode(
   anchor: number,
   contentFrom: number,
   contentTo: number
-): { manual: MermaidBlockMode; effective: MermaidBlockMode; searchReveal: MermaidSearchReveal } {
+): {
+  manual: MermaidBlockMode;
+  decision: RenderedBlockModeShellDecision;
+  searchReveal: MermaidSearchReveal;
+} {
   const editingState = state.field(mermaidEditingStateField, false);
   const manual = editingState?.modes.get(anchor) ?? 'preview';
   const searchReveal = editingState?.searchReveal ?? null;
@@ -167,7 +172,7 @@ export function getMermaidBlockMode(
   });
   return {
     manual,
-    effective: decision.effectiveMode,
+    decision,
     searchReveal: searchInside ? searchReveal : null
   };
 }
@@ -262,7 +267,7 @@ class MermaidToolbarWidget extends WidgetType {
         lineNumber: this.lineNumber,
         manualMode: currentMode,
         temporaryReveal: false
-      }).manualIntent.mode;
+      }).nextManualMode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
@@ -582,8 +587,8 @@ class MermaidEditingController {
     });
     this.root.className = `meo-mermaid-editing-block meo-rendered-block-mode-shell ${decision.modeClass}`;
     this.root.dataset.meoRenderedBlockMode = decision.effectiveMode;
-    this.root.dataset.meoRenderedBlockLayout = decision.layout.wide;
-    if (decision.preview === 'deferred') {
+    this.root.dataset.meoRenderedBlockLayout = decision.wideLayout;
+    if (decision.previewLifecycle === 'deferred') {
       const preferredHeight = getCachedMermaidPreviewHeight(
         this.presentationFactory,
         this.outerView,
@@ -602,7 +607,7 @@ class MermaidEditingController {
         this.root.appendChild(this.previewShell);
       }
       this.renderPreview();
-    } else if (decision.preview === 'destroyed' && this.previewShell) {
+    } else if (decision.previewLifecycle === 'destroyed' && this.previewShell) {
       this.root.style.removeProperty('--meo-mermaid-preview-preferred-height');
       this.destroyPreview();
       this.previewShell.remove();

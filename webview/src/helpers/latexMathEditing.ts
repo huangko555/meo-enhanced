@@ -11,7 +11,8 @@ import { attachLatexMathViewport, type LatexMathViewportController } from './lat
 import { markLiveInputNestedProjection } from '../editor/liveInputDerivedWork';
 import {
   decideRenderedBlockModeShell,
-  type RenderedBlockMode
+  type RenderedBlockMode,
+  type RenderedBlockModeShellDecision
 } from '../editor/renderedBlockModeShell';
 
 export type LatexMathBlockMode = RenderedBlockMode;
@@ -130,7 +131,11 @@ export function getLatexMathBlockMode(
   anchor: number,
   contentFrom: number,
   contentTo: number
-): { manual: LatexMathBlockMode; effective: LatexMathBlockMode; searchReveal: LatexMathSearchReveal } {
+): {
+  manual: LatexMathBlockMode;
+  decision: RenderedBlockModeShellDecision;
+  searchReveal: LatexMathSearchReveal;
+} {
   const editingState = state.field(latexMathEditingStateField, false);
   const manual = editingState?.modes.get(anchor) ?? 'preview';
   const searchReveal = editingState?.searchReveal ?? null;
@@ -147,7 +152,7 @@ export function getLatexMathBlockMode(
   });
   return {
     manual,
-    effective: decision.effectiveMode,
+    decision,
     searchReveal: searchInside ? searchReveal : null
   };
 }
@@ -241,7 +246,7 @@ class LatexMathToolbarWidget extends WidgetType {
         lineNumber: this.lineNumber,
         manualMode: currentMode,
         temporaryReveal: false
-      }).manualIntent.mode;
+      }).nextManualMode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
@@ -512,8 +517,8 @@ class LatexMathEditingController {
     });
     this.root.className = `meo-latex-math-editing-block meo-rendered-block-mode-shell ${decision.modeClass}`;
     this.root.dataset.meoRenderedBlockMode = decision.effectiveMode;
-    this.root.dataset.meoRenderedBlockLayout = decision.layout.wide;
-    if (decision.preview === 'deferred') {
+    this.root.dataset.meoRenderedBlockLayout = decision.wideLayout;
+    if (decision.previewLifecycle === 'deferred') {
       if (!this.previewShell) {
         this.previewShell = document.createElement('div');
         this.previewShell.className = 'meo-latex-math-preview-shell meo-rendered-block-preview-pane';
@@ -523,7 +528,7 @@ class LatexMathEditingController {
         this.root.appendChild(this.previewShell);
       }
       this.renderPreview();
-    } else if (decision.preview === 'destroyed' && this.previewShell) {
+    } else if (decision.previewLifecycle === 'destroyed' && this.previewShell) {
       this.previewViewport?.destroy();
       this.previewViewport = null;
       this.previewShell.remove();

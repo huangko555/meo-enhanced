@@ -2,25 +2,17 @@ export type RenderedBlockMode = 'source' | 'split' | 'preview';
 export type RenderedBlockKind = 'mermaid' | 'latex';
 
 export type RenderedBlockModeShellDecision = {
-  readonly manualMode: RenderedBlockMode;
   readonly effectiveMode: RenderedBlockMode;
   readonly modeClass: 'is-preview' | 'is-split' | 'is-source';
-  readonly manualIntent: {
-    readonly mode: RenderedBlockMode;
-    readonly clearsTemporaryReveal: true;
-  };
+  readonly nextManualMode: RenderedBlockMode;
   readonly controlsLabel: string;
   readonly editorLabel: string;
   readonly modeButton: {
     readonly action: 'edit' | 'source' | 'preview';
     readonly label: string;
   };
-  readonly layout: {
-    readonly wide: 'presentation-only' | 'side-by-side' | 'source-only';
-    readonly narrow: 'presentation-only' | 'stacked' | 'source-only';
-  };
-  readonly source: 'visible' | 'destroyed';
-  readonly preview: 'presented' | 'deferred' | 'destroyed';
+  readonly wideLayout: 'presentation-only' | 'side-by-side' | 'source-only';
+  readonly previewLifecycle: 'presented' | 'deferred' | 'destroyed';
 };
 
 type RenderedBlockModeShellInput = {
@@ -68,24 +60,22 @@ export function decideRenderedBlockModeShell(
       : { action: 'preview' as const, label: copy.preview };
 
   return {
-    manualMode: input.manualMode,
     effectiveMode,
     modeClass: effectiveMode === 'preview'
       ? 'is-preview'
       : effectiveMode === 'split'
         ? 'is-split'
         : 'is-source',
-    manualIntent: { mode: nextManualMode, clearsTemporaryReveal: true },
+    nextManualMode,
     controlsLabel: `${copy.controls} at line ${input.lineNumber}`,
     editorLabel: `${copy.editor} at line ${input.lineNumber}`,
     modeButton,
-    layout: effectiveMode === 'split'
-      ? { wide: 'side-by-side', narrow: 'stacked' }
+    wideLayout: effectiveMode === 'split'
+      ? 'side-by-side'
       : effectiveMode === 'source'
-        ? { wide: 'source-only', narrow: 'source-only' }
-        : { wide: 'presentation-only', narrow: 'presentation-only' },
-    source: effectiveMode === 'preview' ? 'destroyed' : 'visible',
-    preview: effectiveMode === 'preview'
+        ? 'source-only'
+        : 'presentation-only',
+    previewLifecycle: effectiveMode === 'preview'
       ? 'presented'
       : effectiveMode === 'split'
         ? 'deferred'

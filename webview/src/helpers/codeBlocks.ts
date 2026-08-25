@@ -829,9 +829,10 @@ function addMermaidDiagramBlock(
     contentStartLine.from,
     contentEndLine.to
   );
-  addMermaidToolbar(builder, startLine.to, anchor, startLine.number, mode.effective, block.fullBlockText);
+  const decision = mode.decision;
+  addMermaidToolbar(builder, startLine.to, anchor, startLine.number, decision.effectiveMode, block.fullBlockText);
 
-  const widget = mode.effective === 'preview'
+  const widget = decision.effectiveMode === 'preview'
     ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number, {
         presentationFactory: getMermaidDiagramPresentationFactory(state),
         indentColumns
@@ -845,7 +846,7 @@ function addMermaidDiagramBlock(
       startLine: startLine.number,
       endLine: endLine.number,
       indentColumns
-    }, mode.effective, mode.searchReveal);
+    }, decision.effectiveMode, mode.searchReveal);
   builder.push(
     Decoration.replace({
       widget,

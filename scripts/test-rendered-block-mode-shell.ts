@@ -38,16 +38,14 @@ for (const example of kinds) {
     temporaryReveal: false
   });
   assert.deepEqual(preview, {
-    manualMode: 'preview',
     effectiveMode: 'preview',
     modeClass: 'is-preview',
-    manualIntent: { mode: 'split', clearsTemporaryReveal: true },
+    nextManualMode: 'split',
     controlsLabel: example.controls,
     editorLabel: example.editor,
     modeButton: { action: 'edit', label: example.splitAction },
-    layout: { wide: 'presentation-only', narrow: 'presentation-only' },
-    source: 'destroyed',
-    preview: 'presented'
+    wideLayout: 'presentation-only',
+    previewLifecycle: 'presented'
   });
 
   const temporarySplit = decideRenderedBlockModeShell({
@@ -58,10 +56,9 @@ for (const example of kinds) {
   });
   assert.equal(temporarySplit.effectiveMode, 'split');
   assert.equal(temporarySplit.modeClass, 'is-split');
-  assert.deepEqual(temporarySplit.manualIntent, { mode: 'source', clearsTemporaryReveal: true });
-  assert.deepEqual(temporarySplit.layout, { wide: 'side-by-side', narrow: 'stacked' });
-  assert.equal(temporarySplit.source, 'visible');
-  assert.equal(temporarySplit.preview, 'deferred');
+  assert.equal(temporarySplit.nextManualMode, 'source');
+  assert.equal(temporarySplit.wideLayout, 'side-by-side');
+  assert.equal(temporarySplit.previewLifecycle, 'deferred');
 
   const manualSplit = decideRenderedBlockModeShell({
     kind: example.kind,
@@ -79,11 +76,10 @@ for (const example of kinds) {
   });
   assert.equal(manualSource.effectiveMode, 'source', 'manual mode must override an older reveal');
   assert.equal(manualSource.modeClass, 'is-source');
-  assert.deepEqual(manualSource.manualIntent, { mode: 'preview', clearsTemporaryReveal: true });
+  assert.equal(manualSource.nextManualMode, 'preview');
   assert.deepEqual(manualSource.modeButton, { action: 'preview', label: example.previewAction });
-  assert.deepEqual(manualSource.layout, { wide: 'source-only', narrow: 'source-only' });
-  assert.equal(manualSource.source, 'visible');
-  assert.equal(manualSource.preview, 'destroyed');
+  assert.equal(manualSource.wideLayout, 'source-only');
+  assert.equal(manualSource.previewLifecycle, 'destroyed');
 }
 
 console.log('Rendered block mode shell tests passed.');
