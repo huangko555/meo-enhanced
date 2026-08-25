@@ -9,6 +9,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-column-width-pr
 const threeColumns = ['| A | B | C |', '| --- | --- | --- |', '| one | two | three |'].join('\n');
 const twoColumns = ['| A | B |', '| --- | --- |', '| one | two |'].join('\n');
 const focusedCase = process.argv.includes('--case=sticky-width-pointer');
+const cleanupContractCase = process.argv.includes('--case=sticky-width-pointer-cleanup');
 
 async function waitForTableLayout(
   page: any,
@@ -373,6 +374,9 @@ async function dragPath(
     const samples: number[] = [];
     await page.mouse.move(point.x, point.y);
     let pointerDown = false;
+    let hasPrimary = false;
+    let primary: unknown;
+    const cleanupErrors: unknown[] = [];
     try {
       await page.mouse.down();
       pointerDown = true;
@@ -383,85 +387,99 @@ async function dragPath(
           (cell) => cell.getBoundingClientRect().width
         ));
       }
+    } catch (error) {
+      hasPrimary = true;
+      primary = error;
     } finally {
-      if (pointerDown) await page.mouse.up();
+      if (pointerDown) {
+        try { await page.mouse.up(); } catch (error) { cleanupErrors.push(error); }
+      }
+    }
+    if (hasPrimary && cleanupErrors.length) {
+      throw new AggregateError([primary, ...cleanupErrors], 'Table width drag and pointer cleanup failed');
+    }
+    if (hasPrimary) throw primary;
+    if (cleanupErrors.length === 1) throw cleanupErrors[0];
+    if (cleanupErrors.length > 1) {
+      throw new AggregateError(cleanupErrors, 'Table width pointer cleanup failed');
     }
     return samples;
   }
-  const acquisition = await page.evaluate(({ handleSelector, expectedColumn }) => {
-    const matches = Array.from(document.querySelectorAll<HTMLElement>(handleSelector));
-    if (matches.length !== 1) {
-      throw new Error(`resize handle acquisition requires one current match, received ${matches.length}: ${handleSelector}`);
-    }
-    const handle = matches[0];
-    const stickyTable = handle.closest<HTMLTableElement>('.meo-md-html-table-sticky-table');
-    const headerCell = handle.closest<HTMLTableCellElement>('th');
-    const shell = stickyTable?.closest<HTMLElement>('.meo-md-html-table-shell');
-    const mainTable = shell?.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
-    const expectedMainTable = (window as any).__columnWidthStickyPointerExpectedTable;
-    const rect = handle.getBoundingClientRect();
-    const style = getComputedStyle(handle);
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    const hit = document.elementFromPoint(x, y);
-    if (!handle.isConnected || !stickyTable || !headerCell || !mainTable || !mainTable.isConnected) {
-      throw new Error(`resize handle acquisition found a detached or ownerless current handle: ${handleSelector}`);
-    }
-    if (mainTable !== expectedMainTable) {
-      throw new Error(`resize handle acquisition selected the wrong current table: ${handleSelector}`);
-    }
-    if (headerCell.cellIndex !== expectedColumn || handle.dataset.tableResizeColumn !== String(expectedColumn)) {
-      throw new Error(`resize handle acquisition selected the wrong Sticky column: ${handleSelector}`);
-    }
-    if (!(rect.width > 0 && rect.height > 0) || !Number.isFinite(x) || !Number.isFinite(y)) {
-      throw new Error(`current visible resize handle acquisition returned zero geometry: ${JSON.stringify({
-        selector: handleSelector, width: rect.width, height: rect.height, x, y
-      })}`);
-    }
-    if (rect.left < 0 || rect.top < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight ||
-      style.display === 'none' || style.visibility !== 'visible' || style.pointerEvents === 'none') {
-      throw new Error(`resize handle acquisition requires a fully visible pointer target: ${handleSelector}`);
-    }
-    if (!(hit === handle || (hit instanceof Node && handle.contains(hit)))) {
-      throw new Error(`current visible resize handle acquisition returned non-hit point: ${JSON.stringify({
-        selector: handleSelector, x, y, hit: hit instanceof Element ? hit.tagName : null
-      })}`);
-    }
-    (window as any).__columnWidthPointerTransaction = {
-      handle,
-      stickyTable,
-      mainTable,
-      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
-    };
-    return { x, y };
-  }, { handleSelector: selector, expectedColumn: column });
   const samples: number[] = [];
-  await page.mouse.move(acquisition.x, acquisition.y);
-  const preDown = await page.evaluate(({ handleSelector, expectedColumn }) => {
-    const transaction = (window as any).__columnWidthPointerTransaction;
-    delete (window as any).__columnWidthPointerTransaction;
-    delete (window as any).__columnWidthStickyPointerExpectedTable;
-    const current = document.querySelector<HTMLElement>(handleSelector);
-    if (!transaction?.handle?.isConnected || current !== transaction.handle) return 'replacement-or-detach';
-    const handle = transaction.handle as HTMLElement;
-    const rect = handle.getBoundingClientRect();
-    if (handle.closest('.meo-md-html-table-sticky-table') !== transaction.stickyTable ||
-      transaction.stickyTable.closest('.meo-md-html-table-shell')
-        ?.querySelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)') !== transaction.mainTable ||
-      handle.closest<HTMLTableCellElement>('th')?.cellIndex !== expectedColumn) return 'wrong-table-or-column';
-    if (Math.abs(rect.left - transaction.rect.left) >= 0.5 || Math.abs(rect.top - transaction.rect.top) >= 0.5 ||
-      Math.abs(rect.width - transaction.rect.width) >= 0.5 || Math.abs(rect.height - transaction.rect.height) >= 0.5) {
-      return 'moved-after-acquisition';
-    }
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    const hit = document.elementFromPoint(x, y);
-    if (!(hit === handle || (hit instanceof Node && handle.contains(hit)))) return 'non-hit-before-pointerdown';
-    return 'current';
-  }, { handleSelector: selector, expectedColumn: column });
-  assert.equal(preDown, 'current', `resize handle changed before pointerdown: ${preDown}: ${selector}`);
   let pointerDown = false;
+  let hasPrimary = false;
+  let primary: unknown;
+  const cleanupErrors: unknown[] = [];
   try {
+    const acquisition = await page.evaluate(({ handleSelector, expectedColumn }) => {
+      const matches = Array.from(document.querySelectorAll<HTMLElement>(handleSelector));
+      if (matches.length !== 1) {
+        throw new Error(`resize handle acquisition requires one current match, received ${matches.length}: ${handleSelector}`);
+      }
+      const handle = matches[0];
+      const stickyTable = handle.closest<HTMLTableElement>('.meo-md-html-table-sticky-table');
+      const headerCell = handle.closest<HTMLTableCellElement>('th');
+      const shell = stickyTable?.closest<HTMLElement>('.meo-md-html-table-shell');
+      const mainTable = shell?.querySelector<HTMLTableElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
+      const expectedMainTable = (window as any).__columnWidthStickyPointerExpectedTable;
+      const rect = handle.getBoundingClientRect();
+      const style = getComputedStyle(handle);
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!handle.isConnected || !stickyTable || !headerCell || !mainTable || !mainTable.isConnected) {
+        throw new Error(`resize handle acquisition found a detached or ownerless current handle: ${handleSelector}`);
+      }
+      if (mainTable !== expectedMainTable) {
+        throw new Error(`resize handle acquisition selected the wrong current table: ${handleSelector}`);
+      }
+      if (headerCell.cellIndex !== expectedColumn || handle.dataset.tableResizeColumn !== String(expectedColumn)) {
+        throw new Error(`resize handle acquisition selected the wrong Sticky column: ${handleSelector}`);
+      }
+      if (!(rect.width > 0 && rect.height > 0) || !Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new Error(`current visible resize handle acquisition returned zero geometry: ${JSON.stringify({
+          selector: handleSelector, width: rect.width, height: rect.height, x, y
+        })}`);
+      }
+      if (rect.left < 0 || rect.top < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight ||
+        style.display === 'none' || style.visibility !== 'visible' || style.pointerEvents === 'none') {
+        throw new Error(`resize handle acquisition requires a fully visible pointer target: ${handleSelector}`);
+      }
+      if (!(hit === handle || (hit instanceof Node && handle.contains(hit)))) {
+        throw new Error(`current visible resize handle acquisition returned non-hit point: ${JSON.stringify({
+          selector: handleSelector, x, y, hit: hit instanceof Element ? hit.tagName : null
+        })}`);
+      }
+      (window as any).__columnWidthPointerTransaction = {
+        handle,
+        stickyTable,
+        mainTable,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      };
+      return { x, y };
+    }, { handleSelector: selector, expectedColumn: column });
+    await page.mouse.move(acquisition.x, acquisition.y);
+    const preDown = await page.evaluate(({ handleSelector, expectedColumn }) => {
+      const transaction = (window as any).__columnWidthPointerTransaction;
+      const current = document.querySelector<HTMLElement>(handleSelector);
+      if (!transaction?.handle?.isConnected || current !== transaction.handle) return 'replacement-or-detach';
+      const handle = transaction.handle as HTMLElement;
+      const rect = handle.getBoundingClientRect();
+      if (handle.closest('.meo-md-html-table-sticky-table') !== transaction.stickyTable ||
+        transaction.stickyTable.closest('.meo-md-html-table-shell')
+          ?.querySelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)') !== transaction.mainTable ||
+        handle.closest<HTMLTableCellElement>('th')?.cellIndex !== expectedColumn) return 'wrong-table-or-column';
+      if (Math.abs(rect.left - transaction.rect.left) >= 0.5 || Math.abs(rect.top - transaction.rect.top) >= 0.5 ||
+        Math.abs(rect.width - transaction.rect.width) >= 0.5 || Math.abs(rect.height - transaction.rect.height) >= 0.5) {
+        return 'moved-after-acquisition';
+      }
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!(hit === handle || (hit instanceof Node && handle.contains(hit)))) return 'non-hit-before-pointerdown';
+      return 'current';
+    }, { handleSelector: selector, expectedColumn: column });
+    assert.equal(preDown, 'current', `resize handle changed before pointerdown: ${preDown}: ${selector}`);
     await page.mouse.down();
     pointerDown = true;
     for (const delta of deltas) {
@@ -471,8 +489,27 @@ async function dragPath(
         (cell) => cell.getBoundingClientRect().width
       ));
     }
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
   } finally {
-    if (pointerDown) await page.mouse.up();
+    if (pointerDown) {
+      try { await page.mouse.up(); } catch (error) { cleanupErrors.push(error); }
+    }
+    try {
+      await page.evaluate(() => { delete (window as any).__columnWidthPointerTransaction; });
+    } catch (error) { cleanupErrors.push(error); }
+    try {
+      await page.evaluate(() => { delete (window as any).__columnWidthStickyPointerExpectedTable; });
+    } catch (error) { cleanupErrors.push(error); }
+  }
+  if (hasPrimary && cleanupErrors.length) {
+    throw new AggregateError([primary, ...cleanupErrors], 'Sticky width drag and pointer cleanup failed');
+  }
+  if (hasPrimary) throw primary;
+  if (cleanupErrors.length === 1) throw cleanupErrors[0];
+  if (cleanupErrors.length > 1) {
+    throw new AggregateError(cleanupErrors, 'Sticky width pointer cleanup failed');
   }
   return samples;
 }
@@ -873,50 +910,195 @@ async function main(): Promise<void> {
       'container expansion after an active shrink must not expand or reverse the committed intent'
     );
     assert.deepEqual(expandedAfterShrink.sticky.map(Math.round), expandedAfterShrink.primary.map(Math.round));
-    const transactionStateAfter = await page.$eval(`${tableSelector}:first-of-type`, async (table: HTMLTableElement) => {
+    let transactionStateAfter: {
+      rowHeight: number;
+      focused: boolean;
+      selectionStart: number;
+      selectionEnd: number;
+      lastReachable: boolean;
+    } | null = null;
+    let settlementFailure: unknown = null;
+    try {
+      transactionStateAfter = await page.$eval(
+        `${tableSelector}:first-of-type`,
+        async (table: HTMLTableElement, exerciseCleanupContract: boolean) => {
       const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
       const input = table.querySelector<HTMLTextAreaElement>('tbody textarea')!;
       const lastHandle = table.querySelector<HTMLElement>('th:last-child .meo-md-html-table-column-resize-handle')!;
       const nativeFrame = window.requestAnimationFrame.bind(window);
-      const tracker = (window as any).TableStabilityHarness.installCausalFrameSettlement(window, () => null);
-      const projected = new Promise<void>((resolve) => {
-        table.addEventListener('meo-table-column-width-projected', () => tracker.beginEventRoot(), {
-          capture: true,
-          once: true
-        });
-        table.addEventListener('meo-table-column-width-projected', () => {
-          wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
-          wrap.dispatchEvent(new Event('scroll'));
-          tracker.accept();
-          resolve();
-        }, { once: true });
-      });
-      tracker.runRoot(() => {
-        wrap.style.width = '';
-        wrap.style.maxWidth = '';
-      });
-      await projected;
-      await new Promise<void>((resolve, reject) => {
-        const inspect = () => {
-          const diagnostics = tracker.diagnostics();
-          if (diagnostics.failure) return reject(new Error(diagnostics.failure));
-          if (diagnostics.phase === 'complete') return resolve();
-          nativeFrame(inspect);
-        };
-        nativeFrame(inspect);
-      });
-      tracker.dispose();
-      (window as any).__columnWidthStickyPointerExpectedTable = table;
-      const wrapRect = wrap.getBoundingClientRect();
-      const handleRect = lastHandle.getBoundingClientRect();
-      return {
-        rowHeight: table.querySelector<HTMLElement>('tbody tr')!.getBoundingClientRect().height,
-        focused: document.activeElement === input,
-        selectionStart: input.selectionStart,
-        selectionEnd: input.selectionEnd,
-        lastReachable: handleRect.left >= wrapRect.left - 1 && handleRect.right <= wrapRect.right + 1
+      const installedTracker = (window as any).TableStabilityHarness.installCausalFrameSettlement(window, () => null);
+      const evidence = exerciseCleanupContract ? {
+        rootCalls: 0,
+        acceptedCalls: 0,
+        rootRemovals: 0,
+        acceptedRemovals: 0,
+        disposeCalls: 0,
+        cleanupErrors: [] as unknown[],
+        completionErrors: [] as unknown[],
+        originalRemove: table.removeEventListener
+      } : null;
+      if (evidence) {
+        (window as any).__columnWidthPointerTransaction = { sentinel: true };
+        (window as any).__columnWidthStickyPointerExpectedTable = { sentinel: true };
+        (window as any).__columnWidthCleanupEvidence = evidence;
+      }
+      const tracker = evidence ? {
+        beginEventRoot: () => installedTracker.beginEventRoot(),
+        accept: () => installedTracker.accept(),
+        runRoot: () => { throw new Error('synthetic settlement root failure'); },
+        diagnostics: () => installedTracker.diagnostics(),
+        dispose: () => {
+          evidence.disposeCalls += 1;
+          installedTracker.dispose();
+          throw new Error('synthetic tracker dispose failure');
+        }
+      } : installedTracker;
+      const onProjectedRoot = () => {
+        if (evidence) evidence.rootCalls += 1;
+        tracker.beginEventRoot();
       };
-    });
+      const onProjectedAccepted = () => {
+        if (evidence) evidence.acceptedCalls += 1;
+        wrap.scrollLeft = wrap.scrollWidth - wrap.clientWidth;
+        wrap.dispatchEvent(new Event('scroll'));
+        tracker.accept();
+        resolveProjected();
+      };
+      if (evidence) {
+        table.removeEventListener = function (type, listener, options) {
+          evidence.originalRemove.call(this, type, listener, options);
+          if (listener === onProjectedRoot) {
+            evidence.rootRemovals += 1;
+            throw new Error('synthetic root listener cleanup failure');
+          }
+          if (listener === onProjectedAccepted) {
+            evidence.acceptedRemovals += 1;
+            throw new Error('synthetic accepted listener cleanup failure');
+          }
+        };
+      }
+      let resolveProjected!: () => void;
+      let hasPrimary = false;
+      let primary: unknown;
+      const cleanupErrors: unknown[] = [];
+      let result: {
+        rowHeight: number;
+        focused: boolean;
+        selectionStart: number;
+        selectionEnd: number;
+        lastReachable: boolean;
+      } | null = null;
+      try {
+        const projected = new Promise<void>((resolve) => {
+          resolveProjected = resolve;
+          table.addEventListener('meo-table-column-width-projected', onProjectedRoot, {
+            capture: true,
+            once: true
+          });
+          table.addEventListener('meo-table-column-width-projected', onProjectedAccepted, { once: true });
+        });
+        tracker.runRoot(() => {
+          wrap.style.width = '';
+          wrap.style.maxWidth = '';
+        });
+        await projected;
+        await new Promise<void>((resolve, reject) => {
+          const inspect = () => {
+            const diagnostics = tracker.diagnostics();
+            if (diagnostics.failure) return reject(new Error(diagnostics.failure));
+            if (diagnostics.phase === 'complete') return resolve();
+            nativeFrame(inspect);
+          };
+          nativeFrame(inspect);
+        });
+        const wrapRect = wrap.getBoundingClientRect();
+        const handleRect = lastHandle.getBoundingClientRect();
+        result = {
+          rowHeight: table.querySelector<HTMLElement>('tbody tr')!.getBoundingClientRect().height,
+          focused: document.activeElement === input,
+          selectionStart: input.selectionStart,
+          selectionEnd: input.selectionEnd,
+          lastReachable: handleRect.left >= wrapRect.left - 1 && handleRect.right <= wrapRect.right + 1
+        };
+      } catch (error) {
+        hasPrimary = true;
+        primary = error;
+      } finally {
+        try {
+          table.removeEventListener('meo-table-column-width-projected', onProjectedRoot, { capture: true });
+        } catch (error) { cleanupErrors.push(error); }
+        try {
+          table.removeEventListener('meo-table-column-width-projected', onProjectedAccepted);
+        } catch (error) { cleanupErrors.push(error); }
+        try { tracker.dispose(); } catch (error) { cleanupErrors.push(error); }
+        try { delete (window as any).__columnWidthPointerTransaction; } catch (error) { cleanupErrors.push(error); }
+        try { delete (window as any).__columnWidthStickyPointerExpectedTable; } catch (error) { cleanupErrors.push(error); }
+      }
+      if (evidence) {
+        evidence.cleanupErrors.push(...cleanupErrors);
+        evidence.completionErrors.push(...(hasPrimary ? [primary, ...cleanupErrors] : cleanupErrors));
+      }
+      if (hasPrimary && cleanupErrors.length) {
+        throw new AggregateError([primary, ...cleanupErrors], 'Sticky pointer settlement and cleanup failed');
+      }
+      if (hasPrimary) throw primary;
+      if (cleanupErrors.length === 1) throw cleanupErrors[0];
+      if (cleanupErrors.length > 1) {
+        throw new AggregateError(cleanupErrors, 'Sticky pointer settlement cleanup failed');
+      }
+      (window as any).__columnWidthStickyPointerExpectedTable = table;
+      return result!;
+        },
+        cleanupContractCase
+      );
+    } catch (error) {
+      settlementFailure = error;
+    }
+    if (cleanupContractCase) {
+      const cleanupEvidence = await page.evaluate(() => {
+        const evidence = (window as any).__columnWidthCleanupEvidence;
+        const table = document.querySelector<HTMLTableElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table):first-of-type'
+        )!;
+        table.removeEventListener = evidence.originalRemove;
+        const before = { root: evidence.rootCalls, accepted: evidence.acceptedCalls };
+        try { table.dispatchEvent(new CustomEvent('meo-table-column-width-projected')); } catch {}
+        const result = {
+          before,
+          after: { root: evidence.rootCalls, accepted: evidence.acceptedCalls },
+          rootRemovals: evidence.rootRemovals,
+          acceptedRemovals: evidence.acceptedRemovals,
+          disposeCalls: evidence.disposeCalls,
+          pointerSlotPresent: '__columnWidthPointerTransaction' in window,
+          expectedTableSlotPresent: '__columnWidthStickyPointerExpectedTable' in window,
+          cleanupErrorMessages: evidence.cleanupErrors.map((error: Error) => error.message),
+          completionErrorMessages: evidence.completionErrors.map((error: Error) => error.message)
+        };
+        delete (window as any).__columnWidthCleanupEvidence;
+        return result;
+      });
+      assert.match(String(settlementFailure), /Sticky pointer settlement and cleanup failed/);
+      assert.deepEqual(cleanupEvidence.before, cleanupEvidence.after, 'both projected listeners must be removed after settlement failure');
+      assert.equal(cleanupEvidence.rootRemovals, 1, 'root listener cleanup must run exactly once');
+      assert.equal(cleanupEvidence.acceptedRemovals, 1, 'accepted listener cleanup must run exactly once');
+      assert.equal(cleanupEvidence.disposeCalls, 1, 'tracker disposal must run exactly once');
+      assert.equal(cleanupEvidence.pointerSlotPresent, false, 'pointer transaction slot must be cleared');
+      assert.equal(cleanupEvidence.expectedTableSlotPresent, false, 'expected table slot must be cleared');
+      assert.deepEqual(cleanupEvidence.cleanupErrorMessages, [
+        'synthetic root listener cleanup failure',
+        'synthetic accepted listener cleanup failure',
+        'synthetic tracker dispose failure'
+      ]);
+      assert.deepEqual(cleanupEvidence.completionErrorMessages, [
+        'synthetic settlement root failure',
+        'synthetic root listener cleanup failure',
+        'synthetic accepted listener cleanup failure',
+        'synthetic tracker dispose failure'
+      ]);
+      return;
+    }
+    if (settlementFailure) throw settlementFailure;
+    assert.ok(transactionStateAfter);
     assert.ok(Math.abs(transactionStateAfter.rowHeight - transactionStateBefore.rowHeight) < 1);
     assert.equal(transactionStateAfter.focused, transactionStateBefore.focused);
     assert.equal(transactionStateAfter.selectionStart, transactionStateBefore.selectionStart);
@@ -1368,5 +1550,32 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
-console.log('table column width production cutover Chromium trace passed');
+if (cleanupContractCase) {
+  const moveFailure = new Error('synthetic pointer move failure');
+  const releaseFailure = new Error('synthetic pointer release failure');
+  let moves = 0;
+  const fakePage = {
+    $eval: async () => ({ x: 20, y: 30 }),
+    mouse: {
+      async move() {
+        moves += 1;
+        if (moves === 2) throw moveFailure;
+      },
+      async down() {},
+      async up() { throw releaseFailure; }
+    }
+  };
+  let observed: unknown = null;
+  try {
+    await dragPath(fakePage, '.main-table-handle', [8]);
+  } catch (error) {
+    observed = error;
+  }
+  assert.ok(observed instanceof AggregateError, 'safe pointer release must not replace the drag primary error');
+  assert.deepEqual(observed.errors, [moveFailure, releaseFailure]);
+  await main();
+  console.log('table column width pointer cleanup contracts passed');
+} else {
+  await main();
+  console.log('table column width production cutover Chromium trace passed');
+}
