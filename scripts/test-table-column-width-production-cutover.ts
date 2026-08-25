@@ -1639,6 +1639,62 @@ async function main(): Promise<void> {
       );
       assert.equal(new Set(changedTotals).size, 1, `${terminal} must not repeat the changed geometry value`);
     }
+    await page.evaluate(() => {
+      (window as any).__columnWidthCurrentness.setText([
+        '| A | B | C |',
+        '| --- | --- | --- |',
+        '| 1 | 2 | 3 |'
+      ].join('\n'));
+    });
+    await waitForTableLayout(page, tableSelector, 1, 3);
+    await setCurrentnessWrapperWidth(550);
+    await drag(page, currentnessHandle, -80);
+    await drag(page, currentnessHandle, -80);
+    const fixedBeforeReentry = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+    assert.ok(
+      fixedBeforeReentry.primaryTableWidth < 549,
+      `fixture must exit elastic mode before re-entry: ${JSON.stringify(fixedBeforeReentry)}`
+    );
+    const reenteredGrow = await dragWithCommittedSamples(page, currentnessHandle, 600);
+    assert.ok(reenteredGrow.preview.primaryTableWidth >= 549, 'explicit grow must reach the 550px container');
+    for (const sample of reenteredGrow.committed) {
+      assert.deepEqual(sample.primaryWidths.map(Math.round), reenteredGrow.preview.primaryWidths.map(Math.round));
+    }
+    await setCurrentnessWrapperWidth(700);
+    const expandedAfterReentry = await page.$eval(
+      `${tableSelector}:first-of-type`,
+      (table: HTMLTableElement) => {
+        const sticky = table.closest('.meo-md-html-table-shell')!
+          .querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table')!;
+        const primaryWidths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+          .map((cell) => cell.getBoundingClientRect().width);
+        const stickyWidths = Array.from(sticky.querySelectorAll<HTMLTableColElement>('colgroup > col'))
+          .map((column) => Number.parseFloat(column.style.width));
+        return {
+          primaryWidths,
+          stickyWidths,
+          primaryTableWidth: table.getBoundingClientRect().width
+        };
+      }
+    );
+    assert.ok(
+      expandedAfterReentry.primaryWidths.every((width, index) => (
+        width >= reenteredGrow.preview.primaryWidths[index] - 1
+      )),
+      'main columns must grow monotonically after active elastic re-entry'
+    );
+    assert.ok(
+      expandedAfterReentry.primaryTableWidth >= reenteredGrow.preview.primaryTableWidth + 149,
+      `container growth after active re-entry must expand the real table: ${JSON.stringify({
+        preview: reenteredGrow.preview,
+        expanded: expandedAfterReentry
+      })}`
+    );
+    assert.deepEqual(
+      expandedAfterReentry.stickyWidths.map(Math.round),
+      expandedAfterReentry.primaryWidths.map(Math.round),
+      'Sticky must follow the same monotonic width trajectory as the main table'
+    );
     await page.evaluate(() => (window as any).__columnWidthCurrentness.destroy());
     assert.equal(await page.$$('[data-table-column-width-owner="adapter"]').then((items) => items.length), 0);
   } finally {

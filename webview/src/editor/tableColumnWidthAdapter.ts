@@ -34,6 +34,7 @@ type TableLayoutFacts = {
 type PreviewSnapshot = TableLayoutFacts & {
   widths: readonly number[];
   elastic: boolean;
+  tracksAvailableWidth: boolean;
 };
 
 type WidthIntent = {
@@ -198,6 +199,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       minimumWidths: currentFacts.minimumWidths,
       initialTotalWidth: intent.initialTotalWidth,
       elastic: intent.snapshot.elastic,
+      tracksAvailableWidth: intent.snapshot.tracksAvailableWidth,
       defaultWidthWasCapped: intent.defaultWidthWasCapped,
       availableWidth: currentFacts.availableWidth,
       preserveWidthIntent: sameLayoutFacts(intent.snapshot, currentFacts)
@@ -207,6 +209,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       snapshot: {
         widths: [...result.widths],
         elastic: result.elastic,
+        tracksAvailableWidth: result.tracksAvailableWidth,
         ...currentFacts
       },
       initialTotalWidth: intent.snapshot.elastic
@@ -290,6 +293,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           widths: startWidths,
           minimumWidths: facts.minimumWidths,
           elastic: stored?.snapshot.elastic ?? defaultWidthWasCapped,
+          tracksAvailableWidth: stored?.snapshot.tracksAvailableWidth ?? defaultWidthWasCapped,
           column,
           requestedDelta: latestClientX - startX,
           maximumTotalWidth: facts.availableWidth
@@ -297,6 +301,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         const snapshot: PreviewSnapshot = {
           widths: [...result.widths],
           elastic: result.elastic,
+          tracksAvailableWidth: result.tracksAvailableWidth,
           ...facts
         };
         lastPreview = snapshot;

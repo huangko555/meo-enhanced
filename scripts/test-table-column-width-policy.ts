@@ -113,6 +113,59 @@ const fixedExplicitGrowth = tableColumnWidthPolicy.resize({
 });
 assert.equal(fixedExplicitGrowth.elastic, true, 'a later explicit growth may re-enter elastic behavior');
 
+const reenteredElastic = tableColumnWidthPolicy.resize({
+  widths: [100, 100],
+  minimumWidths: [20, 20],
+  elastic: false,
+  tracksAvailableWidth: false,
+  column: 0,
+  requestedDelta: 100,
+  maximumTotalWidth: 300
+});
+assert.deepEqual(reenteredElastic.widths, [200, 100]);
+assert.equal(reenteredElastic.elastic, true);
+assert.equal(
+  reenteredElastic.tracksAvailableWidth,
+  true,
+  'an explicit grow that re-enters elastic mode must record the container-width baseline'
+);
+const expandedAfterReentry = tableColumnWidthPolicy.project({
+  widths: reenteredElastic.widths,
+  minimumWidths: [20, 20],
+  preserveWidthIntent: false,
+  initialTotalWidth: 200,
+  elastic: reenteredElastic.elastic,
+  tracksAvailableWidth: reenteredElastic.tracksAvailableWidth,
+  defaultWidthWasCapped: false,
+  availableWidth: 500
+});
+assert.equal(
+  Math.round(expandedAfterReentry.totalWidth),
+  500,
+  'container growth after explicit re-entry must not remain locked to the initial/requested total'
+);
+const noChangeAfterReentry = tableColumnWidthPolicy.resize({
+  widths: reenteredElastic.widths,
+  minimumWidths: [20, 20],
+  elastic: reenteredElastic.elastic,
+  tracksAvailableWidth: reenteredElastic.tracksAvailableWidth,
+  column: 0,
+  requestedDelta: 0,
+  maximumTotalWidth: 300
+});
+assert.equal(noChangeAfterReentry.tracksAvailableWidth, true, 'no-change preserves active tracking');
+const shrinkAfterReentry = tableColumnWidthPolicy.resize({
+  widths: reenteredElastic.widths,
+  minimumWidths: [20, 20],
+  elastic: reenteredElastic.elastic,
+  tracksAvailableWidth: reenteredElastic.tracksAvailableWidth,
+  column: 0,
+  requestedDelta: -20,
+  maximumTotalWidth: 500
+});
+assert.equal(shrinkAfterReentry.elastic, false);
+assert.equal(shrinkAfterReentry.tracksAvailableWidth, false, 'an active shrink exits container tracking');
+
 const preservedCommittedPreview = tableColumnWidthPolicy.project({
   widths: [180, 100, 74],
   minimumWidths: [180, 110, 50],

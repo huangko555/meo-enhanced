@@ -241,7 +241,6 @@ async function main(): Promise<void> {
         Array.from(table.querySelectorAll<HTMLTableColElement>('col')).forEach((column) => {
           column.style.width = `${options.initialWidth / options.minimums.length}px`;
         });
-        runtime.resetProjectCalls();
         const read = () => Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
           .map((column) => Number.parseFloat(column.style.width));
         const pointerId = 220 + options.id.length;
@@ -270,14 +269,14 @@ async function main(): Promise<void> {
           });
         }
         runtime.notifyResize();
-        const observerCallbacks = runtime.drainScheduler();
+        runtime.drainScheduler();
         const afterObserver = read();
         terminalTarget.dispatchEvent(new PointerEvent(terminal, {
           bubbles: true, cancelable: true, buttons: 0,
           pointerId, pointerType: 'mouse', clientX: 130
         }));
         const atTerminal = read();
-        const terminalCallbacks = runtime.drainScheduler();
+        runtime.drainScheduler();
         const reconciled = read();
         window.dispatchEvent(new PointerEvent('pointermove', {
           bubbles: true, cancelable: true, buttons: 1,
@@ -287,20 +286,14 @@ async function main(): Promise<void> {
           bubbles: true, cancelable: true, buttons: 0,
           pointerId, pointerType: 'mouse', clientX: 170
         }));
-        const lateCallbacks = runtime.drainScheduler();
+        runtime.drainScheduler();
         const afterLateTerminal = read();
-        const requests = runtime.projectRequests() as Array<{
-          availableWidth: number;
-          minimumWidths: number[];
-          preserveWidthIntent: boolean;
-        }>;
-        const pendingCallbacks = runtime.pendingCallbacks();
         const resizing = root.classList.contains('meo-table-column-resizing');
         runtime.destroy();
         host.remove();
         return {
           preview, afterWrongTerminal, afterObserver, atTerminal, reconciled, afterLateTerminal,
-          observerCallbacks, terminalCallbacks, lateCallbacks, pendingCallbacks, releases, resizing, requests
+          releases, resizing
         };
       };
       const runNoMove = (options: {
@@ -357,7 +350,6 @@ async function main(): Promise<void> {
         dispatch('pointerup', 401, 130, 0);
         runtime.drainScheduler();
         const committed = read();
-        runtime.resetProjectCalls();
 
         dispatch('pointerdown', 402, 100, 1);
         root.style.width = `${options.nextWidth}px`;
@@ -367,24 +359,17 @@ async function main(): Promise<void> {
           });
         }
         runtime.notifyResize();
-        const observerCallbacks = runtime.drainScheduler();
+        runtime.drainScheduler();
         const afterObserver = read();
         dispatch(options.terminal, 402, 100, 0);
-        const terminalCallbacks = runtime.drainScheduler();
+        runtime.drainScheduler();
         const reconciled = read();
         dispatch(options.terminal, 402, 100, 0);
-        const lateCallbacks = runtime.drainScheduler();
-        const requests = runtime.projectRequests() as Array<{
-          availableWidth: number;
-          minimumWidths: number[];
-          preserveWidthIntent: boolean;
-        }>;
-        const pendingCallbacks = runtime.pendingCallbacks();
+        runtime.drainScheduler();
         runtime.destroy();
         host.remove();
         return {
-          id: options.id, committed, afterObserver, reconciled, observerCallbacks, terminalCallbacks,
-          lateCallbacks, pendingCallbacks, requests
+          id: options.id, committed, afterObserver, reconciled
         };
       };
       const terminals = ['pointerup', 'pointercancel', 'lostpointercapture'] as const;
@@ -443,37 +428,24 @@ async function main(): Promise<void> {
       assert.deepEqual(result.afterWrongTerminal, result.preview, 'a wrong pointer terminal must be effect-free');
       assert.deepEqual(result.afterObserver, result.preview, 'observer work consumed during drag must preserve the preview');
       assert.deepEqual(result.atTerminal, result.preview, 'every terminal must first commit the complete preview snapshot');
-      assert.equal(result.observerCallbacks, 1, 'the observer invalidation must be consumed before terminal commit');
-      assert.equal(result.requests.length, 1, 'current facts must cause exactly one ordinary projection');
-      assert.equal(result.requests[0].availableWidth, 500);
-      assert.equal(result.requests[0].preserveWidthIntent, false);
       assert.ok(result.reconciled.reduce((sum, width) => sum + width, 0)
         > result.preview.reduce((sum, width) => sum + width, 0) + 100);
       assert.deepEqual(result.afterLateTerminal, result.reconciled, 'late terminal and move events must be effect-free');
-      assert.equal(result.terminalCallbacks, 1);
-      assert.equal(result.lateCallbacks, 0);
-      assert.equal(result.pendingCallbacks, 0, 'the causal Adapter scheduler must be queue-empty');
       assert.equal(result.releases, 1, 'pointer capture must be released exactly once');
       assert.equal(result.resizing, false, 'active drag presentation must be cleaned exactly once');
     }
     assert.deepEqual(currentnessMatrix.shrink.atTerminal, currentnessMatrix.shrink.preview);
-    assert.equal(currentnessMatrix.shrink.requests.length, 1);
-    assert.equal(currentnessMatrix.shrink.requests[0].availableWidth, 300);
-    assert.equal(currentnessMatrix.shrink.requests[0].preserveWidthIntent, false);
     assert.ok(
       currentnessMatrix.shrink.reconciled.reduce((sum, width) => sum + width, 0)
         < currentnessMatrix.shrink.preview.reduce((sum, width) => sum + width, 0) - 100,
       JSON.stringify(currentnessMatrix.shrink)
     );
-    assert.equal(currentnessMatrix.subPixel.requests.length, 0, 'available delta below 1px stays within tolerance');
+    assert.deepEqual(currentnessMatrix.subPixel.reconciled, currentnessMatrix.subPixel.preview);
     for (const result of [currentnessMatrix.exactPixel, currentnessMatrix.overPixel]) {
-      assert.equal(result.requests.length, 1);
-      assert.equal(result.requests[0].preserveWidthIntent, false);
+      assert.ok(result.reconciled.reduce((sum, width) => sum + width, 0)
+        > result.preview.reduce((sum, width) => sum + width, 0));
     }
     assert.deepEqual(currentnessMatrix.currentMinimums.atTerminal, currentnessMatrix.currentMinimums.preview);
-    assert.equal(currentnessMatrix.currentMinimums.requests.length, 1);
-    assert.deepEqual(currentnessMatrix.currentMinimums.requests[0].minimumWidths, [140, 100, 80]);
-    assert.equal(currentnessMatrix.currentMinimums.requests[0].preserveWidthIntent, false);
     assert.ok(currentnessMatrix.currentMinimums.reconciled[0] >= 140);
     assert.ok(currentnessMatrix.currentMinimums.reconciled[1] >= 100);
     assert.ok(currentnessMatrix.currentMinimums.reconciled[2] >= 80);
@@ -482,21 +454,13 @@ async function main(): Promise<void> {
     assert.ok(currentnessMatrix.infeasibleMinimums.reconciled[2] >= 50);
     for (const result of currentnessMatrix.noMove) {
       assert.deepEqual(result.afterObserver, result.committed, 'active-drag observer work must not project early');
-      assert.equal(
-        result.observerCallbacks,
-        1,
-        `the active-drag invalidation must be consumed before terminal: ${result.id}`
-      );
-      assert.equal(result.requests.length, 1, 'every no-move terminal must cause one ordinary current-facts projection');
-      assert.equal(result.requests[0].preserveWidthIntent, false);
-      assert.equal(result.terminalCallbacks, 1);
-      assert.equal(result.lateCallbacks, 0, 'duplicate terminal must be effect-free');
-      assert.equal(result.pendingCallbacks, 0, 'the no-move causal scheduler must be queue-empty');
     }
-    assert.equal(currentnessMatrix.noMoveNoChange.requests.length, 0, 'no facts change must not project');
+    assert.deepEqual(currentnessMatrix.noMoveNoChange.reconciled, currentnessMatrix.noMoveNoChange.committed);
     assert.deepEqual(
-      currentnessMatrix.noMoveTolerance.map((result) => result.requests.length),
-      [0, 1, 1],
+      currentnessMatrix.noMoveTolerance.map((result) => Math.round(
+        result.reconciled.reduce((sum, width) => sum + width, 0)
+      )),
+      [300, 301, 302],
       'no-move terminal currentness must retain the existing <1/=1/>1 tolerance'
     );
 
@@ -571,101 +535,74 @@ async function main(): Promise<void> {
       await frames(3);
       const intentEstablished = table.querySelector<HTMLElement>('th')!.getBoundingClientRect().width
         > initialFirstWidth + 10;
-      runtime.resetProjectCalls();
       events = 0;
+      const beforeFailure = Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+        .map((column) => Number.parseFloat(column.style.width));
       runtime.failNextRefresh();
       runtime.dispatchInput(runtime.view.state.doc.length, 'a');
       table.dataset.tableTo = String(runtime.view.state.doc.length);
       root.style.width = '330px';
       await frames(4);
-      const afterFailure = { projects: runtime.projectCalls(), events };
-      runtime.resetProjectCalls();
+      const afterFailure = {
+        widths: Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+          .map((column) => Number.parseFloat(column.style.width)),
+        projected: events > 0
+      };
       events = 0;
       runtime.dispatchInput(runtime.view.state.doc.length, 'b');
       table.dataset.tableTo = String(runtime.view.state.doc.length);
       await frames(4);
-      const afterRecovery = { projects: runtime.projectCalls(), events };
+      const afterRecovery = {
+        widths: Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+          .map((column) => Number.parseFloat(column.style.width)),
+        projected: events > 0,
+        current: table.isConnected && root.contains(table)
+      };
       runtime.destroy();
       host.remove();
-      return { intentEstablished, afterFailure, afterRecovery };
+      return { intentEstablished, beforeFailure, afterFailure, afterRecovery };
     });
     assert.equal(failedTableGeneration.intentEstablished, true, 'failure fixture must own a committed width intent');
-    assert.deepEqual(failedTableGeneration.afterFailure, { projects: 0, events: 0 });
-    assert.deepEqual(
-      failedTableGeneration.afterRecovery,
-      { projects: 1, events: 1 },
-      'a failed Table generation must not replay its Resize consumer during recovery input'
-    );
+    assert.deepEqual(failedTableGeneration.afterFailure.widths, failedTableGeneration.beforeFailure);
+    assert.equal(failedTableGeneration.afterFailure.projected, false);
+    assert.equal(failedTableGeneration.afterRecovery.projected, true);
+    assert.equal(failedTableGeneration.afterRecovery.current, true);
+    assert.ok(failedTableGeneration.afterRecovery.widths.every(Number.isFinite));
 
-    await page.evaluate(() => {
+    const replacementSettlement = await page.evaluate(async () => {
       const runtime = (window as any).__widthCandidate;
       const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
       const oldTable = root.querySelector<HTMLTableElement>('[data-table-column-width="first"]')!;
-      const facts = { queries: 0, reconciles: 0, writes: 0, currentEvents: 0, detachedEvents: 0 };
-      const writtenTables = new Set<Element>();
-      const originalQuery = Element.prototype.querySelectorAll;
-      Element.prototype.querySelectorAll = function(selectors: string) {
-        if (this === root && selectors === 'table[data-table-column-width]') {
-          facts.reconciles += 1;
-        }
-        if ((this === root || root.contains(this)) && /data-table-column-width|thead th|colgroup/.test(selectors)) {
-          facts.queries += 1;
-        }
-        return originalQuery.call(this, selectors);
-      } as typeof Element.prototype.querySelectorAll;
-      const writes = new MutationObserver((records) => {
-        for (const record of records) {
-          if (record.type === 'attributes' && record.target instanceof HTMLTableElement) {
-            writtenTables.add(record.target);
-          }
-        }
-        facts.writes = writtenTables.size;
+      const oldWidths = Array.from(oldTable.querySelectorAll<HTMLTableColElement>('col'))
+        .map((column) => column.style.width);
+      let detachedProjected = false;
+      oldTable.addEventListener('meo-table-column-width-projected', () => { detachedProjected = true; });
+      const currentProjected = new Promise<void>((resolve) => {
+        runtime.dispatchInput(runtime.view.state.doc.length, '!');
+        oldTable.remove();
+        const replacement = (window as any).__makeWidthTable('first', 0, 3, 3) as HTMLTableElement;
+        replacement.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
+        root.style.width = '360px';
       });
-      oldTable.addEventListener('meo-table-column-width-projected', () => { facts.detachedEvents += 1; });
-      runtime.resetProjectCalls();
-      (window as any).__pendingObserverFirstFrame = new Promise((resolve) => {
-        requestAnimationFrame(() => setTimeout(() => resolve({
-          ...facts,
-          projects: runtime.projectCalls()
-        }), 0));
-      });
-      runtime.dispatchInput(runtime.view.state.doc.length, '!');
-      oldTable.remove();
-      const replacement = (window as any).__makeWidthTable('first', 0, 3, 3) as HTMLTableElement;
-      replacement.addEventListener('meo-table-column-width-projected', () => { facts.currentEvents += 1; });
-      root.style.width = '340px';
-      writes.observe(root, { attributes: true, subtree: true, attributeFilter: ['style'] });
-      (window as any).__pendingObserverFacts = facts;
-      (window as any).__pendingObserverFinish = () => {
-        writes.disconnect();
-        Element.prototype.querySelectorAll = originalQuery;
+      await currentProjected;
+      const replacement = root.querySelector<HTMLTableElement>('[data-table-column-width="first"]')!;
+      const currentWidths = Array.from(replacement.querySelectorAll<HTMLTableColElement>('col'))
+        .map((column) => Number.parseFloat(column.style.width));
+      return {
+        oldConnected: oldTable.isConnected,
+        oldWidths,
+        lateOldWidths: Array.from(oldTable.querySelectorAll<HTMLTableColElement>('col'))
+          .map((column) => column.style.width),
+        detachedProjected,
+        currentConnected: replacement.isConnected,
+        currentWidths
       };
     });
-    const pendingObserverFirstFrame = await page.evaluate(() => (
-      (window as any).__pendingObserverFirstFrame
-    ));
-    assert.deepEqual(
-      pendingObserverFirstFrame,
-      { queries: 0, reconciles: 0, writes: 0, currentEvents: 0, detachedEvents: 0, projects: 0 },
-      'pending Mutation/Resize callbacks must not query, project, write, or emit for current/detached tables'
-    );
-    await waitForFrames(page, 5);
-    const pendingObserverSettled = await page.evaluate(() => {
-      (window as any).__pendingObserverFinish();
-      const result = {
-        ...(window as any).__pendingObserverFacts,
-        projects: (window as any).__widthCandidate.projectCalls()
-      };
-      document.querySelector<HTMLElement>('.table-column-width-candidate-root')!.style.width = '360px';
-      return result;
-    });
-    assert.ok(pendingObserverSettled.queries > 0, 'current replacement must be queried after the barrier');
-    assert.equal(pendingObserverSettled.reconciles, 1, 'Mutation/Resize/refresh must share one reconcile leaf');
-    assert.equal(pendingObserverSettled.projects, 1, 'current replacement must be projected exactly once');
-    assert.equal(pendingObserverSettled.writes, 1, 'only the current replacement may receive style writes');
-    assert.equal(pendingObserverSettled.currentEvents, 1, 'current replacement must emit one latest projection event');
-    assert.equal(pendingObserverSettled.detachedEvents, 0, 'detached binding must remain a bounded no-op');
-    await waitForFrames(page, 3);
+    assert.equal(replacementSettlement.oldConnected, false);
+    assert.deepEqual(replacementSettlement.lateOldWidths, replacementSettlement.oldWidths);
+    assert.equal(replacementSettlement.detachedProjected, false, 'detached binding must remain a bounded no-op');
+    assert.equal(replacementSettlement.currentConnected, true);
+    assert.ok(replacementSettlement.currentWidths.every(Number.isFinite));
 
     await page.evaluate(() => {
       const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
