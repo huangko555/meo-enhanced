@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
-    await page.setContent('<!doctype html><style>html,body,#app,#app2{height:100%;margin:0}</style><div id="app"></div><div id="app2"></div>');
+    await page.setContent('<!doctype html><style>html,body,#app,#app2,#app3,#app4{height:100%;margin:0}</style><div id="app"></div><div id="app2"></div><div id="app3"></div><div id="app4"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
       content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-size:16px;--meo-font-source:monospace;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
@@ -38,14 +38,24 @@ async function main(): Promise<void> {
         __mermaidActive?: number;
         __mermaidMaxActive?: number;
         __resolveMermaid?: (source: string, marker: string) => boolean;
+        __mermaidStarted?: Promise<string>;
       };
       testWindow.__mermaidCalls = [];
       testWindow.__mermaidPending = [];
       testWindow.__mermaidActive = 0;
       testWindow.__mermaidMaxActive = 0;
+      let resolveStarted!: (source: string) => void;
+      const armStarted = () => {
+        testWindow.__mermaidStarted = new Promise<string>((resolve) => {
+          resolveStarted = resolve;
+        });
+      };
+      armStarted();
       testWindow.mermaid = {
         initialize() {},
         render(_renderId: string, source: string) {
+          resolveStarted(source);
+          armStarted();
           testWindow.__mermaidCalls!.push(source);
           testWindow.__mermaidActive! += 1;
           testWindow.__mermaidMaxActive = Math.max(
@@ -72,6 +82,77 @@ async function main(): Promise<void> {
       };
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+
+    const sharedExternalSource = 'graph TD\nSHARED_EXTERNAL_OLD-->FRESH';
+    const sharedExternalText = `\`\`\`mermaid\n${sharedExternalSource}\n\`\`\``;
+    const oldSharedStarted = page.evaluate(() => (
+      window as typeof window & { __mermaidStarted: Promise<string> }
+    ).__mermaidStarted);
+    await page.evaluate((text) => {
+      const testWindow = window as typeof window & {
+        __createSharedMermaidEditor?: (options: any) => any;
+        __sharedExternalEditorA?: any;
+        __sharedExternalEditorB?: any;
+      };
+      testWindow.__sharedExternalEditorA = testWindow.__createSharedMermaidEditor?.({
+        parent: document.getElementById('app3')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      testWindow.__sharedExternalEditorB = testWindow.__createSharedMermaidEditor?.({
+        parent: document.getElementById('app4')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      if (!testWindow.__sharedExternalEditorA || !testWindow.__sharedExternalEditorB) {
+        throw new Error('Shared external Mermaid Editors were not created');
+      }
+    }, sharedExternalText);
+    assert.equal(await oldSharedStarted, sharedExternalSource);
+    const freshSharedStarted = page.evaluate(() => (
+      window as typeof window & { __mermaidStarted: Promise<string> }
+    ).__mermaidStarted);
+    await page.evaluate((text) => {
+      (window as typeof window & { __sharedExternalEditorA?: any })
+        .__sharedExternalEditorA.setText(text);
+    }, sharedExternalText);
+    await page.evaluate((source) => {
+      const resolved = (window as typeof window & {
+        __resolveMermaid?: (source: string, marker: string) => boolean;
+      }).__resolveMermaid?.(source, 'shared-external-old');
+      if (!resolved) throw new Error('Old shared Mermaid render was not found');
+    }, sharedExternalSource);
+    await page.waitForSelector('#app4 .cm-editor svg[data-marker="shared-external-old"]');
+    assert.equal(
+      await page.$('#app3 .cm-editor svg[data-marker="shared-external-old"]'),
+      null,
+      'equal-text external presentation must reject the old shared completion for Editor A'
+    );
+    assert.equal(await freshSharedStarted, sharedExternalSource);
+    await page.evaluate((source) => {
+      const resolved = (window as typeof window & {
+        __resolveMermaid?: (source: string, marker: string) => boolean;
+      }).__resolveMermaid?.(source, 'shared-external-fresh');
+      if (!resolved) throw new Error('Fresh shared Mermaid render was not found');
+    }, sharedExternalSource);
+    await page.waitForSelector('#app3 .cm-editor svg[data-marker="shared-external-fresh"]');
+    assert.equal(
+      await page.$('#app4 .cm-editor svg[data-marker="shared-external-fresh"]'),
+      null,
+      'the fresh replacement completion must remain scoped to Editor A'
+    );
+    await page.evaluate(() => {
+      const testWindow = window as typeof window & {
+        __sharedExternalEditorA?: any;
+        __sharedExternalEditorB?: any;
+        __mermaidCalls?: string[];
+      };
+      testWindow.__sharedExternalEditorA.destroy();
+      testWindow.__sharedExternalEditorB.destroy();
+      testWindow.__mermaidCalls = [];
+    });
 
     const initialSource = 'graph TD\nSOURCE_INITIAL-->PENDING';
     const initialText = `\`\`\`mermaid\n${initialSource}\n\`\`\`\n\nordinary source text`;

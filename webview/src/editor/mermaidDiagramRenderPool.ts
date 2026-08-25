@@ -96,12 +96,16 @@ export function createMermaidDiagramRenderPool(
     error: message
   });
 
+  const retireFromReuse = (job: OperationJob): void => {
+    if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+  };
+
   const removeQueuedJob = (job: OperationJob): void => {
     for (const queue of [highPriority, normalPriority]) {
       const index = queue.indexOf(job);
       if (index >= 0) queue.splice(index, 1);
     }
-    if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+    retireFromReuse(job);
     job.state = 'settled';
   };
 
@@ -126,7 +130,7 @@ export function createMermaidDiagramRenderPool(
       return;
     }
     if (job.state === 'queued') removeQueuedJob(job);
-    else if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+    else retireFromReuse(job);
   };
 
   const retainForGroup = (job: OperationJob, group: RenderGroupRecord): void => {
@@ -175,6 +179,7 @@ export function createMermaidDiagramRenderPool(
         const result = value as MermaidDiagramRenderResult;
         if (
           job.cacheKey
+          && renderJobs.get(job.cacheKey) === job
           && result?.ok === true
           && (job.waiters.size > 0 || job.retainedGroups.size > 0)
           && !disposed
@@ -191,7 +196,7 @@ export function createMermaidDiagramRenderPool(
       job.state = 'settled';
       for (const group of job.retainedGroups) group.retainedJobs.delete(job);
       job.retainedGroups.clear();
-      if (job.cacheKey && renderJobs.get(job.cacheKey) === job) renderJobs.delete(job.cacheKey);
+      retireFromReuse(job);
       if (job.external) initializedIdentity = null;
       activeJob = null;
       runNext();
@@ -288,6 +293,13 @@ export function createMermaidDiagramRenderPool(
     const reason = new MermaidDiagramResourceUnavailableError(
       'Mermaid render group was replaced for an external Document'
     );
+    // Existing sibling waiters may finish, but the replaced group establishes a freshness
+    // barrier: no later request may attach to any work that belonged to its old Document.
+    for (const waiter of group.waiters) retireFromReuse(waiter.job);
+    for (const leaf of group.leaves) {
+      for (const waiter of leaf.waiters) retireFromReuse(waiter.job);
+    }
+    for (const job of group.retainedJobs) retireFromReuse(job);
     detachWaiters(group, reason, false);
     for (const leaf of group.leaves) detachWaiters(leaf, reason, false);
     releaseRetainedJobs(group);

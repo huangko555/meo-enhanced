@@ -47,9 +47,23 @@ const deferred = <T>(): Deferred<T> => {
   };
 };
 
-const waitFor = async (condition: () => boolean): Promise<void> => {
-  for (let index = 0; index < 100 && !condition(); index += 1) await Promise.resolve();
-  assert.equal(condition(), true, 'deterministic Mermaid renderer did not reach the expected state');
+type ControlledRender = {
+  readonly source: string;
+  readonly gate: Deferred<string>;
+};
+
+const createControlledRenderer = () => {
+  let started = deferred<ControlledRender>();
+  return {
+    nextStarted: () => started.promise,
+    render(_renderId: string, source: string): Promise<string> {
+      const currentStarted = started;
+      started = deferred<ControlledRender>();
+      const gate = deferred<string>();
+      currentStarted.resolve({ source, gate });
+      return gate.promise;
+    }
+  };
 };
 
 const request = (
@@ -58,30 +72,27 @@ const request = (
   configKey = 'default'
 ) => ({ rawSource, normalizedSource: rawSource.trim(), themeKey, configKey } as const);
 
-const renderGates: Array<{ readonly source: string; readonly gate: Deferred<string> }> = [];
+const controlledRenderer = createControlledRenderer();
 const initializeCalls: Array<[string, string]> = [];
 const pool = createMermaidDiagramRenderPool({
   initialize(themeKey, configKey) {
     initializeCalls.push([themeKey, configKey]);
   },
-  render(_renderId, source) {
-    const gate = deferred<string>();
-    renderGates.push({ source, gate });
-    return gate.promise;
-  }
+  render: controlledRenderer.render
 });
 
 const sharedRequest = request('graph TD\nA-->B');
 assert.equal(pool.getCached(sharedRequest), null);
-assert.equal(renderGates.length, 0, 'zero consumers must not initialize, queue, or render');
+assert.deepEqual(initializeCalls, [], 'zero consumers must not initialize, queue, or render');
 
 const firstGroup = pool.acquireGroup();
 const secondGroup = pool.acquireGroup();
 const first = firstGroup.createLeaf();
 const second = secondGroup.createLeaf();
+const sharedRenderStarted = controlledRenderer.nextStarted();
 const firstPending = first.render(sharedRequest);
 const secondPending = second.render(sharedRequest);
-await waitFor(() => renderGates.length === 1);
+const sharedRender = await sharedRenderStarted;
 assert.deepEqual(initializeCalls, [['light', 'default']]);
 
 first.release();
@@ -92,7 +103,7 @@ let secondSettled = false;
 void secondPending.then(() => { secondSettled = true; });
 await Promise.resolve();
 assert.equal(secondSettled, false, '2→1 release must not settle the surviving consumer');
-renderGates[0]!.gate.resolve('<svg data-generation="shared"></svg>');
+sharedRender.gate.resolve('<svg data-generation="shared"></svg>');
 assert.deepEqual(await secondPending, { ok: true, svg: '<svg data-generation="shared"></svg>' });
 
 const cachedGroup = pool.acquireGroup();
@@ -101,7 +112,6 @@ assert.deepEqual(await cachedConsumer.render(sharedRequest), {
   ok: true,
   svg: '<svg data-generation="shared"></svg>'
 });
-assert.equal(renderGates.length, 1, 'same-key consumers must reuse the shared cache');
 second.release();
 secondGroup.end();
 assert.notEqual(pool.getCached(sharedRequest), null, 'one surviving consumer must retain shared results');
@@ -118,14 +128,16 @@ const replacementGroup = pool.acquireGroup();
 const replacement = replacementGroup.createLeaf();
 const oldRequest = request('graph TD\nOLD-->STALE');
 const latestRequest = request('graph TD\nLATEST-->READY', 'dark', 'strict');
+const oldRenderStarted = controlledRenderer.nextStarted();
 const oldPending = replacement.render(oldRequest);
-await waitFor(() => renderGates.length === 2);
+const oldRender = await oldRenderStarted;
 replacement.replacePending();
 assert.match((await oldPending).error, /replaced/);
 const latestPending = replacement.render(latestRequest);
-renderGates[1]!.gate.resolve('<svg data-generation="old"></svg>');
-await waitFor(() => renderGates.length === 3);
-renderGates[2]!.gate.resolve('<svg data-generation="latest"></svg>');
+const latestRenderStarted = controlledRenderer.nextStarted();
+oldRender.gate.resolve('<svg data-generation="old"></svg>');
+const latestRender = await latestRenderStarted;
+latestRender.gate.resolve('<svg data-generation="latest"></svg>');
 assert.deepEqual(await latestPending, { ok: true, svg: '<svg data-generation="latest"></svg>' });
 assert.deepEqual(
   pool.getCached(oldRequest),
@@ -139,26 +151,30 @@ assert.deepEqual(pool.getCached(latestRequest), {
 
 const errorRequest = request('INVALID');
 replacement.replacePending();
+const failedRenderStarted = controlledRenderer.nextStarted();
 const failed = replacement.render(errorRequest);
-await waitFor(() => renderGates.length === 4);
-renderGates[3]!.gate.reject(new Error('parse error'));
+const failedRender = await failedRenderStarted;
+failedRender.gate.reject(new Error('parse error'));
 assert.deepEqual(await failed, { ok: false, error: 'parse error' });
+const retriedRenderStarted = controlledRenderer.nextStarted();
 const retried = replacement.render(errorRequest);
-await waitFor(() => renderGates.length === 5);
-renderGates[4]!.gate.resolve('<svg data-generation="retry"></svg>');
+const retriedRender = await retriedRenderStarted;
+retriedRender.gate.resolve('<svg data-generation="retry"></svg>');
 assert.deepEqual(await retried, { ok: true, svg: '<svg data-generation="retry"></svg>' });
 
 let themeRefreshCount = 0;
 const unsubscribe = pool.subscribeThemeRefresh(() => { themeRefreshCount += 1; });
 replacement.replacePending();
+const oldThemeRenderStarted = controlledRenderer.nextStarted();
 const oldThemePending = replacement.render(request('THEME_RACE'));
-await waitFor(() => renderGates.length === 6);
+const oldThemeRender = await oldThemeRenderStarted;
 pool.refreshTheme();
 assert.match((await oldThemePending).error, /theme generation/);
 const newThemePending = replacement.render(request('THEME_RACE'));
-renderGates[5]!.gate.resolve('<svg data-generation="old-theme"></svg>');
-await waitFor(() => renderGates.length === 7);
-renderGates[6]!.gate.resolve('<svg data-generation="new-theme"></svg>');
+const newThemeRenderStarted = controlledRenderer.nextStarted();
+oldThemeRender.gate.resolve('<svg data-generation="old-theme"></svg>');
+const newThemeRender = await newThemeRenderStarted;
+newThemeRender.gate.resolve('<svg data-generation="new-theme"></svg>');
 assert.deepEqual(await newThemePending, { ok: true, svg: '<svg data-generation="new-theme"></svg>' });
 assert.equal(themeRefreshCount, 1);
 unsubscribe();
@@ -370,14 +386,10 @@ capacityLeaf.release();
 capacityConsumer.end();
 capacityPool.dispose();
 
-const abandonedGate = deferred<string>();
-let abandonedRenderStarted = false;
+const abandonedRenderer = createControlledRenderer();
 const abandonedPool = createMermaidDiagramRenderPool({
   initialize() {},
-  render() {
-    abandonedRenderStarted = true;
-    return abandonedGate.promise;
-  }
+  render: abandonedRenderer.render
 });
 const abandonedFactory = createMermaidDiagramPresentationFactory({
   resources: abandonedPool,
@@ -415,32 +427,33 @@ const createView = (events: string[]) => ({
 });
 const firstHandle = firstEditor.create(createView(viewEvents.first));
 const secondHandle = secondEditor.create(createView(viewEvents.second));
+const abandonedStarted = abandonedRenderer.nextStarted();
 firstHandle.present(sharedRequest.rawSource, sharedRequest.themeKey, sharedRequest.configKey);
 secondHandle.present(sharedRequest.rawSource, sharedRequest.themeKey, sharedRequest.configKey);
-await waitFor(() => abandonedRenderStarted);
+const abandonedRender = await abandonedStarted;
 firstEditor.externalDocumentPresented();
 firstHandle.dispose();
-abandonedGate.resolve('<svg data-generation="survivor"></svg>');
+abandonedRender.gate.resolve('<svg data-generation="survivor"></svg>');
 await secondHandle.whenIdle();
 assert.equal(viewEvents.first.some((event) => event.includes('survivor')), false);
 assert.equal(viewEvents.second.some((event) => event.includes('survivor')), true);
-assert.notEqual(abandonedPool.getCached(sharedRequest), null, 'other Editor consumer keeps shared work alive');
+assert.equal(
+  abandonedPool.getCached(sharedRequest),
+  null,
+  'retired shared work may serve existing siblings but must not become reusable cache content'
+);
 secondHandle.dispose();
 secondEditor.dispose();
 firstEditor.dispose();
-assert.notEqual(abandonedPool.getCached(sharedRequest), null, 'completed shared result remains reusable');
+assert.equal(abandonedPool.getCached(sharedRequest), null);
 abandonedFactory.dispose();
 abandonedFactory.dispose();
 abandonedPool.dispose();
 
-const externalReplacementGates: Deferred<string>[] = [];
+const externalReplacementRenderer = createControlledRenderer();
 const externalReplacementPool = createMermaidDiagramRenderPool({
   initialize() {},
-  render() {
-    const gate = deferred<string>();
-    externalReplacementGates.push(gate);
-    return gate.promise;
-  }
+  render: externalReplacementRenderer.render
 });
 const externalReplacementFactory = createMermaidDiagramPresentationFactory({
   resources: externalReplacementPool,
@@ -466,57 +479,113 @@ const externalReplacementFactory = createMermaidDiagramPresentationFactory({
 });
 const externalReplacementConsumer = externalReplacementFactory.createConsumer();
 const releaseExternalReplacementConsumer = externalReplacementConsumer.acquire();
+const externalReplacementSibling = externalReplacementFactory.createConsumer();
+const releaseExternalReplacementSibling = externalReplacementSibling.acquire();
 const externalReplacementEvents: string[] = [];
+const externalReplacementSiblingEvents: string[] = [];
 const externalReplacementHandle = externalReplacementConsumer.create(
   createView(externalReplacementEvents)
 );
+const externalReplacementSiblingHandle = externalReplacementSibling.create(
+  createView(externalReplacementSiblingEvents)
+);
+const oldExternalStarted = externalReplacementRenderer.nextStarted();
 externalReplacementHandle.present(
   sharedRequest.rawSource,
   sharedRequest.themeKey,
   sharedRequest.configKey
 );
-await waitFor(() => externalReplacementGates.length === 1);
-externalReplacementConsumer.externalDocumentPresented();
-externalReplacementGates[0]!.resolve('<svg data-generation="stale-external"></svg>');
-await waitFor(() => externalReplacementGates.length === 2);
-assert.equal(
-  externalReplacementEvents.some((event) => event.includes('stale-external')),
-  false,
-  'the invalidated external generation must have zero presentation effect'
+externalReplacementSiblingHandle.present(
+  sharedRequest.rawSource,
+  sharedRequest.themeKey,
+  sharedRequest.configKey
 );
-externalReplacementGates[1]!.resolve('<svg data-generation="current-external"></svg>');
+const oldExternalRender = await oldExternalStarted;
+const newExternalStarted = externalReplacementRenderer.nextStarted();
+externalReplacementConsumer.externalDocumentPresented();
+oldExternalRender.gate.resolve('<svg data-generation="sibling-old"></svg>');
+await externalReplacementSiblingHandle.whenIdle();
+assert.equal(
+  externalReplacementEvents.some((event) => event.includes('sibling-old')),
+  false,
+  'the old shared completion must have zero effect on the externally replaced Editor'
+);
+assert.equal(
+  externalReplacementSiblingEvents.some((event) => event.includes('sibling-old')),
+  true,
+  'the old shared completion must still serve its existing sibling Editor'
+);
+const newExternalRender = await newExternalStarted;
+newExternalRender.gate.resolve('<svg data-generation="current-external"></svg>');
 await externalReplacementHandle.whenIdle();
-assert.equal(externalReplacementGates.length, 2, 'external presentation must create exactly one replacement');
 assert.equal(
   externalReplacementEvents.filter((event) => event.includes('current-external')).length,
   1,
   'the replacement generation must reach ready exactly once'
 );
+
+const sharedErrorRequest = request('graph TD\nSHARED_OLD_ERROR-->CURRENT_ERROR');
+const oldErrorStarted = externalReplacementRenderer.nextStarted();
+externalReplacementHandle.present(
+  sharedErrorRequest.rawSource,
+  sharedErrorRequest.themeKey,
+  sharedErrorRequest.configKey
+);
+externalReplacementSiblingHandle.present(
+  sharedErrorRequest.rawSource,
+  sharedErrorRequest.themeKey,
+  sharedErrorRequest.configKey
+);
+const oldErrorRender = await oldErrorStarted;
+const newErrorStarted = externalReplacementRenderer.nextStarted();
+externalReplacementConsumer.externalDocumentPresented();
+externalReplacementConsumer.externalDocumentPresented();
+oldErrorRender.gate.reject(new Error('old sibling parse error'));
+await externalReplacementSiblingHandle.whenIdle();
+assert.equal(
+  externalReplacementEvents.includes('old sibling parse error'),
+  false,
+  'the old shared error must have zero effect on the repeatedly replaced Editor'
+);
+assert.equal(
+  externalReplacementSiblingEvents.includes('old sibling parse error'),
+  true,
+  'the old shared error must still serve its existing sibling Editor'
+);
+const newErrorRender = await newErrorStarted;
+newErrorRender.gate.reject(new Error('current external parse error'));
+await externalReplacementHandle.whenIdle();
+assert.equal(
+  externalReplacementEvents.filter((event) => event === 'current external parse error').length,
+  1,
+  'only the latest replacement error may reach the replaced Editor'
+);
+assert.equal(externalReplacementPool.getCached(sharedErrorRequest), null);
 externalReplacementHandle.dispose();
+externalReplacementSiblingHandle.dispose();
 releaseExternalReplacementConsumer();
+releaseExternalReplacementSibling();
 externalReplacementConsumer.dispose();
+externalReplacementSibling.dispose();
 externalReplacementFactory.dispose();
 externalReplacementPool.dispose();
 
-const orphanGate = deferred<string>();
-let orphanStarted = false;
+const orphanRenderer = createControlledRenderer();
 const orphanPool = createMermaidDiagramRenderPool({
   initialize() {},
-  render() {
-    orphanStarted = true;
-    return orphanGate.promise;
-  }
+  render: orphanRenderer.render
 });
 const orphanGroup = orphanPool.acquireGroup();
 const orphanConsumer = orphanGroup.createLeaf();
 const unrelatedPreviewConsumer = orphanPool.acquireGroup();
 const orphanRequest = request('ORPHAN_AFTER_SOURCE_EXIT');
+const orphanStarted = orphanRenderer.nextStarted();
 const orphanPending = orphanConsumer.render(orphanRequest);
-await waitFor(() => orphanStarted);
+const orphanRender = await orphanStarted;
 orphanConsumer.release();
 orphanGroup.end();
 assert.match((await orphanPending).error, /released/);
-orphanGate.resolve('<svg data-generation="orphan"></svg>');
+orphanRender.gate.resolve('<svg data-generation="orphan"></svg>');
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(orphanPool.getCached(orphanRequest), null, 'last release must reject orphan completion cache writes');
 unrelatedPreviewConsumer.end();
