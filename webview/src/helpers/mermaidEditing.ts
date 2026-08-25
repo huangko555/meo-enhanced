@@ -15,8 +15,12 @@ import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import { markLiveInputNestedProjection } from '../editor/liveInputDerivedWork';
+import {
+  decideRenderedBlockModeShell,
+  type RenderedBlockMode
+} from '../editor/renderedBlockModeShell';
 
-export type MermaidBlockMode = 'preview' | 'split' | 'source';
+export type MermaidBlockMode = RenderedBlockMode;
 
 type MermaidModeChange = {
   anchor: number;
@@ -155,17 +159,17 @@ export function getMermaidBlockMode(
     searchReveal.from < contentTo &&
     searchReveal.to > contentFrom
   );
+  const decision = decideRenderedBlockModeShell({
+    kind: 'mermaid',
+    lineNumber: state.doc.lineAt(anchor).number,
+    manualMode: manual,
+    temporaryReveal: searchInside
+  });
   return {
     manual,
-    effective: manual === 'preview' && searchInside ? 'split' : manual,
+    effective: decision.effectiveMode,
     searchReveal: searchInside ? searchReveal : null
   };
-}
-
-function nextMermaidMode(mode: MermaidBlockMode): MermaidBlockMode {
-  if (mode === 'preview') return 'split';
-  if (mode === 'split') return 'source';
-  return 'preview';
 }
 
 const mermaidToolbarCodeContent = Symbol('mermaidToolbarCodeContent');
@@ -173,15 +177,21 @@ type MermaidToolbarElement = HTMLSpanElement & {
   [mermaidToolbarCodeContent]: string;
 };
 
-function updateMermaidModeButton(button: HTMLButtonElement, mode: MermaidBlockMode): void {
-  const modeConfig = mode === 'preview'
-    ? { icon: Pencil, label: 'Edit Mermaid in split view' }
-    : mode === 'split'
-      ? { icon: Code2, label: 'Show Mermaid code only' }
-      : { icon: Eye, label: 'Show Mermaid preview' };
-  button.replaceChildren(createElement(modeConfig.icon, { width: 15, height: 15 }));
-  button.setAttribute('aria-label', modeConfig.label);
-  button.title = modeConfig.label;
+function updateMermaidModeButton(button: HTMLButtonElement, mode: MermaidBlockMode, lineNumber: number): void {
+  const decision = decideRenderedBlockModeShell({
+    kind: 'mermaid',
+    lineNumber,
+    manualMode: mode,
+    temporaryReveal: false
+  });
+  const icon = decision.modeButton.action === 'edit'
+    ? Pencil
+    : decision.modeButton.action === 'source'
+      ? Code2
+      : Eye;
+  button.replaceChildren(createElement(icon, { width: 15, height: 15 }));
+  button.setAttribute('aria-label', decision.modeButton.label);
+  button.title = decision.modeButton.label;
 }
 
 function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect: StateEffect<unknown>): void {
@@ -221,10 +231,16 @@ class MermaidToolbarWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const decision = decideRenderedBlockModeShell({
+      kind: 'mermaid',
+      lineNumber: this.lineNumber,
+      manualMode: this.mode,
+      temporaryReveal: false
+    });
     const toolbar = document.createElement('span') as MermaidToolbarElement;
     toolbar.className = 'meo-mermaid-toolbar';
     toolbar.setAttribute('role', 'group');
-    toolbar.setAttribute('aria-label', `Mermaid block controls at line ${this.lineNumber}`);
+    toolbar.setAttribute('aria-label', decision.controlsLabel);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
     toolbar.dataset.meoMermaidMode = this.mode;
@@ -233,7 +249,7 @@ class MermaidToolbarWidget extends WidgetType {
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
     modeButton.className = 'meo-mermaid-mode-btn';
-    updateMermaidModeButton(modeButton, this.mode);
+    updateMermaidModeButton(modeButton, this.mode, this.lineNumber);
 
     const changeMode = (event: Event) => {
       event.preventDefault();
@@ -241,7 +257,12 @@ class MermaidToolbarWidget extends WidgetType {
       const currentAnchor = resolveMermaidAnchorAtLine(view.state, this.lineNumber);
       if (currentAnchor === null) return;
       const currentMode = toolbar.dataset.meoMermaidMode as MermaidBlockMode;
-      const nextMode = nextMermaidMode(currentMode);
+      const nextMode = decideRenderedBlockModeShell({
+        kind: 'mermaid',
+        lineNumber: this.lineNumber,
+        manualMode: currentMode,
+        temporaryReveal: false
+      }).manualIntent.mode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
@@ -294,7 +315,7 @@ class MermaidToolbarWidget extends WidgetType {
     if (!modeButton) return false;
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
     toolbar.dataset.meoMermaidMode = this.mode;
-    updateMermaidModeButton(modeButton, this.mode);
+    updateMermaidModeButton(modeButton, this.mode, this.lineNumber);
     return true;
   }
 
@@ -394,12 +415,17 @@ class MermaidEditingController {
     this.presentationFactory = getMermaidDiagramPresentationFactory(outerView.state);
     this.mode = mode;
     this.root = document.createElement('div') as MermaidEditingBlockElement;
-    this.root.className = 'meo-mermaid-editing-block';
+    this.root.className = 'meo-mermaid-editing-block meo-rendered-block-mode-shell';
     this.root.setAttribute('role', 'region');
-    this.root.setAttribute('aria-label', `Mermaid editor at line ${block.startLine}`);
+    this.root.setAttribute('aria-label', decideRenderedBlockModeShell({
+      kind: 'mermaid',
+      lineNumber: block.startLine,
+      manualMode: mode,
+      temporaryReveal: false
+    }).editorLabel);
     this.root.dataset.meoMermaidAnchor = String(block.anchor);
     this.sourcePane = document.createElement('div');
-    this.sourcePane.className = 'meo-mermaid-source-pane';
+    this.sourcePane.className = 'meo-mermaid-source-pane meo-rendered-block-source-pane';
     this.sourceSticky = document.createElement('div');
     this.sourceSticky.className = 'meo-mermaid-source-sticky';
     this.sourceHost = document.createElement('div');
@@ -548,9 +574,16 @@ class MermaidEditingController {
       return;
     }
     this.mode = mode;
-    this.root.classList.toggle('is-split', mode === 'split');
-    this.root.classList.toggle('is-source', mode === 'source');
-    if (mode === 'split') {
+    const decision = decideRenderedBlockModeShell({
+      kind: 'mermaid',
+      lineNumber: this.block.startLine,
+      manualMode: mode,
+      temporaryReveal: false
+    });
+    this.root.className = `meo-mermaid-editing-block meo-rendered-block-mode-shell ${decision.modeClass}`;
+    this.root.dataset.meoRenderedBlockMode = decision.effectiveMode;
+    this.root.dataset.meoRenderedBlockLayout = decision.layout.wide;
+    if (decision.preview === 'deferred') {
       const preferredHeight = getCachedMermaidPreviewHeight(
         this.presentationFactory,
         this.outerView,
@@ -562,14 +595,14 @@ class MermaidEditingController {
       }
       if (!this.previewShell) {
         this.previewShell = document.createElement('div');
-        this.previewShell.className = 'meo-mermaid-preview-shell';
+        this.previewShell.className = 'meo-mermaid-preview-shell meo-rendered-block-preview-pane';
         this.previewSticky = document.createElement('div');
         this.previewSticky.className = 'meo-mermaid-preview-sticky';
         this.previewShell.appendChild(this.previewSticky);
         this.root.appendChild(this.previewShell);
       }
       this.renderPreview();
-    } else if (this.previewShell) {
+    } else if (decision.preview === 'destroyed' && this.previewShell) {
       this.root.style.removeProperty('--meo-mermaid-preview-preferred-height');
       this.destroyPreview();
       this.previewShell.remove();
@@ -677,7 +710,12 @@ export class MermaidEditingWidget extends WidgetType {
     const controller = (dom as MermaidEditingBlockElement).__meoMermaidEditingController;
     const updated = controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
     if (updated) {
-      dom.setAttribute('aria-label', `Mermaid editor at line ${this.block.startLine}`);
+      dom.setAttribute('aria-label', decideRenderedBlockModeShell({
+        kind: 'mermaid',
+        lineNumber: this.block.startLine,
+        manualMode: this.mode,
+        temporaryReveal: false
+      }).editorLabel);
       applyLiveBlockIndent(dom, this.block.indentColumns);
     }
     return updated;

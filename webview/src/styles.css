@@ -3774,8 +3774,7 @@ body.outline-resizing .preview-frame {
   pointer-events: auto;
 }
 
-.cm-editor .meo-mermaid-editing-block,
-.cm-editor .meo-latex-math-editing-block {
+.cm-editor .meo-rendered-block-mode-shell {
   --meo-split-preview-available-height: max(0px, calc(100vh - 48px));
 
   display: grid;
@@ -3788,21 +3787,17 @@ body.outline-resizing .preview-frame {
   overflow: clip;
 }
 
-.cm-editor .meo-mermaid-editing-block.is-source,
-.cm-editor .meo-latex-math-editing-block.is-source {
+.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="source-only"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.cm-editor .meo-mermaid-source-pane,
-.cm-editor .meo-mermaid-preview-shell,
-.cm-editor .meo-latex-math-source-pane,
-.cm-editor .meo-latex-math-preview-shell {
+.cm-editor .meo-rendered-block-source-pane,
+.cm-editor .meo-rendered-block-preview-pane {
   min-width: 0;
   background: var(--meo-code-background);
 }
 
-.cm-editor .meo-mermaid-preview-shell,
-.cm-editor .meo-latex-math-preview-shell {
+.cm-editor .meo-rendered-block-preview-pane {
   border-left: 1px solid var(--meo-semantic-tableBorder, var(--vscode-panel-border));
 }
 
@@ -3813,10 +3808,10 @@ body.outline-resizing .preview-frame {
   width: 100%;
 }
 
-.cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-source-sticky,
-.cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-sticky,
-.cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-source-sticky,
-.cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-preview-sticky {
+.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-source-sticky,
+.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky,
+.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-source-sticky,
+.cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
   position: sticky;
   top: 12px;
   align-self: start;
@@ -3927,27 +3922,25 @@ body.outline-resizing .preview-frame {
 }
 
 @media (max-width: 760px) {
-  .cm-editor .meo-mermaid-editing-block.is-split,
-  .cm-editor .meo-latex-math-editing-block.is-split {
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-shell,
-  .cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-preview-shell {
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-rendered-block-preview-pane {
     border-top: 1px solid var(--meo-semantic-tableBorder, var(--vscode-panel-border));
     border-left: 0;
   }
 
-  .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-source-sticky,
-  .cm-editor .meo-mermaid-editing-block.is-split .meo-mermaid-preview-sticky,
-  .cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-source-sticky,
-  .cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-preview-sticky {
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-source-sticky,
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky,
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-source-sticky,
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
     position: relative;
     top: 0;
     min-height: 0;
   }
 
-  .cm-editor .meo-latex-math-editing-block.is-split .meo-latex-math-preview-sticky {
+  .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
     min-height: clamp(160px, 35vh, 280px);
   }
 }

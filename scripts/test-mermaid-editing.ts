@@ -1223,6 +1223,11 @@ async function main() {
       const previewBlock = block?.querySelector<HTMLElement>('.meo-mermaid-preview-sticky > .meo-mermaid-block')!;
       const scroller = block?.querySelector<HTMLElement>('.meo-mermaid-source-editor .cm-scroller')!;
       return {
+        sharedShell: block?.classList.contains('meo-rendered-block-mode-shell') ?? false,
+        shellMode: block?.dataset.meoRenderedBlockMode ?? null,
+        shellLayout: block?.dataset.meoRenderedBlockLayout ?? null,
+        controlsLabel: document.querySelector('.meo-mermaid-toolbar')?.getAttribute('aria-label') ?? null,
+        editorLabel: block?.getAttribute('aria-label') ?? null,
         sourceText: block?.querySelector('.meo-mermaid-source-editor')?.textContent ?? '',
         heightDelta: source && preview ? Math.abs(source.getBoundingClientRect().height - preview.getBoundingClientRect().height) : null,
         sourceHeight: sourceSticky?.getBoundingClientRect().height ?? 0,
@@ -1242,6 +1247,11 @@ async function main() {
       throw new Error(`Split mode did not show equal-height complete source: ${JSON.stringify(splitMode)}`);
     }
     if (
+      !splitMode.sharedShell ||
+      splitMode.shellMode !== 'split' ||
+      splitMode.shellLayout !== 'side-by-side' ||
+      splitMode.controlsLabel !== 'Mermaid block controls at line 1' ||
+      splitMode.editorLabel !== 'Mermaid editor at line 1' ||
       splitMode.hasInternalVerticalScroll ||
       splitMode.sourceStickyPosition !== 'sticky' ||
       splitMode.stickyPosition !== 'sticky' ||
@@ -1417,6 +1427,9 @@ async function main() {
       const source = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;
       const preview = block?.querySelector<HTMLElement>('.meo-mermaid-preview-shell')!;
       return {
+        sharedShell: block?.classList.contains('meo-rendered-block-mode-shell') ?? false,
+        shellMode: block?.dataset.meoRenderedBlockMode ?? null,
+        shellLayout: block?.dataset.meoRenderedBlockLayout ?? null,
         columns: block ? getComputedStyle(block).gridTemplateColumns.split(' ').length : 0,
         previewBelowSource: Boolean(source && preview && preview.getBoundingClientRect().top >= source.getBoundingClientRect().bottom - 1),
         sourceStickyPosition: source
@@ -1429,6 +1442,9 @@ async function main() {
     });
     if (
       narrowLayout.columns !== 1 ||
+      !narrowLayout.sharedShell ||
+      narrowLayout.shellMode !== 'split' ||
+      narrowLayout.shellLayout !== 'side-by-side' ||
       !narrowLayout.previewBelowSource ||
       narrowLayout.sourceStickyPosition !== 'relative' ||
       narrowLayout.stickyPosition !== 'relative'
@@ -1571,6 +1587,11 @@ async function main() {
       const stickyRect = sticky?.getBoundingClientRect();
       const formulaRect = formula?.getBoundingClientRect();
       return {
+        sharedShell: block?.classList.contains('meo-rendered-block-mode-shell') ?? false,
+        shellMode: block?.dataset.meoRenderedBlockMode ?? null,
+        shellLayout: block?.dataset.meoRenderedBlockLayout ?? null,
+        controlsLabel: document.querySelector('.meo-latex-math-toolbar')?.getAttribute('aria-label') ?? null,
+        editorLabel: block?.getAttribute('aria-label') ?? null,
         sourceHeight: sourceRect?.height ?? 0,
         previewHeight: previewRect?.height ?? 0,
         frameHeight: stickyRect?.height ?? 0,
@@ -1585,7 +1606,13 @@ async function main() {
         )
       };
     });
+    const latexShellLabelsMatch = latexSplitLayout.controlsLabel?.startsWith('Formula block controls at line ') === true
+      && latexSplitLayout.editorLabel === latexSplitLayout.controlsLabel.replace('Formula block controls', 'Formula editor');
     if (
+      !latexSplitLayout.sharedShell ||
+      latexSplitLayout.shellMode !== 'split' ||
+      latexSplitLayout.shellLayout !== 'side-by-side' ||
+      !latexShellLabelsMatch ||
       Math.abs(latexSplitLayout.sourceHeight - latexSplitLayout.previewHeight) > 1 ||
       Math.abs(latexSplitLayout.frameHeight - latexSplitLayout.availablePreviewHeight) > 2 ||
       !latexSplitLayout.formulaInsideFrame

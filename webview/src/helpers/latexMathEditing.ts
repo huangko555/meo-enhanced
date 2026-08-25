@@ -9,8 +9,12 @@ import { applyLiveBlockIndent } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 import { markLiveInputNestedProjection } from '../editor/liveInputDerivedWork';
+import {
+  decideRenderedBlockModeShell,
+  type RenderedBlockMode
+} from '../editor/renderedBlockModeShell';
 
-export type LatexMathBlockMode = 'preview' | 'split' | 'source';
+export type LatexMathBlockMode = RenderedBlockMode;
 
 type LatexMathModeChange = {
   anchor: number;
@@ -135,17 +139,17 @@ export function getLatexMathBlockMode(
     searchReveal.from < contentTo &&
     searchReveal.to > contentFrom
   );
+  const decision = decideRenderedBlockModeShell({
+    kind: 'latex',
+    lineNumber: state.doc.lineAt(anchor).number,
+    manualMode: manual,
+    temporaryReveal: searchInside
+  });
   return {
     manual,
-    effective: manual === 'preview' && searchInside ? 'split' : manual,
+    effective: decision.effectiveMode,
     searchReveal: searchInside ? searchReveal : null
   };
-}
-
-function nextLatexMathMode(mode: LatexMathBlockMode): LatexMathBlockMode {
-  if (mode === 'preview') return 'split';
-  if (mode === 'split') return 'source';
-  return 'preview';
 }
 
 const latexToolbarSourceText = Symbol('latexToolbarSourceText');
@@ -153,15 +157,21 @@ type LatexToolbarElement = HTMLSpanElement & {
   [latexToolbarSourceText]: string;
 };
 
-function updateLatexMathModeButton(button: HTMLButtonElement, mode: LatexMathBlockMode): void {
-  const modeConfig = mode === 'preview'
-    ? { icon: Pencil, label: 'Edit formula in split view' }
-    : mode === 'split'
-      ? { icon: Code2, label: 'Show formula source only' }
-      : { icon: Eye, label: 'Show formula preview' };
-  button.replaceChildren(createElement(modeConfig.icon, { width: 15, height: 15 }));
-  button.setAttribute('aria-label', modeConfig.label);
-  button.title = modeConfig.label;
+function updateLatexMathModeButton(button: HTMLButtonElement, mode: LatexMathBlockMode, lineNumber: number): void {
+  const decision = decideRenderedBlockModeShell({
+    kind: 'latex',
+    lineNumber,
+    manualMode: mode,
+    temporaryReveal: false
+  });
+  const icon = decision.modeButton.action === 'edit'
+    ? Pencil
+    : decision.modeButton.action === 'source'
+      ? Code2
+      : Eye;
+  button.replaceChildren(createElement(icon, { width: 15, height: 15 }));
+  button.setAttribute('aria-label', decision.modeButton.label);
+  button.title = decision.modeButton.label;
 }
 
 function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect: StateEffect<unknown>): void {
@@ -203,10 +213,16 @@ class LatexMathToolbarWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const decision = decideRenderedBlockModeShell({
+      kind: 'latex',
+      lineNumber: this.lineNumber,
+      manualMode: this.mode,
+      temporaryReveal: false
+    });
     const toolbar = document.createElement('span') as LatexToolbarElement;
     toolbar.className = 'meo-latex-math-toolbar';
     toolbar.setAttribute('role', 'group');
-    toolbar.setAttribute('aria-label', `Formula block controls at line ${this.lineNumber}`);
+    toolbar.setAttribute('aria-label', decision.controlsLabel);
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.blockTo);
     toolbar.dataset.meoLatexMathMode = this.mode;
@@ -215,12 +231,17 @@ class LatexMathToolbarWidget extends WidgetType {
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
     modeButton.className = 'meo-latex-math-mode-btn';
-    updateLatexMathModeButton(modeButton, this.mode);
+    updateLatexMathModeButton(modeButton, this.mode, this.lineNumber);
     modeButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       const currentMode = toolbar.dataset.meoLatexMathMode as LatexMathBlockMode;
-      const nextMode = nextLatexMathMode(currentMode);
+      const nextMode = decideRenderedBlockModeShell({
+        kind: 'latex',
+        lineNumber: this.lineNumber,
+        manualMode: currentMode,
+        temporaryReveal: false
+      }).manualIntent.mode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
@@ -271,7 +292,7 @@ class LatexMathToolbarWidget extends WidgetType {
     const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
     if (!modeButton) return false;
     toolbar.dataset.meoLatexMathMode = this.mode;
-    updateLatexMathModeButton(modeButton, this.mode);
+    updateLatexMathModeButton(modeButton, this.mode, this.lineNumber);
     return true;
   }
 
@@ -340,13 +361,18 @@ class LatexMathEditingController {
     this.block = block;
     this.mode = mode;
     this.root = document.createElement('div') as LatexMathEditingBlockElement;
-    this.root.className = 'meo-latex-math-editing-block';
+    this.root.className = 'meo-latex-math-editing-block meo-rendered-block-mode-shell';
     this.root.setAttribute('role', 'region');
-    this.root.setAttribute('aria-label', `Formula editor at line ${block.lineNumber}`);
+    this.root.setAttribute('aria-label', decideRenderedBlockModeShell({
+      kind: 'latex',
+      lineNumber: block.lineNumber,
+      manualMode: mode,
+      temporaryReveal: false
+    }).editorLabel);
     this.root.dataset.meoLatexMathAnchor = String(block.anchor);
 
     const sourcePane = document.createElement('div');
-    sourcePane.className = 'meo-latex-math-source-pane';
+    sourcePane.className = 'meo-latex-math-source-pane meo-rendered-block-source-pane';
     const sourceSticky = document.createElement('div');
     sourceSticky.className = 'meo-latex-math-source-sticky';
     this.sourceHost = document.createElement('div');
@@ -478,19 +504,26 @@ class LatexMathEditingController {
       return;
     }
     this.mode = mode;
-    this.root.classList.toggle('is-split', mode === 'split');
-    this.root.classList.toggle('is-source', mode === 'source');
-    if (mode === 'split') {
+    const decision = decideRenderedBlockModeShell({
+      kind: 'latex',
+      lineNumber: this.block.lineNumber,
+      manualMode: mode,
+      temporaryReveal: false
+    });
+    this.root.className = `meo-latex-math-editing-block meo-rendered-block-mode-shell ${decision.modeClass}`;
+    this.root.dataset.meoRenderedBlockMode = decision.effectiveMode;
+    this.root.dataset.meoRenderedBlockLayout = decision.layout.wide;
+    if (decision.preview === 'deferred') {
       if (!this.previewShell) {
         this.previewShell = document.createElement('div');
-        this.previewShell.className = 'meo-latex-math-preview-shell';
+        this.previewShell.className = 'meo-latex-math-preview-shell meo-rendered-block-preview-pane';
         this.previewHost = document.createElement('div');
         this.previewHost.className = 'meo-latex-math-preview-sticky';
         this.previewShell.appendChild(this.previewHost);
         this.root.appendChild(this.previewShell);
       }
       this.renderPreview();
-    } else if (this.previewShell) {
+    } else if (decision.preview === 'destroyed' && this.previewShell) {
       this.previewViewport?.destroy();
       this.previewViewport = null;
       this.previewShell.remove();
@@ -598,7 +631,12 @@ export class LatexMathEditingWidget extends WidgetType {
     const controller = (dom as LatexMathEditingBlockElement).__meoLatexMathEditingController;
     const updated = controller?.update(view, this.block, this.mode, this.searchReveal) ?? false;
     if (updated) {
-      dom.setAttribute('aria-label', `Formula editor at line ${this.block.lineNumber}`);
+      dom.setAttribute('aria-label', decideRenderedBlockModeShell({
+        kind: 'latex',
+        lineNumber: this.block.lineNumber,
+        manualMode: this.mode,
+        temporaryReveal: false
+      }).editorLabel);
       applyLiveBlockIndent(dom, this.block.indentColumns);
     }
     return updated;
