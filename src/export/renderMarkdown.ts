@@ -162,7 +162,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     return [
       `<div class="meo-export-code-block-wrap"${sourceAttrs}>`,
       languageLabel,
-      `<pre class="meo-export-code-block"><code${className}>${highlighted}</code></pre>`,
+      `<pre class="meo-export-code-block"><code${className}>${renderHighlightedCodeLines(highlighted, source)}</code></pre>`,
       '</div>'
     ].join('');
   };
@@ -213,7 +213,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       ol: ['start', 'reversed'],
       li: ['value'],
       '*': ['class', 'style', 'id', 'data-source-b64', 'data-source-line', 'data-source-end-line', 'aria-hidden'],
-      span: ['class', 'style', 'title', 'role', 'aria-label'],
+      span: ['class', 'style', 'title', 'role', 'aria-label', 'aria-hidden', 'data-line-number'],
       th: ['colspan', 'rowspan', 'scope', 'style'],
       td: ['colspan', 'rowspan', 'style'],
       code: ['class'],
@@ -301,6 +301,56 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   });
 
   return { html, hasMermaid, hasMath };
+}
+
+function renderHighlightedCodeLines(highlighted: string, source: string): string {
+  const rows: string[] = [];
+  const openSpans: string[] = [];
+  let rowHtml = '';
+  let cursor = 0;
+
+  while (cursor < highlighted.length) {
+    if (highlighted[cursor] === '\n') {
+      rowHtml += '</span>'.repeat(openSpans.length);
+      rows.push(rowHtml);
+      rowHtml = openSpans.join('');
+      cursor += 1;
+      continue;
+    }
+
+    if (highlighted.startsWith('</span>', cursor)) {
+      openSpans.pop();
+      rowHtml += '</span>';
+      cursor += '</span>'.length;
+      continue;
+    }
+
+    if (highlighted.startsWith('<span', cursor)) {
+      const tagEnd = highlighted.indexOf('>', cursor);
+      if (tagEnd >= 0) {
+        const openingTag = highlighted.slice(cursor, tagEnd + 1);
+        openSpans.push(openingTag);
+        rowHtml += openingTag;
+        cursor = tagEnd + 1;
+        continue;
+      }
+    }
+
+    rowHtml += highlighted[cursor];
+    cursor += 1;
+  }
+
+  if (rows.length === 0 || !source.endsWith('\n')) {
+    rowHtml += '</span>'.repeat(openSpans.length);
+    rows.push(rowHtml);
+  }
+
+  return rows.map((row, index) => [
+    '<span class="meo-export-code-line">',
+    `<span class="meo-export-code-line-number" aria-hidden="true" data-line-number="${index + 1}"></span>`,
+    `<span class="meo-export-code-line-source">${row}</span>`,
+    '</span>'
+  ].join('')).join('') + (source.endsWith('\n') ? '\n' : '');
 }
 
 function installHexColorSwatchTransform(md: MarkdownIt): void {

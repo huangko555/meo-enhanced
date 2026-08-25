@@ -663,7 +663,9 @@ th .meo-export-math-display {
 
 pre.meo-export-code-block {
   padding: 24px 16px;
-  overflow: auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
   border-radius: 6px;
   border: 1px solid var(--meo-code-border);
   background: var(--meo-code-bg);
@@ -692,17 +694,39 @@ pre.meo-export-code-block {
 }
 pre.meo-export-code-block code {
   display: block;
+  min-width: 0;
   font-weight: var(--meo-font-weight-code);
-  font-size: var(--meo-font-size-code);
-  line-height: var(--meo-code-line-height);
+  font-size: 0;
+  line-height: 0;
   font-style: normal;
   text-decoration: none;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
   padding: 0;
   border-radius: 0;
   background: transparent;
+}
+.meo-export-code-line {
+  display: grid;
+  grid-template-columns: 3ch minmax(0, 1fr);
+  column-gap: 1.25ch;
+  min-width: 0;
+  font-size: var(--meo-font-size-code);
+  line-height: var(--meo-code-line-height);
+}
+.meo-export-code-line-number {
+  min-width: 0;
+  color: var(--meo-muted);
+  text-align: right;
+  user-select: none;
+}
+.meo-export-code-line-number::before {
+  content: attr(data-line-number);
+}
+.meo-export-code-line-source {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 blockquote {

@@ -39,6 +39,26 @@ const rendered = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview.md',
   target: 'html'
 });
+const codeLineCases = [
+  { name: 'empty', markdownText: '```text\n```', lines: 1, source: '' },
+  { name: 'one line', markdownText: '```text\nalpha\n```', lines: 1, source: 'alpha\n' },
+  { name: 'multiple lines', markdownText: '```text\nalpha\n\nbeta\n```', lines: 3, source: 'alpha\n\nbeta\n' },
+  { name: 'CRLF and whitespace', markdownText: '```text\r\n  alpha\t \r\n\r\n```', lines: 2, source: '  alpha\t \n\n' },
+  { name: 'escaped source', markdownText: '```text\n<span>& value\n```', lines: 1, source: '<span>& value\n' }
+] as const;
+const renderedCodeLineCases = codeLineCases.map((fixture) => ({
+  fixture,
+  result: renderMarkdownToHtml({
+    markdownText: fixture.markdownText,
+    markdownFilePath: `C:/tmp/preview-code-${fixture.name}.md`,
+    target: 'html'
+  })
+}));
+const highlightedCodeLines = renderMarkdownToHtml({
+  markdownText: '```javascript\n/* comment\ncontinues */\nconst escaped = "<tag>&";\n```',
+  markdownFilePath: 'C:/tmp/preview-code-highlight.md',
+  target: 'html'
+});
 const looseTable = renderMarkdownToHtml({
   markdownText: [
     '| Type | | Type | | | Content | Notes |',
@@ -161,6 +181,33 @@ const formulaCoverage = renderMarkdownToHtml({
 
 if (!rendered.html.includes('id="intro"') || !rendered.html.includes('id="intro-2"')) {
   throw new Error('Preview headings must receive stable, unique anchors');
+}
+for (const { fixture, result } of renderedCodeLineCases) {
+  const rows = result.html.match(/class="meo-export-code-line"/g) ?? [];
+  const gutters = Array.from(
+    result.html.matchAll(/class="meo-export-code-line-number" aria-hidden="true" data-line-number="(\d+)"/g),
+    (match) => match[1]
+  );
+  const sourceText = Array.from(
+    result.html.matchAll(/<span class="meo-export-code-line-source">([\s\S]*?)<\/span>/g),
+    (match) => match[1]
+      .replace(/<[^>]*>/g, '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+  ).join('\n') + (fixture.source.endsWith('\n') ? '\n' : '');
+  const expectedGutters = Array.from({ length: fixture.lines }, (_, index) => String(index + 1));
+  if (rows.length !== fixture.lines || JSON.stringify(gutters) !== JSON.stringify(expectedGutters) || sourceText !== fixture.source) {
+    throw new Error(`Preview fenced code ${fixture.name} must preserve independent lines and exact source text: ${result.html}`);
+  }
+}
+if (
+  (highlightedCodeLines.html.match(/class="meo-export-code-line"/g) ?? []).length !== 3
+  || (highlightedCodeLines.html.match(/hljs-comment/g) ?? []).length < 2
+  || !highlightedCodeLines.html.includes('class="hljs language-javascript"')
+  || !highlightedCodeLines.html.includes('&lt;tag&gt;&amp;')
+) {
+  throw new Error(`Preview fenced code lines must preserve multiline highlighting, language class, and escaping: ${highlightedCodeLines.html}`);
 }
 if (!rendered.html.includes('data-source-line="1"') || !rendered.html.includes('data-source-line="9"')) {
   throw new Error('Preview headings must retain source lines for outline navigation');
