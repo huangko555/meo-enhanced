@@ -2,21 +2,39 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import type { HTTPRequest } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import exportRuntime from '../src/export/runtime';
 
 const root = path.resolve(import.meta.dir, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-reading-surface-'));
+const sourceDocumentPath = path.join(temp, 'preview-reading-surface.md');
 const longToken = 'wrappable'.repeat(90);
 const longKbdToken = 'K'.repeat(500);
 const longLinkToken = 'linked'.repeat(80);
 const codeSource = `/* comment\n${longToken}\ncontinues */\n`;
 const mermaidFallbackSource = `invalid ${longToken}\n`;
-const wideImage = Buffer.from(
+const dataImage = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+const safeHtmlWideImage = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="120" viewBox="0 0 1600 120"><rect width="1600" height="120" fill="#999"/></svg>',
   'utf8'
 ).toString('base64');
+fs.writeFileSync(
+  path.join(temp, 'landscape.svg'),
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="400" viewBox="0 0 1600 400"><rect width="1600" height="400" fill="#567"/></svg>',
+  'utf8'
+);
+fs.writeFileSync(
+  path.join(temp, 'portrait.svg'),
+  '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="1200" viewBox="0 0 300 1200"><rect width="300" height="1200" fill="#678"/></svg>',
+  'utf8'
+);
+fs.writeFileSync(
+  path.join(temp, 'linked.svg'),
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600"><rect width="1200" height="600" fill="#789"/></svg>',
+  'utf8'
+);
 const failingMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
   window.mermaid = {
     initialize() {},
@@ -24,6 +42,18 @@ const failingMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
   };
 `, 'utf8').toString('base64')}`;
 const markdown = [
+  `![Data alt](data:image/png;base64,${dataImage} "Data title")`,
+  '',
+  '![Landscape alt](landscape.svg "Landscape title")',
+  '',
+  `Selection before [![Linked alt](linked.svg "Linked image title")](https://example.com/linked-image "Linked anchor title") selection after`,
+  '',
+  '![Portrait alt](portrait.svg "Portrait title")',
+  '',
+  '![Broken alt](data:image/png;base64,invalid "Broken title")',
+  '',
+  `<img alt="Safe HTML wide" width="1600" height="120" src="data:image/svg+xml;base64,${safeHtmlWideImage}">`,
+  '',
   '```javascript',
   '/* comment',
   longToken,
@@ -42,8 +72,6 @@ const markdown = [
   `<table><thead><tr><th>Safe HTML</th><th>Value</th></tr></thead><tbody><tr><td><kbd>${longKbdToken}</kbd></td><td>reachable</td></tr></tbody></table>`,
   '',
   'Prose shortcut: <kbd>Ctrl+Shift+P</kbd>',
-  '',
-  `<img alt="wide" width="1600" height="120" src="data:image/svg+xml;base64,${wideImage}">`,
   '',
   '$$x^2 + y^2 = z^2$$'
 ].join('\n');
@@ -92,7 +120,7 @@ async function main(): Promise<void> {
       if (request?.type !== 'requestPreviewRender') throw new Error('Preview request failed Protocol decoding');
       const rendered = exportRuntime.renderPreviewDocument({
         markdownText: request.text,
-        sourceDocumentPath: 'C:/preview-reading-surface.md',
+        sourceDocumentPath,
         styleEnvironment: request.environment
       });
       const response = decodeHostToWebviewMessage({
@@ -119,6 +147,7 @@ async function main(): Promise<void> {
       window.acquireVsCodeApi=()=>(
         {
           postMessage(message) {
+            window.__lastPreviewMessage = message;
             if (message.type !== 'requestPreviewRender') return;
             window.__renderPreviewThroughHost(message).then((response) => {
               window.dispatchEvent(new MessageEvent('message', { data: response }));
@@ -145,30 +174,75 @@ async function main(): Promise<void> {
         ?.contentDocument?.querySelector('.meo-export-mermaid.is-error code') !== null
     ));
 
-    await page.setViewport({ width: 420, height: 700, deviceScaleFactor: 1 });
-    await page.evaluate(() => {
-      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-      const kbd = doc.querySelector<HTMLElement>('table kbd')!;
-      const link = doc.querySelector<HTMLAnchorElement>('table a')!;
-      const selection = doc.defaultView!.getSelection()!;
-      const range = doc.createRange();
-      range.selectNodeContents(kbd);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      link.focus();
-    });
-
     const layoutCases = [1, 2].flatMap((deviceScaleFactor) => (
       [420, 1200].flatMap((width) => (
         [0.8, 1.25].map((zoom) => ({ deviceScaleFactor, width, zoom }))
       ))
     ));
     for (const { deviceScaleFactor, width, zoom } of layoutCases) {
+      await page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const kbd = doc.querySelector<HTMLElement>('table kbd')!;
+        const link = doc.querySelector<HTMLAnchorElement>('table a')!;
+        const selection = doc.defaultView!.getSelection()!;
+        const range = doc.createRange();
+        range.selectNodeContents(kbd);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        link.focus({ preventScroll: true });
+      });
       await page.setViewport({ width, height: 700, deviceScaleFactor });
       await page.evaluate((value) => {
         const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
         doc.documentElement.style.zoom = String(value);
       }, zoom);
+      const adjacentInteraction = await page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const table = doc.querySelector<HTMLTableElement>('table')!;
+        return {
+          selection: doc.defaultView!.getSelection()!.toString(),
+          focused: doc.activeElement === table.querySelector('a')
+        };
+      });
+      assert.deepEqual(adjacentInteraction, { selection: longKbdToken, focused: true });
+
+      await page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const image = doc.querySelector<HTMLImageElement>('img[alt="Linked alt"]');
+        if (!image) throw new Error('Linked Markdown image missing from Preview DOM');
+        image.closest('a')!.focus({ preventScroll: true });
+      });
+      await page.setViewport({ width, height: 701, deviceScaleFactor });
+      await page.setViewport({ width, height: 700, deviceScaleFactor });
+      await page.evaluate(({ probe, target }) => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        doc.documentElement.style.zoom = String(probe);
+        doc.documentElement.style.zoom = String(target);
+      }, { probe: zoom === 0.8 ? 0.81 : 1.24, target: zoom });
+      await page.evaluate(() => {
+        (window as typeof window & { __lastPreviewMessage?: unknown }).__lastPreviewMessage = null;
+      });
+      await page.keyboard.press('Enter');
+      const enterActivation = await page.evaluate(() => (
+        window as typeof window & { __lastPreviewMessage?: unknown }
+      ).__lastPreviewMessage);
+      assert.deepEqual(enterActivation, {
+        type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
+      });
+      await page.evaluate(() => {
+        (window as typeof window & { __lastPreviewMessage?: unknown }).__lastPreviewMessage = null;
+      });
+      const previewFrame = page.frames().find((candidate) => candidate !== page.mainFrame());
+      assert.ok(previewFrame, 'Preview iframe must remain attached for linked-image activation');
+      const linkedImageHandle = await previewFrame.$('img[alt="Linked alt"]');
+      assert.ok(linkedImageHandle, 'Linked Markdown image must remain reachable in the Preview iframe');
+      await linkedImageHandle.click();
+      const clickActivation = await page.evaluate(() => (
+        window as typeof window & { __lastPreviewMessage?: unknown }
+      ).__lastPreviewMessage);
+      assert.deepEqual(clickActivation, {
+        type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
+      });
       const result = await page.evaluate(async () => {
         const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
         const doc = frame.contentDocument!;
@@ -183,11 +257,46 @@ async function main(): Promise<void> {
         const kbd = table.querySelector<HTMLElement>('kbd')!;
         const tableLink = table.querySelector<HTMLAnchorElement>('a')!;
         const proseKbd = Array.from(doc.querySelectorAll<HTMLElement>('kbd')).find((item) => !item.closest('table'))!;
-        const preservedSelection = doc.defaultView!.getSelection()!.toString();
-        const preservedFocus = doc.activeElement === tableLink;
+        const pageRoot = doc.querySelector<HTMLElement>('.meo-export-doc')!;
+        const rootRect = pageRoot.getBoundingClientRect();
+        const linkedImage = doc.querySelector<HTMLImageElement>('img[alt="Linked alt"]')!;
+        const linkedAnchor = linkedImage.closest<HTMLAnchorElement>('a')!;
+        const linkedFocusPreserved = doc.activeElement === linkedAnchor;
+        const loadedImages = [
+          { image: doc.querySelector<HTMLImageElement>('img[alt="Data alt"]')!, width: 1, height: 1 },
+          { image: doc.querySelector<HTMLImageElement>('img[alt="Landscape alt"]')!, width: 1600, height: 400 },
+          { image: doc.querySelector<HTMLImageElement>('img[alt="Portrait alt"]')!, width: 300, height: 1200 },
+          { image: linkedImage, width: 1200, height: 600 }
+        ];
+        const safeHtmlImage = doc.querySelector<HTMLImageElement>('img[alt="Safe HTML wide"]')!;
+        const brokenImage = doc.querySelector<HTMLImageElement>('img[alt="Broken alt"]')!;
+        const selectionParagraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+          .find((item) => item.textContent?.includes('Selection before'))!;
+        const imageContainers = Array.from(new Set(
+          [...loadedImages.map(({ image }) => image.parentElement!), safeHtmlImage.parentElement!]
+        ));
+        const clippingAncestors = [...loadedImages.map(({ image }) => image), safeHtmlImage].flatMap((image) => {
+          const clipping: string[] = [];
+          for (let current = image.parentElement; current && current !== pageRoot.parentElement; current = current.parentElement) {
+            const style = getComputedStyle(current);
+            if ([style.overflowX, style.overflowY].some((value) => value === 'hidden' || value === 'clip')) {
+              clipping.push(`${image.alt}:${current.tagName.toLowerCase()}.${current.className}:${style.overflowX}/${style.overflowY}`);
+            }
+          }
+          return clipping;
+        });
+        const imageSelection = doc.createRange();
+        imageSelection.selectNodeContents(selectionParagraph);
+        const imageSelectionOwner = doc.defaultView!.getSelection()!;
+        imageSelectionOwner.removeAllRanges();
+        imageSelectionOwner.addRange(imageSelection);
+        const imageSelectionText = imageSelectionOwner.toString();
+        const imageCopied = doc.execCommand('copy');
+        const imageClipboardText = await doc.defaultView!.navigator.clipboard.readText();
+        const normalizeText = (value: string | null) => (value ?? '').replace(/\s+/g, ' ').trim();
+        const linkedFocusedAfterActivation = doc.activeElement === linkedAnchor;
         const code = doc.querySelector<HTMLElement>('pre.meo-export-code-block code')!;
         const pre = code.closest<HTMLElement>('pre')!;
-        const pageRoot = doc.querySelector<HTMLElement>('.meo-export-doc')!;
         const rows = Array.from(code.querySelectorAll<HTMLElement>('.meo-export-code-line'));
         const gutters = Array.from(code.querySelectorAll<HTMLElement>('.meo-export-code-line-number'));
         const sources = Array.from(code.querySelectorAll<HTMLElement>('.meo-export-code-line-source'));
@@ -200,16 +309,15 @@ async function main(): Promise<void> {
         selection.addRange(fullRange);
         const selected = selection.toString();
         const copied = doc.execCommand('copy');
-        const rootRect = pageRoot.getBoundingClientRect();
         const preRect = pre.getBoundingClientRect();
         const bodyRect = sources[1].getBoundingClientRect();
         const fragments = Array.from(longRange.getClientRects());
-        const adjacent = Array.from(doc.querySelectorAll<HTMLElement>('.meo-table-scroll, img, .meo-export-math'));
+        const adjacent = Array.from(doc.querySelectorAll<HTMLElement>('.meo-table-scroll, .meo-export-math'));
         const kbdRange = doc.createRange();
         kbdRange.selectNodeContents(kbd);
         selection.removeAllRanges();
         selection.addRange(kbdRange);
-        tableLink.focus();
+        tableLink.focus({ preventScroll: true });
         const tableSelectionText = selection.toString();
         const tableCopied = doc.execCommand('copy');
         const tableClipboardText = await doc.defaultView!.navigator.clipboard.readText();
@@ -243,8 +351,77 @@ async function main(): Promise<void> {
           }),
           adjacentKinds: {
             table: Boolean(doc.querySelector('.meo-table-scroll table')),
-            media: Boolean(doc.querySelector('img')),
             math: Boolean(doc.querySelector('.meo-export-math'))
+          },
+          images: {
+            semanticCount: doc.querySelectorAll('img').length,
+            loaded: loadedImages.map(({ image, width: naturalWidth, height: naturalHeight }) => {
+              const rect = image.getBoundingClientRect();
+              return {
+                alt: image.alt,
+                title: image.title,
+                complete: image.complete,
+                naturalWidth: image.naturalWidth,
+                naturalHeight: image.naturalHeight,
+                expectedNaturalWidth: naturalWidth,
+                expectedNaturalHeight: naturalHeight,
+                renderedWidth: rect.width,
+                renderedHeight: rect.height,
+                rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                pageRect: { left: rootRect.left, right: rootRect.right, top: rootRect.top, bottom: rootRect.bottom },
+                withinPage: rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1
+                  && rect.top >= rootRect.top - 1 && rect.bottom <= rootRect.bottom + 1,
+                horizontalOverflow: image.scrollWidth - image.clientWidth
+              };
+            }),
+            safeHtml: (() => {
+              const rect = safeHtmlImage.getBoundingClientRect();
+              return {
+                complete: safeHtmlImage.complete,
+                naturalWidth: safeHtmlImage.naturalWidth,
+                naturalHeight: safeHtmlImage.naturalHeight,
+                renderedWidth: rect.width,
+                renderedHeight: rect.height,
+                withinPage: rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1
+                  && rect.top >= rootRect.top - 1 && rect.bottom <= rootRect.bottom + 1
+              };
+            })(),
+            containersWithinPage: imageContainers.every((container) => {
+              const rect = container.getBoundingClientRect();
+              return rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1;
+            }),
+            containerOverflows: imageContainers.map((container) => container.scrollWidth - container.clientWidth),
+            clippingAncestors,
+            linked: {
+              imageParent: linkedImage.parentElement?.tagName,
+              anchorCount: selectionParagraph.querySelectorAll(':scope > a').length,
+              anchorElementChildren: linkedAnchor.children.length,
+              role: linkedAnchor.getAttribute('role'),
+              tabIndex: linkedAnchor.tabIndex,
+              href: linkedAnchor.dataset.meoPreviewHref,
+              anchorTitle: linkedAnchor.title,
+              imageTitle: linkedImage.title,
+              focusPreserved: linkedFocusPreserved,
+              focusedAfterActivation: linkedFocusedAfterActivation
+            },
+            selection: {
+              domText: normalizeText(selectionParagraph.textContent),
+              selectedText: normalizeText(imageSelectionText),
+              copied: imageCopied,
+              clipboardText: normalizeText(imageClipboardText)
+            },
+            broken: {
+              complete: brokenImage.complete,
+              naturalWidth: brokenImage.naturalWidth,
+              naturalHeight: brokenImage.naturalHeight,
+              alt: brokenImage.alt,
+              title: brokenImage.title,
+              rect: (() => {
+                const rect = brokenImage.getBoundingClientRect();
+                return { width: rect.width, height: rect.height, left: rect.left, right: rect.right };
+              })()
+            },
+            customPresentationNodes: doc.querySelectorAll('.meo-image-wrapper, .meo-image-toolbar, figure, figcaption').length
           },
           table: {
             semanticCounts: {
@@ -284,8 +461,6 @@ async function main(): Promise<void> {
               range.selectNodeContents(item);
               return range.getClientRects().length;
             }),
-            preservedSelection,
-            preservedFocus,
             selectionText: tableSelectionText,
             copied: tableCopied,
             clipboardText: tableClipboardText,
@@ -329,7 +504,63 @@ async function main(): Promise<void> {
       assert.deepEqual(result.gutterNumbers, ['1', '2', '3']);
       assert.ok(result.sourceLefts.every((value) => Math.abs(value - result.sourceLefts[0]) <= 0.01));
       assert.equal(result.adjacentWithinPage, true);
-      assert.deepEqual(result.adjacentKinds, { table: true, media: true, math: true });
+      assert.deepEqual(result.adjacentKinds, { table: true, math: true });
+      assert.equal(result.images.semanticCount, 6);
+      assert.deepEqual(result.images.loaded.map((image) => ({
+        alt: image.alt,
+        title: image.title,
+        complete: image.complete,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        expectedNaturalWidth: image.expectedNaturalWidth,
+        expectedNaturalHeight: image.expectedNaturalHeight
+      })), [
+        { alt: 'Data alt', title: 'Data title', complete: true, naturalWidth: 1, naturalHeight: 1, expectedNaturalWidth: 1, expectedNaturalHeight: 1 },
+        { alt: 'Landscape alt', title: 'Landscape title', complete: true, naturalWidth: 1600, naturalHeight: 400, expectedNaturalWidth: 1600, expectedNaturalHeight: 400 },
+        { alt: 'Portrait alt', title: 'Portrait title', complete: true, naturalWidth: 300, naturalHeight: 1200, expectedNaturalWidth: 300, expectedNaturalHeight: 1200 },
+        { alt: 'Linked alt', title: 'Linked image title', complete: true, naturalWidth: 1200, naturalHeight: 600, expectedNaturalWidth: 1200, expectedNaturalHeight: 600 }
+      ]);
+      assert.ok(result.images.loaded.every((image) => (
+        image.renderedWidth > 0 && image.renderedHeight > 0 && image.withinPage && image.horizontalOverflow <= 1
+        && Math.abs((image.renderedWidth / image.renderedHeight) - (image.naturalWidth / image.naturalHeight)) <= 0.01
+      )), JSON.stringify({ width, zoom, deviceScaleFactor, images: result.images }));
+      assert.ok(
+        result.images.safeHtml.complete &&
+        result.images.safeHtml.naturalWidth === 1600 &&
+        result.images.safeHtml.naturalHeight === 120 &&
+        result.images.safeHtml.withinPage &&
+        Math.abs((result.images.safeHtml.renderedWidth / result.images.safeHtml.renderedHeight) - (1600 / 120)) <= 0.01,
+        JSON.stringify({ width, zoom, deviceScaleFactor, safeHtml: result.images.safeHtml })
+      );
+      assert.equal(result.images.containersWithinPage, true, JSON.stringify(result.images));
+      assert.ok(result.images.containerOverflows.every((overflow) => overflow <= 1), JSON.stringify(result.images));
+      assert.deepEqual(result.images.clippingAncestors, []);
+      assert.deepEqual(result.images.linked, {
+        imageParent: 'A',
+        anchorCount: 1,
+        anchorElementChildren: 1,
+        role: 'link',
+        tabIndex: 0,
+        href: 'https://example.com/linked-image',
+        anchorTitle: 'Linked anchor title',
+        imageTitle: 'Linked image title',
+        focusPreserved: true,
+        focusedAfterActivation: true
+      });
+      assert.deepEqual(result.images.selection, {
+        domText: 'Selection before selection after',
+        selectedText: 'Selection before selection after',
+        copied: true,
+        clipboardText: 'Selection before Linked alt selection after'
+      });
+      assert.deepEqual({
+        complete: result.images.broken.complete,
+        naturalWidth: result.images.broken.naturalWidth,
+        naturalHeight: result.images.broken.naturalHeight,
+        alt: result.images.broken.alt,
+        title: result.images.broken.title
+      }, { complete: true, naturalWidth: 0, naturalHeight: 0, alt: 'Broken alt', title: 'Broken title' });
+      assert.equal(result.images.customPresentationNodes, 0);
       assert.equal(result.mermaidFallback.source, mermaidFallbackSource);
       assert.ok(result.mermaidFallback.fontSize > 0 && result.mermaidFallback.lineHeight > 0, JSON.stringify(result));
       assert.ok(result.mermaidFallback.fragments > 1, JSON.stringify(result));
@@ -349,8 +580,6 @@ async function main(): Promise<void> {
       assert.deepEqual(result.table.clippingAncestors, []);
       assert.equal(result.table.rectsWithinPage, true, JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
       assert.ok(result.table.kbdFragments.every((count) => count > 1), JSON.stringify({ width, zoom, deviceScaleFactor, table: result.table }));
-      assert.equal(result.table.preservedSelection, longKbdToken);
-      assert.equal(result.table.preservedFocus, true);
       assert.equal(result.table.selectionText, longKbdToken);
       assert.equal(result.table.copied, true);
       assert.equal(result.table.clipboardText, longKbdToken);
@@ -359,6 +588,67 @@ async function main(): Promise<void> {
       assert.equal(result.table.proseKbdWhiteSpace, 'nowrap');
       assert.equal(result.table.proseKbdFragments, 1);
     }
+
+    await page.setRequestInterception(true);
+    const delayedRequestHandler = (request: HTTPRequest) => {
+      if (request.url() !== 'http://localhost/controlled-delayed.svg') {
+        void request.continue();
+      }
+    };
+    page.on('request', delayedRequestHandler);
+    const delayedRequest = page.waitForRequest('http://localhost/controlled-delayed.svg');
+    const delayedMarkdown = 'Delayed frame marker\n\n![Delayed alt](http://localhost/controlled-delayed.svg)';
+    await page.evaluate((text) => {
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'docChanged', text, version: 2 } }));
+    }, delayedMarkdown);
+    const pendingRequest = await delayedRequest;
+    await page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+      return doc?.body.textContent?.includes('Delayed frame marker') === true
+        && doc.querySelector('img[alt="Delayed alt"]') !== null;
+    });
+    const pendingObservation = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      (window as typeof window & { __delayedFrameDocument?: Document }).__delayedFrameDocument = doc;
+      const image = doc.querySelector<HTMLImageElement>('img[alt="Delayed alt"]')!;
+      return {
+        marker: doc.body.textContent?.includes('Delayed frame marker') === true,
+        complete: image.complete,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight
+      };
+    });
+    assert.deepEqual(pendingObservation, { marker: true, complete: false, naturalWidth: 0, naturalHeight: 0 });
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'docChanged', text: 'Current frame marker', version: 3 }
+      }));
+    });
+    await page.waitForFunction(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+      return frame?.contentDocument?.body.textContent?.includes('Current frame marker') === true;
+    });
+    const currentObservation = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      const delayedDocument = (window as typeof window & { __delayedFrameDocument?: Document }).__delayedFrameDocument;
+      return {
+        documentReplaced: doc !== delayedDocument,
+        currentMarker: doc.body.textContent?.includes('Current frame marker') === true,
+        delayedMarker: doc.body.textContent?.includes('Delayed frame marker') === true,
+        delayedImagePresent: doc.querySelector('img[alt="Delayed alt"]') !== null
+      };
+    });
+    assert.deepEqual(currentObservation, {
+      documentReplaced: true,
+      currentMarker: true,
+      delayedMarker: false,
+      delayedImagePresent: false
+    });
+    await pendingRequest.abort().catch(() => undefined);
+    page.off('request', delayedRequestHandler);
+    await page.setRequestInterception(false);
 
     const exportedFallback = exportRuntime.renderExportHtmlDocument({
       readingSnapshot: {
