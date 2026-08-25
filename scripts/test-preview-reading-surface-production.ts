@@ -10,15 +10,26 @@ const root = path.resolve(import.meta.dir, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-reading-surface-'));
 const longToken = 'wrappable'.repeat(90);
 const codeSource = `/* comment\n${longToken}\ncontinues */\n`;
+const mermaidFallbackSource = `invalid ${longToken}\n`;
 const wideImage = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="120" viewBox="0 0 1600 120"><rect width="1600" height="120" fill="#999"/></svg>',
   'utf8'
 ).toString('base64');
+const failingMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
+  window.mermaid = {
+    initialize() {},
+    async render() { throw new Error('invalid diagram'); }
+  };
+`, 'utf8').toString('base64')}`;
 const markdown = [
   '```javascript',
   '/* comment',
   longToken,
   'continues */',
+  '```',
+  '',
+  '```mermaid',
+  `invalid ${longToken}`,
   '```',
   '',
   '| Column |',
@@ -87,6 +98,7 @@ async function main(): Promise<void> {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
     await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ content: `
+      document.body.dataset.meoMermaidSrc = ${JSON.stringify(failingMermaidRuntimeSrc)};
       window.acquireVsCodeApi=()=>(
         {
           postMessage(message) {
@@ -137,6 +149,10 @@ async function main(): Promise<void> {
         const bodyRect = sources[1].getBoundingClientRect();
         const fragments = Array.from(longRange.getClientRects());
         const adjacent = Array.from(doc.querySelectorAll<HTMLElement>('.meo-table-scroll, img, .meo-export-math'));
+        const mermaidFallback = doc.querySelector<HTMLElement>('.meo-export-mermaid code')!;
+        const mermaidRange = doc.createRange();
+        mermaidRange.selectNodeContents(mermaidFallback);
+        const mermaidStyle = getComputedStyle(mermaidFallback);
         return {
           rows: rows.length,
           selected,
@@ -165,6 +181,12 @@ async function main(): Promise<void> {
             table: Boolean(doc.querySelector('.meo-table-scroll table')),
             media: Boolean(doc.querySelector('img')),
             math: Boolean(doc.querySelector('.meo-export-math'))
+          },
+          mermaidFallback: {
+            source: mermaidFallback.textContent,
+            fontSize: Number.parseFloat(mermaidStyle.fontSize),
+            lineHeight: Number.parseFloat(mermaidStyle.lineHeight),
+            fragments: mermaidRange.getClientRects().length
           }
         };
       });
@@ -187,6 +209,47 @@ async function main(): Promise<void> {
       assert.ok(result.sourceLefts.every((value) => Math.abs(value - result.sourceLefts[0]) <= 0.01));
       assert.equal(result.adjacentWithinPage, true);
       assert.deepEqual(result.adjacentKinds, { table: true, media: true, math: true });
+      assert.equal(result.mermaidFallback.source, mermaidFallbackSource);
+      assert.ok(result.mermaidFallback.fontSize > 0 && result.mermaidFallback.lineHeight > 0, JSON.stringify(result));
+      assert.ok(result.mermaidFallback.fragments > 1, JSON.stringify(result));
+    }
+
+    const exportedFallback = exportRuntime.renderExportHtmlDocument({
+      readingSnapshot: {
+        snapshotId: 'g2a-mermaid-fallback',
+        text: `\`\`\`mermaid\n${mermaidFallbackSource}\`\`\``,
+        appearance: 'light',
+        environment: {}
+      },
+      sourceDocumentPath: 'C:/preview-reading-surface.md',
+      outputFilePath: 'C:/preview-reading-surface.html',
+      target: 'html',
+      mermaidRuntimeSrc: failingMermaidRuntimeSrc,
+      baseHref: 'file:///C:/',
+      title: 'G2a Mermaid fallback'
+    });
+    const exportPage = await browser.newPage();
+    try {
+      await exportPage.setViewport({ width: 420, height: 700, deviceScaleFactor: 1 });
+      await exportPage.setContent(exportedFallback.htmlDocument, { waitUntil: 'domcontentloaded' });
+      await exportPage.waitForFunction(() => (window as typeof window & { __MEO_EXPORT_READY__?: boolean }).__MEO_EXPORT_READY__ === true);
+      const exportFallback = await exportPage.evaluate(() => {
+        const code = document.querySelector<HTMLElement>('.meo-export-mermaid.is-error code')!;
+        const style = getComputedStyle(code);
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        return {
+          source: code.textContent,
+          fontSize: Number.parseFloat(style.fontSize),
+          lineHeight: Number.parseFloat(style.lineHeight),
+          fragments: range.getClientRects().length
+        };
+      });
+      assert.equal(exportFallback.source, mermaidFallbackSource);
+      assert.ok(exportFallback.fontSize > 0 && exportFallback.lineHeight > 0, JSON.stringify(exportFallback));
+      assert.ok(exportFallback.fragments > 1, JSON.stringify(exportFallback));
+    } finally {
+      await exportPage.close();
     }
   } finally {
     await browser.close();

@@ -696,14 +696,20 @@ pre.meo-export-code-block code {
   display: block;
   min-width: 0;
   font-weight: var(--meo-font-weight-code);
-  font-size: 0;
-  line-height: 0;
+  font-size: var(--meo-font-size-code);
+  line-height: var(--meo-code-line-height);
   font-style: normal;
   text-decoration: none;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   padding: 0;
   border-radius: 0;
   background: transparent;
+}
+.meo-export-code-block-wrap > pre.meo-export-code-block code {
+  font-size: 0;
+  line-height: 0;
 }
 .meo-export-code-line {
   display: grid;
