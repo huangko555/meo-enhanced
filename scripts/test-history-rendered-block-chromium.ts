@@ -1,8 +1,14 @@
 import { launchTestBrowser } from './browser-test-helpers';
 import {
+  HistoryRenderedBlockInteractionError,
   runHistoryRenderedBlockInteraction,
   type HistoryRenderedBlockInteractionAdapter
 } from './history-rendered-block-interaction';
+import { runHistoryRenderedBlockChromiumInteraction } from './history-rendered-block-interaction-chromium';
+
+function check(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
 
 async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean, disposeAfterDown = false, offscreen = false) {
   const browser = await launchTestBrowser();
@@ -85,7 +91,122 @@ async function runCase(replacement: 0 | 1 | 2, moveSameNode: boolean, disposeAft
   } finally { await browser.close(); }
 }
 
+async function runPublicFailureEvidenceCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1">
+          <button aria-label="Edit Mermaid in split view">Split</button>
+        </div>
+      </div>
+    `);
+    await page.evaluate(() => {
+      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      const button = document.querySelector<HTMLButtonElement>('button')!;
+      button.addEventListener('pointerdown', () => {
+        throw new Error('synthetic public page error');
+      });
+      button.addEventListener('click', () => {
+        button.setAttribute('aria-label', 'Show Mermaid code only');
+      });
+    });
+
+    const waitForFunction = page.waitForFunction.bind(page);
+    page.waitForFunction = (...args: any[]) => {
+      const known = args[2];
+      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+        return Promise.reject(new Error('synthetic target settlement timeout'));
+      }
+      return waitForFunction(...args);
+    };
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'target settlement did not preserve InteractionError');
+    check(failure.hasPrimary, 'target settlement evidence lost the primary failure');
+    check(failure.cause === failure.primary && failure.errors[0] === failure.primary, 'InteractionError primary/cause order changed');
+    check(failure.errors.length === 1, 'public evidence case added a cleanup failure');
+    check(failure.primary instanceof Error && failure.primary.cause instanceof Error, 'target settlement cause chain is incomplete');
+    check(String(failure.primary.cause).includes('synthetic target settlement timeout'), 'Puppeteer settlement failure was not retained as cause');
+
+    const evidence = failure.evidence as any;
+    check(evidence && Array.isArray(evidence.events), 'InteractionError omitted observer evidence');
+    const events = evidence.events.map((entry: string) => JSON.parse(entry));
+    check(events.some((entry: any) => entry.type === 'pointerdown'), 'public evidence omitted pointerdown');
+    check(events.some((entry: any) => entry.type === 'pointerup'), 'public evidence omitted pointerup');
+    check(events.some((entry: any) => entry.type === 'click' && entry.semanticTarget), 'public evidence omitted semantic target click');
+    check(events.every((entry: any) => Array.isArray(entry.currentModeLabels)), 'event evidence omitted current mode labels');
+    check(events.every((entry: any) => entry.targetRect && typeof entry.targetHit === 'boolean'), 'event evidence omitted target rect/hit');
+    check(Array.isArray(evidence.labelChanges) && evidence.labelChanges.some((entry: any) => (
+      entry.currentModeLabels.includes('Show Mermaid code only')
+    )), 'single MutationObserver omitted the label transition');
+    check(Array.isArray(evidence.pageErrors) && evidence.pageErrors.some((entry: string) => (
+      entry.includes('synthetic public page error')
+    )), 'public evidence omitted page error');
+    check(String(failure.primary).includes('"currentModeLabels"'), 'primary failure did not atomically publish its public snapshot');
+    check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'failure evidence did not close observer lifecycle');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runMissingSemanticClickCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1">
+          <button aria-label="Edit Mermaid in split view" style="pointer-events:none">Split</button>
+        </div>
+      </div>
+    `);
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    const waitForFunction = page.waitForFunction.bind(page);
+    page.waitForFunction = (...args: any[]) => {
+      const known = args[2];
+      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+        return Promise.reject(new Error('semantic click failure incorrectly entered target wait'));
+      }
+      return waitForFunction(...args);
+    };
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'missing semantic click did not preserve InteractionError');
+    check(String(failure.primary).includes('pointer did not activate semantic target'), 'missing semantic click was not failed fast');
+    check(!String(failure.primary).includes('incorrectly entered target wait'), 'missing semantic click waited for a label transition');
+    const evidence = failure.evidence as any;
+    const events = evidence.events.map((entry: string) => JSON.parse(entry));
+    check(events.some((entry: any) => entry.type === 'click' && !entry.semanticTarget), 'missing semantic click evidence was not retained');
+    check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'missing-click evidence leaked observer lifecycle');
+  } finally {
+    await browser.close();
+  }
+}
+
 for (const scenario of [[0, false], [1, false], [0, true], [2, false], [0, false, true], [0, false, false, true]] as const) {
   await runCase(...scenario);
 }
+await runPublicFailureEvidenceCase();
+await runMissingSemanticClickCase();
 console.log('history rendered-block synthetic Chromium matrix passed');

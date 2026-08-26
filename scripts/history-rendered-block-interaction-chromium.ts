@@ -65,7 +65,14 @@ export async function runHistoryRenderedBlockChromiumInteraction(
     if (sourceMode === interaction.targetMode) return;
     const targetMode = nextMode(sourceMode);
     let observerHandle: any = null;
+    let pageErrorListener: ((error: unknown) => void) | null = null;
+    const pageErrors: string[] = [];
     const safeReleaseLabel = 'History pointer safe release target';
+    const snapshotObserverEvidence = async () => {
+      if (!observerHandle) return null;
+      const evidence = await observerHandle.evaluate((observer: any) => observer.snapshot());
+      return { ...evidence, pageErrors: [...pageErrors] };
+    };
     const adapter: HistoryRenderedBlockInteractionAdapter<any> = {
       isCurrent: () => page.evaluate(({ editorName, controlsLabel }) => {
         const editor = (window as any)[editorName];
@@ -180,11 +187,35 @@ export async function runHistoryRenderedBlockChromiumInteraction(
       deliverPointerDown: async (point) => { await page.mouse.move(point.x, point.y); await page.mouse.down(); },
       preparePointerUp: (point) => page.mouse.move(point.x, point.y),
       deliverPointerUp: async (point) => { await page.mouse.move(point.x, point.y); await page.mouse.up(); },
-      settleTarget: () => page.waitForFunction((known) => {
-        const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${known.controls}"]`);
-        return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
-          .some((button) => button.getAttribute('aria-label') === known.expectedLabel);
-      }, {}, { controls: labels.controls, expectedLabel: labels[targetMode] }),
+      settleTarget: async () => {
+        const deliveredEvidence = await snapshotObserverEvidence();
+        const semanticClickDelivered = deliveredEvidence?.events.some((entry: string) => {
+          try {
+            const event = JSON.parse(entry);
+            return event.type === 'click' && event.semanticTarget === true;
+          } catch {
+            return false;
+          }
+        }) ?? false;
+        if (!semanticClickDelivered) {
+          throw new Error(`Rendered-block pointer did not activate semantic target: ${JSON.stringify(deliveredEvidence)}`);
+        }
+        try {
+          await page.waitForFunction((known) => {
+            const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${known.controls}"]`);
+            return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+              .some((button) => button.getAttribute('aria-label') === known.expectedLabel);
+          }, {}, { controls: labels.controls, expectedLabel: labels[targetMode] });
+        } catch (error) {
+          let publicEvidence: unknown;
+          try {
+            publicEvidence = await snapshotObserverEvidence();
+          } catch (snapshotError) {
+            publicEvidence = { captureError: String(snapshotError), pageErrors: [...pageErrors] };
+          }
+          throw new Error(`Rendered-block target did not settle: ${JSON.stringify(publicEvidence)}`, { cause: error });
+        }
+      },
       disposeSupersededHandle: (handle) => handle.dispose(),
       disposeHandle: (handle) => handle.dispose(),
       moveToSafeReleaseTarget: async () => {
@@ -204,25 +235,134 @@ export async function runHistoryRenderedBlockChromiumInteraction(
       cancelPointer: () => page.mouse.up(),
       disposeSafeReleaseTarget: () => page.evaluate((ariaLabel) => document.querySelector(`[aria-label="${ariaLabel}"]`)?.remove(), safeReleaseLabel),
       openObserver: async () => {
-        observerHandle = await page.evaluateHandle(() => {
+        observerHandle = await page.evaluateHandle((known) => {
           const events: string[] = [];
           let registrations = 0;
           let cleaned = false;
-          const listener = (event: Event) => events.push(event.type);
-          for (const type of ['pointerdown', 'pointerup', 'click']) { document.addEventListener(type, listener, true); registrations += 1; }
-          return {
-            cleanup() { for (const type of ['pointerdown', 'pointerup', 'click']) document.removeEventListener(type, listener, true); registrations = 0; cleaned = true; },
-            snapshot() { return { events: [...events], registrations, cleaned, sentinelRejected: false }; },
-            verifySentinel() { const before = events.length; document.dispatchEvent(new Event('click')); return events.length === before; }
+          const readTarget = () => {
+            const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${known.controls}"]`);
+            const buttons = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []);
+            const currentModeLabels = buttons
+              .map((button) => button.getAttribute('aria-label'))
+              .filter((label): label is string => (
+                label === known.preview || label === known.split || label === known.source
+              ));
+            const target = buttons.find((button) => button.getAttribute('aria-label') === known.currentLabel)
+              ?? buttons.find((button) => button.getAttribute('aria-label') === known.expectedLabel)
+              ?? null;
+            const rect = target?.getBoundingClientRect() ?? null;
+            const hit = rect
+              ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+              : null;
+            return {
+              currentModeLabels,
+              targetConnected: Boolean(target?.isConnected),
+              targetRect: rect ? {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+                left: rect.left
+              } : null,
+              targetHit: Boolean(target && hit && (hit === target || target.contains(hit))),
+              hitTarget: hit ? {
+                tag: hit.tagName.toLowerCase(),
+                ariaLabel: hit.getAttribute('aria-label'),
+                className: (hit as HTMLElement).className?.toString() ?? ''
+              } : null
+            };
           };
+          const labelChanges: Array<ReturnType<typeof readTarget>> = [];
+          const listener = (event: Event) => {
+            const semanticTarget = event.composedPath().some((candidate) => {
+              if (!(candidate instanceof HTMLButtonElement)) return false;
+              const label = candidate.getAttribute('aria-label');
+              return label === known.currentLabel || label === known.expectedLabel;
+            });
+            events.push(JSON.stringify({
+              type: event.type,
+              semanticTarget,
+              eventTarget: event.target instanceof Element ? {
+                tag: event.target.tagName.toLowerCase(),
+                ariaLabel: event.target.getAttribute('aria-label'),
+                className: (event.target as HTMLElement).className?.toString() ?? ''
+              } : null,
+              ...readTarget()
+            }));
+          };
+          for (const type of ['pointerdown', 'pointerup', 'click']) { document.addEventListener(type, listener, true); registrations += 1; }
+          let lastLabels = JSON.stringify(readTarget().currentModeLabels);
+          const mutationObserver = new MutationObserver(() => {
+            const current = readTarget();
+            const serializedLabels = JSON.stringify(current.currentModeLabels);
+            if (serializedLabels === lastLabels) return;
+            lastLabels = serializedLabels;
+            labelChanges.push(current);
+          });
+          const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+          if (!scroller) throw new Error('Missing editor scroller while opening History evidence observer');
+          mutationObserver.observe(scroller, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['aria-label']
+          });
+          registrations += 1;
+          return {
+            cleanup() {
+              for (const type of ['pointerdown', 'pointerup', 'click']) document.removeEventListener(type, listener, true);
+              mutationObserver.disconnect();
+              registrations = 0;
+              cleaned = true;
+            },
+            snapshot() {
+              return {
+                events: [...events],
+                labelChanges: [...labelChanges],
+                current: readTarget(),
+                registrations,
+                cleaned,
+                sentinelRejected: false
+              };
+            },
+            verifySentinel() {
+              const before = JSON.stringify({ events, labelChanges });
+              document.dispatchEvent(new Event('click'));
+              return JSON.stringify({ events, labelChanges }) === before;
+            }
+          };
+        }, {
+          controls: labels.controls,
+          preview: labels.preview,
+          split: labels.split,
+          source: labels.source,
+          currentLabel: labels[sourceMode],
+          expectedLabel: labels[targetMode]
         });
+        pageErrorListener = (error: unknown) => { pageErrors.push(String(error)); };
+        page.on('pageerror', pageErrorListener);
         return {
-          cleanup: () => observerHandle.evaluate((observer: any) => observer.cleanup()),
+          cleanup: async () => {
+            try {
+              await observerHandle.evaluate((observer: any) => observer.cleanup());
+            } finally {
+              if (pageErrorListener) {
+                page.off('pageerror', pageErrorListener);
+                pageErrorListener = null;
+              }
+            }
+          },
           snapshot: async () => {
-            const evidence = await observerHandle.evaluate((observer: any) => observer.snapshot());
-            await observerHandle.dispose();
-            observerHandle = null;
-            return { ...evidence, sentinelRejected: true };
+            try {
+              const evidence = await snapshotObserverEvidence();
+              return { ...evidence, sentinelRejected: true };
+            } finally {
+              await observerHandle.dispose();
+              observerHandle = null;
+            }
           },
           verifySentinel: () => observerHandle.evaluate((observer: any) => observer.verifySentinel())
         };
