@@ -89,24 +89,24 @@ body::-webkit-scrollbar-corner {
 `;
 
 const previewLatexMathViewportStyles = `
-.meo-export-math-fenced-display.meo-latex-math-viewport {
+.meo-export-math-display.meo-latex-math-viewport {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   min-width: 0;
-  overflow: hidden !important;
+  overflow: visible !important;
 }
 
-.meo-export-math-fenced-display .meo-latex-math-canvas {
+.meo-export-math-display > .meo-latex-math-canvas {
   position: relative;
   flex: 0 0 auto;
   width: max-content;
   max-width: none;
 }
 
-.meo-export-math-fenced-display .meo-latex-math-canvas > .katex-display {
+.meo-export-math-display > .meo-latex-math-canvas > .katex-display {
   width: max-content;
   margin: 0;
 }
@@ -258,7 +258,7 @@ export function createPreviewController({
   const attachPreviewMathViewports = (frameDocument: Document) => {
     disposePreviewMathViewports();
     previewMathViewports = Array.from(
-      frameDocument.querySelectorAll<HTMLElement>('.meo-export-math-fenced-display')
+      frameDocument.querySelectorAll<HTMLElement>('.meo-export-math-display')
     ).map((element) => attachLatexMathViewport(element));
   };
 

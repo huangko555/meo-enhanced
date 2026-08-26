@@ -12,6 +12,7 @@ const sourceDocumentPath = path.join(temp, 'preview-reading-surface.md');
 const longToken = 'wrappable'.repeat(90);
 const longKbdToken = 'K'.repeat(500);
 const longLinkToken = 'linked'.repeat(80);
+const longDisplayFormula = `\\operatorname{displayfit}+${'1234567890+'.repeat(80)}0`;
 const codeSource = `/* comment\n${longToken}\ncontinues */\n`;
 const mermaidFallbackSource = `invalid ${longToken}\n`;
 const mermaidWideSource = 'flowchart LR\n  wide_fit_start --> wide_fit_end\n';
@@ -88,7 +89,13 @@ const markdown = [
   '',
   'Prose shortcut: <kbd>Ctrl+Shift+P</kbd>',
   '',
-  '$$x^2 + y^2 = z^2$$'
+  'Inline baseline $x + 1$ remains prose.',
+  '',
+  `$$${longDisplayFormula}$$`,
+  '',
+  '$$',
+  'x^2 + y^2 = z^2',
+  '$$'
 ].join('\n');
 
 const initMessage = {
@@ -399,10 +406,14 @@ async function main(): Promise<void> {
         && doc.querySelectorAll('.meo-export-mermaid.is-rendered .meo-fit-graphic').length === 10
         && doc.querySelector('.meo-export-mermaid.is-error code') !== null;
     }, {}, currentFrame);
+    await page.waitForFunction((frame) => {
+      if (!(frame instanceof HTMLIFrameElement) || !frame.isConnected) return false;
+      return frame.contentDocument?.querySelectorAll('.meo-export-math-fenced-display > .meo-latex-math-canvas').length === 1;
+    }, {}, currentFrame);
 
     const layoutCases = [1, 2].flatMap((deviceScaleFactor) => (
       [420, 1200].flatMap((width) => (
-        [0.8, 1.25].map((zoom) => ({ deviceScaleFactor, width, zoom }))
+        [0.8, 1, 1.25].map((zoom) => ({ deviceScaleFactor, width, zoom }))
       ))
     ));
     for (const { deviceScaleFactor, width, zoom } of layoutCases) {
@@ -585,6 +596,35 @@ async function main(): Promise<void> {
         const bodyRect = sources[1].getBoundingClientRect();
         const fragments = Array.from(longRange.getClientRects());
         const adjacent = Array.from(doc.querySelectorAll<HTMLElement>('.meo-table-scroll, .meo-export-math'));
+        const mathRoots = Array.from(doc.querySelectorAll<HTMLElement>('.meo-export-math'));
+        const inspectMathRoot = (root: HTMLElement) => {
+          const rect = root.getBoundingClientRect();
+          const style = getComputedStyle(root);
+          const baseRects = Array.from(root.querySelectorAll<HTMLElement>('.katex-html .base'))
+            .map((base) => base.getBoundingClientRect());
+          const contentLeft = baseRects.length > 0 ? Math.min(...baseRects.map((base) => base.left)) : rect.left;
+          const contentRight = baseRects.length > 0 ? Math.max(...baseRects.map((base) => base.right)) : rect.right;
+          const clippingAncestors: string[] = [];
+          for (let current: HTMLElement | null = root; current; current = current.parentElement) {
+            const currentStyle = getComputedStyle(current);
+            if ([currentStyle.overflowX, currentStyle.overflowY].some((value) => value === 'hidden' || value === 'clip')) {
+              clippingAncestors.push(`${current.tagName.toLowerCase()}.${current.className}:${currentStyle.overflowX}/${currentStyle.overflowY}`);
+            }
+          }
+          return {
+            fenced: root.classList.contains('meo-export-math-fenced-display'),
+            display: root.classList.contains('meo-export-math-display'),
+            canvasCount: root.querySelectorAll(':scope > .meo-latex-math-canvas').length,
+            contentWithinRoot: contentLeft >= rect.left + Number.parseFloat(style.paddingLeft) - 1
+              && contentRight <= rect.right - Number.parseFloat(style.paddingRight) + 1,
+            contentWithinPage: contentLeft >= rootRect.left - 1 && contentRight <= rootRect.right + 1,
+            rootWithinPage: rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1,
+            scrollOverflow: root.scrollWidth - root.clientWidth,
+            overflowX: style.overflowX,
+            clippingAncestors,
+            draggable: root.getAttribute('draggable')
+          };
+        };
         const kbdRange = doc.createRange();
         kbdRange.selectNodeContents(kbd);
         selection.removeAllRanges();
@@ -657,6 +697,20 @@ async function main(): Promise<void> {
           adjacentKinds: {
             table: Boolean(doc.querySelector('.meo-table-scroll table')),
             math: Boolean(doc.querySelector('.meo-export-math'))
+          },
+          math: {
+            roots: mathRoots.map(inspectMathRoot),
+            controls: doc.querySelectorAll('.meo-latex-math-zoom-controls, [aria-label*="fullscreen" i]').length,
+            inline: (() => {
+              const inline = doc.querySelector<HTMLElement>('.meo-export-math-inline')!;
+              const style = getComputedStyle(inline);
+              return {
+                canvasCount: inline.querySelectorAll(':scope > .meo-latex-math-canvas').length,
+                display: style.display,
+                verticalAlign: style.verticalAlign,
+                text: inline.textContent
+              };
+            })()
           },
           images: {
             semanticCount: doc.querySelectorAll('img').length,
@@ -875,6 +929,22 @@ async function main(): Promise<void> {
       assert.ok(result.sourceLefts.every((value) => Math.abs(value - result.sourceLefts[0]) <= 0.01));
       assert.equal(result.adjacentWithinPage, true);
       assert.deepEqual(result.adjacentKinds, { table: true, math: true });
+      const displayMath = result.math.roots.filter((root) => root.display);
+      const sameLineMath = displayMath.find((root) => !root.fenced)!;
+      const fencedMath = displayMath.find((root) => root.fenced)!;
+      assert.equal(fencedMath.canvasCount, 1, JSON.stringify({ width, zoom, deviceScaleFactor, fencedMath }));
+      assert.equal(fencedMath.contentWithinRoot, true, JSON.stringify({ width, zoom, deviceScaleFactor, fencedMath }));
+      assert.equal(sameLineMath.canvasCount, 1, JSON.stringify({ width, zoom, deviceScaleFactor, sameLineMath }));
+      assert.equal(sameLineMath.contentWithinRoot, true, JSON.stringify({ width, zoom, deviceScaleFactor, sameLineMath }));
+      assert.ok(displayMath.every((root) => root.contentWithinPage && root.rootWithinPage), JSON.stringify({ width, zoom, deviceScaleFactor, displayMath }));
+      assert.ok(displayMath.every((root) => root.scrollOverflow <= 1 && !/(auto|scroll)/.test(root.overflowX)), JSON.stringify({ width, zoom, deviceScaleFactor, displayMath }));
+      assert.ok(displayMath.every((root) => root.clippingAncestors.length === 0), JSON.stringify({ width, zoom, deviceScaleFactor, displayMath }));
+      assert.equal(result.math.inline.canvasCount, 0);
+      assert.equal(result.math.inline.display, 'inline-flex');
+      assert.equal(result.math.inline.verticalAlign, 'baseline');
+      assert.ok(result.math.inline.text?.includes('x+1'));
+      assert.equal(result.math.controls, 0);
+      assert.ok(displayMath.every((root) => root.draggable === null));
       assert.equal(result.images.semanticCount, 6);
       assert.deepEqual(result.images.loaded.map((image) => ({
         alt: image.alt,

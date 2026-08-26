@@ -613,10 +613,14 @@ kbd {
 }
 
 .meo-export-math-display {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
   margin: 0.25em 0;
   text-align: center;
-  overflow-x: clip;
+  overflow-x: visible;
   overflow-y: visible;
   break-inside: avoid;
   page-break-inside: avoid;
@@ -638,20 +642,20 @@ kbd {
   border: 0;
   border-radius: 6px;
   background: var(--meo-code-bg);
-  overflow-x: clip;
+  overflow-x: visible;
   overflow-y: visible;
   line-height: 1;
   text-align: center;
 }
 
-.meo-export-math-fenced-display > .meo-export-math-canvas {
+.meo-export-math-display > .meo-export-math-canvas {
   position: relative;
   flex: 0 0 auto;
   width: max-content;
   max-width: none;
 }
 
-.meo-export-math-fenced-display > .meo-export-math-canvas > .katex-display {
+.meo-export-math-display > .meo-export-math-canvas > .katex-display {
   width: max-content;
   max-width: none;
 }

@@ -13,6 +13,36 @@ const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
 const HORIZONTAL_PADDING = 16;
 const MIN_PREVIEW_HEIGHT = 24;
+const AXIS_EPSILON = 0.000001;
+
+function isFinitePositive(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+function hasOnlyPositiveAxisAlignedTransforms(root: HTMLElement, ownerWindow: Window): boolean {
+  for (let current: HTMLElement | null = root; current; current = current.parentElement) {
+    const transform = ownerWindow.getComputedStyle(current).transform;
+    if (!transform || transform === 'none') {
+      continue;
+    }
+    try {
+      const matrix = new DOMMatrixReadOnly(transform);
+      if (
+        !matrix.is2D ||
+        ![matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].every(Number.isFinite) ||
+        matrix.a <= 0 ||
+        matrix.d <= 0 ||
+        Math.abs(matrix.b) > AXIS_EPSILON ||
+        Math.abs(matrix.c) > AXIS_EPSILON
+      ) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
 
 function createControlButton(
   ownerDocument: Document,
@@ -60,6 +90,8 @@ export function attachLatexMathViewport(
   let destroyed = false;
 
   const applyTransform = () => {
+    const previousFontSize = canvas.style.fontSize;
+    const previousZoom = canvas.style.zoom;
     renderedScale = fitScale * userZoom;
     canvas.style.zoom = '1';
     canvas.style.fontSize = `${renderedScale}em`;
@@ -69,13 +101,19 @@ export function attachLatexMathViewport(
     // scale needed below it so an unusually wide formula still fits.
     const uncorrectedWidth = canvas.getBoundingClientRect().width;
     const targetWidth = naturalWidth * renderedScale;
-    const residualScale = uncorrectedWidth > 0
-      ? Math.min(1, targetWidth / uncorrectedWidth)
-      : 1;
+    if (!isFinitePositive(uncorrectedWidth) || !Number.isFinite(targetWidth) || targetWidth < 0) {
+      canvas.style.fontSize = previousFontSize;
+      canvas.style.zoom = previousZoom;
+      return;
+    }
+    const residualScale = Math.min(1, targetWidth / uncorrectedWidth);
     canvas.style.zoom = `${residualScale}`;
 
     if (!interactive) {
-      root.style.height = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(canvas.getBoundingClientRect().height))}px`;
+      const renderedHeight = canvas.getBoundingClientRect().height;
+      if (Number.isFinite(renderedHeight) && renderedHeight >= 0) {
+        root.style.height = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(renderedHeight))}px`;
+      }
     }
   };
 
@@ -89,14 +127,45 @@ export function attachLatexMathViewport(
     if (destroyed || !root.isConnected) {
       return;
     }
+    let effectiveScale = 1;
+    let availableWidth = root.clientWidth - HORIZONTAL_PADDING;
+    if (!interactive) {
+      const rootStyle = ownerWindow.getComputedStyle(root);
+      const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
+      const paddingRight = Number.parseFloat(rootStyle.paddingRight);
+      const rootRectWidth = root.getBoundingClientRect().width;
+      const offsetWidth = root.offsetWidth;
+      availableWidth = root.clientWidth - paddingLeft - paddingRight;
+      if (
+        !hasOnlyPositiveAxisAlignedTransforms(root, ownerWindow) ||
+        !Number.isFinite(paddingLeft) || paddingLeft < 0 ||
+        !Number.isFinite(paddingRight) || paddingRight < 0 ||
+        !isFinitePositive(rootRectWidth) ||
+        !isFinitePositive(offsetWidth) ||
+        !isFinitePositive(availableWidth)
+      ) {
+        return;
+      }
+      effectiveScale = rootRectWidth / offsetWidth;
+      if (!isFinitePositive(effectiveScale)) {
+        return;
+      }
+      availableWidth *= effectiveScale;
+    }
+
     canvas.style.zoom = '1';
     canvas.style.fontSize = '1em';
-    const naturalRect = canvas.getBoundingClientRect();
-    naturalWidth = naturalRect.width || canvas.scrollWidth;
-    const availableWidth = Math.max(0, root.clientWidth - HORIZONTAL_PADDING);
-    fitScale = naturalWidth > 0 && availableWidth > 0
-      ? Math.min(1, availableWidth / naturalWidth)
-      : 1;
+    const naturalRectWidth = canvas.getBoundingClientRect().width;
+    const fallbackNaturalWidth = canvas.scrollWidth * effectiveScale;
+    const measuredNaturalWidth = isFinitePositive(naturalRectWidth)
+      ? naturalRectWidth
+      : fallbackNaturalWidth;
+    if (!isFinitePositive(measuredNaturalWidth) || !isFinitePositive(availableWidth)) {
+      applyTransform();
+      return;
+    }
+    naturalWidth = measuredNaturalWidth;
+    fitScale = Math.min(1, availableWidth / naturalWidth);
     applyTransform();
   };
 

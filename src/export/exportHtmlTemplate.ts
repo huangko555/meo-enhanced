@@ -52,9 +52,36 @@ ${buildRuntimeScript(options.hasMermaid)}
 function buildMathViewportRuntimeScript(): string {
   return `
 (() => {
-  const ROOT_SELECTOR = '.meo-export-math-fenced-display';
+  const ROOT_SELECTOR = '.meo-export-math-display';
   const CANVAS_CLASS = 'meo-export-math-canvas';
   const controllers = [];
+  const AXIS_EPSILON = 0.000001;
+
+  const isFinitePositive = (value) => Number.isFinite(value) && value > 0;
+  const hasOnlyPositiveAxisAlignedTransforms = (root) => {
+    for (let current = root; current; current = current.parentElement) {
+      const transform = getComputedStyle(current).transform;
+      if (!transform || transform === 'none') {
+        continue;
+      }
+      try {
+        const matrix = new DOMMatrixReadOnly(transform);
+        if (
+          !matrix.is2D ||
+          ![matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].every(Number.isFinite) ||
+          matrix.a <= 0 ||
+          matrix.d <= 0 ||
+          Math.abs(matrix.b) > AXIS_EPSILON ||
+          Math.abs(matrix.c) > AXIS_EPSILON
+        ) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
 
   const afterLayout = () => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -78,22 +105,51 @@ function buildMathViewportRuntimeScript(): string {
         return;
       }
 
+      const rootStyle = getComputedStyle(root);
+      const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
+      const paddingRight = Number.parseFloat(rootStyle.paddingRight);
+      const rootRectWidth = root.getBoundingClientRect().width;
+      const offsetWidth = root.offsetWidth;
+      const localContentWidth = root.clientWidth - paddingLeft - paddingRight;
+      if (
+        !hasOnlyPositiveAxisAlignedTransforms(root) ||
+        !Number.isFinite(paddingLeft) || paddingLeft < 0 ||
+        !Number.isFinite(paddingRight) || paddingRight < 0 ||
+        !isFinitePositive(rootRectWidth) ||
+        !isFinitePositive(offsetWidth) ||
+        !isFinitePositive(localContentWidth)
+      ) {
+        return;
+      }
+      const effectiveScale = rootRectWidth / offsetWidth;
+      const availableWidth = localContentWidth * effectiveScale;
+      if (!isFinitePositive(effectiveScale) || !isFinitePositive(availableWidth)) {
+        return;
+      }
+
+      const previousFontSize = canvas.style.fontSize;
+      const previousZoom = canvas.style.zoom;
       canvas.style.zoom = '1';
       canvas.style.fontSize = '1em';
-      const naturalWidth = canvas.getBoundingClientRect().width || canvas.scrollWidth;
-      const rootStyle = getComputedStyle(root);
-      const horizontalPadding = Number.parseFloat(rootStyle.paddingLeft) + Number.parseFloat(rootStyle.paddingRight);
-      const availableWidth = Math.max(0, root.clientWidth - horizontalPadding);
-      const fitScale = naturalWidth > 0 && availableWidth > 0
-        ? Math.min(1, availableWidth / naturalWidth)
-        : 1;
+      const naturalRectWidth = canvas.getBoundingClientRect().width;
+      const fallbackNaturalWidth = canvas.scrollWidth * effectiveScale;
+      const naturalWidth = isFinitePositive(naturalRectWidth) ? naturalRectWidth : fallbackNaturalWidth;
+      if (!isFinitePositive(naturalWidth)) {
+        canvas.style.fontSize = previousFontSize;
+        canvas.style.zoom = previousZoom;
+        return;
+      }
+      const fitScale = Math.min(1, availableWidth / naturalWidth);
 
       canvas.style.fontSize = fitScale + 'em';
       const uncorrectedWidth = canvas.getBoundingClientRect().width;
       const targetWidth = naturalWidth * fitScale;
-      const residualScale = uncorrectedWidth > 0
-        ? Math.min(1, targetWidth / uncorrectedWidth)
-        : 1;
+      if (!isFinitePositive(uncorrectedWidth) || !Number.isFinite(targetWidth) || targetWidth < 0) {
+        canvas.style.fontSize = previousFontSize;
+        canvas.style.zoom = previousZoom;
+        return;
+      }
+      const residualScale = Math.min(1, targetWidth / uncorrectedWidth);
       canvas.style.zoom = String(residualScale);
     };
 
