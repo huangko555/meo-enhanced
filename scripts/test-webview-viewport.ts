@@ -769,7 +769,11 @@ async function main() {
     await page.evaluate(() => {
       const testWindow = window as typeof window & { __hostMessages?: Array<{ type?: string }> };
       testWindow.__hostMessages = (testWindow.__hostMessages ?? []).filter(
-        (message) => message.type !== 'setPreviewAppearance' && message.type !== 'exportDocument'
+        (message) => (
+          message.type !== 'setPreviewAppearance' &&
+          message.type !== 'setPreviewSourceColoring' &&
+          message.type !== 'exportDocument'
+        )
       );
     });
     const previewToolbarReachability = await page.evaluate(() => {
@@ -786,8 +790,31 @@ async function main() {
           center
         };
       };
+      const describeSourceColoring = (button: HTMLButtonElement) => {
+        const buttonBounds = button.getBoundingClientRect();
+        const iconBounds = button.querySelector<SVGElement>('svg')!.getBoundingClientRect();
+        const textNode = Array.from(button.childNodes).find((node) => node.nodeType === Node.TEXT_NODE)!;
+        const textRange = document.createRange();
+        textRange.selectNodeContents(textNode);
+        const textBounds = textRange.getBoundingClientRect();
+        const withinButton = (bounds: DOMRect) => (
+          bounds.left >= buttonBounds.left - 0.5 &&
+          bounds.right <= buttonBounds.right + 0.5 &&
+          bounds.top >= buttonBounds.top - 0.5 &&
+          bounds.bottom <= buttonBounds.bottom + 0.5
+        );
+        return {
+          ...describe(button),
+          iconWithinButton: withinButton(iconBounds),
+          textWithinButton: withinButton(textBounds),
+          contentDoesNotOverlap: iconBounds.right <= textBounds.left
+        };
+      };
       return {
         font: describe(document.querySelector<HTMLInputElement>('.preview-font-family-input')!),
+        sourceColoring: describeSourceColoring(
+          document.querySelector<HTMLButtonElement>('.preview-source-coloring')!
+        ),
         html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
         pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!)
       };
@@ -796,6 +823,29 @@ async function main() {
     const previewFontFocused = await page.evaluate(() => (
       document.activeElement === document.querySelector('.preview-font-family-input')
     ));
+    await page.mouse.click(
+      previewToolbarReachability.sourceColoring.center.x,
+      previewToolbarReachability.sourceColoring.center.y
+    );
+    const sourceColoringAfterPointer = await page.evaluate(() => ({
+      pressed: document.querySelector('.preview-source-coloring')?.getAttribute('aria-pressed'),
+      commands: (
+        (window as typeof window & {
+          __hostMessages?: Array<{ type?: string; enabled?: boolean }>;
+        }).__hostMessages ?? []
+      ).filter((message) => message.type === 'setPreviewSourceColoring')
+        .map((message) => ({ enabled: message.enabled }))
+    }));
+    await page.keyboard.press('Enter');
+    const sourceColoringAfterKeyboard = await page.evaluate(() => ({
+      pressed: document.querySelector('.preview-source-coloring')?.getAttribute('aria-pressed'),
+      commands: (
+        (window as typeof window & {
+          __hostMessages?: Array<{ type?: string; enabled?: boolean }>;
+        }).__hostMessages ?? []
+      ).filter((message) => message.type === 'setPreviewSourceColoring')
+        .map((message) => ({ enabled: message.enabled }))
+    }));
     await page.mouse.click(previewToolbarReachability.html.center.x, previewToolbarReachability.html.center.y);
     await page.mouse.click(previewToolbarReachability.pdf.center.x, previewToolbarReachability.pdf.center.y);
     const previewExportRequests = await page.evaluate(() => (
@@ -806,12 +856,24 @@ async function main() {
       toolbarTargets.some((target) => (
         !target.connected || !target.visible || target.pointerEvents === 'none' || !target.hit
       )) ||
+      !previewToolbarReachability.sourceColoring.iconWithinButton ||
+      !previewToolbarReachability.sourceColoring.textWithinButton ||
+      !previewToolbarReachability.sourceColoring.contentDoesNotOverlap ||
       !previewFontFocused ||
+      sourceColoringAfterPointer.pressed !== 'false' ||
+      JSON.stringify(sourceColoringAfterPointer.commands) !== JSON.stringify([{ enabled: false }]) ||
+      sourceColoringAfterKeyboard.pressed !== 'true' ||
+      JSON.stringify(sourceColoringAfterKeyboard.commands) !== JSON.stringify([
+        { enabled: false },
+        { enabled: true }
+      ]) ||
       JSON.stringify(previewExportRequests) !== JSON.stringify([{ format: 'html' }, { format: 'pdf' }])
     ) {
       throw new Error(`Preview toolbar commands are not pointer reachable at 900px: ${JSON.stringify({
         previewToolbarReachability,
         previewFontFocused,
+        sourceColoringAfterPointer,
+        sourceColoringAfterKeyboard,
         previewExportRequests
       })}`);
     }

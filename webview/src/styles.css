@@ -600,7 +600,7 @@ body {
     gap: 4px;
   }
 
-  .preview-toolbar-action {
+  .preview-toolbar-action[data-format] {
     width: 26px;
     padding-inline: 0;
     gap: 0;
