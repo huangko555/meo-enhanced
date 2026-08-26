@@ -665,9 +665,13 @@ exportHtmlOption.type = 'button';
 exportHtmlOption.className = 'preview-toolbar-action';
 exportHtmlOption.dataset.format = 'html';
 exportHtmlOption.title = 'Export as HTML';
+exportHtmlOption.setAttribute('aria-label', 'Export as HTML');
+const exportHtmlLabel = document.createElement('span');
+exportHtmlLabel.className = 'preview-toolbar-action-label';
+exportHtmlLabel.textContent = 'Export HTML';
 exportHtmlOption.append(
   createElement(FileCode2, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  document.createTextNode('Export HTML')
+  exportHtmlLabel
 );
 
 const exportPdfOption = document.createElement('button');
@@ -675,9 +679,13 @@ exportPdfOption.type = 'button';
 exportPdfOption.className = 'preview-toolbar-action';
 exportPdfOption.dataset.format = 'pdf';
 exportPdfOption.title = 'Export as PDF';
+exportPdfOption.setAttribute('aria-label', 'Export as PDF');
+const exportPdfLabel = document.createElement('span');
+exportPdfLabel.className = 'preview-toolbar-action-label';
+exportPdfLabel.textContent = 'Export PDF';
 exportPdfOption.append(
   createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
-  document.createTextNode('Export PDF')
+  exportPdfLabel
 );
 
 const previewAppearanceSlot = document.createElement('span');

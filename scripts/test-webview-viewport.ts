@@ -769,21 +769,51 @@ async function main() {
     await page.evaluate(() => {
       const testWindow = window as typeof window & { __hostMessages?: Array<{ type?: string }> };
       testWindow.__hostMessages = (testWindow.__hostMessages ?? []).filter(
-        (message) => message.type !== 'setPreviewAppearance'
+        (message) => message.type !== 'setPreviewAppearance' && message.type !== 'exportDocument'
       );
     });
-    await page.click('.preview-toolbar-action[data-format="html"]');
-    await page.click('.preview-toolbar-action[data-format="pdf"]');
+    const previewToolbarReachability = await page.evaluate(() => {
+      const describe = (element: HTMLElement) => {
+        const bounds = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+        const hit = document.elementFromPoint(center.x, center.y);
+        return {
+          connected: element.isConnected,
+          visible: style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0,
+          pointerEvents: style.pointerEvents,
+          hit: Boolean(hit && element.contains(hit)),
+          center
+        };
+      };
+      return {
+        font: describe(document.querySelector<HTMLInputElement>('.preview-font-family-input')!),
+        html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
+        pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!)
+      };
+    });
+    await page.mouse.click(previewToolbarReachability.font.center.x, previewToolbarReachability.font.center.y);
+    const previewFontFocused = await page.evaluate(() => (
+      document.activeElement === document.querySelector('.preview-font-family-input')
+    ));
+    await page.mouse.click(previewToolbarReachability.html.center.x, previewToolbarReachability.html.center.y);
+    await page.mouse.click(previewToolbarReachability.pdf.center.x, previewToolbarReachability.pdf.center.y);
     const previewExportRequests = await page.evaluate(() => (
       (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string }> }).__hostMessages ?? []
-    ).filter((message) => message.type === 'exportDocument').map((message) => ({
-      format: message.format
-    })));
-    if (JSON.stringify(previewExportRequests) !== JSON.stringify([
-      { format: 'html' },
-      { format: 'pdf' }
-    ])) {
-      throw new Error(`Preview export buttons did not request both formats with the current appearance: ${JSON.stringify(previewExportRequests)}`);
+    ).filter((message) => message.type === 'exportDocument').map((message) => ({ format: message.format })));
+    const toolbarTargets = Object.values(previewToolbarReachability);
+    if (
+      toolbarTargets.some((target) => (
+        !target.connected || !target.visible || target.pointerEvents === 'none' || !target.hit
+      )) ||
+      !previewFontFocused ||
+      JSON.stringify(previewExportRequests) !== JSON.stringify([{ format: 'html' }, { format: 'pdf' }])
+    ) {
+      throw new Error(`Preview toolbar commands are not pointer reachable at 900px: ${JSON.stringify({
+        previewToolbarReachability,
+        previewFontFocused,
+        previewExportRequests
+      })}`);
     }
     let previewRequestId = await page.evaluate(() => {
       const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; requestId?: string }> }).__hostMessages ?? [];
@@ -861,6 +891,20 @@ async function main() {
     }
     await page.setViewport({ width: 420, height: 720, deviceScaleFactor: 1 });
     await waitForFrames(page, 4);
+    const narrowPreviewToolbar = await page.evaluate(() => ({
+      overflowIndicatorVisible: !document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
+      hiddenItemCount: document.querySelectorAll('.preview-format-group > .toolbar-overflow-hidden').length,
+      toolbarHeight: document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect().height,
+      pageFitsViewport: document.documentElement.scrollWidth <= window.innerWidth
+    }));
+    if (
+      !narrowPreviewToolbar.overflowIndicatorVisible ||
+      narrowPreviewToolbar.hiddenItemCount === 0 ||
+      narrowPreviewToolbar.toolbarHeight !== 40 ||
+      !narrowPreviewToolbar.pageFitsViewport
+    ) {
+      throw new Error(`Narrow Preview toolbar overflow regressed: ${JSON.stringify(narrowPreviewToolbar)}`);
+    }
     const previewMathFit = await page.evaluate(() => {
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const viewport = frameDocument.querySelector<HTMLElement>('#preview-wide-math')!;
@@ -891,6 +935,32 @@ async function main() {
     }
     await page.setViewport({ width: 1100, height: 720, deviceScaleFactor: 1 });
     await waitForFrames(page, 4);
+    const widePreviewToolbar = await page.evaluate(() => {
+      const describe = (element: HTMLElement) => {
+        const bounds = element.getBoundingClientRect();
+        const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+        const hit = document.elementFromPoint(center.x, center.y);
+        return {
+          visible: getComputedStyle(element).visibility !== 'hidden',
+          hit: Boolean(hit && element.contains(hit))
+        };
+      };
+      return {
+        overflowIndicatorHidden: document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
+        html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
+        pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!),
+        labelsVisible: Array.from(document.querySelectorAll<HTMLElement>('.preview-toolbar-action-label'))
+          .every((label) => getComputedStyle(label).display !== 'none')
+      };
+    });
+    if (
+      !widePreviewToolbar.overflowIndicatorHidden ||
+      !widePreviewToolbar.html.visible || !widePreviewToolbar.html.hit ||
+      !widePreviewToolbar.pdf.visible || !widePreviewToolbar.pdf.hit ||
+      !widePreviewToolbar.labelsVisible
+    ) {
+      throw new Error(`Wide Preview toolbar layout regressed: ${JSON.stringify(widePreviewToolbar)}`);
+    }
     await positionPreviewElement(page, '#collapsed-long-code', 0.7);
     await page.click('[data-mode="live"]');
     await waitForFrames(page, 16);

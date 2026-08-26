@@ -539,11 +539,12 @@ body {
 .preview-font-family-control {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
 }
 
 .preview-font-family-input {
   box-sizing: border-box;
-  width: 168px;
+  width: clamp(112px, 15vw, 168px);
   height: 26px;
   padding: 0 8px;
   border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, transparent));
@@ -592,6 +593,22 @@ body {
 .preview-toolbar-action:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, currentColor);
   outline-offset: 1px;
+}
+
+@media (max-width: 960px) {
+  .preview-format-group {
+    gap: 4px;
+  }
+
+  .preview-toolbar-action {
+    width: 26px;
+    padding-inline: 0;
+    gap: 0;
+  }
+
+  .preview-toolbar-action-label {
+    display: none;
+  }
 }
 
 .line-jump-control {
