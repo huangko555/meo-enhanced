@@ -121,6 +121,13 @@ async function runPublicFailureEvidenceCase() {
       }
       return waitForFunction(...args);
     };
+    const evaluateHandle = page.evaluateHandle.bind(page);
+    let retainedObserverHandle: any;
+    page.evaluateHandle = async (...args: any[]) => {
+      const handle = await evaluateHandle(...args);
+      retainedObserverHandle ??= handle;
+      return handle;
+    };
 
     let failure: unknown;
     try {
@@ -164,6 +171,13 @@ async function runPublicFailureEvidenceCase() {
     )), 'public evidence omitted page error');
     check(String(failure.primary).includes('"currentModeLabels"'), 'primary failure did not atomically publish its public snapshot');
     check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'failure evidence did not close observer lifecycle');
+    let retainedHandleClosed = false;
+    try {
+      await retainedObserverHandle.evaluate((observer: any) => observer.snapshot());
+    } catch {
+      retainedHandleClosed = true;
+    }
+    check(retainedHandleClosed, 'Module-owned handoff retained its observer JSHandle');
   } finally {
     await browser.close();
   }
@@ -332,6 +346,192 @@ async function runMaterializationDisconnectCase() {
   }
 }
 
+async function runRunnerOwnedUnsupportedCleanupCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1" style="margin-top:80px">
+          <button aria-label="Edit Mermaid in split view">Split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      for (const prototype of [HTMLElement.prototype, Element.prototype, Document.prototype, Window.prototype]) {
+        Reflect.deleteProperty(prototype, 'onscrollend');
+      }
+      const scroller = document.querySelector('.cm-scroller')!;
+      if ('onscrollend' in scroller) throw new Error('fixture could not establish unsupported scroll settlement');
+      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+    });
+    const evaluateHandle = page.evaluateHandle.bind(page);
+    let retainedObserverHandle: any;
+    page.evaluateHandle = async (...args: any[]) => {
+      const handle = await evaluateHandle(...args);
+      retainedObserverHandle ??= handle;
+      return handle;
+    };
+
+    const result = await runHistoryRenderedBlockChromiumInteraction(
+      page,
+      { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+      '__historyMatrixEditor'
+    );
+    check(result?.status === 'unsupported', 'runner did not preserve unsupported result');
+    check(result.evidence?.registrations === 0 && result.evidence.cleaned && result.evidence.sentinelRejected, 'unsupported runner result leaked observer registry');
+    await page.evaluate(() => {
+      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      document.querySelector('[role="group"]')?.setAttribute('aria-label', 'late public group mutation');
+      queueMicrotask(() => { throw new Error('late public page error'); });
+    });
+    let retainedHandleClosed = false;
+    try {
+      await retainedObserverHandle.evaluate((observer: any) => observer.snapshot());
+    } catch {
+      retainedHandleClosed = true;
+    }
+    check(retainedHandleClosed, 'unsupported runner result retained its observer JSHandle after late public events');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runRunnerOwnedNoopCleanupCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1">
+          <button aria-label="Edit Mermaid in split view">Split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      (window as any).__historyMatrixEditor = {
+        scrollToLine() {
+          const group = document.querySelector<HTMLElement>('[role="group"]')!;
+          if (group.style.marginTop === '80px') {
+            group.style.marginTop = '0';
+            group.querySelector('button')!.setAttribute('aria-label', 'Show Mermaid code only');
+            return;
+          }
+          queueMicrotask(() => { group.style.marginTop = '80px'; });
+        }
+      };
+    });
+
+    const result = await runHistoryRenderedBlockChromiumInteraction(
+      page,
+      { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+      '__historyMatrixEditor'
+    );
+    check(result.status === 'noop', 'runner did not preserve Module noop result');
+    check(result.evidence?.registrations === 0 && result.evidence.cleaned && result.evidence.sentinelRejected, 'noop runner result leaked observer registry');
+    const before = JSON.stringify(result.evidence);
+    await page.evaluate(() => {
+      document.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      document.querySelector('[role="group"]')?.setAttribute('aria-label', 'late noop group mutation');
+    });
+    check(JSON.stringify(result.evidence) === before, 'noop evidence changed after public late events');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runRunnerOwnedPreOpeningFailureCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:0;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1">
+          <button aria-label="Edit Mermaid in split view">Split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    const evaluateHandle = page.evaluateHandle.bind(page);
+    let retainedObserverHandle: any;
+    page.evaluateHandle = async (...args: any[]) => {
+      const handle = await evaluateHandle(...args);
+      retainedObserverHandle ??= handle;
+      return handle;
+    };
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'pre-opening failure did not preserve InteractionError');
+    check(failure.hasPrimary && failure.cause === failure.primary && failure.errors[0] === failure.primary, 'pre-opening cleanup changed primary-first order');
+    check(String(failure.primary).includes('Invalid rendered block geometry'), 'pre-opening failure lost its public geometry primary');
+    check(failure.evidence?.registrations === 0 && failure.evidence.cleaned && failure.evidence.sentinelRejected, 'pre-opening failure leaked observer registry');
+    let retainedHandleClosed = false;
+    try {
+      await retainedObserverHandle.evaluate((observer: any) => observer.snapshot());
+    } catch {
+      retainedHandleClosed = true;
+    }
+    check(retainedHandleClosed, 'pre-opening failure retained its observer JSHandle');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runRunnerOwnedDisconnectCleanupFailureCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1">
+          <button aria-label="Edit Mermaid in split view">Split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      (window as any).__historyMatrixEditor = {
+        scrollToLine() {
+          const group = document.querySelector<HTMLElement>('[role="group"]')!;
+          if (group.style.marginTop === '80px') {
+            console.log('close-before-observer-opening');
+            return;
+          }
+          queueMicrotask(() => { group.style.marginTop = '80px'; });
+        }
+      };
+    });
+    page.on('console', (message: any) => {
+      if (message.text() === 'close-before-observer-opening') void page.close();
+    });
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'runner-owned disconnect did not preserve InteractionError');
+    check(failure.hasPrimary && failure.cause === failure.primary && failure.errors[0] === failure.primary, 'runner-owned disconnect changed primary-first order');
+    check(failure.errors.length > 1, 'runner-owned disconnect omitted cleanup failures');
+    check(failure.errors.slice(1).every((error: unknown) => String(error).includes('cleanup failed')), 'runner-owned cleanup failure preceded primary');
+  } finally {
+    await browser.close();
+  }
+}
+
 async function runMissingSemanticClickCase() {
   const browser = await launchTestBrowser();
   try {
@@ -495,6 +695,10 @@ await runPublicFailureEvidenceCase();
 await runMaterializationFailureEvidenceCase();
 await runMaterializationHandoffEvidenceCase();
 await runMaterializationDisconnectCase();
+await runRunnerOwnedUnsupportedCleanupCase();
+await runRunnerOwnedNoopCleanupCase();
+await runRunnerOwnedPreOpeningFailureCase();
+await runRunnerOwnedDisconnectCleanupFailureCase();
 await runMissingSemanticClickCase();
 await runSameLabelDifferentGroupCase();
 await runMoveSettlementMismatchCase();

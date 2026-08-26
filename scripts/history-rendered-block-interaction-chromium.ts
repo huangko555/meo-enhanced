@@ -2,6 +2,7 @@ import {
   HistoryRenderedBlockInteractionError,
   runHistoryRenderedBlockInteraction,
   type HistoryRenderedBlockInteractionAdapter,
+  type HistoryRenderedBlockInteractionResult,
   type HistoryRenderedBlockKind,
   type HistoryRenderedBlockObserver,
   type HistoryRenderedBlockObserverEvidence,
@@ -397,14 +398,37 @@ export async function runHistoryRenderedBlockChromiumInteraction(
   page: any,
   interaction: { readonly kind: HistoryRenderedBlockKind; readonly lineNumber: number; readonly targetMode: HistoryRenderedBlockTargetMode },
   editorGlobal: '__historyMatrixEditor' | '__renderedHistoryStressEditor'
-) {
+): Promise<HistoryRenderedBlockInteractionResult> {
   const labels = labelsFor(interaction.kind, interaction.lineNumber);
   let observer: ChromiumHistoryObserver;
+  let observerOwnership: 'runner-owned' | 'claimed' | 'closed' = 'runner-owned';
   try {
     observer = await openHistoryObserver(page, interaction, labels);
   } catch (error) {
     throw new HistoryRenderedBlockInteractionError(true, error, [], null);
   }
+  const closeRunnerOwnedObserver = async () => {
+    if (observerOwnership !== 'runner-owned') return null;
+    // Claim terminal ownership before the first cleanup await. Re-entry and
+    // late failures can then neither close nor dispose the same resource twice.
+    observerOwnership = 'closed';
+    return closeHistoryObserver(observer);
+  };
+  const mergeRunnerFailure = (
+    error: unknown,
+    closed: Awaited<ReturnType<typeof closeHistoryObserver>>
+  ): HistoryRenderedBlockInteractionError => {
+    if (error instanceof HistoryRenderedBlockInteractionError) {
+      const previousCleanup = error.errors.slice(error.hasPrimary ? 1 : 0);
+      return new HistoryRenderedBlockInteractionError(
+        error.hasPrimary,
+        error.primary,
+        [...previousCleanup, ...closed.cleanup],
+        closed.evidence ?? error.evidence
+      );
+    }
+    return new HistoryRenderedBlockInteractionError(true, error, closed.cleanup, closed.evidence);
+  };
   // The Module owns settled scrolling. This one-time semantic lookup only
   // makes the virtualized accessible group materialize so the first explicit
   // source mode can be read; it never sends a pointer or accepts geometry.
@@ -418,7 +442,8 @@ export async function runHistoryRenderedBlockChromiumInteraction(
       document.querySelector(`[role="group"][aria-label="${controlsLabel}"]`)
     ), {}, labels.controls);
   } catch (error) {
-    const closed = await closeHistoryObserver(observer);
+    const closed = await closeRunnerOwnedObserver();
+    if (!closed) throw error;
     const primary = new Error(
       `Rendered-block controls did not materialize: ${JSON.stringify(closed.evidence)}`,
       { cause: error }
@@ -430,27 +455,31 @@ export async function runHistoryRenderedBlockChromiumInteraction(
     try {
       sourceMode = await currentMode(page, labels);
     } catch (error) {
-      const closed = await closeHistoryObserver(observer);
+      const closed = await closeRunnerOwnedObserver();
+      if (!closed) throw error;
       const primary = new Error(`Rendered-block controls selector failed: ${JSON.stringify(closed.evidence)}`, { cause: error });
       throw new HistoryRenderedBlockInteractionError(true, primary, closed.cleanup, closed.evidence);
     }
     if (!sourceMode) {
-      const closed = await closeHistoryObserver(observer);
+      const closed = await closeRunnerOwnedObserver();
+      if (!closed) throw new Error('History observer ownership was transferred before current-mode inspection');
       const primary = new Error(`Missing current rendered-block mode: ${labels.controls}`);
       throw new HistoryRenderedBlockInteractionError(true, primary, closed.cleanup, closed.evidence);
     }
     if (sourceMode === interaction.targetMode) {
-      const closed = await closeHistoryObserver(observer);
+      const closed = await closeRunnerOwnedObserver();
+      if (!closed) throw new Error('History observer ownership was transferred before target-mode inspection');
       if (closed.cleanup.length > 0) {
         throw new HistoryRenderedBlockInteractionError(false, undefined, closed.cleanup, closed.evidence);
       }
-      return;
+      return { status: 'noop', evidence: closed.evidence };
     }
     const targetMode = nextMode(sourceMode);
     try {
       await observer.configureTarget(labels[sourceMode], labels[targetMode]);
     } catch (error) {
-      const closed = await closeHistoryObserver(observer);
+      const closed = await closeRunnerOwnedObserver();
+      if (!closed) throw error;
       const primary = new Error(`Rendered-block controls selector failed: ${JSON.stringify(closed.evidence)}`, { cause: error });
       throw new HistoryRenderedBlockInteractionError(true, primary, closed.cleanup, closed.evidence);
     }
@@ -629,12 +658,33 @@ export async function runHistoryRenderedBlockChromiumInteraction(
       },
       cancelPointer: () => page.mouse.up(),
       disposeSafeReleaseTarget: () => page.evaluate((ariaLabel) => document.querySelector(`[aria-label="${ariaLabel}"]`)?.remove(), safeReleaseLabel),
-      openObserver: async () => transitionObserver
+      openObserver: async () => {
+        if (observerOwnership !== 'runner-owned') {
+          throw new Error(`History observer cannot transfer from ${observerOwnership}`);
+        }
+        observerOwnership = 'claimed';
+        return transitionObserver;
+      }
     };
-    await runHistoryRenderedBlockInteraction({ ...interaction, targetMode }, adapter);
-    if (targetMode === interaction.targetMode) return;
+    let result: HistoryRenderedBlockInteractionResult;
+    try {
+      result = await runHistoryRenderedBlockInteraction({ ...interaction, targetMode }, adapter);
+    } catch (error) {
+      const closed = await closeRunnerOwnedObserver();
+      if (!closed) throw error;
+      throw mergeRunnerFailure(error, closed);
+    }
+    const runnerClosed = await closeRunnerOwnedObserver();
+    if (runnerClosed) {
+      if (runnerClosed.cleanup.length > 0) {
+        throw new HistoryRenderedBlockInteractionError(false, undefined, runnerClosed.cleanup, runnerClosed.evidence);
+      }
+      result = { ...result, evidence: runnerClosed.evidence };
+    }
+    if (targetMode === interaction.targetMode) return result;
     try {
       observer = await openHistoryObserver(page, interaction, labels);
+      observerOwnership = 'runner-owned';
     } catch (error) {
       throw new HistoryRenderedBlockInteractionError(true, error, [], null);
     }
