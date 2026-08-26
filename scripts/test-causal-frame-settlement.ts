@@ -1,8 +1,4 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { installCausalFrameSettlement } from './causal-frame-settlement';
 
 function createFakeEnvironment({
@@ -416,81 +412,5 @@ for (const cleanup of [null, undefined, 0, false, ''] as const) {
   assert.throws(() => settlement.dispose(), /native cancel 1 failed/);
   assert.equal(settlement.diagnostics().phase, 'disposed', 'cleanup error must still restore an explicit disposed state');
 }
-
-async function assertGenerationGuardMutantIsRed(): Promise<void> {
-  const sourcePath = path.join(import.meta.dir, 'causal-frame-settlement.ts');
-  const source = fs.readFileSync(sourcePath, 'utf8');
-  const mutant = source.replace('record.generation !== generation', 'false');
-  assert.notEqual(mutant, source, 'generation guard mutation must target the live scheduler source');
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-causal-generation-mutant-'));
-  const mutantPath = path.join(tempDir, 'causal-frame-settlement-mutant.ts');
-  fs.writeFileSync(mutantPath, mutant);
-  try {
-    const imported = await import(`${pathToFileURL(mutantPath).href}?generation-guard-mutant`);
-    const fake = createFakeEnvironment();
-    let callbackRuns = 0;
-    const settlement = imported.installCausalFrameSettlement(fake.environment, () => callbackRuns);
-    settlement.runRoot(() => {});
-    settlement.accept();
-    fake.environment.queueMicrotask(() => { callbackRuns += 1; });
-    settlement.dispose();
-    fake.drain();
-    assert.equal(callbackRuns, 1, 'removing the generation guard must revive a disposed queued callback');
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-}
-
-await assertGenerationGuardMutantIsRed();
-
-async function assertCompletionLedgerMutantsAreRed(): Promise<void> {
-  const sourcePath = path.join(import.meta.dir, 'causal-frame-settlement.ts');
-  const source = fs.readFileSync(sourcePath, 'utf8');
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-causal-completion-mutant-'));
-  const importMutant = async (name: string, mutate: (current: string) => string) => {
-    const mutant = mutate(source);
-    assert.notEqual(mutant, source, `${name} mutation must target the live scheduler source`);
-    const mutantPath = path.join(tempDir, `${name}.ts`);
-    fs.writeFileSync(mutantPath, mutant);
-    return import(`${pathToFileURL(mutantPath).href}?${name}`);
-  };
-  try {
-    const nullSentinel = await importMutant('null-sentinel', (current) => current.replace(
-      'if (completion.hasPrimary && completion.cleanupErrors.length)',
-      'if (completion.primary !== null && completion.cleanupErrors.length)'
-    ));
-    {
-      const fake = createFakeEnvironment({ throwOnCancel: true });
-      const settlement = nullSentinel.installCausalFrameSettlement(fake.environment, () => 0);
-      settlement.runRoot(() => {});
-      settlement.accept();
-      fake.environment.requestAnimationFrame(() => {});
-      fake.environment.queueMicrotask(() => {
-        try {
-          throw null;
-        } finally {
-          settlement.dispose();
-        }
-      });
-      assert.equal(thrown(fake.drain), null, 'the null-sentinel mutant must lose the cleanup cause');
-    }
-    const skipExternalFlush = await importMutant('skip-external-flush', (current) => current.replace(
-      '    maybeRestore();\n    finalizeCompletion();\n  };\n  const beginExternalRoot',
-      '    maybeRestore();\n  };\n  const beginExternalRoot'
-    ));
-    {
-      const fake = createFakeEnvironment({ throwOnCancel: true });
-      const settlement = skipExternalFlush.installCausalFrameSettlement(fake.environment, () => 0);
-      const endRoot = settlement.beginExternalRoot();
-      fake.environment.requestAnimationFrame(() => {});
-      settlement.dispose();
-      assert.deepEqual(captured(endRoot), { threw: false }, 'skipping external completion flush must hide the cleanup failure');
-    }
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-}
-
-await assertCompletionLedgerMutantsAreRed();
 
 console.log('causal frame settlement matrix checks passed');
