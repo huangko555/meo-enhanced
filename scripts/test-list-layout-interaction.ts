@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     }).html;
     const previewStyles = buildPreviewStyles({
       previewFontFamily: '',
-      liveFontFamily: 'Arial, sans-serif',
+      editorFontFamily: 'Arial, sans-serif',
       editorFontSizePx: 16
     }, 'light');
     const page = await browser.newPage();
