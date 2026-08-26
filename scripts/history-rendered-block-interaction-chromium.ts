@@ -1,11 +1,24 @@
 import {
+  HistoryRenderedBlockInteractionError,
   runHistoryRenderedBlockInteraction,
   type HistoryRenderedBlockInteractionAdapter,
   type HistoryRenderedBlockKind,
+  type HistoryRenderedBlockObserver,
+  type HistoryRenderedBlockObserverEvidence,
   type HistoryRenderedBlockTargetMode
 } from './history-rendered-block-interaction';
 
 type ModeLabels = Record<HistoryRenderedBlockTargetMode, string> & { readonly controls: string };
+
+type ChromiumHistoryObserver = HistoryRenderedBlockObserver & {
+  configureTarget(currentLabel: string, expectedLabel: string): Promise<void>;
+  settleAndValidatePointer(
+    point: { readonly x: number; readonly y: number },
+    phase: 'pointerdown' | 'pointerup',
+    currentLabel: string
+  ): Promise<void>;
+  snapshotCurrent(): Promise<HistoryRenderedBlockObserverEvidence>;
+};
 
 function labelsFor(kind: HistoryRenderedBlockKind, lineNumber: number): ModeLabels {
   return kind === 'mermaid'
@@ -37,6 +50,344 @@ async function currentMode(page: any, labels: ModeLabels): Promise<HistoryRender
   }, labels);
 }
 
+async function openHistoryObserver(
+  page: any,
+  requested: { readonly kind: HistoryRenderedBlockKind; readonly lineNumber: number },
+  labels: ModeLabels
+): Promise<ChromiumHistoryObserver> {
+  let handle: any = null;
+  const pageErrors: string[] = [];
+  const pageErrorListener = (error: unknown) => { pageErrors.push(String(error)); };
+  page.on('pageerror', pageErrorListener);
+  try {
+    handle = await page.evaluateHandle((known) => {
+      const events: string[] = [];
+      const groupMutations: Array<Record<string, unknown>> = [];
+      let registrations = 0;
+      let cleaned = false;
+      let targetGroup: HTMLElement | null = null;
+      let currentLabel: string | null = null;
+      let expectedLabel: string | null = null;
+      const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+      if (!scroller) throw new Error('Missing editor scroller while opening History evidence observer');
+      const pointerSettlements: Array<{
+        readonly known: { readonly controls: string; readonly currentLabel: string; readonly point: { readonly x: number; readonly y: number }; readonly phase: string };
+        readonly resolve: () => void;
+        readonly reject: (error: unknown) => void;
+      }> = [];
+      const rectOf = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          left: rect.left
+        };
+      };
+      const describeElement = (element: Element) => ({
+        tag: element.tagName.toLowerCase(),
+        role: element.getAttribute('role'),
+        ariaLabel: element.getAttribute('aria-label'),
+        className: (element as HTMLElement).className?.toString() ?? '',
+        text: (element.textContent ?? '').trim().slice(0, 240),
+        connected: element.isConnected,
+        rect: rectOf(element)
+      });
+      const groupsIn = (node: Node) => {
+        if (!(node instanceof Element)) return [];
+        return [
+          ...(node.matches('[role="group"]') ? [node] : []),
+          ...node.querySelectorAll('[role="group"]')
+        ].map((group) => group.getAttribute('aria-label'))
+          .filter((label): label is string => Boolean(label));
+      };
+      const readMaterialization = () => {
+        const viewport = scroller.getBoundingClientRect();
+        const groups = Array.from(document.querySelectorAll<HTMLElement>('[role="group"]')).map((group) => {
+          const description = describeElement(group);
+          const rect = group.getBoundingClientRect();
+          return {
+            ...description,
+            visible: rect.bottom >= viewport.top && rect.top <= viewport.bottom
+              && rect.right >= viewport.left && rect.left <= viewport.right
+          };
+        });
+        const sources = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .map((line, domIndex) => ({ line, domIndex, text: line.textContent ?? '' }))
+          .filter(({ text }) => known.kind === 'mermaid'
+            ? text.trimStart().startsWith('```mermaid')
+            : text.trim() === '$$')
+          .map(({ line, domIndex, text }) => ({
+            domIndex,
+            text,
+            connected: line.isConnected,
+            rect: rectOf(line),
+            blocks: Array.from(line.querySelectorAll<HTMLElement>('[role="group"], [role="region"], .meo-rendered-block-mode-shell'))
+              .map(describeElement)
+          }));
+        const activeElement = document.activeElement instanceof Element
+          ? describeElement(document.activeElement)
+          : null;
+        return {
+          requested: { targetLine: known.lineNumber, controlsLabel: known.controls },
+          groups,
+          sources,
+          scroller: { connected: scroller.isConnected, scrollTop: scroller.scrollTop, rect: rectOf(scroller) },
+          activeElement,
+          groupMutations: [...groupMutations]
+        };
+      };
+      const readTarget = () => {
+        const buttons = Array.from(targetGroup?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []);
+        const currentModeLabels = buttons
+          .map((button) => button.getAttribute('aria-label'))
+          .filter((label): label is string => (
+            label === known.preview || label === known.split || label === known.source
+          ));
+        const target = buttons.find((button) => button.getAttribute('aria-label') === currentLabel)
+          ?? buttons.find((button) => button.getAttribute('aria-label') === expectedLabel)
+          ?? null;
+        const rect = target?.getBoundingClientRect() ?? null;
+        const hit = rect
+          ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+          : null;
+        return {
+          currentModeLabels,
+          targetConnected: Boolean(target?.isConnected),
+          targetRect: rect ? rectOf(target) : null,
+          targetHit: Boolean(target && hit && (hit === target || target.contains(hit))),
+          hitTarget: hit ? {
+            tag: hit.tagName.toLowerCase(),
+            ariaLabel: hit.getAttribute('aria-label'),
+            className: (hit as HTMLElement).className?.toString() ?? '',
+            actualGroup: hit.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
+          } : null
+        };
+      };
+      const labelChanges: Array<ReturnType<typeof readTarget>> = [];
+      let lastLabels = JSON.stringify(readTarget().currentModeLabels);
+      const validateCurrentPointer = (pointer: (typeof pointerSettlements)[number]['known']) => {
+        const registeredGroup = document.querySelector<HTMLElement>(`[role="group"][aria-label="${pointer.controls}"]`);
+        const current = Array.from(targetGroup?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+          .find((button) => button.getAttribute('aria-label') === pointer.currentLabel) ?? null;
+        const rect = current?.getBoundingClientRect() ?? null;
+        const hit = document.elementFromPoint(pointer.point.x, pointer.point.y);
+        const identityCurrent = Boolean(targetGroup?.isConnected)
+          && registeredGroup === targetGroup
+          && Boolean(targetGroup && scroller.contains(targetGroup))
+          && Boolean(current?.isConnected)
+          && current?.closest('[role="group"]') === targetGroup;
+        const geometryCurrent = Boolean(rect
+          && [rect.x, rect.y, rect.width, rect.height, rect.top, rect.right, rect.bottom, rect.left].every(Number.isFinite)
+          && rect.width > 0
+          && rect.height > 0);
+        const targetHit = Boolean(current && hit && (hit === current || current.contains(hit)));
+        const evidence = {
+          controls: pointer.controls,
+          currentLabel: pointer.currentLabel,
+          point: pointer.point,
+          identityCurrent,
+          geometryCurrent,
+          targetHit,
+          hitTarget: hit instanceof Element ? {
+            tag: hit.tagName.toLowerCase(),
+            ariaLabel: hit.getAttribute('aria-label'),
+            className: (hit as HTMLElement).className?.toString() ?? '',
+            actualGroup: hit.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
+          } : null
+        };
+        if (!identityCurrent) throw new Error(`Rendered-block current target identity changed before ${pointer.phase}: ${JSON.stringify(evidence)}`);
+        if (!geometryCurrent) throw new Error(`Rendered-block current target geometry was invalid before ${pointer.phase}: ${JSON.stringify(evidence)}`);
+        if (!targetHit) throw new Error(`Rendered-block pointer did not activate semantic target before ${pointer.phase}: ${JSON.stringify(evidence)}`);
+      };
+      const listener = (event: Event) => {
+        const eventButton = event.composedPath()
+          .find((candidate): candidate is HTMLButtonElement => candidate instanceof HTMLButtonElement);
+        const actualGroup = eventButton?.closest<HTMLElement>('[role="group"]') ?? null;
+        const eventButtonLabel = eventButton?.getAttribute('aria-label') ?? null;
+        const semanticTarget = actualGroup === targetGroup
+          && (eventButtonLabel === currentLabel || eventButtonLabel === expectedLabel);
+        events.push(JSON.stringify({
+          type: event.type,
+          semanticTarget,
+          actualGroup: actualGroup ? {
+            ariaLabel: actualGroup.getAttribute('aria-label'),
+            isTarget: actualGroup === targetGroup
+          } : null,
+          eventTarget: event.target instanceof Element ? {
+            tag: event.target.tagName.toLowerCase(),
+            ariaLabel: event.target.getAttribute('aria-label'),
+            className: (event.target as HTMLElement).className?.toString() ?? ''
+          } : null,
+          ...readTarget()
+        }));
+      };
+      for (const type of ['pointerdown', 'pointerup', 'click']) {
+        document.addEventListener(type, listener, true);
+        registrations += 1;
+      }
+      const mutationObserver = new MutationObserver((records) => {
+        for (const record of records) {
+          if (record.type === 'attributes' && record.target instanceof Element && record.target.matches('[role="group"]')) {
+            groupMutations.push({
+              type: 'aria-label',
+              oldValue: record.oldValue,
+              ariaLabel: record.target.getAttribute('aria-label'),
+              connected: record.target.isConnected,
+              rect: rectOf(record.target)
+            });
+            continue;
+          }
+          if (record.type === 'childList') {
+            const added = Array.from(record.addedNodes).flatMap(groupsIn);
+            const removed = Array.from(record.removedNodes).flatMap(groupsIn);
+            if (added.length || removed.length) groupMutations.push({ type: 'childList', added, removed });
+          }
+        }
+        const current = readTarget();
+        const serializedLabels = JSON.stringify(current.currentModeLabels);
+        if (serializedLabels !== lastLabels) {
+          lastLabels = serializedLabels;
+          labelChanges.push(current);
+        }
+        for (const settlement of pointerSettlements.splice(0)) {
+          try {
+            validateCurrentPointer(settlement.known);
+            settlement.resolve();
+          } catch (error) {
+            settlement.reject(error);
+          }
+        }
+      });
+      mutationObserver.observe(scroller, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: ['aria-label']
+      });
+      registrations += 1;
+      return {
+        configureTarget(configured: { readonly controls: string; readonly currentLabel: string; readonly expectedLabel: string }) {
+          const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${configured.controls}"]`);
+          if (!group) throw new Error(`Missing rendered-block controls while configuring observer: ${configured.controls}`);
+          targetGroup = group;
+          currentLabel = configured.currentLabel;
+          expectedLabel = configured.expectedLabel;
+          lastLabels = JSON.stringify(readTarget().currentModeLabels);
+        },
+        cleanup() {
+          if (cleaned) return;
+          for (const type of ['pointerdown', 'pointerup', 'click']) document.removeEventListener(type, listener, true);
+          mutationObserver.disconnect();
+          registrations = 0;
+          cleaned = true;
+        },
+        settleAndValidatePointer(pointer: (typeof pointerSettlements)[number]['known']) {
+          return new Promise<void>((resolve, reject) => {
+            if (!targetGroup?.isConnected || !scroller.contains(targetGroup)) {
+              try { validateCurrentPointer(pointer); }
+              catch (error) { reject(error); }
+              return;
+            }
+            pointerSettlements.push({ known: pointer, resolve, reject });
+            const sentinel = document.createComment('History pointer DOM settlement');
+            targetGroup.append(sentinel);
+            sentinel.remove();
+          });
+        },
+        snapshot() {
+          return {
+            events: [...events],
+            labelChanges: [...labelChanges],
+            current: readTarget(),
+            ...readMaterialization(),
+            registrations,
+            cleaned,
+            sentinelRejected: false
+          };
+        },
+        verifySentinel() {
+          const before = JSON.stringify({ events, labelChanges, groupMutations });
+          document.dispatchEvent(new Event('click'));
+          const sentinel = document.createComment('History observer cleanup sentinel');
+          scroller.append(sentinel);
+          sentinel.remove();
+          return JSON.stringify({ events, labelChanges, groupMutations }) === before;
+        }
+      };
+    }, {
+      controls: labels.controls,
+      preview: labels.preview,
+      split: labels.split,
+      source: labels.source,
+      kind: requested.kind,
+      lineNumber: requested.lineNumber
+    });
+  } catch (error) {
+    page.off('pageerror', pageErrorListener);
+    throw error;
+  }
+
+  const snapshotCurrent = async () => {
+    const evidence = await handle.evaluate((observer: any) => observer.snapshot());
+    return { ...evidence, pageErrors: [...pageErrors] };
+  };
+  return {
+    configureTarget: (currentLabel, expectedLabel) => handle.evaluate(
+      (observer: any, configured) => observer.configureTarget(configured),
+      { controls: labels.controls, currentLabel, expectedLabel }
+    ),
+    settleAndValidatePointer: (point, phase, currentLabel) => handle.evaluate(
+      (observer: any, known) => observer.settleAndValidatePointer(known),
+      { controls: labels.controls, currentLabel, point, phase }
+    ),
+    cleanup: async () => {
+      try {
+        await handle.evaluate((observer: any) => observer.cleanup());
+      } finally {
+        page.off('pageerror', pageErrorListener);
+      }
+    },
+    snapshotCurrent,
+    snapshot: async () => {
+      try {
+        const evidence = await snapshotCurrent();
+        return { ...evidence, sentinelRejected: true };
+      } finally {
+        await handle.dispose();
+        handle = null;
+      }
+    },
+    verifySentinel: () => handle.evaluate((observer: any) => observer.verifySentinel())
+  };
+}
+
+async function closeHistoryObserver(observer: ChromiumHistoryObserver) {
+  const cleanup: unknown[] = [];
+  let evidence: HistoryRenderedBlockObserverEvidence | null = null;
+  try { await observer.cleanup(); }
+  catch (error) { cleanup.push(new Error('History rendered-block interaction cleanup failed during observerCleanup', { cause: error })); }
+  try {
+    if (!await observer.verifySentinel()) throw new Error('History rendered-block observer accepted a late event');
+  } catch (error) {
+    cleanup.push(new Error('History rendered-block interaction cleanup failed during observerSentinel', { cause: error }));
+  }
+  try {
+    evidence = await observer.snapshot();
+    if (evidence.registrations !== 0 || !evidence.cleaned || !evidence.sentinelRejected) {
+      cleanup.push(new Error('History rendered-block observer evidence did not close its registry'));
+    }
+  } catch (error) {
+    cleanup.push(new Error('History rendered-block interaction cleanup failed during observerSnapshot', { cause: error }));
+  }
+  return { cleanup, evidence };
+}
+
 /**
  * The real-browser Adapter for a rendered-block mode intent. It deliberately
  * owns neither editor state nor private controllers: all facts are exposed by
@@ -48,39 +399,66 @@ export async function runHistoryRenderedBlockChromiumInteraction(
   editorGlobal: '__historyMatrixEditor' | '__renderedHistoryStressEditor'
 ) {
   const labels = labelsFor(interaction.kind, interaction.lineNumber);
+  let observer: ChromiumHistoryObserver;
+  try {
+    observer = await openHistoryObserver(page, interaction, labels);
+  } catch (error) {
+    throw new HistoryRenderedBlockInteractionError(true, error, [], null);
+  }
   // The Module owns settled scrolling. This one-time semantic lookup only
   // makes the virtualized accessible group materialize so the first explicit
   // source mode can be read; it never sends a pointer or accepts geometry.
-  await page.evaluate(({ editorName, lineNumber }) => {
-    const editor = (window as any)[editorName];
-    if (!editor) throw new Error(`Missing History editor: ${editorName}`);
-    editor.scrollToLine(lineNumber, 'center');
-  }, { editorName: editorGlobal, lineNumber: interaction.lineNumber });
-  await page.waitForFunction((controlsLabel) => Boolean(
-    document.querySelector(`[role="group"][aria-label="${controlsLabel}"]`)
-  ), {}, labels.controls);
+  try {
+    await page.evaluate(({ editorName, lineNumber }) => {
+      const editor = (window as any)[editorName];
+      if (!editor) throw new Error(`Missing History editor: ${editorName}`);
+      editor.scrollToLine(lineNumber, 'center');
+    }, { editorName: editorGlobal, lineNumber: interaction.lineNumber });
+    await page.waitForFunction((controlsLabel) => Boolean(
+      document.querySelector(`[role="group"][aria-label="${controlsLabel}"]`)
+    ), {}, labels.controls);
+  } catch (error) {
+    const closed = await closeHistoryObserver(observer);
+    const primary = new Error(
+      `Rendered-block controls did not materialize: ${JSON.stringify(closed.evidence)}`,
+      { cause: error }
+    );
+    throw new HistoryRenderedBlockInteractionError(true, primary, closed.cleanup, closed.evidence);
+  }
   for (let transition = 0; transition < 3; transition += 1) {
-    const sourceMode = await currentMode(page, labels);
-    if (!sourceMode) throw new Error(`Missing current rendered-block mode: ${labels.controls}`);
-    if (sourceMode === interaction.targetMode) return;
+    let sourceMode: HistoryRenderedBlockTargetMode | null;
+    try {
+      sourceMode = await currentMode(page, labels);
+    } catch (error) {
+      const closed = await closeHistoryObserver(observer);
+      const primary = new Error(`Rendered-block controls selector failed: ${JSON.stringify(closed.evidence)}`, { cause: error });
+      throw new HistoryRenderedBlockInteractionError(true, primary, closed.cleanup, closed.evidence);
+    }
+    if (!sourceMode) {
+      const closed = await closeHistoryObserver(observer);
+      const primary = new Error(`Missing current rendered-block mode: ${labels.controls}`);
+      throw new HistoryRenderedBlockInteractionError(true, primary, closed.cleanup, closed.evidence);
+    }
+    if (sourceMode === interaction.targetMode) {
+      const closed = await closeHistoryObserver(observer);
+      if (closed.cleanup.length > 0) {
+        throw new HistoryRenderedBlockInteractionError(false, undefined, closed.cleanup, closed.evidence);
+      }
+      return;
+    }
     const targetMode = nextMode(sourceMode);
-    let observerHandle: any = null;
-    let pageErrorListener: ((error: unknown) => void) | null = null;
-    const pageErrors: string[] = [];
+    try {
+      await observer.configureTarget(labels[sourceMode], labels[targetMode]);
+    } catch (error) {
+      const closed = await closeHistoryObserver(observer);
+      const primary = new Error(`Rendered-block controls selector failed: ${JSON.stringify(closed.evidence)}`, { cause: error });
+      throw new HistoryRenderedBlockInteractionError(true, primary, closed.cleanup, closed.evidence);
+    }
+    const transitionObserver = observer;
     const safeReleaseLabel = 'History pointer safe release target';
-    const snapshotObserverEvidence = async () => {
-      if (!observerHandle) return null;
-      const evidence = await observerHandle.evaluate((observer: any) => observer.snapshot());
-      return { ...evidence, pageErrors: [...pageErrors] };
-    };
+    const snapshotObserverEvidence = () => transitionObserver.snapshotCurrent();
     const settleAndValidatePointer = async (point: { readonly x: number; readonly y: number }, phase: 'pointerdown' | 'pointerup') => {
-      if (!observerHandle) throw new Error(`Missing History evidence observer before ${phase}`);
-      await observerHandle.evaluate((observer: any, known) => observer.settleAndValidatePointer(known), {
-        controls: labels.controls,
-        currentLabel: labels[sourceMode],
-        point,
-        phase
-      });
+      await transitionObserver.settleAndValidatePointer(point, phase, labels[sourceMode]);
     };
     const adapter: HistoryRenderedBlockInteractionAdapter<any> = {
       isCurrent: () => page.evaluate(({ editorName, controlsLabel }) => {
@@ -228,7 +606,7 @@ export async function runHistoryRenderedBlockChromiumInteraction(
           try {
             publicEvidence = await snapshotObserverEvidence();
           } catch (snapshotError) {
-            publicEvidence = { captureError: String(snapshotError), pageErrors: [...pageErrors] };
+            publicEvidence = { captureError: String(snapshotError) };
           }
           throw new Error(`Rendered-block target did not settle: ${JSON.stringify(publicEvidence)}`, { cause: error });
         }
@@ -251,209 +629,15 @@ export async function runHistoryRenderedBlockChromiumInteraction(
       },
       cancelPointer: () => page.mouse.up(),
       disposeSafeReleaseTarget: () => page.evaluate((ariaLabel) => document.querySelector(`[aria-label="${ariaLabel}"]`)?.remove(), safeReleaseLabel),
-      openObserver: async () => {
-        observerHandle = await page.evaluateHandle((known) => {
-          const events: string[] = [];
-          let registrations = 0;
-          let cleaned = false;
-          const targetGroup = document.querySelector<HTMLElement>(`[role="group"][aria-label="${known.controls}"]`);
-          if (!targetGroup) throw new Error(`Missing rendered-block controls while opening observer: ${known.controls}`);
-          const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
-          if (!scroller) throw new Error('Missing editor scroller while opening History evidence observer');
-          const pointerSettlements: Array<{
-            readonly known: { readonly controls: string; readonly currentLabel: string; readonly point: { readonly x: number; readonly y: number }; readonly phase: string };
-            readonly resolve: () => void;
-            readonly reject: (error: unknown) => void;
-          }> = [];
-          const readTarget = () => {
-            const buttons = Array.from(targetGroup.querySelectorAll<HTMLButtonElement>('button[aria-label]'));
-            const currentModeLabels = buttons
-              .map((button) => button.getAttribute('aria-label'))
-              .filter((label): label is string => (
-                label === known.preview || label === known.split || label === known.source
-              ));
-            const target = buttons.find((button) => button.getAttribute('aria-label') === known.currentLabel)
-              ?? buttons.find((button) => button.getAttribute('aria-label') === known.expectedLabel)
-              ?? null;
-            const rect = target?.getBoundingClientRect() ?? null;
-            const hit = rect
-              ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
-              : null;
-            return {
-              currentModeLabels,
-              targetConnected: Boolean(target?.isConnected),
-              targetRect: rect ? {
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-                left: rect.left
-              } : null,
-              targetHit: Boolean(target && hit && (hit === target || target.contains(hit))),
-              hitTarget: hit ? {
-                tag: hit.tagName.toLowerCase(),
-                ariaLabel: hit.getAttribute('aria-label'),
-                className: (hit as HTMLElement).className?.toString() ?? '',
-                actualGroup: hit.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
-              } : null
-            };
-          };
-          const labelChanges: Array<ReturnType<typeof readTarget>> = [];
-          const validateCurrentPointer = (pointer: (typeof pointerSettlements)[number]['known']) => {
-            const registeredGroup = document.querySelector<HTMLElement>(`[role="group"][aria-label="${pointer.controls}"]`);
-            const current = Array.from(targetGroup.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
-              .find((button) => button.getAttribute('aria-label') === pointer.currentLabel) ?? null;
-            const rect = current?.getBoundingClientRect() ?? null;
-            const hit = document.elementFromPoint(pointer.point.x, pointer.point.y);
-            const identityCurrent = targetGroup.isConnected
-              && registeredGroup === targetGroup
-              && scroller.contains(targetGroup)
-              && Boolean(current?.isConnected)
-              && current?.closest('[role="group"]') === targetGroup;
-            const geometryCurrent = Boolean(rect
-              && [rect.x, rect.y, rect.width, rect.height, rect.top, rect.right, rect.bottom, rect.left].every(Number.isFinite)
-              && rect.width > 0
-              && rect.height > 0);
-            const targetHit = Boolean(current && hit && (hit === current || current.contains(hit)));
-            const evidence = {
-              controls: pointer.controls,
-              currentLabel: pointer.currentLabel,
-              point: pointer.point,
-              identityCurrent,
-              geometryCurrent,
-              targetHit,
-              hitTarget: hit instanceof Element ? {
-                tag: hit.tagName.toLowerCase(),
-                ariaLabel: hit.getAttribute('aria-label'),
-                className: (hit as HTMLElement).className?.toString() ?? '',
-                actualGroup: hit.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
-              } : null
-            };
-            if (!identityCurrent) throw new Error(`Rendered-block current target identity changed before ${pointer.phase}: ${JSON.stringify(evidence)}`);
-            if (!geometryCurrent) throw new Error(`Rendered-block current target geometry was invalid before ${pointer.phase}: ${JSON.stringify(evidence)}`);
-            if (!targetHit) throw new Error(`Rendered-block pointer did not activate semantic target before ${pointer.phase}: ${JSON.stringify(evidence)}`);
-          };
-          const listener = (event: Event) => {
-            const eventButton = event.composedPath()
-              .find((candidate): candidate is HTMLButtonElement => candidate instanceof HTMLButtonElement);
-            const actualGroup = eventButton?.closest<HTMLElement>('[role="group"]') ?? null;
-            const eventButtonLabel = eventButton?.getAttribute('aria-label') ?? null;
-            const semanticTarget = actualGroup === targetGroup
-              && (eventButtonLabel === known.currentLabel || eventButtonLabel === known.expectedLabel);
-            events.push(JSON.stringify({
-              type: event.type,
-              semanticTarget,
-              actualGroup: actualGroup ? {
-                ariaLabel: actualGroup.getAttribute('aria-label'),
-                isTarget: actualGroup === targetGroup
-              } : null,
-              eventTarget: event.target instanceof Element ? {
-                tag: event.target.tagName.toLowerCase(),
-                ariaLabel: event.target.getAttribute('aria-label'),
-                className: (event.target as HTMLElement).className?.toString() ?? ''
-              } : null,
-              ...readTarget()
-            }));
-          };
-          for (const type of ['pointerdown', 'pointerup', 'click']) { document.addEventListener(type, listener, true); registrations += 1; }
-          let lastLabels = JSON.stringify(readTarget().currentModeLabels);
-          const mutationObserver = new MutationObserver(() => {
-            const current = readTarget();
-            const serializedLabels = JSON.stringify(current.currentModeLabels);
-            if (serializedLabels !== lastLabels) {
-              lastLabels = serializedLabels;
-              labelChanges.push(current);
-            }
-            for (const settlement of pointerSettlements.splice(0)) {
-              try {
-                validateCurrentPointer(settlement.known);
-                settlement.resolve();
-              } catch (error) {
-                settlement.reject(error);
-              }
-            }
-          });
-          mutationObserver.observe(scroller, {
-            subtree: true,
-            childList: true,
-            attributes: true,
-            attributeFilter: ['aria-label']
-          });
-          registrations += 1;
-          return {
-            cleanup() {
-              for (const type of ['pointerdown', 'pointerup', 'click']) document.removeEventListener(type, listener, true);
-              mutationObserver.disconnect();
-              registrations = 0;
-              cleaned = true;
-            },
-            settleAndValidatePointer(pointer: (typeof pointerSettlements)[number]['known']) {
-              return new Promise<void>((resolve, reject) => {
-                if (!targetGroup.isConnected || !scroller.contains(targetGroup)) {
-                  try { validateCurrentPointer(pointer); }
-                  catch (error) { reject(error); }
-                  return;
-                }
-                pointerSettlements.push({ known: pointer, resolve, reject });
-                const sentinel = document.createComment('History pointer DOM settlement');
-                targetGroup.append(sentinel);
-                sentinel.remove();
-              });
-            },
-            snapshot() {
-              return {
-                events: [...events],
-                labelChanges: [...labelChanges],
-                current: readTarget(),
-                registrations,
-                cleaned,
-                sentinelRejected: false
-              };
-            },
-            verifySentinel() {
-              const before = JSON.stringify({ events, labelChanges });
-              document.dispatchEvent(new Event('click'));
-              return JSON.stringify({ events, labelChanges }) === before;
-            }
-          };
-        }, {
-          controls: labels.controls,
-          preview: labels.preview,
-          split: labels.split,
-          source: labels.source,
-          currentLabel: labels[sourceMode],
-          expectedLabel: labels[targetMode]
-        });
-        pageErrorListener = (error: unknown) => { pageErrors.push(String(error)); };
-        page.on('pageerror', pageErrorListener);
-        return {
-          cleanup: async () => {
-            try {
-              await observerHandle.evaluate((observer: any) => observer.cleanup());
-            } finally {
-              if (pageErrorListener) {
-                page.off('pageerror', pageErrorListener);
-                pageErrorListener = null;
-              }
-            }
-          },
-          snapshot: async () => {
-            try {
-              const evidence = await snapshotObserverEvidence();
-              return { ...evidence, sentinelRejected: true };
-            } finally {
-              await observerHandle.dispose();
-              observerHandle = null;
-            }
-          },
-          verifySentinel: () => observerHandle.evaluate((observer: any) => observer.verifySentinel())
-        };
-      }
+      openObserver: async () => transitionObserver
     };
     await runHistoryRenderedBlockInteraction({ ...interaction, targetMode }, adapter);
+    if (targetMode === interaction.targetMode) return;
+    try {
+      observer = await openHistoryObserver(page, interaction, labels);
+    } catch (error) {
+      throw new HistoryRenderedBlockInteractionError(true, error, [], null);
+    }
   }
   throw new Error(`Rendered-block mode did not reach ${interaction.targetMode}: ${labels.controls}`);
 }

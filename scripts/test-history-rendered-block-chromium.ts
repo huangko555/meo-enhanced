@@ -169,6 +169,169 @@ async function runPublicFailureEvidenceCase() {
   }
 }
 
+async function runMaterializationFailureEvidenceCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:auto">
+        <div class="cm-content" contenteditable="true" role="textbox">
+          <div class="cm-line">before target</div>
+          <div class="cm-line"><span>\`\`\`mermaid</span><div class="mermaid-source-block">graph TD</div></div>
+          <div class="cm-line">after target</div>
+        </div>
+        <div role="group" aria-label="Mermaid block controls at line 130" style="position:absolute;left:10px;top:20px;width:30px;height:20px">
+          <button aria-label="Edit Mermaid in split view">Old split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      (window as any).__historyMatrixEditor = {
+        scrollToLine() {
+          queueMicrotask(() => { throw new Error('synthetic materialization page error'); });
+        }
+      };
+      (document.querySelector('[contenteditable="true"]') as HTMLElement).focus();
+    });
+    const waitForFunction = page.waitForFunction.bind(page);
+    page.waitForFunction = (...args: any[]) => {
+      if (args[2] === 'Mermaid block controls at line 131') {
+        return Promise.reject(new Error('synthetic controls materialization timeout'));
+      }
+      return waitForFunction(...args);
+    };
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 131, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'materialization failure did not preserve InteractionError');
+    check(failure.hasPrimary, 'materialization failure lost its primary');
+    check(failure.cause === failure.primary && failure.errors[0] === failure.primary, 'materialization primary/cause order changed');
+    check(failure.errors.length === 1, 'materialization evidence added an unexpected cleanup failure');
+    check(failure.primary instanceof Error && failure.primary.cause instanceof Error, 'materialization wait cause chain is incomplete');
+    check(String(failure.primary.cause).includes('synthetic controls materialization timeout'), 'materialization wait error was not retained');
+    const evidence = failure.evidence as any;
+    check(evidence?.requested?.targetLine === 131, 'materialization evidence omitted requested target line');
+    check(evidence?.requested?.controlsLabel === 'Mermaid block controls at line 131', 'materialization evidence omitted requested controls');
+    check(evidence.groups.some((group: any) => group.ariaLabel === 'Mermaid block controls at line 130' && group.connected), 'materialization evidence omitted current line130 group');
+    check(evidence.sources.some((source: any) => source.text.includes('```mermaid') && source.connected && source.rect?.height > 0), 'materialization evidence omitted target source DOM');
+    check(evidence.groupMutations.every((mutation: any) => !mutation.added?.includes('Mermaid block controls at line 131')), 'materialization evidence invented a target group add');
+    check(typeof evidence.scroller?.scrollTop === 'number' && evidence.scroller?.rect?.height > 0, 'materialization evidence omitted scroll geometry');
+    check(evidence.activeElement?.role === 'textbox' && evidence.activeElement?.connected, 'materialization evidence omitted active element');
+    check(evidence.pageErrors.some((entry: string) => entry.includes('synthetic materialization page error')), 'materialization evidence omitted page error');
+    check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'materialization evidence leaked observer lifecycle');
+    check(String(failure.primary).includes('"targetLine":131'), 'materialization primary did not atomically publish evidence');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runMaterializationHandoffEvidenceCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:auto;position:relative">
+        <div class="cm-line"><span>\`\`\`mermaid</span><div class="mermaid-source-block">graph TD</div></div>
+        <div role="group" aria-label="Mermaid block controls at line 130">
+          <button aria-label="Edit Mermaid in split view">Old split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      (window as any).__historyMatrixEditor = {
+        scrollToLine() {
+          const scroller = document.querySelector('.cm-scroller')!;
+          const group = document.createElement('div');
+          group.setAttribute('role', 'group');
+          group.setAttribute('aria-label', 'Mermaid block controls at line 131');
+          group.innerHTML = '<button aria-label="Edit Mermaid in split view">Target split</button>';
+          group.querySelector('button')!.addEventListener('click', (event) => {
+            (event.currentTarget as HTMLButtonElement).setAttribute('aria-label', 'Show Mermaid code only');
+          });
+          scroller.append(group);
+          document.querySelector('[aria-label="Mermaid block controls at line 130"]')!.remove();
+        }
+      };
+    });
+    const waitForFunction = page.waitForFunction.bind(page);
+    page.waitForFunction = (...args: any[]) => {
+      const known = args[2];
+      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+        return Promise.reject(new Error('synthetic handoff settlement timeout'));
+      }
+      return waitForFunction(...args);
+    };
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 131, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'materialization handoff did not reach gesture evidence');
+    const evidence = failure.evidence as any;
+    const events = evidence.events.map((entry: string) => JSON.parse(entry));
+    check(evidence.groupMutations.some((mutation: any) => mutation.added?.includes('Mermaid block controls at line 131')), 'single observer missed target group add');
+    check(evidence.groupMutations.some((mutation: any) => mutation.removed?.includes('Mermaid block controls at line 130')), 'single observer missed prior group removal');
+    check(events.filter((event: any) => event.type === 'pointerdown').length === 1, 'materialization handoff repeated pointerdown');
+    check(events.filter((event: any) => event.type === 'pointerup').length === 1, 'materialization handoff repeated pointerup');
+    check(events.filter((event: any) => event.type === 'click' && event.semanticTarget).length === 1, 'materialization handoff did not use current target once');
+    check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'materialization handoff leaked observer lifecycle');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runMaterializationDisconnectCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent('<div class="cm-editor"><div class="cm-scroller"></div></div>');
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    page.waitForFunction = async (...args: any[]) => {
+      if (args[2] === 'Mermaid block controls at line 131') {
+        await page.close();
+        throw new Error('synthetic materialization page disconnect');
+      }
+      throw new Error('unexpected waitForFunction');
+    };
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 131, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'page disconnect did not preserve InteractionError');
+    check(failure.hasPrimary && failure.cause === failure.primary && failure.errors[0] === failure.primary, 'page disconnect changed primary-first order');
+    check(failure.primary instanceof Error && failure.primary.cause instanceof Error, 'page disconnect lost original cause');
+    check(String(failure.primary.cause).includes('synthetic materialization page disconnect'), 'page disconnect primary lost selector failure');
+    check(failure.errors.length > 1, 'page disconnect did not append observer cleanup failures');
+    check(failure.errors.slice(1).every((error: unknown) => String(error).includes('cleanup failed')), 'page disconnect cleanup failures preceded primary');
+  } finally {
+    await browser.close();
+  }
+}
+
 async function runMissingSemanticClickCase() {
   const browser = await launchTestBrowser();
   try {
@@ -329,6 +492,9 @@ for (const scenario of [[0, false], [1, false], [0, true], [2, false], [0, false
   await runCase(...scenario);
 }
 await runPublicFailureEvidenceCase();
+await runMaterializationFailureEvidenceCase();
+await runMaterializationHandoffEvidenceCase();
+await runMaterializationDisconnectCase();
 await runMissingSemanticClickCase();
 await runSameLabelDifferentGroupCase();
 await runMoveSettlementMismatchCase();
