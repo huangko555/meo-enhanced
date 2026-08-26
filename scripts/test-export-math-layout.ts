@@ -39,6 +39,7 @@ const rendered = exportRuntime.renderExportHtmlDocument({
     ].join('\n'),
     appearance: 'dark',
     environment: {
+      previewFontFamily: '',
       editorBackgroundColor: '#20252b',
       editorForegroundColor: '#d8dee9',
       codeBlockBackgroundColor: '#171b20',

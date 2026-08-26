@@ -7,6 +7,7 @@ const rendered = exportRuntime.renderExportHtmlDocument({
     text: '# Heading\n\n**Bold**\n\n*Italic*\n\n~~Deleted~~\n\n`Code`',
     appearance: 'dark',
     environment: {
+      previewFontFamily: '',
       editorBackgroundColor: '#20252b',
       editorForegroundColor: '#d8dee9',
       codeBlockBackgroundColor: '#171b20',

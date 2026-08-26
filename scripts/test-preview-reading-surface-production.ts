@@ -4,7 +4,9 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { launchTestBrowser } from './browser-test-helpers';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
+import type { PreviewRenderRequest } from '../src/protocol/previewRender';
 import exportRuntime from '../src/export/runtime';
+import { buildExportHtmlDocument } from '../src/export/exportHtmlTemplate';
 
 const root = path.resolve(import.meta.dirname, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-reading-surface-'));
@@ -408,6 +410,247 @@ async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<
   assert.equal(cancellationCount, 6);
 }
 
+async function assertPreviewProjectionTransactions(
+  browser: import('puppeteer-core').Browser,
+  bundlePath: string
+): Promise<void> {
+  type ControlledRequest = {
+    message: PreviewRenderRequest;
+    resolve: (response: null) => void;
+  };
+  const available: ControlledRequest[] = [];
+  const outboundTypes: string[] = [];
+  let page: import('puppeteer-core').Page;
+  const resolveRequest = async (request: ControlledRequest): Promise<void> => {
+    const rendered = exportRuntime.renderPreviewDocument({
+      markdownText: request.message.text,
+      sourceDocumentPath,
+      styleEnvironment: request.message.environment
+    });
+    const response = decodeHostToWebviewMessage({
+      type: 'previewRenderResult',
+      requestId: request.message.requestId,
+      result: { ok: true, value: rendered }
+    });
+    assert.equal(response?.type, 'previewRenderResult');
+    request.resolve(null);
+    await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), response);
+  };
+
+  page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 900, height: 600, deviceScaleFactor: 1 });
+    await page.exposeFunction('__hasPendingProjectionRequest', () => available.length > 0);
+    const nextRequest = async (label: string): Promise<ControlledRequest> => {
+      try {
+        await page.waitForFunction(async () => (
+          await (window as typeof window & { __hasPendingProjectionRequest: () => Promise<boolean> })
+            .__hasPendingProjectionRequest()
+        ));
+      } catch (error) {
+        const state = await page.evaluate(() => ({
+          fontFamily: document.querySelector<HTMLInputElement>('.preview-font-family-input')?.value,
+          sourceColoring: document.querySelector<HTMLButtonElement>('.preview-source-coloring')?.getAttribute('aria-pressed'),
+          frameText: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent
+        }));
+        throw new Error(`No ${label} Preview request: ${JSON.stringify({ outboundTypes, state })}`, { cause: error });
+      }
+      return available.shift()!;
+    };
+    await page.exposeFunction('__deliverProjectionMessageToHost', (raw: unknown) => {
+      const message = decodeWebviewToHostMessage(raw);
+      assert.ok(message, 'Projection transaction message failed Protocol decoding');
+      outboundTypes.push(message.type);
+      if (message.type !== 'requestPreviewRender') return null;
+      return new Promise<null>((resolve) => {
+        available.push({ message, resolve });
+      });
+    });
+    await page.setRequestInterception(true);
+    page.once('request', (request) => void request.respond({
+      status: 200,
+      contentType: 'text/html',
+      body: '<!doctype html><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>'
+    }));
+    await page.goto('http://localhost');
+    await page.setRequestInterception(false);
+    await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
+    await page.addScriptTag({ content: `
+      window.acquireVsCodeApi=()=>({
+        postMessage(message) {
+          window.__deliverProjectionMessageToHost(message).then((response) => {
+            if (response) window.dispatchEvent(new MessageEvent('message', { data: response }));
+          });
+        },
+        getState() { return undefined; },
+        setState() {}
+      });
+    ` });
+    await page.addScriptTag({ path: bundlePath });
+    const initialText = '# Projection T0\n\nOld frame sentinel';
+    await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), {
+      ...initMessage,
+      text: initialText,
+      savedRevision: { version: 1, text: initialText }
+    });
+    const initialRequest = await nextRequest('initial');
+    assert.equal(initialRequest.message.text, initialText);
+    await resolveRequest(initialRequest);
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Old frame sentinel')
+    ));
+
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'docChanged', text: '', version: 2 }
+    })));
+    const emptyDocumentRequest = await nextRequest('empty document');
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = 'MEO Projection Empty';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
+      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="dark"]')!.click();
+    });
+    const emptyFontRequest = await nextRequest('empty font');
+    const emptySourceRequest = await nextRequest('empty source-color');
+    assert.deepEqual(
+      [emptyDocumentRequest.message.text, emptyFontRequest.message.text, emptySourceRequest.message.text],
+      ['', '', ''],
+      'Empty pending text must survive font/source reprojection'
+    );
+    await resolveRequest(emptySourceRequest);
+    await page.waitForFunction(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
+      return frame?.contentDocument?.querySelector('.meo-export-doc')?.textContent === '';
+    });
+    await resolveRequest(emptyFontRequest);
+    await resolveRequest(emptyDocumentRequest);
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLElement>('.cm-content')?.textContent === ''
+    ));
+
+    await page.close();
+    available.length = 0;
+    outboundTypes.length = 0;
+    page = await browser.newPage();
+    await page.setViewport({ width: 900, height: 600, deviceScaleFactor: 1 });
+    await page.exposeFunction('__hasPendingProjectionRequest', () => available.length > 0);
+    await page.exposeFunction('__deliverProjectionMessageToHost', (raw: unknown) => {
+      const message = decodeWebviewToHostMessage(raw);
+      assert.ok(message, 'Projection transaction message failed Protocol decoding');
+      outboundTypes.push(message.type);
+      if (message.type !== 'requestPreviewRender') return null;
+      return new Promise<null>((resolve) => available.push({ message, resolve }));
+    });
+    await page.setRequestInterception(true);
+    page.once('request', (request) => void request.respond({
+      status: 200,
+      contentType: 'text/html',
+      body: '<!doctype html><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>'
+    }));
+    await page.goto('http://localhost');
+    await page.setRequestInterception(false);
+    await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
+    await page.addScriptTag({ content: `
+      window.acquireVsCodeApi=()=>({
+        postMessage(message) {
+          window.__deliverProjectionMessageToHost(message).then((response) => {
+            if (response) window.dispatchEvent(new MessageEvent('message', { data: response }));
+          });
+        },
+        getState() { return undefined; },
+        setState() {}
+      });
+    ` });
+    await page.addScriptTag({ path: bundlePath });
+    await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), {
+      ...initMessage,
+      text: initialText,
+      savedRevision: { version: 1, text: initialText }
+    });
+    await resolveRequest(await nextRequest('second initial'));
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Old frame sentinel')
+    ));
+
+    const nextText = `# Projection T1\n\n${Array.from({ length: 80 }, (_, index) => `Line ${index}`).join('\n\n')}`;
+    await page.evaluate((text) => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'docChanged', text, version: 2 }
+    })), nextText);
+    const nextDocumentRequest = await nextRequest('T1 document');
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = 'MEO Projection T1';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="light"]')!.click();
+    });
+    const nextFontRequest = await nextRequest('T1 font');
+    assert.equal(nextFontRequest.message.text, nextText);
+    await resolveRequest(nextFontRequest);
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Projection T1')
+    ));
+    await resolveRequest(nextDocumentRequest);
+
+    const interaction = await page.evaluateHandle(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      const paragraph = doc.querySelector('p')!;
+      const range = doc.createRange();
+      range.selectNodeContents(paragraph);
+      const selection = doc.defaultView!.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      doc.scrollingElement!.scrollTop = 160;
+      frame.focus();
+      doc.defaultView!.focus();
+      return { document: doc, selection: selection.toString(), scrollTop: doc.scrollingElement!.scrollTop };
+    });
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = 'MEO Projection Final';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="dark"]')!.click();
+      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="light"]')!.click();
+    });
+    const sourceRequest = await nextRequest('final source-color');
+    const finalFontRequest = await nextRequest('final font');
+    await resolveRequest(finalFontRequest);
+    await page.waitForFunction(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      return getComputedStyle(doc.documentElement).colorScheme === 'light'
+        && getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('MEO Projection Final');
+    });
+    const preserved = await page.evaluate((before) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      return {
+        sameDocument: doc === before.document,
+        selection: doc.defaultView!.getSelection()!.toString(),
+        expectedSelection: before.selection,
+        scrollTop: doc.scrollingElement!.scrollTop,
+        expectedScrollTop: before.scrollTop,
+        frameFocused: document.activeElement === frame
+      };
+    }, interaction);
+    await interaction.dispose();
+    assert.deepEqual(preserved, {
+      sameDocument: true,
+      selection: preserved.expectedSelection,
+      expectedSelection: preserved.expectedSelection,
+      scrollTop: preserved.expectedScrollTop,
+      expectedScrollTop: preserved.expectedScrollTop,
+      frameFocused: true
+    });
+    await resolveRequest(sourceRequest);
+    assert.equal(outboundTypes.filter((type) => /^(?:edit|undo|redo|applied|docChanged)/i.test(type)).length, 0);
+  } finally {
+    await page.close();
+  }
+}
+
 async function assertFontEnumerationFallbackMatrix(
   browser: import('puppeteer-core').Browser,
   bundlePath: string
@@ -522,6 +765,7 @@ async function main(): Promise<void> {
   let openLinkWaiter: ReturnType<typeof createOpenLinkWaiter> | null = null;
   const previewFontFamilyCommands: string[] = [];
   try {
+    await assertPreviewProjectionTransactions(browser, path.join(temp, 'bundle.js'));
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 700, deviceScaleFactor: 1 });
     await assertOpenLinkWaiterLifecycle(page.getDefaultTimeout());
@@ -685,6 +929,8 @@ async function main(): Promise<void> {
     await page.evaluate(() => {
       const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
       input.value = 'MEO Synthetic Sans";color:red;}';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      input.value = 'MEO</style><script>malicious</script>';
       input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     });
     assert.equal(previewFontFamilyCommands.length, acceptedCommandCount);
@@ -1630,7 +1876,7 @@ async function main(): Promise<void> {
         snapshotId: 'g2a-mermaid-fallback',
         text: `\`\`\`mermaid\n${mermaidFallbackSource}\`\`\``,
         appearance: 'light',
-        environment: {}
+        environment: { previewFontFamily: '' }
       },
       sourceDocumentPath: 'C:/preview-reading-surface.md',
       outputFilePath: 'C:/preview-reading-surface.html',
@@ -1659,6 +1905,21 @@ async function main(): Promise<void> {
       assert.equal(exportFallback.source, mermaidFallbackSource);
       assert.ok(exportFallback.fontSize > 0 && exportFallback.lineHeight > 0, JSON.stringify(exportFallback));
       assert.ok(exportFallback.fragments > 1, JSON.stringify(exportFallback));
+
+      const injectionProbe = buildExportHtmlDocument({
+        title: 'Style raw-text DOM safety',
+        bodyHtml: '<p class="safe">safe</p>',
+        stylesCss: '.safe{color:rgb(0,128,0)}</StYlE><script data-meo-style-injection>globalThis.__meoInjected=true</script><style>',
+        target: 'html',
+        hasMermaid: false,
+        hasMath: false
+      });
+      await exportPage.setContent(injectionProbe, { waitUntil: 'domcontentloaded' });
+      assert.deepEqual(await exportPage.evaluate(() => ({
+        injectionNodes: document.querySelectorAll('[data-meo-style-injection]').length,
+        injected: (globalThis as typeof globalThis & { __meoInjected?: boolean }).__meoInjected === true,
+        color: getComputedStyle(document.querySelector<HTMLElement>('.safe')!).color
+      })), { injectionNodes: 0, injected: false, color: 'rgb(0, 128, 0)' });
     } finally {
       await exportPage.close();
     }

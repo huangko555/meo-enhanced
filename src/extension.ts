@@ -51,6 +51,7 @@ import { cleanupRetiredWorkspaceState } from './host/vscodeRetiredWorkspaceState
 import {
   normalizePreviewAppearance,
   normalizePreviewFontFamily,
+  normalizeStoredPreviewFontFamily,
   PREVIEW_APPEARANCE_STATE_KEY,
   PREVIEW_FONT_FAMILY_STATE_KEY,
   PREVIEW_SOURCE_COLORING_STATE_KEY,
@@ -563,7 +564,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   private getPreviewFontFamily(): string {
-    return normalizePreviewFontFamily(this.context.globalState.get(PREVIEW_FONT_FAMILY_STATE_KEY)) ?? '';
+    return normalizeStoredPreviewFontFamily(this.context.globalState.get(PREVIEW_FONT_FAMILY_STATE_KEY));
   }
 
   private async setPreviewFontFamily(fontFamily: string): Promise<void> {

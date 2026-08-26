@@ -60,6 +60,7 @@ async function main(): Promise<void> {
       target: 'html'
     }).html;
     const previewStyles = buildPreviewStyles({
+      previewFontFamily: '',
       liveFontFamily: 'Arial, sans-serif',
       editorFontSizePx: 16
     }, 'light');

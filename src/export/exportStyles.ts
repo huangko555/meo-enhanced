@@ -13,14 +13,14 @@ const styleValueInjectionPattern = /[\n\r;{}]/g;
 export type ExportStyleEnvironment = EditorStyleEnvironment;
 
 export function buildExportStyles(
-  environment: ExportStyleEnvironment = {},
+  environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'light'
 ): string {
   return buildReadingStyles(environment, appearance);
 }
 
 export function buildPreviewStyles(
-  environment: ExportStyleEnvironment = {},
+  environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'dark'
 ): string {
   return buildReadingStyles(environment, appearance);

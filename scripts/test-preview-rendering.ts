@@ -10,7 +10,8 @@ const markdownBlockBoundaryCases = [
 ] as const;
 const blockBoundaryPreviews = markdownBlockBoundaryCases.map((markdownText, index) => exportRuntime.renderPreviewDocument({
   markdownText,
-  sourceDocumentPath: `C:/tmp/preview-color-block-${index}.md`
+  sourceDocumentPath: `C:/tmp/preview-color-block-${index}.md`,
+  styleEnvironment: { previewFontFamily: '' }
 }));
 
 const previewColors = exportRuntime.renderPreviewDocument({
@@ -26,7 +27,8 @@ const previewColors = exportRuntime.renderPreviewDocument({
     'After unmatched #010203',
     escapedMultiBacktick
   ].join('\n'),
-  sourceDocumentPath: 'C:/tmp/preview-colors.md'
+  sourceDocumentPath: 'C:/tmp/preview-colors.md',
+  styleEnvironment: { previewFontFamily: '' }
 });
 const exportedColors = renderMarkdownToHtml({
   markdownText: 'Export keeps #abc as ordinary text',

@@ -1,5 +1,5 @@
 export type EditorStyleEnvironment = {
-  readonly previewFontFamily?: string;
+  readonly previewFontFamily: string;
   readonly editorFontFamily?: string;
   readonly editorFontSizePx?: number;
   readonly editorFontWeight?: string;
@@ -29,12 +29,11 @@ export type EditorStyleEnvironment = {
 export const MAX_PREVIEW_FONT_FAMILY_LENGTH = 128;
 
 export function normalizePreviewFontFamily(value: unknown): string | null {
-  if (value === undefined || value === null) return '';
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
   if (normalized.length > MAX_PREVIEW_FONT_FAMILY_LENGTH
     || /[\u0000-\u001f\u007f-\u009f]/u.test(normalized)
-    || /[,"\\;{}]/u.test(normalized)) return null;
+    || /[<>,"\\;{}]/u.test(normalized)) return null;
   return normalized;
 }
 
@@ -61,8 +60,10 @@ export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnviron
   if ('previewFontFamilyName' in value
     || 'previewFontFamilyFallback' in value
     || 'previewFontFamilies' in value) return null;
-  if (value.previewFontFamily !== undefined
-    && normalizePreviewFontFamily(value.previewFontFamily) === null) return null;
+  if (!Object.prototype.hasOwnProperty.call(value, 'previewFontFamily')
+    || typeof value.previewFontFamily !== 'string') return null;
+  const previewFontFamily = normalizePreviewFontFamily(value.previewFontFamily);
+  if (previewFontFamily === null) return null;
   for (const key of stringKeys) {
     if (value[key] !== undefined && typeof value[key] !== 'string') return null;
   }
@@ -83,7 +84,5 @@ export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnviron
           .some((key) => typeof palette[key] !== 'string')) return null;
     }
   }
-  return value.previewFontFamily === undefined
-    ? value as EditorStyleEnvironment
-    : { ...value, previewFontFamily: normalizePreviewFontFamily(value.previewFontFamily) as string };
+  return { ...value, previewFontFamily } as EditorStyleEnvironment;
 }

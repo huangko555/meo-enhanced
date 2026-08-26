@@ -117,8 +117,8 @@ for (const target of ['html', 'pdf'] as const) {
 assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html', appearance: 'light' }), null);
 assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html' })?.type, 'exportDocument');
 for (const invalid of [
-  { text: '# split', appearance: 'dark', environment: {} },
-  { snapshotId: 'request-1', text: '# split', environment: {} },
+  { text: '# split', appearance: 'dark', environment: { previewFontFamily: '' } },
+  { snapshotId: 'request-1', text: '# split', environment: { previewFontFamily: '' } },
   { snapshotId: 'request-1', text: '# split', appearance: 'dark' }
 ]) {
   assert.equal(decodeWebviewToHostMessage({

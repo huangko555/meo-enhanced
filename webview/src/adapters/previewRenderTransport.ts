@@ -18,7 +18,7 @@ export type PreviewRenderTransportOptions = {
 };
 
 export type PreviewRenderTransport = {
-  render(request: { readonly text: string; readonly environment?: PreviewStyleEnvironment }): Promise<PreviewRenderResolution>;
+  render(request: { readonly text: string; readonly environment: PreviewStyleEnvironment }): Promise<PreviewRenderResolution>;
   accept(response: PreviewRenderResponse): boolean;
   cancelAll(message?: string): void;
 };

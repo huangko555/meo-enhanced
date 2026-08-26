@@ -13,6 +13,7 @@ export type BuildExportHtmlDocumentOptions = {
 export function buildExportHtmlDocument(options: BuildExportHtmlDocumentOptions): string {
   const title = escapeHtml(options.title || 'Markdown Export');
   const exportTarget = escapeHtmlAttr(options.target);
+  const stylesCss = serializeStyleElementText(options.stylesCss);
   const baseTag = options.baseHref ? `<base href="${escapeHtmlAttr(options.baseHref)}" />` : '';
   const katexStylesTag = options.hasMath && options.katexStylesHref
     ? `<link rel="stylesheet" href="${escapeHtmlAttr(options.katexStylesHref)}" />`
@@ -32,7 +33,7 @@ export function buildExportHtmlDocument(options: BuildExportHtmlDocumentOptions)
     <title>${title}</title>
     ${baseTag}
     ${katexStylesTag}
-    <style>${options.stylesCss}</style>
+    <style>${stylesCss}</style>
   </head>
   <body data-meo-export-target="${exportTarget}">
     <div class="meo-export-page">
@@ -47,6 +48,10 @@ ${buildRuntimeScript(options.hasMermaid)}
     </script>
   </body>
 </html>`;
+}
+
+function serializeStyleElementText(value: string): string {
+  return value.replace(/<\/style/gi, '<\\/style');
 }
 
 function buildMathViewportRuntimeScript(): string {

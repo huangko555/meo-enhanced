@@ -22,7 +22,7 @@ const posted: WebviewToHostMessage[] = [];
 let currentText = '# first';
 let currentTextError: Error | null = null;
 let currentAppearance: 'light' | 'dark' = 'light';
-let currentEnvironment = { editorBackgroundColor: '#fff' };
+let currentEnvironment = { previewFontFamily: '', editorBackgroundColor: '#fff' };
 let idle = createDeferred();
 const adapter = createExportWebviewAdapter({
   postMessage(message) {
@@ -44,7 +44,7 @@ assert.equal(adapter.accept({ type: 'focusEditor' } as HostToWebviewMessage), fa
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-1' }), true);
 currentText = '# second';
 currentAppearance = 'dark';
-currentEnvironment = { editorBackgroundColor: '#111' };
+currentEnvironment = { previewFontFamily: '', editorBackgroundColor: '#111' };
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-2' }), true);
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-2' }), true);
 assert.equal(posted.length, 0);
@@ -65,7 +65,7 @@ assert.deepEqual(posted.splice(0), [
         snapshotId: 'snapshot-1',
         text: '# second',
         appearance: 'dark',
-        environment: { editorBackgroundColor: '#111' }
+        environment: { previewFontFamily: '', editorBackgroundColor: '#111' }
       }
     }
   },
@@ -78,7 +78,7 @@ assert.deepEqual(posted.splice(0), [
         snapshotId: 'snapshot-2',
         text: '# second',
         appearance: 'dark',
-        environment: { editorBackgroundColor: '#111' }
+        environment: { previewFontFamily: '', editorBackgroundColor: '#111' }
       }
     }
   }
@@ -126,7 +126,7 @@ posted.length = 0;
 idle = createDeferred();
 currentText = '# next request';
 currentAppearance = 'light';
-currentEnvironment = { editorBackgroundColor: '#fafafa' };
+currentEnvironment = { previewFontFamily: '', editorBackgroundColor: '#fafafa' };
 assert.equal(adapter.accept({ type: 'requestExportSnapshot', requestId: 'snapshot-next-request' }), true);
 idle.resolve();
 await Promise.resolve();
@@ -140,7 +140,7 @@ assert.deepEqual(posted.shift(), {
       snapshotId: 'snapshot-next-request',
       text: '# next request',
       appearance: 'light',
-      environment: { editorBackgroundColor: '#fafafa' }
+      environment: { previewFontFamily: '', editorBackgroundColor: '#fafafa' }
     }
   }
 });

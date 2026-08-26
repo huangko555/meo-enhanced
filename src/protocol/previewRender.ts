@@ -13,7 +13,7 @@ export type PreviewRenderRequest = {
   readonly type: 'requestPreviewRender';
   readonly requestId: string;
   readonly text: string;
-  readonly environment?: PreviewStyleEnvironment;
+  readonly environment: PreviewStyleEnvironment;
 };
 
 export type PreviewRenderValue = {
@@ -43,14 +43,14 @@ export function decodePreviewRenderRequest(value: unknown): PreviewRenderRequest
     || value.type !== 'requestPreviewRender'
     || !isNonEmptyString(value.requestId)
     || typeof value.text !== 'string') return null;
-  const environment = value.environment === undefined ? undefined : decodeEditorStyleEnvironment(value.environment);
-  if (value.environment !== undefined && environment === null) return null;
-  const request: PreviewRenderRequest = {
+  const environment = decodeEditorStyleEnvironment(value.environment);
+  if (environment === null) return null;
+  return {
     type: 'requestPreviewRender',
     requestId: value.requestId,
-    text: value.text
+    text: value.text,
+    environment
   };
-  return environment ? { ...request, environment } : request;
 }
 
 export function decodePreviewRenderResponse(value: unknown): PreviewRenderResponse | null {

@@ -1,3 +1,5 @@
+import { normalizePreviewFontFamily as normalizeProtocolPreviewFontFamily } from '../protocol/editorStyleEnvironment';
+
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
 export type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 
@@ -9,6 +11,10 @@ export {
   normalizePreviewFontFamily
 } from '../protocol/editorStyleEnvironment';
 
+export function normalizeStoredPreviewFontFamily(value: unknown): string {
+  return normalizeProtocolPreviewFontFamily(value) ?? '';
+}
+
 export function normalizePreviewAppearance(value: unknown): PreviewAppearance {
   return value === 'light' || value === 'dark' ? value : 'auto';
 }
@@ -16,7 +22,7 @@ export function normalizePreviewAppearance(value: unknown): PreviewAppearance {
 export type PreviewStyles = Record<ResolvedPreviewAppearance, string>;
 
 export type PreviewStyleEnvironment = {
-  previewFontFamily?: string;
+  previewFontFamily: string;
   editorFontFamily?: string;
   editorFontSizePx?: number;
   editorFontWeight?: string;

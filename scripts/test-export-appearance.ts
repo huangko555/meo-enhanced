@@ -6,6 +6,7 @@ const baseOptions = {
     text: '# Export appearance\n\n```mermaid\nflowchart LR\nA --> B\n```',
     appearance: 'light' as const,
     environment: {
+      previewFontFamily: '',
       editorBackgroundColor: '#20252b',
       editorForegroundColor: '#d8dee9',
       codeBlockBackgroundColor: '#171b20',

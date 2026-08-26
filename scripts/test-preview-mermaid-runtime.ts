@@ -133,6 +133,7 @@ try {
     target: 'html'
   });
   const styleEnvironment = {
+    previewFontFamily: '',
     editorBackgroundColor: '#20252b',
     editorForegroundColor: '#d8dee9'
   };

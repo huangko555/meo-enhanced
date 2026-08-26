@@ -70,10 +70,17 @@ assert.notEqual(decodeInitMessage({ ...completeInit, savedRevision: null }), nul
 assert.equal(decodeInitMessage({ ...completeInit, mode: 'bad' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewAppearance: 'broken' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewFontFamily: '  MEO Synthetic Sans  ' })?.previewFontFamily, 'MEO Synthetic Sans');
-for (const invalidFontFamily of ['MEO\nSynthetic', 'MEO\u0000Synthetic', 'x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)]) {
+for (const invalidFontFamily of [
+  'MEO\nSynthetic',
+  'MEO\u0000Synthetic',
+  'MEO<Synthetic',
+  'MEO>Synthetic',
+  'x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)
+]) {
   assert.equal(decodeInitMessage({ ...completeInit, previewFontFamily: invalidFontFamily }), null);
 }
-assert.equal(normalizePreviewFontFamily(undefined), '');
+assert.equal(normalizePreviewFontFamily(undefined), null);
+assert.equal(normalizePreviewFontFamily(null), null);
 assert.equal(normalizePreviewFontFamily('  MEO Synthetic Sans  '), 'MEO Synthetic Sans');
 assert.equal(normalizePreviewFontFamily('MEO\nSynthetic'), null);
 assert.equal(normalizePreviewFontFamily('x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)), null);
@@ -386,8 +393,16 @@ assert.deepEqual(decodePreviewRenderRequest({
   environment: { previewFontFamily: 'MEO Synthetic Sans', editorFontFamily: 'sans-serif', editorFontSizePx: 14, meoThemeColors: { base00: '#fff' } }
 });
 assert.equal(decodePreviewRenderRequest({
-  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', environment: { editorFontSizePx: '14' }
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  environment: { previewFontFamily: '', editorFontSizePx: '14' }
 }), null);
+assert.equal(decodePreviewRenderRequest({
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  environment: { editorFontFamily: 'sans-serif' }
+}), null, 'Preview render environments without previewFontFamily must be rejected');
+assert.equal(decodePreviewRenderRequest({
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview'
+}), null, 'Preview render requests without environment must be rejected');
 assert.equal(decodePreviewRenderRequest({
   type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
   environment: { previewFontFamily: 'MEO Synthetic Sans', previewFontFamilies: ['MEO Synthetic Sans'] }
@@ -428,7 +443,7 @@ const previewTransport = createPreviewRenderTransport((message) => { postedPrevi
     canceledPreviewTimeouts += 1;
   }
 });
-const renderedPreview = previewTransport.render({ text: '# Preview' });
+const renderedPreview = previewTransport.render({ text: '# Preview', environment: { previewFontFamily: '' } });
 const previewRequestId = (postedPreviewRequest as { requestId: string }).requestId;
 assert.match(previewRequestId, /^preview-\d+-0$/);
 assert.equal(previewTransport.accept({
@@ -440,7 +455,7 @@ assert.deepEqual(await renderedPreview, {
   ok: true, value: { html: '<h1>Preview</h1>', hasMermaid: false, styles: { dark: 'dark', light: 'light' } }
 });
 assert.equal(canceledPreviewTimeouts, 1);
-const timedOutPreview = previewTransport.render({ text: '# Timeout' });
+const timedOutPreview = previewTransport.render({ text: '# Timeout', environment: { previewFontFamily: '' } });
 const timedOutPreviewRequestId = (postedPreviewRequest as { requestId: string }).requestId;
 const triggerPreviewTimeout = scheduledPreviewTimeout as (() => void) | null;
 assert.notEqual(triggerPreviewTimeout, null);
@@ -454,10 +469,10 @@ assert.equal(previewTransport.accept({
   }
 }), false);
 const failedPreviewTransport = createPreviewRenderTransport(() => { throw new Error('transport unavailable'); });
-assert.deepEqual(await failedPreviewTransport.render({ text: '# Failed' }), {
+assert.deepEqual(await failedPreviewTransport.render({ text: '# Failed', environment: { previewFontFamily: '' } }), {
   ok: false, error: { code: 'operation-failed', message: 'transport unavailable' }
 });
-const canceledPreview = previewTransport.render({ text: '# Canceled' });
+const canceledPreview = previewTransport.render({ text: '# Canceled', environment: { previewFontFamily: '' } });
 const canceledPreviewRequestId = (postedPreviewRequest as { requestId: string }).requestId;
 previewTransport.cancelAll('Preview closed');
 assert.deepEqual(await canceledPreview, {
@@ -477,7 +492,7 @@ const protocolReadingSnapshot = {
   snapshotId: 'export-1',
   text: '# Export',
   appearance: 'dark' as const,
-  environment: { editorFontFamily: 'sans-serif' }
+  environment: { previewFontFamily: '', editorFontFamily: 'sans-serif' }
 };
 assert.deepEqual(decodeExportSnapshotResponse({
   type: 'exportSnapshotResult', requestId: 'export-1', result: {
@@ -499,9 +514,14 @@ assert.deepEqual(decodeExportSnapshotResponse({
 });
 assert.equal(decodeExportSnapshotResponse({
   type: 'exportSnapshotResult', requestId: 'export-1', result: {
-    ok: true, value: { ...protocolReadingSnapshot, environment: { liveLineHeight: '1.5' } }
+    ok: true, value: { ...protocolReadingSnapshot, environment: { previewFontFamily: '', liveLineHeight: '1.5' } }
   }
 }), null);
+assert.equal(decodeExportSnapshotResponse({
+  type: 'exportSnapshotResult', requestId: 'export-1', result: {
+    ok: true, value: { ...protocolReadingSnapshot, environment: { editorFontFamily: 'sans-serif' } }
+  }
+}), null, 'Export snapshots without previewFontFamily must be rejected');
 let postedExportRequest: unknown;
 let scheduledExportTimeout: (() => void) | null = null;
 let canceledExportTimeouts = 0;
@@ -608,6 +628,7 @@ assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 3 }), n
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 0 }), null);
 assert.equal(decodeEditorCommand({ type: 'setOutlineWidth', width: Number.NaN }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'MEO\nSynthetic' }), null);
+assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'MEO</style>Synthetic' }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1) }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', previewFontFamily: 'MEO Synthetic Sans' }), null);
 for (const event of [

@@ -251,7 +251,8 @@ export function createPreviewController({
   let pendingViewportRestore: PreviewViewportRestore | null = null;
   let acceptingViewportProjection: PreviewViewportProjectionSlot | null = null;
   let pendingText = '';
-  let latestRenderedText = '';
+  let latestAcceptedText: string | null = null;
+  let frameRenderedText: string | null = null;
   let latestPayload: PreviewRenderValue | null = null;
   const previewRenderTransport = createPreviewRenderTransport((message) => vscode.postMessage(message));
   const previewMermaidRenderer = createPreviewMermaidRenderer(
@@ -407,14 +408,19 @@ export function createPreviewController({
     status.textContent = message ?? '';
   };
 
-  const renderFrame = (viewportRestore: PreviewViewportRestore | null = null) => {
+  const renderFrame = (
+    renderedText: string,
+    viewportRestore: PreviewViewportRestore | null = null
+  ) => {
     if (disposed || !latestPayload) {
       return;
     }
+    const payload = latestPayload;
     const loadGeneration = frameGeneration + 1;
     frameGeneration = loadGeneration;
     mermaidPresentationGeneration += 1;
     activeFrameDocument = null;
+    frameRenderedText = null;
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
     const katexInlineStyles = collectPreviewKatexStyles(katexHref).replace(/<\/style/gi, '<\\/style');
     const katexStylesTag = katexInlineStyles
@@ -422,7 +428,7 @@ export function createPreviewController({
       : katexHref
         ? `<link rel="stylesheet" href="${escapeHtmlAttribute(katexHref)}">`
         : '';
-    const styles = latestPayload.styles[appearance].replace(/<\/style/gi, '<\\/style');
+    const styles = payload.styles[appearance].replace(/<\/style/gi, '<\\/style');
     frame.onload = () => {
       if (disposed || loadGeneration !== frameGeneration) return;
       const frameDocument = frame.contentDocument;
@@ -430,8 +436,9 @@ export function createPreviewController({
         return;
       }
       activeFrameDocument = frameDocument;
+      frameRenderedText = renderedText;
       const styleElement = frameDocument.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
-      if (styleElement && latestPayload) styleElement.textContent = latestPayload.styles[appearance];
+      if (styleElement) styleElement.textContent = payload.styles[appearance];
       const presentationGeneration = mermaidPresentationGeneration + 1;
       mermaidPresentationGeneration = presentationGeneration;
       const isCurrent = () => (
@@ -471,13 +478,13 @@ export function createPreviewController({
         onRendered?.();
       };
       finishRender();
-      if (latestPayload?.hasMermaid) {
+      if (payload.hasMermaid) {
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
       }
     };
     disposePreviewMathViewports();
     scrollToTopController.setScrollElement(null);
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${latestPayload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {
@@ -548,7 +555,11 @@ export function createPreviewController({
     } = {}
   ) => {
     if (disposed) return;
-    if (!force && latestPayload && text === latestRenderedText && frame.contentDocument?.querySelector('.meo-export-doc')) {
+    if (!force
+      && latestPayload
+      && text === latestAcceptedText
+      && text === frameRenderedText
+      && frame.contentDocument?.querySelector('.meo-export-doc')) {
       setStatus(null);
       onRendered?.();
       return;
@@ -558,6 +569,7 @@ export function createPreviewController({
       return;
     }
     const generation = requestGeneration + 1;
+    const requestText = text;
     requestGeneration = generation;
     hasPendingRequest = true;
     pendingViewportRestore = null;
@@ -575,12 +587,15 @@ export function createPreviewController({
         return;
       }
       latestPayload = result.value;
-      latestRenderedText = pendingText;
+      latestAcceptedText = requestText;
       setStatus(null);
       const viewportRestore = pendingViewportRestore;
       pendingViewportRestore = null;
-      if (preserveFrame && activeFrameDocument) applyAppearanceToFrame();
-      else renderFrame(viewportRestore);
+      if (preserveFrame && activeFrameDocument && frameRenderedText === requestText) {
+        applyAppearanceToFrame();
+      } else {
+        renderFrame(requestText, viewportRestore);
+      }
     });
   };
 
@@ -617,9 +632,8 @@ export function createPreviewController({
     }
     sourceColoring = enabled;
     updateSourceColoringControl();
-    if (latestPayload) {
-      const text = pendingText || latestRenderedText;
-      latestRenderedText = '';
+    const text = hasPendingRequest ? pendingText : latestAcceptedText;
+    if (text !== null) {
       requestRender(text, { force: true, preserveViewport: true });
     }
     if (post) vscode.postMessage({ type: 'setPreviewSourceColoring', enabled });
@@ -638,11 +652,14 @@ export function createPreviewController({
     fontFamilyPreference = nextFontFamily;
     fontFamilyInput.value = nextFontFamily;
     if (changed && (latestPayload || hasPendingRequest)) {
-      requestRender(pendingText || latestRenderedText, {
-        force: true,
-        preserveViewport: true,
-        preserveFrame: true
-      });
+      const text = hasPendingRequest ? pendingText : latestAcceptedText;
+      if (text !== null) {
+        requestRender(text, {
+          force: true,
+          preserveViewport: true,
+          preserveFrame: true
+        });
+      }
     }
     if (changed && post) vscode.postMessage({ type: 'setPreviewFontFamily', fontFamily: nextFontFamily });
   };
@@ -897,6 +914,7 @@ export function createPreviewController({
       mermaidPresentationGeneration += 1;
       previewMermaidRenderer.dispose();
       activeFrameDocument = null;
+      frameRenderedText = null;
       hasPendingRequest = false;
       pendingViewportRestore = null;
       previewRenderTransport.cancelAll('Preview closed');
