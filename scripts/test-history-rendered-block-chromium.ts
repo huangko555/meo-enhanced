@@ -397,6 +397,108 @@ async function runRunnerOwnedUnsupportedCleanupCase() {
   }
 }
 
+async function runMultiStepUnsupportedTerminalCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:40px;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1" style="margin-top:80px">
+          <button aria-label="Edit Mermaid in split view">Split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      for (const prototype of [HTMLElement.prototype, Element.prototype, Document.prototype, Window.prototype]) {
+        Reflect.deleteProperty(prototype, 'onscrollend');
+      }
+      const scroller = document.querySelector('.cm-scroller')!;
+      if ('onscrollend' in scroller) throw new Error('fixture could not establish unsupported scroll settlement');
+      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+    });
+    const evaluateHandle = page.evaluateHandle.bind(page);
+    let retainedLatestObserverHandle: any;
+    page.evaluateHandle = async (...args: any[]) => {
+      const handle = await evaluateHandle(...args);
+      retainedLatestObserverHandle = handle;
+      return handle;
+    };
+
+    const result = await runHistoryRenderedBlockChromiumInteraction(
+      page,
+      { kind: 'mermaid', lineNumber: 1, targetMode: 'source' },
+      '__historyMatrixEditor'
+    );
+    check(result.status === 'unsupported', 'multi-step runner did not terminate on first unsupported result');
+    check(result.evidence?.registrations === 0 && result.evidence.cleaned && result.evidence.sentinelRejected, 'multi-step unsupported result leaked observer registry');
+    const before = JSON.stringify(result.evidence);
+    await page.evaluate(() => {
+      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      document.querySelector('[role="group"]')?.setAttribute('aria-label', 'late multi-step mutation');
+    });
+    check(JSON.stringify(result.evidence) === before, 'multi-step unsupported evidence changed after late events');
+    let retainedHandleClosed = false;
+    try {
+      await retainedLatestObserverHandle.evaluate((observer: any) => observer.snapshot());
+    } catch {
+      retainedHandleClosed = true;
+    }
+    check(retainedHandleClosed, 'multi-step unsupported retained its latest observer JSHandle');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runMultiStepCompletedCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden">
+        <div role="group" aria-label="Mermaid block controls at line 1">
+          <button aria-label="Edit Mermaid in split view">Next mode</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      document.querySelector('button')!.addEventListener('click', (event) => {
+        const button = event.currentTarget as HTMLButtonElement;
+        const label = button.getAttribute('aria-label');
+        button.setAttribute(
+          'aria-label',
+          label === 'Edit Mermaid in split view' ? 'Show Mermaid code only' : 'Show Mermaid preview'
+        );
+      });
+    });
+    const evaluateHandle = page.evaluateHandle.bind(page);
+    let retainedLatestObserverHandle: any;
+    page.evaluateHandle = async (...args: any[]) => {
+      const handle = await evaluateHandle(...args);
+      retainedLatestObserverHandle = handle;
+      return handle;
+    };
+
+    const result = await runHistoryRenderedBlockChromiumInteraction(
+      page,
+      { kind: 'mermaid', lineNumber: 1, targetMode: 'source' },
+      '__historyMatrixEditor'
+    );
+    check(result.status === 'completed', 'normal multi-step runner did not complete');
+    check(result.evidence?.registrations === 0 && result.evidence.cleaned && result.evidence.sentinelRejected, 'normal multi-step result leaked observer registry');
+    check(await page.$eval('button', (button) => button.getAttribute('aria-label')) === 'Show Mermaid preview', 'normal multi-step runner stopped before source mode');
+    let retainedHandleClosed = false;
+    try {
+      await retainedLatestObserverHandle.evaluate((observer: any) => observer.snapshot());
+    } catch {
+      retainedHandleClosed = true;
+    }
+    check(retainedHandleClosed, 'normal multi-step runner retained its latest observer JSHandle');
+  } finally {
+    await browser.close();
+  }
+}
+
 async function runRunnerOwnedNoopCleanupCase() {
   const browser = await launchTestBrowser();
   try {
@@ -696,6 +798,8 @@ await runMaterializationFailureEvidenceCase();
 await runMaterializationHandoffEvidenceCase();
 await runMaterializationDisconnectCase();
 await runRunnerOwnedUnsupportedCleanupCase();
+await runMultiStepUnsupportedTerminalCase();
+await runMultiStepCompletedCase();
 await runRunnerOwnedNoopCleanupCase();
 await runRunnerOwnedPreOpeningFailureCase();
 await runRunnerOwnedDisconnectCleanupFailureCase();

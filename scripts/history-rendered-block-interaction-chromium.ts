@@ -681,6 +681,7 @@ export async function runHistoryRenderedBlockChromiumInteraction(
       }
       result = { ...result, evidence: runnerClosed.evidence };
     }
+    if (result.status === 'unsupported') return result;
     if (targetMode === interaction.targetMode) return result;
     try {
       observer = await openHistoryObserver(page, interaction, labels);
