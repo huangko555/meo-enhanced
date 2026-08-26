@@ -11,6 +11,10 @@ const longInlineFormula = `\\mathrm{${Array.from(
   { length: 192 },
   (_, index) => `INLINE${String(index).padStart(3, '0')}`
 ).join('')}}`;
+const mediumInlineFormula = `\\mathrm{${Array.from(
+  { length: 8 },
+  (_, index) => `MEDIUM${String(index).padStart(2, '0')}`
+).join('')}}`;
 const fencedControlFormula = 'x^2 + y^2 = z^2';
 const katexStylesHref = `data:text/css;base64,${Buffer.from(
   fs.readFileSync(path.resolve('node_modules/katex/dist/katex.min.css'), 'utf8')
@@ -20,6 +24,8 @@ const rendered = exportRuntime.renderExportHtmlDocument({
     snapshotId: 'math-layout',
     text: [
       'Short prefix $x + 1$ short suffix.',
+      '',
+      `Medium prefix $${mediumInlineFormula}$ medium suffix.`,
       '',
       `Prefix prose wraps before [safe link](https://example.com/safe) and $${longInlineFormula}$ then suffix prose wraps after the formula.`,
       '',
@@ -235,6 +241,57 @@ try {
         }
       }
     }
+  }
+
+  const lifecyclePage = await browser.newPage();
+  try {
+    await lifecyclePage.setViewport({ width: 1200, height: 720, deviceScaleFactor: 1 });
+    await lifecyclePage.goto(renderedUrl, { waitUntil: 'domcontentloaded' });
+    await lifecyclePage.waitForFunction(() => (window as ExportMathRuntimeWindow).__MEO_EXPORT_READY__ === true);
+    const initialNative = await lifecyclePage.evaluate(() => {
+      const paragraph = Array.from(document.querySelectorAll<HTMLParagraphElement>('p'))
+        .find((candidate) => candidate.textContent?.includes('Medium prefix'))!;
+      const root = paragraph.querySelector<HTMLElement>('.meo-export-math-inline')!;
+      const before = document.createElement('span');
+      const after = document.createElement('span');
+      before.style.cssText = after.style.cssText = 'display:inline-block;width:0;height:0;padding:0;margin:0;border:0;';
+      root.before(before);
+      root.after(after);
+      return {
+        html: root.innerHTML,
+        className: root.className,
+        canvasCount: root.querySelectorAll(':scope > .meo-export-math-canvas').length,
+        baselineDelta: Math.abs(before.getBoundingClientRect().bottom - after.getBoundingClientRect().bottom),
+        displayControllers: document.querySelectorAll('.meo-export-math-display > .meo-export-math-canvas').length
+      };
+    });
+    assert.equal(initialNative.canvasCount, 0, JSON.stringify(initialNative));
+    assert.equal(initialNative.className, 'meo-export-math meo-export-math-inline', JSON.stringify(initialNative));
+    assert.ok(initialNative.html.startsWith('<span class="katex"'), JSON.stringify(initialNative));
+    assert.ok(initialNative.baselineDelta <= 0.01, JSON.stringify(initialNative));
+    assert.equal(initialNative.displayControllers, 2, JSON.stringify(initialNative));
+
+    await lifecyclePage.setViewport({ width: 420, height: 720, deviceScaleFactor: 1 });
+    await lifecyclePage.evaluate(() => (window as ExportMathRuntimeWindow).__MEO_EXPORT_REFIT_MATH__?.());
+    const narrowed = await lifecyclePage.evaluate(async () => {
+      await (window as ExportMathRuntimeWindow).__MEO_EXPORT_REFIT_MATH__?.();
+      const paragraph = Array.from(document.querySelectorAll<HTMLParagraphElement>('p'))
+        .find((candidate) => candidate.textContent?.includes('Medium prefix'))!;
+      const root = paragraph.querySelector<HTMLElement>('.meo-export-math-inline')!;
+      const rootRect = root.getBoundingClientRect();
+      const baseRects = Array.from(root.querySelectorAll<HTMLElement>('.katex-html .base'))
+        .map((base) => base.getBoundingClientRect());
+      return {
+        canvasCount: root.querySelectorAll(':scope > .meo-export-math-canvas').length,
+        fits: Math.min(...baseRects.map((rect) => rect.left)) >= rootRect.left - 1
+          && Math.max(...baseRects.map((rect) => rect.right)) <= rootRect.right + 1,
+        pageOverflow: document.querySelector<HTMLElement>('.meo-export-doc')!.scrollWidth
+          - document.querySelector<HTMLElement>('.meo-export-doc')!.clientWidth
+      };
+    });
+    assert.deepEqual(narrowed, { canvasCount: 1, fits: true, pageOverflow: 0 }, JSON.stringify(narrowed));
+  } finally {
+    await lifecyclePage.close();
   }
 
   const refitPage = await browser.newPage();

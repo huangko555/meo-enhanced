@@ -18,6 +18,8 @@ type LatexMathViewportLayout =
   | { kind: 'block'; interactive: boolean }
   | { kind: 'inline' };
 
+type LatexMathViewportPhase = 'observing-native' | 'fitted';
+
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
@@ -60,6 +62,28 @@ function hasOnlyPositiveAxisAlignedTransforms(root: HTMLElement, ownerWindow: Wi
   return true;
 }
 
+function hasInlineContentOverflow(root: HTMLElement, ownerWindow: Window): boolean {
+  const rootRect = root.getBoundingClientRect();
+  const rootStyle = ownerWindow.getComputedStyle(root);
+  const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
+  const paddingRight = Number.parseFloat(rootStyle.paddingRight);
+  const leftBoundary = rootRect.left + paddingLeft;
+  const rightBoundary = rootRect.right - paddingRight;
+  const baseRects = Array.from(root.querySelectorAll<HTMLElement>('.katex-html .base'))
+    .map((base) => base.getBoundingClientRect());
+  if (
+    baseRects.length === 0 ||
+    ![paddingLeft, paddingRight, leftBoundary, rightBoundary].every(Number.isFinite) ||
+    paddingLeft < 0 ||
+    paddingRight < 0 ||
+    !baseRects.every((rect) => [rect.left, rect.right].every(Number.isFinite))
+  ) {
+    return false;
+  }
+  return Math.min(...baseRects.map((rect) => rect.left)) < leftBoundary - 1
+    || Math.max(...baseRects.map((rect) => rect.right)) > rightBoundary + 1;
+}
+
 function createControlButton(
   ownerDocument: Document,
   icon: typeof ZoomIn,
@@ -93,14 +117,8 @@ export function attachLatexMathViewport(
   const interactive = layout.kind === 'block' && layout.interactive;
   const ownerDocument = root.ownerDocument;
   const ownerWindow = ownerDocument.defaultView ?? window;
-  const canvas = ownerDocument.createElement('div');
-  canvas.className = 'meo-latex-math-canvas';
-  while (root.firstChild) {
-    canvas.appendChild(root.firstChild);
-  }
-  root.appendChild(canvas);
-  root.classList.add('meo-latex-math-viewport');
-  root.classList.toggle('is-interactive', interactive);
+  let canvas: HTMLElement | null = null;
+  let phase: LatexMathViewportPhase = layout.kind === 'inline' ? 'observing-native' : 'fitted';
 
   let fitScale = 1;
   let userZoom = 1;
@@ -109,15 +127,50 @@ export function attachLatexMathViewport(
   let measureFrame = 0;
   let destroyed = false;
 
+  let resizeObserver: ResizeObserver | null = null;
+  let observedMeasurementRoot: HTMLElement | null = null;
+
+  const attachCanvas = (): HTMLElement => {
+    if (canvas) return canvas;
+    canvas = ownerDocument.createElement('div');
+    canvas.className = 'meo-latex-math-canvas';
+    while (root.firstChild) {
+      canvas.appendChild(root.firstChild);
+    }
+    root.appendChild(canvas);
+    root.classList.add('meo-latex-math-viewport');
+    root.classList.toggle('is-interactive', interactive);
+    resizeObserver?.observe(canvas);
+    return canvas;
+  };
+
+  const restoreNativeInline = (): void => {
+    if (!canvas || layout.kind !== 'inline') return;
+    resizeObserver?.unobserve(canvas);
+    while (canvas.firstChild) {
+      root.insertBefore(canvas.firstChild, canvas);
+    }
+    canvas.remove();
+    canvas = null;
+    root.classList.remove('meo-latex-math-viewport', 'is-interactive');
+    phase = 'observing-native';
+  };
+
+  if (layout.kind === 'block') {
+    attachCanvas();
+  }
+
   const capturePresentation = (): LatexMathPresentationSnapshot => ({
-    fontSize: canvas.style.fontSize,
-    zoom: canvas.style.zoom,
+    fontSize: canvas?.style.fontSize ?? '',
+    zoom: canvas?.style.zoom ?? '',
     height: root.style.height
   });
 
   const restorePresentation = (snapshot: LatexMathPresentationSnapshot): void => {
-    canvas.style.fontSize = snapshot.fontSize;
-    canvas.style.zoom = snapshot.zoom;
+    if (canvas) {
+      canvas.style.fontSize = snapshot.fontSize;
+      canvas.style.zoom = snapshot.zoom;
+    }
     root.style.height = snapshot.height;
   };
 
@@ -126,6 +179,7 @@ export function attachLatexMathViewport(
     candidateFitScale: number,
     entryPresentation = capturePresentation()
   ): boolean => {
+    if (!canvas) return false;
     const candidateRenderedScale = candidateFitScale * userZoom;
     if (
       !isFinitePositive(candidateNaturalWidth) ||
@@ -194,14 +248,33 @@ export function attachLatexMathViewport(
     if (destroyed || !root.isConnected) {
       return;
     }
+    const measurementRoot = layout.kind === 'inline' ? root.parentElement : root;
+    if (resizeObserver && measurementRoot !== observedMeasurementRoot) {
+      if (observedMeasurementRoot && observedMeasurementRoot !== root) {
+        resizeObserver.unobserve(observedMeasurementRoot);
+      }
+      observedMeasurementRoot = measurementRoot;
+      if (observedMeasurementRoot && observedMeasurementRoot !== root) {
+        resizeObserver.observe(observedMeasurementRoot);
+      }
+    }
+    let transitionedFromNative = false;
+    if (layout.kind === 'inline' && phase === 'observing-native') {
+      if (!hasInlineContentOverflow(root, ownerWindow)) return;
+      attachCanvas();
+      phase = 'fitted';
+      transitionedFromNative = true;
+    }
+    if (!canvas) return;
     const entryPresentation = capturePresentation();
+    let committed = false;
     try {
       let effectiveScale = 1;
       let availableWidth = root.clientWidth - HORIZONTAL_PADDING;
       if (!interactive) {
-        const measurementRoot = layout.kind === 'inline' ? root.parentElement : root;
         if (!measurementRoot) {
           restorePresentation(entryPresentation);
+          if (transitionedFromNative) restoreNativeInline();
           return;
         }
         const rootStyle = ownerWindow.getComputedStyle(measurementRoot);
@@ -218,17 +291,20 @@ export function attachLatexMathViewport(
           !isFinitePositive(offsetWidth)
         ) {
           restorePresentation(entryPresentation);
+          if (transitionedFromNative) restoreNativeInline();
           return;
         }
         effectiveScale = rootRectWidth / offsetWidth;
       }
       if (!isFinitePositive(effectiveScale) || !isFinitePositive(availableWidth)) {
         restorePresentation(entryPresentation);
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
       availableWidth *= effectiveScale;
       if (!isFinitePositive(availableWidth)) {
         restorePresentation(entryPresentation);
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
 
@@ -241,18 +317,21 @@ export function attachLatexMathViewport(
         : fallbackNaturalWidth;
       if (!isFinitePositive(measuredNaturalWidth)) {
         restorePresentation(entryPresentation);
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
       const candidateFitScale = Math.min(1, availableWidth / measuredNaturalWidth);
       if (!isFinitePositive(candidateFitScale)) {
         restorePresentation(entryPresentation);
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
 
-      commitPresentation(measuredNaturalWidth, candidateFitScale, entryPresentation);
+      committed = commitPresentation(measuredNaturalWidth, candidateFitScale, entryPresentation);
     } catch {
       restorePresentation(entryPresentation);
     }
+    if (transitionedFromNative && !committed) restoreNativeInline();
   };
 
   const scheduleMeasure = () => {
@@ -262,11 +341,10 @@ export function attachLatexMathViewport(
     measureFrame = ownerWindow.requestAnimationFrame(measure);
   };
 
-  let resizeObserver: ResizeObserver | null = null;
   if (typeof ownerWindow.ResizeObserver !== 'undefined') {
     resizeObserver = new ownerWindow.ResizeObserver(scheduleMeasure);
     resizeObserver.observe(root);
-    resizeObserver.observe(canvas);
+    if (canvas) resizeObserver.observe(canvas);
   } else {
     ownerWindow.addEventListener('resize', scheduleMeasure);
   }
@@ -290,6 +368,7 @@ export function attachLatexMathViewport(
   }
 
   scheduleMeasure();
+  ownerDocument.fonts?.addEventListener('loadingdone', scheduleMeasure);
   void ownerDocument.fonts?.ready.then(scheduleMeasure);
 
   return {
@@ -302,6 +381,7 @@ export function attachLatexMathViewport(
       if (!resizeObserver) {
         ownerWindow.removeEventListener('resize', scheduleMeasure);
       }
+      ownerDocument.fonts?.removeEventListener('loadingdone', scheduleMeasure);
       controls?.remove();
     }
   };

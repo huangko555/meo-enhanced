@@ -54,7 +54,7 @@ function buildMathViewportRuntimeScript(): string {
 (() => {
   const ROOT_SELECTOR = '.meo-export-math-display, .meo-export-math-inline';
   const CANVAS_CLASS = 'meo-export-math-canvas';
-  const controllers = [];
+  const controllers = new Map();
   const AXIS_EPSILON = 0.000001;
 
   const isFinitePositive = (value) => Number.isFinite(value) && value > 0;
@@ -110,16 +110,37 @@ function buildMathViewportRuntimeScript(): string {
 
   const createController = (root) => {
     const layout = root.classList.contains('meo-export-math-inline') ? 'inline' : 'block';
-    let canvas = Array.from(root.children).find((child) => child.classList.contains(CANVAS_CLASS));
-    if (!canvas) {
+    let phase = layout === 'inline' ? 'observing-native' : 'fitted';
+    let canvas = null;
+    let resizeObserver = null;
+    let observedMeasurementRoot = null;
+
+    const attachCanvas = () => {
+      if (canvas) return canvas;
       canvas = document.createElement('div');
       canvas.className = CANVAS_CLASS;
       while (root.firstChild) {
         canvas.appendChild(root.firstChild);
       }
       root.appendChild(canvas);
-    }
-    root.classList.add('meo-latex-math-viewport');
+      root.classList.add('meo-latex-math-viewport');
+      if (resizeObserver) resizeObserver.observe(canvas);
+      return canvas;
+    };
+
+    const restoreNativeInline = () => {
+      if (!canvas || layout !== 'inline') return;
+      if (resizeObserver) resizeObserver.unobserve(canvas);
+      while (canvas.firstChild) {
+        root.insertBefore(canvas.firstChild, canvas);
+      }
+      canvas.remove();
+      canvas = null;
+      root.classList.remove('meo-latex-math-viewport');
+      phase = 'observing-native';
+    };
+
+    if (layout === 'block') attachCanvas();
 
     let frame = 0;
     const measure = () => {
@@ -129,9 +150,26 @@ function buildMathViewportRuntimeScript(): string {
       }
 
       const measurementRoot = layout === 'inline' ? root.parentElement : root;
+      if (resizeObserver && measurementRoot !== observedMeasurementRoot) {
+        if (observedMeasurementRoot && observedMeasurementRoot !== root) {
+          resizeObserver.unobserve(observedMeasurementRoot);
+        }
+        observedMeasurementRoot = measurementRoot;
+        if (observedMeasurementRoot && observedMeasurementRoot !== root) {
+          resizeObserver.observe(observedMeasurementRoot);
+        }
+      }
       if (!measurementRoot) {
         return;
       }
+      let transitionedFromNative = false;
+      if (layout === 'inline' && phase === 'observing-native') {
+        if (!hasInlineContentOverflow(root)) return;
+        attachCanvas();
+        phase = 'fitted';
+        transitionedFromNative = true;
+      }
+      if (!canvas) return;
       const rootStyle = getComputedStyle(measurementRoot);
       const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
       const paddingRight = Number.parseFloat(rootStyle.paddingRight);
@@ -146,11 +184,13 @@ function buildMathViewportRuntimeScript(): string {
         !isFinitePositive(offsetWidth) ||
         !isFinitePositive(localContentWidth)
       ) {
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
       const effectiveScale = rootRectWidth / offsetWidth;
       const availableWidth = localContentWidth * effectiveScale;
       if (!isFinitePositive(effectiveScale) || !isFinitePositive(availableWidth)) {
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
 
@@ -164,6 +204,7 @@ function buildMathViewportRuntimeScript(): string {
       if (!isFinitePositive(naturalWidth)) {
         canvas.style.fontSize = previousFontSize;
         canvas.style.zoom = previousZoom;
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
       const fitScale = Math.min(1, availableWidth / naturalWidth);
@@ -174,9 +215,16 @@ function buildMathViewportRuntimeScript(): string {
       if (!isFinitePositive(uncorrectedWidth) || !Number.isFinite(targetWidth) || targetWidth < 0) {
         canvas.style.fontSize = previousFontSize;
         canvas.style.zoom = previousZoom;
+        if (transitionedFromNative) restoreNativeInline();
         return;
       }
       const residualScale = Math.min(1, targetWidth / uncorrectedWidth);
+      if (!isFinitePositive(residualScale)) {
+        canvas.style.fontSize = previousFontSize;
+        canvas.style.zoom = previousZoom;
+        if (transitionedFromNative) restoreNativeInline();
+        return;
+      }
       canvas.style.zoom = String(residualScale);
     };
 
@@ -188,22 +236,21 @@ function buildMathViewportRuntimeScript(): string {
     };
 
     if (typeof ResizeObserver === 'function') {
-      new ResizeObserver(schedule).observe(root);
+      resizeObserver = new ResizeObserver(schedule);
+      resizeObserver.observe(root);
+      if (canvas) resizeObserver.observe(canvas);
     } else {
       window.addEventListener('resize', schedule);
     }
+    if (document.fonts) document.fonts.addEventListener('loadingdone', schedule);
 
     return { measure };
   };
 
   const initialize = () => {
-    if (controllers.length === 0) {
-      document.querySelectorAll(ROOT_SELECTOR).forEach((root) => {
-        if (hasInlineContentOverflow(root)) {
-          controllers.push(createController(root));
-        }
-      });
-    }
+    document.querySelectorAll(ROOT_SELECTOR).forEach((root) => {
+      if (!controllers.has(root)) controllers.set(root, createController(root));
+    });
   };
 
   const refit = async () => {

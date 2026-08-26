@@ -17,6 +17,10 @@ const longInlineFormula = `\\mathrm{${Array.from(
   { length: 192 },
   (_, index) => `INLINE${String(index).padStart(3, '0')}`
 ).join('')}}`;
+const mediumInlineFormula = `\\mathrm{${Array.from(
+  { length: 8 },
+  (_, index) => `MEDIUM${String(index).padStart(2, '0')}`
+).join('')}}`;
 const codeSource = `/* comment\n${longToken}\ncontinues */\n`;
 const mermaidFallbackSource = `invalid ${longToken}\n`;
 const mermaidWideSource = 'flowchart LR\n  wide_fit_start --> wide_fit_end\n';
@@ -95,6 +99,8 @@ const markdown = [
   '',
   'Short prefix $x + 1$ short suffix.',
   '',
+  `Medium prefix $${mediumInlineFormula}$ medium suffix.`,
+  '',
   `Prefix prose wraps before [safe link](https://example.com/safe) and $${longInlineFormula}$ then suffix prose wraps after the formula.`,
   '',
   'BROKEN_INLINE_SENTINEL $\\frac{',
@@ -136,8 +142,11 @@ type OpenLinkWaiterState = 'idle' | 'pending' | 'resolved' | 'rejected' | 'dispo
 async function assertPreviewMathMeasurementTransaction(page: import('puppeteer-core').Page): Promise<void> {
   const transaction = await page.evaluate(async () => {
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-    const runTransaction = async (selector: string) => {
-      const root = doc.querySelector<HTMLElement>(selector)!;
+    const runTransaction = async (selector: string, textSentinel?: string) => {
+      const root = textSentinel
+        ? Array.from(doc.querySelectorAll<HTMLElement>(selector))
+          .find((candidate) => candidate.textContent?.includes(textSentinel))!
+        : doc.querySelector<HTMLElement>(selector)!;
       const canvas = root.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
       const originalRect = canvas.getBoundingClientRect.bind(canvas);
       const stable = {
@@ -200,7 +209,7 @@ async function assertPreviewMathMeasurementTransaction(page: import('puppeteer-c
 
     return {
       display: await runTransaction('.meo-export-math-display:not(.meo-export-math-fenced-display)'),
-      inline: await runTransaction('.meo-export-math-inline.meo-latex-math-viewport')
+      inline: await runTransaction('.meo-export-math-inline.meo-latex-math-viewport', 'INLINE000')
     };
   });
 
@@ -412,6 +421,7 @@ async function main(): Promise<void> {
   let openLinkWaiter: ReturnType<typeof createOpenLinkWaiter> | null = null;
   try {
     const page = await browser.newPage();
+    await page.setViewport({ width: 1200, height: 700, deviceScaleFactor: 1 });
     await assertOpenLinkWaiterLifecycle(page.getDefaultTimeout());
     openLinkWaiter = createOpenLinkWaiter({
       timeoutMs: page.getDefaultTimeout(),
@@ -503,6 +513,76 @@ async function main(): Promise<void> {
       if (!(frame instanceof HTMLIFrameElement) || !frame.isConnected) return false;
       return frame.contentDocument?.querySelectorAll('.meo-export-math-fenced-display > .meo-latex-math-canvas').length === 1;
     }, {}, currentFrame);
+
+    const initialNative = await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+        .find((candidate) => candidate.textContent?.includes('Medium prefix'))!;
+      const root = paragraph.querySelector<HTMLElement>('.meo-export-math-inline')!;
+      const before = doc.createElement('span');
+      const after = doc.createElement('span');
+      before.style.cssText = after.style.cssText = 'display:inline-block;width:0;height:0;padding:0;margin:0;border:0;';
+      root.before(before);
+      root.after(after);
+      return {
+        html: root.innerHTML,
+        className: root.className,
+        canvasCount: root.querySelectorAll(':scope > .meo-latex-math-canvas').length,
+        baselineDelta: Math.abs(before.getBoundingClientRect().bottom - after.getBoundingClientRect().bottom),
+        scrollTop: doc.scrollingElement!.scrollTop
+      };
+    });
+    assert.equal(initialNative.canvasCount, 0, JSON.stringify(initialNative));
+    assert.equal(initialNative.className, 'meo-export-math meo-export-math-inline', JSON.stringify(initialNative));
+    assert.ok(initialNative.html.startsWith('<span class="katex"'), JSON.stringify(initialNative));
+    assert.ok(initialNative.baselineDelta <= 0.01, JSON.stringify(initialNative));
+
+    await page.setViewport({ width: 420, height: 700, deviceScaleFactor: 1 });
+    await page.waitForFunction((expectedFrame) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      if (frame !== expectedFrame) return false;
+      const paragraph = Array.from(frame.contentDocument!.querySelectorAll<HTMLParagraphElement>('p'))
+        .find((candidate) => candidate.textContent?.includes('Medium prefix'))!;
+      return paragraph.querySelectorAll(':scope .meo-export-math-inline > .meo-latex-math-canvas').length === 1;
+    }, {}, currentFrame);
+    await page.setViewport({ width: 421, height: 700, deviceScaleFactor: 1 });
+    await page.setViewport({ width: 420, height: 700, deviceScaleFactor: 1 });
+    const narrowed = await page.evaluate((expectedFrame) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+        .find((candidate) => candidate.textContent?.includes('Medium prefix'))!;
+      const root = paragraph.querySelector<HTMLElement>('.meo-export-math-inline')!;
+      const rootRect = root.getBoundingClientRect();
+      const baseRects = Array.from(root.querySelectorAll<HTMLElement>('.katex-html .base'))
+        .map((base) => base.getBoundingClientRect());
+      return {
+        sameFrame: frame === expectedFrame,
+        canvasCount: root.querySelectorAll(':scope > .meo-latex-math-canvas').length,
+        fits: Math.min(...baseRects.map((rect) => rect.left)) >= rootRect.left - 1
+          && Math.max(...baseRects.map((rect) => rect.right)) <= rootRect.right + 1,
+        pageOverflow: doc.querySelector<HTMLElement>('.meo-export-doc')!.scrollWidth
+          - doc.querySelector<HTMLElement>('.meo-export-doc')!.clientWidth,
+        scrollTop: doc.scrollingElement!.scrollTop
+      };
+    }, currentFrame);
+    assert.deepEqual(narrowed, {
+      sameFrame: true,
+      canvasCount: 1,
+      fits: true,
+      pageOverflow: 0,
+      scrollTop: initialNative.scrollTop
+    }, JSON.stringify(narrowed));
+    await page.setViewport({ width: 1200, height: 700, deviceScaleFactor: 1 });
+    await page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const paragraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+        .find((candidate) => candidate.textContent?.includes('Medium prefix'))!;
+      return paragraph.querySelectorAll(':scope .meo-export-math-inline > .meo-latex-math-canvas').length === 1
+        && doc.querySelector<HTMLElement>('.meo-export-doc')!.scrollWidth
+          - doc.querySelector<HTMLElement>('.meo-export-doc')!.clientWidth <= 1;
+    });
 
     const layoutCases = [1, 2].flatMap((deviceScaleFactor) => (
       [420, 1200].flatMap((width) => (
