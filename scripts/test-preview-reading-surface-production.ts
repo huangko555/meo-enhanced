@@ -125,6 +125,82 @@ const initMessage = {
 type PreviewOpenLink = { readonly type: 'openLink'; readonly href: string; readonly source: 'preview' };
 type OpenLinkWaiterState = 'idle' | 'pending' | 'resolved' | 'rejected' | 'disposed';
 
+async function assertPreviewMathMeasurementTransaction(page: import('puppeteer-core').Page): Promise<void> {
+  const transaction = await page.evaluate(async () => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const root = doc.querySelector<HTMLElement>('.meo-export-math-display:not(.meo-export-math-fenced-display)')!;
+    const canvas = root.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
+    const originalRect = canvas.getBoundingClientRect.bind(canvas);
+    const stable = {
+      fontSize: canvas.style.fontSize,
+      zoom: canvas.style.zoom,
+      height: root.style.height
+    };
+    const afterCanvasStyleTransaction = (mutate: () => void) => new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        observer.disconnect();
+        resolve();
+      });
+      observer.observe(canvas, { attributes: true, attributeFilter: ['style'] });
+      mutate();
+    });
+
+    canvas.getBoundingClientRect = () => ({ ...originalRect(), width: Number.NaN } as DOMRect);
+    Object.defineProperty(canvas, 'scrollWidth', { configurable: true, get: () => Number.NaN });
+    await afterCanvasStyleTransaction(() => {
+      root.style.width = 'calc(100% - 1px)';
+    });
+    const invalid = {
+      fontSize: canvas.style.fontSize,
+      zoom: canvas.style.zoom,
+      height: root.style.height,
+      invalidCss: /(?:NaN|Infinity)/i.test(`${canvas.style.cssText};${root.style.cssText}`)
+    };
+
+    canvas.getBoundingClientRect = originalRect;
+    delete (canvas as HTMLElement & { scrollWidth?: number }).scrollWidth;
+    await afterCanvasStyleTransaction(() => {
+      root.style.width = 'calc(100% - 2px)';
+    });
+    const recoveredRect = canvas.getBoundingClientRect();
+    const recoveredRootRect = root.getBoundingClientRect();
+    const recovered = {
+      fontSize: canvas.style.fontSize,
+      zoom: canvas.style.zoom,
+      height: root.style.height,
+      fits: recoveredRect.left >= recoveredRootRect.left - 1 && recoveredRect.right <= recoveredRootRect.right + 1
+    };
+
+    await afterCanvasStyleTransaction(() => {
+      root.style.width = '';
+    });
+    const finalRect = canvas.getBoundingClientRect();
+    const finalRootRect = root.getBoundingClientRect();
+    return {
+      stable,
+      invalid,
+      recovered,
+      final: {
+        fontSize: canvas.style.fontSize,
+        zoom: canvas.style.zoom,
+        height: root.style.height,
+        fits: finalRect.left >= finalRootRect.left - 1 && finalRect.right <= finalRootRect.right + 1
+      }
+    };
+  });
+
+  assert.deepEqual(
+    { fontSize: transaction.invalid.fontSize, zoom: transaction.invalid.zoom, height: transaction.invalid.height },
+    transaction.stable,
+    JSON.stringify(transaction)
+  );
+  assert.equal(transaction.invalid.invalidCss, false, JSON.stringify(transaction));
+  assert.equal(transaction.recovered.fits, true, JSON.stringify(transaction));
+  assert.notEqual(transaction.recovered.fontSize, '1em', JSON.stringify(transaction));
+  assert.equal(transaction.final.fits, true, JSON.stringify(transaction));
+  assert.notEqual(transaction.final.fontSize, '1em', JSON.stringify(transaction));
+}
+
 function createOpenLinkWaiter(options: {
   readonly timeoutMs: number;
   readonly scheduleTimeout: (callback: () => void, timeoutMs: number) => unknown;
@@ -945,6 +1021,9 @@ async function main(): Promise<void> {
       assert.ok(result.math.inline.text?.includes('x+1'));
       assert.equal(result.math.controls, 0);
       assert.ok(displayMath.every((root) => root.draggable === null));
+      if (width === 420 && zoom === 0.8 && deviceScaleFactor === 1) {
+        await assertPreviewMathMeasurementTransaction(page);
+      }
       assert.equal(result.images.semanticCount, 6);
       assert.deepEqual(result.images.loaded.map((image) => ({
         alt: image.alt,

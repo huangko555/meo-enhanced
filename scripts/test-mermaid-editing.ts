@@ -15,6 +15,82 @@ async function waitForFrames(page: Page, count = 8): Promise<void> {
   }, count);
 }
 
+async function assertInitialInteractiveMathMeasurementStaysVisible(page: Page): Promise<void> {
+  const result = await page.evaluate(() => new Promise<{
+    rootClientWidth: number;
+    canvasWidth: number;
+    fontSize: string;
+    zoom: string;
+  }>((resolve, reject) => {
+    const host = document.createElement('div');
+    host.id = 'initial-interactive-math-probe';
+    host.style.width = '16px';
+    const style = document.createElement('style');
+    style.textContent = `
+      #initial-interactive-math-probe .meo-latex-math-viewport {
+        width: 16px !important;
+        max-width: 16px !important;
+      }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(host);
+    const editor = (window as any).MermaidEditingHarness.createEditor({
+      parent: host,
+      text: ['$$', String.raw`\frac{a+b}{c+d}`, '$$'].join('\n'),
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+    const cleanup = () => {
+      editor.destroy();
+      host.remove();
+      style.remove();
+    };
+    const hostObserver = new MutationObserver(() => {
+      const canvas = host.querySelector<HTMLElement>('.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas');
+      if (!canvas) return;
+      hostObserver.disconnect();
+      const root = canvas.parentElement!;
+      const measurementObserved = new Promise<void>((resolveMeasurement) => {
+        Object.defineProperty(root, 'clientWidth', {
+          configurable: true,
+          get: () => {
+            resolveMeasurement();
+            return 16;
+          }
+        });
+      });
+      void measurementObserved.then(() => {
+        const measured = {
+          rootClientWidth: 16,
+          canvasWidth: canvas.getBoundingClientRect().width,
+          fontSize: canvas.style.fontSize,
+          zoom: canvas.style.zoom
+        };
+        delete (root as HTMLElement & { clientWidth?: number }).clientWidth;
+        cleanup();
+        resolve(measured);
+      }).catch((error: unknown) => {
+        delete (root as HTMLElement & { clientWidth?: number }).clientWidth;
+        cleanup();
+        reject(error);
+      });
+    });
+    hostObserver.observe(host, { childList: true, subtree: true });
+    const modeButton = host.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
+    if (!modeButton) {
+      hostObserver.disconnect();
+      cleanup();
+      reject(new Error('Initial interactive LaTeX probe did not expose its public mode button'));
+      return;
+    }
+    modeButton.click();
+  }));
+
+  if (result.rootClientWidth > 16 || result.canvasWidth <= 0 || result.zoom === '0') {
+    throw new Error(`Initial interactive LaTeX measurement hid natural content: ${JSON.stringify(result)}`);
+  }
+}
+
 async function assertEmbeddedMermaidUsesButtonOnlyNavigation(page: Page): Promise<void> {
   const wrapperSelector = '.meo-mermaid-block .meo-mermaid-svg-wrapper';
   await page.waitForFunction((selector) => {
@@ -902,6 +978,7 @@ async function main() {
         onApplyChanges() {}
       });
     });
+    await assertInitialInteractiveMathMeasurementStaysVisible(page);
     await waitForFrames(page);
 
     const defaultMode = await page.evaluate(() => ({

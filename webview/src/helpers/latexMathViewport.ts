@@ -15,6 +15,12 @@ const HORIZONTAL_PADDING = 16;
 const MIN_PREVIEW_HEIGHT = 24;
 const AXIS_EPSILON = 0.000001;
 
+type LatexMathPresentationSnapshot = {
+  fontSize: string;
+  zoom: string;
+  height: string;
+};
+
 function isFinitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
@@ -89,32 +95,79 @@ export function attachLatexMathViewport(
   let measureFrame = 0;
   let destroyed = false;
 
-  const applyTransform = () => {
-    const previousFontSize = canvas.style.fontSize;
-    const previousZoom = canvas.style.zoom;
-    renderedScale = fitScale * userZoom;
-    canvas.style.zoom = '1';
-    canvas.style.fontSize = `${renderedScale}em`;
+  const capturePresentation = (): LatexMathPresentationSnapshot => ({
+    fontSize: canvas.style.fontSize,
+    zoom: canvas.style.zoom,
+    height: root.style.height
+  });
 
-    // Chromium enforces a minimum rendered font size in some hosts. Font-size
-    // scaling remains sharp above that floor; zoom only supplies the residual
-    // scale needed below it so an unusually wide formula still fits.
-    const uncorrectedWidth = canvas.getBoundingClientRect().width;
-    const targetWidth = naturalWidth * renderedScale;
-    if (!isFinitePositive(uncorrectedWidth) || !Number.isFinite(targetWidth) || targetWidth < 0) {
-      canvas.style.fontSize = previousFontSize;
-      canvas.style.zoom = previousZoom;
-      return;
+  const restorePresentation = (snapshot: LatexMathPresentationSnapshot): void => {
+    canvas.style.fontSize = snapshot.fontSize;
+    canvas.style.zoom = snapshot.zoom;
+    root.style.height = snapshot.height;
+  };
+
+  const commitPresentation = (
+    candidateNaturalWidth: number,
+    candidateFitScale: number,
+    entryPresentation = capturePresentation()
+  ): boolean => {
+    const candidateRenderedScale = candidateFitScale * userZoom;
+    if (
+      !isFinitePositive(candidateNaturalWidth) ||
+      !isFinitePositive(candidateFitScale) ||
+      !isFinitePositive(candidateRenderedScale)
+    ) {
+      restorePresentation(entryPresentation);
+      return false;
     }
-    const residualScale = Math.min(1, targetWidth / uncorrectedWidth);
-    canvas.style.zoom = `${residualScale}`;
 
-    if (!interactive) {
-      const renderedHeight = canvas.getBoundingClientRect().height;
-      if (Number.isFinite(renderedHeight) && renderedHeight >= 0) {
-        root.style.height = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(renderedHeight))}px`;
+    try {
+      canvas.style.zoom = '1';
+      canvas.style.fontSize = `${candidateRenderedScale}em`;
+
+      // Chromium enforces a minimum rendered font size in some hosts. Font-size
+      // scaling remains sharp above that floor; zoom only supplies the residual
+      // scale needed below it so an unusually wide formula still fits.
+      const uncorrectedWidth = canvas.getBoundingClientRect().width;
+      const targetWidth = candidateNaturalWidth * candidateRenderedScale;
+      if (!isFinitePositive(uncorrectedWidth) || !isFinitePositive(targetWidth)) {
+        restorePresentation(entryPresentation);
+        return false;
       }
+      const residualScale = Math.min(1, targetWidth / uncorrectedWidth);
+      if (!isFinitePositive(residualScale)) {
+        restorePresentation(entryPresentation);
+        return false;
+      }
+      canvas.style.zoom = `${residualScale}`;
+
+      let candidateHeight: string | null = null;
+      if (!interactive) {
+        const renderedHeight = canvas.getBoundingClientRect().height;
+        if (!isFinitePositive(renderedHeight)) {
+          restorePresentation(entryPresentation);
+          return false;
+        }
+        candidateHeight = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(renderedHeight))}px`;
+      }
+
+      if (candidateHeight !== null) {
+        root.style.height = candidateHeight;
+      }
+      naturalWidth = candidateNaturalWidth;
+      fitScale = candidateFitScale;
+      renderedScale = candidateRenderedScale;
+      return true;
+    } catch {
+      restorePresentation(entryPresentation);
+      return false;
     }
+  };
+
+  const applyTransform = () => {
+    const entryPresentation = capturePresentation();
+    commitPresentation(naturalWidth, fitScale, entryPresentation);
   };
 
   const reset = () => {
@@ -127,46 +180,60 @@ export function attachLatexMathViewport(
     if (destroyed || !root.isConnected) {
       return;
     }
-    let effectiveScale = 1;
-    let availableWidth = root.clientWidth - HORIZONTAL_PADDING;
-    if (!interactive) {
-      const rootStyle = ownerWindow.getComputedStyle(root);
-      const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
-      const paddingRight = Number.parseFloat(rootStyle.paddingRight);
-      const rootRectWidth = root.getBoundingClientRect().width;
-      const offsetWidth = root.offsetWidth;
-      availableWidth = root.clientWidth - paddingLeft - paddingRight;
-      if (
-        !hasOnlyPositiveAxisAlignedTransforms(root, ownerWindow) ||
-        !Number.isFinite(paddingLeft) || paddingLeft < 0 ||
-        !Number.isFinite(paddingRight) || paddingRight < 0 ||
-        !isFinitePositive(rootRectWidth) ||
-        !isFinitePositive(offsetWidth) ||
-        !isFinitePositive(availableWidth)
-      ) {
-        return;
+    const entryPresentation = capturePresentation();
+    try {
+      let effectiveScale = 1;
+      let availableWidth = root.clientWidth - HORIZONTAL_PADDING;
+      if (!interactive) {
+        const rootStyle = ownerWindow.getComputedStyle(root);
+        const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
+        const paddingRight = Number.parseFloat(rootStyle.paddingRight);
+        const rootRectWidth = root.getBoundingClientRect().width;
+        const offsetWidth = root.offsetWidth;
+        availableWidth = root.clientWidth - paddingLeft - paddingRight;
+        if (
+          !hasOnlyPositiveAxisAlignedTransforms(root, ownerWindow) ||
+          !Number.isFinite(paddingLeft) || paddingLeft < 0 ||
+          !Number.isFinite(paddingRight) || paddingRight < 0 ||
+          !isFinitePositive(rootRectWidth) ||
+          !isFinitePositive(offsetWidth)
+        ) {
+          restorePresentation(entryPresentation);
+          return;
+        }
+        effectiveScale = rootRectWidth / offsetWidth;
       }
-      effectiveScale = rootRectWidth / offsetWidth;
-      if (!isFinitePositive(effectiveScale)) {
+      if (!isFinitePositive(effectiveScale) || !isFinitePositive(availableWidth)) {
+        restorePresentation(entryPresentation);
         return;
       }
       availableWidth *= effectiveScale;
-    }
+      if (!isFinitePositive(availableWidth)) {
+        restorePresentation(entryPresentation);
+        return;
+      }
 
-    canvas.style.zoom = '1';
-    canvas.style.fontSize = '1em';
-    const naturalRectWidth = canvas.getBoundingClientRect().width;
-    const fallbackNaturalWidth = canvas.scrollWidth * effectiveScale;
-    const measuredNaturalWidth = isFinitePositive(naturalRectWidth)
-      ? naturalRectWidth
-      : fallbackNaturalWidth;
-    if (!isFinitePositive(measuredNaturalWidth) || !isFinitePositive(availableWidth)) {
-      applyTransform();
-      return;
+      canvas.style.zoom = '1';
+      canvas.style.fontSize = '1em';
+      const naturalRectWidth = canvas.getBoundingClientRect().width;
+      const fallbackNaturalWidth = canvas.scrollWidth * effectiveScale;
+      const measuredNaturalWidth = isFinitePositive(naturalRectWidth)
+        ? naturalRectWidth
+        : fallbackNaturalWidth;
+      if (!isFinitePositive(measuredNaturalWidth)) {
+        restorePresentation(entryPresentation);
+        return;
+      }
+      const candidateFitScale = Math.min(1, availableWidth / measuredNaturalWidth);
+      if (!isFinitePositive(candidateFitScale)) {
+        restorePresentation(entryPresentation);
+        return;
+      }
+
+      commitPresentation(measuredNaturalWidth, candidateFitScale, entryPresentation);
+    } catch {
+      restorePresentation(entryPresentation);
     }
-    naturalWidth = measuredNaturalWidth;
-    fitScale = Math.min(1, availableWidth / naturalWidth);
-    applyTransform();
   };
 
   const scheduleMeasure = () => {
