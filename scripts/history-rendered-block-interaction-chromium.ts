@@ -98,6 +98,17 @@ async function openHistoryObserver(
         connected: element.isConnected,
         rect: rectOf(element)
       });
+      const describeHitStack = (point: { readonly x: number; readonly y: number }) => (
+        document.elementsFromPoint(point.x, point.y).slice(0, 10).map((element) => ({
+          ...describeElement(element),
+          position: getComputedStyle(element).position,
+          zIndex: getComputedStyle(element).zIndex,
+          pointerEvents: getComputedStyle(element).pointerEvents,
+          opacity: getComputedStyle(element).opacity,
+          transform: getComputedStyle(element).transform,
+          actualGroup: element.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
+        }))
+      );
       const groupsIn = (node: Node) => {
         if (!(node instanceof Element)) return [];
         return [
@@ -156,11 +167,14 @@ async function openHistoryObserver(
         const hit = rect
           ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
           : null;
+        const point = rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+        const targetHit = Boolean(target && hit && (hit === target || target.contains(hit)));
         return {
           currentModeLabels,
           targetConnected: Boolean(target?.isConnected),
           targetRect: rect ? rectOf(target) : null,
-          targetHit: Boolean(target && hit && (hit === target || target.contains(hit))),
+          targetHit,
+          elementsFromPoint: !targetHit && point ? describeHitStack(point) : [],
           hitTarget: hit ? {
             tag: hit.tagName.toLowerCase(),
             ariaLabel: hit.getAttribute('aria-label'),
@@ -194,6 +208,7 @@ async function openHistoryObserver(
           identityCurrent,
           geometryCurrent,
           targetHit,
+          elementsFromPoint: targetHit ? [] : describeHitStack(pointer.point),
           hitTarget: hit instanceof Element ? {
             tag: hit.tagName.toLowerCase(),
             ariaLabel: hit.getAttribute('aria-label'),

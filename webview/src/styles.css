@@ -2185,6 +2185,21 @@ body {
   position: static;
 }
 
+.meo-latex-math-toolbar {
+  pointer-events: none;
+}
+
+.meo-latex-math-toolbar.is-block-hovered,
+.meo-latex-math-toolbar:focus-within {
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .meo-latex-math-toolbar {
+    pointer-events: auto;
+  }
+}
+
 .meo-mermaid-mode-btn,
 .meo-latex-math-mode-btn {
   display: inline-flex;

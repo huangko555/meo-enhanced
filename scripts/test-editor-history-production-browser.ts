@@ -15,6 +15,174 @@ async function waitForFrames(page: any, count = 8): Promise<void> {
   }, count);
 }
 
+async function assertFormulaToolbarHistoryHitability(page: any): Promise<void> {
+  const formulaText = [
+    ...Array.from({ length: 72 }, (_, index) => `formula history line ${index + 1}`),
+    '$$',
+    'x = 1',
+    '$$',
+    'formula history tail'
+  ].join('\n');
+  await page.evaluate((text) => {
+    const previous = (window as any).__historyProductionEditor;
+    previous?.destroy();
+    document.getElementById('app')!.replaceChildren();
+    (window as any).__historyProductionEditor = (window as any).MermaidEditingHarness.createEditor({
+      parent: document.getElementById('app')!,
+      text,
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+  }, formulaText);
+  await waitForFrames(page, 12);
+
+  const formulaLine = await page.evaluate(() => {
+    const editor = (window as any).__historyProductionEditor;
+    const lineNumber = editor.getText().split('\n').findIndex((line: string) => line.trim() === '$$') + 1;
+    if (lineNumber > 0) return lineNumber;
+    throw new Error('Missing Formula opening line in History hitability fixture');
+  });
+  const readTarget = () => page.evaluate((lineNumber) => {
+    const group = document.querySelector<HTMLElement>(
+      `[role="group"][aria-label="Formula block controls at line ${lineNumber}"]`
+    );
+    const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+      .find((candidate) => {
+        const label = candidate.getAttribute('aria-label');
+        return label === 'Edit formula in split view'
+          || label === 'Show formula source only'
+          || label === 'Show formula preview';
+      }) ?? null;
+    const rect = button?.getBoundingClientRect() ?? null;
+    return {
+      connected: Boolean(group?.isConnected && button?.isConnected),
+      mode: button?.getAttribute('aria-label') ?? null,
+      point: rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
+    };
+  }, formulaLine);
+  const readMode = () => page.evaluate((lineNumber) => {
+    const group = document.querySelector<HTMLElement>(
+      `[role="group"][aria-label="Formula block controls at line ${lineNumber}"]`
+    );
+    return Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+      .map((button) => button.getAttribute('aria-label'))
+      .find((label) => label === 'Edit formula in split view'
+        || label === 'Show formula source only'
+        || label === 'Show formula preview') ?? null;
+  }, formulaLine);
+
+  await page.evaluate((lineNumber) => (window as any).__historyProductionEditor.scrollToLine(lineNumber, 'center'), formulaLine);
+  await waitForFrames(page, 8);
+  const firstButton = await readTarget();
+  if (!firstButton.connected || !firstButton.point) throw new Error('Formula toolbar disappeared after initial scroll');
+  await page.click('.cm-content');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('End');
+  await page.keyboard.up('Control');
+  await page.keyboard.type(' HISTORY_EDIT');
+  await waitForFrames(page, 8);
+  const editedText = await page.evaluate(() => (window as any).__historyProductionEditor.getText());
+  if (!editedText.endsWith('formula history tail HISTORY_EDIT')) {
+    throw new Error(`Formula History fixture did not accept the real outer edit: ${JSON.stringify(editedText.slice(-48))}`);
+  }
+  const replay = await page.evaluate(async () => {
+    const editor = (window as any).__historyProductionEditor;
+    const undone = await editor.undo();
+    const redone = await editor.redo();
+    return { undone, redone };
+  });
+  assert.deepEqual(replay, { undone: true, redone: true }, 'Formula History chain did not replay through the public editor contract');
+  await waitForFrames(page, 12);
+  await page.evaluate((lineNumber) => (window as any).__historyProductionEditor.scrollToLine(lineNumber, 'center'), formulaLine);
+  await waitForFrames(page, 8);
+
+  await page.mouse.move(5, 5);
+  await waitForFrames(page, 2);
+  const freshBeforeMove = await readTarget();
+  if (!freshBeforeMove.connected || !freshBeforeMove.point) {
+    throw new Error('Formula toolbar did not fresh-reacquire after History replay');
+  }
+  const hiddenState = await page.evaluate((point) => {
+    const group = document.querySelector<HTMLElement>('[role="group"][aria-label^="Formula block controls at line "]');
+    const hit = document.elementFromPoint(point.x, point.y);
+    const stack = document.elementsFromPoint(point.x, point.y).slice(0, 8).map((element) => ({
+      tag: element.tagName.toLowerCase(),
+      ariaLabel: element.getAttribute('aria-label'),
+      role: element.getAttribute('role'),
+      actualGroup: element.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
+    }));
+    return {
+      targetHit: Boolean(group && hit && group.contains(hit)),
+      stack
+    };
+  }, freshBeforeMove.point);
+  if (hiddenState.targetHit) {
+    throw new Error(`Hidden Formula toolbar intercepted a pointer before hover: ${JSON.stringify(hiddenState)}`);
+  }
+
+  await page.mouse.move(freshBeforeMove.point.x, freshBeforeMove.point.y);
+  const hitAfterMove = await page.evaluate(({ lineNumber, point }) => {
+    const group = document.querySelector<HTMLElement>(
+      `[role="group"][aria-label="Formula block controls at line ${lineNumber}"]`
+    );
+    const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+      .find((candidate) => {
+        const label = candidate.getAttribute('aria-label');
+        return label === 'Edit formula in split view'
+          || label === 'Show formula source only'
+          || label === 'Show formula preview';
+      }) ?? null;
+    const currentButton = button?.closest<HTMLElement>('[role="group"]') === group ? button : null;
+    const hit = document.elementFromPoint(point.x, point.y);
+    const stack = document.elementsFromPoint(point.x, point.y).slice(0, 10).map((element) => ({
+      tag: element.tagName.toLowerCase(),
+      ariaLabel: element.getAttribute('aria-label'),
+      role: element.getAttribute('role'),
+      actualGroup: element.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
+    }));
+    return {
+      connected: Boolean(group?.isConnected && button?.isConnected),
+      currentButton: button === currentButton,
+      targetHit: Boolean(button && hit && (hit === button || button.contains(hit))),
+      stack
+    };
+  }, { lineNumber: formulaLine, point: freshBeforeMove.point });
+  if (!hitAfterMove.connected || !hitAfterMove.currentButton || !hitAfterMove.targetHit) {
+    throw new Error(`Fresh Formula toolbar did not become the browser hit target after real mouse movement: ${JSON.stringify(hitAfterMove)}`);
+  }
+
+  const beforeClick = await readMode();
+  await page.mouse.down();
+  await page.mouse.up();
+  await waitForFrames(page, 8);
+  const afterMouseClick = await readMode();
+  if (!beforeClick || !afterMouseClick || beforeClick === afterMouseClick) {
+    throw new Error(`Real Formula toolbar click did not advance its mode: ${JSON.stringify({ beforeClick, afterMouseClick })}`);
+  }
+
+  const keyboardBefore = await readTarget();
+  if (!keyboardBefore.connected) throw new Error('Formula toolbar disappeared before keyboard semantic check');
+  await page.evaluate((lineNumber) => {
+    const group = document.querySelector<HTMLElement>(
+      `[role="group"][aria-label="Formula block controls at line ${lineNumber}"]`
+    );
+    const button = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? [])
+      .find((candidate) => {
+        const label = candidate.getAttribute('aria-label');
+        return label === 'Edit formula in split view'
+          || label === 'Show formula source only'
+          || label === 'Show formula preview';
+      });
+    button?.focus();
+  }, formulaLine);
+  await page.keyboard.press('Enter');
+  await waitForFrames(page, 8);
+  const keyboardAfter = await readMode();
+  if (!keyboardAfter || keyboardAfter === afterMouseClick) {
+    throw new Error(`Keyboard activation did not advance the Formula toolbar mode: ${JSON.stringify({ afterMouseClick, keyboardAfter })}`);
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-editing-entry.ts')],
@@ -249,6 +417,7 @@ async function main(): Promise<void> {
       sourceRedo: { source: true, head: 24, focused: true }
     });
 
+    await assertFormulaToolbarHistoryHitability(page);
     await page.evaluate(() => (window as any).__historyProductionEditor.destroy());
   } finally {
     await browser.close();
