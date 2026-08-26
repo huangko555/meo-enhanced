@@ -151,6 +151,9 @@ async function runPublicFailureEvidenceCase() {
       && entry.actualGroup?.ariaLabel === 'Mermaid block controls at line 1'
       && entry.actualGroup?.isTarget
     )), 'public evidence omitted semantic target group identity');
+    check(events.filter((entry: any) => entry.type === 'pointerdown').length === 1, 'public evidence repeated pointerdown');
+    check(events.filter((entry: any) => entry.type === 'pointerup').length === 1, 'public evidence repeated pointerup');
+    check(events.filter((entry: any) => entry.type === 'click').length === 1, 'public evidence repeated click');
     check(events.every((entry: any) => Array.isArray(entry.currentModeLabels)), 'event evidence omitted current mode labels');
     check(events.every((entry: any) => entry.targetRect && typeof entry.targetHit === 'boolean'), 'event evidence omitted target rect/hit');
     check(Array.isArray(evidence.labelChanges) && evidence.labelChanges.some((entry: any) => (
@@ -202,7 +205,8 @@ async function runMissingSemanticClickCase() {
     check(!String(failure.primary).includes('incorrectly entered target wait'), 'missing semantic click waited for a label transition');
     const evidence = failure.evidence as any;
     const events = evidence.events.map((entry: string) => JSON.parse(entry));
-    check(events.some((entry: any) => entry.type === 'click' && !entry.semanticTarget), 'missing semantic click evidence was not retained');
+    check(events.every((entry: any) => entry.type !== 'pointerdown' && entry.type !== 'click'), 'missing semantic target consumed a pointer gesture');
+    check(!evidence.current?.targetHit, 'missing semantic target evidence omitted the hit mismatch');
     check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'missing-click evidence leaked observer lifecycle');
   } finally {
     await browser.close();
@@ -248,12 +252,74 @@ async function runSameLabelDifferentGroupCase() {
     check(!String(failure.primary).includes('incorrectly entered target wait'), 'different-group click entered target settlement');
     const evidence = failure.evidence as any;
     const events = evidence.events.map((entry: string) => JSON.parse(entry));
-    check(events.some((entry: any) => (
-      entry.type === 'click'
-      && !entry.semanticTarget
-      && entry.actualGroup?.ariaLabel === 'Mermaid block controls at line 2'
-    )), 'different-group click evidence omitted the actual group');
+    check(events.every((entry: any) => entry.type !== 'pointerdown' && entry.type !== 'click'), 'different-group target consumed a pointer gesture');
+    check(evidence.current?.hitTarget?.actualGroup === 'Mermaid block controls at line 2', 'different-group evidence omitted the actual group');
     check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'different-group evidence leaked observer lifecycle');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function runMoveSettlementMismatchCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden;position:relative">
+        <div role="group" aria-label="Mermaid block controls at line 1" style="position:absolute;left:0;top:0">
+          <button aria-label="Edit Mermaid in split view">Target split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => {
+      (window as any).__historyMatrixEditor = { scrollToLine() {} };
+      const group = document.querySelector<HTMLElement>('[role="group"]')!;
+      document.addEventListener('pointermove', () => {
+        if (!group.dataset.moveSettlement) {
+          const current = group.querySelector<HTMLButtonElement>('button')!;
+          const replacement = current.cloneNode(true) as HTMLButtonElement;
+          replacement.dataset.currentTarget = 'true';
+          current.replaceWith(replacement);
+          group.style.transform = 'translateX(120px)';
+          group.dataset.moveSettlement = 'replaced';
+          return;
+        }
+        if (group.dataset.moveSettlement !== 'replaced') return;
+        const rect = group.querySelector<HTMLButtonElement>('button')!.getBoundingClientRect();
+        const blocker = document.createElement('div');
+        blocker.className = 'move-settlement-blocker';
+        Object.assign(blocker.style, {
+          position: 'fixed',
+          left: `${rect.left}px`,
+          top: `${rect.top}px`,
+          width: `${rect.width}px`,
+          height: `${rect.height}px`,
+          zIndex: '1'
+        });
+        document.body.append(blocker);
+        group.dataset.moveSettlement = 'blocked';
+      }, true);
+    });
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'move settlement mismatch did not preserve InteractionError');
+    check(String(failure.primary).includes('pointer did not activate semantic target before pointerdown'), 'move settlement mismatch was not rejected before pointerdown');
+    const evidence = failure.evidence as any;
+    const events = evidence.events.map((entry: string) => JSON.parse(entry));
+    check(events.every((entry: any) => entry.type !== 'pointerdown' && entry.type !== 'click'), 'move settlement mismatch consumed a pointer gesture');
+    check(evidence.current?.targetConnected, 'move settlement evidence lost the replacement target');
+    check(!evidence.current?.targetHit, 'move settlement evidence did not expose the hit mismatch');
+    check(evidence.current?.hitTarget?.className === 'move-settlement-blocker', 'move settlement evidence omitted the actual hit target');
+    check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'move settlement evidence leaked observer lifecycle');
   } finally {
     await browser.close();
   }
@@ -265,4 +331,5 @@ for (const scenario of [[0, false], [1, false], [0, true], [2, false], [0, false
 await runPublicFailureEvidenceCase();
 await runMissingSemanticClickCase();
 await runSameLabelDifferentGroupCase();
+await runMoveSettlementMismatchCase();
 console.log('history rendered-block synthetic Chromium matrix passed');

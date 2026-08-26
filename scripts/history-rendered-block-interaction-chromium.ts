@@ -73,6 +73,15 @@ export async function runHistoryRenderedBlockChromiumInteraction(
       const evidence = await observerHandle.evaluate((observer: any) => observer.snapshot());
       return { ...evidence, pageErrors: [...pageErrors] };
     };
+    const settleAndValidatePointer = async (point: { readonly x: number; readonly y: number }, phase: 'pointerdown' | 'pointerup') => {
+      if (!observerHandle) throw new Error(`Missing History evidence observer before ${phase}`);
+      await observerHandle.evaluate((observer: any, known) => observer.settleAndValidatePointer(known), {
+        controls: labels.controls,
+        currentLabel: labels[sourceMode],
+        point,
+        phase
+      });
+    };
     const adapter: HistoryRenderedBlockInteractionAdapter<any> = {
       isCurrent: () => page.evaluate(({ editorName, controlsLabel }) => {
         const editor = (window as any)[editorName];
@@ -184,9 +193,17 @@ export async function runHistoryRenderedBlockChromiumInteraction(
         }, { controls: labels.controls, currentLabel: labels[sourceMode], phase });
       },
       preparePointerDown: (point) => page.mouse.move(point.x, point.y),
-      deliverPointerDown: async (point) => { await page.mouse.move(point.x, point.y); await page.mouse.down(); },
+      deliverPointerDown: async (point) => {
+        await page.mouse.move(point.x, point.y);
+        await settleAndValidatePointer(point, 'pointerdown');
+        await page.mouse.down();
+      },
       preparePointerUp: (point) => page.mouse.move(point.x, point.y),
-      deliverPointerUp: async (point) => { await page.mouse.move(point.x, point.y); await page.mouse.up(); },
+      deliverPointerUp: async (point) => {
+        await page.mouse.move(point.x, point.y);
+        await settleAndValidatePointer(point, 'pointerup');
+        await page.mouse.up();
+      },
       settleTarget: async () => {
         const deliveredEvidence = await snapshotObserverEvidence();
         const semanticClickDelivered = deliveredEvidence?.events.some((entry: string) => {
@@ -241,6 +258,13 @@ export async function runHistoryRenderedBlockChromiumInteraction(
           let cleaned = false;
           const targetGroup = document.querySelector<HTMLElement>(`[role="group"][aria-label="${known.controls}"]`);
           if (!targetGroup) throw new Error(`Missing rendered-block controls while opening observer: ${known.controls}`);
+          const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+          if (!scroller) throw new Error('Missing editor scroller while opening History evidence observer');
+          const pointerSettlements: Array<{
+            readonly known: { readonly controls: string; readonly currentLabel: string; readonly point: { readonly x: number; readonly y: number }; readonly phase: string };
+            readonly resolve: () => void;
+            readonly reject: (error: unknown) => void;
+          }> = [];
           const readTarget = () => {
             const buttons = Array.from(targetGroup.querySelectorAll<HTMLButtonElement>('button[aria-label]'));
             const currentModeLabels = buttons
@@ -272,11 +296,46 @@ export async function runHistoryRenderedBlockChromiumInteraction(
               hitTarget: hit ? {
                 tag: hit.tagName.toLowerCase(),
                 ariaLabel: hit.getAttribute('aria-label'),
-                className: (hit as HTMLElement).className?.toString() ?? ''
+                className: (hit as HTMLElement).className?.toString() ?? '',
+                actualGroup: hit.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
               } : null
             };
           };
           const labelChanges: Array<ReturnType<typeof readTarget>> = [];
+          const validateCurrentPointer = (pointer: (typeof pointerSettlements)[number]['known']) => {
+            const registeredGroup = document.querySelector<HTMLElement>(`[role="group"][aria-label="${pointer.controls}"]`);
+            const current = Array.from(targetGroup.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
+              .find((button) => button.getAttribute('aria-label') === pointer.currentLabel) ?? null;
+            const rect = current?.getBoundingClientRect() ?? null;
+            const hit = document.elementFromPoint(pointer.point.x, pointer.point.y);
+            const identityCurrent = targetGroup.isConnected
+              && registeredGroup === targetGroup
+              && scroller.contains(targetGroup)
+              && Boolean(current?.isConnected)
+              && current?.closest('[role="group"]') === targetGroup;
+            const geometryCurrent = Boolean(rect
+              && [rect.x, rect.y, rect.width, rect.height, rect.top, rect.right, rect.bottom, rect.left].every(Number.isFinite)
+              && rect.width > 0
+              && rect.height > 0);
+            const targetHit = Boolean(current && hit && (hit === current || current.contains(hit)));
+            const evidence = {
+              controls: pointer.controls,
+              currentLabel: pointer.currentLabel,
+              point: pointer.point,
+              identityCurrent,
+              geometryCurrent,
+              targetHit,
+              hitTarget: hit instanceof Element ? {
+                tag: hit.tagName.toLowerCase(),
+                ariaLabel: hit.getAttribute('aria-label'),
+                className: (hit as HTMLElement).className?.toString() ?? '',
+                actualGroup: hit.closest<HTMLElement>('[role="group"]')?.getAttribute('aria-label') ?? null
+              } : null
+            };
+            if (!identityCurrent) throw new Error(`Rendered-block current target identity changed before ${pointer.phase}: ${JSON.stringify(evidence)}`);
+            if (!geometryCurrent) throw new Error(`Rendered-block current target geometry was invalid before ${pointer.phase}: ${JSON.stringify(evidence)}`);
+            if (!targetHit) throw new Error(`Rendered-block pointer did not activate semantic target before ${pointer.phase}: ${JSON.stringify(evidence)}`);
+          };
           const listener = (event: Event) => {
             const eventButton = event.composedPath()
               .find((candidate): candidate is HTMLButtonElement => candidate instanceof HTMLButtonElement);
@@ -304,12 +363,19 @@ export async function runHistoryRenderedBlockChromiumInteraction(
           const mutationObserver = new MutationObserver(() => {
             const current = readTarget();
             const serializedLabels = JSON.stringify(current.currentModeLabels);
-            if (serializedLabels === lastLabels) return;
-            lastLabels = serializedLabels;
-            labelChanges.push(current);
+            if (serializedLabels !== lastLabels) {
+              lastLabels = serializedLabels;
+              labelChanges.push(current);
+            }
+            for (const settlement of pointerSettlements.splice(0)) {
+              try {
+                validateCurrentPointer(settlement.known);
+                settlement.resolve();
+              } catch (error) {
+                settlement.reject(error);
+              }
+            }
           });
-          const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
-          if (!scroller) throw new Error('Missing editor scroller while opening History evidence observer');
           mutationObserver.observe(scroller, {
             subtree: true,
             childList: true,
@@ -323,6 +389,19 @@ export async function runHistoryRenderedBlockChromiumInteraction(
               mutationObserver.disconnect();
               registrations = 0;
               cleaned = true;
+            },
+            settleAndValidatePointer(pointer: (typeof pointerSettlements)[number]['known']) {
+              return new Promise<void>((resolve, reject) => {
+                if (!targetGroup.isConnected || !scroller.contains(targetGroup)) {
+                  try { validateCurrentPointer(pointer); }
+                  catch (error) { reject(error); }
+                  return;
+                }
+                pointerSettlements.push({ known: pointer, resolve, reject });
+                const sentinel = document.createComment('History pointer DOM settlement');
+                targetGroup.append(sentinel);
+                sentinel.remove();
+              });
             },
             snapshot() {
               return {
