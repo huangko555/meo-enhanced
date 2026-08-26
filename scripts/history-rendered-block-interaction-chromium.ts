@@ -239,9 +239,10 @@ export async function runHistoryRenderedBlockChromiumInteraction(
           const events: string[] = [];
           let registrations = 0;
           let cleaned = false;
+          const targetGroup = document.querySelector<HTMLElement>(`[role="group"][aria-label="${known.controls}"]`);
+          if (!targetGroup) throw new Error(`Missing rendered-block controls while opening observer: ${known.controls}`);
           const readTarget = () => {
-            const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${known.controls}"]`);
-            const buttons = Array.from(group?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []);
+            const buttons = Array.from(targetGroup.querySelectorAll<HTMLButtonElement>('button[aria-label]'));
             const currentModeLabels = buttons
               .map((button) => button.getAttribute('aria-label'))
               .filter((label): label is string => (
@@ -277,14 +278,19 @@ export async function runHistoryRenderedBlockChromiumInteraction(
           };
           const labelChanges: Array<ReturnType<typeof readTarget>> = [];
           const listener = (event: Event) => {
-            const semanticTarget = event.composedPath().some((candidate) => {
-              if (!(candidate instanceof HTMLButtonElement)) return false;
-              const label = candidate.getAttribute('aria-label');
-              return label === known.currentLabel || label === known.expectedLabel;
-            });
+            const eventButton = event.composedPath()
+              .find((candidate): candidate is HTMLButtonElement => candidate instanceof HTMLButtonElement);
+            const actualGroup = eventButton?.closest<HTMLElement>('[role="group"]') ?? null;
+            const eventButtonLabel = eventButton?.getAttribute('aria-label') ?? null;
+            const semanticTarget = actualGroup === targetGroup
+              && (eventButtonLabel === known.currentLabel || eventButtonLabel === known.expectedLabel);
             events.push(JSON.stringify({
               type: event.type,
               semanticTarget,
+              actualGroup: actualGroup ? {
+                ariaLabel: actualGroup.getAttribute('aria-label'),
+                isTarget: actualGroup === targetGroup
+              } : null,
               eventTarget: event.target instanceof Element ? {
                 tag: event.target.tagName.toLowerCase(),
                 ariaLabel: event.target.getAttribute('aria-label'),

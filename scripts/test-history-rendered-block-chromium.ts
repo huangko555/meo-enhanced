@@ -145,7 +145,12 @@ async function runPublicFailureEvidenceCase() {
     const events = evidence.events.map((entry: string) => JSON.parse(entry));
     check(events.some((entry: any) => entry.type === 'pointerdown'), 'public evidence omitted pointerdown');
     check(events.some((entry: any) => entry.type === 'pointerup'), 'public evidence omitted pointerup');
-    check(events.some((entry: any) => entry.type === 'click' && entry.semanticTarget), 'public evidence omitted semantic target click');
+    check(events.some((entry: any) => (
+      entry.type === 'click'
+      && entry.semanticTarget
+      && entry.actualGroup?.ariaLabel === 'Mermaid block controls at line 1'
+      && entry.actualGroup?.isTarget
+    )), 'public evidence omitted semantic target group identity');
     check(events.every((entry: any) => Array.isArray(entry.currentModeLabels)), 'event evidence omitted current mode labels');
     check(events.every((entry: any) => entry.targetRect && typeof entry.targetHit === 'boolean'), 'event evidence omitted target rect/hit');
     check(Array.isArray(evidence.labelChanges) && evidence.labelChanges.some((entry: any) => (
@@ -204,9 +209,60 @@ async function runMissingSemanticClickCase() {
   }
 }
 
+async function runSameLabelDifferentGroupCase() {
+  const browser = await launchTestBrowser();
+  try {
+    const page: any = await browser.newPage();
+    await page.setContent(`
+      <div class="cm-editor"><div class="cm-scroller" style="height:80px;overflow:hidden;position:relative">
+        <div role="group" aria-label="Mermaid block controls at line 1" style="position:absolute;left:0;top:0">
+          <button aria-label="Edit Mermaid in split view">Target split</button>
+        </div>
+        <div role="group" aria-label="Mermaid block controls at line 2" style="position:absolute;left:0;top:0;z-index:1">
+          <button aria-label="Edit Mermaid in split view">Other split</button>
+        </div>
+      </div></div>
+    `);
+    await page.evaluate(() => { (window as any).__historyMatrixEditor = { scrollToLine() {} }; });
+    const waitForFunction = page.waitForFunction.bind(page);
+    page.waitForFunction = (...args: any[]) => {
+      const known = args[2];
+      if (known && typeof known === 'object' && known.expectedLabel === 'Show Mermaid code only') {
+        return Promise.reject(new Error('different group click incorrectly entered target wait'));
+      }
+      return waitForFunction(...args);
+    };
+
+    let failure: unknown;
+    try {
+      await runHistoryRenderedBlockChromiumInteraction(
+        page,
+        { kind: 'mermaid', lineNumber: 1, targetMode: 'split' },
+        '__historyMatrixEditor'
+      );
+    } catch (error) {
+      failure = error;
+    }
+    check(failure instanceof HistoryRenderedBlockInteractionError, 'different-group click did not preserve InteractionError');
+    check(String(failure.primary).includes('pointer did not activate semantic target'), 'different-group click was mistaken for the semantic target');
+    check(!String(failure.primary).includes('incorrectly entered target wait'), 'different-group click entered target settlement');
+    const evidence = failure.evidence as any;
+    const events = evidence.events.map((entry: string) => JSON.parse(entry));
+    check(events.some((entry: any) => (
+      entry.type === 'click'
+      && !entry.semanticTarget
+      && entry.actualGroup?.ariaLabel === 'Mermaid block controls at line 2'
+    )), 'different-group click evidence omitted the actual group');
+    check(evidence.registrations === 0 && evidence.cleaned && evidence.sentinelRejected, 'different-group evidence leaked observer lifecycle');
+  } finally {
+    await browser.close();
+  }
+}
+
 for (const scenario of [[0, false], [1, false], [0, true], [2, false], [0, false, true], [0, false, false, true]] as const) {
   await runCase(...scenario);
 }
 await runPublicFailureEvidenceCase();
 await runMissingSemanticClickCase();
+await runSameLabelDifferentGroupCase();
 console.log('history rendered-block synthetic Chromium matrix passed');
