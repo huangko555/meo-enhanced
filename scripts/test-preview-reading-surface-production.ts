@@ -463,6 +463,42 @@ async function main(): Promise<void> {
       assert.deepEqual(clickActivation, {
         type: 'openLink', href: 'https://example.com/linked-image', source: 'preview'
       });
+      const readMermaidInteractionState = () => page.evaluate(() => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        const diagrams = Array.from(doc.querySelectorAll<SVGSVGElement>('svg[data-fit-diagram]'));
+        return {
+          viewBoxes: diagrams.map((svg) => svg.getAttribute('viewBox')),
+          transforms: diagrams.flatMap((svg) => Array.from(svg.querySelectorAll<SVGGraphicsElement>('*')).map((element) => ({
+            attribute: element.getAttribute('transform'),
+            computed: getComputedStyle(element).transform
+          }))),
+          scrollPositions: Array.from(doc.querySelectorAll<HTMLElement>('.meo-export-mermaid, .meo-export-mermaid-svg'))
+            .map((element) => ({ left: element.scrollLeft, top: element.scrollTop }))
+        };
+      });
+      const previewScrollBeforeDrag = await page.evaluate(() => (
+        document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.scrollingElement!.scrollTop
+      ));
+      const tallDiagramHandle = await previewFrame.$('svg[data-fit-diagram="tall"]');
+      assert.ok(tallDiagramHandle, 'Tall Mermaid SVG must remain reachable for the public drag probe');
+      await tallDiagramHandle.evaluate((svg) => svg.scrollIntoView({ block: 'center' }));
+      const beforeMermaidDrag = await readMermaidInteractionState();
+      const tallDiagramBox = await tallDiagramHandle.boundingBox();
+      assert.ok(tallDiagramBox, 'Tall Mermaid SVG must expose a public viewport for the drag probe');
+      const dragStart = {
+        x: tallDiagramBox.x + (tallDiagramBox.width / 2),
+        y: tallDiagramBox.y + Math.min(tallDiagramBox.height / 2, 120)
+      };
+      await page.mouse.move(dragStart.x, dragStart.y);
+      await page.mouse.down();
+      await page.mouse.move(dragStart.x + 40, dragStart.y + 30);
+      await page.mouse.up();
+      assert.deepEqual(await readMermaidInteractionState(), beforeMermaidDrag, 'Preview Mermaid must not pan or transform after dragging');
+      await page.evaluate((scrollTop) => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        doc.defaultView!.scrollTo(0, scrollTop);
+      }, previewScrollBeforeDrag);
+      await previewFrame.focus('a:has(img[alt="Linked alt"])');
       const result = await page.evaluate(async () => {
         const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
         const doc = frame.contentDocument!;
@@ -551,7 +587,7 @@ async function main(): Promise<void> {
         const mermaidGraphics = mermaidSvgs.flatMap((svg) => Array.from(svg.querySelectorAll<SVGGraphicsElement>('.meo-fit-graphic')));
         const mermaidHtmlClippingAncestors = mermaidGraphics.flatMap((graphic) => {
           const clipping: string[] = [];
-          for (let current = graphic.parentElement; current && current !== pageRoot.parentElement; current = current.parentElement) {
+          for (let current = graphic.parentElement; current; current = current.parentElement) {
             if (current.namespaceURI === 'http://www.w3.org/2000/svg') continue;
             const style = getComputedStyle(current);
             if ([style.overflowX, style.overflowY].some((value) => value === 'hidden' || value === 'clip')) {
@@ -567,6 +603,17 @@ async function main(): Promise<void> {
         const mermaidSelectionText = normalizeText(selection.toString());
         const mermaidCopied = doc.execCommand('copy');
         const mermaidClipboardText = normalizeText(await doc.defaultView!.navigator.clipboard.readText());
+        const scrollingElement = doc.scrollingElement!;
+        const initialScrollTop = scrollingElement.scrollTop;
+        mermaidSvgs[1].scrollIntoView({ block: 'end' });
+        const tallReachRect = mermaidSvgs[1].getBoundingClientRect();
+        const tallBottomReachable = tallReachRect.bottom > 0 && tallReachRect.bottom <= doc.defaultView!.innerHeight + 1;
+        const tallScrollTop = scrollingElement.scrollTop;
+        mermaidSvgs[0].scrollIntoView({ block: 'start' });
+        const wideReachRect = mermaidSvgs[0].getBoundingClientRect();
+        const wideReturnReachable = wideReachRect.top >= -1 && wideReachRect.top < doc.defaultView!.innerHeight;
+        const wideScrollTop = scrollingElement.scrollTop;
+        doc.defaultView!.scrollTo(0, initialScrollTop);
         return {
           rows: rows.length,
           selected,
@@ -768,6 +815,13 @@ async function main(): Promise<void> {
               };
             }),
             htmlClippingAncestors: mermaidHtmlClippingAncestors,
+            verticalReach: {
+              tallBottomReachable,
+              wideReturnReachable,
+              tallScrollTop,
+              wideScrollTop,
+              initialScrollTop
+            },
             selectionText: mermaidSelectionText,
             copied: mermaidCopied,
             clipboardText: mermaidClipboardText,
@@ -865,6 +919,9 @@ async function main(): Promise<void> {
       assert.ok(result.mermaidFallback.fontSize > 0 && result.mermaidFallback.lineHeight > 0, JSON.stringify(result));
       assert.ok(result.mermaidFallback.fragments > 1, JSON.stringify(result));
       assert.deepEqual(result.mermaidSuccess.htmlClippingAncestors, []);
+      assert.equal(result.mermaidSuccess.verticalReach.tallBottomReachable, true);
+      assert.equal(result.mermaidSuccess.verticalReach.wideReturnReachable, true);
+      assert.ok(result.mermaidSuccess.verticalReach.tallScrollTop > result.mermaidSuccess.verticalReach.wideScrollTop);
       assert.deepEqual(result.mermaidSuccess.controls, {
         fullscreenButtons: 0,
         liveControls: 0,
