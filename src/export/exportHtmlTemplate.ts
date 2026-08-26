@@ -52,7 +52,7 @@ ${buildRuntimeScript(options.hasMermaid)}
 function buildMathViewportRuntimeScript(): string {
   return `
 (() => {
-  const ROOT_SELECTOR = '.meo-export-math-display';
+  const ROOT_SELECTOR = '.meo-export-math-display, .meo-export-math-inline';
   const CANVAS_CLASS = 'meo-export-math-canvas';
   const controllers = [];
   const AXIS_EPSILON = 0.000001;
@@ -87,7 +87,29 @@ function buildMathViewportRuntimeScript(): string {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   });
 
+  const hasInlineContentOverflow = (root) => {
+    if (!root.classList.contains('meo-export-math-inline')) {
+      return true;
+    }
+    const rootRect = root.getBoundingClientRect();
+    const rootStyle = getComputedStyle(root);
+    const leftBoundary = rootRect.left + Number.parseFloat(rootStyle.paddingLeft);
+    const rightBoundary = rootRect.right - Number.parseFloat(rootStyle.paddingRight);
+    const baseRects = Array.from(root.querySelectorAll('.katex-html .base'))
+      .map((base) => base.getBoundingClientRect());
+    if (
+      baseRects.length === 0 ||
+      ![leftBoundary, rightBoundary].every(Number.isFinite) ||
+      !baseRects.every((rect) => [rect.left, rect.right].every(Number.isFinite))
+    ) {
+      return false;
+    }
+    return Math.min(...baseRects.map((rect) => rect.left)) < leftBoundary - 1 ||
+      Math.max(...baseRects.map((rect) => rect.right)) > rightBoundary + 1;
+  };
+
   const createController = (root) => {
+    const layout = root.classList.contains('meo-export-math-inline') ? 'inline' : 'block';
     let canvas = Array.from(root.children).find((child) => child.classList.contains(CANVAS_CLASS));
     if (!canvas) {
       canvas = document.createElement('div');
@@ -97,6 +119,7 @@ function buildMathViewportRuntimeScript(): string {
       }
       root.appendChild(canvas);
     }
+    root.classList.add('meo-latex-math-viewport');
 
     let frame = 0;
     const measure = () => {
@@ -105,14 +128,18 @@ function buildMathViewportRuntimeScript(): string {
         return;
       }
 
-      const rootStyle = getComputedStyle(root);
+      const measurementRoot = layout === 'inline' ? root.parentElement : root;
+      if (!measurementRoot) {
+        return;
+      }
+      const rootStyle = getComputedStyle(measurementRoot);
       const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
       const paddingRight = Number.parseFloat(rootStyle.paddingRight);
-      const rootRectWidth = root.getBoundingClientRect().width;
-      const offsetWidth = root.offsetWidth;
-      const localContentWidth = root.clientWidth - paddingLeft - paddingRight;
+      const rootRectWidth = measurementRoot.getBoundingClientRect().width;
+      const offsetWidth = measurementRoot.offsetWidth;
+      const localContentWidth = measurementRoot.clientWidth - paddingLeft - paddingRight;
       if (
-        !hasOnlyPositiveAxisAlignedTransforms(root) ||
+        !hasOnlyPositiveAxisAlignedTransforms(measurementRoot) ||
         !Number.isFinite(paddingLeft) || paddingLeft < 0 ||
         !Number.isFinite(paddingRight) || paddingRight < 0 ||
         !isFinitePositive(rootRectWidth) ||
@@ -172,7 +199,9 @@ function buildMathViewportRuntimeScript(): string {
   const initialize = () => {
     if (controllers.length === 0) {
       document.querySelectorAll(ROOT_SELECTOR).forEach((root) => {
-        controllers.push(createController(root));
+        if (hasInlineContentOverflow(root)) {
+          controllers.push(createController(root));
+        }
       });
     }
   };

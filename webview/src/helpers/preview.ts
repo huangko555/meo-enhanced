@@ -110,6 +110,20 @@ const previewLatexMathViewportStyles = `
   width: max-content;
   margin: 0;
 }
+
+.meo-export-math-inline.meo-latex-math-viewport {
+  align-items: baseline;
+  overflow: visible !important;
+}
+
+.meo-export-math-inline > .meo-latex-math-canvas {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
 `;
 
 function collectPreviewKatexStyles(katexHref: string): string {
@@ -255,11 +269,37 @@ export function createPreviewController({
     previewMathViewports = [];
   };
 
+  const hasInlineContentOverflow = (root: HTMLElement): boolean => {
+    const ownerWindow = root.ownerDocument.defaultView;
+    if (!ownerWindow || !root.classList.contains('meo-export-math-inline')) {
+      return true;
+    }
+    const rootRect = root.getBoundingClientRect();
+    const rootStyle = ownerWindow.getComputedStyle(root);
+    const leftBoundary = rootRect.left + Number.parseFloat(rootStyle.paddingLeft);
+    const rightBoundary = rootRect.right - Number.parseFloat(rootStyle.paddingRight);
+    const baseRects = Array.from(root.querySelectorAll<HTMLElement>('.katex-html .base'))
+      .map((base) => base.getBoundingClientRect());
+    if (
+      baseRects.length === 0 ||
+      ![leftBoundary, rightBoundary].every(Number.isFinite) ||
+      !baseRects.every((rect) => [rect.left, rect.right].every(Number.isFinite))
+    ) {
+      return false;
+    }
+    return Math.min(...baseRects.map((rect) => rect.left)) < leftBoundary - 1
+      || Math.max(...baseRects.map((rect) => rect.right)) > rightBoundary + 1;
+  };
+
   const attachPreviewMathViewports = (frameDocument: Document) => {
     disposePreviewMathViewports();
-    previewMathViewports = Array.from(
-      frameDocument.querySelectorAll<HTMLElement>('.meo-export-math-display')
-    ).map((element) => attachLatexMathViewport(element));
+    previewMathViewports = Array.from(frameDocument.querySelectorAll<HTMLElement>(
+      '.meo-export-math-display, .meo-export-math-inline'
+    )).filter(hasInlineContentOverflow).map((element) => (
+      element.classList.contains('meo-export-math-inline')
+        ? attachLatexMathViewport(element, { layout: { kind: 'inline' } })
+        : attachLatexMathViewport(element)
+    ));
   };
 
   const clearSearchMatches = (): void => {

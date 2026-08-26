@@ -4,9 +4,19 @@ export type LatexMathViewportController = {
   destroy(): void;
 };
 
-type LatexMathViewportOptions = {
+type LatexMathBlockViewportOptions = {
   interactive?: boolean;
 };
+
+type LatexMathInlineViewportOptions = {
+  layout: { kind: 'inline' };
+};
+
+type LatexMathViewportOptions = LatexMathBlockViewportOptions | LatexMathInlineViewportOptions;
+
+type LatexMathViewportLayout =
+  | { kind: 'block'; interactive: boolean }
+  | { kind: 'inline' };
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
@@ -75,8 +85,12 @@ function createControlButton(
 
 export function attachLatexMathViewport(
   root: HTMLElement,
-  { interactive = false }: LatexMathViewportOptions = {}
+  options: LatexMathViewportOptions = {}
 ): LatexMathViewportController {
+  const layout: LatexMathViewportLayout = 'layout' in options
+    ? options.layout
+    : { kind: 'block', interactive: options.interactive ?? false };
+  const interactive = layout.kind === 'block' && layout.interactive;
   const ownerDocument = root.ownerDocument;
   const ownerWindow = ownerDocument.defaultView ?? window;
   const canvas = ownerDocument.createElement('div');
@@ -143,7 +157,7 @@ export function attachLatexMathViewport(
       canvas.style.zoom = `${residualScale}`;
 
       let candidateHeight: string | null = null;
-      if (!interactive) {
+      if (layout.kind === 'block' && !interactive) {
         const renderedHeight = canvas.getBoundingClientRect().height;
         if (!isFinitePositive(renderedHeight)) {
           restorePresentation(entryPresentation);
@@ -185,14 +199,19 @@ export function attachLatexMathViewport(
       let effectiveScale = 1;
       let availableWidth = root.clientWidth - HORIZONTAL_PADDING;
       if (!interactive) {
-        const rootStyle = ownerWindow.getComputedStyle(root);
+        const measurementRoot = layout.kind === 'inline' ? root.parentElement : root;
+        if (!measurementRoot) {
+          restorePresentation(entryPresentation);
+          return;
+        }
+        const rootStyle = ownerWindow.getComputedStyle(measurementRoot);
         const paddingLeft = Number.parseFloat(rootStyle.paddingLeft);
         const paddingRight = Number.parseFloat(rootStyle.paddingRight);
-        const rootRectWidth = root.getBoundingClientRect().width;
-        const offsetWidth = root.offsetWidth;
-        availableWidth = root.clientWidth - paddingLeft - paddingRight;
+        const rootRectWidth = measurementRoot.getBoundingClientRect().width;
+        const offsetWidth = measurementRoot.offsetWidth;
+        availableWidth = measurementRoot.clientWidth - paddingLeft - paddingRight;
         if (
-          !hasOnlyPositiveAxisAlignedTransforms(root, ownerWindow) ||
+          !hasOnlyPositiveAxisAlignedTransforms(measurementRoot, ownerWindow) ||
           !Number.isFinite(paddingLeft) || paddingLeft < 0 ||
           !Number.isFinite(paddingRight) || paddingRight < 0 ||
           !isFinitePositive(rootRectWidth) ||

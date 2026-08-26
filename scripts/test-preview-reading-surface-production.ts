@@ -6,13 +6,17 @@ import { launchTestBrowser } from './browser-test-helpers';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import exportRuntime from '../src/export/runtime';
 
-const root = path.resolve(import.meta.dir, '..');
+const root = path.resolve(import.meta.dirname, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-reading-surface-'));
 const sourceDocumentPath = path.join(temp, 'preview-reading-surface.md');
 const longToken = 'wrappable'.repeat(90);
 const longKbdToken = 'K'.repeat(500);
 const longLinkToken = 'linked'.repeat(80);
 const longDisplayFormula = `\\operatorname{displayfit}+${'1234567890+'.repeat(80)}0`;
+const longInlineFormula = `\\mathrm{${Array.from(
+  { length: 192 },
+  (_, index) => `INLINE${String(index).padStart(3, '0')}`
+).join('')}}`;
 const codeSource = `/* comment\n${longToken}\ncontinues */\n`;
 const mermaidFallbackSource = `invalid ${longToken}\n`;
 const mermaidWideSource = 'flowchart LR\n  wide_fit_start --> wide_fit_end\n';
@@ -89,7 +93,11 @@ const markdown = [
   '',
   'Prose shortcut: <kbd>Ctrl+Shift+P</kbd>',
   '',
-  'Inline baseline $x + 1$ remains prose.',
+  'Short prefix $x + 1$ short suffix.',
+  '',
+  `Prefix prose wraps before [safe link](https://example.com/safe) and $${longInlineFormula}$ then suffix prose wraps after the formula.`,
+  '',
+  'BROKEN_INLINE_SENTINEL $\\frac{',
   '',
   `$$${longDisplayFormula}$$`,
   '',
@@ -128,77 +136,86 @@ type OpenLinkWaiterState = 'idle' | 'pending' | 'resolved' | 'rejected' | 'dispo
 async function assertPreviewMathMeasurementTransaction(page: import('puppeteer-core').Page): Promise<void> {
   const transaction = await page.evaluate(async () => {
     const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-    const root = doc.querySelector<HTMLElement>('.meo-export-math-display:not(.meo-export-math-fenced-display)')!;
-    const canvas = root.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
-    const originalRect = canvas.getBoundingClientRect.bind(canvas);
-    const stable = {
-      fontSize: canvas.style.fontSize,
-      zoom: canvas.style.zoom,
-      height: root.style.height
-    };
-    const afterCanvasStyleTransaction = (mutate: () => void) => new Promise<void>((resolve) => {
-      const observer = new MutationObserver(() => {
-        observer.disconnect();
-        resolve();
+    const runTransaction = async (selector: string) => {
+      const root = doc.querySelector<HTMLElement>(selector)!;
+      const canvas = root.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
+      const originalRect = canvas.getBoundingClientRect.bind(canvas);
+      const stable = {
+        fontSize: canvas.style.fontSize,
+        zoom: canvas.style.zoom,
+        height: root.style.height
+      };
+      const afterCanvasStyleTransaction = (mutate: () => void) => new Promise<void>((resolve) => {
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          resolve();
+        });
+        observer.observe(canvas, { attributes: true, attributeFilter: ['style'] });
+        mutate();
       });
-      observer.observe(canvas, { attributes: true, attributeFilter: ['style'] });
-      mutate();
-    });
 
-    canvas.getBoundingClientRect = () => ({ ...originalRect(), width: Number.NaN } as DOMRect);
-    Object.defineProperty(canvas, 'scrollWidth', { configurable: true, get: () => Number.NaN });
-    await afterCanvasStyleTransaction(() => {
-      root.style.width = 'calc(100% - 1px)';
-    });
-    const invalid = {
-      fontSize: canvas.style.fontSize,
-      zoom: canvas.style.zoom,
-      height: root.style.height,
-      invalidCss: /(?:NaN|Infinity)/i.test(`${canvas.style.cssText};${root.style.cssText}`)
-    };
-
-    canvas.getBoundingClientRect = originalRect;
-    delete (canvas as HTMLElement & { scrollWidth?: number }).scrollWidth;
-    await afterCanvasStyleTransaction(() => {
-      root.style.width = 'calc(100% - 2px)';
-    });
-    const recoveredRect = canvas.getBoundingClientRect();
-    const recoveredRootRect = root.getBoundingClientRect();
-    const recovered = {
-      fontSize: canvas.style.fontSize,
-      zoom: canvas.style.zoom,
-      height: root.style.height,
-      fits: recoveredRect.left >= recoveredRootRect.left - 1 && recoveredRect.right <= recoveredRootRect.right + 1
-    };
-
-    await afterCanvasStyleTransaction(() => {
-      root.style.width = '';
-    });
-    const finalRect = canvas.getBoundingClientRect();
-    const finalRootRect = root.getBoundingClientRect();
-    return {
-      stable,
-      invalid,
-      recovered,
-      final: {
+      canvas.getBoundingClientRect = () => ({ ...originalRect(), width: Number.NaN } as DOMRect);
+      Object.defineProperty(canvas, 'scrollWidth', { configurable: true, get: () => Number.NaN });
+      await afterCanvasStyleTransaction(() => {
+        root.style.width = 'calc(100% - 1px)';
+      });
+      const invalid = {
         fontSize: canvas.style.fontSize,
         zoom: canvas.style.zoom,
         height: root.style.height,
-        fits: finalRect.left >= finalRootRect.left - 1 && finalRect.right <= finalRootRect.right + 1
-      }
+        invalidCss: /(?:NaN|Infinity)/i.test(`${canvas.style.cssText};${root.style.cssText}`)
+      };
+
+      canvas.getBoundingClientRect = originalRect;
+      delete (canvas as HTMLElement & { scrollWidth?: number }).scrollWidth;
+      await afterCanvasStyleTransaction(() => {
+        root.style.width = 'calc(100% - 2px)';
+      });
+      const recoveredRect = canvas.getBoundingClientRect();
+      const recoveredRootRect = root.getBoundingClientRect();
+      const recovered = {
+        fontSize: canvas.style.fontSize,
+        zoom: canvas.style.zoom,
+        height: root.style.height,
+        fits: recoveredRect.left >= recoveredRootRect.left - 1 && recoveredRect.right <= recoveredRootRect.right + 1
+      };
+
+      await afterCanvasStyleTransaction(() => {
+        root.style.width = '';
+      });
+      const finalRect = canvas.getBoundingClientRect();
+      const finalRootRect = root.getBoundingClientRect();
+      return {
+        stable,
+        invalid,
+        recovered,
+        final: {
+          fontSize: canvas.style.fontSize,
+          zoom: canvas.style.zoom,
+          height: root.style.height,
+          fits: finalRect.left >= finalRootRect.left - 1 && finalRect.right <= finalRootRect.right + 1
+        }
+      };
+    };
+
+    return {
+      display: await runTransaction('.meo-export-math-display:not(.meo-export-math-fenced-display)'),
+      inline: await runTransaction('.meo-export-math-inline.meo-latex-math-viewport')
     };
   });
 
-  assert.deepEqual(
-    { fontSize: transaction.invalid.fontSize, zoom: transaction.invalid.zoom, height: transaction.invalid.height },
-    transaction.stable,
-    JSON.stringify(transaction)
-  );
-  assert.equal(transaction.invalid.invalidCss, false, JSON.stringify(transaction));
-  assert.equal(transaction.recovered.fits, true, JSON.stringify(transaction));
-  assert.notEqual(transaction.recovered.fontSize, '1em', JSON.stringify(transaction));
-  assert.equal(transaction.final.fits, true, JSON.stringify(transaction));
-  assert.notEqual(transaction.final.fontSize, '1em', JSON.stringify(transaction));
+  for (const candidate of [transaction.display, transaction.inline]) {
+    assert.deepEqual(
+      { fontSize: candidate.invalid.fontSize, zoom: candidate.invalid.zoom, height: candidate.invalid.height },
+      candidate.stable,
+      JSON.stringify(transaction)
+    );
+    assert.equal(candidate.invalid.invalidCss, false, JSON.stringify(transaction));
+    assert.equal(candidate.recovered.fits, true, JSON.stringify(transaction));
+    assert.notEqual(candidate.recovered.fontSize, '1em', JSON.stringify(transaction));
+    assert.equal(candidate.final.fits, true, JSON.stringify(transaction));
+    assert.notEqual(candidate.final.fontSize, '1em', JSON.stringify(transaction));
+  }
 }
 
 function createOpenLinkWaiter(options: {
@@ -688,6 +705,7 @@ async function main(): Promise<void> {
             }
           }
           return {
+            inline: root.classList.contains('meo-export-math-inline'),
             fenced: root.classList.contains('meo-export-math-fenced-display'),
             display: root.classList.contains('meo-export-math-display'),
             canvasCount: root.querySelectorAll(':scope > .meo-latex-math-canvas').length,
@@ -701,6 +719,56 @@ async function main(): Promise<void> {
             draggable: root.getAttribute('draggable')
           };
         };
+        const shortParagraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+          .find((paragraph) => paragraph.textContent?.includes('Short prefix'))!;
+        const longMathParagraph = Array.from(doc.querySelectorAll<HTMLParagraphElement>('p'))
+          .find((paragraph) => paragraph.textContent?.includes('Prefix prose wraps before'))!;
+        const shortInline = shortParagraph.querySelector<HTMLElement>('.meo-export-math-inline')!;
+        const longInline = longMathParagraph.querySelector<HTMLElement>('.meo-export-math-inline')!;
+        const installBaselineProbe = (root: HTMLElement, side: 'before' | 'after') => {
+          const probe = doc.createElement('span');
+          probe.dataset.mathBaselineProbe = side;
+          probe.style.cssText = 'display:inline-block;width:0;height:0;padding:0;margin:0;border:0;';
+          root[side === 'before' ? 'before' : 'after'](probe);
+          return probe;
+        };
+        const shortBefore = installBaselineProbe(shortInline, 'before');
+        const shortAfter = installBaselineProbe(shortInline, 'after');
+        const longBefore = installBaselineProbe(longInline, 'before');
+        const longAfter = installBaselineProbe(longInline, 'after');
+        const inspectInline = (root: HTMLElement, before: HTMLElement, after: HTMLElement) => {
+          const inspected = inspectMathRoot(root);
+          const canvas = root.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas');
+          const rootBox = root.getBoundingClientRect();
+          const canvasBox = canvas?.getBoundingClientRect();
+          const paragraph = root.closest('p')!;
+          const fragmentSummary = (node: Node | null) => {
+            if (!node) return { count: 0, firstTop: Number.NaN, lastTop: Number.NaN };
+            const range = doc.createRange();
+            range.selectNodeContents(node);
+            const rects = Array.from(range.getClientRects());
+            return {
+              count: rects.length,
+              firstTop: rects[0]?.top ?? Number.NaN,
+              lastTop: rects.at(-1)?.top ?? Number.NaN
+            };
+          };
+          return {
+            ...inspected,
+            computedDisplay: doc.defaultView!.getComputedStyle(root).display,
+            verticalAlign: doc.defaultView!.getComputedStyle(root).verticalAlign,
+            canvasFontSize: canvas?.style.fontSize ?? '',
+            canvasZoom: canvas?.style.zoom ?? '',
+            rootBoxCount: root.getClientRects().length,
+            widthDelta: canvasBox ? Math.abs(rootBox.width - canvasBox.width) : 0,
+            heightDelta: canvasBox ? Math.abs(rootBox.height - canvasBox.height) : 0,
+            prefix: fragmentSummary(paragraph.firstChild),
+            formula: fragmentSummary(root),
+            suffix: fragmentSummary(paragraph.lastChild),
+            baselineBefore: before.getBoundingClientRect().bottom,
+            baselineAfter: after.getBoundingClientRect().bottom
+          };
+        };
         const kbdRange = doc.createRange();
         kbdRange.selectNodeContents(kbd);
         selection.removeAllRanges();
@@ -709,6 +777,7 @@ async function main(): Promise<void> {
         const tableSelectionText = selection.toString();
         const tableCopied = doc.execCommand('copy');
         const tableClipboardText = await doc.defaultView!.navigator.clipboard.readText();
+        const tableFocusedLink = doc.activeElement === tableLink;
         const mermaidFallback = doc.querySelector<HTMLElement>('.meo-export-mermaid code')!;
         const mermaidRange = doc.createRange();
         mermaidRange.selectNodeContents(mermaidFallback);
@@ -735,6 +804,16 @@ async function main(): Promise<void> {
         const mermaidSelectionText = normalizeText(selection.toString());
         const mermaidCopied = doc.execCommand('copy');
         const mermaidClipboardText = normalizeText(await doc.defaultView!.navigator.clipboard.readText());
+        const mathSelection = doc.createRange();
+        mathSelection.selectNodeContents(longMathParagraph);
+        selection.removeAllRanges();
+        selection.addRange(mathSelection);
+        const safeMathLink = longMathParagraph.querySelector<HTMLAnchorElement>('a')!;
+        safeMathLink.focus({ preventScroll: true });
+        const normalizeMathSelection = (value: string) => normalizeText(value.replace(/[\u200b\u2060]/g, ''));
+        const mathSelectionText = normalizeMathSelection(selection.toString());
+        const mathCopied = doc.execCommand('copy');
+        const mathClipboardText = normalizeMathSelection(await doc.defaultView!.navigator.clipboard.readText());
         const scrollingElement = doc.scrollingElement!;
         const initialScrollTop = scrollingElement.scrollTop;
         mermaidSvgs[1].scrollIntoView({ block: 'end' });
@@ -777,16 +856,17 @@ async function main(): Promise<void> {
           math: {
             roots: mathRoots.map(inspectMathRoot),
             controls: doc.querySelectorAll('.meo-latex-math-zoom-controls, [aria-label*="fullscreen" i]').length,
-            inline: (() => {
-              const inline = doc.querySelector<HTMLElement>('.meo-export-math-inline')!;
-              const style = getComputedStyle(inline);
-              return {
-                canvasCount: inline.querySelectorAll(':scope > .meo-latex-math-canvas').length,
-                display: style.display,
-                verticalAlign: style.verticalAlign,
-                text: inline.textContent
-              };
-            })()
+            inline: {
+              short: inspectInline(shortInline, shortBefore, shortAfter),
+              long: inspectInline(longInline, longBefore, longAfter),
+              selectionText: mathSelectionText,
+              clipboardText: mathClipboardText,
+              copied: mathCopied,
+              focusedLink: doc.activeElement === safeMathLink,
+              href: safeMathLink.dataset.meoPreviewHref,
+              linkTabIndex: safeMathLink.tabIndex
+            },
+            brokenFallbackVisible: doc.body.textContent?.includes('BROKEN_INLINE_SENTINEL') ?? false
           },
           images: {
             semanticCount: doc.querySelectorAll('img').length,
@@ -899,7 +979,7 @@ async function main(): Promise<void> {
             selectionText: tableSelectionText,
             copied: tableCopied,
             clipboardText: tableClipboardText,
-            focusedLink: doc.activeElement === tableLink,
+            focusedLink: tableFocusedLink,
             linkTabIndex: tableLink.tabIndex,
             proseKbdWhiteSpace: getComputedStyle(proseKbd).whiteSpace,
             proseKbdFragments: (() => {
@@ -1015,10 +1095,43 @@ async function main(): Promise<void> {
       assert.ok(displayMath.every((root) => root.contentWithinPage && root.rootWithinPage), JSON.stringify({ width, zoom, deviceScaleFactor, displayMath }));
       assert.ok(displayMath.every((root) => root.scrollOverflow <= 1 && !/(auto|scroll)/.test(root.overflowX)), JSON.stringify({ width, zoom, deviceScaleFactor, displayMath }));
       assert.ok(displayMath.every((root) => root.clippingAncestors.length === 0), JSON.stringify({ width, zoom, deviceScaleFactor, displayMath }));
-      assert.equal(result.math.inline.canvasCount, 0);
-      assert.equal(result.math.inline.display, 'inline-flex');
-      assert.equal(result.math.inline.verticalAlign, 'baseline');
-      assert.ok(result.math.inline.text?.includes('x+1'));
+      assert.equal(result.math.inline.short.canvasCount, 0);
+      assert.equal(result.math.inline.short.computedDisplay, 'inline-flex');
+      assert.equal(result.math.inline.short.verticalAlign, 'baseline');
+      assert.equal(result.math.inline.short.canvasFontSize, '');
+      assert.equal(result.math.inline.short.canvasZoom, '');
+      assert.equal(result.math.inline.short.rootBoxCount, 1);
+      assert.ok(Math.abs(result.math.inline.short.baselineBefore - result.math.inline.short.baselineAfter) <= 0.01, JSON.stringify(result.math.inline.short));
+      assert.equal(result.math.inline.long.contentWithinRoot, true, JSON.stringify({ width, zoom, deviceScaleFactor, inline: result.math.inline.long }));
+      assert.equal(result.math.inline.long.contentWithinPage, true, JSON.stringify({ width, zoom, deviceScaleFactor, inline: result.math.inline.long }));
+      assert.equal(result.math.inline.long.canvasCount, 1, JSON.stringify({ width, zoom, deviceScaleFactor, inline: result.math.inline.long }));
+      assert.equal(result.math.inline.long.computedDisplay, 'inline-flex');
+      assert.equal(result.math.inline.long.verticalAlign, 'baseline');
+      assert.equal(result.math.inline.long.rootBoxCount, 1);
+      assert.ok(result.math.inline.long.widthDelta <= 1 && result.math.inline.long.heightDelta <= 1, JSON.stringify(result.math.inline.long));
+      assert.ok(result.math.inline.long.prefix.count > 0 && result.math.inline.long.formula.count > 0 && result.math.inline.long.suffix.count > 0);
+      assert.ok(result.math.inline.long.prefix.firstTop <= result.math.inline.long.formula.firstTop);
+      assert.ok(result.math.inline.long.formula.firstTop <= result.math.inline.long.suffix.lastTop);
+      assert.equal(result.math.inline.long.scrollOverflow <= 1, true, JSON.stringify(result.math.inline.long));
+      assert.deepEqual(result.math.inline.long.clippingAncestors, []);
+      assert.equal(result.math.inline.long.draggable, null);
+      assert.equal(result.math.inline.selectionText, result.math.inline.clipboardText);
+      assert.equal(result.math.inline.copied, true);
+      assert.equal((result.math.inline.selectionText.match(/INLINE000/g) ?? []).length, 1);
+      assert.equal((result.math.inline.selectionText.match(/INLINE191/g) ?? []).length, 1);
+      assert.ok(result.math.inline.selectionText.startsWith('Prefix prose wraps before safe link and'));
+      assert.ok(result.math.inline.selectionText.endsWith('then suffix prose wraps after the formula.'));
+      assert.equal(result.math.inline.focusedLink, true);
+      assert.equal(result.math.inline.href, 'https://example.com/safe');
+      assert.equal(result.math.inline.linkTabIndex, 0);
+      assert.equal(result.math.brokenFallbackVisible, true);
+      const safeMathActivation = await activateAndWaitForOpenLink(
+        openLinkWaiter,
+        () => page.keyboard.press('Enter')
+      );
+      assert.deepEqual(safeMathActivation, {
+        type: 'openLink', href: 'https://example.com/safe', source: 'preview'
+      });
       assert.equal(result.math.controls, 0);
       assert.ok(displayMath.every((root) => root.draggable === null));
       if (width === 420 && zoom === 0.8 && deviceScaleFactor === 1) {
@@ -1137,6 +1250,56 @@ async function main(): Promise<void> {
       assert.equal(result.table.proseKbdWhiteSpace, 'nowrap');
       assert.equal(result.table.proseKbdFragments, 1);
     }
+
+    const oldInlineState = await page.evaluateHandle(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const oldDocument = frame.contentDocument!;
+      const oldRoot = oldDocument.querySelector<HTMLElement>('.meo-export-math-inline.meo-latex-math-viewport')!;
+      const oldCanvas = oldRoot.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
+      return {
+        document: oldDocument,
+        root: oldRoot,
+        canvas: oldCanvas,
+        presentation: { fontSize: oldCanvas.style.fontSize, zoom: oldCanvas.style.zoom }
+      };
+    });
+    await page.click('.preview-source-coloring');
+    await page.waitForFunction((state) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      return Boolean(
+        state && frame.contentDocument !== state.document
+        && frame.contentDocument?.querySelector('.meo-export-math-inline.meo-latex-math-viewport')
+      );
+    }, {}, oldInlineState);
+    const replacementCurrentness = await page.evaluate((state) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      state.root.style.width = '1px';
+      state.document.defaultView?.dispatchEvent(new state.document.defaultView.Event('resize'));
+      const currentRoot = frame.contentDocument!
+        .querySelector<HTMLElement>('.meo-export-math-inline.meo-latex-math-viewport')!;
+      const currentCanvas = currentRoot.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
+      const currentRootRect = currentRoot.getBoundingClientRect();
+      const contentRects = Array.from(currentRoot.querySelectorAll<HTMLElement>('.katex-html .base'))
+        .map((base) => base.getBoundingClientRect());
+      return {
+        oldFrameIsCurrent: frame.contentDocument === state.document,
+        oldPresentation: { fontSize: state.canvas.style.fontSize, zoom: state.canvas.style.zoom },
+        expectedOldPresentation: state.presentation,
+        currentConnected: currentRoot.isConnected,
+        currentFits: Math.min(...contentRects.map((rect) => rect.left)) >= currentRootRect.left - 1
+          && Math.max(...contentRects.map((rect) => rect.right)) <= currentRootRect.right + 1,
+        currentInvalidCss: /(?:NaN|Infinity)/i.test(`${currentCanvas.style.cssText};${currentRoot.style.cssText}`)
+      };
+    }, oldInlineState);
+    await oldInlineState.dispose();
+    assert.deepEqual(replacementCurrentness, {
+      oldFrameIsCurrent: false,
+      oldPresentation: replacementCurrentness.expectedOldPresentation,
+      expectedOldPresentation: replacementCurrentness.expectedOldPresentation,
+      currentConnected: true,
+      currentFits: true,
+      currentInvalidCss: false
+    });
 
     const exportedFallback = exportRuntime.renderExportHtmlDocument({
       readingSnapshot: {

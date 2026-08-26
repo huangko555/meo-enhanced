@@ -612,6 +612,20 @@ kbd {
   font-size: 1em;
 }
 
+.meo-export-math-inline.meo-latex-math-viewport {
+  align-items: baseline;
+  overflow: visible;
+}
+
+.meo-export-math-inline > .meo-export-math-canvas {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
 .meo-export-math-display {
   display: flex;
   align-items: center;
