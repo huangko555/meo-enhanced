@@ -1,3 +1,5 @@
+import { normalizePreviewFontFamily } from './editorStyleEnvironment';
+
 export type EditorMode = 'live' | 'source' | 'preview';
 export type EditorAppearance = 'auto' | 'dark' | 'light';
 export type DiffBaselineMode = 'current-edit' | 'recent-save' | 'git-head';
@@ -24,6 +26,7 @@ export type EditorCommand =
   | { readonly type: 'reloadDocumentFromDisk'; readonly topLine: number; readonly topLineOffset?: number }
   | { readonly type: 'exportDocument'; readonly format: 'html' | 'pdf' }
   | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
+  | { readonly type: 'setPreviewFontFamily'; readonly fontFamily: string }
   | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
   | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance };
 
@@ -92,6 +95,11 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
         ? value as EditorCommand : null;
     case 'setPreviewSourceColoring':
       return typeof value.enabled === 'boolean' ? value as EditorCommand : null;
+    case 'setPreviewFontFamily': {
+      if (typeof value.fontFamily !== 'string') return null;
+      const fontFamily = normalizePreviewFontFamily(value.fontFamily);
+      return fontFamily === null ? null : { type: value.type, fontFamily };
+    }
     default:
       return null;
   }

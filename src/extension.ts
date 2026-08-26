@@ -50,7 +50,9 @@ import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAd
 import { cleanupRetiredWorkspaceState } from './host/vscodeRetiredWorkspaceStateCleanup';
 import {
   normalizePreviewAppearance,
+  normalizePreviewFontFamily,
   PREVIEW_APPEARANCE_STATE_KEY,
+  PREVIEW_FONT_FAMILY_STATE_KEY,
   PREVIEW_SOURCE_COLORING_STATE_KEY,
   type PreviewAppearance,
   type PreviewRenderResult
@@ -483,6 +485,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       setFindOptions: (options) => this.setFindOptions(options),
       getPreviewAppearance: () => this.getPreviewAppearance(),
       setPreviewAppearance: (appearance) => this.setPreviewAppearance(appearance),
+      getPreviewFontFamily: () => this.getPreviewFontFamily(),
+      setPreviewFontFamily: (fontFamily) => this.setPreviewFontFamily(fontFamily),
       getPreviewSourceColoring: () => this.getPreviewSourceColoring(),
       setPreviewSourceColoring: (enabled) => this.setPreviewSourceColoring(enabled),
       getEditorAppearance: () => this.getEditorAppearance(),
@@ -556,6 +560,16 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
   private getPreviewSourceColoring(): boolean {
     return this.context.globalState.get(PREVIEW_SOURCE_COLORING_STATE_KEY, true);
+  }
+
+  private getPreviewFontFamily(): string {
+    return normalizePreviewFontFamily(this.context.globalState.get(PREVIEW_FONT_FAMILY_STATE_KEY)) ?? '';
+  }
+
+  private async setPreviewFontFamily(fontFamily: string): Promise<void> {
+    const nextFontFamily = normalizePreviewFontFamily(fontFamily);
+    if (nextFontFamily === null || this.getPreviewFontFamily() === nextFontFamily) return;
+    await this.context.globalState.update(PREVIEW_FONT_FAMILY_STATE_KEY, nextFontFamily);
   }
 
   private async setPreviewSourceColoring(enabled: boolean): Promise<void> {

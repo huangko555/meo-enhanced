@@ -323,6 +323,8 @@ if (
 }
 
 const environment = {
+  editorFontFamily: 'MEO Synthetic Mono',
+  previewFontFamily: 'MEO Synthetic Sans',
   editorBackgroundColor: '#20252b',
   editorForegroundColor: '#d8dee9',
   codeBlockBackgroundColor: '#171b20',
@@ -342,6 +344,23 @@ const plainTextStyles = buildPreviewStyles({
   ...environment,
   previewSourceColoring: false
 }, 'dark');
+const defaultFontStyles = buildPreviewStyles({ ...environment, previewFontFamily: '' }, 'dark');
+const maliciousFontStyles = buildPreviewStyles({
+  ...environment,
+  previewFontFamily: 'MEO Synthetic Sans";color:red;}'
+}, 'dark');
+
+if (!darkPreviewStyles.includes('--meo-font-body: "MEO Synthetic Sans", MEO Synthetic Mono')
+  || !darkPreviewStyles.includes('--meo-font-code: MEO Synthetic Mono')) {
+  throw new Error('Selected Preview font must affect prose while code keeps the captured editor monospace family');
+}
+if (!/\.meo-export-frontmatter-line\.is-raw\s*\{[^}]*font-family:\s*var\(--meo-font-body\)/s.test(darkPreviewStyles)) {
+  throw new Error('Structured and raw Frontmatter must use the selected Preview prose family');
+}
+if (!defaultFontStyles.includes('--meo-font-body: MEO Synthetic Mono')
+  || maliciousFontStyles.includes('color:red')) {
+  throw new Error('Empty or malicious Preview fonts must use the captured editor family without CSS injection');
+}
 
 if (!lightPreviewStyles.includes('--meo-code-keyword: #121212')
   || !darkPreviewStyles.includes('--meo-code-keyword: #e2e2e2')) {

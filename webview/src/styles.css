@@ -536,6 +536,29 @@ body {
   --segmented-control-content-gap: 5px;
 }
 
+.preview-font-family-control {
+  display: inline-flex;
+  align-items: center;
+}
+
+.preview-font-family-input {
+  box-sizing: border-box;
+  width: 168px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, transparent));
+  border-radius: 5px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  font: inherit;
+  font-size: 12px;
+}
+
+.preview-font-family-input:focus {
+  border-color: var(--vscode-focusBorder);
+  outline: none;
+}
+
 .editor-appearance-button {
   --segmented-control-content-gap: 5px;
   min-width: 76px;

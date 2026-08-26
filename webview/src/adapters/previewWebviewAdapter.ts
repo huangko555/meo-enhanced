@@ -9,6 +9,7 @@ type ResolvedPreviewAppearance = Exclude<PreviewAppearance, 'auto'>;
 export type PreviewSurface = {
   setAppearance(appearance: PreviewAppearance): void;
   setSourceColoring(enabled: boolean): void;
+  setFontFamily(fontFamily: string): void;
   getAppearance(): ResolvedPreviewAppearance;
   setVisible(visible: boolean): void;
   preload(text: string): void;
@@ -19,7 +20,7 @@ export type PreviewSurface = {
 };
 
 export type PreviewWebviewAdapter = {
-  start(input: { text: string; appearance: PreviewAppearance; sourceColoring: boolean; active: boolean }): void;
+  start(input: { text: string; appearance: PreviewAppearance; fontFamily: string; sourceColoring: boolean; active: boolean }): void;
   setActive(input: {
     active: boolean;
     text: string;
@@ -41,6 +42,7 @@ export function createPreviewWebviewAdapter(surface: PreviewSurface): PreviewWeb
       active = input.active;
       surface.setAppearance(input.appearance);
       surface.setSourceColoring(input.sourceColoring);
+      surface.setFontFamily(input.fontFamily);
       if (!input.active) surface.preload(input.text);
     },
     setActive(input) {

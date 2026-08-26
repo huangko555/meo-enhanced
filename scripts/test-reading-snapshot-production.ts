@@ -16,10 +16,13 @@ const createDeferred = (): Deferred => {
   return { promise, resolve };
 };
 
-const createHarness = (initialText: string, initialAppearance: 'light' | 'dark') => {
+const createHarness = (initialText: string, initialAppearance: 'light' | 'dark', initialFontFamily: string) => {
   let text = initialText;
   let appearance = initialAppearance;
-  let environment = { editorBackgroundColor: initialAppearance === 'dark' ? '#111111' : '#ffffff' };
+  let environment = {
+    editorBackgroundColor: initialAppearance === 'dark' ? '#111111' : '#ffffff',
+    previewFontFamily: initialFontFamily
+  };
   let idle = createDeferred();
   let adapter!: ReturnType<typeof createExportWebviewAdapter>;
   const hostTransport = createExportSnapshotTransport(async (message) => {
@@ -45,10 +48,14 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark')
       readonly text: string;
       readonly appearance: 'light' | 'dark';
       readonly background: string;
+      readonly fontFamily?: string;
     }) {
       text = next.text;
       appearance = next.appearance;
-      environment = { editorBackgroundColor: next.background };
+      environment = {
+        editorBackgroundColor: next.background,
+        previewFontFamily: next.fontFamily ?? environment.previewFontFamily
+      };
     },
     resolveIdle: () => idle.resolve(),
     nextIdle: () => { idle = createDeferred(); },
@@ -59,8 +66,8 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark')
   };
 };
 
-const first = createHarness('# editor one old', 'light');
-const second = createHarness('# editor two', 'light');
+const first = createHarness('# editor one old', 'light', 'MEO Synthetic Sans');
+const second = createHarness('# editor two', 'light', 'MEO Synthetic Serif');
 const firstPending = first.request();
 const secondPending = second.request();
 first.replaceState({ text: '# editor one current', appearance: 'dark', background: '#101010' });
@@ -76,13 +83,16 @@ assert.deepEqual(firstSnapshot, {
   snapshotId: firstSnapshot.snapshotId,
   text: '# editor one current',
   appearance: 'dark',
-  environment: { editorBackgroundColor: '#101010' }
+  environment: { editorBackgroundColor: '#101010', previewFontFamily: 'MEO Synthetic Sans' }
 });
 assert.equal(secondResult.value.text, '# editor two', 'two Editor/panel transports must remain isolated');
+assert.equal(secondResult.value.environment.previewFontFamily, 'MEO Synthetic Serif');
 assert.notEqual(firstSnapshot.snapshotId.length, 0);
 assert.notEqual(secondResult.value.snapshotId.length, 0);
 
-first.replaceState({ text: '# later edit', appearance: 'light', background: '#eeeeee' });
+first.replaceState({
+  text: '# later edit', appearance: 'light', background: '#eeeeee', fontFamily: 'MEO Synthetic Serif'
+});
 const commonOutput = {
   sourceDocumentPath: 'C:/notes/input.md',
   outputFilePath: 'C:/notes/output.html',
@@ -100,6 +110,8 @@ for (const target of ['html', 'pdf'] as const) {
   assert.match(rendered.htmlDocument, /editor one current/);
   assert.doesNotMatch(rendered.htmlDocument, /later edit/);
   assert.match(rendered.htmlDocument, /#101010/);
+  assert.match(rendered.htmlDocument, /MEO Synthetic Sans/);
+  assert.doesNotMatch(rendered.htmlDocument, /MEO Synthetic Serif/);
 }
 
 assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html', appearance: 'light' }), null);

@@ -10,8 +10,7 @@ export interface ExportStyleEnvironment extends Record<string, unknown> {
   editorFontFamily: string;
   editorFontWeight: string;
   editorFontSizePx: number | undefined;
-  liveFontFamily: string;
-  sourceFontFamily: string;
+  previewFontFamily: string;
   liveFontWeight: string;
   sourceFontWeight: string;
   liveLineHeight: number | undefined;
@@ -22,6 +21,7 @@ export interface ExportStyleEnvironment extends Record<string, unknown> {
 }
 
 export const getExportStyleEnvironment = (code: {
+  readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
   readonly previewCodePalettes: Readonly<Record<'light' | 'dark', PreviewCodePalette>>;
 }): ExportStyleEnvironment => {
@@ -43,6 +43,9 @@ export const getExportStyleEnvironment = (code: {
   const fontSizeRaw = editorFontSizeRaw || (editorStyles?.fontSize || bodyStyles.fontSize || '').trim();
   const parsedFontSize = Number.parseFloat(fontSizeRaw);
   const editorFontFamilyRaw = rootStyles.getPropertyValue('--vscode-editor-font-family').trim();
+  const capturedEditorFontFamily = /^var\(/i.test(editorFontFamilyRaw)
+    ? (editorStyles?.fontFamily || bodyStyles.fontFamily || '').trim()
+    : editorFontFamilyRaw || (editorStyles?.fontFamily || bodyStyles.fontFamily || '').trim();
   const editorFontWeightRaw = rootStyles.getPropertyValue('--vscode-editor-font-weight').trim();
   const lineHeightLiveRaw = rootStyles.getPropertyValue('--meo-line-height-live').trim();
   const lineHeightSourceRaw = rootStyles.getPropertyValue('--meo-line-height-source').trim();
@@ -71,11 +74,10 @@ export const getExportStyleEnvironment = (code: {
     ),
     sideBarBackgroundColor: resolvedColorVar('--meo-surface-background', colorVar('--vscode-sideBar-background', '')),
     panelBorderColor: colorVar('--vscode-panel-border', ''),
-    editorFontFamily: editorFontFamilyRaw || (editorStyles?.fontFamily || bodyStyles.fontFamily || '').trim(),
+    editorFontFamily: capturedEditorFontFamily,
     editorFontWeight: editorFontWeightRaw || 'normal',
     editorFontSizePx: Number.isFinite(parsedFontSize) ? parsedFontSize : undefined,
-    liveFontFamily: colorVar('--meo-font-live', ''),
-    sourceFontFamily: colorVar('--meo-font-source', ''),
+    previewFontFamily: code.previewFontFamily,
     liveFontWeight: colorVar('--meo-font-live-weight', ''),
     sourceFontWeight: colorVar('--meo-font-source-weight', ''),
     liveLineHeight: Number.isFinite(parsedLiveLineHeight) ? parsedLiveLineHeight : undefined,

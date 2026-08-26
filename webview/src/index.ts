@@ -681,6 +681,7 @@ exportPdfOption.append(
 );
 
 const previewAppearanceSlot = document.createElement('span');
+const previewFontFamilySlot = document.createElement('span');
 const previewSourceColoringSlot = document.createElement('span');
 const previewFormatGroup = document.createElement('div');
 previewFormatGroup.className = 'preview-format-group';
@@ -688,6 +689,7 @@ previewFormatGroup.setAttribute('role', 'group');
 previewFormatGroup.setAttribute('aria-label', 'Preview tools');
 previewFormatGroup.append(
   previewOutlineLeftBtn,
+  previewFontFamilySlot,
   previewSourceColoringSlot,
   previewAppearanceSlot,
   exportHtmlOption,
@@ -970,6 +972,7 @@ const previewController = createPreviewController({
 });
 const previewAdapter = createPreviewWebviewAdapter(previewController);
 previewAppearanceSlot.replaceWith(previewController.appearanceControl);
+previewFontFamilySlot.replaceWith(previewController.fontFamilyControl);
 previewSourceColoringSlot.replaceWith(previewController.sourceColoringControl);
 outlineController = createOutlineController({
   root,
@@ -1714,6 +1717,7 @@ window.addEventListener('message', (event) => {
       previewAdapter.start({
         text: message.text,
         appearance: message.previewAppearance,
+        fontFamily: message.previewFontFamily,
         sourceColoring: message.previewSourceColoring,
         active: false
       });

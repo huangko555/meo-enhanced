@@ -37,6 +37,7 @@ async function main(): Promise<void> {
         diagnostics: [],
         mode: 'source',
         previewAppearance: 'dark',
+        previewFontFamily: '',
         previewSourceColoring: true,
         editorAppearance: 'dark',
         gitChangesGutter: false,

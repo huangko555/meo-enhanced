@@ -94,7 +94,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///reload-retry.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'live',
-        previewAppearance: 'dark', previewSourceColoring: true, editorAppearance: 'dark',
+        previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false,

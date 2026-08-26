@@ -5,7 +5,7 @@ import {
   type VisualColors,
   type BuiltInVisuals
 } from '../shared/builtInVisualBaseline';
-import type { PreviewAppearance } from '../shared/preview';
+import { normalizePreviewFontFamily, type PreviewAppearance } from '../shared/preview';
 import type { EditorStyleEnvironment } from '../protocol/editorStyleEnvironment';
 
 const styleValueInjectionPattern = /[\n\r;{}]/g;
@@ -67,18 +67,11 @@ function buildReadingStyles(
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
   const readingForegroundColor = previewForegroundColor;
-  const liveFont = resolveThemeFontChoice(
-    sanitizeCssFont(environment.liveFontFamily ?? ''),
-    sanitizeCssFont(fonts.liveFont),
-    editorFontFamily,
-    'var(--meo-font-system-sans)'
-  );
-  const sourceFont = resolveThemeFontChoice(
-    sanitizeCssFont(environment.sourceFontFamily ?? ''),
-    sanitizeCssFont(fonts.sourceFont),
-    editorFontFamily,
-    'var(--meo-font-system-mono)'
-  );
+  const selectedFontFamily = normalizePreviewFontFamily(environment.previewFontFamily);
+  const liveFont = selectedFontFamily
+    ? `${quoteCssFontFamily(selectedFontFamily)}, ${editorFontFamily || 'var(--meo-font-system-sans)'}`
+    : editorFontFamily || 'var(--meo-font-system-sans)';
+  const sourceFont = editorFontFamily || 'var(--meo-font-system-mono)';
   const liveFontWeight = resolveThemeFontChoice(
     sanitizeFontWeight(environment.liveFontWeight, editorFontWeight),
     sanitizeFontWeight(fonts.liveFontWeight, editorFontWeight),
@@ -316,7 +309,7 @@ body[data-meo-export-target='pdf'] hr {
 
 .meo-export-frontmatter-line.is-raw {
   color: var(--meo-muted);
-  font-family: var(--meo-font-code);
+  font-family: var(--meo-font-body);
   font-size: var(--meo-font-size-code);
   white-space: pre-wrap;
   word-break: break-word;
@@ -1058,6 +1051,10 @@ function sanitizeCssFont(value: string | undefined): string {
     return '';
   }
   return trimmed.replace(styleValueInjectionPattern, ' ');
+}
+
+function quoteCssFontFamily(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 function sanitizeFontWeight(value: string | undefined, fallback: string): string {

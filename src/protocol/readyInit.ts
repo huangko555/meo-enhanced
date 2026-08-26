@@ -3,6 +3,7 @@ import {
   decodeCodeTheme,
   type CodeThemeDto
 } from './hostConfigurationEvents';
+import { normalizePreviewFontFamily } from './editorStyleEnvironment';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
@@ -25,6 +26,7 @@ export type InitMessage = {
   readonly diagnostics: readonly SerializedDiagnostic[];
   readonly mode: EditorMode;
   readonly previewAppearance: PreviewAppearance;
+  readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
   readonly editorAppearance: PreviewAppearance;
   readonly gitChangesGutter: boolean;
@@ -57,6 +59,9 @@ export function decodeReadyMessage(value: unknown): ReadyMessage | null {
 }
 
 export function decodeInitMessage(value: unknown): InitMessage | null {
+  const previewFontFamily = isRecord(value) && typeof value.previewFontFamily === 'string'
+    ? normalizePreviewFontFamily(value.previewFontFamily)
+    : null;
   if (!isRecord(value)
     || value.type !== 'init'
     || 'theme' in value
@@ -65,6 +70,9 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || 'lineNumbers' in value
     || 'restoreTopLine' in value
     || 'restoreTopLineOffset' in value
+    || 'previewFontFamilyName' in value
+    || 'previewFontFamilyFallback' in value
+    || 'previewFontFamilies' in value
     || typeof value.documentId !== 'string'
     || value.documentId.length === 0
     || typeof value.text !== 'string'
@@ -74,6 +82,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isSavedRevision(value.savedRevision, value.version, value.text)
     || !isEditorMode(value.mode)
     || !isPreviewAppearance(value.previewAppearance)
+    || previewFontFamily === null
     || typeof value.previewSourceColoring !== 'boolean'
     || !isPreviewAppearance(value.editorAppearance)
     || !Array.isArray(value.diagnostics)
@@ -98,7 +107,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || decodeCodeTheme(value.vscodeTheme) === undefined) {
     return null;
   }
-  return value as InitMessage;
+  return { ...value, previewFontFamily } as InitMessage;
 }
 
 function isSavedRevision(value: unknown, currentVersion: number, currentText: string): value is SavedRevisionDto | null {

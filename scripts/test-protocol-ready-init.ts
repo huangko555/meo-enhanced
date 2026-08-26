@@ -21,6 +21,7 @@ import { decodeHostConfigurationEvent } from '../src/protocol/hostConfigurationE
 import { decodeDiagnosticsChangedEvent } from '../src/protocol/diagnostics';
 import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/protocol/messages';
 import { createDocumentSessionCoordinatorFromInit } from '../webview/src/adapters/documentSessionTransport';
+import { MAX_PREVIEW_FONT_FAMILY_LENGTH, normalizePreviewFontFamily } from '../src/shared/preview';
 
 const codeTheme = { name: 'VS Dark', type: 'dark' as const, colors: {}, tokenColors: [] };
 const completeInit = {
@@ -32,6 +33,7 @@ const completeInit = {
   diagnostics: [],
   mode: 'live' as const,
   previewAppearance: 'dark' as const,
+  previewFontFamily: '' as const,
   previewSourceColoring: true,
   editorAppearance: 'dark' as const,
   gitChangesGutter: true,
@@ -67,8 +69,16 @@ assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: 3, t
 assert.notEqual(decodeInitMessage({ ...completeInit, savedRevision: null }), null);
 assert.equal(decodeInitMessage({ ...completeInit, mode: 'bad' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewAppearance: 'broken' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, previewFontFamily: '  MEO Synthetic Sans  ' })?.previewFontFamily, 'MEO Synthetic Sans');
+for (const invalidFontFamily of ['MEO\nSynthetic', 'MEO\u0000Synthetic', 'x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)]) {
+  assert.equal(decodeInitMessage({ ...completeInit, previewFontFamily: invalidFontFamily }), null);
+}
+assert.equal(normalizePreviewFontFamily(undefined), '');
+assert.equal(normalizePreviewFontFamily('  MEO Synthetic Sans  '), 'MEO Synthetic Sans');
+assert.equal(normalizePreviewFontFamily('MEO\nSynthetic'), null);
+assert.equal(normalizePreviewFontFamily('x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)), null);
 for (const requiredKey of [
-  'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'editorAppearance', 'gitChangesGutter',
+  'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'previewFontFamily', 'editorAppearance', 'gitChangesGutter',
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'contentMaxWidthEnabled',
   'findOptions', 'outlinePosition', 'outlineVisible',
@@ -84,6 +94,9 @@ for (const removedKey of ['theme', 'shikiCodeBlocks', 'codeTheme', 'lineNumbers'
     null,
     `Init must reject removed ${removedKey} payloads`
   );
+}
+for (const removedFontKey of ['previewFontFamilyName', 'previewFontFamilyFallback', 'previewFontFamilies']) {
+  assert.equal(decodeInitMessage({ ...completeInit, [removedFontKey]: 'MEO Synthetic Sans' }), null);
 }
 assert.deepEqual(decodeHostToWebviewMessage(completeInit), completeInit);
 assert.deepEqual(decodeWebviewToHostMessage({ type: 'ready' }), { type: 'ready' });
@@ -367,13 +380,17 @@ assert.equal(saveTransport.accept({
 
 assert.deepEqual(decodePreviewRenderRequest({
   type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
-  environment: { editorFontFamily: 'sans-serif', editorFontSizePx: 14, meoThemeColors: { base00: '#fff' } }
+  environment: { previewFontFamily: '  MEO Synthetic Sans  ', editorFontFamily: 'sans-serif', editorFontSizePx: 14, meoThemeColors: { base00: '#fff' } }
 }), {
   type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
-  environment: { editorFontFamily: 'sans-serif', editorFontSizePx: 14, meoThemeColors: { base00: '#fff' } }
+  environment: { previewFontFamily: 'MEO Synthetic Sans', editorFontFamily: 'sans-serif', editorFontSizePx: 14, meoThemeColors: { base00: '#fff' } }
 });
 assert.equal(decodePreviewRenderRequest({
   type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', environment: { editorFontSizePx: '14' }
+}), null);
+assert.equal(decodePreviewRenderRequest({
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  environment: { previewFontFamily: 'MEO Synthetic Sans', previewFontFamilies: ['MEO Synthetic Sans'] }
 }), null);
 assert.deepEqual(decodePreviewRenderResponse({
   type: 'previewRenderResult', requestId: 'preview-1', result: {
@@ -577,6 +594,7 @@ for (const command of [
   { type: 'reloadDocumentFromDisk', topLine: 1 },
 { type: 'exportDocument', format: 'pdf' },
 { type: 'setPreviewAppearance', appearance: 'auto' },
+{ type: 'setPreviewFontFamily', fontFamily: 'MEO Synthetic Sans' },
 { type: 'setPreviewSourceColoring', enabled: false },
 { type: 'setEditorAppearance', appearance: 'auto' }
 ]) {
@@ -589,6 +607,9 @@ assert.equal(decodeEditorCommand({ type: 'setLongCodeBlockFolding', enabled: fal
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 3 }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 0 }), null);
 assert.equal(decodeEditorCommand({ type: 'setOutlineWidth', width: Number.NaN }), null);
+assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'MEO\nSynthetic' }), null);
+assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1) }), null);
+assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', previewFontFamily: 'MEO Synthetic Sans' }), null);
 for (const event of [
   { type: 'focusEditor' },
   { type: 'revealSelection', anchor: 0, head: 4, preserveViewport: true },

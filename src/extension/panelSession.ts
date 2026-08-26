@@ -115,6 +115,8 @@ type PanelSessionControllerParams = {
   setFindOptions: (options: FindOptions) => Promise<void>;
   getPreviewAppearance: () => PreviewAppearance;
   setPreviewAppearance: (appearance: PreviewAppearance) => Promise<void>;
+  getPreviewFontFamily: () => string;
+  setPreviewFontFamily: (fontFamily: string) => Promise<void>;
   getPreviewSourceColoring: () => boolean;
   setPreviewSourceColoring: (enabled: boolean) => Promise<void>;
   getEditorAppearance: () => EditorAppearance;
@@ -163,6 +165,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     setFindOptions,
     getPreviewAppearance,
     setPreviewAppearance,
+    getPreviewFontFamily,
+    setPreviewFontFamily,
     getPreviewSourceColoring,
     setPreviewSourceColoring,
     getEditorAppearance,
@@ -321,6 +325,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: diagnostics.read(),
       mode: initialMode,
       previewAppearance: getPreviewAppearance(),
+      previewFontFamily: getPreviewFontFamily(),
       previewSourceColoring: getPreviewSourceColoring(),
       editorAppearance: getEditorAppearance(),
       gitChangesGutter: getGitChangesGutterEnabled(context),
@@ -537,6 +542,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setPreviewAppearance':
         await setPreviewAppearance(raw.appearance);
+        return;
+      case 'setPreviewFontFamily':
+        await setPreviewFontFamily(raw.fontFamily);
         return;
       case 'setPreviewSourceColoring':
         await setPreviewSourceColoring(raw.enabled);

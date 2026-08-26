@@ -15,6 +15,9 @@ const surface = {
   setSourceColoring(enabled: boolean) {
     calls.push({ type: 'sourceColoring', enabled });
   },
+  setFontFamily(fontFamily: string) {
+    calls.push({ type: 'fontFamily', fontFamily });
+  },
   getAppearance: () => appearance,
   setVisible(visible: boolean) {
     calls.push({ type: 'visible', visible });
@@ -41,15 +44,16 @@ const surface = {
 };
 
 const adapter = createPreviewWebviewAdapter(surface);
-adapter.start({ text: 'hidden', appearance: 'auto', sourceColoring: false, active: false });
+adapter.start({ text: 'hidden', appearance: 'auto', fontFamily: 'MEO Synthetic Sans', sourceColoring: false, active: false });
 assert.deepEqual(calls, [
   { type: 'appearance', appearance: 'auto' },
   { type: 'sourceColoring', enabled: false },
+  { type: 'fontFamily', fontFamily: 'MEO Synthetic Sans' },
   { type: 'preload', text: 'hidden' }
 ]);
 
 adapter.setActive({ active: true, text: 'visible' });
-assert.deepEqual(calls.slice(3), [
+assert.deepEqual(calls.slice(4), [
   { type: 'visible', visible: true },
   { type: 'render', text: 'visible', force: false, preserveViewport: false }
 ]);
@@ -91,6 +95,7 @@ adapter.dispose();
 const beforeDisposedActions = calls.length;
 adapter.setActive({ active: true, text: 'ignored' });
 adapter.refreshVisible('ignored');
+adapter.start({ text: 'ignored', appearance: 'light', fontFamily: '', sourceColoring: true, active: false });
 assert.equal(adapter.accept(response), true);
 assert.equal(calls.length, beforeDisposedActions);
 assert.equal(calls.filter(call => call.type === 'dispose').length, 1);
@@ -104,7 +109,8 @@ for (const forbiddenCall of [
   'previewController.preload',
   'previewController.acceptRenderResponse',
   'previewController.setVisible',
-  'previewController.setAppearance'
+  'previewController.setAppearance',
+  'previewController.setFontFamily'
 ]) {
   assert.equal(bootstrap.includes(forbiddenCall), false, `Preview lifecycle leaked into Bootstrap: ${forbiddenCall}`);
 }

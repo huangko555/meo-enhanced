@@ -121,6 +121,7 @@ const initMessage = {
   diagnostics: [],
   mode: 'preview',
   previewAppearance: 'light',
+  previewFontFamily: '',
   previewSourceColoring: true,
   editorAppearance: 'light',
   gitChangesGutter: false,
@@ -407,6 +408,106 @@ async function assertOpenLinkWaiterLifecycle(defaultTimeoutMs: number): Promise<
   assert.equal(cancellationCount, 6);
 }
 
+async function assertFontEnumerationFallbackMatrix(
+  browser: import('puppeteer-core').Browser,
+  bundlePath: string
+): Promise<void> {
+  const scenarios = ['unsupported', 'NotAllowedError', 'SecurityError', 'other', 'throw', 'empty'] as const;
+  const fallbackText = '# Font fallback\n\n`synthetic code`';
+  const fallbackInit = {
+    ...initMessage,
+    text: fallbackText,
+    savedRevision: { version: 1, text: fallbackText }
+  };
+  for (const scenario of scenarios) {
+    const page = await browser.newPage();
+    try {
+      await page.exposeFunction('__deliverFontFallbackMessageToHost', (raw: unknown) => {
+        const message = decodeWebviewToHostMessage(raw);
+        assert.ok(message, 'Font fallback message failed Protocol decoding');
+        if (message.type !== 'requestPreviewRender') return null;
+        return decodeHostToWebviewMessage({
+          type: 'previewRenderResult',
+          requestId: message.requestId,
+          result: {
+            ok: true,
+            value: exportRuntime.renderPreviewDocument({
+              markdownText: message.text,
+              sourceDocumentPath,
+              styleEnvironment: message.environment
+            })
+          }
+        });
+      });
+      await page.setRequestInterception(true);
+      page.once('request', (request) => {
+        void request.respond({
+          status: 200,
+          contentType: 'text/html',
+          body: '<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>'
+        });
+      });
+      await page.goto('http://localhost');
+      await page.setRequestInterception(false);
+      await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
+      await page.addScriptTag({ content: `
+        window.__meoFallbackFontQueryCount = 0;
+        const scenario = ${JSON.stringify(scenario)};
+        if (scenario !== 'unsupported') {
+          window.queryLocalFonts = () => {
+            window.__meoFallbackFontQueryCount += 1;
+            if (scenario === 'throw') throw new Error('synthetic unavailable');
+            return (async () => {
+              if (scenario === 'empty') return [];
+              if (scenario === 'other') throw new Error('synthetic unavailable');
+              throw new DOMException('synthetic unavailable', scenario);
+            })();
+          };
+        }
+        window.acquireVsCodeApi = () => ({
+          postMessage(message) {
+            window.__deliverFontFallbackMessageToHost(message).then((response) => {
+              if (response) window.dispatchEvent(new MessageEvent('message', { data: response }));
+            });
+          },
+          getState() { return undefined; },
+          setState() {}
+        });
+      ` });
+      await page.addScriptTag({ path: bundlePath });
+      await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), fallbackInit);
+      await page.waitForFunction(() => (
+        document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Font fallback')
+      ));
+      assert.equal(await page.evaluate(() => (
+        (window as typeof window & { __meoFallbackFontQueryCount?: number }).__meoFallbackFontQueryCount
+      )), 0);
+      await page.click('.preview-font-family-input');
+      await page.click('.preview-font-family-input');
+      await page.waitForFunction(() => (
+        document.querySelector<HTMLElement>('.preview-font-family-control')?.title
+          === 'Local font list unavailable; type a family name'
+      ));
+      assert.equal(await page.evaluate(() => (
+        (window as typeof window & { __meoFallbackFontQueryCount?: number }).__meoFallbackFontQueryCount
+      )), scenario === 'unsupported' ? 0 : 1);
+      await page.evaluate(() => {
+        const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+        input.value = 'MEO Synthetic Manual';
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      });
+      await page.waitForFunction(() => (
+        getComputedStyle(
+          document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+            .querySelector<HTMLElement>('.meo-export-doc')!
+        ).fontFamily.includes('MEO Synthetic Manual')
+      ));
+    } finally {
+      await page.close();
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(root, 'scripts', 'test-preview-reading-surface-production-entry.ts')],
@@ -419,6 +520,7 @@ async function main(): Promise<void> {
 
   const browser = await launchTestBrowser();
   let openLinkWaiter: ReturnType<typeof createOpenLinkWaiter> | null = null;
+  const previewFontFamilyCommands: string[] = [];
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 700, deviceScaleFactor: 1 });
@@ -450,6 +552,10 @@ async function main(): Promise<void> {
         }
         return null;
       }
+      if (message.type === 'setPreviewFontFamily') {
+        previewFontFamilyCommands.push(message.fontFamily);
+        return null;
+      }
       if (message.type !== 'requestPreviewRender') return null;
       const rendered = exportRuntime.renderPreviewDocument({
         markdownText: message.text,
@@ -477,6 +583,20 @@ async function main(): Promise<void> {
     await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ url: deterministicMermaidRuntimeSrc });
     await page.addScriptTag({ content: `
+      window.__meoSyntheticFontQueryCount = 0;
+      window.queryLocalFonts = () => {
+        window.__meoSyntheticFontQueryCount += 1;
+        return new Promise((resolve) => {
+          window.__resolveMEOFontQuery = () => resolve([
+            { family: 'MEO Synthetic Serif' },
+            { family: 'meo synthetic serif' },
+            { family: 'MEO Synthetic Sans' },
+            { family: '' },
+            { family: 'MEO\\nMalformed' },
+            { family: 42 }
+          ]);
+        });
+      };
       window.acquireVsCodeApi=()=>(
         {
           postMessage(message) {
@@ -494,6 +614,130 @@ async function main(): Promise<void> {
     await page.waitForFunction(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
       return frame?.contentDocument?.body.textContent?.includes('continues */') === true;
+    });
+    assert.equal(await page.evaluate(() => {
+      document.querySelector<HTMLInputElement>('.preview-font-family-input')!
+        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      return (window as typeof window & { __meoSyntheticFontQueryCount?: number }).__meoSyntheticFontQueryCount;
+    }), 0, 'Init and synthetic activation must not enumerate local fonts');
+    const fontInteractionState = await page.evaluateHandle(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      const target = doc.querySelector<HTMLElement>('.meo-export-code-line-source')!;
+      const range = doc.createRange();
+      range.selectNodeContents(target);
+      const selection = doc.defaultView!.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      doc.defaultView!.scrollTo(0, 120);
+      return { frame, selection: selection.toString(), scrollTop: doc.scrollingElement!.scrollTop };
+    });
+    await page.click('.preview-font-family-input');
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = 'MEO Synthetic Sans';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      (window as typeof window & { __resolveMEOFontQuery?: () => void }).__resolveMEOFontQuery?.();
+    });
+    await page.waitForFunction(() => (
+      document.querySelectorAll<HTMLOptionElement>('#meo-preview-font-family-options option').length === 2
+    ));
+    const enumeratedFontOptions = await page.evaluate(() => ({
+      count: (window as typeof window & { __meoSyntheticFontQueryCount?: number }).__meoSyntheticFontQueryCount,
+      values: Array.from(
+        document.querySelectorAll<HTMLOptionElement>('#meo-preview-font-family-options option'),
+        (option) => option.value
+      )
+    }));
+    assert.deepEqual(enumeratedFontOptions, {
+      count: 1,
+      values: ['MEO Synthetic Sans', 'MEO Synthetic Serif']
+    });
+    assert.equal(await page.$eval('.preview-font-family-input', (input) => (input as HTMLInputElement).value), 'MEO Synthetic Sans');
+    await page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+      if (!doc) return false;
+      const bodyFamily = getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily;
+      const codeFamily = getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-line-source')!).fontFamily;
+      return bodyFamily.includes('MEO Synthetic Sans') && !codeFamily.includes('MEO Synthetic Sans');
+    });
+    assert.equal(previewFontFamilyCommands.at(-1), 'MEO Synthetic Sans');
+    const preservedFontInteraction = await page.evaluate((before) => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      return {
+        sameFrame: frame === before.frame,
+        selection: doc.defaultView!.getSelection()!.toString(),
+        expectedSelection: before.selection,
+        scrollTop: doc.scrollingElement!.scrollTop,
+        expectedScrollTop: before.scrollTop
+      };
+    }, fontInteractionState);
+    await fontInteractionState.dispose();
+    assert.deepEqual(preservedFontInteraction, {
+      sameFrame: true,
+      selection: preservedFontInteraction.expectedSelection,
+      expectedSelection: preservedFontInteraction.expectedSelection,
+      scrollTop: preservedFontInteraction.expectedScrollTop,
+      expectedScrollTop: preservedFontInteraction.expectedScrollTop
+    });
+    const acceptedCommandCount = previewFontFamilyCommands.length;
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = 'MEO Synthetic Sans";color:red;}';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    });
+    assert.equal(previewFontFamilyCommands.length, acceptedCommandCount);
+    assert.equal(await page.$eval('.preview-font-family-input', (input) => (input as HTMLInputElement).value), 'MEO Synthetic Sans');
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = 'MEO Missing Synthetic';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    });
+    await page.waitForFunction(() => (
+      getComputedStyle(
+        document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+          .querySelector<HTMLElement>('.meo-export-doc')!
+      ).fontFamily.includes('MEO Missing Synthetic')
+    ));
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = '';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+    });
+    await page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      return !getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('MEO Missing Synthetic');
+    });
+    assert.equal(previewFontFamilyCommands.at(-1), '');
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      input.value = 'MEO Synthetic Sans';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    });
+    await page.waitForFunction(() => (
+      getComputedStyle(
+        document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+          .querySelector<HTMLElement>('.meo-export-doc')!
+      ).fontFamily.includes('MEO Synthetic Sans')
+    ));
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
+      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="dark"]')!.click();
+      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
+      input.value = 'MEO Synthetic Serif';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="light"]')!.click();
+      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
+      input.value = 'MEO Synthetic Final';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    });
+    await page.waitForFunction(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const doc = frame.contentDocument!;
+      return getComputedStyle(doc.documentElement).colorScheme === 'light'
+        && document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.getAttribute('aria-pressed') === 'true'
+        && getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('MEO Synthetic Final');
     });
     const initialRows = await page.evaluate(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')
@@ -1418,6 +1662,7 @@ async function main(): Promise<void> {
     } finally {
       await exportPage.close();
     }
+    await assertFontEnumerationFallbackMatrix(browser, path.join(temp, 'bundle.js'));
   } finally {
     openLinkWaiter?.dispose(new Error('Preview test ended before openLink delivery'));
     await browser.close();

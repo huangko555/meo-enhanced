@@ -1,4 +1,5 @@
 export type EditorStyleEnvironment = {
+  readonly previewFontFamily?: string;
   readonly editorFontFamily?: string;
   readonly editorFontSizePx?: number;
   readonly editorFontWeight?: string;
@@ -7,8 +8,6 @@ export type EditorStyleEnvironment = {
   readonly codeBlockBackgroundColor?: string;
   readonly sideBarBackgroundColor?: string;
   readonly panelBorderColor?: string;
-  readonly liveFontFamily?: string;
-  readonly sourceFontFamily?: string;
   readonly liveFontWeight?: string;
   readonly sourceFontWeight?: string;
   readonly liveLineHeight?: number;
@@ -27,6 +26,18 @@ export type EditorStyleEnvironment = {
   }>>>;
 };
 
+export const MAX_PREVIEW_FONT_FAMILY_LENGTH = 128;
+
+export function normalizePreviewFontFamily(value: unknown): string | null {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (normalized.length > MAX_PREVIEW_FONT_FAMILY_LENGTH
+    || /[\u0000-\u001f\u007f-\u009f]/u.test(normalized)
+    || /[,"\\;{}]/u.test(normalized)) return null;
+  return normalized;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -39,8 +50,6 @@ const stringKeys = [
   'codeBlockBackgroundColor',
   'sideBarBackgroundColor',
   'panelBorderColor',
-  'liveFontFamily',
-  'sourceFontFamily',
   'liveFontWeight',
   'sourceFontWeight'
 ] as const;
@@ -49,6 +58,11 @@ const numberKeys = ['editorFontSizePx', 'liveLineHeight', 'sourceLineHeight'] as
 
 export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnvironment | null {
   if (!isRecord(value)) return null;
+  if ('previewFontFamilyName' in value
+    || 'previewFontFamilyFallback' in value
+    || 'previewFontFamilies' in value) return null;
+  if (value.previewFontFamily !== undefined
+    && normalizePreviewFontFamily(value.previewFontFamily) === null) return null;
   for (const key of stringKeys) {
     if (value[key] !== undefined && typeof value[key] !== 'string') return null;
   }
@@ -69,5 +83,7 @@ export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnviron
           .some((key) => typeof palette[key] !== 'string')) return null;
     }
   }
-  return value as EditorStyleEnvironment;
+  return value.previewFontFamily === undefined
+    ? value as EditorStyleEnvironment
+    : { ...value, previewFontFamily: normalizePreviewFontFamily(value.previewFontFamily) as string };
 }
