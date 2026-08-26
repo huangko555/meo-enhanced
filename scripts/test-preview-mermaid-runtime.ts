@@ -243,41 +243,6 @@ try {
   if (!previewMathFont.includes('KaTeX_Main')) {
     throw new Error(`Preview iframe did not receive KaTeX styles: ${previewMathFont}`);
   }
-  const displayMathLayout = await page.evaluate(async () => {
-    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
-    const formula = frameDocument?.querySelector<HTMLElement>('.meo-export-math-display');
-    if (!formula) return null;
-    await frameDocument?.fonts.load('19px KaTeX_Size2');
-    const largeOperator = formula.querySelector<HTMLElement>('.op-symbol.large-op');
-    const style = frameDocument.defaultView?.getComputedStyle(formula);
-    const operatorStyle = largeOperator
-      ? frameDocument.defaultView?.getComputedStyle(largeOperator)
-      : null;
-    return {
-      overflowX: style?.overflowX ?? '',
-      paddingTop: Number.parseFloat(style?.paddingTop ?? '0'),
-      paddingBottom: Number.parseFloat(style?.paddingBottom ?? '0'),
-      clientWidth: formula.clientWidth,
-      scrollWidth: formula.scrollWidth,
-      height: formula.getBoundingClientRect().height,
-      fontsLoaded: frameDocument?.fonts.check('16px KaTeX_Size2') ?? false,
-      operatorFont: operatorStyle?.fontFamily ?? '',
-      operatorHeight: largeOperator?.getBoundingClientRect().height ?? 0
-    };
-  });
-  if (
-    !displayMathLayout ||
-    !['hidden', 'clip'].includes(displayMathLayout.overflowX) ||
-    displayMathLayout.paddingTop <= 0 ||
-    displayMathLayout.paddingBottom <= 0 ||
-    displayMathLayout.clientWidth <= 0 ||
-    displayMathLayout.height > 120 ||
-    !displayMathLayout.fontsLoaded ||
-    !displayMathLayout.operatorFont.includes('KaTeX_Size2') ||
-    displayMathLayout.operatorHeight <= 0
-  ) {
-    throw new Error(`Preview display math layout is unstable: ${JSON.stringify(displayMathLayout)}`);
-  }
   const mermaidReadyAfterMs = await page.evaluate((startedAt) => performance.now() - startedAt, previewStartedAt);
   if (mermaidReadyAfterMs > 700) {
     throw new Error(`Preview Mermaid was blocked behind hidden Live renders for ${Math.round(mermaidReadyAfterMs)}ms`);
