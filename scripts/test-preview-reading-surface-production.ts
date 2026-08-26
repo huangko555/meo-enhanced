@@ -485,10 +485,26 @@ async function main(): Promise<void> {
       const beforeMermaidDrag = await readMermaidInteractionState();
       const tallDiagramBox = await tallDiagramHandle.boundingBox();
       assert.ok(tallDiagramBox, 'Tall Mermaid SVG must expose a public viewport for the drag probe');
-      const dragStart = {
-        x: tallDiagramBox.x + (tallDiagramBox.width / 2),
-        y: tallDiagramBox.y + Math.min(tallDiagramBox.height / 2, 120)
+      const previewFrameBox = await currentFrame.boundingBox();
+      assert.ok(previewFrameBox, 'Current Preview iframe must expose a public viewport for the drag probe');
+      const visibleDiagramRect = {
+        left: Math.max(tallDiagramBox.x, previewFrameBox.x),
+        right: Math.min(tallDiagramBox.x + tallDiagramBox.width, previewFrameBox.x + previewFrameBox.width),
+        top: Math.max(tallDiagramBox.y, previewFrameBox.y),
+        bottom: Math.min(tallDiagramBox.y + tallDiagramBox.height, previewFrameBox.y + previewFrameBox.height)
       };
+      assert.ok(
+        visibleDiagramRect.right > visibleDiagramRect.left && visibleDiagramRect.bottom > visibleDiagramRect.top,
+        'Tall Mermaid SVG must intersect the current Preview viewport'
+      );
+      const dragStart = {
+        x: (visibleDiagramRect.left + visibleDiagramRect.right) / 2,
+        y: (visibleDiagramRect.top + visibleDiagramRect.bottom) / 2
+      };
+      const dragHitTallDiagram = await previewFrame.evaluate(({ x, y }) => (
+        document.elementFromPoint(x, y)?.closest('svg[data-fit-diagram="tall"]') !== null
+      ), { x: dragStart.x - previewFrameBox.x, y: dragStart.y - previewFrameBox.y });
+      assert.equal(dragHitTallDiagram, true, 'Public hit testing must prove the drag starts on the tall Mermaid SVG');
       await page.mouse.move(dragStart.x, dragStart.y);
       await page.mouse.down();
       await page.mouse.move(dragStart.x + 40, dragStart.y + 30);
