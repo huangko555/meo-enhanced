@@ -1,4 +1,4 @@
-import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createElement, Code2, Eye, Pencil } from 'lucide';
@@ -370,6 +370,49 @@ function applyMermaidSourceLinePrefix(sourceText: string, prefix: string): strin
   return sourceText.split('\n').map((line) => `${prefix}${line}`).join('\n');
 }
 
+function resolveMermaidSourceProjection(
+  contentFrom: number,
+  currentText: string,
+  nextText: string
+): { from: number; to: number; insert: string } {
+  let unchangedPrefix = 0;
+  const prefixLimit = Math.min(currentText.length, nextText.length);
+  while (
+    unchangedPrefix < prefixLimit &&
+    currentText.charCodeAt(unchangedPrefix) === nextText.charCodeAt(unchangedPrefix)
+  ) {
+    unchangedPrefix += 1;
+  }
+
+  let unchangedSuffix = 0;
+  const suffixLimit = prefixLimit - unchangedPrefix;
+  while (
+    unchangedSuffix < suffixLimit &&
+    currentText.charCodeAt(currentText.length - unchangedSuffix - 1) ===
+      nextText.charCodeAt(nextText.length - unchangedSuffix - 1)
+  ) {
+    unchangedSuffix += 1;
+  }
+
+  // A zero-width change exactly on the inclusive boundary of the replacing
+  // decoration makes CodeMirror replace the widget that owns this editor.
+  // Carry one unchanged code unit through the projection so the transaction
+  // stays inside the current source range and preserves its lifecycle.
+  if (unchangedPrefix + unchangedSuffix === currentText.length) {
+    if (unchangedPrefix > 0) {
+      unchangedPrefix -= 1;
+    } else if (unchangedSuffix > 0) {
+      unchangedSuffix -= 1;
+    }
+  }
+
+  return {
+    from: contentFrom + unchangedPrefix,
+    to: contentFrom + currentText.length - unchangedSuffix,
+    insert: nextText.slice(unchangedPrefix, nextText.length - unchangedSuffix)
+  };
+}
+
 function mermaidOuterOffsetToEditorOffset(sourceText: string, prefix: string, offset: number): number {
   if (!prefix) return Math.max(0, Math.min(offset, sourceText.length));
   const target = Math.max(0, offset);
@@ -390,6 +433,96 @@ function mermaidOuterOffsetToEditorOffset(sourceText: string, prefix: string, of
     }
   }
   return sourceText.length;
+}
+
+type MermaidSourceProjectionLock = {
+  scrollTop: number;
+  releaseFrame: number | null;
+  releaseOnInteraction: () => void;
+  previousSelection: EditorSelection;
+  pinnedSelection: EditorSelection | null;
+};
+
+const mermaidSourceProjectionLocks = new WeakMap<
+  EditorView,
+  Map<number, MermaidSourceProjectionLock>
+>();
+
+function releaseMermaidSourceProjectionLock(
+  outerView: EditorView,
+  anchor: number,
+  lock: MermaidSourceProjectionLock
+): void {
+  const locks = mermaidSourceProjectionLocks.get(outerView);
+  if (locks?.get(anchor) !== lock) return;
+  if (lock.releaseFrame !== null) {
+    window.cancelAnimationFrame(lock.releaseFrame);
+    lock.releaseFrame = null;
+  }
+  outerView.scrollDOM.removeEventListener('pointerdown', lock.releaseOnInteraction);
+  outerView.scrollDOM.removeEventListener('touchstart', lock.releaseOnInteraction);
+  outerView.scrollDOM.removeEventListener('wheel', lock.releaseOnInteraction);
+  locks.delete(anchor);
+  if (locks.size === 0) mermaidSourceProjectionLocks.delete(outerView);
+  if (
+    outerView.dom.isConnected &&
+    lock.pinnedSelection &&
+    outerView.state.selection.eq(lock.pinnedSelection)
+  ) {
+    outerView.dispatch({
+      selection: lock.previousSelection,
+      annotations: Transaction.addToHistory.of(false)
+    });
+  }
+}
+
+function acquireMermaidSourceProjectionLock(
+  outerView: EditorView,
+  anchor: number
+): MermaidSourceProjectionLock {
+  let locks = mermaidSourceProjectionLocks.get(outerView);
+  if (!locks) {
+    locks = new Map();
+    mermaidSourceProjectionLocks.set(outerView, locks);
+  }
+  let lock = locks.get(anchor);
+  if (!lock) {
+    const releaseOnInteraction = () => {
+      const currentLocks = mermaidSourceProjectionLocks.get(outerView);
+      const currentLock = currentLocks?.get(anchor);
+      if (!currentLock) return;
+      releaseMermaidSourceProjectionLock(outerView, anchor, currentLock);
+    };
+    lock = {
+      scrollTop: outerView.scrollDOM.scrollTop,
+      releaseFrame: null,
+      releaseOnInteraction,
+      previousSelection: outerView.state.selection,
+      pinnedSelection: null
+    };
+    locks.set(anchor, lock);
+    outerView.scrollDOM.addEventListener('pointerdown', releaseOnInteraction, { passive: true });
+    outerView.scrollDOM.addEventListener('touchstart', releaseOnInteraction, { passive: true });
+    outerView.scrollDOM.addEventListener('wheel', releaseOnInteraction, { passive: true });
+  }
+  if (lock.releaseFrame !== null) {
+    window.cancelAnimationFrame(lock.releaseFrame);
+    lock.releaseFrame = null;
+  }
+  return lock;
+}
+
+function releaseMermaidSourceProjectionLockAfterFrame(
+  outerView: EditorView,
+  anchor: number,
+  lock: MermaidSourceProjectionLock
+): void {
+  lock.releaseFrame = window.requestAnimationFrame(() => {
+    lock.releaseFrame = null;
+    const locks = mermaidSourceProjectionLocks.get(outerView);
+    if (locks?.get(anchor) !== lock) return;
+    releaseMermaidSourceProjectionLock(outerView, anchor, lock);
+  });
 }
 
 class MermaidEditingController {
@@ -417,6 +550,9 @@ class MermaidEditingController {
   ) {
     this.outerView = outerView;
     this.block = block;
+    if (mermaidSourceProjectionLocks.get(outerView)?.has(block.anchor)) {
+      acquireMermaidSourceProjectionLock(outerView, block.anchor);
+    }
     this.presentationFactory = getMermaidDiagramPresentationFactory(outerView.state);
     this.mode = mode;
     this.root = document.createElement('div') as MermaidEditingBlockElement;
@@ -446,6 +582,25 @@ class MermaidEditingController {
           lineNumbers(),
           innerMermaidSearchField,
           EditorView.lineWrapping,
+          EditorView.domEventHandlers({
+            beforeinput: () => {
+              acquireMermaidSourceProjectionLock(this.outerView, this.block.anchor);
+              return false;
+            },
+            blur: () => {
+              const projectionLock = mermaidSourceProjectionLocks
+                .get(this.outerView)
+                ?.get(this.block.anchor);
+              if (projectionLock) {
+                releaseMermaidSourceProjectionLockAfterFrame(
+                  this.outerView,
+                  this.block.anchor,
+                  projectionLock
+                );
+              }
+              return false;
+            }
+          }),
           keymap.of([
             { key: 'Mod-z', run: () => consumeEditorHistoryCommand(this.outerView, 'undo') },
             { key: 'Mod-y', run: () => consumeEditorHistoryCommand(this.outerView, 'redo') },
@@ -460,24 +615,46 @@ class MermaidEditingController {
             const nextText = update.state.doc.toString();
             const { contentFrom, contentTo } = this.block;
             const outerSourceText = applyMermaidSourceLinePrefix(nextText, this.block.sourceLinePrefix);
-            if (this.outerView.state.doc.sliceString(contentFrom, contentTo) === outerSourceText) {
+            const currentOuterSourceText = this.outerView.state.doc.sliceString(contentFrom, contentTo);
+            if (currentOuterSourceText === outerSourceText) {
               return;
             }
             const userEvent = update.transactions.reduce<string | undefined>(
               (current, transaction) => transaction.annotation(Transaction.userEvent) ?? current,
               undefined
             ) ?? 'input';
+            const change = resolveMermaidSourceProjection(
+              contentFrom,
+              currentOuterSourceText,
+              outerSourceText
+            );
             this.block = {
               ...this.block,
               contentTo: contentFrom + outerSourceText.length,
               diagramText: nextText
             };
-            this.outerView.dispatch({
-              changes: { from: contentFrom, to: contentTo, insert: outerSourceText },
+            const viewportController = getViewportController(this.outerView);
+            const projectionLock = acquireMermaidSourceProjectionLock(
+              this.outerView,
+              this.block.anchor
+            );
+            const scrollTop = projectionLock.scrollTop;
+            viewportController?.markInteraction();
+            const projection = this.outerView.state.update({
+              changes: change,
+              selection: EditorSelection.cursor(contentFrom, -1),
               annotations: [
                 Transaction.userEvent.of(userEvent),
                 markLiveInputNestedProjection()
               ]
+            });
+            projectionLock.previousSelection = projectionLock.previousSelection.map(projection.changes);
+            projectionLock.pinnedSelection = projection.newSelection;
+            this.outerView.dispatch(projection);
+            viewportController?.lockScrollTop(scrollTop);
+            const outerView = this.outerView;
+            queueMicrotask(() => {
+              if (outerView.dom.isConnected) viewportController?.lockScrollTop(scrollTop);
             });
           })
         ]
@@ -674,6 +851,14 @@ class MermaidEditingController {
 
   destroy(): void {
     this.unsubscribeThemeRefresh();
+    const projectionLock = mermaidSourceProjectionLocks.get(this.outerView)?.get(this.block.anchor);
+    if (projectionLock) {
+      releaseMermaidSourceProjectionLockAfterFrame(
+        this.outerView,
+        this.block.anchor,
+        projectionLock
+      );
+    }
     if (this.previewTimer !== null) {
       window.clearTimeout(this.previewTimer);
       this.previewTimer = null;
