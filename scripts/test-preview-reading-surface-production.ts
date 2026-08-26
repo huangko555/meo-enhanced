@@ -14,6 +14,8 @@ const longKbdToken = 'K'.repeat(500);
 const longLinkToken = 'linked'.repeat(80);
 const codeSource = `/* comment\n${longToken}\ncontinues */\n`;
 const mermaidFallbackSource = `invalid ${longToken}\n`;
+const mermaidWideSource = 'flowchart LR\n  wide_fit_start --> wide_fit_end\n';
+const mermaidTallSource = 'flowchart TD\n  tall_fit_start --> tall_fit_end\n';
 const dataImage = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const safeHtmlWideImage = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="120" viewBox="0 0 1600 120"><rect width="1600" height="120" fill="#999"/></svg>',
@@ -34,10 +36,16 @@ fs.writeFileSync(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600"><rect width="1200" height="600" fill="#789"/></svg>',
   'utf8'
 );
-const failingMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
+const deterministicMermaidRuntimeSrc = `data:text/javascript;base64,${Buffer.from(`
   window.mermaid = {
     initialize() {},
-    async render() { throw new Error('invalid diagram'); }
+    async render(_id, source) {
+      if (source.includes('invalid')) throw new Error('invalid diagram');
+      if (source.includes('wide_fit')) {
+        return { svg: '<svg data-fit-diagram="wide" width="2400" height="600" viewBox="0 0 2400 600" preserveAspectRatio="xMidYMid meet" role="img" xmlns="http://www.w3.org/2000/svg"><title>Wide fit diagram</title><rect class="meo-fit-graphic" x="12" y="12" width="2376" height="576" fill="none" stroke="currentColor" stroke-width="12"/><path class="meo-fit-graphic" d="M220 294 H2180 V306 H220 Z" fill="currentColor"/><text class="meo-fit-graphic meo-fit-label" x="24" y="80">Wide start label</text><a href="https://example.com/wide"><text class="meo-fit-graphic meo-fit-label" x="2376" y="540" text-anchor="end">Wide end label</text></a><foreignObject class="meo-fit-graphic" x="1900" y="210" width="460" height="120"><div xmlns="http://www.w3.org/1999/xhtml" class="nodeLabel">Wide foreign label</div></foreignObject></svg>' };
+      }
+      return { svg: '<svg data-fit-diagram="tall" width="600" height="2400" viewBox="0 0 600 2400" preserveAspectRatio="xMidYMid meet" role="img" xmlns="http://www.w3.org/2000/svg"><title>Tall fit diagram</title><rect class="meo-fit-graphic" x="12" y="12" width="576" height="2376" fill="none" stroke="currentColor" stroke-width="12"/><path class="meo-fit-graphic" d="M294 220 H306 V2180 H294 Z" fill="currentColor"/><text class="meo-fit-graphic meo-fit-label" x="24" y="80">Tall start label</text><text class="meo-fit-graphic meo-fit-label" x="576" y="2340" text-anchor="end">Tall end label</text><foreignObject class="meo-fit-graphic" x="70" y="2080" width="460" height="120"><div xmlns="http://www.w3.org/1999/xhtml" class="nodeLabel">Tall foreign label</div></foreignObject></svg>' };
+    }
   };
 `, 'utf8').toString('base64')}`;
 const markdown = [
@@ -57,6 +65,14 @@ const markdown = [
   '/* comment',
   longToken,
   'continues */',
+  '```',
+  '',
+  '```mermaid',
+  mermaidWideSource.trimEnd(),
+  '```',
+  '',
+  '```mermaid',
+  mermaidTallSource.trimEnd(),
   '```',
   '',
   '```mermaid',
@@ -349,7 +365,7 @@ async function main(): Promise<void> {
     await page.goto('http://localhost');
     await page.setRequestInterception(false);
     await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
-    await page.addScriptTag({ url: failingMermaidRuntimeSrc });
+    await page.addScriptTag({ url: deterministicMermaidRuntimeSrc });
     await page.addScriptTag({ content: `
       window.acquireVsCodeApi=()=>(
         {
@@ -374,10 +390,15 @@ async function main(): Promise<void> {
         ?.contentDocument?.querySelectorAll('.meo-export-code-line').length ?? 0
     ));
     assert.equal(initialRows, 3, 'Preview must expose one independent row per fenced source line');
-    await page.waitForFunction(() => (
-      document.querySelector<HTMLIFrameElement>('.preview-frame')
-        ?.contentDocument?.querySelector('.meo-export-mermaid.is-error code') !== null
-    ));
+    const currentFrame = await page.$('.preview-frame');
+    assert.ok(currentFrame, 'Preview iframe must exist before Mermaid settlement');
+    await page.waitForFunction((frame) => {
+      if (!(frame instanceof HTMLIFrameElement) || !frame.isConnected) return false;
+      const doc = frame.contentDocument;
+      return doc?.querySelectorAll('.meo-export-mermaid.is-rendered svg[data-fit-diagram]').length === 2
+        && doc.querySelectorAll('.meo-export-mermaid.is-rendered .meo-fit-graphic').length === 10
+        && doc.querySelector('.meo-export-mermaid.is-error code') !== null;
+    }, {}, currentFrame);
 
     const layoutCases = [1, 2].flatMap((deviceScaleFactor) => (
       [420, 1200].flatMap((width) => (
@@ -524,6 +545,28 @@ async function main(): Promise<void> {
         const mermaidRange = doc.createRange();
         mermaidRange.selectNodeContents(mermaidFallback);
         const mermaidStyle = getComputedStyle(mermaidFallback);
+        const mermaidBlocks = Array.from(doc.querySelectorAll<HTMLElement>('.meo-export-mermaid.is-rendered'));
+        const mermaidWrappers = mermaidBlocks.map((block) => block.querySelector<HTMLElement>('.meo-export-mermaid-svg')!);
+        const mermaidSvgs = mermaidWrappers.map((wrapper) => wrapper.querySelector<SVGSVGElement>('svg[data-fit-diagram]')!);
+        const mermaidGraphics = mermaidSvgs.flatMap((svg) => Array.from(svg.querySelectorAll<SVGGraphicsElement>('.meo-fit-graphic')));
+        const mermaidHtmlClippingAncestors = mermaidGraphics.flatMap((graphic) => {
+          const clipping: string[] = [];
+          for (let current = graphic.parentElement; current && current !== pageRoot.parentElement; current = current.parentElement) {
+            if (current.namespaceURI === 'http://www.w3.org/2000/svg') continue;
+            const style = getComputedStyle(current);
+            if ([style.overflowX, style.overflowY].some((value) => value === 'hidden' || value === 'clip')) {
+              clipping.push(`${current.tagName.toLowerCase()}.${current.className}:${style.overflowX}/${style.overflowY}`);
+            }
+          }
+          return clipping;
+        });
+        const mermaidSelection = doc.createRange();
+        mermaidSelection.selectNodeContents(mermaidSvgs[0]);
+        selection.removeAllRanges();
+        selection.addRange(mermaidSelection);
+        const mermaidSelectionText = normalizeText(selection.toString());
+        const mermaidCopied = doc.execCommand('copy');
+        const mermaidClipboardText = normalizeText(await doc.defaultView!.navigator.clipboard.readText());
         return {
           rows: rows.length,
           selected,
@@ -677,6 +720,64 @@ async function main(): Promise<void> {
             fontSize: Number.parseFloat(mermaidStyle.fontSize),
             lineHeight: Number.parseFloat(mermaidStyle.lineHeight),
             fragments: mermaidRange.getClientRects().length
+          },
+          mermaidSuccess: {
+            diagrams: mermaidSvgs.map((svg, index) => {
+              const block = mermaidBlocks[index];
+              const wrapper = mermaidWrappers[index];
+              const svgRect = svg.getBoundingClientRect();
+              const blockRect = block.getBoundingClientRect();
+              const wrapperRect = wrapper.getBoundingClientRect();
+              const viewBox = svg.viewBox.baseVal;
+              return {
+                kind: svg.dataset.fitDiagram,
+                viewBox: { width: viewBox.width, height: viewBox.height },
+                viewport: { width: svgRect.width, height: svgRect.height, left: svgRect.left, right: svgRect.right },
+                withinPage: svgRect.left >= rootRect.left - 1 && svgRect.right <= rootRect.right + 1,
+                blockWithinPage: blockRect.left >= rootRect.left - 1 && blockRect.right <= rootRect.right + 1,
+                wrapperWithinPage: wrapperRect.left >= rootRect.left - 1 && wrapperRect.right <= rootRect.right + 1,
+                horizontalOverflows: [
+                  block.scrollWidth - block.clientWidth,
+                  wrapper.scrollWidth - wrapper.clientWidth,
+                  svg.scrollWidth - svg.clientWidth
+                ],
+                verticalOverflows: [
+                  block.scrollHeight - block.clientHeight,
+                  wrapper.scrollHeight - wrapper.clientHeight,
+                  svg.scrollHeight - svg.clientHeight
+                ],
+                overflowModes: [block, wrapper].map((element) => {
+                  const style = getComputedStyle(element);
+                  return `${style.overflowX}/${style.overflowY}`;
+                }),
+                graphicsWithinViewport: Array.from(svg.querySelectorAll<SVGGraphicsElement>('.meo-fit-graphic')).every((graphic) => {
+                  const rect = graphic.getBoundingClientRect();
+                  return rect.width > 0 && rect.height > 0
+                    && rect.left >= svgRect.left - 1 && rect.right <= svgRect.right + 1
+                    && rect.top >= svgRect.top - 1 && rect.bottom <= svgRect.bottom + 1;
+                }),
+                graphicsWithinPage: Array.from(svg.querySelectorAll<SVGGraphicsElement>('.meo-fit-graphic')).every((graphic) => {
+                  const rect = graphic.getBoundingClientRect();
+                  return rect.left >= rootRect.left - 1 && rect.right <= rootRect.right + 1
+                    && rect.top >= rootRect.top - 1 && rect.bottom <= rootRect.bottom + 1;
+                }),
+                labelTexts: Array.from(svg.querySelectorAll('.meo-fit-label, .nodeLabel')).map((label) => normalizeText(label.textContent)),
+                preserveAspectRatio: svg.preserveAspectRatio.baseVal.align,
+                draggable: svg.getAttribute('draggable'),
+                cursor: getComputedStyle(svg).cursor
+              };
+            }),
+            htmlClippingAncestors: mermaidHtmlClippingAncestors,
+            selectionText: mermaidSelectionText,
+            copied: mermaidCopied,
+            clipboardText: mermaidClipboardText,
+            controls: {
+              fullscreenButtons: Array.from(doc.querySelectorAll('button'))
+                .filter((button) => button.getAttribute('aria-label')?.toLowerCase().includes('fullscreen')).length,
+              liveControls: doc.querySelectorAll('.meo-mermaid-zoom-controls').length,
+              fullscreenSurfaces: doc.querySelectorAll('.meo-mermaid-fullscreen-scrim').length,
+              panSurfaces: doc.querySelectorAll('[data-mermaid-pan], .is-panning').length
+            }
           }
         };
       });
@@ -763,6 +864,33 @@ async function main(): Promise<void> {
       assert.equal(result.mermaidFallback.source, mermaidFallbackSource);
       assert.ok(result.mermaidFallback.fontSize > 0 && result.mermaidFallback.lineHeight > 0, JSON.stringify(result));
       assert.ok(result.mermaidFallback.fragments > 1, JSON.stringify(result));
+      assert.deepEqual(result.mermaidSuccess.htmlClippingAncestors, []);
+      assert.deepEqual(result.mermaidSuccess.controls, {
+        fullscreenButtons: 0,
+        liveControls: 0,
+        fullscreenSurfaces: 0,
+        panSurfaces: 0
+      });
+      assert.equal(result.mermaidSuccess.selectionText, 'Wide start label Wide end label Wide foreign label');
+      assert.equal(result.mermaidSuccess.copied, true);
+      assert.equal(result.mermaidSuccess.clipboardText, result.mermaidSuccess.selectionText);
+      assert.deepEqual(result.mermaidSuccess.diagrams.map((diagram) => diagram.kind), ['wide', 'tall']);
+      assert.deepEqual(result.mermaidSuccess.diagrams.map((diagram) => diagram.labelTexts), [
+        ['Wide start label', 'Wide end label', 'Wide foreign label'],
+        ['Tall start label', 'Tall end label', 'Tall foreign label']
+      ]);
+      assert.ok(result.mermaidSuccess.diagrams.every((diagram) => (
+        diagram.viewport.width > 0 && diagram.viewport.height > 0
+        && Math.abs((diagram.viewport.width / diagram.viewport.height) - (diagram.viewBox.width / diagram.viewBox.height)) <= 0.01
+        && diagram.withinPage && diagram.blockWithinPage && diagram.wrapperWithinPage
+        && diagram.horizontalOverflows.every((value) => value <= 1)
+        && diagram.verticalOverflows.every((value) => value <= 1)
+        && diagram.overflowModes.every((value) => !/(auto|scroll)/.test(value))
+        && diagram.graphicsWithinViewport && diagram.graphicsWithinPage
+        && diagram.preserveAspectRatio !== 0
+        && diagram.draggable === null
+        && diagram.cursor !== 'grab' && diagram.cursor !== 'grabbing'
+      )), JSON.stringify({ width, zoom, deviceScaleFactor, mermaidSuccess: result.mermaidSuccess }));
       assert.deepEqual(result.table.semanticCounts, { table: 2, thead: 2, tbody: 2, tr: 5, th: 10, td: 18 });
       assert.equal(result.table.resizeHandleCount, 0);
       assert.ok(result.table.listPadding >= 24 && result.table.listCellPadding >= 12, JSON.stringify(result.table));
@@ -798,7 +926,7 @@ async function main(): Promise<void> {
       sourceDocumentPath: 'C:/preview-reading-surface.md',
       outputFilePath: 'C:/preview-reading-surface.html',
       target: 'html',
-      mermaidRuntimeSrc: failingMermaidRuntimeSrc,
+      mermaidRuntimeSrc: deterministicMermaidRuntimeSrc,
       baseHref: 'file:///C:/',
       title: 'G2a Mermaid fallback'
     });

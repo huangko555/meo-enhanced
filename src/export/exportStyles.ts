@@ -932,7 +932,6 @@ th:empty::before {
   border-radius: 6px;
   border: 1px solid var(--meo-code-border);
   background: var(--meo-code-bg);
-  overflow: hidden;
 }
 .meo-export-mermaid .meo-export-mermaid-svg {
   display: flex;
@@ -940,7 +939,6 @@ th:empty::before {
   align-items: center;
   max-width: 100%;
   padding: 0.45em 0;
-  overflow: hidden;
 }
 .meo-export-mermaid .meo-export-mermaid-svg svg {
   max-width: 100%;

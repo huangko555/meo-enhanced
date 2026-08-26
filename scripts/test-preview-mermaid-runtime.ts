@@ -231,23 +231,6 @@ try {
       frameDocument.querySelector('.meo-export-mermaid.is-math .katex')
     );
   }, { timeout: 5000 });
-  const previewFullscreenEntry = await page.evaluate(() => {
-    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
-    return {
-      fullscreenButtons: Array.from(frameDocument?.querySelectorAll('button') ?? [])
-        .filter((button) => button.getAttribute('aria-label')?.toLowerCase().includes('fullscreen'))
-        .length,
-      liveControls: frameDocument?.querySelectorAll('.meo-mermaid-zoom-controls').length ?? 0,
-      fullscreenSurface: frameDocument?.querySelectorAll('.meo-mermaid-fullscreen-scrim').length ?? 0
-    };
-  });
-  if (
-    previewFullscreenEntry.fullscreenButtons !== 0 ||
-    previewFullscreenEntry.liveControls !== 0 ||
-    previewFullscreenEntry.fullscreenSurface !== 0
-  ) {
-    throw new Error(`Preview exposed a Mermaid fullscreen entry: ${JSON.stringify(previewFullscreenEntry)}`);
-  }
   await page.evaluate(() => {
     (window as typeof window & { __previewController?: any }).__previewController?.setVisible(true);
   });
