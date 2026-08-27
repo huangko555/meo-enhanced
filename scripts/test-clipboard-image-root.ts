@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { saveClipboardImageFile } from '../src/host/clipboardImageSave';
@@ -104,6 +104,35 @@ try {
     if (!rejected) {
       throw new Error(`unsafe image file name was accepted: ${unsafeName}`);
     }
+  }
+
+  const externalDirectory = path.join(tempRoot, 'external');
+  await mkdir(externalDirectory, { recursive: true });
+  const linkedAssets = path.join(documentDirectory, 'linked-assets');
+  await symlink(externalDirectory, linkedAssets, process.platform === 'win32' ? 'junction' : 'dir');
+  let linkedFolderRejected = false;
+  try {
+    await saveClipboardImageFile({
+      documentFsPath: markdownPath,
+      workspaceFsPath: workspacePath,
+      configuredFolder: 'notes/linked-assets',
+      requestedFileName: 'escaped.png',
+      contents: Buffer.from('escaped')
+    });
+  } catch {
+    linkedFolderRejected = true;
+  }
+  if (!linkedFolderRejected) {
+    throw new Error('a linked image folder escaping the workspace was accepted');
+  }
+  let escapedFileExists = true;
+  try {
+    await readFile(path.join(externalDirectory, 'escaped.png'));
+  } catch (error) {
+    escapedFileExists = (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
+  if (escapedFileExists) {
+    throw new Error('a linked image folder wrote outside the workspace');
   }
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
