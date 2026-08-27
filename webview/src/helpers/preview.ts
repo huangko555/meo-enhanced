@@ -609,7 +609,7 @@ export function createPreviewController({
       hasPendingRequest = false;
       if (result.ok === false) {
         pendingViewportRestore = null;
-        setStatus(result.error.message || uiStrings.previewFailed);
+        setStatus(uiStrings.previewFailed);
         return;
       }
       latestPayload = result.value;

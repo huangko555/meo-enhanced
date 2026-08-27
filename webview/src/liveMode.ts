@@ -92,7 +92,6 @@ import {
 } from './helpers/latexMathEditing';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
 import { getUiStrings } from './application/uiLanguage';
-import { getGeneratedUiStrings } from '../../src/foundation/uiLanguage';
 import { uiLanguageFacet } from './editor/uiLanguage';
 import {
   isLiveInputDerivedWorkRefresh,
@@ -590,7 +589,7 @@ function addFrontmatterBoundaryDecorations(
         addTopLinePillLabel(
           builder,
           line.to,
-          getGeneratedUiStrings(state.facet(uiLanguageFacet)).properties
+          getUiStrings(state.facet(uiLanguageFacet)).properties
         );
       }
       addRange(builder, boundary.from, boundary.to, frontmatterBoundaryMarkerDeco);

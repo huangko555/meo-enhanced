@@ -144,10 +144,11 @@ const invalidFrontmatter = renderMarkdownToHtml({
   target: 'html'
 });
 const localizedReading = renderMarkdownToHtml({
-  markdownText: '---\ntitle: 中文\n---\n\n> [!WARNING]\n> 内容',
+  markdownText: '---\ntitle: 中文\n---\n\n> [!WARNING]\n> 内容\n\n颜色 #ff0000 与脚注[^note]。\n\n[^note]: 脚注内容',
   markdownFilePath: 'C:/tmp/preview-localized.md',
   target: 'html',
-  uiLanguage: 'zh-CN'
+  uiLanguage: 'zh-CN',
+  renderHexColorSwatches: true
 });
 const tableLikeCode = renderMarkdownToHtml({
   markdownText: '```text\n| A | B |\n| --- |\n```',
@@ -293,8 +294,13 @@ if (
 }
 if (!localizedReading.html.includes('>属性<')
   || !localizedReading.html.includes('>警告<')
+  || !localizedReading.html.includes('aria-label="颜色 #ff0000"')
+  || !localizedReading.html.includes('aria-label="返回脚注引用 1"')
+  || !localizedReading.html.includes('aria-label="返回脚注引用"')
   || localizedReading.html.includes('>Properties<')
-  || localizedReading.html.includes('>WARNING<')) {
+  || localizedReading.html.includes('>WARNING<')
+  || localizedReading.html.includes('aria-label="Color #ff0000"')
+  || localizedReading.html.includes('aria-label="Back to reference')) {
   throw new Error('Preview/export generated labels must use the frozen UI language');
 }
 if (

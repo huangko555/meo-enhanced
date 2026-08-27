@@ -8,7 +8,8 @@ import type {
   ApplyChangesMessage,
   DraftChangedMessage
 } from '../../../src/protocol/documentSync';
-import { getGeneratedUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings } from '../application/uiLanguage';
 
 type RemoteDocumentSessionAction = Extract<
   DocumentSessionAction,
@@ -42,7 +43,7 @@ const MAX_REVISION_REQUEST_ATTEMPTS = 2;
 export function createDocumentSessionActionAdapter(
   dependencies: DocumentSessionActionAdapterDependencies
 ): DocumentSessionActionAdapter {
-  const uiStrings = getGeneratedUiStrings(dependencies.uiLanguage);
+  const uiStrings = getUiStrings(dependencies.uiLanguage);
   return {
     async execute(actions) {
       const queue = Array.from(actions);

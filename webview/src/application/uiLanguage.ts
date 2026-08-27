@@ -1,4 +1,4 @@
-import { getGeneratedUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
@@ -180,6 +180,9 @@ export type UiStrings = Readonly<{
   transientLoadRetry: string;
   transientLoadFailure: string;
   pasteImageFailure: (message: string) => string;
+  properties: string;
+  resyncFailureNotice: string;
+  externalConflictNotice: string;
 }>;
 
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
@@ -247,7 +250,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     acceptCurrent: 'Accept Current', acceptIncoming: 'Accept Incoming', acceptBoth: 'Accept Both',
     currentVersion: (label: string) => `Current: ${label},`,
     incomingVersion: (label: string) => `Incoming: ${label}`,
-    alertLabel: getGeneratedUiStrings('en').alertLabel,
+    alertLabel: (type: string) => type,
     tableActions: 'Table actions', insertRowAbove: 'Insert row above', insertRowBelow: 'Insert row below',
     deleteRow: 'Delete row', insertColumnLeft: 'Insert column left', insertColumnRight: 'Insert column right',
     deleteColumn: 'Delete column', alignColumnLeft: 'Align selected column left',
@@ -274,7 +277,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     transientModeFailure: 'Live mode hit a transient render error. Staying in current mode; try again.',
     transientLoadRetry: 'Live mode hit a transient render error while loading. Retrying...',
     transientLoadFailure: 'Live mode hit a transient render error while loading. Try reopening or switching modes.',
-    pasteImageFailure: (message: string) => `Could not paste image: ${message}`
+    pasteImageFailure: (message: string) => `Could not paste image: ${message}`,
+    properties: 'Properties',
+    resyncFailureNotice: 'Could not resynchronize the document. Local edits were kept.',
+    externalConflictNotice: 'The document changed externally while local edits were pending. Local edits were kept.'
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
@@ -338,7 +344,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     acceptCurrent: '接受当前更改', acceptIncoming: '接受传入更改', acceptBoth: '接受两者',
     currentVersion: (label: string) => `当前：${label}，`,
     incomingVersion: (label: string) => `传入：${label}`,
-    alertLabel: getGeneratedUiStrings('zh-CN').alertLabel,
+    alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
     tableActions: '表格操作', insertRowAbove: '在上方插入行', insertRowBelow: '在下方插入行',
     deleteRow: '删除行', insertColumnLeft: '在左侧插入列', insertColumnRight: '在右侧插入列',
     deleteColumn: '删除列', alignColumnLeft: '所选列左对齐',
@@ -364,7 +370,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     transientModeFailure: '实时模式遇到临时渲染错误，将保持当前模式；请重试。',
     transientLoadRetry: '实时模式加载时遇到临时渲染错误，正在重试…',
     transientLoadFailure: '实时模式加载时遇到临时渲染错误，请重新打开文件或切换模式。',
-    pasteImageFailure: (message: string) => `无法粘贴图片：${message}`
+    pasteImageFailure: (message: string) => `无法粘贴图片：${message}`,
+    properties: '属性',
+    resyncFailureNotice: '无法重新同步文档，已保留本地编辑。',
+    externalConflictNotice: '存在本地编辑时文档发生了外部变更，已保留本地编辑。'
   })
 });
 

@@ -6,6 +6,8 @@ export type PrepareMarkdownWithFootnotesOptions = {
   outputFilePath?: string;
   renderMarkdown: (markdownText: string) => string;
   normalizeMarkdown: (markdownText: string) => string;
+  backToReference: string;
+  backToNumberedReference: (number: number) => string;
 };
 
 export type PreparedMarkdownWithFootnotes = {
@@ -294,10 +296,10 @@ function renderFootnoteItemHtml(
   const referenceHref = buildInternalAnchorHref(hrefPrefix, firstReferenceId);
   const contentHtml = options.renderMarkdown(options.normalizeMarkdown(footnote.contentMarkdown)).trim();
   const indexHtml = firstReferenceId
-    ? `<a href="${escapeHtmlAttr(referenceHref)}" class="footnote-index" aria-label="Back to reference ${number}">${number}.</a>`
+    ? `<a href="${escapeHtmlAttr(referenceHref)}" class="footnote-index" aria-label="${escapeHtmlAttr(options.backToNumberedReference(number))}">${number}.</a>`
     : `<span class="footnote-index">${number}.</span>`;
   const backlinkHtml = firstReferenceId
-    ? `<a href="${escapeHtmlAttr(referenceHref)}" class="footnote-backref" aria-label="Back to reference">↩</a>`
+    ? `<a href="${escapeHtmlAttr(referenceHref)}" class="footnote-backref" aria-label="${escapeHtmlAttr(options.backToReference)}">↩</a>`
     : '';
 
   return [

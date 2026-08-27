@@ -15,7 +15,8 @@ import {
   supportedHtmlTags
 } from '../shared/htmlPolicy';
 import { collectHexColorRangesFromText } from '../shared/hexColorSwatches';
-import { getGeneratedUiStrings, type UiLanguage } from '../foundation/uiLanguage';
+import type { UiLanguage } from '../foundation/uiLanguage';
+import { getReadingUiStrings } from './readingUiLanguage';
 
 const POWER_QUERY_KEYWORDS =
   'let in each if then else try otherwise error and or not as is type meta section shared';
@@ -53,7 +54,7 @@ export type RenderMarkdownResult = {
 };
 
 export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMarkdownResult {
-  const uiStrings = getGeneratedUiStrings(options.uiLanguage ?? 'en');
+  const uiStrings = getReadingUiStrings(options.uiLanguage ?? 'en');
   let hasMermaid = false;
   let hasMath = false;
   let bodySourceLines: number[] | null = null;
@@ -82,7 +83,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   installKbdFallbackTransform(md);
   installAlertTransform(md, uiStrings.alertLabel);
   if (options.renderHexColorSwatches) {
-    installHexColorSwatchTransform(md);
+    installHexColorSwatchTransform(md, uiStrings.colorLabel);
   }
   installSafeHtmlTransform(
     md,
@@ -120,7 +121,9 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     target: options.target,
     outputFilePath: options.outputFilePath,
     renderMarkdown: (markdownText) => md.render(markdownText),
-    normalizeMarkdown: normalizeMarkdownForExport
+    normalizeMarkdown: normalizeMarkdownForExport,
+    backToReference: uiStrings.backToReference,
+    backToNumberedReference: uiStrings.backToNumberedReference
   });
   md.renderer.rules.fence = (tokens, idx) => {
     const fenceBlock = tokens[idx];
@@ -210,7 +213,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       'polyline'
     ],
     allowedAttributes: {
-      a: ['href', 'name', 'target', 'rel', 'title'],
+      a: ['href', 'name', 'target', 'rel', 'title', 'aria-label'],
       details: ['open'],
       img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
       ol: ['start', 'reversed'],
@@ -356,10 +359,10 @@ function renderHighlightedCodeLines(highlighted: string, source: string): string
   ].join('')).join('') + (source.endsWith('\n') ? '\n' : '');
 }
 
-function installHexColorSwatchTransform(md: MarkdownIt): void {
+function installHexColorSwatchTransform(md: MarkdownIt, colorLabel: (value: string) => string): void {
   md.renderer.rules.meo_hex_color_swatch = (tokens, index) => {
     const value = escapeHtmlAttr(tokens[index].content);
-    return `<span class="meo-md-color-swatch" style="background-color:${value}" title="${value}" role="img" aria-label="Color ${value}"></span>`;
+    return `<span class="meo-md-color-swatch" style="background-color:${value}" title="${value}" role="img" aria-label="${escapeHtmlAttr(colorLabel(tokens[index].content))}"></span>`;
   };
   md.core.ruler.after('inline', 'meo-hex-color-swatches', (state) => {
     for (const inlineToken of state.tokens) {
