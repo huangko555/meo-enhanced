@@ -57,6 +57,18 @@ export type UiStrings = Readonly<{
   outlineNoHeadings: string;
   editorToolbar: string;
   formatting: string;
+  markdownMode: string;
+  live: string;
+  source: string;
+  preview: string;
+  inlineMarkdownFormatting: string;
+  bold: string;
+  italic: string;
+  lineover: string;
+  highlight: string;
+  inlineCode: string;
+  kbd: string;
+  underline: string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -128,7 +140,11 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineResize: 'Drag to resize outline',
     outlineEmptyHeading: '(Empty heading)',
     outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings',
-    editorToolbar: 'Editor toolbar', formatting: 'Formatting', heading: 'Heading',
+    editorToolbar: 'Editor toolbar', formatting: 'Formatting', markdownMode: 'Markdown mode',
+    live: 'Live', source: 'Source', preview: 'Preview',
+    inlineMarkdownFormatting: 'Inline markdown formatting', bold: 'Bold', italic: 'Italic',
+    lineover: 'Lineover', highlight: 'Highlight', inlineCode: 'Inline Code', kbd: 'Kbd',
+    underline: 'Underline', heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
     showOutlineLeft: 'Show Outline on Left', showOutlineRight: 'Show Outline on Right',
@@ -176,7 +192,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineResize: '拖动调整目录宽度',
     outlineEmptyHeading: '(空标题)',
     outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题',
-    editorToolbar: '编辑器工具栏', formatting: '格式', heading: '标题', headingLevels: '标题级别',
+    editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
+    live: '实时', source: '源码', preview: '预览', inlineMarkdownFormatting: '行内 Markdown 格式',
+    bold: '加粗', italic: '斜体', lineover: '删除线', highlight: '高亮', inlineCode: '行内代码',
+    kbd: '按键', underline: '下划线', heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',

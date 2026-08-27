@@ -28,6 +28,14 @@ assert.equal(chinese.findMatches(2), '2 个匹配项');
 assert.equal(chinese.replacedRemaining(3), '已替换 • 剩余 3 个');
 assert.equal(chinese.outlineNoHeadings, '暂无标题');
 assert.equal(chinese.headingLevel(3), '3 级标题');
+assert.deepEqual(
+  [chinese.markdownMode, chinese.live, chinese.source, chinese.preview],
+  ['Markdown 模式', '实时', '源码', '预览']
+);
+assert.deepEqual(
+  [chinese.inlineMarkdownFormatting, chinese.bold, chinese.inlineCode, chinese.underline],
+  ['行内 Markdown 格式', '加粗', '行内代码', '下划线']
+);
 assert.equal(chinese.hideChanges(chinese.currentEdits), '隐藏更改（当前编辑）');
 assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
 assert.equal(Object.isFrozen(english), true);

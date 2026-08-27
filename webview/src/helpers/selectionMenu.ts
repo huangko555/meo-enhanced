@@ -1,7 +1,9 @@
 import { createElement, Bold, Italic, Strikethrough, Highlighter, Terminal, Link, Brackets, Keyboard, Underline } from 'lucide';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export interface SelectionMenuElements {
   menu: HTMLDivElement;
+  setUiLanguage(language: UiLanguage): void;
 };
 
 export type SelectionMenuState = {
@@ -50,7 +52,29 @@ export const createSelectionMenu = (): SelectionMenuElements => {
     selectionUnderlineBtn
   );
 
-  return { menu };
+  const setUiLanguage = (language: UiLanguage): void => {
+    const strings = getUiStrings(language);
+    menu.setAttribute('aria-label', strings.inlineMarkdownFormatting);
+    const labels: Readonly<Record<string, string>> = {
+      bold: strings.bold,
+      italic: strings.italic,
+      lineover: strings.lineover,
+      highlight: strings.highlight,
+      inlineCode: strings.inlineCode,
+      link: strings.link,
+      wikiLink: strings.wikiLink,
+      kbd: strings.kbd,
+      underline: strings.underline
+    };
+    for (const button of menu.querySelectorAll<HTMLButtonElement>('[data-action]')) {
+      const label = labels[button.dataset.action ?? ''];
+      if (!label) continue;
+      button.title = label;
+      button.setAttribute('aria-label', label);
+    }
+  };
+
+  return { menu, setUiLanguage };
 };
 
 export const createSelectionMenuController = (

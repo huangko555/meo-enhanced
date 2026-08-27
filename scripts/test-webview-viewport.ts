@@ -153,7 +153,11 @@ async function main() {
       heading: document.querySelector('[data-action="heading"]')?.getAttribute('title'),
       save: document.querySelector('[data-action="save"]')?.getAttribute('aria-label'),
       line: document.querySelector('.line-jump-input')?.getAttribute('placeholder'),
-      dismissNotice: document.querySelector('.editor-notice-close')?.getAttribute('aria-label')
+      dismissNotice: document.querySelector('.editor-notice-close')?.getAttribute('aria-label'),
+      mode: document.querySelector('.mode-group')?.getAttribute('aria-label'),
+      modeLabels: Array.from(document.querySelectorAll('.mode-group [data-mode]')).map((element) => element.textContent?.trim()),
+      selectionMenu: document.querySelector('.selection-inline-menu')?.getAttribute('aria-label'),
+      selectionLabels: Array.from(document.querySelectorAll('.selection-inline-menu [data-action]')).map((element) => element.getAttribute('aria-label'))
     }));
     if (JSON.stringify(chineseChrome) !== JSON.stringify({
       language: 'zh-CN',
@@ -171,7 +175,11 @@ async function main() {
       heading: '标题',
       save: '保存文档',
       line: '行',
-      dismissNotice: '关闭通知'
+      dismissNotice: '关闭通知',
+      mode: 'Markdown 模式',
+      modeLabels: ['实时', '源码', '预览'],
+      selectionMenu: '行内 Markdown 格式',
+      selectionLabels: ['加粗', '斜体', '删除线', '高亮', '行内代码', '链接', 'Wiki 链接', '按键', '下划线']
     })) {
       throw new Error(`Resolved UI language did not project into the current Webview: ${JSON.stringify(chineseChrome)}`);
     }
@@ -428,9 +436,7 @@ async function main() {
       initialToolbarStart.modeControlRadius !== 8 ||
       initialToolbarStart.activeModeRadius !== 5 ||
       initialToolbarStart.activeModeLabelOffset !== 0.5 ||
-      initialToolbarStart.modeButtonWidths.live !== 56 ||
-      !(initialToolbarStart.modeButtonWidths.preview > initialToolbarStart.modeButtonWidths.source) ||
-      !(initialToolbarStart.modeButtonWidths.source > initialToolbarStart.modeButtonWidths.live) ||
+      Object.values(initialToolbarStart.modeButtonWidths).some((width) => width !== 56) ||
       JSON.stringify(initialToolbarStart.activeModeInsets) !== JSON.stringify({ top: 3, bottom: 3, left: 4 }) ||
       initialToolbarStart.modeSegmentGap !== 0 ||
       !initialToolbarStart.modeUsesSharedComponent ||
