@@ -6,6 +6,7 @@ import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-mar
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
+import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
@@ -302,6 +303,7 @@ export function createEditor({
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
+  const largeDocument = assessLargeDocument(text).preferSource;
   let gitGutterVisible = initialGitGutter !== false;
   let currentDiagnostics: EditorDiagnostic[] = Array.isArray(initialDiagnostics) ? initialDiagnostics : [];
   let applyingExternal = false;
@@ -2015,7 +2017,7 @@ export function createEditor({
       mermaidDiagramPresentationFactoryFacet.of(
         mermaidDiagramPresentationConsumer
       ),
-      modeCompartment.of(startMode === 'live' ? liveModeExtensions() : sourceMode()),
+      modeCompartment.of(startMode === 'live' ? liveModeExtensions({ largeDocument }) : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
       diagnosticDataField,
@@ -2666,7 +2668,9 @@ export function createEditor({
         try {
           view.dispatch({
             effects: [
-              modeCompartment.reconfigure(nextMode === 'live' ? liveModeExtensions() : sourceMode()),
+              modeCompartment.reconfigure(
+                nextMode === 'live' ? liveModeExtensions({ largeDocument }) : sourceMode()
+              ),
               gitGutterCompartment.reconfigure(
                 nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
               )

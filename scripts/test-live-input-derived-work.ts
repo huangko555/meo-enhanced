@@ -185,6 +185,36 @@ assert.equal(applies, 4, 'dispose must reject late completion');
 scheduler.documentChanged();
 assert.equal(frames.pendingCount, 0, 'disposed schedulers must ignore new input');
 
+const budgetFrames = createFrameHarness();
+const deferred = createFrameHarness();
+let budgetedApplies = 0;
+const budgetedScheduler = createLiveInputDerivedWorkScheduler({
+  requestFrame: (callback) => budgetFrames.requestFrame(callback),
+  cancelFrame: (id) => budgetFrames.cancelFrame(id),
+  requestDeferred: (callback) => deferred.requestFrame(callback),
+  cancelDeferred: (id) => deferred.cancelFrame(id),
+  apply: () => { budgetedApplies += 1; },
+  reportError: (error) => { throw error; }
+});
+budgetedScheduler.documentChanged();
+budgetFrames.flushFrame();
+budgetFrames.flushFrame();
+assert.equal(budgetedApplies, 0, 'budgeted work must preserve two primary text frames');
+assert.equal(deferred.pendingCount, 1, 'full derived refresh must wait for the deferred budget');
+budgetedScheduler.documentChanged();
+assert.equal(deferred.pendingCount, 0, 'new input must cancel an accepted deferred refresh');
+budgetFrames.flushFrame();
+budgetFrames.flushFrame();
+deferred.flushFrame();
+assert.equal(budgetedApplies, 1, 'only the latest quiet generation may consume the deferred budget');
+budgetedScheduler.documentChanged();
+budgetFrames.flushFrame();
+budgetFrames.flushFrame();
+budgetedScheduler.dispose();
+assert.equal(deferred.pendingCount, 0, 'dispose must cancel deferred large-document work');
+deferred.flushFrame();
+assert.equal(budgetedApplies, 1, 'disposed deferred work must have no late effect');
+
 const firstFrames = createFrameHarness();
 const secondFrames = createFrameHarness();
 let firstApplies = 0;

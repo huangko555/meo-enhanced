@@ -97,10 +97,14 @@ import {
   isLiveInputNestedProjection,
   liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
-  shouldDeferLiveInputDerivedWork
+  shouldDeferLiveInputDerivedWork,
+  usesLargeDocumentDerivedWorkBudget
 } from './editor/liveInputDerivedWork';
 
 const markerDeco = Decoration.mark({ class: 'meo-md-marker' });
+// The benchmark viewport exposes at most ~70 CodeMirror lines. Retaining 80
+// lines on either side keeps the current surface live without mapping the file.
+const largeDocumentInputLineRadius = 80;
 const activeLineMarkerDeco = Decoration.mark({ class: 'meo-md-marker-active' });
 const frontmatterBoundaryMarkerDeco = Decoration.mark({ class: 'meo-md-frontmatter-boundary-marker' });
 const linkMarkerDeco = Decoration.mark({ class: 'meo-md-marker meo-md-link-marker' });
@@ -2776,6 +2780,26 @@ function addColorSwatchDecorations(
   }
 }
 
+function retainLargeDocumentInputDecorations(
+  decorations: DecorationSet,
+  transaction: Transaction
+): DecorationSet {
+  const document = transaction.startState.doc;
+  let from = document.length;
+  let to = 0;
+  for (const selection of transaction.startState.selection.ranges) {
+    const startLine = document.lineAt(Math.min(selection.from, document.length)).number;
+    const endLine = document.lineAt(Math.min(selection.to, document.length)).number;
+    from = Math.min(from, document.line(Math.max(1, startLine - largeDocumentInputLineRadius)).from);
+    to = Math.max(to, document.line(Math.min(document.lines, endLine + largeDocumentInputLineRadius)).to);
+  }
+  const retained: DecorationCollector = [];
+  decorations.between(from, to, (rangeFrom, rangeTo, value) => {
+    retained.push(value.range(rangeFrom, rangeTo));
+  });
+  return Decoration.set(retained, true);
+}
+
 const liveDecorationField = StateField.define<DecorationSet>({
   create(state: EditorState): DecorationSet {
     return safeBuildDecorations(state, Decoration.none, 'create');
@@ -2790,11 +2814,14 @@ const liveDecorationField = StateField.define<DecorationSet>({
       return decorations;
     }
     if (shouldDeferLiveInputDerivedWork(transaction)) {
+      const inputDecorations = usesLargeDocumentDerivedWorkBudget(transaction.state)
+        ? retainLargeDocumentInputDecorations(decorations, transaction)
+        : decorations;
       return transaction.docChanged
         ? isLiveInputNestedProjection(transaction)
-          ? decorations.map(transaction.changes)
-          : mapLiveInputDerivedDecorations(decorations, transaction)
-        : decorations;
+          ? inputDecorations.map(transaction.changes)
+          : mapLiveInputDerivedDecorations(inputDecorations, transaction)
+        : inputDecorations;
     }
     // Recompute on every transaction so live mode stays in sync with parser updates
     // that may arrive without direct doc/selection changes.
@@ -2983,9 +3010,9 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   provide: (field) => gutterLineClass.from(field)
 });
 
-export function liveModeExtensions(): Extension[] {
+export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [
-    ...liveInputDerivedWorkExtensions(),
+    ...liveInputDerivedWorkExtensions(options),
     markdown({
       base: markdownLanguage,
       addKeymap: false,

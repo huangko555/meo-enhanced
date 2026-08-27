@@ -1,4 +1,4 @@
-import { Annotation, EditorState, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
+import { Annotation, EditorState, Facet, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view';
 
 export type LiveInputDerivedWorkScheduler = {
@@ -12,7 +12,13 @@ type LiveInputDerivedWorkSchedulerOptions = {
   cancelFrame(frameId: number): void;
   apply(): void;
   reportError(error: unknown): void;
-};
+} & ({
+  requestDeferred(callback: () => void): number;
+  cancelDeferred(taskId: number): void;
+} | {
+  requestDeferred?: never;
+  cancelDeferred?: never;
+});
 
 /**
  * Coalesces derived presentation behind one observable primary-text frame.
@@ -23,6 +29,7 @@ export function createLiveInputDerivedWorkScheduler(
 ): LiveInputDerivedWorkScheduler {
   let generation = 0;
   let frameId: number | null = null;
+  let deferredId: number | null = null;
   let disposed = false;
 
   const cancelPendingFrame = (): void => {
@@ -31,15 +38,33 @@ export function createLiveInputDerivedWorkScheduler(
     frameId = null;
   };
 
+  const cancelPendingDeferred = (): void => {
+    if (deferredId === null) return;
+    options.cancelDeferred?.(deferredId);
+    deferredId = null;
+  };
+
+  const applyCurrentGeneration = (currentGeneration: number): void => {
+    if (disposed || currentGeneration !== generation) return;
+    try {
+      options.apply();
+    } catch (error) {
+      options.reportError(error);
+    }
+  };
+
   const scheduleDerivedFrame = (currentGeneration: number): void => {
     frameId = options.requestFrame(() => {
       frameId = null;
       if (disposed || currentGeneration !== generation) return;
-      try {
-        options.apply();
-      } catch (error) {
-        options.reportError(error);
+      if (options.requestDeferred) {
+        deferredId = options.requestDeferred(() => {
+          deferredId = null;
+          applyCurrentGeneration(currentGeneration);
+        });
+        return;
       }
+      applyCurrentGeneration(currentGeneration);
     });
   };
 
@@ -49,6 +74,7 @@ export function createLiveInputDerivedWorkScheduler(
       generation += 1;
       const currentGeneration = generation;
       cancelPendingFrame();
+      cancelPendingDeferred();
       frameId = options.requestFrame(() => {
         frameId = null;
         if (disposed || currentGeneration !== generation) return;
@@ -59,12 +85,14 @@ export function createLiveInputDerivedWorkScheduler(
       if (disposed) return;
       generation += 1;
       cancelPendingFrame();
+      cancelPendingDeferred();
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       generation += 1;
       cancelPendingFrame();
+      cancelPendingDeferred();
     }
   };
 }
@@ -100,6 +128,13 @@ const idleLiveInputDerivedWorkPhase: LiveInputDerivedWorkPhaseState = Object.fre
 });
 type LiveInputDerivedWorkProvenance = 'automatic-normalization' | 'nested-input-projection';
 const liveInputDerivedWorkProvenance = Annotation.define<LiveInputDerivedWorkProvenance>();
+const liveInputDerivedWorkLargeDocumentFacet = Facet.define<boolean, boolean>({
+  combine: (values) => values.some(Boolean)
+});
+
+export function usesLargeDocumentDerivedWorkBudget(state: EditorState): boolean {
+  return state.facet(liveInputDerivedWorkLargeDocumentFacet);
+}
 
 export function markLiveInputDerivedWorkFollowUp(): Annotation<LiveInputDerivedWorkProvenance> {
   return liveInputDerivedWorkProvenance.of('automatic-normalization');
@@ -460,9 +495,11 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const hasAcceptedFrameDesired = (): boolean => (
     [...frameConsumers.values()].some((record) => record.state === 'accepted-generation')
   );
-  const scheduler = createLiveInputDerivedWorkScheduler({
-    requestFrame: (callback) => window.requestAnimationFrame(() => callback()),
-    cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
+  const largeDocument = view.state.facet(liveInputDerivedWorkLargeDocumentFacet);
+  const canRequestIdle = largeDocument && typeof window.requestIdleCallback === 'function';
+  const schedulerOptions = {
+    requestFrame: (callback: () => void) => window.requestAnimationFrame(() => callback()),
+    cancelFrame: (frameId: number) => window.cancelAnimationFrame(frameId),
     apply() {
       try {
         view.dispatch({ effects: refreshLiveInputDerivedWorkEffect.of(true) });
@@ -471,7 +508,19 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       }
     },
     reportError
-  });
+  };
+  const scheduler = largeDocument
+    ? createLiveInputDerivedWorkScheduler({
+      ...schedulerOptions,
+      requestDeferred: (callback: () => void) => canRequestIdle
+        ? window.requestIdleCallback(() => callback())
+        : window.requestAnimationFrame(() => callback()),
+      cancelDeferred: (taskId: number) => {
+        if (canRequestIdle) window.cancelIdleCallback(taskId);
+        else window.cancelAnimationFrame(taskId);
+      }
+    })
+    : createLiveInputDerivedWorkScheduler(schedulerOptions);
   return {
     request(key: object, operation: () => void) {
       requestConsumer(key, operation);
@@ -588,8 +637,9 @@ function isHistoryTransaction(transaction: Transaction): boolean {
       || userEvent.startsWith('undo.') || userEvent.startsWith('redo.'));
 }
 
-export function liveInputDerivedWorkExtensions(): Extension[] {
+export function liveInputDerivedWorkExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [
+    liveInputDerivedWorkLargeDocumentFacet.of(options.largeDocument === true),
     EditorState.transactionExtender.of((transaction) => {
       if (!transaction.docChanged) return null;
       const phase = transaction.startState.field(liveInputDerivedWorkPhaseField, false)?.phase ?? 'idle';
