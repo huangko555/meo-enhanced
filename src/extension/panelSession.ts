@@ -116,6 +116,7 @@ type PanelSessionControllerParams = {
   }) => Promise<PreviewRenderResult>;
   getFindOptions: () => FindOptions;
   getUiLanguage: () => InitMessage['uiLanguage'];
+  getSourceLineNumbers: () => boolean;
   setFindOptions: (options: FindOptions) => Promise<void>;
   getPreviewAppearance: () => PreviewAppearance;
   setPreviewAppearance: (appearance: PreviewAppearance) => Promise<void>;
@@ -167,6 +168,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     renderPreview,
     getFindOptions,
     getUiLanguage,
+    getSourceLineNumbers,
     setFindOptions,
     getPreviewAppearance,
     setPreviewAppearance,
@@ -339,6 +341,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: diagnostics.read(),
       mode: initialMode,
       uiLanguage: getUiLanguage(),
+      sourceLineNumbers: getSourceLineNumbers(),
       previewAppearance: getPreviewAppearance(),
       previewFontFamily: getPreviewFontFamily(),
       previewSourceColoring: getPreviewSourceColoring(),

@@ -34,6 +34,7 @@ async function main(): Promise<void> {
         diagnostics: [],
         mode: 'source',
         uiLanguage: 'en',
+        sourceLineNumbers: true,
         previewAppearance: 'dark',
         previewFontFamily: '',
         previewSourceColoring: true,

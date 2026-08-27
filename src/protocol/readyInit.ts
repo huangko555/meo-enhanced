@@ -27,6 +27,7 @@ export type InitMessage = {
   readonly diagnostics: readonly SerializedDiagnostic[];
   readonly mode: EditorMode;
   readonly uiLanguage: UiLanguage;
+  readonly sourceLineNumbers: boolean;
   readonly previewAppearance: PreviewAppearance;
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
@@ -84,6 +85,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isSavedRevision(value.savedRevision, value.version, value.text)
     || !isEditorMode(value.mode)
     || !isUiLanguage(value.uiLanguage)
+    || typeof value.sourceLineNumbers !== 'boolean'
     || !isPreviewAppearance(value.previewAppearance)
     || previewFontFamily === null
     || typeof value.previewSourceColoring !== 'boolean'

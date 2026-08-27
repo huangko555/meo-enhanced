@@ -33,6 +33,7 @@ const completeInit = {
   diagnostics: [],
   mode: 'live' as const,
   uiLanguage: 'en' as const,
+  sourceLineNumbers: true,
   previewAppearance: 'dark' as const,
   previewFontFamily: '' as const,
   previewSourceColoring: true,
@@ -86,7 +87,7 @@ assert.equal(normalizePreviewFontFamily('  MEO Synthetic Sans  '), 'MEO Syntheti
 assert.equal(normalizePreviewFontFamily('MEO\nSynthetic'), null);
 assert.equal(normalizePreviewFontFamily('x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)), null);
 for (const requiredKey of [
-  'documentId', 'savedRevision', 'diagnostics', 'uiLanguage', 'previewAppearance', 'previewFontFamily', 'editorAppearance', 'gitChangesGutter',
+  'documentId', 'savedRevision', 'diagnostics', 'uiLanguage', 'sourceLineNumbers', 'previewAppearance', 'previewFontFamily', 'editorAppearance', 'gitChangesGutter',
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'contentMaxWidthEnabled',
   'findOptions', 'outlinePosition', 'outlineVisible',

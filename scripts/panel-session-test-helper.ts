@@ -141,6 +141,7 @@ export const createPanelSessionControllerParams = (
   renderPreview: async () => ({ html: '', metadata: {} }),
   getFindOptions: () => ({ wholeWord: false, caseSensitive: false }),
   getUiLanguage: () => 'en',
+  getSourceLineNumbers: () => true,
   setFindOptions: async () => undefined,
   getPreviewAppearance: () => 'light',
   setPreviewAppearance: async () => undefined,

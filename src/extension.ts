@@ -513,6 +513,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get('language', 'auto'),
         vscode.env.language
       ),
+      getSourceLineNumbers: () => vscode.workspace
+        .getConfiguration('editor', documentUri)
+        .get<string>('lineNumbers', 'on') !== 'off',
       setFindOptions: (options) => this.setFindOptions(options),
       getPreviewAppearance: this.appearanceSettings.getPreviewAppearance,
       setPreviewAppearance: this.appearanceSettings.setPreviewAppearance,

@@ -1140,6 +1140,7 @@ const getActiveEditableMode = (): 'live' | 'source' => {
   return state.mode === 'preview' ? state.lastEditableMode : state.mode;
 };
 let pendingInitialText: string | null = null;
+let pendingSourceLineNumbers = true;
 let gitClient: any = null;
 let pendingEditorFocus = false;
 let pendingDiagnostics: any[] = [];
@@ -1610,6 +1611,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     onSelectionChange: (state: any) => selectionMenuController.update(state),
     mermaidDiagramPresentationFactory,
     uiLanguage: activeUiLanguage,
+    sourceLineNumbers: pendingSourceLineNumbers,
     previewViewportSurface: {
       captureTopVisiblePosition() {
         const position = previewController.getTopVisiblePosition();
@@ -1742,6 +1744,7 @@ editorModeRuntime = createEditorModeRuntime(
 
 const handleInit = (message: InitMessage) => {
   applyUiLanguage(message.uiLanguage);
+  pendingSourceLineNumbers = message.sourceLineNumbers;
   toolbar.classList.remove('meo-preload-toolbar');
   toolbar.removeAttribute('aria-hidden');
   editorWrapper.classList.remove('meo-preload-editor-shell');

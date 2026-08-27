@@ -170,6 +170,7 @@ type CreateEditorOptions = {
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
   previewViewportSurface?: PreviewViewportSurface;
   uiLanguage?: UiLanguage;
+  sourceLineNumbers?: boolean;
 };
 
 type PointerClickState = { pointerId: number };
@@ -289,7 +290,8 @@ export function createEditor({
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory,
   previewViewportSurface,
-  uiLanguage = 'en'
+  uiLanguage = 'en',
+  sourceLineNumbers = true
 }: CreateEditorOptions) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
@@ -302,6 +304,7 @@ export function createEditor({
 
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
+  const lineNumberCompartment = new Compartment();
   const startMode = initialMode === 'live' ? 'live' : 'source';
   const largeDocument = assessLargeDocument(text).preferSource;
   let gitGutterVisible = initialGitGutter !== false;
@@ -1793,11 +1796,12 @@ export function createEditor({
         ...editorHistoryKeymap
       ]),
       historyCompartment.of(history()),
-      lineNumbers(),
+      lineNumberCompartment.of(startMode === 'live' || sourceLineNumbers
+        ? [lineNumbers(), highlightActiveLineGutter()]
+        : []),
       tableTransactionProvenanceAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
-      highlightActiveLineGutter(),
       highlightActiveLine(),
       EditorView.lineWrapping,
       EditorView.domEventHandlers({
@@ -2673,6 +2677,11 @@ export function createEditor({
               ),
               gitGutterCompartment.reconfigure(
                 nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
+              ),
+              lineNumberCompartment.reconfigure(
+                nextMode === 'live' || sourceLineNumbers
+                  ? [lineNumbers(), highlightActiveLineGutter()]
+                  : []
               )
             ]
           });
