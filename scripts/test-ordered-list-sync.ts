@@ -29,7 +29,6 @@ async function main(): Promise<void> {
     await page.addScriptTag({ content: `
       window.__hostText = '';
       window.__hostVersion = 1;
-      window.__applyCount = 0;
       window.acquireVsCodeApi = () => ({
         postMessage(message) {
           if (message.type !== 'applyChanges') return;
@@ -38,7 +37,6 @@ async function main(): Promise<void> {
             nextText = nextText.slice(0, change.from) + change.insert + nextText.slice(change.to);
           }
           const nextVersion = ++window.__hostVersion;
-          window.__applyCount += 1;
           setTimeout(() => {
             window.__hostText = nextText;
             window.dispatchEvent(new MessageEvent('message', { data: { type: 'applied', version: nextVersion } }));
@@ -74,11 +72,15 @@ async function main(): Promise<void> {
         await page.keyboard.press('Enter');
         await page.keyboard.type(item);
       }
-      const previousApplyCount = await page.evaluate(() => (window as any).__applyCount as number);
+      const expectedText = await page.evaluate(() => (
+        Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .map((line) => line.textContent ?? '')
+          .join('\n')
+      ));
       await page.waitForFunction(
-        (count) => (window as any).__applyCount > count,
-        { timeout: 2_000 },
-        previousApplyCount
+        (text) => (window as any).__hostText === text,
+        {},
+        expectedText
       );
     }
 
