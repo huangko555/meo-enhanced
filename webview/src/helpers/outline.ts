@@ -1,6 +1,7 @@
 import { createElement, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, PanelLeft, PanelRight, Pin, PinOff, X, type IconNode } from 'lucide';
 import { DEFAULT_OUTLINE_WIDTH, normalizeOutlineWidth } from '../../../src/shared/outlineWidth';
 import type { HeadingInlineSegment } from './markdownSyntax';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export interface OutlineHeading {
   text: string;
@@ -57,6 +58,7 @@ interface OutlineController {
   getPosition: () => OutlinePosition;
   setMode: (mode: OutlineMode) => void;
   setWidth: (width: number) => void;
+  setUiLanguage: (language: UiLanguage) => void;
   isVisible: () => boolean;
 }
 
@@ -135,21 +137,22 @@ export function createOutlineController({
   onUiStateChange,
   onResizeEnd
 }: OutlineControllerOptions): OutlineController {
+  let uiStrings = getUiStrings('en');
   const outlineSidebar = document.createElement('div');
   outlineSidebar.className = 'outline-sidebar';
   outlineSidebar.setAttribute('role', 'navigation');
-  outlineSidebar.setAttribute('aria-label', 'Document outline');
+  outlineSidebar.setAttribute('aria-label', uiStrings.documentOutline);
 
   const outlineHeader = document.createElement('div');
   outlineHeader.className = 'outline-header';
   const outlineLabel = document.createElement('span');
   outlineLabel.className = 'outline-header-label';
-  outlineLabel.textContent = 'Outline';
-  const collapseButton = iconButton(ChevronsUp, 'collapse-top2', '只展开前两层');
-  const expandButton = iconButton(ChevronsDown, 'expand-all', '展开全部');
-  const modeButton = iconButton(Pin, 'toggle-mode', '切换到固定目录');
-  const positionButton = iconButton(PanelLeft, 'toggle-position', '切换到左侧');
-  const closeButton = iconButton(X, 'close', '关闭目录');
+  outlineLabel.textContent = uiStrings.outline;
+  const collapseButton = iconButton(ChevronsUp, 'collapse-top2', uiStrings.outlineCollapseTopTwo);
+  const expandButton = iconButton(ChevronsDown, 'expand-all', uiStrings.outlineExpandAll);
+  const modeButton = iconButton(Pin, 'toggle-mode', uiStrings.outlineSwitchFixed);
+  const positionButton = iconButton(PanelLeft, 'toggle-position', uiStrings.outlineSwitchLeft);
+  const closeButton = iconButton(X, 'close', uiStrings.outlineClose);
   closeButton.classList.add('outline-close-button');
   outlineHeader.append(outlineLabel, collapseButton, expandButton, positionButton, modeButton, closeButton);
 
@@ -160,7 +163,7 @@ export function createOutlineController({
   visibleRangeHighlight.hidden = true;
   const outlineResizer = document.createElement('div');
   outlineResizer.className = 'outline-resizer';
-  outlineResizer.title = '拖动调整目录宽度';
+  outlineResizer.title = uiStrings.outlineResize;
   outlineSidebar.append(outlineHeader, outlineContent, outlineResizer);
 
   let visible = false;
@@ -289,7 +292,7 @@ export function createOutlineController({
 
   const appendHeadingContent = (item: HTMLElement, heading: OutlineHeading) => {
     if (!heading.inlineSegments?.length) {
-      item.textContent = heading.text || '(空标题)';
+      item.textContent = heading.text || uiStrings.outlineEmptyHeading;
       return;
     }
     for (const segment of heading.inlineSegments) {
@@ -330,7 +333,7 @@ export function createOutlineController({
     if (node.children.length > 0) {
       const collapsed = collapsedKeys.has(node.key);
       foldButton.dataset.outlineKey = node.key;
-      foldButton.title = collapsed ? '展开' : '折叠';
+      foldButton.title = collapsed ? uiStrings.outlineExpand : uiStrings.outlineCollapse;
       foldButton.setAttribute('aria-label', foldButton.title);
       foldButton.appendChild(createElement(collapsed ? ChevronRight : ChevronDown, { width: 12, height: 12 }));
     } else {
@@ -362,7 +365,7 @@ export function createOutlineController({
     if (currentTreeRoots.length === 0) {
       const emptyMsg = document.createElement('div');
       emptyMsg.className = 'outline-empty';
-      emptyMsg.textContent = '暂无标题';
+      emptyMsg.textContent = uiStrings.outlineNoHeadings;
       outlineContent.appendChild(emptyMsg);
       return;
     }
@@ -399,14 +402,14 @@ export function createOutlineController({
 
   const updateModeButton = () => {
     modeButton.replaceChildren(createElement(mode === 'floating' ? Pin : PinOff, { width: 14, height: 14 }));
-    modeButton.title = mode === 'floating' ? '切换到固定目录' : '切换到浮动目录';
+    modeButton.title = mode === 'floating' ? uiStrings.outlineSwitchFixed : uiStrings.outlineSwitchFloating;
     modeButton.setAttribute('aria-label', modeButton.title);
   };
 
   const updatePositionButton = () => {
     const nextPosition = position === 'left' ? 'right' : 'left';
     positionButton.replaceChildren(createElement(nextPosition === 'left' ? PanelLeft : PanelRight, { width: 14, height: 14 }));
-    positionButton.title = nextPosition === 'left' ? '切换到左侧' : '切换到右侧';
+    positionButton.title = nextPosition === 'left' ? uiStrings.outlineSwitchLeft : uiStrings.outlineSwitchRight;
     positionButton.setAttribute('aria-label', positionButton.title);
   };
 
@@ -578,6 +581,21 @@ export function createOutlineController({
     getPosition: () => position,
     setMode,
     setWidth,
+    setUiLanguage: (language) => {
+      uiStrings = getUiStrings(language);
+      outlineSidebar.setAttribute('aria-label', uiStrings.documentOutline);
+      outlineLabel.textContent = uiStrings.outline;
+      collapseButton.title = uiStrings.outlineCollapseTopTwo;
+      collapseButton.setAttribute('aria-label', collapseButton.title);
+      expandButton.title = uiStrings.outlineExpandAll;
+      expandButton.setAttribute('aria-label', expandButton.title);
+      closeButton.title = uiStrings.outlineClose;
+      closeButton.setAttribute('aria-label', closeButton.title);
+      outlineResizer.title = uiStrings.outlineResize;
+      updateModeButton();
+      updatePositionButton();
+      renderTree();
+    },
     isVisible: () => visible
   };
 }

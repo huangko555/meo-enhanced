@@ -144,7 +144,10 @@ async function main() {
       exports: Array.from(document.querySelectorAll('[data-format]')).map((element) => element.textContent?.trim()),
       previewFrameTitle: document.querySelector('iframe.preview-frame')?.getAttribute('title'),
       previewAppearance: document.querySelector('.preview-appearance-control')?.getAttribute('aria-label'),
-      editorAppearance: document.querySelector('.editor-appearance-control')?.getAttribute('aria-label')
+      editorAppearance: document.querySelector('.editor-appearance-control')?.getAttribute('aria-label'),
+      outline: document.querySelector('.outline-sidebar')?.getAttribute('aria-label'),
+      outlineLabel: document.querySelector('.outline-header-label')?.textContent,
+      outlineClose: document.querySelector('[data-action="close"]')?.getAttribute('aria-label')
     }));
     if (JSON.stringify(chineseChrome) !== JSON.stringify({
       language: 'zh-CN',
@@ -153,7 +156,10 @@ async function main() {
       exports: ['导出 HTML', '导出 PDF'],
       previewFrameTitle: 'Markdown 预览',
       previewAppearance: '预览外观',
-      editorAppearance: '编辑器外观'
+      editorAppearance: '编辑器外观',
+      outline: '文档目录',
+      outlineLabel: '目录',
+      outlineClose: '关闭目录'
     })) {
       throw new Error(`Resolved UI language did not project into the current Webview: ${JSON.stringify(chineseChrome)}`);
     }
@@ -1126,18 +1132,18 @@ async function main() {
       panel.style.setProperty('--vscode-input-placeholderForeground', 'rgb(128, 136, 144)');
       panel.style.setProperty('--vscode-descriptionForeground', 'rgb(255, 255, 255)');
       panel.style.setProperty('--vscode-editor-foreground', 'rgb(255, 255, 255)');
-      const findInput = panel.querySelector<HTMLInputElement>('[placeholder="Find"]')!;
-      const replaceInput = panel.querySelector<HTMLInputElement>('[placeholder="Replace"]')!;
+      const findInput = panel.querySelector<HTMLInputElement>('.find-row:first-child .find-input')!;
+      const replaceInput = panel.querySelector<HTMLInputElement>('.find-replace-row .find-input')!;
       return {
         findPlaceholder: getComputedStyle(findInput, '::placeholder').color,
         replacePlaceholder: getComputedStyle(replaceInput, '::placeholder').color,
-        findClear: getComputedStyle(panel.querySelector<HTMLElement>('[aria-label="Clear Find"]')!).color,
-        replaceClear: getComputedStyle(panel.querySelector<HTMLElement>('[aria-label="Clear Replace"]')!).color
+        findClear: getComputedStyle(panel.querySelector<HTMLElement>('.find-row:first-child .find-clear-button')!).color,
+        replaceClear: getComputedStyle(panel.querySelector<HTMLElement>('.find-replace-row .find-clear-button')!).color
       };
     });
-    await page.hover('.find-panel [aria-label="Clear Find"]');
+    await page.hover('.find-panel .find-row:first-child .find-clear-button');
     const hoveredFindClearColor = await page.$eval(
-      '.find-panel [aria-label="Clear Find"]',
+      '.find-panel .find-row:first-child .find-clear-button',
       (element) => getComputedStyle(element).color
     );
     if (
@@ -1149,12 +1155,12 @@ async function main() {
     ) {
       throw new Error(`Find and Replace clear icons did not match their placeholder text: ${JSON.stringify({ ...findClearColors, hoveredFindClearColor })}`);
     }
-    await page.type('.find-panel .find-input[placeholder="Find"]', 'Tall Mermaid');
+    await page.type('.find-panel .find-row:first-child .find-input', 'Tall Mermaid');
     await waitForFrames(page, 2);
     const previewFindState = await page.evaluate(() => {
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const replaceRow = document.querySelector<HTMLElement>('.find-replace-row')!;
-      const replaceInput = replaceRow.querySelector<HTMLInputElement>('[placeholder="Replace"]')!;
+      const replaceInput = replaceRow.querySelector<HTMLInputElement>('.find-input')!;
       return {
         status: document.querySelector<HTMLElement>('.find-status')?.textContent,
         matches: frameDocument.querySelectorAll('.meo-preview-search-match').length,
@@ -1163,7 +1169,7 @@ async function main() {
       };
     });
     if (
-      previewFindState.status !== '1 matches' ||
+      previewFindState.status !== '1 个匹配项' ||
       previewFindState.matches !== 1 ||
       !previewFindState.replaceVisible ||
       !previewFindState.replaceDisabled

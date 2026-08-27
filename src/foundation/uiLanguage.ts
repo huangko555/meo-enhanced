@@ -41,6 +41,20 @@ export type UiStrings = Readonly<{
   replacedCurrent: (current: number, total: number) => string;
   replacedRemaining: (count: number) => string;
   replacedMatches: (count: number) => string;
+  documentOutline: string;
+  outline: string;
+  outlineCollapseTopTwo: string;
+  outlineExpandAll: string;
+  outlineSwitchFixed: string;
+  outlineSwitchFloating: string;
+  outlineSwitchLeft: string;
+  outlineSwitchRight: string;
+  outlineClose: string;
+  outlineResize: string;
+  outlineEmptyHeading: string;
+  outlineExpand: string;
+  outlineCollapse: string;
+  outlineNoHeadings: string;
 }>;
 
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
@@ -61,7 +75,14 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     replaced: 'Replaced', findMatches: (count: number) => `${count} matches`,
     replacedCurrent: (current: number, total: number) => `Replaced • ${current}/${total}`,
     replacedRemaining: (count: number) => `Replaced • ${count} remaining`,
-    replacedMatches: (count: number) => `Replaced ${count} matches`
+    replacedMatches: (count: number) => `Replaced ${count} matches`,
+    documentOutline: 'Document outline', outline: 'Outline', outlineCollapseTopTwo: 'Show top two levels',
+    outlineExpandAll: 'Expand all', outlineSwitchFixed: 'Switch to fixed outline',
+    outlineSwitchFloating: 'Switch to floating outline', outlineSwitchLeft: 'Switch to left side',
+    outlineSwitchRight: 'Switch to right side', outlineClose: 'Close outline',
+    outlineResize: 'Drag to resize outline',
+    outlineEmptyHeading: '(Empty heading)',
+    outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings'
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
@@ -79,7 +100,14 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     replaced: '已替换', findMatches: (count: number) => `${count} 个匹配项`,
     replacedCurrent: (current: number, total: number) => `已替换 • ${current}/${total}`,
     replacedRemaining: (count: number) => `已替换 • 剩余 ${count} 个`,
-    replacedMatches: (count: number) => `已替换 ${count} 个匹配项`
+    replacedMatches: (count: number) => `已替换 ${count} 个匹配项`,
+    documentOutline: '文档目录', outline: '目录', outlineCollapseTopTwo: '只展开前两层',
+    outlineExpandAll: '展开全部', outlineSwitchFixed: '切换到固定目录',
+    outlineSwitchFloating: '切换到浮动目录', outlineSwitchLeft: '切换到左侧',
+    outlineSwitchRight: '切换到右侧', outlineClose: '关闭目录',
+    outlineResize: '拖动调整目录宽度',
+    outlineEmptyHeading: '(空标题)',
+    outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题'
   })
 });
 
