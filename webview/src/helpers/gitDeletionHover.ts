@@ -1,5 +1,7 @@
 import type { EditorView } from '@codemirror/view';
 import { getBaselineRangesPreview, getDeletedGapRangesPreview } from './gitDiffGutter';
+import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 
 type DiffContentHoverController = {
   hide(): void;
@@ -86,6 +88,7 @@ export function findModifiedMarkerForMouseEvent(
 }
 
 export function createGitDiffContentHoverController(view: EditorView): DiffContentHoverController {
+  const strings = getUiStrings(view.state.facet(uiLanguageFacet));
   const root = document.createElement('div');
   root.className = 'meo-deletion-tooltip';
   root.hidden = true;
@@ -104,7 +107,7 @@ export function createGitDiffContentHoverController(view: EditorView): DiffConte
   modifiedRoot.hidden = true;
   const modifiedTitle = document.createElement('div');
   modifiedTitle.className = 'meo-modified-tooltip-title';
-  modifiedTitle.textContent = 'Before change';
+  modifiedTitle.textContent = strings.beforeChange;
   const modifiedContent = document.createElement('pre');
   modifiedContent.className = 'meo-modified-tooltip-content';
   const modifiedMore = document.createElement('div');
@@ -172,9 +175,9 @@ export function createGitDiffContentHoverController(view: EditorView): DiffConte
         return;
       }
       activeKey = key;
-      title.textContent = `Deleted ${preview.totalLines} ${preview.totalLines === 1 ? 'line' : 'lines'}`;
+      title.textContent = strings.deletedLines(preview.totalLines);
       content.textContent = preview.text;
-      more.textContent = preview.truncated ? 'More deleted content is not shown.' : '';
+      more.textContent = preview.truncated ? strings.moreDeletedContentHidden : '';
       modifiedRoot.hidden = true;
       root.hidden = false;
       position(root, marker);
@@ -201,7 +204,7 @@ export function createGitDiffContentHoverController(view: EditorView): DiffConte
     }
     activeKey = key;
     modifiedContent.textContent = preview.text;
-    modifiedMore.textContent = preview.truncated ? 'More original content is not shown.' : '';
+    modifiedMore.textContent = preview.truncated ? strings.moreOriginalContentHidden : '';
     root.hidden = true;
     modifiedRoot.hidden = false;
     position(modifiedRoot, modifiedMarker);

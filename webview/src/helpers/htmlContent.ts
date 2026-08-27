@@ -19,6 +19,7 @@ import { ImageWidget } from './images';
 import { getImagePresentationFactory } from '../editor/imagePresentation';
 import { getDetailsBlocks, toggleDetailsBlock } from './detailsBlocks';
 import { uiLanguageFacet } from '../editor/uiLanguage';
+import { getUiStrings } from '../../../src/foundation/uiLanguage';
 
 export interface RenderableHtmlBlock {
   from: number;
@@ -258,6 +259,7 @@ class HtmlBlockWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const root = document.createElement('div');
     root.className = 'meo-md-html-block';
     root.dataset.meoHtmlFrom = String(this.block.from);
@@ -285,7 +287,11 @@ class HtmlBlockWidget extends WidgetType {
       });
     }
 
-    const button = createHtmlModeButton('meo-md-html-mode-btn meo-md-html-source-toggle', 'Show HTML source', Code2);
+    const button = createHtmlModeButton(
+      'meo-md-html-mode-btn meo-md-html-source-toggle',
+      strings.showHtmlSource,
+      Code2
+    );
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -316,9 +322,14 @@ class HtmlSourceControlWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const control = document.createElement('span');
     control.className = 'meo-md-html-source-control';
-    const button = createHtmlModeButton('meo-md-html-mode-btn meo-md-html-preview-toggle', 'Show HTML preview', Eye);
+    const button = createHtmlModeButton(
+      'meo-md-html-mode-btn meo-md-html-preview-toggle',
+      strings.showHtmlPreview,
+      Eye
+    );
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -330,10 +341,11 @@ class HtmlSourceControlWidget extends WidgetType {
 }
 
 class HtmlWarningWidget extends WidgetType {
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const warning = document.createElement('span');
     warning.className = 'meo-md-html-warning';
-    warning.title = 'This HTML stays as source because it contains unsupported or invalid markup.';
+    warning.title = strings.unsupportedHtmlSource;
     warning.setAttribute('aria-label', warning.title);
     warning.appendChild(createElement(AlertTriangle, { width: 14, height: 14, 'aria-hidden': 'true' }));
     return warning;

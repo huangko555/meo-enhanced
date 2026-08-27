@@ -5,6 +5,8 @@ import {
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
+import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 
 const lineDecos = {
   currentHeader: Decoration.line({ class: 'meo-merge-line meo-merge-current-header' }),
@@ -155,15 +157,16 @@ class MergeConflictActionsWidget extends WidgetType {
       other.incomingLabel === this.incomingLabel;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const wrap = document.createElement('div');
     wrap.className = 'meo-merge-actions';
     wrap.setAttribute('contenteditable', 'false');
 
     const buttons = [
-      { action: 'current', label: 'Accept Current' },
-      { action: 'incoming', label: 'Accept Incoming' },
-      { action: 'both', label: 'Accept Both' }
+      { action: 'current', label: strings.acceptCurrent },
+      { action: 'incoming', label: strings.acceptIncoming },
+      { action: 'both', label: strings.acceptBoth }
     ];
 
     for (const item of buttons) {
@@ -181,10 +184,10 @@ class MergeConflictActionsWidget extends WidgetType {
       labels.className = 'meo-merge-action-labels';
       const parts: string[] = [];
       if (this.currentLabel) {
-        parts.push(`Current: ${this.currentLabel},`);
+        parts.push(strings.currentVersion(this.currentLabel));
       }
       if (this.incomingLabel) {
-        parts.push(`Incoming: ${this.incomingLabel}`);
+        parts.push(strings.incomingVersion(this.incomingLabel));
       }
       labels.textContent = parts.join('  ');
       wrap.appendChild(labels);

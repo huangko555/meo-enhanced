@@ -33,7 +33,7 @@ import {
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import { uiLanguageFacet } from '../editor/uiLanguage';
-import type { UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 import {
   getTableTransactionProvenance,
   getTableTransactionProvenanceSnapshot,
@@ -1778,7 +1778,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
     const color = colorRangesByStart.get(i);
     if (color && (!tag || tag[0].length === color.value.length)) {
       flushBuffer();
-      parent.appendChild(createColorSwatchElement(color.value));
+      parent.appendChild(createColorSwatchElement(color.value, options.uiLanguage));
       appendTablePlainText(parent, color.value, baseOffset + i, diagnostics, searchState, sourceRange);
       i = color.to;
       continue;
@@ -4428,35 +4428,36 @@ class HtmlTableWidget extends WidgetType {
   }
 
   createTableToolbar(container: HTMLElement) {
+    const strings = getUiStrings(this.view!.state.facet(uiLanguageFacet));
     const toolbar = document.createElement('div');
     toolbar.className = 'meo-visual-surface meo-md-html-table-toolbar';
-    toolbar.setAttribute('aria-label', 'Table actions');
+    toolbar.setAttribute('aria-label', strings.tableActions);
 
-    const insertRowAbove = this.createToolbarButton('Insert row above', tableToolbarIcons.rowInsertTop, () => {
+    const insertRowAbove = this.createToolbarButton(strings.insertRowAbove, tableToolbarIcons.rowInsertTop, () => {
       this.requestInsertRowAbove(container);
     });
-    const insertRowBelow = this.createToolbarButton('Insert row below', tableToolbarIcons.rowInsertBottom, () => {
+    const insertRowBelow = this.createToolbarButton(strings.insertRowBelow, tableToolbarIcons.rowInsertBottom, () => {
       this.requestInsertRowBelow(container);
     });
-    const deleteRow = this.createToolbarButton('Delete row', tableToolbarIcons.rowRemove, () => {
+    const deleteRow = this.createToolbarButton(strings.deleteRow, tableToolbarIcons.rowRemove, () => {
       this.requestDeleteRow(container);
     });
-    const insertColumnLeft = this.createToolbarButton('Insert column left', tableToolbarIcons.columnInsertLeft, () => {
+    const insertColumnLeft = this.createToolbarButton(strings.insertColumnLeft, tableToolbarIcons.columnInsertLeft, () => {
       this.requestInsertColumnLeft(container);
     });
-    const insertColumnRight = this.createToolbarButton('Insert column right', tableToolbarIcons.columnInsertRight, () => {
+    const insertColumnRight = this.createToolbarButton(strings.insertColumnRight, tableToolbarIcons.columnInsertRight, () => {
       this.requestInsertColumnRight(container);
     });
-    const deleteColumn = this.createToolbarButton('Delete column', tableToolbarIcons.columnRemove, () => {
+    const deleteColumn = this.createToolbarButton(strings.deleteColumn, tableToolbarIcons.columnRemove, () => {
       this.requestDeleteColumn(container);
     });
-    const alignColumnLeft = this.createToolbarButton('Align selected column left', tableToolbarIcons.alignLeft, () => {
+    const alignColumnLeft = this.createToolbarButton(strings.alignColumnLeft, tableToolbarIcons.alignLeft, () => {
       this.requestColumnAlignment(container, 'left');
     });
-    const alignColumnCenter = this.createToolbarButton('Align selected column center', tableToolbarIcons.alignCenter, () => {
+    const alignColumnCenter = this.createToolbarButton(strings.alignColumnCenter, tableToolbarIcons.alignCenter, () => {
       this.requestColumnAlignment(container, 'center');
     });
-    const alignColumnRight = this.createToolbarButton('Align selected column right', tableToolbarIcons.alignRight, () => {
+    const alignColumnRight = this.createToolbarButton(strings.alignColumnRight, tableToolbarIcons.alignRight, () => {
       this.requestColumnAlignment(container, 'right');
     });
     const rowSeparator = this.createToolbarSeparator();

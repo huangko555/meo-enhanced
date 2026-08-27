@@ -1,5 +1,7 @@
-import { WidgetType } from '@codemirror/view';
+import { WidgetType, type EditorView } from '@codemirror/view';
 import { createElement, Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
+import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 
 export type AlertType = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION';
 
@@ -65,13 +67,13 @@ export class AlertIconWidget extends WidgetType {
     return other instanceof AlertIconWidget && other.type === this.type;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const container = document.createElement('span');
     container.className = 'meo-md-alert-icon';
     container.appendChild(getAlertIconElement(this.type));
     const label = document.createElement('span');
     label.className = 'meo-md-alert-label';
-    label.textContent = this.type;
+    label.textContent = getUiStrings(view.state.facet(uiLanguageFacet)).alertLabel(this.type);
     container.appendChild(label);
     return container;
   }

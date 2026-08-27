@@ -330,7 +330,7 @@ async function main(): Promise<void> {
       host.replaceChildren();
       const longCode = Array.from({ length: 20 }, (_, index) => `const long${index + 1} = ${index + 1};`).join('\n');
       const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-      const text = `[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\n[![Pixel](${pixel})](https://example.com)\n\n\`\`\`ts\nconst value = 1;\n\`\`\`\n\n\`\`\`js\n${longCode}\n\`\`\`\n\n\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\`\n\n$$\nx^2\n$$\n\nplain`;
+      const text = `[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\n[![Pixel](${pixel})](https://example.com)\n\n\`\`\`ts\nconst value = 1;\n\`\`\`\n\n\`\`\`js\n${longCode}\n\`\`\`\n\n\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\`\n\n$$\nx^2\n$$\n\n> [!NOTE]\n> note\n\nColor #ff0000\n\n<div>HTML</div>\n\n<<<<<<< Current\ncurrent\n=======\nincoming\n>>>>>>> Incoming\n\n| A | B |\n| - | - |\n| one | two |\n\nplain`;
       const editor = harness.createEditor({
         parent: host,
         text,
@@ -358,6 +358,10 @@ async function main(): Promise<void> {
         imageActions: Array.from(document.querySelectorAll<HTMLElement>(
           '.meo-md-image-controls [aria-label]'
         )).map((element) => element.getAttribute('aria-label')),
+        featureChrome: {
+          alert: document.querySelector('.meo-md-alert-label')?.textContent,
+          html: read('.meo-md-html-source-toggle')
+        },
         renderedBlocks: {
           controls: Array.from(document.querySelectorAll<HTMLElement>(
             '.meo-mermaid-toolbar[role="group"], .meo-latex-math-toolbar[role="group"]'
@@ -395,6 +399,10 @@ async function main(): Promise<void> {
       codeActions: ['全选代码', '复制代码', '全选代码', '复制代码'],
       longCode: { lines: '20 行', action: '显示其余 10 行代码' },
       imageActions: ['打开链接', '使用系统应用打开', '全屏查看图片'],
+      featureChrome: {
+        alert: '备注',
+        html: '显示 HTML 源码'
+      },
       renderedBlocks: {
         controls: ['第 41 行 Mermaid 块控件', '第 46 行公式块控件'],
         modes: ['以分栏视图编辑 Mermaid', '以分栏视图编辑公式']

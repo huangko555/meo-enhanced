@@ -113,6 +113,29 @@ export type UiStrings = Readonly<{
   mermaidError: (message: string) => string;
   openWithSystemApp: string;
   fullscreenImage: string;
+  colorLabel: (value: string) => string;
+  beforeChange: string;
+  deletedLines: (count: number) => string;
+  moreDeletedContentHidden: string;
+  moreOriginalContentHidden: string;
+  showHtmlPreview: string;
+  unsupportedHtmlSource: string;
+  acceptCurrent: string;
+  acceptIncoming: string;
+  acceptBoth: string;
+  currentVersion: (label: string) => string;
+  incomingVersion: (label: string) => string;
+  alertLabel: (type: string) => string;
+  tableActions: string;
+  insertRowAbove: string;
+  insertRowBelow: string;
+  deleteRow: string;
+  insertColumnLeft: string;
+  insertColumnRight: string;
+  deleteColumn: string;
+  alignColumnLeft: string;
+  alignColumnCenter: string;
+  alignColumnRight: string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -214,6 +237,20 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
     mermaidError: (message: string) => `Mermaid error: ${message}`,
     openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image',
+    colorLabel: (value: string) => `Color ${value}`, beforeChange: 'Before change',
+    deletedLines: (count: number) => `Deleted ${count} ${count === 1 ? 'line' : 'lines'}`,
+    moreDeletedContentHidden: 'More deleted content is not shown.',
+    moreOriginalContentHidden: 'More original content is not shown.',
+    showHtmlPreview: 'Show HTML preview',
+    unsupportedHtmlSource: 'This HTML stays as source because it contains unsupported or invalid markup.',
+    acceptCurrent: 'Accept Current', acceptIncoming: 'Accept Incoming', acceptBoth: 'Accept Both',
+    currentVersion: (label: string) => `Current: ${label},`,
+    incomingVersion: (label: string) => `Incoming: ${label}`,
+    alertLabel: (type: string) => type,
+    tableActions: 'Table actions', insertRowAbove: 'Insert row above', insertRowBelow: 'Insert row below',
+    deleteRow: 'Delete row', insertColumnLeft: 'Insert column left', insertColumnRight: 'Insert column right',
+    deleteColumn: 'Delete column', alignColumnLeft: 'Align selected column left',
+    alignColumnCenter: 'Align selected column center', alignColumnRight: 'Align selected column right',
     heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
@@ -291,6 +328,20 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     fullscreen: '全屏', exitFullscreen: '退出全屏',
     mermaidError: (message: string) => `Mermaid 错误：${message}`,
     openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片',
+    colorLabel: (value: string) => `颜色 ${value}`, beforeChange: '更改前',
+    deletedLines: (count: number) => `已删除 ${count} 行`,
+    moreDeletedContentHidden: '还有更多已删除内容未显示。',
+    moreOriginalContentHidden: '还有更多原始内容未显示。',
+    showHtmlPreview: '显示 HTML 预览',
+    unsupportedHtmlSource: '此 HTML 包含不支持或无效的标记，因此保留为源码。',
+    acceptCurrent: '接受当前更改', acceptIncoming: '接受传入更改', acceptBoth: '接受两者',
+    currentVersion: (label: string) => `当前：${label}，`,
+    incomingVersion: (label: string) => `传入：${label}`,
+    alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
+    tableActions: '表格操作', insertRowAbove: '在上方插入行', insertRowBelow: '在下方插入行',
+    deleteRow: '删除行', insertColumnLeft: '在左侧插入列', insertColumnRight: '在右侧插入列',
+    deleteColumn: '删除列', alignColumnLeft: '所选列左对齐',
+    alignColumnCenter: '所选列居中对齐', alignColumnRight: '所选列右对齐',
     heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',

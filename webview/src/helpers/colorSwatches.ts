@@ -1,13 +1,15 @@
-import { Decoration, WidgetType } from '@codemirror/view';
+import { Decoration, WidgetType, type EditorView } from '@codemirror/view';
 import type { HexColorRange } from '../../../src/shared/hexColorSwatches';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 
-export function createColorSwatchElement(value: string): HTMLSpanElement {
+export function createColorSwatchElement(value: string, uiLanguage: UiLanguage = 'en'): HTMLSpanElement {
   const swatch = document.createElement('span');
   swatch.className = 'meo-md-color-swatch';
   swatch.style.backgroundColor = value;
   swatch.title = value;
   swatch.setAttribute('role', 'img');
-  swatch.setAttribute('aria-label', `Color ${value}`);
+  swatch.setAttribute('aria-label', getUiStrings(uiLanguage).colorLabel(value));
   return swatch;
 }
 
@@ -23,8 +25,8 @@ export class ColorSwatchWidget extends WidgetType {
     return other instanceof ColorSwatchWidget && other.value === this.value;
   }
 
-  toDOM(): HTMLElement {
-    return createColorSwatchElement(this.value);
+  toDOM(view: EditorView): HTMLElement {
+    return createColorSwatchElement(this.value, view.state.facet(uiLanguageFacet));
   }
 
   ignoreEvent(): boolean {

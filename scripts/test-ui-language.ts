@@ -38,6 +38,14 @@ assert.deepEqual(
   [chinese.loading, chinese.zoomIn, chinese.zoomOut, chinese.resetZoom, chinese.fullscreen, chinese.exitFullscreen],
   ['正在加载…', '放大', '缩小', '重置缩放', '全屏', '退出全屏']
 );
+assert.deepEqual(
+  [chinese.colorLabel('#ff0000'), chinese.acceptCurrent, chinese.acceptIncoming, chinese.acceptBoth],
+  ['颜色 #ff0000', '接受当前更改', '接受传入更改', '接受两者']
+);
+assert.deepEqual(
+  [chinese.tableActions, chinese.insertRowAbove, chinese.alignColumnRight],
+  ['表格操作', '在上方插入行', '所选列右对齐']
+);
 assert.equal(chinese.headingLevel(3), '3 级标题');
 assert.deepEqual(
   [chinese.markdownMode, chinese.live, chinese.source, chinese.preview],
