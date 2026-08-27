@@ -58,9 +58,15 @@ export function createLiveInputDerivedWorkScheduler(
       frameId = null;
       if (disposed || currentGeneration !== generation) return;
       if (options.requestDeferred) {
-        deferredId = options.requestDeferred(() => {
-          deferredId = null;
-          applyCurrentGeneration(currentGeneration);
+        // Let the accepted text produce two consecutive painted frames before
+        // an unbounded full-document refresh is allowed to enter browser idle.
+        frameId = options.requestFrame(() => {
+          frameId = null;
+          if (disposed || currentGeneration !== generation) return;
+          deferredId = options.requestDeferred(() => {
+            deferredId = null;
+            applyCurrentGeneration(currentGeneration);
+          });
         });
         return;
       }
