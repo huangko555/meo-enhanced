@@ -225,6 +225,24 @@ try {
       }
     }
     editor.destroy();
+    const invalidText = '---\ntitle: [unterminated\n---\nBody';
+    const invalidEditor = window.createEditor({
+      parent: document.getElementById('app'),
+      text: invalidText,
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+    invalidEditor.view.requestMeasure();
+    await wait();
+    const invalidContent = document.querySelector('.cm-content');
+    if (
+      invalidContent?.querySelector('.meo-md-frontmatter-property')
+      || invalidContent?.querySelector('.meo-md-frontmatter-array-pills')
+      || !invalidContent?.textContent?.includes('title: [unterminated')
+    ) {
+      failures.push({ symptom: 'invalid-yaml-was-rendered-as-properties' });
+    }
+    invalidEditor.destroy();
     return failures;
   });
   if (failures.length > 0) {

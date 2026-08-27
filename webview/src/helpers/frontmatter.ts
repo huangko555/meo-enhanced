@@ -2,6 +2,7 @@ import { StateField, RangeSetBuilder, EditorState } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
 import {
   findYamlMappingSeparator,
+  isYamlFrontmatterValid,
   isYamlBlockScalarValue,
   yamlIndentationWidth
 } from '../../../src/shared/yamlFrontmatter';
@@ -102,6 +103,10 @@ export function parseFrontmatter(state: EditorState): FrontmatterInfo | null {
           continue;
         }
         const closingOffset = closingLine.text.indexOf('---');
+        const content = doc.sliceString(doc.line(2).from, closingLine.from);
+        if (!isYamlFrontmatterValid(content)) {
+          break;
+        }
         parsed = {
           openingFrom: openingLine.from + openingOffset,
           openingTo: openingLine.from + openingOffset + 3,

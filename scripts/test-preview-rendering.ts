@@ -126,6 +126,7 @@ const propertiesFrontmatter = renderMarkdownToHtml({
     '  owner: Example',
     '  notes: |',
     '    Keep: this nested YAML content.',
+    'links:',
     '  - https://example.com/docs',
     '"a:b": quoted key',
     '# Preserve comments',
@@ -133,6 +134,11 @@ const propertiesFrontmatter = renderMarkdownToHtml({
     '# Body'
   ].join('\n'),
   markdownFilePath: 'C:/tmp/preview-properties.md',
+  target: 'html'
+});
+const invalidFrontmatter = renderMarkdownToHtml({
+  markdownText: '---\ntitle: [unterminated\n---\n# Body',
+  markdownFilePath: 'C:/tmp/preview-invalid-frontmatter.md',
   target: 'html'
 });
 const tableLikeCode = renderMarkdownToHtml({
@@ -276,6 +282,13 @@ if (
   || !propertiesFrontmatter.html.includes('# Preserve comments')
 ) {
   throw new Error('Preview Properties must preserve complex and unstructured YAML lines');
+}
+if (
+  invalidFrontmatter.html.includes('class="meo-export-frontmatter"')
+  || invalidFrontmatter.html.includes('>Properties<')
+  || !invalidFrontmatter.html.includes('title: [unterminated')
+) {
+  throw new Error('Invalid YAML frontmatter must remain visible as Markdown source');
 }
 if (!transformedSources.html.includes('class="footnotes" data-source-line="6" data-source-end-line="7"')) {
   throw new Error('Preview footnotes must participate in viewport position mapping');

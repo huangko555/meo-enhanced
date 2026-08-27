@@ -1,6 +1,7 @@
 import { sliceSourceMappedMarkdown, type SourceMappedMarkdown } from './sourceMappedMarkdown';
 import {
   findYamlMappingSeparator,
+  isYamlFrontmatterValid,
   isYamlBlockScalarValue,
   yamlIndentationWidth
 } from '../shared/yamlFrontmatter';
@@ -38,6 +39,9 @@ export function extractExportFrontmatter(source: SourceMappedMarkdown): Extracte
 
   const closingLineIndex = findFrontmatterClosingLine(lines);
   if (closingLineIndex < 1) {
+    return { frontmatterHtml: '', body: source };
+  }
+  if (!isYamlFrontmatterValid(lines.slice(1, closingLineIndex).join('\n'))) {
     return { frontmatterHtml: '', body: source };
   }
 

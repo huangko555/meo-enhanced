@@ -351,6 +351,7 @@
     "@lezer/markdown": "1.6.3",
     "@types/vscode": "^1.109.0",
     "highlight.js": "^11.11.1",
+    "js-yaml": "4.1.1",
     "katex": "^0.16.28",
     "lucide": "^1.25.0",
     "markdown-it": "^14.1.0",
@@ -361,6 +362,7 @@
     "vscode-diff": "3.0.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "4.0.9",
     "@types/markdown-it": "^14.1.2",
     "@types/sanitize-html": "^2.16.0",
     "@vscode/vsce": "3.9.2",

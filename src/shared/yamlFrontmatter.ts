@@ -1,3 +1,14 @@
+import { load as parseYaml } from 'js-yaml';
+
+export function isYamlFrontmatterValid(source: string): boolean {
+  try {
+    parseYaml(source, { json: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function findYamlMappingSeparator(lineText: string, startOffset: number): number {
   let quote: 'single' | 'double' | null = null;
   let flowDepth = 0;
