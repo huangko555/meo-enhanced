@@ -3,12 +3,13 @@ import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 type ScrollElement = Element & { scrollTop: number };
 
-export function createDocumentScrollToTopController() {
+export function createDocumentScrollToTopController(uiLanguage: UiLanguage) {
+  const strings = getUiStrings(uiLanguage);
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'document-scroll-top';
-  button.title = 'Back to top';
-  button.setAttribute('aria-label', 'Back to top');
+  button.title = strings.backToTop;
+  button.setAttribute('aria-label', strings.backToTop);
   button.appendChild(createElement(ChevronsUp, {
     width: 22,
     height: 22,

@@ -62,9 +62,14 @@ type MigrationValue = {
   readonly value?: unknown;
 };
 
+type ConfigurationMigrationValue = MigrationValue & {
+  readonly hasExpectedValue: boolean;
+  readonly expectedValue?: unknown;
+};
+
 type AppearanceSettingsMigration = {
   readonly version: 1;
-  readonly configuration: readonly MigrationValue[];
+  readonly configuration: readonly ConfigurationMigrationValue[];
   readonly legacy: readonly MigrationValue[];
 };
 
@@ -120,6 +125,11 @@ const isMigrationValue = (value: unknown): value is MigrationValue => {
   return typeof candidate.key === 'string' && typeof candidate.hasValue === 'boolean';
 };
 
+const isConfigurationMigrationValue = (value: unknown): value is ConfigurationMigrationValue => (
+  isMigrationValue(value)
+  && typeof (value as Partial<ConfigurationMigrationValue>).hasExpectedValue === 'boolean'
+);
+
 const readPendingMigration = (store: AppearanceSettingsStore): AppearanceSettingsMigration | null => {
   const value = store.readLegacy(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY);
   if (value === undefined) return null;
@@ -129,7 +139,7 @@ const readPendingMigration = (store: AppearanceSettingsStore): AppearanceSetting
   const candidate = value as Partial<AppearanceSettingsMigration>;
   if (candidate.version !== 1
     || !Array.isArray(candidate.configuration)
-    || !candidate.configuration.every(isMigrationValue)
+    || !candidate.configuration.every(isConfigurationMigrationValue)
     || !Array.isArray(candidate.legacy)
     || !candidate.legacy.every(isMigrationValue)) {
     throw new Error('Appearance settings migration journal is invalid');
@@ -151,6 +161,9 @@ const restoreMigration = async (
   }
   for (const entry of [...migration.configuration].reverse()) {
     try {
+      const current = store.readConfiguration(entry.key).globalValue;
+      const expected = entry.hasExpectedValue ? entry.expectedValue : undefined;
+      if (!Object.is(current, expected)) continue;
       await store.updateConfiguration(entry.key, entry.hasValue ? entry.value : undefined);
     } catch (error) {
       errors.push(error);
@@ -206,7 +219,11 @@ export async function createAppearanceSettingsOwner(
     const configured = store.readConfiguration(descriptor.settingKey);
     return configured.explicit
       ? []
-      : [toMigrationValue(descriptor.settingKey, configured.globalValue)];
+      : [{
+          ...toMigrationValue(descriptor.settingKey, configured.globalValue),
+          hasExpectedValue: true,
+          expectedValue: descriptor.read(legacySnapshot)
+        }];
   });
   const migration: AppearanceSettingsMigration = {
     version: 1,

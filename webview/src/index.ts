@@ -124,13 +124,13 @@ const headingBtn = document.createElement('button');
 headingBtn.type = 'button';
 headingBtn.className = 'format-button';
 headingBtn.dataset.action = 'heading';
-headingBtn.title = 'Heading';
+headingBtn.title = activeUiStrings.heading;
 headingBtn.appendChild(createElement(Heading, { width: 18, height: 18 }));
 
 const headingDropdown = document.createElement('div');
 headingDropdown.className = 'heading-dropdown';
 headingDropdown.setAttribute('role', 'menu');
-headingDropdown.setAttribute('aria-label', 'Heading levels');
+headingDropdown.setAttribute('aria-label', activeUiStrings.headingLevels);
 
 const headingDropdownWrapper = document.createElement('div');
 headingDropdownWrapper.className = 'heading-dropdown-wrapper';
@@ -142,7 +142,7 @@ for (let level = 1; level <= 6; level++) {
   option.type = 'button';
   option.className = 'heading-dropdown-option';
   option.dataset.level = String(level);
-  option.title = `Heading ${level}`;
+  option.title = activeUiStrings.headingLevel(level);
   option.appendChild(createElement(headingIcons[level - 1], { width: 18, height: 18 }));
   headingDropdown.appendChild(option);
 }
@@ -157,21 +157,21 @@ const bulletListBtn = document.createElement('button');
 bulletListBtn.type = 'button';
 bulletListBtn.className = 'format-button';
 bulletListBtn.dataset.action = 'bulletList';
-bulletListBtn.title = 'Bullet List';
+bulletListBtn.title = activeUiStrings.bulletList;
 bulletListBtn.appendChild(createElement(List, { width: 18, height: 18 }));
 
 const numberedListBtn = document.createElement('button');
 numberedListBtn.type = 'button';
 numberedListBtn.className = 'format-button';
 numberedListBtn.dataset.action = 'numberedList';
-numberedListBtn.title = 'Numbered List';
+numberedListBtn.title = activeUiStrings.numberedList;
 numberedListBtn.appendChild(createElement(ListOrdered, { width: 18, height: 18 }));
 
 const taskBtn = document.createElement('button');
 taskBtn.type = 'button';
 taskBtn.className = 'format-button';
 taskBtn.dataset.action = 'task';
-taskBtn.title = 'Task';
+taskBtn.title = activeUiStrings.task;
 taskBtn.appendChild(createElement(ListTodo, { width: 18, height: 18 }));
 
 let gitChangesGutterVisible = true;
@@ -189,7 +189,7 @@ const createOutlineButton = (position: 'left' | 'right') => {
   button.type = 'button';
   button.className = 'format-button toggle-button';
   button.dataset.action = `outline-${position}`;
-  button.title = `Show Outline on ${position === 'left' ? 'Left' : 'Right'}`;
+  button.title = position === 'left' ? activeUiStrings.showOutlineLeft : activeUiStrings.showOutlineRight;
   button.setAttribute('aria-label', button.title);
   button.appendChild(createElement(ListTree, { width: 18, height: 18 }));
   return button;
@@ -229,7 +229,7 @@ const gitChangesGutterBtn = document.createElement('button');
 gitChangesGutterBtn.type = 'button';
 gitChangesGutterBtn.className = 'format-button toggle-button is-active';
 gitChangesGutterBtn.dataset.action = 'gitChangesGutter';
-gitChangesGutterBtn.title = 'Hide Changes';
+gitChangesGutterBtn.title = activeUiStrings.hideChanges(activeUiStrings.currentEdits);
 gitChangesGutterBtn.appendChild(createElement(GitCompare, { width: 18, height: 18 }));
 
 const fixedBaselineBtn = document.createElement('button');
@@ -400,49 +400,49 @@ const codeBlockBtn = document.createElement('button');
 codeBlockBtn.type = 'button';
 codeBlockBtn.className = 'format-button';
 codeBlockBtn.dataset.action = 'codeBlock';
-codeBlockBtn.title = 'Code Block';
+codeBlockBtn.title = activeUiStrings.codeBlock;
 codeBlockBtn.appendChild(createElement(Code, { width: 18, height: 18 }));
 
 const quoteBtn = document.createElement('button');
 quoteBtn.type = 'button';
 quoteBtn.className = 'format-button';
 quoteBtn.dataset.action = 'quote';
-quoteBtn.title = 'Quote';
+quoteBtn.title = activeUiStrings.quote;
 quoteBtn.appendChild(createElement(Quote, { width: 18, height: 18 }));
 
 const hrBtn = document.createElement('button');
 hrBtn.type = 'button';
 hrBtn.className = 'format-button';
 hrBtn.dataset.action = 'hr';
-hrBtn.title = 'Horizontal Rule';
+hrBtn.title = activeUiStrings.horizontalRule;
 hrBtn.appendChild(createElement(Minus, { width: 18, height: 18 }));
 
 const linkBtn = document.createElement('button');
 linkBtn.type = 'button';
 linkBtn.className = 'format-button';
 linkBtn.dataset.action = 'link';
-linkBtn.title = 'Link';
+linkBtn.title = activeUiStrings.link;
 linkBtn.appendChild(createElement(Link, { width: 18, height: 18 }));
 
 const wikiLinkBtn = document.createElement('button');
 wikiLinkBtn.type = 'button';
 wikiLinkBtn.className = 'format-button';
 wikiLinkBtn.dataset.action = 'wikiLink';
-wikiLinkBtn.title = 'Wiki Link';
+wikiLinkBtn.title = activeUiStrings.wikiLink;
 wikiLinkBtn.appendChild(createElement(Brackets, { width: 18, height: 18 }));
 
 const imageBtn = document.createElement('button');
 imageBtn.type = 'button';
 imageBtn.className = 'format-button';
 imageBtn.dataset.action = 'image';
-imageBtn.title = 'Image';
+imageBtn.title = activeUiStrings.image;
 imageBtn.appendChild(createElement(Image, { width: 18, height: 18 }));
 
 const tableBtn = document.createElement('button');
 tableBtn.type = 'button';
 tableBtn.className = 'format-button';
 tableBtn.dataset.action = 'table';
-tableBtn.title = 'Table';
+tableBtn.title = activeUiStrings.table;
 tableBtn.appendChild(createElement(Table2, { width: 18, height: 18 }));
 
 const tableDropdown = document.createElement('div');
@@ -519,11 +519,11 @@ lineJumpControl.className = 'line-jump-control';
 const lineJumpInput = document.createElement('input');
 lineJumpInput.className = 'line-jump-input';
 lineJumpInput.type = 'text';
-lineJumpInput.placeholder = 'Line';
+lineJumpInput.placeholder = activeUiStrings.line;
 lineJumpInput.inputMode = 'numeric';
 lineJumpInput.autocomplete = 'off';
 lineJumpInput.spellcheck = false;
-lineJumpInput.setAttribute('aria-label', 'Go to line');
+lineJumpInput.setAttribute('aria-label', activeUiStrings.goToLine);
 
 lineJumpControl.append(lineJumpInput);
 
@@ -619,16 +619,16 @@ const saveBtn = document.createElement('button');
 saveBtn.type = 'button';
 saveBtn.className = 'format-button';
 saveBtn.dataset.action = 'save';
-saveBtn.title = 'Save (Ctrl+S)';
-saveBtn.setAttribute('aria-label', 'Save document');
+saveBtn.title = activeUiStrings.save;
+saveBtn.setAttribute('aria-label', activeUiStrings.saveDocument);
 saveBtn.appendChild(createElement(Save, { width: 18, height: 18 }));
 
 const discardBtn = document.createElement('button');
 discardBtn.type = 'button';
 discardBtn.className = 'format-button';
 discardBtn.dataset.action = 'discard';
-discardBtn.title = 'Reload disk version (double-click)';
-discardBtn.setAttribute('aria-label', 'Reload disk version');
+discardBtn.title = activeUiStrings.reloadDiskVersionDoubleClick;
+discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
 discardBtn.appendChild(createElement(StickyNoteOff, { width: 18, height: 18 }));
 
 const preserveEditorFocusOnDocumentAction = (event: PointerEvent) => {
@@ -888,15 +888,15 @@ moreToolsPanel.addEventListener('click', (event) => {
 });
 
 const modeControl = createSegmentedControl<EditorMode>({
-  ariaLabel: 'Markdown mode',
+  ariaLabel: activeUiStrings.markdownMode,
   className: 'mode-group',
   buttonClassName: 'mode-button',
   datasetKey: 'mode',
   role: 'tablist',
   options: [
-    { value: 'live', label: 'Live' },
-    { value: 'source', label: 'Source' },
-    { value: 'preview', label: 'Preview' }
+    { value: 'live', label: activeUiStrings.live },
+    { value: 'source', label: activeUiStrings.source },
+    { value: 'preview', label: activeUiStrings.preview }
   ]
 });
 const modeGroup = modeControl.element;
@@ -913,7 +913,7 @@ const toolbarRight = document.createElement('div');
 toolbarRight.className = 'toolbar-right';
 toolbarRight.append(rightGroup, modeGroup);
 
-const findPanelElements = createFindPanel(findToggleBtn);
+const findPanelElements = createFindPanel(findToggleBtn, activeUiLanguage);
 const findPanelController = createFindPanelController(
   findPanelElements,
   () => getActiveEditorMode() === 'preview' ? previewController.getSearchAdapter() : editor,
@@ -929,7 +929,8 @@ const findPanelController = createFindPanelController(
       }
     }
     return '';
-  }
+  },
+  activeUiLanguage
 );
 
 const selectionMenuElements = createSelectionMenu();
@@ -1032,7 +1033,7 @@ editorWrapper.setAttribute('aria-hidden', 'true');
 const existingEditorHost = editorWrapper.querySelector('.editor-host');
 const editorHost = existingEditorHost instanceof HTMLElement ? existingEditorHost : document.createElement('div');
 editorHost.className = 'editor-host';
-const editorScrollToTopController = createDocumentScrollToTopController();
+const editorScrollToTopController = createDocumentScrollToTopController(activeUiLanguage);
 editorHost.appendChild(editorScrollToTopController.button);
 
 let editor: any = null;
@@ -1070,6 +1071,7 @@ let resolveCodePaletteForPreview = (appearance: 'light' | 'dark') => (
 );
 const previewController = createPreviewController({
   vscode,
+  uiLanguage: activeUiLanguage,
   getEditorAppearance: () => resolveEditorAppearanceForPreview(),
   getCodePalette: (appearance) => resolveCodePaletteForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,

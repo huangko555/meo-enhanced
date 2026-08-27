@@ -24,11 +24,12 @@ export interface FindPanelContext {
   isVisible: () => boolean;
 }
 
-export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements => {
+export const createFindPanel = (toggleBtn: HTMLButtonElement, uiLanguage: UiLanguage): FindPanelElements => {
+  const uiStrings = getUiStrings(uiLanguage);
   const panel = document.createElement('div');
   panel.className = 'find-panel';
   panel.setAttribute('role', 'search');
-  panel.setAttribute('aria-label', 'Find and replace');
+  panel.setAttribute('aria-label', uiStrings.findAndReplacePanel);
 
   const findRow = document.createElement('div');
   findRow.className = 'find-row';
@@ -39,8 +40,8 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   const findInput = document.createElement('input');
   findInput.type = 'text';
   findInput.className = 'find-input';
-  findInput.placeholder = 'Find';
-  findInput.setAttribute('aria-label', 'Find');
+  findInput.placeholder = uiStrings.find;
+  findInput.setAttribute('aria-label', uiStrings.find);
 
   const findStatus = document.createElement('span');
   findStatus.className = 'find-status';
@@ -48,43 +49,43 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   const findClearBtn = document.createElement('button');
   findClearBtn.type = 'button';
   findClearBtn.className = 'format-button find-clear-button';
-  findClearBtn.title = 'Clear Find';
-  findClearBtn.setAttribute('aria-label', 'Clear Find');
+  findClearBtn.title = uiStrings.clearFind;
+  findClearBtn.setAttribute('aria-label', uiStrings.clearFind);
   findClearBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
   const wholeWordBtn = document.createElement('button');
   wholeWordBtn.type = 'button';
   wholeWordBtn.className = 'format-button toggle-button find-option-button';
-  wholeWordBtn.title = 'Whole Word';
+  wholeWordBtn.title = uiStrings.wholeWord;
   wholeWordBtn.appendChild(createElement(WholeWord, { width: 16, height: 16 }));
-  wholeWordBtn.setAttribute('aria-label', 'Whole Word');
+  wholeWordBtn.setAttribute('aria-label', uiStrings.wholeWord);
   wholeWordBtn.setAttribute('aria-pressed', 'false');
 
   const caseSensitiveBtn = document.createElement('button');
   caseSensitiveBtn.type = 'button';
   caseSensitiveBtn.className = 'format-button toggle-button find-option-button';
-  caseSensitiveBtn.title = 'Case Sensitive';
+  caseSensitiveBtn.title = uiStrings.caseSensitive;
   caseSensitiveBtn.appendChild(createElement(CaseSensitive, { width: 16, height: 16 }));
-  caseSensitiveBtn.setAttribute('aria-label', 'Case Sensitive');
+  caseSensitiveBtn.setAttribute('aria-label', uiStrings.caseSensitive);
   caseSensitiveBtn.setAttribute('aria-pressed', 'false');
 
   const findPrevBtn = document.createElement('button');
   findPrevBtn.type = 'button';
   findPrevBtn.className = 'format-button';
-  findPrevBtn.title = 'Previous Match';
+  findPrevBtn.title = uiStrings.previousMatch;
   findPrevBtn.appendChild(createElement(ChevronUp, { width: 16, height: 16 }));
 
   const findNextBtn = document.createElement('button');
   findNextBtn.type = 'button';
   findNextBtn.className = 'format-button';
-  findNextBtn.title = 'Next Match';
+  findNextBtn.title = uiStrings.nextMatch;
   findNextBtn.appendChild(createElement(ChevronDown, { width: 16, height: 16 }));
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'format-button find-close-button';
-  closeBtn.title = 'Close Find';
-  closeBtn.setAttribute('aria-label', 'Close Find');
+  closeBtn.title = uiStrings.closeFind;
+  closeBtn.setAttribute('aria-label', uiStrings.closeFind);
   closeBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
   findInputWrap.append(findInput, findStatus, findClearBtn);
@@ -99,14 +100,14 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   const replaceInput = document.createElement('input');
   replaceInput.type = 'text';
   replaceInput.className = 'find-input';
-  replaceInput.placeholder = 'Replace';
-  replaceInput.setAttribute('aria-label', 'Replace');
+  replaceInput.placeholder = uiStrings.replace;
+  replaceInput.setAttribute('aria-label', uiStrings.replace);
 
   const replaceClearBtn = document.createElement('button');
   replaceClearBtn.type = 'button';
   replaceClearBtn.className = 'format-button find-clear-button';
-  replaceClearBtn.title = 'Clear Replace';
-  replaceClearBtn.setAttribute('aria-label', 'Clear Replace');
+  replaceClearBtn.title = uiStrings.clearReplace;
+  replaceClearBtn.setAttribute('aria-label', uiStrings.clearReplace);
   replaceClearBtn.appendChild(createElement(X, { width: 16, height: 16 }));
 
   replaceInputWrap.append(replaceInput, replaceClearBtn);
@@ -114,13 +115,13 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   const replaceBtn = document.createElement('button');
   replaceBtn.type = 'button';
   replaceBtn.className = 'format-button';
-  replaceBtn.title = 'Replace Current Match';
+  replaceBtn.title = uiStrings.replaceCurrentMatch;
   replaceBtn.appendChild(createElement(Replace, { width: 16, height: 16 }));
 
   const replaceAllBtn = document.createElement('button');
   replaceAllBtn.type = 'button';
   replaceAllBtn.className = 'format-button';
-  replaceAllBtn.title = 'Replace All Matches';
+  replaceAllBtn.title = uiStrings.replaceAllMatches;
   replaceAllBtn.appendChild(createElement(ReplaceAll, { width: 16, height: 16 }));
 
   const closeSpacer = document.createElement('span');
@@ -176,9 +177,10 @@ export const createFindPanelController = (
   getEditor: () => any,
   toolbar: HTMLElement,
   modeGroup: HTMLElement,
-  getSelectedSurfaceText?: () => string
+  getSelectedSurfaceText: (() => string) | undefined,
+  initialUiLanguage: UiLanguage
 ) => {
-  let uiStrings = getUiStrings('en');
+  let uiStrings = getUiStrings(initialUiLanguage);
   let visible = false;
 
   const isWholeWordEnabled = (): boolean => {

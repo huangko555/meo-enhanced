@@ -72,6 +72,7 @@ type SharedMermaidEditorOptions = Omit<
 >;
 const controller = createPreviewController({
   vscode: { postMessage(message) { previewMessages.push(message); } },
+  uiLanguage: 'en',
   getEditorAppearance: () => 'dark',
   getCodePalette: (appearance) => resolveFinalCodePalette(undefined, appearance).preview,
   mermaidRenderResources: previewMermaidResources,

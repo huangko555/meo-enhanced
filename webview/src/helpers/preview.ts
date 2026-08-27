@@ -16,6 +16,7 @@ import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
+  uiLanguage: UiLanguage;
   getEditorAppearance: () => 'light' | 'dark';
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   onRendered?: () => void;
@@ -163,6 +164,7 @@ function collectPreviewKatexStyles(katexHref: string): string {
 
 export function createPreviewController({
   vscode,
+  uiLanguage: initialUiLanguage,
   getEditorAppearance,
   getCodePalette,
   onRendered,
@@ -171,7 +173,7 @@ export function createPreviewController({
   runViewportTransaction,
   mermaidRenderResources
 }: PreviewControllerOptions) {
-  let uiLanguage: UiLanguage = 'en';
+  let uiLanguage = initialUiLanguage;
   let uiStrings = getUiStrings(uiLanguage);
   const host = document.createElement('div');
   host.className = 'preview-host';
@@ -179,11 +181,11 @@ export function createPreviewController({
 
   const frame = document.createElement('iframe');
   frame.className = 'preview-frame';
-  frame.title = 'Markdown Preview';
+  frame.title = uiStrings.previewTitle;
   frame.setAttribute('sandbox', 'allow-same-origin');
 
   const appearanceSegmentedControl = createSegmentedControl<PreviewAppearance>({
-    ariaLabel: 'Preview appearance',
+    ariaLabel: uiStrings.previewAppearance,
     className: 'preview-appearance-control',
     buttonClassName: 'preview-appearance-button',
     datasetKey: 'appearance',
@@ -191,16 +193,16 @@ export function createPreviewController({
     options: [
       {
         value: 'auto',
-        label: 'Auto'
+        label: uiStrings.auto
       },
       {
         value: 'light',
-        label: 'Light',
+        label: uiStrings.light,
         renderLeading: () => createElement(Sun, { width: 14, height: 14, 'aria-hidden': 'true' })
       },
       {
         value: 'dark',
-        label: 'Dark',
+        label: uiStrings.dark,
         renderLeading: () => createElement(Moon, { width: 14, height: 14, 'aria-hidden': 'true' })
       }
     ]
@@ -211,21 +213,21 @@ export function createPreviewController({
   const sourceColoringControl = document.createElement('button');
   sourceColoringControl.type = 'button';
   sourceColoringControl.className = 'preview-toolbar-action preview-source-coloring';
-  sourceColoringControl.title = 'Preview source coloring';
-  sourceColoringControl.setAttribute('aria-label', 'Preview source coloring');
-  const sourceColoringLabel = document.createTextNode('Code colors');
+  sourceColoringControl.title = uiStrings.previewSourceColoring;
+  sourceColoringControl.setAttribute('aria-label', uiStrings.previewSourceColoring);
+  const sourceColoringLabel = document.createTextNode(uiStrings.previewCodeColors);
   sourceColoringControl.append(
     createElement(Code2, { width: 15, height: 15, 'aria-hidden': 'true' }),
     sourceColoringLabel
   );
   const fontFamilyControl = document.createElement('label');
   fontFamilyControl.className = 'preview-font-family-control';
-  fontFamilyControl.title = 'Preview font family';
+  fontFamilyControl.title = uiStrings.previewFontFamily;
   const fontFamilyInput = document.createElement('input');
   fontFamilyInput.className = 'preview-font-family-input';
   fontFamilyInput.type = 'text';
-  fontFamilyInput.placeholder = 'VS Code editor font';
-  fontFamilyInput.setAttribute('aria-label', 'Preview font family');
+  fontFamilyInput.placeholder = uiStrings.previewFontPlaceholder;
+  fontFamilyInput.setAttribute('aria-label', uiStrings.previewFontFamily);
   fontFamilyInput.setAttribute('role', 'combobox');
   const fontFamilyOptions = document.createElement('datalist');
   fontFamilyOptions.id = 'meo-preview-font-family-options';
@@ -257,7 +259,7 @@ export function createPreviewController({
     scrollToTopController.setUiLanguage(language);
   };
 
-  const scrollToTopController = createDocumentScrollToTopController();
+  const scrollToTopController = createDocumentScrollToTopController(uiLanguage);
   host.append(frame, status, scrollToTopController.button);
 
   let appearancePreference: PreviewAppearance = 'auto';

@@ -23,14 +23,14 @@ const createStore = (options: {
   explicit?: readonly string[];
   failConfigurationOnce?: string;
   failLegacyOnce?: string;
-  configurationFailureCalls?: Readonly<Record<string, readonly number[]>>;
+  configurationFailures?: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
 } = {}) => {
   const legacy = new Map(Object.entries(options.legacy ?? {}));
   const configuration = new Map(Object.entries(options.configuration ?? {}));
   const explicit = new Set(options.explicit ?? []);
   let failConfigurationOnce = options.failConfigurationOnce;
   let failLegacyOnce = options.failLegacyOnce;
-  const configurationCallCounts = new Map<string, number>();
+  const configurationFailures = [...(options.configurationFailures ?? [])];
   const store: AppearanceSettingsStore = {
     readConfiguration: (key) => ({
       value: configuration.get(key),
@@ -38,14 +38,16 @@ const createStore = (options: {
       globalValue: configuration.get(key)
     }),
     updateConfiguration: async (key, value) => {
-      const call = (configurationCallCounts.get(key) ?? 0) + 1;
-      configurationCallCounts.set(key, call);
       if (failConfigurationOnce === key) {
         failConfigurationOnce = undefined;
         throw new Error(`configuration failure: ${key}`);
       }
-      if (options.configurationFailureCalls?.[key]?.includes(call)) {
-        throw new Error(`configuration failure ${call}: ${key}`);
+      const failureIndex = configurationFailures.findIndex((failure) => (
+        failure.key === key && Object.is(failure.value, value)
+      ));
+      if (failureIndex >= 0) {
+        configurationFailures.splice(failureIndex, 1);
+        throw new Error(`configuration failure: ${key}=${String(value)}`);
       }
       if (value === undefined) configuration.delete(key);
       else configuration.set(key, value);
@@ -167,16 +169,16 @@ const legacyValues = {
 {
   const fixture = createStore({
     legacy: legacyValues,
-    configurationFailureCalls: {
-      [PREVIEW_APPEARANCE_SETTING_KEY]: [1],
-      [EDITOR_APPEARANCE_SETTING_KEY]: [2]
-    }
+    configurationFailures: [
+      { key: PREVIEW_APPEARANCE_SETTING_KEY, value: 'light' },
+      { key: EDITOR_APPEARANCE_SETTING_KEY, value: undefined }
+    ]
   });
   await assert.rejects(
     createAppearanceSettingsOwner(fixture.store),
     (error: unknown) => error instanceof AggregateError
       && error.errors[0] instanceof Error
-      && error.errors[0].message === `configuration failure 1: ${PREVIEW_APPEARANCE_SETTING_KEY}`
+      && error.errors[0].message === `configuration failure: ${PREVIEW_APPEARANCE_SETTING_KEY}=light`
       && error.cause === error.errors[0],
     'migration and compensation failures must preserve the primary error'
   );
@@ -200,6 +202,32 @@ const legacyValues = {
   assert.equal(fixture.legacy.size, 0, 'successful recovery and migration must clear the journal and legacy keys');
   assert.deepEqual(Object.fromEntries(fixture.configuration), {
     [EDITOR_APPEARANCE_SETTING_KEY]: 'dark',
+    [PREVIEW_APPEARANCE_SETTING_KEY]: 'light',
+    [PREVIEW_FONT_FAMILY_SETTING_KEY]: 'Noto Sans',
+    [PREVIEW_SOURCE_COLORING_SETTING_KEY]: false
+  });
+}
+
+{
+  const fixture = createStore({
+    legacy: legacyValues,
+    configurationFailures: [
+      { key: PREVIEW_APPEARANCE_SETTING_KEY, value: 'light' },
+      { key: EDITOR_APPEARANCE_SETTING_KEY, value: undefined }
+    ]
+  });
+  await assert.rejects(createAppearanceSettingsOwner(fixture.store), AggregateError);
+  fixture.configuration.set(EDITOR_APPEARANCE_SETTING_KEY, 'light');
+
+  const recoveredOwner = await createAppearanceSettingsOwner(fixture.store);
+  assert.equal(
+    recoveredOwner.getEditorAppearance(),
+    'light',
+    'recovery must preserve a configuration value changed after the failed migration'
+  );
+  assert.equal(fixture.legacy.size, 0, 'recovery must still converge and clear the durable journal');
+  assert.deepEqual(Object.fromEntries(fixture.configuration), {
+    [EDITOR_APPEARANCE_SETTING_KEY]: 'light',
     [PREVIEW_APPEARANCE_SETTING_KEY]: 'light',
     [PREVIEW_FONT_FAMILY_SETTING_KEY]: 'Noto Sans',
     [PREVIEW_SOURCE_COLORING_SETTING_KEY]: false
