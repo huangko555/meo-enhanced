@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { saveClipboardImageFile } from '../src/host/clipboardImageSave';
@@ -115,7 +115,7 @@ try {
     await saveClipboardImageFile({
       documentFsPath: markdownPath,
       workspaceFsPath: workspacePath,
-      configuredFolder: 'notes/linked-assets',
+      configuredFolder: 'notes/linked-assets/new/subdir',
       requestedFileName: 'escaped.png',
       contents: Buffer.from('escaped')
     });
@@ -133,6 +133,15 @@ try {
   }
   if (escapedFileExists) {
     throw new Error('a linked image folder wrote outside the workspace');
+  }
+  let escapedDirectoryExists = true;
+  try {
+    await access(path.join(externalDirectory, 'new'));
+  } catch (error) {
+    escapedDirectoryExists = (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
+  if (escapedDirectoryExists) {
+    throw new Error('a linked image folder created directories outside the workspace');
   }
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

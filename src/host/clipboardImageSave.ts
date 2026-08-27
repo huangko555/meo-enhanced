@@ -27,9 +27,8 @@ export async function saveClipboardImageFile(
   const requestedFileName = normalizeFileName(request.requestedFileName);
 
   await mkdir(baseDirectory, { recursive: true });
-  await mkdir(targetDirectory, { recursive: true });
   const canonicalBaseDirectory = await realpath(baseDirectory);
-  await assertCanonicalDirectory(canonicalBaseDirectory, baseDirectory, targetDirectory);
+  await ensureCanonicalDirectory(canonicalBaseDirectory, baseDirectory, targetDirectory);
   const extension = path.extname(requestedFileName);
   const stem = requestedFileName.slice(0, requestedFileName.length - extension.length);
 
@@ -38,7 +37,7 @@ export async function saveClipboardImageFile(
     const candidatePath = resolveContainedPath(targetDirectory, candidateName, 'Image file name');
     let handle;
     try {
-      await assertCanonicalDirectory(canonicalBaseDirectory, baseDirectory, targetDirectory);
+      await ensureCanonicalDirectory(canonicalBaseDirectory, baseDirectory, targetDirectory);
       handle = await open(
         candidatePath,
         constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0)
@@ -64,21 +63,30 @@ export async function saveClipboardImageFile(
   }
 }
 
-async function assertCanonicalDirectory(
+async function ensureCanonicalDirectory(
   canonicalBaseDirectory: string,
   baseDirectory: string,
   targetDirectory: string
 ): Promise<void> {
-  const canonicalTargetDirectory = await realpath(targetDirectory);
-  assertContainedPath(canonicalBaseDirectory, canonicalTargetDirectory, 'Image folder');
-
   const relative = path.relative(baseDirectory, targetDirectory);
   let current = baseDirectory;
   for (const segment of relative.split(path.sep).filter(Boolean)) {
     current = path.join(current, segment);
-    if ((await lstat(current)).isSymbolicLink()) {
+    let entry;
+    try {
+      entry = await lstat(current);
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+      await mkdir(current);
+      entry = await lstat(current);
+    }
+    if (entry.isSymbolicLink()) {
       throw new Error('Image folder must not traverse a symbolic link or junction');
     }
+    if (!entry.isDirectory()) {
+      throw new Error('Image folder must contain only directories');
+    }
+    assertContainedPath(canonicalBaseDirectory, await realpath(current), 'Image folder');
   }
 }
 
@@ -107,4 +115,8 @@ function assertContainedPath(root: string, target: string, label: string): void 
 
 function isAlreadyExistsError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'EEXIST';
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
