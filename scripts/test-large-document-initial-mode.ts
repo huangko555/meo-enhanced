@@ -27,12 +27,13 @@ mock.module('vscode', () => vscodeMock);
 
 const { createPanelSessionController } = await import('../src/extension/panelSession');
 const persisted = new Map<string, unknown>();
+const persistedKeys: string[] = [];
 const context = {
   globalState: {
     get: <T>(key: string, fallback?: T): T | undefined => persisted.has(key)
       ? persisted.get(key) as T
       : fallback,
-    update: async (key: string, value: unknown) => { persisted.set(key, value); }
+    update: async (key: string, value: unknown) => { persistedKeys.push(key); persisted.set(key, value); }
   }
 };
 
@@ -81,8 +82,9 @@ await automaticSource.controller.handleMessage({ type: 'setMode', mode: 'live' }
 automaticSource.controller.dispose();
 
 const manualLive = await openPanel(fixtures.get('composite')!);
-assert.equal(manualLive.init.mode, 'live', 'a manual Live preference must beat later automatic decisions');
+assert.equal(manualLive.init.mode, 'source', 'a new panel session must reassess a large document');
 manualLive.controller.dispose();
+assert.equal(persistedKeys.some((key) => key.includes(document.uri.toString())), false, 'document URIs must not be persisted as mode keys');
 
 const otherLargeDocument = createPanelSessionTestDocument(
   createPanelSessionTestUri('C:/other-large-document.md'),
@@ -106,10 +108,9 @@ persisted.set('editorMode', 'preview');
 optimizationEnabled = true;
 const otherDocumentPreview = await openPanel(fixtures.get('composite')!);
 assert.equal(otherDocumentPreview.init.mode, 'source', 'another document Preview preference must not bypass optimization');
-await otherDocumentPreview.controller.handleMessage({ type: 'setMode', mode: 'preview' });
 otherDocumentPreview.controller.dispose();
 const manualPreview = await openPanel(fixtures.get('composite')!);
-assert.equal(manualPreview.init.mode, 'preview', 'this document manual Preview preference must retain precedence');
+assert.equal(manualPreview.init.mode, 'source', 'large-document optimization must remain session-local');
 manualPreview.controller.dispose();
 
 console.log('Large document initial mode production checks passed');

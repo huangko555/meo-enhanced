@@ -77,7 +77,6 @@ export type EditorMode = 'live' | 'source' | 'preview';
 export type ExportFormat = 'html' | 'pdf';
 
 const EDITOR_MODE_STATE_KEY = 'editorMode';
-const LARGE_DOCUMENT_MODE_STATE_PREFIX = 'largeDocumentMode:';
 
 function isEditorMode(value: unknown): value is EditorMode {
   return value === 'live' || value === 'source' || value === 'preview';
@@ -188,8 +187,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const documentKey = document.uri.toString();
   const persistedMode = context.globalState.get(EDITOR_MODE_STATE_KEY);
   const persistedEditorMode: EditorMode | null = isEditorMode(persistedMode) ? persistedMode : null;
-  const persistedDocumentMode = context.globalState.get(`${LARGE_DOCUMENT_MODE_STATE_PREFIX}${documentKey}`);
-  const documentEditorMode: EditorMode | null = isEditorMode(persistedDocumentMode) ? persistedDocumentMode : null;
   let applyQueue: Promise<void> = Promise.resolve();
   // Flush responses wait only for preceding TextDocument I/O, never for a manual save
   // that may itself be inside applyQueue and awaiting VS Code's will-save lifecycle.
@@ -330,7 +327,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     const initialMode = selectInitialEditorMode({
       text: initialText,
       persistedMode: persistedEditorMode,
-      documentMode: documentEditorMode,
       optimizationEnabled: getLargeDocumentOptimizationEnabled()
     });
     const message: InitMessage = {
@@ -505,7 +501,6 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           return;
         }
         await context.globalState.update(EDITOR_MODE_STATE_KEY, raw.mode);
-        await context.globalState.update(`${LARGE_DOCUMENT_MODE_STATE_PREFIX}${documentKey}`, raw.mode);
         return;
       case 'setGitChangesGutter': {
         const visible = raw.visible ?? raw.enabled;
