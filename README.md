@@ -101,6 +101,7 @@ Editor and Preview appearances are independent. Live and Preview use fixed light
 
 Common settings include:
 
+- `meoEnhanced.language` — use VS Code's language automatically, or choose English or Simplified Chinese for newly opened editor panels.
 - `meoEnhanced.outline.position` — place the outline on the left or right.
 - `meoEnhanced.changes.baseline` — select `current-edit`, `recent-save`, or `git-head` as the comparison baseline.
 - `meoEnhanced.gitChanges.visible` — show or hide document change indicators.

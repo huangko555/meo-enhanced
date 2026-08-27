@@ -102,6 +102,7 @@ Editor 与 Preview 外观彼此独立。Live 和 Preview 使用固定的浅色/�
 
 常用设置包括：
 
+- `meoEnhanced.language`：自动使用 VS Code 的语言，或为新打开的编辑器面板选择英文或简体中文。
 - `meoEnhanced.outline.position`：将大纲放在左侧或右侧。
 - `meoEnhanced.changes.baseline`：选择 `current-edit`、`recent-save` 或 `git-head` 作为对比基线。
 - `meoEnhanced.gitChanges.visible`：显示或隐藏文档改动标记。
