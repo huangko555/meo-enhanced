@@ -105,7 +105,8 @@ if (!root) {
 }
 
 root.classList.add('editor-root');
-let activeUiStrings = getUiStrings('en');
+let activeUiLanguage: UiLanguage = 'en';
+let activeUiStrings = getUiStrings(activeUiLanguage);
 
 const existingToolbar = root.querySelector('.mode-toolbar');
 const toolbar = existingToolbar instanceof HTMLElement ? existingToolbar : document.createElement('div');
@@ -763,6 +764,7 @@ editorAppearanceControl.setActive('dark');
 
 const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
+  activeUiLanguage = language;
   activeUiStrings = strings;
   document.documentElement.lang = language;
   toolbar.setAttribute('aria-label', strings.editorToolbar);
@@ -1572,6 +1574,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onSelectionChange: (state: any) => selectionMenuController.update(state),
     mermaidDiagramPresentationFactory,
+    uiLanguage: activeUiLanguage,
     previewViewportSurface: {
       captureTopVisiblePosition() {
         const position = previewController.getTopVisiblePosition();

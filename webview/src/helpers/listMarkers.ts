@@ -9,6 +9,8 @@ import {
   type Range
 } from '@codemirror/state';
 import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemirror/view';
+import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
 
 interface ListMarkerData {
@@ -529,7 +531,8 @@ class CheckboxWidget extends WidgetType {
     checkbox.type = 'checkbox';
     checkbox.className = `meo-task-checkbox ${taskStatusCssClass(this.status)}`;
     checkbox.checked = isDone;
-    checkbox.setAttribute('aria-label', isDone ? 'Mark task as incomplete' : 'Mark task as complete');
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
+    checkbox.setAttribute('aria-label', isDone ? strings.markTaskIncomplete : strings.markTaskComplete);
 
     checkbox.addEventListener('mousedown', (e) => {
       e.preventDefault();

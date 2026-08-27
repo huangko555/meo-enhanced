@@ -30,6 +30,7 @@ assert.equal(chinese.outlineNoHeadings, '暂无标题');
 assert.equal(chinese.previewFontUnavailable, '无法获取本地字体列表；请手动输入字体名称');
 assert.equal(chinese.untitled, '未命名');
 assert.equal(chinese.backToTop, '回到顶部');
+assert.equal(chinese.markTaskComplete, '标记任务为已完成');
 assert.equal(chinese.headingLevel(3), '3 级标题');
 assert.deepEqual(
   [chinese.markdownMode, chinese.live, chinese.source, chinese.preview],

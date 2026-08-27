@@ -5,6 +5,8 @@ import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, re
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
+import type { UiLanguage } from '../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
@@ -166,6 +168,7 @@ type CreateEditorOptions = {
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
   previewViewportSurface?: PreviewViewportSurface;
+  uiLanguage?: UiLanguage;
 };
 
 type PointerClickState = { pointerId: number };
@@ -284,7 +287,8 @@ export function createEditor({
   initialGitGutter = true,
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory,
-  previewViewportSurface
+  previewViewportSurface,
+  uiLanguage = 'en'
 }: CreateEditorOptions) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
@@ -2006,6 +2010,7 @@ export function createEditor({
       tableColumnWidthAdapter.extension,
       tableStickyHeaderAdapterFactoryFacet.of(tableStickyHeaderAdapterFactory),
       tableCommandEnvironmentFacet.of(tableCommandEnvironment),
+      uiLanguageFacet.of(uiLanguage),
       imagePresentationFactoryFacet.of(imagePresentationFactory),
       mermaidDiagramPresentationFactoryFacet.of(
         mermaidDiagramPresentationConsumer

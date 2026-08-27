@@ -112,6 +112,7 @@ async function main(): Promise<void> {
         parent: host,
         text: source,
         initialMode: 'live',
+        uiLanguage: 'zh-CN',
         onApplyChanges(text: string) {
           applied.push(text);
         }
@@ -185,6 +186,7 @@ async function main(): Promise<void> {
       editor.setMode('live');
       await waitFrames(3);
       const checkbox = host.querySelector<HTMLInputElement>('.meo-task-checkbox')!;
+      const checkboxLabel = checkbox.getAttribute('aria-label');
       checkbox.click();
       await waitFrames(1);
       const afterCheckbox = editor.getText();
@@ -227,6 +229,7 @@ async function main(): Promise<void> {
         afterUndo,
         afterRedo,
         afterCheckbox,
+        checkboxLabel,
         appliedAfterCheckbox,
         afterTwenty,
         undoResults,
@@ -248,6 +251,7 @@ async function main(): Promise<void> {
         parent: host,
         text: '3. alpha',
         initialMode: 'live',
+        uiLanguage: 'zh-CN',
         onApplyChanges(text: string) {
           changes.push(text);
         }
@@ -335,6 +339,7 @@ async function main(): Promise<void> {
     assert.equal(result.afterUndo, markdown);
     assert.equal(result.afterRedo, result.afterPaste);
     assert.ok(result.afterCheckbox.includes('- [x] task'));
+    assert.equal(result.checkboxLabel, '标记任务为已完成');
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');
     assert.ok(result.undoResults.every(Boolean), 'all 20 list edits must undo');
     assert.ok(result.redoResults.every(Boolean), 'all 20 list edits must redo');

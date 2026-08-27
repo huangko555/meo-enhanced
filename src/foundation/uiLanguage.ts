@@ -72,6 +72,8 @@ export type UiStrings = Readonly<{
   inlineCode: string;
   kbd: string;
   underline: string;
+  markTaskComplete: string;
+  markTaskIncomplete: string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -150,7 +152,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     live: 'Live', source: 'Source', preview: 'Preview',
     inlineMarkdownFormatting: 'Inline markdown formatting', bold: 'Bold', italic: 'Italic',
     lineover: 'Lineover', highlight: 'Highlight', inlineCode: 'Inline Code', kbd: 'Kbd',
-    underline: 'Underline', heading: 'Heading',
+    underline: 'Underline', markTaskComplete: 'Mark task as complete',
+    markTaskIncomplete: 'Mark task as incomplete', heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
     showOutlineLeft: 'Show Outline on Left', showOutlineRight: 'Show Outline on Right',
@@ -204,7 +207,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
     live: '实时', source: '源码', preview: '预览', inlineMarkdownFormatting: '行内 Markdown 格式',
     bold: '加粗', italic: '斜体', lineover: '删除线', highlight: '高亮', inlineCode: '行内代码',
-    kbd: '按键', underline: '下划线', heading: '标题', headingLevels: '标题级别',
+    kbd: '按键', underline: '下划线', markTaskComplete: '标记任务为已完成',
+    markTaskIncomplete: '标记任务为未完成', heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
