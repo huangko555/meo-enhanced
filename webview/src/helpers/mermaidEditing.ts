@@ -642,7 +642,6 @@ class MermaidEditingController {
             viewportController?.markInteraction();
             const projection = this.outerView.state.update({
               changes: change,
-              selection: EditorSelection.cursor(contentFrom, -1),
               annotations: [
                 Transaction.userEvent.of(userEvent),
                 markLiveInputNestedProjection()
