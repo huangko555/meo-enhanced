@@ -9,7 +9,7 @@ import {
   PREVIEW_FONT_FAMILY_SETTING_KEY,
   PREVIEW_SOURCE_COLORING_SETTING_KEY,
   type AppearanceSettingsStore
-} from '../src/shared/appearanceSettings';
+} from '../src/host/appearanceSettings';
 import { EDITOR_APPEARANCE_STATE_KEY } from '../src/shared/editorAppearance';
 import {
   PREVIEW_APPEARANCE_STATE_KEY,

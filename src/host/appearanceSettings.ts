@@ -1,17 +1,21 @@
-import {
-  EDITOR_APPEARANCE_STATE_KEY,
-  normalizeEditorAppearance,
-  type EditorAppearance
-} from './editorAppearance';
-import {
-  normalizePreviewAppearance,
-  normalizePreviewFontFamily,
-  normalizeStoredPreviewFontFamily,
-  PREVIEW_APPEARANCE_STATE_KEY,
-  PREVIEW_FONT_FAMILY_STATE_KEY,
-  PREVIEW_SOURCE_COLORING_STATE_KEY,
-  type PreviewAppearance
-} from './preview';
+import type { EditorAppearance } from '../protocol/editorCommands';
+import { normalizePreviewFontFamily } from '../protocol/editorStyleEnvironment';
+import type { PreviewAppearance } from '../protocol/readyInit';
+
+const EDITOR_APPEARANCE_STATE_KEY = 'editorAppearance';
+const PREVIEW_APPEARANCE_STATE_KEY = 'previewAppearance';
+const PREVIEW_FONT_FAMILY_STATE_KEY = 'previewFontFamily';
+const PREVIEW_SOURCE_COLORING_STATE_KEY = 'previewSourceColoring';
+
+const normalizeEditorAppearance = (value: unknown): EditorAppearance => (
+  value === 'light' || value === 'dark' ? value : 'auto'
+);
+const normalizePreviewAppearance = (value: unknown): PreviewAppearance => (
+  value === 'light' || value === 'dark' ? value : 'auto'
+);
+const normalizeStoredPreviewFontFamily = (value: unknown): string => (
+  normalizePreviewFontFamily(value) ?? ''
+);
 
 export const EDITOR_APPEARANCE_SETTING_KEY = 'appearance.editor';
 export const PREVIEW_APPEARANCE_SETTING_KEY = 'appearance.preview';

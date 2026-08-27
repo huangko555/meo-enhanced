@@ -53,7 +53,7 @@ import {
   createAppearanceSettingsOwner,
   type AppearanceSettingsOwner,
   type AppearanceSettingsStore
-} from './shared/appearanceSettings';
+} from './host/appearanceSettings';
 import {
   collectWebviewImageResourceRoots,
   getDocumentFragmentHref,
