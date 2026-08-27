@@ -25,7 +25,7 @@ if (leakedBroadcasts.length > 0) {
   throw new Error(`Persisted editor settings still broadcast to open sessions: ${leakedBroadcasts.join(', ')}`);
 }
 
-for (const methodName of ['setFindOptions', 'setPreviewAppearance', 'setPreviewFontFamily', 'setEditorAppearance', 'setOutlineVisible']) {
+for (const methodName of ['setFindOptions', 'setOutlineVisible']) {
   const methodStart = extensionSource.indexOf(`private async ${methodName}(`);
   const methodEnd = extensionSource.indexOf('\n  private ', methodStart + 1);
   if (methodStart < 0 || methodEnd < 0) {
@@ -34,6 +34,14 @@ for (const methodName of ['setFindOptions', 'setPreviewAppearance', 'setPreviewF
   if (extensionSource.slice(methodStart, methodEnd).includes('this.broadcast(')) {
     throw new Error(`${methodName} still updates other open editor sessions`);
   }
+}
+
+const appearanceSettingsSource = fs.readFileSync(
+  path.join(repoRoot, 'src', 'shared', 'appearanceSettings.ts'),
+  'utf8'
+);
+if (appearanceSettingsSource.includes('broadcast(') || appearanceSettingsSource.includes('postMessage(')) {
+  throw new Error('Appearance settings owner still broadcasts defaults to open sessions');
 }
 
 console.log('session setting isolation checks passed');

@@ -48,21 +48,12 @@ import { createVscodeDiagnosticsAdapter } from './host/vscodeDiagnosticsAdapter'
 import { createDiffBaselineProtocolAdapter } from './host/diffBaselineProtocolAdapter';
 import { createVscodeViewNavigationAdapter } from './host/vscodeViewNavigationAdapter';
 import { cleanupRetiredWorkspaceState } from './host/vscodeRetiredWorkspaceStateCleanup';
+import { type PreviewRenderResult } from './shared/preview';
 import {
-  normalizePreviewAppearance,
-  normalizePreviewFontFamily,
-  normalizeStoredPreviewFontFamily,
-  PREVIEW_APPEARANCE_STATE_KEY,
-  PREVIEW_FONT_FAMILY_STATE_KEY,
-  PREVIEW_SOURCE_COLORING_STATE_KEY,
-  type PreviewAppearance,
-  type PreviewRenderResult
-} from './shared/preview';
-import {
-  EDITOR_APPEARANCE_STATE_KEY,
-  normalizeEditorAppearance,
-  type EditorAppearance
-} from './shared/editorAppearance';
+  createAppearanceSettingsOwner,
+  type AppearanceSettingsOwner,
+  type AppearanceSettingsStore
+} from './shared/appearanceSettings';
 import {
   collectWebviewImageResourceRoots,
   getDocumentFragmentHref,
@@ -119,7 +110,40 @@ type ExportRuntimeModule = {
 
 let exportRuntimeModulePromise: Promise<ExportRuntimeModule> | null = null;
 
-export function activate(context: vscode.ExtensionContext): void {
+const hasExplicitConfigurationValue = (inspected: ReturnType<vscode.WorkspaceConfiguration['inspect']>): boolean => {
+  if (!inspected) return false;
+  const languageScoped = inspected as typeof inspected & {
+    globalLanguageValue?: unknown;
+    workspaceLanguageValue?: unknown;
+    workspaceFolderLanguageValue?: unknown;
+  };
+  return inspected.globalValue !== undefined
+    || inspected.workspaceValue !== undefined
+    || inspected.workspaceFolderValue !== undefined
+    || languageScoped.globalLanguageValue !== undefined
+    || languageScoped.workspaceLanguageValue !== undefined
+    || languageScoped.workspaceFolderLanguageValue !== undefined;
+};
+
+const createVscodeAppearanceSettingsStore = (context: vscode.ExtensionContext): AppearanceSettingsStore => ({
+  readConfiguration: (key) => {
+    const configuration = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
+    const inspected = configuration.inspect(key);
+    return {
+      value: configuration.get(key),
+      explicit: hasExplicitConfigurationValue(inspected),
+      globalValue: inspected?.globalValue
+    };
+  },
+  updateConfiguration: (key, value) => Promise.resolve(vscode.workspace
+    .getConfiguration(EXTENSION_CONFIG_SECTION)
+    .update(key, value, vscode.ConfigurationTarget.Global)),
+  readLegacy: (key) => context.globalState.get(key),
+  updateLegacy: (key, value) => Promise.resolve(context.globalState.update(key, value))
+});
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const appearanceSettings = await createAppearanceSettingsOwner(createVscodeAppearanceSettingsStore(context));
   void vscode.commands.executeCommand('setContext', ACTIVE_EDITOR_CONTEXT_KEY, false);
   const useAsDefault = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>('useAsDefault', true);
   void syncEditorAssociations(useAsDefault);
@@ -138,7 +162,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   void agentReviewOverrides.syncNow();
 
-  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff);
+  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings);
   void provider.initializeGitWatcher();
 
   context.subscriptions.push(
@@ -313,7 +337,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly agentReviewHandoff: AgentReviewHandoffController
+    private readonly agentReviewHandoff: AgentReviewHandoffController,
+    private readonly appearanceSettings: AppearanceSettingsOwner
   ) {}
 
   async initializeGitWatcher(): Promise<void> {
@@ -489,14 +514,14 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         vscode.env.language
       ),
       setFindOptions: (options) => this.setFindOptions(options),
-      getPreviewAppearance: () => this.getPreviewAppearance(),
-      setPreviewAppearance: (appearance) => this.setPreviewAppearance(appearance),
-      getPreviewFontFamily: () => this.getPreviewFontFamily(),
-      setPreviewFontFamily: (fontFamily) => this.setPreviewFontFamily(fontFamily),
-      getPreviewSourceColoring: () => this.getPreviewSourceColoring(),
-      setPreviewSourceColoring: (enabled) => this.setPreviewSourceColoring(enabled),
-      getEditorAppearance: () => this.getEditorAppearance(),
-      setEditorAppearance: (appearance) => this.setEditorAppearance(appearance),
+      getPreviewAppearance: this.appearanceSettings.getPreviewAppearance,
+      setPreviewAppearance: this.appearanceSettings.setPreviewAppearance,
+      getPreviewFontFamily: this.appearanceSettings.getPreviewFontFamily,
+      setPreviewFontFamily: this.appearanceSettings.setPreviewFontFamily,
+      getPreviewSourceColoring: this.appearanceSettings.getPreviewSourceColoring,
+      setPreviewSourceColoring: this.appearanceSettings.setPreviewSourceColoring,
+      getEditorAppearance: this.appearanceSettings.getEditorAppearance,
+      setEditorAppearance: this.appearanceSettings.setEditorAppearance,
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
       onPanelActivated: (activePanel) => {
         this.lastActivePanel = activePanel;
@@ -550,49 +575,6 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     }
 
     await this.context.globalState.update(FIND_OPTIONS_STATE_KEY, nextOptions);
-  }
-
-  private getPreviewAppearance(): PreviewAppearance {
-    return normalizePreviewAppearance(this.context.globalState.get(PREVIEW_APPEARANCE_STATE_KEY));
-  }
-
-  private async setPreviewAppearance(appearance: PreviewAppearance): Promise<void> {
-    const nextAppearance = normalizePreviewAppearance(appearance);
-    if (this.getPreviewAppearance() === nextAppearance) {
-      return;
-    }
-    await this.context.globalState.update(PREVIEW_APPEARANCE_STATE_KEY, nextAppearance);
-  }
-
-  private getPreviewSourceColoring(): boolean {
-    return this.context.globalState.get(PREVIEW_SOURCE_COLORING_STATE_KEY, true);
-  }
-
-  private getPreviewFontFamily(): string {
-    return normalizeStoredPreviewFontFamily(this.context.globalState.get(PREVIEW_FONT_FAMILY_STATE_KEY));
-  }
-
-  private async setPreviewFontFamily(fontFamily: string): Promise<void> {
-    const nextFontFamily = normalizePreviewFontFamily(fontFamily);
-    if (nextFontFamily === null || this.getPreviewFontFamily() === nextFontFamily) return;
-    await this.context.globalState.update(PREVIEW_FONT_FAMILY_STATE_KEY, nextFontFamily);
-  }
-
-  private async setPreviewSourceColoring(enabled: boolean): Promise<void> {
-    if (this.getPreviewSourceColoring() === enabled) return;
-    await this.context.globalState.update(PREVIEW_SOURCE_COLORING_STATE_KEY, enabled);
-  }
-
-  private getEditorAppearance(): EditorAppearance {
-    return normalizeEditorAppearance(this.context.globalState.get(EDITOR_APPEARANCE_STATE_KEY));
-  }
-
-  private async setEditorAppearance(appearance: EditorAppearance): Promise<void> {
-    const nextAppearance = normalizeEditorAppearance(appearance);
-    if (this.getEditorAppearance() === nextAppearance) {
-      return;
-    }
-    await this.context.globalState.update(EDITOR_APPEARANCE_STATE_KEY, nextAppearance);
   }
 
   private async setOutlineVisible(visible: boolean): Promise<void> {
