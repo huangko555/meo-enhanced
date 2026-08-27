@@ -25,6 +25,16 @@ type OwnedBrowserState = {
   closePromise?: Promise<void>;
 };
 
+type BrowserCloseOutcome = {
+  readonly cleanupErrors: unknown[];
+  readonly processTerminal: boolean;
+};
+
+type ProcessExitOutcome = {
+  readonly cleanupErrors: unknown[];
+  readonly processTerminal: boolean;
+};
+
 const ownedBrowserStates = new WeakMap<Browser, OwnedBrowserState>();
 
 export async function launchTestBrowser(
@@ -81,17 +91,24 @@ export async function launchOwnedTestBrowser(
     const cleanupErrors: unknown[] = [];
     if (browser !== undefined) {
       try {
-        const closeErrors = await closeBrowserAndWait(
+        const closeOutcome = await closeBrowserAndWait(
           browser,
           browserProcess,
           originalClose ?? browser.close.bind(browser)
         );
-        for (const closeError of closeErrors) appendFlat(cleanupErrors, closeError);
+        for (const closeError of closeOutcome.cleanupErrors) appendFlat(cleanupErrors, closeError);
+        if (!closeOutcome.processTerminal) appendFlat(cleanupErrors, processTerminalUnavailableError());
+        if (userDataDir !== undefined && closeOutcome.processTerminal) {
+          try {
+            await dependencies.cleanupUserDataDir(userDataDir);
+          } catch (cleanupError) {
+            appendFlat(cleanupErrors, cleanupError);
+          }
+        }
       } catch (closeError) {
         appendFlat(cleanupErrors, closeError);
       }
-    }
-    if (userDataDir !== undefined) {
+    } else if (userDataDir !== undefined) {
       try {
         await dependencies.cleanupUserDataDir(userDataDir);
       } catch (cleanupError) {
@@ -125,12 +142,17 @@ function installOwnedBrowserState(browser: Browser, state: OwnedBrowserState): v
 }
 
 async function disposeOwnedBrowser(browser: Browser, state: OwnedBrowserState): Promise<void> {
-  const cleanupErrors = await closeBrowserAndWait(browser, state.process, state.originalClose);
+  const closeOutcome = await closeBrowserAndWait(browser, state.process, state.originalClose);
+  const cleanupErrors = [...closeOutcome.cleanupErrors];
 
-  try {
-    await state.cleanupUserDataDir(state.userDataDir);
-  } catch (error) {
-    appendFlat(cleanupErrors, error);
+  if (closeOutcome.processTerminal) {
+    try {
+      await state.cleanupUserDataDir(state.userDataDir);
+    } catch (error) {
+      appendFlat(cleanupErrors, error);
+    }
+  } else {
+    cleanupErrors.push(processTerminalUnavailableError());
   }
 
   state.sealed = true;
@@ -149,7 +171,7 @@ async function closeBrowserAndWait(
   browser: Browser,
   process: ChildProcess | null,
   close: () => Promise<void>
-): Promise<unknown[]> {
+): Promise<BrowserCloseOutcome> {
   const cleanupErrors: unknown[] = [];
   let disconnected = Promise.resolve();
   try {
@@ -157,7 +179,10 @@ async function closeBrowserAndWait(
   } catch (error) {
     appendFlat(cleanupErrors, error);
   }
-  let processExit = Promise.resolve<unknown[]>([]);
+  let processExit = Promise.resolve<ProcessExitOutcome>({
+    cleanupErrors: [],
+    processTerminal: false
+  });
   try {
     processExit = waitForProcessExit(process);
   } catch (error) {
@@ -170,9 +195,12 @@ async function closeBrowserAndWait(
     appendFlat(cleanupErrors, error);
   }
 
-  const [, processExitErrors] = await Promise.all([disconnected, processExit]);
-  for (const error of processExitErrors) appendFlat(cleanupErrors, error);
-  return cleanupErrors;
+  const [, processExitOutcome] = await Promise.all([disconnected, processExit]);
+  for (const error of processExitOutcome.cleanupErrors) appendFlat(cleanupErrors, error);
+  return {
+    cleanupErrors,
+    processTerminal: processExitOutcome.processTerminal
+  };
 }
 
 function waitForDisconnected(browser: Browser): Promise<void> {
@@ -182,10 +210,13 @@ function waitForDisconnected(browser: Browser): Promise<void> {
   });
 }
 
-function waitForProcessExit(process: ChildProcess | null): Promise<unknown[]> {
-  if (!process) return Promise.resolve([]);
+function waitForProcessExit(process: ChildProcess | null): Promise<ProcessExitOutcome> {
+  if (!process) return Promise.resolve({ cleanupErrors: [], processTerminal: false });
   if (process.exitCode !== null || process.signalCode !== null) {
-    return Promise.resolve(processExitErrors(process.exitCode, process.signalCode));
+    return Promise.resolve({
+      cleanupErrors: processExitErrors(process.exitCode, process.signalCode),
+      processTerminal: true
+    });
   }
 
   return new Promise((resolve) => {
@@ -195,11 +226,17 @@ function waitForProcessExit(process: ChildProcess | null): Promise<unknown[]> {
       process.removeListener('error', onError);
       process.removeListener('exit', onExit);
       errors.push(...processExitErrors(code, signal));
-      resolve(errors);
+      resolve({ cleanupErrors: errors, processTerminal: true });
     };
     process.once('error', onError);
     process.once('exit', onExit);
   });
+}
+
+function processTerminalUnavailableError(): Error {
+  return new Error(
+    'Cannot safely clean test browser profile before the browser process reaches a terminal state'
+  );
 }
 
 function processExitErrors(code: number | null, signal: NodeJS.Signals | null): unknown[] {

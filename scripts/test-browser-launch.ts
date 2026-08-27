@@ -192,24 +192,22 @@ async function runOwnedBrowserLifecycleChecks(): Promise<void> {
 
   {
     const setupFailure = new Error('browser process accessor failed');
-    const closeFailure = new Error('setup-failure browser close failed');
-    const cleanupFailure = new Error('setup-failure profile cleanup failed');
-    const fake = createFakeBrowser({ processFailure: setupFailure, closeFailure });
+    const fake = createFakeBrowser({ processFailure: setupFailure });
     fake.setCloseAction(() => {
       fake.emitDisconnected();
-      fake.emitExit();
     });
-    const dependencies = createFakeDependencies(fake, 'profile-process-setup-failure', { cleanupFailure });
+    const dependencies = createFakeDependencies(fake, 'profile-process-setup-failure');
     const observed = await captureFailure(() => launchOwnedTestBrowser(dependencies).then(() => undefined));
     assert.ok(observed instanceof AggregateError);
-    assert.deepEqual((observed as AggregateError).errors, [setupFailure, closeFailure, cleanupFailure]);
+    const errors = (observed as AggregateError).errors;
+    assert.equal(errors[0], setupFailure);
+    assert.match(String(errors[1]), /Cannot safely clean test browser profile/);
     assert.equal((observed as AggregateError).cause, setupFailure);
     assert.equal(fake.browser.connected, false);
-    assert.equal(fake.process.exitCode, 0);
-    assert.deepEqual(dependencies.cleanupPaths, ['profile-process-setup-failure']);
-    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
-      { userDataDir: 'profile-process-setup-failure', deleted: false }
-    ]);
+    assert.equal(fake.process.exitCode, null);
+    assert.deepEqual(dependencies.cleanupPaths, [], 'profile cleanup requires observable process terminal');
+    assert.deepEqual([...dependencies.profileRegistry.profiles], ['profile-process-setup-failure']);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, []);
   }
 
   {
@@ -266,6 +264,8 @@ async function runOwnedBrowserLifecycleChecks(): Promise<void> {
     const closing = browser.close();
     assert.deepEqual(dependencies.cleanupPaths, [], 'cleanup must wait for public close/exit signals');
     fake.emitDisconnected();
+    assert.deepEqual(dependencies.cleanupPaths, [], 'disconnected is not process terminal');
+    assert.deepEqual([...dependencies.profileRegistry.profiles], ['profile-late-exit']);
     fake.process.emit('error', exitFailure);
     fake.emitExit(17);
     const observed = await captureFailure(() => closing);
