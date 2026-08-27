@@ -1,4 +1,5 @@
 import { ChevronsUp, createElement } from 'lucide';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 type ScrollElement = Element & { scrollTop: number };
 
@@ -43,6 +44,11 @@ export function createDocumentScrollToTopController() {
   return {
     button,
     setScrollElement,
-    sync
+    sync,
+    setUiLanguage(language: UiLanguage): void {
+      const label = getUiStrings(language).backToTop;
+      button.title = label;
+      button.setAttribute('aria-label', label);
+    }
   };
 }

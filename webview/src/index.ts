@@ -806,6 +806,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   modeControl.element.setAttribute('aria-label', strings.markdownMode);
   modeControl.setLabels({ live: strings.live, source: strings.source, preview: strings.preview });
   selectionMenuElements.setUiLanguage(language);
+  editorScrollToTopController.setUiLanguage(language);
   findToggleBtn.title = strings.findAndReplace;
   exportHtmlOption.title = strings.exportAsHtml;
   exportHtmlOption.setAttribute('aria-label', strings.exportAsHtml);

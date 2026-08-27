@@ -11,6 +11,7 @@ export type UiStrings = Readonly<{
   previewCodeColors: string;
   previewFontFamily: string;
   previewFontPlaceholder: string;
+  previewFontUnavailable: string;
   previewGenerating: string;
   previewFailed: string;
   previewTools: string;
@@ -55,6 +56,8 @@ export type UiStrings = Readonly<{
   outlineExpand: string;
   outlineCollapse: string;
   outlineNoHeadings: string;
+  untitled: string;
+  backToTop: string;
   editorToolbar: string;
   formatting: string;
   markdownMode: string;
@@ -119,7 +122,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     auto: 'Auto', light: 'Light', dark: 'Dark', previewTitle: 'Markdown Preview',
     previewAppearance: 'Preview appearance', previewSourceColoring: 'Preview source coloring',
     previewCodeColors: 'Code colors', previewFontFamily: 'Preview font family',
-    previewFontPlaceholder: 'VS Code editor font', previewGenerating: 'Generating preview…',
+    previewFontPlaceholder: 'VS Code editor font',
+    previewFontUnavailable: 'Local font list unavailable; type a family name',
+    previewGenerating: 'Generating preview…',
     previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
     exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportAsHtml: 'Export as HTML',
     exportAsPdf: 'Export as PDF', findAndReplace: 'Find and Replace', more: 'More',
@@ -139,7 +144,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineSwitchRight: 'Switch to right side', outlineClose: 'Close outline',
     outlineResize: 'Drag to resize outline',
     outlineEmptyHeading: '(Empty heading)',
-    outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings',
+    outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings', untitled: 'Untitled',
+    backToTop: 'Back to top',
     editorToolbar: 'Editor toolbar', formatting: 'Formatting', markdownMode: 'Markdown mode',
     live: 'Live', source: 'Source', preview: 'Preview',
     inlineMarkdownFormatting: 'Inline markdown formatting', bold: 'Bold', italic: 'Italic',
@@ -172,7 +178,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
     previewAppearance: '预览外观', previewSourceColoring: '预览源码着色',
     previewCodeColors: '代码着色', previewFontFamily: '预览字体',
-    previewFontPlaceholder: 'VS Code 编辑器字体', previewGenerating: '正在生成预览…',
+    previewFontPlaceholder: 'VS Code 编辑器字体',
+    previewFontUnavailable: '无法获取本地字体列表；请手动输入字体名称',
+    previewGenerating: '正在生成预览…',
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
     findAndReplace: '查找和替换', more: '更多', moreTools: '更多工具',
@@ -191,7 +199,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineSwitchRight: '切换到右侧', outlineClose: '关闭目录',
     outlineResize: '拖动调整目录宽度',
     outlineEmptyHeading: '(空标题)',
-    outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题',
+    outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题', untitled: '未命名',
+    backToTop: '回到顶部',
     editorToolbar: '编辑器工具栏', formatting: '格式', markdownMode: 'Markdown 模式',
     live: '实时', source: '源码', preview: '预览', inlineMarkdownFormatting: '行内 Markdown 格式',
     bold: '加粗', italic: '斜体', lineover: '删除线', highlight: '高亮', inlineCode: '行内代码',

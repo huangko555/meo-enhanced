@@ -27,6 +27,9 @@ assert.equal(english.findMatches(2), '2 matches');
 assert.equal(chinese.findMatches(2), '2 个匹配项');
 assert.equal(chinese.replacedRemaining(3), '已替换 • 剩余 3 个');
 assert.equal(chinese.outlineNoHeadings, '暂无标题');
+assert.equal(chinese.previewFontUnavailable, '无法获取本地字体列表；请手动输入字体名称');
+assert.equal(chinese.untitled, '未命名');
+assert.equal(chinese.backToTop, '回到顶部');
 assert.equal(chinese.headingLevel(3), '3 级标题');
 assert.deepEqual(
   [chinese.markdownMode, chinese.live, chinese.source, chinese.preview],

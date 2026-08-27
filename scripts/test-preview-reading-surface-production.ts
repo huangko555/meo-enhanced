@@ -660,6 +660,7 @@ async function assertFontEnumerationFallbackMatrix(
   const fallbackText = '# Font fallback\n\n`synthetic code`';
   const fallbackInit = {
     ...initMessage,
+    uiLanguage: 'zh-CN' as const,
     text: fallbackText,
     savedRevision: { version: 1, text: fallbackText }
   };
@@ -730,7 +731,7 @@ async function assertFontEnumerationFallbackMatrix(
       await page.click('.preview-font-family-input');
       await page.waitForFunction(() => (
         document.querySelector<HTMLElement>('.preview-font-family-control')?.title
-          === 'Local font list unavailable; type a family name'
+          === '无法获取本地字体列表；请手动输入字体名称'
       ));
       assert.equal(await page.evaluate(() => (
         (window as typeof window & { __meoFallbackFontQueryCount?: number }).__meoFallbackFontQueryCount

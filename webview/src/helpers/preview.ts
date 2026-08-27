@@ -254,6 +254,7 @@ export function createPreviewController({
     fontFamilyControl.title = uiStrings.previewFontFamily;
     fontFamilyInput.placeholder = uiStrings.previewFontPlaceholder;
     fontFamilyInput.setAttribute('aria-label', uiStrings.previewFontFamily);
+    scrollToTopController.setUiLanguage(language);
   };
 
   const scrollToTopController = createDocumentScrollToTopController();
@@ -693,7 +694,7 @@ export function createPreviewController({
       queryLocalFonts?: () => Promise<readonly { family?: unknown }[]>;
     }).queryLocalFonts;
     if (typeof queryLocalFonts !== 'function') {
-      fontFamilyControl.title = 'Local font list unavailable; type a family name';
+      fontFamilyControl.title = uiStrings.previewFontUnavailable;
       return;
     }
     const generation = ++fontEnumerationGeneration;
@@ -701,7 +702,7 @@ export function createPreviewController({
     try {
       query = Promise.resolve(queryLocalFonts.call(window));
     } catch {
-      fontFamilyControl.title = 'Local font list unavailable; type a family name';
+      fontFamilyControl.title = uiStrings.previewFontUnavailable;
       return;
     }
     void query.then((fonts) => {
@@ -721,11 +722,11 @@ export function createPreviewController({
       }
       fontFamilyOptions.replaceChildren(fragment);
       if (families.size === 0) {
-        fontFamilyControl.title = 'Local font list unavailable; type a family name';
+        fontFamilyControl.title = uiStrings.previewFontUnavailable;
       }
     }).catch(() => {
       if (!disposed && generation === fontEnumerationGeneration) {
-        fontFamilyControl.title = 'Local font list unavailable; type a family name';
+        fontFamilyControl.title = uiStrings.previewFontUnavailable;
       }
     });
   };
@@ -843,7 +844,7 @@ export function createPreviewController({
     return headingElements.map((heading) => {
       const line = Number.parseInt(heading.dataset.sourceLine ?? '1', 10);
       return {
-        text: heading.textContent?.trim() || 'Untitled',
+        text: heading.textContent?.trim() || uiStrings.untitled,
         level: Number.parseInt(heading.tagName.slice(1), 10),
         from: line,
         line

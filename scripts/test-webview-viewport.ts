@@ -157,7 +157,8 @@ async function main() {
       mode: document.querySelector('.mode-group')?.getAttribute('aria-label'),
       modeLabels: Array.from(document.querySelectorAll('.mode-group [data-mode]')).map((element) => element.textContent?.trim()),
       selectionMenu: document.querySelector('.selection-inline-menu')?.getAttribute('aria-label'),
-      selectionLabels: Array.from(document.querySelectorAll('.selection-inline-menu [data-action]')).map((element) => element.getAttribute('aria-label'))
+      selectionLabels: Array.from(document.querySelectorAll('.selection-inline-menu [data-action]')).map((element) => element.getAttribute('aria-label')),
+      scrollToTop: Array.from(document.querySelectorAll('.document-scroll-top')).map((element) => element.getAttribute('aria-label'))
     }));
     if (JSON.stringify(chineseChrome) !== JSON.stringify({
       language: 'zh-CN',
@@ -179,7 +180,8 @@ async function main() {
       mode: 'Markdown 模式',
       modeLabels: ['实时', '源码', '预览'],
       selectionMenu: '行内 Markdown 格式',
-      selectionLabels: ['加粗', '斜体', '删除线', '高亮', '行内代码', '链接', 'Wiki 链接', '按键', '下划线']
+      selectionLabels: ['加粗', '斜体', '删除线', '高亮', '行内代码', '链接', 'Wiki 链接', '按键', '下划线'],
+      scrollToTop: ['回到顶部', '回到顶部']
     })) {
       throw new Error(`Resolved UI language did not project into the current Webview: ${JSON.stringify(chineseChrome)}`);
     }
