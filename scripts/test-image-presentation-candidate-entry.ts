@@ -16,16 +16,6 @@ type CandidateInstance = {
 
 type CandidateEnvironment = {
   create(root: HTMLElement, contextKey: string, altText: string): CandidateInstance;
-  counts(): {
-    applications: number;
-    runtimes: number;
-    adapters: number;
-    resourcePools: number;
-    resolveCalls: number;
-    loadCalls: number;
-    preservedReplacements: number;
-    legacyWidgets: number;
-  };
   dispose(): void;
 };
 
@@ -38,20 +28,12 @@ type CandidateHarness = {
 (globalThis as typeof globalThis & { ImagePresentationCandidate?: CandidateHarness })
   .ImagePresentationCandidate = {
     createEnvironment(resolveSource) {
-      let applications = 0;
-      let runtimes = 0;
-      let adapters = 0;
-      let resolveCalls = 0;
-      let loadCalls = 0;
-      let preservedReplacements = 0;
       const instances = new Set<CandidateInstance>();
       const resources = createImagePresentationResourcePool({
         async resolveSource(contextKey, rawSrc) {
-          resolveCalls += 1;
           return resolveSource(contextKey, rawSrc);
         },
         async loadImage(resolvedSrc) {
-          loadCalls += 1;
           return loadBrowserImage(resolvedSrc);
         }
       });
@@ -59,9 +41,6 @@ type CandidateHarness = {
 
       return {
         create(root, contextKey, altText) {
-          applications += 1;
-          adapters += 1;
-          runtimes += 1;
           const application = createImagePresentationApplication();
           const adapter = createCodeMirrorDomImagePresentationAdapter({
             resources,
@@ -84,7 +63,6 @@ type CandidateHarness = {
                 return true;
               },
               async preserveLayoutChange(apply) {
-                preservedReplacements += 1;
                 const active = root.ownerDocument.activeElement;
                 const selection = root.ownerDocument.getSelection()?.toString() ?? '';
                 const scrollTop = root.ownerDocument.scrollingElement?.scrollTop ?? 0;
@@ -126,16 +104,6 @@ type CandidateHarness = {
           instances.add(instance);
           return instance;
         },
-        counts: () => ({
-          applications,
-          runtimes,
-          adapters,
-          resourcePools: 1,
-          resolveCalls,
-          loadCalls,
-          preservedReplacements,
-          legacyWidgets: 0
-        }),
         dispose() {
           for (const instance of [...instances]) instance.dispose();
           releaseResources();

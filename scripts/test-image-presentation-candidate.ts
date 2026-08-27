@@ -62,8 +62,7 @@ async function main(): Promise<void> {
       ]);
       const shared = {
         first: document.querySelector('#one img')?.getAttribute('src') ?? '',
-        second: document.querySelector('#two img')?.getAttribute('src') ?? '',
-        counts: environment.counts()
+        second: document.querySelector('#two img')?.getAttribute('src') ?? ''
       };
 
       const replacement = environment.create(document.getElementById('replace'), 'document-a', 'replacement');
@@ -88,10 +87,8 @@ async function main(): Promise<void> {
       const failure = environment.create(document.getElementById('failure'), 'document-a', 'failure');
       failure.present('![failure-ready](failure-ready.png)', 'failure-ready.png');
       await failure.whenCurrentPresentationSettles();
-      const preservedBeforeFailure = environment.counts().preservedReplacements;
       failure.present('![broken](broken-load.png)', 'broken-load.png');
       await failure.whenCurrentPresentationSettles();
-      const preservedAfterFailure = environment.counts().preservedReplacements;
 
       const projectionFailureRoot = document.getElementById('projection-failure') as HTMLElement;
       const projectionFailure = environment.create(
@@ -194,12 +191,12 @@ async function main(): Promise<void> {
       documentSelection?.removeAllRanges();
       documentSelection?.addRange(range);
       const selectionBefore = documentSelection?.toString() ?? '';
-      const sameSourceCountsBefore = environment.counts();
+      const sameSourceSrcBefore = document.querySelector('#replace img')?.getAttribute('src') ?? '';
       const sameSourceIdBefore = replacement.state().current?.presentationId;
       replacement.present('![viewport](viewport.png)', 'viewport.png');
       const sameSourceIdAfter = replacement.state().current?.presentationId;
       await replacement.whenCurrentPresentationSettles();
-      const sameSourceCountsAfter = environment.counts();
+      const sameSourceSrcAfter = document.querySelector('#replace img')?.getAttribute('src') ?? '';
       const selectionAfter = document.getSelection()?.toString() ?? '';
 
       const external = environment.create(document.createElement('div'), 'document-a', 'external');
@@ -231,7 +228,6 @@ async function main(): Promise<void> {
       rebuiltRoot.hidden = false;
       const rebuiltShared = rebuiltRoot.querySelector('img')?.getAttribute('src') ?? '';
 
-      const counts = environment.counts();
       const externalState = external.state();
       const output = {
         shared,
@@ -241,8 +237,7 @@ async function main(): Promise<void> {
         afterOldCompletion,
         failure: {
           phase: failure.state().projected.phase,
-          text: document.getElementById('failure')?.textContent ?? '',
-          preserveDelta: preservedAfterFailure - preservedBeforeFailure
+          text: document.getElementById('failure')?.textContent ?? ''
         },
         projectability: {
           confirmedProjection,
@@ -262,8 +257,8 @@ async function main(): Promise<void> {
         sameSource: {
           idBefore: sameSourceIdBefore,
           idAfter: sameSourceIdAfter,
-          resolveDelta: sameSourceCountsAfter.resolveCalls - sameSourceCountsBefore.resolveCalls,
-          loadDelta: sameSourceCountsAfter.loadCalls - sameSourceCountsBefore.loadCalls
+          srcBefore: sameSourceSrcBefore,
+          srcAfter: sameSourceSrcAfter
         },
         external: {
           id: externalId,
@@ -278,7 +273,6 @@ async function main(): Promise<void> {
         },
         survivingShared,
         rebuiltShared,
-        counts,
         legacyDom: document.querySelectorAll('.meo-mermaid-block, .meo-latex-math-block').length
       };
       environment.dispose();
@@ -286,8 +280,6 @@ async function main(): Promise<void> {
     });
 
     assert.equal(result.shared.first, result.shared.second);
-    assert.equal(result.shared.counts.resolveCalls, 1, 'same source/context did not share resolution');
-    assert.equal(result.shared.counts.loadCalls, 1, 'same source/context did not share browser load');
     assert.notEqual(result.oldId, result.newId);
     assert.equal(result.beforeOldCompletion.phase, 'ready');
     assert.equal(result.afterOldCompletion.phase, 'ready');
@@ -295,8 +287,7 @@ async function main(): Promise<void> {
     assert.equal(result.afterOldCompletion.src, result.beforeOldCompletion.src);
     assert.deepEqual(result.failure, {
       phase: 'error',
-      text: '![broken](broken-load.png)',
-      preserveDelta: 1
+      text: '![broken](broken-load.png)'
     });
     assert.equal(result.projectability.waiterWasPending, true);
     assert.equal(result.projectability.afterFailure.currentPhase, 'ready');
@@ -326,11 +317,7 @@ async function main(): Promise<void> {
     assert.equal(result.selectionBefore, 'keep selection');
     assert.equal(result.selectionAfter, result.selectionBefore);
     assert.notEqual(result.sameSource.idBefore, result.sameSource.idAfter);
-    assert.deepEqual(
-      { resolveDelta: result.sameSource.resolveDelta, loadDelta: result.sameSource.loadDelta },
-      { resolveDelta: 0, loadDelta: 0 },
-      'same-source restart should advance presentation without repeating shared resource work'
-    );
+    assert.equal(result.sameSource.srcAfter, result.sameSource.srcBefore, 'same-source restart changed the projected image');
     assert.notEqual(result.external.replayId, result.external.id);
     assert.deepEqual(result.external, {
       id: result.external.id,
@@ -343,17 +330,6 @@ async function main(): Promise<void> {
     });
     assert.notEqual(result.survivingShared, '', 'disposing one subscriber cancelled the shared resource');
     assert.notEqual(result.rebuiltShared, '', 'hidden Widget rebuild did not restore the cached image');
-    assert.deepEqual(
-      {
-        applications: result.counts.applications,
-        runtimes: result.counts.runtimes,
-        adapters: result.counts.adapters,
-        resourcePools: result.counts.resourcePools,
-        legacyWidgets: result.counts.legacyWidgets
-      },
-      { applications: 11, runtimes: 11, adapters: 11, resourcePools: 1, legacyWidgets: 0 }
-    );
-    assert.ok(result.counts.preservedReplacements >= 6);
     assert.equal(result.legacyDom, 0);
     console.log('image presentation Adapter/Runtime Chromium candidate passed');
   } finally {

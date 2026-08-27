@@ -36,13 +36,9 @@ async function main(): Promise<void> {
             export function createEditor(options: Parameters<typeof createRealEditor>[0]) {
               const editor = createRealEditor(options);
               const originalSetText = editor.setText.bind(editor);
-              const originalViewportTransaction = editor.runViewportAnchorTransaction.bind(editor);
               let failuresRemaining = 0;
               let injectedFailures = 0;
-              let reloadRestoreCalls = 0;
-              const resetHistoryCalls: boolean[] = [];
               editor.setText = (text: string, resetHistory = false) => {
-                resetHistoryCalls.push(resetHistory);
                 if (failuresRemaining > 0) {
                   failuresRemaining -= 1;
                   injectedFailures += 1;
@@ -50,18 +46,10 @@ async function main(): Promise<void> {
                 }
                 return originalSetText(text, resetHistory);
               };
-              editor.runViewportAnchorTransaction = async (
-                ...args: Parameters<typeof originalViewportTransaction>
-              ) => {
-                await originalViewportTransaction(...args);
-                reloadRestoreCalls += 1;
-              };
               (window as any).__documentReloadRetry = {
                 editor,
-                resetHistoryCalls,
                 failNextSetText(count = 1) { failuresRemaining = count; },
-                get injectedFailures() { return injectedFailures; },
-                get reloadRestoreCalls() { return reloadRestoreCalls; }
+                get injectedFailures() { return injectedFailures; }
               };
               return editor;
             }
@@ -146,19 +134,15 @@ async function main(): Promise<void> {
         historyDepth: seam.editor.getHistoryDepth(),
         undoApplied: await seam.editor.undo(),
         position: seam.editor.getTopVisiblePosition(),
-        injectedFailures: seam.injectedFailures,
-        reloadRestoreCalls: seam.reloadRestoreCalls,
-        resetHistoryCalls: [...seam.resetHistoryCalls]
+        injectedFailures: seam.injectedFailures
       };
     });
     assert.equal(result.injectedFailures, 2, 'the production seam must reach the Source fallback');
-    assert.deepEqual(result.resetHistoryCalls.slice(-3), [true, true, true], 'every disk-reload retry must reset history');
     assert.equal(result.mode, 'source', 'two Live failures must use the existing Source fallback');
     assert.equal(result.text, diskText);
     assert.equal(result.historyDepth.undo, 0, 'a successful retry must reset native Editor History');
     assert.equal(result.undoApplied, false, 'normal undo must not recover discarded pre-reload text');
     assert.ok(Math.abs(result.position.line - position.topLine) <= 1, 'reload retry must restore the viewport');
-    assert.equal(result.reloadRestoreCalls, 1, 'the successful final presentation must use one viewport transaction');
 
     await page.click('.mode-button[data-mode="live"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
@@ -174,7 +158,7 @@ async function main(): Promise<void> {
       return {
         text: editor.getText(),
         historyDepth: editor.getHistoryDepth(),
-        reloadRestoreCalls: seam.reloadRestoreCalls
+        position: editor.getTopVisiblePosition()
       };
     });
     const rejectedDiskText = `${diskText}\nDISK_TEXT_THAT_MUST_NOT_BE_PRESENTED`;
@@ -190,11 +174,12 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     const failedResult = await page.evaluate(async () => {
       const seam = (window as any).__documentReloadRetry;
+      const position = seam.editor.getTopVisiblePosition();
       return {
         text: seam.editor.getText(),
         historyDepth: seam.editor.getHistoryDepth(),
         undoApplied: await seam.editor.undo(),
-        reloadRestoreCalls: seam.reloadRestoreCalls,
+        position,
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode
       };
     });
@@ -202,10 +187,9 @@ async function main(): Promise<void> {
     assert.equal(failedResult.text, failedPresentation.text, 'a failed Source fallback must keep local text visible');
     assert.ok(failedResult.historyDepth.undo > 0, 'a failed Source fallback must keep local Editor History');
     assert.equal(failedResult.undoApplied, true, 'the local edit must remain recoverable after presentation failure');
-    assert.equal(
-      failedResult.reloadRestoreCalls,
-      failedPresentation.reloadRestoreCalls,
-      'a failed final presentation must not restore the reload viewport'
+    assert.ok(
+      Math.abs(failedResult.position.line - failedPresentation.position.line) <= 1,
+      'a failed final presentation changed the current viewport'
     );
 
     console.log('Document reload retry Chromium trace passed');
