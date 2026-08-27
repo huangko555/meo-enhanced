@@ -9,6 +9,7 @@ import {
 
 const thematicBreakRe = /^[ \t]{0,3}(?:([-*_])(?:[ \t]*\1){2,})[ \t]*$/;
 const frontmatterCache = new WeakMap<object, FrontmatterInfo | null>();
+const frontmatterCandidateCache = new WeakMap<object, FrontmatterInfo | null>();
 
 export interface FrontmatterInfo {
   openingFrom: number;
@@ -92,35 +93,10 @@ export function parseFrontmatter(state: EditorState): FrontmatterInfo | null {
     return cached;
   }
 
-  let parsed: FrontmatterInfo | null = null;
-  if (doc.lines >= 2) {
-    const openingLine = doc.line(1);
-    if (isFrontmatterDelimiterLine(openingLine.text)) {
-      const openingOffset = openingLine.text.indexOf('---');
-      for (let lineNo = 2; lineNo <= doc.lines; lineNo += 1) {
-        const closingLine = doc.line(lineNo);
-        if (!isFrontmatterDelimiterLine(closingLine.text)) {
-          continue;
-        }
-        const closingOffset = closingLine.text.indexOf('---');
-        const content = doc.sliceString(doc.line(2).from, closingLine.from);
-        if (!isYamlFrontmatterValid(content)) {
-          break;
-        }
-        parsed = {
-          openingFrom: openingLine.from + openingOffset,
-          openingTo: openingLine.from + openingOffset + 3,
-          contentFrom: doc.line(2).from,
-          contentTo: closingLine.from,
-          closingFrom: closingLine.from + closingOffset,
-          closingTo: closingLine.from + closingOffset + 3,
-          from: openingLine.from,
-          to: closingLine.from + closingOffset + 3
-        };
-        break;
-      }
-    }
-  }
+  const candidate = parseFrontmatterCandidate(state);
+  const parsed = candidate && isYamlFrontmatterValid(doc.sliceString(candidate.contentFrom, candidate.contentTo))
+    ? candidate
+    : null;
 
   frontmatterCache.set(doc, parsed);
   return parsed;
@@ -338,6 +314,38 @@ export function forEachYamlFrontmatterLayoutLine(
       blockScalarParentIndent = indentation;
     }
   }
+}
+
+export function parseFrontmatterCandidate(state: EditorState): FrontmatterInfo | null {
+  const { doc } = state;
+  const cached = frontmatterCandidateCache.get(doc);
+  if (cached !== undefined) return cached;
+
+  let candidate: FrontmatterInfo | null = null;
+  if (doc.lines >= 2) {
+    const openingLine = doc.line(1);
+    if (isFrontmatterDelimiterLine(openingLine.text)) {
+      const openingOffset = openingLine.text.indexOf('---');
+      for (let lineNo = 2; lineNo <= doc.lines; lineNo += 1) {
+        const closingLine = doc.line(lineNo);
+        if (!isFrontmatterDelimiterLine(closingLine.text)) continue;
+        const closingOffset = closingLine.text.indexOf('---');
+        candidate = {
+          openingFrom: openingLine.from + openingOffset,
+          openingTo: openingLine.from + openingOffset + 3,
+          contentFrom: doc.line(2).from,
+          contentTo: closingLine.from,
+          closingFrom: closingLine.from + closingOffset,
+          closingTo: closingLine.from + closingOffset + 3,
+          from: openingLine.from,
+          to: closingLine.from + closingOffset + 3
+        };
+        break;
+      }
+    }
+  }
+  frontmatterCandidateCache.set(doc, candidate);
+  return candidate;
 }
 
 function buildSourceFrontmatterDecorations(state: EditorState): any {

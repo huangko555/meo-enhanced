@@ -235,12 +235,15 @@ try {
     invalidEditor.view.requestMeasure();
     await wait();
     const invalidContent = document.querySelector('.cm-content');
+    const invalidLines = Array.from(invalidContent?.querySelectorAll('.cm-line') ?? [], (line) => line.textContent);
     if (
       invalidContent?.querySelector('.meo-md-frontmatter-property')
       || invalidContent?.querySelector('.meo-md-frontmatter-array-pills')
+      || invalidContent?.querySelector('.meo-md-hr')
+      || JSON.stringify(invalidLines) !== JSON.stringify(['---', 'title: [unterminated', '---', 'Body'])
       || !invalidContent?.textContent?.includes('title: [unterminated')
     ) {
-      failures.push({ symptom: 'invalid-yaml-was-rendered-as-properties' });
+      failures.push({ symptom: 'invalid-yaml-was-not-preserved-as-source', invalidLines });
     }
     invalidEditor.destroy();
     return failures;

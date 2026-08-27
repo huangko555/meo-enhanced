@@ -35,6 +35,7 @@ import { addTableDecorations, addTableDecorationsForLineRange, isTableDelimiterL
 import {
   forEachYamlFrontmatterLayoutLine,
   parseFrontmatter,
+  parseFrontmatterCandidate,
   parseSimpleYamlFlowArrayValue,
   isInsideFrontmatter,
   isInsideFrontmatterContent,
@@ -1679,6 +1680,8 @@ function buildDecorations(state: EditorState): DecorationSet {
     frontmatter = parseFrontmatter(state);
     if (frontmatter) {
       addFrontmatterBoundaryDecorations(ranges, state, frontmatter, activeLines);
+    } else {
+      frontmatter = parseFrontmatterCandidate(state);
     }
   } catch {
     frontmatter = null;

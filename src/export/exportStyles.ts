@@ -272,6 +272,11 @@ body[data-meo-export-target='pdf'] hr {
   font-size: 0.92em;
 }
 
+.meo-export-frontmatter-source {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .meo-export-frontmatter-header {
   display: flex;
   align-items: center;

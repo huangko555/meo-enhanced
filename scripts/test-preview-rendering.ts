@@ -300,6 +300,8 @@ if (!localizedReading.html.includes('>属性<')
 if (
   invalidFrontmatter.html.includes('class="meo-export-frontmatter"')
   || invalidFrontmatter.html.includes('>Properties<')
+  || !invalidFrontmatter.html.includes('class="meo-export-frontmatter-source"')
+  || !invalidFrontmatter.html.includes('<code>---\ntitle: [unterminated\n---</code>')
   || !invalidFrontmatter.html.includes('title: [unterminated')
 ) {
   throw new Error('Invalid YAML frontmatter must remain visible as Markdown source');

@@ -42,7 +42,14 @@ export function extractExportFrontmatter(source: SourceMappedMarkdown, propertie
     return { frontmatterHtml: '', body: source };
   }
   if (!isYamlFrontmatterValid(lines.slice(1, closingLineIndex).join('\n'))) {
-    return { frontmatterHtml: '', body: source };
+    return {
+      frontmatterHtml: renderInvalidFrontmatterSourceHtml(
+        lines.slice(0, closingLineIndex + 1),
+        source.sourceLines[0] ?? 1,
+        source.sourceLines[closingLineIndex] ?? closingLineIndex + 1
+      ),
+      body: sliceSourceMappedMarkdown(source, closingLineIndex + 1)
+    };
   }
 
   return {
@@ -91,6 +98,14 @@ function renderFrontmatterHtml(contentLines: string[], sourceLine: number, sourc
     `<div class="meo-export-frontmatter-header"><span class="meo-export-frontmatter-header-icon" aria-hidden="true"></span><span>${escapeHtml(propertiesLabel)}</span></div>`,
     linesHtml,
     '</section>'
+  ].join('');
+}
+
+function renderInvalidFrontmatterSourceHtml(lines: string[], sourceLine: number, sourceEndLine: number): string {
+  return [
+    `<pre class="meo-export-frontmatter-source" data-source-line="${sourceLine}" data-source-end-line="${sourceEndLine}">`,
+    `<code>${escapeHtml(lines.join('\n'))}</code>`,
+    '</pre>'
   ].join('');
 }
 
