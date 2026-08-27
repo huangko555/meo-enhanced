@@ -1,4 +1,5 @@
 import { AlertCircle, createElement } from 'lucide';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 import { createLocalLinkResolutionTransport, type LocalLinkResolutionTransport } from '../adapters/localLinkResolutionTransport';
 import type { ResolvedLocalLinksResponse } from '../../../src/protocol/localLinkResolution';
 
@@ -105,11 +106,12 @@ export function isMissingLocalLinkTarget(target: string | null | undefined): boo
   );
 }
 
-export function createMissingLocalLinkIndicator(): HTMLElement {
+export function createMissingLocalLinkIndicator(language: UiLanguage = 'en'): HTMLElement {
+  const strings = getUiStrings(language);
   const badge = document.createElement('span');
   badge.className = 'meo-md-local-link-missing-icon';
-  badge.title = 'Local file link target not found';
-  badge.setAttribute('aria-label', 'Local file link target not found');
+  badge.title = strings.missingLocalLink;
+  badge.setAttribute('aria-label', strings.missingLocalLink);
   badge.appendChild(createElement(AlertCircle, { 'aria-hidden': 'true' }));
   return badge;
 }

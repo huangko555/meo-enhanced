@@ -90,6 +90,8 @@ import {
   latexMathEditingStateField
 } from './helpers/latexMathEditing';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
+import { getUiStrings } from '../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from './editor/uiLanguage';
 import {
   isLiveInputDerivedWorkRefresh,
   isLiveInputNestedProjection,
@@ -705,12 +707,13 @@ class ClearLinkUrlWidget extends WidgetType {
     return other instanceof ClearLinkUrlWidget && other.urlFrom === this.urlFrom && other.urlTo === this.urlTo;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-link-clear-btn';
-    button.title = 'Clear link URL';
-    button.setAttribute('aria-label', 'Clear link URL');
+    button.title = strings.clearLinkUrl;
+    button.setAttribute('aria-label', strings.clearLinkUrl);
     button.appendChild(createElement(Delete, { 'aria-hidden': 'true' }));
     button.addEventListener('pointerdown', (event) => {
       event.preventDefault();
@@ -749,8 +752,8 @@ class OpenLinkWidget extends WidgetType {
     return other instanceof OpenLinkWidget && other.href === this.href;
   }
 
-  toDOM(): HTMLElement {
-    return createOpenLinkButton(this.href);
+  toDOM(view: EditorView): HTMLElement {
+    return createOpenLinkButton(this.href, view.state.facet(uiLanguageFacet));
   }
 
   ignoreEvent(): boolean {
@@ -763,11 +766,12 @@ class MissingWikiLinkWidget extends WidgetType {
     return other instanceof MissingWikiLinkWidget;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const badge = document.createElement('span');
     badge.className = 'meo-md-wiki-missing-icon';
-    badge.title = 'Wiki link target not found locally';
-    badge.setAttribute('aria-label', 'Wiki link target not found locally');
+    badge.title = strings.missingWikiLink;
+    badge.setAttribute('aria-label', strings.missingWikiLink);
     badge.appendChild(createElement(AlertCircle, { 'aria-hidden': 'true' }));
     return badge;
   }
@@ -782,8 +786,8 @@ class MissingLocalLinkWidget extends WidgetType {
     return other instanceof MissingLocalLinkWidget;
   }
 
-  toDOM(): HTMLElement {
-    return createMissingLocalLinkIndicator();
+  toDOM(view: EditorView): HTMLElement {
+    return createMissingLocalLinkIndicator(view.state.facet(uiLanguageFacet));
   }
 
   ignoreEvent(): boolean {
@@ -890,11 +894,12 @@ class DetailsSummaryWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-details-summary';
-    button.title = this.collapsed ? 'Expand details' : 'Collapse details';
-    button.setAttribute('aria-label', this.collapsed ? 'Expand details' : 'Collapse details');
+    button.title = this.collapsed ? strings.expandDetails : strings.collapseDetails;
+    button.setAttribute('aria-label', button.title);
 
     const label = document.createElement('span');
     label.className = 'meo-md-details-summary-label';
@@ -939,11 +944,12 @@ class FootnoteReferenceWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-footnote-ref';
-    button.title = `Jump to footnote ${this.footnoteNumber}`;
-    button.setAttribute('aria-label', `Jump to footnote ${this.footnoteNumber}`);
+    button.title = strings.jumpToFootnote(this.footnoteNumber);
+    button.setAttribute('aria-label', button.title);
 
     const number = document.createElement('sup');
     number.textContent = String(this.footnoteNumber);
@@ -992,11 +998,12 @@ class FootnoteBacklinkWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-footnote-backref';
-    button.title = `Jump to footnote reference ${this.footnoteNumber}`;
-    button.setAttribute('aria-label', `Jump to footnote reference ${this.footnoteNumber}`);
+    button.title = strings.jumpToFootnoteReference(this.footnoteNumber);
+    button.setAttribute('aria-label', button.title);
     button.textContent = `${this.footnoteNumber}.`;
 
     button.addEventListener('pointerdown', (event) => {
@@ -1085,11 +1092,12 @@ class DetailsSourceToggleWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'meo-md-html-mode-btn meo-md-html-source-toggle meo-md-details-source-toggle';
-    button.title = 'Show HTML source';
-    button.setAttribute('aria-label', 'Show HTML source');
+    button.title = strings.showHtmlSource;
+    button.setAttribute('aria-label', strings.showHtmlSource);
     button.appendChild(createElement(Code2, { width: 18, height: 18, 'aria-hidden': 'true' }));
     button.addEventListener('pointerdown', (event) => {
       event.preventDefault();

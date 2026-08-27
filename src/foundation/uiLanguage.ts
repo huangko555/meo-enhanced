@@ -74,6 +74,16 @@ export type UiStrings = Readonly<{
   underline: string;
   markTaskComplete: string;
   markTaskIncomplete: string;
+  clearLinkUrl: string;
+  jumpWithinDocument: string;
+  openLink: string;
+  missingWikiLink: string;
+  missingLocalLink: string;
+  expandDetails: string;
+  collapseDetails: string;
+  showHtmlSource: string;
+  jumpToFootnote: (number: number) => string;
+  jumpToFootnoteReference: (number: number) => string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -153,7 +163,13 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     inlineMarkdownFormatting: 'Inline markdown formatting', bold: 'Bold', italic: 'Italic',
     lineover: 'Lineover', highlight: 'Highlight', inlineCode: 'Inline Code', kbd: 'Kbd',
     underline: 'Underline', markTaskComplete: 'Mark task as complete',
-    markTaskIncomplete: 'Mark task as incomplete', heading: 'Heading',
+    markTaskIncomplete: 'Mark task as incomplete', clearLinkUrl: 'Clear link URL',
+    jumpWithinDocument: 'Jump within document', openLink: 'Open link',
+    missingWikiLink: 'Wiki link target not found locally', missingLocalLink: 'Local file link target not found',
+    expandDetails: 'Expand details', collapseDetails: 'Collapse details', showHtmlSource: 'Show HTML source',
+    jumpToFootnote: (number: number) => `Jump to footnote ${number}`,
+    jumpToFootnoteReference: (number: number) => `Jump to footnote reference ${number}`,
+    heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
     showOutlineLeft: 'Show Outline on Left', showOutlineRight: 'Show Outline on Right',
@@ -208,7 +224,13 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     live: '实时', source: '源码', preview: '预览', inlineMarkdownFormatting: '行内 Markdown 格式',
     bold: '加粗', italic: '斜体', lineover: '删除线', highlight: '高亮', inlineCode: '行内代码',
     kbd: '按键', underline: '下划线', markTaskComplete: '标记任务为已完成',
-    markTaskIncomplete: '标记任务为未完成', heading: '标题', headingLevels: '标题级别',
+    markTaskIncomplete: '标记任务为未完成', clearLinkUrl: '清除链接地址',
+    jumpWithinDocument: '在文档内跳转', openLink: '打开链接',
+    missingWikiLink: '本地未找到 Wiki 链接目标', missingLocalLink: '未找到本地文件链接目标',
+    expandDetails: '展开详细信息', collapseDetails: '折叠详细信息', showHtmlSource: '显示 HTML 源码',
+    jumpToFootnote: (number: number) => `跳转到脚注 ${number}`,
+    jumpToFootnoteReference: (number: number) => `跳转到脚注引用 ${number}`,
+    heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',

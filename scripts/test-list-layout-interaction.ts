@@ -324,6 +324,35 @@ async function main(): Promise<void> {
       return output;
     });
 
+    const localizedNavigation = await page.evaluate(async () => {
+      const harness = (window as any).ListEditingHarness;
+      const host = document.getElementById('editor-host')!;
+      host.replaceChildren();
+      const text = '[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\nplain';
+      const editor = harness.createEditor({
+        parent: host,
+        text,
+        initialMode: 'live',
+        uiLanguage: 'zh-CN',
+        onApplyChanges() {}
+      });
+      const lastLine = editor.view.state.doc.line(editor.view.state.doc.lines);
+      editor.view.dispatch({ selection: { anchor: lastLine.to } });
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const read = (selector: string) => document.querySelector<HTMLElement>(selector)?.getAttribute('aria-label');
+      const output = {
+        openLink: read('.meo-md-link-open-btn'),
+        details: read('.meo-md-details-summary'),
+        detailsSource: read('.meo-md-details-source-toggle'),
+        footnote: read('.meo-md-footnote-ref'),
+        footnoteBack: read('.meo-md-footnote-backref')
+      };
+      editor.destroy();
+      return output;
+    });
+
     assertAligned(result.live, 'Live');
     assertAligned(result.previewAlignment, 'Preview');
     assert.deepEqual(result.sourceLayout, {
@@ -340,6 +369,11 @@ async function main(): Promise<void> {
     assert.equal(result.afterRedo, result.afterPaste);
     assert.ok(result.afterCheckbox.includes('- [x] task'));
     assert.equal(result.checkboxLabel, '标记任务为已完成');
+    assert.deepEqual(localizedNavigation, {
+      openLink: '打开链接',
+      footnote: '跳转到脚注 1',
+      footnoteBack: '跳转到脚注引用 1'
+    });
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');
     assert.ok(result.undoResults.every(Boolean), 'all 20 list edits must undo');
     assert.ok(result.redoResults.every(Boolean), 'all 20 list edits must redo');

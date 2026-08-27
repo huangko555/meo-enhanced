@@ -31,6 +31,7 @@ assert.equal(chinese.previewFontUnavailable, '无法获取本地字体列表；�
 assert.equal(chinese.untitled, '未命名');
 assert.equal(chinese.backToTop, '回到顶部');
 assert.equal(chinese.markTaskComplete, '标记任务为已完成');
+assert.equal(chinese.jumpToFootnoteReference(2), '跳转到脚注引用 2');
 assert.equal(chinese.headingLevel(3), '3 级标题');
 assert.deepEqual(
   [chinese.markdownMode, chinese.live, chinese.source, chinese.preview],
