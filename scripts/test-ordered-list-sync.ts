@@ -79,7 +79,7 @@ async function main(): Promise<void> {
       ));
       await page.waitForFunction(
         (text) => (window as any).__hostText === text,
-        {},
+        { timeout: 2_000 },
         expectedText
       );
     }

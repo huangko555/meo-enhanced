@@ -40,7 +40,7 @@ import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/edit
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { EditorAppearance } from '../../src/protocol/editorCommands';
 import type { InitMessage } from '../../src/protocol/readyInit';
-import { getUiStrings, type UiLanguage } from '../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from './application/uiLanguage';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -110,16 +110,15 @@ let activeUiStrings = getUiStrings(activeUiLanguage);
 
 const existingToolbar = root.querySelector('.mode-toolbar');
 const toolbar = existingToolbar instanceof HTMLElement ? existingToolbar : document.createElement('div');
-toolbar.className = 'mode-toolbar';
-toolbar.classList.remove('meo-preload-toolbar');
-toolbar.removeAttribute('aria-hidden');
+toolbar.classList.add('mode-toolbar', 'meo-preload-toolbar');
+toolbar.setAttribute('aria-hidden', 'true');
 toolbar.setAttribute('role', 'toolbar');
-toolbar.setAttribute('aria-label', 'Editor toolbar');
+toolbar.setAttribute('aria-label', activeUiStrings.editorToolbar);
 
 const formatGroup = document.createElement('div');
 formatGroup.className = 'format-group';
 formatGroup.setAttribute('role', 'group');
-formatGroup.setAttribute('aria-label', 'Formatting');
+formatGroup.setAttribute('aria-label', activeUiStrings.formatting);
 
 const headingBtn = document.createElement('button');
 headingBtn.type = 'button';
@@ -222,9 +221,9 @@ const contentMaxWidthBtn = document.createElement('button');
 contentMaxWidthBtn.type = 'button';
 contentMaxWidthBtn.className = 'more-tools-option more-tools-toggle-option';
 contentMaxWidthBtn.dataset.action = 'contentMaxWidth';
-contentMaxWidthBtn.title = 'Constrain Content Width';
+contentMaxWidthBtn.title = activeUiStrings.constrainContentWidth;
 contentMaxWidthBtn.setAttribute('role', 'menuitemcheckbox');
-appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, 'Constrain Width');
+appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, activeUiStrings.constrainWidth);
 
 const gitChangesGutterBtn = document.createElement('button');
 gitChangesGutterBtn.type = 'button';
@@ -244,7 +243,7 @@ releaseFixedBaselineBtn.type = 'button';
 releaseFixedBaselineBtn.className = 'more-tools-option fixed-baseline-release-option';
 releaseFixedBaselineBtn.dataset.action = 'releaseFixedBaseline';
 releaseFixedBaselineBtn.setAttribute('role', 'menuitem');
-appendMoreToolsOptionContent(releaseFixedBaselineBtn, MapPinOff, 'Release Fixed Baseline');
+appendMoreToolsOptionContent(releaseFixedBaselineBtn, MapPinOff, activeUiStrings.releaseFixedBaseline);
 
 const diffBaselineOptions = [
   { mode: 'current-edit' },
@@ -670,18 +669,18 @@ const findToggleBtn = document.createElement('button');
 findToggleBtn.type = 'button';
 findToggleBtn.className = 'format-button toggle-button';
 findToggleBtn.dataset.action = 'find';
-findToggleBtn.title = 'Find and Replace';
+findToggleBtn.title = activeUiStrings.findAndReplace;
 findToggleBtn.appendChild(createElement(Search, { width: 18, height: 18 }));
 
 const exportHtmlOption = document.createElement('button');
 exportHtmlOption.type = 'button';
 exportHtmlOption.className = 'preview-toolbar-action';
 exportHtmlOption.dataset.format = 'html';
-exportHtmlOption.title = 'Export as HTML';
-exportHtmlOption.setAttribute('aria-label', 'Export as HTML');
+exportHtmlOption.title = activeUiStrings.exportAsHtml;
+exportHtmlOption.setAttribute('aria-label', activeUiStrings.exportAsHtml);
 const exportHtmlLabel = document.createElement('span');
 exportHtmlLabel.className = 'preview-toolbar-action-label';
-exportHtmlLabel.textContent = 'Export HTML';
+exportHtmlLabel.textContent = activeUiStrings.exportHtml;
 exportHtmlOption.append(
   createElement(FileCode2, { width: 15, height: 15, 'aria-hidden': 'true' }),
   exportHtmlLabel
@@ -691,11 +690,11 @@ const exportPdfOption = document.createElement('button');
 exportPdfOption.type = 'button';
 exportPdfOption.className = 'preview-toolbar-action';
 exportPdfOption.dataset.format = 'pdf';
-exportPdfOption.title = 'Export as PDF';
-exportPdfOption.setAttribute('aria-label', 'Export as PDF');
+exportPdfOption.title = activeUiStrings.exportAsPdf;
+exportPdfOption.setAttribute('aria-label', activeUiStrings.exportAsPdf);
 const exportPdfLabel = document.createElement('span');
 exportPdfLabel.className = 'preview-toolbar-action-label';
-exportPdfLabel.textContent = 'Export PDF';
+exportPdfLabel.textContent = activeUiStrings.exportPdf;
 exportPdfOption.append(
   createElement(FileText, { width: 15, height: 15, 'aria-hidden': 'true' }),
   exportPdfLabel
@@ -707,7 +706,7 @@ const previewSourceColoringSlot = document.createElement('span');
 const previewFormatGroup = document.createElement('div');
 previewFormatGroup.className = 'preview-format-group';
 previewFormatGroup.setAttribute('role', 'group');
-previewFormatGroup.setAttribute('aria-label', 'Preview tools');
+previewFormatGroup.setAttribute('aria-label', activeUiStrings.previewTools);
 previewFormatGroup.append(
   previewOutlineLeftBtn,
   previewFontFamilySlot,
@@ -720,8 +719,8 @@ previewFormatGroup.append(
 const moreToolsButton = document.createElement('button');
 moreToolsButton.type = 'button';
 moreToolsButton.className = 'format-button';
-moreToolsButton.title = 'More';
-moreToolsButton.setAttribute('aria-label', 'More tools');
+moreToolsButton.title = activeUiStrings.more;
+moreToolsButton.setAttribute('aria-label', activeUiStrings.moreTools);
 moreToolsButton.setAttribute('aria-haspopup', 'menu');
 moreToolsButton.setAttribute('aria-expanded', 'false');
 moreToolsButton.appendChild(createElement(Settings2, { width: 18, height: 18 }));
@@ -729,7 +728,7 @@ moreToolsButton.appendChild(createElement(Settings2, { width: 18, height: 18 }))
 const moreToolsPanel = document.createElement('div');
 moreToolsPanel.className = 'more-tools-panel';
 moreToolsPanel.setAttribute('role', 'menu');
-moreToolsPanel.setAttribute('aria-label', 'More tools');
+moreToolsPanel.setAttribute('aria-label', activeUiStrings.moreTools);
 moreToolsPanel.hidden = true;
 const toolbarOverflowSection = document.createElement('div');
 toolbarOverflowSection.className = 'more-tools-overflow-items';
@@ -741,7 +740,7 @@ const changesSeparator = document.createElement('div');
 changesSeparator.className = 'more-tools-separator';
 changesSeparator.setAttribute('role', 'separator');
 const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
-  ariaLabel: 'Editor appearance',
+  ariaLabel: activeUiStrings.editorAppearance,
   className: 'editor-appearance-control',
   buttonClassName: 'editor-appearance-button',
   datasetKey: 'editorAppearance',
@@ -749,16 +748,16 @@ const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
   options: [
     {
       value: 'auto',
-      label: 'Auto'
+      label: activeUiStrings.auto
     },
     {
       value: 'light',
-      label: 'Light',
+      label: activeUiStrings.light,
       renderLeading: () => createElement(Sun, { width: 14, height: 14, 'aria-hidden': 'true' })
     },
     {
       value: 'dark',
-      label: 'Dark',
+      label: activeUiStrings.dark,
       renderLeading: () => createElement(Moon, { width: 14, height: 14, 'aria-hidden': 'true' })
     }
   ]
@@ -832,6 +831,8 @@ const applyUiLanguage = (language: UiLanguage): void => {
   findPanelController.setUiLanguage(language);
   outlineController.setUiLanguage(language);
   previewController.setUiLanguage(language);
+  toolbarOverflowLayoutKey = '';
+  syncToolbarOverflow();
 };
 const editorAppearanceRow = document.createElement('div');
 editorAppearanceRow.className = 'more-tools-appearance-row';
@@ -966,7 +967,7 @@ const moveToolbarItemToMore = (item: HTMLElement): void => {
 };
 
 const syncToolbarOverflow = () => {
-  const nextLayoutKey = `${toolbar.clientWidth}:${rightGroup.offsetWidth}:${root.dataset.mode ?? ''}`;
+  const nextLayoutKey = `${toolbar.clientWidth}:${rightGroup.offsetWidth}:${root.dataset.mode ?? ''}:${activeUiLanguage}`;
   if (nextLayoutKey === toolbarOverflowLayoutKey) return;
   toolbarOverflowLayoutKey = nextLayoutKey;
   restoreToolbarOverflowItems();
@@ -1025,9 +1026,8 @@ requestAnimationFrame(syncToolbarOverflow);
 
 const existingEditorWrapper = root.querySelector('.editor-wrapper');
 const editorWrapper = existingEditorWrapper instanceof HTMLElement ? existingEditorWrapper : document.createElement('div');
-editorWrapper.className = 'editor-wrapper';
-editorWrapper.classList.remove('meo-preload-editor-shell');
-editorWrapper.removeAttribute('aria-hidden');
+editorWrapper.classList.add('editor-wrapper', 'meo-preload-editor-shell');
+editorWrapper.setAttribute('aria-hidden', 'true');
 
 const existingEditorHost = editorWrapper.querySelector('.editor-host');
 const editorHost = existingEditorHost instanceof HTMLElement ? existingEditorHost : document.createElement('div');
@@ -1736,6 +1736,10 @@ editorModeRuntime = createEditorModeRuntime(
 
 const handleInit = (message: InitMessage) => {
   applyUiLanguage(message.uiLanguage);
+  toolbar.classList.remove('meo-preload-toolbar');
+  toolbar.removeAttribute('aria-hidden');
+  editorWrapper.classList.remove('meo-preload-editor-shell');
+  editorWrapper.removeAttribute('aria-hidden');
   if (typeof message.contentMaxWidthEnabled === 'boolean') {
     setContentMaxWidthEnabled(message.contentMaxWidthEnabled, { post: false });
   }

@@ -1,5 +1,5 @@
 import { AlertCircle, createElement } from 'lucide';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { createLocalLinkResolutionTransport, type LocalLinkResolutionTransport } from '../adapters/localLinkResolutionTransport';
 import type { ResolvedLocalLinksResponse } from '../../../src/protocol/localLinkResolution';
 

@@ -1,5 +1,5 @@
 import { ChevronsUp, createElement } from 'lucide';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 type ScrollElement = Element & { scrollTop: number };
 

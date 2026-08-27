@@ -90,7 +90,7 @@ import {
   latexMathEditingStateField
 } from './helpers/latexMathEditing';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
-import { getUiStrings } from '../../src/foundation/uiLanguage';
+import { getUiStrings } from './application/uiLanguage';
 import { uiLanguageFacet } from './editor/uiLanguage';
 import {
   isLiveInputDerivedWorkRefresh,

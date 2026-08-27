@@ -1,5 +1,5 @@
 import { createElement, Bold, Italic, Strikethrough, Highlighter, Terminal, Link, Brackets, Keyboard, Underline } from 'lucide';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 export interface SelectionMenuElements {
   menu: HTMLDivElement;

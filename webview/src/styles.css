@@ -695,6 +695,10 @@ body {
   position: relative;
 }
 
+.mode-toolbar.meo-preload-toolbar > * {
+  visibility: hidden;
+}
+
 .changes-controls {
   position: relative;
   display: inline-flex;

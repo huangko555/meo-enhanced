@@ -33,7 +33,7 @@ import {
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import { uiLanguageFacet } from '../editor/uiLanguage';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import {
   getTableTransactionProvenance,
   getTableTransactionProvenanceSnapshot,

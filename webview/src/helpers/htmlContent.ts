@@ -19,7 +19,7 @@ import { ImageWidget } from './images';
 import { getImagePresentationFactory } from '../editor/imagePresentation';
 import { getDetailsBlocks, toggleDetailsBlock } from './detailsBlocks';
 import { uiLanguageFacet } from '../editor/uiLanguage';
-import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 export interface RenderableHtmlBlock {
   from: number;
@@ -140,7 +140,7 @@ function sanitizeElementTree(root: ParentNode): void {
   }
 }
 
-function enhanceLinks(root: ParentNode, inline: boolean): void {
+function enhanceLinks(root: ParentNode, inline: boolean, uiLanguage: UiLanguage): void {
   for (const anchor of Array.from(root.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
     const href = anchor.getAttribute('href')?.trim() ?? '';
     if (!isSafeHtmlUrl(href, 'href')) continue;
@@ -154,7 +154,7 @@ function enhanceLinks(root: ParentNode, inline: boolean): void {
       event.preventDefault();
       linkText.dispatchEvent(new CustomEvent('meo-open-link', { bubbles: true, detail: { href } }));
     });
-    const button = createOpenLinkButton(href);
+    const button = createOpenLinkButton(href, uiLanguage);
     button.classList.add(inline ? 'meo-md-html-inline-link-button' : 'meo-md-html-link-button');
     anchor.replaceWith(linkText, button);
   }
@@ -194,6 +194,7 @@ function enhanceImages(root: ParentNode, view: EditorView, sourceFrom: number): 
 function createSanitizedHtml(
   source: string,
   inline: boolean,
+  uiLanguage: UiLanguage,
   view?: EditorView,
   sourceFrom = 0
 ): { fragment: DocumentFragment; imageWidgets: ImageWidget[] } | null {
@@ -202,7 +203,7 @@ function createSanitizedHtml(
   template.innerHTML = source;
   sanitizeElementTree(template.content);
   const imageWidgets = view ? enhanceImages(template.content, view, sourceFrom) : [];
-  enhanceLinks(template.content, inline);
+  enhanceLinks(template.content, inline, uiLanguage);
   return { fragment: template.content, imageWidgets };
 }
 
@@ -266,7 +267,13 @@ class HtmlBlockWidget extends WidgetType {
     root.dataset.meoHtmlTo = String(this.block.to);
     const contentRoot = document.createElement('div');
     contentRoot.className = 'meo-md-html-content';
-    const content = createSanitizedHtml(this.block.source, false, view, this.block.from);
+    const content = createSanitizedHtml(
+      this.block.source,
+      false,
+      view.state.facet(uiLanguageFacet),
+      view,
+      this.block.from
+    );
     if (content) {
       this.imageWidgets = content.imageWidgets;
       const firstElement = content.fragment.firstElementChild as HTMLElement | null;
@@ -361,10 +368,10 @@ class InlineHtmlWidget extends WidgetType {
     return other instanceof InlineHtmlWidget && other.source === this.source;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement('span');
     wrapper.className = 'meo-md-html-inline';
-    const content = createSanitizedHtml(this.source, true);
+    const content = createSanitizedHtml(this.source, true, view.state.facet(uiLanguageFacet));
     if (content) wrapper.appendChild(content.fragment);
     const firstElement = wrapper.firstElementChild;
     if (firstElement) {

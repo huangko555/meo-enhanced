@@ -9,7 +9,7 @@ import type {
   ImagePresentationFactory,
   ImagePresentationHandle
 } from '../editor/imagePresentation';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 

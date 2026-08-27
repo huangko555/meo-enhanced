@@ -17,6 +17,7 @@ export const EDITOR_APPEARANCE_SETTING_KEY = 'appearance.editor';
 export const PREVIEW_APPEARANCE_SETTING_KEY = 'appearance.preview';
 export const PREVIEW_FONT_FAMILY_SETTING_KEY = 'preview.fontFamily';
 export const PREVIEW_SOURCE_COLORING_SETTING_KEY = 'preview.sourceColoring';
+export const APPEARANCE_SETTINGS_MIGRATION_STATE_KEY = 'appearanceSettingsMigration';
 
 export type AppearanceSettings = {
   editorAppearance: EditorAppearance;
@@ -53,6 +54,18 @@ type Descriptor = {
   readonly settingKey: string;
   readonly legacyKey: string;
   readonly read: (settings: AppearanceSettings) => unknown;
+};
+
+type MigrationValue = {
+  readonly key: string;
+  readonly hasValue: boolean;
+  readonly value?: unknown;
+};
+
+type AppearanceSettingsMigration = {
+  readonly version: 1;
+  readonly configuration: readonly MigrationValue[];
+  readonly legacy: readonly MigrationValue[];
 };
 
 const descriptors: readonly Descriptor[] = [
@@ -95,23 +108,82 @@ const resolveSettings = (store: AppearanceSettingsStore, preferLegacy: boolean):
   };
 };
 
-const compensate = async (
+const toMigrationValue = (key: string, value: unknown): MigrationValue => ({
+  key,
+  hasValue: value !== undefined,
+  ...(value === undefined ? {} : { value })
+});
+
+const isMigrationValue = (value: unknown): value is MigrationValue => {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Partial<MigrationValue>;
+  return typeof candidate.key === 'string' && typeof candidate.hasValue === 'boolean';
+};
+
+const readPendingMigration = (store: AppearanceSettingsStore): AppearanceSettingsMigration | null => {
+  const value = store.readLegacy(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY);
+  if (value === undefined) return null;
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('Appearance settings migration journal is invalid');
+  }
+  const candidate = value as Partial<AppearanceSettingsMigration>;
+  if (candidate.version !== 1
+    || !Array.isArray(candidate.configuration)
+    || !candidate.configuration.every(isMigrationValue)
+    || !Array.isArray(candidate.legacy)
+    || !candidate.legacy.every(isMigrationValue)) {
+    throw new Error('Appearance settings migration journal is invalid');
+  }
+  return candidate as AppearanceSettingsMigration;
+};
+
+const restoreMigration = async (
   store: AppearanceSettingsStore,
-  clearedLegacy: ReadonlyArray<{ key: string; value: unknown }>,
-  writtenConfiguration: ReadonlyArray<{ key: string; value: unknown }>,
-  primary: unknown
-): Promise<void> => {
-  const errors = [primary];
-  for (const entry of [...clearedLegacy].reverse()) {
+  migration: AppearanceSettingsMigration
+): Promise<unknown[]> => {
+  const errors: unknown[] = [];
+  for (const entry of [...migration.legacy].reverse()) {
     try {
-      await store.updateLegacy(entry.key, entry.value);
+      await store.updateLegacy(entry.key, entry.hasValue ? entry.value : undefined);
     } catch (error) {
       errors.push(error);
     }
   }
-  for (const entry of [...writtenConfiguration].reverse()) {
+  for (const entry of [...migration.configuration].reverse()) {
     try {
-      await store.updateConfiguration(entry.key, entry.value);
+      await store.updateConfiguration(entry.key, entry.hasValue ? entry.value : undefined);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  return errors;
+};
+
+const recoverPendingMigration = async (store: AppearanceSettingsStore): Promise<void> => {
+  const migration = readPendingMigration(store);
+  if (migration === null) return;
+  const primary = new Error('Appearance settings migration recovery failed');
+  const errors = await restoreMigration(store, migration);
+  if (errors.length === 0) {
+    try {
+      await store.updateLegacy(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY, undefined);
+      return;
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  throw new AggregateError([primary, ...errors], primary.message, { cause: primary });
+};
+
+const compensate = async (
+  store: AppearanceSettingsStore,
+  migration: AppearanceSettingsMigration,
+  primary: unknown
+): Promise<void> => {
+  const errors = [primary, ...await restoreMigration(store, migration)];
+  if (errors.length === 1) {
+    try {
+      await store.updateLegacy(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY, undefined);
     } catch (error) {
       errors.push(error);
     }
@@ -124,28 +196,45 @@ const compensate = async (
 export async function createAppearanceSettingsOwner(
   store: AppearanceSettingsStore
 ): Promise<AppearanceSettingsOwner> {
+  await recoverPendingMigration(store);
   const legacySnapshot = resolveSettings(store, true);
   const legacyEntries = descriptors.flatMap((descriptor) => {
     const value = store.readLegacy(descriptor.legacyKey);
     return value === undefined ? [] : [{ descriptor, value }];
   });
-  const writtenConfiguration: Array<{ key: string; value: unknown }> = [];
-  const clearedLegacy: Array<{ key: string; value: unknown }> = [];
+  const configurationEntries = legacyEntries.flatMap(({ descriptor }) => {
+    const configured = store.readConfiguration(descriptor.settingKey);
+    return configured.explicit
+      ? []
+      : [toMigrationValue(descriptor.settingKey, configured.globalValue)];
+  });
+  const migration: AppearanceSettingsMigration = {
+    version: 1,
+    configuration: configurationEntries,
+    legacy: legacyEntries.map(({ descriptor, value }) => toMigrationValue(descriptor.legacyKey, value))
+  };
+  let migrationJournalWritten = false;
   let fallback: AppearanceSettings | null = null;
 
   try {
+    if (legacyEntries.length > 0) {
+      await store.updateLegacy(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY, migration);
+      migrationJournalWritten = true;
+    }
     for (const { descriptor } of legacyEntries) {
       const configured = store.readConfiguration(descriptor.settingKey);
       if (configured.explicit) continue;
-      writtenConfiguration.push({ key: descriptor.settingKey, value: configured.globalValue });
       await store.updateConfiguration(descriptor.settingKey, descriptor.read(legacySnapshot));
     }
-    for (const { descriptor, value } of legacyEntries) {
-      clearedLegacy.push({ key: descriptor.legacyKey, value });
+    for (const { descriptor } of legacyEntries) {
       await store.updateLegacy(descriptor.legacyKey, undefined);
     }
+    if (migrationJournalWritten) {
+      await store.updateLegacy(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY, undefined);
+      migrationJournalWritten = false;
+    }
   } catch (primary) {
-    await compensate(store, clearedLegacy, writtenConfiguration, primary);
+    if (migrationJournalWritten) await compensate(store, migration, primary);
     fallback = legacySnapshot;
   }
 

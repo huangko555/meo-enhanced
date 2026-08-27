@@ -1,5 +1,5 @@
 import type { EditorNotice } from './errors';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 export function createEditorNoticeController(
   banner: HTMLElement,

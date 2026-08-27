@@ -1,5 +1,5 @@
 import { createElement, CaseSensitive, ChevronUp, ChevronDown, Replace, ReplaceAll, WholeWord, X } from 'lucide';
-import { getUiStrings, type UiLanguage, type UiStrings } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage, type UiStrings } from '../application/uiLanguage';
 
 export interface FindPanelElements {
   panel: HTMLDivElement;

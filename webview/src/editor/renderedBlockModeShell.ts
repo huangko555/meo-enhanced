@@ -81,4 +81,4 @@ export function decideRenderedBlockModeShell(
         : 'destroyed'
   };
 }
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';

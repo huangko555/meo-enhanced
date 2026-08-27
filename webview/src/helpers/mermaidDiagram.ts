@@ -10,7 +10,7 @@ import type {
   MermaidDiagramPresentationConsumer,
   MermaidDiagramPresentationHandle
 } from '../editor/mermaidDiagramPresentation';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 declare global {
   interface Window {

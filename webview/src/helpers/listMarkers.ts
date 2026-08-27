@@ -9,7 +9,7 @@ import {
   type Range
 } from '@codemirror/state';
 import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemirror/view';
-import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { getUiStrings } from '../application/uiLanguage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
 

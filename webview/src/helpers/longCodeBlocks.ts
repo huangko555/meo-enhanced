@@ -8,7 +8,7 @@ import {
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
-import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { getUiStrings } from '../application/uiLanguage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 
 const LONG_CODE_LINE_THRESHOLD = 18;

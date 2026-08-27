@@ -1,6 +1,6 @@
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
-export function createCopyCodeButton(codeContent: string, language: UiLanguage = 'en'): HTMLSpanElement {
+export function createCopyCodeButton(codeContent: string, language: UiLanguage): HTMLSpanElement {
   const strings = getUiStrings(language);
   const button = document.createElement('span');
   button.className = 'meo-code-block-pill meo-copy-code-btn';
@@ -36,7 +36,7 @@ export function createCopyCodeButton(codeContent: string, language: UiLanguage =
   return button;
 }
 
-export function createSelectAllCodeButton(onSelectAll: () => void, language: UiLanguage = 'en'): HTMLSpanElement {
+export function createSelectAllCodeButton(onSelectAll: () => void, language: UiLanguage): HTMLSpanElement {
   const strings = getUiStrings(language);
   const button = document.createElement('span');
   button.className = 'meo-code-block-pill meo-select-all-code-btn';

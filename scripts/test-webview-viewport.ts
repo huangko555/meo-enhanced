@@ -68,7 +68,7 @@ async function main() {
   try {
     const page = await browser.newPage();
     page.on('console', (message) => console.log(message.text()));
-    await page.setViewport({ width: 900, height: 520, deviceScaleFactor: 1 });
+    await page.setViewport({ width: 420, height: 520, deviceScaleFactor: 1 });
     await page.setContent(`<!doctype html><body class="vscode-light"><div id="app" class="editor-root">
       <div class="mode-toolbar meo-preload-toolbar" role="presentation" aria-hidden="true"></div>
       <div class="editor-wrapper meo-preload-editor-shell" role="presentation" aria-hidden="true">
@@ -120,6 +120,22 @@ async function main() {
     ` });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
+    await waitForFrames(page, 4);
+    const pendingLanguageProjection = await page.evaluate(() => {
+      const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
+      const visibleText = Array.from(toolbar.querySelectorAll<HTMLElement>('button, [role="button"], input'))
+        .filter((element) => {
+          const style = getComputedStyle(element);
+          return style.display !== 'none' && style.visibility !== 'hidden';
+        })
+        .map((element) => element.textContent?.trim() || element.getAttribute('aria-label') || element.title)
+        .filter(Boolean);
+      return { ariaHidden: toolbar.getAttribute('aria-hidden'), visibleText };
+    });
+    if (pendingLanguageProjection.ariaHidden !== 'true' || pendingLanguageProjection.visibleText.length !== 0) {
+      throw new Error(`Unresolved UI language projected fallback English chrome: ${JSON.stringify(pendingLanguageProjection)}`);
+    }
+
     const initialText = createFixture();
     await page.evaluate(({ text, theme }) => {
       const init = {
@@ -137,6 +153,24 @@ async function main() {
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
+    const resolvedLanguageLayout = await page.evaluate(() => {
+      const toolbarRight = document.querySelector<HTMLElement>('.toolbar-right')!;
+      const visibleGroup = document.querySelector<HTMLElement>('.format-group')!;
+      const rightBoundary = toolbarRight.getBoundingClientRect().left;
+      const crossedBoundary = Array.from(visibleGroup.children).some((child) => {
+        if (!(child instanceof HTMLElement) || getComputedStyle(child).display === 'none') return false;
+        return child.getBoundingClientRect().right > rightBoundary + 1;
+      });
+      return {
+        crossedBoundary,
+        migratedCount: document.querySelectorAll('.more-tools-overflow-items > .is-toolbar-overflow-item').length
+      };
+    });
+    if (resolvedLanguageLayout.crossedBoundary || resolvedLanguageLayout.migratedCount === 0) {
+      throw new Error(`Resolved language did not refresh toolbar overflow currentness: ${JSON.stringify(resolvedLanguageLayout)}`);
+    }
+    await page.setViewport({ width: 900, height: 520, deviceScaleFactor: 1 });
+    await waitForFrames(page, 4);
     const chineseChrome = await page.evaluate(() => ({
       language: document.documentElement.lang,
       previewTools: document.querySelector('.preview-format-group')?.getAttribute('aria-label'),

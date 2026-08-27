@@ -5,7 +5,7 @@ import {
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
-import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { getUiStrings } from '../application/uiLanguage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 
 const lineDecos = {

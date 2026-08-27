@@ -1,5 +1,5 @@
 import { createElement, RotateCcw, ZoomIn, ZoomOut } from 'lucide';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 export type LatexMathViewportController = {
   destroy(): void;

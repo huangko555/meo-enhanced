@@ -127,6 +127,7 @@ async function main() {
         parent: document.getElementById('app')!,
         text,
         initialMode: 'live',
+        uiLanguage: 'zh-CN',
         onApplyChanges() {},
         onSelectionChange(state: any) {
           (window as any).__htmlSelectionState = state;
@@ -504,6 +505,10 @@ async function main() {
 
     const externalButton = await page.$('.meo-md-html-inline-link-button');
     if (!externalButton) throw new Error('Always-visible inline HTML link button was not rendered');
+    const externalButtonLabel = await externalButton.evaluate((button) => button.getAttribute('aria-label'));
+    if (externalButtonLabel !== '打开链接') {
+      throw new Error(`HTML link action did not use the editor UI language: ${externalButtonLabel}`);
+    }
     await externalButton.click();
     await waitForFrames(page, 2);
     const openedLinks = await page.evaluate(() => (window as any).__openedHtmlLinks);

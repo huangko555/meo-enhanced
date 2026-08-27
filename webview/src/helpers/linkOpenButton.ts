@@ -1,7 +1,7 @@
 import { createElement, ExternalLink, SquareArrowRightEnter } from 'lucide';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
-export function createOpenLinkButton(href: string, language: UiLanguage = 'en'): HTMLButtonElement {
+export function createOpenLinkButton(href: string, language: UiLanguage): HTMLButtonElement {
   const isDocumentFragment = href.startsWith('#');
   const strings = getUiStrings(language);
   const button = document.createElement('button');

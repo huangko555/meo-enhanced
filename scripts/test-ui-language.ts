@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  getUiStrings,
   normalizeUiLanguagePreference,
   resolveUiLanguage
 } from '../src/foundation/uiLanguage';
+import { getUiStrings } from '../webview/src/application/uiLanguage';
 
 assert.equal(normalizeUiLanguagePreference('en'), 'en');
 assert.equal(normalizeUiLanguagePreference('zh-CN'), 'zh-CN');

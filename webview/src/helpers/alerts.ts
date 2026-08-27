@@ -1,6 +1,6 @@
 import { WidgetType, type EditorView } from '@codemirror/view';
 import { createElement, Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
-import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { getUiStrings } from '../application/uiLanguage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 
 export type AlertType = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION';

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  APPEARANCE_SETTINGS_MIGRATION_STATE_KEY,
   createAppearanceSettingsOwner,
   EDITOR_APPEARANCE_SETTING_KEY,
   PREVIEW_APPEARANCE_SETTING_KEY,
@@ -22,22 +23,29 @@ const createStore = (options: {
   explicit?: readonly string[];
   failConfigurationOnce?: string;
   failLegacyOnce?: string;
+  configurationFailureCalls?: Readonly<Record<string, readonly number[]>>;
 } = {}) => {
   const legacy = new Map(Object.entries(options.legacy ?? {}));
   const configuration = new Map(Object.entries(options.configuration ?? {}));
   const explicit = new Set(options.explicit ?? []);
   let failConfigurationOnce = options.failConfigurationOnce;
   let failLegacyOnce = options.failLegacyOnce;
+  const configurationCallCounts = new Map<string, number>();
   const store: AppearanceSettingsStore = {
     readConfiguration: (key) => ({
       value: configuration.get(key),
-      explicit: explicit.has(key),
+      explicit: explicit.has(key) || configuration.has(key),
       globalValue: configuration.get(key)
     }),
     updateConfiguration: async (key, value) => {
+      const call = (configurationCallCounts.get(key) ?? 0) + 1;
+      configurationCallCounts.set(key, call);
       if (failConfigurationOnce === key) {
         failConfigurationOnce = undefined;
         throw new Error(`configuration failure: ${key}`);
+      }
+      if (options.configurationFailureCalls?.[key]?.includes(call)) {
+        throw new Error(`configuration failure ${call}: ${key}`);
       }
       if (value === undefined) configuration.delete(key);
       else configuration.set(key, value);
@@ -154,6 +162,48 @@ const legacyValues = {
   assert.equal(owner.getPreviewAppearance(), 'dark', 'explicit configuration must win over legacy state');
   assert.equal(legacy.size, 0, 'superseded legacy values must still be removed');
   assert.equal(configuration.get(PREVIEW_APPEARANCE_SETTING_KEY), 'dark');
+}
+
+{
+  const fixture = createStore({
+    legacy: legacyValues,
+    configurationFailureCalls: {
+      [PREVIEW_APPEARANCE_SETTING_KEY]: [1],
+      [EDITOR_APPEARANCE_SETTING_KEY]: [2]
+    }
+  });
+  await assert.rejects(
+    createAppearanceSettingsOwner(fixture.store),
+    (error: unknown) => error instanceof AggregateError
+      && error.errors[0] instanceof Error
+      && error.errors[0].message === `configuration failure 1: ${PREVIEW_APPEARANCE_SETTING_KEY}`
+      && error.cause === error.errors[0],
+    'migration and compensation failures must preserve the primary error'
+  );
+  assert.equal(
+    fixture.legacy.has(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY),
+    true,
+    'a compensation failure must retain a durable recovery journal'
+  );
+
+  const recoveredOwner = await createAppearanceSettingsOwner(fixture.store);
+  assert.deepEqual(
+    [
+      recoveredOwner.getEditorAppearance(),
+      recoveredOwner.getPreviewAppearance(),
+      recoveredOwner.getPreviewFontFamily(),
+      recoveredOwner.getPreviewSourceColoring()
+    ],
+    ['dark', 'light', 'Noto Sans', false],
+    'the next activation must recover one complete legacy snapshot before migrating again'
+  );
+  assert.equal(fixture.legacy.size, 0, 'successful recovery and migration must clear the journal and legacy keys');
+  assert.deepEqual(Object.fromEntries(fixture.configuration), {
+    [EDITOR_APPEARANCE_SETTING_KEY]: 'dark',
+    [PREVIEW_APPEARANCE_SETTING_KEY]: 'light',
+    [PREVIEW_FONT_FAMILY_SETTING_KEY]: 'Noto Sans',
+    [PREVIEW_SOURCE_COLORING_SETTING_KEY]: false
+  });
 }
 
 console.log('appearance settings migration checks passed');

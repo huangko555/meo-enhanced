@@ -2206,6 +2206,45 @@ async function main() {
     await assertLateFullscreenExitCannotCloseReplacementSession(page);
     await assertFullscreenCleanupPreservesPrimaryCause(page);
 
+    await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.id = 'localized-rendered-block-actions';
+      document.body.appendChild(host);
+      (window as any).__localizedRenderedBlockEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: host,
+        text: ['```mermaid', 'graph TD', 'A --> B', '```', '', '$$', 'x = 1', '$$'].join('\n'),
+        initialMode: 'live',
+        uiLanguage: 'zh-CN',
+        onApplyChanges() {}
+      });
+    });
+    await page.waitForFunction(() => (
+      document.querySelectorAll('#localized-rendered-block-actions .meo-mermaid-toolbar .meo-code-block-pill').length === 2
+      && document.querySelectorAll('#localized-rendered-block-actions .meo-latex-math-toolbar .meo-code-block-pill').length === 2
+    ));
+    const localizedRenderedBlockActions = await page.evaluate(() => ({
+      mermaid: Array.from(document.querySelectorAll<HTMLElement>(
+        '#localized-rendered-block-actions .meo-mermaid-toolbar .meo-code-block-pill'
+      )).map((button) => ({ text: button.textContent?.trim(), label: button.getAttribute('aria-label') })),
+      latex: Array.from(document.querySelectorAll<HTMLElement>(
+        '#localized-rendered-block-actions .meo-latex-math-toolbar .meo-code-block-pill'
+      )).map((button) => ({ text: button.textContent?.trim(), label: button.getAttribute('aria-label') }))
+    }));
+    const expectedLocalizedActions = [
+      { text: '全选', label: '全选代码' },
+      { text: '复制', label: '复制代码' }
+    ];
+    if (
+      JSON.stringify(localizedRenderedBlockActions.mermaid) !== JSON.stringify(expectedLocalizedActions)
+      || JSON.stringify(localizedRenderedBlockActions.latex) !== JSON.stringify(expectedLocalizedActions)
+    ) {
+      throw new Error(`Rendered-block actions did not use the editor UI language: ${JSON.stringify(localizedRenderedBlockActions)}`);
+    }
+    await page.evaluate(() => {
+      (window as any).__localizedRenderedBlockEditor.destroy();
+      document.getElementById('localized-rendered-block-actions')?.remove();
+    });
+
     console.log('Mermaid editing checks passed');
   } finally {
     await browser.close();

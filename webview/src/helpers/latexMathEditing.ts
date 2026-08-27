@@ -292,9 +292,9 @@ class LatexMathToolbarWidget extends WidgetType {
         );
         (editingBlock as LatexMathEditingBlockElement | null)?.__meoLatexMathEditingController?.selectAll();
       });
-    });
+    }, uiLanguage);
 
-    toolbar.append(modeButton, selectAllButton, createCopyCodeButton(this.sourceText));
+    toolbar.append(modeButton, selectAllButton, createCopyCodeButton(this.sourceText, uiLanguage));
     return toolbar;
   }
 

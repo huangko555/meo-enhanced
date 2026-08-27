@@ -314,8 +314,8 @@ class MermaidToolbarWidget extends WidgetType {
         );
         (editingBlock as MermaidEditingBlockElement | null)?.__meoMermaidEditingController?.selectAll();
       });
-    });
-    const copyButton = createCopyCodeButton(this.codeContent);
+    }, uiLanguage);
+    const copyButton = createCopyCodeButton(this.codeContent, uiLanguage);
 
     toolbar.append(modeButton, selectAllButton, copyButton);
     return toolbar;

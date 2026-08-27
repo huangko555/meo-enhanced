@@ -1,6 +1,6 @@
 import { Decoration, WidgetType, type EditorView } from '@codemirror/view';
 import type { HexColorRange } from '../../../src/shared/hexColorSwatches';
-import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 
 export function createColorSwatchElement(value: string, uiLanguage: UiLanguage = 'en'): HTMLSpanElement {

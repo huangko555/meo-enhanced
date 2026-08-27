@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view';
 import { getBaselineRangesPreview, getDeletedGapRangesPreview } from './gitDiffGutter';
-import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { getUiStrings } from '../application/uiLanguage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 
 type DiffContentHoverController = {
