@@ -353,9 +353,9 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        'Release Fixed Baseline',
-        'Current Edits', 'Recent Save', 'Git HEAD',
-        'Constrain Width'
+        '释放固定基线',
+        '当前编辑', '最近保存', 'Git HEAD',
+        '限制宽度'
       ]) ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||

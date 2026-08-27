@@ -78,6 +78,20 @@ export type UiStrings = Readonly<{
   saveDocument: string;
   reloadDiskVersion: string;
   reloadDiskVersionDoubleClick: string;
+  constrainContentWidth: string;
+  constrainWidth: string;
+  disableConstrainedWidth: string;
+  hideChanges: (baseline: string) => string;
+  showChanges: (baseline: string) => string;
+  fixedBaseline: string;
+  changes: string;
+  pinLatestSavedBaseline: string;
+  selectedMode: string;
+  showFixedBaseline: string;
+  releaseFixedBaseline: string;
+  currentEdits: string;
+  recentSave: string;
+  gitHead: string;
 }>;
 
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
@@ -113,7 +127,15 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     codeBlock: 'Code Block', quote: 'Quote', horizontalRule: 'Horizontal Rule',
     link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Line',
     goToLine: 'Go to line', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
-    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Reload disk version (double-click)'
+    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Reload disk version (double-click)',
+    constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
+    disableConstrainedWidth: 'Disable Constrained Width',
+    hideChanges: (baseline: string) => `Hide Changes (${baseline})`,
+    showChanges: (baseline: string) => `Show Changes (${baseline})`, fixedBaseline: 'Fixed Baseline',
+    changes: 'Changes', pinLatestSavedBaseline: 'Pin Latest Saved Version as Baseline',
+    selectedMode: 'Selected Mode', showFixedBaseline: 'Show Fixed Baseline',
+    releaseFixedBaseline: 'Release Fixed Baseline', currentEdits: 'Current Edits',
+    recentSave: 'Recent Save', gitHead: 'Git HEAD'
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
@@ -145,7 +167,15 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
     horizontalRule: '分隔线', link: '链接', wikiLink: 'Wiki 链接', image: '图片', table: '表格',
     line: '行', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
-    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '重新加载磁盘版本（双击）'
+    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '重新加载磁盘版本（双击）',
+    constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
+    disableConstrainedWidth: '取消内容宽度限制',
+    hideChanges: (baseline: string) => `隐藏更改（${baseline}）`,
+    showChanges: (baseline: string) => `显示更改（${baseline}）`, fixedBaseline: '固定基线',
+    changes: '更改', pinLatestSavedBaseline: '将最近保存版本固定为基线',
+    selectedMode: '所选模式', showFixedBaseline: '显示固定基线',
+    releaseFixedBaseline: '释放固定基线', currentEdits: '当前编辑', recentSave: '最近保存',
+    gitHead: 'Git HEAD'
   })
 });
 

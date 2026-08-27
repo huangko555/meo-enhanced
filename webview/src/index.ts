@@ -105,6 +105,7 @@ if (!root) {
 }
 
 root.classList.add('editor-root');
+let activeUiStrings = getUiStrings('en');
 
 const existingToolbar = root.querySelector('.mode-toolbar');
 const toolbar = existingToolbar instanceof HTMLElement ? existingToolbar : document.createElement('div');
@@ -245,10 +246,16 @@ releaseFixedBaselineBtn.setAttribute('role', 'menuitem');
 appendMoreToolsOptionContent(releaseFixedBaselineBtn, MapPinOff, 'Release Fixed Baseline');
 
 const diffBaselineOptions = [
-  { mode: 'current-edit', label: 'Current Edits' },
-  { mode: 'recent-save', label: 'Recent Save' },
-  { mode: 'git-head', label: 'Git HEAD' }
+  { mode: 'current-edit' },
+  { mode: 'recent-save' },
+  { mode: 'git-head' }
 ] as const;
+
+const getDiffBaselineLabel = (mode: typeof diffBaselineOptions[number]['mode']): string => ({
+  'current-edit': activeUiStrings.currentEdits,
+  'recent-save': activeUiStrings.recentSave,
+  'git-head': activeUiStrings.gitHead
+})[mode];
 
 const diffBaselineButtons: HTMLButtonElement[] = [];
 for (const option of diffBaselineOptions) {
@@ -257,7 +264,7 @@ for (const option of diffBaselineOptions) {
   button.className = 'more-tools-option changes-baseline-option';
   button.dataset.baselineMode = option.mode;
   button.setAttribute('role', 'menuitemradio');
-  appendMoreToolsOptionContent(button, GitCompare, option.label);
+  appendMoreToolsOptionContent(button, GitCompare, getDiffBaselineLabel(option.mode));
   diffBaselineButtons.push(button);
 }
 
@@ -269,17 +276,19 @@ const updateGitChangesGutterUI = () => {
   gitChangesGutterBtn.classList.toggle('is-active', gitChangesGutterVisible);
   gitChangesGutterBtn.setAttribute('aria-pressed', gitChangesGutterVisible ? 'true' : 'false');
   const modeLabel = fixedBaselineActive
-    ? 'Fixed Baseline'
-    : diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Changes';
-  gitChangesGutterBtn.title = gitChangesGutterVisible ? `Hide Changes (${modeLabel})` : `Show Changes (${modeLabel})`;
+    ? activeUiStrings.fixedBaseline
+    : getDiffBaselineLabel(diffBaselineMode) ?? activeUiStrings.changes;
+  gitChangesGutterBtn.title = gitChangesGutterVisible
+    ? activeUiStrings.hideChanges(modeLabel)
+    : activeUiStrings.showChanges(modeLabel);
   fixedBaselineBtn.classList.toggle('is-active', fixedBaselineActive);
   fixedBaselineBtn.classList.toggle('is-standby', fixedBaselinePinned && !fixedBaselineActive);
   fixedBaselineBtn.setAttribute('aria-pressed', fixedBaselineActive ? 'true' : 'false');
   fixedBaselineBtn.title = !fixedBaselinePinned
-    ? 'Pin Latest Saved Version as Baseline'
+    ? activeUiStrings.pinLatestSavedBaseline
     : fixedBaselineActive
-      ? `Show Changes (${diffBaselineOptions.find((option) => option.mode === diffBaselineMode)?.label ?? 'Selected Mode'})`
-      : 'Show Fixed Baseline';
+      ? activeUiStrings.showChanges(getDiffBaselineLabel(diffBaselineMode) ?? activeUiStrings.selectedMode)
+      : activeUiStrings.showFixedBaseline;
   fixedBaselineBtn.setAttribute('aria-label', fixedBaselineBtn.title);
   releaseFixedBaselineBtn.disabled = !fixedBaselinePinned;
   for (const option of diffBaselineButtons) {
@@ -314,7 +323,9 @@ const setFixedBaselineState = (pinned: boolean, active: boolean) => {
 const updateContentMaxWidthUI = () => {
   contentMaxWidthBtn.classList.toggle('is-active', contentMaxWidthEnabled);
   contentMaxWidthBtn.setAttribute('aria-checked', contentMaxWidthEnabled ? 'true' : 'false');
-  contentMaxWidthBtn.title = contentMaxWidthEnabled ? 'Disable Constrained Width' : 'Constrain Content Width';
+  contentMaxWidthBtn.title = contentMaxWidthEnabled
+    ? activeUiStrings.disableConstrainedWidth
+    : activeUiStrings.constrainContentWidth;
 };
 
 const syncGitDiffLineHighlights = () => {
@@ -752,6 +763,7 @@ editorAppearanceControl.setActive('dark');
 
 const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
+  activeUiStrings = strings;
   document.documentElement.lang = language;
   toolbar.setAttribute('aria-label', strings.editorToolbar);
   formatGroup.setAttribute('aria-label', strings.formatting);
@@ -782,6 +794,14 @@ const applyUiLanguage = (language: UiLanguage): void => {
   saveBtn.setAttribute('aria-label', strings.saveDocument);
   discardBtn.title = strings.reloadDiskVersionDoubleClick;
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
+  contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
+  releaseFixedBaselineBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.releaseFixedBaseline;
+  diffBaselineButtons.forEach((button) => {
+    const mode = button.dataset.baselineMode as typeof diffBaselineOptions[number]['mode'];
+    button.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = getDiffBaselineLabel(mode);
+  });
+  updateGitChangesGutterUI();
+  updateContentMaxWidthUI();
   findToggleBtn.title = strings.findAndReplace;
   exportHtmlOption.title = strings.exportAsHtml;
   exportHtmlOption.setAttribute('aria-label', strings.exportAsHtml);
