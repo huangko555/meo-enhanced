@@ -329,7 +329,7 @@ async function main(): Promise<void> {
       const host = document.getElementById('editor-host')!;
       host.replaceChildren();
       const longCode = Array.from({ length: 20 }, (_, index) => `const long${index + 1} = ${index + 1};`).join('\n');
-      const text = `[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\n\`\`\`ts\nconst value = 1;\n\`\`\`\n\n\`\`\`js\n${longCode}\n\`\`\`\n\nplain`;
+      const text = `[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\n\`\`\`ts\nconst value = 1;\n\`\`\`\n\n\`\`\`js\n${longCode}\n\`\`\`\n\n\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\`\n\n$$\nx^2\n$$\n\nplain`;
       const editor = harness.createEditor({
         parent: host,
         text,
@@ -353,6 +353,15 @@ async function main(): Promise<void> {
         longCode: {
           lines: document.querySelector('.meo-md-long-code-placeholder .meo-long-code-line-count')?.textContent,
           action: read('.meo-md-long-code-placeholder .meo-long-code-action')
+        },
+        renderedBlocks: {
+          controls: Array.from(document.querySelectorAll<HTMLElement>(
+            '.meo-mermaid-toolbar[role="group"], .meo-latex-math-toolbar[role="group"]'
+          )).map((element) => element.getAttribute('aria-label')),
+          modes: [
+            read('.meo-mermaid-mode-btn'),
+            read('.meo-latex-math-mode-btn')
+          ]
         }
       };
       editor.destroy();
@@ -380,7 +389,11 @@ async function main(): Promise<void> {
       footnote: '跳转到脚注 1',
       footnoteBack: '跳转到脚注引用 1',
       codeActions: ['全选代码', '复制代码', '全选代码', '复制代码'],
-      longCode: { lines: '20 行', action: '显示其余 10 行代码' }
+      longCode: { lines: '20 行', action: '显示其余 10 行代码' },
+      renderedBlocks: {
+        controls: ['第 39 行 Mermaid 块控件', '第 44 行公式块控件'],
+        modes: ['以分栏视图编辑 Mermaid', '以分栏视图编辑公式']
+      }
     });
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');
     assert.ok(result.undoResults.every(Boolean), 'all 20 list edits must undo');

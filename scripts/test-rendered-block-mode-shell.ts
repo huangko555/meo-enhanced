@@ -80,6 +80,23 @@ for (const example of kinds) {
   assert.deepEqual(manualSource.modeButton, { action: 'preview', label: example.previewAction });
   assert.equal(manualSource.wideLayout, 'source-only');
   assert.equal(manualSource.previewLifecycle, 'destroyed');
+
+  const localized = decideRenderedBlockModeShell({
+    kind: example.kind,
+    lineNumber: 12,
+    manualMode: 'preview',
+    temporaryReveal: false,
+    uiLanguage: 'zh-CN'
+  });
+  assert.equal(localized.controlsLabel, example.kind === 'mermaid'
+    ? '第 12 行 Mermaid 块控件'
+    : '第 12 行公式块控件');
+  assert.equal(localized.editorLabel, example.kind === 'mermaid'
+    ? '第 12 行 Mermaid 编辑器'
+    : '第 12 行公式编辑器');
+  assert.equal(localized.modeButton.label, example.kind === 'mermaid'
+    ? '以分栏视图编辑 Mermaid'
+    : '以分栏视图编辑公式');
 }
 
 console.log('Rendered block mode shell tests passed.');

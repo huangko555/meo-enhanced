@@ -94,6 +94,16 @@ export type UiStrings = Readonly<{
   showMoreLines: (count: number) => string;
   showLessCode: string;
   showLess: string;
+  mermaidBlockControls: (line: number) => string;
+  mermaidEditor: (line: number) => string;
+  editMermaidSplit: string;
+  showMermaidSource: string;
+  showMermaidPreview: string;
+  formulaBlockControls: (line: number) => string;
+  formulaEditor: (line: number) => string;
+  editFormulaSplit: string;
+  showFormulaSource: string;
+  showFormulaPreview: string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -183,6 +193,14 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     codeLines: (count: number) => `${count} lines`,
     showMoreCode: (count: number) => `Show ${count} more lines of code`,
     showMoreLines: (count: number) => `Show ${count} more lines`, showLessCode: 'Show less code', showLess: 'Show less',
+    mermaidBlockControls: (line: number) => `Mermaid block controls at line ${line}`,
+    mermaidEditor: (line: number) => `Mermaid editor at line ${line}`,
+    editMermaidSplit: 'Edit Mermaid in split view', showMermaidSource: 'Show Mermaid code only',
+    showMermaidPreview: 'Show Mermaid preview',
+    formulaBlockControls: (line: number) => `Formula block controls at line ${line}`,
+    formulaEditor: (line: number) => `Formula editor at line ${line}`,
+    editFormulaSplit: 'Edit formula in split view', showFormulaSource: 'Show formula source only',
+    showFormulaPreview: 'Show formula preview',
     heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
@@ -248,6 +266,14 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     codeLines: (count: number) => `${count} 行`,
     showMoreCode: (count: number) => `显示其余 ${count} 行代码`,
     showMoreLines: (count: number) => `显示其余 ${count} 行`, showLessCode: '收起代码', showLess: '收起',
+    mermaidBlockControls: (line: number) => `第 ${line} 行 Mermaid 块控件`,
+    mermaidEditor: (line: number) => `第 ${line} 行 Mermaid 编辑器`,
+    editMermaidSplit: '以分栏视图编辑 Mermaid', showMermaidSource: '仅显示 Mermaid 源码',
+    showMermaidPreview: '显示 Mermaid 预览',
+    formulaBlockControls: (line: number) => `第 ${line} 行公式块控件`,
+    formulaEditor: (line: number) => `第 ${line} 行公式编辑器`,
+    editFormulaSplit: '以分栏视图编辑公式', showFormulaSource: '仅显示公式源码',
+    showFormulaPreview: '显示公式预览',
     heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',

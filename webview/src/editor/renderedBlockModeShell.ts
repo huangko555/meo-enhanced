@@ -20,24 +20,8 @@ type RenderedBlockModeShellInput = {
   readonly lineNumber: number;
   readonly manualMode: RenderedBlockMode;
   readonly temporaryReveal: boolean;
+  readonly uiLanguage?: UiLanguage;
 };
-
-const COPY = {
-  mermaid: {
-    controls: 'Mermaid block controls',
-    editor: 'Mermaid editor',
-    split: 'Edit Mermaid in split view',
-    source: 'Show Mermaid code only',
-    preview: 'Show Mermaid preview'
-  },
-  latex: {
-    controls: 'Formula block controls',
-    editor: 'Formula editor',
-    split: 'Edit formula in split view',
-    source: 'Show formula source only',
-    preview: 'Show formula preview'
-  }
-} as const;
 
 function nextMode(mode: RenderedBlockMode): RenderedBlockMode {
   if (mode === 'preview') return 'split';
@@ -52,7 +36,22 @@ export function decideRenderedBlockModeShell(
     ? 'split'
     : input.manualMode;
   const nextManualMode = nextMode(effectiveMode);
-  const copy = COPY[input.kind];
+  const strings = getUiStrings(input.uiLanguage ?? 'en');
+  const copy = input.kind === 'mermaid'
+    ? {
+        controls: strings.mermaidBlockControls,
+        editor: strings.mermaidEditor,
+        split: strings.editMermaidSplit,
+        source: strings.showMermaidSource,
+        preview: strings.showMermaidPreview
+      }
+    : {
+        controls: strings.formulaBlockControls,
+        editor: strings.formulaEditor,
+        split: strings.editFormulaSplit,
+        source: strings.showFormulaSource,
+        preview: strings.showFormulaPreview
+      };
   const modeButton = nextManualMode === 'split'
     ? { action: 'edit' as const, label: copy.split }
     : nextManualMode === 'source'
@@ -67,8 +66,8 @@ export function decideRenderedBlockModeShell(
         ? 'is-split'
         : 'is-source',
     nextManualMode,
-    controlsLabel: `${copy.controls} at line ${input.lineNumber}`,
-    editorLabel: `${copy.editor} at line ${input.lineNumber}`,
+    controlsLabel: copy.controls(input.lineNumber),
+    editorLabel: copy.editor(input.lineNumber),
     modeButton,
     wideLayout: effectiveMode === 'split'
       ? 'side-by-side'
@@ -82,3 +81,4 @@ export function decideRenderedBlockModeShell(
         : 'destroyed'
   };
 }
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';

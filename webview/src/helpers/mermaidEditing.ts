@@ -20,6 +20,8 @@ import {
   type RenderedBlockMode,
   type RenderedBlockModeShellDecision
 } from '../editor/renderedBlockModeShell';
+import { uiLanguageFacet } from '../editor/uiLanguage';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export type MermaidBlockMode = RenderedBlockMode;
 
@@ -168,7 +170,8 @@ export function getMermaidBlockMode(
     kind: 'mermaid',
     lineNumber: state.doc.lineAt(anchor).number,
     manualMode: manual,
-    temporaryReveal: searchInside
+    temporaryReveal: searchInside,
+    uiLanguage: state.facet(uiLanguageFacet)
   });
   return {
     manual,
@@ -182,12 +185,18 @@ type MermaidToolbarElement = HTMLSpanElement & {
   [mermaidToolbarCodeContent]: string;
 };
 
-function updateMermaidModeButton(button: HTMLButtonElement, mode: MermaidBlockMode, lineNumber: number): void {
+function updateMermaidModeButton(
+  button: HTMLButtonElement,
+  mode: MermaidBlockMode,
+  lineNumber: number,
+  uiLanguage: UiLanguage
+): void {
   const decision = decideRenderedBlockModeShell({
     kind: 'mermaid',
     lineNumber,
     manualMode: mode,
-    temporaryReveal: false
+    temporaryReveal: false,
+    uiLanguage
   });
   const icon = decision.modeButton.action === 'edit'
     ? Pencil
@@ -236,11 +245,13 @@ class MermaidToolbarWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const uiLanguage = view.state.facet(uiLanguageFacet);
     const decision = decideRenderedBlockModeShell({
       kind: 'mermaid',
       lineNumber: this.lineNumber,
       manualMode: this.mode,
-      temporaryReveal: false
+      temporaryReveal: false,
+      uiLanguage
     });
     const toolbar = document.createElement('span') as MermaidToolbarElement;
     toolbar.className = 'meo-mermaid-toolbar';
@@ -254,7 +265,7 @@ class MermaidToolbarWidget extends WidgetType {
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
     modeButton.className = 'meo-mermaid-mode-btn';
-    updateMermaidModeButton(modeButton, this.mode, this.lineNumber);
+    updateMermaidModeButton(modeButton, this.mode, this.lineNumber, uiLanguage);
 
     const changeMode = (event: Event) => {
       event.preventDefault();
@@ -266,7 +277,8 @@ class MermaidToolbarWidget extends WidgetType {
         kind: 'mermaid',
         lineNumber: this.lineNumber,
         manualMode: currentMode,
-        temporaryReveal: false
+        temporaryReveal: false,
+        uiLanguage
       }).nextManualMode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
@@ -309,7 +321,7 @@ class MermaidToolbarWidget extends WidgetType {
     return toolbar;
   }
 
-  updateDOM(dom: HTMLElement): boolean {
+  updateDOM(dom: HTMLElement, view: EditorView): boolean {
     const toolbar = dom as MermaidToolbarElement;
     if (
       !toolbar.classList.contains('meo-mermaid-toolbar') ||
@@ -320,7 +332,12 @@ class MermaidToolbarWidget extends WidgetType {
     if (!modeButton) return false;
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
     toolbar.dataset.meoMermaidMode = this.mode;
-    updateMermaidModeButton(modeButton, this.mode, this.lineNumber);
+    updateMermaidModeButton(
+      modeButton,
+      this.mode,
+      this.lineNumber,
+      view.state.facet(uiLanguageFacet)
+    );
     return true;
   }
 
@@ -562,7 +579,8 @@ class MermaidEditingController {
       kind: 'mermaid',
       lineNumber: block.startLine,
       manualMode: mode,
-      temporaryReveal: false
+      temporaryReveal: false,
+      uiLanguage: outerView.state.facet(uiLanguageFacet)
     }).editorLabel);
     this.root.dataset.meoMermaidAnchor = String(block.anchor);
     this.sourcePane = document.createElement('div');
@@ -759,7 +777,8 @@ class MermaidEditingController {
       kind: 'mermaid',
       lineNumber: this.block.startLine,
       manualMode: mode,
-      temporaryReveal: false
+      temporaryReveal: false,
+      uiLanguage: this.outerView.state.facet(uiLanguageFacet)
     });
     this.root.className = `meo-mermaid-editing-block meo-rendered-block-mode-shell ${decision.modeClass}`;
     this.root.dataset.meoRenderedBlockMode = decision.effectiveMode;
@@ -903,7 +922,8 @@ export class MermaidEditingWidget extends WidgetType {
         kind: 'mermaid',
         lineNumber: this.block.startLine,
         manualMode: this.mode,
-        temporaryReveal: false
+        temporaryReveal: false,
+        uiLanguage: view.state.facet(uiLanguageFacet)
       }).editorLabel);
       applyLiveBlockIndent(dom, this.block.indentColumns);
     }

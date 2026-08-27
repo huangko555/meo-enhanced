@@ -14,6 +14,8 @@ import {
   type RenderedBlockMode,
   type RenderedBlockModeShellDecision
 } from '../editor/renderedBlockModeShell';
+import { uiLanguageFacet } from '../editor/uiLanguage';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export type LatexMathBlockMode = RenderedBlockMode;
 
@@ -148,7 +150,8 @@ export function getLatexMathBlockMode(
     kind: 'latex',
     lineNumber: state.doc.lineAt(anchor).number,
     manualMode: manual,
-    temporaryReveal: searchInside
+    temporaryReveal: searchInside,
+    uiLanguage: state.facet(uiLanguageFacet)
   });
   return {
     manual,
@@ -162,12 +165,18 @@ type LatexToolbarElement = HTMLSpanElement & {
   [latexToolbarSourceText]: string;
 };
 
-function updateLatexMathModeButton(button: HTMLButtonElement, mode: LatexMathBlockMode, lineNumber: number): void {
+function updateLatexMathModeButton(
+  button: HTMLButtonElement,
+  mode: LatexMathBlockMode,
+  lineNumber: number,
+  uiLanguage: UiLanguage
+): void {
   const decision = decideRenderedBlockModeShell({
     kind: 'latex',
     lineNumber,
     manualMode: mode,
-    temporaryReveal: false
+    temporaryReveal: false,
+    uiLanguage
   });
   const icon = decision.modeButton.action === 'edit'
     ? Pencil
@@ -218,11 +227,13 @@ class LatexMathToolbarWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const uiLanguage = view.state.facet(uiLanguageFacet);
     const decision = decideRenderedBlockModeShell({
       kind: 'latex',
       lineNumber: this.lineNumber,
       manualMode: this.mode,
-      temporaryReveal: false
+      temporaryReveal: false,
+      uiLanguage
     });
     const toolbar = document.createElement('span') as LatexToolbarElement;
     toolbar.className = 'meo-latex-math-toolbar';
@@ -236,7 +247,7 @@ class LatexMathToolbarWidget extends WidgetType {
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
     modeButton.className = 'meo-latex-math-mode-btn';
-    updateLatexMathModeButton(modeButton, this.mode, this.lineNumber);
+    updateLatexMathModeButton(modeButton, this.mode, this.lineNumber, uiLanguage);
     modeButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -245,7 +256,8 @@ class LatexMathToolbarWidget extends WidgetType {
         kind: 'latex',
         lineNumber: this.lineNumber,
         manualMode: currentMode,
-        temporaryReveal: false
+        temporaryReveal: false,
+        uiLanguage
       }).nextManualMode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
@@ -286,7 +298,7 @@ class LatexMathToolbarWidget extends WidgetType {
     return toolbar;
   }
 
-  updateDOM(dom: HTMLElement): boolean {
+  updateDOM(dom: HTMLElement, view: EditorView): boolean {
     const toolbar = dom as LatexToolbarElement;
     if (
       !toolbar.classList.contains('meo-latex-math-toolbar') ||
@@ -297,7 +309,12 @@ class LatexMathToolbarWidget extends WidgetType {
     const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
     if (!modeButton) return false;
     toolbar.dataset.meoLatexMathMode = this.mode;
-    updateLatexMathModeButton(modeButton, this.mode, this.lineNumber);
+    updateLatexMathModeButton(
+      modeButton,
+      this.mode,
+      this.lineNumber,
+      view.state.facet(uiLanguageFacet)
+    );
     return true;
   }
 
@@ -371,7 +388,8 @@ class LatexMathEditingController {
       kind: 'latex',
       lineNumber: block.lineNumber,
       manualMode: mode,
-      temporaryReveal: false
+      temporaryReveal: false,
+      uiLanguage: outerView.state.facet(uiLanguageFacet)
     }).editorLabel);
     this.root.dataset.meoLatexMathAnchor = String(block.anchor);
 
@@ -512,7 +530,8 @@ class LatexMathEditingController {
       kind: 'latex',
       lineNumber: this.block.lineNumber,
       manualMode: mode,
-      temporaryReveal: false
+      temporaryReveal: false,
+      uiLanguage: this.outerView.state.facet(uiLanguageFacet)
     });
     this.root.className = `meo-latex-math-editing-block meo-rendered-block-mode-shell ${decision.modeClass}`;
     this.root.dataset.meoRenderedBlockMode = decision.effectiveMode;
@@ -623,7 +642,8 @@ export class LatexMathEditingWidget extends WidgetType {
         kind: 'latex',
         lineNumber: this.block.lineNumber,
         manualMode: this.mode,
-        temporaryReveal: false
+        temporaryReveal: false,
+        uiLanguage: view.state.facet(uiLanguageFacet)
       }).editorLabel);
       applyLiveBlockIndent(dom, this.block.indentColumns);
     }
