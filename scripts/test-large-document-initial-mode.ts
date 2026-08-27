@@ -36,9 +36,9 @@ const context = {
   }
 };
 
-const openPanel = async (text: string) => {
-  document.text = text;
-  document.version += 1;
+const openPanel = async (text: string, targetDocument = document) => {
+  targetDocument.text = text;
+  targetDocument.version += 1;
   const messages: Array<Record<string, unknown>> = [];
   const panel = {
     active: true,
@@ -54,8 +54,8 @@ const openPanel = async (text: string) => {
   };
   const controller = createPanelSessionController(createPanelSessionControllerParams({
     panel,
-    document,
-    readDiskText: () => document.text,
+    document: targetDocument,
+    readDiskText: () => targetDocument.text,
     pendingDraftRecovery: {
       remember: (_text: string | null, version: number) => version,
       discardIfCurrent: () => true,
@@ -84,6 +84,18 @@ const manualLive = await openPanel(fixtures.get('composite')!);
 assert.equal(manualLive.init.mode, 'live', 'a manual Live preference must beat later automatic decisions');
 manualLive.controller.dispose();
 
+const otherLargeDocument = createPanelSessionTestDocument(
+  createPanelSessionTestUri('C:/other-large-document.md'),
+  fixtures.get('composite')!
+);
+const isolatedAutomaticSource = await openPanel(fixtures.get('composite')!, otherLargeDocument);
+assert.equal(
+  isolatedAutomaticSource.init.mode,
+  'source',
+  'manual Live intent from one document must not disable optimization in another document'
+);
+isolatedAutomaticSource.controller.dispose();
+
 persisted.clear();
 optimizationEnabled = false;
 const disabled = await openPanel(fixtures.get('composite')!);
@@ -92,8 +104,12 @@ disabled.controller.dispose();
 
 persisted.set('editorMode', 'preview');
 optimizationEnabled = true;
+const otherDocumentPreview = await openPanel(fixtures.get('composite')!);
+assert.equal(otherDocumentPreview.init.mode, 'source', 'another document Preview preference must not bypass optimization');
+await otherDocumentPreview.controller.handleMessage({ type: 'setMode', mode: 'preview' });
+otherDocumentPreview.controller.dispose();
 const manualPreview = await openPanel(fixtures.get('composite')!);
-assert.equal(manualPreview.init.mode, 'preview', 'all valid manual modes must retain precedence');
+assert.equal(manualPreview.init.mode, 'preview', 'this document manual Preview preference must retain precedence');
 manualPreview.controller.dispose();
 
 console.log('Large document initial mode production checks passed');

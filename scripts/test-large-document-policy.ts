@@ -59,26 +59,37 @@ assert.equal(
 assert.equal(selectInitialEditorMode({
   text: fixtures.get('ordinary')!.text,
   persistedMode: null,
+  documentMode: null,
   optimizationEnabled: true
 }), 'live');
 assert.equal(selectInitialEditorMode({
   text: fixtures.get('composite')!.text,
   persistedMode: null,
+  documentMode: null,
   optimizationEnabled: true
 }), 'source');
 assert.equal(selectInitialEditorMode({
   text: fixtures.get('composite')!.text,
   persistedMode: null,
+  documentMode: null,
   optimizationEnabled: false
 }), 'live');
 assert.equal(selectInitialEditorMode({
   text: fixtures.get('composite')!.text,
   persistedMode: 'live',
+  documentMode: null,
   optimizationEnabled: true
-}), 'live', 'a persisted manual Live preference must beat the automatic Source decision');
+}), 'source', 'another document global Live preference must not disable automatic Source');
+assert.equal(selectInitialEditorMode({
+  text: fixtures.get('composite')!.text,
+  persistedMode: 'preview',
+  documentMode: 'live',
+  optimizationEnabled: true
+}), 'live', 'this document manual Live preference must beat the automatic Source decision');
 assert.equal(selectInitialEditorMode({
   text: fixtures.get('ordinary')!.text,
   persistedMode: 'preview',
+  documentMode: null,
   optimizationEnabled: true
 }), 'preview');
 
