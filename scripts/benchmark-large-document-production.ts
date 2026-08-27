@@ -33,6 +33,15 @@ type BrowserMemory = {
   readonly jsHeapSizeLimit: number;
 } | null;
 
+type ResourceSample = {
+  readonly resizeObservers: number;
+  readonly mutationObservers: number;
+  readonly intersectionObservers: number;
+  readonly pendingFrames: number;
+  readonly pendingIdleCallbacks: number;
+  readonly pendingTimeouts: number;
+};
+
 const median = (values: readonly number[]): number => {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -48,7 +57,197 @@ async function preparePage(page: Page): Promise<void> {
   await page.addStyleTag({
     content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--meo-line-height-live:1.6;--meo-line-height-source:1.5}'
   });
+  await page.evaluate(() => {
+    const active = {
+      resize: new Set<object>(),
+      mutation: new Set<object>(),
+      intersection: new Set<object>(),
+      frames: new Set<number>(),
+      idle: new Set<number>(),
+      timeouts: new Set<number>()
+    };
+    const idleWaiters = new Set<() => void>();
+    const resourcesAreIdle = () => active.resize.size === 0
+      && active.mutation.size === 0
+      && active.intersection.size === 0
+      && active.frames.size === 0
+      && active.idle.size === 0
+      && active.timeouts.size === 0;
+    const settleIdleWaiters = () => {
+      if (!resourcesAreIdle()) return;
+      for (const resolve of idleWaiters) resolve();
+      idleWaiters.clear();
+    };
+    const NativeResizeObserver = window.ResizeObserver;
+    const NativeMutationObserver = window.MutationObserver;
+    const NativeIntersectionObserver = window.IntersectionObserver;
+    const NativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    const NativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+    const NativeRequestIdleCallback = window.requestIdleCallback?.bind(window);
+    const NativeCancelIdleCallback = window.cancelIdleCallback?.bind(window);
+    const NativeSetTimeout = window.setTimeout.bind(window);
+    const NativeClearTimeout = window.clearTimeout.bind(window);
+
+    class TrackedResizeObserver extends NativeResizeObserver {
+      readonly targets = new Set<Element>();
+      override observe(target: Element, options?: ResizeObserverOptions): void {
+        this.targets.add(target);
+        active.resize.add(this);
+        super.observe(target, options);
+      }
+      override unobserve(target: Element): void {
+        super.unobserve(target);
+        this.targets.delete(target);
+        if (this.targets.size === 0) active.resize.delete(this);
+        settleIdleWaiters();
+      }
+      override disconnect(): void {
+        super.disconnect();
+        this.targets.clear();
+        active.resize.delete(this);
+        settleIdleWaiters();
+      }
+    }
+    class TrackedMutationObserver extends NativeMutationObserver {
+      override observe(target: Node, options?: MutationObserverInit): void {
+        active.mutation.add(this);
+        super.observe(target, options);
+      }
+      override disconnect(): void {
+        super.disconnect();
+        active.mutation.delete(this);
+        settleIdleWaiters();
+      }
+    }
+    class TrackedIntersectionObserver extends NativeIntersectionObserver {
+      readonly targets = new Set<Element>();
+      override observe(target: Element): void {
+        this.targets.add(target);
+        active.intersection.add(this);
+        super.observe(target);
+      }
+      override unobserve(target: Element): void {
+        super.unobserve(target);
+        this.targets.delete(target);
+        if (this.targets.size === 0) active.intersection.delete(this);
+        settleIdleWaiters();
+      }
+      override disconnect(): void {
+        super.disconnect();
+        this.targets.clear();
+        active.intersection.delete(this);
+        settleIdleWaiters();
+      }
+    }
+
+    window.ResizeObserver = TrackedResizeObserver;
+    window.MutationObserver = TrackedMutationObserver;
+    window.IntersectionObserver = TrackedIntersectionObserver;
+    window.requestAnimationFrame = (callback) => {
+      const id = NativeRequestAnimationFrame((time) => {
+        active.frames.delete(id);
+        try {
+          callback(time);
+        } finally {
+          settleIdleWaiters();
+        }
+      });
+      active.frames.add(id);
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => {
+      active.frames.delete(id);
+      NativeCancelAnimationFrame(id);
+      settleIdleWaiters();
+    };
+    if (NativeRequestIdleCallback && NativeCancelIdleCallback) {
+      window.requestIdleCallback = (callback, options) => {
+        const id = NativeRequestIdleCallback((deadline) => {
+          active.idle.delete(id);
+          try {
+            callback(deadline);
+          } finally {
+            settleIdleWaiters();
+          }
+        }, options);
+        active.idle.add(id);
+        return id;
+      };
+      window.cancelIdleCallback = (id) => {
+        active.idle.delete(id);
+        NativeCancelIdleCallback(id);
+        settleIdleWaiters();
+      };
+    }
+    window.setTimeout = ((callback: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (typeof callback !== 'function') return NativeSetTimeout(callback, delay, ...args);
+      const id = NativeSetTimeout(() => {
+        active.timeouts.delete(id);
+        try {
+          callback(...args);
+        } finally {
+          settleIdleWaiters();
+        }
+      }, delay);
+      active.timeouts.add(id);
+      return id;
+    }) as typeof window.setTimeout;
+    window.clearTimeout = ((id?: number) => {
+      if (typeof id === 'number') active.timeouts.delete(id);
+      NativeClearTimeout(id);
+      settleIdleWaiters();
+    }) as typeof window.clearTimeout;
+    (window as any).__largeDocumentResourceProbe = {
+      snapshot: (): ResourceSample => ({
+        resizeObservers: active.resize.size,
+        mutationObservers: active.mutation.size,
+        intersectionObservers: active.intersection.size,
+        pendingFrames: active.frames.size,
+        pendingIdleCallbacks: active.idle.size,
+        pendingTimeouts: active.timeouts.size
+      }),
+      whenIdle: () => resourcesAreIdle()
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => idleWaiters.add(resolve))
+    };
+  });
   await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+}
+
+async function readResources(page: Page): Promise<ResourceSample> {
+  return page.evaluate(() => (window as any).__largeDocumentResourceProbe.snapshot());
+}
+
+function assertLiveResourceBound(
+  kind: LargeDocumentFixture['kind'],
+  sample: StableSample,
+  resources: ResourceSample
+): void {
+  const connectedRichBlocks = sample.tables + sample.mermaid + sample.images + sample.math;
+  assert.ok(
+    resources.resizeObservers <= 4 + connectedRichBlocks,
+    `${kind} allocated ResizeObservers outside the connected rich surface: ${JSON.stringify({ sample, resources })}`
+  );
+  assert.ok(
+    resources.mutationObservers <= 2 + sample.mermaid * 2,
+    `${kind} allocated MutationObservers outside the connected Mermaid surface`
+  );
+  assert.ok(resources.intersectionObservers <= 2, `${kind} duplicated viewport observers`);
+  assert.ok(resources.pendingFrames <= 1, `${kind} retained unbounded frame work`);
+  assert.ok(resources.pendingIdleCallbacks <= 1, `${kind} retained unbounded idle work`);
+  assert.ok(
+    resources.pendingTimeouts <= 4,
+    `${kind} retained unbounded timeout work: ${resources.pendingTimeouts}`
+  );
+}
+
+function assertSourceResourceBound(kind: LargeDocumentFixture['kind'], resources: ResourceSample): void {
+  assert.ok(resources.resizeObservers <= 3, `${kind} Source duplicated ResizeObservers`);
+  assert.ok(resources.mutationObservers <= 1, `${kind} Source duplicated MutationObservers`);
+  assert.ok(resources.intersectionObservers <= 2, `${kind} Source duplicated viewport observers`);
+  assert.ok(resources.pendingFrames <= 1, `${kind} Source retained unbounded frame work`);
+  assert.ok(resources.pendingIdleCallbacks <= 1, `${kind} Source retained unbounded idle work`);
+  assert.ok(resources.pendingTimeouts <= 4, `${kind} Source retained unbounded timeout work`);
 }
 
 async function observeStableEditor(page: Page, expectedMode: 'live' | 'source'): Promise<{
@@ -118,15 +317,33 @@ async function createEditor(page: Page, fixture: LargeDocumentFixture, mode: 'li
   return { synchronousMs, stableMs: stable.elapsedMs, sample: stable.sample };
 }
 
-async function destroyEditor(page: Page): Promise<{ readonly connectedEditors: number }> {
-  return page.evaluate(async () => {
+async function destroyEditor(page: Page): Promise<{
+  readonly connectedEditors: number;
+  readonly resources: ResourceSample;
+}> {
+  const connectedEditors = await page.evaluate(async () => {
     (window as any).__largeDocumentBenchmarkEditor?.destroy();
     (window as any).__largeDocumentBenchmarkEditor = null;
     document.getElementById('app')?.replaceChildren();
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    return { connectedEditors: document.querySelectorAll('#app .cm-editor').length };
+    return document.querySelectorAll('#app .cm-editor').length;
   });
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      page.evaluate(() => (window as any).__largeDocumentResourceProbe.whenIdle()),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Browser resources did not settle after editor destroy')),
+          page.getDefaultTimeout()
+        );
+      })
+    ]);
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
+  }
+  return { connectedEditors, resources: await readResources(page) };
 }
 
 async function measureInput(page: Page, marker: string): Promise<number> {
@@ -176,6 +393,7 @@ async function measureScroll(page: Page, line: number): Promise<{
   readonly line: number;
   readonly elapsedMs: number;
   readonly sample: StableSample;
+  readonly resources: ResourceSample;
 }> {
   const startedAt = await page.evaluate(() => performance.now());
   await page.evaluate((targetLine) => {
@@ -183,7 +401,7 @@ async function measureScroll(page: Page, line: number): Promise<{
   }, line);
   const stable = await observeStableEditor(page, 'live');
   const elapsedMs = await page.evaluate((started) => performance.now() - started, startedAt);
-  return { line, elapsedMs, sample: stable.sample };
+  return { line, elapsedMs, sample: stable.sample, resources: await readResources(page) };
 }
 
 async function main(): Promise<void> {
@@ -209,12 +427,24 @@ async function main(): Promise<void> {
         console.log(`[benchmark] ${fixture.kind} initial Live`);
         const initialLive = await createEditor(page, fixture, 'live');
         const initialLiveMemory = await readMemory(page);
+        const initialLiveResources = await readResources(page);
+        assertLiveResourceBound(fixture.kind, initialLive.sample, initialLiveResources);
         const liveDestroy = await destroyEditor(page);
         assert.equal(liveDestroy.connectedEditors, 0);
+        assert.deepEqual(liveDestroy.resources, {
+          resizeObservers: 0,
+          mutationObservers: 0,
+          intersectionObservers: 0,
+          pendingFrames: 0,
+          pendingIdleCallbacks: 0,
+          pendingTimeouts: 0
+        }, `${fixture.kind} Live destroy leaked browser resources`);
 
         console.log(`[benchmark] ${fixture.kind} initial Source`);
         const initialSource = await createEditor(page, fixture, 'source');
         const sourceMemory = await readMemory(page);
+        const initialSourceResources = await readResources(page);
+        assertSourceResourceBound(fixture.kind, initialSourceResources);
         const sourceToLiveStartedAt = await page.evaluate(() => performance.now());
         await page.evaluate(() => (window as any).__largeDocumentBenchmarkEditor.setMode('live'));
         await observeStableEditor(page, 'live');
@@ -233,12 +463,18 @@ async function main(): Promise<void> {
         ]) {
           scroll.push(await measureScroll(page, line));
         }
+        for (const observation of scroll) {
+          assertLiveResourceBound(fixture.kind, observation.sample, observation.resources);
+        }
 
         console.log(`[benchmark] ${fixture.kind} input`);
         const inputSamples: number[] = [];
         for (const marker of ['x', 'y', 'z']) {
           inputSamples.push(await measureInput(page, marker));
         }
+        const inputSample = (await observeStableEditor(page, 'live')).sample;
+        const inputResources = await readResources(page);
+        assertLiveResourceBound(fixture.kind, inputSample, inputResources);
 
         console.log(`[benchmark] ${fixture.kind} return Source`);
         const liveToSourceStartedAt = await page.evaluate(() => performance.now());
@@ -264,6 +500,14 @@ async function main(): Promise<void> {
         });
         const finalDestroy = await destroyEditor(page);
         assert.equal(finalDestroy.connectedEditors, 0);
+        assert.deepEqual(finalDestroy.resources, {
+          resizeObservers: 0,
+          mutationObservers: 0,
+          intersectionObservers: 0,
+          pendingFrames: 0,
+          pendingIdleCallbacks: 0,
+          pendingTimeouts: 0
+        }, `${fixture.kind} final destroy leaked browser resources`);
         assert.deepEqual(pageErrors, [], `${fixture.kind} emitted browser page errors`);
         assert.equal(finalState.textSuffix.endsWith('xyz'), true);
         assert.equal(finalState.selectionCollapsed, true);
@@ -275,14 +519,17 @@ async function main(): Promise<void> {
           dimensions,
           initialLive,
           initialLiveMemory,
+          initialLiveResources,
           initialSource,
           sourceMemory,
+          initialSourceResources,
           sourceToLiveMs,
           scroll,
           inputToPaintMs: {
             samples: inputSamples,
             median: median(inputSamples)
           },
+          inputResources,
           liveToSourceMs,
           finalState
         });
@@ -296,7 +543,7 @@ async function main(): Promise<void> {
     const reportPath = path.join(outputDir, `large-document-${Date.now()}.json`);
     const head = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repoRoot }).stdout.toString().trim();
     fs.writeFileSync(reportPath, `${JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       head,
       createdAt: new Date().toISOString(),
       environment: {
