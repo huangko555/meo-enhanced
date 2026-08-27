@@ -25,7 +25,7 @@ async function main() {
     const result = await page.evaluate(() => {
       const banner = document.getElementById('notice') as HTMLElement;
       let dismissCount = 0;
-      const controller = (window as any).EditorNoticeHarness.createEditorNoticeController(banner, () => {
+      const controller = (window as any).EditorNoticeHarness.createEditorNoticeController(banner, 'zh-CN', () => {
         dismissCount += 1;
       });
       controller.setEditorNotice('First warning', 'warning');
@@ -48,7 +48,7 @@ async function main() {
     });
 
     if (!result.firstState.visible || result.firstState.text !== 'First warning' ||
-      result.firstState.closeLabel !== 'Dismiss notification' || !result.firstState.closeIsLast) {
+      result.firstState.closeLabel !== '关闭通知' || !result.firstState.closeIsLast) {
       throw new Error(`notice close control was incorrect: ${JSON.stringify(result.firstState)}`);
     }
     if (!result.dismissed || result.dismissCount !== 1) throw new Error('notice could not be dismissed');

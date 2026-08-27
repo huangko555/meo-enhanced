@@ -942,7 +942,11 @@ editorNoticeBanner.setAttribute('role', 'status');
 editorNoticeBanner.setAttribute('aria-live', 'polite');
 editorNoticeBanner.hidden = true;
 let handleEditorNoticeDismiss = (): void => {};
-const editorNotice = createEditorNoticeController(editorNoticeBanner, () => handleEditorNoticeDismiss());
+const editorNotice = createEditorNoticeController(
+  editorNoticeBanner,
+  activeUiLanguage,
+  () => handleEditorNoticeDismiss()
+);
 
 toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarRight, findPanelElements.panel, editorNoticeBanner);
 

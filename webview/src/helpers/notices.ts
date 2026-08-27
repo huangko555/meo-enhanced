@@ -3,8 +3,10 @@ import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 export function createEditorNoticeController(
   banner: HTMLElement,
+  uiLanguage: UiLanguage,
   onDismiss?: () => void
 ): EditorNotice & { setUiLanguage: (language: UiLanguage) => void } {
+  const strings = getUiStrings(uiLanguage);
   const message = document.createElement('span');
   message.className = 'editor-notice-message';
 
@@ -12,8 +14,8 @@ export function createEditorNoticeController(
   closeButton.type = 'button';
   closeButton.className = 'editor-notice-close';
   closeButton.textContent = '×';
-  closeButton.title = 'Dismiss notification';
-  closeButton.setAttribute('aria-label', 'Dismiss notification');
+  closeButton.title = strings.dismissNotification;
+  closeButton.setAttribute('aria-label', strings.dismissNotification);
   banner.replaceChildren(message, closeButton);
 
   const clearEditorNotice = (): void => {

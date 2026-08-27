@@ -54,6 +54,7 @@ type Descriptor = {
   readonly settingKey: string;
   readonly legacyKey: string;
   readonly read: (settings: AppearanceSettings) => unknown;
+  readonly normalizeLegacy: (value: unknown) => unknown;
 };
 
 type MigrationValue = {
@@ -68,35 +69,39 @@ type ConfigurationMigrationValue = MigrationValue & {
 };
 
 type AppearanceSettingsMigration = {
-  readonly version: 1;
+  readonly version: 2;
   readonly configuration: readonly ConfigurationMigrationValue[];
   readonly legacy: readonly MigrationValue[];
 };
+
+const normalizeSourceColoring = (value: unknown): boolean => value !== false;
 
 const descriptors: readonly Descriptor[] = [
   {
     settingKey: EDITOR_APPEARANCE_SETTING_KEY,
     legacyKey: EDITOR_APPEARANCE_STATE_KEY,
-    read: (settings) => settings.editorAppearance
+    read: (settings) => settings.editorAppearance,
+    normalizeLegacy: normalizeEditorAppearance
   },
   {
     settingKey: PREVIEW_APPEARANCE_SETTING_KEY,
     legacyKey: PREVIEW_APPEARANCE_STATE_KEY,
-    read: (settings) => settings.previewAppearance
+    read: (settings) => settings.previewAppearance,
+    normalizeLegacy: normalizePreviewAppearance
   },
   {
     settingKey: PREVIEW_FONT_FAMILY_SETTING_KEY,
     legacyKey: PREVIEW_FONT_FAMILY_STATE_KEY,
-    read: (settings) => settings.previewFontFamily
+    read: (settings) => settings.previewFontFamily,
+    normalizeLegacy: normalizeStoredPreviewFontFamily
   },
   {
     settingKey: PREVIEW_SOURCE_COLORING_SETTING_KEY,
     legacyKey: PREVIEW_SOURCE_COLORING_STATE_KEY,
-    read: (settings) => settings.previewSourceColoring
+    read: (settings) => settings.previewSourceColoring,
+    normalizeLegacy: normalizeSourceColoring
   }
 ];
-
-const normalizeSourceColoring = (value: unknown): boolean => value !== false;
 
 const resolveSettings = (store: AppearanceSettingsStore, preferLegacy: boolean): AppearanceSettings => {
   const resolve = (settingKey: string, legacyKey: string): unknown => {
@@ -136,15 +141,38 @@ const readPendingMigration = (store: AppearanceSettingsStore): AppearanceSetting
   if (typeof value !== 'object' || value === null) {
     throw new Error('Appearance settings migration journal is invalid');
   }
-  const candidate = value as Partial<AppearanceSettingsMigration>;
-  if (candidate.version !== 1
-    || !Array.isArray(candidate.configuration)
-    || !candidate.configuration.every(isConfigurationMigrationValue)
+  const candidate = value as {
+    version?: unknown;
+    configuration?: unknown;
+    legacy?: unknown;
+  };
+  if (!Array.isArray(candidate.configuration)
     || !Array.isArray(candidate.legacy)
     || !candidate.legacy.every(isMigrationValue)) {
     throw new Error('Appearance settings migration journal is invalid');
   }
-  return candidate as AppearanceSettingsMigration;
+  if (candidate.version === 2 && candidate.configuration.every(isConfigurationMigrationValue)) {
+    return candidate as AppearanceSettingsMigration;
+  }
+  if (candidate.version === 1 && candidate.configuration.every(isMigrationValue)) {
+    const legacy = candidate.legacy as MigrationValue[];
+    const configuration = candidate.configuration.map((entry): ConfigurationMigrationValue => {
+      const descriptor = descriptors.find(({ settingKey }) => settingKey === entry.key);
+      const legacyEntry = descriptor
+        ? legacy.find(({ key }) => key === descriptor.legacyKey)
+        : undefined;
+      if (!descriptor || !legacyEntry?.hasValue) {
+        throw new Error('Appearance settings migration journal is invalid');
+      }
+      return {
+        ...entry,
+        hasExpectedValue: true,
+        expectedValue: descriptor.normalizeLegacy(legacyEntry.value)
+      };
+    });
+    return { version: 2, configuration, legacy };
+  }
+  throw new Error('Appearance settings migration journal is invalid');
 };
 
 const restoreMigration = async (
@@ -226,7 +254,7 @@ export async function createAppearanceSettingsOwner(
         }];
   });
   const migration: AppearanceSettingsMigration = {
-    version: 1,
+    version: 2,
     configuration: configurationEntries,
     legacy: legacyEntries.map(({ descriptor, value }) => toMigrationValue(descriptor.legacyKey, value))
   };

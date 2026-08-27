@@ -217,13 +217,22 @@ const legacyValues = {
     ]
   });
   await assert.rejects(createAppearanceSettingsOwner(fixture.store), AggregateError);
+  const currentJournal = fixture.legacy.get(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY) as {
+    configuration: Array<{ key: string; hasValue: boolean; value?: unknown }>;
+    legacy: Array<{ key: string; hasValue: boolean; value?: unknown }>;
+  };
+  fixture.legacy.set(APPEARANCE_SETTINGS_MIGRATION_STATE_KEY, {
+    version: 1,
+    configuration: currentJournal.configuration.map(({ key, hasValue, value }) => ({ key, hasValue, value })),
+    legacy: currentJournal.legacy
+  });
   fixture.configuration.set(EDITOR_APPEARANCE_SETTING_KEY, 'light');
 
   const recoveredOwner = await createAppearanceSettingsOwner(fixture.store);
   assert.equal(
     recoveredOwner.getEditorAppearance(),
     'light',
-    'recovery must preserve a configuration value changed after the failed migration'
+    'v1 journal recovery must preserve a configuration value changed after the failed migration'
   );
   assert.equal(fixture.legacy.size, 0, 'recovery must still converge and clear the durable journal');
   assert.deepEqual(Object.fromEntries(fixture.configuration), {
