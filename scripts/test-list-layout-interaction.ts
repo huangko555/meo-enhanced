@@ -328,7 +328,7 @@ async function main(): Promise<void> {
       const harness = (window as any).ListEditingHarness;
       const host = document.getElementById('editor-host')!;
       host.replaceChildren();
-      const text = '[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\nplain';
+      const text = '[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\n```ts\nconst value = 1;\n```\n\nplain';
       const editor = harness.createEditor({
         parent: host,
         text,
@@ -347,7 +347,8 @@ async function main(): Promise<void> {
         details: read('.meo-md-details-summary'),
         detailsSource: read('.meo-md-details-source-toggle'),
         footnote: read('.meo-md-footnote-ref'),
-        footnoteBack: read('.meo-md-footnote-backref')
+        footnoteBack: read('.meo-md-footnote-backref'),
+        codeActions: Array.from(document.querySelectorAll('.meo-code-block-actions [aria-label]')).map((element) => element.getAttribute('aria-label'))
       };
       editor.destroy();
       return output;
@@ -372,7 +373,8 @@ async function main(): Promise<void> {
     assert.deepEqual(localizedNavigation, {
       openLink: '打开链接',
       footnote: '跳转到脚注 1',
-      footnoteBack: '跳转到脚注引用 1'
+      footnoteBack: '跳转到脚注引用 1',
+      codeActions: ['全选代码', '复制代码']
     });
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');
     assert.ok(result.undoResults.every(Boolean), 'all 20 list edits must undo');

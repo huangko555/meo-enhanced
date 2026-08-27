@@ -1,13 +1,16 @@
-export function createCopyCodeButton(codeContent: string): HTMLSpanElement {
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
+
+export function createCopyCodeButton(codeContent: string, language: UiLanguage = 'en'): HTMLSpanElement {
+  const strings = getUiStrings(language);
   const button = document.createElement('span');
   button.className = 'meo-code-block-pill meo-copy-code-btn';
-  button.setAttribute('aria-label', 'Copy code');
+  button.setAttribute('aria-label', strings.copyCode);
   button.setAttribute('role', 'button');
   button.setAttribute('tabindex', '0');
-  button.textContent = 'copy';
+  button.textContent = strings.copy;
 
   const updateText = (copied: boolean) => {
-    button.textContent = copied ? 'copied' : 'copy';
+    button.textContent = copied ? strings.copied : strings.copy;
     button.classList.toggle('copied', copied);
   };
 
@@ -33,13 +36,14 @@ export function createCopyCodeButton(codeContent: string): HTMLSpanElement {
   return button;
 }
 
-export function createSelectAllCodeButton(onSelectAll: () => void): HTMLSpanElement {
+export function createSelectAllCodeButton(onSelectAll: () => void, language: UiLanguage = 'en'): HTMLSpanElement {
+  const strings = getUiStrings(language);
   const button = document.createElement('span');
   button.className = 'meo-code-block-pill meo-select-all-code-btn';
-  button.setAttribute('aria-label', 'Select all code');
+  button.setAttribute('aria-label', strings.selectAllCode);
   button.setAttribute('role', 'button');
   button.setAttribute('tabindex', '0');
-  button.textContent = 'all';
+  button.textContent = strings.all;
 
   const selectAll = (event: Event) => {
     event.preventDefault();

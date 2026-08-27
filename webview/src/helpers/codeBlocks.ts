@@ -14,6 +14,7 @@ import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 import {
   addMermaidToolbar,
   getMermaidBlockMode,
@@ -654,6 +655,7 @@ class CodeBlockActionsWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const language = view.state.facet(uiLanguageFacet);
     const actions = document.createElement('span');
     actions.className = 'meo-code-block-actions';
     actions.dataset.meoBlockFrom = String(this.blockFrom);
@@ -667,8 +669,8 @@ class CodeBlockActionsWidget extends WidgetType {
           view.focus();
         };
         getViewportController(view)?.preserveScrollPosition(focusSelection) ?? focusSelection();
-      }),
-      createCopyCodeButton(this.codeContent)
+      }, language),
+      createCopyCodeButton(this.codeContent, language)
     );
     return actions;
   }
