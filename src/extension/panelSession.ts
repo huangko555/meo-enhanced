@@ -27,12 +27,14 @@ import {
   getGitChangesGutterEnabled,
   getGitDiffLineHighlightsEnabled,
   getDiffBaselineMode,
+  getLargeDocumentOptimizationEnabled,
   getOutlinePosition,
   getOutlineVisible,
   getOutlineWidth,
   normalizeOutlineWidth,
   getCurrentVscodeCodeTheme
 } from '../shared/extensionConfig';
+import { selectInitialEditorMode } from '../application/largeDocumentPolicy';
 import {
   openImageExternally,
   openLink,
@@ -181,7 +183,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
 
   const documentKey = document.uri.toString();
   const persistedMode = context.globalState.get(EDITOR_MODE_STATE_KEY);
-  const initialMode: EditorMode = isEditorMode(persistedMode) ? persistedMode : 'live';
+  const persistedEditorMode: EditorMode | null = isEditorMode(persistedMode) ? persistedMode : null;
   let applyQueue: Promise<void> = Promise.resolve();
   // Flush responses wait only for preceding TextDocument I/O, never for a manual save
   // that may itself be inside applyQueue and awaiting VS Code's will-save lifecycle.
@@ -318,10 +320,16 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const sendInit = async (): Promise<boolean> => {
     const savedRevision = await readInitialSavedRevision();
     const diffBaselineState = diffBaselineSelection.getState();
+    const initialText = document.getText();
+    const initialMode = selectInitialEditorMode({
+      text: initialText,
+      persistedMode: persistedEditorMode,
+      optimizationEnabled: getLargeDocumentOptimizationEnabled()
+    });
     const message: InitMessage = {
       type: 'init',
       documentId: documentKey,
-      text: document.getText(),
+      text: initialText,
       version: document.version,
       savedRevision,
       diagnostics: diagnostics.read(),

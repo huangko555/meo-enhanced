@@ -8,6 +8,7 @@ export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
 export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
+export const LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY = 'performance.largeDocumentOptimization';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY = 'gitChanges.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY = 'gitChangesGutter.visibility';
 export const GIT_CHANGES_GUTTER_LEGACY_SETTING_KEY = 'gitChangesGutter.enabled';
@@ -61,6 +62,12 @@ export function getOutlineWidth(context: vscode.ExtensionContext): number {
 
 export function getContentMaxWidthEnabled(context: vscode.ExtensionContext): boolean {
   return getToggleSettingValue(context, CONTENT_MAX_WIDTH_SETTING_KEY, CONTENT_MAX_WIDTH_ENABLED_KEY, [], false);
+}
+
+export function getLargeDocumentOptimizationEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration(EXTENSION_CONFIG_SECTION)
+    .get<boolean>(LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY, true);
 }
 
 export function getExportEditorFontEnvironment(): { editorFontFamily?: string; editorFontWeight?: string; editorFontSizePx?: number } {

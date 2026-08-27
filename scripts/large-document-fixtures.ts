@@ -1,3 +1,5 @@
+import { assessLargeDocument } from '../src/application/largeDocumentPolicy';
+
 export type LargeDocumentFixtureKind =
   | 'ordinary'
   | 'bytes-heavy'
@@ -77,20 +79,16 @@ export function createLargeDocumentFixtures(): readonly LargeDocumentFixture[] {
 }
 
 export function describeLargeDocumentFixture(text: string): LargeDocumentFixtureDescription {
-  const tables = Array.from(text.matchAll(/^\|\s*:?-{3,}.*\|\s*$/gmu)).length;
-  const mermaid = Array.from(text.matchAll(/^```mermaid\s*$/gmu)).length;
-  const images = Array.from(text.matchAll(/!\[[^\]\r\n]*\]\([^\r\n]+\)/gu)).length;
-  const displayMathDelimiters = Array.from(text.matchAll(/^\$\$\s*$/gmu)).length;
-  const math = Math.floor(displayMathDelimiters / 2);
+  const { dimensions } = assessLargeDocument(text);
   return {
-    bytes: new TextEncoder().encode(text).byteLength,
-    lines: text.split('\n').length,
+    bytes: dimensions.bytes,
+    lines: dimensions.lines,
     rich: {
-      tables,
-      mermaid,
-      images,
-      math,
-      total: tables + mermaid + images + math
+      tables: dimensions.tables,
+      mermaid: dimensions.mermaid,
+      images: dimensions.images,
+      math: dimensions.math,
+      total: dimensions.richBlocks
     }
   };
 }

@@ -22,6 +22,7 @@
   "config.outline.right": "Show the document outline on the right side of the editor.",
   "config.outline.position": "Position of the document outline sidebar.",
   "config.contentMaxWidth": "Constrain the editor content to a centered 800px column.",
+  "config.performance.largeDocumentOptimization": "Open large documents in Source mode initially to keep editing responsive. A manual mode choice remains preferred.",
   "config.gitChanges": "Show change indicators in the editor.",
   "config.baseline.currentEdit": "Compare with the latest content saved to disk.",
   "config.baseline.recentSave": "Compare with the version before the most recent save batch.",

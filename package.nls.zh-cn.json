@@ -22,6 +22,7 @@
   "config.outline.right": "在编辑器右侧显示文档目录。",
   "config.outline.position": "文档目录侧边栏的位置。",
   "config.contentMaxWidth": "将编辑器内容限制在居中的 800px 栏内。",
+  "config.performance.largeDocumentOptimization": "大文档初次以源码模式打开以保持编辑响应；手动选择的模式仍然优先。",
   "config.gitChanges": "在编辑器中显示更改指示器。",
   "config.baseline.currentEdit": "与最近保存到磁盘的内容比较。",
   "config.baseline.recentSave": "与最近一次保存批次之前的版本比较。",
