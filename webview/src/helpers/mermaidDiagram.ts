@@ -10,6 +10,7 @@ import type {
   MermaidDiagramPresentationConsumer,
   MermaidDiagramPresentationHandle
 } from '../editor/mermaidDiagramPresentation';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 declare global {
   interface Window {
@@ -521,6 +522,7 @@ export class MermaidDiagramWidget extends WidgetType {
   indentColumns: number;
   presentationFactory: MermaidDiagramPresentationConsumer;
   presentationHandle: MermaidDiagramPresentationHandle | null;
+  uiLanguage: UiLanguage;
 
   constructor(
     diagramText: string,
@@ -530,6 +532,7 @@ export class MermaidDiagramWidget extends WidgetType {
       presentationFactory: MermaidDiagramPresentationConsumer;
       cachePreviewHeight?: boolean;
       indentColumns?: number;
+      uiLanguage?: UiLanguage;
     }
   ) {
     super();
@@ -544,6 +547,7 @@ export class MermaidDiagramWidget extends WidgetType {
     this.themeSignature = getMermaidEditorPresentationIdentity().themeKey;
     this.presentationFactory = options.presentationFactory;
     this.presentationHandle = null;
+    this.uiLanguage = options.uiLanguage ?? 'en';
     this.cachePreviewHeight = options.cachePreviewHeight ?? true;
     this.indentColumns = options.indentColumns ?? 0;
     this.previewResizeObserver = null;
@@ -566,6 +570,7 @@ export class MermaidDiagramWidget extends WidgetType {
       other.startLine === this.startLine &&
       other.endLine === this.endLine &&
       other.indentColumns === this.indentColumns &&
+      other.uiLanguage === this.uiLanguage &&
       other.themeSignature === this.themeSignature
     );
   }
@@ -622,7 +627,7 @@ export class MermaidDiagramWidget extends WidgetType {
       showPending: () => {
         const loading = document.createElement('div');
         loading.className = 'meo-mermaid-loading';
-        loading.textContent = 'Loading...';
+        loading.textContent = getUiStrings(this.uiLanguage).loading;
         container.replaceChildren(loading);
       },
       showDiagram: (svg) => {
@@ -854,6 +859,7 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   createZoomControls(svgContainer: HTMLElement): HTMLElement {
+    const strings = getUiStrings(this.uiLanguage);
     const controls = document.createElement('div');
     controls.className = 'meo-visual-controls meo-mermaid-zoom-controls';
     applyMermaidThemeClass(controls);
@@ -862,25 +868,25 @@ export class MermaidDiagramWidget extends WidgetType {
     zoomIn.type = 'button';
     zoomIn.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomIn.appendChild(createElement(ZoomIn, { width: 16, height: 16 }));
-    zoomIn.setAttribute('aria-label', 'Zoom in');
+    zoomIn.setAttribute('aria-label', strings.zoomIn);
 
     const zoomOut = document.createElement('button');
     zoomOut.type = 'button';
     zoomOut.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomOut.appendChild(createElement(ZoomOut, { width: 16, height: 16 }));
-    zoomOut.setAttribute('aria-label', 'Zoom out');
+    zoomOut.setAttribute('aria-label', strings.zoomOut);
 
     const reset = document.createElement('button');
     reset.type = 'button';
     reset.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     reset.appendChild(createElement(RotateCcw, { width: 16, height: 16 }));
-    reset.setAttribute('aria-label', 'Reset zoom');
+    reset.setAttribute('aria-label', strings.resetZoom);
 
     const fullscreen = document.createElement('button');
     fullscreen.type = 'button';
     fullscreen.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     fullscreen.appendChild(createElement(Maximize2, { width: 16, height: 16 }));
-    fullscreen.setAttribute('aria-label', 'Fullscreen');
+    fullscreen.setAttribute('aria-label', strings.fullscreen);
 
     zoomIn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -1011,6 +1017,7 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   createFullscreenControls(session: MermaidFullscreenSession): HTMLElement {
+    const strings = getUiStrings(this.uiLanguage);
     const svgContainer = session.svgWrapper;
     const controls = document.createElement('div');
     controls.className = 'meo-visual-controls meo-mermaid-zoom-controls meo-mermaid-fullscreen-controls';
@@ -1020,25 +1027,25 @@ export class MermaidDiagramWidget extends WidgetType {
     zoomIn.type = 'button';
     zoomIn.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomIn.appendChild(createElement(ZoomIn, { width: 16, height: 16 }));
-    zoomIn.setAttribute('aria-label', 'Zoom in');
+    zoomIn.setAttribute('aria-label', strings.zoomIn);
 
     const zoomOut = document.createElement('button');
     zoomOut.type = 'button';
     zoomOut.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     zoomOut.appendChild(createElement(ZoomOut, { width: 16, height: 16 }));
-    zoomOut.setAttribute('aria-label', 'Zoom out');
+    zoomOut.setAttribute('aria-label', strings.zoomOut);
 
     const reset = document.createElement('button');
     reset.type = 'button';
     reset.className = 'meo-visual-control-btn meo-mermaid-zoom-btn';
     reset.appendChild(createElement(RotateCcw, { width: 16, height: 16 }));
-    reset.setAttribute('aria-label', 'Reset zoom');
+    reset.setAttribute('aria-label', strings.resetZoom);
 
     const exitBtn = document.createElement('button');
     exitBtn.type = 'button';
     exitBtn.className = 'meo-visual-control-btn meo-mermaid-zoom-btn meo-mermaid-exit-btn';
     exitBtn.appendChild(createElement(X, { width: 16, height: 16 }));
-    exitBtn.setAttribute('aria-label', 'Exit fullscreen');
+    exitBtn.setAttribute('aria-label', strings.exitFullscreen);
 
     zoomIn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -1292,7 +1299,7 @@ export class MermaidDiagramWidget extends WidgetType {
 
     const badge = document.createElement('div');
     badge.className = 'meo-mermaid-error-badge';
-    badge.textContent = `Mermaid error: ${errorMsg}`;
+    badge.textContent = getUiStrings(this.uiLanguage).mermaidError(errorMsg);
 
     container.appendChild(fallback);
     container.appendChild(badge);

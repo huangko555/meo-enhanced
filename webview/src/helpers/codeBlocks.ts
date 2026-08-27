@@ -837,7 +837,8 @@ function addMermaidDiagramBlock(
   const widget = decision.effectiveMode === 'preview'
     ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number, {
         presentationFactory: getMermaidDiagramPresentationFactory(state),
-        indentColumns
+        indentColumns,
+        uiLanguage: state.facet(uiLanguageFacet)
       })
     : new MermaidEditingWidget({
       anchor,

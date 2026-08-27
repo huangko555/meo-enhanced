@@ -104,6 +104,13 @@ export type UiStrings = Readonly<{
   editFormulaSplit: string;
   showFormulaSource: string;
   showFormulaPreview: string;
+  loading: string;
+  zoomIn: string;
+  zoomOut: string;
+  resetZoom: string;
+  fullscreen: string;
+  exitFullscreen: string;
+  mermaidError: (message: string) => string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -201,6 +208,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     formulaEditor: (line: number) => `Formula editor at line ${line}`,
     editFormulaSplit: 'Edit formula in split view', showFormulaSource: 'Show formula source only',
     showFormulaPreview: 'Show formula preview',
+    loading: 'Loading...', zoomIn: 'Zoom in', zoomOut: 'Zoom out', resetZoom: 'Reset zoom',
+    fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
+    mermaidError: (message: string) => `Mermaid error: ${message}`,
     heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
@@ -274,6 +284,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     formulaEditor: (line: number) => `第 ${line} 行公式编辑器`,
     editFormulaSplit: '以分栏视图编辑公式', showFormulaSource: '仅显示公式源码',
     showFormulaPreview: '显示公式预览',
+    loading: '正在加载…', zoomIn: '放大', zoomOut: '缩小', resetZoom: '重置缩放',
+    fullscreen: '全屏', exitFullscreen: '退出全屏',
+    mermaidError: (message: string) => `Mermaid 错误：${message}`,
     heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',

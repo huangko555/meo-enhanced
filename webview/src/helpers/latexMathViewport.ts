@@ -1,4 +1,5 @@
 import { createElement, RotateCcw, ZoomIn, ZoomOut } from 'lucide';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export type LatexMathViewportController = {
   destroy(): void;
@@ -6,6 +7,7 @@ export type LatexMathViewportController = {
 
 type LatexMathBlockViewportOptions = {
   interactive?: boolean;
+  uiLanguage?: UiLanguage;
 };
 
 type LatexMathInlineViewportOptions = {
@@ -115,6 +117,8 @@ export function attachLatexMathViewport(
     ? options.layout
     : { kind: 'block', interactive: options.interactive ?? false };
   const interactive = layout.kind === 'block' && layout.interactive;
+  const uiLanguage = 'uiLanguage' in options ? options.uiLanguage ?? 'en' : 'en';
+  const strings = getUiStrings(uiLanguage);
   const ownerDocument = root.ownerDocument;
   const ownerWindow = ownerDocument.defaultView ?? window;
   let canvas: HTMLElement | null = null;
@@ -354,15 +358,15 @@ export function attachLatexMathViewport(
     controls = ownerDocument.createElement('div');
     controls.className = 'meo-visual-controls meo-latex-math-zoom-controls';
     controls.append(
-      createControlButton(ownerDocument, ZoomIn, 'Zoom in', () => {
+      createControlButton(ownerDocument, ZoomIn, strings.zoomIn, () => {
         userZoom = Math.min(MAX_ZOOM, userZoom + ZOOM_STEP);
         applyTransform();
       }),
-      createControlButton(ownerDocument, ZoomOut, 'Zoom out', () => {
+      createControlButton(ownerDocument, ZoomOut, strings.zoomOut, () => {
         userZoom = Math.max(MIN_ZOOM, userZoom - ZOOM_STEP);
         applyTransform();
       }),
-      createControlButton(ownerDocument, RotateCcw, 'Reset zoom', reset)
+      createControlButton(ownerDocument, RotateCcw, strings.resetZoom, reset)
     );
     root.appendChild(controls);
   }

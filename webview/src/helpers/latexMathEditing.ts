@@ -596,7 +596,10 @@ class LatexMathEditingController {
     this.previewViewport?.destroy();
     this.previewHost.replaceChildren(preview);
     this.previewViewport = html
-      ? attachLatexMathViewport(preview, { interactive: true })
+      ? attachLatexMathViewport(preview, {
+          interactive: true,
+          uiLanguage: this.outerView.state.facet(uiLanguageFacet)
+        })
       : null;
   }
 

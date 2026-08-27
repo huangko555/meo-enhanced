@@ -855,7 +855,8 @@ class MermaidEditingController {
       this.block.endLine,
       {
         presentationFactory: this.presentationFactory,
-        cachePreviewHeight: false
+        cachePreviewHeight: false,
+        uiLanguage: this.outerView.state.facet(uiLanguageFacet)
       }
     );
     this.previewSticky.replaceChildren(this.previewWidget.toDOM());
