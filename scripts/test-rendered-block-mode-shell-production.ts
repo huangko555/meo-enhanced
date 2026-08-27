@@ -81,20 +81,11 @@ async function main(): Promise<void> {
     await page.waitForSelector('.meo-latex-math-editing-block.is-split');
     await page.click('.meo-latex-math-editing-block.is-split .cm-content');
     await page.keyboard.press('End');
-    const [renderedImmediately] = await Promise.all([
-      page.evaluate(() => new Promise<boolean>((resolve) => {
-        const source = document.querySelector<HTMLElement>(
-          '.meo-latex-math-editing-block.is-split .cm-content'
-        )!;
-        const observer = new MutationObserver(() => {
-          observer.disconnect();
-          resolve(document.querySelector('.meo-latex-math-editing-block.is-split [data-rendered-math]')
-            ?.textContent?.includes('x = 1S') === true);
-        });
-        observer.observe(source, { childList: true, characterData: true, subtree: true });
-      })),
-      page.keyboard.press('S')
-    ]);
+    await page.keyboard.press('S');
+    const renderedImmediately = await page.evaluate(() =>
+      document.querySelector('.meo-latex-math-editing-block.is-split [data-rendered-math]')
+        ?.textContent?.includes('x = 1S') === true
+    );
     assert.equal(renderedImmediately, true,
       'Split mode must expose the synchronous renderer result after the keyboard input returns');
     const beforeErrorEdit = await page.evaluate(() => {
@@ -104,37 +95,23 @@ async function main(): Promise<void> {
     await page.evaluate(() => {
       (window as any).RenderedBlockModeShellProductionHarness.setMathRendererProbe({ kind: 'error' });
     });
-    const [afterErrorEdit] = await Promise.all([
-      page.evaluate(() => new Promise<{
-        errorText: string | null;
-        sourceFocused: boolean;
-        caretInSource: boolean;
-        scrollTop: number;
-      }>((resolve) => {
-        const content = document.querySelector<HTMLElement>(
-          '.meo-latex-math-editing-block.is-split .cm-content'
-        )!;
-        const observer = new MutationObserver(() => {
-          observer.disconnect();
-          const source = document.querySelector<HTMLElement>(
-            '.meo-latex-math-editing-block.is-split .meo-latex-math-source-pane'
-          )!;
-          const error = document.querySelector<HTMLElement>(
-            '.meo-latex-math-editing-block.is-split .meo-latex-math-preview-error'
-          );
-          const selection = window.getSelection();
-          const outerScroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
-          resolve({
-            errorText: error?.textContent ?? null,
-            sourceFocused: source.contains(document.activeElement),
-            caretInSource: Boolean(selection?.isCollapsed && selection.anchorNode && source.contains(selection.anchorNode)),
-            scrollTop: outerScroller.scrollTop
-          });
-        });
-        observer.observe(content, { childList: true, characterData: true, subtree: true });
-      })),
-      page.keyboard.press('E')
-    ]);
+    await page.keyboard.press('E');
+    const afterErrorEdit = await page.evaluate(() => {
+      const source = document.querySelector<HTMLElement>(
+        '.meo-latex-math-editing-block.is-split .meo-latex-math-source-pane'
+      )!;
+      const error = document.querySelector<HTMLElement>(
+        '.meo-latex-math-editing-block.is-split .meo-latex-math-preview-error'
+      );
+      const selection = window.getSelection();
+      const outerScroller = document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!;
+      return {
+        errorText: error?.textContent ?? null,
+        sourceFocused: source.contains(document.activeElement),
+        caretInSource: Boolean(selection?.isCollapsed && selection.anchorNode && source.contains(selection.anchorNode)),
+        scrollTop: outerScroller.scrollTop
+      };
+    });
     assert.equal(afterErrorEdit.errorText?.includes('x = 1SE'), true,
       'Split mode must expose a synchronous renderer error before the edit completes');
     assert.equal(afterErrorEdit.sourceFocused, true, 'Synchronous renderer errors must preserve source focus');
