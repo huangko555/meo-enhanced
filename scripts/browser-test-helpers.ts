@@ -20,21 +20,26 @@ type OwnedBrowserState = {
   readonly process: ChildProcess | null;
   readonly cleanupUserDataDir: (userDataDir: string) => Promise<void>;
   readonly primaryErrors: unknown[];
+  sealed: boolean;
+  settledOutcome?: { readonly cleanupErrors: readonly unknown[] };
   closePromise?: Promise<void>;
 };
 
 const ownedBrowserStates = new WeakMap<Browser, OwnedBrowserState>();
 
-export async function launchTestBrowser(): Promise<Browser> {
-  const executablePath = findBrowserExecutable();
-  const args = ['--no-sandbox'];
-
-  if (process.platform === 'win32' && path.basename(executablePath).toLowerCase() === 'msedge.exe') {
-    // Edge can relaunch through the Windows compatibility layer, leaving Puppeteer watching a wrapper that exits.
-    args.push('--edge-skip-compat-layer-relaunch');
-  }
-
+export async function launchTestBrowser(
+  dependencies?: TestBrowserLaunchDependencies
+): Promise<Browser> {
+  let executablePath: string | undefined;
   try {
+    if (dependencies) return await launchOwnedTestBrowser(dependencies);
+
+    executablePath = findBrowserExecutable();
+    const args = ['--no-sandbox'];
+    if (process.platform === 'win32' && path.basename(executablePath).toLowerCase() === 'msedge.exe') {
+      // Edge can relaunch through the Windows compatibility layer, leaving Puppeteer watching a wrapper that exits.
+      args.push('--edge-skip-compat-layer-relaunch');
+    }
     return await launchOwnedTestBrowser({
       createUserDataDir: () => fs.promises.mkdtemp(path.join(os.tmpdir(), 'meo-test-browser-profile-')),
       launch: ({ userDataDir }) => puppeteer.launch({ executablePath, headless: true, args, userDataDir }),
@@ -42,10 +47,12 @@ export async function launchTestBrowser(): Promise<Browser> {
     });
   } catch (error) {
     const runtime = typeof Bun === 'undefined' ? `Node ${process.version}` : `Bun ${Bun.version}`;
-    throw new Error(
-      `Failed to launch test browser (${runtime}, ${process.platform}/${process.arch}, executable: ${executablePath}).`,
-      { cause: error }
-    );
+    const executableContext = executablePath === undefined ? '' : `, executable: ${executablePath}`;
+    const context = `Failed to launch test browser (${runtime}, ${process.platform}/${process.arch}${executableContext}).`;
+    if (error instanceof AggregateError) {
+      throw new AggregateError(error.errors, `${context} ${error.message}`, { cause: error.cause });
+    }
+    throw new Error(context, { cause: error });
   }
 }
 
@@ -53,19 +60,37 @@ export async function launchOwnedTestBrowser(
   dependencies: TestBrowserLaunchDependencies
 ): Promise<Browser> {
   let userDataDir: string | undefined;
+  let browser: Browser | undefined;
+  let browserProcess: ChildProcess | null = null;
+  let originalClose: (() => Promise<void>) | undefined;
   try {
     userDataDir = await dependencies.createUserDataDir();
-    const browser = await dependencies.launch({ userDataDir });
+    browser = await dependencies.launch({ userDataDir });
+    originalClose = browser.close.bind(browser);
+    browserProcess = browser.process();
     installOwnedBrowserState(browser, {
       userDataDir,
-      originalClose: browser.close.bind(browser),
-      process: browser.process(),
+      originalClose,
+      process: browserProcess,
       cleanupUserDataDir: dependencies.cleanupUserDataDir,
-      primaryErrors: []
+      primaryErrors: [],
+      sealed: false
     });
     return browser;
   } catch (error) {
     const cleanupErrors: unknown[] = [];
+    if (browser !== undefined) {
+      try {
+        const closeErrors = await closeBrowserAndWait(
+          browser,
+          browserProcess,
+          originalClose ?? browser.close.bind(browser)
+        );
+        for (const closeError of closeErrors) appendFlat(cleanupErrors, closeError);
+      } catch (closeError) {
+        appendFlat(cleanupErrors, closeError);
+      }
+    }
     if (userDataDir !== undefined) {
       try {
         await dependencies.cleanupUserDataDir(userDataDir);
@@ -80,32 +105,27 @@ export async function launchOwnedTestBrowser(
 export function closeTestBrowser(browser: Browser, primary?: unknown): Promise<void> {
   const state = ownedBrowserStates.get(browser);
   if (!state) return browser.close();
-  if (arguments.length > 1) appendFlat(state.primaryErrors, primary);
+  const hasPrimary = arguments.length > 1;
+  if (state.sealed) {
+    if (!hasPrimary) return state.closePromise!;
+    return rejectLatePrimary(primary, state.settledOutcome!.cleanupErrors);
+  }
+  if (hasPrimary) appendFlat(state.primaryErrors, primary);
   state.closePromise ??= disposeOwnedBrowser(browser, state);
   return state.closePromise;
 }
 
 function installOwnedBrowserState(browser: Browser, state: OwnedBrowserState): void {
-  ownedBrowserStates.set(browser, state);
   Object.defineProperty(browser, 'close', {
     configurable: true,
+    writable: true,
     value: () => closeTestBrowser(browser)
   });
+  ownedBrowserStates.set(browser, state);
 }
 
 async function disposeOwnedBrowser(browser: Browser, state: OwnedBrowserState): Promise<void> {
-  const cleanupErrors: unknown[] = [];
-  const disconnected = waitForDisconnected(browser);
-  const processExit = waitForProcessExit(state.process);
-
-  try {
-    await state.originalClose();
-  } catch (error) {
-    appendFlat(cleanupErrors, error);
-  }
-
-  const [, processExitErrors] = await Promise.all([disconnected, processExit]);
-  for (const error of processExitErrors) appendFlat(cleanupErrors, error);
+  const cleanupErrors = await closeBrowserAndWait(browser, state.process, state.originalClose);
 
   try {
     await state.cleanupUserDataDir(state.userDataDir);
@@ -113,7 +133,46 @@ async function disposeOwnedBrowser(browser: Browser, state: OwnedBrowserState): 
     appendFlat(cleanupErrors, error);
   }
 
+  state.sealed = true;
+  state.settledOutcome = { cleanupErrors: [...cleanupErrors] };
   throwLifecycleErrors(state.primaryErrors, cleanupErrors, 'Test browser close and cleanup failed');
+}
+
+async function rejectLatePrimary(
+  primary: unknown,
+  cleanupErrors: readonly unknown[]
+): Promise<void> {
+  throwLifecycleErrors([primary], cleanupErrors, 'Test browser late primary and cleanup failed');
+}
+
+async function closeBrowserAndWait(
+  browser: Browser,
+  process: ChildProcess | null,
+  close: () => Promise<void>
+): Promise<unknown[]> {
+  const cleanupErrors: unknown[] = [];
+  let disconnected = Promise.resolve();
+  try {
+    disconnected = waitForDisconnected(browser);
+  } catch (error) {
+    appendFlat(cleanupErrors, error);
+  }
+  let processExit = Promise.resolve<unknown[]>([]);
+  try {
+    processExit = waitForProcessExit(process);
+  } catch (error) {
+    appendFlat(cleanupErrors, error);
+  }
+
+  try {
+    await close();
+  } catch (error) {
+    appendFlat(cleanupErrors, error);
+  }
+
+  const [, processExitErrors] = await Promise.all([disconnected, processExit]);
+  for (const error of processExitErrors) appendFlat(cleanupErrors, error);
+  return cleanupErrors;
 }
 
 function waitForDisconnected(browser: Browser): Promise<void> {

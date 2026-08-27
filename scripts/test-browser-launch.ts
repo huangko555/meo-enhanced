@@ -11,39 +11,51 @@ import {
 type FakeBrowser = {
   browser: Browser;
   process: EventEmitter & { exitCode: number | null; signalCode: NodeJS.Signals | null };
-  closeCalls: number;
   setCloseAction(action: () => void): void;
   emitDisconnected(): void;
   emitExit(code?: number | null, signal?: NodeJS.Signals | null): void;
 };
 
-function createFakeBrowser(options: { closeFailure?: unknown } = {}): FakeBrowser {
-  const browserEvents = new EventEmitter();
+type FakeProfileRegistry = {
+  profiles: Set<string>;
+  cleanupResults: Array<{ userDataDir: string; deleted: boolean }>;
+};
+
+function createFakeBrowser(options: {
+  closeFailure?: unknown;
+  nonExtensible?: boolean;
+  processFailure?: unknown;
+} = {}): FakeBrowser {
+  let closeAction = () => {};
+  class FakeBrowserEvents extends EventEmitter {
+    async close(): Promise<void> {
+      try {
+        if (options.closeFailure) throw options.closeFailure;
+      } finally {
+        closeAction();
+      }
+    }
+  }
+  const browserEvents = new FakeBrowserEvents();
   const process = Object.assign(new EventEmitter(), {
     exitCode: null as number | null,
     signalCode: null as NodeJS.Signals | null
   });
   let connected = true;
-  let closeCalls = 0;
-  let closeAction = () => {};
   const browser = browserEvents as unknown as Browser & {
     connected: boolean;
     process(): typeof process;
     close(): Promise<void>;
   };
   Object.defineProperty(browser, 'connected', { get: () => connected });
-  browser.process = () => process;
-  browser.close = async () => {
-    closeCalls += 1;
-    if (options.closeFailure) throw options.closeFailure;
-    closeAction();
+  browser.process = () => {
+    if (options.processFailure) throw options.processFailure;
+    return process;
   };
+  if (options.nonExtensible) Object.preventExtensions(browser);
   return {
     browser,
     process,
-    get closeCalls() {
-      return closeCalls;
-    },
     setCloseAction(action) {
       closeAction = action;
     },
@@ -62,13 +74,20 @@ function createFakeBrowser(options: { closeFailure?: unknown } = {}): FakeBrowse
 function createFakeDependencies(
   fake: FakeBrowser,
   userDataDir: string,
-  options: { cleanupFailure?: unknown } = {}
-): TestBrowserLaunchDependencies & { cleanupPaths: string[]; launchedPaths: string[] } {
+  options: { cleanupFailure?: unknown } = {},
+  profileRegistry: FakeProfileRegistry = { profiles: new Set(), cleanupResults: [] }
+): TestBrowserLaunchDependencies & {
+  cleanupPaths: string[];
+  launchedPaths: string[];
+  profileRegistry: FakeProfileRegistry;
+} {
   const cleanupPaths: string[] = [];
   const launchedPaths: string[] = [];
+  profileRegistry.profiles.add(userDataDir);
   return {
     cleanupPaths,
     launchedPaths,
+    profileRegistry,
     async createUserDataDir() {
       return userDataDir;
     },
@@ -78,7 +97,9 @@ function createFakeDependencies(
     },
     async cleanupUserDataDir(cleanupUserDataDir) {
       cleanupPaths.push(cleanupUserDataDir);
-      if (options.cleanupFailure) throw options.cleanupFailure;
+      const deleted = options.cleanupFailure === undefined && profileRegistry.profiles.delete(cleanupUserDataDir);
+      profileRegistry.cleanupResults.push({ userDataDir: cleanupUserDataDir, deleted });
+      if (options.cleanupFailure !== undefined) throw options.cleanupFailure;
     }
   };
 }
@@ -106,10 +127,14 @@ async function runOwnedBrowserLifecycleChecks(): Promise<void> {
     const secondClose = browser.close();
     assert.strictEqual(firstClose, secondClose, 'duplicate close must share one disposal');
     await firstClose;
-    assert.equal(fake.closeCalls, 1);
     assert.deepEqual(dependencies.cleanupPaths, ['profile-success']);
+    assert.equal(fake.browser.connected, false);
+    assert.equal(fake.process.exitCode, 0);
+    assert.deepEqual([...dependencies.profileRegistry.profiles], []);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-success', deleted: true }
+    ]);
     await browser.close();
-    assert.equal(fake.closeCalls, 1, 'repeated close must not close the browser twice');
     assert.deepEqual(dependencies.cleanupPaths, ['profile-success']);
   }
 
@@ -126,6 +151,90 @@ async function runOwnedBrowserLifecycleChecks(): Promise<void> {
     assert.deepEqual((observed as AggregateError).errors, [launchFailure, cleanupFailure]);
     assert.equal((observed as AggregateError).cause, launchFailure);
     assert.deepEqual(dependencies.cleanupPaths, ['profile-launch-failure']);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-launch-failure', deleted: false }
+    ]);
+  }
+
+  {
+    const fake = createFakeBrowser();
+    const launchFailure = new Error('shared entry launch failed');
+    const cleanupFailure = new Error('shared entry cleanup failed');
+    const dependencies = createFakeDependencies(fake, 'profile-shared-entry', { cleanupFailure });
+    dependencies.launch = async () => {
+      throw launchFailure;
+    };
+    const environmentKeys = [
+      'MEO_TEST_BROWSER',
+      'PUPPETEER_EXECUTABLE_PATH',
+      'PROGRAMFILES',
+      'PROGRAMFILES(X86)',
+      'LOCALAPPDATA'
+    ] as const;
+    const previousEnvironment = new Map(environmentKeys.map((key) => [key, process.env[key]]));
+    for (const key of environmentKeys) process.env[key] = 'Z:\\missing-browser-root';
+    let observed: unknown;
+    try {
+      observed = await captureFailure(() => launchTestBrowser(dependencies).then(() => undefined));
+    } finally {
+      for (const key of environmentKeys) {
+        const value = previousEnvironment.get(key);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    assert.ok(observed instanceof AggregateError, 'shared entry must preserve lifecycle aggregates');
+    assert.deepEqual((observed as AggregateError).errors, [launchFailure, cleanupFailure]);
+    assert.equal((observed as AggregateError).cause, launchFailure);
+    assert.match((observed as AggregateError).message, /Failed to launch test browser/);
+    assert.deepEqual(dependencies.cleanupPaths, ['profile-shared-entry']);
+  }
+
+  {
+    const setupFailure = new Error('browser process accessor failed');
+    const closeFailure = new Error('setup-failure browser close failed');
+    const cleanupFailure = new Error('setup-failure profile cleanup failed');
+    const fake = createFakeBrowser({ processFailure: setupFailure, closeFailure });
+    fake.setCloseAction(() => {
+      fake.emitDisconnected();
+      fake.emitExit();
+    });
+    const dependencies = createFakeDependencies(fake, 'profile-process-setup-failure', { cleanupFailure });
+    const observed = await captureFailure(() => launchOwnedTestBrowser(dependencies).then(() => undefined));
+    assert.ok(observed instanceof AggregateError);
+    assert.deepEqual((observed as AggregateError).errors, [setupFailure, closeFailure, cleanupFailure]);
+    assert.equal((observed as AggregateError).cause, setupFailure);
+    assert.equal(fake.browser.connected, false);
+    assert.equal(fake.process.exitCode, 0);
+    assert.deepEqual(dependencies.cleanupPaths, ['profile-process-setup-failure']);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-process-setup-failure', deleted: false }
+    ]);
+  }
+
+  {
+    const closeFailure = new Error('sealed browser close failed');
+    const cleanupFailure = new Error('sealed profile cleanup failed');
+    const fake = createFakeBrowser({ nonExtensible: true, closeFailure });
+    fake.setCloseAction(() => {
+      fake.emitDisconnected();
+      fake.emitExit();
+    });
+    const dependencies = createFakeDependencies(fake, 'profile-sealed-setup-failure', { cleanupFailure });
+    const observed = await captureFailure(() => launchOwnedTestBrowser(dependencies).then(() => undefined));
+    assert.ok(observed instanceof AggregateError);
+    const errors = (observed as AggregateError).errors;
+    assert.equal(errors.length, 3);
+    assert.ok(errors[0] instanceof TypeError);
+    assert.equal(errors[1], closeFailure);
+    assert.equal(errors[2], cleanupFailure);
+    assert.equal((observed as AggregateError).cause, errors[0]);
+    assert.equal(fake.browser.connected, false);
+    assert.equal(fake.process.exitCode, 0);
+    assert.deepEqual(dependencies.cleanupPaths, ['profile-sealed-setup-failure']);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-sealed-setup-failure', deleted: false }
+    ]);
   }
 
   {
@@ -165,13 +274,84 @@ async function runOwnedBrowserLifecycleChecks(): Promise<void> {
     assert.equal((observed as AggregateError).errors[0], exitFailure);
     assert.match(String((observed as AggregateError).errors[1]), /exited with code 17/);
     assert.deepEqual(dependencies.cleanupPaths, ['profile-late-exit']);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-late-exit', deleted: true }
+    ]);
+  }
+
+  {
+    const fake = createFakeBrowser();
+    const dependencies = createFakeDependencies(fake, 'profile-settled-success');
+    fake.setCloseAction(() => {
+      fake.emitDisconnected();
+      fake.emitExit();
+    });
+    const browser = await launchOwnedTestBrowser(dependencies);
+    const settled = browser.close();
+    await settled;
+    assert.strictEqual(browser.close(), settled, 'settled no-primary close must reuse its promise');
+    const latePrimary = new Error('late success primary');
+    const late = closeTestBrowser(browser, latePrimary);
+    assert.notStrictEqual(late, settled, 'late primary must not reuse a settled success promise');
+    const observed = await captureFailure(() => late);
+    assert.strictEqual(observed, latePrimary);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-settled-success', deleted: true }
+    ]);
+  }
+
+  {
+    const cleanupFailure = new Error('settled cleanup failed');
+    const fake = createFakeBrowser();
+    const dependencies = createFakeDependencies(fake, 'profile-settled-failure', { cleanupFailure });
+    fake.setCloseAction(() => {
+      fake.emitDisconnected();
+      fake.emitExit();
+    });
+    const browser = await launchOwnedTestBrowser(dependencies);
+    const settled = browser.close();
+    const initial = await captureFailure(() => settled);
+    assert.strictEqual(initial, cleanupFailure);
+    assert.strictEqual(browser.close(), settled, 'settled no-primary failure must reuse its promise');
+    const latePrimary = new Error('late failure primary');
+    const late = closeTestBrowser(browser, latePrimary);
+    const observed = await captureFailure(() => late);
+    assert.ok(observed instanceof AggregateError);
+    assert.deepEqual((observed as AggregateError).errors, [latePrimary, cleanupFailure]);
+    assert.equal((observed as AggregateError).cause, latePrimary);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-settled-failure', deleted: false }
+    ]);
+  }
+
+  {
+    const firstPrimary = new Error('first concurrent primary');
+    const secondPrimary = new Error('second concurrent primary');
+    const fake = createFakeBrowser();
+    const dependencies = createFakeDependencies(fake, 'profile-concurrent-primary');
+    fake.setCloseAction(() => {
+      fake.emitDisconnected();
+      fake.emitExit();
+    });
+    const browser = await launchOwnedTestBrowser(dependencies);
+    const first = closeTestBrowser(browser, firstPrimary);
+    const second = closeTestBrowser(browser, secondPrimary);
+    assert.strictEqual(first, second, 'concurrent primary closes must share one promise');
+    const observed = await captureFailure(() => first);
+    assert.ok(observed instanceof AggregateError);
+    assert.deepEqual((observed as AggregateError).errors, [firstPrimary, secondPrimary]);
+    assert.equal((observed as AggregateError).cause, firstPrimary);
+    assert.deepEqual(dependencies.profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-concurrent-primary', deleted: true }
+    ]);
   }
 
   {
     const first = createFakeBrowser();
     const second = createFakeBrowser();
-    const firstDependencies = createFakeDependencies(first, 'profile-one');
-    const secondDependencies = createFakeDependencies(second, 'profile-two');
+    const profileRegistry: FakeProfileRegistry = { profiles: new Set(), cleanupResults: [] };
+    const firstDependencies = createFakeDependencies(first, 'profile-one', {}, profileRegistry);
+    const secondDependencies = createFakeDependencies(second, 'profile-two', {}, profileRegistry);
     first.setCloseAction(() => {
       first.emitDisconnected();
       first.emitExit();
@@ -187,8 +367,11 @@ async function runOwnedBrowserLifecycleChecks(): Promise<void> {
     await Promise.all([firstBrowser.close(), secondBrowser.close()]);
     assert.deepEqual(firstDependencies.cleanupPaths, ['profile-one']);
     assert.deepEqual(secondDependencies.cleanupPaths, ['profile-two']);
-    assert.equal(first.closeCalls, 1);
-    assert.equal(second.closeCalls, 1);
+    assert.deepEqual([...profileRegistry.profiles], []);
+    assert.deepEqual(profileRegistry.cleanupResults, [
+      { userDataDir: 'profile-one', deleted: true },
+      { userDataDir: 'profile-two', deleted: true }
+    ]);
   }
 }
 
