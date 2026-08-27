@@ -389,10 +389,10 @@ const matrix: Array<[string, () => Promise<void>]> = [
     }
   }],
   ['table-driven primary stages preserve ownership and physical pointer safety', async () => {
-    const releaseStages = new Set<PrimaryStage>(['deliverDown', 'prepareUp', 'upValidate', 'deliverUp']);
+    const releaseStages = new Set<PrimaryStage>(['afterPointerDown', 'prepareUp', 'upValidate', 'deliverUp']);
     const stages: readonly PrimaryStage[] = [
       'acquire1', 'initialValidate', 'prepareDown', 'reacquire2', 'downValidate',
-      'deliverDown', 'prepareUp', 'upValidate', 'deliverUp', 'settleTarget'
+      'deliverDown', 'afterPointerDown', 'prepareUp', 'upValidate', 'deliverUp', 'settleTarget'
     ];
     for (const primaryFailure of stages) {
       const subject = fixture({ primaryFailure, replacement: 1 });
@@ -407,6 +407,24 @@ const matrix: Array<[string, () => Promise<void>]> = [
         : primaryFailure === 'settleTarget' ? 'released' : 'notPressed';
       assertTerminal(subject, [], expectedPointer);
     }
+  }],
+  ['pointer release ownership begins only after successful down delivery', async () => {
+    const beforeDown = fixture({ primaryFailure: 'deliverDown', replacement: 1 });
+    const beforeDownError = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction(
+      { kind: 'math', lineNumber: 19, targetMode: 'split' }, beforeDown.adapter
+    ));
+    check(beforeDownError instanceof AggregateError && beforeDownError.errors.length === 1, 'down-before primary gained a cleanup error');
+    check(String(beforeDownError.errors[0]).includes('synthetic deliverDown'), 'down-before failure stopped being the sole primary');
+    check(!beforeDown.trace.includes('cancel-pointer'), 'down-before primary emitted a public release gesture');
+    assertTerminal(beforeDown, [], 'notPressed');
+
+    const afterDown = fixture({ primaryFailure: 'afterPointerDown', replacement: 1 });
+    const afterDownError = await expectInteractionFailure(() => runHistoryRenderedBlockInteraction(
+      { kind: 'mermaid', lineNumber: 20, targetMode: 'source' }, afterDown.adapter
+    ));
+    check(String(afterDownError).includes('synthetic afterPointerDown'), 'later primary was not preserved');
+    check(afterDown.trace.filter((entry) => entry === 'cancel-pointer').length === 1, 'successful down was not released exactly once after a later primary');
+    assertTerminal(afterDown);
   }],
   ['every cleanup operation remains ordered and observable under a single fault', async () => {
     const releaseOps: readonly CleanupOp[] = ['safeReleaseMove', 'cancelPointer', 'safeTargetDispose'];

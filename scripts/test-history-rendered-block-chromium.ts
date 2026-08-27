@@ -778,6 +778,8 @@ async function runMoveSettlementMismatchCase() {
     }
     check(failure instanceof HistoryRenderedBlockInteractionError, 'move settlement mismatch did not preserve InteractionError');
     check(String(failure.primary).includes('pointer did not activate semantic target before pointerdown'), 'move settlement mismatch was not rejected before pointerdown');
+    check(failure.errors.length === 1, 'pre-down hit mismatch appended a pointer release cleanup error');
+    check(failure.errors.every((error: unknown) => !String(error).includes("'left' is not pressed")), 'pre-down hit mismatch attempted mouse.up');
     const evidence = failure.evidence as any;
     const events = evidence.events.map((entry: string) => JSON.parse(entry));
     check(events.every((entry: any) => entry.type !== 'pointerdown' && entry.type !== 'click'), 'move settlement mismatch consumed a pointer gesture');

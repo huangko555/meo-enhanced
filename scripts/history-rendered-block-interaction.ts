@@ -54,6 +54,7 @@ export type HistoryRenderedBlockInteractionAdapter<Handle, Point = { x: number; 
   acquireCurrentHandle(interaction: HistoryRenderedBlockInteraction): Promise<Handle>;
   validateCurrentHandle(handle: Handle, phase: 'pointerdown' | 'pointerup'): Promise<Point>;
   preparePointerDown(point: Point): Promise<void>;
+  /** Successful resolution transfers physical pointer-release ownership. */
   deliverPointerDown(point: Point): Promise<void>;
   afterPointerDown?(handle: Handle): Promise<void>;
   preparePointerUp(point: Point): Promise<void>;
@@ -164,8 +165,11 @@ export async function runHistoryRenderedBlockInteraction<Handle, Point>(
     }
 
     const downPoint = await foreground('downValidate', () => adapter.validateCurrentHandle(currentHandle, 'pointerdown'));
-    pointerNeedsRelease = true;
-    await foreground('deliverDown', () => adapter.deliverPointerDown(downPoint));
+    await foreground(
+      'deliverDown',
+      () => adapter.deliverPointerDown(downPoint),
+      () => { pointerNeedsRelease = true; }
+    );
     await foreground('afterPointerDown', async () => adapter.afterPointerDown?.(currentHandle));
 
     await foreground('prepareUp', () => adapter.preparePointerUp(downPoint));
