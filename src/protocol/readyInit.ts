@@ -8,6 +8,7 @@ import { isUiLanguage, type UiLanguage } from '../foundation/uiLanguage';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
+export type SourceLineNumberMode = 'on' | 'off' | 'relative' | 'interval';
 
 export type ReadyMessage = {
   readonly type: 'ready';
@@ -27,7 +28,7 @@ export type InitMessage = {
   readonly diagnostics: readonly SerializedDiagnostic[];
   readonly mode: EditorMode;
   readonly uiLanguage: UiLanguage;
-  readonly sourceLineNumbers: boolean;
+  readonly sourceLineNumbers: SourceLineNumberMode;
   readonly previewAppearance: PreviewAppearance;
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
@@ -85,7 +86,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isSavedRevision(value.savedRevision, value.version, value.text)
     || !isEditorMode(value.mode)
     || !isUiLanguage(value.uiLanguage)
-    || typeof value.sourceLineNumbers !== 'boolean'
+    || !isSourceLineNumberMode(value.sourceLineNumbers)
     || !isPreviewAppearance(value.previewAppearance)
     || previewFontFamily === null
     || typeof value.previewSourceColoring !== 'boolean'
@@ -113,6 +114,10 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     return null;
   }
   return { ...value, previewFontFamily } as InitMessage;
+}
+
+function isSourceLineNumberMode(value: unknown): value is SourceLineNumberMode {
+  return value === 'on' || value === 'off' || value === 'relative' || value === 'interval';
 }
 
 function isSavedRevision(value: unknown, currentVersion: number, currentText: string): value is SavedRevisionDto | null {

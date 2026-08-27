@@ -140,7 +140,7 @@ async function main() {
     await page.evaluate(({ text, theme }) => {
       const init = {
         type: 'init', documentId: 'file:///viewport.md', text, version: 1,
-        savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', uiLanguage: 'zh-CN', sourceLineNumbers: true, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark',
+        savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', uiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false,

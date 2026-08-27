@@ -50,7 +50,7 @@ import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
 import type { OutlinePosition } from '../shared/extensionConfig';
-import type { InitMessage, SavedRevisionDto } from '../protocol/readyInit';
+import type { InitMessage, SavedRevisionDto, SourceLineNumberMode } from '../protocol/readyInit';
 import type {
   AppliedMessage,
   ApplyChangesMessage,
@@ -117,7 +117,7 @@ type PanelSessionControllerParams = {
   }) => Promise<PreviewRenderResult>;
   getFindOptions: () => FindOptions;
   getUiLanguage: () => InitMessage['uiLanguage'];
-  getSourceLineNumbers: () => boolean;
+  getSourceLineNumbers: () => SourceLineNumberMode;
   setFindOptions: (options: FindOptions) => Promise<void>;
   getPreviewAppearance: () => PreviewAppearance;
   setPreviewAppearance: (appearance: PreviewAppearance) => Promise<void>;

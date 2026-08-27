@@ -1140,7 +1140,7 @@ const getActiveEditableMode = (): 'live' | 'source' => {
   return state.mode === 'preview' ? state.lastEditableMode : state.mode;
 };
 let pendingInitialText: string | null = null;
-let pendingSourceLineNumbers = true;
+let pendingSourceLineNumbers: InitMessage['sourceLineNumbers'] = 'on';
 let gitClient: any = null;
 let pendingEditorFocus = false;
 let pendingDiagnostics: any[] = [];

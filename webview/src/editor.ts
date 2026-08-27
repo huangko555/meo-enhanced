@@ -6,6 +6,7 @@ import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-mar
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
+import type { SourceLineNumberMode } from '../../src/protocol/readyInit';
 import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
@@ -170,7 +171,7 @@ type CreateEditorOptions = {
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
   previewViewportSurface?: PreviewViewportSurface;
   uiLanguage?: UiLanguage;
-  sourceLineNumbers?: boolean;
+  sourceLineNumbers?: SourceLineNumberMode;
 };
 
 type PointerClickState = { pointerId: number };
@@ -279,6 +280,27 @@ const searchMatchField = StateField.define<SearchMatchFieldValue>({
   }
 });
 
+function lineNumberExtensions(
+  mode: EditableEditorMode,
+  sourceMode: SourceLineNumberMode
+): Extension {
+  const lineNumberMode: SourceLineNumberMode = mode === 'live' ? 'on' : sourceMode;
+  if (lineNumberMode === 'off') return [];
+
+  const formatNumber = lineNumberMode === 'relative'
+    ? (lineNo: number, state: EditorState) => {
+      const currentLine = state.doc.lineAt(state.selection.main.head).number;
+      return String(lineNo === currentLine ? lineNo : Math.abs(lineNo - currentLine));
+    }
+    : lineNumberMode === 'interval'
+      ? (lineNo: number, state: EditorState) => {
+        const currentLine = state.doc.lineAt(state.selection.main.head).number;
+        return lineNo === currentLine || lineNo % 10 === 0 ? String(lineNo) : '';
+      }
+      : undefined;
+  return [lineNumbers(formatNumber ? { formatNumber } : undefined), highlightActiveLineGutter()];
+}
+
 export function createEditor({
   parent,
   text,
@@ -291,7 +313,7 @@ export function createEditor({
   mermaidDiagramPresentationFactory,
   previewViewportSurface,
   uiLanguage = 'en',
-  sourceLineNumbers = true
+  sourceLineNumbers = 'on'
 }: CreateEditorOptions) {
   // VS Code webviews can hit cross-origin window access issues in the EditContext path.
   // Disable it explicitly for stability in embedded Chromium.
@@ -1796,9 +1818,7 @@ export function createEditor({
         ...editorHistoryKeymap
       ]),
       historyCompartment.of(history()),
-      lineNumberCompartment.of(startMode === 'live' || sourceLineNumbers
-        ? [lineNumbers(), highlightActiveLineGutter()]
-        : []),
+      lineNumberCompartment.of(lineNumberExtensions(startMode, sourceLineNumbers)),
       tableTransactionProvenanceAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
@@ -2678,11 +2698,7 @@ export function createEditor({
               gitGutterCompartment.reconfigure(
                 nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
               ),
-              lineNumberCompartment.reconfigure(
-                nextMode === 'live' || sourceLineNumbers
-                  ? [lineNumbers(), highlightActiveLineGutter()]
-                  : []
-              )
+              lineNumberCompartment.reconfigure(lineNumberExtensions(nextMode, sourceLineNumbers))
             ]
           });
         } catch (error) {

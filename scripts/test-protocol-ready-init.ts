@@ -33,7 +33,7 @@ const completeInit = {
   diagnostics: [],
   mode: 'live' as const,
   uiLanguage: 'en' as const,
-  sourceLineNumbers: true,
+  sourceLineNumbers: 'on' as const,
   previewAppearance: 'dark' as const,
   previewFontFamily: '' as const,
   previewSourceColoring: true,
@@ -98,6 +98,11 @@ for (const requiredKey of [
   assert.equal(decodeInitMessage(incomplete), null, `Init without ${requiredKey} must be rejected`);
 }
 assert.equal(decodeInitMessage({ ...completeInit, uiLanguage: 'fr' }), null);
+for (const mode of ['on', 'off', 'relative', 'interval'] as const) {
+  assert.equal(decodeInitMessage({ ...completeInit, sourceLineNumbers: mode })?.sourceLineNumbers, mode);
+}
+assert.equal(decodeInitMessage({ ...completeInit, sourceLineNumbers: true }), null);
+assert.equal(decodeInitMessage({ ...completeInit, sourceLineNumbers: 'visible' }), null);
 for (const removedKey of ['theme', 'shikiCodeBlocks', 'codeTheme', 'lineNumbers', 'restoreTopLine', 'restoreTopLineOffset']) {
   assert.equal(
     decodeInitMessage({ ...completeInit, [removedKey]: removedKey === 'shikiCodeBlocks' ? true : {} }),

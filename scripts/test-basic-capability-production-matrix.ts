@@ -4,15 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Browser, Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
+import type { SourceLineNumberMode } from '../src/protocol/readyInit';
 
 const root = path.resolve(import.meta.dir, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-basic-capability-index-'));
 const target = 'format target';
 const actions = [['bold', `**${target}**`], ['italic', `*${target}*`], ['lineover', `~~${target}~~`], ['highlight', `==${target}==`], ['inlineCode', `\`${target}\``], ['link', `[${target}]()`], ['wikiLink', `[[${target}]]`], ['kbd', `<kbd>${target}</kbd>`], ['underline', `<u>${target}</u>`]] as const;
 
-const init = (text: string, mode: 'live' | 'source', sourceLineNumbers = true) => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
+const init = (text: string, mode: 'live' | 'source', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
 
-async function open(browser: Browser, text: string, mode: 'live' | 'source', sourceLineNumbers = true): Promise<Page> {
+async function open(browser: Browser, text: string, mode: 'live' | 'source', sourceLineNumbers: SourceLineNumberMode = 'on'): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
@@ -87,7 +88,8 @@ async function alerts(browser: Browser): Promise<void> {
 }
 
 async function sourceLineNumberPreference(browser: Browser): Promise<void> {
-  const page = await open(browser, 'one\ntwo', 'source', false);
+  const text = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\n');
+  const page = await open(browser, text, 'source', 'off');
   try {
     assert.equal(await page.$('.cm-lineNumbers'), null, 'Source must respect the native line-number setting');
     await page.click('[data-mode="live"]');
@@ -97,6 +99,29 @@ async function sourceLineNumberPreference(browser: Browser): Promise<void> {
       && document.querySelector('.cm-lineNumbers') === null);
   } finally {
     await page.close();
+  }
+
+  const expectedVisibleNumbers: Record<Exclude<SourceLineNumberMode, 'off'>, string[]> = {
+    on: Array.from({ length: 12 }, (_, index) => String(index + 1)),
+    relative: ['4', '3', '2', '1', '5', '1', '2', '3', '4', '5', '6', '7'],
+    interval: ['1', '10']
+  };
+  for (const mode of ['on', 'relative', 'interval'] as const) {
+    const modePage = await open(browser, text, 'source', mode);
+    try {
+      if (mode === 'relative') {
+        const line = await modePage.$$('.cm-line').then((lines) => lines[4]);
+        const rect = await line?.boundingBox();
+        assert.ok(rect, 'relative line-number target was not visible');
+        await modePage.mouse.click(rect.x + 12, rect.y + rect.height / 2);
+      }
+      const visible = await modePage.evaluate(() => Array.from(
+        document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+      ).map((element) => element.textContent ?? '').filter(Boolean).slice(-12));
+      assert.deepEqual(visible, expectedVisibleNumbers[mode], `Source did not preserve ${mode} line-number semantics`);
+    } finally {
+      await modePage.close();
+    }
   }
 }
 

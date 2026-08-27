@@ -123,7 +123,7 @@ const initMessage = {
   diagnostics: [],
   mode: 'preview',
   uiLanguage: 'en',
-  sourceLineNumbers: true,
+  sourceLineNumbers: 'on',
   previewAppearance: 'light',
   previewFontFamily: '',
   previewSourceColoring: true,

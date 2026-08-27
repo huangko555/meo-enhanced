@@ -172,7 +172,7 @@ async function main(): Promise<void> {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///viewport-anchor.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'source',
-        uiLanguage: 'en', sourceLineNumbers: true, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light',
+        uiLanguage: 'en', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false,
