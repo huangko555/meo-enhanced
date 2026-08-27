@@ -997,21 +997,61 @@ async function main() {
     if (!darkPreviewMermaidFill || darkPreviewMermaidFill === '#ffffff') {
       throw new Error(`Dark Preview Mermaid used a light node fill: ${darkPreviewMermaidFill}`);
     }
+    const previewPdfNode = await page.$('.preview-toolbar-action[data-format="pdf"]');
+    if (!previewPdfNode) throw new Error('Preview PDF action is missing before toolbar migration');
     await page.setViewport({ width: 420, height: 720, deviceScaleFactor: 1 });
     await waitForFrames(page, 4);
-    const narrowPreviewToolbar = await page.evaluate(() => ({
-      overflowIndicatorVisible: !document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
-      hiddenItemCount: document.querySelectorAll('.preview-format-group > .toolbar-overflow-hidden').length,
-      toolbarHeight: document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect().height,
-      pageFitsViewport: document.documentElement.scrollWidth <= window.innerWidth
-    }));
+    const narrowPreviewToolbar = await page.evaluate((pdfNode) => {
+      const moreButton = document.querySelector<HTMLButtonElement>('.more-tools-wrapper > .format-button')!;
+      const moreBounds = moreButton.getBoundingClientRect();
+      const moreCenter = { x: moreBounds.left + moreBounds.width / 2, y: moreBounds.top + moreBounds.height / 2 };
+      const moreHit = document.elementFromPoint(moreCenter.x, moreCenter.y);
+      return {
+        overflowIndicatorVisible: !document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
+        migratedCount: document.querySelectorAll('.more-tools-overflow-items > .is-toolbar-overflow-item').length,
+        pdfMigrated: pdfNode.parentElement?.classList.contains('more-tools-overflow-items') === true,
+        moreVisible: getComputedStyle(moreButton).display !== 'none',
+        moreHit: Boolean(moreHit && moreButton.contains(moreHit)),
+        moreCenter,
+        toolbarHeight: document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect().height,
+        pageFitsViewport: document.documentElement.scrollWidth <= window.innerWidth
+      };
+    }, previewPdfNode);
     if (
       !narrowPreviewToolbar.overflowIndicatorVisible ||
-      narrowPreviewToolbar.hiddenItemCount === 0 ||
+      narrowPreviewToolbar.migratedCount === 0 ||
+      !narrowPreviewToolbar.pdfMigrated ||
+      !narrowPreviewToolbar.moreVisible ||
+      !narrowPreviewToolbar.moreHit ||
       narrowPreviewToolbar.toolbarHeight !== 40 ||
       !narrowPreviewToolbar.pageFitsViewport
     ) {
       throw new Error(`Narrow Preview toolbar overflow regressed: ${JSON.stringify(narrowPreviewToolbar)}`);
+    }
+    await page.mouse.click(narrowPreviewToolbar.moreCenter.x, narrowPreviewToolbar.moreCenter.y);
+    const migratedPdfTarget = await page.evaluate((pdfNode) => {
+      const bounds = pdfNode.getBoundingClientRect();
+      const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+      const hit = document.elementFromPoint(center.x, center.y);
+      return {
+        panelOpen: !document.querySelector<HTMLElement>('.more-tools-panel')!.hidden,
+        hit: Boolean(hit && pdfNode.contains(hit)),
+        center
+      };
+    }, previewPdfNode);
+    if (!migratedPdfTarget.panelOpen || !migratedPdfTarget.hit) {
+      throw new Error(`Migrated Preview PDF action is not reachable: ${JSON.stringify(migratedPdfTarget)}`);
+    }
+    await page.mouse.click(migratedPdfTarget.center.x, migratedPdfTarget.center.y);
+    const narrowExportRequests = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string; format?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'exportDocument').map((message) => ({ format: message.format })));
+    if (JSON.stringify(narrowExportRequests) !== JSON.stringify([
+      { format: 'html' },
+      { format: 'pdf' },
+      { format: 'pdf' }
+    ])) {
+      throw new Error(`Migrated Preview PDF action lost its command identity: ${JSON.stringify(narrowExportRequests)}`);
     }
     const previewMathFit = await page.evaluate(() => {
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
@@ -1043,7 +1083,7 @@ async function main() {
     }
     await page.setViewport({ width: 1100, height: 720, deviceScaleFactor: 1 });
     await waitForFrames(page, 4);
-    const widePreviewToolbar = await page.evaluate(() => {
+    const widePreviewToolbar = await page.evaluate((pdfNode) => {
       const describe = (element: HTMLElement) => {
         const bounds = element.getBoundingClientRect();
         const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
@@ -1055,14 +1095,18 @@ async function main() {
       };
       return {
         overflowIndicatorHidden: document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
+        pdfRestored: pdfNode.parentElement?.classList.contains('preview-format-group') === true,
+        overflowSectionEmpty: document.querySelector('.more-tools-overflow-items')?.childElementCount === 0,
         html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
         pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!),
         labelsVisible: Array.from(document.querySelectorAll<HTMLElement>('.preview-toolbar-action-label'))
           .every((label) => getComputedStyle(label).display !== 'none')
       };
-    });
+    }, previewPdfNode);
     if (
       !widePreviewToolbar.overflowIndicatorHidden ||
+      !widePreviewToolbar.pdfRestored ||
+      !widePreviewToolbar.overflowSectionEmpty ||
       !widePreviewToolbar.html.visible || !widePreviewToolbar.html.hit ||
       !widePreviewToolbar.pdf.visible || !widePreviewToolbar.pdf.hit ||
       !widePreviewToolbar.labelsVisible

@@ -691,11 +691,6 @@ body {
   display: none;
 }
 
-.toolbar-overflow-hidden {
-  visibility: hidden;
-  pointer-events: none;
-}
-
 .more-tools-wrapper {
   position: relative;
 }
@@ -726,6 +721,23 @@ body {
 
 .more-tools-panel[hidden] {
   display: none;
+}
+
+.more-tools-overflow-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.more-tools-overflow-items[hidden] {
+  display: none;
+}
+
+.more-tools-overflow-items .is-toolbar-overflow-item {
+  flex: 0 0 auto;
 }
 
 .more-tools-option {
@@ -4191,6 +4203,10 @@ body.outline-resizing .preview-frame {
 
 .editor-root[data-mode='preview'] .preview-hidden-toolbar-control {
   display: none;
+}
+
+.editor-root[data-mode='preview'] .preview-hidden-toolbar-control.has-toolbar-overflow-items {
+  display: block;
 }
 
 .editor-root[data-mode='preview'] .find-replace-row {

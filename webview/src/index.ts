@@ -731,6 +731,9 @@ moreToolsPanel.className = 'more-tools-panel';
 moreToolsPanel.setAttribute('role', 'menu');
 moreToolsPanel.setAttribute('aria-label', 'More tools');
 moreToolsPanel.hidden = true;
+const toolbarOverflowSection = document.createElement('div');
+toolbarOverflowSection.className = 'more-tools-overflow-items';
+toolbarOverflowSection.hidden = true;
 const releaseFixedBaselineSeparator = document.createElement('div');
 releaseFixedBaselineSeparator.className = 'more-tools-separator';
 releaseFixedBaselineSeparator.setAttribute('role', 'separator');
@@ -834,6 +837,7 @@ const editorAppearanceRow = document.createElement('div');
 editorAppearanceRow.className = 'more-tools-appearance-row';
 editorAppearanceRow.append(editorAppearanceControl.element);
 moreToolsPanel.append(
+  toolbarOverflowSection,
   releaseFixedBaselineBtn,
   releaseFixedBaselineSeparator,
   ...diffBaselineButtons,
@@ -940,7 +944,33 @@ const editorNotice = createEditorNoticeController(editorNoticeBanner, () => hand
 
 toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarRight, findPanelElements.panel, editorNoticeBanner);
 
+const toolbarOverflowHomes = new Map<HTMLElement, Comment>();
+let toolbarOverflowLayoutKey = '';
+
+const restoreToolbarOverflowItems = (): void => {
+  for (const [item, home] of toolbarOverflowHomes) {
+    home.replaceWith(item);
+    item.classList.remove('is-toolbar-overflow-item');
+  }
+  toolbarOverflowHomes.clear();
+  toolbarOverflowSection.hidden = true;
+  moreToolsWrapper.classList.remove('has-toolbar-overflow-items');
+};
+
+const moveToolbarItemToMore = (item: HTMLElement): void => {
+  const home = document.createComment('toolbar overflow home');
+  item.before(home);
+  toolbarOverflowHomes.set(item, home);
+  item.classList.add('is-toolbar-overflow-item');
+  toolbarOverflowSection.append(item);
+};
+
 const syncToolbarOverflow = () => {
+  const nextLayoutKey = `${toolbar.clientWidth}:${rightGroup.offsetWidth}:${root.dataset.mode ?? ''}`;
+  if (nextLayoutKey === toolbarOverflowLayoutKey) return;
+  toolbarOverflowLayoutKey = nextLayoutKey;
+  restoreToolbarOverflowItems();
+
   const toolbarBounds = toolbar.getBoundingClientRect();
   const visibleLeftGroup = previewFormatGroup.getClientRects().length > 0
     ? previewFormatGroup
@@ -948,19 +978,20 @@ const syncToolbarOverflow = () => {
   const leftItems = Array.from(visibleLeftGroup.children).filter((child): child is HTMLElement => (
     child instanceof HTMLElement && getComputedStyle(child).display !== 'none'
   ));
-  const rightBoundary = toolbarRight.getBoundingClientRect().left;
+  let rightBoundary = toolbarRight.getBoundingClientRect().left;
   const hasOverflow = leftItems.some((item) => item.getBoundingClientRect().right > rightBoundary);
-
-  for (const group of [formatGroup, previewFormatGroup]) {
-    for (const child of group.children) {
-      child.classList.remove('toolbar-overflow-hidden');
-    }
-  }
 
   if (!hasOverflow) {
     toolbarOverflowIndicator.hidden = true;
+    if (visibleLeftGroup === previewFormatGroup) setMoreToolsVisible(false);
     return;
   }
+
+  // Reserve the existing More button before selecting the suffix to migrate.
+  // The moved controls remain the authoritative nodes and retain their state/listeners.
+  moreToolsWrapper.classList.add('has-toolbar-overflow-items');
+  toolbarOverflowSection.hidden = false;
+  rightBoundary = toolbarRight.getBoundingClientRect().left;
 
   const indicatorWidth = 24;
   const indicatorGap = 4;
@@ -974,9 +1005,7 @@ const syncToolbarOverflow = () => {
     visibleCount -= 1;
   }
 
-  leftItems.forEach((item, index) => {
-    item.classList.toggle('toolbar-overflow-hidden', index >= visibleCount);
-  });
+  leftItems.slice(visibleCount).forEach(moveToolbarItemToMore);
 
   const leftGroupBounds = visibleLeftGroup.getBoundingClientRect();
   const indicatorLeft = visibleCount > 0
