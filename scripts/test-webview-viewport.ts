@@ -971,7 +971,7 @@ async function main() {
       }}));
     }, previewRequestId);
     const previewError = await page.$eval('.preview-status', (element) => element.textContent);
-    if (previewError !== 'Preview test error') {
+    if (previewError !== '预览生成失败') {
       throw new Error(`Preview render error was not shown: ${previewError}`);
     }
     const stalePreviewRequestId = previewRequestId;

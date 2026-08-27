@@ -310,7 +310,7 @@ async function main() {
         'tags: [Markdown, Editor]',
         'metadata:',
         '  owner: Example',
-        '  - https://example.com/docs',
+        '  link: https://example.com/docs',
         '---',
         '# Body'
       ].join('\n');
