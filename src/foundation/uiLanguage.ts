@@ -89,6 +89,11 @@ export type UiStrings = Readonly<{
   copy: string;
   selectAllCode: string;
   all: string;
+  codeLines: (count: number) => string;
+  showMoreCode: (count: number) => string;
+  showMoreLines: (count: number) => string;
+  showLessCode: string;
+  showLess: string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -175,6 +180,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     jumpToFootnote: (number: number) => `Jump to footnote ${number}`,
     jumpToFootnoteReference: (number: number) => `Jump to footnote reference ${number}`,
     copyCode: 'Copy code', copied: 'copied', copy: 'copy', selectAllCode: 'Select all code', all: 'all',
+    codeLines: (count: number) => `${count} lines`,
+    showMoreCode: (count: number) => `Show ${count} more lines of code`,
+    showMoreLines: (count: number) => `Show ${count} more lines`, showLessCode: 'Show less code', showLess: 'Show less',
     heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
@@ -237,6 +245,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     jumpToFootnote: (number: number) => `跳转到脚注 ${number}`,
     jumpToFootnoteReference: (number: number) => `跳转到脚注引用 ${number}`,
     copyCode: '复制代码', copied: '已复制', copy: '复制', selectAllCode: '全选代码', all: '全选',
+    codeLines: (count: number) => `${count} 行`,
+    showMoreCode: (count: number) => `显示其余 ${count} 行代码`,
+    showMoreLines: (count: number) => `显示其余 ${count} 行`, showLessCode: '收起代码', showLess: '收起',
     heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',

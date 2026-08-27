@@ -328,7 +328,8 @@ async function main(): Promise<void> {
       const harness = (window as any).ListEditingHarness;
       const host = document.getElementById('editor-host')!;
       host.replaceChildren();
-      const text = '[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\n```ts\nconst value = 1;\n```\n\nplain';
+      const longCode = Array.from({ length: 20 }, (_, index) => `const long${index + 1} = ${index + 1};`).join('\n');
+      const text = `[Open](https://example.com)\n\n<details>\n<summary>More</summary>\nBody\n</details>\n\nFootnote[^1]\n\n[^1]: note\n\n\`\`\`ts\nconst value = 1;\n\`\`\`\n\n\`\`\`js\n${longCode}\n\`\`\`\n\nplain`;
       const editor = harness.createEditor({
         parent: host,
         text,
@@ -348,7 +349,11 @@ async function main(): Promise<void> {
         detailsSource: read('.meo-md-details-source-toggle'),
         footnote: read('.meo-md-footnote-ref'),
         footnoteBack: read('.meo-md-footnote-backref'),
-        codeActions: Array.from(document.querySelectorAll('.meo-code-block-actions [aria-label]')).map((element) => element.getAttribute('aria-label'))
+        codeActions: Array.from(document.querySelectorAll('.meo-code-block-actions [aria-label]')).map((element) => element.getAttribute('aria-label')),
+        longCode: {
+          lines: document.querySelector('.meo-md-long-code-placeholder .meo-long-code-line-count')?.textContent,
+          action: read('.meo-md-long-code-placeholder .meo-long-code-action')
+        }
       };
       editor.destroy();
       return output;
@@ -374,7 +379,8 @@ async function main(): Promise<void> {
       openLink: '打开链接',
       footnote: '跳转到脚注 1',
       footnoteBack: '跳转到脚注引用 1',
-      codeActions: ['全选代码', '复制代码']
+      codeActions: ['全选代码', '复制代码', '全选代码', '复制代码'],
+      longCode: { lines: '20 行', action: '显示其余 10 行代码' }
     });
     assert.equal(result.appliedAfterCheckbox, result.afterCheckbox, 'checkbox must publish exactly its accepted text');
     assert.ok(result.undoResults.every(Boolean), 'all 20 list edits must undo');

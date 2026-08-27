@@ -8,10 +8,11 @@ import {
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
+import { getUiStrings } from '../../../src/foundation/uiLanguage';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
-const COLLAPSE_LABEL = 'Show less';
 
 type LongCodeBlockDescriptor = {
   anchor: number;
@@ -206,16 +207,17 @@ function makeActionButton(
   hiddenLineCount: number,
   resolveAnchor: () => number
 ): HTMLButtonElement {
+  const strings = getUiStrings(view.state.facet(uiLanguageFacet));
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'meo-long-code-action';
   button.setAttribute('aria-expanded', action === 'collapse' ? 'true' : 'false');
   button.setAttribute('aria-label', action === 'expand'
-    ? `Show ${hiddenLineCount} more lines of code`
-    : 'Show less code');
+    ? strings.showMoreCode(hiddenLineCount)
+    : strings.showLessCode);
   button.textContent = action === 'expand'
-    ? `Show ${hiddenLineCount} more lines`
-    : COLLAPSE_LABEL;
+    ? strings.showMoreLines(hiddenLineCount)
+    : strings.showLess;
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -247,6 +249,7 @@ class LongCodePlaceholderWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const container = document.createElement('div');
     container.className = 'meo-md-long-code-placeholder';
     container.dataset.longCodeAnchor = String(this.anchor);
@@ -261,7 +264,7 @@ class LongCodePlaceholderWidget extends WidgetType {
     language.textContent = this.language;
     const metadata = document.createElement('span');
     metadata.className = 'meo-long-code-line-count';
-    metadata.textContent = `${this.lineCount} lines`;
+    metadata.textContent = strings.codeLines(this.lineCount);
     container.append(language, metadata);
     container.appendChild(makeActionButton(
       view,
@@ -297,6 +300,7 @@ class LongCodeFooterWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const container = document.createElement('div');
     container.className = 'meo-md-long-code-footer';
     container.dataset.longCodeAnchor = String(this.anchor);
@@ -306,7 +310,7 @@ class LongCodeFooterWidget extends WidgetType {
     language.textContent = this.language;
     const metadata = document.createElement('span');
     metadata.className = 'meo-long-code-line-count';
-    metadata.textContent = `${this.lineCount} lines`;
+    metadata.textContent = strings.codeLines(this.lineCount);
     container.append(language, metadata);
     container.appendChild(makeActionButton(
       view,
@@ -566,8 +570,9 @@ class LongCodeFloatingButtonPlugin {
     this.button = document.createElement('button');
     this.button.type = 'button';
     this.button.className = 'meo-long-code-floating-action';
-    this.button.textContent = COLLAPSE_LABEL;
-    this.button.setAttribute('aria-label', 'Show less code');
+    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
+    this.button.textContent = strings.showLess;
+    this.button.setAttribute('aria-label', strings.showLessCode);
     this.button.hidden = true;
     this.button.addEventListener('click', (event) => {
       event.preventDefault();
