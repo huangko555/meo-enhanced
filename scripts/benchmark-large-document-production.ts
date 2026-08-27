@@ -1,0 +1,323 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { Page } from 'puppeteer-core';
+import { launchTestBrowser } from './browser-test-helpers';
+import {
+  createLargeDocumentFixtures,
+  describeLargeDocumentFixture,
+  type LargeDocumentFixture
+} from './large-document-fixtures';
+
+const repoRoot = path.resolve(import.meta.dir, '..');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-large-document-benchmark-'));
+const outputDir = path.join(repoRoot, '.local', 'plans', 'phase-i-baseline');
+const viewport = { width: 1100, height: 720, deviceScaleFactor: 1 } as const;
+
+type StableSample = {
+  readonly editorTextLength: number;
+  readonly mode: 'live' | 'source' | 'unknown';
+  readonly scrollHeight: number;
+  readonly visibleLines: number;
+  readonly tables: number;
+  readonly mermaid: number;
+  readonly images: number;
+  readonly math: number;
+};
+
+type BrowserMemory = {
+  readonly usedJSHeapSize: number;
+  readonly totalJSHeapSize: number;
+  readonly jsHeapSizeLimit: number;
+} | null;
+
+const median = (values: readonly number[]): number => {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1]! + sorted[middle]!) / 2
+    : sorted[middle]!;
+};
+
+async function preparePage(page: Page): Promise<void> {
+  await page.setViewport(viewport);
+  await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+  await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+  await page.addStyleTag({
+    content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--meo-line-height-live:1.6;--meo-line-height-source:1.5}'
+  });
+  await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+}
+
+async function observeStableEditor(page: Page, expectedMode: 'live' | 'source'): Promise<{
+  readonly elapsedMs: number;
+  readonly sample: StableSample;
+}> {
+  return page.evaluate(async (mode) => {
+    const startedAt = performance.now();
+    const sample = (): StableSample => {
+      const editor = (window as any).__largeDocumentBenchmarkEditor;
+      const root = document.querySelector<HTMLElement>('#app > .cm-editor');
+      const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
+      return {
+        editorTextLength: editor?.getText().length ?? -1,
+        mode: root?.classList.contains('meo-mode-live')
+          ? 'live'
+          : root?.classList.contains('meo-mode-source') ? 'source' : 'unknown',
+        scrollHeight: scroller?.scrollHeight ?? -1,
+        visibleLines: root?.querySelectorAll('.cm-line').length ?? 0,
+        tables: root?.querySelectorAll('.meo-md-html-table-shell').length ?? 0,
+        mermaid: root?.querySelectorAll('.meo-mermaid-block, .meo-mermaid-editing-block').length ?? 0,
+        images: root?.querySelectorAll('.meo-md-image, .meo-image-editing-block').length ?? 0,
+        math: root?.querySelectorAll('.meo-md-math, .meo-latex-math-editing-block').length ?? 0
+      };
+    };
+    let previous = '';
+    let stableFrames = 0;
+    let latest = sample();
+    for (let frame = 0; frame < 120; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      latest = sample();
+      const serialized = JSON.stringify(latest);
+      stableFrames = latest.mode === mode && serialized === previous ? stableFrames + 1 : 0;
+      if (stableFrames >= 2) return { elapsedMs: performance.now() - startedAt, sample: latest };
+      previous = serialized;
+    }
+    throw new Error(`Editor did not become semantically stable in ${mode}: ${JSON.stringify(latest)}`);
+  }, expectedMode);
+}
+
+async function readMemory(page: Page): Promise<BrowserMemory> {
+  return page.evaluate(() => {
+    const memory = (performance as Performance & { memory?: BrowserMemory }).memory;
+    return memory && Number.isFinite(memory.usedJSHeapSize)
+      ? {
+          usedJSHeapSize: memory.usedJSHeapSize,
+          totalJSHeapSize: memory.totalJSHeapSize,
+          jsHeapSizeLimit: memory.jsHeapSizeLimit
+        }
+      : null;
+  });
+}
+
+async function createEditor(page: Page, fixture: LargeDocumentFixture, mode: 'live' | 'source') {
+  const synchronousMs = await page.evaluate(({ text, initialMode }) => {
+    const harness = (window as any).LargeDocumentBenchmarkHarness;
+    const startedAt = performance.now();
+    (window as any).__largeDocumentBenchmarkEditor = harness.createEditor({
+      parent: document.getElementById('app'),
+      text,
+      initialMode,
+      onApplyChanges() {}
+    });
+    return performance.now() - startedAt;
+  }, { text: fixture.text, initialMode: mode });
+  const stable = await observeStableEditor(page, mode);
+  return { synchronousMs, stableMs: stable.elapsedMs, sample: stable.sample };
+}
+
+async function destroyEditor(page: Page): Promise<{ readonly connectedEditors: number }> {
+  return page.evaluate(async () => {
+    (window as any).__largeDocumentBenchmarkEditor?.destroy();
+    (window as any).__largeDocumentBenchmarkEditor = null;
+    document.getElementById('app')?.replaceChildren();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    return { connectedEditors: document.querySelectorAll('#app .cm-editor').length };
+  });
+}
+
+async function measureInput(page: Page, marker: string): Promise<number> {
+  await page.evaluate(() => {
+    const editor = (window as any).__largeDocumentBenchmarkEditor;
+    const end = editor.getText().length;
+    editor.revealSelection(end, end, { focusEditor: true, align: 'nearest' });
+  });
+  await page.waitForFunction(() => document.activeElement?.closest('.cm-editor') !== null);
+  await page.evaluate((expectedMarker) => {
+    const content = document.querySelector<HTMLElement>('#app .cm-content');
+    if (!content) {
+      throw new Error('Benchmark content is not connected');
+    }
+    (window as any).__largeDocumentInputReceipt = new Promise<number>((resolve, reject) => {
+      content.addEventListener('beforeinput', () => {
+        const startedAt = performance.now();
+        let previousText = '';
+        let stableFrames = 0;
+        const observe = () => requestAnimationFrame(() => {
+          const editor = (window as any).__largeDocumentBenchmarkEditor;
+          const currentText = editor.getText();
+          const visible = content.textContent?.includes(expectedMarker) === true;
+          stableFrames = visible && currentText.endsWith(expectedMarker) && currentText === previousText
+            ? stableFrames + 1
+            : 0;
+          if (stableFrames >= 2) {
+            resolve(performance.now() - startedAt);
+            return;
+          }
+          previousText = currentText;
+          if (performance.now() - startedAt > 5_000) {
+            reject(new Error(`Input was not visibly painted: ${expectedMarker}`));
+            return;
+          }
+          observe();
+        });
+        observe();
+      }, { capture: true, once: true });
+    });
+  }, marker);
+  await page.keyboard.type(marker);
+  return page.evaluate(() => (window as any).__largeDocumentInputReceipt);
+}
+
+async function measureScroll(page: Page, line: number): Promise<{
+  readonly line: number;
+  readonly elapsedMs: number;
+  readonly sample: StableSample;
+}> {
+  const startedAt = await page.evaluate(() => performance.now());
+  await page.evaluate((targetLine) => {
+    (window as any).__largeDocumentBenchmarkEditor.scrollToLine(targetLine, 'top');
+  }, line);
+  const stable = await observeStableEditor(page, 'live');
+  const elapsedMs = await page.evaluate((started) => performance.now() - started, startedAt);
+  return { line, elapsedMs, sample: stable.sample };
+}
+
+async function main(): Promise<void> {
+  const build = await Bun.build({
+    entrypoints: [path.join(repoRoot, 'scripts', 'benchmark-large-document-entry.ts')],
+    outdir: tempDir,
+    target: 'browser',
+    format: 'iife',
+    naming: 'bundle.js'
+  });
+  if (!build.success) throw new Error(build.logs.map(String).join('\n'));
+
+  const browser = await launchTestBrowser();
+  try {
+    const browserVersion = await browser.version();
+    const results = [];
+    for (const fixture of createLargeDocumentFixtures()) {
+      const page = await browser.newPage();
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      try {
+        await preparePage(page);
+        console.log(`[benchmark] ${fixture.kind} initial Live`);
+        const initialLive = await createEditor(page, fixture, 'live');
+        const initialLiveMemory = await readMemory(page);
+        const liveDestroy = await destroyEditor(page);
+        assert.equal(liveDestroy.connectedEditors, 0);
+
+        console.log(`[benchmark] ${fixture.kind} initial Source`);
+        const initialSource = await createEditor(page, fixture, 'source');
+        const sourceMemory = await readMemory(page);
+        const sourceToLiveStartedAt = await page.evaluate(() => performance.now());
+        await page.evaluate(() => (window as any).__largeDocumentBenchmarkEditor.setMode('live'));
+        await observeStableEditor(page, 'live');
+        const sourceToLiveMs = await page.evaluate(
+          (startedAt) => performance.now() - startedAt,
+          sourceToLiveStartedAt
+        );
+
+        console.log(`[benchmark] ${fixture.kind} scroll`);
+        const dimensions = describeLargeDocumentFixture(fixture.text);
+        const scroll = [];
+        for (const line of [
+          Math.max(1, Math.floor(dimensions.lines / 4)),
+          Math.max(1, Math.floor(dimensions.lines / 2)),
+          dimensions.lines
+        ]) {
+          scroll.push(await measureScroll(page, line));
+        }
+
+        console.log(`[benchmark] ${fixture.kind} input`);
+        const inputSamples: number[] = [];
+        for (const marker of ['x', 'y', 'z']) {
+          inputSamples.push(await measureInput(page, marker));
+        }
+
+        console.log(`[benchmark] ${fixture.kind} return Source`);
+        const liveToSourceStartedAt = await page.evaluate(() => performance.now());
+        await page.evaluate(() => (window as any).__largeDocumentBenchmarkEditor.setMode('source'));
+        await observeStableEditor(page, 'source');
+        const liveToSourceMs = await page.evaluate(
+          (startedAt) => performance.now() - startedAt,
+          liveToSourceStartedAt
+        );
+        const finalState = await page.evaluate(() => {
+          const editor = (window as any).__largeDocumentBenchmarkEditor;
+          const selection = window.getSelection();
+          const content = document.querySelector<HTMLElement>('#app .cm-content');
+          return {
+            textSuffix: editor.getText().slice(-6),
+            focused: editor.hasFocus(),
+            selectionCollapsed: selection?.isCollapsed ?? false,
+            selectionInsideContent: Boolean(
+              selection?.anchorNode && content?.contains(selection.anchorNode)
+            ),
+            history: editor.getHistoryDepth()
+          };
+        });
+        const finalDestroy = await destroyEditor(page);
+        assert.equal(finalDestroy.connectedEditors, 0);
+        assert.deepEqual(pageErrors, [], `${fixture.kind} emitted browser page errors`);
+        assert.equal(finalState.textSuffix.endsWith('xyz'), true);
+        assert.equal(finalState.selectionCollapsed, true);
+        assert.equal(finalState.selectionInsideContent, true);
+
+        results.push({
+          kind: fixture.kind,
+          sha256: createHash('sha256').update(fixture.text).digest('hex'),
+          dimensions,
+          initialLive,
+          initialLiveMemory,
+          initialSource,
+          sourceMemory,
+          sourceToLiveMs,
+          scroll,
+          inputToPaintMs: {
+            samples: inputSamples,
+            median: median(inputSamples)
+          },
+          liveToSourceMs,
+          finalState
+        });
+        console.log(`[benchmark] ${fixture.kind} complete`);
+      } finally {
+        await page.close();
+      }
+    }
+
+    fs.mkdirSync(outputDir, { recursive: true });
+    const reportPath = path.join(outputDir, `large-document-${Date.now()}.json`);
+    const head = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repoRoot }).stdout.toString().trim();
+    fs.writeFileSync(reportPath, `${JSON.stringify({
+      schemaVersion: 1,
+      head,
+      createdAt: new Date().toISOString(),
+      environment: {
+        platform: process.platform,
+        arch: process.arch,
+        logicalCpuCount: os.cpus().length,
+        bunVersion: Bun.version,
+        browserVersion,
+        viewport
+      },
+      results
+    }, null, 2)}\n`);
+    console.log(JSON.stringify({ reportPath, fixtureCount: results.length }));
+  } finally {
+    await browser.close();
+  }
+}
+
+main()
+  .finally(() => fs.rmSync(tempDir, { recursive: true, force: true }))
+  .catch((error) => {
+    console.error(error instanceof Error ? error.stack : error);
+    process.exitCode = 1;
+  });
