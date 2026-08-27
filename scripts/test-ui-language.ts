@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   getUiStrings,
   normalizeUiLanguagePreference,
@@ -27,5 +29,18 @@ assert.equal(chinese.replacedRemaining(3), '已替换 • 剩余 3 个');
 assert.equal(chinese.outlineNoHeadings, '暂无标题');
 assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);
+
+const repoRoot = path.resolve(import.meta.dir, '..');
+const packageText = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8');
+const englishNls = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.nls.json'), 'utf8')) as Record<string, string>;
+const chineseNls = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.nls.zh-cn.json'), 'utf8')) as Record<string, string>;
+const referencedNlsKeys = [...packageText.matchAll(/%([^%]+)%/g)].map((match) => match[1]);
+assert.deepEqual(Object.keys(chineseNls).sort(), Object.keys(englishNls).sort());
+for (const key of referencedNlsKeys) {
+  assert.equal(typeof englishNls[key], 'string', `Missing English package NLS key: ${key}`);
+  assert.equal(typeof chineseNls[key], 'string', `Missing Chinese package NLS key: ${key}`);
+  assert.notEqual(englishNls[key], '');
+  assert.notEqual(chineseNls[key], '');
+}
 
 console.log('UI language checks passed');

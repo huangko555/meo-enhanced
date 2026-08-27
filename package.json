@@ -1,7 +1,7 @@
 {
   "name": "meo-enhanced",
-  "displayName": "MEO Enhanced - Markdown Editor",
-  "description": "An enhanced Markdown editor with live editing mode for VS Code.",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
   "version": "0.3.7",
   "publisher": "huangko555",
   "private": true,
@@ -44,7 +44,7 @@
     "commands": [
       {
         "command": "meoEnhanced.open",
-        "title": "Open With MEO Enhanced",
+        "title": "%command.open%",
         "icon": "$(book)"
       },
       {
@@ -53,22 +53,22 @@
       },
       {
         "command": "meoEnhanced.setDefaultEditor",
-        "title": "MEO Enhanced: Set as Default",
+        "title": "%command.setDefaultEditor%",
         "icon": "$(check)"
       },
       {
         "command": "meoEnhanced.toggleMode",
-        "title": "MEO Enhanced: Toggle Live/Source Mode",
+        "title": "%command.toggleMode%",
         "icon": "$(sync)"
       },
       {
         "command": "meoEnhanced.exportHtml",
-        "title": "MEO Enhanced: Export as HTML",
+        "title": "%command.exportHtml%",
         "icon": "$(export)"
       },
       {
         "command": "meoEnhanced.exportPdf",
-        "title": "MEO Enhanced: Export as PDF",
+        "title": "%command.exportPdf%",
         "icon": "$(file-pdf)"
       }
     ],
@@ -158,19 +158,19 @@
             "zh-CN"
           ],
           "enumDescriptions": [
-            "Follow the VS Code display language. Chinese (Simplified) is used only for zh-CN; other locales use English.",
-            "Use English.",
-            "Use Simplified Chinese."
+            "%config.language.auto%",
+            "%config.language.en%",
+            "%config.language.zhCN%"
           ],
           "default": "auto",
           "order": 1,
-          "description": "Display language for the MEO Enhanced editor and Preview interface."
+          "description": "%config.language.description%"
         },
         "meoEnhanced.useAsDefault": {
           "type": "boolean",
           "default": true,
           "order": 2,
-          "description": "Use MEO Enhanced as the default editor for Markdown files"
+          "description": "%config.useAsDefault%"
         },
         "meoEnhanced.outline.position": {
           "type": "string",
@@ -179,24 +179,24 @@
             "right"
           ],
           "enumDescriptions": [
-            "Show the document outline on the left side of the editor.",
-            "Show the document outline on the right side of the editor."
+            "%config.outline.left%",
+            "%config.outline.right%"
           ],
           "default": "right",
           "order": 2,
-          "description": "Position of the contents outline sidebar."
+          "description": "%config.outline.position%"
         },
         "meoEnhanced.contentMaxWidth.visible": {
           "type": "boolean",
           "default": false,
           "order": 3,
-          "description": "Constrain the editor content to a centered 800px column."
+          "description": "%config.contentMaxWidth%"
         },
         "meoEnhanced.gitChanges.visible": {
           "type": "boolean",
           "default": true,
           "order": 5,
-          "description": "Show change indicators in the editor."
+          "description": "%config.gitChanges%"
         },
         "meoEnhanced.changes.baseline": {
           "type": "string",
@@ -206,25 +206,25 @@
             "git-head"
           ],
           "enumDescriptions": [
-            "Compare with the latest content saved to disk.",
-            "Compare with the version before the most recent save batch.",
-            "Compare with the file at Git HEAD."
+            "%config.baseline.currentEdit%",
+            "%config.baseline.recentSave%",
+            "%config.baseline.gitHead%"
           ],
           "default": "current-edit",
           "order": 6,
-          "description": "Choose the baseline used for change indicators."
+          "description": "%config.baseline.description%"
         },
         "meoEnhanced.gitChanges.lineHighlights": {
           "type": "boolean",
           "default": true,
           "order": 6,
-          "description": "Show subtle line coloring for modified lines in Source mode."
+          "description": "%config.lineHighlights%"
         },
         "meoEnhanced.imageFolder": {
           "type": "string",
           "default": "assets",
           "order": 9,
-          "description": "Folder name to save pasted images (relative to workspace root)."
+          "description": "%config.imageFolder%"
         }
       }
     }
