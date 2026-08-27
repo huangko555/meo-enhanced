@@ -1,4 +1,5 @@
 import { createElement, CaseSensitive, ChevronUp, ChevronDown, Replace, ReplaceAll, WholeWord, X } from 'lucide';
+import { getUiStrings, type UiLanguage, type UiStrings } from '../../../src/foundation/uiLanguage';
 
 export interface FindPanelElements {
   panel: HTMLDivElement;
@@ -15,6 +16,7 @@ export interface FindPanelElements {
   replaceBtn: HTMLButtonElement;
   replaceAllBtn: HTMLButtonElement;
   toggleBtn: HTMLButtonElement;
+  applyUiStrings: (strings: UiStrings) => void;
 }
 
 export interface FindPanelContext {
@@ -128,6 +130,28 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
   replaceRow.append(replaceInputWrap, replaceBtn, replaceAllBtn, closeSpacer, closeBtn);
   panel.append(findRow, replaceRow);
 
+  const applyUiStrings = (strings: UiStrings): void => {
+    panel.setAttribute('aria-label', strings.findAndReplacePanel);
+    findInput.placeholder = strings.find;
+    findInput.setAttribute('aria-label', strings.find);
+    findClearBtn.title = strings.clearFind;
+    findClearBtn.setAttribute('aria-label', strings.clearFind);
+    wholeWordBtn.title = strings.wholeWord;
+    wholeWordBtn.setAttribute('aria-label', strings.wholeWord);
+    caseSensitiveBtn.title = strings.caseSensitive;
+    caseSensitiveBtn.setAttribute('aria-label', strings.caseSensitive);
+    findPrevBtn.title = strings.previousMatch;
+    findNextBtn.title = strings.nextMatch;
+    closeBtn.title = strings.closeFind;
+    closeBtn.setAttribute('aria-label', strings.closeFind);
+    replaceInput.placeholder = strings.replace;
+    replaceInput.setAttribute('aria-label', strings.replace);
+    replaceClearBtn.title = strings.clearReplace;
+    replaceClearBtn.setAttribute('aria-label', strings.clearReplace);
+    replaceBtn.title = strings.replaceCurrentMatch;
+    replaceAllBtn.title = strings.replaceAllMatches;
+  };
+
   return {
     panel,
     findInput,
@@ -142,7 +166,8 @@ export const createFindPanel = (toggleBtn: HTMLButtonElement): FindPanelElements
     closeBtn,
     replaceBtn,
     replaceAllBtn,
-    toggleBtn
+    toggleBtn,
+    applyUiStrings
   };
 };
 
@@ -153,6 +178,7 @@ export const createFindPanelController = (
   modeGroup: HTMLElement,
   getSelectedSurfaceText?: () => string
 ) => {
+  let uiStrings = getUiStrings('en');
   let visible = false;
 
   const isWholeWordEnabled = (): boolean => {
@@ -215,10 +241,10 @@ export const createFindPanelController = (
 
     const total = editor.countMatches(query, searchOptions);
     if (!total) {
-      setFindStatus('No matches', true);
+      setFindStatus(uiStrings.noMatches, true);
       return;
     }
-    setFindStatus(`${total} matches`);
+    setFindStatus(uiStrings.findMatches(total));
   };
 
   const close = (): void => {
@@ -271,7 +297,7 @@ export const createFindPanelController = (
 
   const applyFindResult = (result: { found?: boolean; current?: number; total?: number } | null): boolean => {
     if (!result?.found) {
-      setFindStatus('No matches', true);
+      setFindStatus(uiStrings.noMatches, true);
       return false;
     }
     setFindStatus(`${result.current}/${result.total}`);
@@ -286,7 +312,7 @@ export const createFindPanelController = (
 
     const query = elements.findInput.value;
     if (!query) {
-      setFindStatus('Enter text', true);
+      setFindStatus(uiStrings.enterText, true);
       return false;
     }
 
@@ -303,7 +329,7 @@ export const createFindPanelController = (
 
     const query = elements.findInput.value;
     if (!query) {
-      setFindStatus('Enter text', true);
+      setFindStatus(uiStrings.enterText, true);
       return false;
     }
 
@@ -313,11 +339,11 @@ export const createFindPanelController = (
     }
 
     if (result.found) {
-      setFindStatus(`Replaced • ${result.current}/${result.total}`);
+      setFindStatus(uiStrings.replacedCurrent(result.current ?? 0, result.total ?? 0));
       return true;
     }
 
-    setFindStatus(result.total ? `Replaced • ${result.total} remaining` : 'Replaced');
+    setFindStatus(result.total ? uiStrings.replacedRemaining(result.total) : uiStrings.replaced);
     return true;
   };
 
@@ -329,17 +355,17 @@ export const createFindPanelController = (
 
     const query = elements.findInput.value;
     if (!query) {
-      setFindStatus('Enter text', true);
+      setFindStatus(uiStrings.enterText, true);
       return false;
     }
 
     const result = editor.replaceAll(query, elements.replaceInput.value, getSearchOptions());
     if (!result.replaced) {
-      setFindStatus('No matches', true);
+      setFindStatus(uiStrings.noMatches, true);
       return false;
     }
 
-    setFindStatus(`Replaced ${result.replaced} matches`);
+    setFindStatus(uiStrings.replacedMatches(result.replaced));
     return true;
   };
 
@@ -384,6 +410,11 @@ export const createFindPanelController = (
     setSearchOptions,
     updateAnchor,
     updateFindStatusSummary,
+    setUiLanguage(language: UiLanguage) {
+      uiStrings = getUiStrings(language);
+      elements.applyUiStrings(uiStrings);
+      updateFindStatusSummary();
+    },
     toggleWholeWord,
     toggleCaseSensitive,
     runFind,

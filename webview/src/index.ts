@@ -770,6 +770,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
     light: strings.light,
     dark: strings.dark
   });
+  findPanelController.setUiLanguage(language);
   previewController.setUiLanguage(language);
 };
 const editorAppearanceRow = document.createElement('div');

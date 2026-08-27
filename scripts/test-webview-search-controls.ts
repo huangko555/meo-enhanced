@@ -50,7 +50,7 @@ async function main() {
     await page.evaluate(({ documentText, theme }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///search.md', text: documentText, version: 1,
-        savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live', uiLanguage: 'en', previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark',
+        savedRevision: { version: 1, text: documentText }, diagnostics: [], mode: 'live', uiLanguage: 'zh-CN', previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false,
@@ -61,6 +61,13 @@ async function main() {
     }, { documentText: text, theme: darkBuiltInVisuals });
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 100));
+    const localizedFindChrome = await page.evaluate(() => ({
+      panel: document.querySelector('.find-panel')?.getAttribute('aria-label'),
+      find: document.querySelector<HTMLInputElement>('.find-input')?.placeholder,
+      replace: document.querySelectorAll<HTMLInputElement>('.find-input')[1]?.placeholder,
+      close: document.querySelector('.find-close-button')?.getAttribute('aria-label'),
+      wholeWord: document.querySelector('.find-option-button')?.getAttribute('aria-label')
+    }));
 
     const tableSelectionText = await page.evaluate(async () => {
       const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
@@ -70,7 +77,7 @@ async function main() {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return document.querySelector<HTMLInputElement>('.find-input')!.value;
     });
-    await page.click('[aria-label="Close Find"]');
+    await page.click('.find-close-button');
 
     await page.evaluate(() => {
       const find = document.querySelector<HTMLInputElement>('.find-input')!;
@@ -79,6 +86,7 @@ async function main() {
       find.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await page.waitForSelector('.meo-search-match');
+    const localizedFindStatus = await page.$eval('.find-status', (element) => element.textContent);
     await page.click('[data-mode="preview"]');
     const previewRequestId = await page.evaluate(() => (
       (window as any).__hostMessages as Array<{ type?: string; requestId?: string }>
@@ -126,7 +134,7 @@ async function main() {
         wheelDelta: scrollElement.scrollTop - before
       };
     });
-    await page.click('[aria-label="Close Find"]');
+    await page.click('.find-close-button');
 
     const discardState = await page.evaluate(async () => {
       const messages = (window as any).__hostMessages as Array<{ type?: string; topLine?: number }>;
@@ -157,6 +165,14 @@ async function main() {
     });
 
     const failures: string[] = [];
+    if (JSON.stringify(localizedFindChrome) !== JSON.stringify({
+      panel: '查找和替换', find: '查找', replace: '替换', close: '关闭查找', wholeWord: '全字匹配'
+    })) {
+      failures.push(`Find chrome did not use the resolved language: ${JSON.stringify(localizedFindChrome)}`);
+    }
+    if (localizedFindStatus !== '2 个匹配项') {
+      failures.push(`Find status did not use the resolved language: ${JSON.stringify(localizedFindStatus)}`);
+    }
     if (tableSelectionText !== 'table-selected') {
       failures.push(`table selection was not copied into Find: ${JSON.stringify(tableSelectionText)}`);
     }
