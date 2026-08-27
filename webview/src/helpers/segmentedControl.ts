@@ -68,6 +68,15 @@ export const createSegmentedControl = <Value extends string>(options: SegmentedC
           button.setAttribute('aria-pressed', active ? 'true' : 'false');
         }
       }
+    },
+    setLabels(labels: Readonly<Partial<Record<Value, string>>>) {
+      for (const [value, button] of buttons) {
+        const label = labels[value];
+        if (label === undefined) continue;
+        button.title = label;
+        const labelElement = button.querySelector<HTMLElement>('.segmented-control-button-label');
+        if (labelElement) labelElement.textContent = label;
+      }
     }
   };
 };

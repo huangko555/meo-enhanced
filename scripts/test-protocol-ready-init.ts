@@ -32,6 +32,7 @@ const completeInit = {
   savedRevision: { version: null, text: '# saved title' },
   diagnostics: [],
   mode: 'live' as const,
+  uiLanguage: 'en' as const,
   previewAppearance: 'dark' as const,
   previewFontFamily: '' as const,
   previewSourceColoring: true,
@@ -85,7 +86,7 @@ assert.equal(normalizePreviewFontFamily('  MEO Synthetic Sans  '), 'MEO Syntheti
 assert.equal(normalizePreviewFontFamily('MEO\nSynthetic'), null);
 assert.equal(normalizePreviewFontFamily('x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)), null);
 for (const requiredKey of [
-  'documentId', 'savedRevision', 'diagnostics', 'previewAppearance', 'previewFontFamily', 'editorAppearance', 'gitChangesGutter',
+  'documentId', 'savedRevision', 'diagnostics', 'uiLanguage', 'previewAppearance', 'previewFontFamily', 'editorAppearance', 'gitChangesGutter',
   'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'contentMaxWidthEnabled',
   'findOptions', 'outlinePosition', 'outlineVisible',
@@ -95,6 +96,7 @@ for (const requiredKey of [
   delete incomplete[requiredKey];
   assert.equal(decodeInitMessage(incomplete), null, `Init without ${requiredKey} must be rejected`);
 }
+assert.equal(decodeInitMessage({ ...completeInit, uiLanguage: 'fr' }), null);
 for (const removedKey of ['theme', 'shikiCodeBlocks', 'codeTheme', 'lineNumbers', 'restoreTopLine', 'restoreTopLineOffset']) {
   assert.equal(
     decodeInitMessage({ ...completeInit, [removedKey]: removedKey === 'shikiCodeBlocks' ? true : {} }),

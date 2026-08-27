@@ -122,20 +122,41 @@ async function main() {
 
     const initialText = createFixture();
     await page.evaluate(({ text, theme }) => {
-      window.dispatchEvent(new MessageEvent('message', { data: {
+      const init = {
         type: 'init', documentId: 'file:///viewport.md', text, version: 1,
-        savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark',
+        savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', uiLanguage: 'zh-CN', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark',
         gitChangesGutter: false, gitDiffLineHighlights: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false,
         findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260,
         vscodeTheme: null
-      }}));
+      };
+      window.dispatchEvent(new MessageEvent('message', { data: init }));
     }, { text: initialText, theme: darkBuiltInVisuals });
     await page.waitForSelector('.editor-host > .cm-editor');
     await new Promise((resolve) => setTimeout(resolve, 120));
     await waitForFrames(page);
+    const chineseChrome = await page.evaluate(() => ({
+      language: document.documentElement.lang,
+      previewTools: document.querySelector('.preview-format-group')?.getAttribute('aria-label'),
+      sourceColoring: document.querySelector('.preview-source-coloring')?.textContent?.trim(),
+      exports: Array.from(document.querySelectorAll('[data-format]')).map((element) => element.textContent?.trim()),
+      previewFrameTitle: document.querySelector('iframe.preview-frame')?.getAttribute('title'),
+      previewAppearance: document.querySelector('.preview-appearance-control')?.getAttribute('aria-label'),
+      editorAppearance: document.querySelector('.editor-appearance-control')?.getAttribute('aria-label')
+    }));
+    if (JSON.stringify(chineseChrome) !== JSON.stringify({
+      language: 'zh-CN',
+      previewTools: '预览工具',
+      sourceColoring: '代码着色',
+      exports: ['导出 HTML', '导出 PDF'],
+      previewFrameTitle: 'Markdown 预览',
+      previewAppearance: '预览外观',
+      editorAppearance: '编辑器外观'
+    })) {
+      throw new Error(`Resolved UI language did not project into the current Webview: ${JSON.stringify(chineseChrome)}`);
+    }
     const liveLineNumberBoundary = await page.evaluate(() => ({
       gutter: Boolean(document.querySelector('.editor-host .cm-lineNumbers')),
       meoToggle: Boolean(document.querySelector('[data-action="lineNumbers"]'))
@@ -303,7 +324,7 @@ async function main() {
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'gitChangesGutterChanged', enabled: true }
     })));
-    await page.click('[aria-label="More tools"]');
+    await page.click('.more-tools-wrapper > button');
     const moreToolsLayout = await page.evaluate(() => {
       const panel = document.querySelector<HTMLElement>('.more-tools-panel')!;
       const options = Array.from(panel.querySelectorAll<HTMLElement>(':scope > .more-tools-option'));
@@ -327,7 +348,7 @@ async function main() {
     ) {
       throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
     }
-    await page.click('[aria-label="More tools"]');
+    await page.click('.more-tools-wrapper > button');
     const measureToolbarStart = () => page.evaluate(() => {
       const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
       const firstButton = document.querySelector<HTMLElement>('.format-group > .format-button')!;
@@ -697,7 +718,7 @@ async function main() {
       !previewToolbarLayout.appearanceUsesSharedComponent ||
       previewToolbarLayout.activeAppearance !== 'light' ||
       JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
-        'outline-left', 'Code colors', 'auto', 'light', 'dark', 'Export HTML', 'Export PDF'
+        'outline-left', '代码着色', 'auto', 'light', 'dark', '导出 HTML', '导出 PDF'
       ]) ||
       previewToolbarLayout.moreExports !== 0 ||
       previewToolbarLayout.floatingThemeToggle
@@ -748,7 +769,6 @@ async function main() {
       lightAppearanceGeometry.height !== 20 ||
       lightAppearanceGeometry.radius !== '5px' ||
       lightAppearanceGeometry.labelOffset !== 0.5 ||
-      darkAppearanceGeometry.buttonWidths.dark === darkAppearanceGeometry.buttonWidths.light ||
       darkAppearanceGeometry.buttonWidths.light < 56 ||
       darkAppearanceGeometry.buttonWidths.dark < 56 ||
       Math.abs(darkAppearanceGeometry.left - (

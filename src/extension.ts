@@ -77,6 +77,7 @@ import {
 import type { ExportStyleEnvironment } from './export/runtime';
 import type { ReadingSnapshot } from './protocol/exportSnapshot';
 import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents';
+import { resolveUiLanguage } from './foundation/uiLanguage';
 
 const VIEW_TYPE = 'meoEnhanced.editor';
 const ACTIVE_EDITOR_CONTEXT_KEY = 'meoEnhanced.activeEditor';
@@ -483,6 +484,10 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         });
       },
       getFindOptions: () => this.getFindOptions(),
+      getUiLanguage: () => resolveUiLanguage(
+        vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get('language', 'auto'),
+        vscode.env.language
+      ),
       setFindOptions: (options) => this.setFindOptions(options),
       getPreviewAppearance: () => this.getPreviewAppearance(),
       setPreviewAppearance: (appearance) => this.setPreviewAppearance(appearance),

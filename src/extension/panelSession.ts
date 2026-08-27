@@ -112,6 +112,7 @@ type PanelSessionControllerParams = {
     styleEnvironment?: ExportStyleEnvironment;
   }) => Promise<PreviewRenderResult>;
   getFindOptions: () => FindOptions;
+  getUiLanguage: () => InitMessage['uiLanguage'];
   setFindOptions: (options: FindOptions) => Promise<void>;
   getPreviewAppearance: () => PreviewAppearance;
   setPreviewAppearance: (appearance: PreviewAppearance) => Promise<void>;
@@ -162,6 +163,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     onExportDocument,
     renderPreview,
     getFindOptions,
+    getUiLanguage,
     setFindOptions,
     getPreviewAppearance,
     setPreviewAppearance,
@@ -324,6 +326,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       savedRevision,
       diagnostics: diagnostics.read(),
       mode: initialMode,
+      uiLanguage: getUiLanguage(),
       previewAppearance: getPreviewAppearance(),
       previewFontFamily: getPreviewFontFamily(),
       previewSourceColoring: getPreviewSourceColoring(),

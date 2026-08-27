@@ -4,6 +4,7 @@ import {
   type CodeThemeDto
 } from './hostConfigurationEvents';
 import { normalizePreviewFontFamily } from './editorStyleEnvironment';
+import { isUiLanguage, type UiLanguage } from '../foundation/uiLanguage';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
@@ -25,6 +26,7 @@ export type InitMessage = {
   readonly savedRevision: SavedRevisionDto | null;
   readonly diagnostics: readonly SerializedDiagnostic[];
   readonly mode: EditorMode;
+  readonly uiLanguage: UiLanguage;
   readonly previewAppearance: PreviewAppearance;
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
@@ -81,6 +83,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || value.version < 0
     || !isSavedRevision(value.savedRevision, value.version, value.text)
     || !isEditorMode(value.mode)
+    || !isUiLanguage(value.uiLanguage)
     || !isPreviewAppearance(value.previewAppearance)
     || previewFontFamily === null
     || typeof value.previewSourceColoring !== 'boolean'

@@ -140,6 +140,7 @@ export const createPanelSessionControllerParams = (
   onExportDocument: async () => undefined,
   renderPreview: async () => ({ html: '', metadata: {} }),
   getFindOptions: () => ({ wholeWord: false, caseSensitive: false }),
+  getUiLanguage: () => 'en',
   setFindOptions: async () => undefined,
   getPreviewAppearance: () => 'light',
   setPreviewAppearance: async () => undefined,

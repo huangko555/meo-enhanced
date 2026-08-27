@@ -122,6 +122,7 @@ const initMessage = {
   savedRevision: { version: 1, text: markdown },
   diagnostics: [],
   mode: 'preview',
+  uiLanguage: 'en',
   previewAppearance: 'light',
   previewFontFamily: '',
   previewSourceColoring: true,

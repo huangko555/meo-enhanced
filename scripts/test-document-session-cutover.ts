@@ -33,6 +33,7 @@ async function main(): Promise<void> {
         savedRevision: { version: 1, text: 'alpha' },
         diagnostics: [],
         mode: 'source',
+        uiLanguage: 'en',
         previewAppearance: 'dark',
         previewFontFamily: '',
         previewSourceColoring: true,

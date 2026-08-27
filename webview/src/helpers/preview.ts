@@ -12,6 +12,7 @@ import { attachLatexMathViewport, type LatexMathViewportController } from './lat
 import type { MermaidDiagramRenderResources } from '../application/mermaidDiagramRenderResources';
 import type { PreviewCodePalette } from '../application/finalCodePalette';
 import { normalizePreviewFontFamily } from '../../../src/shared/preview';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
@@ -170,6 +171,8 @@ export function createPreviewController({
   runViewportTransaction,
   mermaidRenderResources
 }: PreviewControllerOptions) {
+  let uiLanguage: UiLanguage = 'en';
+  let uiStrings = getUiStrings(uiLanguage);
   const host = document.createElement('div');
   host.className = 'preview-host';
   host.hidden = true;
@@ -210,9 +213,10 @@ export function createPreviewController({
   sourceColoringControl.className = 'preview-toolbar-action preview-source-coloring';
   sourceColoringControl.title = 'Preview source coloring';
   sourceColoringControl.setAttribute('aria-label', 'Preview source coloring');
+  const sourceColoringLabel = document.createTextNode('Code colors');
   sourceColoringControl.append(
     createElement(Code2, { width: 15, height: 15, 'aria-hidden': 'true' }),
-    document.createTextNode('Code colors')
+    sourceColoringLabel
   );
   const fontFamilyControl = document.createElement('label');
   fontFamilyControl.className = 'preview-font-family-control';
@@ -233,6 +237,24 @@ export function createPreviewController({
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   status.hidden = true;
+
+  const applyUiLanguage = (language: UiLanguage): void => {
+    uiLanguage = language;
+    uiStrings = getUiStrings(language);
+    frame.title = uiStrings.previewTitle;
+    appearanceControl.setAttribute('aria-label', uiStrings.previewAppearance);
+    appearanceSegmentedControl.setLabels({
+      auto: uiStrings.auto,
+      light: uiStrings.light,
+      dark: uiStrings.dark
+    });
+    sourceColoringControl.title = uiStrings.previewSourceColoring;
+    sourceColoringControl.setAttribute('aria-label', uiStrings.previewSourceColoring);
+    sourceColoringLabel.textContent = uiStrings.previewCodeColors;
+    fontFamilyControl.title = uiStrings.previewFontFamily;
+    fontFamilyInput.placeholder = uiStrings.previewFontPlaceholder;
+    fontFamilyInput.setAttribute('aria-label', uiStrings.previewFontFamily);
+  };
 
   const scrollToTopController = createDocumentScrollToTopController();
   host.append(frame, status, scrollToTopController.button);
@@ -484,7 +506,7 @@ export function createPreviewController({
     };
     disposePreviewMathViewports();
     scrollToTopController.setScrollElement(null);
-    frame.srcdoc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {
@@ -565,7 +587,7 @@ export function createPreviewController({
       return;
     }
     if (!force && hasPendingRequest && text === pendingText) {
-      if (!background) setStatus('正在生成预览…');
+      if (!background) setStatus(uiStrings.previewGenerating);
       return;
     }
     const generation = requestGeneration + 1;
@@ -574,7 +596,7 @@ export function createPreviewController({
     hasPendingRequest = true;
     pendingViewportRestore = null;
     pendingText = text;
-    if (!background) setStatus('正在生成预览…');
+    if (!background) setStatus(uiStrings.previewGenerating);
     void previewRenderTransport.render({
       text,
       environment: getStyleEnvironment()
@@ -583,7 +605,7 @@ export function createPreviewController({
       hasPendingRequest = false;
       if (result.ok === false) {
         pendingViewportRestore = null;
-        setStatus(result.error.message || 'Preview 生成失败');
+        setStatus(result.error.message || uiStrings.previewFailed);
         return;
       }
       latestPayload = result.value;
@@ -877,6 +899,7 @@ export function createPreviewController({
     setAppearance,
     setSourceColoring,
     setFontFamily,
+    setUiLanguage: applyUiLanguage,
     syncAutoAppearance: () => {
       if (appearancePreference === 'auto') setAppearance('auto');
     },

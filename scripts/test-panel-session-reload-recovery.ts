@@ -295,6 +295,7 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
   await reopened.controller.handleMessage({ type: 'ready' });
   const init = reopened.postedToWebview.find((message) => message.type === 'init');
   assert.equal(init?.text, 'Draft recovered on reopen', 'reopened panel presents the recovered Draft');
+  assert.equal(init?.uiLanguage, 'en', 'new panels receive one resolved UI language value');
   reopened.controller.dispose();
   await flushMicrotasks();
 }

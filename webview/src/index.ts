@@ -40,6 +40,7 @@ import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/edit
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { EditorAppearance } from '../../src/protocol/editorCommands';
 import type { InitMessage } from '../../src/protocol/readyInit';
+import { getUiStrings, type UiLanguage } from '../../src/foundation/uiLanguage';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -748,6 +749,29 @@ const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
   ]
 });
 editorAppearanceControl.setActive('dark');
+
+const applyUiLanguage = (language: UiLanguage): void => {
+  const strings = getUiStrings(language);
+  document.documentElement.lang = language;
+  findToggleBtn.title = strings.findAndReplace;
+  exportHtmlOption.title = strings.exportAsHtml;
+  exportHtmlOption.setAttribute('aria-label', strings.exportAsHtml);
+  exportHtmlLabel.textContent = strings.exportHtml;
+  exportPdfOption.title = strings.exportAsPdf;
+  exportPdfOption.setAttribute('aria-label', strings.exportAsPdf);
+  exportPdfLabel.textContent = strings.exportPdf;
+  previewFormatGroup.setAttribute('aria-label', strings.previewTools);
+  moreToolsButton.title = strings.more;
+  moreToolsButton.setAttribute('aria-label', strings.moreTools);
+  moreToolsPanel.setAttribute('aria-label', strings.moreTools);
+  editorAppearanceControl.element.setAttribute('aria-label', strings.editorAppearance);
+  editorAppearanceControl.setLabels({
+    auto: strings.auto,
+    light: strings.light,
+    dark: strings.dark
+  });
+  previewController.setUiLanguage(language);
+};
 const editorAppearanceRow = document.createElement('div');
 editorAppearanceRow.className = 'more-tools-appearance-row';
 editorAppearanceRow.append(editorAppearanceControl.element);
@@ -1623,6 +1647,7 @@ editorModeRuntime = createEditorModeRuntime(
 );
 
 const handleInit = (message: InitMessage) => {
+  applyUiLanguage(message.uiLanguage);
   if (typeof message.contentMaxWidthEnabled === 'boolean') {
     setContentMaxWidthEnabled(message.contentMaxWidthEnabled, { post: false });
   }

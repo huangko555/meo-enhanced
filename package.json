@@ -150,10 +150,26 @@
     "configuration": {
       "title": "MEO Enhanced",
       "properties": {
+        "meoEnhanced.language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh-CN"
+          ],
+          "enumDescriptions": [
+            "Follow the VS Code display language. Chinese (Simplified) is used only for zh-CN; other locales use English.",
+            "Use English.",
+            "Use Simplified Chinese."
+          ],
+          "default": "auto",
+          "order": 1,
+          "description": "Display language for the MEO Enhanced editor and Preview interface."
+        },
         "meoEnhanced.useAsDefault": {
           "type": "boolean",
           "default": true,
-          "order": 1,
+          "order": 2,
           "description": "Use MEO Enhanced as the default editor for Markdown files"
         },
         "meoEnhanced.outline.position": {
@@ -216,7 +232,7 @@
   "scripts": {
     "install:all": "bun install && (cd webview && bun install)",
     "test": "bun run test:latex-scanner && bun run test:table-provenance && bun run test:table-column-width && bun run test:table-sticky-header && bun run test:table-command && bun run test:image-presentation && bun run test:mermaid-presentation && bun run test:unit && bun run test:browser",
-    "test:latex-scanner": "bun scripts/test-latex-math-scanner.ts && bun scripts/test-latex-math-scanner-integration.ts && bun scripts/test-architecture-shared-module-contracts.ts",
+    "test:latex-scanner": "bun scripts/test-ui-language.ts && bun scripts/test-latex-math-scanner.ts && bun scripts/test-latex-math-scanner-integration.ts && bun scripts/test-architecture-shared-module-contracts.ts",
     "test:table-provenance": "bun scripts/test-table-transaction-provenance.ts && bun scripts/test-table-provenance-adapter-browser.ts && bun scripts/test-table-provenance-external-presentation.ts",
     "test:table-column-width": "bun scripts/test-table-column-width-policy.ts && bun scripts/test-table-column-width-policy-browser.ts && bun scripts/test-table-column-width-adapter.ts && bun scripts/test-table-column-width-adapter-browser.ts && bun scripts/test-table-column-width-lifecycle.ts && bun scripts/test-table-column-width-production-cutover.ts && bun scripts/test-source-lightweight-table-column-width.ts",
     "test:table-sticky-header": "bun scripts/test-fixed-chrome-geometry.ts && bun scripts/test-table-sticky-header-policy.ts && bun scripts/test-table-sticky-header-adapter-browser.ts && bun scripts/test-table-sticky-header-production.ts",
