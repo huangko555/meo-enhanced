@@ -147,7 +147,12 @@ async function main() {
       editorAppearance: document.querySelector('.editor-appearance-control')?.getAttribute('aria-label'),
       outline: document.querySelector('.outline-sidebar')?.getAttribute('aria-label'),
       outlineLabel: document.querySelector('.outline-header-label')?.textContent,
-      outlineClose: document.querySelector('[data-action="close"]')?.getAttribute('aria-label')
+      outlineClose: document.querySelector('[data-action="close"]')?.getAttribute('aria-label'),
+      toolbar: document.querySelector('.mode-toolbar')?.getAttribute('aria-label'),
+      formatting: document.querySelector('.format-group')?.getAttribute('aria-label'),
+      heading: document.querySelector('[data-action="heading"]')?.getAttribute('title'),
+      save: document.querySelector('[data-action="save"]')?.getAttribute('aria-label'),
+      line: document.querySelector('.line-jump-input')?.getAttribute('placeholder')
     }));
     if (JSON.stringify(chineseChrome) !== JSON.stringify({
       language: 'zh-CN',
@@ -159,7 +164,12 @@ async function main() {
       editorAppearance: '编辑器外观',
       outline: '文档目录',
       outlineLabel: '目录',
-      outlineClose: '关闭目录'
+      outlineClose: '关闭目录',
+      toolbar: '编辑器工具栏',
+      formatting: '格式',
+      heading: '标题',
+      save: '保存文档',
+      line: '行'
     })) {
       throw new Error(`Resolved UI language did not project into the current Webview: ${JSON.stringify(chineseChrome)}`);
     }

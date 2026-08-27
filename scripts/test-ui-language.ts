@@ -27,6 +27,7 @@ assert.equal(english.findMatches(2), '2 matches');
 assert.equal(chinese.findMatches(2), '2 个匹配项');
 assert.equal(chinese.replacedRemaining(3), '已替换 • 剩余 3 个');
 assert.equal(chinese.outlineNoHeadings, '暂无标题');
+assert.equal(chinese.headingLevel(3), '3 级标题');
 assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);
 

@@ -55,6 +55,29 @@ export type UiStrings = Readonly<{
   outlineExpand: string;
   outlineCollapse: string;
   outlineNoHeadings: string;
+  editorToolbar: string;
+  formatting: string;
+  heading: string;
+  headingLevels: string;
+  headingLevel: (level: number) => string;
+  bulletList: string;
+  numberedList: string;
+  task: string;
+  showOutlineLeft: string;
+  showOutlineRight: string;
+  codeBlock: string;
+  quote: string;
+  horizontalRule: string;
+  link: string;
+  wikiLink: string;
+  image: string;
+  table: string;
+  line: string;
+  goToLine: string;
+  save: string;
+  saveDocument: string;
+  reloadDiskVersion: string;
+  reloadDiskVersionDoubleClick: string;
 }>;
 
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
@@ -82,7 +105,15 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineSwitchRight: 'Switch to right side', outlineClose: 'Close outline',
     outlineResize: 'Drag to resize outline',
     outlineEmptyHeading: '(Empty heading)',
-    outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings'
+    outlineExpand: 'Expand', outlineCollapse: 'Collapse', outlineNoHeadings: 'No headings',
+    editorToolbar: 'Editor toolbar', formatting: 'Formatting', heading: 'Heading',
+    headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
+    bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
+    showOutlineLeft: 'Show Outline on Left', showOutlineRight: 'Show Outline on Right',
+    codeBlock: 'Code Block', quote: 'Quote', horizontalRule: 'Horizontal Rule',
+    link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Line',
+    goToLine: 'Go to line', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
+    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Reload disk version (double-click)'
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
@@ -107,7 +138,14 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     outlineSwitchRight: '切换到右侧', outlineClose: '关闭目录',
     outlineResize: '拖动调整目录宽度',
     outlineEmptyHeading: '(空标题)',
-    outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题'
+    outlineExpand: '展开', outlineCollapse: '折叠', outlineNoHeadings: '暂无标题',
+    editorToolbar: '编辑器工具栏', formatting: '格式', heading: '标题', headingLevels: '标题级别',
+    headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
+    numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',
+    showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
+    horizontalRule: '分隔线', link: '链接', wikiLink: 'Wiki 链接', image: '图片', table: '表格',
+    line: '行', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
+    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '重新加载磁盘版本（双击）'
   })
 });
 

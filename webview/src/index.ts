@@ -753,6 +753,35 @@ editorAppearanceControl.setActive('dark');
 const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
   document.documentElement.lang = language;
+  toolbar.setAttribute('aria-label', strings.editorToolbar);
+  formatGroup.setAttribute('aria-label', strings.formatting);
+  headingBtn.title = strings.heading;
+  headingDropdown.setAttribute('aria-label', strings.headingLevels);
+  for (const option of headingDropdown.querySelectorAll<HTMLElement>('[data-level]')) {
+    option.title = strings.headingLevel(Number.parseInt(option.dataset.level ?? '', 10));
+  }
+  bulletListBtn.title = strings.bulletList;
+  numberedListBtn.title = strings.numberedList;
+  taskBtn.title = strings.task;
+  for (const button of [outlineLeftBtn, previewOutlineLeftBtn]) {
+    button.title = strings.showOutlineLeft;
+    button.setAttribute('aria-label', button.title);
+  }
+  outlineBtn.title = strings.showOutlineRight;
+  outlineBtn.setAttribute('aria-label', outlineBtn.title);
+  codeBlockBtn.title = strings.codeBlock;
+  quoteBtn.title = strings.quote;
+  hrBtn.title = strings.horizontalRule;
+  linkBtn.title = strings.link;
+  wikiLinkBtn.title = strings.wikiLink;
+  imageBtn.title = strings.image;
+  tableBtn.title = strings.table;
+  lineJumpInput.placeholder = strings.line;
+  lineJumpInput.setAttribute('aria-label', strings.goToLine);
+  saveBtn.title = strings.save;
+  saveBtn.setAttribute('aria-label', strings.saveDocument);
+  discardBtn.title = strings.reloadDiskVersionDoubleClick;
+  discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
   findToggleBtn.title = strings.findAndReplace;
   exportHtmlOption.title = strings.exportAsHtml;
   exportHtmlOption.setAttribute('aria-label', strings.exportAsHtml);
