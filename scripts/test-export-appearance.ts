@@ -5,6 +5,7 @@ const baseOptions = {
     snapshotId: 'appearance',
     text: '# Export appearance\n\n```mermaid\nflowchart LR\nA --> B\n```',
     appearance: 'light' as const,
+    uiLanguage: 'en' as const,
     environment: {
       previewFontFamily: '',
       editorBackgroundColor: '#20252b',

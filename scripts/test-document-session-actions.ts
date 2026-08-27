@@ -12,6 +12,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const messages: unknown[] = [];
   const presentations: Array<{ text: string; source: string }> = [];
   const adapter = createDocumentSessionActionAdapter({
+    uiLanguage: 'en',
     postMessage: (message) => messages.push(message),
     presentText: (text, source) => {
       presentations.push({ text, source });
@@ -55,6 +56,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const presentations: string[] = [];
   const notices: string[] = [];
   const adapter = createDocumentSessionActionAdapter({
+    uiLanguage: 'en',
     postMessage: (message) => messages.push(message),
     presentText: (text) => {
       presentations.push(text);
@@ -95,6 +97,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    uiLanguage: 'en',
     postMessage: (message) => messages.push(message),
     presentText: () => true,
     executeRemote: async (action) => {
@@ -128,6 +131,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const presentations: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    uiLanguage: 'en',
     postMessage: () => undefined,
     presentText: (text) => {
       presentations.push(text);
@@ -155,6 +159,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    uiLanguage: 'zh-CN',
     postMessage: () => undefined,
     presentText: () => true,
     executeRemote: async () => {
@@ -168,7 +173,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   await adapter.execute([{ type: 'requestRevision' }]);
 
   assert.equal(revisionRequests, 2);
-  assert.deepEqual(notices, ['Could not resynchronize the document. Local edits were kept.']);
+  assert.deepEqual(notices, ['无法重新同步文档，已保留本地编辑。']);
 }
 
 console.log('Document Session action adapter checks passed');

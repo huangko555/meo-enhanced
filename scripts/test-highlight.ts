@@ -14,6 +14,7 @@ const rendered = exportRuntime.renderExportHtmlDocument({
     snapshotId: 'highlight',
     text: [richHighlight, '', '**粗体里的 ==高亮==**', '', '====', '', '\\==不高亮=='].join('\n'),
     appearance: 'dark',
+    uiLanguage: 'en',
     environment: {
       previewFontFamily: '',
       editorBackgroundColor: '#20252b',

@@ -8,6 +8,7 @@ import type {
   ApplyChangesMessage,
   DraftChangedMessage
 } from '../../../src/protocol/documentSync';
+import { getGeneratedUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 type RemoteDocumentSessionAction = Extract<
   DocumentSessionAction,
@@ -29,13 +30,10 @@ export type DocumentSessionActionAdapterDependencies = {
   readonly executeRemote: (action: RemoteDocumentSessionAction) => Promise<DocumentSessionInput>;
   readonly handleInput: (input: DocumentSessionInput) => readonly DocumentSessionAction[];
   readonly showFailureNotice: (message: string) => void;
+  readonly uiLanguage: UiLanguage;
 };
 
 const MAX_REVISION_REQUEST_ATTEMPTS = 2;
-const RESYNC_FAILURE_NOTICE = 'Could not resynchronize the document. Local edits were kept.';
-const EXTERNAL_CONFLICT_NOTICE =
-  'The document changed externally while local edits were pending. Local edits were kept.';
-
 /**
  * Executes Application effects against Webview capabilities. The Adapter owns
  * only one bounded execution queue; Document Session state remains in the
@@ -44,6 +42,7 @@ const EXTERNAL_CONFLICT_NOTICE =
 export function createDocumentSessionActionAdapter(
   dependencies: DocumentSessionActionAdapterDependencies
 ): DocumentSessionActionAdapter {
+  const uiStrings = getGeneratedUiStrings(dependencies.uiLanguage);
   return {
     async execute(actions) {
       const queue = Array.from(actions);
@@ -78,12 +77,12 @@ export function createDocumentSessionActionAdapter(
           continue;
         }
         if (action.type === 'showExternalConflict') {
-          dependencies.showFailureNotice(EXTERNAL_CONFLICT_NOTICE);
+          dependencies.showFailureNotice(uiStrings.externalConflictNotice);
           continue;
         }
         if (action.type === 'requestRevision'
           && revisionRequestAttempts >= MAX_REVISION_REQUEST_ATTEMPTS) {
-          dependencies.showFailureNotice(RESYNC_FAILURE_NOTICE);
+          dependencies.showFailureNotice(uiStrings.resyncFailureNotice);
           continue;
         }
 
@@ -96,7 +95,7 @@ export function createDocumentSessionActionAdapter(
           if (revisionRequestAttempts < MAX_REVISION_REQUEST_ATTEMPTS) {
             queue.unshift(action);
           } else {
-            dependencies.showFailureNotice(RESYNC_FAILURE_NOTICE);
+            dependencies.showFailureNotice(uiStrings.resyncFailureNotice);
           }
           continue;
         }

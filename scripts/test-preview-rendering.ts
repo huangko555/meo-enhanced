@@ -11,6 +11,7 @@ const markdownBlockBoundaryCases = [
 const blockBoundaryPreviews = markdownBlockBoundaryCases.map((markdownText, index) => exportRuntime.renderPreviewDocument({
   markdownText,
   sourceDocumentPath: `C:/tmp/preview-color-block-${index}.md`,
+  uiLanguage: 'en',
   styleEnvironment: { previewFontFamily: '' }
 }));
 
@@ -28,6 +29,7 @@ const previewColors = exportRuntime.renderPreviewDocument({
     escapedMultiBacktick
   ].join('\n'),
   sourceDocumentPath: 'C:/tmp/preview-colors.md',
+  uiLanguage: 'en',
   styleEnvironment: { previewFontFamily: '' }
 });
 const exportedColors = renderMarkdownToHtml({
@@ -140,6 +142,12 @@ const invalidFrontmatter = renderMarkdownToHtml({
   markdownText: '---\ntitle: [unterminated\n---\n# Body',
   markdownFilePath: 'C:/tmp/preview-invalid-frontmatter.md',
   target: 'html'
+});
+const localizedReading = renderMarkdownToHtml({
+  markdownText: '---\ntitle: 中文\n---\n\n> [!WARNING]\n> 内容',
+  markdownFilePath: 'C:/tmp/preview-localized.md',
+  target: 'html',
+  uiLanguage: 'zh-CN'
 });
 const tableLikeCode = renderMarkdownToHtml({
   markdownText: '```text\n| A | B |\n| --- |\n```',
@@ -282,6 +290,12 @@ if (
   || !propertiesFrontmatter.html.includes('# Preserve comments')
 ) {
   throw new Error('Preview Properties must preserve complex and unstructured YAML lines');
+}
+if (!localizedReading.html.includes('>属性<')
+  || !localizedReading.html.includes('>警告<')
+  || localizedReading.html.includes('>Properties<')
+  || localizedReading.html.includes('>WARNING<')) {
+  throw new Error('Preview/export generated labels must use the frozen UI language');
 }
 if (
   invalidFrontmatter.html.includes('class="meo-export-frontmatter"')

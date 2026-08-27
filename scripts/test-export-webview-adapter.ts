@@ -34,6 +34,7 @@ const adapter = createExportWebviewAdapter({
   },
   whenDocumentIdle: () => idle.promise,
   getPreviewAppearance: () => currentAppearance,
+  getUiLanguage: () => 'en',
   getStyleEnvironment: () => currentEnvironment
 });
 
@@ -65,6 +66,7 @@ assert.deepEqual(posted.splice(0), [
         snapshotId: 'snapshot-1',
         text: '# second',
         appearance: 'dark',
+        uiLanguage: 'en',
         environment: { previewFontFamily: '', editorBackgroundColor: '#111' }
       }
     }
@@ -78,6 +80,7 @@ assert.deepEqual(posted.splice(0), [
         snapshotId: 'snapshot-2',
         text: '# second',
         appearance: 'dark',
+        uiLanguage: 'en',
         environment: { previewFontFamily: '', editorBackgroundColor: '#111' }
       }
     }
@@ -140,6 +143,7 @@ assert.deepEqual(posted.shift(), {
       snapshotId: 'snapshot-next-request',
       text: '# next request',
       appearance: 'light',
+      uiLanguage: 'en',
       environment: { previewFontFamily: '', editorBackgroundColor: '#fafafa' }
     }
   }

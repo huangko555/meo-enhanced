@@ -5,6 +5,7 @@ import {
   type PreviewRenderResponse,
   type PreviewStyleEnvironment
 } from '../../../src/protocol/previewRender';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
 type PendingRequest = {
   resolve: (result: PreviewRenderResolution) => void;
@@ -18,7 +19,7 @@ export type PreviewRenderTransportOptions = {
 };
 
 export type PreviewRenderTransport = {
-  render(request: { readonly text: string; readonly environment: PreviewStyleEnvironment }): Promise<PreviewRenderResolution>;
+  render(request: { readonly text: string; readonly uiLanguage: UiLanguage; readonly environment: PreviewStyleEnvironment }): Promise<PreviewRenderResolution>;
   accept(response: PreviewRenderResponse): boolean;
   cancelAll(message?: string): void;
 };

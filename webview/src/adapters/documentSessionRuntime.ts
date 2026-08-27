@@ -65,6 +65,7 @@ export function createDocumentSessionRuntime(
       coordinator = createDocumentSessionCoordinatorFromInit(message);
       actionAdapter = createDocumentSessionActionAdapter({
         ...dependencies,
+        uiLanguage: message.uiLanguage,
         handleInput: (input) => requireSession().coordinator.handle(input)
       });
       return operation;

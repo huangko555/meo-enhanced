@@ -389,25 +389,25 @@ assert.equal(saveTransport.accept({
 }), false);
 
 assert.deepEqual(decodePreviewRenderRequest({
-  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', uiLanguage: 'zh-CN',
   environment: { previewFontFamily: '  MEO Synthetic Sans  ', editorFontFamily: 'sans-serif', editorFontSizePx: 14, meoThemeColors: { base00: '#fff' } }
 }), {
-  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', uiLanguage: 'zh-CN',
   environment: { previewFontFamily: 'MEO Synthetic Sans', editorFontFamily: 'sans-serif', editorFontSizePx: 14, meoThemeColors: { base00: '#fff' } }
 });
 assert.equal(decodePreviewRenderRequest({
-  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', uiLanguage: 'en',
   environment: { previewFontFamily: '', editorFontSizePx: '14' }
 }), null);
 assert.equal(decodePreviewRenderRequest({
-  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', uiLanguage: 'en',
   environment: { editorFontFamily: 'sans-serif' }
 }), null, 'Preview render environments without previewFontFamily must be rejected');
 assert.equal(decodePreviewRenderRequest({
-  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview'
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', uiLanguage: 'en'
 }), null, 'Preview render requests without environment must be rejected');
 assert.equal(decodePreviewRenderRequest({
-  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview',
+  type: 'requestPreviewRender', requestId: 'preview-1', text: '# Preview', uiLanguage: 'en',
   environment: { previewFontFamily: 'MEO Synthetic Sans', previewFontFamilies: ['MEO Synthetic Sans'] }
 }), null);
 assert.deepEqual(decodePreviewRenderResponse({
@@ -446,7 +446,11 @@ const previewTransport = createPreviewRenderTransport((message) => { postedPrevi
     canceledPreviewTimeouts += 1;
   }
 });
-const renderedPreview = previewTransport.render({ text: '# Preview', environment: { previewFontFamily: '' } });
+assert.equal(decodePreviewRenderRequest({
+  type: 'requestPreviewRender', requestId: 'preview-language', text: '# Preview',
+  environment: { previewFontFamily: '' }
+}), null, 'Preview render requests without uiLanguage must be rejected');
+const renderedPreview = previewTransport.render({ text: '# Preview', uiLanguage: 'en', environment: { previewFontFamily: '' } });
 const previewRequestId = (postedPreviewRequest as { requestId: string }).requestId;
 assert.match(previewRequestId, /^preview-\d+-0$/);
 assert.equal(previewTransport.accept({
@@ -458,7 +462,7 @@ assert.deepEqual(await renderedPreview, {
   ok: true, value: { html: '<h1>Preview</h1>', hasMermaid: false, styles: { dark: 'dark', light: 'light' } }
 });
 assert.equal(canceledPreviewTimeouts, 1);
-const timedOutPreview = previewTransport.render({ text: '# Timeout', environment: { previewFontFamily: '' } });
+const timedOutPreview = previewTransport.render({ text: '# Timeout', uiLanguage: 'en', environment: { previewFontFamily: '' } });
 const timedOutPreviewRequestId = (postedPreviewRequest as { requestId: string }).requestId;
 const triggerPreviewTimeout = scheduledPreviewTimeout as (() => void) | null;
 assert.notEqual(triggerPreviewTimeout, null);
@@ -472,10 +476,10 @@ assert.equal(previewTransport.accept({
   }
 }), false);
 const failedPreviewTransport = createPreviewRenderTransport(() => { throw new Error('transport unavailable'); });
-assert.deepEqual(await failedPreviewTransport.render({ text: '# Failed', environment: { previewFontFamily: '' } }), {
+assert.deepEqual(await failedPreviewTransport.render({ text: '# Failed', uiLanguage: 'en', environment: { previewFontFamily: '' } }), {
   ok: false, error: { code: 'operation-failed', message: 'transport unavailable' }
 });
-const canceledPreview = previewTransport.render({ text: '# Canceled', environment: { previewFontFamily: '' } });
+const canceledPreview = previewTransport.render({ text: '# Canceled', uiLanguage: 'en', environment: { previewFontFamily: '' } });
 const canceledPreviewRequestId = (postedPreviewRequest as { requestId: string }).requestId;
 previewTransport.cancelAll('Preview closed');
 assert.deepEqual(await canceledPreview, {
@@ -495,6 +499,7 @@ const protocolReadingSnapshot = {
   snapshotId: 'export-1',
   text: '# Export',
   appearance: 'dark' as const,
+  uiLanguage: 'zh-CN' as const,
   environment: { previewFontFamily: '', editorFontFamily: 'sans-serif' }
 };
 assert.deepEqual(decodeExportSnapshotResponse({
@@ -525,6 +530,11 @@ assert.equal(decodeExportSnapshotResponse({
     ok: true, value: { ...protocolReadingSnapshot, environment: { editorFontFamily: 'sans-serif' } }
   }
 }), null, 'Export snapshots without previewFontFamily must be rejected');
+assert.equal(decodeExportSnapshotResponse({
+  type: 'exportSnapshotResult', requestId: 'export-1', result: {
+    ok: true, value: { ...protocolReadingSnapshot, uiLanguage: undefined }
+  }
+}), null, 'Export snapshots without uiLanguage must be rejected');
 let postedExportRequest: unknown;
 let scheduledExportTimeout: (() => void) | null = null;
 let canceledExportTimeouts = 0;

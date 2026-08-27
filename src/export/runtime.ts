@@ -25,7 +25,8 @@ function renderExportHtmlDocument(
     markdownText: snapshot.text,
     markdownFilePath: options.sourceDocumentPath,
     outputFilePath: options.outputFilePath,
-    target: options.target
+    target: options.target,
+    uiLanguage: snapshot.uiLanguage
   });
 
   const stylesCss = buildExportStyles(snapshot.environment, snapshot.appearance);
@@ -48,12 +49,14 @@ function renderExportHtmlDocument(
 function renderPreviewDocument(options: {
   markdownText: string;
   sourceDocumentPath: string;
+  uiLanguage: ReadingSnapshot['uiLanguage'];
   styleEnvironment?: ExportStyleEnvironment;
 }): PreviewRenderResult {
   const rendered = renderMarkdownToHtml({
     markdownText: options.markdownText,
     markdownFilePath: options.sourceDocumentPath,
     target: 'html',
+    uiLanguage: options.uiLanguage,
     renderHexColorSwatches: true
   });
   return {

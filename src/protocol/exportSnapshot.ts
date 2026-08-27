@@ -1,6 +1,7 @@
 import { decodeEditorStyleEnvironment, type EditorStyleEnvironment } from './editorStyleEnvironment';
 import type { PreviewAppearance } from './previewRender';
 import { decodeRequestResult, type RequestResult } from './requestResult';
+import { isUiLanguage, type UiLanguage } from '../foundation/uiLanguage';
 
 export const EXPORT_SNAPSHOT_TIMEOUT_MS = 20_000;
 
@@ -13,6 +14,7 @@ export type ReadingSnapshot = {
   readonly snapshotId: string;
   readonly text: string;
   readonly appearance: PreviewAppearance;
+  readonly uiLanguage: UiLanguage;
   readonly environment: EditorStyleEnvironment;
 };
 
@@ -45,6 +47,7 @@ export function decodeExportSnapshotResponse(value: unknown): ExportSnapshotResp
         if (!isRecord(candidate)
           || !isNonEmptyString(candidate.snapshotId)
           || typeof candidate.text !== 'string'
+          || !isUiLanguage(candidate.uiLanguage)
           || (candidate.appearance !== 'dark' && candidate.appearance !== 'light')) return null;
         const environment = decodeEditorStyleEnvironment(candidate.environment);
         if (environment === null) return null;
@@ -52,6 +55,7 @@ export function decodeExportSnapshotResponse(value: unknown): ExportSnapshotResp
           snapshotId: candidate.snapshotId,
           text: candidate.text,
           appearance: candidate.appearance,
+          uiLanguage: candidate.uiLanguage,
           environment
         };
       })

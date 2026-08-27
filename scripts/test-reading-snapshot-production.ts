@@ -40,6 +40,7 @@ const createHarness = (initialText: string, initialAppearance: 'light' | 'dark',
     getCurrentText: () => text,
     whenDocumentIdle: () => idle.promise,
     getPreviewAppearance: () => appearance,
+    getUiLanguage: () => 'zh-CN',
     getStyleEnvironment: () => environment
   });
   return {
@@ -83,6 +84,7 @@ assert.deepEqual(firstSnapshot, {
   snapshotId: firstSnapshot.snapshotId,
   text: '# editor one current',
   appearance: 'dark',
+  uiLanguage: 'zh-CN',
   environment: { editorBackgroundColor: '#101010', previewFontFamily: 'MEO Synthetic Sans' }
 });
 assert.equal(secondResult.value.text, '# editor two', 'two Editor/panel transports must remain isolated');
@@ -117,9 +119,9 @@ for (const target of ['html', 'pdf'] as const) {
 assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html', appearance: 'light' }), null);
 assert.equal(decodeWebviewToHostMessage({ type: 'exportDocument', format: 'html' })?.type, 'exportDocument');
 for (const invalid of [
-  { text: '# split', appearance: 'dark', environment: { previewFontFamily: '' } },
-  { snapshotId: 'request-1', text: '# split', environment: { previewFontFamily: '' } },
-  { snapshotId: 'request-1', text: '# split', appearance: 'dark' }
+  { text: '# split', appearance: 'dark', uiLanguage: 'en', environment: { previewFontFamily: '' } },
+  { snapshotId: 'request-1', text: '# split', appearance: 'dark', environment: { previewFontFamily: '' } },
+  { snapshotId: 'request-1', text: '# split', appearance: 'dark', uiLanguage: 'en' }
 ]) {
   assert.equal(decodeWebviewToHostMessage({
     type: 'exportSnapshotResult',

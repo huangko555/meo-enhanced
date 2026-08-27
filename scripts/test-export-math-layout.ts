@@ -38,6 +38,7 @@ const rendered = exportRuntime.renderExportHtmlDocument({
       'BROKEN_INLINE_SENTINEL $\\frac{'
     ].join('\n'),
     appearance: 'dark',
+    uiLanguage: 'en',
     environment: {
       previewFontFamily: '',
       editorBackgroundColor: '#20252b',

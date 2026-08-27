@@ -22,16 +22,16 @@ const baseOptions = {
 };
 
 try {
-  const preview = exportRuntime.renderPreviewDocument({ ...baseOptions, markdownText, styleEnvironment: { previewFontFamily: '' } });
+  const preview = exportRuntime.renderPreviewDocument({ ...baseOptions, markdownText, uiLanguage: 'en', styleEnvironment: { previewFontFamily: '' } });
   const exported = exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
-    readingSnapshot: { snapshotId: 'images-html', text: markdownText, appearance: 'dark', environment: { previewFontFamily: '' } },
+    readingSnapshot: { snapshotId: 'images-html', text: markdownText, appearance: 'dark', uiLanguage: 'en', environment: { previewFontFamily: '' } },
     outputFilePath: path.join(tempDir, 'export.html'),
     target: 'html' as const
   });
   const pdf = exportRuntime.renderExportHtmlDocument({
     ...baseOptions,
-    readingSnapshot: { snapshotId: 'images-pdf', text: markdownText, appearance: 'dark', environment: { previewFontFamily: '' } },
+    readingSnapshot: { snapshotId: 'images-pdf', text: markdownText, appearance: 'dark', uiLanguage: 'en', environment: { previewFontFamily: '' } },
     outputFilePath: path.join(tempDir, 'export.pdf'),
     target: 'pdf' as const
   });

@@ -5,6 +5,7 @@ import {
   normalizeUiLanguagePreference,
   resolveUiLanguage
 } from '../src/foundation/uiLanguage';
+import { getGeneratedUiStrings } from '../src/foundation/uiLanguage';
 import { getUiStrings } from '../webview/src/application/uiLanguage';
 
 assert.equal(normalizeUiLanguagePreference('en'), 'en');
@@ -18,6 +19,10 @@ assert.equal(resolveUiLanguage('auto', 'zh-CN'), 'zh-CN');
 assert.equal(resolveUiLanguage('auto', 'ZH-cn'), 'zh-CN');
 assert.equal(resolveUiLanguage('auto', 'zh-TW'), 'en');
 assert.equal(resolveUiLanguage('invalid', 'en'), 'en');
+assert.deepEqual(
+  [getGeneratedUiStrings('zh-CN').properties, getGeneratedUiStrings('zh-CN').alertLabel('WARNING')],
+  ['属性', '警告']
+);
 
 const english = getUiStrings('en');
 const chinese = getUiStrings('zh-CN');

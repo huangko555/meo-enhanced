@@ -427,6 +427,7 @@ async function assertPreviewProjectionTransactions(
     const rendered = exportRuntime.renderPreviewDocument({
       markdownText: request.message.text,
       sourceDocumentPath,
+      uiLanguage: request.message.uiLanguage,
       styleEnvironment: request.message.environment
     });
     const response = decodeHostToWebviewMessage({
@@ -680,6 +681,7 @@ async function assertFontEnumerationFallbackMatrix(
             value: exportRuntime.renderPreviewDocument({
               markdownText: message.text,
               sourceDocumentPath,
+              uiLanguage: message.uiLanguage,
               styleEnvironment: message.environment
             })
           }
@@ -807,6 +809,7 @@ async function main(): Promise<void> {
       const rendered = exportRuntime.renderPreviewDocument({
         markdownText: message.text,
         sourceDocumentPath,
+        uiLanguage: message.uiLanguage,
         styleEnvironment: message.environment
       });
       const response = decodeHostToWebviewMessage({
@@ -1879,6 +1882,7 @@ async function main(): Promise<void> {
         snapshotId: 'g2a-mermaid-fallback',
         text: `\`\`\`mermaid\n${mermaidFallbackSource}\`\`\``,
         appearance: 'light',
+        uiLanguage: 'en',
         environment: { previewFontFamily: '' }
       },
       sourceDocumentPath: 'C:/preview-reading-surface.md',

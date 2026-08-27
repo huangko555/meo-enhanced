@@ -93,6 +93,7 @@ type ExportRuntimeModule = {
   renderPreviewDocument: (options: {
     markdownText: string;
     sourceDocumentPath: string;
+    uiLanguage: ReadingSnapshot['uiLanguage'];
     styleEnvironment?: ExportStyleEnvironment;
   }) => PreviewRenderResult;
   writeHtmlExport: (options: {

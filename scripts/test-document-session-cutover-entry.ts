@@ -140,6 +140,7 @@ const candidate = {
     savedText = init.savedRevision?.text ?? '';
     transport = createDocumentSessionTransport(postMessage);
     actionAdapter = createDocumentSessionActionAdapter({
+      uiLanguage: 'en',
       postMessage,
       presentText: (text) => {
         requireRuntime().editor.setText(text);

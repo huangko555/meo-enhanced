@@ -6,6 +6,7 @@ const rendered = exportRuntime.renderExportHtmlDocument({
     snapshotId: 'export-colors',
     text: '# Heading\n\n**Bold**\n\n*Italic*\n\n~~Deleted~~\n\n`Code`',
     appearance: 'dark',
+    uiLanguage: 'en',
     environment: {
       previewFontFamily: '',
       editorBackgroundColor: '#20252b',

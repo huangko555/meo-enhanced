@@ -3,12 +3,14 @@ import type { HostToWebviewMessage, WebviewToHostMessage } from '../../../src/pr
 import type { PreviewAppearance } from '../../../src/protocol/previewRender';
 import type { ExportSnapshotResolution } from '../../../src/protocol/exportSnapshot';
 import { createExportSnapshotResponder } from './exportSnapshotTransport';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export type ExportWebviewAdapterDependencies = {
   readonly postMessage: (message: WebviewToHostMessage) => void;
   readonly getCurrentText: () => string;
   readonly whenDocumentIdle: () => Promise<void>;
   readonly getPreviewAppearance: () => PreviewAppearance;
+  readonly getUiLanguage: () => UiLanguage;
   readonly getStyleEnvironment: () => EditorStyleEnvironment;
 };
 
@@ -68,6 +70,7 @@ export function createExportWebviewAdapter(
               snapshotId: requestId,
               text: dependencies.getCurrentText(),
               appearance: dependencies.getPreviewAppearance(),
+              uiLanguage: dependencies.getUiLanguage(),
               environment: Object.freeze(environment)
             })
           });

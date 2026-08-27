@@ -112,6 +112,7 @@ type PanelSessionControllerParams = {
   renderPreview: (options: {
     markdownText: string;
     sourceDocumentPath: string;
+    uiLanguage: InitMessage['uiLanguage'];
     styleEnvironment?: ExportStyleEnvironment;
   }) => Promise<PreviewRenderResult>;
   getFindOptions: () => FindOptions;
@@ -659,6 +660,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           const rendered = await renderPreview({
             markdownText: raw.text,
             sourceDocumentPath: documentUri.fsPath,
+            uiLanguage: raw.uiLanguage,
             styleEnvironment: raw.environment
           });
           response = {

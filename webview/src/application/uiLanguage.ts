@@ -1,4 +1,4 @@
-import type { UiLanguage } from '../../../src/foundation/uiLanguage';
+import { getGeneratedUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 export type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
@@ -247,7 +247,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     acceptCurrent: 'Accept Current', acceptIncoming: 'Accept Incoming', acceptBoth: 'Accept Both',
     currentVersion: (label: string) => `Current: ${label},`,
     incomingVersion: (label: string) => `Incoming: ${label}`,
-    alertLabel: (type: string) => type,
+    alertLabel: getGeneratedUiStrings('en').alertLabel,
     tableActions: 'Table actions', insertRowAbove: 'Insert row above', insertRowBelow: 'Insert row below',
     deleteRow: 'Delete row', insertColumnLeft: 'Insert column left', insertColumnRight: 'Insert column right',
     deleteColumn: 'Delete column', alignColumnLeft: 'Align selected column left',
@@ -338,7 +338,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     acceptCurrent: '接受当前更改', acceptIncoming: '接受传入更改', acceptBoth: '接受两者',
     currentVersion: (label: string) => `当前：${label}，`,
     incomingVersion: (label: string) => `传入：${label}`,
-    alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
+    alertLabel: getGeneratedUiStrings('zh-CN').alertLabel,
     tableActions: '表格操作', insertRowAbove: '在上方插入行', insertRowBelow: '在下方插入行',
     deleteRow: '删除行', insertColumnLeft: '在左侧插入列', insertColumnRight: '在右侧插入列',
     deleteColumn: '删除列', alignColumnLeft: '所选列左对齐',

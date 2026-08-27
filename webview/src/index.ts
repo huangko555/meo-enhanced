@@ -1793,6 +1793,7 @@ const exportAdapter = createExportWebviewAdapter({
   getCurrentText: getCurrentEditorText,
   whenDocumentIdle: () => documentSessionAdapter.whenIdle(),
   getPreviewAppearance: () => previewAdapter.getAppearance(),
+  getUiLanguage: () => activeUiLanguage,
   getStyleEnvironment: () => previewController.getStyleEnvironment()
 });
 

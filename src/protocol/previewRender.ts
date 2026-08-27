@@ -1,5 +1,6 @@
 import { decodeRequestResult, type RequestResult } from './requestResult';
 import { decodeEditorStyleEnvironment, type EditorStyleEnvironment } from './editorStyleEnvironment';
+import { isUiLanguage, type UiLanguage } from '../foundation/uiLanguage';
 
 export const PREVIEW_RENDER_TIMEOUT_MS = 15_000;
 
@@ -13,6 +14,7 @@ export type PreviewRenderRequest = {
   readonly type: 'requestPreviewRender';
   readonly requestId: string;
   readonly text: string;
+  readonly uiLanguage: UiLanguage;
   readonly environment: PreviewStyleEnvironment;
 };
 
@@ -42,13 +44,15 @@ export function decodePreviewRenderRequest(value: unknown): PreviewRenderRequest
   if (!isRecord(value)
     || value.type !== 'requestPreviewRender'
     || !isNonEmptyString(value.requestId)
-    || typeof value.text !== 'string') return null;
+    || typeof value.text !== 'string'
+    || !isUiLanguage(value.uiLanguage)) return null;
   const environment = decodeEditorStyleEnvironment(value.environment);
   if (environment === null) return null;
   return {
     type: 'requestPreviewRender',
     requestId: value.requestId,
     text: value.text,
+    uiLanguage: value.uiLanguage,
     environment
   };
 }

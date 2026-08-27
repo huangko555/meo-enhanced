@@ -26,7 +26,7 @@ type RenderedFrontmatterLine = {
   html: string;
 };
 
-export function extractExportFrontmatter(source: SourceMappedMarkdown): ExtractedExportFrontmatter {
+export function extractExportFrontmatter(source: SourceMappedMarkdown, propertiesLabel: string): ExtractedExportFrontmatter {
   const lines = String(source.markdown ?? '').split(/\r?\n/);
   if (lines.length < 2) {
     return { frontmatterHtml: '', body: source };
@@ -49,7 +49,8 @@ export function extractExportFrontmatter(source: SourceMappedMarkdown): Extracte
     frontmatterHtml: renderFrontmatterHtml(
       lines.slice(1, closingLineIndex),
       source.sourceLines[0] ?? 1,
-      source.sourceLines[closingLineIndex] ?? closingLineIndex + 1
+      source.sourceLines[closingLineIndex] ?? closingLineIndex + 1,
+      propertiesLabel
     ),
     body: sliceSourceMappedMarkdown(source, closingLineIndex + 1)
   };
@@ -65,7 +66,7 @@ function findFrontmatterClosingLine(lines: string[]): number {
   return -1;
 }
 
-function renderFrontmatterHtml(contentLines: string[], sourceLine: number, sourceEndLine: number): string {
+function renderFrontmatterHtml(contentLines: string[], sourceLine: number, sourceEndLine: number, propertiesLabel: string): string {
   let blockScalarParentIndent: number | null = null;
   const linesHtml = contentLines.map((line) => {
     const indentation = yamlIndentationWidth(line);
@@ -87,7 +88,7 @@ function renderFrontmatterHtml(contentLines: string[], sourceLine: number, sourc
 
   return [
     `<section class="meo-export-frontmatter" data-source-line="${sourceLine}" data-source-end-line="${sourceEndLine}">`,
-    '<div class="meo-export-frontmatter-header"><span class="meo-export-frontmatter-header-icon" aria-hidden="true"></span><span>Properties</span></div>',
+    `<div class="meo-export-frontmatter-header"><span class="meo-export-frontmatter-header-icon" aria-hidden="true"></span><span>${escapeHtml(propertiesLabel)}</span></div>`,
     linesHtml,
     '</section>'
   ].join('');

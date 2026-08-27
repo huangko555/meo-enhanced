@@ -602,6 +602,7 @@ export function createPreviewController({
     if (!background) setStatus(uiStrings.previewGenerating);
     void previewRenderTransport.render({
       text,
+      uiLanguage,
       environment: getStyleEnvironment()
     }).then((result) => {
       if (generation !== requestGeneration) return;

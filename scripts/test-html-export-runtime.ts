@@ -14,6 +14,7 @@ try {
       snapshotId: 'html-runtime',
       text: '```mermaid\ngraph TD\n  A --> B\n```',
       appearance: 'light',
+      uiLanguage: 'en',
       environment: { previewFontFamily: '' }
     },
     sourceDocumentPath: path.join(fixtureRoot, 'diagram.md'),

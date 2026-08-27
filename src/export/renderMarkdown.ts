@@ -15,6 +15,7 @@ import {
   supportedHtmlTags
 } from '../shared/htmlPolicy';
 import { collectHexColorRangesFromText } from '../shared/hexColorSwatches';
+import { getGeneratedUiStrings, type UiLanguage } from '../foundation/uiLanguage';
 
 const POWER_QUERY_KEYWORDS =
   'let in each if then else try otherwise error and or not as is type meta section shared';
@@ -42,6 +43,7 @@ export type RenderMarkdownOptions = {
   outputFilePath?: string;
   target: RenderMarkdownTarget;
   renderHexColorSwatches?: boolean;
+  uiLanguage?: UiLanguage;
 };
 
 export type RenderMarkdownResult = {
@@ -51,13 +53,14 @@ export type RenderMarkdownResult = {
 };
 
 export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMarkdownResult {
+  const uiStrings = getGeneratedUiStrings(options.uiLanguage ?? 'en');
   let hasMermaid = false;
   let hasMath = false;
   let bodySourceLines: number[] | null = null;
   const embeddedImageDataUrlCache = new Map<string, string | null>();
   const originalSourceLines = String(options.markdownText ?? '').split(/\r?\n/);
   const normalized = normalizeMarkdownForExportWithSourceMap(options.markdownText);
-  const extractedFrontmatter = extractExportFrontmatter(normalized);
+  const extractedFrontmatter = extractExportFrontmatter(normalized, uiStrings.properties);
   const shouldEnableMathTransform = extractedFrontmatter.body.markdown.includes('$');
 
   const md = new MarkdownIt({
@@ -77,7 +80,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   installTableCellListTransform(md);
   installTaskListTransform(md);
   installKbdFallbackTransform(md);
-  installAlertTransform(md);
+  installAlertTransform(md, uiStrings.alertLabel);
   if (options.renderHexColorSwatches) {
     installHexColorSwatchTransform(md);
   }
@@ -999,7 +1002,7 @@ const ALERT_ICONS: Record<AlertType, string> = {
   CAUTION: renderLucideIcon(XCircle as unknown as IconNode)
 };
 
-function installAlertTransform(md: MarkdownIt): void {
+function installAlertTransform(md: MarkdownIt, alertLabel: (type: string) => string): void {
   const defaultBlockquoteRender = md.renderer.rules.blockquote_open ??
     ((tokens: any, idx: number, opts: any, _env: any, self: any) => self.renderToken(tokens, idx, opts));
 
@@ -1020,7 +1023,7 @@ function installAlertTransform(md: MarkdownIt): void {
           headerHtml = [
             '<span class="meo-export-alert-header">',
             `<span class="meo-export-alert-icon">${ALERT_ICONS[alertType]}</span>`,
-            `<span class="meo-export-alert-label">${alertType}</span>`,
+            `<span class="meo-export-alert-label">${escapeHtml(alertLabel(alertType))}</span>`,
             '</span>'
           ].join('');
           token.content = token.content.replace(match[0], '').trim();
