@@ -9,6 +9,7 @@ import type {
   ImagePresentationFactory,
   ImagePresentationHandle
 } from '../editor/imagePresentation';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
 const IMAGE_EXT_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)(?:$|[?#])/i;
 
@@ -290,6 +291,7 @@ export class ImageWidget extends WidgetType {
   fullscreenCleanup: (() => void) | null;
   exitFullscreenHandler: ((event: KeyboardEvent) => void) | null;
   presentationHandle: ImagePresentationHandle | null;
+  uiLanguage: UiLanguage;
 
   constructor(
     url: string | null | undefined,
@@ -297,7 +299,10 @@ export class ImageWidget extends WidgetType {
     linkUrl: string | null | undefined,
     sourceFrom: number | null = null,
     readonly presentationFactory: ImagePresentationFactory,
-    options: { pointerInteractionOwner?: 'widget' | 'parent' } = {}
+    options: {
+      pointerInteractionOwner?: 'widget' | 'parent';
+      uiLanguage?: UiLanguage;
+    } = {}
   ) {
     super();
     this.url = url?.trim() ?? '';
@@ -309,6 +314,7 @@ export class ImageWidget extends WidgetType {
     this.fullscreenCleanup = null;
     this.exitFullscreenHandler = null;
     this.presentationHandle = null;
+    this.uiLanguage = options.uiLanguage ?? 'en';
     if (this.url) {
       void this.presentationFactory.preload(this.url);
     }
@@ -321,7 +327,8 @@ export class ImageWidget extends WidgetType {
       other.altText === this.altText &&
       other.linkUrl === this.linkUrl &&
       other.sourceFrom === this.sourceFrom &&
-      other.pointerInteractionOwner === this.pointerInteractionOwner
+      other.pointerInteractionOwner === this.pointerInteractionOwner &&
+      other.uiLanguage === this.uiLanguage
     );
   }
 
@@ -450,6 +457,7 @@ export class ImageWidget extends WidgetType {
   }
 
   createImageControls(img: HTMLImageElement): HTMLElement {
+    const strings = getUiStrings(this.uiLanguage);
     const controls = document.createElement('div');
     controls.className = 'meo-visual-controls meo-md-image-controls';
 
@@ -458,7 +466,7 @@ export class ImageWidget extends WidgetType {
       const openLink = document.createElement('button');
       openLink.type = 'button';
       openLink.className = 'meo-visual-control-btn meo-md-image-control-btn';
-      openLink.title = isDocumentFragment ? 'Jump within document' : 'Open link';
+      openLink.title = isDocumentFragment ? strings.jumpWithinDocument : strings.openLink;
       openLink.setAttribute('aria-label', openLink.title);
       openLink.appendChild(createElement(isDocumentFragment ? SquareArrowRightEnter : ExternalLink, { width: 16, height: 16 }));
       openLink.addEventListener('pointerdown', (event) => {
@@ -472,8 +480,8 @@ export class ImageWidget extends WidgetType {
     const openExternally = document.createElement('button');
     openExternally.type = 'button';
     openExternally.className = 'meo-visual-control-btn meo-md-image-control-btn';
-    openExternally.title = 'Open with system app';
-    openExternally.setAttribute('aria-label', 'Open with system app');
+    openExternally.title = strings.openWithSystemApp;
+    openExternally.setAttribute('aria-label', strings.openWithSystemApp);
     openExternally.appendChild(createElement(AppWindow, { width: 16, height: 16 }));
     openExternally.addEventListener('pointerdown', (event) => {
       event.preventDefault();
@@ -484,8 +492,8 @@ export class ImageWidget extends WidgetType {
     const fullscreen = document.createElement('button');
     fullscreen.type = 'button';
     fullscreen.className = 'meo-visual-control-btn meo-md-image-control-btn';
-    fullscreen.title = 'Fullscreen image';
-    fullscreen.setAttribute('aria-label', 'Fullscreen image');
+    fullscreen.title = strings.fullscreenImage;
+    fullscreen.setAttribute('aria-label', strings.fullscreenImage);
     fullscreen.appendChild(createElement(Maximize2, { width: 16, height: 16 }));
     fullscreen.addEventListener('pointerdown', (event) => {
       event.preventDefault();
@@ -545,16 +553,17 @@ export class ImageWidget extends WidgetType {
       });
       controls.appendChild(button);
     };
-    addButton(ZoomIn, 'Zoom in', () => changeZoom(0.5));
-    addButton(ZoomOut, 'Zoom out', () => changeZoom(-0.5));
-    addButton(RotateCcw, 'Reset zoom', () => {
+    const strings = getUiStrings(this.uiLanguage);
+    addButton(ZoomIn, strings.zoomIn, () => changeZoom(0.5));
+    addButton(ZoomOut, strings.zoomOut, () => changeZoom(-0.5));
+    addButton(RotateCcw, strings.resetZoom, () => {
       zoom = 1;
       panX = 0;
       panY = 0;
       applyTransform();
     });
-    addButton(AppWindow, 'Open with system app', () => openImageExternally(this.url));
-    addButton(X, 'Exit fullscreen', () => this.closeFullscreen());
+    addButton(AppWindow, strings.openWithSystemApp, () => openImageExternally(this.url));
+    addButton(X, strings.exitFullscreen, () => this.closeFullscreen());
     viewer.appendChild(controls);
 
     const onPointerDown = (event: PointerEvent) => {
@@ -678,7 +687,11 @@ export class ImageGroupWidget extends WidgetType {
   readonly items: readonly ImageGroupItem[];
   private readonly widgets: ImageWidget[];
 
-  constructor(items: readonly ImageGroupItem[], presentationFactory: ImagePresentationFactory) {
+  constructor(
+    items: readonly ImageGroupItem[],
+    presentationFactory: ImagePresentationFactory,
+    uiLanguage: UiLanguage = 'en'
+  ) {
     super();
     this.items = items.map((item) => ({ ...item }));
     this.widgets = this.items.map((item) => new ImageWidget(
@@ -686,7 +699,8 @@ export class ImageGroupWidget extends WidgetType {
       item.altText,
       item.linkUrl,
       item.sourceFrom,
-      presentationFactory
+      presentationFactory,
+      { uiLanguage }
     ));
   }
 

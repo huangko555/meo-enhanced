@@ -32,6 +32,8 @@ import {
   type InlineDomCaret
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
+import { uiLanguageFacet } from '../editor/uiLanguage';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import {
   getTableTransactionProvenance,
   getTableTransactionProvenanceSnapshot,
@@ -1511,17 +1513,23 @@ function appendTableInlinePreviewLink(parent: HTMLElement, label: string, href: 
   searchState?: TableSearchState | null;
   sourceRange?: TableCellRange | null;
   presentationFactory: ImagePresentationFactory;
+  uiLanguage: UiLanguage;
 }) {
   const el = document.createElement('span');
   el.className = 'meo-md-link';
   if (href) el.setAttribute('data-meo-link-href', href);
   appendTableInlinePreviewNodes(el, label, { ...options, disableLinkParsers: true });
-  if (isMissingLocalLinkTarget(href)) parent.appendChild(createMissingLocalLinkIndicator());
+  if (isMissingLocalLinkTarget(href)) {
+    parent.appendChild(createMissingLocalLinkIndicator(options.uiLanguage));
+  }
   parent.appendChild(el);
-  if (href) parent.appendChild(createOpenLinkButton(href));
+  if (href) parent.appendChild(createOpenLinkButton(href, options.uiLanguage));
 }
 
-export function refreshTableLocalLinkIndicators(root: ParentNode): void {
+export function refreshTableLocalLinkIndicators(
+  root: ParentNode,
+  uiLanguage: UiLanguage = 'en'
+): void {
   const links = root.querySelectorAll<HTMLElement>(
     '.meo-md-html-table-cell-preview .meo-md-link[data-meo-link-href]'
   );
@@ -1531,7 +1539,7 @@ export function refreshTableLocalLinkIndicators(root: ParentNode): void {
       : null;
     const href = link.getAttribute('data-meo-link-href') ?? '';
     if (isMissingLocalLinkTarget(href)) {
-      if (!indicator) link.before(createMissingLocalLinkIndicator());
+      if (!indicator) link.before(createMissingLocalLinkIndicator(uiLanguage));
     } else {
       indicator?.remove();
     }
@@ -1543,7 +1551,8 @@ function appendTableInlinePreviewImage(
   altText: string,
   url: string,
   sourceRange: TableCellRange,
-  presentationFactory: ImagePresentationFactory
+  presentationFactory: ImagePresentationFactory,
+  uiLanguage: UiLanguage
 ) {
   if (!url) {
     appendInlineMappedText(parent, `![${altText}]()`, sourceRange);
@@ -1552,7 +1561,8 @@ function appendTableInlinePreviewImage(
   // Table cells own pointer selection so image clicks enter the cell editor on
   // pointerup instead of being consumed by the standalone image interaction.
   const dom = new ImageWidget(url, decodeTableInlineEscapes(altText), '', null, presentationFactory, {
-    pointerInteractionOwner: 'parent'
+    pointerInteractionOwner: 'parent',
+    uiLanguage
   }).toDOM();
   if (dom instanceof HTMLElement) {
     dom.setAttribute('data-meo-link-href', url);
@@ -1568,6 +1578,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
   searchState?: TableSearchState | null;
   sourceRange?: TableCellRange | null;
   presentationFactory: ImagePresentationFactory;
+  uiLanguage: UiLanguage;
 }) {
   const { baseOffset = 0, diagnostics = [], disableLinkParsers = false, searchState = null, sourceRange = null } = options;
   const colorRangesByStart = new Map(collectHexColorRangesFromText(text).map((range) => [range.from, range]));
@@ -1673,7 +1684,8 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
         image.label,
         decodeTableInlineEscapes(image.url),
         { from: baseOffset + i, to: baseOffset + image.nextIndex },
-        options.presentationFactory
+        options.presentationFactory,
+        options.uiLanguage
       );
       i = image.nextIndex;
       continue;
@@ -1848,7 +1860,8 @@ function appendTableCellRenderedPreview(
   diagnostics: TableCellDiagnostics[],
   searchState: TableSearchState | null,
   sourceRange: TableCellRange | null,
-  presentationFactory: ImagePresentationFactory
+  presentationFactory: ImagePresentationFactory,
+  uiLanguage: UiLanguage
 ) {
   const listStack: Array<{ indentColumns: number; type: 'ul' | 'ol'; list: HTMLUListElement | HTMLOListElement; lastItem: HTMLLIElement | null }> = [];
   const appendInline = (parent: HTMLElement, content: string, baseOffset: number) => {
@@ -1857,7 +1870,8 @@ function appendTableCellRenderedPreview(
       diagnostics,
       searchState,
       sourceRange,
-      presentationFactory
+      presentationFactory,
+      uiLanguage
     });
   };
 
@@ -1934,7 +1948,8 @@ function renderTableCellInlinePreview(
   diagnostics: TableCellDiagnostics[] = [],
   searchState: TableSearchState | null = null,
   sourceRange: TableCellRange | null,
-  presentationFactory: ImagePresentationFactory
+  presentationFactory: ImagePresentationFactory,
+  uiLanguage: UiLanguage
 ) {
   if (!(previewEl instanceof HTMLElement)) return;
   disposeImagePresentations(previewEl);
@@ -1953,7 +1968,8 @@ function renderTableCellInlinePreview(
     diagnostics,
     searchState,
     sourceRange,
-    presentationFactory
+    presentationFactory,
+    uiLanguage
   );
 }
 
@@ -4246,7 +4262,8 @@ class HtmlTableWidget extends WidgetType {
       diagnostics,
       this.searchState,
       sourceRange,
-      getImagePresentationFactory(this.view!.state)
+      getImagePresentationFactory(this.view!.state),
+      this.view!.state.facet(uiLanguageFacet)
     );
   }
 

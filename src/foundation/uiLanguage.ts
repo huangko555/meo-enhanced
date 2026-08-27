@@ -111,6 +111,8 @@ export type UiStrings = Readonly<{
   fullscreen: string;
   exitFullscreen: string;
   mermaidError: (message: string) => string;
+  openWithSystemApp: string;
+  fullscreenImage: string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -211,6 +213,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     loading: 'Loading...', zoomIn: 'Zoom in', zoomOut: 'Zoom out', resetZoom: 'Reset zoom',
     fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
     mermaidError: (message: string) => `Mermaid error: ${message}`,
+    openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image',
     heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
@@ -287,6 +290,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     loading: '正在加载…', zoomIn: '放大', zoomOut: '缩小', resetZoom: '重置缩放',
     fullscreen: '全屏', exitFullscreen: '退出全屏',
     mermaidError: (message: string) => `Mermaid 错误：${message}`,
+    openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片',
     heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',

@@ -2868,7 +2868,7 @@ export function createEditor({
     },
     refreshDecorations() {
       view.dispatch({ effects: refreshDecorationsEffect.of(null) });
-      refreshTableLocalLinkIndicators(view.dom);
+      refreshTableLocalLinkIndicators(view.dom, view.state.facet(uiLanguageFacet));
     },
     preserveViewport(mutate: () => void) {
       viewportController.preserveDocumentAnchorWhileMutation(mutate);

@@ -1844,7 +1844,8 @@ function buildDecorations(state: EditorState): DecorationSet {
                     '',
                     '',
                     node.from,
-                    getImagePresentationFactory(state)
+                    getImagePresentationFactory(state),
+                    { uiLanguage: state.facet(uiLanguageFacet) }
                   ),
                   inclusive: false
                 }).range(node.from, node.to)
@@ -1893,7 +1894,8 @@ function buildDecorations(state: EditorState): DecorationSet {
                 altText,
                 linkUrl,
                 node.from,
-                getImagePresentationFactory(state)
+                getImagePresentationFactory(state),
+                { uiLanguage: state.facet(uiLanguageFacet) }
               ),
               inclusive: false
             }).range(node.from, node.to)
@@ -2038,9 +2040,14 @@ function buildDecorations(state: EditorState): DecorationSet {
         items[0].altText,
         items[0].linkUrl,
         items[0].sourceFrom,
-        getImagePresentationFactory(state)
+        getImagePresentationFactory(state),
+        { uiLanguage: state.facet(uiLanguageFacet) }
       )
-      : new ImageGroupWidget(items, getImagePresentationFactory(state));
+      : new ImageGroupWidget(
+        items,
+        getImagePresentationFactory(state),
+        state.facet(uiLanguageFacet)
+      );
     ranges.push(
       Decoration.widget({ widget, side: 1, block: true }).range(line.to)
     );

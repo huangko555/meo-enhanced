@@ -18,6 +18,7 @@ import { getViewportController } from './viewportController';
 import { ImageWidget } from './images';
 import { getImagePresentationFactory } from '../editor/imagePresentation';
 import { getDetailsBlocks, toggleDetailsBlock } from './detailsBlocks';
+import { uiLanguageFacet } from '../editor/uiLanguage';
 
 export interface RenderableHtmlBlock {
   from: number;
@@ -170,7 +171,8 @@ function enhanceImages(root: ParentNode, view: EditorView, sourceFrom: number): 
       image.getAttribute('alt') ?? '',
       isSafeHtmlUrl(linkUrl, 'href') ? linkUrl : '',
       sourceFrom,
-      getImagePresentationFactory(view.state)
+      getImagePresentationFactory(view.state),
+      { uiLanguage: view.state.facet(uiLanguageFacet) }
     );
     const container = widget.toDOM(view);
     container.classList.add('meo-md-html-image');
