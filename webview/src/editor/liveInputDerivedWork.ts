@@ -13,12 +13,14 @@ type LiveInputDerivedWorkSchedulerOptions = {
   apply(): void;
   reportError(error: unknown): void;
 } & ({
-  requestDeferred(callback: () => void): number;
+  requestDeferred(callback: () => void, timeoutMs: number): number;
   cancelDeferred(taskId: number): void;
 } | {
   requestDeferred?: never;
   cancelDeferred?: never;
 });
+
+const LARGE_DOCUMENT_DERIVED_WORK_DEADLINE_MS = 500;
 
 /**
  * Coalesces derived presentation behind one observable primary-text frame.
@@ -66,7 +68,7 @@ export function createLiveInputDerivedWorkScheduler(
           deferredId = options.requestDeferred(() => {
             deferredId = null;
             applyCurrentGeneration(currentGeneration);
-          });
+          }, LARGE_DOCUMENT_DERIVED_WORK_DEADLINE_MS);
         });
         return;
       }
@@ -518,8 +520,8 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const scheduler = largeDocument
     ? createLiveInputDerivedWorkScheduler({
       ...schedulerOptions,
-      requestDeferred: (callback: () => void) => canRequestIdle
-        ? window.requestIdleCallback(() => callback())
+      requestDeferred: (callback: () => void, timeoutMs: number) => canRequestIdle
+        ? window.requestIdleCallback(() => callback(), { timeout: timeoutMs })
         : window.requestAnimationFrame(() => callback()),
       cancelDeferred: (taskId: number) => {
         if (canRequestIdle) window.cancelIdleCallback(taskId);

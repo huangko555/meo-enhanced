@@ -206,6 +206,66 @@ async function main(): Promise<void> {
     }, original);
     await waitForFrames(page, 6);
 
+    const busyIdleDeadlineFacts = await page.evaluate(async () => {
+      const nativeRequestIdleCallback = window.requestIdleCallback;
+      const nativeCancelIdleCallback = window.cancelIdleCallback;
+      const active = new Set<number>();
+      let nextIdleId = 1;
+      let requestedDeadline: number | undefined;
+      window.requestIdleCallback = ((callback: IdleRequestCallback, options?: IdleRequestOptions) => {
+        const id = nextIdleId++;
+        active.add(id);
+        requestedDeadline = options?.timeout;
+        queueMicrotask(() => {
+          if (!active.delete(id)) return;
+          callback({ didTimeout: true, timeRemaining: () => 0 });
+        });
+        return id;
+      }) as typeof window.requestIdleCallback;
+      window.cancelIdleCallback = ((id: number) => { active.delete(id); }) as typeof window.cancelIdleCallback;
+
+      const host = document.createElement('div');
+      document.body.append(host);
+      const editor = (window as any).__createInputCursorEditor({
+        parent: host,
+        text: Array.from({ length: 8_001 }, (_, index) => `busy-line-${index}`).join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      try {
+        editor.setSearchQuery('deadline-needle');
+        const observed = new Promise<void>((resolve) => {
+          const observer = new MutationObserver(() => {
+            if (!host.querySelector('.meo-search-match')) return;
+            observer.disconnect();
+            resolve();
+          });
+          observer.observe(host, { childList: true, subtree: true });
+        });
+        (window as any).__dispatchProductionInput(editor, 0, 'deadline-needle ');
+        await observed;
+        return {
+          requestedDeadline,
+          textCommitted: editor.getText().startsWith('deadline-needle '),
+          publicMatch: host.querySelector('.meo-search-match')?.textContent ?? ''
+        };
+      } finally {
+        editor.destroy();
+        host.remove();
+        window.requestIdleCallback = nativeRequestIdleCallback;
+        window.cancelIdleCallback = nativeCancelIdleCallback;
+      }
+    });
+    if (
+      !busyIdleDeadlineFacts.textCommitted
+      || busyIdleDeadlineFacts.publicMatch !== 'deadline-needle'
+      || typeof busyIdleDeadlineFacts.requestedDeadline !== 'number'
+      || !Number.isFinite(busyIdleDeadlineFacts.requestedDeadline)
+      || busyIdleDeadlineFacts.requestedDeadline <= 0
+    ) {
+      throw new Error(`Busy large-document derived work missed its public deadline: ${JSON.stringify(busyIdleDeadlineFacts)}`);
+    }
+
     const failedGenerationConsumerFacts = await page.evaluate(async () => {
       const host = document.createElement('div');
       document.body.append(host);

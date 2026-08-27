@@ -187,11 +187,15 @@ assert.equal(frames.pendingCount, 0, 'disposed schedulers must ignore new input'
 
 const budgetFrames = createFrameHarness();
 const deferred = createFrameHarness();
+const deferredDeadlines: Array<number | undefined> = [];
 let budgetedApplies = 0;
 const budgetedScheduler = createLiveInputDerivedWorkScheduler({
   requestFrame: (callback) => budgetFrames.requestFrame(callback),
   cancelFrame: (id) => budgetFrames.cancelFrame(id),
-  requestDeferred: (callback) => deferred.requestFrame(callback),
+  requestDeferred: (callback, timeoutMs) => {
+    deferredDeadlines.push(timeoutMs);
+    return deferred.requestFrame(callback);
+  },
   cancelDeferred: (id) => deferred.cancelFrame(id),
   apply: () => { budgetedApplies += 1; },
   reportError: (error) => { throw error; }
@@ -203,6 +207,10 @@ assert.equal(budgetedApplies, 0, 'budgeted work must preserve two primary text f
 assert.equal(deferred.pendingCount, 0, 'derived work must not enter idle before the painted text settles');
 budgetFrames.flushFrame();
 assert.equal(deferred.pendingCount, 1, 'full derived refresh must wait for the deferred budget');
+assert.ok(
+  typeof deferredDeadlines[0] === 'number' && Number.isFinite(deferredDeadlines[0]) && deferredDeadlines[0]! > 0,
+  'large-document deferred work must carry a finite delivery deadline'
+);
 budgetedScheduler.documentChanged();
 assert.equal(deferred.pendingCount, 0, 'new input must cancel an accepted deferred refresh');
 budgetFrames.flushFrame();
