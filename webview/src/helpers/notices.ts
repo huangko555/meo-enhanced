@@ -1,6 +1,10 @@
 import type { EditorNotice } from './errors';
+import { getUiStrings, type UiLanguage } from '../../../src/foundation/uiLanguage';
 
-export function createEditorNoticeController(banner: HTMLElement, onDismiss?: () => void): EditorNotice {
+export function createEditorNoticeController(
+  banner: HTMLElement,
+  onDismiss?: () => void
+): EditorNotice & { setUiLanguage: (language: UiLanguage) => void } {
   const message = document.createElement('span');
   message.className = 'editor-notice-message';
 
@@ -35,5 +39,13 @@ export function createEditorNoticeController(banner: HTMLElement, onDismiss?: ()
     clearEditorNotice();
     onDismiss?.();
   });
-  return { setEditorNotice, clearEditorNotice };
+  return {
+    setEditorNotice,
+    clearEditorNotice,
+    setUiLanguage: (language) => {
+      const label = getUiStrings(language).dismissNotification;
+      closeButton.title = label;
+      closeButton.setAttribute('aria-label', label);
+    }
+  };
 }

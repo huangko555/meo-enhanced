@@ -152,7 +152,8 @@ async function main() {
       formatting: document.querySelector('.format-group')?.getAttribute('aria-label'),
       heading: document.querySelector('[data-action="heading"]')?.getAttribute('title'),
       save: document.querySelector('[data-action="save"]')?.getAttribute('aria-label'),
-      line: document.querySelector('.line-jump-input')?.getAttribute('placeholder')
+      line: document.querySelector('.line-jump-input')?.getAttribute('placeholder'),
+      dismissNotice: document.querySelector('.editor-notice-close')?.getAttribute('aria-label')
     }));
     if (JSON.stringify(chineseChrome) !== JSON.stringify({
       language: 'zh-CN',
@@ -169,7 +170,8 @@ async function main() {
       formatting: '格式',
       heading: '标题',
       save: '保存文档',
-      line: '行'
+      line: '行',
+      dismissNotice: '关闭通知'
     })) {
       throw new Error(`Resolved UI language did not project into the current Webview: ${JSON.stringify(chineseChrome)}`);
     }

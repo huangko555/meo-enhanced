@@ -802,6 +802,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   });
   updateGitChangesGutterUI();
   updateContentMaxWidthUI();
+  editorNotice.setUiLanguage(language);
   findToggleBtn.title = strings.findAndReplace;
   exportHtmlOption.title = strings.exportAsHtml;
   exportHtmlOption.setAttribute('aria-label', strings.exportAsHtml);
@@ -1423,12 +1424,12 @@ const setEditorTextSafely = async (
       } catch (retryInLiveError) {
         logWebviewRenderError('setText.retryInLive', retryInLiveError, { context });
         if (!shouldAutoFallbackToSourceForLiveError(retryInLiveError)) {
-          failureNotice.setFailureNotice('Live mode hit a transient render error while updating. Try again.', 'warning');
+          failureNotice.setFailureNotice(activeUiStrings.transientUpdateFailure, 'warning');
           return false;
         }
       }
 
-      failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
+      failureNotice.setFailureNotice(activeUiStrings.liveModeFailure, 'warning');
       await editorModeRuntime.dispatch({
         type: 'requestMode', mode: 'source', source: 'render-failure', basisManualIntentId
       });
@@ -1438,12 +1439,12 @@ const setEditorTextSafely = async (
         return true;
       } catch (retryError) {
         logWebviewRenderError('setText.retryInSource', retryError, { context });
-        failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+        failureNotice.setFailureNotice(activeUiStrings.editorUpdateFailure, 'error');
         return false;
       }
     }
 
-    failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+    failureNotice.setFailureNotice(activeUiStrings.editorUpdateFailure, 'error');
     return false;
   }
 };
@@ -1667,15 +1668,15 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   postMode: (mode) => vscode.postMessage({ type: 'setMode', mode }),
   showNotice(notice) {
     if (notice === 'transient-live') {
-      failureNotice.setFailureNotice('Live mode hit a transient render error. Staying in current mode; try again.', 'warning');
+      failureNotice.setFailureNotice(activeUiStrings.transientModeFailure, 'warning');
     } else if (notice === 'live-fallback') {
-      failureNotice.setFailureNotice(failureNotice.liveModeFailureMessage, 'warning');
+      failureNotice.setFailureNotice(activeUiStrings.liveModeFailure, 'warning');
     } else if (notice === 'mount-retry') {
-      failureNotice.setFailureNotice('Live mode hit a transient render error while loading. Retrying...', 'warning');
+      failureNotice.setFailureNotice(activeUiStrings.transientLoadRetry, 'warning');
     } else if (notice === 'mount-failure') {
-      failureNotice.setFailureNotice('Live mode hit a transient render error while loading. Try reopening or switching modes.', 'warning');
+      failureNotice.setFailureNotice(activeUiStrings.transientLoadFailure, 'warning');
     } else {
-      failureNotice.setFailureNotice(failureNotice.editorUpdateFailureMessage, 'error');
+      failureNotice.setFailureNotice(activeUiStrings.editorUpdateFailure, 'error');
     }
     failureNotice.updateEditorNotice();
   },
@@ -1952,7 +1953,7 @@ window.addEventListener('paste', async (event) => {
   await handleImagePaste(event, editor, {
     lineNumber: lineNumberAtPaste,
     lineOffset: lineOffsetAtPaste,
-    onError: (message) => failureNotice.setFailureNotice(`Could not paste image: ${message}`, 'warning')
+    onError: (message) => failureNotice.setFailureNotice(activeUiStrings.pasteImageFailure(message), 'warning')
   });
 });
 

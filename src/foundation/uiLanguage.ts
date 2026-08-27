@@ -92,6 +92,14 @@ export type UiStrings = Readonly<{
   currentEdits: string;
   recentSave: string;
   gitHead: string;
+  dismissNotification: string;
+  liveModeFailure: string;
+  editorUpdateFailure: string;
+  transientUpdateFailure: string;
+  transientModeFailure: string;
+  transientLoadRetry: string;
+  transientLoadFailure: string;
+  pasteImageFailure: (message: string) => string;
 }>;
 
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
@@ -135,7 +143,14 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     changes: 'Changes', pinLatestSavedBaseline: 'Pin Latest Saved Version as Baseline',
     selectedMode: 'Selected Mode', showFixedBaseline: 'Show Fixed Baseline',
     releaseFixedBaseline: 'Release Fixed Baseline', currentEdits: 'Current Edits',
-    recentSave: 'Recent Save', gitHead: 'Git HEAD'
+    recentSave: 'Recent Save', gitHead: 'Git HEAD', dismissNotification: 'Dismiss notification',
+    liveModeFailure: 'Live mode failed to render this document. Switched to Source mode.',
+    editorUpdateFailure: 'Editor failed to update this document. Try reopening the file.',
+    transientUpdateFailure: 'Live mode hit a transient render error while updating. Try again.',
+    transientModeFailure: 'Live mode hit a transient render error. Staying in current mode; try again.',
+    transientLoadRetry: 'Live mode hit a transient render error while loading. Retrying...',
+    transientLoadFailure: 'Live mode hit a transient render error while loading. Try reopening or switching modes.',
+    pasteImageFailure: (message: string) => `Could not paste image: ${message}`
   }),
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
@@ -175,7 +190,14 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     changes: '更改', pinLatestSavedBaseline: '将最近保存版本固定为基线',
     selectedMode: '所选模式', showFixedBaseline: '显示固定基线',
     releaseFixedBaseline: '释放固定基线', currentEdits: '当前编辑', recentSave: '最近保存',
-    gitHead: 'Git HEAD'
+    gitHead: 'Git HEAD', dismissNotification: '关闭通知',
+    liveModeFailure: '实时模式无法渲染此文档，已切换到源码模式。',
+    editorUpdateFailure: '编辑器无法更新此文档，请重新打开文件。',
+    transientUpdateFailure: '实时模式更新时遇到临时渲染错误，请重试。',
+    transientModeFailure: '实时模式遇到临时渲染错误，将保持当前模式；请重试。',
+    transientLoadRetry: '实时模式加载时遇到临时渲染错误，正在重试…',
+    transientLoadFailure: '实时模式加载时遇到临时渲染错误，请重新打开文件或切换模式。',
+    pasteImageFailure: (message: string) => `无法粘贴图片：${message}`
   })
 });
 

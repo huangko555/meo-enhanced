@@ -1,6 +1,3 @@
-const liveModeFailureNoticeMessage = 'Live mode failed to render this document. Switched to Source mode.';
-const editorUpdateFailureNoticeMessage = 'Editor failed to update this document. Try reopening the file.';
-
 export interface EditorNotice {
   setEditorNotice: (message: string, kind?: string) => void;
   clearEditorNotice: () => void;
@@ -78,9 +75,7 @@ export const createFailureNoticeManager = (notice: EditorNotice) => {
     setFailureNotice,
     clearFailureNotice,
     hasFailureNotice,
-    updateEditorNotice,
-    get liveModeFailureMessage() { return liveModeFailureNoticeMessage; },
-    get editorUpdateFailureMessage() { return editorUpdateFailureNoticeMessage; }
+    updateEditorNotice
   };
 };
 

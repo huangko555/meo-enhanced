@@ -29,6 +29,7 @@ assert.equal(chinese.replacedRemaining(3), '已替换 • 剩余 3 个');
 assert.equal(chinese.outlineNoHeadings, '暂无标题');
 assert.equal(chinese.headingLevel(3), '3 级标题');
 assert.equal(chinese.hideChanges(chinese.currentEdits), '隐藏更改（当前编辑）');
+assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
 assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);
 
