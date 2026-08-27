@@ -42,7 +42,6 @@ import {
   resolveWebviewImageSrc,
   resolveWikiLinkTargets
 } from '../shared/documentLinks';
-import { resolveClipboardImageSaveRoot } from '../shared/clipboardImages';
 import { GitDocumentState } from '../git/documentState';
 import type { GitBaselinePayload } from '../git/types';
 import { SavedRevisionTracker } from '../diff/savedRevisionTracker';
@@ -69,6 +68,7 @@ import { createExportSnapshotTransport } from '../host/exportSnapshotTransport';
 import { respondToDocumentSessionRequest } from '../host/documentSessionRequestHandler';
 import { createVscodeDocumentReloadAdapter } from '../host/vscodeDocumentReloadAdapter';
 import { createVscodeDocumentSaveLifecycleAdapter } from '../host/vscodeDocumentSaveLifecycleAdapter';
+import { saveClipboardImageFile } from '../host/clipboardImageSave';
 import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protocol/documentSession';
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
@@ -965,33 +965,30 @@ async function handleSaveImageFromClipboard(
   documentUri: vscode.Uri
 ): Promise<SavedImagePathResponse> {
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
-  const saveRoot = workspaceFolder?.uri ?? vscode.Uri.file(resolveClipboardImageSaveRoot(documentUri.fsPath));
   const config = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION);
-  const imageFolder = config.get<string>('imageFolder', 'assets');
+  const imageFolderSetting = config.inspect<string>('imageFolder');
+  const imageFolder = imageFolderSetting?.workspaceFolderValue
+    ?? imageFolderSetting?.workspaceValue
+    ?? imageFolderSetting?.globalValue;
 
   try {
     const base64Data = message.imageData.replace(/^data:image\/[^;]+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
 
-    const assetsFolderUri = vscode.Uri.joinPath(saveRoot, imageFolder);
-
-    try {
-      await vscode.workspace.fs.stat(assetsFolderUri);
-    } catch {
-      await vscode.workspace.fs.createDirectory(assetsFolderUri);
-    }
-
-    const filePath = vscode.Uri.joinPath(assetsFolderUri, message.fileName);
-    await vscode.workspace.fs.writeFile(filePath, imageBuffer);
-
-    const relativePath = path.relative(path.dirname(documentUri.fsPath), filePath.fsPath);
+    const saved = await saveClipboardImageFile({
+      documentFsPath: documentUri.fsPath,
+      workspaceFsPath: workspaceFolder?.uri.fsPath,
+      configuredFolder: imageFolder,
+      requestedFileName: message.fileName,
+      contents: imageBuffer
+    });
 
     return {
       type: 'savedImagePath',
       requestId: message.requestId,
       result: {
         ok: true,
-        value: { path: relativePath.replace(/\\/g, '/') }
+        value: { path: saved.relativePath }
       }
     };
   } catch (error) {
