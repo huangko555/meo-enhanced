@@ -568,6 +568,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let pendingRestoreTopLine: number | null = null;
   let pendingRestoreTopLineOffset = 0;
   let pendingDraftText: string | null = null;
+  let lastSentDocVersion = -1;
   let lastSavedRememberedLine: number | null = null;
   let lastSavedRememberedLineOffset = 0;
   let disposed = false;
@@ -835,7 +836,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       text: document.getText(),
       version: document.version
     };
-    return postToWebview(message);
+    const sent = await postToWebview(message);
+    if (sent) {
+      lastSentDocVersion = document.version;
+    }
+    return sent;
   };
 
   const sendApplied = async (version: number): Promise<boolean> => {
@@ -1679,8 +1684,14 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (event.webviewPanel.active) {
       onPanelActivated(event.webviewPanel);
       refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_REFRESH_DELAY_MS });
+      // Activation snapshots exist only to re-sync a possibly-stale webview.
+      // Re-sending an unchanged document version makes a full-text echo race
+      // with keystrokes the user just typed in the Live editor (the webview's
+      // 100ms publish debounce keeps recent edits unflushed), so skip it.
       runBackground(enqueue(async () => {
-        await sendDocChanged();
+        if (lastSentDocVersion !== document.version) {
+          await sendDocChanged();
+        }
       }), 'sendDocChanged.viewState');
       runBackground(flushPendingRevealSelection(), 'flushPendingRevealSelection');
       runBackground(sendRevealSelectionForEditor(findEditorForDocumentReveal()), 'sendRevealSelectionForEditor.viewState');

@@ -44,6 +44,15 @@ export function reconcileExternalDocument(
     return { text: incomingText, pendingText: null };
   }
 
+  // The incoming snapshot carries no change relative to the base the local
+  // draft was built on (e.g. a panel-activation, save, or base-version-mismatch
+  // freshness echo that predates the pending keystrokes). Treating it as a
+  // conflicting edit would silently revert typing/deletions made inside the
+  // debounce window, so the local draft must survive.
+  if (incomingText === baseText) {
+    return { text: localText, pendingText: localText };
+  }
+
   const localChange = findTextChange(baseText, localText);
   const incomingChange = findTextChange(baseText, incomingText);
   if (!localChange || !incomingChange || changesOverlap(localChange, incomingChange)) {

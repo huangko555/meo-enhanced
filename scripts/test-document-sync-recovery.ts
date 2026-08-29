@@ -58,6 +58,41 @@ async function main(): Promise<void> {
       (message: any) => message.type === 'draftChanged' && message.text === '1. alpha\n2. beta'
     ));
 
+    // A stale document snapshot identical to the base the draft was built on
+    // (e.g. the panel-activation freshness echo) must not discard keystrokes
+    // made inside the publish debounce window.
+    await page.evaluate(() => {
+      const EditorView = (window as any).__EditorView;
+      const editorElement = document.querySelector('.cm-editor');
+      const view = EditorView.findFromDOM(editorElement);
+      view.dispatch = function (...args: any[]) {
+        void args;
+        throw new Error('forced ordered-list render failure');
+      };
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'docChanged',
+        text: '1. alpha',
+        version: 1
+      }}));
+    });
+
+    await page.waitForFunction(() => {
+      const EditorView = (window as any).__EditorView;
+      const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+      return view.state.doc.toString() === '1. alpha\n2. beta';
+    }, { timeout: 2_000 });
+
+    // Give any erroneous reverted flush time to surface before asserting.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const staleEchoFinal = await page.evaluate(() => {
+      const EditorView = (window as any).__EditorView;
+      const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+      return view.state.doc.toString();
+    });
+    if (staleEchoFinal !== '1. alpha\n2. beta') {
+      throw new Error(`stale echo snapshot discarded the pending draft: ${JSON.stringify(staleEchoFinal)}`);
+    }
+
     await page.evaluate(() => {
       const EditorView = (window as any).__EditorView;
       const editorElement = document.querySelector('.cm-editor');
