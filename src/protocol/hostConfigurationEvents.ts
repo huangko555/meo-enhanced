@@ -7,7 +7,11 @@ export type CodeThemeDto = {
 
 export type HostConfigurationEvent =
   | { readonly type: 'toggleMode' }
-  | { readonly type: 'vscodeCodeThemeChanged'; readonly vscodeTheme: CodeThemeDto | null };
+  | {
+      readonly type: 'vscodeCodeThemeChanged';
+      readonly appearance: 'light' | 'dark';
+      readonly vscodeTheme: CodeThemeDto | null;
+    };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -38,7 +42,8 @@ export function decodeHostConfigurationEvent(value: unknown): HostConfigurationE
     case 'toggleMode':
       return { type: 'toggleMode' };
     case 'vscodeCodeThemeChanged':
-      return decodeCodeTheme(value.vscodeTheme) !== false && decodeCodeTheme(value.vscodeTheme) !== undefined
+      return (value.appearance === 'light' || value.appearance === 'dark')
+        && decodeCodeTheme(value.vscodeTheme) !== false && decodeCodeTheme(value.vscodeTheme) !== undefined
         ? value as HostConfigurationEvent : null;
     default:
       return null;

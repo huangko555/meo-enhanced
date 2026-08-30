@@ -286,6 +286,33 @@ async function main() {
       throw new Error(`Hovering the HTML source button did not reveal its content range: ${JSON.stringify(hoveredBlockRange)}`);
     }
 
+    const actionRailPoint = await page.evaluate(() => {
+      const block = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-block[data-meo-html-from]'))
+        .find((candidate) => {
+          const button = candidate.querySelector<HTMLElement>('.meo-md-html-source-toggle');
+          return Boolean(button && candidate.getBoundingClientRect().height > button.getBoundingClientRect().height + 24);
+        });
+      if (!block) throw new Error('Missing a tall HTML block action-rail fixture');
+      const button = block.querySelector<HTMLElement>('.meo-md-html-source-toggle')!;
+      const blockRect = block.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      return {
+        x: buttonRect.left + buttonRect.width / 2,
+        y: Math.min(blockRect.bottom - 2, buttonRect.bottom + 16)
+      };
+    });
+    await page.mouse.move(actionRailPoint.x, actionRailPoint.y);
+    await waitForFrames(page, 8);
+    const actionRailHover = await page.evaluate(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y);
+      const block = hit?.closest<HTMLElement>('.meo-md-html-block');
+      const button = block?.querySelector<HTMLElement>('.meo-md-html-source-toggle');
+      return { opacity: button ? getComputedStyle(button).opacity : '', hit: hit?.className ?? '' };
+    }, actionRailPoint);
+    if (actionRailHover.opacity !== '1') {
+      throw new Error(`HTML action rail below the edit button did not keep the button visible: ${JSON.stringify(actionRailHover)}`);
+    }
+
     const selectionPoints = await page.$eval('.meo-md-html-block[data-meo-html-from] .meo-md-html-link', (element) => {
       const text = element.firstChild;
       if (!text) return null;

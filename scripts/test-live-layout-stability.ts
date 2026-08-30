@@ -67,7 +67,10 @@ async function main(): Promise<void> {
     const tableWrapCounterexample = process.argv.find((argument) => (
       argument.startsWith('--table-wrap-counterexample=')
     ))?.split('=')[1] ?? null;
-    const tableWrapOnly = process.argv.includes('--table-wrap') || tableWrapCounterexample !== null;
+    const tableStableVisibleOnly = process.argv.includes('--table-stable-visible');
+    const tableWrapOnly = process.argv.includes('--table-wrap')
+      || tableStableVisibleOnly
+      || tableWrapCounterexample !== null;
     if (tableWrapOnly) {
       await page.evaluate(() => {
         (window as any).__editor = (window as any).LiveLayoutStabilityHarness.createEditor({
@@ -539,6 +542,70 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     if (tableWrapOnly) {
       await page.waitForSelector('.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea');
+      await page.evaluate(() => (window as any).__editor.scrollToLine(83, 'center'));
+      await waitForFrames(page, 6);
+      const stableInput = await page.$(
+        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea'
+      );
+      if (!stableInput) throw new Error('Could not locate the stable visible table input');
+      await stableInput.click();
+      await stableInput.press('End');
+      const stableBefore = await page.$eval(
+        '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+        (input: HTMLTextAreaElement) => {
+          const scroller = input.closest<HTMLElement>('.cm-scroller')!;
+          const cell = input.closest<HTMLTableCellElement>('td')!;
+          const viewport = scroller.getBoundingClientRect();
+          const rect = cell.getBoundingClientRect();
+          return {
+            scrollTop: scroller.scrollTop,
+            visible: rect.top >= viewport.top + 20 && rect.bottom <= viewport.bottom - 20,
+            value: input.value
+          };
+        }
+      );
+      if (!stableBefore.visible) throw new Error(`Stable table fixture was not comfortably visible: ${JSON.stringify(stableBefore)}`);
+      const stableFrames: number[] = [];
+      const stableFocus: Array<{ active: boolean; value: string }> = [];
+      let expectedStableValue = stableBefore.value;
+      for (const character of 'ABCDE') {
+        await page.keyboard.type(character);
+        expectedStableValue += character;
+        // Exercise the real manual-typing path: each character survives the
+        // 250ms table auto-commit, widget projection, and focus restoration.
+        await new Promise((resolve) => setTimeout(resolve, 320));
+        await waitForFrames(page, 3);
+        stableFrames.push(await page.$eval('.cm-scroller', (scroller) => scroller.scrollTop));
+        const currentFocus = await page.$eval(
+          '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
+          (input: HTMLTextAreaElement) => ({
+            active: document.activeElement === input,
+            value: input.value
+          })
+        );
+        stableFocus.push(currentFocus);
+        if (!currentFocus.active || currentFocus.value !== expectedStableValue) {
+          throw new Error(`Table auto-commit lost the active cell or subsequent input: ${JSON.stringify({
+            expectedStableValue,
+            stableFocus
+          })}`);
+        }
+      }
+      if (stableFrames.some((scrollTop) => Math.abs(scrollTop - stableBefore.scrollTop) > 1)) {
+        throw new Error(`Typing in a fully visible table cell moved the document viewport: ${JSON.stringify({
+          stableBefore, stableFrames
+        })}`);
+      }
+      if (tableStableVisibleOnly) {
+        console.log('stable visible table input passed');
+        return;
+      }
+      await page.evaluate(({ text }) => {
+        const editor = (window as any).__editor;
+        editor.setText(text);
+        editor.scrollToLine(81, 'top');
+      }, { text: tableSource });
+      await waitForFrames(page, 8);
     }
     if (!tableWrapOnly) {
       const tableBefore = await page.evaluate(() => ({
@@ -842,7 +909,8 @@ async function main(): Promise<void> {
       };
     });
     if (
-      hiddenToolbarHitTest.toolbarOpacity !== '0' ||
+      hiddenToolbarHitTest.toolbarVisibility !== 'hidden' ||
+      hiddenToolbarHitTest.toolbarPointerEvents !== 'none' ||
       hiddenToolbarHitTest.hitToolbarButton ||
       hiddenToolbarHitTest.cursor === 'pointer'
     ) {

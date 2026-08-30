@@ -20,6 +20,7 @@ import { getImagePresentationFactory } from '../editor/imagePresentation';
 import { getDetailsBlocks, toggleDetailsBlock } from './detailsBlocks';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
+import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
 export interface RenderableHtmlBlock {
   from: number;
@@ -246,9 +247,20 @@ function createHtmlModeButton(className: string, label: string, icon: typeof Cod
 
 class HtmlBlockWidget extends WidgetType {
   private imageWidgets: ImageWidget[] = [];
+  private heightObserver: ResizeObserver | null = null;
+  private measuredHeight = -1;
 
   constructor(readonly block: RenderableHtmlBlock) {
     super();
+  }
+
+  get estimatedHeight(): number {
+    return estimateBlockWidgetHeight({
+      kind: 'html-block',
+      source: this.block.source,
+      collapsed: this.block.detailsCollapsed === true,
+      measuredHeight: this.measuredHeight
+    });
   }
 
   eq(other: WidgetType): boolean {
@@ -265,6 +277,9 @@ class HtmlBlockWidget extends WidgetType {
     root.className = 'meo-md-html-block';
     root.dataset.meoHtmlFrom = String(this.block.from);
     root.dataset.meoHtmlTo = String(this.block.to);
+    root.dataset.meoRenderedBlockKind = 'html';
+    root.dataset.meoRenderedBlockStartLine = String(this.block.startLine);
+    root.dataset.meoRenderedBlockEndLine = String(this.block.endLine);
     const contentRoot = document.createElement('div');
     contentRoot.className = 'meo-md-html-content';
     const content = createSanitizedHtml(
@@ -305,6 +320,13 @@ class HtmlBlockWidget extends WidgetType {
       enterHtmlSource(view, this.block);
     });
     root.appendChild(button);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.heightObserver = new ResizeObserver(() => {
+        const height = root.getBoundingClientRect().height;
+        if (height > 0) this.measuredHeight = height;
+      });
+      this.heightObserver.observe(root);
+    }
     return root;
   }
 
@@ -313,6 +335,8 @@ class HtmlBlockWidget extends WidgetType {
   }
 
   destroy(): void {
+    this.heightObserver?.disconnect();
+    this.heightObserver = null;
     for (const widget of this.imageWidgets) widget.destroy();
     this.imageWidgets = [];
   }

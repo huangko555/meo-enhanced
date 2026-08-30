@@ -21,14 +21,17 @@ bun install --frozen-lockfile
 
 ## Develop and verify
 
-Use the narrowest test command that exercises the behavior you changed. The
-feature contracts in `package.json` include, for example:
+Use the tiered workflow in [docs/testing-workflow.md](docs/testing-workflow.md).
+For normal development, run the quick gate after a coherent change and add the
+targeted pack for the affected high-risk area:
 
 ```shell
-bun run test:table-command
-bun run test:image-presentation
-bun run test:mermaid-presentation
+bun run test:quick
+bun run test:targeted -- table
 ```
+
+The feature contracts in `package.json` remain available when one narrower
+contract is sufficient during the implementation loop.
 
 Before submitting a change, run the relevant feature contract and the baseline
 checks that match its risk. The pull-request and push workflow always runs:
@@ -44,15 +47,17 @@ bun run package:check
 `package:check` runs after the build and verifies the local VSIX file listing;
 it does not publish or upload an extension.
 
-Run the full suite for broad runtime changes, production ownership cutovers,
-and feature or project milestones:
+For broad runtime changes, production ownership cutovers, and feature or
+project milestones, intentionally start the guarded release workflow:
 
 ```shell
-bun run test
+bun run test:release -- --confirm-long-run
 ```
 
-Use `bun run test`, not `bun test`; the latter invokes Bun's built-in test
-discovery and is not this repository's test pipeline.
+It includes the full `bun run test` suite. Use `bun run test`, not `bun test`;
+the latter invokes Bun's built-in test discovery and is not this repository's
+test pipeline. Full-document stress is separately available through
+`bun run test:endurance` and should be scheduled deliberately.
 
 ### Full-suite expectation
 

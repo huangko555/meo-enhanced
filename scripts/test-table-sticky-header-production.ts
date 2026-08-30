@@ -343,7 +343,16 @@ async function main(): Promise<void> {
       const wrap = document.querySelector<HTMLElement>('.meo-md-html-table-wrap')!;
       transactions.push(await settle(() => {
         wrap.scrollLeft = 42; wrap.dispatchEvent(new Event('scroll'));
-      }, () => true, true));
+      }, () => {
+        const normal = Array.from(document.querySelectorAll<HTMLElement>(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) colgroup col'
+        )).map((column) => column.getBoundingClientRect().width);
+        const sticky = Array.from(document.querySelectorAll<HTMLElement>(
+          '.meo-md-html-table-sticky-table colgroup col'
+        )).map((column) => column.getBoundingClientRect().width);
+        return normal.length > 0 && normal.length === sticky.length
+          && normal.every((width, index) => Math.abs(width - sticky[index]) < 1);
+      }));
       const colWidths = (selector: string) => Array.from(document.querySelectorAll<HTMLElement>(selector))
         .map((col) => col.getBoundingClientRect().width);
       const domContract = {
@@ -355,6 +364,8 @@ async function main(): Promise<void> {
         wrapOverflow: getComputedStyle(wrap).overflowX,
         lineNumbers: Boolean(document.querySelector('.meo-md-html-table-line-numbers')),
         horizontalScroll: wrap.scrollLeft,
+        scrollWidth: wrap.scrollWidth,
+        clientWidth: wrap.clientWidth,
         firstColumnDelta: Math.abs(
           document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th')!.getBoundingClientRect().left -
           document.querySelector<HTMLElement>('.meo-md-html-table-sticky-table thead th')!.getBoundingClientRect().left
@@ -521,9 +532,13 @@ async function main(): Promise<void> {
     assert.deepEqual(result.domContract.stickyCols, result.domContract.normalCols);
     assert.deepEqual([result.domContract.normalHandles, result.domContract.stickyHandles], [2, 2]);
     assert.equal(result.domContract.interactive, 0);
-    assert.ok(result.domContract.horizontalScroll > 0);
+    assert.equal(result.domContract.horizontalScroll, 0);
+    assert.ok(
+      result.domContract.scrollWidth <= result.domContract.clientWidth + 1,
+      `a table whose readable minimums fit must not expose horizontal overflow: ${JSON.stringify(result.domContract)}`
+    );
     assert.ok(result.domContract.firstColumnDelta <= 1);
-    assert.match(result.domContract.wrapOverflow, /auto|scroll/);
+    assert.equal(result.domContract.wrapOverflow, 'clip');
     assert.equal(result.domContract.lineNumbers, true);
     assert.equal(result.hiddenAtTail, true, JSON.stringify(result.tailState));
     assert.equal(result.equalExternalCount, 1);

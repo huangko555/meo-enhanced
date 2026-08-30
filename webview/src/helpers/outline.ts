@@ -223,7 +223,7 @@ export function createOutlineController({
     return null;
   };
 
-  const highlightVisibleHeadings = () => {
+  const highlightVisibleHeadings = (followContent = true) => {
     for (const item of outlineContent.querySelectorAll('.outline-item.is-visible, .outline-item.is-visible-first')) {
       item.classList.remove('is-visible', 'is-visible-first');
     }
@@ -233,6 +233,13 @@ export function createOutlineController({
       if (!item) continue;
       item.classList.add('is-visible');
       if (!visibleItems.includes(item)) visibleItems.push(item);
+    }
+    if (visibleItems.length === 0) {
+      const fallbackItem = findVisibleItem(activeHeadingIndex);
+      if (fallbackItem) {
+        fallbackItem.classList.add('is-visible');
+        visibleItems.push(fallbackItem);
+      }
     }
     visibleItems[0]?.classList.add('is-visible-first');
     const visibleRows = visibleItems
@@ -249,8 +256,7 @@ export function createOutlineController({
       visibleRangeHighlight.style.height = `${Math.ceil(bottom - top)}px`;
       visibleRangeHighlight.hidden = false;
     }
-    const fallbackItem = findVisibleItem(activeHeadingIndex);
-    scrollItemsIntoView(visibleItems.length > 0 ? visibleItems : fallbackItem ? [fallbackItem] : []);
+    if (followContent) scrollItemsIntoView(visibleItems);
   };
 
   const updateActiveHeadings = () => {
@@ -360,7 +366,8 @@ export function createOutlineController({
     return itemNode;
   };
 
-  const renderTree = () => {
+  const renderTree = ({ followContent = true, preserveScroll = false } = {}) => {
+    const previousScrollTop = preserveScroll ? outlineContent.scrollTop : null;
     outlineContent.replaceChildren(visibleRangeHighlight);
     if (currentTreeRoots.length === 0) {
       const emptyMsg = document.createElement('div');
@@ -373,7 +380,8 @@ export function createOutlineController({
     tree.className = 'outline-tree';
     for (const rootNode of currentTreeRoots) tree.appendChild(renderNode(rootNode));
     outlineContent.appendChild(tree);
-    highlightVisibleHeadings();
+    highlightVisibleHeadings(followContent);
+    if (previousScrollTop !== null) outlineContent.scrollTop = previousScrollTop;
   };
 
   const refresh = () => {
@@ -475,14 +483,14 @@ export function createOutlineController({
     if (action === 'close') requestVisible(false);
     else if (action === 'expand-all') {
       collapsedKeys.clear();
-      renderTree();
+      renderTree({ followContent: false, preserveScroll: true });
     } else if (action === 'collapse-top2') {
       collapsedKeys = new Set(
         [...currentNodeByIndex.values()]
-          .filter((node) => node.depth >= 1 && node.children.length > 0)
+          .filter((node) => node.children.length > 0)
           .map((node) => node.key)
       );
-      renderTree();
+      renderTree({ followContent: false, preserveScroll: true });
     } else if (action === 'toggle-position') requestPosition(position === 'left' ? 'right' : 'left');
     else if (action === 'toggle-mode') setMode(mode === 'floating' ? 'fixed' : 'floating');
   });
@@ -495,7 +503,7 @@ export function createOutlineController({
       if (key) {
         if (collapsedKeys.has(key)) collapsedKeys.delete(key);
         else collapsedKeys.add(key);
-        renderTree();
+        renderTree({ followContent: false, preserveScroll: true });
       }
       return;
     }

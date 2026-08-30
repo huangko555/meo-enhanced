@@ -62,7 +62,9 @@ export function createMermaidDiagramPresentationRuntime(
     const remaining = (pendingByPresentation.get(presentationId) ?? 1) - 1;
     if (remaining > 0) pendingByPresentation.set(presentationId, remaining);
     else pendingByPresentation.delete(presentationId);
-    if (!disposed && input) dispatchInternal(input);
+    if (!disposed) {
+      dispatchInternal(input ?? { type: 'renderUnavailable', presentationId });
+    }
     notifyIdle();
   };
 

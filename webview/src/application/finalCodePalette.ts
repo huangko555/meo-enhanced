@@ -13,6 +13,10 @@ export type PreviewCodePalette = Readonly<{
   number: string;
   type: string;
   property: string;
+  operator: string;
+  punctuation: string;
+  function: string;
+  variable: string;
   link: string;
 }>;
 
@@ -130,6 +134,10 @@ export function resolveFinalCodePalette(
       number: resolveTokenColor(theme, ['constant.numeric'], foreground),
       type: resolveTokenColor(theme, ['entity.name.type', 'entity.name.class', 'support.type'], foreground),
       property: resolveTokenColor(theme, ['variable.other.property', 'entity.other.attribute-name'], foreground),
+      operator: sourceTokens.operator,
+      punctuation: sourceTokens.punctuation,
+      function: sourceTokens.functionName,
+      variable: sourceTokens.variableName,
       link: resolveTokenColor(theme, ['markup.underline.link', 'string.other.link'], foreground)
     })
   });

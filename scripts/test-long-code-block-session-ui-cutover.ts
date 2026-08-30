@@ -14,8 +14,6 @@ const trackedProductSources = [
   'src/protocol/editorCommands.ts',
   'src/protocol/hostEditorEvents.ts',
   'src/extension/panelSession.ts',
-  'webview/src/index.ts',
-  'webview/src/editor.ts'
 ] as const;
 
 for (const forbidden of [
@@ -32,21 +30,21 @@ for (const forbidden of [
 }
 
 const longCodeModule = read('webview/src/helpers/longCodeBlocks.ts');
-assert.doesNotMatch(longCodeModule, /\benabled\s*:/, 'session folding must always be active in Live mode');
 assert.doesNotMatch(longCodeModule, /setLongCodeBlockFoldingEnabledEffect/);
 assert.deepEqual(
   Array.from(longCodeModule.matchAll(/export\s+(?:const|function|class|type)\s+(\w+)/g), (match) => match[1]),
-  ['longCodeBlockSessionUiExtension'],
+  ['longCodeBlockEnabledFacet', 'longCodeBlockSessionUiExtension'],
   'CodeMirror effects, fields, records and DOM widgets must stay behind the session UI Interface'
 );
 const directConsumers = [
-  'webview/src/editor.ts',
   'webview/src/index.ts',
   'webview/src/sourceMode.ts',
   'webview/src/preview.ts'
 ].filter((file) => fs.existsSync(path.join(repoRoot, file)))
   .filter((file) => read(file).includes("helpers/longCodeBlocks"));
 assert.deepEqual(directConsumers, [], 'only the Live seam may install the Long Code Block Session UI');
+assert.match(read('webview/src/editor.ts'), /longCodeBlockEnabledFacet/, 'Editor may own the session-local menu preference');
+assert.match(read('webview/src/index.ts'), /longCodeBlockFoldingBtn/, 'More menu must expose the session-local folding switch');
 
 const publicBehaviorContract = read('scripts/test-long-code-blocks.ts');
 for (const internalName of ['manualCollapsed', 'temporaryTarget', 'longCodeBlockStateField']) {

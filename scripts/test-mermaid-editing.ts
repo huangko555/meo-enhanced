@@ -91,7 +91,7 @@ async function assertInitialInteractiveMathMeasurementStaysVisible(page: Page): 
   }
 }
 
-async function assertEmbeddedMermaidUsesButtonOnlyNavigation(page: Page): Promise<void> {
+async function assertEmbeddedMermaidSupportsPointerPanning(page: Page): Promise<void> {
   const wrapperSelector = '.meo-mermaid-block .meo-mermaid-svg-wrapper';
   await page.waitForFunction((selector) => {
     const wrapper = document.querySelector<HTMLElement>(selector);
@@ -124,12 +124,12 @@ async function assertEmbeddedMermaidUsesButtonOnlyNavigation(page: Page): Promis
   }));
   if (
     Math.abs(afterDrag.transform.scale - initial.transform.scale) > 0.001 ||
-    Math.abs(afterDrag.transform.x - initial.transform.x) > 1 ||
-    Math.abs(afterDrag.transform.y - initial.transform.y) > 1 ||
-    Math.abs(afterDrag.rect.x - initial.rect.x) > 1 ||
-    Math.abs(afterDrag.rect.y - initial.rect.y) > 1
+    Math.abs(afterDrag.transform.x - initial.transform.x - 48) > 2 ||
+    Math.abs(afterDrag.transform.y - initial.transform.y - 32) > 2 ||
+    Math.abs(afterDrag.rect.x - initial.rect.x - 48) > 2 ||
+    Math.abs(afterDrag.rect.y - initial.rect.y - 32) > 2
   ) {
-    throw new Error(`Embedded Mermaid drag changed its public transform: ${JSON.stringify({ initial, afterDrag })}`);
+    throw new Error(`Embedded Mermaid drag did not pan the diagram: ${JSON.stringify({ initial, afterDrag })}`);
   }
 
   await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Zoom in"]');
@@ -985,9 +985,15 @@ async function main() {
       preview: Boolean(document.querySelector('.meo-mermaid-block')),
       previewHeight: document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect().height ?? 0,
       editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
-      buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label')
+      buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label'),
+      sharedSplitIcon: document.querySelector('.meo-mermaid-mode-btn svg')?.innerHTML
+        === document.querySelector('.meo-latex-math-mode-btn svg')?.innerHTML
     }));
-    if (!defaultMode.preview || defaultMode.editing || defaultMode.buttonLabel !== 'Edit Mermaid in split view') {
+    if (
+      !defaultMode.preview || defaultMode.editing
+      || defaultMode.buttonLabel !== 'Edit Mermaid in split view'
+      || !defaultMode.sharedSplitIcon
+    ) {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
     }
     const customLightNodeColors = await page.evaluate(() => {
@@ -1013,7 +1019,7 @@ async function main() {
     if (hiddenToolbarState.mermaid !== '0' || hiddenToolbarState.latex !== '0') {
       throw new Error(`Block toolbars were visible before hover: ${JSON.stringify(hiddenToolbarState)}`);
     }
-    await assertEmbeddedMermaidUsesButtonOnlyNavigation(page);
+          await assertEmbeddedMermaidSupportsPointerPanning(page);
     await assertFullscreenNavigationIsSessionLocal(page);
     await assertFullscreenWheelKeepsPointerAnchored(page);
     await assertFullscreenPanStaysWithinDiagramBounds(page);
@@ -1330,18 +1336,18 @@ async function main() {
       splitMode.controlsLabel !== 'Mermaid block controls at line 1' ||
       splitMode.editorLabel !== 'Mermaid editor at line 1' ||
       splitMode.hasInternalVerticalScroll ||
-      splitMode.sourceStickyPosition !== 'sticky' ||
-      splitMode.stickyPosition !== 'sticky' ||
+      splitMode.sourceStickyPosition !== 'relative' ||
+      splitMode.stickyPosition !== 'relative' ||
       splitMode.nextLabel !== 'Show Mermaid code only'
     ) {
       throw new Error(`Unexpected split mode controls or scrolling: ${JSON.stringify(splitMode)}`);
     }
     if (
       Math.abs(splitMode.sourcePaneHeight - splitMode.sourceHeight) > 1 ||
-      Math.abs(splitMode.previewHeight - splitMode.previewFrameHeight) > 2 ||
-      Math.abs(splitMode.previewFrameHeight - splitMode.availablePreviewHeight) > 2
+      splitMode.previewHeight > splitMode.previewFrameHeight + 2 ||
+      splitMode.previewFrameHeight >= splitMode.availablePreviewHeight
     ) {
-      throw new Error(`Split preview viewport did not fill the available right pane: ${JSON.stringify({ defaultMode, splitMode })}`);
+      throw new Error(`Split preview retained the old floating viewport layout: ${JSON.stringify({ defaultMode, splitMode })}`);
     }
 
     const lightSplitTheme = await page.$eval(
@@ -1400,10 +1406,10 @@ async function main() {
       return { viewportTop, sourceTop, previewTop };
     });
     if (
-      Math.abs(codeTallerScroll.previewTop - (codeTallerScroll.viewportTop + 12)) > 3 ||
-      codeTallerScroll.sourceTop >= codeTallerScroll.viewportTop - 100
+      Math.abs(codeTallerScroll.previewTop - codeTallerScroll.sourceTop) > 3 ||
+      codeTallerScroll.previewTop >= codeTallerScroll.viewportTop - 100
     ) {
-      throw new Error(`Short preview did not stay visible while source scrolled: ${JSON.stringify(codeTallerScroll)}`);
+      throw new Error(`Fixed split panes did not scroll together: ${JSON.stringify(codeTallerScroll)}`);
     }
     await page.evaluate(() => {
       (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop = 0;
@@ -1579,7 +1585,7 @@ async function main() {
       shortSplitLayout.previewNaturalHeight <= shortSplitLayout.sourceHeight ||
       Math.abs(shortSplitLayout.blockHeight - shortSplitLayout.previewNaturalHeight) > 1 ||
       Math.abs(shortSplitLayout.sourcePaneHeight - shortSplitLayout.blockHeight) > 1 ||
-      shortSplitLayout.sourceStickyPosition !== 'sticky'
+      shortSplitLayout.sourceStickyPosition !== 'relative'
     ) {
       throw new Error(`Short Mermaid split mode did not preserve natural pane heights: ${JSON.stringify(shortSplitLayout)}`);
     }
@@ -1608,10 +1614,10 @@ async function main() {
       return { viewportTop, sourceTop, previewTop };
     });
     if (
-      Math.abs(previewTallerScroll.sourceTop - (previewTallerScroll.viewportTop + 12)) > 3 ||
+      Math.abs(previewTallerScroll.sourceTop - previewTallerScroll.previewTop) > 3 ||
       previewTallerScroll.previewTop >= previewTallerScroll.viewportTop - 100
     ) {
-      throw new Error(`Short source did not stay visible while preview scrolled: ${JSON.stringify(previewTallerScroll)}`);
+      throw new Error(`Fixed split panes did not scroll together: ${JSON.stringify(previewTallerScroll)}`);
     }
     await page.evaluate(() => {
       (window as any).__mermaidEditingEditor.view.scrollDOM.scrollTop = 0;
@@ -1953,9 +1959,9 @@ async function main() {
       !narrowLatexPreview.fits ||
       narrowLatexPreview.naturalWidth <= narrowLatexPreview.viewportWidth ||
       narrowLatexPreview.renderedWidth >= wideLatexPreview.renderedWidth - 1 ||
-      narrowLatexPreview.controls !== 0
+      wideLatexPreview.controls !== 4 || narrowLatexPreview.controls !== 4
     ) {
-      throw new Error(`LaTeX preview did not fit dynamically without controls: ${JSON.stringify({
+      throw new Error(`LaTeX preview did not fit dynamically with interactive controls: ${JSON.stringify({
         wideLatexPreview,
         narrowLatexPreview
       })}`);
@@ -1973,7 +1979,7 @@ async function main() {
       const canvasRect = canvas.getBoundingClientRect();
       return {
         controls: viewport.querySelectorAll('.meo-latex-math-zoom-controls button').length,
-        presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
+        presentation: `${canvas.style.fontSize}|${canvas.style.transform}`,
         canvasRect: canvas.getBoundingClientRect().toJSON(),
         scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop,
         fits: canvasRect.left >= viewportRect.left - 1 && canvasRect.right <= viewportRect.right + 1,
@@ -1983,7 +1989,7 @@ async function main() {
         }
       };
     });
-    if (splitInitial.controls !== 3 || !splitInitial.fits) {
+    if (splitInitial.controls !== 4 || !splitInitial.fits) {
       throw new Error(`LaTeX split preview did not expose a fitted interactive viewport: ${JSON.stringify(splitInitial)}`);
     }
 
@@ -1994,7 +2000,7 @@ async function main() {
       (element) => {
         const canvas = element as HTMLElement;
         return {
-          presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
+          presentation: `${canvas.style.fontSize}|${canvas.style.transform}`,
           canvasRect: canvas.getBoundingClientRect().toJSON(),
           scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop
         };
@@ -2034,19 +2040,19 @@ async function main() {
       (element) => {
         const canvas = element as HTMLElement;
         return {
-          presentation: `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`,
+          presentation: `${canvas.style.fontSize}|${canvas.style.transform}`,
           canvasRect: canvas.getBoundingClientRect().toJSON(),
           scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor > .cm-scroller')!.scrollTop
         };
       }
     );
     if (
-      afterDrag.presentation !== zoomedState.presentation ||
-      Math.abs(afterDrag.canvasRect.x - zoomedState.canvasRect.x) > 1 ||
-      Math.abs(afterDrag.canvasRect.y - zoomedState.canvasRect.y) > 1 ||
+      afterDrag.presentation === zoomedState.presentation ||
+      Math.abs(afterDrag.canvasRect.x - zoomedState.canvasRect.x) < 20 ||
+      Math.abs(afterDrag.canvasRect.y - zoomedState.canvasRect.y) < 12 ||
       Math.abs(afterDrag.scrollTop - zoomedState.scrollTop) > 1
     ) {
-      throw new Error(`Dragging the LaTeX split preview changed its public presentation or viewport: ${JSON.stringify({
+      throw new Error(`Dragging the LaTeX split preview did not pan its canvas without moving the document viewport: ${JSON.stringify({
         before: zoomedState,
         after: afterDrag
       })}`);
@@ -2058,21 +2064,37 @@ async function main() {
       '.meo-latex-math-viewport.is-interactive .meo-latex-math-canvas',
       (element) => {
         const canvas = element as HTMLElement;
-        return `${canvas.style.fontSize}|${canvas.style.left}|${canvas.style.top}`;
+        return `${canvas.style.fontSize}|${canvas.style.transform}`;
       }
     );
-    const [initialScale, initialLeft, initialTop] = splitInitial.presentation.split('|');
-    const [resetScale, resetLeft, resetTop] = resetPresentation.split('|');
+    const [initialScale] = splitInitial.presentation.split('|');
+    const [resetScale, resetTransform] = resetPresentation.split('|');
     if (
       Math.abs(Number.parseFloat(resetScale) - Number.parseFloat(initialScale)) > 0.001 ||
-      resetLeft !== initialLeft ||
-      resetTop !== initialTop
+      resetTransform !== 'translate(0px, 0px)'
     ) {
       throw new Error(`Reset did not restore the fitted LaTeX transform: ${JSON.stringify({
         initial: splitInitial.presentation,
         reset: resetPresentation
       })}`);
     }
+
+    await page.click('.meo-latex-math-zoom-btn[aria-label="Fullscreen"]');
+    await page.waitForSelector('.meo-latex-math-fullscreen');
+    const fullscreenMath = await page.evaluate(() => ({
+      formula: document.querySelector('.meo-latex-math-fullscreen .katex')?.textContent ?? '',
+      zoomControls: document.querySelectorAll(
+        '.meo-latex-math-fullscreen .meo-latex-math-zoom-controls button'
+      ).length,
+      exitControls: document.querySelectorAll(
+        '.meo-latex-math-fullscreen-exit-controls button'
+      ).length
+    }));
+    if (!fullscreenMath.formula || fullscreenMath.zoomControls !== 3 || fullscreenMath.exitControls !== 1) {
+      throw new Error(`LaTeX fullscreen did not expose the Mermaid-equivalent viewport controls: ${JSON.stringify(fullscreenMath)}`);
+    }
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.meo-latex-math-fullscreen'));
 
     const assertHistoryFocusForRenderedBlock = async ({
       text,
@@ -2125,7 +2147,7 @@ async function main() {
         const block = document.querySelector<HTMLElement>(blockSelector);
         const innerView = block ? (block as any)[property]?.innerView : null;
         return {
-          split: Boolean(block?.classList.contains('is-split')),
+          preview: block === null,
           head: innerView?.state.selection.main.head ?? null,
           focused: innerView?.hasFocus ?? false
         };
@@ -2137,12 +2159,14 @@ async function main() {
         const block = document.querySelector<HTMLElement>(blockSelector);
         const innerView = block ? (block as any)[property]?.innerView : null;
         return {
-          split: Boolean(block?.classList.contains('is-split')),
+          preview: block === null,
           head: innerView?.state.selection.main.head ?? null,
           focused: innerView?.hasFocus ?? false
         };
       }, { blockSelector: editingBlock, property: controllerProperty });
 
+      await page.click(modeButton);
+      await waitForFrames(page);
       await page.click(modeButton);
       await waitForFrames(page);
       await page.evaluate(({ blockSelector, property, offset }) => {
@@ -2178,8 +2202,8 @@ async function main() {
       }, { blockSelector: editingBlock, property: controllerProperty });
 
       if (
-        !previewUndo.split || previewUndo.head !== positions.before || !previewUndo.focused ||
-        !splitRedo.split || splitRedo.head !== positions.after || !splitRedo.focused ||
+        !previewUndo.preview || previewUndo.head !== null || previewUndo.focused ||
+        !splitRedo.preview || splitRedo.head !== null || splitRedo.focused ||
         !sourceUndo.source || sourceUndo.head !== positions.before || !sourceUndo.focused ||
         !sourceRedo.source || sourceRedo.head !== positions.after || !sourceRedo.focused
       ) {

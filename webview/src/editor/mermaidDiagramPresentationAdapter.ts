@@ -39,7 +39,8 @@ export function createMermaidDiagramPresentationEffectAdapter(
           rawSource: effect.source,
           normalizedSource: normalizeSource(effect.source),
           themeKey: effect.themeKey,
-          configKey: effect.configKey
+          configKey: effect.configKey,
+          priority: 'high' as const
         };
         const cached = resources.getCached(request);
         if (cached) {
@@ -59,6 +60,7 @@ export function createMermaidDiagramPresentationEffectAdapter(
         }
         return {
           completion: resources.render(request).then((result) => {
+            if (!result.ok && result.unavailable) return null;
             if (!('error' in result)) {
               return {
                 type: 'renderSucceeded' as const,

@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, Settings2, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, Settings, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -40,6 +40,7 @@ import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/edit
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { EditorAppearance } from '../../src/protocol/editorCommands';
 import type { InitMessage } from '../../src/protocol/readyInit';
+import type { UiLanguagePreference } from '../../src/foundation/uiLanguage';
 import { getUiStrings, type UiLanguage } from './application/uiLanguage';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
@@ -107,6 +108,8 @@ if (!root) {
 root.classList.add('editor-root');
 let activeUiLanguage: UiLanguage = 'en';
 let activeUiStrings = getUiStrings(activeUiLanguage);
+let activeUiLanguagePreference: UiLanguagePreference = 'auto';
+let automaticUiLanguage: UiLanguage = 'en';
 
 const existingToolbar = root.querySelector('.mode-toolbar');
 const toolbar = existingToolbar instanceof HTMLElement ? existingToolbar : document.createElement('div');
@@ -224,6 +227,20 @@ contentMaxWidthBtn.dataset.action = 'contentMaxWidth';
 contentMaxWidthBtn.title = activeUiStrings.constrainContentWidth;
 contentMaxWidthBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(contentMaxWidthBtn, PanelLeftRightDashed, activeUiStrings.constrainWidth);
+
+const sourceLineNumbersBtn = document.createElement('button');
+sourceLineNumbersBtn.type = 'button';
+sourceLineNumbersBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+sourceLineNumbersBtn.dataset.action = 'sourceLineNumbers';
+sourceLineNumbersBtn.setAttribute('role', 'menuitemcheckbox');
+appendMoreToolsOptionContent(sourceLineNumbersBtn, Hash, activeUiStrings.showLineNumbers);
+
+const longCodeBlockFoldingBtn = document.createElement('button');
+longCodeBlockFoldingBtn.type = 'button';
+longCodeBlockFoldingBtn.className = 'more-tools-option more-tools-toggle-option is-active';
+longCodeBlockFoldingBtn.dataset.action = 'longCodeBlockFolding';
+longCodeBlockFoldingBtn.setAttribute('role', 'menuitemcheckbox');
+appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, activeUiStrings.foldLongCodeBlocks);
 
 const gitChangesGutterBtn = document.createElement('button');
 gitChangesGutterBtn.type = 'button';
@@ -631,16 +648,20 @@ discardBtn.title = activeUiStrings.reloadDiskVersionDoubleClick;
 discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
 discardBtn.appendChild(createElement(StickyNoteOff, { width: 18, height: 18 }));
 
-const preserveEditorFocusOnDocumentAction = (event: PointerEvent) => {
-  if (event.button === 0 && editor?.hasFocus()) {
-    // Toolbar actions must not let the browser move focus and scroll the editor
-    // before the document/save synchronization starts.
+toolbar.addEventListener('pointerdown', (event) => {
+  const target = event.target;
+  if (
+    event.button === 0 &&
+    target instanceof Element &&
+    target.closest('button') &&
+    editor?.hasFocus()
+  ) {
+    // Toolbar commands operate on the current editor context. Retaining focus
+    // prevents native blur from committing embedded editors and changing layout
+    // before the command establishes its own viewport/document transaction.
     event.preventDefault();
   }
-};
-
-saveBtn.addEventListener('pointerdown', preserveEditorFocusOnDocumentAction);
-discardBtn.addEventListener('pointerdown', preserveEditorFocusOnDocumentAction);
+}, true);
 
 formatGroup.append(
   outlineLeftBtn,
@@ -719,11 +740,12 @@ previewFormatGroup.append(
 const moreToolsButton = document.createElement('button');
 moreToolsButton.type = 'button';
 moreToolsButton.className = 'format-button';
+moreToolsButton.dataset.action = 'settings';
 moreToolsButton.title = activeUiStrings.more;
 moreToolsButton.setAttribute('aria-label', activeUiStrings.moreTools);
 moreToolsButton.setAttribute('aria-haspopup', 'menu');
 moreToolsButton.setAttribute('aria-expanded', 'false');
-moreToolsButton.appendChild(createElement(Settings2, { width: 18, height: 18 }));
+moreToolsButton.appendChild(createElement(Settings, { width: 18, height: 18 }));
 
 const moreToolsPanel = document.createElement('div');
 moreToolsPanel.className = 'more-tools-panel';
@@ -739,6 +761,9 @@ releaseFixedBaselineSeparator.setAttribute('role', 'separator');
 const changesSeparator = document.createElement('div');
 changesSeparator.className = 'more-tools-separator';
 changesSeparator.setAttribute('role', 'separator');
+const displaySeparator = document.createElement('div');
+displaySeparator.className = 'more-tools-separator';
+displaySeparator.setAttribute('role', 'separator');
 const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
   ariaLabel: activeUiStrings.editorAppearance,
   className: 'editor-appearance-control',
@@ -762,7 +787,21 @@ const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
     }
   ]
 });
-editorAppearanceControl.setActive('dark');
+editorAppearanceControl.setActive('auto');
+
+const uiLanguageControl = createSegmentedControl<UiLanguagePreference>({
+  ariaLabel: activeUiStrings.interfaceLanguage,
+  className: 'ui-language-control',
+  buttonClassName: 'ui-language-button',
+  datasetKey: 'uiLanguage',
+  role: 'group',
+  options: [
+    { value: 'auto', label: 'Auto' },
+    { value: 'zh-CN', label: '简体中文' },
+    { value: 'en', label: 'English' }
+  ]
+});
+uiLanguageControl.setActive('auto');
 
 const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
@@ -799,6 +838,8 @@ const applyUiLanguage = (language: UiLanguage): void => {
   discardBtn.title = strings.reloadDiskVersionDoubleClick;
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
   contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
+  sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
+  longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
   releaseFixedBaselineBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.releaseFixedBaseline;
   diffBaselineButtons.forEach((button) => {
     const mode = button.dataset.baselineMode as typeof diffBaselineOptions[number]['mode'];
@@ -828,6 +869,9 @@ const applyUiLanguage = (language: UiLanguage): void => {
     light: strings.light,
     dark: strings.dark
   });
+  editorAppearanceLabel.textContent = strings.editorAppearance;
+  uiLanguageLabel.textContent = strings.interfaceLanguage;
+  uiLanguageControl.element.setAttribute('aria-label', strings.interfaceLanguage);
   findPanelController.setUiLanguage(language);
   outlineController.setUiLanguage(language);
   previewController.setUiLanguage(language);
@@ -836,7 +880,16 @@ const applyUiLanguage = (language: UiLanguage): void => {
 };
 const editorAppearanceRow = document.createElement('div');
 editorAppearanceRow.className = 'more-tools-appearance-row';
-editorAppearanceRow.append(editorAppearanceControl.element);
+const editorAppearanceLabel = document.createElement('span');
+editorAppearanceLabel.className = 'more-tools-control-label';
+editorAppearanceLabel.textContent = activeUiStrings.editorAppearance;
+editorAppearanceRow.append(editorAppearanceLabel, editorAppearanceControl.element);
+const uiLanguageRow = document.createElement('div');
+uiLanguageRow.className = 'more-tools-appearance-row';
+const uiLanguageLabel = document.createElement('span');
+uiLanguageLabel.className = 'more-tools-control-label';
+uiLanguageLabel.textContent = activeUiStrings.interfaceLanguage;
+uiLanguageRow.append(uiLanguageLabel, uiLanguageControl.element);
 moreToolsPanel.append(
   toolbarOverflowSection,
   releaseFixedBaselineBtn,
@@ -844,11 +897,15 @@ moreToolsPanel.append(
   ...diffBaselineButtons,
   changesSeparator,
   contentMaxWidthBtn,
-  editorAppearanceRow
+  sourceLineNumbersBtn,
+  longCodeBlockFoldingBtn,
+  displaySeparator,
+  editorAppearanceRow,
+  uiLanguageRow
 );
 
 const moreToolsWrapper = document.createElement('div');
-moreToolsWrapper.className = 'more-tools-wrapper preview-hidden-toolbar-control';
+moreToolsWrapper.className = 'more-tools-wrapper';
 moreToolsWrapper.append(moreToolsButton, moreToolsPanel);
 
 const rightToolsSeparator = document.createElement('div');
@@ -857,6 +914,17 @@ rightToolsSeparator.setAttribute('role', 'separator');
 
 const setMoreToolsVisible = (visible: boolean) => {
   moreToolsPanel.hidden = !visible;
+  moreToolsPanel.style.transform = '';
+  if (visible) {
+    const bounds = moreToolsPanel.getBoundingClientRect();
+    const viewportPadding = 8;
+    const shift = bounds.left < viewportPadding
+      ? viewportPadding - bounds.left
+      : bounds.right > window.innerWidth - viewportPadding
+        ? window.innerWidth - viewportPadding - bounds.right
+        : 0;
+    if (shift !== 0) moreToolsPanel.style.transform = `translateX(${shift}px)`;
+  }
   moreToolsButton.classList.toggle('is-active', visible);
   moreToolsButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
 };
@@ -873,10 +941,10 @@ document.addEventListener('pointerdown', (event) => {
 
 rightGroup.append(
   changesControls,
-  moreToolsWrapper,
   rightToolsSeparator,
   findToggleBtn,
-  outlineBtn
+  outlineBtn,
+  moreToolsWrapper
 );
 
 moreToolsPanel.addEventListener('click', (event) => {
@@ -1141,6 +1209,8 @@ const getActiveEditableMode = (): 'live' | 'source' => {
 };
 let pendingInitialText: string | null = null;
 let pendingSourceLineNumbers: InitMessage['sourceLineNumbers'] = 'on';
+let previousVisibleSourceLineNumbers: Exclude<InitMessage['sourceLineNumbers'], 'off'> = 'on';
+let longCodeBlockFoldingEnabled = true;
 let gitClient: any = null;
 let pendingEditorFocus = false;
 let pendingDiagnostics: any[] = [];
@@ -1161,6 +1231,18 @@ editorAppearanceControl.element.addEventListener('click', (event) => {
   if (appearance === 'auto' || appearance === 'light' || appearance === 'dark') {
     themeAdapter.setAppearance(appearance, { post: true });
   }
+});
+
+uiLanguageControl.element.addEventListener('click', (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest<HTMLButtonElement>('.ui-language-button[data-ui-language]')
+    : null;
+  const preference = button?.dataset.uiLanguage;
+  if (preference !== 'auto' && preference !== 'zh-CN' && preference !== 'en') return;
+  activeUiLanguagePreference = preference;
+  uiLanguageControl.setActive(preference);
+  applyUiLanguage(preference === 'auto' ? automaticUiLanguage : preference);
+  vscode.postMessage({ type: 'setUiLanguagePreference', language: preference });
 });
 
 const loadCreateEditorFactory = async (): Promise<CreateEditorFactory> => {
@@ -1622,6 +1704,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
       }
     }
   });
+  editor.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
   gitClient?.applyBaselineToEditor(editor);
   syncGitDiffLineHighlights();
@@ -1743,8 +1826,17 @@ editorModeRuntime = createEditorModeRuntime(
 );
 
 const handleInit = (message: InitMessage) => {
+  activeUiLanguagePreference = message.uiLanguagePreference;
+  automaticUiLanguage = message.automaticUiLanguage;
+  uiLanguageControl.setActive(activeUiLanguagePreference);
   applyUiLanguage(message.uiLanguage);
   pendingSourceLineNumbers = message.sourceLineNumbers;
+  if (message.sourceLineNumbers !== 'off') {
+    previousVisibleSourceLineNumbers = message.sourceLineNumbers;
+  }
+  sourceLineNumbersBtn.classList.toggle('is-active', message.sourceLineNumbers !== 'off');
+  sourceLineNumbersBtn.setAttribute('aria-checked', message.sourceLineNumbers !== 'off' ? 'true' : 'false');
+  longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   toolbar.classList.remove('meo-preload-toolbar');
   toolbar.removeAttribute('aria-hidden');
   editorWrapper.classList.remove('meo-preload-editor-shell');
@@ -1808,7 +1900,6 @@ const themeAdapter = createAppearanceWebviewAdapter({
     else action();
   },
   refreshEditorDecorations: () => editor?.refreshDecorations(),
-  refreshPreview: () => previewAdapter.refreshVisible(getCurrentEditorText()),
   syncPreviewAutoAppearance: () => previewController.syncAutoAppearance(),
   postEditorAppearance: (appearance) => {
     vscode.postMessage({ type: 'setEditorAppearance', appearance });
@@ -2096,19 +2187,6 @@ previewButton.addEventListener('click', () => {
   });
 });
 
-const preserveEditorFocusOnModePointerToggle = (event: PointerEvent) => {
-  const target = event.target;
-  if (!(target instanceof Element) || !target.closest('.mode-button')) {
-    return;
-  }
-  if (!editor || !editor.hasFocus()) {
-    return;
-  }
-  event.preventDefault();
-};
-
-modeGroup.addEventListener('pointerdown', preserveEditorFocusOnModePointerToggle);
-
 const handleFormatAction = (action: string) => {
   if (!editor) return;
   editor.insertFormat(action);
@@ -2249,12 +2327,22 @@ outlineBtn.addEventListener('click', () => showOutlineAt('right'));
 contentMaxWidthBtn.addEventListener('click', () => {
   setContentMaxWidthEnabled(!contentMaxWidthEnabled);
 });
-gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
-fixedBaselineBtn.addEventListener('pointerdown', (event) => {
-  if (event.button === 0 && editor?.hasFocus()) {
-    event.preventDefault();
-  }
+sourceLineNumbersBtn.addEventListener('click', () => {
+  const nextMode = pendingSourceLineNumbers === 'off' ? previousVisibleSourceLineNumbers : 'off';
+  if (nextMode !== 'off') previousVisibleSourceLineNumbers = nextMode;
+  pendingSourceLineNumbers = nextMode;
+  sourceLineNumbersBtn.classList.toggle('is-active', nextMode !== 'off');
+  sourceLineNumbersBtn.setAttribute('aria-checked', nextMode !== 'off' ? 'true' : 'false');
+  editor?.setSourceLineNumbers(nextMode);
+  vscode.postMessage({ type: 'setSourceLineNumbers', mode: nextMode });
 });
+longCodeBlockFoldingBtn.addEventListener('click', () => {
+  longCodeBlockFoldingEnabled = !longCodeBlockFoldingEnabled;
+  longCodeBlockFoldingBtn.classList.toggle('is-active', longCodeBlockFoldingEnabled);
+  longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
+  editor?.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
+});
+gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
 fixedBaselineBtn.addEventListener('click', () => {
   vscode.postMessage({ type: 'setFixedBaseline', enabled: !fixedBaselineActive });
 });

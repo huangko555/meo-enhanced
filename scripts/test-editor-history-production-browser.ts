@@ -183,6 +183,208 @@ async function assertFormulaToolbarHistoryHitability(page: any): Promise<void> {
   }
 }
 
+async function assertHistoryViewportPolicy(page: any): Promise<void> {
+  const targetLineNumber = 96;
+  const marker = ' HISTORY_VIEWPORT_EDIT';
+  const text = Array.from({ length: 180 }, (_, index) => `history viewport line ${index + 1}`).join('\n');
+  await page.evaluate((fixture) => {
+    const previous = (window as any).__historyProductionEditor;
+    previous?.destroy();
+    document.getElementById('app')!.replaceChildren();
+    (window as any).__historyProductionEditor = (window as any).MermaidEditingHarness.createEditor({
+      parent: document.getElementById('app')!,
+      text: fixture,
+      initialMode: 'source',
+      onApplyChanges() {}
+    });
+  }, text);
+  await waitForFrames(page, 10);
+
+  await page.evaluate(({ lineNumber, insert }) => {
+    const editor = (window as any).__historyProductionEditor;
+    const line = editor.view.state.doc.line(lineNumber);
+    editor.view.dispatch({
+      changes: { from: line.to, insert },
+      selection: { anchor: line.to + insert.length }
+    });
+    editor.scrollToLine(lineNumber, 'center');
+  }, { lineNumber: targetLineNumber, insert: marker });
+  await waitForFrames(page, 10);
+
+  const capture = () => page.evaluate((lineNumber) => {
+    const editor = (window as any).__historyProductionEditor;
+    const scroller = editor.view.scrollDOM as HTMLElement;
+    const line = editor.view.state.doc.line(lineNumber);
+    const coords = editor.view.coordsAtPos(line.from);
+    const viewport = scroller.getBoundingClientRect();
+    return {
+      bottomGap: coords ? viewport.bottom - coords.bottom : null,
+      contextMargin: Math.min(editor.view.defaultLineHeight * 2.5, viewport.height * 0.2),
+      scrollTop: scroller.scrollTop,
+      topGap: coords ? coords.top - viewport.top : null,
+      visible: Boolean(coords && coords.bottom > viewport.top && coords.top < viewport.bottom)
+    };
+  }, targetLineNumber);
+
+  const beforeVisibleUndo = await capture();
+  assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.undo()), true);
+  await waitForFrames(page, 12);
+  const afterVisibleUndo = await capture();
+  assert.equal(afterVisibleUndo.visible, true, 'visible Undo target must stay visible');
+  assert.ok(
+    Math.abs(afterVisibleUndo.scrollTop - beforeVisibleUndo.scrollTop) <= 2,
+    `visible Undo moved the viewport: ${JSON.stringify({ beforeVisibleUndo, afterVisibleUndo })}`
+  );
+
+  const beforeVisibleRedo = await capture();
+  assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.redo()), true);
+  await waitForFrames(page, 12);
+  const afterVisibleRedo = await capture();
+  assert.equal(afterVisibleRedo.visible, true, 'visible Redo target must stay visible');
+  assert.ok(
+    Math.abs(afterVisibleRedo.scrollTop - beforeVisibleRedo.scrollTop) <= 2,
+    `visible Redo moved the viewport: ${JSON.stringify({ beforeVisibleRedo, afterVisibleRedo })}`
+  );
+
+  const moveAway = async () => {
+    await page.evaluate(() => {
+      const editor = (window as any).__historyProductionEditor;
+      editor.scrollToLine(4, 'center');
+    });
+    await waitForFrames(page, 10);
+    assert.equal((await capture()).visible, false, 'history target fixture did not move offscreen');
+  };
+  const replayWithFrameTrace = (direction: 'undo' | 'redo') => page.evaluate(async (replayDirection) => {
+    const editor = (window as any).__historyProductionEditor;
+    const trace = [editor.view.scrollDOM.scrollTop as number];
+    const frames = new Promise<void>((resolve) => {
+      let remaining = 24;
+      const sample = () => {
+        trace.push(editor.view.scrollDOM.scrollTop);
+        remaining -= 1;
+        if (remaining > 0) requestAnimationFrame(sample);
+        else resolve();
+      };
+      requestAnimationFrame(sample);
+    });
+    const applied = await editor[replayDirection]();
+    await frames;
+    return { applied, trace };
+  }, direction);
+  const assertSingleVisibleReveal = (trace: number[], label: string) => {
+    const significant = trace.reduce<number[]>((values, value) => {
+      if (values.length === 0 || Math.abs(value - values.at(-1)!) > 2) values.push(value);
+      return values;
+    }, []);
+    assert.ok(
+      significant.length <= 2,
+      `${label} used more than one visible viewport movement: ${JSON.stringify({ significant, trace })}`
+    );
+  };
+  await moveAway();
+  const undoReplay = await replayWithFrameTrace('undo');
+  assert.equal(undoReplay.applied, true);
+  assertSingleVisibleReveal(undoReplay.trace, 'offscreen Undo');
+  await waitForFrames(page, 12);
+  const offscreenUndo = await capture();
+  assert.equal(offscreenUndo.visible, true, 'offscreen Undo target was not revealed');
+  assert.ok(
+    offscreenUndo.bottomGap !== null && offscreenUndo.bottomGap >= offscreenUndo.contextMargin - 2,
+    `offscreen Undo target lacked visual context: ${JSON.stringify(offscreenUndo)}`
+  );
+
+  await moveAway();
+  const redoReplay = await replayWithFrameTrace('redo');
+  assert.equal(redoReplay.applied, true);
+  assertSingleVisibleReveal(redoReplay.trace, 'offscreen Redo');
+  await waitForFrames(page, 12);
+  const offscreenRedo = await capture();
+  assert.equal(offscreenRedo.visible, true, 'offscreen Redo target was not revealed');
+  assert.ok(
+    offscreenRedo.bottomGap !== null && offscreenRedo.bottomGap >= offscreenRedo.contextMargin - 2,
+    `offscreen Redo target lacked visual context: ${JSON.stringify(offscreenRedo)}`
+  );
+}
+
+async function assertRenderedHistoryViewportPolicy(page: any): Promise<void> {
+  const text = [
+    ...Array.from({ length: 72 }, (_, index) => `rendered viewport before ${index + 1}`),
+    '```mermaid',
+    'graph TD',
+    'A --> B',
+    '```',
+    ...Array.from({ length: 72 }, (_, index) => `rendered viewport after ${index + 1}`)
+  ].join('\n');
+  await page.evaluate((fixture) => {
+    const previous = (window as any).__historyProductionEditor;
+    previous?.destroy();
+    document.getElementById('app')!.replaceChildren();
+    (window as any).__historyProductionEditor = (window as any).MermaidEditingHarness.createEditor({
+      parent: document.getElementById('app')!,
+      text: fixture,
+      initialMode: 'live',
+      onApplyChanges() {}
+    });
+  }, text);
+  await waitForFrames(page, 12);
+  await page.evaluate(() => (window as any).__historyProductionEditor.scrollToLine(73, 'center'));
+  await waitForFrames(page, 10);
+  await page.click('.meo-mermaid-mode-btn');
+  await waitForFrames(page, 10);
+  await page.click('.meo-mermaid-source-editor .cm-content');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('End');
+  await page.keyboard.up('Control');
+  await page.keyboard.type('\nB --> C');
+  await waitForFrames(page, 10);
+
+  const capture = () => page.evaluate(() => {
+    const editor = (window as any).__historyProductionEditor;
+    const scroller = editor.view.scrollDOM as HTMLElement;
+    const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
+    const rect = block?.getBoundingClientRect();
+    const viewport = scroller.getBoundingClientRect();
+    return {
+      scrollTop: scroller.scrollTop,
+      visible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom)
+    };
+  });
+  const beforeVisibleUndo = await capture();
+  assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.undo()), true);
+  await waitForFrames(page, 14);
+  const afterVisibleUndo = await capture();
+  assert.equal(afterVisibleUndo.visible, true, 'visible Mermaid Undo target must stay visible');
+  assert.ok(
+    Math.abs(afterVisibleUndo.scrollTop - beforeVisibleUndo.scrollTop) <= 2,
+    `visible Mermaid Undo moved the viewport: ${JSON.stringify({ beforeVisibleUndo, afterVisibleUndo })}`
+  );
+
+  const beforeVisibleRedo = await capture();
+  assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.redo()), true);
+  await waitForFrames(page, 14);
+  const afterVisibleRedo = await capture();
+  assert.equal(afterVisibleRedo.visible, true, 'visible Mermaid Redo target must stay visible');
+  assert.ok(
+    Math.abs(afterVisibleRedo.scrollTop - beforeVisibleRedo.scrollTop) <= 2,
+    `visible Mermaid Redo moved the viewport: ${JSON.stringify({ beforeVisibleRedo, afterVisibleRedo })}`
+  );
+
+  const moveAway = async () => {
+    await page.evaluate(() => (window as any).__historyProductionEditor.scrollToLine(3, 'center'));
+    await waitForFrames(page, 10);
+    assert.equal((await capture()).visible, false, 'Mermaid history target fixture did not move offscreen');
+  };
+  await moveAway();
+  assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.undo()), true);
+  await waitForFrames(page, 14);
+  assert.equal((await capture()).visible, true, 'offscreen Mermaid Undo target was not revealed');
+
+  await moveAway();
+  assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.redo()), true);
+  await waitForFrames(page, 14);
+  assert.equal((await capture()).visible, true, 'offscreen Mermaid Redo target was not revealed');
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-editing-entry.ts')],
@@ -219,6 +421,14 @@ async function main(): Promise<void> {
       });
     });
     await waitForFrames(page);
+
+    if (process.argv.includes('--viewport-policy-only')) {
+      await assertHistoryViewportPolicy(page);
+      await assertRenderedHistoryViewportPolicy(page);
+      await page.evaluate(() => (window as any).__historyProductionEditor.destroy());
+      console.log('Editor History viewport policy checks passed');
+      return;
+    }
 
     const publicReplay = await page.evaluate(async () => {
       const editor = (window as any).__historyProductionEditor;
@@ -320,6 +530,9 @@ async function main(): Promise<void> {
       undoApplied: false
     }, 'a disk reload must not leave discarded local text reachable by normal undo');
 
+    await assertHistoryViewportPolicy(page);
+    await assertRenderedHistoryViewportPolicy(page);
+
     const renderedHistoryEditorReady = await page.evaluate(async () => {
       const previous = (window as any).__historyProductionEditor;
       previous.destroy();
@@ -389,6 +602,8 @@ async function main(): Promise<void> {
     const splitRedo = await readBlock();
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
+    await page.click('.meo-mermaid-mode-btn');
+    await waitForFrames(page);
     await page.click(`${sourceContentSelector} .cm-line:last-child`);
     await page.keyboard.press('End');
     await page.keyboard.down('Control');
@@ -411,8 +626,8 @@ async function main(): Promise<void> {
     };
     assert.deepEqual(renderedHistoryPresentation, {
       positions: { before: 16, after: 24 },
-      previewUndo: { split: true, head: 16, focused: true },
-      splitRedo: { split: true, head: 24, focused: true },
+      previewUndo: { split: false, head: null, focused: false },
+      splitRedo: { split: false, head: null, focused: false },
       sourceUndo: { source: true, head: 16, focused: true },
       sourceRedo: { source: true, head: 24, focused: true }
     });

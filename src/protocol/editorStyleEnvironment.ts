@@ -22,6 +22,10 @@ export type EditorStyleEnvironment = {
     number: string;
     type: string;
     property: string;
+    operator?: string;
+    punctuation?: string;
+    function?: string;
+    variable?: string;
     link: string;
   }>>>;
 };
@@ -82,6 +86,8 @@ export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnviron
       if (!isRecord(palette)
         || ['foreground', 'comment', 'keyword', 'string', 'number', 'type', 'property', 'link']
           .some((key) => typeof palette[key] !== 'string')) return null;
+      if (['operator', 'punctuation', 'function', 'variable']
+        .some((key) => palette[key] !== undefined && typeof palette[key] !== 'string')) return null;
     }
   }
   return { ...value, previewFontFamily } as EditorStyleEnvironment;

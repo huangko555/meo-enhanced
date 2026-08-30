@@ -17,6 +17,7 @@ export type TableColumnWidthProjectionRequest = {
   readonly defaultWidthWasCapped: boolean;
   readonly availableWidth: number;
   readonly preserveWidthIntent: boolean;
+  readonly maximumTrackedWidth?: number;
 } & TableColumnWidthPolicyState;
 
 export type TableColumnWidthResult = {
@@ -32,6 +33,36 @@ export type TableColumnWidthPolicy = {
 
 function total(widths: readonly number[]): number {
   return widths.reduce((sum, width) => sum + width, 0);
+}
+
+function compressColumns(
+  widths: number[],
+  minimumWidths: readonly number[],
+  from: number,
+  to: number,
+  requestedCompression: number
+): number {
+  const indexes = Array.from({ length: Math.max(0, to - from) }, (_, offset) => from + offset);
+  const capacity = indexes.reduce((sum, index) => (
+    sum + Math.max(0, widths[index] - minimumWidths[index])
+  ), 0);
+  const compression = Math.min(Math.max(0, requestedCompression), capacity);
+  if (compression <= 0 || indexes.length === 0) return 0;
+  const targetTotal = indexes.reduce((sum, index) => sum + widths[index], 0) - compression;
+  let low = 0;
+  let high = 1;
+  for (let iteration = 0; iteration < 32; iteration += 1) {
+    const scale = (low + high) / 2;
+    const scaledTotal = indexes.reduce((sum, index) => (
+      sum + Math.max(minimumWidths[index], widths[index] * scale)
+    ), 0);
+    if (scaledTotal > targetTotal) high = scale;
+    else low = scale;
+  }
+  for (const index of indexes) {
+    widths[index] = Math.max(minimumWidths[index], widths[index] * low);
+  }
+  return compression;
 }
 
 function requirePolicyState(request: {
@@ -80,25 +111,16 @@ function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
   const widths = [...baseWidths];
   widths[request.column] = baseColumnWidth + delta;
 
+  const continuedLeftCompression = request.requestedDelta < minimumDelta
+    ? minimumDelta - request.requestedDelta
+    : 0;
+  if (continuedLeftCompression > 0 && request.column > 0) {
+    compressColumns(widths, request.minimumWidths, 0, request.column, continuedLeftCompression);
+  }
+
   const compression = infeasibleMaximum ? 0 : Math.max(0, delta - availableTotalGrowth);
   if (compression > 0 && rightWidths.length) {
-    const targetRightTotal = total(rightWidths) - compression;
-    let low = 0;
-    let high = 1;
-    for (let iteration = 0; iteration < 32; iteration += 1) {
-      const scale = (low + high) / 2;
-      const scaledTotal = rightWidths.reduce((sum, width, index) => (
-        sum + Math.max(rightMinimumWidths[index], width * scale)
-      ), 0);
-      if (scaledTotal > targetRightTotal) high = scale;
-      else low = scale;
-    }
-    for (let index = 0; index < rightWidths.length; index += 1) {
-      widths[request.column + index + 1] = Math.max(
-        rightMinimumWidths[index],
-        rightWidths[index] * low
-      );
-    }
+    compressColumns(widths, request.minimumWidths, request.column + 1, widths.length, compression);
   }
 
   const totalWidth = total(widths);
@@ -107,12 +129,13 @@ function resize(request: TableColumnResizeRequest): TableColumnWidthResult {
   const enteredAvailableWidth = activeWidthDelta > 1
     && reachedAvailableWidth
     && startTotalWidth <= maximumTotalWidth + 1;
-  const nextTracksAvailableWidth = activeWidthDelta < -1
+  const remainsConstrained = reachedAvailableWidth && (request.elastic || infeasibleMaximum);
+  const nextTracksAvailableWidth = activeWidthDelta < -1 && !remainsConstrained
     ? false
-    : request.tracksAvailableWidth || enteredAvailableWidth;
-  const nextElastic = activeWidthDelta < -1
+    : request.tracksAvailableWidth || enteredAvailableWidth || remainsConstrained;
+  const nextElastic = activeWidthDelta < -1 && !remainsConstrained
     ? false
-    : request.elastic || (activeWidthDelta > 1 && reachedAvailableWidth);
+    : request.elastic || infeasibleMaximum || (activeWidthDelta > 1 && reachedAvailableWidth);
   return {
     widths,
     totalWidth,
@@ -140,36 +163,54 @@ function project(request: TableColumnWidthProjectionRequest): TableColumnWidthRe
       ...policyState(request.elastic, request.tracksAvailableWidth)
     };
   }
-  const requestedTotalWidth = total(request.widths);
-  const availableWidth = Math.max(0, request.availableWidth);
-  const elasticLimit = request.defaultWidthWasCapped || request.tracksAvailableWidth
-    ? availableWidth
-    : Math.max(requestedTotalWidth, request.initialTotalWidth);
-  const targetTotalWidth = Math.min(
-    availableWidth || requestedTotalWidth,
-    request.elastic ? elasticLimit : requestedTotalWidth
-  );
+  const requestedWidths = request.widths.map((width, index) => (
+    Math.max(width, request.minimumWidths[index])
+  ));
+  const requestedTotalWidth = total(requestedWidths);
   const minimumTotalWidth = total(request.minimumWidths);
+  const availableWidth = Math.max(0, request.availableWidth);
+  const preferredTotalWidth = Math.max(0, request.maximumTrackedWidth
+    ?? Math.max(requestedTotalWidth, request.initialTotalWidth));
+  const fixedWidthReachedContainer = !request.elastic
+    && availableWidth > 0
+    && minimumTotalWidth <= availableWidth + 0.5
+    && requestedTotalWidth > availableWidth + 0.5;
+  const responsive = request.elastic || fixedWidthReachedContainer;
+  const targetTotalWidth = responsive
+    ? Math.min(availableWidth || preferredTotalWidth, preferredTotalWidth)
+    : requestedTotalWidth;
   const constrainedTargetWidth = Math.max(targetTotalWidth, minimumTotalWidth);
-  const elasticities = request.widths.map((width, index) => (
-    Math.max(0, width - request.minimumWidths[index])
-  ));
-  const totalElasticity = total(elasticities);
-  const distributableWidth = constrainedTargetWidth - minimumTotalWidth;
-  const fallbackWeightTotal = total(request.widths);
-  const widths = request.minimumWidths.map((minimumWidth, index) => (
-    minimumWidth + distributableWidth * (totalElasticity > 0
-      ? elasticities[index] / totalElasticity
-      : fallbackWeightTotal > 0
-        ? request.widths[index] / fallbackWeightTotal
-        : 1 / request.widths.length)
-  ));
+  const widths = [...requestedWidths];
+  if (requestedTotalWidth > constrainedTargetWidth) {
+    compressColumns(
+      widths,
+      request.minimumWidths,
+      0,
+      widths.length,
+      requestedTotalWidth - constrainedTargetWidth
+    );
+  } else if (requestedTotalWidth < constrainedTargetWidth) {
+    const scale = requestedTotalWidth > 0 ? constrainedTargetWidth / requestedTotalWidth : 0;
+    for (let index = 0; index < widths.length; index += 1) {
+      widths[index] = requestedTotalWidth > 0
+        ? widths[index] * scale
+        : constrainedTargetWidth / Math.max(1, widths.length);
+    }
+  }
   const totalWidth = total(widths);
+  const restoredPreferredWidth = request.tracksAvailableWidth
+    && availableWidth >= preferredTotalWidth - 0.5
+    && totalWidth >= preferredTotalWidth - 0.5;
+  const nextState = restoredPreferredWidth
+    ? policyState(false, false)
+    : fixedWidthReachedContainer
+      ? policyState(true, true)
+      : policyState(request.elastic, request.tracksAvailableWidth);
   return {
     widths,
     totalWidth,
     reachedAvailableWidth: availableWidth > 0 && totalWidth >= availableWidth - 1,
-    ...policyState(request.elastic, request.tracksAvailableWidth)
+    ...nextState
   };
 }
 

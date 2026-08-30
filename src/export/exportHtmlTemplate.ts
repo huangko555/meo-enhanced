@@ -643,7 +643,18 @@ function buildRuntimeScript(hasMermaid: boolean): string {
         }
         const normalizedSource = normalizeMermaidSource(source);
         const renderId = 'meo-export-mermaid-' + (++index);
-        const result = await mermaidApi.render(renderId, normalizedSource);
+        const renderHost = document.createElement('div');
+        renderHost.setAttribute('aria-hidden', 'true');
+        renderHost.style.cssText = 'position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none;';
+        document.body.appendChild(renderHost);
+        let result;
+        try {
+          result = await mermaidApi.render(renderId, normalizedSource, renderHost);
+        } finally {
+          renderHost.remove();
+          const leakedRuntimeNode = document.getElementById('d' + renderId);
+          if (leakedRuntimeNode) leakedRuntimeNode.remove();
+        }
         const svg = typeof result === 'string' ? result : (result && result.svg) || '';
         if (!svg) {
           throw new Error('Empty Mermaid SVG output');

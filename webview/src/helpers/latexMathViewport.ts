@@ -1,4 +1,4 @@
-import { createElement, RotateCcw, ZoomIn, ZoomOut } from 'lucide';
+import { createElement, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
 export type LatexMathViewportController = {
@@ -8,6 +8,7 @@ export type LatexMathViewportController = {
 type LatexMathBlockViewportOptions = {
   interactive?: boolean;
   uiLanguage?: UiLanguage;
+  allowFullscreen?: boolean;
 };
 
 type LatexMathInlineViewportOptions = {
@@ -32,6 +33,7 @@ const AXIS_EPSILON = 0.000001;
 type LatexMathPresentationSnapshot = {
   fontSize: string;
   zoom: string;
+  transform: string;
   height: string;
 };
 
@@ -118,6 +120,7 @@ export function attachLatexMathViewport(
     : { kind: 'block', interactive: options.interactive ?? false };
   const interactive = layout.kind === 'block' && layout.interactive;
   const uiLanguage = 'uiLanguage' in options ? options.uiLanguage ?? 'en' : 'en';
+  const allowFullscreen = 'layout' in options ? false : options.allowFullscreen ?? true;
   const strings = getUiStrings(uiLanguage);
   const ownerDocument = root.ownerDocument;
   const ownerWindow = ownerDocument.defaultView ?? window;
@@ -128,8 +131,15 @@ export function attachLatexMathViewport(
   let userZoom = 1;
   let renderedScale = 1;
   let naturalWidth = 0;
+  let panX = 0;
+  let panY = 0;
   let measureFrame = 0;
   let destroyed = false;
+  let pointerId: number | null = null;
+  let lastPointerX = 0;
+  let lastPointerY = 0;
+  let fullscreenCleanup: (() => void) | null = null;
+  let interactionCleanup = () => undefined;
 
   let resizeObserver: ResizeObserver | null = null;
   let observedMeasurementRoot: HTMLElement | null = null;
@@ -167,6 +177,7 @@ export function attachLatexMathViewport(
   const capturePresentation = (): LatexMathPresentationSnapshot => ({
     fontSize: canvas?.style.fontSize ?? '',
     zoom: canvas?.style.zoom ?? '',
+    transform: canvas?.style.transform ?? '',
     height: root.style.height
   });
 
@@ -174,6 +185,7 @@ export function attachLatexMathViewport(
     if (canvas) {
       canvas.style.fontSize = snapshot.fontSize;
       canvas.style.zoom = snapshot.zoom;
+      canvas.style.transform = snapshot.transform;
     }
     root.style.height = snapshot.height;
   };
@@ -230,6 +242,10 @@ export function attachLatexMathViewport(
       naturalWidth = candidateNaturalWidth;
       fitScale = candidateFitScale;
       renderedScale = candidateRenderedScale;
+      // Reading surfaces only fit the formula; they never pan it. Leaving an
+      // identity transform there creates a second, misleading layout state and
+      // can promote the formula to a composited layer for no visual benefit.
+      canvas.style.transform = interactive ? `translate(${panX}px, ${panY}px)` : '';
       return true;
     } catch {
       restorePresentation(entryPresentation);
@@ -244,6 +260,8 @@ export function attachLatexMathViewport(
 
   const reset = () => {
     userZoom = 1;
+    panX = 0;
+    panY = 0;
     applyTransform();
   };
 
@@ -368,7 +386,98 @@ export function attachLatexMathViewport(
       }),
       createControlButton(ownerDocument, RotateCcw, strings.resetZoom, reset)
     );
+    if (allowFullscreen) {
+      controls.append(createControlButton(ownerDocument, Maximize2, strings.fullscreen, () => {
+        if (!canvas || fullscreenCleanup) return;
+        const scroller = root.closest<HTMLElement>('.cm-scroller');
+        const savedScrollTop = scroller?.scrollTop ?? null;
+        const savedFocus = ownerDocument.activeElement instanceof HTMLElement
+          ? ownerDocument.activeElement
+          : null;
+        const overlay = ownerDocument.createElement('div');
+        overlay.className = 'meo-latex-math-fullscreen-scrim';
+        const fullscreen = ownerDocument.createElement('div');
+        fullscreen.className = 'meo-latex-math-fullscreen meo-md-math meo-md-math-display meo-md-math-fenced-display';
+        fullscreen.innerHTML = canvas.innerHTML;
+        overlay.appendChild(fullscreen);
+        ownerDocument.body.appendChild(overlay);
+
+        const fullscreenViewport = attachLatexMathViewport(fullscreen, {
+          interactive: true,
+          uiLanguage,
+          allowFullscreen: false
+        });
+        const exitControls = ownerDocument.createElement('div');
+        exitControls.className = 'meo-visual-controls meo-latex-math-fullscreen-exit-controls';
+        const closeButton = createControlButton(ownerDocument, X, strings.exitFullscreen, () => {
+          fullscreenCleanup?.();
+        });
+        exitControls.append(closeButton);
+        fullscreen.append(exitControls);
+
+        const close = () => {
+          if (!fullscreenCleanup) return;
+          fullscreenCleanup = null;
+          ownerDocument.removeEventListener('keydown', onKeydown, true);
+          fullscreenViewport.destroy();
+          overlay.remove();
+          ownerWindow.requestAnimationFrame(() => {
+            if (savedScrollTop !== null && scroller?.isConnected) scroller.scrollTop = savedScrollTop;
+            if (savedFocus?.isConnected) savedFocus.focus({ preventScroll: true });
+          });
+        };
+        const onKeydown = (event: KeyboardEvent) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        };
+        fullscreenCleanup = close;
+        ownerDocument.addEventListener('keydown', onKeydown, true);
+      }));
+    }
     root.appendChild(controls);
+
+    const finishPan = (event: PointerEvent) => {
+      if (pointerId !== event.pointerId) return;
+      if (root.hasPointerCapture?.(event.pointerId)) root.releasePointerCapture(event.pointerId);
+      pointerId = null;
+      root.classList.remove('is-dragging');
+    };
+    const beginPan = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (event.button !== 0 || target?.closest('.meo-visual-controls')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pointerId = event.pointerId;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+      root.classList.add('is-dragging');
+      root.setPointerCapture?.(event.pointerId);
+    };
+    const pan = (event: PointerEvent) => {
+      if (pointerId !== event.pointerId) return;
+      panX += event.clientX - lastPointerX;
+      panY += event.clientY - lastPointerY;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+      applyTransform();
+    };
+    root.addEventListener('pointerdown', beginPan);
+    root.addEventListener('pointermove', pan);
+    root.addEventListener('pointerup', finishPan);
+    root.addEventListener('pointercancel', finishPan);
+    interactionCleanup = () => {
+      if (pointerId !== null && root.hasPointerCapture?.(pointerId)) {
+        root.releasePointerCapture(pointerId);
+      }
+      pointerId = null;
+      root.classList.remove('is-dragging');
+      root.removeEventListener('pointerdown', beginPan);
+      root.removeEventListener('pointermove', pan);
+      root.removeEventListener('pointerup', finishPan);
+      root.removeEventListener('pointercancel', finishPan);
+    };
   }
 
   scheduleMeasure();
@@ -378,6 +487,9 @@ export function attachLatexMathViewport(
   return {
     destroy() {
       destroyed = true;
+      fullscreenCleanup?.();
+      fullscreenCleanup = null;
+      interactionCleanup();
       if (measureFrame !== 0) {
         ownerWindow.cancelAnimationFrame(measureFrame);
       }

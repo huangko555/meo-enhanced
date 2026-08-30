@@ -229,7 +229,8 @@ await assert.rejects(completedCacheRoot.runExclusive(async () => undefined), /en
 assert.throws(() => completedCacheRoot.replaceForExternalDocument(), /ended/);
 assert.deepEqual(await completedCacheLeaf.render(completedCacheRequest), {
   ok: false,
-  error: 'Mermaid render leaf consumer is released'
+  error: 'Mermaid render leaf consumer is released',
+  unavailable: true
 });
 completedCachePool.dispose();
 
@@ -376,7 +377,8 @@ await assert.rejects(
 const capacityRequest = request('retry-after-capacity');
 assert.deepEqual(await capacityLeaf.render(capacityRequest), {
   ok: false,
-  error: 'Mermaid render queue capacity exceeded'
+  error: 'Mermaid render queue capacity exceeded',
+  unavailable: true
 });
 capacityGate.resolve();
 await Promise.all([capacityActive, capacityQueued]);
@@ -602,7 +604,11 @@ const activeRender = disposalLeaf.render(request('never'));
 const queuedExclusive = disposalConsumer.runExclusive(async () => undefined);
 disposalPool.dispose();
 disposalPool.dispose();
-assert.deepEqual(await activeRender, { ok: false, error: 'Mermaid render Pool is disposed' });
+assert.deepEqual(await activeRender, {
+  ok: false,
+  error: 'Mermaid render Pool is disposed',
+  unavailable: true
+});
 await assert.rejects(queuedExclusive, /disposed/);
 disposalLeaf.release();
 disposalConsumer.end();

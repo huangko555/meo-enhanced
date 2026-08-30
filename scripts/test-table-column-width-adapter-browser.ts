@@ -99,6 +99,170 @@ async function main(): Promise<void> {
     const initialFirst = await widths('first');
     const initialSecond = await widths('second');
 
+    const startupWidthCap = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.append(host);
+      const runtime = window.TableColumnWidthAdapterCandidate!.create(host, 'startup-cap');
+      const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+      root.style.width = '500px';
+      const table = document.createElement('table');
+      table.style.width = '300px';
+      table.dataset.tableColumnWidth = 'startup-cap';
+      table.dataset.tableFrom = '0';
+      table.dataset.tableTo = '11';
+      const colgroup = document.createElement('colgroup');
+      const head = document.createElement('thead');
+      const row = document.createElement('tr');
+      for (let index = 0; index < 2; index += 1) {
+        const column = document.createElement('col');
+        column.style.width = '150px';
+        colgroup.append(column);
+        const cell = document.createElement('th');
+        const handle = document.createElement('span');
+        handle.dataset.tableResizeColumn = String(index);
+        cell.append(handle);
+        row.append(cell);
+      }
+      head.append(row);
+      table.append(colgroup, head);
+      root.append(table);
+      runtime.adapter.acquire();
+      const frames = async (count = 4) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      await frames();
+      const read = () => Array.from(table.querySelectorAll<HTMLTableColElement>('col'))
+        .map((column) => Number.parseFloat(column.style.width));
+      const dispatch = (type: string, clientX: number, buttons: number) => {
+        const target = type === 'pointerdown'
+          ? table.querySelector<HTMLElement>('[data-table-resize-column="1"]')!
+          : window;
+        target.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, cancelable: true, button: type === 'pointerdown' ? 0 : -1,
+          buttons, pointerId: 811, pointerType: 'mouse', clientX
+        }));
+      };
+      dispatch('pointerdown', 100, 1);
+      dispatch('pointermove', 200, 1);
+      dispatch('pointerup', 200, 0);
+      await frames();
+      const manuallyExpanded = read();
+      root.style.width = '250px';
+      await frames(8);
+      const constrained = read();
+      const constrainedOverflow = {
+        className: root.classList.contains('is-table-overflowing'),
+        clientWidth: root.clientWidth,
+        scrollWidth: root.scrollWidth
+      };
+      root.style.width = '500px';
+      await frames(8);
+      const restored = read();
+      runtime.destroy();
+      host.remove();
+      return { manuallyExpanded, constrained, constrainedOverflow, restored };
+    });
+    assert.ok(startupWidthCap.manuallyExpanded.reduce((sum, width) => sum + width, 0) > 390);
+    assert.ok(startupWidthCap.constrained.reduce((sum, width) => sum + width, 0) < 251);
+    assert.equal(
+      startupWidthCap.constrainedOverflow.className,
+      false,
+      `a feasible table must never enter horizontal-scroll mode because of projection residue: ${JSON.stringify(startupWidthCap)}`
+    );
+    assert.ok(startupWidthCap.constrainedOverflow.scrollWidth <= startupWidthCap.constrainedOverflow.clientWidth + 1);
+    assert.ok(
+      Math.abs(startupWidthCap.restored.reduce((sum, width) => sum + width, 0) - 300) < 2,
+      `elastic regrowth must stop at the startup default width, not the larger manual width: ${JSON.stringify(startupWidthCap)}`
+    );
+    const normalizedWidths = (widths: readonly number[]) => {
+      const total = widths.reduce((sum, width) => sum + width, 0);
+      return widths.map((width) => width / total);
+    };
+    const manuallyExpandedRatio = normalizedWidths(startupWidthCap.manuallyExpanded);
+    const restoredRatio = normalizedWidths(startupWidthCap.restored);
+    assert.ok(
+      restoredRatio.every((ratio, index) => Math.abs(ratio - manuallyExpandedRatio[index]) < 0.01),
+      `elastic total-width changes must preserve the latest manually adjusted column proportions: ${JSON.stringify(startupWidthCap)}`
+    );
+
+    const lateMountedNarrowBaseline = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      const style = document.createElement('style');
+      style.textContent = '[data-table-column-width="late-mounted"] { width: 100%; }';
+      host.append(style);
+      document.body.append(host);
+      const runtime = window.TableColumnWidthAdapterCandidate!.create(host, 'late-mounted');
+      const root = host.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+      root.style.width = '300px';
+      const table = document.createElement('table');
+      table.dataset.tableColumnWidth = 'late-mounted';
+      table.dataset.tableFrom = '0';
+      table.dataset.tableTo = '12';
+      const colgroup = document.createElement('colgroup');
+      const head = document.createElement('thead');
+      const row = document.createElement('tr');
+      for (let index = 0; index < 2; index += 1) {
+        colgroup.append(document.createElement('col'));
+        const cell = document.createElement('th');
+        const handle = document.createElement('span');
+        handle.dataset.tableResizeColumn = String(index);
+        cell.append(handle);
+        row.append(cell);
+      }
+      head.append(row);
+      table.append(colgroup, head);
+      root.append(table);
+      runtime.adapter.acquire();
+      const frames = async (count = 4) => {
+        for (let index = 0; index < count; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      };
+      const read = () => Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+        .map((cell) => cell.getBoundingClientRect().width);
+      await frames(6);
+      const firstMounted = read();
+      root.style.width = '500px';
+      await frames(8);
+      const naturallyExpanded = read();
+      const dispatch = (type: string, clientX: number, buttons: number) => {
+        const target = type === 'pointerdown'
+          ? table.querySelector<HTMLElement>('[data-table-resize-column="0"]')!
+          : window;
+        target.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, cancelable: true, button: type === 'pointerdown' ? 0 : -1,
+          buttons, pointerId: 812, pointerType: 'mouse', clientX
+        }));
+      };
+      dispatch('pointerdown', 100, 1);
+      dispatch('pointermove', 124, 1);
+      dispatch('pointerup', 124, 0);
+      await frames(6);
+      const manuallyAdjusted = read();
+      root.style.width = '250px';
+      await frames(8);
+      const constrained = read();
+      root.style.width = '500px';
+      await frames(8);
+      const restored = read();
+      runtime.destroy();
+      host.remove();
+      return { firstMounted, naturallyExpanded, manuallyAdjusted, constrained, restored };
+    });
+    const lateMountedTotal = (widths: readonly number[]) => widths.reduce((sum, width) => sum + width, 0);
+    assert.ok(lateMountedTotal(lateMountedNarrowBaseline.firstMounted) < 301);
+    assert.ok(lateMountedTotal(lateMountedNarrowBaseline.naturallyExpanded) > 499);
+    assert.ok(lateMountedTotal(lateMountedNarrowBaseline.constrained) < 251);
+    assert.ok(
+      Math.abs(
+        lateMountedTotal(lateMountedNarrowBaseline.restored)
+          - lateMountedTotal(lateMountedNarrowBaseline.naturallyExpanded)
+      ) < 2,
+      `a table first mounted in a narrow virtualized viewport must restore its widest natural pre-intent width: ${JSON.stringify(lateMountedNarrowBaseline)}`
+    );
+
     const infeasibleTransaction = await page.evaluate(async () => {
       const host = document.createElement('div');
       document.body.append(host);
@@ -162,6 +326,7 @@ async function main(): Promise<void> {
       const cancelled = drag(2, 8, 'pointercancel');
       const narrowed = drag(2, -12);
       const noChange = drag(2, 0);
+      const overflowingAtInfeasibleWidth = root.classList.contains('is-table-overflowing');
       const expandedProjection = new Promise<void>((resolve) => {
         table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
       });
@@ -170,7 +335,10 @@ async function main(): Promise<void> {
       const expanded = readWidths();
       runtime.destroy();
       host.remove();
-      return { grown, narrowed, noChange, cancelled, expanded };
+      return {
+        grown, narrowed, noChange, cancelled, expanded,
+        overflowingAtInfeasibleWidth
+      };
     });
     assert.deepEqual(infeasibleTransaction.grown.preview, [180, 100, 74]);
     assert.deepEqual(
@@ -186,10 +354,15 @@ async function main(): Promise<void> {
     assert.deepEqual(infeasibleTransaction.narrowed.preview, [180, 100, 70]);
     assert.deepEqual(infeasibleTransaction.narrowed.committed, [180, 100, 70]);
     assert.deepEqual(infeasibleTransaction.noChange.committed, [180, 100, 70]);
+    assert.equal(
+      infeasibleTransaction.overflowingAtInfeasibleWidth,
+      true,
+      'only infeasible readable minimums may enable horizontal scrolling'
+    );
     assert.deepEqual(
       infeasibleTransaction.expanded,
-      [180, 100, 70],
-      'an active shrink exits elastic behavior, so later container growth cannot expand or reverse it'
+      [180, 100, 50],
+      'an infeasible table must remain elastic and restore its startup default widths'
     );
 
     const currentnessMatrix = await page.evaluate(() => {
@@ -549,8 +722,12 @@ async function main(): Promise<void> {
       assert.deepEqual(result.afterWrongTerminal, result.preview, 'a wrong pointer terminal must be effect-free');
       assert.deepEqual(result.afterObserver, result.preview, 'observer work consumed during drag must preserve the preview');
       assert.deepEqual(result.atTerminal, result.preview, 'every terminal must first commit the complete preview snapshot');
-      assert.ok(result.reconciled.reduce((sum, width) => sum + width, 0)
-        > result.preview.reduce((sum, width) => sum + width, 0) + 100);
+      const previewTotal = result.preview.reduce((sum, width) => sum + width, 0);
+      const reconciledTotal = result.reconciled.reduce((sum, width) => sum + width, 0);
+      assert.ok(
+        Math.abs(reconciledTotal - 300) < 2,
+        `container tracking must return to the immutable startup total: ${JSON.stringify({ previewTotal, ...result })}`
+      );
       assert.deepEqual(result.afterLateTerminal, result.reconciled, 'late terminal and move events must be effect-free');
       assert.equal(result.releases, 1, 'pointer capture must be released exactly once');
       assert.equal(result.resizing, false, 'active drag presentation must be cleaned exactly once');
@@ -563,8 +740,7 @@ async function main(): Promise<void> {
     );
     assert.deepEqual(currentnessMatrix.subPixel.reconciled, currentnessMatrix.subPixel.preview);
     for (const result of [currentnessMatrix.exactPixel, currentnessMatrix.overPixel]) {
-      assert.ok(result.reconciled.reduce((sum, width) => sum + width, 0)
-        > result.preview.reduce((sum, width) => sum + width, 0));
+      assert.ok(Math.abs(result.reconciled.reduce((sum, width) => sum + width, 0) - 300) < 2);
     }
     assert.deepEqual(currentnessMatrix.currentMinimums.atTerminal, currentnessMatrix.currentMinimums.preview);
     assert.ok(currentnessMatrix.currentMinimums.reconciled[0] >= 140);
@@ -581,8 +757,8 @@ async function main(): Promise<void> {
       currentnessMatrix.noMoveTolerance.map((result) => Math.round(
         result.reconciled.reduce((sum, width) => sum + width, 0)
       )),
-      [300, 301, 302],
-      'no-move terminal currentness must retain the existing <1/=1/>1 tolerance'
+      [300, 300, 300],
+      'container growth must not redefine the immutable startup total'
     );
 
     await drag(page, handle, 90);
@@ -688,7 +864,10 @@ async function main(): Promise<void> {
     assert.equal(failedTableGeneration.afterFailure.projected, false);
     assert.equal(failedTableGeneration.afterRecovery.projected, true);
     assert.equal(failedTableGeneration.afterRecovery.current, true);
-    assert.ok(failedTableGeneration.afterRecovery.widths.every(Number.isFinite));
+    assert.ok(
+      failedTableGeneration.afterRecovery.widths.every(Number.isFinite),
+      JSON.stringify(failedTableGeneration)
+    );
 
     const replacementSettlement = await page.evaluate(async () => {
       const runtime = (window as any).__widthCandidate;
@@ -874,6 +1053,22 @@ async function main(): Promise<void> {
     await waitForFrames(page, 8);
     const afterResize = await widths('first');
     assert.ok(afterResize.reduce((sum, width) => sum + width, 0) < beforeResize.reduce((sum, width) => sum + width, 0));
+    await page.evaluate(() => {
+      const root = document.querySelector<HTMLElement>('.table-column-width-candidate-root')!;
+      root.style.width = '360px';
+    });
+    await waitForFrames(page, 8);
+    const afterContainerRegrowth = await widths('first');
+    const beforeResizeTotal = beforeResize.reduce((sum, width) => sum + width, 0);
+    const afterContainerRegrowthTotal = afterContainerRegrowth.reduce((sum, width) => sum + width, 0);
+    assert.ok(
+      afterContainerRegrowth.every((width, index) => (
+        Math.abs(width / afterContainerRegrowthTotal - beforeResize[index] / beforeResizeTotal) < 0.01
+      )),
+      `container-constrained table must grow back to its startup total while preserving the latest manual proportions: ${JSON.stringify({
+        beforeResize, afterResize, afterContainerRegrowth
+      })}`
+    );
 
     const disposePoint = await page.$eval(handle, (element: Element) => {
       const rect = element.getBoundingClientRect();

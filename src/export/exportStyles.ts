@@ -35,10 +35,10 @@ function buildReadingStyles(
   const fonts = theme.typography;
   const editorFontFamily = sanitizeCssFont(environment.editorFontFamily ?? '');
   const editorFontWeight = sanitizeFontWeight(environment.editorFontWeight, 'normal');
-  const darkBackgroundColor =
-    sanitizeCssColor(environment.editorBackgroundColor ?? '') ||
-    sanitizeCssColor(theme.backgroundColor) ||
-    colors.base03;
+  const capturedEditorBackground = sanitizeCssColor(environment.editorBackgroundColor ?? '');
+  const darkBackgroundColor = isDarkCssColor(capturedEditorBackground) === true
+    ? capturedEditorBackground
+    : sanitizeCssColor(theme.backgroundColor) || colors.base03;
   const editorBackgroundColor = appearance === 'light' ? '#ffffff' : darkBackgroundColor;
   const previewForegroundColor = appearance === 'light' ? '#1f2328' : '#d8dee9';
   const previewMutedColor = appearance === 'light' ? '#59636e' : '#9aa4af';
@@ -118,6 +118,10 @@ function buildReadingStyles(
   --meo-code-number: ${codeColor('number')};
   --meo-code-type: ${codeColor('type')};
   --meo-code-property: ${codeColor('property')};
+  --meo-code-operator: ${codeColor('operator')};
+  --meo-code-punctuation: ${codeColor('punctuation')};
+  --meo-code-function: ${codeColor('function')};
+  --meo-code-variable: ${codeColor('variable')};
   --meo-code-link: ${codeColor('link')};
   --meo-muted: ${readingMutedColor};
   --meo-border: ${panelBorderColor};
@@ -129,7 +133,6 @@ function buildReadingStyles(
   --meo-heading: ${readingForegroundColor};
   --meo-link: ${readingForegroundColor};
   --meo-accent-2: ${readingForegroundColor};
-  --meo-strong: ${readingForegroundColor};
   --meo-number: ${readingForegroundColor};
   --meo-quote: ${readingMutedColor};
   --meo-font-body: ${liveFont};
@@ -332,12 +335,13 @@ body[data-meo-export-target='pdf'] hr {
 }
 
 .meo-export-frontmatter-key {
+  color: var(--meo-code-property);
   font-weight: 500;
 }
 
 .meo-export-frontmatter-value {
   min-width: 0;
-  color: var(--meo-fg);
+  color: var(--meo-code-string);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -357,8 +361,8 @@ body[data-meo-export-target='pdf'] hr {
   min-height: 1.35em;
   padding: 0 6px;
   border-radius: 999px;
+  color: var(--meo-code-string);
   background: var(--meo-border);
-  color: var(--meo-fg);
   font-size: 0.92em;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -545,7 +549,7 @@ sup.footnote-ref {
   color: var(--meo-muted);
 }
 
-strong { color: var(--meo-strong); font-weight: 700; }
+strong { color: inherit; font-weight: 700; }
 em { font-style: italic; }
 mark {
   color: inherit;
@@ -574,7 +578,7 @@ th code {
   padding: 0.08em 0.6em;
   border-radius: 0.35em;
   background: var(--meo-code-bg);
-  color: var(--meo-strong);
+  color: var(--meo-fg);
 }
 
 kbd {
@@ -998,11 +1002,15 @@ th:empty::before {
 /* highlight.js token colors */
 .hljs { color: var(--meo-code-fg); background: transparent; }
 .hljs-comment, .hljs-quote { color: var(--meo-code-comment); font-style: italic; }
-.hljs-keyword, .hljs-selector-tag, .hljs-title.function_ { color: var(--meo-code-keyword); }
+.hljs-keyword, .hljs-selector-tag, .hljs-meta { color: var(--meo-code-keyword); }
 .hljs-string, .hljs-regexp { color: var(--meo-code-string); }
 .hljs-number, .hljs-literal, .hljs-symbol { color: var(--meo-code-number); }
-.hljs-type, .hljs-class, .hljs-built_in, .hljs-function { color: var(--meo-code-type); }
+.hljs-type, .hljs-class, .hljs-built_in, .hljs-title.class_, .hljs-name { color: var(--meo-code-type); }
+.hljs-title.function_, .hljs-function { color: var(--meo-code-function); }
 .hljs-attr, .hljs-attribute, .hljs-property { color: var(--meo-code-property); }
+.hljs-variable, .hljs-params { color: var(--meo-code-variable); }
+.hljs-operator { color: var(--meo-code-operator); }
+.hljs-punctuation { color: var(--meo-code-punctuation); }
 .hljs-link { color: var(--meo-code-link); text-decoration: underline; }
 
 @media (max-width: 700px) {
@@ -1088,6 +1096,23 @@ function sanitizeCssColor(value: string): string {
     return '';
   }
   return trimmed.replace(styleValueInjectionPattern, ' ');
+}
+
+function isDarkCssColor(value: string): boolean | null {
+  const hex = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(value);
+  let channels: number[] | null = null;
+  if (hex) {
+    const raw = hex[1].length === 3
+      ? [...hex[1]].map((channel) => `${channel}${channel}`).join('')
+      : hex[1];
+    channels = [0, 2, 4].map((offset) => Number.parseInt(raw.slice(offset, offset + 2), 16));
+  } else {
+    const rgb = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(value);
+    if (rgb) channels = rgb.slice(1, 4).map(Number);
+  }
+  if (!channels || channels.some((channel) => !Number.isFinite(channel))) return null;
+  const [red, green, blue] = channels.map((channel) => channel / 255);
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5;
 }
 
 function clampLineHeight(value: number): number {

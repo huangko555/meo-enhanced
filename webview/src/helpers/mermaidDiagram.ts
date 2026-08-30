@@ -11,6 +11,7 @@ import type {
   MermaidDiagramPresentationHandle
 } from '../editor/mermaidDiagramPresentation';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
+import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
 declare global {
   interface Window {
@@ -23,9 +24,9 @@ type MermaidRuntimeConfig = MermaidConfig & {
   forceLegacyMathML?: boolean;
 };
 
-interface MermaidRuntime {
+export interface MermaidRuntime {
   initialize(config: MermaidRuntimeConfig): void;
-  render(id: string, text: string): Promise<{ svg: string }>;
+  render(id: string, text: string, container?: Element): Promise<{ svg: string } | string>;
 }
 
 type MermaidSvgBox = {
@@ -385,8 +386,30 @@ export async function initializeMermaidEditorRuntime(
 export async function renderMermaidRuntime(renderId: string, source: string): Promise<string> {
   await document.fonts?.ready;
   const runtime = await loadMermaidRuntime();
-  const result = await runtime.render(renderId, source);
-  return result.svg;
+  return renderMermaidSvgInDocument(runtime, renderId, source, document);
+}
+
+export async function renderMermaidSvgInDocument(
+  runtime: MermaidRuntime,
+  renderId: string,
+  source: string,
+  ownerDocument: Document
+): Promise<string> {
+  // Mermaid executes in the Webview realm, so its temporary container must
+  // belong to that realm even when the resulting SVG targets a Preview iframe.
+  const renderDocument = document;
+  const renderHost = renderDocument.createElement('div');
+  renderHost.setAttribute('aria-hidden', 'true');
+  renderHost.style.cssText = 'position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none;';
+  renderDocument.body.appendChild(renderHost);
+  try {
+    const result = await runtime.render(renderId, source, renderHost);
+    return typeof result === 'string' ? result : result.svg;
+  } finally {
+    renderHost.remove();
+    renderDocument.getElementById(`d${renderId}`)?.remove();
+    if (ownerDocument !== renderDocument) ownerDocument.getElementById(`d${renderId}`)?.remove();
+  }
 }
 
 export async function restoreMermaidEditorTheme(): Promise<void> {
@@ -411,7 +434,7 @@ function currentMermaidContentWidth(element?: HTMLElement): number {
   const ownContent = element?.closest<HTMLElement>('.cm-content');
   if (ownContent && ownContent.clientWidth > 0) return ownContent.clientWidth;
   return Array.from(
-    document.querySelectorAll<HTMLElement>('.editor-host > .cm-editor .cm-content')
+    document.querySelectorAll<HTMLElement>('.editor-host > .cm-editor .cm-content, .cm-editor .cm-content')
   ).find((content) => content.clientWidth > 0)?.clientWidth ?? 0;
 }
 
@@ -519,10 +542,13 @@ export class MermaidDiagramWidget extends WidgetType {
   cachePreviewHeight: boolean;
   previewResizeObserver: ResizeObserver | null;
   measuredHeight: number;
+  initialHeightSeed: number;
   indentColumns: number;
   presentationFactory: MermaidDiagramPresentationConsumer;
   presentationHandle: MermaidDiagramPresentationHandle | null;
+  unsubscribeThemeRefresh: () => void;
   uiLanguage: UiLanguage;
+  embeddedInteractionCleanup: () => void;
 
   constructor(
     diagramText: string,
@@ -547,6 +573,8 @@ export class MermaidDiagramWidget extends WidgetType {
     this.themeSignature = getMermaidEditorPresentationIdentity().themeKey;
     this.presentationFactory = options.presentationFactory;
     this.presentationHandle = null;
+    this.unsubscribeThemeRefresh = () => undefined;
+    this.embeddedInteractionCleanup = () => undefined;
     this.uiLanguage = options.uiLanguage ?? 'en';
     this.cachePreviewHeight = options.cachePreviewHeight ?? true;
     this.indentColumns = options.indentColumns ?? 0;
@@ -557,10 +585,17 @@ export class MermaidDiagramWidget extends WidgetType {
     this.measuredHeight = this.presentationFactory.getHeight(
       mermaidEstimatedHeightKey(JSON.stringify(request), contentWidth)
     ) ?? estimateCachedMermaidHeight(cached && 'svg' in cached ? cached.svg : undefined, contentWidth);
+    this.initialHeightSeed = this.measuredHeight;
   }
 
   get estimatedHeight(): number {
-    return this.measuredHeight;
+    return estimateBlockWidgetHeight({
+      kind: 'mermaid-preview',
+      source: this.diagramText,
+      displayMath: this.isDisplayMath,
+      measuredHeight: this.measuredHeight,
+      contentWidth: currentMermaidContentWidth()
+    });
   }
 
   eq(other: WidgetType): boolean {
@@ -571,15 +606,17 @@ export class MermaidDiagramWidget extends WidgetType {
       other.endLine === this.endLine &&
       other.indentColumns === this.indentColumns &&
       other.uiLanguage === this.uiLanguage &&
-      other.themeSignature === this.themeSignature
+      other.themeSignature === this.themeSignature &&
+      Math.abs(other.initialHeightSeed - this.initialHeightSeed) < 1
     );
   }
 
   toDOM(view?: EditorView) {
     const container = document.createElement('div');
     container.className = 'meo-mermaid-block';
-    if (this.measuredHeight > 0) {
-      container.style.minHeight = `${this.measuredHeight}px`;
+    const initialHeight = this.estimatedHeight;
+    if (initialHeight > 0) {
+      container.style.minHeight = `${initialHeight}px`;
     }
     container.addEventListener('pointerdown', (event: PointerEvent) => {
       if (event.button === 0) {
@@ -653,6 +690,7 @@ export class MermaidDiagramWidget extends WidgetType {
       },
       clearPresentation: () => {
         this.exitFullscreen('external');
+        this.embeddedInteractionCleanup();
         container.style.removeProperty('min-height');
         container.replaceChildren();
       },
@@ -678,6 +716,17 @@ export class MermaidDiagramWidget extends WidgetType {
     });
     const identity = getMermaidEditorPresentationIdentity();
     this.presentationHandle.present(this.diagramText, identity.themeKey, identity.configKey);
+    this.unsubscribeThemeRefresh();
+    this.unsubscribeThemeRefresh = this.presentationFactory.subscribeThemeRefresh(() => {
+      if (!container.isConnected || !this.presentationHandle) return;
+      const refreshedIdentity = getMermaidEditorPresentationIdentity();
+      this.themeSignature = refreshedIdentity.themeKey;
+      this.presentationHandle.present(
+        this.diagramText,
+        refreshedIdentity.themeKey,
+        refreshedIdentity.configKey
+      );
+    });
 
     return container;
   }
@@ -695,7 +744,58 @@ export class MermaidDiagramWidget extends WidgetType {
 
     const controls = this.createZoomControls(svgWrapper);
     container.appendChild(controls);
+    this.attachEmbeddedInteractions(container, svgWrapper);
+  }
 
+  attachEmbeddedInteractions(container: HTMLElement, svgWrapper: HTMLElement): void {
+    this.embeddedInteractionCleanup();
+    let pointerId: number | null = null;
+    let lastX = 0;
+    let lastY = 0;
+
+    const finish = (event: PointerEvent) => {
+      if (pointerId !== event.pointerId) return;
+      if (container.hasPointerCapture(event.pointerId)) {
+        container.releasePointerCapture(event.pointerId);
+      }
+      pointerId = null;
+      container.classList.remove('meo-mermaid-dragging');
+    };
+    const down = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (event.button !== 0 || target?.closest('.meo-mermaid-zoom-controls')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pointerId = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      container.classList.add('meo-mermaid-dragging');
+      container.setPointerCapture(event.pointerId);
+    };
+    const move = (event: PointerEvent) => {
+      if (pointerId !== event.pointerId) return;
+      this.panX += event.clientX - lastX;
+      this.panY += event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      this.applyTransform(svgWrapper);
+    };
+    container.addEventListener('pointerdown', down);
+    container.addEventListener('pointermove', move);
+    container.addEventListener('pointerup', finish);
+    container.addEventListener('pointercancel', finish);
+    this.embeddedInteractionCleanup = () => {
+      if (pointerId !== null && container.hasPointerCapture(pointerId)) {
+        container.releasePointerCapture(pointerId);
+      }
+      pointerId = null;
+      container.classList.remove('meo-mermaid-dragging');
+      container.removeEventListener('pointerdown', down);
+      container.removeEventListener('pointermove', move);
+      container.removeEventListener('pointerup', finish);
+      container.removeEventListener('pointercancel', finish);
+      this.embeddedInteractionCleanup = () => undefined;
+    };
   }
 
   trimDisplayMathSvg(svgWrapper: HTMLElement): void {
@@ -1311,6 +1411,18 @@ export class MermaidDiagramWidget extends WidgetType {
 
   destroy() {
     const errors: unknown[] = [];
+    try {
+      this.embeddedInteractionCleanup();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.unsubscribeThemeRefresh();
+    } catch (error) {
+      errors.push(error);
+    } finally {
+      this.unsubscribeThemeRefresh = () => undefined;
+    }
     try {
       this.presentationHandle?.dispose();
     } catch (error) {

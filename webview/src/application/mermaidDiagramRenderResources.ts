@@ -13,7 +13,8 @@ export type MermaidDiagramRenderRequest = {
 
 export type MermaidDiagramRenderResult =
   | { readonly ok: true; readonly svg: string }
-  | { readonly ok: false; readonly error: string };
+  | { readonly ok: false; readonly error: string; readonly unavailable?: false }
+  | { readonly ok: false; readonly error: string; readonly unavailable: true };
 
 /**
  * One independently replaceable Widget presentation within an active render group.

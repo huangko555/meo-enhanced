@@ -140,32 +140,28 @@ async function editOuterLine(page: any, needle: string, marker: string) {
 
 async function editTableCell(page: any, tableLine: string, before: string, after: string) {
   await scrollToLineContaining(page, tableLine, 'first', before);
-  const tableFrom = await page.evaluate((sourceLine) => {
+  const targetSourceLine = await page.evaluate((sourceLine) => {
     const editor = (window as any).__historyMatrixEditor;
     const documentLines = editor.view.state.doc.toString().split('\n');
     const sourceLineIndex = documentLines.findIndex((line: string) => line.includes(sourceLine));
     if (sourceLineIndex < 0) throw new Error(`Missing table source line: ${sourceLine}`);
-    let tableStartLineIndex = sourceLineIndex;
-    while (tableStartLineIndex > 0 && documentLines[tableStartLineIndex - 1].trim().startsWith('|')) {
-      tableStartLineIndex -= 1;
-    }
-    return editor.view.state.doc.line(tableStartLineIndex + 1).from;
+    return sourceLineIndex + 1;
   }, tableLine);
-  await page.waitForFunction(({ currentValue, currentTableFrom }) => (
+  await page.waitForFunction(({ currentValue, currentSourceLine }) => (
     Array.from(document.querySelectorAll<HTMLTextAreaElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea'
     )).some((candidate) => (
-      candidate.value === currentValue
-        && Number(candidate.closest<HTMLTableElement>('table')?.dataset.tableFrom) === currentTableFrom
+      candidate.value === currentValue &&
+      Number(candidate.closest('tr')?.getAttribute('data-source-line-number')) === currentSourceLine
     ))
-  ), {}, { currentValue: before, currentTableFrom: tableFrom });
-  const settlement = await page.evaluate(({ currentValue, nextValue, currentTableFrom }) => {
+  ), {}, { currentValue: before, currentSourceLine: targetSourceLine });
+  const settlement = await page.evaluate(({ currentValue, nextValue, currentSourceLine }) => {
     const editor = (window as any).__historyMatrixEditor;
     const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table) textarea'
     )).find((candidate) => (
-      candidate.value === currentValue
-        && Number(candidate.closest<HTMLTableElement>('table')?.dataset.tableFrom) === currentTableFrom
+      candidate.value === currentValue &&
+      Number(candidate.closest('tr')?.getAttribute('data-source-line-number')) === currentSourceLine
     ));
     if (!input) throw new Error(`Missing table input: ${currentValue}`);
     input.focus();
@@ -180,7 +176,7 @@ async function editTableCell(page: any, tableLine: string, before: string, after
       committed: editor.commitTransientEdits(),
       text: editor.view.state.doc.toString()
     };
-  }, { currentValue: before, nextValue: after, currentTableFrom: tableFrom });
+  }, { currentValue: before, nextValue: after, currentSourceLine: targetSourceLine });
   const expectedLine = tableLine.replace(before, after);
   if (!settlement.committed || !settlement.text.includes(expectedLine)) {
     throw new Error(`Table edit did not settle: ${JSON.stringify({ tableLine, before, after, settlement })}`);
@@ -1009,37 +1005,37 @@ async function main() {
   }
   const fixture = realFixtureText
     ? {
-        outerTop: 'represents the pro',
-        table1Line: '| 三种写法 | 12312 |',
-        table1FirstBefore: '三种写法',
-        table1FirstAfter: '三种写法_REAL',
-        table1LineAfterFirst: '| 三种写法_REAL | 12312 |',
-        table1SecondBefore: '12312',
-        table1SecondAfter: '12312_REAL',
-        code: "CODE_BLOCK_SEARCH_NEEDLE = 'visible diff search target'",
-        mermaidPreview: 'Start --> Check --> Done',
-        mermaidSplit: 'MERMAID_SPLIT_SEARCH_TARGET',
-        mermaidSource: 'A[Open Markdown File] --> B{Choose Editor}',
-        mathPreview: '\\int \\!\\!\\! \\int \\!\\!\\! \\int_V',
-        mathPreviewOccurrence: 'last' as NeedleOccurrence,
-        mathSplit: '\\sum_{i=1}^{n}',
-        mathSource: 'E = mc^2',
-        table2Line: '| Bold        |    OK    | left text |',
-        table2FirstBefore: 'Bold',
-        table2FirstAfter: 'Bold_REAL',
-        table2LineAfterFirst: '| Bold_REAL',
-        table2SecondBefore: 'OK',
-        table2SecondAfter: 'OK_REAL',
-        table2ThirdBefore: 'left text',
-        table2ThirdAfter: 'left text_REAL',
-        extraOuter1: 'represents the probability',
-        extraOuter2: '# Markdown Render Test123123',
-        extraMermaid1: 'Start --> Check --> Done',
-        extraMermaid2: 'A[Start]',
-        extraMath1: '\\int \\!\\!\\! \\int_V',
+        outerTop: '普通段落原始值：Alpha Bravo Charlie',
+        table1Line: '| 1 | Alpha | Ready |',
+        table1FirstBefore: '1',
+        table1FirstAfter: '1_REAL',
+        table1LineAfterFirst: '| 1_REAL | Alpha | Ready |',
+        table1SecondBefore: 'Alpha',
+        table1SecondAfter: 'Alpha_REAL',
+        code: "const baselineUser: User = { id: 1, name: 'Alice' }",
+        mermaidPreview: 'A[Baseline A] --> B{Choose}',
+        mermaidSplit: 'participant U as User',
+        mermaidSource: 'B -->|Undo| C[Restore]',
+        mathPreview: '\\int_{-\\infty}^{\\infty}',
+        mathPreviewOccurrence: 'first' as NeedleOccurrence,
+        mathSplit: '\\operatorname{score}',
+        mathSource: '\\alpha \\cdot \\operatorname{readability}',
+        table2Line: '| Long Chinese | 这是一段很长很长的中文说明文字，用来测试表格列宽、自动换行、输入后高度变化以及撤销重做时的布局稳定性。 | 原始值 LONG-CN | Pending |',
+        table2FirstBefore: 'Long Chinese',
+        table2FirstAfter: 'Long Chinese_REAL',
+        table2LineAfterFirst: '| Long Chinese_REAL',
+        table2SecondBefore: '这是一段很长很长的中文说明文字，用来测试表格列宽、自动换行、输入后高度变化以及撤销重做时的布局稳定性。',
+        table2SecondAfter: '长表内容_REAL',
+        table2ThirdBefore: 'Pending',
+        table2ThirdAfter: 'Pending_REAL',
+        extraOuter1: '标题 B 的正文',
+        extraOuter2: '压力行 A：STRESS-A-BASELINE',
+        extraMermaid1: 'participant U as User',
+        extraMermaid2: 'A[Baseline A] --> B{Choose}',
+        extraMath1: '\\operatorname{score}',
         extraMath2: '\\int_{-\\infty}^{\\infty}',
-        outerBottom: '123123123123123123123123123123123123123123',
-        typingNeedle: 'represents the pro'
+        outerBottom: '最后一行：END-BASELINE-C',
+        typingNeedle: '普通段落原始值：Alpha Bravo Charlie'
       }
     : {
         outerTop: 'PLAIN_TOP',
@@ -1168,7 +1164,6 @@ async function main() {
     await page.waitForFunction(() => Boolean(
       (window as any).__historyMatrixEditor?.getText()
       && document.querySelector('.cm-editor > .cm-scroller')
-      && document.querySelector('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')
     ));
 
     if (firstMermaidClickOnly) {
@@ -1195,7 +1190,7 @@ async function main() {
 
     const pendingTableBaseline = await page.evaluate(() => (window as any).__historyMatrixEditor.getText());
     await scrollToLineContaining(page, fixture.table1Line);
-    await page.evaluate((before) => {
+    const pendingTableBaselineRowCount = await page.evaluate((before) => {
       const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
       const input = table?.querySelector<HTMLTextAreaElement>('tbody textarea');
       if (!input) throw new Error('Missing first-table pending edit target');
@@ -1203,6 +1198,7 @@ async function main() {
       input.focus();
       input.value = `${before}_PENDING`;
       input.dispatchEvent(new Event('input', { bubbles: true }));
+      return table.querySelectorAll('tbody tr').length;
     }, fixture.table1FirstBefore);
     const commandConsumed = await page.evaluate(() => {
       const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
@@ -1216,9 +1212,9 @@ async function main() {
       }));
     });
     if (!commandConsumed) throw new Error('Insert row below command was not consumed');
-    await page.waitForFunction(() => document.querySelectorAll<HTMLElement>(
+    await page.waitForFunction((expectedRows) => document.querySelectorAll<HTMLElement>(
       '.meo-md-html-table:not(.meo-md-html-table-sticky-table)'
-    )[0]?.querySelectorAll('tbody tr').length === 2);
+    )[0]?.querySelectorAll('tbody tr').length === expectedRows, {}, pendingTableBaselineRowCount + 1);
     const afterPendingInsert = await page.evaluate(({ pending }) => {
       const editor = (window as any).__historyMatrixEditor;
       const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
@@ -1229,7 +1225,7 @@ async function main() {
       };
     }, { pending: `${fixture.table1FirstBefore}_PENDING` });
     if (
-      afterPendingInsert.rowCount !== 2
+      afterPendingInsert.rowCount !== pendingTableBaselineRowCount + 1
       || !afterPendingInsert.text.includes(afterPendingInsert.pending)
       || !afterPendingInsert.text.includes(fixture.table2FirstBefore)
     ) {
@@ -1251,14 +1247,14 @@ async function main() {
       const applied = await (window as any).__historyMatrixEditor.undo();
       if (!applied) throw new Error('Pending table structure undo was not applied');
     });
-    await waitForPendingStructureState({ text: pendingTableBaseline, rowCount: 1, focused: true });
+    await waitForPendingStructureState({ text: pendingTableBaseline, rowCount: pendingTableBaselineRowCount, focused: true });
     await page.evaluate(async () => {
       const applied = await (window as any).__historyMatrixEditor.redo();
       if (!applied) throw new Error('Pending table structure redo was not applied');
     });
-    await waitForPendingStructureState({ text: afterPendingInsert.text, rowCount: 2, focused: true });
+    await waitForPendingStructureState({ text: afterPendingInsert.text, rowCount: pendingTableBaselineRowCount + 1, focused: true });
     await page.evaluate((text) => (window as any).__historyMatrixEditor.setText(text), pendingTableBaseline);
-    await waitForPendingStructureState({ text: pendingTableBaseline, rowCount: 1, focused: false });
+    await waitForPendingStructureState({ text: pendingTableBaseline, rowCount: pendingTableBaselineRowCount, focused: false });
 
     const versions = [await documentText(page)];
     const targets: HistoryTarget[] = [];
@@ -1527,17 +1523,32 @@ async function main() {
       return { mermaidLine, formulaLine };
     });
     await page.keyboard.press('Enter');
+    const shiftedSemanticLines = await page.evaluate(() => {
+      const editor = (window as any).__historyMatrixEditor;
+      const lines = editor.getText().split('\n');
+      return {
+        mermaidLine: lines.findIndex((line: string) => line.startsWith('```mermaid')) + 1,
+        formulaLine: lines.findIndex((line: string) => line.trim() === '$$') + 1
+      };
+    });
+    if (shiftedSemanticLines.mermaidLine !== semanticLines.mermaidLine + 1
+      || shiftedSemanticLines.formulaLine !== semanticLines.formulaLine + 1) {
+      throw new Error(`Equal-length leading-line edit did not shift rendered blocks: ${JSON.stringify({
+        before: semanticLines,
+        after: shiftedSemanticLines
+      })}`);
+    }
     // This intentionally uses the shared public Chromium Adapter. A direct DOM
     // click can appear green while its detached/offscreen control never
     // receives the real pointer transaction.
     await runHistoryRenderedBlockChromiumInteraction(
       page,
-      { kind: 'mermaid', lineNumber: semanticLines.mermaidLine + 1, targetMode: 'split' },
+      { kind: 'mermaid', lineNumber: shiftedSemanticLines.mermaidLine, targetMode: 'split' },
       '__historyMatrixEditor'
     );
     await runHistoryRenderedBlockChromiumInteraction(
       page,
-      { kind: 'math', lineNumber: semanticLines.formulaLine + 1, targetMode: 'split' },
+      { kind: 'math', lineNumber: shiftedSemanticLines.formulaLine, targetMode: 'split' },
       '__historyMatrixEditor'
     );
     await page.evaluate(async () => {

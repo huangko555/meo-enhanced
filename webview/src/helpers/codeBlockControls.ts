@@ -1,6 +1,9 @@
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 
-export function createCopyCodeButton(codeContent: string, language: UiLanguage): HTMLSpanElement {
+export function createCopyCodeButton(
+  codeContent: string | (() => string),
+  language: UiLanguage
+): HTMLSpanElement {
   const strings = getUiStrings(language);
   const button = document.createElement('span');
   button.className = 'meo-code-block-pill meo-copy-code-btn';
@@ -18,7 +21,9 @@ export function createCopyCodeButton(codeContent: string, language: UiLanguage):
     event.preventDefault();
     event.stopPropagation();
     try {
-      await navigator.clipboard.writeText(codeContent);
+      await navigator.clipboard.writeText(
+        typeof codeContent === 'function' ? codeContent() : codeContent
+      );
       updateText(true);
       setTimeout(() => updateText(false), 2000);
     } catch (error) {

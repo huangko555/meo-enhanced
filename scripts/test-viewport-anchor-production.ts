@@ -335,7 +335,7 @@ async function main(): Promise<void> {
     ).__releaseViewportAnchorMermaid === 'function');
     await waitForFrames(page, 2);
 
-    await page.click('.preview-appearance-button[data-appearance="dark"]');
+    await page.select('.preview-appearance-select', 'dark');
     await page.evaluate(() => (
       window as typeof window & { __releaseViewportAnchorMermaid?: () => void }
     ).__releaseViewportAnchorMermaid?.());
@@ -504,17 +504,116 @@ async function main(): Promise<void> {
     const liveOffset = await scrollLiveRenderedBlockToOffset(page, 20, 90);
     assert.ok(Math.abs(liveOffset - 90) <= 2, `Live block offset was ${liveOffset}`);
 
-    await page.click('[data-mode="preview"]');
-    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
-    await waitForFrames(page, 3);
-    const previewRenderedOffset = await page.$eval<HTMLIFrameElement, number>('.preview-frame', (previewFrame) => {
-      const block = previewFrame.contentDocument?.querySelector<HTMLElement>('[data-source-line="20"]');
-      if (!block) throw new Error('Missing Preview rendered block');
-      return -block.getBoundingClientRect().top;
+    const liveToPreviewTrace = await page.evaluate(async () => {
+      const observation = (window as typeof window & {
+        ProductFrameObservation: { observeContinuousFrames: Function };
+      }).ProductFrameObservation;
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const previewButton = document.querySelector<HTMLButtonElement>('[data-mode="preview"]')!;
+      const sample = () => {
+        const block = frame.contentDocument?.querySelector<HTMLElement>('[data-source-line="20"]');
+        const previewVisible = document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview'
+          && frame.getBoundingClientRect().height > 0
+          && getComputedStyle(frame).visibility !== 'hidden';
+        return {
+          metrics: {
+            previewVisible: previewVisible ? 1 : 0,
+            blockPresent: block ? 1 : 0,
+            offset: block ? -block.getBoundingClientRect().top : -1
+          }
+        };
+      };
+      const trace = await observation.observeContinuousFrames(sample, {
+        trigger: () => previewButton.click(),
+        stableFrameCount: 4,
+        maxFrameCount: 60,
+        tolerance: 0.25
+      });
+      return trace.samples.map((entry: any) => entry.metrics);
     });
+    const visiblePreviewSamples = liveToPreviewTrace.filter((sample) => sample.previewVisible === 1);
+    assert.ok(visiblePreviewSamples.length > 0, `Live to Preview trace never became visible: ${JSON.stringify(liveToPreviewTrace)}`);
+    assert.ok(
+      visiblePreviewSamples.every((sample) => sample.blockPresent === 1),
+      `Preview became visible before its rendered block was available: ${JSON.stringify(liveToPreviewTrace)}`
+    );
+    assert.ok(
+      visiblePreviewSamples.every((sample) => Math.abs(sample.offset - liveOffset) <= 2),
+      `Live to Preview exposed a stale position before settling: ${JSON.stringify({ liveOffset, liveToPreviewTrace })}`
+    );
+    const previewRenderedOffset = visiblePreviewSamples.at(-1)!.offset;
     assert.ok(
       Math.abs(previewRenderedOffset - liveOffset) <= 2,
       `Live to Preview lost rendered-block offset: ${liveOffset} -> ${previewRenderedOffset}`
+    );
+
+    await page.$eval<HTMLIFrameElement>('.preview-frame', (frame) => {
+      const target = frame.contentDocument?.querySelector<HTMLElement>('[data-source-line="120"]');
+      const scroller = frame.contentDocument?.scrollingElement;
+      if (!target || !scroller) throw new Error('Missing delayed-render stale Preview fixture');
+      scroller.scrollTop += target.getBoundingClientRect().top - 36;
+    });
+    await page.click('[data-mode="live"]');
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'live');
+    await waitForFrames(page, 6);
+    await page.evaluate((text) => {
+      (window as any).__viewportAnchorTransaction.editor.setText(`${text}\npreview invalidation`);
+    }, fixture);
+    await waitForFrames(page, 6);
+    const delayedRenderLiveOffset = await scrollLiveRenderedBlockToOffset(page, 20, 90);
+    assert.ok(
+      Math.abs(delayedRenderLiveOffset - 90) <= 2,
+      `Delayed-render Live block offset was ${delayedRenderLiveOffset}`
+    );
+    const delayedRenderTrace = await page.evaluate(async ({ html }) => {
+      const observation = (window as typeof window & {
+        ProductFrameObservation: { observeContinuousFrames: Function };
+        __hostMessages?: Array<{ type?: string; requestId?: string }>;
+      }).ProductFrameObservation;
+      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
+      const previewButton = document.querySelector<HTMLButtonElement>('[data-mode="preview"]')!;
+      const previousRequestId = window.__hostMessages
+        ?.findLast((message) => message.type === 'requestPreviewRender')?.requestId;
+      const trigger = () => {
+        previewButton.click();
+        const started = performance.now();
+        const deliver = () => {
+          const requestId = window.__hostMessages
+            ?.findLast((message) => message.type === 'requestPreviewRender')?.requestId;
+          if (!requestId || requestId === previousRequestId) {
+            if (performance.now() - started < 1000) requestAnimationFrame(deliver);
+            return;
+          }
+          setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: {
+            type: 'previewRenderResult', requestId,
+            result: { ok: true, value: {
+              html, hasMermaid: false,
+              styles: {
+                light: 'html,body{margin:0}.meo-export-doc{padding:0}',
+                dark: 'html,body{margin:0}.meo-export-doc{padding:0}'
+              }
+            } }
+          }})), 120);
+        };
+        requestAnimationFrame(deliver);
+      };
+      const trace = await observation.observeContinuousFrames(() => {
+        const block = frame.contentDocument?.querySelector<HTMLElement>('[data-source-line="20"]');
+        return { metrics: {
+          previewVisible: document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview'
+            && getComputedStyle(frame).visibility !== 'hidden' ? 1 : 0,
+          offset: block ? -block.getBoundingClientRect().top : -1
+        } };
+      }, { trigger, stableFrameCount: 12, maxFrameCount: 90, tolerance: 0.25 });
+      return trace.samples.map((entry: any) => entry.metrics);
+    }, { html: previewHtml });
+    const delayedVisibleSamples = delayedRenderTrace.filter((sample) => sample.previewVisible === 1);
+    assert.ok(
+      delayedVisibleSamples.length > 0
+        && delayedVisibleSamples.every((sample) => Math.abs(sample.offset - delayedRenderLiveOffset) <= 2),
+      `Live to Preview exposed stale position while a fresh render was pending: ${JSON.stringify({
+        delayedRenderLiveOffset, delayedRenderTrace
+      })}`
     );
 
     await page.click('[data-mode="source"]');

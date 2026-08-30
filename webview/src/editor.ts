@@ -6,6 +6,7 @@ import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-mar
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
+import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
 import type { SourceLineNumberMode } from '../../src/protocol/readyInit';
 import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
@@ -24,6 +25,7 @@ import {
   gitDiffGutterBaselineExtensions,
   gitDiffGutterLiveRenderExtensions,
   gitDiffGutterRenderExtensions,
+  gitDiffLineFlagsField,
   setGitBaselineEffect
 } from './helpers/gitDiffGutter';
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
@@ -72,7 +74,8 @@ import {
   tableHeaderAlignmentOverrideField,
   commitPendingTableEdits,
   focusHistoryChange,
-  focusTableHistoryChange
+  focusTableHistoryChange,
+  refreshMountedTablePositions
 } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
@@ -84,6 +87,7 @@ import { focusLatexMathEditingOffset, getLatexMathBlockMode, setLatexMathBlockMo
 import { getLiveRenderedBlocks } from './helpers/liveRenderedBlocks';
 import {
   ViewportController,
+  visualLineContextMargin,
   type PreviewViewportSurface,
   type ViewportAnchorOwner,
   type ViewportAnchorToken
@@ -105,6 +109,10 @@ import {
   type MermaidDiagramPresentationFactory
 } from './editor/mermaidDiagramPresentation';
 import {
+  createMermaidDocumentPreloader,
+  type MermaidDocumentPreloader
+} from './helpers/mermaidDocumentPreloader';
+import {
   beginLiveInputComposition,
   completeLiveInputComposition,
   isLiveInputDerivedWorkRefresh,
@@ -114,6 +122,10 @@ import {
   shouldDeferLiveInputDerivedWork,
   supersedeLiveInputDerivedWork
 } from './editor/liveInputDerivedWork';
+import {
+  createEditorInteractionContinuity,
+  type EditorInteractionContinuity
+} from './editor/interactionContinuity';
 import { markExternalDocumentPresentation } from './editor/externalDocumentPresentation';
 
 declare module '@codemirror/view' {
@@ -281,10 +293,10 @@ const searchMatchField = StateField.define<SearchMatchFieldValue>({
 });
 
 function lineNumberExtensions(
-  mode: EditableEditorMode,
+  _mode: EditableEditorMode,
   sourceMode: SourceLineNumberMode
 ): Extension {
-  const lineNumberMode: SourceLineNumberMode = mode === 'live' ? 'on' : sourceMode;
+  const lineNumberMode = sourceMode;
   if (lineNumberMode === 'off') return [];
 
   const formatNumber = lineNumberMode === 'relative'
@@ -327,6 +339,8 @@ export function createEditor({
   const modeCompartment = new Compartment();
   const gitGutterCompartment = new Compartment();
   const lineNumberCompartment = new Compartment();
+  const longCodeBlockPreferenceCompartment = new Compartment();
+  let currentSourceLineNumbers = sourceLineNumbers;
   const startMode = initialMode === 'live' ? 'live' : 'source';
   const largeDocument = assessLargeDocument(text).preferSource;
   let gitGutterVisible = initialGitGutter !== false;
@@ -342,6 +356,7 @@ export function createEditor({
   let checkboxClick: PointerClickState | null = null;
   let frontmatterBoundaryClick: FrontmatterBoundaryClickState | null = null;
   let view: EditorView;
+  let mermaidDocumentPreloader: MermaidDocumentPreloader | null = null;
   let currentMode: EditableEditorMode = startMode;
   let lastSearchStateSignature = '';
   let tableInteractionActive = false;
@@ -353,6 +368,7 @@ export function createEditor({
   let onTableSelectionChange: EventListener | null = null;
   let onScroll: (() => void) | null = null;
   let viewportController: ViewportController;
+  let interactionContinuity: EditorInteractionContinuity | null = null;
   let onWindowPointerUp: ((event: PointerEvent) => void) | null = null;
   let onWindowPointerCancel: ((event: PointerEvent) => void) | null = null;
   let onWindowBlur: (() => void) | null = null;
@@ -363,8 +379,8 @@ export function createEditor({
   let onBlockActionPointerLeave: (() => void) | null = null;
   let editorHistoryRuntime: EditorHistoryRuntime | null = null;
   let historyScrollGuard: EditorHistoryViewport | null = null;
+  let pendingTableHistoryFocus: { replayId: number; semanticTarget: string; stableChecks: number } | null = null;
   let pendingRenderedHistoryFocus: { replayId: number; run: () => boolean } | null = null;
-  let recentRenderedReplayPresentation: { anchor: number; mode: 'preview' | 'split' | 'source' } | null = null;
   let onHistoryKeyDown: ((event: KeyboardEvent) => void) | null = null;
   let onHistoryBeforeInput: ((event: InputEvent) => void) | null = null;
   let onHistoryPointerDown: (() => void) | null = null;
@@ -385,6 +401,7 @@ export function createEditor({
   const gitOverviewDerivedConsumer = {};
   const searchOverviewDerivedConsumer = {};
   const liveSearchDecorationDerivedConsumer = {};
+  const tablePositionDerivedConsumer = {};
   const bootstrapDerivedConsumer = {};
   let editorDestroyed = false;
   const publishComposedDocumentChange = () => {
@@ -911,7 +928,9 @@ export function createEditor({
   };
 
   const requestEditorHistoryReplay = async (direction: EditorHistoryDirection): Promise<boolean> => {
-    const result = await editorHistoryRuntime?.dispatch({ type: 'requestReplay', direction });
+    const runtime = editorHistoryRuntime;
+    const result = await runtime?.dispatch({ type: 'requestReplay', direction });
+    if (result === true) await runtime?.whenSettled();
     return result === true;
   };
 
@@ -1399,19 +1418,15 @@ export function createEditor({
   };
 
   const suppressHistoryAutoScrollAt = (position: number): boolean => {
-    if (!historyScrollGuard) return false;
-    const coords = view.coordsAtPos(position);
-    const viewport = view.scrollDOM.getBoundingClientRect();
-    if (coords) {
-      return coords.top >= viewport.top && coords.bottom <= viewport.bottom;
-    }
-    const block = view.lineBlockAt(position);
-    return block.bottom > view.scrollDOM.scrollTop
-      && block.top < view.scrollDOM.scrollTop + view.scrollDOM.clientHeight;
+    void position;
+    // History restoration owns the single final reveal. Allowing CodeMirror to
+    // scroll first would expose a nearest-edge frame before contextual placement.
+    return historyScrollGuard !== null;
   };
 
   const prepareRenderedHistoryPosition = (
     position: number,
+    previousViewport: EditorHistoryViewport,
     isCurrent: () => boolean
   ): (() => boolean) | null => {
     if (currentMode !== 'live') {
@@ -1438,35 +1453,83 @@ export function createEditor({
     const closingLine = view.state.doc.line(block.endLine);
     const contentTo = Math.max(contentFrom, closingLine.from - 1);
     const offset = Math.max(0, Math.min(targetPosition - contentFrom, contentTo - contentFrom));
+    const targetWasVisibleBeforeReplay = targetLineNumber >= previousViewport.selection.visibleFromLineNumber
+      && targetLineNumber <= previousViewport.selection.visibleToLineNumber;
     const manualMode = block.kind === 'mermaid'
       ? getMermaidBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual
       : getLatexMathBlockMode(view.state, openingLine.from, contentFrom, contentTo).manual;
-    const desiredMode = recentRenderedReplayPresentation?.anchor === openingLine.from
-      ? recentRenderedReplayPresentation.mode
-      : manualMode === 'preview' ? 'split' : manualMode;
-    const modeEffect = desiredMode !== manualMode
-      ? block.kind === 'mermaid'
-        ? setMermaidBlockModeEffect.of({ anchor: openingLine.from, mode: desiredMode })
-        : setLatexMathBlockModeEffect.of({ anchor: openingLine.from, mode: desiredMode })
-      : null;
-
     view.dispatch({
-      selection: { anchor: targetPosition },
-      effects: modeEffect ? [modeEffect] : []
+      selection: { anchor: manualMode === 'preview' ? openingLine.from : targetPosition },
+      effects: targetWasVisibleBeforeReplay
+        ? []
+        : EditorView.scrollIntoView(openingLine.from, { y: 'center' })
     });
-    viewportController.revealPosition(openingLine.from, {
-      y: isPositionVisible(openingLine.from) ? 'nearest' : 'center'
-    }, isCurrent);
-    // Mode effects dispatched by this replay synchronously invalidate the
-    // previous hint. Record the accepted presentation only after dispatch so
-    // a later replay can reuse it, while a user-initiated mode effect wins.
-    recentRenderedReplayPresentation = { anchor: openingLine.from, mode: desiredMode };
-    // Keep the outer editor focused until the target controller mounts. The
-    // coordinator owns cancellation when a newer command or user action wins.
-    view.focus();
-    return () => block.kind === 'mermaid'
-      ? focusMermaidEditingOffset(view, openingLine.from, offset, isCurrent)
-      : focusLatexMathEditingOffset(view, openingLine.from, offset, isCurrent);
+    if (targetWasVisibleBeforeReplay) {
+      viewportController.lockScrollTop(previousViewport.scrollTop, isCurrent);
+    } else {
+      viewportController.revealPositionUntilStable(openingLine.from, { y: 'center' }, isCurrent);
+    }
+    // Undo/Redo follows the user's chosen presentation. Preview has no source
+    // editor to focus, so restoring the visible block and outer editor is the
+    // complete interaction outcome; Source and Split restore the inner caret.
+    const renderedBlockRoots = () => manualMode === 'preview'
+      ? Array.from(view.dom.querySelectorAll<HTMLElement>(
+          `[data-meo-rendered-block-start-line="${block.startLine}"]`
+        ))
+      : Array.from(view.dom.querySelectorAll<HTMLElement>(
+          block.kind === 'mermaid'
+            ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${openingLine.from}"]`
+            : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${openingLine.from}"]`
+        ));
+    const renderedBlockIsReady = () => {
+      const viewport = view.scrollDOM.getBoundingClientRect();
+      return renderedBlockRoots().some((element) => {
+        const rect = element.getBoundingClientRect();
+        const visibleHeight = Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top);
+        const requiredVisibleHeight = Math.min(
+          rect.height,
+          Math.max(96, viewport.height * 0.4)
+        );
+        return visibleHeight >= requiredVisibleHeight;
+      });
+    };
+    if (manualMode === 'preview') {
+      return () => {
+        if (!isCurrent()) return false;
+        if (!renderedBlockIsReady()) {
+          viewportController.revealPositionUntilStable(openingLine.from, { y: 'center' }, isCurrent);
+          return false;
+        }
+        view.contentDOM.focus({ preventScroll: true });
+        return true;
+      };
+    }
+    let stableFocusedElement: Element | null = null;
+    return () => {
+      if (!renderedBlockIsReady()) {
+        stableFocusedElement = null;
+        view.dispatch({ effects: EditorView.scrollIntoView(openingLine.from, { y: 'center' }) });
+        viewportController.revealPositionUntilStable(openingLine.from, { y: 'center' }, isCurrent);
+        return false;
+      }
+      const focused = block.kind === 'mermaid'
+        ? focusMermaidEditingOffset(view, openingLine.from, offset, isCurrent)
+        : focusLatexMathEditingOffset(view, openingLine.from, offset, isCurrent);
+      const activeElement = view.dom.ownerDocument.activeElement;
+      if (
+        !focused || !(activeElement instanceof Element) ||
+        !activeElement.isConnected ||
+        !renderedBlockRoots().some((root) => root.contains(activeElement))
+      ) {
+        stableFocusedElement = null;
+        return false;
+      }
+      if (stableFocusedElement !== activeElement) {
+        stableFocusedElement = activeElement;
+        return false;
+      }
+      return true;
+    };
   };
 
   const revealRenderedSourceLine = (lineNumber: number) => {
@@ -1818,7 +1881,8 @@ export function createEditor({
         ...editorHistoryKeymap
       ]),
       historyCompartment.of(history()),
-      lineNumberCompartment.of(lineNumberExtensions(startMode, sourceLineNumbers)),
+      lineNumberCompartment.of(lineNumberExtensions(startMode, currentSourceLineNumbers)),
+      longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(true)),
       tableTransactionProvenanceAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
@@ -2055,6 +2119,9 @@ export function createEditor({
         const searchQueryChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => effect.is(setSearchQueryEffect))
         ));
+        const gitBaselineChanged = update.transactions.some((transaction) => (
+          transaction.effects.some((effect) => effect.is(setGitBaselineEffect))
+        ));
         const renderedPresentationChanged = update.transactions.some((transaction) => (
           transaction.effects.some((effect) => (
             effect.is(setMermaidBlockModeEffect) || effect.is(setLatexMathBlockModeEffect)
@@ -2068,18 +2135,25 @@ export function createEditor({
             scheduleBlockActionToolbarReconcile();
           });
         }
+        if (!liveDerivedRefresh && (update.docChanged || gitBaselineChanged)) {
+          requestLiveInputDerivedWorkOnFrame(update.view, tablePositionDerivedConsumer, () => {
+            refreshMountedTablePositions(
+              update.view,
+              update.view.state.field(diagnosticDataField, false) ?? [],
+              update.view.state.field(gitDiffLineFlagsField, false)
+            );
+          });
+        }
         viewportController?.reconcileAfterEditorUpdate(
           update.docChanged ? (position) => update.changes.mapPos(position, 1) : undefined
         );
+        interactionContinuity?.observe(update);
 
         syncModeClasses();
         if (!liveDerivedRefresh && presentationMayHaveChanged) {
           requestLiveInputDerivedWork(update.view, gitDerivedConsumer, () => {
             syncGitGutterVisibility();
           });
-        }
-        if (renderedPresentationChanged) {
-          recentRenderedReplayPresentation = null;
         }
         if (update.selectionSet) {
           suppressSelectionMenuForNativeHtml = false;
@@ -2090,8 +2164,8 @@ export function createEditor({
         }
 
         if (update.docChanged) {
+          if (currentMode === 'live') mermaidDocumentPreloader?.schedule(update.state);
           if (!applyingExternal && !isHistoryReplayUpdate(update)) {
-            recentRenderedReplayPresentation = null;
             void editorHistoryRuntime?.dispatch({ type: 'localDocumentEdited' });
           }
         }
@@ -2136,6 +2210,27 @@ export function createEditor({
     getMode: () => currentMode === 'live' ? 'live' : 'source',
     previewSurface: previewViewportSurface
   });
+  mermaidDocumentPreloader = createMermaidDocumentPreloader(
+    mermaidDiagramPresentationConsumer,
+    () => {
+      if (!editorDestroyed && currentMode === 'live') {
+        view.dispatch({ effects: refreshDecorationsEffect.of(null) });
+      }
+    }
+  );
+  if (startMode === 'live') mermaidDocumentPreloader.schedule(view.state);
+  interactionContinuity = createEditorInteractionContinuity({
+    view,
+    viewport: {
+      revealCaret(position, isCurrent) {
+        viewportController.revealPosition(position, {
+          y: 'nearest',
+          yMargin: visualLineContextMargin(view, 1)
+        }, isCurrent);
+      }
+    },
+    getMode: () => currentMode === 'live' ? 'live' : 'source'
+  });
   const editorHistoryApplication = createEditorHistoryApplication();
   const editorHistoryEffectAdapter = createEditorHistoryEffectAdapter({
     captureContext(): EditorHistoryContext {
@@ -2152,6 +2247,12 @@ export function createEditor({
       const beforeDocument = view.state.doc;
       try {
         const applied = direction === 'undo' ? undo(view) : redo(view);
+        if (applied && !view.dom.contains(view.dom.ownerDocument.activeElement)) {
+          // Replaying a change can synchronously remove the focused table or
+          // rendered-block editor. Keep keyboard ownership inside the editor
+          // while the richer boundary restore resolves its replacement target.
+          view.contentDOM.focus({ preventScroll: true });
+        }
         return {
           applied,
           changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null
@@ -2169,31 +2270,68 @@ export function createEditor({
         : false;
       if (changedRangeIsTable) {
         if (!request.changedRange) return 'not-rendered';
-        recentRenderedReplayPresentation = null;
-        if (focusTableHistoryChange(
+        const tableAttempt = focusTableHistoryChange(
           view,
           request.changedRange,
           request.previousViewport.scrollTop,
           request.targetPosition ?? undefined,
           isCurrent
-        )) return 'restored';
+        );
+        if (tableAttempt === 'retry') {
+          pendingTableHistoryFocus = null;
+          return 'retry';
+        }
+        if (tableAttempt === 'restored') {
+          const activeElement = view.dom.ownerDocument.activeElement;
+          if (
+            !(activeElement instanceof HTMLTextAreaElement) ||
+            !activeElement.isConnected ||
+            !view.dom.contains(activeElement)
+          ) {
+            pendingTableHistoryFocus = null;
+            return 'retry';
+          }
+          const semanticTarget = [
+            activeElement.closest('tr')?.dataset.sourceLineNumber ?? '',
+            activeElement.dataset.tableRow ?? '',
+            activeElement.dataset.tableCol ?? '',
+            activeElement.value,
+            activeElement.selectionStart ?? 0
+          ].join(':');
+          if (
+            pendingTableHistoryFocus?.replayId === request.replayId &&
+            pendingTableHistoryFocus.semanticTarget === semanticTarget
+          ) {
+            const stableChecks = pendingTableHistoryFocus.stableChecks + 1;
+            if (stableChecks >= 3) {
+              pendingTableHistoryFocus = null;
+              return 'restored';
+            }
+            pendingTableHistoryFocus = { replayId: request.replayId, semanticTarget, stableChecks };
+            return 'retry';
+          }
+          pendingTableHistoryFocus = { replayId: request.replayId, semanticTarget, stableChecks: 1 };
+          return 'retry';
+        }
+        pendingTableHistoryFocus = null;
         focusHistoryChange(
           view,
           request.changedRange,
           request.previousViewport.scrollTop,
-          (anchor, head) => applyRevealSelection(anchor, head, { focusEditor: true, align: 'nearest' }),
           request.previousViewport.selection,
           request.targetPosition ?? undefined,
           isCurrent
         );
         return 'retry';
       }
+      pendingTableHistoryFocus = null;
       if (request.targetPosition === null) {
         return 'not-rendered';
       }
       if (pendingRenderedHistoryFocus?.replayId !== request.replayId) {
         const run = prepareRenderedHistoryPosition(
           request.targetPosition,
+          request.previousViewport,
           isCurrent
         );
         if (!run) return 'not-rendered';
@@ -2204,12 +2342,11 @@ export function createEditor({
       return 'restored';
     },
     restoreEditorInteraction(request, isCurrent) {
-      recentRenderedReplayPresentation = null;
+      pendingTableHistoryFocus = null;
       focusHistoryChange(
         view,
         request.changedRange,
         request.previousViewport.scrollTop,
-        (anchor, head) => applyRevealSelection(anchor, head, { focusEditor: true, align: 'nearest' }),
         request.previousViewport.selection,
         request.targetPosition ?? undefined,
         isCurrent
@@ -2225,7 +2362,6 @@ export function createEditor({
         if (frame !== null) cancelAnimationFrame(frame);
         frame = null;
         observer.disconnect();
-        pendingRenderedHistoryFocus = null;
       };
       const trigger = () => {
         if (cancelled) return;
@@ -2241,8 +2377,8 @@ export function createEditor({
       console.error(`Editor history ${operation} failed`, error);
     },
     dispose() {
+      pendingTableHistoryFocus = null;
       pendingRenderedHistoryFocus = null;
-      recentRenderedReplayPresentation = null;
       historyScrollGuard = null;
       setEditorHistoryRunner(view, null);
       if (onHistoryKeyDown) view.dom.removeEventListener('keydown', onHistoryKeyDown, true);
@@ -2293,7 +2429,11 @@ export function createEditor({
         // Native history can remove the focused embedded editor before its
         // correlated interaction restore has started. That replay-owned blur
         // must not invalidate the restore that will focus the new target.
-        if (editorHistoryRuntime?.getState().pendingReplay?.phase === 'running-native-history') return;
+        const replayOwnedDetachedBlur = (
+          (next === null || next === view.dom.ownerDocument.body) &&
+          Boolean(editorHistoryRuntime?.getState().pendingReplay)
+        );
+        if (replayOwnedDetachedBlur) return;
         void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
       }
     });
@@ -2498,7 +2638,8 @@ export function createEditor({
       scheduleLiveSearchDecorationRefresh();
     },
     hasFocus() {
-      return view.hasFocus;
+      const activeElement = view.dom.ownerDocument.activeElement;
+      return view.hasFocus || Boolean(activeElement && view.dom.contains(activeElement));
     },
     requestDerivedWork(operation: () => void) {
       if (editorDestroyed) return;
@@ -2601,9 +2742,13 @@ export function createEditor({
       editorHistoryRuntime?.dispose();
       editorHistoryRuntime = null;
       tableCommandRuntime.dispose();
+      interactionContinuity?.dispose();
+      interactionContinuity = null;
       viewportController.destroy();
       tableTransactionProvenanceAdapter.dispose();
       tableColumnWidthAdapter.adapter.dispose();
+      mermaidDocumentPreloader?.dispose();
+      mermaidDocumentPreloader = null;
       view.destroy();
       mermaidDiagramPresentationConsumer.dispose();
       imagePresentationFactory.dispose();
@@ -2618,7 +2763,6 @@ export function createEditor({
         tableCommandRuntime.externalDocumentPresented();
         imagePresentationFactory.externalDocumentPresented();
         void editorHistoryRuntime?.dispatch({ type: 'externalDocumentPresented' });
-        recentRenderedReplayPresentation = null;
         mermaidDiagramPresentationConsumer.externalDocumentPresented();
         const currentText = view.state.doc.toString();
         const syncChange = findSyncChange(currentText, textValue);
@@ -2667,6 +2811,7 @@ export function createEditor({
     },
     setMode(mode: EditableEditorMode, viewport: ViewportAnchorToken | null = null) {
       const applyMode = (isTransactionCurrent: () => boolean): void => {
+        interactionContinuity?.cancel();
         commitActiveTableInput();
         const nextMode = mode === 'live' ? 'live' : 'source';
         if (nextMode === currentMode) {
@@ -2674,7 +2819,6 @@ export function createEditor({
         }
 
         void editorHistoryRuntime?.dispatch({ type: 'presentationChanged' });
-        recentRenderedReplayPresentation = null;
 
         const topPosition = isTransactionCurrent() ? null : computeTopVisiblePosition();
         viewportController.markInteraction();
@@ -2698,7 +2842,7 @@ export function createEditor({
               gitGutterCompartment.reconfigure(
                 nextMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()
               ),
-              lineNumberCompartment.reconfigure(lineNumberExtensions(nextMode, sourceLineNumbers))
+              lineNumberCompartment.reconfigure(lineNumberExtensions(nextMode, currentSourceLineNumbers))
             ]
           });
         } catch (error) {
@@ -2727,6 +2871,7 @@ export function createEditor({
           // field refreshes when CodeMirror publishes later parser transactions.
           forceParsing(view, view.state.doc.length, 500);
           tableColumnWidthAdapter.adapter.acquire();
+          mermaidDocumentPreloader?.schedule(view.state);
         }
         syncModeClasses();
         syncGitGutterVisibility();
@@ -2748,6 +2893,17 @@ export function createEditor({
       }
       gitGutterVisible = nextVisible;
       syncGitGutterVisibility();
+    },
+    setSourceLineNumbers(mode: SourceLineNumberMode) {
+      currentSourceLineNumbers = mode;
+      view.dispatch({
+        effects: lineNumberCompartment.reconfigure(lineNumberExtensions(currentMode, currentSourceLineNumbers))
+      });
+    },
+    setLongCodeBlockFolding(enabled: boolean) {
+      view.dispatch({
+        effects: longCodeBlockPreferenceCompartment.reconfigure(longCodeBlockEnabledFacet.of(enabled))
+      });
     },
     insertFormat(action: EditorFormatAction, level?: EditorFormatLevel) {
       const activeTableInput = getActiveTableInput();
@@ -2868,13 +3024,27 @@ export function createEditor({
       if (align === 'upper' && revealRenderedSourceLine(line.number)) {
         return;
       }
+      if (align === 'top') {
+        // Keep the first distant jump atomic inside CodeMirror. Directly
+        // writing scrollTop after a separate selection transaction can paint
+        // target content beside gutters from the previous viewport for one
+        // frame. The controller only owns later height-map settlement.
+        const isRevealCurrent = viewportController.beginNavigationReveal();
+        view.dispatch({
+          selection: { anchor: line.from, head: line.from },
+          effects: EditorView.scrollIntoView(line.from, { y: 'start' })
+        });
+        view.focus();
+        requestAnimationFrame(() => {
+          if (!isRevealCurrent()) return;
+          const targetLine = view.state.doc.line(Math.min(line.number, view.state.doc.lines));
+          viewportController.restoreTopVisibleLine(targetLine.number, 0, undefined, { force: true });
+        });
+        return;
+      }
       const targetIsVisible = align === 'upper' && isPositionVisible(line.from);
       const effectiveAlign = targetIsVisible ? 'nearest' : align;
       applyRevealSelection(line.from, line.from, { focusEditor: true, align: effectiveAlign }, true);
-      if (align === 'top') {
-        // Outline navigation must survive delayed block-widget measurements.
-        restoreTopVisibleLine(line.number, 0, { syncCursor: false });
-      }
     },
     restoreTopLine(lineNumber: number, lineOffset: number, { syncCursor = true, force = false }: { syncCursor?: boolean; force?: boolean } = {}) {
       restoreTopVisibleLine(lineNumber, lineOffset, { syncCursor, force });

@@ -14,7 +14,6 @@ export type AppearanceWebviewAdapterDependencies = {
   readonly refreshMermaidTheme: () => void;
   readonly applyWithEditorViewportPreserved: (action: () => void) => void;
   readonly refreshEditorDecorations: () => void;
-  readonly refreshPreview: () => void;
   readonly syncPreviewAutoAppearance: () => void;
   readonly postEditorAppearance: (appearance: EditorAppearance) => void;
   readonly reportUnexpectedError: (context: string, error: unknown) => void;
@@ -36,11 +35,12 @@ export function createAppearanceWebviewAdapter(
   dependencies: AppearanceWebviewAdapterDependencies
 ): AppearanceWebviewAdapter {
   let vscodeTheme: CodeThemeDto | null | undefined;
+  let vscodeAppearance: 'light' | 'dark' = 'dark';
   let appearancePreference: EditorAppearance = 'auto';
   let appearance: 'light' | 'dark' = 'dark';
 
   const resolveAppearance = (): 'light' | 'dark' => (
-    appearancePreference === 'auto' ? vscodeTheme?.type ?? 'dark' : appearancePreference
+    appearancePreference === 'auto' ? vscodeAppearance : appearancePreference
   );
 
   const applyCodePalette = (): void => {
@@ -50,6 +50,7 @@ export function createAppearanceWebviewAdapter(
   return {
     start(input) {
       vscodeTheme = input.vscodeTheme;
+      vscodeAppearance = input.vscodeTheme?.type ?? 'dark';
       appearancePreference = input.appearance;
       appearance = resolveAppearance();
       dependencies.setAppearanceControl(appearancePreference);
@@ -85,6 +86,7 @@ export function createAppearanceWebviewAdapter(
       if (message.type !== 'vscodeCodeThemeChanged') return false;
       try {
         vscodeTheme = message.vscodeTheme;
+        vscodeAppearance = message.appearance;
         const nextAppearance = resolveAppearance();
         appearance = nextAppearance;
         dependencies.applyWithEditorViewportPreserved(() => {
@@ -96,7 +98,6 @@ export function createAppearanceWebviewAdapter(
           dependencies.refreshEditorDecorations();
           dependencies.syncPreviewAutoAppearance();
         });
-        dependencies.refreshPreview();
       } catch (error) {
         dependencies.reportUnexpectedError('vscodeCodeThemeChanged handler', error);
       }

@@ -10,6 +10,8 @@ export type UiStrings = Readonly<{
   previewAppearance: string;
   previewSourceColoring: string;
   previewCodeColors: string;
+  previewCodeColorsOn: string;
+  previewCodeColorsOff: string;
   previewFontFamily: string;
   previewFontPlaceholder: string;
   previewFontUnavailable: string;
@@ -24,6 +26,9 @@ export type UiStrings = Readonly<{
   more: string;
   moreTools: string;
   editorAppearance: string;
+  interfaceLanguage: string;
+  showLineNumbers: string;
+  foldLongCodeBlocks: string;
   findAndReplacePanel: string;
   find: string;
   replace: string;
@@ -189,14 +194,17 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   en: Object.freeze({
     auto: 'Auto', light: 'Light', dark: 'Dark', previewTitle: 'Markdown Preview',
     previewAppearance: 'Preview appearance', previewSourceColoring: 'Preview source coloring',
-    previewCodeColors: 'Code colors', previewFontFamily: 'Preview font family',
+    previewCodeColors: 'Code colors', previewCodeColorsOn: 'On', previewCodeColorsOff: 'Off',
+    previewFontFamily: 'Preview font family',
     previewFontPlaceholder: 'VS Code editor font',
     previewFontUnavailable: 'Local font list unavailable; type a family name',
     previewGenerating: 'Generating preview…',
     previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
     exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportAsHtml: 'Export as HTML',
-    exportAsPdf: 'Export as PDF', findAndReplace: 'Find and Replace', more: 'More',
-    moreTools: 'More tools', editorAppearance: 'Editor appearance',
+    exportAsPdf: 'Export as PDF', findAndReplace: 'Find and Replace', more: 'Settings',
+    moreTools: 'Settings', editorAppearance: 'Editor appearance',
+    interfaceLanguage: 'Interface language', showLineNumbers: 'Show line numbers',
+    foldLongCodeBlocks: 'Fold long code blocks',
     findAndReplacePanel: 'Find and replace', find: 'Find', replace: 'Replace',
     clearFind: 'Clear Find', clearReplace: 'Clear Replace', wholeWord: 'Whole Word',
     caseSensitive: 'Case Sensitive', previousMatch: 'Previous Match', nextMatch: 'Next Match',
@@ -206,7 +214,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     replacedCurrent: (current: number, total: number) => `Replaced • ${current}/${total}`,
     replacedRemaining: (count: number) => `Replaced • ${count} remaining`,
     replacedMatches: (count: number) => `Replaced ${count} matches`,
-    documentOutline: 'Document outline', outline: 'Outline', outlineCollapseTopTwo: 'Show top two levels',
+    documentOutline: 'Document outline', outline: 'Outline', outlineCollapseTopTwo: 'Show top level only',
     outlineExpandAll: 'Expand all', outlineSwitchFixed: 'Switch to fixed outline',
     outlineSwitchFloating: 'Switch to floating outline', outlineSwitchLeft: 'Switch to left side',
     outlineSwitchRight: 'Switch to right side', outlineClose: 'Close outline',
@@ -260,7 +268,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
     showOutlineLeft: 'Show Outline on Left', showOutlineRight: 'Show Outline on Right',
     codeBlock: 'Code Block', quote: 'Quote', horizontalRule: 'Horizontal Rule',
-    link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Line',
+    link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Lines',
     goToLine: 'Go to line', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
     reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Reload disk version (double-click)',
     constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
@@ -285,14 +293,16 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   'zh-CN': Object.freeze({
     auto: '自动', light: '浅色', dark: '深色', previewTitle: 'Markdown 预览',
     previewAppearance: '预览外观', previewSourceColoring: '预览源码着色',
-    previewCodeColors: '代码着色', previewFontFamily: '预览字体',
+    previewCodeColors: '代码着色', previewCodeColorsOn: '开启', previewCodeColorsOff: '关闭',
+    previewFontFamily: '预览字体',
     previewFontPlaceholder: 'VS Code 编辑器字体',
     previewFontUnavailable: '无法获取本地字体列表；请手动输入字体名称',
     previewGenerating: '正在生成预览…',
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
-    findAndReplace: '查找和替换', more: '更多', moreTools: '更多工具',
-    editorAppearance: '编辑器外观', findAndReplacePanel: '查找和替换', find: '查找',
+    findAndReplace: '查找和替换', more: '设置', moreTools: '设置',
+    editorAppearance: '编辑器外观', interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
+    foldLongCodeBlocks: '折叠长代码块', findAndReplacePanel: '查找和替换', find: '查找',
     replace: '替换', clearFind: '清除查找内容', clearReplace: '清除替换内容',
     wholeWord: '全字匹配', caseSensitive: '区分大小写', previousMatch: '上一个匹配项',
     nextMatch: '下一个匹配项', closeFind: '关闭查找', replaceCurrentMatch: '替换当前匹配项',
@@ -301,7 +311,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     replacedCurrent: (current: number, total: number) => `已替换 • ${current}/${total}`,
     replacedRemaining: (count: number) => `已替换 • 剩余 ${count} 个`,
     replacedMatches: (count: number) => `已替换 ${count} 个匹配项`,
-    documentOutline: '文档目录', outline: '目录', outlineCollapseTopTwo: '只展开前两层',
+    documentOutline: '文档目录', outline: '目录', outlineCollapseTopTwo: '只显示一级标题',
     outlineExpandAll: '展开全部', outlineSwitchFixed: '切换到固定目录',
     outlineSwitchFloating: '切换到浮动目录', outlineSwitchLeft: '切换到左侧',
     outlineSwitchRight: '切换到右侧', outlineClose: '关闭目录',
@@ -354,7 +364,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
     horizontalRule: '分隔线', link: '链接', wikiLink: 'Wiki 链接', image: '图片', table: '表格',
-    line: '行', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
+    line: '行号', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
     reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '重新加载磁盘版本（双击）',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',

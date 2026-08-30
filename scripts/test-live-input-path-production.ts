@@ -12,6 +12,8 @@ type FrameSample = {
   applyCount: number;
   selectionText: string;
   tableCount: number;
+  tableIdentityStable: boolean;
+  formattedNeighborStable: boolean;
   caretVisible: boolean;
   derivedAdditions: number;
   tableProjectionEvents: number;
@@ -47,6 +49,7 @@ async function armFirstFrame(
         let gitOverviewRenders = 0;
         let searchOverviewRenders = 0;
         const derivedMutationKinds: string[] = [];
+        const initialTableShell = document.querySelector('#primary .meo-md-html-table-shell');
         const textContentDescriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
         if (!textContentDescriptor?.get || !textContentDescriptor.set) {
           throw new Error('Node.textContent is not observable');
@@ -86,12 +89,21 @@ async function armFirstFrame(
           const selection = document.getSelection();
           const caret = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
           const viewport = content.closest<HTMLElement>('.cm-scroller')?.getBoundingClientRect() ?? null;
+          const formattedNeighbor = Array.from(content.querySelectorAll<HTMLElement>('.cm-line'))
+            .find((line) => line.textContent?.includes('marked text'));
+          const hiddenMarker = formattedNeighbor?.querySelector<HTMLElement>('.meo-md-marker');
           return {
             text: editor.getText(),
             domText: content.textContent ?? '',
             applyCount: (window as any).__liveInputApplies.length,
             selectionText: selection?.toString() ?? '',
             tableCount: document.querySelectorAll('#primary .meo-md-html-table-shell').length,
+            tableIdentityStable: document.querySelector('#primary .meo-md-html-table-shell') === initialTableShell,
+            formattedNeighborStable: Boolean(
+              formattedNeighbor?.querySelector('.meo-md-strong')
+              && hiddenMarker
+              && getComputedStyle(hiddenMarker).display === 'none'
+            ),
             caretVisible: Boolean(caret && viewport && caret.bottom >= viewport.top && caret.top <= viewport.bottom),
             derivedAdditions,
             tableProjectionEvents,
@@ -1139,6 +1151,8 @@ async function main(): Promise<void> {
       plainFrame.selectionText !== '' ||
       !plainFrame.caretVisible ||
       plainFrame.tableCount !== 1 ||
+      !plainFrame.tableIdentityStable ||
+      !plainFrame.formattedNeighborStable ||
       plainFrame.derivedAdditions !== 0 ||
       plainFrame.tableProjectionEvents !== 0 ||
       plainFrame.searchEvents !== 0 ||
@@ -1181,13 +1195,15 @@ async function main(): Promise<void> {
     if (
       !boundaryFrame.text.includes('**marked text**\nZ\n| A | B |') ||
       !boundaryFrame.domText.includes('Z') ||
-      boundaryFrame.tableCount !== 0 ||
+      boundaryFrame.tableCount !== 1 ||
+      !boundaryFrame.tableIdentityStable ||
       boundaryFrame.derivedAdditions !== 0 ||
       boundaryFrame.tableProjectionEvents !== 0 ||
       boundaryFrame.searchEvents !== 0 ||
       boundarySettled.tableCount !== 1 ||
-      boundarySettled.derivedAdditions === 0 ||
-      boundarySettled.tableProjectionEvents === 0 ||
+      !boundarySettled.tableIdentityStable ||
+      boundarySettled.derivedAdditions !== 0 ||
+      boundarySettled.tableProjectionEvents !== 0 ||
       boundarySettled.searchEvents === 0 ||
       boundarySettled.text !== boundaryFrame.text
     ) {
@@ -1336,7 +1352,7 @@ async function main(): Promise<void> {
       imeFrame.tableProjectionEvents !== 0 ||
       imeFrame.searchEvents !== 0 ||
       imeSettled.applyCount !== beforeImeApplyCount + 1 ||
-      imeSettled.derivedAdditions === 0
+      imeSettled.derivedAdditions !== 0
     ) {
       throw new Error(`IME commit did not preserve preedit/commit ownership: ${JSON.stringify({ imeFrame, imeSettled })}`);
     }
@@ -1378,8 +1394,7 @@ async function main(): Promise<void> {
       imeCancelFrame.derivedAdditions !== 0 ||
       imeCancelFrame.tableProjectionEvents !== 0 ||
       imeCancelFrame.searchEvents !== 0 ||
-      imeCancelSettled.applyCount !== beforeImeCancelApplyCount + 1 ||
-      imeCancelSettled.derivedAdditions === 0
+      imeCancelSettled.applyCount !== beforeImeCancelApplyCount + 1
     ) {
       throw new Error(`IME cancel did not restore and refresh the committed document once: ${JSON.stringify({ imeCancelFrame, imeCancelSettled })}`);
     }

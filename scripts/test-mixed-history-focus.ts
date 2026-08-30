@@ -103,6 +103,15 @@ async function main() {
       (window as any).__mixedHistoryEditor.commitTransientEdits();
     });
     await waitForFrames(page);
+    const committedTableLines = await page.evaluate(() => (
+      (window as any).__mixedHistoryEditor.getText().split('\n').filter((line: string) => line.includes('|'))
+    ));
+    if (
+      !committedTableLines.includes('| row | TABLE_EDIT |') ||
+      !committedTableLines.includes('| --- | --- |')
+    ) {
+      throw new Error(`Table cell edit was committed to the wrong source row: ${JSON.stringify(committedTableLines)}`);
+    }
 
     await page.evaluate(() => {
       const editor = (window as any).__mixedHistoryEditor;
@@ -181,38 +190,47 @@ async function main() {
 
     await pressHistoryShortcut(page, 'z');
     await pressHistoryShortcut(page, 'z');
-    const afterSecondUndo = await page.evaluate(() => ({
-      text: (window as any).__mixedHistoryEditor.view.state.doc.toString(),
-      mathSplit: Boolean(document.querySelector('.meo-latex-math-editing-block.is-split')),
-      mathFocused: Boolean((document.querySelector('.meo-latex-math-editing-block') as any)
-        ?.__meoLatexMathEditingController?.innerView?.hasFocus)
-    }));
-    if (afterSecondUndo.text.includes('y = 2') || !afterSecondUndo.mathSplit || !afterSecondUndo.mathFocused) {
-      throw new Error(`Second mixed undo did not focus the formula change: ${JSON.stringify(afterSecondUndo)}`);
+    const afterSecondUndo = await page.evaluate(() => {
+      const editor = (window as any).__mixedHistoryEditor;
+      const button = document.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
+      const rect = button?.getBoundingClientRect();
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return {
+        text: editor.view.state.doc.toString(),
+        mode: button?.getAttribute('aria-label') ?? null,
+        outerFocused: editor.view.hasFocus,
+        targetVisible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom)
+      };
+    });
+    if (
+      afterSecondUndo.text.includes('y = 2') ||
+      afterSecondUndo.mode !== 'Edit formula in split view' ||
+      !afterSecondUndo.outerFocused || !afterSecondUndo.targetVisible
+    ) {
+      throw new Error(`Second mixed undo did not restore the formula Preview target: ${JSON.stringify(afterSecondUndo)}`);
     }
 
     await pressHistoryShortcut(page, 'z');
     const afterThirdUndo = await page.evaluate(() => {
       const editor = (window as any).__mixedHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
-      const rect = block?.getBoundingClientRect();
+      const button = document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
+      const rect = button?.getBoundingClientRect();
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       return {
         text: editor.view.state.doc.toString(),
-        mermaidSplit: Boolean(block?.classList.contains('is-split')),
-        mermaidFocused: Boolean(innerView?.hasFocus),
+        mode: button?.getAttribute('aria-label') ?? null,
+        outerFocused: editor.view.hasFocus,
         mermaidVisible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom),
         activeClass: (document.activeElement as HTMLElement | null)?.className?.toString() ?? null
       };
     });
     if (
       afterThirdUndo.text.includes('C --> D') ||
-      !afterThirdUndo.mermaidSplit ||
-      !afterThirdUndo.mermaidFocused ||
+      afterThirdUndo.mode !== 'Edit Mermaid in split view' ||
+      !afterThirdUndo.outerFocused ||
       !afterThirdUndo.mermaidVisible
     ) {
-      throw new Error(`Third mixed undo changed content without moving the cursor: ${JSON.stringify(afterThirdUndo)}`);
+      throw new Error(`Third mixed undo did not restore the Mermaid Preview target: ${JSON.stringify(afterThirdUndo)}`);
     }
 
     const readOuterLineFocus = (needle: string) => page.evaluate((lineNeedle) => {
@@ -292,37 +310,43 @@ async function main() {
     await pressHistoryShortcut(page, 'y');
     const afterMermaidRedo = await page.evaluate(() => {
       const editor = (window as any).__mixedHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block');
-      const innerView = (block as any)?.__meoMermaidEditingController?.innerView;
-      const rect = block?.getBoundingClientRect();
+      const button = document.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
+      const rect = button?.getBoundingClientRect();
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       return {
         text: editor.view.state.doc.toString(),
-        split: Boolean(block?.classList.contains('is-split')),
-        focused: Boolean(innerView?.hasFocus),
+        mode: button?.getAttribute('aria-label') ?? null,
+        outerFocused: editor.view.hasFocus,
         targetVisible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom)
       };
     });
-    if (!afterMermaidRedo.text.includes('C --> D') || !afterMermaidRedo.split || !afterMermaidRedo.focused || !afterMermaidRedo.targetVisible) {
-      throw new Error(`Mixed redo did not focus the Mermaid change: ${JSON.stringify(afterMermaidRedo)}`);
+    if (
+      !afterMermaidRedo.text.includes('C --> D') ||
+      afterMermaidRedo.mode !== 'Edit Mermaid in split view' ||
+      !afterMermaidRedo.outerFocused || !afterMermaidRedo.targetVisible
+    ) {
+      throw new Error(`Mixed redo did not restore the Mermaid Preview target: ${JSON.stringify(afterMermaidRedo)}`);
     }
 
     await pressHistoryShortcut(page, 'y');
     const afterMathRedo = await page.evaluate(() => {
       const editor = (window as any).__mixedHistoryEditor;
-      const block = document.querySelector<HTMLElement>('.meo-latex-math-editing-block');
-      const innerView = (block as any)?.__meoLatexMathEditingController?.innerView;
-      const rect = block?.getBoundingClientRect();
+      const button = document.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
+      const rect = button?.getBoundingClientRect();
       const viewport = editor.view.scrollDOM.getBoundingClientRect();
       return {
         text: editor.view.state.doc.toString(),
-        split: Boolean(block?.classList.contains('is-split')),
-        focused: Boolean(innerView?.hasFocus),
+        mode: button?.getAttribute('aria-label') ?? null,
+        outerFocused: editor.view.hasFocus,
         targetVisible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom)
       };
     });
-    if (!afterMathRedo.text.includes('y = 2') || !afterMathRedo.split || !afterMathRedo.focused || !afterMathRedo.targetVisible) {
-      throw new Error(`Mixed redo did not focus the formula change: ${JSON.stringify(afterMathRedo)}`);
+    if (
+      !afterMathRedo.text.includes('y = 2') ||
+      afterMathRedo.mode !== 'Edit formula in split view' ||
+      !afterMathRedo.outerFocused || !afterMathRedo.targetVisible
+    ) {
+      throw new Error(`Mixed redo did not restore the formula Preview target: ${JSON.stringify(afterMathRedo)}`);
     }
 
     await pressHistoryShortcut(page, 'y');

@@ -27,11 +27,17 @@ assert.deepEqual(
 const english = getUiStrings('en');
 const chinese = getUiStrings('zh-CN');
 assert.equal(english.exportHtml, 'Export HTML');
+assert.deepEqual([english.more, english.moreTools], ['Settings', 'Settings']);
+assert.deepEqual([chinese.more, chinese.moreTools], ['设置', '设置']);
+assert.equal(english.line, 'Lines');
+assert.equal(chinese.line, '行号');
 assert.equal(chinese.exportHtml, '导出 HTML');
 assert.equal(english.findMatches(2), '2 matches');
 assert.equal(chinese.findMatches(2), '2 个匹配项');
 assert.equal(chinese.replacedRemaining(3), '已替换 • 剩余 3 个');
 assert.equal(chinese.outlineNoHeadings, '暂无标题');
+assert.equal(chinese.outlineCollapseTopTwo, '只显示一级标题');
+assert.equal(english.outlineCollapseTopTwo, 'Show top level only');
 assert.equal(chinese.previewFontUnavailable, '无法获取本地字体列表；请手动输入字体名称');
 assert.equal(chinese.untitled, '未命名');
 assert.equal(chinese.backToTop, '回到顶部');
@@ -67,6 +73,13 @@ assert.equal(Object.isFrozen(chinese), true);
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const packageText = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8');
+const packageManifest = JSON.parse(packageText) as {
+  contributes?: { commands?: Array<{ command?: string; title?: string }> };
+};
+assert.equal(
+  packageManifest.contributes?.commands?.find((command) => command.command === 'meoEnhanced.toggleEditor')?.title,
+  'MEO+'
+);
 const englishNls = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.nls.json'), 'utf8')) as Record<string, string>;
 const chineseNls = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.nls.zh-cn.json'), 'utf8')) as Record<string, string>;
 const referencedNlsKeys = [...packageText.matchAll(/%([^%]+)%/g)].map((match) => match[1]);

@@ -27,6 +27,8 @@ export type MermaidDiagramPresentationConsumer = {
   /** Keeps shared work reusable while this Editor remains in Live mode. */
   acquire(): () => void;
   create(view: MermaidDiagramPresentationView): MermaidDiagramPresentationHandle;
+  /** Warms one content-addressed SVG result without mounting diagram DOM. */
+  preload(request: MermaidDiagramRenderRequest): Promise<void>;
   getCached(request: MermaidDiagramRenderRequest): MermaidDiagramRenderResult | null;
   getHeight(key: string): number | null;
   rememberHeight(key: string, height: number): void;
@@ -107,6 +109,15 @@ export function createMermaidDiagramPresentationFactory(
           };
           handles.add(handle);
           return handle;
+        },
+        preload(request) {
+          if (consumerDisposed || !activeGroup || options.resources.getCached(request)) {
+            return Promise.resolve();
+          }
+          const resources = activeGroup.createLeaf();
+          return resources.render({ ...request, priority: 'normal' })
+            .then(() => undefined)
+            .finally(() => resources.release());
         },
         getCached: (request) => options.resources.getCached(request),
         getHeight: (key) => options.resources.getHeight(key),

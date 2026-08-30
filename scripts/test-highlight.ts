@@ -73,6 +73,8 @@ try {
     '| --- |',
     '| ==表格 **粗体**== |',
     '',
+    '上下标 H~2~O x^2^ CO~2~',
+    '',
     '格式化目标'
   ].join('\n');
 
@@ -111,7 +113,9 @@ try {
         leftInset: firstButtonRect ? firstButtonRect.left - menuRect.left : null,
         rightInset: lastButtonRect ? menuRect.right - lastButtonRect.right : null
       },
-      headingHighlight: editor.getHeadings()[0]?.inlineSegments?.some((segment: any) => segment.highlight) ?? false
+      headingHighlight: editor.getHeadings()[0]?.inlineSegments?.some((segment: any) => segment.highlight) ?? false,
+      subscripts: Array.from(document.querySelectorAll('.meo-md-subscript')).map((node) => node.textContent),
+      superscripts: Array.from(document.querySelectorAll('.meo-md-superscript')).map((node) => node.textContent)
     };
   }, source);
 
@@ -137,6 +141,12 @@ try {
     !live.headingHighlight
   ) {
     throw new Error(`Highlight integration is incomplete: ${JSON.stringify(live)}`);
+  }
+  if (
+    JSON.stringify(live.subscripts) !== JSON.stringify(['2', '2'])
+    || JSON.stringify(live.superscripts) !== JSON.stringify(['2'])
+  ) {
+    throw new Error(`Live subscript/superscript rendering is incomplete: ${JSON.stringify(live)}`);
   }
   const toolbarInsets = [
     live.toolbarGeometry.topInset,

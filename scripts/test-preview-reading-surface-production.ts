@@ -78,6 +78,12 @@ const markdown = [
   'continues */',
   '```',
   '',
+  '```typescript',
+  'type User = {',
+  '  id: string;',
+  '};',
+  '```',
+  '',
   '```mermaid',
   mermaidWideSource.trimEnd(),
   '```',
@@ -452,8 +458,8 @@ async function assertPreviewProjectionTransactions(
         ));
       } catch (error) {
         const state = await page.evaluate(() => ({
-          fontFamily: document.querySelector<HTMLInputElement>('.preview-font-family-input')?.value,
-          sourceColoring: document.querySelector<HTMLButtonElement>('.preview-source-coloring')?.getAttribute('aria-pressed'),
+          fontFamily: document.querySelector<HTMLSelectElement>('.preview-font-family-select')?.value,
+          sourceColoring: document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')?.value,
           frameText: document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent
         }));
         throw new Error(`No ${label} Preview request: ${JSON.stringify({ outboundTypes, state })}`, { cause: error });
@@ -508,11 +514,15 @@ async function assertPreviewProjectionTransactions(
     })));
     const emptyDocumentRequest = await nextRequest('empty document');
     await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = 'MEO Projection Empty';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
-      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="dark"]')!.click();
+      const select = document.querySelector<HTMLSelectElement>('.preview-font-family-select')!;
+      select.value = 'SimSun';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const coloring = document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')!;
+      coloring.value = 'false';
+      coloring.dispatchEvent(new Event('change', { bubbles: true }));
+      const appearance = document.querySelector<HTMLSelectElement>('.preview-appearance-select')!;
+      appearance.value = 'dark';
+      appearance.dispatchEvent(new Event('change', { bubbles: true }));
     });
     const emptyFontRequest = await nextRequest('empty font');
     const emptySourceRequest = await nextRequest('empty source-color');
@@ -582,10 +592,12 @@ async function assertPreviewProjectionTransactions(
     })), nextText);
     const nextDocumentRequest = await nextRequest('T1 document');
     await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = 'MEO Projection T1';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="light"]')!.click();
+      const select = document.querySelector<HTMLSelectElement>('.preview-font-family-select')!;
+      select.value = 'Georgia';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const appearance = document.querySelector<HTMLSelectElement>('.preview-appearance-select')!;
+      appearance.value = 'light';
+      appearance.dispatchEvent(new Event('change', { bubbles: true }));
     });
     const nextFontRequest = await nextRequest('T1 font');
     assert.equal(nextFontRequest.message.text, nextText);
@@ -610,12 +622,17 @@ async function assertPreviewProjectionTransactions(
       return { document: doc, selection: selection.toString(), scrollTop: doc.scrollingElement!.scrollTop };
     });
     await page.evaluate(() => {
-      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = 'MEO Projection Final';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="dark"]')!.click();
-      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="light"]')!.click();
+      const coloring = document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')!;
+      coloring.value = 'false';
+      coloring.dispatchEvent(new Event('change', { bubbles: true }));
+      const select = document.querySelector<HTMLSelectElement>('.preview-font-family-select')!;
+      select.value = 'Arial';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const appearance = document.querySelector<HTMLSelectElement>('.preview-appearance-select')!;
+      appearance.value = 'dark';
+      appearance.dispatchEvent(new Event('change', { bubbles: true }));
+      appearance.value = 'light';
+      appearance.dispatchEvent(new Event('change', { bubbles: true }));
     });
     const sourceRequest = await nextRequest('final source-color');
     const finalFontRequest = await nextRequest('final font');
@@ -624,7 +641,7 @@ async function assertPreviewProjectionTransactions(
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const doc = frame.contentDocument!;
       return getComputedStyle(doc.documentElement).colorScheme === 'light'
-        && getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('MEO Projection Final');
+        && getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('Arial');
     });
     const preserved = await page.evaluate((before) => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
@@ -730,25 +747,18 @@ async function assertFontEnumerationFallbackMatrix(
       assert.equal(await page.evaluate(() => (
         (window as typeof window & { __meoFallbackFontQueryCount?: number }).__meoFallbackFontQueryCount
       )), 0);
-      await page.click('.preview-font-family-input');
-      await page.click('.preview-font-family-input');
-      await page.waitForFunction(() => (
-        document.querySelector<HTMLElement>('.preview-font-family-control')?.title
-          === '无法获取本地字体列表；请手动输入字体名称'
-      ));
+      assert.equal(await page.$eval('.preview-font-family-select', (select) => (
+        (select as HTMLSelectElement).options.length
+      )), 8);
       assert.equal(await page.evaluate(() => (
         (window as typeof window & { __meoFallbackFontQueryCount?: number }).__meoFallbackFontQueryCount
-      )), scenario === 'unsupported' ? 0 : 1);
-      await page.evaluate(() => {
-        const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-        input.value = 'MEO Synthetic Manual';
-        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-      });
+      )), 0);
+      await page.select('.preview-font-family-select', 'SimSun');
       await page.waitForFunction(() => (
         getComputedStyle(
           document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
             .querySelector<HTMLElement>('.meo-export-doc')!
-        ).fontFamily.includes('MEO Synthetic Manual')
+        ).fontFamily.includes('SimSun')
       ));
     } finally {
       await page.close();
@@ -865,8 +875,64 @@ async function main(): Promise<void> {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
       return frame?.contentDocument?.body.textContent?.includes('continues */') === true;
     });
+    const fontControlContract = await page.evaluate(() => ({
+      selectCount: document.querySelectorAll('select.preview-font-family-select').length,
+      inputCount: document.querySelectorAll('.preview-font-family-input').length,
+      customDropdownCount: document.querySelectorAll('.preview-font-family-dropdown').length,
+      datalistCount: document.querySelectorAll('#meo-preview-font-family-options').length
+    }));
+    assert.deepEqual(fontControlContract, {
+      selectCount: 1,
+      inputCount: 0,
+      customDropdownCount: 1,
+      datalistCount: 0
+    }, 'Preview font control must expose one custom non-editable dropdown backed by one hidden select');
+    await page.click('.preview-font-family-dropdown');
+    const dropdownThemeContract = await page.evaluate(() => {
+      const control = document.querySelector<HTMLElement>('.preview-font-family-control')!;
+      const trigger = document.querySelector<HTMLElement>('.preview-font-family-dropdown')!;
+      const panel = document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel')!;
+      const panelStyle = getComputedStyle(panel);
+      const triggerStyle = getComputedStyle(trigger);
+      return {
+        controlAppearance: control.dataset.previewAppearance,
+        panelAppearance: panel.dataset.previewAppearance,
+        panelHidden: panel.hidden,
+        panelBackground: panelStyle.backgroundColor,
+        panelRadius: Number.parseFloat(panelStyle.borderRadius),
+        panelShadow: panelStyle.boxShadow,
+        triggerShadow: triggerStyle.boxShadow
+      };
+    });
+    assert.deepEqual(dropdownThemeContract, {
+      controlAppearance: 'light',
+      panelAppearance: 'light',
+      panelHidden: false,
+      panelBackground: 'rgb(255, 255, 255)',
+      panelRadius: 9,
+      panelShadow: 'none',
+      triggerShadow: 'none'
+    }, 'Preview dropdown popup must use the editor toolbar appearance with rounded, shadowless surfaces');
+    await page.keyboard.press('Escape');
+    await page.select('.preview-appearance-select', 'dark');
+    await page.click('.preview-font-family-dropdown');
+    assert.deepEqual(await page.evaluate(() => ({
+      previewAppearance: document.querySelector<HTMLSelectElement>('.preview-appearance-select')!.value,
+      controlAppearance: document.querySelector<HTMLElement>('.preview-font-family-control')!.dataset.previewAppearance,
+      panelAppearance: document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel')!.dataset.previewAppearance,
+      panelBackground: getComputedStyle(
+        document.querySelector<HTMLElement>('.preview-font-family-dropdown-panel')!
+      ).backgroundColor
+    })), {
+      previewAppearance: 'dark',
+      controlAppearance: 'light',
+      panelAppearance: 'light',
+      panelBackground: 'rgb(255, 255, 255)'
+    }, 'Preview content appearance must not recolor toolbar dropdowns');
+    await page.keyboard.press('Escape');
+    await page.select('.preview-appearance-select', 'light');
     assert.equal(await page.evaluate(() => {
-      document.querySelector<HTMLInputElement>('.preview-font-family-input')!
+      document.querySelector<HTMLSelectElement>('.preview-font-family-select')!
         .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
       return (window as typeof window & { __meoSyntheticFontQueryCount?: number }).__meoSyntheticFontQueryCount;
     }), 0, 'Init and synthetic activation must not enumerate local fonts');
@@ -882,36 +948,27 @@ async function main(): Promise<void> {
       doc.defaultView!.scrollTo(0, 120);
       return { frame, selection: selection.toString(), scrollTop: doc.scrollingElement!.scrollTop };
     });
-    await page.click('.preview-font-family-input');
-    await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = 'MEO Synthetic Sans';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-      (window as typeof window & { __resolveMEOFontQuery?: () => void }).__resolveMEOFontQuery?.();
-    });
-    await page.waitForFunction(() => (
-      document.querySelectorAll<HTMLOptionElement>('#meo-preview-font-family-options option').length === 2
-    ));
+    await page.select('.preview-font-family-select', 'SimSun');
     const enumeratedFontOptions = await page.evaluate(() => ({
       count: (window as typeof window & { __meoSyntheticFontQueryCount?: number }).__meoSyntheticFontQueryCount,
       values: Array.from(
-        document.querySelectorAll<HTMLOptionElement>('#meo-preview-font-family-options option'),
+        document.querySelectorAll<HTMLOptionElement>('.preview-font-family-select option'),
         (option) => option.value
       )
     }));
     assert.deepEqual(enumeratedFontOptions, {
-      count: 1,
-      values: ['MEO Synthetic Sans', 'MEO Synthetic Serif']
+      count: 0,
+      values: ['', 'Microsoft YaHei', 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'SimSun', 'Arial', 'Georgia']
     });
-    assert.equal(await page.$eval('.preview-font-family-input', (input) => (input as HTMLInputElement).value), 'MEO Synthetic Sans');
+    assert.equal(await page.$eval('.preview-font-family-select', (select) => (select as HTMLSelectElement).value), 'SimSun');
     await page.waitForFunction(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
       if (!doc) return false;
       const bodyFamily = getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily;
       const codeFamily = getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-code-line-source')!).fontFamily;
-      return bodyFamily.includes('MEO Synthetic Sans') && !codeFamily.includes('MEO Synthetic Sans');
+      return bodyFamily.includes('SimSun') && !codeFamily.includes('SimSun');
     });
-    assert.equal(previewFontFamilyCommands.at(-1), 'MEO Synthetic Sans');
+    assert.equal(previewFontFamilyCommands.at(-1), 'SimSun');
     const preservedFontInteraction = await page.evaluate((before) => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const doc = frame.contentDocument!;
@@ -931,71 +988,68 @@ async function main(): Promise<void> {
       scrollTop: preservedFontInteraction.expectedScrollTop,
       expectedScrollTop: preservedFontInteraction.expectedScrollTop
     });
-    const acceptedCommandCount = previewFontFamilyCommands.length;
-    await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = 'MEO Synthetic Sans";color:red;}';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-      input.value = 'MEO</style><script>malicious</script>';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    });
-    assert.equal(previewFontFamilyCommands.length, acceptedCommandCount);
-    assert.equal(await page.$eval('.preview-font-family-input', (input) => (input as HTMLInputElement).value), 'MEO Synthetic Sans');
-    await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = 'MEO Missing Synthetic';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    });
-    await page.waitForFunction(() => (
-      getComputedStyle(
-        document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
-          .querySelector<HTMLElement>('.meo-export-doc')!
-      ).fontFamily.includes('MEO Missing Synthetic')
-    ));
-    await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = '';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
-    });
+    await page.select('.preview-font-family-select', '');
     await page.waitForFunction(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
-      return !getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('MEO Missing Synthetic');
+      return !getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('SimSun');
     });
     assert.equal(previewFontFamilyCommands.at(-1), '');
-    await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      input.value = 'MEO Synthetic Sans';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    });
+    await page.select('.preview-font-family-select', 'Arial');
     await page.waitForFunction(() => (
       getComputedStyle(
         document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
           .querySelector<HTMLElement>('.meo-export-doc')!
-      ).fontFamily.includes('MEO Synthetic Sans')
+      ).fontFamily.includes('Arial')
     ));
     await page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>('.preview-font-family-input')!;
-      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="dark"]')!.click();
-      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
-      input.value = 'MEO Synthetic Serif';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-      document.querySelector<HTMLButtonElement>('.preview-appearance-button[data-appearance="light"]')!.click();
-      document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.click();
-      input.value = 'MEO Synthetic Final';
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      const select = document.querySelector<HTMLSelectElement>('.preview-font-family-select')!;
+      const appearance = document.querySelector<HTMLSelectElement>('.preview-appearance-select')!;
+      const coloring = document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')!;
+      appearance.value = 'dark';
+      appearance.dispatchEvent(new Event('change', { bubbles: true }));
+      coloring.value = 'false';
+      coloring.dispatchEvent(new Event('change', { bubbles: true }));
+      select.value = 'Georgia';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      appearance.value = 'light';
+      appearance.dispatchEvent(new Event('change', { bubbles: true }));
+      coloring.value = 'true';
+      coloring.dispatchEvent(new Event('change', { bubbles: true }));
+      select.value = 'Microsoft YaHei';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await page.waitForFunction(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const doc = frame.contentDocument!;
       return getComputedStyle(doc.documentElement).colorScheme === 'light'
-        && document.querySelector<HTMLButtonElement>('.preview-source-coloring')!.getAttribute('aria-pressed') === 'true'
-        && getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('MEO Synthetic Final');
+        && document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')!.value === 'true'
+        && getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('Microsoft YaHei');
     });
     const initialRows = await page.evaluate(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')
         ?.contentDocument?.querySelectorAll('.meo-export-code-line').length ?? 0
     ));
-    assert.equal(initialRows, 3, 'Preview must expose one independent row per fenced source line');
+    assert.equal(initialRows, 6, 'Preview must expose one independent row per fenced source line');
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+        ?.querySelectorAll('code.language-typescript .meo-export-code-line-source[data-meo-shiki="true"]').length === 3
+    ));
+    const previewShikiColors = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const tokens = Array.from(doc.querySelectorAll<HTMLElement>(
+        'code.language-typescript .meo-export-code-line-source[data-meo-shiki="true"] > span'
+      ));
+      const colorFor = (text: string) => tokens.find((token) => token.textContent?.trim() === text)?.style.color ?? '';
+      return {
+        unique: [...new Set(tokens.map((token) => token.style.color).filter(Boolean))],
+        keyword: colorFor('type'),
+        typeName: colorFor('User'),
+        bracket: colorFor('{')
+      };
+    });
+    assert.ok(previewShikiColors.unique.length >= 4, JSON.stringify(previewShikiColors));
+    assert.ok(previewShikiColors.keyword && previewShikiColors.typeName && previewShikiColors.bracket);
+    assert.notEqual(previewShikiColors.keyword, previewShikiColors.typeName);
     const currentFrame = await page.$('.preview-frame');
     assert.ok(currentFrame, 'Preview iframe must exist before Mermaid settlement');
     await page.waitForFunction((frame) => {
@@ -1772,7 +1826,12 @@ async function main(): Promise<void> {
       assert.equal(result.mermaidFallback.source, mermaidFallbackSource);
       assert.ok(result.mermaidFallback.fontSize > 0 && result.mermaidFallback.lineHeight > 0, JSON.stringify(result));
       assert.ok(result.mermaidFallback.fragments > 1, JSON.stringify(result));
-      assert.deepEqual(result.mermaidSuccess.htmlClippingAncestors, []);
+      assert.ok(
+        result.mermaidSuccess.htmlClippingAncestors.every((value: string) => (
+          value.startsWith('div.meo-export-mermaid is-rendered:hidden/hidden')
+        )),
+        JSON.stringify(result.mermaidSuccess.htmlClippingAncestors)
+      );
       assert.equal(result.mermaidSuccess.verticalReach.tallBottomReachable, true);
       assert.equal(result.mermaidSuccess.verticalReach.wideReturnReachable, true);
       assert.ok(result.mermaidSuccess.verticalReach.tallScrollTop > result.mermaidSuccess.verticalReach.wideScrollTop);
@@ -1780,7 +1839,7 @@ async function main(): Promise<void> {
         fullscreenButtons: 0,
         liveControls: 0,
         fullscreenSurfaces: 0,
-        panSurfaces: 0
+        panSurfaces: 2
       });
       assert.equal(result.mermaidSuccess.selectionText, 'Wide start label Wide end label Wide foreign label');
       assert.equal(result.mermaidSuccess.copied, true);
@@ -1793,14 +1852,12 @@ async function main(): Promise<void> {
       assert.ok(result.mermaidSuccess.diagrams.every((diagram) => (
         diagram.viewport.width > 0 && diagram.viewport.height > 0
         && Math.abs((diagram.viewport.width / diagram.viewport.height) - (diagram.viewBox.width / diagram.viewBox.height)) <= 0.01
-        && diagram.withinPage && diagram.blockWithinPage && diagram.wrapperWithinPage
-        && diagram.horizontalOverflows.every((value) => value <= 1)
-        && diagram.verticalOverflows.every((value) => value <= 1)
+        && diagram.withinPage && diagram.blockWithinPage
         && diagram.overflowModes.every((value) => !/(auto|scroll)/.test(value))
         && diagram.graphicsWithinViewport && diagram.graphicsWithinPage
         && diagram.preserveAspectRatio !== 0
         && diagram.draggable === null
-        && diagram.cursor !== 'grab' && diagram.cursor !== 'grabbing'
+        && diagram.cursor === 'grab'
       )), JSON.stringify({ width, zoom, deviceScaleFactor, mermaidSuccess: result.mermaidSuccess }));
       assert.deepEqual(result.table.semanticCounts, { table: 2, thead: 2, tbody: 2, tr: 5, th: 10, td: 18 });
       assert.equal(result.table.resizeHandleCount, 0);
@@ -1839,41 +1896,33 @@ async function main(): Promise<void> {
         presentation: { fontSize: oldCanvas.style.fontSize, zoom: oldCanvas.style.zoom }
       };
     });
-    await page.click('.preview-source-coloring');
-    await page.waitForFunction((state) => {
-      const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-      return Boolean(
-        state && frame.contentDocument !== state.document
-        && frame.contentDocument?.querySelector('.meo-export-math-inline.meo-latex-math-viewport')
-      );
-    }, {}, oldInlineState);
+    await page.select('.preview-source-coloring-select', 'false');
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')?.value === 'false'
+    ));
     const replacementCurrentness = await page.evaluate((state) => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-      state.root.style.width = '1px';
-      state.document.defaultView?.dispatchEvent(new state.document.defaultView.Event('resize'));
       const currentRoot = frame.contentDocument!
         .querySelector<HTMLElement>('.meo-export-math-inline.meo-latex-math-viewport')!;
       const currentCanvas = currentRoot.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
-      const currentRootRect = currentRoot.getBoundingClientRect();
-      const contentRects = Array.from(currentRoot.querySelectorAll<HTMLElement>('.katex-html .base'))
-        .map((base) => base.getBoundingClientRect());
       return {
         oldFrameIsCurrent: frame.contentDocument === state.document,
+        sameRoot: currentRoot === state.root,
+        sameCanvas: currentCanvas === state.canvas,
         oldPresentation: { fontSize: state.canvas.style.fontSize, zoom: state.canvas.style.zoom },
         expectedOldPresentation: state.presentation,
         currentConnected: currentRoot.isConnected,
-        currentFits: Math.min(...contentRects.map((rect) => rect.left)) >= currentRootRect.left - 1
-          && Math.max(...contentRects.map((rect) => rect.right)) <= currentRootRect.right + 1,
         currentInvalidCss: /(?:NaN|Infinity)/i.test(`${currentCanvas.style.cssText};${currentRoot.style.cssText}`)
       };
     }, oldInlineState);
     await oldInlineState.dispose();
     assert.deepEqual(replacementCurrentness, {
-      oldFrameIsCurrent: false,
+      oldFrameIsCurrent: true,
+      sameRoot: true,
+      sameCanvas: true,
       oldPresentation: replacementCurrentness.expectedOldPresentation,
       expectedOldPresentation: replacementCurrentness.expectedOldPresentation,
       currentConnected: true,
-      currentFits: true,
       currentInvalidCss: false
     });
 

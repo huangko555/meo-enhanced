@@ -4,7 +4,12 @@ import {
   type CodeThemeDto
 } from './hostConfigurationEvents';
 import { normalizePreviewFontFamily } from './editorStyleEnvironment';
-import { isUiLanguage, type UiLanguage } from '../foundation/uiLanguage';
+import {
+  isUiLanguage,
+  isUiLanguagePreference,
+  type UiLanguage,
+  type UiLanguagePreference
+} from '../foundation/uiLanguage';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
@@ -28,6 +33,8 @@ export type InitMessage = {
   readonly diagnostics: readonly SerializedDiagnostic[];
   readonly mode: EditorMode;
   readonly uiLanguage: UiLanguage;
+  readonly uiLanguagePreference: UiLanguagePreference;
+  readonly automaticUiLanguage: UiLanguage;
   readonly sourceLineNumbers: SourceLineNumberMode;
   readonly previewAppearance: PreviewAppearance;
   readonly previewFontFamily: string;
@@ -86,6 +93,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || !isSavedRevision(value.savedRevision, value.version, value.text)
     || !isEditorMode(value.mode)
     || !isUiLanguage(value.uiLanguage)
+    || (value.uiLanguagePreference !== undefined && !isUiLanguagePreference(value.uiLanguagePreference))
+    || (value.automaticUiLanguage !== undefined && !isUiLanguage(value.automaticUiLanguage))
     || !isSourceLineNumberMode(value.sourceLineNumbers)
     || !isPreviewAppearance(value.previewAppearance)
     || previewFontFamily === null
@@ -113,7 +122,12 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || decodeCodeTheme(value.vscodeTheme) === undefined) {
     return null;
   }
-  return { ...value, previewFontFamily } as InitMessage;
+  return {
+    ...value,
+    uiLanguagePreference: value.uiLanguagePreference ?? 'auto',
+    automaticUiLanguage: value.automaticUiLanguage ?? value.uiLanguage,
+    previewFontFamily
+  } as InitMessage;
 }
 
 function isSourceLineNumberMode(value: unknown): value is SourceLineNumberMode {

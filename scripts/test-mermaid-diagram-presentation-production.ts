@@ -44,10 +44,15 @@ async function main(): Promise<void> {
           active += 1;
           maxActive = Math.max(maxActive, active);
           try {
-            await new Promise((resolve) => setTimeout(resolve, source.includes('SLOW_OLD') ? 90 : 10));
+            await new Promise((resolve) => setTimeout(
+              resolve,
+              source.includes('SLOW_OLD') || source.includes('SLOW_THEME') ? 90 : 10
+            ));
             if (source.includes('INVALID')) throw new Error('parse error');
             const marker = source.includes('SLOW_OLD')
               ? 'old'
+              : source.includes('SLOW_THEME')
+                ? 'theme'
               : source.includes('FAST_NEW')
                 ? 'new'
                 : source.includes('RECOVERED')
@@ -132,6 +137,24 @@ async function main(): Promise<void> {
         oldVisible: Boolean(document.querySelector('svg[data-marker="old"]'))
       };
 
+      presentText('```mermaid\nSLOW_THEME\n```');
+      await settle(20);
+      const beforePendingThemeCalls = calls.length;
+      document.documentElement.style.setProperty('--meo-background', '#151515');
+      document.documentElement.style.setProperty('--meo-foreground', '#f0f0f0');
+      document.documentElement.style.setProperty('--meo-code-background', '#151515');
+      document.documentElement.style.setProperty('--meo-surface-background', '#252525');
+      document.documentElement.style.setProperty('--meo-color-base05', '#88bbff');
+      harness.refreshMermaidTheme();
+      editor.refreshDecorations();
+      await settle(180);
+      const pendingTheme = {
+        marker: document.querySelector('.meo-mermaid-svg-wrapper > svg')?.getAttribute('data-marker') ?? null,
+        errors: document.querySelectorAll('.meo-mermaid-error-badge').length,
+        replacementErrorVisible: document.body.textContent?.includes('theme generation was replaced') ?? false,
+        rerendered: calls.length > beforePendingThemeCalls
+      };
+
       const beforeThemeCalls = calls.length;
       document.documentElement.style.setProperty('--meo-background', '#111111');
       document.documentElement.style.setProperty('--meo-foreground', '#eeeeee');
@@ -174,6 +197,7 @@ async function main(): Promise<void> {
         recovered,
         cachedError,
         rapid,
+        pendingTheme,
         theme,
         beforeMode,
         sourceDiagramCount,
@@ -197,13 +221,19 @@ async function main(): Promise<void> {
     assert.equal(result.recovered.marker, 'recovered', JSON.stringify(result.recovered));
     assert.deepEqual(result.cachedError, { errors: 1, retriedRender: true });
     assert.deepEqual(result.rapid, { marker: 'new', oldVisible: false });
+    assert.deepEqual(result.pendingTheme, {
+      marker: 'theme',
+      errors: 0,
+      replacementErrorVisible: false,
+      rerendered: true
+    });
     assert.equal(result.theme.rerendered, true);
     assert.ok(result.theme.initializations >= 2);
     assert.equal(result.sourceDiagramCount, 0);
     assert.equal(result.afterMode.selection, result.beforeMode.selection);
     assert.equal(result.afterMode.scrollTop, result.beforeMode.scrollTop);
     assert.equal(result.afterMode.focused, true);
-    assert.equal(result.afterMode.marker, 'new');
+    assert.equal(result.afterMode.marker, 'theme');
     assert.equal(result.editorDomAfterDestroy, 0);
     assert.equal(result.mermaidDomAfterDestroy, 0);
     console.log('Mermaid diagram presentation production characterization passed');

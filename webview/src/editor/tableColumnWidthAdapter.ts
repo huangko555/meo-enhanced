@@ -10,6 +10,7 @@ import {
   requestLiveInputDerivedWork,
   requestLiveInputDerivedWorkOnFrame
 } from './liveInputDerivedWork';
+import { isExternalDocumentPresentation } from './externalDocumentPresentation';
 
 export type TableColumnWidthAdapter = {
   acquire(): void;
@@ -35,21 +36,35 @@ type TableLayoutFacts = {
 
 type PreviewSnapshot = {
   readonly widths: readonly number[];
+  /** Latest manual column proportions; container projections must not redefine them. */
+  readonly intentWidths: readonly number[];
   readonly minimumWidths: readonly number[];
   readonly availableWidth: number;
   readonly policyState: TableColumnWidthPolicyState;
+  readonly preferredTotalWidth: number;
 };
 
 type WidthIntent = {
   from: number;
   to: number;
+  table: HTMLTableElement;
+  signature: string | null;
   snapshot: PreviewSnapshot;
+};
+
+type StartupBaseline = {
+  from: number;
+  to: number;
+  table: HTMLTableElement;
+  signature: string | null;
+  widths: readonly number[];
+  totalWidth: number;
 };
 
 type TableBinding = {
   readonly table: HTMLTableElement;
   readonly cleanup: () => void;
-  project(): boolean;
+  project(): 'changed' | 'drag-pending' | 'stable';
 };
 
 type LifecycleEpoch = {
@@ -81,12 +96,13 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 ): CodeMirrorDomTableColumnWidthAdapter {
   const policy = options.policy ?? tableColumnWidthPolicy;
   const intents: WidthIntent[] = [];
+  const startupBaselines: StartupBaseline[] = [];
   const bindings = new Map<HTMLTableElement, TableBinding>();
   let mutationObserver: MutationObserver | null = null;
   let currentEpoch: LifecycleEpoch | null = null;
   let currentView: EditorView | null = null;
   let disposed = false;
-  let reconcile: (epoch: LifecycleEpoch, forceProjectionEvent?: boolean) => void;
+  let reconcile: (epoch: LifecycleEpoch, notifyPendingDrag?: boolean) => void;
 
   const isCurrentEpoch = (epoch: LifecycleEpoch): boolean => (
     !disposed && epoch.alive && currentEpoch === epoch
@@ -106,19 +122,115 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     else requestAnimationFrame(operation);
   };
 
-  const findIntent = (table: HTMLTableElement): WidthIntent | null => {
+  const findIntent = (table: HTMLTableElement, allowSignatureFallback = false): WidthIntent | null => {
     const from = numberFromDataset(table, 'tableFrom');
     const to = numberFromDataset(table, 'tableTo');
     if (from === null || to === null) return null;
     const columnCount = table.querySelectorAll('thead th').length;
-    return intents.find((intent) => (
+    const exact = intents.find((intent) => (
       intent.from === from && intent.to === to && intent.snapshot.widths.length === columnCount
-    )) ?? null;
+    ));
+    if (exact) return exact;
+    if (!allowSignatureFallback) return null;
+    const signature = table.dataset.tableSignature;
+    if (!signature) return null;
+    return intents
+      .filter((intent) => (
+        intent.signature === signature
+        && intent.snapshot.widths.length === columnCount
+        && Math.abs(intent.from - from) <= 8
+        && (!intent.table.isConnected || intent.table === table)
+      ))
+      .sort((left, right) => (
+        Number(right.table === table) - Number(left.table === table)
+        || Math.abs(left.from - from) - Math.abs(right.from - from)
+      ))[0] ?? null;
   };
 
   const availableWidth = (table: HTMLTableElement): number => {
     const container = table.parentElement ?? options.root;
-    return Math.max(0, container.clientWidth - tableCollapsedOuterBorderWidth(table));
+    const style = getComputedStyle(container);
+    const numeric = (value: string) => Number.parseFloat(value) || 0;
+    const borderWidth = numeric(style.borderLeftWidth) + numeric(style.borderRightWidth);
+    const paddingWidth = numeric(style.paddingLeft) + numeric(style.paddingRight);
+    const scrollbarWidth = Math.max(0, container.offsetWidth - container.clientWidth - borderWidth);
+    const contentWidth = container.getBoundingClientRect().width
+      - borderWidth
+      - paddingWidth
+      - scrollbarWidth;
+    return Math.max(0, contentWidth - tableCollapsedOuterBorderWidth(table));
+  };
+
+  const findStartupBaseline = (table: HTMLTableElement): StartupBaseline | null => {
+    const from = numberFromDataset(table, 'tableFrom');
+    const to = numberFromDataset(table, 'tableTo');
+    if (from === null || to === null) return null;
+    const columnCount = table.querySelectorAll('thead th').length;
+    const exact = startupBaselines.find((baseline) => (
+      baseline.from === from && baseline.to === to && baseline.widths.length === columnCount
+    ));
+    if (exact) return exact;
+    const signature = table.dataset.tableSignature;
+    if (!signature) return null;
+    return startupBaselines
+      .filter((baseline) => baseline.signature === signature && baseline.widths.length === columnCount)
+      .sort((left, right) => Math.abs(left.from - from) - Math.abs(right.from - from))[0] ?? null;
+  };
+
+  const acquireStartupBaseline = (table: HTMLTableElement): StartupBaseline | null => {
+    const existing = findStartupBaseline(table);
+    if (existing) {
+      const from = numberFromDataset(table, 'tableFrom');
+      const to = numberFromDataset(table, 'tableTo');
+      if (from !== null && to !== null) {
+        existing.from = from;
+        existing.to = to;
+        existing.table = table;
+        existing.signature = table.dataset.tableSignature ?? null;
+      }
+      return existing;
+    }
+    const from = numberFromDataset(table, 'tableFrom');
+    const to = numberFromDataset(table, 'tableTo');
+    if (from === null || to === null) return null;
+    const widths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+      .map((cell) => cell.getBoundingClientRect().width);
+    if (!widths.length || widths.some((width) => !Number.isFinite(width) || width <= 0)) return null;
+    const baseline: StartupBaseline = {
+      from,
+      to,
+      table,
+      signature: table.dataset.tableSignature ?? null,
+      widths,
+      totalWidth: widths.reduce((sum, width) => sum + width, 0)
+    };
+    startupBaselines.push(baseline);
+    return baseline;
+  };
+
+  const refreshUncommittedStartupBaseline = (table: HTMLTableElement): StartupBaseline | null => {
+    const baseline = acquireStartupBaseline(table);
+    if (!baseline) return null;
+    const widths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+      .map((cell) => cell.getBoundingClientRect().width);
+    if (!widths.length || widths.some((width) => !Number.isFinite(width) || width <= 0)) return baseline;
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+    // A virtualized table may first enter the DOM while the document is narrow.
+    // Before the first user width intent, retain the widest natural layout seen;
+    // later container shrinkage must not redefine the restoration ceiling.
+    if (totalWidth > baseline.totalWidth + 0.5) {
+      baseline.widths = widths;
+      baseline.totalWidth = totalWidth;
+    }
+    return baseline;
+  };
+
+  const setOverflowState = (table: HTMLTableElement, maximumWidth: number): void => {
+    const minimumTotalWidth = minimumWidths(table).reduce((sum, width) => sum + width, 0);
+    table.parentElement?.classList.toggle(
+      'is-table-overflowing',
+      minimumTotalWidth > maximumWidth + 0.5
+    );
   };
 
   const minimumWidths = (table: HTMLTableElement): readonly number[] => (
@@ -158,6 +270,10 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   const renderStickyColumns = (table: HTMLTableElement, widths: readonly number[]): void => {
     const stickyTable = stickyTableFor(table);
     if (!stickyTable) return;
+    stickyTable.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+    stickyTable.style.maxWidth = 'none';
+    stickyTable.style.minWidth = '0';
+    stickyTable.style.tableLayout = 'fixed';
     const columns = Array.from(stickyTable.querySelectorAll<HTMLTableColElement>('colgroup > col'));
     widths.forEach((width, index) => {
       if (columns[index]) columns[index].style.width = `${width}px`;
@@ -174,6 +290,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       if (columns[index]) columns[index].style.width = `${width}px`;
     });
     renderStickyColumns(table, widths);
+    setOverflowState(table, availableWidth(table));
   };
 
   const reset = (table: HTMLTableElement): void => {
@@ -181,6 +298,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     table.style.maxWidth = '';
     table.style.minWidth = '';
     table.style.tableLayout = '';
+    table.parentElement?.classList.remove('is-table-overflowing');
     for (const column of table.querySelectorAll<HTMLTableColElement>('colgroup > col')) {
       column.style.width = '';
     }
@@ -193,9 +311,44 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
 
   const project = (table: HTMLTableElement, epoch: LifecycleEpoch): void => {
     if (!isCurrentEpoch(epoch)) return;
-    const intent = findIntent(table);
+    const intent = findIntent(table, true);
     if (!intent) {
       reset(table);
+      const startupBaseline = refreshUncommittedStartupBaseline(table);
+      const currentFacts = layoutFacts(table);
+      const currentTotalWidth = currentFacts.widths.reduce((sum, width) => sum + width, 0);
+      const minimumTotalWidth = currentFacts.minimumWidths.reduce((sum, width) => sum + width, 0);
+      const canFitReadableColumns = minimumTotalWidth <= currentFacts.availableWidth + 0.5;
+      if (startupBaseline && currentFacts.availableWidth > 0
+        && currentTotalWidth > currentFacts.availableWidth + 0.5
+        && canFitReadableColumns) {
+        const result = policy.project({
+          widths: currentFacts.widths,
+          minimumWidths: currentFacts.minimumWidths,
+          initialTotalWidth: startupBaseline.totalWidth,
+          maximumTrackedWidth: startupBaseline.totalWidth,
+          defaultWidthWasCapped: true,
+          availableWidth: currentFacts.availableWidth,
+          preserveWidthIntent: false,
+          elastic: true,
+          tracksAvailableWidth: true
+        });
+        render(table, result.widths, result.totalWidth);
+        storeIntent(table, {
+          snapshot: {
+            widths: [...result.widths],
+            intentWidths: [...startupBaseline.widths],
+            minimumWidths: [...currentFacts.minimumWidths],
+            availableWidth: currentFacts.availableWidth,
+            policyState: result.elastic
+              ? { elastic: true, tracksAvailableWidth: result.tracksAvailableWidth }
+              : { elastic: false, tracksAvailableWidth: false },
+            preferredTotalWidth: startupBaseline.totalWidth
+          }
+        });
+        return;
+      }
+      setOverflowState(table, currentFacts.availableWidth);
       return;
     }
     const currentFacts = layoutFacts(table);
@@ -205,37 +358,53 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           tracksAvailableWidth: intent.snapshot.policyState.tracksAvailableWidth
         }
       : { elastic: false, tracksAvailableWidth: false };
+    const preserveWidthIntent = sameLayoutFacts(intent.snapshot, currentFacts);
+    const projectionWidths = currentPolicyState.tracksAvailableWidth && !preserveWidthIntent
+      ? intent.snapshot.intentWidths
+      : currentFacts.widths;
     const result = policy.project({
-      widths: currentFacts.widths,
+      widths: projectionWidths,
       minimumWidths: currentFacts.minimumWidths,
-      initialTotalWidth: currentFacts.widths.reduce((sum, width) => sum + width, 0),
+      initialTotalWidth: intent.snapshot.preferredTotalWidth,
+      maximumTrackedWidth: intent.snapshot.preferredTotalWidth,
       defaultWidthWasCapped: false,
       availableWidth: currentFacts.availableWidth,
-      preserveWidthIntent: sameLayoutFacts(intent.snapshot, currentFacts),
+      preserveWidthIntent,
       ...currentPolicyState
     });
     render(table, result.widths, result.totalWidth);
-    storeIntent(table, {
-      snapshot: {
-        widths: [...result.widths],
-        minimumWidths: [...currentFacts.minimumWidths],
-        availableWidth: currentFacts.availableWidth,
-        policyState: result.elastic
-          ? {
-              elastic: true,
-              tracksAvailableWidth: result.tracksAvailableWidth
-            }
-          : { elastic: false, tracksAvailableWidth: false }
-      }
-    });
+    intent.table = table;
+    intent.signature = table.dataset.tableSignature ?? null;
+    intent.snapshot = {
+      widths: [...result.widths],
+      intentWidths: [...intent.snapshot.intentWidths],
+      minimumWidths: [...currentFacts.minimumWidths],
+      availableWidth: currentFacts.availableWidth,
+      policyState: result.elastic
+        ? {
+            elastic: true,
+            tracksAvailableWidth: result.tracksAvailableWidth
+          }
+        : { elastic: false, tracksAvailableWidth: false },
+      preferredTotalWidth: intent.snapshot.preferredTotalWidth
+    };
   };
 
-  const storeIntent = (table: HTMLTableElement, next: Omit<WidthIntent, 'from' | 'to'>): void => {
+  const storeIntent = (
+    table: HTMLTableElement,
+    next: Omit<WidthIntent, 'from' | 'to' | 'table' | 'signature'>
+  ): void => {
     const from = numberFromDataset(table, 'tableFrom');
     const to = numberFromDataset(table, 'tableTo');
     if (from === null || to === null || disposed) return;
     const existing = intents.findIndex((intent) => intent.from === from && intent.to === to);
-    const value = { from, to, ...next };
+    const value = {
+      from,
+      to,
+      table,
+      signature: table.dataset.tableSignature ?? null,
+      ...next
+    };
     if (existing >= 0) intents[existing] = value;
     else intents.push(value);
   };
@@ -249,8 +418,17 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     let initialResizePending = true;
     let projectedContainerWidth: number | null = null;
     table.dataset.tableColumnWidthOwner = 'adapter';
-    const committedIntent = findIntent(table);
+    acquireStartupBaseline(table);
+    const committedIntent = findIntent(table, true);
     if (committedIntent) {
+      const currentFrom = numberFromDataset(table, 'tableFrom');
+      const currentTo = numberFromDataset(table, 'tableTo');
+      if (currentFrom !== null && currentTo !== null) {
+        committedIntent.from = currentFrom;
+        committedIntent.to = currentTo;
+        committedIntent.table = table;
+        committedIntent.signature = table.dataset.tableSignature ?? null;
+      }
       // A replacement first restores the committed presentation. Policy then
       // receives freshly measured DOM facts; stored layout fields never enter its request.
       render(
@@ -292,8 +470,12 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       dragCleanup?.();
 
       const stored = findIntent(table);
+      const startupBaseline = acquireStartupBaseline(table);
       const startFacts = layoutFacts(table);
       const initialTotalWidth = table.getBoundingClientRect().width;
+      const preferredTotalWidth = stored?.snapshot.preferredTotalWidth
+        ?? startupBaseline?.totalWidth
+        ?? Math.max(initialTotalWidth, table.scrollWidth);
       const startMaximumTotalWidth = availableWidth(table);
       const defaultWidthWasCapped = initialTotalWidth >= startMaximumTotalWidth - 1;
       let startPolicyState: TableColumnWidthPolicyState;
@@ -322,8 +504,13 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           maximumTotalWidth: facts.availableWidth,
           ...startPolicyState
         });
+        const requestedDelta = latestClientX - startX;
         const snapshot: PreviewSnapshot = {
           widths: [...result.widths],
+          // A drag is the only operation that changes the user's preferred
+          // proportions. Elastic container projections scale this basis but
+          // leave it intact, while the startup total remains the growth cap.
+          intentWidths: [...result.widths],
           minimumWidths: [...facts.minimumWidths],
           availableWidth: facts.availableWidth,
           policyState: result.elastic
@@ -331,7 +518,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
                 elastic: true,
                 tracksAvailableWidth: result.tracksAvailableWidth
               }
-            : { elastic: false, tracksAvailableWidth: false }
+            : { elastic: false, tracksAvailableWidth: false },
+          preferredTotalWidth
         };
         lastPreview = snapshot;
         // Keep the live drag intent available to a replacement widget. A DOM rebuild
@@ -406,8 +594,9 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     };
 
     const handleRoot = table.closest<HTMLElement>('.meo-md-html-table-shell') ?? table;
-    handleRoot.addEventListener('pointerdown', start);
-    cleanups.push(() => handleRoot.removeEventListener('pointerdown', start));
+    // Capture before the passive Sticky Header layer can consume cloned-cell events.
+    handleRoot.addEventListener('pointerdown', start, true);
+    cleanups.push(() => handleRoot.removeEventListener('pointerdown', start, true));
 
     if (typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(scheduleProjection);
@@ -424,14 +613,23 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
           if (intent && !sameLayoutFacts(intent.snapshot, layoutFacts(table))) {
             dragLayoutFactsDirty = true;
           }
-          projectedContainerWidth = (table.parentElement ?? options.root).clientWidth;
-          return false;
+          projectedContainerWidth = availableWidth(table);
+          return 'drag-pending';
         }
+        const beforeWidths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+          .map((cell) => cell.getBoundingClientRect().width);
+        const beforeTotalWidth = table.getBoundingClientRect().width;
         project(table, epoch);
         dragLayoutFactsDirty = false;
-        projectedContainerWidth = (table.parentElement ?? options.root).clientWidth;
-        return previousContainerWidth === null
-          || Math.round(previousContainerWidth) !== Math.round(projectedContainerWidth);
+        projectedContainerWidth = availableWidth(table);
+        const afterWidths = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+          .map((cell) => cell.getBoundingClientRect().width);
+        const afterTotalWidth = table.getBoundingClientRect().width;
+        const changed = previousContainerWidth === null
+          || Math.round(previousContainerWidth) !== Math.round(projectedContainerWidth)
+          || Math.abs(afterTotalWidth - beforeTotalWidth) >= 1
+          || afterWidths.some((width, index) => Math.abs(width - (beforeWidths[index] ?? 0)) >= 1);
+        return changed ? 'changed' : 'stable';
       },
       cleanup() {
         if (!lifecycle.alive) return;
@@ -443,7 +641,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     };
   };
 
-  reconcile = (epoch: LifecycleEpoch, forceProjectionEvent = false): void => {
+  reconcile = (epoch: LifecycleEpoch, notifyPendingDrag = false): void => {
     if (!isCurrentEpoch(epoch)) return;
     const current = new Set(options.root.querySelectorAll<HTMLTableElement>(tableSelector));
     for (const [table, binding] of bindings) {
@@ -459,8 +657,8 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
         bindings.set(table, binding);
       }
       if (!isCurrentEpoch(epoch) || !table.isConnected || !options.root.contains(table)) continue;
-      const projectionChanged = binding.project();
-      if (forceProjectionEvent || isNewBinding || projectionChanged) {
+      const projection = binding.project();
+      if (isNewBinding || projection === 'changed' || (notifyPendingDrag && projection === 'drag-pending')) {
         table.dispatchEvent(new CustomEvent(projectionEventName));
       }
     }
@@ -472,11 +670,36 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     for (const transaction of update.transactions) {
       if (transaction.docChanged) {
         for (const intent of intents) {
-          intent.from = transaction.changes.mapPos(intent.from, 1);
-          intent.to = transaction.changes.mapPos(intent.to, 1);
+          const mappedFrom = transaction.changes.mapPos(intent.from, 1);
+          const mappedTo = transaction.changes.mapPos(intent.to, 1);
+          if (isExternalDocumentPresentation(transaction)
+            && intent.table.isConnected && options.root.contains(intent.table)) {
+            const currentFrom = numberFromDataset(intent.table, 'tableFrom');
+            const currentTo = numberFromDataset(intent.table, 'tableTo');
+            if (currentFrom !== null && currentTo !== null) {
+              // ViewPlugin updates can run before or after a retained table
+              // widget refreshes its source metadata. Adopt refreshed metadata
+              // when it has moved; otherwise map the still-stale DOM range
+              // through this transaction so a replacement can recover the
+              // same width intent by its new document position.
+              const metadataWasRefreshed = currentFrom !== intent.from || currentTo !== intent.to;
+              intent.from = metadataWasRefreshed ? currentFrom : mappedFrom;
+              intent.to = metadataWasRefreshed ? currentTo : mappedTo;
+              continue;
+            }
+          }
+          intent.from = mappedFrom;
+          intent.to = mappedTo;
+        }
+        for (const baseline of startupBaselines) {
+          baseline.from = transaction.changes.mapPos(baseline.from, 1);
+          baseline.to = transaction.changes.mapPos(baseline.to, 1);
         }
         for (let index = intents.length - 1; index >= 0; index -= 1) {
           if (intents[index].from >= intents[index].to) intents.splice(index, 1);
+        }
+        for (let index = startupBaselines.length - 1; index >= 0; index -= 1) {
+          if (startupBaselines[index].from >= startupBaselines[index].to) startupBaselines.splice(index, 1);
         }
       }
       if (transaction.docChanged || isLiveInputDerivedWorkRefresh(transaction)) {
@@ -516,6 +739,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       release();
       disposed = true;
       intents.splice(0, intents.length);
+      startupBaselines.splice(0, startupBaselines.length);
     }
   };
 

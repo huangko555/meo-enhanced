@@ -33,6 +33,8 @@ const completeInit = {
   diagnostics: [],
   mode: 'live' as const,
   uiLanguage: 'en' as const,
+  uiLanguagePreference: 'auto' as const,
+  automaticUiLanguage: 'en' as const,
   sourceLineNumbers: 'on' as const,
   previewAppearance: 'dark' as const,
   previewFontFamily: '' as const,
@@ -98,6 +100,8 @@ for (const requiredKey of [
   assert.equal(decodeInitMessage(incomplete), null, `Init without ${requiredKey} must be rejected`);
 }
 assert.equal(decodeInitMessage({ ...completeInit, uiLanguage: 'fr' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, uiLanguagePreference: 'fr' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, automaticUiLanguage: 'fr' }), null);
 for (const mode of ['on', 'off', 'relative', 'interval'] as const) {
   assert.equal(decodeInitMessage({ ...completeInit, sourceLineNumbers: mode })?.sourceLineNumbers, mode);
 }
@@ -115,6 +119,14 @@ for (const removedFontKey of ['previewFontFamilyName', 'previewFontFamilyFallbac
 }
 assert.deepEqual(decodeHostToWebviewMessage(completeInit), completeInit);
 assert.deepEqual(decodeWebviewToHostMessage({ type: 'ready' }), { type: 'ready' });
+assert.deepEqual(
+  decodeWebviewToHostMessage({ type: 'setUiLanguagePreference', language: 'zh-CN' }),
+  { type: 'setUiLanguagePreference', language: 'zh-CN' }
+);
+assert.deepEqual(
+  decodeWebviewToHostMessage({ type: 'setSourceLineNumbers', mode: 'off' }),
+  { type: 'setSourceLineNumbers', mode: 'off' }
+);
 assert.deepEqual(decodeDocumentSyncMessage({ type: 'docChanged', text: 'next', version: 4 }), {
   type: 'docChanged', text: 'next', version: 4
 });
@@ -672,8 +684,9 @@ assert.equal(decodeHostEditorEvent({ type: 'previewAppearanceChanged', appearanc
 assert.equal(decodeHostEditorEvent({ type: 'previewSourceColoringChanged', enabled: false }), null);
 assert.equal(decodeHostToWebviewMessage({ type: 'previewAppearanceChanged', appearance: 'light' }), null);
 assert.equal(decodeHostToWebviewMessage({ type: 'previewSourceColoringChanged', enabled: false }), null);
-const vscodeThemeEvent = { type: 'vscodeCodeThemeChanged', vscodeTheme: codeTheme } as const;
+const vscodeThemeEvent = { type: 'vscodeCodeThemeChanged', appearance: 'dark', vscodeTheme: codeTheme } as const;
 assert.deepEqual(decodeHostConfigurationEvent(vscodeThemeEvent), vscodeThemeEvent);
+assert.equal(decodeHostConfigurationEvent({ type: 'vscodeCodeThemeChanged', vscodeTheme: codeTheme }), null);
 assert.equal(decodeHostConfigurationEvent({ type: 'themeChanged', theme: {}, codeTheme }), null);
 assert.equal(decodeHostConfigurationEvent({ type: 'shikiCodeBlocksChanged', enabled: true, codeTheme }), null);
 assert.deepEqual(decodeHostConfigurationEvent({ type: 'toggleMode' }), { type: 'toggleMode' });

@@ -27,6 +27,15 @@ export type ViewportAnchorToken = object & {
   readonly __viewportAnchorHandle: unique symbol;
 };
 
+/** Converts visual-line context into a bounded viewport margin at reveal time. */
+export function visualLineContextMargin(
+  view: Pick<EditorView, 'defaultLineHeight' | 'scrollDOM'>,
+  lineCount: number
+): number {
+  const requested = Math.max(0, view.defaultLineHeight * lineCount);
+  return Math.min(requested, view.scrollDOM.clientHeight * 0.2);
+}
+
 export interface PreviewViewportSurface {
   captureTopVisiblePosition(): { line: number; lineOffset: number } | null;
   restoreTopVisiblePosition(
@@ -104,6 +113,8 @@ interface NavigationRevealOptions {
 }
 
 interface RevealPositionOptions {
+  readonly geometry?: 'caret' | 'line-block';
+  readonly marginMode?: 'outside-only' | 'comfort-band';
   readonly y?: 'nearest' | 'center' | 'start';
   readonly yMargin?: number;
   readonly schedule?: 'immediate' | 'next-frame';
@@ -249,7 +260,10 @@ function mapPositionThroughDocumentChange(
 
 const MAX_SETTLE_FRAMES = 8;
 const REQUIRED_STABLE_FRAMES = 2;
-const POSITION_EPSILON = 0.5;
+// Chromium exposes fractional element geometry but rounds scrollTop to whole
+// CSS pixels. Treat an adjacent-pixel correction as already stable so layout
+// variants cannot make the viewport oscillate by one pixel on every toggle.
+const POSITION_EPSILON = 1;
 const WHEEL_GESTURE_IDLE_MS = 250;
 const controllerByDom = new WeakMap<HTMLElement, ViewportController>();
 
@@ -441,7 +455,9 @@ export class ViewportController {
         this.destroyed ||
         lockGeneration !== this.scrollLockGeneration ||
         !isCurrent()
-      ) return;
+      ) {
+        return;
+      }
       this.view.scrollDOM.scrollTop = Math.max(0, Math.min(
         targetTop,
         this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight
@@ -902,21 +918,9 @@ export class ViewportController {
       this.markInteraction();
       return;
     }
-    this.interactionGeneration += 1;
-    this.navigationGeneration += 1;
-    this.generation += 1;
-    this.scrollLockGeneration += 1;
-    this.activeScrollTarget = null;
+    this.markInteraction();
     this.lastWheelAt = performance.now();
     this.lastScrollDirection = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : this.lastScrollDirection;
-    const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? Math.max(16, this.view.defaultLineHeight)
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? this.view.scrollDOM.clientHeight
-        : 1;
-    const current = this.readScrollPosition();
-    const expected = this.resolveScrollTarget({ top: current.top + event.deltaY * deltaScale }, current);
-    this.mergeNativeScrollIntoLayoutAnchor(expected.top - current.top);
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
@@ -1008,10 +1012,7 @@ export class ViewportController {
       this.markInteraction();
       return;
     }
-    this.interactionGeneration += 1;
-    this.navigationGeneration += 1;
-    this.generation += 1;
-    this.activeScrollTarget = null;
+    this.markInteraction();
     this.lastTouchMoveAt = performance.now();
     this.lastTouchY = touch.clientY;
   }
@@ -1022,15 +1023,12 @@ export class ViewportController {
       this.markInteraction();
       return;
     }
-    this.interactionGeneration += 1;
-    this.navigationGeneration += 1;
-    this.generation += 1;
-    this.activeScrollTarget = null;
+    const previousTouchY = this.lastTouchY;
+    this.markInteraction();
     this.lastTouchMoveAt = performance.now();
-    if (this.lastTouchY !== null) {
-      const current = this.readScrollPosition();
-      const expected = this.resolveScrollTarget({ top: current.top + this.lastTouchY - touch.clientY }, current);
-      this.mergeNativeScrollIntoLayoutAnchor(expected.top - current.top);
+    if (previousTouchY !== null) {
+      const deltaY = previousTouchY - touch.clientY;
+      this.lastScrollDirection = deltaY < 0 ? -1 : deltaY > 0 ? 1 : this.lastScrollDirection;
     }
     this.lastTouchY = touch.clientY;
   }
@@ -1044,6 +1042,10 @@ export class ViewportController {
 
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
+    // An explicit newer navigation supersedes an absolute scroll lock left by
+    // transient-edit settlement. Otherwise the old lock can pull the viewport
+    // back after the new target has already been shown.
+    this.scrollLockGeneration += 1;
     const navigationGeneration = ++this.navigationGeneration;
     this.pendingNavigationTarget = null;
     return () => !this.destroyed && navigationGeneration === this.navigationGeneration;
@@ -1070,6 +1072,8 @@ export class ViewportController {
   private revealPositionInternal(
     position: number,
     {
+      geometry = 'caret',
+      marginMode = 'outside-only',
       y = 'nearest',
       yMargin = 0,
       schedule = 'immediate'
@@ -1086,7 +1090,7 @@ export class ViewportController {
     }
     this.runNavigationReveal(() => {
       const current = this.readScrollPosition();
-      const coords = this.view.coordsAtPos(targetPosition);
+      const coords = geometry === 'caret' ? this.view.coordsAtPos(targetPosition) : null;
       const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
       if (y === 'center') {
         if (coords) {
@@ -1113,7 +1117,17 @@ export class ViewportController {
         };
       }
       if (coords) {
-        if (coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom) {
+        const targetHeight = Math.max(0, coords.bottom - coords.top);
+        const viewportHeight = Math.max(0, scrollerRect.bottom - scrollerRect.top);
+        const margin = Math.min(
+          Math.max(0, yMargin),
+          Math.max(0, (viewportHeight - targetHeight) / 2)
+        );
+        const appliedMargin = marginMode === 'comfort-band' ? margin : 0;
+        if (
+          coords.top >= scrollerRect.top + appliedMargin &&
+          coords.bottom <= scrollerRect.bottom - appliedMargin
+        ) {
           return { kind: 'stable' };
         }
         return {
@@ -1121,17 +1135,24 @@ export class ViewportController {
           target: {
             top: current.top + (
               coords.top < scrollerRect.top
-                ? coords.top - scrollerRect.top
-                : coords.bottom - scrollerRect.bottom
+                ? coords.top - scrollerRect.top - margin
+                : coords.bottom - scrollerRect.bottom + margin
             )
           }
         };
       }
       const block = this.view.lineBlockAt(targetPosition);
       const viewportHeight = this.view.scrollDOM.clientHeight;
-      if (block.top < current.top) return { kind: 'target', target: { top: block.top } };
-      if (block.bottom > current.top + viewportHeight) {
-        return { kind: 'target', target: { top: block.bottom - viewportHeight } };
+      const margin = Math.min(
+        Math.max(0, yMargin),
+        Math.max(0, (viewportHeight - block.height) / 2)
+      );
+      const appliedMargin = marginMode === 'comfort-band' ? margin : 0;
+      if (block.top < current.top + appliedMargin) {
+        return { kind: 'target', target: { top: block.top - margin } };
+      }
+      if (block.bottom > current.top + viewportHeight - appliedMargin) {
+        return { kind: 'target', target: { top: block.bottom - viewportHeight + margin } };
       }
       return { kind: 'stable' };
     }, { schedule, settle }, isCurrent);
@@ -1529,24 +1550,19 @@ export class ViewportController {
         if (!current || current !== activeAnchor) return null;
         return {
           revision: current.revision,
-          target: this.resolveScrollTarget({
-            top: this.view.lineBlockAt(current.position).top - current.viewportOffset
-          }, this.readScrollPosition())
+          target: this.resolveLayoutAnchorTarget(current)
         };
       },
       write: (measurement) => {
         activeAnchor.frameScheduled = false;
         if (!measurement || this.activeLayoutAnchor !== activeAnchor) return;
         queueMicrotask(() => {
-          if (
-            this.activeLayoutAnchor !== activeAnchor ||
-            measurement.revision !== activeAnchor.revision
-          ) {
-            this.scheduleLayoutMeasure();
-            return;
-          }
+          if (this.activeLayoutAnchor !== activeAnchor) return;
+          const target = measurement.revision === activeAnchor.revision
+            ? measurement.target
+            : this.resolveLayoutAnchorTarget(activeAnchor);
           activeAnchor.remainingFrames -= 1;
-          const changed = this.writeScrollPosition(measurement.target);
+          const changed = this.writeScrollPosition(target);
           activeAnchor.stableFrames = changed ? 0 : activeAnchor.stableFrames + 1;
           if (
             activeAnchor.stableFrames >= REQUIRED_STABLE_FRAMES ||
@@ -1561,11 +1577,11 @@ export class ViewportController {
     });
   }
 
-  private mergeNativeScrollIntoLayoutAnchor(deltaTop: number): void {
-    const activeAnchor = this.activeLayoutAnchor;
-    if (!activeAnchor || Math.abs(deltaTop) <= POSITION_EPSILON) return;
-    activeAnchor.viewportOffset -= deltaTop;
-    this.restartLayoutStabilization();
+  private resolveLayoutAnchorTarget(anchor: ActiveLayoutAnchor): ScrollPosition {
+    const current = this.readScrollPosition();
+    return this.resolveScrollTarget({
+      top: this.view.lineBlockAt(anchor.position).top - anchor.viewportOffset
+    }, current);
   }
 
   private resolveScrollTarget(target: ScrollTarget, fallback: ScrollPosition): ScrollPosition {

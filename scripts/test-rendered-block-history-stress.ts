@@ -186,6 +186,7 @@ async function editBlock(page: any, target: EditTarget, mode: Exclude<BlockMode,
 
 async function assertFocusedTarget(page: any, target: EditTarget, direction: 'undo' | 'redo', step: number) {
   const state = await page.evaluate((blockKind) => {
+    const outer = (window as any).__renderedHistoryStressEditor.view;
     const selector = blockKind === 'mermaid' ? '.meo-mermaid-editing-block' : '.meo-latex-math-editing-block';
     const property = blockKind === 'mermaid'
       ? '__meoMermaidEditingController'
@@ -197,7 +198,19 @@ async function assertFocusedTarget(page: any, target: EditTarget, direction: 'un
       source: focused ? (focused as any)[property].innerView.state.doc.toString() : null,
       head: focused ? (focused as any)[property].innerView.state.selection.main.head : null,
       length: focused ? (focused as any)[property].innerView.state.doc.length : null,
-      activeClass: (document.activeElement as HTMLElement | null)?.className?.toString() ?? null
+      activeClass: (document.activeElement as HTMLElement | null)?.className?.toString() ?? null,
+      activeRegion: (document.activeElement as HTMLElement | null)?.closest('[role="region"]')?.getAttribute('aria-label') ?? null,
+      outerSelectionLine: outer.state.doc.lineAt(outer.state.selection.main.head).number,
+      visibleFromLine: outer.state.doc.lineAt(outer.viewport.from).number,
+      visibleToLine: outer.state.doc.lineAt(outer.viewport.to).number,
+      scrollTop: outer.scrollDOM.scrollTop,
+      blocks: blocks.map((block) => ({
+        ariaLabel: block.getAttribute('aria-label'),
+        anchor: block.dataset.meoMermaidAnchor ?? block.dataset.meoLatexMathAnchor ?? null,
+        focused: Boolean((block as any)[property]?.innerView?.hasFocus),
+        top: block.getBoundingClientRect().top,
+        bottom: block.getBoundingClientRect().bottom
+      }))
     };
   }, target.kind);
   if (!state.focused || !state.source?.includes(target.needle) || state.head !== state.length) {

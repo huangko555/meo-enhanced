@@ -62,6 +62,11 @@ const compressed = tableColumnWidthPolicy.resize({
 });
 assert.deepEqual(compressed.widths.map(Math.round), [250, 75, 75]);
 assert.equal(Math.round(compressed.totalWidth), 400);
+assert.equal(
+  compressed.tracksAvailableWidth,
+  true,
+  'reaching the available-width ceiling must release fixed total width and begin container tracking'
+);
 
 const clamped = tableColumnWidthPolicy.resize({
   widths: [100, 100, 100],
@@ -73,6 +78,21 @@ const clamped = tableColumnWidthPolicy.resize({
   maximumTotalWidth: 400
 });
 assert.deepEqual(clamped.widths, [24, 100, 100]);
+
+const continuedLeftDrag = tableColumnWidthPolicy.resize({
+  widths: [100, 100, 100],
+  minimumWidths: [20, 60, 20],
+  elastic: false,
+  tracksAvailableWidth: false,
+  column: 1,
+  requestedDelta: -100,
+  maximumTotalWidth: 400
+});
+assert.deepEqual(
+  continuedLeftDrag.widths.map(Math.round),
+  [40, 60, 100],
+  'after the active column reaches its minimum, continued left drag must proportionally shrink eligible columns on its left'
+);
 
 const blockedByRightMinimums = tableColumnWidthPolicy.resize({
   widths: [180, 60, 60],
@@ -117,9 +137,10 @@ const narrowedInsideInfeasibleContainer = tableColumnWidthPolicy.resize({
 assert.deepEqual(narrowedInsideInfeasibleContainer.widths, [180, 100, 62]);
 assert.equal(
   narrowedInsideInfeasibleContainer.elastic,
-  false,
-  'an active column that finishes narrower than its drag-start width exits elastic behavior'
+  true,
+  'a table that still cannot fit after an active shrink must remain elastic'
 );
+assert.equal(narrowedInsideInfeasibleContainer.tracksAvailableWidth, true);
 
 for (const [label, requestedDelta, expectedElastic] of [
   ['no change', 0, true],
@@ -147,7 +168,8 @@ const fixedNoChange = tableColumnWidthPolicy.resize({
   requestedDelta: 0,
   maximumTotalWidth: 300
 });
-assert.equal(fixedNoChange.elastic, false, 'no-change must not re-enter elastic behavior');
+assert.equal(fixedNoChange.elastic, true, 'an infeasible table must enter elastic behavior even without pointer movement');
+assert.equal(fixedNoChange.tracksAvailableWidth, true);
 const fixedExplicitGrowth = tableColumnWidthPolicy.resize({
   widths: [180, 100, 70],
   minimumWidths: [180, 100, 50],
@@ -187,8 +209,8 @@ const expandedAfterReentry = tableColumnWidthPolicy.project({
 });
 assert.equal(
   Math.round(expandedAfterReentry.totalWidth),
-  500,
-  'container growth after explicit re-entry must not remain locked to the initial/requested total'
+  300,
+  'container tracking must stop at the remembered preferred total width'
 );
 const noChangeAfterReentry = tableColumnWidthPolicy.resize({
   widths: reenteredElastic.widths,
@@ -273,8 +295,8 @@ const projectedWithHeterogeneousMinimums = tableColumnWidthPolicy.project({
 });
 assert.deepEqual(
   projectedWithHeterogeneousMinimums.widths.map(Math.round),
-  [160, 120, 80],
-  'remaining width is distributed in proportion to each column\'s elasticity above its own minimum'
+  [157, 125, 78],
+  'container compression preserves the existing column proportions until a readable minimum binds'
 );
 assert.equal(Math.round(projectedWithHeterogeneousMinimums.totalWidth), 360);
 
@@ -350,9 +372,9 @@ assert.deepEqual(projectedSingleColumn.widths, [110]);
 assert.equal(projectedSingleColumn.totalWidth, 110);
 
 for (const [label, widths, minimumWidths, expected] of [
-  ['first', [120, 160, 100], [120, 60, 40], [120, 123, 78]],
-  ['middle', [200, 60, 100], [120, 60, 40], [177, 60, 83]],
-  ['last', [200, 140, 40], [120, 60, 40], [170, 110, 40]]
+  ['first', [120, 160, 100], [120, 60, 40], [120, 123, 77]],
+  ['middle', [200, 60, 100], [120, 60, 40], [173, 60, 87]],
+  ['last', [200, 140, 40], [120, 60, 40], [165, 115, 40]]
 ] as const) {
   const result = tableColumnWidthPolicy.project({
     widths,
@@ -394,6 +416,59 @@ assert.deepEqual(fixed.widths, [120, 80]);
 assert.equal(fixed.totalWidth, 200);
 assert.equal(fixed.reachedAvailableWidth, false);
 assert.equal(fixed.elastic, false, 'container projection must preserve the Policy-owned elastic decision');
+
+const manuallySizedThenContainerNarrowed = tableColumnWidthPolicy.project({
+  widths: [200, 100],
+  minimumWidths: [40, 40],
+  preserveWidthIntent: false,
+  initialTotalWidth: 300,
+  elastic: false,
+  tracksAvailableWidth: false,
+  defaultWidthWasCapped: false,
+  availableWidth: 240
+});
+assert.deepEqual(
+  manuallySizedThenContainerNarrowed.widths.map(Math.round),
+  [160, 80],
+  'a fixed table that reaches a narrower container must proportionally fill the available width'
+);
+assert.equal(manuallySizedThenContainerNarrowed.elastic, true);
+assert.equal(
+  manuallySizedThenContainerNarrowed.tracksAvailableWidth,
+  true,
+  'reaching the current document width must enter container tracking even without a column drag'
+);
+
+const containerRegrewBelowPreferredWidth = tableColumnWidthPolicy.project({
+  widths: manuallySizedThenContainerNarrowed.widths,
+  minimumWidths: [40, 40],
+  preserveWidthIntent: false,
+  initialTotalWidth: 300,
+  elastic: manuallySizedThenContainerNarrowed.elastic,
+  tracksAvailableWidth: manuallySizedThenContainerNarrowed.tracksAvailableWidth,
+  defaultWidthWasCapped: false,
+  availableWidth: 270
+});
+assert.deepEqual(containerRegrewBelowPreferredWidth.widths.map(Math.round), [180, 90]);
+assert.equal(containerRegrewBelowPreferredWidth.tracksAvailableWidth, true);
+
+const containerRegrewPastPreferredWidth = tableColumnWidthPolicy.project({
+  widths: containerRegrewBelowPreferredWidth.widths,
+  minimumWidths: [40, 40],
+  preserveWidthIntent: false,
+  initialTotalWidth: 300,
+  elastic: containerRegrewBelowPreferredWidth.elastic,
+  tracksAvailableWidth: containerRegrewBelowPreferredWidth.tracksAvailableWidth,
+  defaultWidthWasCapped: false,
+  availableWidth: 360
+});
+assert.deepEqual(containerRegrewPastPreferredWidth.widths.map(Math.round), [200, 100]);
+assert.equal(containerRegrewPastPreferredWidth.elastic, false);
+assert.equal(
+  containerRegrewPastPreferredWidth.tracksAvailableWidth,
+  false,
+  'container tracking must release after restoring the remembered preferred total width'
+);
 
 const policySource = readFileSync(
   new URL('../webview/src/editor/tableColumnWidthPolicy.ts', import.meta.url),

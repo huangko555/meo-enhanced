@@ -182,13 +182,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void syncEditorAssociations(shouldUseAsDefault);
       }
 
+      if (event.affectsConfiguration('workbench.colorTheme')) {
+        provider.notifyVscodeCodeThemeChanged();
+      }
+
       void provider.handleConfigurationChanged(event);
     })
   );
 
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveColorTheme(() => {
-      provider.notifyVscodeCodeThemeChanged();
+    vscode.window.onDidChangeActiveColorTheme((theme) => {
+      provider.notifyVscodeCodeThemeChanged(theme.kind);
     })
   );
 
@@ -418,8 +422,15 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
   }
 
-  notifyVscodeCodeThemeChanged(): void {
-    this.broadcast({ type: 'vscodeCodeThemeChanged', vscodeTheme: getCurrentVscodeCodeTheme() });
+  notifyVscodeCodeThemeChanged(kind: vscode.ColorThemeKind = vscode.window.activeColorTheme.kind): void {
+    const appearance = kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight
+      ? 'light'
+      : 'dark';
+    this.broadcast({
+      type: 'vscodeCodeThemeChanged',
+      appearance,
+      vscodeTheme: getCurrentVscodeCodeTheme(kind)
+    });
   }
 
   async toggleActiveEditorMode(): Promise<void> {

@@ -32,12 +32,13 @@ const emptyFrame = {
 } as unknown as Document;
 const previewRequests = [
   previewRenderer.render(emptyFrame, 'dark'),
-  previewRenderer.render(emptyFrame, 'dark'),
+  previewRenderer.render(emptyFrame, 'light'),
   previewRenderer.render(emptyFrame, 'dark')
 ];
-if (previewResourceRequests !== 3) {
+await new Promise((resolve) => setTimeout(resolve, 0));
+if (previewResourceRequests !== 1) {
   releaseFirstPreview();
-  throw new Error('Preview Mermaid requests must enter the shared Pool without a shadow queue');
+  throw new Error(`Rapid Preview theme switches must coalesce to the latest render (requests=${previewResourceRequests})`);
 }
 releaseFirstPreview();
 await Promise.all(previewRequests);
@@ -96,6 +97,13 @@ try {
       document.head.appendChild(script);
     }
   }, { runtime, entry });
+  const invalidMermaidLeaked = await page.evaluate(() => (
+    (window as typeof window & { __probeInvalidMermaidCleanup?: () => Promise<boolean> })
+      .__probeInvalidMermaidCleanup?.()
+  ));
+  if (invalidMermaidLeaked !== false) {
+    throw new Error('Invalid Mermaid rendering leaked a syntax-error SVG into the document body');
+  }
   const katexCss = fs.readFileSync(path.join(repoRoot, 'webview', 'dist', 'katex', 'katex-embedded.css'), 'utf8');
   await page.evaluate(async (css) => {
     const link = document.createElement('link');

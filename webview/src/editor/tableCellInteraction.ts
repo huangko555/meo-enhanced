@@ -119,7 +119,7 @@ function decideKeyboard(input: TableCellKeyboardInput): TableCellKeyboardDecisio
     return {
       type: 'focus-cell',
       target: { row: Math.floor(offset / input.colCount), col: offset % input.colCount },
-      caretColumn: input.selectionStart
+      caretColumn: 0
     };
   }
   if ((input.key === 'ArrowUp' || input.key === 'ArrowDown') && !input.shiftKey && !primaryModifier) {

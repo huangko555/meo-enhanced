@@ -339,7 +339,7 @@ async function main() {
     if (initial.placeholders !== 2) {
       throw new Error(`Expected language and plain-text long blocks to collapse, got ${JSON.stringify(initial)}`);
     }
-    if (initial.expandText.replace(/\s+/g, ' ').trim() !== 'js19 linesShow 9 more lines') {
+    if (initial.expandText.replace(/\s+/g, ' ').trim() !== 'Show 9 more lines') {
       throw new Error(`Unexpected expand label: ${JSON.stringify(initial.expandText)}`);
     }
     const initialMetadata = await page.evaluate(() => ({
@@ -348,11 +348,10 @@ async function main() {
       copyVisible: Boolean(document.querySelector('.meo-copy-code-btn'))
     }));
     if (
-      !initialMetadata.labels.includes('js') || !initialMetadata.labels.includes('Plain text') ||
-      initialMetadata.lineCounts.filter((label) => label === '19 lines').length !== 2 ||
+      initialMetadata.labels.length !== 0 || initialMetadata.lineCounts.length !== 0 ||
       !initialMetadata.copyVisible
     ) {
-      throw new Error(`Collapsed code metadata was incomplete: ${JSON.stringify(initialMetadata)}`);
+      throw new Error(`Collapsed code action retained redundant metadata: ${JSON.stringify(initialMetadata)}`);
     }
     await page.$eval('.meo-copy-code-btn', (button: HTMLElement) => button.click());
     await page.evaluate(() => Promise.resolve());
@@ -576,8 +575,14 @@ async function main() {
       (window as any).__longCodeBlocksEditor.setSearchQuery('');
     });
     await waitForFrames(page);
-    if (await page.$$eval('.meo-md-long-code-placeholder', (elements) => elements.length) !== 2) {
-      throw new Error('Ending search did not restore the manual collapsed state');
+    for (const lineNumber of [1, 37]) {
+      await page.evaluate((line) => {
+        (window as any).__longCodeBlocksEditor.scrollToLine(line, 'center');
+      }, lineNumber);
+      await waitForFrames(page);
+      if (!await page.$('.meo-md-long-code-placeholder')) {
+        throw new Error(`Ending search did not restore the collapsed block at line ${lineNumber}`);
+      }
     }
     await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
@@ -646,8 +651,8 @@ async function main() {
       documentText: (window as any).__longCodeBlocksEditor.view.state.doc.toString()
     }));
     if (
-      unusualLive.placeholders !== 2 || !unusualLive.labels.includes('brainfuck') ||
-      !unusualLive.labels.includes('mystery') || unusualLive.visibleText.includes('unknown 11') ||
+      unusualLive.placeholders !== 2 || unusualLive.labels.length !== 0 ||
+      unusualLive.visibleText.includes('unknown 11') ||
       unusualLive.visibleText.includes('incomplete 11') || unusualLive.documentText !== unusualText
     ) {
       throw new Error(`Unknown or incomplete fenced code was not safely folded: ${JSON.stringify(unusualLive)}`);
@@ -666,13 +671,42 @@ async function main() {
     ) {
       throw new Error(`Cursor target did not temporarily reveal hidden code without history: ${JSON.stringify(targetDepth)}`);
     }
+    const revealedTarget = await page.evaluate(() => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((candidate) => candidate.textContent?.includes('unknown 15'));
+      const rect = line?.getBoundingClientRect();
+      return rect ? { x: rect.left + 24, y: rect.top + rect.height / 2 } : null;
+    });
+    if (!revealedTarget) throw new Error('Could not click the temporarily revealed long-code target');
+    await page.mouse.click(revealedTarget.x, revealedTarget.y);
+    await waitForFrames(page);
     await page.evaluate(() => {
       (window as any).__longCodeBlocksEditor.view.dispatch({ selection: { anchor: 0 } });
     });
     await waitForFrames(page);
-    if (await page.$$eval('.meo-md-long-code-placeholder', (elements) => elements.length) !== 2) {
-      throw new Error('Cursor leaving hidden code did not restore the manual collapsed state');
+    if (await page.$$eval('.meo-md-long-code-placeholder', (elements) => elements.length) !== 1) {
+      throw new Error('Clicking temporarily revealed code did not promote the block to user-kept expansion');
     }
+    await page.click('.meo-md-long-code-footer .meo-long-code-action');
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const position = editor.view.state.doc.toString().indexOf('unknown 15');
+      editor.view.dispatch({ selection: { anchor: position } });
+      editor.view.focus();
+    });
+    await waitForFrames(page);
+    await page.keyboard.type('X');
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      (window as any).__longCodeBlocksEditor.view.dispatch({ selection: { anchor: 0 } });
+    });
+    await waitForFrames(page);
+    if (await page.$$eval('.meo-md-long-code-placeholder', (elements) => elements.length) !== 1) {
+      throw new Error('Editing temporarily revealed code did not promote the block to user-kept expansion');
+    }
+    await page.click('.meo-md-long-code-footer .meo-long-code-action');
+    await waitForFrames(page);
     const crossBoundaryDepth = await page.evaluate(() => {
       const editor = (window as any).__longCodeBlocksEditor;
       const hidden = editor.view.state.doc.toString().indexOf('unknown 15');
@@ -734,7 +768,9 @@ async function main() {
 
     const tallText = [
       '```js',
-      ...Array.from({ length: 100 }, (_, index) => `const tall${index + 1} = ${index + 1};`),
+      ...Array.from({ length: 100 }, (_, index) => (
+        `const tall${index + 1} = '${'x'.repeat((index % 7) * 9)}';`
+      )),
       '```',
       '',
       ...Array.from({ length: 40 }, (_, index) => `after block ${index + 1}`)
@@ -753,14 +789,14 @@ async function main() {
     await waitForFrames(page);
     const tallFirstLine = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll('.meo-md-code-line-numbered'))
-        .find((element) => element.textContent?.includes('const tall1 = 1;'));
+        .find((element) => element.textContent?.includes('const tall1 ='));
       const rect = line?.getBoundingClientRect();
       return rect ? { x: rect.left + 8, y: rect.top + rect.height / 2 } : null;
     });
     if (!tallFirstLine) {
       throw new Error('Could not locate the tall code block');
     }
-    const fixedControlCenter = await page.$eval('.meo-md-long-code-placeholder', (element) => {
+    const fixedControlCenter = await page.$eval('.meo-md-long-code-placeholder .meo-long-code-action', (element) => {
       const rect = element.getBoundingClientRect();
       return rect.left + rect.width / 2;
     });
@@ -811,6 +847,25 @@ async function main() {
     const floatingInsideBlock = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => !button.hidden);
     if (!floatingInsideBlock) {
       throw new Error('Floating collapse button was not shown while viewport bottom was inside an expanded block');
+    }
+    const floatingHorizontalCenters = await page.evaluate(async () => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const readCenter = () => {
+        const floating = document.querySelector<HTMLElement>('.meo-long-code-floating-action')!;
+        const rect = floating.getBoundingClientRect();
+        return rect.left + rect.width / 2;
+      };
+      const samples = [readCenter()];
+      editor.view.scrollDOM.scrollTop += 32;
+      samples.push(readCenter());
+      for (let frame = 0; frame < 3; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        samples.push(readCenter());
+      }
+      return samples;
+    });
+    if (floatingHorizontalCenters.some((center) => Math.abs(center - fixedControlCenter) > 1)) {
+      throw new Error(`Floating collapse button moved horizontally while settling after scroll: ${JSON.stringify({ fixedControlCenter, floatingHorizontalCenters })}`);
     }
     const floatingBackground = await page.$eval('.meo-long-code-floating-action', (button: HTMLButtonElement) => {
       const style = getComputedStyle(button);
@@ -986,6 +1041,35 @@ async function main() {
       });
     }, nestedRenderedBlocksText);
     await waitForFrames(page, 12);
+
+    const mermaidShellLayout = await page.evaluate(() => {
+      const diagram = document.querySelector<HTMLElement>('.meo-mermaid-block');
+      if (!diagram) return null;
+      const diagramRect = diagram.getBoundingClientRect();
+      const start = diagram.previousElementSibling as HTMLElement | null;
+      let next = diagram.nextElementSibling as HTMLElement | null;
+      let detachedClosingFence = false;
+      while (next && !next.classList.contains('meo-md-code-block-start')) {
+        if (next.classList.contains('meo-md-code-block-end')) detachedClosingFence = true;
+        next = next.nextElementSibling as HTMLElement | null;
+      }
+      const startRect = start?.getBoundingClientRect();
+      return {
+        startIsOpeningFence: Boolean(start?.classList.contains('meo-md-code-block-start')),
+        startGap: startRect ? diagramRect.top - startRect.bottom : null,
+        diagramRadius: getComputedStyle(diagram).borderRadius,
+        detachedClosingFence
+      };
+    });
+    if (
+      !mermaidShellLayout?.startIsOpeningFence ||
+      mermaidShellLayout.startGap === null ||
+      Math.abs(mermaidShellLayout.startGap) > 1 ||
+      mermaidShellLayout.diagramRadius !== '0px 0px 6px 6px' ||
+      mermaidShellLayout.detachedClosingFence
+    ) {
+      throw new Error(`Mermaid preview shell is visually disconnected: ${JSON.stringify(mermaidShellLayout)}`);
+    }
 
     const renderedBlockLayout = await page.evaluate(() => {
       const top = document.querySelector<HTMLElement>('.cm-line.meo-md-code-block-start')?.getBoundingClientRect();

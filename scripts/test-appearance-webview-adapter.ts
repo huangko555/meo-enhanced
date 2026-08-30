@@ -47,7 +47,6 @@ assert.equal(appliedShikiThemes.at(-1), currentDark);
 const appliedAppearances: string[] = [];
 const appliedCodePalettes: ReturnType<typeof resolveFinalCodePalette>[] = [];
 const appearanceControls: string[] = [];
-let previewRefreshes = 0;
 let decorationRefreshes = 0;
 let previewAutoSyncs = 0;
 const adapter = createAppearanceWebviewAdapter({
@@ -58,7 +57,6 @@ const adapter = createAppearanceWebviewAdapter({
   refreshMermaidTheme: () => undefined,
   applyWithEditorViewportPreserved: (action) => action(),
   refreshEditorDecorations: () => { decorationRefreshes += 1; },
-  refreshPreview: () => { previewRefreshes += 1; },
   syncPreviewAutoAppearance: () => { previewAutoSyncs += 1; },
   postEditorAppearance: () => undefined,
   reportUnexpectedError: (_context, error) => { throw error; }
@@ -69,11 +67,19 @@ assert.equal(adapter.getAppearance(), 'dark');
 assert.deepEqual(appearanceControls, ['auto']);
 assert.deepEqual(appliedAppearances, ['dark']);
 assert.equal(appliedCodePalettes.at(-1)?.theme, currentDark);
-assert.equal(adapter.accept({ type: 'vscodeCodeThemeChanged', vscodeTheme: currentLight }), true);
+assert.equal(adapter.accept({
+  type: 'vscodeCodeThemeChanged',
+  appearance: 'light',
+  vscodeTheme: currentDark
+} as never), true);
 assert.equal(adapter.getAppearance(), 'light');
 assert.deepEqual(appliedAppearances, ['dark', 'light']);
-assert.equal(appliedCodePalettes.at(-1)?.theme, currentLight);
-assert.equal(previewRefreshes, 1);
+assert.equal(
+  appliedCodePalettes.at(-1)?.theme?.type,
+  'light',
+  'Auto must switch appearance immediately while rejecting stale dark token colors'
+);
+assert.notEqual(appliedCodePalettes.at(-1)?.theme, currentDark);
 assert.equal(decorationRefreshes, 1);
 assert.equal(previewAutoSyncs, 1);
 adapter.setAppearance('dark');

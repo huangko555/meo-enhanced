@@ -283,7 +283,11 @@ async function main(): Promise<void> {
       'the resize observer must not project before its requested frame runs'
     );
     assert.ok(reacquired.current.queries > reacquired.afterCurrentResize.queries);
-    assert.ok(reacquired.current.projections > reacquired.afterOldCallbacks.projections);
+    assert.equal(
+      reacquired.current.projections,
+      reacquired.afterOldCallbacks.projections,
+      'a current resize with stable geometry must not publish a duplicate projection event'
+    );
 
     const balanced = await page.evaluate(() => {
       const lifecycle = (window as any).__lifecycle;
@@ -331,7 +335,15 @@ async function main(): Promise<void> {
       sourceOnly.dispose();
       return { beforeSecond, afterSecond, final: lifecycle.snapshot() };
     });
-    assert.ok(isolated.afterSecond.projections > isolated.beforeSecond.projections);
+    assert.ok(
+      isolated.afterSecond.queries > isolated.beforeSecond.queries,
+      'the surviving adapter must consume its own resize callback after the peer releases'
+    );
+    assert.equal(
+      isolated.afterSecond.projections,
+      isolated.beforeSecond.projections,
+      'an isolated stable resize must not publish a duplicate projection event'
+    );
     assert.equal(
       isolated.final.mutationDisconnects,
       isolated.final.mutationConstructs,

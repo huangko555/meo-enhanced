@@ -691,9 +691,10 @@ const wheelView = {
   defaultLineHeight: 20,
   lineBlockAtHeight: (height: number) => ({ from: 42, top: height }),
   lineBlockAt: () => ({ top: 1000 }),
+  coordsAtPos: () => null,
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
 };
-const wheelController = new ViewportController(wheelView as any);
+const wheelController = new ViewportController(wheelView as any, { getMode: () => 'source' });
 let defaultPrevented = false;
 const dispatchWheel = (deltaY: number) => wheelScrollDOM.dispatch('wheel', {
   deltaX: 0,
@@ -731,6 +732,67 @@ dispatchWheel(-80);
 if (wheelNavigationReveal()) {
   throw new Error('A newer wheel interaction did not invalidate a delayed navigation reveal');
 }
+
+let liveWheelScrollTop = 1000;
+const liveWheelWrites: number[] = [];
+const liveWheelLine = {
+  classList: { contains: () => false },
+  closest: () => null,
+  getBoundingClientRect: () => ({
+    top: 1200 - liveWheelScrollTop,
+    bottom: 1220 - liveWheelScrollTop
+  })
+};
+const liveWheelScrollDOM = Object.assign(new FakeEventTarget(), {
+  ownerDocument: new FakeEventTarget(),
+  scrollLeft: 0,
+  scrollHeight: 5000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900, height: 500, width: 900 })
+});
+Object.defineProperty(liveWheelScrollDOM, 'scrollTop', {
+  configurable: true,
+  get: () => liveWheelScrollTop,
+  set: (value: number) => {
+    liveWheelScrollTop = value;
+    liveWheelWrites.push(value);
+  }
+});
+const liveWheelController = new ViewportController({
+  dom: new FakeEventTarget(),
+  scrollDOM: liveWheelScrollDOM,
+  contentDOM: { querySelectorAll: () => [liveWheelLine] },
+  posAtDOM: () => 42,
+  coordsAtPos: () => ({
+    top: 1200 - liveWheelScrollTop,
+    bottom: 1220 - liveWheelScrollTop
+  }),
+  lineBlockAt: () => ({ top: 1200 }),
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+} as any, { getMode: () => 'live' });
+liveWheelScrollDOM.dispatch('wheel', {
+  deltaX: 0,
+  deltaY: 120,
+  deltaMode: 0,
+  ctrlKey: false,
+  preventDefault() {}
+});
+// The wheel listener runs before Chromium applies the native scroll. With no
+// intervening layout change, the controller must not overwrite that movement.
+liveWheelScrollDOM.scrollTop = 1120;
+liveWheelWrites.length = 0;
+await flushFrames(wheelFrames);
+if (liveWheelScrollTop !== 1120 || liveWheelWrites.length > 0) {
+  throw new Error(
+    `Live wheel movement was pulled back by viewport stabilization: ${JSON.stringify({
+      scrollTop: liveWheelScrollTop,
+      writes: liveWheelWrites
+    })}`
+  );
+}
+liveWheelController.destroy();
 
 wheelScrollDOM.scrollTop = 1000;
 let elementScrollIntoViewCalls = 0;
@@ -857,6 +919,44 @@ await flushFrames(wheelFrames);
 if (revealScrollDOM.scrollTop !== 420) {
   throw new Error(`Nearest reveal reached ${revealScrollDOM.scrollTop} instead of 420`);
 }
+revealScrollDOM.scrollTop = 100;
+const contextualBelowReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(900, { y: 'nearest', yMargin: 40 }, contextualBelowReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 460) {
+  throw new Error(`Contextual nearest reveal below reached ${revealScrollDOM.scrollTop} instead of 460`);
+}
+revealScrollDOM.scrollTop = 700;
+const contextualAboveReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(200, { y: 'nearest', yMargin: 40 }, contextualAboveReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 160) {
+  throw new Error(`Contextual nearest reveal above reached ${revealScrollDOM.scrollTop} instead of 160`);
+}
+revealScrollDOM.scrollTop = 180;
+const contextualVisibleReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(200, { y: 'nearest', yMargin: 40 }, contextualVisibleReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 180) {
+  throw new Error(`Contextual nearest reveal moved an already-visible target to ${revealScrollDOM.scrollTop}`);
+}
+revealScrollDOM.scrollTop = 100;
+const lineBlockContextReveal = revealController.beginNavigationReveal();
+revealController.revealPosition(900, {
+  geometry: 'line-block',
+  marginMode: 'comfort-band',
+  y: 'nearest',
+  yMargin: 40
+}, lineBlockContextReveal);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 460) {
+  throw new Error(`Line-block contextual reveal reached ${revealScrollDOM.scrollTop} instead of 460`);
+}
+revealScrollDOM.scrollTop = 420;
 const staleReveal = revealController.beginNavigationReveal();
 revealController.revealPosition(1500, { y: 'nearest', schedule: 'next-frame' }, staleReveal);
 revealController.markInteraction();
@@ -1065,6 +1165,77 @@ if (defaultPrevented) {
 if (wheelScrollDOM.scrollTop !== 1220) {
   throw new Error(`Viewport controller overrode native wheel scrolling: ${wheelScrollDOM.scrollTop}`);
 }
+
+const readingWheelDom = new FakeEventTarget();
+const readingWheelDocument = new FakeEventTarget();
+let readingAnchorDocumentTop = 1200;
+const readingWheelScrollDOM = Object.assign(new FakeEventTarget(), {
+  ownerDocument: readingWheelDocument,
+  scrollTop: 1000,
+  scrollLeft: 0,
+  scrollHeight: 5000,
+  scrollWidth: 900,
+  clientHeight: 500,
+  clientWidth: 900,
+  getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900, height: 500, width: 900 })
+});
+const readingWheelLine = {
+  classList: { contains: () => false },
+  closest: () => null,
+  getBoundingClientRect: () => ({
+    top: readingAnchorDocumentTop - readingWheelScrollDOM.scrollTop,
+    bottom: readingAnchorDocumentTop - readingWheelScrollDOM.scrollTop + 20
+  })
+};
+const readingWheelView = {
+  dom: readingWheelDom,
+  defaultLineHeight: 20,
+  scrollDOM: readingWheelScrollDOM,
+  contentDOM: { querySelectorAll: () => [readingWheelLine] },
+  posAtDOM: () => 42,
+  lineBlockAt: () => ({ from: 42, top: readingAnchorDocumentTop }),
+  lineBlockAtHeight: () => ({ from: 42, top: readingAnchorDocumentTop }),
+  coordsAtPos: () => ({
+    top: readingAnchorDocumentTop - readingWheelScrollDOM.scrollTop,
+    bottom: readingAnchorDocumentTop - readingWheelScrollDOM.scrollTop + 20
+  }),
+  requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
+};
+const readingWheelController = new ViewportController(readingWheelView as any);
+readingWheelScrollDOM.scrollTop = 820;
+readingWheelScrollDOM.dispatch('wheel', {
+  deltaX: 0,
+  deltaY: -180,
+  deltaMode: 0,
+  ctrlKey: false
+});
+wheelFrames.shift()?.(0);
+readingAnchorDocumentTop += 14;
+readingWheelScrollDOM.scrollHeight += 14;
+await flushFrames(wheelFrames);
+if (readingWheelScrollDOM.scrollTop !== 820) {
+  throw new Error(
+    `A positive height correction overrode native reading scroll: ${readingWheelScrollDOM.scrollTop}`
+  );
+}
+readingWheelScrollDOM.scrollTop = 654;
+readingAnchorDocumentTop = 854;
+readingWheelScrollDOM.dispatch('wheel', {
+  deltaX: 0,
+  deltaY: -180,
+  deltaMode: 0,
+  ctrlKey: false
+});
+wheelFrames.shift()?.(0);
+readingAnchorDocumentTop -= 20;
+readingWheelScrollDOM.scrollHeight -= 20;
+await flushFrames(wheelFrames);
+if (readingWheelScrollDOM.scrollTop !== 654) {
+  throw new Error(
+    `A negative height correction overrode native reading scroll: ${readingWheelScrollDOM.scrollTop}`
+  );
+}
+readingWheelController.destroy();
 
 wheelController.markInteraction();
 wheelScrollDOM.scrollTop = 1000;

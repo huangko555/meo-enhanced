@@ -532,32 +532,161 @@ body {
   box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, currentColor);
 }
 
-.preview-appearance-button {
-  --segmented-control-content-gap: 5px;
-}
-
-.preview-font-family-control {
+.preview-select-control {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 26px;
+  color-scheme: dark;
+  --preview-select-background: #252a30;
+  --preview-select-foreground: #f0f3f6;
+  --preview-select-border: #4a515b;
+  --preview-select-hover-border: #73808f;
+  --preview-select-label-foreground: #d4d9df;
+}
+
+.preview-select-control[data-preview-appearance="light"] {
+  color-scheme: light;
+  --preview-select-background: #ffffff;
+  --preview-select-foreground: #20242a;
+  --preview-select-border: #c5cbd3;
+  --preview-select-hover-border: #778391;
+  --preview-select-label-foreground: #4d5662;
+}
+
+.preview-select-label {
+  flex: 0 0 auto;
+  color: var(--preview-select-label-foreground);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.preview-select-shell {
+  position: relative;
+  display: inline-flex;
   min-width: 0;
 }
 
-.preview-font-family-input {
-  box-sizing: border-box;
-  width: clamp(112px, 15vw, 168px);
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, transparent));
-  border-radius: 5px;
-  color: var(--vscode-input-foreground);
-  background: var(--vscode-input-background);
-  font: inherit;
-  font-size: 12px;
+.preview-toolbar-native-select {
+  display: none !important;
 }
 
-.preview-font-family-input:focus {
-  border-color: var(--vscode-focusBorder);
+.preview-toolbar-dropdown {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px 0 9px;
+  border: 1px solid var(--preview-select-border);
+  border-radius: 8px;
+  color: var(--preview-select-foreground);
+  background: var(--preview-select-background);
+  font: inherit;
+  font-size: 12px;
+  line-height: 24px;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.preview-font-family-dropdown {
+  width: clamp(112px, 13vw, 156px);
+}
+
+.preview-source-coloring-dropdown {
+  width: 64px;
+}
+
+.preview-appearance-dropdown {
+  width: 76px;
+}
+
+.preview-toolbar-dropdown:hover,
+.preview-toolbar-dropdown[aria-expanded="true"] {
+  border-color: var(--preview-select-hover-border);
+}
+
+.preview-toolbar-dropdown:focus-visible {
+  border-color: var(--preview-select-hover-border);
   outline: none;
+  box-shadow: none;
+}
+
+.preview-toolbar-dropdown-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-toolbar-dropdown-chevron {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin: -3px 1px 0 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.preview-dropdown-panel {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid #4a515b;
+  border-radius: 9px;
+  color: #f0f3f6;
+  background: #252a30;
+  color-scheme: dark;
+  box-shadow: none;
+}
+
+.preview-dropdown-panel[data-preview-appearance="light"] {
+  border-color: #c5cbd3;
+  color: #20242a;
+  background: #ffffff;
+  color-scheme: light;
+}
+
+.preview-dropdown-panel[hidden] {
+  display: none;
+}
+
+.preview-dropdown-option {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.preview-dropdown-option:hover,
+.preview-dropdown-option:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.preview-dropdown-panel[data-preview-appearance="light"] .preview-dropdown-option:hover,
+.preview-dropdown-panel[data-preview-appearance="light"] .preview-dropdown-option:focus-visible {
+  background: rgba(32, 36, 42, 0.08);
+}
+
+.preview-dropdown-option.is-selected {
+  background: rgba(90, 150, 255, 0.2);
 }
 
 .editor-appearance-button {
@@ -715,12 +844,15 @@ body {
   flex-direction: column;
   align-items: stretch;
   gap: 2px;
-  width: 200px;
+  box-sizing: border-box;
+  width: min(268px, calc(100vw - 24px));
+  max-height: calc(100vh - 64px);
   padding: 4px;
   border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
   background: var(--vscode-sideBar-background);
   box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
+  overflow-y: auto;
 }
 
 .more-tools-panel[hidden] {
@@ -770,20 +902,31 @@ body {
 
 .more-tools-appearance-row {
   display: flex;
+  flex-direction: column;
   align-items: stretch;
-  padding: 4px 8px;
+  gap: 5px;
+  padding: 5px 8px;
 }
 
-.editor-appearance-control {
-  align-items: flex-start;
+.editor-appearance-control,
+.ui-language-control {
   display: flex;
-  height: 25px;
-  margin-bottom: 1px;
+  align-items: stretch;
+  height: 26px;
   width: 100%;
 }
 
-.editor-appearance-control .segmented-control-button {
+.editor-appearance-control .segmented-control-button,
+.ui-language-control .segmented-control-button {
   flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 6px;
+}
+
+.more-tools-control-label {
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .mode-group {
@@ -1085,7 +1228,7 @@ body {
 
 .meo-md-long-code-placeholder .meo-long-code-action,
 .meo-md-long-code-footer .meo-long-code-action {
-  margin-left: 8px;
+  margin-left: 0;
 }
 
 .meo-long-code-action,
@@ -1573,9 +1716,23 @@ body {
   font-style: italic;
 }
 
+.cm-editor.meo-mode-live .meo-md-subscript,
+.cm-editor.meo-mode-live .meo-md-superscript {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.cm-editor.meo-mode-live .meo-md-subscript {
+  vertical-align: sub;
+}
+
+.cm-editor.meo-mode-live .meo-md-superscript {
+  vertical-align: super;
+}
+
 .cm-editor .meo-md-strong {
-  color: var(--meo-foreground) !important;
-  -webkit-text-fill-color: var(--meo-foreground) !important;
+  color: inherit !important;
+  -webkit-text-fill-color: inherit !important;
   font-weight: 700;
 }
 
@@ -1592,7 +1749,6 @@ body {
   -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;
 }
 
-.cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strong,
 .cm-editor.meo-mode-live .cm-line:is(.meo-md-h1, .meo-md-h2, .meo-md-h3, .meo-md-h4, .meo-md-h5, .meo-md-h6) .meo-md-strike {
   color: var(--meo-semantic-headingForeground, #79b8ff) !important;
   -webkit-text-fill-color: var(--meo-semantic-headingForeground, #79b8ff) !important;
@@ -1660,9 +1816,10 @@ body {
 }
 
 .cm-editor .meo-md-link {
-  color: var(--meo-token-link-color, var(--meo-color-base05));
+  color: var(--meo-semantic-headingForeground, #79b8ff);
+  -webkit-text-fill-color: var(--meo-semantic-headingForeground, #79b8ff);
   text-decoration: underline;
-  text-decoration-color: var(--meo-color-base05);
+  text-decoration-color: var(--meo-semantic-headingForeground, #79b8ff);
   text-underline-offset: 4px;
 }
 
@@ -2116,6 +2273,13 @@ body {
   align-self: stretch;
   min-height: inherit;
   user-select: none;
+  cursor: grab;
+  overflow: hidden;
+}
+
+.cm-editor .meo-latex-math-viewport.is-interactive.is-dragging,
+.meo-latex-math-fullscreen.is-dragging {
+  cursor: grabbing;
 }
 
 .cm-editor .meo-md-code-block .meo-md-inline-code,
@@ -2178,6 +2342,7 @@ body {
   align-items: center;
   gap: 4px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 100ms ease;
 }
 
@@ -2186,6 +2351,7 @@ body {
 .meo-mermaid-toolbar:focus-within,
 .meo-latex-math-toolbar:focus-within {
   opacity: 1;
+  pointer-events: auto;
 }
 
 @media (hover: none) {
@@ -2193,27 +2359,13 @@ body {
   .meo-mermaid-toolbar,
   .meo-latex-math-toolbar {
     opacity: 1;
+    pointer-events: auto;
   }
 }
 
 .meo-mermaid-toolbar .meo-copy-code-btn,
 .meo-latex-math-toolbar .meo-copy-code-btn {
   position: static;
-}
-
-.meo-latex-math-toolbar {
-  pointer-events: none;
-}
-
-.meo-latex-math-toolbar.is-block-hovered,
-.meo-latex-math-toolbar:focus-within {
-  pointer-events: auto;
-}
-
-@media (hover: none) {
-  .meo-latex-math-toolbar {
-    pointer-events: auto;
-  }
 }
 
 .meo-mermaid-mode-btn,
@@ -2256,6 +2408,15 @@ body {
   user-select: text;
   -webkit-user-select: text;
   transition: background-color 100ms ease, box-shadow 100ms ease;
+}
+
+.cm-editor .meo-md-html-block::after {
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--meo-html-action-rail-offset));
+  bottom: 0;
+  width: var(--meo-html-action-rail-offset);
+  content: '';
 }
 
 .cm-editor .meo-md-html-content {
@@ -2754,6 +2915,10 @@ body {
   cursor: grab;
 }
 
+.cm-editor.meo-mode-live .cm-line.meo-md-code-block-start + .meo-mermaid-block {
+  border-radius: 0 0 6px 6px;
+}
+
 .cm-editor .meo-mermaid-block.meo-mermaid-light-theme {
   color: #1f2328;
 }
@@ -3070,6 +3235,48 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
 
 .meo-mermaid-fullscreen.meo-mermaid-light-theme {
   color: #1f2328;
+}
+
+.meo-latex-math-fullscreen-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background-color: var(--meo-background);
+}
+
+.meo-latex-math-fullscreen {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: var(--meo-foreground);
+  background-color: var(--meo-code-background);
+  cursor: grab;
+  user-select: none;
+}
+
+.meo-latex-math-fullscreen .meo-latex-math-canvas {
+  position: relative;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+}
+
+.meo-latex-math-fullscreen .meo-latex-math-canvas > .katex-display {
+  width: max-content;
+  margin: 0 !important;
+}
+
+.meo-latex-math-fullscreen .meo-latex-math-zoom-controls {
+  right: calc(5px + 28px);
+  opacity: 1;
+}
+
+.meo-latex-math-fullscreen-exit-controls {
+  opacity: 1;
 }
 
 .outline-sidebar {
@@ -3876,21 +4083,15 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-mermaid-preview-sticky,
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-source-sticky,
 .cm-editor .meo-rendered-block-mode-shell[data-meo-rendered-block-layout="side-by-side"] .meo-latex-math-preview-sticky {
-  position: sticky;
-  top: 12px;
-  align-self: start;
+  position: relative;
+  top: 0;
+  align-self: stretch;
 }
 
 .cm-editor .meo-mermaid-preview-sticky {
   display: flex;
   align-items: stretch;
-  min-height: min(
-    100%,
-    max(
-      var(--meo-mermaid-preview-preferred-height, 0px),
-      var(--meo-split-preview-available-height)
-    )
-  );
+  min-height: max(180px, var(--meo-mermaid-preview-preferred-height, 0px));
   overflow: hidden;
 }
 
@@ -3898,7 +4099,7 @@ body.outline-resizing .preview-frame {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: min(100%, var(--meo-split-preview-available-height));
+  min-height: max(180px, min(100%, var(--meo-split-preview-available-height)));
 }
 
 .cm-editor .meo-latex-math-preview-sticky > .meo-latex-math-viewport.is-interactive {
@@ -4017,7 +4218,7 @@ body.outline-resizing .preview-frame {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  overflow-x: clip;
   overflow-y: visible;
   scrollbar-color: var(--meo-scrollbar-thumb) transparent;
   scrollbar-width: thin;
@@ -4146,6 +4347,15 @@ body.outline-resizing .preview-frame {
   width: 10px;
   cursor: col-resize !important;
   touch-action: none;
+}
+
+.cm-editor .meo-md-html-table-wrap.is-table-overflowing {
+  overflow-x: auto;
+}
+
+.cm-editor .meo-md-html-table th:last-child > .meo-md-html-table-column-resize-handle {
+  right: 0;
+  width: 5px;
 }
 
 .cm-editor.meo-table-column-resizing,
@@ -4327,7 +4537,7 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-cell-preview .meo-md-link {
-  color: var(--meo-color-base05);
+  color: var(--meo-semantic-headingForeground, #79b8ff);
   overflow-wrap: anywhere;
   word-break: normal;
 }

@@ -425,9 +425,9 @@ if (exportStyles !== lightPreviewStyles || darkExportStyles !== darkPreviewStyle
 if (
   !darkPreviewStyles.includes('--meo-heading-1-size: 1.6em') ||
   !darkPreviewStyles.includes('--meo-heading-1-weight: 400') ||
-  !darkPreviewStyles.includes('strong { color: var(--meo-strong); font-weight: 700; }')
+  !darkPreviewStyles.includes('strong { color: inherit; font-weight: 700; }')
 ) {
-  throw new Error('Preview headings and strong text must use the same explicit theme typography as Live mode');
+  throw new Error('Preview strong text must inherit its surrounding color and only change font weight');
 }
 
 if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
@@ -436,7 +436,6 @@ if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
 for (const expected of [
   '--meo-fg: #d8dee9',
   '--meo-heading: #d8dee9',
-  '--meo-strong: #d8dee9',
   '--meo-link: #d8dee9'
 ]) {
   if (!darkPreviewStyles.includes(expected)) {

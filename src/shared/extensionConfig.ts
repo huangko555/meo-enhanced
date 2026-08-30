@@ -33,8 +33,9 @@ export function getGitDiffLineHighlightsEnabled(): boolean {
   return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY, true);
 }
 
-export function getCurrentVscodeCodeTheme(): RawVscodeTheme | null {
-  return getActiveVscodeRawTheme();
+export function getCurrentVscodeCodeTheme(kind?: vscode.ColorThemeKind): RawVscodeTheme | null {
+  const activeKind = kind ?? (vscode.window as typeof vscode.window | undefined)?.activeColorTheme?.kind;
+  return activeKind === undefined ? null : getActiveVscodeRawTheme(activeKind);
 }
 
 export function getOutlinePosition(): OutlinePosition {

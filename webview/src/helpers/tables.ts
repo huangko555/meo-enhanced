@@ -15,7 +15,7 @@ import { wikiLinkScheme } from './wikiLinks';
 import { normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
 import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from './listMarkers';
-import { getViewportController } from './viewportController';
+import { getViewportController, visualLineContextMargin } from './viewportController';
 import { changedDocumentRange, runEditorHistoryCommand } from './historyCommands';
 import { createOpenLinkButton } from './linkOpenButton';
 import { collectHexColorRangesFromText } from '../../../src/shared/hexColorSwatches';
@@ -70,6 +70,7 @@ import {
   type TableCellSelectionTransition,
   type TableCellRange as TableSelectionRange
 } from '../editor/tableCellSelection';
+import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 import {
   projectFixedChromeGeometry
 } from '../editor/fixedChromeGeometry';
@@ -241,6 +242,9 @@ const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row
 const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
 const tableToolbarHeight = 24;
 const tableCellAutoCommitDelayMs = 250;
+// Chromium reports fractional caret bounds while scrollTop is effectively
+// quantized. Treat sub-pixel differences as visible so reveal retries settle.
+const tableCellCaretRevealEpsilon = 1;
 let nextTableCellEditSequence = 0;
 
 export function commitPendingTableEdits(view: EditorView): boolean {
@@ -336,8 +340,8 @@ export function focusTableHistoryChange(
   previousScrollTop: number,
   targetPosition?: number,
   isCurrent: () => boolean = () => true
-): boolean {
-  if (!isCurrent()) return false;
+): 'not-rendered' | 'restored' | 'retry' {
+  if (!isCurrent()) return 'not-rendered';
 
   const changedLine = view.state.doc.lineAt(Math.min(changed.from, view.state.doc.length)).number;
   const findInput = () => {
@@ -350,6 +354,11 @@ export function focusTableHistoryChange(
       const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
       const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
       if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
+      // A history transaction updates the document before Live's derived table
+      // presentation is replaced. Never focus that stale textarea: it would be
+      // detached on the next frame and the restored focus would immediately vanish.
+      const currentSource = view.state.doc.sliceString(from, to).trim();
+      if (tableCellEditorValueToSource(input.value).trim() !== currentSource) continue;
       const distance = changed.to < from
         ? from - changed.to
         : changed.from > to
@@ -360,12 +369,12 @@ export function focusTableHistoryChange(
     return closest?.input ?? null;
   };
 
-  if (!view.state.doc.line(changedLine).text.includes('|')) return false;
+  if (!view.state.doc.line(changedLine).text.includes('|')) return 'not-rendered';
   let viewportPreservationScheduled = false;
   const focusInput = () => {
-    if (!isCurrent()) return false;
+    if (!isCurrent()) return 'not-rendered' as const;
     const input = findInput();
-    if (!input) return false;
+    if (!input) return 'not-rendered' as const;
     const cellFrom = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
     const cellTo = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
     const sourceCaret = Math.min(Math.max((targetPosition ?? changed.to) - cellFrom, 0), cellTo - cellFrom);
@@ -374,46 +383,62 @@ export function focusTableHistoryChange(
     input.setSelectionRange(caret, caret);
 
     const cell = input.closest<HTMLElement>(tableCellSelector);
-    if (!cell) return true;
-    const cellRect = cell.getBoundingClientRect();
+    if (!cell) return 'restored' as const;
     const scrollerRect = view.scrollDOM.getBoundingClientRect();
-    const cellTop = cellRect.top - scrollerRect.top + view.scrollDOM.scrollTop;
-    const cellBottom = cellTop + cellRect.height;
-    const wasVisible = (
-      cellBottom > previousScrollTop &&
-      cellTop < previousScrollTop + view.scrollDOM.clientHeight
+    const caretRect = tableCellCaretViewportBounds(input);
+    const caretTop = caretRect.top - scrollerRect.top + view.scrollDOM.scrollTop;
+    const caretBottom = caretRect.bottom - scrollerRect.top + view.scrollDOM.scrollTop;
+    const historyContextMargin = visualLineContextMargin(view, 2.5);
+    const caretWasVisible = (
+      caretTop >= previousScrollTop - tableCellCaretRevealEpsilon &&
+      caretBottom <= previousScrollTop + view.scrollDOM.clientHeight + tableCellCaretRevealEpsilon
     );
-    if (wasVisible) {
+    if (caretWasVisible) {
       if (!viewportPreservationScheduled) {
         viewportPreservationScheduled = true;
         stabilizeHistoryScrollTop(view, previousScrollTop, isCurrent);
       }
-      return true;
+      return 'restored' as const;
     }
-    const isFullyVisible = (
-      cellRect.top >= scrollerRect.top &&
-      cellRect.bottom <= scrollerRect.bottom &&
-      cellRect.left >= scrollerRect.left &&
-      cellRect.right <= scrollerRect.right
+    const caretIsVisible = (
+      caretRect.top >= scrollerRect.top - tableCellCaretRevealEpsilon &&
+      caretRect.bottom <= scrollerRect.bottom + tableCellCaretRevealEpsilon
     );
-    if (!isFullyVisible) {
+    if (!caretIsVisible) {
       const viewportController = getViewportController(view);
       const isNavigationCurrent = viewportController?.beginNavigationReveal();
       if (viewportController && isNavigationCurrent) {
-        viewportController.revealElement(cell, () => isCurrent() && isNavigationCurrent());
+        const canReveal = () => isCurrent() && isNavigationCurrent();
+        view.requestMeasure({
+          read: () => {
+            if (!canReveal() || !input.isConnected) return null;
+            const currentCaret = tableCellCaretViewportBounds(input);
+            const currentViewport = view.scrollDOM.getBoundingClientRect();
+            const delta = currentCaret.top < currentViewport.top
+              ? currentCaret.top - currentViewport.top - historyContextMargin
+              : currentCaret.bottom > currentViewport.bottom
+                ? currentCaret.bottom - currentViewport.bottom + historyContextMargin
+                : 0;
+            return Math.abs(delta) >= 1 ? delta : null;
+          },
+          write: (delta) => {
+            if (delta !== null && canReveal()) viewportController.navigateBy({ top: delta });
+          }
+        });
+      } else {
+        input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       }
+      return 'retry' as const;
     }
-    return true;
+    return 'restored' as const;
   };
-  if (focusInput()) return true;
-  return false;
+  return focusInput();
 }
 
 export function focusHistoryChange(
   view: EditorView,
   changed: { from: number; to: number } | null,
   previousScrollTop: number,
-  revealSelection?: (anchor: number, head: number) => void,
   previousSelection?: {
     lineNumber: number;
     visibleFromLineNumber: number;
@@ -425,6 +450,14 @@ export function focusHistoryChange(
 ) {
   if (!isCurrent()) return;
   const target = targetPosition ?? changed?.to;
+  const targetLineBeforeFocus = typeof target === 'number'
+    ? view.state.doc.lineAt(Math.max(0, Math.min(target, view.state.doc.length))).number
+    : null;
+  const targetWasVisibleBeforeReplay = targetLineBeforeFocus !== null && Boolean(
+    previousSelection &&
+    targetLineBeforeFocus >= previousSelection.visibleFromLineNumber &&
+    targetLineBeforeFocus <= previousSelection.visibleToLineNumber
+  );
   if (typeof target === 'number' && view.state.selection.main.head !== target) {
     view.dispatch({ selection: { anchor: target } });
   }
@@ -434,11 +467,19 @@ export function focusHistoryChange(
   view.focus();
   let viewportPreservationScheduled = false;
   let tableFocused = false;
-  const revealOffscreenSelection = (block: ReturnType<EditorView['lineBlockAt']>) => {
+  let offscreenRevealScheduled = false;
+  const revealOffscreenSelection = () => {
     if (!isCurrent() || tableFocused) return;
     const selection = view.state.selection.main;
-    if (revealSelection) {
-      revealSelection(selection.anchor, selection.head);
+    const viewport = getViewportController(view);
+    if (viewport) {
+      const navigationIsCurrent = viewport.beginNavigationReveal();
+      viewport.revealPositionUntilStable(selection.head, {
+        geometry: 'line-block',
+        marginMode: 'comfort-band',
+        y: 'nearest',
+        yMargin: visualLineContextMargin(view, 2.5)
+      }, () => isCurrent() && navigationIsCurrent());
     } else {
       view.dispatch({ effects: EditorView.scrollIntoView(selection.head, { y: 'nearest' }) });
     }
@@ -453,12 +494,7 @@ export function focusHistoryChange(
     const isVisibleNow = coords
       ? coords.top >= scrollerRect.top && coords.bottom <= scrollerRect.bottom
       : block.bottom > currentScrollTop && block.top < currentScrollTop + view.scrollDOM.clientHeight;
-    const targetLine = view.state.doc.lineAt(head).number;
-    const wasVisibleBeforeReplay = Boolean(
-      previousSelection?.wasVisible &&
-      targetLine >= previousSelection.visibleFromLineNumber &&
-      targetLine <= previousSelection.visibleToLineNumber
-    ) || (
+    const wasVisibleBeforeReplay = targetWasVisibleBeforeReplay || (
       block.top >= previousScrollTop &&
       block.bottom <= previousScrollTop + view.scrollDOM.clientHeight
     );
@@ -469,16 +505,23 @@ export function focusHistoryChange(
       }
       return;
     }
+    if (!offscreenRevealScheduled) {
+      offscreenRevealScheduled = true;
+      revealOffscreenSelection();
+    }
+    if (getViewportController(view)) {
+      return;
+    }
     // CodeMirror may already have revealed an offscreen history target while
     // applying the transaction. In that case any second scroll only creates a
     // visible bounce, so keep the current nearest position.
     if (isVisibleNow) return;
     if (!coords) {
-      revealOffscreenSelection(block);
+      revealOffscreenSelection();
       return;
     }
     if (coords.top < scrollerRect.top || coords.bottom > scrollerRect.bottom) {
-      revealOffscreenSelection(block);
+      revealOffscreenSelection();
     }
   };
   // Start offscreen history navigation before the next paint. Unmeasured
@@ -844,11 +887,15 @@ export function tableCellSourceOffsetToEditorOffset(value: string, offset: numbe
   return tableCellSourceToEditorValue(source.slice(0, Math.max(0, offset))).length;
 }
 
-export function tableCellVisualLineBoundary(input: HTMLTextAreaElement): {
-  atFirst: boolean;
-  atLast: boolean;
-  caretColumn: number;
-} {
+function withTableCellVisualLineProbe<T>(
+  input: HTMLTextAreaElement,
+  run: (probe: {
+    caret: number;
+    lineHeight: number;
+    lineTopAt(offset: number): number;
+    value: string;
+  }) => T
+): T {
   const value = input.value;
   const caret = Math.max(0, Math.min(input.selectionStart ?? 0, value.length));
   const computed = getComputedStyle(input);
@@ -879,6 +926,27 @@ export function tableCellVisualLineBoundary(input: HTMLTextAreaElement): {
     return marker.offsetTop;
   };
   try {
+    const parsedLineHeight = Number.parseFloat(computed.lineHeight);
+    const parsedFontSize = Number.parseFloat(computed.fontSize);
+    return run({
+      caret,
+      lineHeight: Number.isFinite(parsedLineHeight)
+        ? parsedLineHeight
+        : (Number.isFinite(parsedFontSize) ? parsedFontSize * 1.2 : 16),
+      lineTopAt,
+      value
+    });
+  } finally {
+    mirror.remove();
+  }
+}
+
+export function tableCellVisualLineBoundary(input: HTMLTextAreaElement): {
+  atFirst: boolean;
+  atLast: boolean;
+  caretColumn: number;
+} {
+  return withTableCellVisualLineProbe(input, ({ caret, lineTopAt, value }) => {
     const caretTop = lineTopAt(caret);
     const sameLine = (offset: number) => Math.abs(lineTopAt(offset) - caretTop) < 1;
     let low = 0;
@@ -893,9 +961,15 @@ export function tableCellVisualLineBoundary(input: HTMLTextAreaElement): {
       atLast: sameLine(value.length),
       caretColumn: caret - low
     };
-  } finally {
-    mirror.remove();
-  }
+  });
+}
+
+function tableCellCaretViewportBounds(input: HTMLTextAreaElement): { top: number; bottom: number } {
+  return withTableCellVisualLineProbe(input, ({ caret, lineHeight, lineTopAt }) => {
+    const inputRect = input.getBoundingClientRect();
+    const top = inputRect.top + lineTopAt(caret) - input.scrollTop;
+    return { top, bottom: top + lineHeight };
+  });
 }
 
 function normalizeTableCellEditorInput(input: HTMLTextAreaElement) {
@@ -2177,6 +2251,62 @@ function buildTableDataForLineRange(state: EditorState, startLineNo: number, end
   };
 }
 
+function tableWidthIdentity(tableData: WidgetTableData): string {
+  return JSON.stringify({
+    colCount: tableData.colCount,
+    alignments: tableData.alignments
+  });
+}
+
+function buildWidgetTableData(
+  data: BuiltTableData,
+  diagnostics: EditorDiagnostic[] = [],
+  diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
+): WidgetTableData | null {
+  const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
+  if (colCount === 0 || !headerLine) return null;
+  const indent = /^(\s*)/.exec(headerLine.text)?.[1] ?? '';
+  const normalizedAlignments = normalizeRow(alignments, colCount, '').map((value) => value ?? null);
+  const headerCells = normalizeRow(headerLine.cells, colCount, '');
+  const rows = dataLines.map((line) => normalizeRow(line.cells, colCount, ''));
+  const diffFlagsByLine = collectTableDiffFlags(data, diffLineFlags);
+  const tableDiagnostics = collectTableDiagnostics(data, diagnostics);
+  return {
+    from,
+    to,
+    indent,
+    colCount,
+    alignments: normalizedAlignments,
+    headerCells,
+    rows,
+    signature: JSON.stringify({
+      colCount,
+      headerCells,
+      rows,
+      normalizedAlignments,
+      diagnostics: tableDiagnostics,
+      diffFlagsByLine
+    }),
+    startLine,
+    endLine,
+    diagnostics: tableDiagnostics,
+    sourceRanges: collectTableSourceRanges(data),
+    diffFlagsByLine
+  };
+}
+
+const mountedTableWidgets = new WeakMap<EditorView, Set<HtmlTableWidget>>();
+
+export function refreshMountedTablePositions(
+  view: EditorView,
+  diagnostics: EditorDiagnostic[] = [],
+  diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
+): void {
+  const widgets = mountedTableWidgets.get(view);
+  if (!widgets) return;
+  for (const widget of widgets) widget.refreshCurrentPosition(view, diagnostics, diffLineFlags);
+}
+
 class HtmlTableWidget extends WidgetType {
   tableData: WidgetTableData;
   view: EditorView | null;
@@ -2198,6 +2328,7 @@ class HtmlTableWidget extends WidgetType {
   tableCommandTargetId: string;
   tableCommandTargetRegistration: TableCommandTargetRegistration | null;
   selectionDomAnchor: { node: Node; offset: number } | null;
+  measuredHeight: number;
 
   constructor(
     tableData: WidgetTableData,
@@ -2221,6 +2352,7 @@ class HtmlTableWidget extends WidgetType {
     this.tableCommandTargetId = '';
     this.tableCommandTargetRegistration = null;
     this.selectionDomAnchor = null;
+    this.measuredHeight = -1;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -2246,17 +2378,97 @@ class HtmlTableWidget extends WidgetType {
     });
   }
 
+  get estimatedHeight(): number {
+    return estimateBlockWidgetHeight({
+      kind: 'table',
+      headerCells: this.tableData.headerCells,
+      rows: this.tableData.rows,
+      measuredHeight: this.measuredHeight
+    });
+  }
+
   eq(other: WidgetType): boolean {
-    return (
+    const equivalent = (
       other instanceof HtmlTableWidget &&
-      other.tableData.signature === this.tableData.signature &&
       other.tableData.indent === this.tableData.indent &&
-      other.tableData.from === this.tableData.from &&
-      other.tableData.to === this.tableData.to &&
-      other.tableData.startLine === this.tableData.startLine &&
-      other.tableData.endLine === this.tableData.endLine
-      && other.stickyHeaderAdapterFactory === this.stickyHeaderAdapterFactory
+      other.tableData.colCount === this.tableData.colCount &&
+      other.tableData.headerCells.length === this.tableData.headerCells.length &&
+      other.tableData.rows.length === this.tableData.rows.length &&
+      other.tableData.rows.every((row, index) => row.length === this.tableData.rows[index]?.length) &&
+      other.tableData.alignments.every((alignment, index) => alignment === this.tableData.alignments[index]) &&
+      other.stickyHeaderAdapterFactory === this.stickyHeaderAdapterFactory
     );
+    if (equivalent && other instanceof HtmlTableWidget) {
+      const mounted = this.domRefs ? this : other.domRefs ? other : null;
+      const projected = mounted === this ? other.tableData : this.tableData;
+      mounted?.adoptEquivalentTableData(projected);
+    }
+    return equivalent;
+  }
+
+  adoptEquivalentTableData(tableData: WidgetTableData): void {
+    const contentChanged = this.tableData.signature !== tableData.signature;
+    this.tableData = tableData;
+    if (!this.domRefs) return;
+    const { shell, table, rowEntries, allRowInputs } = this.domRefs;
+    shell.dataset.meoRenderedBlockStartLine = String(tableData.startLine);
+    shell.dataset.meoRenderedBlockEndLine = String(tableData.endLine);
+    table.dataset.tableFrom = String(tableData.from);
+    table.dataset.tableTo = String(tableData.to);
+    table.dataset.tableSignature = tableWidthIdentity(tableData);
+    rowEntries.forEach(({ row }, index) => {
+      row.dataset.sourceLineNumber = String(tableData.startLine + (index === 0 ? 0 : index + 1));
+    });
+    for (let row = 0; row < allRowInputs.length; row += 1) {
+      for (let col = 0; col < allRowInputs[row].length; col += 1) {
+        const input = allRowInputs[row][col];
+        const range = tableData.sourceRanges?.[row]?.[col];
+        if (!range) continue;
+        input.dataset.tableCellFrom = String(range.from);
+        input.dataset.tableCellTo = String(range.to);
+      }
+    }
+    if (contentChanged) {
+      const values = [tableData.headerCells, ...tableData.rows];
+      for (let row = 0; row < allRowInputs.length; row += 1) {
+        for (let col = 0; col < allRowInputs[row].length; col += 1) {
+          const input = allRowInputs[row][col];
+          const value = tableCellSourceToEditorValue(values[row]?.[col] ?? '');
+          if (input.value !== value) input.value = value;
+          this.refreshCellPreviewFromInput(input);
+        }
+      }
+      this.stickyHeaderAdapter.update();
+      this.scheduleLayout({ resizeRows: true });
+    } else {
+      this.scheduleLayout();
+    }
+  }
+
+  refreshCurrentPosition(
+    view: EditorView = this.view!,
+    diagnostics: EditorDiagnostic[] = [],
+    diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
+  ): void {
+    if (!view || !this.domRefs?.shell.isConnected) return;
+    const pos = view.posAtDOM(this.domRefs.wrap, 0);
+    let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, -1);
+    while (node && node.name !== 'Table') node = node.parent;
+    if (!node) {
+      this.resolveCurrentTableRange(view, this.domRefs.wrap);
+      return;
+    }
+    const current = buildWidgetTableData(
+      buildTableData(view.state, node),
+      diagnostics,
+      diffLineFlags
+    );
+    if (
+      !current || current.colCount !== this.tableData.colCount ||
+      current.rows.length !== this.tableData.rows.length ||
+      current.rows.some((row, index) => row.length !== this.tableData.rows[index]?.length)
+    ) return;
+    this.adoptEquivalentTableData(current);
   }
 
   get hasPendingCellEdits() {
@@ -2313,12 +2525,29 @@ class HtmlTableWidget extends WidgetType {
     }
 
     if (pos >= 0) {
-      let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, 1);
+      // Replacement widgets map their DOM position to the end of the replaced
+      // range. Resolve toward the table at that boundary; resolving forward can
+      // land after the table and fall back to absolute offsets captured before
+      // an embedded editor inserted lines above it.
+      let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(pos, -1);
       while (node) {
         if (node.name === 'Table') {
           if (this.tableData) {
-            this.tableData.from = node.from;
-            this.tableData.to = node.to;
+            const delta = node.from - this.tableData.from;
+            const sourceRanges = delta === 0
+              ? this.tableData.sourceRanges
+              : this.tableData.sourceRanges?.map((row) => row.map((range) => ({
+                from: range.from + delta,
+                to: range.to + delta
+              })));
+            this.adoptEquivalentTableData({
+              ...this.tableData,
+              from: node.from,
+              to: node.to,
+              startLine: view.state.doc.lineAt(node.from).number,
+              endLine: view.state.doc.lineAt(Math.max(node.from, node.to - 1)).number,
+              sourceRanges
+            });
           }
           return { from: node.from, to: node.to };
         }
@@ -2333,6 +2562,20 @@ class HtmlTableWidget extends WidgetType {
     }
 
     return null;
+  }
+
+  resolveCurrentTableStartLine(view: EditorView, row: number, fallbackRange: TableRange | null = null): number | null {
+    const renderedRow = this.domRefs?.rowEntries[row]?.row;
+    const renderedLine = Number.parseInt(renderedRow?.dataset.sourceLineNumber ?? '', 10);
+    const candidate = renderedLine - (row === 0 ? 0 : row + 1);
+    if (
+      Number.isInteger(candidate) && candidate >= 1 && candidate < view.state.doc.lines &&
+      tableDelimiterRegex.test(view.state.doc.line(candidate + 1).text)
+    ) return candidate;
+    const range = fallbackRange ?? (
+      this.domRefs ? this.resolveCurrentTableRange(view, this.domRefs.wrap) : null
+    );
+    return range ? view.state.doc.lineAt(range.from).number : null;
   }
 
   readCellMatrix(): CellMatrix {
@@ -2596,7 +2839,10 @@ class HtmlTableWidget extends WidgetType {
     const viewport = getViewportController(view);
     const isRevealCurrent = viewport?.beginNavigationReveal();
     view.dispatch({ selection: { anchor: targetPos } });
-    if (viewport && isRevealCurrent) viewport.revealPosition(targetPos, { y: 'nearest' }, isRevealCurrent);
+    if (viewport && isRevealCurrent) viewport.revealPosition(targetPos, {
+      y: 'nearest',
+      yMargin: visualLineContextMargin(view, 1)
+    }, isRevealCurrent);
     else view.dispatch({ effects: EditorView.scrollIntoView(targetPos, { y: 'nearest' }) });
     view.focus();
     return true;
@@ -3190,13 +3436,18 @@ class HtmlTableWidget extends WidgetType {
       this.cellInteraction.accept({ type: 'commit-result', generation: commit.generation, outcome: 'failed' });
       return null;
     }
+    const currentRange = dom ? this.resolveCurrentTableRange(view, dom) : null;
+    if (!currentRange) {
+      this.cellInteraction.accept({ type: 'commit-result', generation: commit.generation, outcome: 'failed' });
+      return null;
+    }
     const pendingCellEdits = commit.edits;
     const confirmation = createTableCellCommitConfirmation(this.cellInteraction, commit.generation);
     this.cancelPendingCellAutoCommit();
     if (pendingCellEdits.length) {
-      const tableStartLine = view.state.doc.lineAt(
-        Math.max(0, Math.min(this.tableData.from ?? 0, view.state.doc.length))
-      ).number;
+      // The widget can survive edits made before the table, so its captured
+      // absolute offset may be stale. Resolve through the mounted DOM before
+      // translating row coordinates back into current Markdown line numbers.
       return {
         view,
         confirmation,
@@ -3204,6 +3455,8 @@ class HtmlTableWidget extends WidgetType {
           sequence: edit.sequence,
           confirmation,
           build: (state) => {
+            const tableStartLine = this.resolveCurrentTableStartLine(view, edit.row, currentRange);
+            if (tableStartLine === null) return null;
             const change = this.pendingCellSourceChange(state, edit, tableStartLine);
             return change
               ? state.update({ changes: change, annotations: isolateHistory.of('full') })
@@ -3359,15 +3612,20 @@ class HtmlTableWidget extends WidgetType {
       this.pendingCellAutoCommitTimer = null;
       const view = this.view;
       if (!view || !this.cellInteraction.accept({ type: 'timer', generation }).timerCurrent || document.activeElement !== input) return;
-      const tableStartLine = view.state.doc.lineAt(
-        Math.max(0, Math.min(this.tableData.from, view.state.doc.length))
-      ).number;
+      const currentRange = this.domRefs ? this.resolveCurrentTableRange(view, this.domRefs.wrap) : null;
+      if (!currentRange) return;
+      const tableStartLine = this.resolveCurrentTableStartLine(view, row, currentRange);
+      if (tableStartLine === null) return;
       const focusTarget = { row, col, caret: input.selectionStart ?? 0 };
-      this.preserveTableCommandViewport(() => {
-        if (commitPendingTableEdits(view)) {
-          this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget);
-        }
-      });
+      const scrollTop = view.scrollDOM.scrollTop;
+      if (commitPendingTableEdits(view)) {
+        // A cell edit has already resized its row before the source transaction.
+        // Re-anchoring to the document here interprets the widget replacement as
+        // fresh layout and shifts the viewport by one source line. Keep the owned
+        // scroller absolute; the caret restore below will reveal only when needed.
+        getViewportController(view)?.lockScrollTop(scrollTop);
+        this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget, input);
+      }
     }, tableCellAutoCommitDelayMs);
   }
 
@@ -3508,32 +3766,88 @@ class HtmlTableWidget extends WidgetType {
     return changes;
   }
 
-  scheduleFocusCellAfterCommit(view: EditorView, tableStartLine: number, focusTarget: PendingCellFocus) {
+  scheduleFocusCellAfterCommit(
+    view: EditorView,
+    tableStartLine: number,
+    focusTarget: PendingCellFocus,
+    replacedInput: HTMLTextAreaElement | null = null
+  ) {
     const viewport = getViewportController(view);
     const isRevealCurrent = viewport?.beginNavigationReveal() ?? (() => true);
+    let observer: MutationObserver | null = null;
+    let timeout: number | null = null;
+    const dispose = () => {
+      observer?.disconnect();
+      observer = null;
+      if (timeout !== null) window.clearTimeout(timeout);
+      timeout = null;
+    };
     const focusCell = () => {
-      if (!isRevealCurrent()) return false;
+      if (!isRevealCurrent()) {
+        dispose();
+        return false;
+      }
       const input = view.dom.querySelector(
         `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] textarea[data-table-row="${focusTarget.row}"][data-table-col="${focusTarget.col}"]`
       );
       if (!(input instanceof HTMLTextAreaElement)) return false;
+      // Value-only commits reuse the mounted table DOM, so the original input
+      // is already the durable target. Structural commits still replace it and
+      // reach this method again through the observer below.
+      if (input === replacedInput && !input.isConnected) return false;
       input.focus({ preventScroll: true });
       const caret = Math.min(Math.max(focusTarget.caret ?? 0, 0), input.value.length);
       input.setSelectionRange(caret, caret);
-      const cell = input.closest<HTMLElement>(tableCellSelector);
-      if (cell) {
-        if (viewport) viewport.revealElement(cell, isRevealCurrent);
-        else cell.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-      }
+      dispose();
+      this.revealTableCellCaretIfNeeded(input, isRevealCurrent);
       return true;
     };
 
     if (focusCell()) return;
-    requestAnimationFrame(() => {
-      if (!focusCell()) {
-        setTimeout(focusCell, 0);
-      }
+    // Live derived work can replace a large table later than the fixed eight-frame
+    // retry window. Observe the actual replacement so focus returns in the same
+    // microtask checkpoint in which the new textarea is mounted.
+    observer = new MutationObserver(() => {
+      focusCell();
     });
+    observer.observe(view.contentDOM, { childList: true, subtree: true });
+    timeout = window.setTimeout(dispose, 1500);
+    requestAnimationFrame(() => focusCell());
+  }
+
+  revealTableCellCaretIfNeeded(input: HTMLTextAreaElement, isCurrent: () => boolean = () => true) {
+    const view = this.view;
+    if (!view || !isCurrent()) return;
+    const viewport = getViewportController(view);
+    if (viewport) {
+      const isNavigationCurrent = viewport.beginNavigationReveal();
+      const canReveal = () => isCurrent() && isNavigationCurrent();
+      const inputContextMargin = visualLineContextMargin(view, 1);
+      view.requestMeasure({
+        read: () => {
+          if (!canReveal() || !input.isConnected) return null;
+          const caret = tableCellCaretViewportBounds(input);
+          const viewportRect = view.scrollDOM.getBoundingClientRect();
+          const delta = caret.top < viewportRect.top
+            ? caret.top - viewportRect.top - inputContextMargin
+            : caret.bottom > viewportRect.bottom
+              ? caret.bottom - viewportRect.bottom + inputContextMargin
+              : 0;
+          return Math.abs(delta) >= 1 ? delta : null;
+        },
+        write: (delta) => {
+          if (delta !== null && canReveal()) viewport.navigateBy({ top: delta });
+        }
+      });
+    } else {
+      const caret = tableCellCaretViewportBounds(input);
+      const viewportRect = view.scrollDOM.getBoundingClientRect();
+      if (
+        caret.top >= viewportRect.top &&
+        caret.bottom <= viewportRect.bottom
+      ) return;
+      input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
   }
 
   buildMatrixTransaction(
@@ -3907,10 +4221,8 @@ class HtmlTableWidget extends WidgetType {
         this.scheduleLayout();
       };
       resizeAndSchedule();
-      const viewport = this.view ? getViewportController(this.view) : null;
-      if (viewport && document.activeElement === input) {
-        const isRevealCurrent = viewport.beginNavigationReveal();
-        viewport.revealElement(rowEl, isRevealCurrent);
+      if (document.activeElement === input) {
+        this.revealTableCellCaretIfNeeded(input);
       }
       notifySelectionChange();
     });
@@ -4014,6 +4326,9 @@ class HtmlTableWidget extends WidgetType {
       }
     });
     input.addEventListener('focus', () => {
+      const view = this.view;
+      const wrap = this.domRefs?.wrap;
+      if (view && wrap) this.resolveCurrentTableRange(view, wrap);
       this.cellInteraction.accept({ type: 'focus', target: { row: rowIndex, col: colIndex } });
       const pending = this.cellInteraction.snapshot().pending;
       const lastPendingEdit = pending[pending.length - 1];
@@ -4032,9 +4347,12 @@ class HtmlTableWidget extends WidgetType {
           const activeCell = activeInput.closest<HTMLTableCellElement>(tableCellSelector);
           const focusTarget = activeCell ? this.coordsFromCell(activeCell) : null;
           if (!focusTarget || !this.hasPendingCellEdits) return;
-          const tableStartLine = view.state.doc.lineAt(
-            Math.max(0, Math.min(this.tableData.from, view.state.doc.length))
-          ).number;
+          const tableStartLine = this.resolveCurrentTableStartLine(
+            view,
+            focusTarget.row,
+            this.resolveCurrentTableRange(view, wrap)
+          );
+          if (tableStartLine === null) return;
           const caret = activeInput.selectionStart ?? 0;
           if (commitPendingTableEdits(view)) {
             this.scheduleFocusCellAfterCommit(view, tableStartLine, { ...focusTarget, caret });
@@ -4514,12 +4832,21 @@ class HtmlTableWidget extends WidgetType {
       shell.dataset.meoRenderedBlockEndLine = String(this.tableData.endLine);
     }
     shell.dataset.meoRenderedBlockKind = 'table';
+    if (typeof ResizeObserver !== 'undefined') {
+      const heightObserver = new ResizeObserver(() => {
+        const height = shell.getBoundingClientRect().height;
+        if (height > 0) this.measuredHeight = height;
+      });
+      heightObserver.observe(shell);
+      this.cleanupFns.push(() => heightObserver.disconnect());
+    }
     const { toolbar, buttons: toolbarButtons } = this.createTableToolbar(wrap);
 
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
     table.tabIndex = -1;
     table.dataset.tableColumnWidth = 'true';
+    table.dataset.tableSignature = tableWidthIdentity(this.tableData);
     if (Number.isFinite(this.tableData.from) && Number.isFinite(this.tableData.to)) {
       table.dataset.tableFrom = String(this.tableData.from);
       table.dataset.tableTo = String(this.tableData.to);
@@ -4658,6 +4985,12 @@ class HtmlTableWidget extends WidgetType {
       stickyHeaderRow,
       toolbarButtons
     };
+    let mounted = mountedTableWidgets.get(view);
+    if (!mounted) {
+      mounted = new Set();
+      mountedTableWidgets.set(view, mounted);
+    }
+    mounted.add(this);
     const tableCommandTarget: TableCommandEditorTarget = {
       view,
       identityKey: JSON.stringify({ indent: this.tableData.indent, header: this.tableData.headerCells }),
@@ -4716,6 +5049,7 @@ class HtmlTableWidget extends WidgetType {
       this.layoutFrame = 0;
     }
     this.layoutTasks.clear();
+    if (this.view) mountedTableWidgets.get(this.view)?.delete(this);
     this.domRefs = null;
     this.view = null;
     this.cellInteraction.accept({ type: 'dispose' });
@@ -4912,8 +5246,8 @@ function addTableWidgetDecoration(
   diagnostics: EditorDiagnostic[] = [],
   diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
 ) {
-  const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
-  if (colCount === 0 || !headerLine) return;
+  const tableData = buildWidgetTableData(data, diagnostics, diffLineFlags);
+  if (!tableData) return;
   if (!stickyHeaderAdapterFactory) {
     throw new Error('Table Sticky Header Adapter factory is not configured');
   }
@@ -4921,43 +5255,15 @@ function addTableWidgetDecoration(
     throw new Error('Table Command environment is not configured');
   }
 
-  const indent = /^(\s*)/.exec(headerLine.text)?.[1] ?? '';
-  const normalizedAlignments = normalizeRow(alignments, colCount, '').map((value) => value ?? null);
-  const headerCells = normalizeRow(headerLine.cells, colCount, '');
-  const rows = dataLines.map((line) => normalizeRow(line.cells, colCount, ''));
-  const diffFlagsByLine = collectTableDiffFlags(data, diffLineFlags);
-  const signature = JSON.stringify({
-    colCount,
-    headerCells,
-    rows,
-    normalizedAlignments,
-    diagnostics: collectTableDiagnostics(data, diagnostics),
-    diffFlagsByLine
-  });
-
   builder.push(
     Decoration.replace({
       block: true,
       widget: new HtmlTableWidget(
-        {
-          from,
-          to,
-          indent,
-          colCount,
-          alignments: normalizedAlignments,
-          headerCells,
-          rows,
-          signature,
-          startLine,
-          endLine,
-          diagnostics: collectTableDiagnostics(data, diagnostics),
-          sourceRanges: collectTableSourceRanges(data),
-          diffFlagsByLine
-        },
+        tableData,
         stickyHeaderAdapterFactory,
         tableCommandEnvironment
       )
-    }).range(from, to)
+    }).range(tableData.from, tableData.to)
   );
 }
 

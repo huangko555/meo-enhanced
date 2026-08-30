@@ -115,6 +115,18 @@ document.body.append(controller.host);
     const result = await mermaid.render('meo-live-before-preview', 'flowchart LR\n  Live --> Preview');
     return result.svg;
   });
+(window as typeof window & { __probeInvalidMermaidCleanup?: () => Promise<boolean> })
+  .__probeInvalidMermaidCleanup = async () => {
+    try {
+      await renderMermaidRuntime('meo-invalid-cleanup-probe', 'this is invalid mermaid');
+    } catch {
+      // Invalid syntax is expected; only leaked runtime DOM is under test.
+    }
+    return Boolean(
+      document.getElementById('dmeo-invalid-cleanup-probe')
+      || document.body.textContent?.includes('Syntax error in text')
+    );
+  };
 (window as typeof window & { __queueSlowLiveOperations?: (count: number, delayMs: number) => void })
   .__queueSlowLiveOperations = (count, delayMs) => {
     for (let index = 0; index < count; index += 1) {

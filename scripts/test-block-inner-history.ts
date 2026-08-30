@@ -68,6 +68,172 @@ async function main() {
     });
     await waitForFrames(page);
 
+    const assertImmediateModeSwitchAfterProjectedInput = async (
+      modeButton: string,
+      editingBlock: string,
+      controllerProperty: string,
+      marker: string
+    ) => {
+      await page.click(modeButton);
+      await waitForFrames(page);
+      const immediateMode = await page.evaluate(
+        ({ buttonSelector, blockSelector, property, insertedText }) => {
+          const block = document.querySelector<HTMLElement>(blockSelector) as any;
+          const controller = block?.[property];
+          if (!controller) throw new Error(`Missing embedded controller for ${blockSelector}`);
+          const innerView = controller.innerView;
+          innerView.dispatch({
+            changes: { from: innerView.state.doc.length, insert: insertedText }
+          });
+          document.querySelector<HTMLButtonElement>(buttonSelector)!.click();
+          return document.querySelector<HTMLElement>(blockSelector)?.dataset.meoRenderedBlockMode ?? null;
+        },
+        {
+          buttonSelector: modeButton,
+          blockSelector: editingBlock,
+          property: controllerProperty,
+          insertedText: marker
+        }
+      );
+      if (immediateMode !== 'source') {
+        throw new Error(`${modeButton} deferred an explicit mode switch behind projected input: ${immediateMode}`);
+      }
+      await page.click(modeButton);
+      await waitForFrames(page);
+    };
+
+    await assertImmediateModeSwitchAfterProjectedInput(
+      '.meo-mermaid-mode-btn',
+      '.meo-mermaid-editing-block',
+      '__meoMermaidEditingController',
+      '\nB --> IMMEDIATE_MODE_PROBE'
+    );
+    await assertImmediateModeSwitchAfterProjectedInput(
+      '.meo-latex-math-mode-btn',
+      '.meo-latex-math-editing-block',
+      '__meoLatexMathEditingController',
+      '。。。'
+    );
+
+    const assertCanExitSplitAfterInput = async (
+      modeButton: string,
+      editingBlock: string,
+      controllerProperty: string,
+      marker: string
+    ) => {
+      await page.click(modeButton);
+      await waitForFrames(page);
+      await page.$eval(modeButton, (button) => {
+        button.setAttribute('data-meo-input-mode-switch-probe', 'retained');
+      });
+      await page.evaluate(({ blockSelector, property }) => {
+        const block = document.querySelector<HTMLElement>(blockSelector) as any;
+        const controller = block?.[property];
+        if (!controller) throw new Error(`Missing embedded controller for ${blockSelector}`);
+        controller.focusOffset(controller.innerView.state.doc.length);
+      }, { blockSelector: editingBlock, property: controllerProperty });
+      await page.keyboard.type(marker);
+      const retainedButton = await page.$eval(modeButton, (button) => (
+        button.getAttribute('data-meo-input-mode-switch-probe') === 'retained'
+      ));
+      if (!retainedButton) {
+        throw new Error(`${modeButton} was replaced while embedded input was settling`);
+      }
+      await page.evaluate(({ buttonSelector, blockSelector, property }) => {
+        const trace: string[] = [];
+        (window as any).__renderedBlockModePointerTrace = trace;
+        const button = document.querySelector<HTMLButtonElement>(buttonSelector)!;
+        const block = document.querySelector<HTMLElement>(blockSelector) as any;
+        const content = block?.[property]?.innerView?.contentDOM as HTMLElement | undefined;
+        button.addEventListener('pointerdown', () => trace.push('pointerdown'));
+        button.addEventListener('click', () => trace.push('click'));
+        content?.addEventListener('blur', () => trace.push('blur'));
+      }, {
+        buttonSelector: modeButton,
+        blockSelector: editingBlock,
+        property: controllerProperty
+      });
+      await page.click(modeButton);
+      const pointerTrace = await page.evaluate(() => (
+        (window as any).__renderedBlockModePointerTrace as string[]
+      ));
+      const clickIndex = pointerTrace.indexOf('click');
+      const blurIndex = pointerTrace.indexOf('blur');
+      if (blurIndex >= 0 && (clickIndex < 0 || blurIndex < clickIndex)) {
+        throw new Error(`${modeButton} blurred its source editor before mode switching: ${JSON.stringify(pointerTrace)}`);
+      }
+      const immediateMode = await page.$eval(
+        editingBlock,
+        (block) => block.dataset.meoRenderedBlockMode
+      );
+      if (immediateMode !== 'source') {
+        throw new Error(`${modeButton} deferred an explicit mode switch behind pending input: ${immediateMode}`);
+      }
+      await waitForFrames(page);
+      const switchedToSource = await page.$eval(editingBlock, (block) => block.classList.contains('is-source'));
+      if (!switchedToSource) {
+        throw new Error(`${editingBlock} could not leave split mode after input`);
+      }
+      await page.click(modeButton);
+      await waitForFrames(page);
+      if (await page.$(editingBlock)) {
+        throw new Error(`${editingBlock} could not return to preview after input`);
+      }
+    };
+
+    await assertCanExitSplitAfterInput(
+      '.meo-mermaid-mode-btn',
+      '.meo-mermaid-editing-block',
+      '__meoMermaidEditingController',
+      '\nB --> C'
+    );
+    await assertCanExitSplitAfterInput(
+      '.meo-latex-math-mode-btn',
+      '.meo-latex-math-editing-block',
+      '__meoLatexMathEditingController',
+      '。。。'
+    );
+
+    await page.evaluate(() => {
+      const editor = (window as any).__blockHistoryEditor;
+      editor.view.dispatch({
+        changes: { from: editor.view.state.doc.length, insert: '\n\n$$\nz = 3\n$$' }
+      });
+    });
+    await waitForFrames(page);
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page);
+    const shiftedFormulaSwitch = await page.evaluate(() => {
+      const firstBlock = document.querySelector<HTMLElement>('.meo-latex-math-editing-block') as any;
+      const firstController = firstBlock?.__meoLatexMathEditingController;
+      const secondButton = document.querySelectorAll<HTMLButtonElement>('.meo-latex-math-mode-btn')[1];
+      if (!firstController || !secondButton) throw new Error('Missing two-formula mode-switch fixture');
+      const innerView = firstController.innerView;
+      innerView.dispatch({ changes: { from: innerView.state.doc.length, insert: 'SHIFT' } });
+      secondButton.click();
+      return [...document.querySelectorAll<HTMLElement>('.meo-latex-math-editing-block')]
+        .map((block) => block.dataset.meoRenderedBlockMode);
+    });
+    if (shiftedFormulaSwitch.length !== 2 || shiftedFormulaSwitch.some((mode) => mode !== 'split')) {
+      throw new Error(`A shifted formula toolbar targeted its stale anchor: ${JSON.stringify(shiftedFormulaSwitch)}`);
+    }
+    if (process.argv.includes('--mode-switch-only')) {
+      console.log('rendered block mode switching after projected input passed');
+      return;
+    }
+
+    await page.evaluate(() => {
+      (window as any).__blockHistoryEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__blockHistoryEditor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: ['```mermaid', 'graph TD', 'A --> B', '```', '', '$$', 'x = 1', '$$'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page);
+
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
     await page.evaluate(() => {
@@ -298,9 +464,15 @@ async function main() {
     await page.keyboard.down('Control');
     await page.keyboard.press('End');
     await page.keyboard.up('Control');
-    const sourceInputScrollTop = await page.evaluate(() => (
-      document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!.scrollTop
-    ));
+    const sourceInputStart = await page.evaluate(() => {
+      const source = document.querySelector<HTMLElement>('.meo-mermaid-source-editor');
+      const block = source?.closest<HTMLElement>('.meo-mermaid-editing-block');
+      return {
+        scrollTop: document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!.scrollTop,
+        focused: Boolean(source?.contains(document.activeElement)),
+        mode: block?.dataset.meoRenderedBlockMode ?? null
+      };
+    });
     await page.keyboard.type('STALE_MEASURE');
     const sourceInputProjection = await page.evaluate((marker) => {
       const editor = (window as any).__blockHistoryEditor;
@@ -309,6 +481,8 @@ async function main() {
       const scroller = document.querySelector<HTMLElement>('#app > .cm-editor .cm-scroller')!;
       return {
         markerProjected: editor.getText().includes(marker),
+        textSuffix: editor.getText().slice(-80),
+        mode: block?.dataset.meoRenderedBlockMode ?? null,
         sourceConnected: Boolean(block?.isConnected && sourceEditor?.isConnected),
         sourceFocused: Boolean(sourceEditor?.contains(document.activeElement)),
         scrollTop: scroller.scrollTop
@@ -318,10 +492,11 @@ async function main() {
       !sourceInputProjection.markerProjected ||
       !sourceInputProjection.sourceConnected ||
       !sourceInputProjection.sourceFocused ||
-      Math.abs(sourceInputProjection.scrollTop - sourceInputScrollTop) > 1
+      !sourceInputStart.focused ||
+      Math.abs(sourceInputProjection.scrollTop - sourceInputStart.scrollTop) > 1
     ) {
       throw new Error(`Tall Mermaid source input lost its current projection: ${JSON.stringify({
-        sourceInputScrollTop,
+        sourceInputStart,
         sourceInputProjection
       })}`);
     }
@@ -479,15 +654,26 @@ async function main() {
       const secondSource = secondHost.querySelector<HTMLElement>('.meo-mermaid-source-editor');
       return {
         firstMarker: first.getText().includes('MULTI_FIRST'),
+        firstSuffix: first.getText().slice(-80),
         firstIsolated: !first.getText().includes('MULTI_SECOND'),
         secondMarker: second.getText().includes('MULTI_SECOND'),
+        secondSuffix: second.getText().slice(-80),
+        secondMode: secondHost.querySelector<HTMLElement>('.meo-mermaid-editing-block')?.dataset.meoRenderedBlockMode ?? null,
         secondIsolated: !second.getText().includes('MULTI_FIRST'),
         firstScrollStable: Math.abs(firstScroller.scrollTop - firstTop) <= 1,
         secondScrollStable: Math.abs(secondScroller.scrollTop - secondTop) <= 1,
         secondFocused: Boolean(secondSource?.contains(document.activeElement))
       };
     }, { firstTop: firstMultiScrollTop, secondTop: secondMultiScrollTop });
-    if (Object.values(multiBeforeDestroy).some((value) => value !== true)) {
+    if (
+      !multiBeforeDestroy.firstMarker ||
+      !multiBeforeDestroy.firstIsolated ||
+      !multiBeforeDestroy.secondMarker ||
+      !multiBeforeDestroy.secondIsolated ||
+      !multiBeforeDestroy.firstScrollStable ||
+      !multiBeforeDestroy.secondScrollStable ||
+      !multiBeforeDestroy.secondFocused
+    ) {
       throw new Error(`Concurrent Mermaid source projections were not isolated: ${JSON.stringify(multiBeforeDestroy)}`);
     }
 

@@ -106,6 +106,18 @@ renders.get(externalReplacementId)?.resolve({
 await runtime.whenCurrentPresentationSettles();
 assert.equal(application.getState().phase, 'error');
 
+runtime.dispatch({ type: 'present', source: 'theme-refresh', themeKey: 'light', configKey: 'default' });
+const unavailableId = application.getState().presentationId;
+assert.ok(unavailableId);
+renders.get(unavailableId)?.resolve(null);
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(
+  application.getState().phase,
+  'idle',
+  'A theme-generation replacement must not leave the presentation permanently pending'
+);
+
 runtime.dispose();
 assert.equal(disposed, true);
 assert.deepEqual(application.getState(), {

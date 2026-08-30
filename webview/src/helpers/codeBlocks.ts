@@ -850,11 +850,21 @@ function addMermaidDiagramBlock(
       endLine: endLine.number,
       indentColumns
     }, decision.effectiveMode, mode.searchReveal);
+  const replacementFrom = decision.effectiveMode === 'preview'
+    ? startLine.to
+    : contentStartLine.from;
+  const replacementTo = decision.effectiveMode === 'preview'
+    ? endLine.to
+    : contentEndLine.to;
   builder.push(
     Decoration.replace({
       widget,
-      block: true
-    }).range(contentStartLine.from, contentEndLine.to)
+      block: true,
+      // Source/split mode edits project into the replaced range itself. Keep
+      // boundary insertions (especially appending at the last source line)
+      // owned by the current widget until its updateDOM receives new text.
+      inclusive: decision.effectiveMode !== 'preview'
+    }).range(replacementFrom, replacementTo)
   );
 }
 

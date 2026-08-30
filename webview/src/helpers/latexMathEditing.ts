@@ -1,14 +1,16 @@
 import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
-import { createElement, Code2, Eye, Pencil } from 'lucide';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
 import { getViewportController } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
-import { markLiveInputNestedProjection } from '../editor/liveInputDerivedWork';
+import {
+  markLiveInputNestedProjection,
+  supersedeLiveInputDerivedWork
+} from '../editor/liveInputDerivedWork';
 import {
   decideRenderedBlockModeShell,
   type RenderedBlockMode,
@@ -16,6 +18,11 @@ import {
 } from '../editor/renderedBlockModeShell';
 import { uiLanguageFacet } from '../editor/uiLanguage';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
+import {
+  renderRenderedBlockModeButton,
+  retainRenderedBlockModePointerFocus
+} from './renderedBlockModeControls';
+import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
 export type LatexMathBlockMode = RenderedBlockMode;
 
@@ -77,6 +84,29 @@ function isLatexMathAnchor(state: EditorState, anchor: number): boolean {
   }
   const line = state.doc.lineAt(anchor);
   return line.from === anchor && latexMathOpeningLineRegex.test(line.text);
+}
+
+function resolveLatexMathAnchorAtLine(state: EditorState, lineNumber: number): number | null {
+  if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > state.doc.lines) {
+    return null;
+  }
+  const anchor = state.doc.line(lineNumber).from;
+  return isLatexMathAnchor(state, anchor) ? anchor : null;
+}
+
+function resolveLatexMathToolbarAnchor(
+  view: EditorView,
+  toolbar: HTMLElement,
+  fallbackLineNumber: number
+): number | null {
+  try {
+    const position = view.posAtDOM(toolbar);
+    const line = view.state.doc.lineAt(Math.max(0, Math.min(position, view.state.doc.length)));
+    if (isLatexMathAnchor(view.state, line.from)) return line.from;
+  } catch {
+    // Fall through for a retained toolbar whose DOM position is unavailable.
+  }
+  return resolveLatexMathAnchorAtLine(view.state, fallbackLineNumber);
 }
 
 export const latexMathEditingStateField = StateField.define<LatexMathEditingState>({
@@ -178,32 +208,20 @@ function updateLatexMathModeButton(
     temporaryReveal: false,
     uiLanguage
   });
-  const icon = decision.modeButton.action === 'edit'
-    ? Pencil
-    : decision.modeButton.action === 'source'
-      ? Code2
-      : Eye;
-  button.replaceChildren(createElement(icon, { width: 15, height: 15 }));
-  button.setAttribute('aria-label', decision.modeButton.label);
-  button.title = decision.modeButton.label;
+  renderRenderedBlockModeButton(button, decision);
 }
 
-function preserveAnchorWhileDispatching(view: EditorView, anchor: number, effect: StateEffect<unknown>): void {
+function preserveAnchorWhileDispatching(
+  view: EditorView,
+  anchor: number,
+  effects: StateEffect<unknown> | readonly StateEffect<unknown>[]
+): void {
   const controller = getViewportController(view);
   if (!controller) {
-    view.dispatch({ effects: effect });
+    view.dispatch({ effects });
     return;
   }
-  controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects: effect }));
-}
-
-function focusOuterWithoutMovingViewport(view: EditorView): void {
-  const controller = getViewportController(view);
-  if (controller) {
-    controller.preserveScrollPosition(() => view.focus());
-    return;
-  }
-  view.focus();
+  controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects }));
 }
 
 class LatexMathToolbarWidget extends WidgetType {
@@ -247,10 +265,13 @@ class LatexMathToolbarWidget extends WidgetType {
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
     modeButton.className = 'meo-latex-math-mode-btn';
+    retainRenderedBlockModePointerFocus(modeButton);
     updateLatexMathModeButton(modeButton, this.mode, this.lineNumber, uiLanguage);
     modeButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      const currentAnchor = resolveLatexMathToolbarAnchor(view, toolbar, this.lineNumber);
+      if (currentAnchor === null) return;
       const currentMode = toolbar.dataset.meoLatexMathMode as LatexMathBlockMode;
       const nextMode = decideRenderedBlockModeShell({
         kind: 'latex',
@@ -262,39 +283,51 @@ class LatexMathToolbarWidget extends WidgetType {
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
-        this.anchor,
-        setLatexMathBlockModeEffect.of({ anchor: this.anchor, mode: nextMode })
+        currentAnchor,
+        [
+          supersedeLiveInputDerivedWork(),
+          setLatexMathBlockModeEffect.of({ anchor: currentAnchor, mode: nextMode })
+        ]
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
         if (nextMode === 'preview') {
-          focusOuterWithoutMovingViewport(view);
+          modeButton.focus({ preventScroll: true });
           return;
         }
         const editingBlock = view.dom.querySelector<HTMLElement>(
-          `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`
+          `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${currentAnchor}"]`
         );
         (editingBlock as LatexMathEditingBlockElement | null)?.__meoLatexMathEditingController?.focus();
       });
     });
 
     const selectAllButton = createSelectAllCodeButton(() => {
+      const currentAnchor = resolveLatexMathToolbarAnchor(view, toolbar, this.lineNumber);
+      if (currentAnchor === null) return;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
       preserveAnchorWhileDispatching(
         view,
-        this.anchor,
-        setLatexMathBlockModeEffect.of({ anchor: this.anchor, mode: 'source' })
+        currentAnchor,
+        [
+          supersedeLiveInputDerivedWork(),
+          setLatexMathBlockModeEffect.of({ anchor: currentAnchor, mode: 'source' })
+        ]
       );
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
         const editingBlock = view.dom.querySelector<HTMLElement>(
-          `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`
+          `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${currentAnchor}"]`
         );
         (editingBlock as LatexMathEditingBlockElement | null)?.__meoLatexMathEditingController?.selectAll();
       });
     }, uiLanguage);
 
-    toolbar.append(modeButton, selectAllButton, createCopyCodeButton(this.sourceText, uiLanguage));
+    toolbar.append(
+      modeButton,
+      selectAllButton,
+      createCopyCodeButton(() => toolbar[latexToolbarSourceText] ?? '', uiLanguage)
+    );
     return toolbar;
   }
 
@@ -302,13 +335,13 @@ class LatexMathToolbarWidget extends WidgetType {
     const toolbar = dom as LatexToolbarElement;
     if (
       !toolbar.classList.contains('meo-latex-math-toolbar') ||
-      toolbar[latexToolbarSourceText] !== this.sourceText ||
-      toolbar.dataset.meoBlockFrom !== String(this.anchor) ||
-      toolbar.dataset.meoBlockTo !== String(this.blockTo)
+      toolbar.dataset.meoBlockFrom !== String(this.anchor)
     ) return false;
     const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
     if (!modeButton) return false;
     toolbar.dataset.meoLatexMathMode = this.mode;
+    toolbar.dataset.meoBlockTo = String(this.blockTo);
+    toolbar[latexToolbarSourceText] = this.sourceText;
     updateLatexMathModeButton(
       modeButton,
       this.mode,
@@ -618,6 +651,15 @@ export class LatexMathEditingWidget extends WidgetType {
     readonly searchReveal: LatexMathSearchReveal
   ) {
     super();
+  }
+
+  get estimatedHeight(): number {
+    return estimateBlockWidgetHeight({
+      kind: 'rendered-block-editor',
+      renderer: 'latex',
+      mode: this.mode,
+      source: this.block.sourceText
+    });
   }
 
   eq(other: WidgetType): boolean {

@@ -10,6 +10,7 @@ import type {
 export type EditorHistoryRuntime = {
   dispatch(input: EditorHistoryRuntimeInput): Promise<boolean | null>;
   whenIdle(): Promise<void>;
+  whenSettled(): Promise<void>;
   getState(): EditorHistoryState;
   dispose(): void;
 };
@@ -23,6 +24,7 @@ export function createEditorHistoryRuntime(
   let operation = Promise.resolve();
   let disposed = false;
   let generation = 0;
+  const deferredCompletions = new Set<Promise<void>>();
 
   const processEffect = async (
     effect: EditorHistoryEffect,
@@ -32,12 +34,15 @@ export function createEditorHistoryRuntime(
     if (!execution.completion) return null;
 
     if (execution.completionMode === 'deferred') {
-      void execution.completion
-        .then((completion) => {
+      let trackedCompletion!: Promise<void>;
+      trackedCompletion = execution.completion
+        .then(async (completion) => {
           if (!completion || disposed || currentGeneration !== generation) return;
-          enqueueApplicationInput(completion, currentGeneration);
+          await enqueueApplicationInput(completion, currentGeneration);
         })
-        .catch(reportUnexpectedError);
+        .catch(reportUnexpectedError)
+        .finally(() => deferredCompletions.delete(trackedCompletion));
+      deferredCompletions.add(trackedCompletion);
       return null;
     }
 
@@ -94,6 +99,16 @@ export function createEditorHistoryRuntime(
         current = operation;
         await current;
         await Promise.resolve();
+      }
+    },
+    async whenSettled() {
+      while (true) {
+        const currentOperation = operation;
+        const currentDeferred = [...deferredCompletions];
+        await currentOperation;
+        await Promise.all(currentDeferred);
+        await Promise.resolve();
+        if (currentOperation === operation && deferredCompletions.size === 0) return;
       }
     },
     getState: () => application.getState(),

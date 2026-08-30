@@ -1,5 +1,5 @@
 import { Annotation, EditorState, Facet, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view';
+import { Decoration, EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view';
 
 export type LiveInputDerivedWorkScheduler = {
   documentChanged(): void;
@@ -21,6 +21,10 @@ type LiveInputDerivedWorkSchedulerOptions = {
 });
 
 const LARGE_DOCUMENT_DERIVED_WORK_DEADLINE_MS = 500;
+// requestIdleCallback can run between operating-system key-repeat events. Give
+// large documents a real quiet window first, otherwise one full decoration
+// rebuild blocks later key events and makes characters arrive in batches.
+const LARGE_DOCUMENT_INPUT_QUIET_MS = 120;
 
 /**
  * Coalesces derived presentation behind one observable primary-text frame.
@@ -136,6 +140,11 @@ const idleLiveInputDerivedWorkPhase: LiveInputDerivedWorkPhaseState = Object.fre
 });
 type LiveInputDerivedWorkProvenance = 'automatic-normalization' | 'nested-input-projection';
 const liveInputDerivedWorkProvenance = Annotation.define<LiveInputDerivedWorkProvenance>();
+export const replaceLiveInputNestedDecorationEffect = StateEffect.define<{
+  from: number;
+  to: number;
+  decoration: Decoration;
+}>();
 const liveInputDerivedWorkLargeDocumentFacet = Facet.define<boolean, boolean>({
   combine: (values) => values.some(Boolean)
 });
@@ -150,6 +159,14 @@ export function markLiveInputDerivedWorkFollowUp(): Annotation<LiveInputDerivedW
 
 export function markLiveInputNestedProjection(): Annotation<LiveInputDerivedWorkProvenance> {
   return liveInputDerivedWorkProvenance.of('nested-input-projection');
+}
+
+export function replaceLiveInputNestedDecoration(
+  from: number,
+  to: number,
+  decoration: Decoration
+): StateEffect<unknown> {
+  return replaceLiveInputNestedDecorationEffect.of({ from, to, decoration });
 }
 
 export function isLiveInputNestedProjection(transaction: Transaction): boolean {
@@ -222,11 +239,7 @@ function isLiveInputDerivedWorkPending(state: EditorState): boolean {
     || phase === 'composing-without-pending';
 }
 
-/**
- * Maps unaffected presentation while exposing the edited line and its neighbors.
- * This keeps accepted text visible even when an old replace/widget decoration
- * covered the Markdown around the change.
- */
+/** Maps stable presentation while dropping only widgets that cover edited text. */
 export function mapLiveInputDerivedDecorations(
   decorations: DecorationSet,
   transaction: Transaction
@@ -234,19 +247,21 @@ export function mapLiveInputDerivedDecorations(
   let mapped = decorations.map(transaction.changes);
   const affected: Array<{ from: number; to: number }> = [];
   transaction.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
-    const doc = transaction.newDoc;
-    const startLine = doc.lineAt(Math.min(fromB, doc.length)).number;
-    const endLine = doc.lineAt(Math.min(toB, doc.length)).number;
-    affected.push({
-      from: doc.line(Math.max(1, startLine - 1)).from,
-      to: doc.line(Math.min(doc.lines, endLine + 1)).to
-    });
+    affected.push({ from: fromB, to: toB });
   });
   for (const range of affected) {
+    const doc = transaction.newDoc;
+    const filterFrom = doc.lineAt(Math.min(range.from, doc.length)).from;
+    const filterTo = doc.lineAt(Math.min(range.to, doc.length)).to;
     mapped = mapped.update({
-      filterFrom: range.from,
-      filterTo: range.to,
-      filter: () => false
+      filterFrom,
+      filterTo,
+      filter: (from, to, decoration) => {
+        if (!decoration.spec.widget) return true;
+        return range.from === range.to
+          ? range.from < from || range.from > to
+          : range.to <= from || range.from >= to;
+      }
     });
   }
   return mapped;
@@ -505,6 +520,41 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   );
   const largeDocument = view.state.facet(liveInputDerivedWorkLargeDocumentFacet);
   const canRequestIdle = largeDocument && typeof window.requestIdleCallback === 'function';
+  let nextDeferredTaskId = 1;
+  const deferredTasks = new Map<number, {
+    idleId: number | null;
+    quietTimerId: number | null;
+  }>();
+  const requestLargeDocumentDeferred = (
+    callback: () => void,
+    timeoutMs: number
+  ): number => {
+    const taskId = nextDeferredTaskId++;
+    const task = { idleId: null as number | null, quietTimerId: null as number | null };
+    deferredTasks.set(taskId, task);
+    task.quietTimerId = window.setTimeout(() => {
+      task.quietTimerId = null;
+      if (!deferredTasks.has(taskId)) return;
+      const run = () => {
+        if (!deferredTasks.delete(taskId)) return;
+        callback();
+      };
+      task.idleId = canRequestIdle
+        ? window.requestIdleCallback(run, { timeout: timeoutMs })
+        : window.requestAnimationFrame(run);
+    }, LARGE_DOCUMENT_INPUT_QUIET_MS);
+    return taskId;
+  };
+  const cancelLargeDocumentDeferred = (taskId: number): void => {
+    const task = deferredTasks.get(taskId);
+    if (!task) return;
+    deferredTasks.delete(taskId);
+    if (task.quietTimerId !== null) window.clearTimeout(task.quietTimerId);
+    if (task.idleId !== null) {
+      if (canRequestIdle) window.cancelIdleCallback(task.idleId);
+      else window.cancelAnimationFrame(task.idleId);
+    }
+  };
   const schedulerOptions = {
     requestFrame: (callback: () => void) => window.requestAnimationFrame(() => callback()),
     cancelFrame: (frameId: number) => window.cancelAnimationFrame(frameId),
@@ -520,13 +570,8 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const scheduler = largeDocument
     ? createLiveInputDerivedWorkScheduler({
       ...schedulerOptions,
-      requestDeferred: (callback: () => void, timeoutMs: number) => canRequestIdle
-        ? window.requestIdleCallback(() => callback(), { timeout: timeoutMs })
-        : window.requestAnimationFrame(() => callback()),
-      cancelDeferred: (taskId: number) => {
-        if (canRequestIdle) window.cancelIdleCallback(taskId);
-        else window.cancelAnimationFrame(taskId);
-      }
+      requestDeferred: requestLargeDocumentDeferred,
+      cancelDeferred: cancelLargeDocumentDeferred
     })
     : createLiveInputDerivedWorkScheduler(schedulerOptions);
   return {
@@ -587,6 +632,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
     destroy() {
       disposed = true;
       scheduler.dispose();
+      for (const taskId of [...deferredTasks.keys()]) cancelLargeDocumentDeferred(taskId);
       cancelConsumerGeneration();
       cancelFrameConsumers();
       immediateConsumers.clear();

@@ -22,6 +22,7 @@ export type MermaidDiagramPresentationInput =
     }
   | { readonly type: 'renderSucceeded'; readonly presentationId: number; readonly svg: string }
   | { readonly type: 'renderFailed'; readonly presentationId: number; readonly error: string }
+  | { readonly type: 'renderUnavailable'; readonly presentationId: number }
   | { readonly type: 'externalDocumentPresented' }
   | { readonly type: 'dispose' };
 
@@ -121,6 +122,11 @@ export function createMermaidDiagramPresentationApplication(): MermaidDiagramPre
           source,
           error: input.error
         }];
+      case 'renderUnavailable':
+        if (phase !== 'pending' || input.presentationId !== presentationId) return [];
+        const unavailablePresentationId = presentationId;
+        clear('idle');
+        return [{ type: 'clearPresentation', presentationId: unavailablePresentationId }];
       case 'externalDocumentPresented':
         if (
           phase !== 'pending'

@@ -101,7 +101,11 @@ const key = (value: Partial<Parameters<typeof interaction.accept>[0]> & { type: 
 const keyboardInput = {
   row: 1, col: 0, rowCount: 3, colCount: 2, selectionStart: 2, selectionEnd: 2, value: 'ab'
 };
-assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Tab' } })?.type === 'focus-cell', 'Tab did not move within table');
+const tabTarget = key({ type: 'keyboard', input: { ...keyboardInput, key: 'Tab' } });
+assert(
+  tabTarget?.type === 'focus-cell' && tabTarget.caretColumn === 0,
+  `Tab did not move to the start of the next cell: ${JSON.stringify(tabTarget)}`
+);
 assert(key({ type: 'keyboard', input: { ...keyboardInput, row: 2, col: 1, key: 'Tab' } })?.type === 'pass-through', 'Last Tab tried to add or wrap a row');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, row: 0, col: 0, key: 'Tab', shiftKey: true } })?.type === 'pass-through', 'First Shift+Tab moved outside explicitly');
 assert(key({ type: 'keyboard', input: { ...keyboardInput, key: 'Enter', shiftKey: true } })?.type === 'insert-line-break', 'Shift+Enter did not insert a line break');

@@ -300,6 +300,34 @@ async function main() {
       console.log('external update viewport stability checks passed');
       return;
     }
+    const contextualStrongColors = await page.evaluate(() => {
+      const bodyLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('粗体一')) ?? null;
+      const headingLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent?.includes('标题里的')) ?? null;
+      const bodyStrong = bodyLine?.querySelector<HTMLElement>('.meo-md-strong') ?? null;
+      const headingStrong = headingLine?.querySelector<HTMLElement>('.meo-md-strong') ?? null;
+      if (!bodyLine || !headingLine || !bodyStrong || !headingStrong) return null;
+      const read = (element: HTMLElement) => {
+        const style = getComputedStyle(element);
+        return { color: style.color, textFillColor: style.webkitTextFillColor };
+      };
+      return {
+        body: read(bodyLine),
+        bodyStrong: read(bodyStrong),
+        heading: read(headingLine),
+        headingStrong: read(headingStrong)
+      };
+    });
+    if (
+      !contextualStrongColors ||
+      contextualStrongColors.bodyStrong.color !== contextualStrongColors.body.color ||
+      contextualStrongColors.bodyStrong.textFillColor !== contextualStrongColors.body.textFillColor ||
+      contextualStrongColors.headingStrong.color !== contextualStrongColors.heading.color ||
+      contextualStrongColors.headingStrong.textFillColor !== contextualStrongColors.heading.textFillColor
+    ) {
+      throw new Error(`Strong text did not inherit its context color: ${JSON.stringify(contextualStrongColors)}`);
+    }
     const frontmatterProperties = await page.evaluate(() => {
       const host = document.createElement('div');
       host.style.width = '760px';

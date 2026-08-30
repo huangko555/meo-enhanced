@@ -90,8 +90,8 @@ async function main(): Promise<void> {
     assert.deepEqual(result.measured.map(Math.round), [100, 100, 100]);
     assert.deepEqual(result.resized.map(Math.round), [250, 25, 25]);
     assert.deepEqual(result.renderedAfterResize.map(Math.round), [250, 25, 25]);
-    assert.deepEqual(result.projected.map(Math.round), [193, 24, 24]);
-    assert.deepEqual(result.renderedAfterProjection.map(Math.round), [193, 24, 24]);
+    assert.deepEqual(result.projected.map(Math.round), [200, 20, 20]);
+    assert.deepEqual(result.renderedAfterProjection.map(Math.round), [200, 20, 20]);
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

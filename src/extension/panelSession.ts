@@ -73,6 +73,7 @@ import type { DocumentRevisionDto, DocumentRevisionResolution } from '../protoco
 import type { HostEditorEvent } from '../protocol/hostEditorEvents';
 import type { DiagnosticsChangedEvent, SerializedDiagnostic } from '../protocol/diagnostics';
 import { decodeWebviewToHostMessage, type WebviewToHostMessage } from '../protocol/messages';
+import { normalizeUiLanguagePreference, resolveUiLanguage } from '../foundation/uiLanguage';
 export type EditorMode = 'live' | 'source' | 'preview';
 export type ExportFormat = 'html' | 'pdf';
 
@@ -338,6 +339,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diagnostics: diagnostics.read(),
       mode: initialMode,
       uiLanguage: getUiLanguage(),
+      uiLanguagePreference: normalizeUiLanguagePreference(
+        vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get('language', 'auto')
+      ),
+      automaticUiLanguage: resolveUiLanguage('auto', vscode.env.language),
       sourceLineNumbers: getSourceLineNumbers(),
       previewAppearance: getPreviewAppearance(),
       previewFontFamily: getPreviewFontFamily(),
@@ -566,6 +571,16 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setEditorAppearance':
         await setEditorAppearance(raw.appearance);
+        return;
+      case 'setUiLanguagePreference':
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update('language', raw.language, vscode.ConfigurationTarget.Global);
+        return;
+      case 'setSourceLineNumbers':
+        await vscode.workspace
+          .getConfiguration('editor', documentUri)
+          .update('lineNumbers', raw.mode, vscode.ConfigurationTarget.Global);
         return;
       case 'openLink': {
         if (await viewNavigation.revealDocumentLink(raw.href)) return;

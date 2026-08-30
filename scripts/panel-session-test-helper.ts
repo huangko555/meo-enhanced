@@ -68,6 +68,7 @@ export const createPanelSessionVscodeMock = (
     })
   },
   commands: { executeCommand: overrides.executeCommand ?? (async () => undefined) },
+  env: { language: 'en' },
   extensions: { all: [] },
   languages: { onDidChangeDiagnostics: () => panelSessionDisposable() },
   window: {

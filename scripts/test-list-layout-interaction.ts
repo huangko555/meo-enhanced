@@ -352,7 +352,9 @@ async function main(): Promise<void> {
         footnoteBack: read('.meo-md-footnote-backref'),
         codeActions: Array.from(document.querySelectorAll('.meo-code-block-actions [aria-label]')).map((element) => element.getAttribute('aria-label')),
         longCode: {
-          lines: document.querySelector('.meo-md-long-code-placeholder .meo-long-code-line-count')?.textContent,
+          lineCountVisible: Boolean(document.querySelector(
+            '.meo-md-long-code-placeholder .meo-long-code-line-count'
+          )),
           action: read('.meo-md-long-code-placeholder .meo-long-code-action')
         },
         imageActions: Array.from(document.querySelectorAll<HTMLElement>(
@@ -397,7 +399,7 @@ async function main(): Promise<void> {
       footnote: '跳转到脚注 1',
       footnoteBack: '跳转到脚注引用 1',
       codeActions: ['全选代码', '复制代码', '全选代码', '复制代码'],
-      longCode: { lines: '20 行', action: '显示其余 10 行代码' },
+      longCode: { lineCountVisible: false, action: '显示其余 10 行代码' },
       imageActions: ['打开链接', '使用系统应用打开', '全屏查看图片'],
       featureChrome: {
         alert: '备注',

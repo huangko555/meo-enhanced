@@ -16,3 +16,7 @@ export function resolveUiLanguage(preference: unknown, vscodeLanguage: unknown):
 export function isUiLanguage(value: unknown): value is UiLanguage {
   return value === 'en' || value === 'zh-CN';
 }
+
+export function isUiLanguagePreference(value: unknown): value is UiLanguagePreference {
+  return value === 'auto' || isUiLanguage(value);
+}

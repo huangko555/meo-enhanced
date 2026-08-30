@@ -60,6 +60,7 @@ import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls'
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
 import { createOpenLinkButton } from './helpers/linkOpenButton';
 import { getViewportController } from './helpers/viewportController';
+import { estimateBlockWidgetHeight } from './editor/blockWidgetHeight';
 import { collectInlineFootnoteMarkerRanges } from './helpers/inlineFootnotes';
 import {
   collectLatexMathRanges,
@@ -98,6 +99,7 @@ import {
   isLiveInputNestedProjection,
   liveInputDerivedWorkExtensions,
   mapLiveInputDerivedDecorations,
+  replaceLiveInputNestedDecorationEffect,
   shouldDeferLiveInputDerivedWork,
   usesLargeDocumentDerivedWorkBudget
 } from './editor/liveInputDerivedWork';
@@ -153,6 +155,8 @@ const activeEmMarkerDeco = Decoration.mark({
 });
 const codeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker' });
 const activeCodeMarkerDeco = Decoration.mark({ class: 'meo-md-code-marker-active' });
+const subscriptContentDeco = Decoration.mark({ class: 'meo-md-subscript' });
+const superscriptContentDeco = Decoration.mark({ class: 'meo-md-superscript' });
 const fenceMarkerDeco = Decoration.mark({ class: 'meo-md-fence-marker' });
 const headingContentDeco = Decoration.mark({ class: 'meo-md-heading-content' });
 const strongMarkerDeco = Decoration.mark({
@@ -1916,6 +1920,23 @@ function buildDecorations(state: EditorState): DecorationSet {
         addHtmlBreakDecoration(ranges, state, node, activeLines, frontmatter);
       }
 
+      if (node.name === 'Subscript' || node.name === 'Superscript') {
+        const footnoteContainer = node.node.parent?.name === 'Link' ? node.node.parent : null;
+        const isFootnoteReference = Boolean(
+          footnoteContainer && footnotes.referencesByContainerKey.has(
+            footnoteReferenceKey(footnoteContainer.from, footnoteContainer.to)
+          )
+        );
+        if (!isFootnoteReference && node.to - node.from > 2) {
+          addRange(
+            ranges,
+            node.from + 1,
+            node.to - 1,
+            node.name === 'Subscript' ? subscriptContentDeco : superscriptContentDeco
+          );
+        }
+      }
+
       if (!node.name.endsWith('Mark')) {
         return;
       }
@@ -2294,6 +2315,15 @@ class LatexMathWidget extends WidgetType {
     this.indentColumns = indentColumns;
   }
 
+  get estimatedHeight(): number {
+    return this.fencedDisplay && this.mode === 'display'
+      ? estimateBlockWidgetHeight({
+          kind: 'latex-display',
+          html: this.html
+        })
+      : -1;
+  }
+
   eq(other: WidgetType): boolean {
     return (
       other instanceof LatexMathWidget &&
@@ -2306,7 +2336,7 @@ class LatexMathWidget extends WidgetType {
     );
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement(this.mode === 'display' ? 'div' : 'span') as LatexMathWidgetElement;
     wrapper.className = `meo-md-math meo-md-math-${this.mode}`;
     if (this.startLine > 0) {
@@ -2329,7 +2359,10 @@ class LatexMathWidget extends WidgetType {
     applyLiveBlockIndent(wrapper, this.indentColumns);
     wrapper.innerHTML = this.html;
     if (this.fencedDisplay && this.mode === 'display') {
-      wrapper.__meoLatexMathViewport = attachLatexMathViewport(wrapper);
+      wrapper.__meoLatexMathViewport = attachLatexMathViewport(wrapper, {
+        interactive: true,
+        uiLanguage: view.state.facet(uiLanguageFacet)
+      });
     }
     return wrapper;
   }
@@ -2794,12 +2827,24 @@ function retainLargeDocumentInputDecorations(
   const document = transaction.startState.doc;
   let from = document.length;
   let to = 0;
+  const retainLineRange = (startLine: number, endLine: number) => {
+    from = Math.min(from, document.line(Math.max(1, startLine - largeDocumentInputLineRadius)).from);
+    to = Math.max(to, document.line(Math.min(document.lines, endLine + largeDocumentInputLineRadius)).to);
+  };
   for (const selection of transaction.startState.selection.ranges) {
     const startLine = document.lineAt(Math.min(selection.from, document.length)).number;
     const endLine = document.lineAt(Math.min(selection.to, document.length)).number;
-    from = Math.min(from, document.line(Math.max(1, startLine - largeDocumentInputLineRadius)).from);
-    to = Math.max(to, document.line(Math.min(document.lines, endLine + largeDocumentInputLineRadius)).to);
+    retainLineRange(startLine, endLine);
   }
+  // Embedded Mermaid/math editors can own focus while the outer CodeMirror
+  // selection remains elsewhere. Retain presentation around the actual edit as
+  // well, otherwise the live widget is discarded before it can project input.
+  transaction.changes.iterChangedRanges((fromA, toA) => {
+    retainLineRange(
+      document.lineAt(Math.min(fromA, document.length)).number,
+      document.lineAt(Math.min(toA, document.length)).number
+    );
+  });
   const retained: DecorationCollector = [];
   decorations.between(from, to, (rangeFrom, rangeTo, value) => {
     retained.push(value.range(rangeFrom, rangeTo));
@@ -2826,7 +2871,17 @@ const liveDecorationField = StateField.define<DecorationSet>({
         : decorations;
       return transaction.docChanged
         ? isLiveInputNestedProjection(transaction)
-          ? inputDecorations.map(transaction.changes)
+          ? transaction.effects
+            .filter((effect) => effect.is(replaceLiveInputNestedDecorationEffect))
+            .reduce((mapped, effect) => {
+              const { from, to, decoration } = effect.value;
+              return mapped.update({
+                filterFrom: from,
+                filterTo: to,
+                filter: (_rangeFrom, _rangeTo, value) => !value.spec.widget,
+                add: [decoration.range(from, to)]
+              });
+            }, inputDecorations.map(transaction.changes))
           : mapLiveInputDerivedDecorations(inputDecorations, transaction)
         : inputDecorations;
     }

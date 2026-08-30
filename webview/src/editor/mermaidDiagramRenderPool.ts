@@ -93,7 +93,8 @@ export function createMermaidDiagramRenderPool(
 
   const unavailable = (message: string): MermaidDiagramRenderResult => ({
     ok: false,
-    error: message
+    error: message,
+    unavailable: true
   });
 
   const retireFromReuse = (job: OperationJob): void => {
@@ -211,6 +212,14 @@ export function createMermaidDiagramRenderPool(
     return true;
   };
 
+  const promoteQueuedJob = (job: OperationJob): void => {
+    if (job.state !== 'queued') return;
+    const index = normalPriority.indexOf(job);
+    if (index < 0) return;
+    normalPriority.splice(index, 1);
+    highPriority.unshift(job);
+  };
+
   const attach = <T>(job: OperationJob, owner: WaiterOwner): Promise<T> => (
     new Promise<T>((resolve, reject) => {
       const group = 'group' in owner ? owner.group : owner;
@@ -243,6 +252,7 @@ export function createMermaidDiagramRenderPool(
     }
     const pending = renderJobs.get(key);
     if (pending && pending.resourceGeneration === resourceGeneration) {
+      if (request.priority === 'high') promoteQueuedJob(pending);
       return attach<MermaidDiagramRenderResult>(pending, consumer).catch((error) => unavailable(
         error instanceof Error ? error.message : String(error)
       ));

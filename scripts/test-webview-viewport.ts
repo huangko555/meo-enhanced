@@ -174,7 +174,7 @@ async function main() {
     const chineseChrome = await page.evaluate(() => ({
       language: document.documentElement.lang,
       previewTools: document.querySelector('.preview-format-group')?.getAttribute('aria-label'),
-      sourceColoring: document.querySelector('.preview-source-coloring')?.textContent?.trim(),
+      sourceColoring: document.querySelector('.preview-source-coloring .preview-select-label')?.textContent?.trim(),
       exports: Array.from(document.querySelectorAll('[data-format]')).map((element) => element.textContent?.trim()),
       previewFrameTitle: document.querySelector('iframe.preview-frame')?.getAttribute('title'),
       previewAppearance: document.querySelector('.preview-appearance-control')?.getAttribute('aria-label'),
@@ -209,7 +209,7 @@ async function main() {
       formatting: '格式',
       heading: '标题',
       save: '保存文档',
-      line: '行',
+      line: '行号',
       dismissNotice: '关闭通知',
       mode: 'Markdown 模式',
       modeLabels: ['实时', '源码', '预览'],
@@ -357,7 +357,7 @@ async function main() {
     });
     if (
       JSON.stringify(toolbarLayout.left.slice(0, 5)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'discard', 'separator']) ||
-      JSON.stringify(toolbarLayout.right) !== JSON.stringify(['changes', 'more', 'separator', 'find', 'outline-right']) ||
+      JSON.stringify(toolbarLayout.right) !== JSON.stringify(['changes', 'separator', 'find', 'outline-right', 'more']) ||
       JSON.stringify(toolbarLayout.changes) !== JSON.stringify(['fixedBaseline', 'gitChangesGutter'])
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);
@@ -394,17 +394,22 @@ async function main() {
         labels: options.map((option) => option.querySelector('.more-tools-option-label')?.textContent),
         directChildren: options.every((option) => option.parentElement === panel),
         baselineIcons: options.slice(1, 4).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
-        separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length
+        separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length,
+        width: panel.getBoundingClientRect().width,
+        clientWidth: panel.clientWidth,
+        scrollWidth: panel.scrollWidth
       };
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         '释放固定基线',
         '当前编辑', '最近保存', 'Git HEAD',
-        '限制宽度'
+        '限制宽度', '显示行号', '折叠长代码块'
       ]) ||
       !moreToolsLayout.directChildren ||
-      moreToolsLayout.separatorCount !== 2 ||
+      moreToolsLayout.separatorCount !== 3 ||
+      moreToolsLayout.width > 268 ||
+      moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth ||
       moreToolsLayout.baselineIcons.some((icon) => !icon) ||
       new Set(moreToolsLayout.baselineIcons).size !== 1
     ) {
@@ -571,6 +576,7 @@ async function main() {
       document.documentElement.style.setProperty('--vscode-sideBar-background', '#040506');
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'vscodeCodeThemeChanged',
+        appearance: 'dark',
         vscodeTheme: { name: 'Host Dark', type: 'dark', colors: {}, tokenColors: [] }
       }}));
     });
@@ -664,6 +670,7 @@ async function main() {
       document.documentElement.style.setProperty('--vscode-sideBar-background', '#f0f0f0');
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'vscodeCodeThemeChanged',
+        appearance: 'light',
         vscodeTheme: { name: 'Host Light', type: 'light', colors: {}, tokenColors: [] }
       }}));
     });
@@ -680,7 +687,136 @@ async function main() {
     })) {
       throw new Error(`VS Code host theme changed the manual dark appearance: ${JSON.stringify(darkAfterHostThemeChange)}`);
     }
-    await page.click('[data-action="save"]');
+    const toolbarBaselineText = initialText.replace(
+      'stable line 40',
+      `${Array.from({ length: 18 }, (_, index) => `removed baseline line ${index + 1}`).join('\n')}\nstable line 40`
+    );
+    await page.evaluate((baseText) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'gitBaselineChanged',
+        version: 1,
+        payload: {
+          available: true,
+          tracked: true,
+          mode: 'current-edit',
+          generation: 1,
+          baseText
+        }
+      }}));
+    }, toolbarBaselineText);
+    await waitForFrames(page, 8);
+    const toolbarDocumentActions = [
+      { name: 'save', selector: '[data-action="save"]' },
+      { name: 'reload', selector: '[data-action="discard"]' },
+      { name: 'fixed-baseline', selector: '[data-action="fixedBaseline"]' },
+      { name: 'changes', selector: '[data-action="gitChangesGutter"]' },
+      { name: 'settings', selector: '[data-action="settings"]' }
+    ];
+    const toolbarDocumentActionTraces: Array<{
+      name: string;
+      before: { scrollTop: number; anchorText: string; anchorTop: number };
+      samples: Array<{ scrollTop: number; anchorTop: number | null }>;
+      editorOwnsFocus: boolean;
+    }> = [];
+    for (const action of toolbarDocumentActions) {
+      await page.$eval<HTMLElement>('.editor-host .cm-content', (content) => {
+        content.focus({ preventScroll: true });
+      });
+      await page.$eval<HTMLElement>('.editor-host > .cm-editor .cm-scroller', (scroller) => {
+        scroller.scrollTop = Math.min(1400, scroller.scrollHeight - scroller.clientHeight);
+      });
+      await waitForFrames(page, 2);
+      const before = await page.evaluate(() => {
+        const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+        const scrollerTop = scroller.getBoundingClientRect().top;
+        const anchor = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+          .find((line) => {
+            const rect = line.getBoundingClientRect();
+            return rect.top >= scrollerTop && rect.bottom <= scroller.getBoundingClientRect().bottom
+              && line.textContent?.startsWith('stable line ');
+          });
+        if (!anchor?.textContent) throw new Error('Missing visible toolbar viewport anchor');
+        return {
+          scrollTop: scroller.scrollTop,
+          anchorText: anchor.textContent,
+          anchorTop: anchor.getBoundingClientRect().top
+        };
+      });
+      await page.evaluate((anchorText) => {
+        const targetWindow = window as typeof window & {
+          __toolbarActionScrollTrace?: Array<{ scrollTop: number; anchorTop: number | null }>;
+        };
+        const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+        const readAnchorTop = () => {
+          const anchor = Array.from(document.querySelectorAll<HTMLElement>('.editor-host .cm-line'))
+            .find((line) => line.textContent === anchorText);
+          return anchor?.getBoundingClientRect().top ?? null;
+        };
+        targetWindow.__toolbarActionScrollTrace = [{
+          scrollTop: scroller.scrollTop,
+          anchorTop: readAnchorTop()
+        }];
+        let remainingFrames = 16;
+        const sample = () => {
+          targetWindow.__toolbarActionScrollTrace!.push({
+            scrollTop: scroller.scrollTop,
+            anchorTop: readAnchorTop()
+          });
+          remainingFrames -= 1;
+          if (remainingFrames > 0) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }, before.anchorText);
+      await page.click(action.selector);
+      await waitForFrames(page, 18);
+      const samples = await page.evaluate(() => (
+        (window as typeof window & {
+          __toolbarActionScrollTrace?: Array<{ scrollTop: number; anchorTop: number | null }>;
+        }).__toolbarActionScrollTrace ?? []
+      ));
+      const editorOwnsFocus = await page.evaluate(() => (
+        Boolean(document.activeElement && document.querySelector('.editor-host')?.contains(document.activeElement))
+      ));
+      toolbarDocumentActionTraces.push({ name: action.name, before, samples, editorOwnsFocus });
+      if (action.name === 'settings') await page.keyboard.press('Escape');
+    }
+    const movedToolbarDocumentAction = toolbarDocumentActionTraces.find((trace) => (
+      !trace.editorOwnsFocus ||
+      trace.samples.some((sample) => (
+        sample.anchorTop === null || Math.abs(sample.anchorTop - trace.before.anchorTop) > 1
+      ))
+    ));
+    if (movedToolbarDocumentAction) {
+      throw new Error(`Toolbar document action moved the Live viewport: ${JSON.stringify(toolbarDocumentActionTraces)}`);
+    }
+    const embeddedToolbarScrollBefore = await page.evaluate(() => {
+      const editorDom = document.querySelector<HTMLElement>('.editor-host > .cm-editor')!;
+      const nestedInput = document.createElement('textarea');
+      nestedInput.dataset.testNestedEditorFocus = 'true';
+      nestedInput.style.position = 'absolute';
+      nestedInput.style.width = '1px';
+      nestedInput.style.height = '1px';
+      nestedInput.style.opacity = '0';
+      editorDom.appendChild(nestedInput);
+      nestedInput.focus({ preventScroll: true });
+      return editorDom.querySelector<HTMLElement>('.cm-scroller')!.scrollTop;
+    });
+    await page.click('[data-action="settings"]');
+    await waitForFrames(page, 4);
+    const embeddedToolbarFocus = await page.evaluate((before) => {
+      const nestedInput = document.querySelector<HTMLTextAreaElement>('[data-test-nested-editor-focus]')!;
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const result = {
+        focused: document.activeElement === nestedInput,
+        scrollDelta: scroller.scrollTop - before
+      };
+      nestedInput.remove();
+      return result;
+    }, embeddedToolbarScrollBefore);
+    await page.keyboard.press('Escape');
+    if (!embeddedToolbarFocus.focused || Math.abs(embeddedToolbarFocus.scrollDelta) > 1) {
+      throw new Error(`Toolbar did not retain embedded editor focus: ${JSON.stringify(embeddedToolbarFocus)}`);
+    }
     await waitForFrames(page, 2);
     const saveMessages = await page.evaluate(() => (
       (window as typeof window & {
@@ -736,116 +872,53 @@ async function main() {
     }
     const previewToolbarLayout = await page.evaluate(() => {
       const group = document.querySelector<HTMLElement>('.preview-format-group')!;
-      const appearanceControl = group.querySelector<HTMLElement>('.preview-appearance-control')!;
-      const activeAppearanceButton = appearanceControl.querySelector<HTMLElement>('.is-active')!;
-      const appearanceButtons = Array.from(appearanceControl.querySelectorAll<HTMLElement>('.segmented-control-button'));
-      const activeAppearanceIndicator = activeAppearanceButton.querySelector<HTMLElement>('.segmented-control-button-indicator')!;
-      const appearanceControlBounds = appearanceControl.getBoundingClientRect();
-      const activeAppearanceBounds = activeAppearanceIndicator.getBoundingClientRect();
+      const selects = Array.from(group.querySelectorAll<HTMLButtonElement>('.preview-toolbar-dropdown'));
+      const settingsButton = document.querySelector<HTMLButtonElement>('[data-action="settings"]')!;
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
         toolbarHeight: document.querySelector<HTMLElement>('.mode-toolbar')!.getBoundingClientRect().height,
-        appearanceControlHeight: appearanceControl.getBoundingClientRect().height,
-        appearanceControlRadius: Number.parseFloat(getComputedStyle(appearanceControl).borderRadius),
-        activeAppearanceRadius: Number.parseFloat(getComputedStyle(activeAppearanceIndicator).borderRadius),
-        activeAppearanceInsets: {
-          top: activeAppearanceBounds.top - appearanceControlBounds.top,
-          right: appearanceControlBounds.right - activeAppearanceBounds.right,
-          bottom: appearanceControlBounds.bottom - activeAppearanceBounds.bottom
-        },
-        appearanceSegmentGap: appearanceButtons[1].getBoundingClientRect().left - appearanceButtons[0].getBoundingClientRect().right,
-        appearanceUsesSharedComponent: appearanceControl.classList.contains('segmented-control'),
-        activeAppearance: activeAppearanceButton.dataset.appearance,
+        selectCount: selects.length,
+        selectHeights: selects.map((select) => select.getBoundingClientRect().height),
+        selectRadii: selects.map((select) => Number.parseFloat(getComputedStyle(select).borderRadius)),
+        labels: Array.from(group.querySelectorAll('.preview-select-label')).map((label) => label.textContent?.trim()),
+        appearance: group.querySelector<HTMLSelectElement>('.preview-appearance-select')?.value,
+        colorSchemes: selects.map((select) => getComputedStyle(select.closest<HTMLElement>('.preview-select-control')!).colorScheme),
+        oldAppearanceButtons: group.querySelectorAll('.preview-appearance-button').length,
+        oldColorButtons: group.querySelectorAll('button.preview-source-coloring').length,
         visible: getComputedStyle(group).display !== 'none',
-        items: Array.from(group.querySelectorAll(':scope > button, :scope > .preview-appearance-control > button')).map((element) => (
-          (element as HTMLElement).dataset.action ||
-          (element as HTMLElement).dataset.appearance ||
-          element.textContent?.trim()
-        )),
         moreExports: document.querySelectorAll('.more-tools-panel [data-format]').length,
-        floatingThemeToggle: Boolean(document.querySelector('.preview-host .preview-theme-toggle'))
+        floatingThemeToggle: Boolean(document.querySelector('.preview-host .preview-theme-toggle')),
+        settingsVisible: getComputedStyle(settingsButton).display !== 'none',
+        settingsTitle: settingsButton.title,
+        settingsAfterOutline: settingsButton.closest('.more-tools-wrapper')?.previousElementSibling
+          === document.querySelector('[data-action="outline-right"]'),
+        settingsIcon: Boolean(
+          settingsButton.querySelector('svg path[d^="M9.671 4.136"]')
+          && settingsButton.querySelector('svg circle[cx="12"][cy="12"][r="3"]')
+        )
       };
     });
     if (
       !previewToolbarLayout.visible ||
       Math.abs(previewToolbarLayout.toolbarHeight - initialToolbarStart.toolbarHeight) > 0.5 ||
-      previewToolbarLayout.appearanceControlHeight !== 26 ||
-      previewToolbarLayout.appearanceControlRadius !== 8 ||
-      previewToolbarLayout.activeAppearanceRadius !== 5 ||
-      previewToolbarLayout.activeAppearanceInsets.top !== 3 ||
-      previewToolbarLayout.activeAppearanceInsets.bottom !== 3 ||
-      previewToolbarLayout.appearanceSegmentGap !== 0 ||
-      !previewToolbarLayout.appearanceUsesSharedComponent ||
-      previewToolbarLayout.activeAppearance !== 'light' ||
-      JSON.stringify(previewToolbarLayout.items) !== JSON.stringify([
-        'outline-left', '代码着色', 'auto', 'light', 'dark', '导出 HTML', '导出 PDF'
-      ]) ||
+      previewToolbarLayout.selectCount !== 3 ||
+      previewToolbarLayout.selectHeights.some((height) => height !== 26) ||
+      previewToolbarLayout.selectRadii.some((radius) => radius !== 8) ||
+      JSON.stringify(previewToolbarLayout.labels) !== JSON.stringify(['预览字体', '代码着色', '预览外观']) ||
+      previewToolbarLayout.appearance !== 'light' ||
+      previewToolbarLayout.colorSchemes.some((scheme) => scheme !== 'dark') ||
+      previewToolbarLayout.oldAppearanceButtons !== 0 ||
+      previewToolbarLayout.oldColorButtons !== 0 ||
       previewToolbarLayout.moreExports !== 0 ||
-      previewToolbarLayout.floatingThemeToggle
+      previewToolbarLayout.floatingThemeToggle ||
+      !previewToolbarLayout.settingsVisible ||
+      previewToolbarLayout.settingsTitle !== '设置' ||
+      !previewToolbarLayout.settingsAfterOutline ||
+      !previewToolbarLayout.settingsIcon
     ) {
       throw new Error(`Unexpected Preview toolbar: ${JSON.stringify({ initialToolbarStart, previewToolbarLayout })}`);
     }
-    const measureAppearanceIndicator = () => page.evaluate(() => {
-      const control = document.querySelector<HTMLElement>('.preview-appearance-control')!;
-      const activeButton = control.querySelector<HTMLElement>('.preview-appearance-button.is-active')!;
-      const indicator = activeButton.querySelector<HTMLElement>('.segmented-control-button-indicator')!;
-      const label = activeButton.querySelector<HTMLElement>('.segmented-control-button-label')!;
-      const controlBounds = control.getBoundingClientRect();
-      const indicatorBounds = indicator.getBoundingClientRect();
-      const labelBounds = label.getBoundingClientRect();
-      const appearanceButtons = Array.from(control.querySelectorAll<HTMLElement>('.preview-appearance-button'));
-      return {
-        active: activeButton.dataset.appearance,
-        top: indicatorBounds.top - controlBounds.top,
-        right: controlBounds.right - indicatorBounds.right,
-        bottom: controlBounds.bottom - indicatorBounds.bottom,
-        left: indicatorBounds.left - controlBounds.left,
-        height: indicatorBounds.height,
-        radius: getComputedStyle(indicator).borderTopLeftRadius,
-        labelOffset: indicatorBounds.top + indicatorBounds.height / 2
-          - (labelBounds.top + labelBounds.height / 2),
-        controlWidth: controlBounds.width,
-        buttonWidths: Object.fromEntries(appearanceButtons.map((button) => [
-          button.dataset.appearance,
-          button.getBoundingClientRect().width
-        ]))
-      };
-    });
-    const lightAppearanceGeometry = await measureAppearanceIndicator();
-    await page.click('.preview-appearance-button[data-appearance="dark"]');
-    const darkAppearanceGeometry = await measureAppearanceIndicator();
-    if (
-      darkAppearanceGeometry.active !== 'dark' ||
-      darkAppearanceGeometry.top !== 3 ||
-      darkAppearanceGeometry.right !== 3 ||
-      darkAppearanceGeometry.bottom !== 3 ||
-      darkAppearanceGeometry.height !== 20 ||
-      darkAppearanceGeometry.radius !== '5px' ||
-      darkAppearanceGeometry.labelOffset !== 0.5 ||
-      lightAppearanceGeometry.active !== 'light' ||
-      lightAppearanceGeometry.top !== 3 ||
-      lightAppearanceGeometry.bottom !== 3 ||
-      Math.abs(lightAppearanceGeometry.left - (lightAppearanceGeometry.buttonWidths.auto + 3)) > 0.01 ||
-      lightAppearanceGeometry.height !== 20 ||
-      lightAppearanceGeometry.radius !== '5px' ||
-      lightAppearanceGeometry.labelOffset !== 0.5 ||
-      darkAppearanceGeometry.buttonWidths.light < 56 ||
-      darkAppearanceGeometry.buttonWidths.dark < 56 ||
-      Math.abs(darkAppearanceGeometry.left - (
-        darkAppearanceGeometry.buttonWidths.auto + darkAppearanceGeometry.buttonWidths.light + 3
-      )) > 0.01 ||
-      Math.abs(lightAppearanceGeometry.right - (lightAppearanceGeometry.buttonWidths.dark + 3)) > 0.01 ||
-      Math.abs(darkAppearanceGeometry.controlWidth - (
-        darkAppearanceGeometry.buttonWidths.auto
-        + darkAppearanceGeometry.buttonWidths.light
-        + darkAppearanceGeometry.buttonWidths.dark
-      )) > 0.01
-    ) {
-      throw new Error(`Preview appearance control geometry is inconsistent: ${JSON.stringify({
-        darkAppearanceGeometry,
-        lightAppearanceGeometry
-      })}`);
-    }
+    await page.select('.preview-appearance-select', 'dark');
     await page.evaluate(() => {
       const testWindow = window as typeof window & { __hostMessages?: Array<{ type?: string }> };
       testWindow.__hostMessages = (testWindow.__hostMessages ?? []).filter(
@@ -870,45 +943,20 @@ async function main() {
           center
         };
       };
-      const describeSourceColoring = (button: HTMLButtonElement) => {
-        const buttonBounds = button.getBoundingClientRect();
-        const iconBounds = button.querySelector<SVGElement>('svg')!.getBoundingClientRect();
-        const textNode = Array.from(button.childNodes).find((node) => node.nodeType === Node.TEXT_NODE)!;
-        const textRange = document.createRange();
-        textRange.selectNodeContents(textNode);
-        const textBounds = textRange.getBoundingClientRect();
-        const withinButton = (bounds: DOMRect) => (
-          bounds.left >= buttonBounds.left - 0.5 &&
-          bounds.right <= buttonBounds.right + 0.5 &&
-          bounds.top >= buttonBounds.top - 0.5 &&
-          bounds.bottom <= buttonBounds.bottom + 0.5
-        );
-        return {
-          ...describe(button),
-          iconWithinButton: withinButton(iconBounds),
-          textWithinButton: withinButton(textBounds),
-          contentDoesNotOverlap: iconBounds.right <= textBounds.left
-        };
-      };
       return {
-        font: describe(document.querySelector<HTMLInputElement>('.preview-font-family-input')!),
-        sourceColoring: describeSourceColoring(
-          document.querySelector<HTMLButtonElement>('.preview-source-coloring')!
-        ),
+        font: describe(document.querySelector<HTMLButtonElement>('.preview-font-family-dropdown')!),
+        sourceColoring: describe(document.querySelector<HTMLButtonElement>('.preview-source-coloring-dropdown')!),
         html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
         pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!)
       };
     });
     await page.mouse.click(previewToolbarReachability.font.center.x, previewToolbarReachability.font.center.y);
     const previewFontFocused = await page.evaluate(() => (
-      document.activeElement === document.querySelector('.preview-font-family-input')
+      document.activeElement === document.querySelector('.preview-font-family-dropdown')
     ));
-    await page.mouse.click(
-      previewToolbarReachability.sourceColoring.center.x,
-      previewToolbarReachability.sourceColoring.center.y
-    );
+    await page.select('.preview-source-coloring-select', 'false');
     const sourceColoringAfterPointer = await page.evaluate(() => ({
-      pressed: document.querySelector('.preview-source-coloring')?.getAttribute('aria-pressed'),
+      value: document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')?.value,
       commands: (
         (window as typeof window & {
           __hostMessages?: Array<{ type?: string; enabled?: boolean }>;
@@ -916,9 +964,9 @@ async function main() {
       ).filter((message) => message.type === 'setPreviewSourceColoring')
         .map((message) => ({ enabled: message.enabled }))
     }));
-    await page.keyboard.press('Enter');
+    await page.select('.preview-source-coloring-select', 'true');
     const sourceColoringAfterKeyboard = await page.evaluate(() => ({
-      pressed: document.querySelector('.preview-source-coloring')?.getAttribute('aria-pressed'),
+      value: document.querySelector<HTMLSelectElement>('.preview-source-coloring-select')?.value,
       commands: (
         (window as typeof window & {
           __hostMessages?: Array<{ type?: string; enabled?: boolean }>;
@@ -936,13 +984,10 @@ async function main() {
       toolbarTargets.some((target) => (
         !target.connected || !target.visible || target.pointerEvents === 'none' || !target.hit
       )) ||
-      !previewToolbarReachability.sourceColoring.iconWithinButton ||
-      !previewToolbarReachability.sourceColoring.textWithinButton ||
-      !previewToolbarReachability.sourceColoring.contentDoesNotOverlap ||
       !previewFontFocused ||
-      sourceColoringAfterPointer.pressed !== 'false' ||
+      sourceColoringAfterPointer.value !== 'false' ||
       JSON.stringify(sourceColoringAfterPointer.commands) !== JSON.stringify([{ enabled: false }]) ||
-      sourceColoringAfterKeyboard.pressed !== 'true' ||
+      sourceColoringAfterKeyboard.value !== 'true' ||
       JSON.stringify(sourceColoringAfterKeyboard.commands) !== JSON.stringify([
         { enabled: false },
         { enabled: true }
@@ -1298,12 +1343,12 @@ async function main() {
     });
     const darkPreviewState = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
-      const toggle = document.querySelector<HTMLElement>('.preview-appearance-button[data-appearance="light"]')!;
+      const select = document.querySelector<HTMLSelectElement>('.preview-appearance-select')!;
       return {
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode,
         editorHidden: document.querySelector<HTMLElement>('.editor-host')?.hidden,
         previewHidden: document.querySelector<HTMLElement>('.preview-host')?.hidden,
-        pressed: toggle.getAttribute('aria-pressed'),
+        appearance: select.value,
         background: getComputedStyle(frame.contentDocument!.body).backgroundColor
       };
     });
@@ -1311,7 +1356,7 @@ async function main() {
       darkPreviewState.mode !== 'preview' ||
       !darkPreviewState.editorHidden ||
       darkPreviewState.previewHidden ||
-      darkPreviewState.pressed !== 'false' ||
+      darkPreviewState.appearance !== 'dark' ||
       darkPreviewState.background !== 'rgb(32, 37, 43)'
     ) {
       throw new Error(`Unexpected dark Preview state: ${JSON.stringify(darkPreviewState)}`);
@@ -1440,9 +1485,9 @@ async function main() {
       const frameBody = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.body;
       frameBody.dataset.themeSwitchSentinel = 'preserve-document';
     });
-    await page.click('.preview-appearance-button[data-appearance="light"]');
+    await page.select('.preview-appearance-select', 'light');
     await page.waitForFunction(() => {
-      return document.querySelector<HTMLElement>('.preview-appearance-button[data-appearance="light"]')?.getAttribute('aria-pressed') === 'true';
+      return document.querySelector<HTMLSelectElement>('.preview-appearance-select')?.value === 'light';
     });
     await waitForFrames(page, 4);
     await page.waitForFunction((darkFill) => {
@@ -1750,16 +1795,26 @@ async function main() {
     await waitForFrames(page, 8);
     const afterUpdate = await readViewport();
 
+    const previewRequestsBeforeTheme = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'requestPreviewRender').length);
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', {
         data: {
           type: 'vscodeCodeThemeChanged',
+          appearance: 'dark',
           vscodeTheme: { name: 'Current Dark', type: 'dark', colors: {}, tokenColors: [] }
         }
       }));
     });
     await waitForFrames(page);
     const afterTheme = await readViewport();
+    const previewRequestsAfterTheme = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'requestPreviewRender').length);
+    if (previewRequestsAfterTheme !== previewRequestsBeforeTheme) {
+      throw new Error(`Theme switch restarted Preview rendering: ${previewRequestsBeforeTheme} -> ${previewRequestsAfterTheme}`);
+    }
 
     await page.mouse.move(450, 260);
     const wheelScrollTops: number[] = [];
@@ -1930,7 +1985,49 @@ async function main() {
     await testEditorScrollToTop('live');
     await testEditorScrollToTop('source');
 
+    // A changed editable document starts a fresh Preview render, but the cached
+    // frame is still the first surface the user sees. It must be repositioned
+    // synchronously instead of painting its old scroll location first.
+    await page.evaluate((text) => {
+      const position = text.indexOf('stable line 240');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor: position, head: position, focus: true
+      }}));
+    }, updatedText);
+    await page.keyboard.type('x');
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find((line) => line.textContent === '## Tall Mermaid');
+      if (heading) {
+        scroller.scrollTop += heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      }
+    });
+    await waitForFrames(page, 2);
+    const requestsBeforePendingPreviewSwitch = await page.evaluate(() => (
+      (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
+    ).filter((message) => message.type === 'requestPreviewRender').length);
     await page.click('[data-mode="preview"]');
+    const pendingPreviewFirstSurface = await page.evaluate(() => {
+      const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? [];
+      const heading = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<HTMLElement>('#tall-mermaid');
+      return {
+        requests: messages.filter((message) => message.type === 'requestPreviewRender').length,
+        headingTop: heading?.getBoundingClientRect().top ?? null
+      };
+    });
+    if (
+      pendingPreviewFirstSurface.requests !== requestsBeforePendingPreviewSwitch + 1 ||
+      pendingPreviewFirstSurface.headingTop === null ||
+      Math.abs(pendingPreviewFirstSurface.headingTop) > 4
+    ) {
+      throw new Error(`Pending Preview switch painted a stale viewport first: ${JSON.stringify({
+        requestsBeforePendingPreviewSwitch,
+        pendingPreviewFirstSurface
+      })}`);
+    }
+
     await page.waitForSelector('.preview-host:not([hidden]) .preview-frame');
     await waitForFrames(page);
     await page.evaluate(() => {

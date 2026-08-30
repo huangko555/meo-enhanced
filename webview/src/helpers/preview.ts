@@ -1,9 +1,7 @@
-import { createElement, Code2, Moon, Sun } from 'lucide';
 import { getExportStyleEnvironment } from './export';
 import { createPreviewMermaidRenderer } from './previewMermaid';
 import { logWebviewRenderError } from './errors';
 import { createDocumentScrollToTopController } from './scrollToTop';
-import { createSegmentedControl } from './segmentedControl';
 import type { OutlineHeading } from './outline';
 import type { EditorAppearance as PreviewAppearance } from '../../../src/protocol/editorCommands';
 import type { PreviewRenderResponse, PreviewRenderValue } from '../../../src/protocol/previewRender';
@@ -13,6 +11,9 @@ import type { MermaidDiagramRenderResources } from '../application/mermaidDiagra
 import type { PreviewCodePalette } from '../application/finalCodePalette';
 import { normalizePreviewFontFamily } from '../../../src/shared/preview';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
+import { applyPreviewCodeHighlight } from './previewCodeHighlight';
+import { activateShikiCodeHighlighting, subscribeShikiRefresh } from './shikiHighlighter';
+import { createToolbarDropdown } from './toolbarDropdown';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
@@ -90,6 +91,16 @@ body::-webkit-scrollbar-corner {
   background: transparent !important;
 }
 `;
+
+const previewFontFamilies = [
+  'Microsoft YaHei',
+  'Segoe UI',
+  'Noto Sans CJK SC',
+  'Source Han Sans SC',
+  'SimSun',
+  'Arial',
+  'Georgia'
+] as const;
 
 const previewLatexMathViewportStyles = `
 .meo-export-math-display.meo-latex-math-viewport {
@@ -184,55 +195,46 @@ export function createPreviewController({
   frame.title = uiStrings.previewTitle;
   frame.setAttribute('sandbox', 'allow-same-origin');
 
-  const appearanceSegmentedControl = createSegmentedControl<PreviewAppearance>({
-    ariaLabel: uiStrings.previewAppearance,
-    className: 'preview-appearance-control',
-    buttonClassName: 'preview-appearance-button',
-    datasetKey: 'appearance',
-    role: 'group',
-    options: [
-      {
-        value: 'auto',
-        label: uiStrings.auto
-      },
-      {
-        value: 'light',
-        label: uiStrings.light,
-        renderLeading: () => createElement(Sun, { width: 14, height: 14, 'aria-hidden': 'true' })
-      },
-      {
-        value: 'dark',
-        label: uiStrings.dark,
-        renderLeading: () => createElement(Moon, { width: 14, height: 14, 'aria-hidden': 'true' })
-      }
-    ]
-  });
-  const appearanceControl = appearanceSegmentedControl.element;
-  const lightAppearanceButton = appearanceSegmentedControl.getButton('light');
-  const darkAppearanceButton = appearanceSegmentedControl.getButton('dark');
-  const sourceColoringControl = document.createElement('button');
-  sourceColoringControl.type = 'button';
-  sourceColoringControl.className = 'preview-toolbar-action preview-source-coloring';
-  sourceColoringControl.title = uiStrings.previewSourceColoring;
-  sourceColoringControl.setAttribute('aria-label', uiStrings.previewSourceColoring);
-  const sourceColoringLabel = document.createTextNode(uiStrings.previewCodeColors);
-  sourceColoringControl.append(
-    createElement(Code2, { width: 15, height: 15, 'aria-hidden': 'true' }),
-    sourceColoringLabel
-  );
-  const fontFamilyControl = document.createElement('label');
-  fontFamilyControl.className = 'preview-font-family-control';
-  fontFamilyControl.title = uiStrings.previewFontFamily;
-  const fontFamilyInput = document.createElement('input');
-  fontFamilyInput.className = 'preview-font-family-input';
-  fontFamilyInput.type = 'text';
-  fontFamilyInput.placeholder = uiStrings.previewFontPlaceholder;
-  fontFamilyInput.setAttribute('aria-label', uiStrings.previewFontFamily);
-  fontFamilyInput.setAttribute('role', 'combobox');
-  const fontFamilyOptions = document.createElement('datalist');
-  fontFamilyOptions.id = 'meo-preview-font-family-options';
-  fontFamilyInput.setAttribute('list', fontFamilyOptions.id);
-  fontFamilyControl.append(fontFamilyInput, fontFamilyOptions);
+  const appearanceSelectControl = createToolbarDropdown('preview-appearance-control', uiStrings.previewAppearance);
+  const appearanceControl = appearanceSelectControl.element;
+  const appearanceSelect = appearanceSelectControl.select;
+  appearanceSelect.classList.add('preview-appearance-select');
+  for (const value of ['auto', 'light', 'dark'] as const) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value === 'auto' ? uiStrings.auto : value === 'light' ? uiStrings.light : uiStrings.dark;
+    appearanceSelect.append(option);
+  }
+  appearanceSelectControl.refreshOptions();
+
+  const sourceColoringSelectControl = createToolbarDropdown('preview-source-coloring-control', uiStrings.previewCodeColors);
+  const sourceColoringControl = sourceColoringSelectControl.element;
+  sourceColoringControl.classList.add('preview-source-coloring');
+  const sourceColoringSelect = sourceColoringSelectControl.select;
+  sourceColoringSelect.classList.add('preview-source-coloring-select');
+  for (const enabled of [true, false]) {
+    const option = document.createElement('option');
+    option.value = String(enabled);
+    option.textContent = enabled ? uiStrings.previewCodeColorsOn : uiStrings.previewCodeColorsOff;
+    sourceColoringSelect.append(option);
+  }
+  sourceColoringSelectControl.refreshOptions();
+  const fontFamilySelectControl = createToolbarDropdown('preview-font-family-control', uiStrings.previewFontFamily);
+  const fontFamilyControl = fontFamilySelectControl.element;
+  const fontFamilyLabel = fontFamilySelectControl.label;
+  const fontFamilySelect = fontFamilySelectControl.select;
+  fontFamilySelect.classList.add('preview-font-family-select');
+  const defaultFontOption = document.createElement('option');
+  defaultFontOption.value = '';
+  defaultFontOption.textContent = uiStrings.previewFontPlaceholder;
+  fontFamilySelect.append(defaultFontOption);
+  for (const family of previewFontFamilies) {
+    const option = document.createElement('option');
+    option.value = family;
+    option.textContent = family;
+    fontFamilySelect.append(option);
+  }
+  fontFamilySelectControl.refreshOptions();
 
   const status = document.createElement('div');
   status.className = 'preview-status';
@@ -244,18 +246,18 @@ export function createPreviewController({
     uiLanguage = language;
     uiStrings = getUiStrings(language);
     frame.title = uiStrings.previewTitle;
-    appearanceControl.setAttribute('aria-label', uiStrings.previewAppearance);
-    appearanceSegmentedControl.setLabels({
-      auto: uiStrings.auto,
-      light: uiStrings.light,
-      dark: uiStrings.dark
-    });
-    sourceColoringControl.title = uiStrings.previewSourceColoring;
-    sourceColoringControl.setAttribute('aria-label', uiStrings.previewSourceColoring);
-    sourceColoringLabel.textContent = uiStrings.previewCodeColors;
-    fontFamilyControl.title = uiStrings.previewFontFamily;
-    fontFamilyInput.placeholder = uiStrings.previewFontPlaceholder;
-    fontFamilyInput.setAttribute('aria-label', uiStrings.previewFontFamily);
+    appearanceSelectControl.setLabel(uiStrings.previewAppearance);
+    appearanceSelect.options[0].textContent = uiStrings.auto;
+    appearanceSelect.options[1].textContent = uiStrings.light;
+    appearanceSelect.options[2].textContent = uiStrings.dark;
+    appearanceSelectControl.refreshOptions();
+    sourceColoringSelectControl.setLabel(uiStrings.previewCodeColors);
+    sourceColoringSelect.options[0].textContent = uiStrings.previewCodeColorsOn;
+    sourceColoringSelect.options[1].textContent = uiStrings.previewCodeColorsOff;
+    sourceColoringSelectControl.refreshOptions();
+    fontFamilySelectControl.setLabel(uiStrings.previewFontFamily);
+    defaultFontOption.textContent = uiStrings.previewFontPlaceholder;
+    fontFamilySelectControl.refreshOptions();
     scrollToTopController.setUiLanguage(language);
   };
 
@@ -266,8 +268,6 @@ export function createPreviewController({
   let appearance: 'light' | 'dark' = 'dark';
   let sourceColoring = true;
   let fontFamilyPreference = '';
-  let fontEnumerationStarted = false;
-  let fontEnumerationGeneration = 0;
   let requestGeneration = 0;
   let frameGeneration = 0;
   let mermaidPresentationGeneration = 0;
@@ -290,6 +290,12 @@ export function createPreviewController({
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
   let disposed = false;
+  const releasePreviewCodeHighlighting = activateShikiCodeHighlighting();
+  const unsubscribePreviewCodeHighlight = subscribeShikiRefresh(() => {
+    if (!disposed && sourceColoring && activeFrameDocument) {
+      applyPreviewCodeHighlight(activeFrameDocument);
+    }
+  });
 
   const withViewportTransaction = (
     mutate: (slot: PreviewViewportProjectionSlot) => void
@@ -426,7 +432,14 @@ export function createPreviewController({
     return { found: true, current: activeSearchIndex + 1, total: searchMatches.length };
   };
 
-  const updateThemeToggle = () => appearanceSegmentedControl.setActive(appearancePreference);
+  const updateThemeToggle = () => {
+    appearanceSelect.value = appearancePreference;
+    const toolbarAppearance = getEditorAppearance();
+    for (const control of [appearanceSelectControl, sourceColoringSelectControl, fontFamilySelectControl]) {
+      control.setAppearance(toolbarAppearance);
+    }
+    appearanceSelectControl.syncFromSelect();
+  };
 
   const setStatus = (message: string | null) => {
     status.hidden = !message;
@@ -446,6 +459,7 @@ export function createPreviewController({
     mermaidPresentationGeneration += 1;
     activeFrameDocument = null;
     frameRenderedText = null;
+    frame.style.visibility = 'hidden';
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
     const katexInlineStyles = collectPreviewKatexStyles(katexHref).replace(/<\/style/gi, '<\\/style');
     const katexStylesTag = katexInlineStyles
@@ -475,6 +489,7 @@ export function createPreviewController({
       scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
       attachPreviewMathViewports(frameDocument);
+      if (sourceColoring) applyPreviewCodeHighlight(frameDocument);
       if (viewportRestore?.isCurrent()) {
         restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
       }
@@ -499,6 +514,7 @@ export function createPreviewController({
       };
       const finishRender = () => {
         keepPosition();
+        frame.style.removeProperty('visibility');
         scrollToTopController.sync();
         onRendered?.();
       };
@@ -644,8 +660,8 @@ export function createPreviewController({
   );
 
   const updateSourceColoringControl = (): void => {
-    sourceColoringControl.classList.toggle('is-active', sourceColoring);
-    sourceColoringControl.setAttribute('aria-pressed', String(sourceColoring));
+    sourceColoringSelect.value = String(sourceColoring);
+    sourceColoringSelectControl.syncFromSelect();
   };
 
   const setSourceColoring = (
@@ -660,7 +676,7 @@ export function createPreviewController({
     updateSourceColoringControl();
     const text = hasPendingRequest ? pendingText : latestAcceptedText;
     if (text !== null) {
-      requestRender(text, { force: true, preserveViewport: true });
+        requestRender(text, { force: true, preserveViewport: true, preserveFrame: true });
     }
     if (post) vscode.postMessage({ type: 'setPreviewSourceColoring', enabled });
   };
@@ -671,12 +687,20 @@ export function createPreviewController({
   ): void => {
     const nextFontFamily = normalizePreviewFontFamily(value);
     if (disposed || nextFontFamily === null) {
-      fontFamilyInput.value = fontFamilyPreference;
+      fontFamilySelect.value = fontFamilyPreference;
       return;
     }
     const changed = fontFamilyPreference !== nextFontFamily;
     fontFamilyPreference = nextFontFamily;
-    fontFamilyInput.value = nextFontFamily;
+    if (nextFontFamily && !Array.from(fontFamilySelect.options).some((option) => option.value === nextFontFamily)) {
+      const option = document.createElement('option');
+      option.value = nextFontFamily;
+      option.textContent = nextFontFamily;
+      fontFamilySelect.append(option);
+      fontFamilySelectControl.refreshOptions();
+    }
+    fontFamilySelect.value = nextFontFamily;
+    fontFamilySelectControl.syncFromSelect();
     if (changed && (latestPayload || hasPendingRequest)) {
       const text = hasPendingRequest ? pendingText : latestAcceptedText;
       if (text !== null) {
@@ -690,67 +714,18 @@ export function createPreviewController({
     if (changed && post) vscode.postMessage({ type: 'setPreviewFontFamily', fontFamily: nextFontFamily });
   };
 
-  const enumerateLocalFontFamilies = (event: Event): void => {
-    if (disposed || fontEnumerationStarted || !event.isTrusted || navigator.userActivation?.isActive !== true) return;
-    fontEnumerationStarted = true;
-    const queryLocalFonts = (window as unknown as {
-      queryLocalFonts?: () => Promise<readonly { family?: unknown }[]>;
-    }).queryLocalFonts;
-    if (typeof queryLocalFonts !== 'function') {
-      fontFamilyControl.title = uiStrings.previewFontUnavailable;
-      return;
-    }
-    const generation = ++fontEnumerationGeneration;
-    let query: Promise<readonly { family?: unknown }[]>;
-    try {
-      query = Promise.resolve(queryLocalFonts.call(window));
-    } catch {
-      fontFamilyControl.title = uiStrings.previewFontUnavailable;
-      return;
-    }
-    void query.then((fonts) => {
-      if (disposed || generation !== fontEnumerationGeneration) return;
-      const families = new Map<string, string>();
-      for (const font of Array.isArray(fonts) ? fonts : []) {
-        const family = normalizePreviewFontFamily(font?.family);
-        if (!family) continue;
-        const key = family.toLocaleLowerCase();
-        if (!families.has(key)) families.set(key, family);
-      }
-      const fragment = document.createDocumentFragment();
-      for (const family of [...families.values()].sort((left, right) => left.localeCompare(right))) {
-        const option = document.createElement('option');
-        option.value = family;
-        fragment.append(option);
-      }
-      fontFamilyOptions.replaceChildren(fragment);
-      if (families.size === 0) {
-        fontFamilyControl.title = uiStrings.previewFontUnavailable;
-      }
-    }).catch(() => {
-      if (!disposed && generation === fontEnumerationGeneration) {
-        fontFamilyControl.title = uiStrings.previewFontUnavailable;
-      }
-    });
-  };
-
-  const handleAppearanceControlClick = (event: Event) => {
-    const button = event.target instanceof Element
-      ? event.target.closest<HTMLButtonElement>('.preview-appearance-button[data-appearance]')
-      : null;
-    const nextAppearance = button?.dataset.appearance;
+  const handleAppearanceControlChange = () => {
+    const nextAppearance = appearanceSelect.value;
     if (nextAppearance !== 'auto' && nextAppearance !== 'light' && nextAppearance !== 'dark') {
       return;
     }
     setAppearance(nextAppearance, { post: true });
   };
-  appearanceControl.addEventListener('click', handleAppearanceControlClick);
-  const handleSourceColoringClick = () => setSourceColoring(!sourceColoring, { post: true });
-  sourceColoringControl.addEventListener('click', handleSourceColoringClick);
-  const handleFontFamilyInput = () => setFontFamily(fontFamilyInput.value, { post: true });
-  fontFamilyInput.addEventListener('input', handleFontFamilyInput);
-  fontFamilyInput.addEventListener('pointerdown', enumerateLocalFontFamilies);
-  fontFamilyInput.addEventListener('keydown', enumerateLocalFontFamilies);
+  appearanceSelect.addEventListener('change', handleAppearanceControlChange);
+  const handleSourceColoringChange = () => setSourceColoring(sourceColoringSelect.value === 'true', { post: true });
+  sourceColoringSelect.addEventListener('change', handleSourceColoringChange);
+  const handleFontFamilyChange = () => setFontFamily(fontFamilySelect.value, { post: true });
+  fontFamilySelect.addEventListener('change', handleFontFamilyChange);
   updateThemeToggle();
   updateSourceColoringControl();
 
@@ -836,6 +811,9 @@ export function createPreviewController({
     if (acceptingViewportProjection) acceptingViewportProjection.restore = restore;
     if (hasPendingRequest) {
       pendingViewportRestore = restore;
+      if (activeFrameDocument && frameRenderedText !== null && restore.isCurrent()) {
+        restoreTopLine(restore.line, restore.lineOffset);
+      }
       return;
     }
     if (restore.isCurrent()) restoreTopLine(restore.line, restore.lineOffset);
@@ -906,6 +884,7 @@ export function createPreviewController({
     setUiLanguage: applyUiLanguage,
     syncAutoAppearance: () => {
       if (appearancePreference === 'auto') setAppearance('auto');
+      else updateThemeToggle();
     },
     getAppearance: () => appearance,
     getSourceColoring: () => sourceColoring,
@@ -940,17 +919,20 @@ export function createPreviewController({
       frameGeneration += 1;
       mermaidPresentationGeneration += 1;
       previewMermaidRenderer.dispose();
+      unsubscribePreviewCodeHighlight();
+      releasePreviewCodeHighlighting();
       activeFrameDocument = null;
       frameRenderedText = null;
+      frame.style.removeProperty('visibility');
       hasPendingRequest = false;
       pendingViewportRestore = null;
       previewRenderTransport.cancelAll('Preview closed');
-      appearanceControl.removeEventListener('click', handleAppearanceControlClick);
-      sourceColoringControl.removeEventListener('click', handleSourceColoringClick);
-      fontFamilyInput.removeEventListener('input', handleFontFamilyInput);
-      fontFamilyInput.removeEventListener('pointerdown', enumerateLocalFontFamilies);
-      fontFamilyInput.removeEventListener('keydown', enumerateLocalFontFamilies);
-      fontEnumerationGeneration += 1;
+      appearanceSelect.removeEventListener('change', handleAppearanceControlChange);
+      sourceColoringSelect.removeEventListener('change', handleSourceColoringChange);
+      fontFamilySelect.removeEventListener('change', handleFontFamilyChange);
+      appearanceSelectControl.dispose();
+      sourceColoringSelectControl.dispose();
+      fontFamilySelectControl.dispose();
       frame.onload = null;
       disposePreviewMathViewports();
       scrollToTopController.setScrollElement(null);

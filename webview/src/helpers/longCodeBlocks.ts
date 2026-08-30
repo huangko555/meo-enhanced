@@ -1,4 +1,4 @@
-import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { EditorState, Facet, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { getFencedCodeInfo } from './codeBlocks';
@@ -10,6 +10,7 @@ import {
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
 import { getUiStrings } from '../application/uiLanguage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
+import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
@@ -33,6 +34,7 @@ type LongCodeBlockRecord = LongCodeBlockDescriptor & {
   wasLong: boolean;
   manualCollapsed: boolean;
   temporaryTarget: boolean;
+  temporaryTargetKind: 'selection' | 'search' | null;
   collapsed: boolean;
 };
 
@@ -43,6 +45,9 @@ type LongCodeBlockState = {
 
 const setLongCodeBlockPointerInteractionEffect = StateEffect.define<{ position: number }>();
 const toggleLongCodeBlockEffect = StateEffect.define<{ anchor: number; collapsed: boolean }>();
+export const longCodeBlockEnabledFacet = Facet.define<boolean, boolean>({
+  combine: (values) => values.at(-1) ?? true
+});
 const viewportGeneration = new WeakMap<EditorView, number>();
 
 function isMermaidLanguage(info: string | null): boolean {
@@ -140,9 +145,17 @@ function ensureCollapsedBlockVisible(view: EditorView, anchor: number, generatio
       }
 
       const start = measuredView.coordsAtPos(descriptor.start);
-      const placeholder = measuredView.dom.querySelector<HTMLElement>(
-        `.meo-md-long-code-placeholder[data-long-code-anchor="${anchor}"]`
-      )?.getBoundingClientRect() ?? null;
+      const placeholderElement = Array.from(
+        measuredView.dom.querySelectorAll<HTMLElement>('.meo-md-long-code-placeholder')
+      ).find((element) => {
+        try {
+          const position = measuredView.posAtDOM(element);
+          return position >= descriptor.start && position <= descriptor.end;
+        } catch {
+          return false;
+        }
+      });
+      const placeholder = placeholderElement?.getBoundingClientRect() ?? null;
       const startVisible = Boolean(start && start.bottom >= scroller.top && start.top <= scroller.bottom);
       const placeholderVisible = Boolean(
         placeholder && placeholder.bottom >= scroller.top && placeholder.top <= scroller.bottom
@@ -238,18 +251,19 @@ class LongCodePlaceholderWidget extends WidgetType {
     super();
   }
 
+  get estimatedHeight(): number {
+    return estimateBlockWidgetHeight({ kind: 'long-code-control' });
+  }
+
   eq(other: WidgetType): boolean {
     return other instanceof LongCodePlaceholderWidget &&
-      other.anchor === this.anchor &&
       other.language === this.language &&
       other.lineCount === this.lineCount &&
       other.hiddenLineCount === this.hiddenLineCount &&
-      other.contentTo === this.contentTo &&
       other.indentColumns === this.indentColumns;
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const container = document.createElement('div');
     container.className = 'meo-md-long-code-placeholder';
     container.dataset.longCodeAnchor = String(this.anchor);
@@ -259,13 +273,6 @@ class LongCodePlaceholderWidget extends WidgetType {
     container.dataset.meoRenderedBlockStartLine = String(contentEndLineNumber);
     container.dataset.meoRenderedBlockEndLine = String(contentEndLineNumber);
     applyLiveBlockIndent(container, this.indentColumns);
-    const language = document.createElement('span');
-    language.className = 'meo-long-code-language';
-    language.textContent = this.language;
-    const metadata = document.createElement('span');
-    metadata.className = 'meo-long-code-line-count';
-    metadata.textContent = strings.codeLines(this.lineCount);
-    container.append(language, metadata);
     container.appendChild(makeActionButton(
       view,
       'expand',
@@ -291,27 +298,22 @@ class LongCodeFooterWidget extends WidgetType {
     super();
   }
 
+  get estimatedHeight(): number {
+    return estimateBlockWidgetHeight({ kind: 'long-code-control' });
+  }
+
   eq(other: WidgetType): boolean {
     return other instanceof LongCodeFooterWidget &&
-      other.anchor === this.anchor &&
       other.language === this.language &&
       other.lineCount === this.lineCount &&
       other.indentColumns === this.indentColumns;
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const strings = getUiStrings(view.state.facet(uiLanguageFacet));
     const container = document.createElement('div');
     container.className = 'meo-md-long-code-footer';
     container.dataset.longCodeAnchor = String(this.anchor);
     applyLiveBlockIndent(container, this.indentColumns);
-    const language = document.createElement('span');
-    language.className = 'meo-long-code-language';
-    language.textContent = this.language;
-    const metadata = document.createElement('span');
-    metadata.className = 'meo-long-code-line-count';
-    metadata.textContent = strings.codeLines(this.lineCount);
-    container.append(language, metadata);
     container.appendChild(makeActionButton(
       view,
       'collapse',
@@ -328,8 +330,10 @@ class LongCodeFooterWidget extends WidgetType {
 }
 
 function buildLongCodeDecorations(
-  blocks: ReadonlyArray<LongCodeBlockRecord>
+  blocks: ReadonlyArray<LongCodeBlockRecord>,
+  enabled = true
 ): DecorationSet {
+  if (!enabled) return Decoration.none;
   const ranges: Array<{ from: number; to: number; decoration: Decoration }> = [];
   for (const block of blocks) {
     if (!block.isLong) {
@@ -398,6 +402,7 @@ function buildLongCodeState(
         wasLong: descriptor.isLong,
         manualCollapsed: descriptor.isLong,
         temporaryTarget: false,
+        temporaryTargetKind: null,
         collapsed: descriptor.isLong
       };
     }
@@ -405,11 +410,13 @@ function buildLongCodeState(
     const crossedThreshold = !old.wasLong && descriptor.isLong;
     const manualCollapsed = crossedThreshold ? false : old.manualCollapsed;
     const temporaryTarget = crossedThreshold ? false : old.temporaryTarget;
+    const temporaryTargetKind = crossedThreshold ? null : old.temporaryTargetKind;
     return {
       ...descriptor,
       wasLong: old.wasLong || descriptor.isLong,
       manualCollapsed,
       temporaryTarget,
+      temporaryTargetKind,
       collapsed: descriptor.isLong && manualCollapsed && !temporaryTarget
     };
   });
@@ -418,7 +425,7 @@ function buildLongCodeState(
 
   return {
     blocks: reduced.blocks,
-    decorations: buildLongCodeDecorations(reduced.blocks)
+    decorations: buildLongCodeDecorations(reduced.blocks, state.facet(longCodeBlockEnabledFacet))
   };
 }
 
@@ -431,13 +438,19 @@ function hasLongCodeImmediateEffect(transaction: Transaction): boolean {
 
 function applyTemporaryTarget(
   blocks: LongCodeBlockRecord[],
-  target: LongCodeBlockRecord | null
+  target: LongCodeBlockRecord | null,
+  kind: 'selection' | 'search'
 ): boolean {
   let changed = false;
   for (const block of blocks) {
     const temporaryTarget = block === target && block.manualCollapsed;
-    if (block.temporaryTarget === temporaryTarget) continue;
+    const temporaryTargetKind = temporaryTarget ? kind : null;
+    if (
+      block.temporaryTarget === temporaryTarget
+      && block.temporaryTargetKind === temporaryTargetKind
+    ) continue;
     block.temporaryTarget = temporaryTarget;
+    block.temporaryTargetKind = temporaryTargetKind;
     block.collapsed = block.isLong && block.manualCollapsed && !temporaryTarget;
     changed = true;
   }
@@ -462,7 +475,7 @@ function reduceLongCodeInteractions(
     const target = searchReveal
       ? findBlockIntersectingHiddenRange(blocks, selection.from, selection.to)
       : null;
-    if (applyTemporaryTarget(blocks, target)) presentationChanged = true;
+    if (applyTemporaryTarget(blocks, target, 'search')) presentationChanged = true;
   }
 
   for (const effect of transaction.effects) {
@@ -471,6 +484,7 @@ function reduceLongCodeInteractions(
       if (target?.isLong) {
         target.manualCollapsed = effect.value.collapsed;
         target.temporaryTarget = false;
+        target.temporaryTargetKind = null;
         target.collapsed = effect.value.collapsed;
         presentationChanged = true;
       }
@@ -479,9 +493,22 @@ function reduceLongCodeInteractions(
       if (target?.isLong) {
         target.manualCollapsed = false;
         target.temporaryTarget = false;
+        target.temporaryTargetKind = null;
         target.collapsed = false;
         presentationChanged = true;
       }
+    }
+  }
+
+  if (transaction.docChanged && transaction.isUserEvent('input')) {
+    const selection = transaction.state.selection.main;
+    const target = findBlockContainingPosition(blocks, selection.from, selection.to);
+    if (target?.temporaryTargetKind === 'selection') {
+      target.manualCollapsed = false;
+      target.temporaryTarget = false;
+      target.temporaryTargetKind = null;
+      target.collapsed = false;
+      presentationChanged = true;
     }
   }
 
@@ -489,7 +516,7 @@ function reduceLongCodeInteractions(
   if (transaction.selection && !searchReveal && !searchClear && !toggleEffectPresent) {
     const selection = transaction.state.selection.main;
     const target = findBlockIntersectingHiddenRange(blocks, selection.from, selection.to);
-    if (applyTemporaryTarget(blocks, target)) presentationChanged = true;
+    if (applyTemporaryTarget(blocks, target, 'selection')) presentationChanged = true;
   }
   return { blocks, presentationChanged };
 }
@@ -519,7 +546,7 @@ function updateDeferredLongCodeState(
     decorations: hasLongCodeImmediateEffect(transaction)
       || reduced.presentationChanged
       || !transaction.docChanged
-      ? buildLongCodeDecorations(reduced.blocks)
+      ? buildLongCodeDecorations(reduced.blocks, transaction.state.facet(longCodeBlockEnabledFacet))
       : mapLiveInputDerivedDecorations(value.decorations, transaction)
   };
 }
@@ -529,6 +556,10 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
     return buildLongCodeState(state);
   },
   update(value, transaction) {
+    if (transaction.startState.facet(longCodeBlockEnabledFacet)
+      !== transaction.state.facet(longCodeBlockEnabledFacet)) {
+      return buildLongCodeState(transaction.state, value, transaction);
+    }
     if (isExternalDocumentPresentation(transaction)) {
       return buildLongCodeState(transaction.state);
     }
@@ -545,6 +576,7 @@ const longCodeBlockStateField = StateField.define<LongCodeBlockState>({
 class LongCodeFloatingButtonPlugin {
   button: HTMLButtonElement;
   view: EditorView;
+  private readonly horizontalOffsets = new Map<number, number>();
   private readonly onScroll = (): void => this.refresh();
   private readonly onPointerDown = (event: PointerEvent): void => {
     const target = event.target instanceof Element ? event.target : null;
@@ -560,7 +592,7 @@ class LongCodeFloatingButtonPlugin {
       return;
     }
     const block = findBlockContainingPosition(state.blocks, position);
-    if (block?.collapsed) {
+    if (block?.collapsed || block?.temporaryTargetKind === 'selection') {
       this.view.dispatch({ effects: setLongCodeBlockPointerInteractionEffect.of({ position }) });
     }
   };
@@ -618,6 +650,27 @@ class LongCodeFloatingButtonPlugin {
           return { visible: false, anchor: 0, left: 0, top: 0 };
         }
 
+        for (const control of view.dom.querySelectorAll<HTMLElement>(
+          '.meo-md-long-code-placeholder, .meo-md-long-code-footer'
+        )) {
+          const action = control.querySelector<HTMLElement>('.meo-long-code-action');
+          if (!action) continue;
+          try {
+            const position = view.posAtDOM(control);
+            const owner = state.blocks.find((candidate) => (
+              position >= candidate.start && position <= candidate.end
+            ));
+            if (!owner) continue;
+            const actionRect = action.getBoundingClientRect();
+            this.horizontalOffsets.set(
+              owner.anchor,
+              actionRect.left + actionRect.width / 2 - contentCenter
+            );
+          } catch {
+            // A widget may be detached between CodeMirror's layout and measure phases.
+          }
+        }
+
         const probeY = scroller.bottom - 8;
         const block = state.blocks
           .filter((candidate) => {
@@ -631,9 +684,16 @@ class LongCodeFloatingButtonPlugin {
             return startTop <= probeY && endBottom > scroller.bottom;
           })
           .filter((candidate) => {
-            const footer = view.dom.querySelector<HTMLElement>(
-              `.meo-md-long-code-footer[data-long-code-anchor="${candidate.anchor}"]`
-            );
+            const footer = Array.from(
+              view.dom.querySelectorAll<HTMLElement>('.meo-md-long-code-footer')
+            ).find((element) => {
+              try {
+                const position = view.posAtDOM(element);
+                return position >= candidate.start && position <= candidate.end;
+              } catch {
+                return false;
+              }
+            });
             if (!footer) {
               return true;
             }
@@ -642,19 +702,11 @@ class LongCodeFloatingButtonPlugin {
           })
           .sort((left, right) => right.start - left.start)[0];
 
-        const visibleCodeLine = Array.from(
-          view.dom.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block')
-        ).map((line) => line.getBoundingClientRect())
-          .find((rect) => rect.top <= probeY && rect.bottom >= probeY);
-        const blockCenter = visibleCodeLine
-          ? visibleCodeLine.left + visibleCodeLine.width / 2
-          : contentCenter;
-
         return block
           ? {
               visible: true,
               anchor: block.anchor,
-              left: blockCenter,
+              left: contentCenter + (this.horizontalOffsets.get(block.anchor) ?? 0),
               top: scroller.bottom - 34
             }
           : { visible: false, anchor: 0, left: 0, top: 0 };

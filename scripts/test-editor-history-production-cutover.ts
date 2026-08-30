@@ -92,14 +92,9 @@ assert.equal(
   'Effect Adapter contract must resolve concrete boundaries after native replay'
 );
 assert.equal(
-  (editorSource.match(/let recentRenderedReplayPresentation:/g) ?? []).length,
-  1,
-  'production may keep only one bounded recent Rendered Block presentation hint'
-);
-assert.equal(
-  /recentRenderedReplayPresentation\s*:\s*(?:Array|Map|Set)|recentRenderedReplayPresentations/.test(editorSource),
+  editorSource.includes('recentRenderedReplayPresentation'),
   false,
-  'the presentation hint must not grow into a history mirror'
+  'history replay must preserve the user-selected Rendered Block mode without a recent-presentation hint'
 );
 assert.match(editorSource, /isTableHistoryRange\(view\.state, request\.changedRange\)/);
 assert.equal(

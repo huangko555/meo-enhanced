@@ -1,4 +1,6 @@
 import { normalizePreviewFontFamily } from './editorStyleEnvironment';
+import { isUiLanguagePreference, type UiLanguagePreference } from '../foundation/uiLanguage';
+import type { SourceLineNumberMode } from './readyInit';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type EditorAppearance = 'auto' | 'dark' | 'light';
@@ -28,7 +30,9 @@ export type EditorCommand =
   | { readonly type: 'setPreviewAppearance'; readonly appearance: EditorAppearance }
   | { readonly type: 'setPreviewFontFamily'; readonly fontFamily: string }
   | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
-  | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance };
+  | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance }
+  | { readonly type: 'setUiLanguagePreference'; readonly language: UiLanguagePreference }
+  | { readonly type: 'setSourceLineNumbers'; readonly mode: SourceLineNumberMode };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -100,6 +104,12 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
       const fontFamily = normalizePreviewFontFamily(value.fontFamily);
       return fontFamily === null ? null : { type: value.type, fontFamily };
     }
+    case 'setUiLanguagePreference':
+      return isUiLanguagePreference(value.language) ? value as EditorCommand : null;
+    case 'setSourceLineNumbers':
+      return value.mode === 'on' || value.mode === 'off' || value.mode === 'relative' || value.mode === 'interval'
+        ? value as EditorCommand
+        : null;
     default:
       return null;
   }

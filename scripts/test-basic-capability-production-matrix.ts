@@ -93,7 +93,8 @@ async function sourceLineNumberPreference(browser: Browser): Promise<void> {
   try {
     assert.equal(await page.$('.cm-lineNumbers'), null, 'Source must respect the native line-number setting');
     await page.click('[data-mode="live"]');
-    await page.waitForSelector('.editor-host .cm-editor.meo-mode-live .cm-lineNumbers');
+    await page.waitForFunction(() => document.querySelector('.editor-host .cm-editor')?.classList.contains('meo-mode-live') === true
+      && document.querySelector('.cm-lineNumbers') === null);
     await page.click('[data-mode="source"]');
     await page.waitForFunction(() => document.querySelector('.editor-host .cm-editor')?.classList.contains('meo-mode-source') === true
       && document.querySelector('.cm-lineNumbers') === null);
