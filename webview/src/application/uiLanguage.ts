@@ -270,7 +270,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     codeBlock: 'Code Block', quote: 'Quote', horizontalRule: 'Horizontal Rule',
     link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Lines',
     goToLine: 'Go to line', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
-    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Reload disk version (double-click)',
+    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Click again to reload disk version',
     constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
     disableConstrainedWidth: 'Disable Constrained Width',
     hideChanges: (baseline: string) => `Hide Changes (${baseline})`,
@@ -365,7 +365,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
     horizontalRule: '分隔线', link: '链接', wikiLink: 'Wiki 链接', image: '图片', table: '表格',
     line: '行号', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
-    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '重新加载磁盘版本（双击）',
+    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '再次点击以重新加载磁盘版本',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',
     hideChanges: (baseline: string) => `隐藏更改（${baseline}）`,
@@ -381,7 +381,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     transientLoadRetry: '实时模式加载时遇到临时渲染错误，正在重试…',
     transientLoadFailure: '实时模式加载时遇到临时渲染错误，请重新打开文件或切换模式。',
     pasteImageFailure: (message: string) => `无法粘贴图片：${message}`,
-    properties: '属性',
+    properties: 'Properties',
     resyncFailureNotice: '无法重新同步文档，已保留本地编辑。',
     externalConflictNotice: '存在本地编辑时文档发生了外部变更，已保留本地编辑。'
   })

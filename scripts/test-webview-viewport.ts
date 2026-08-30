@@ -609,17 +609,18 @@ async function main() {
         type: 'fixedBaselineChanged', pinned: true, active: false
       }}));
     });
-    const standbyBaselineColor = await page.$eval('[data-action="fixedBaseline"]', (button) => (
-      getComputedStyle(button, '::before').backgroundColor
-    ));
+    const standbyBaseline = await page.$eval('[data-action="fixedBaseline"]', (button) => ({
+      icon: button.querySelector('svg')?.classList.contains('lucide-bookmark-check') ?? false,
+      opacity: getComputedStyle(button).opacity
+    }));
     if (
       JSON.stringify(activeBaselineColors) !== JSON.stringify({
         color: 'rgb(255, 255, 255)',
         background: 'rgb(45, 164, 78)'
       }) ||
-      standbyBaselineColor !== 'rgb(26, 127, 55)'
+      !standbyBaseline.icon || standbyBaseline.opacity !== '1'
     ) {
-      throw new Error(`Editor light baseline colors were not readable: ${JSON.stringify({ activeBaselineColors, standbyBaselineColor })}`);
+      throw new Error(`Editor light baseline states were not readable: ${JSON.stringify({ activeBaselineColors, standbyBaseline })}`);
     }
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', { data: {

@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, Settings, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, FileDiff, PanelLeftRightDashed, Settings, Check, Bookmark, BookmarkPlus, BookmarkCheck, BookmarkOff, Ellipsis, Sun, Moon } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -175,7 +175,7 @@ taskBtn.type = 'button';
 taskBtn.className = 'format-button';
 taskBtn.dataset.action = 'task';
 taskBtn.title = activeUiStrings.task;
-taskBtn.appendChild(createElement(ListTodo, { width: 18, height: 18 }));
+taskBtn.appendChild(createElement(SquareCheck, { width: 18, height: 18 }));
 
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
@@ -247,20 +247,20 @@ gitChangesGutterBtn.type = 'button';
 gitChangesGutterBtn.className = 'format-button toggle-button is-active';
 gitChangesGutterBtn.dataset.action = 'gitChangesGutter';
 gitChangesGutterBtn.title = activeUiStrings.hideChanges(activeUiStrings.currentEdits);
-gitChangesGutterBtn.appendChild(createElement(GitCompare, { width: 18, height: 18 }));
+gitChangesGutterBtn.appendChild(createElement(FileDiff, { width: 18, height: 18 }));
 
 const fixedBaselineBtn = document.createElement('button');
 fixedBaselineBtn.type = 'button';
 fixedBaselineBtn.className = 'format-button toggle-button';
 fixedBaselineBtn.dataset.action = 'fixedBaseline';
-fixedBaselineBtn.appendChild(createElement(MapPin, { width: 18, height: 18 }));
+fixedBaselineBtn.appendChild(createElement(BookmarkPlus, { width: 18, height: 18 }));
 
 const releaseFixedBaselineBtn = document.createElement('button');
 releaseFixedBaselineBtn.type = 'button';
 releaseFixedBaselineBtn.className = 'more-tools-option fixed-baseline-release-option';
 releaseFixedBaselineBtn.dataset.action = 'releaseFixedBaseline';
 releaseFixedBaselineBtn.setAttribute('role', 'menuitem');
-appendMoreToolsOptionContent(releaseFixedBaselineBtn, MapPinOff, activeUiStrings.releaseFixedBaseline);
+appendMoreToolsOptionContent(releaseFixedBaselineBtn, BookmarkOff, activeUiStrings.releaseFixedBaseline);
 
 const diffBaselineOptions = [
   { mode: 'current-edit' },
@@ -281,7 +281,7 @@ for (const option of diffBaselineOptions) {
   button.className = 'more-tools-option changes-baseline-option';
   button.dataset.baselineMode = option.mode;
   button.setAttribute('role', 'menuitemradio');
-  appendMoreToolsOptionContent(button, GitCompare, getDiffBaselineLabel(option.mode));
+  appendMoreToolsOptionContent(button, FileDiff, getDiffBaselineLabel(option.mode));
   diffBaselineButtons.push(button);
 }
 
@@ -300,6 +300,12 @@ const updateGitChangesGutterUI = () => {
     : activeUiStrings.showChanges(modeLabel);
   fixedBaselineBtn.classList.toggle('is-active', fixedBaselineActive);
   fixedBaselineBtn.classList.toggle('is-standby', fixedBaselinePinned && !fixedBaselineActive);
+  const fixedBaselineIcon = !fixedBaselinePinned
+    ? BookmarkPlus
+    : fixedBaselineActive
+      ? Bookmark
+      : BookmarkCheck;
+  fixedBaselineBtn.replaceChildren(createElement(fixedBaselineIcon, { width: 18, height: 18 }));
   fixedBaselineBtn.setAttribute('aria-pressed', fixedBaselineActive ? 'true' : 'false');
   fixedBaselineBtn.title = !fixedBaselinePinned
     ? activeUiStrings.pinLatestSavedBaseline
@@ -644,9 +650,9 @@ const discardBtn = document.createElement('button');
 discardBtn.type = 'button';
 discardBtn.className = 'format-button';
 discardBtn.dataset.action = 'discard';
-discardBtn.title = activeUiStrings.reloadDiskVersionDoubleClick;
+discardBtn.title = activeUiStrings.reloadDiskVersion;
 discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
-discardBtn.appendChild(createElement(StickyNoteOff, { width: 18, height: 18 }));
+discardBtn.appendChild(createElement(HardDriveUpload, { width: 18, height: 18 }));
 
 toolbar.addEventListener('pointerdown', (event) => {
   const target = event.target;
@@ -807,6 +813,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
   activeUiLanguage = language;
   activeUiStrings = strings;
+  editor?.setUiLanguage?.(language);
   document.documentElement.lang = language;
   toolbar.setAttribute('aria-label', strings.editorToolbar);
   formatGroup.setAttribute('aria-label', strings.formatting);
@@ -835,7 +842,9 @@ const applyUiLanguage = (language: UiLanguage): void => {
   lineJumpInput.setAttribute('aria-label', strings.goToLine);
   saveBtn.title = strings.save;
   saveBtn.setAttribute('aria-label', strings.saveDocument);
-  discardBtn.title = strings.reloadDiskVersionDoubleClick;
+  discardBtn.title = discardBtn.classList.contains('is-discard-armed')
+    ? strings.reloadDiskVersionDoubleClick
+    : strings.reloadDiskVersion;
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
   contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
@@ -1486,7 +1495,7 @@ const applyDiagnosticsFromHost = (diagnostics: unknown): void => {
 
 gitClient = createGitClient();
 
-const discardConfirmationWindowMs = 500;
+const discardConfirmationWindowMs = 3000;
 let discardConfirmationTimer: number | null = null;
 let pendingReloadViewport: { handle: ViewportAnchorToken; owner: 'editor' | 'preview' } | null = null;
 
@@ -1496,6 +1505,9 @@ const clearDiscardConfirmation = () => {
     discardConfirmationTimer = null;
   }
   discardBtn.classList.remove('is-discard-armed');
+  discardBtn.title = activeUiStrings.reloadDiskVersion;
+  discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
+  discardBtn.replaceChildren(createElement(HardDriveUpload, { width: 18, height: 18 }));
 };
 
 const discardUnsavedChanges = () => {
@@ -1521,6 +1533,9 @@ discardBtn.addEventListener('click', () => {
     return;
   }
   discardBtn.classList.add('is-discard-armed');
+  discardBtn.title = activeUiStrings.reloadDiskVersionDoubleClick;
+  discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersionDoubleClick);
+  discardBtn.replaceChildren(createElement(Check, { width: 18, height: 18, 'stroke-width': 2.5 }));
   discardConfirmationTimer = window.setTimeout(clearDiscardConfirmation, discardConfirmationWindowMs);
 });
 

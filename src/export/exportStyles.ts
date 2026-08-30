@@ -323,6 +323,17 @@ body[data-meo-export-target='pdf'] hr {
   word-break: break-word;
 }
 
+.meo-export-frontmatter-line.is-list-item {
+  display: flex;
+  align-items: flex-start;
+}
+
+.meo-export-frontmatter-list-prefix {
+  flex: none;
+  color: var(--meo-muted);
+  white-space: pre;
+}
+
 .meo-export-frontmatter-key-cell {
   min-width: 0;
   color: var(--meo-muted);
@@ -344,6 +355,19 @@ body[data-meo-export-target='pdf'] hr {
   color: var(--meo-code-string);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.meo-export-frontmatter-value.is-number,
+.meo-export-frontmatter-value.is-literal {
+  color: var(--meo-code-number);
+}
+
+.meo-export-frontmatter-value.is-link {
+  color: var(--meo-code-link);
+}
+
+.meo-export-frontmatter-value.is-comment {
+  color: var(--meo-muted);
 }
 
 .meo-export-frontmatter-array {

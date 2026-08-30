@@ -340,6 +340,7 @@ export function createEditor({
   const gitGutterCompartment = new Compartment();
   const lineNumberCompartment = new Compartment();
   const longCodeBlockPreferenceCompartment = new Compartment();
+  const uiLanguageCompartment = new Compartment();
   let currentSourceLineNumbers = sourceLineNumbers;
   const startMode = initialMode === 'live' ? 'live' : 'source';
   const largeDocument = assessLargeDocument(text).preferSource;
@@ -2100,7 +2101,7 @@ export function createEditor({
       tableColumnWidthAdapter.extension,
       tableStickyHeaderAdapterFactoryFacet.of(tableStickyHeaderAdapterFactory),
       tableCommandEnvironmentFacet.of(tableCommandEnvironment),
-      uiLanguageFacet.of(uiLanguage),
+      uiLanguageCompartment.of(uiLanguageFacet.of(uiLanguage)),
       imagePresentationFactoryFacet.of(imagePresentationFactory),
       mermaidDiagramPresentationFactoryFacet.of(
         mermaidDiagramPresentationConsumer
@@ -2903,6 +2904,11 @@ export function createEditor({
     setLongCodeBlockFolding(enabled: boolean) {
       view.dispatch({
         effects: longCodeBlockPreferenceCompartment.reconfigure(longCodeBlockEnabledFacet.of(enabled))
+      });
+    },
+    setUiLanguage(language: UiLanguage) {
+      view.dispatch({
+        effects: uiLanguageCompartment.reconfigure(uiLanguageFacet.of(language))
       });
     },
     insertFormat(action: EditorFormatAction, level?: EditorFormatLevel) {

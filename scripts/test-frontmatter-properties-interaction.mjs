@@ -101,6 +101,10 @@ try {
       '  - https://example.com/first',
       '  - label: Documentation',
       '    url: https://example.com/second',
+      'tagList:',
+      '  - undo',
+      '  - redo',
+      '  - live-mode',
       'emptyValue:',
       'nullValue: null',
       '---',
@@ -155,6 +159,33 @@ try {
       .filter(({ source, lineNumber }) => lineNumber > 1 && lineNumber < sourceLines.length - 1 && source.includes(':'));
     const inactive = new Map(checkedLines.map(({ lineNumber }) => [lineNumber, snapshot(lineNumber)]));
     const failures = [];
+    const getPropertiesLabel = () => lineElement(1)?.querySelector('.meo-code-language-label')?.textContent?.trim() ?? null;
+    if (getPropertiesLabel() !== 'Properties') {
+      failures.push({ symptom: 'initial-properties-language', label: getPropertiesLabel() });
+    }
+    if (typeof editor.setUiLanguage !== 'function') {
+      failures.push({ symptom: 'missing-live-ui-language-update' });
+    } else {
+      editor.setUiLanguage('zh-CN');
+      await wait();
+      if (getPropertiesLabel() !== 'Properties') {
+        failures.push({ symptom: 'properties-language-did-not-update', label: getPropertiesLabel() });
+      }
+    }
+    const tagListLineNumber = sourceLines.findIndex((line) => line.trim() === '- undo') + 1;
+    const tagListLine = lineElement(tagListLineNumber);
+    const tagListValue = tagListLine?.querySelector('.meo-md-frontmatter-value');
+    const tagListPrefix = tagListLine?.querySelector('.meo-md-list-prefix');
+    const tagListColors = {
+      value: tagListValue ? getComputedStyle(tagListValue).color : null,
+      prefix: tagListPrefix ? getComputedStyle(tagListPrefix).color : null
+    };
+    if (JSON.stringify(tagListColors) !== JSON.stringify({
+      value: 'rgb(230, 237, 243)',
+      prefix: 'rgb(125, 137, 152)'
+    })) {
+      failures.push({ symptom: 'frontmatter-list-color-hierarchy', tagListColors });
+    }
     const visualLineHeight = Number.parseFloat(getComputedStyle(lineElement(2)).lineHeight);
     const titleSnapshot = inactive.get(2);
     if (titleSnapshot?.height === null || titleSnapshot.height > visualLineHeight + 1) {

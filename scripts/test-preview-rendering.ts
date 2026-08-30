@@ -123,7 +123,13 @@ const propertiesFrontmatter = renderMarkdownToHtml({
   markdownText: [
     '---',
     'title: Properties preview',
-    'tags: [Markdown, Editor]',
+    'aliases: [Markdown, Editor]',
+    'tags:',
+    '  - undo',
+    '  - redo',
+    'draft: true',
+    'version: 1',
+    'homepage: https://example.com/home',
     'metadata:',
     '  owner: Example',
     '  notes: |',
@@ -280,6 +286,11 @@ if (
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-property"')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-key">title</span>')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-pill">Markdown</span>')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-list-item"')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value is-string">undo</span>')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value is-literal">true</span>')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value is-number">1</span>')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value is-link">https://example.com/home</span>')
 ) {
   throw new Error('Preview frontmatter must render an Obsidian-style Properties layout');
 }
@@ -393,6 +404,10 @@ if (!darkPreviewStyles.includes('--meo-font-body: "MEO Synthetic Sans", MEO Synt
 }
 if (!/\.meo-export-frontmatter-line\.is-raw\s*\{[^}]*font-family:\s*var\(--meo-font-body\)/s.test(darkPreviewStyles)) {
   throw new Error('Structured and raw Frontmatter must use the selected Preview prose family');
+}
+if (!/\.meo-export-frontmatter-value\.is-number[^}]*color:\s*var\(--meo-code-number\)/s.test(darkPreviewStyles)
+  || !/\.meo-export-frontmatter-value\.is-link[^}]*color:\s*var\(--meo-code-link\)/s.test(darkPreviewStyles)) {
+  throw new Error('Preview Properties must expose semantic value colors through the source-coloring palette');
 }
 if (!defaultFontStyles.includes('--meo-font-body: MEO Synthetic Mono')
   || maliciousFontStyles.includes('color:red')) {

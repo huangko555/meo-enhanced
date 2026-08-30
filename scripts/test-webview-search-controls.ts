@@ -144,7 +144,7 @@ async function main() {
       button.click();
       const afterClick = messages.filter((message) => message.type === 'reloadDocumentFromDisk').length;
       const firstArmed = button.classList.contains('is-discard-armed');
-      await new Promise((resolve) => window.setTimeout(resolve, 550));
+      await new Promise((resolve) => window.setTimeout(resolve, 3050));
       const recoveredAfterTimeout = !button.classList.contains('is-discard-armed');
       button.click();
       button.click();

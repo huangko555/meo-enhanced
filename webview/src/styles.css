@@ -1090,7 +1090,10 @@ body {
 }
 
 .format-button.is-discard-armed {
-  color: var(--vscode-errorForeground, #f48771);
+  color: #fff;
+  background-color: #bc4b42;
+  outline: none;
+  box-shadow: none;
 }
 
 .format-button svg,
@@ -1102,6 +1105,11 @@ body {
 .heading-dropdown-option:hover,
 .more-tools-wrapper > .format-button.is-active {
   background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.format-button.is-discard-armed:hover {
+  color: #fff;
+  background-color: #bc4b42;
 }
 
 .format-button.toggle-button:not(.is-active) {
@@ -1117,30 +1125,15 @@ body {
   );
 }
 
+.format-button[data-action='fixedBaseline'] svg {
+  width: 19px;
+  height: 19px;
+}
+
 .format-button[data-action='fixedBaseline'].is-standby {
   position: relative;
-  color: var(--vscode-descriptionForeground, var(--vscode-icon-foreground));
+  color: var(--vscode-editor-foreground, #fff);
   background-color: transparent;
-  opacity: 1;
-}
-
-.format-button[data-action='fixedBaseline'].is-standby::before {
-  position: absolute;
-  right: 5px;
-  bottom: 3px;
-  left: 5px;
-  height: 3px;
-  border-radius: 999px;
-  background-color: var(--meo-fixed-baseline-standby, var(--vscode-testing-iconPassed, #73c991));
-  content: '';
-  pointer-events: none;
-}
-
-.format-button[data-action='fixedBaseline'].is-standby svg {
-  opacity: 0.5;
-}
-
-.format-button[data-action='fixedBaseline'].is-standby:hover svg {
   opacity: 1;
 }
 
@@ -4883,7 +4876,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-toolbar-delet
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-value {
   display: inline;
   min-width: 0;
-  color: var(--meo-foreground) !important;
+  color: var(--meo-semantic-frontmatterValue) !important;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -4897,14 +4890,14 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-toolbar-delet
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-block-value {
   display: inline;
   min-width: 0;
-  color: var(--meo-foreground) !important;
+  color: var(--meo-semantic-frontmatterValue) !important;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-list-marker,
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-list-prefix {
-  color: var(--meo-semantic-frontmatterKey) !important;
+  color: var(--meo-semantic-mutedForeground) !important;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-content .meo-md-frontmatter-array-pills {
@@ -4925,7 +4918,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-toolbar-delet
   margin-block: 0.075em;
   border-radius: 999px;
   background: var(--meo-semantic-frontmatterPillBackground);
-  color: var(--meo-foreground) !important;
+  color: var(--meo-semantic-frontmatterValue) !important;
   font-size: 1em;
   line-height: 1.35;
   white-space: nowrap;

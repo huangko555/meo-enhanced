@@ -22,9 +22,11 @@ type YamlArrayItem = {
 };
 
 type RenderedFrontmatterLine = {
-  kind: 'property' | 'raw';
+  kind: 'property' | 'list-item' | 'raw';
   html: string;
 };
+
+type FrontmatterValueKind = 'string' | 'number' | 'literal' | 'link' | 'comment';
 
 export function extractExportFrontmatter(source: SourceMappedMarkdown, propertiesLabel: string): ExtractedExportFrontmatter {
   const lines = String(source.markdown ?? '').split(/\r?\n/);
@@ -120,6 +122,16 @@ function isYamlBlockScalarHeader(line: string): boolean {
 function renderFrontmatterLineHtml(line: string): RenderedFrontmatterLine {
   const offsets = yamlFrontmatterFieldOffsets(line);
   if (!offsets) {
+    const listItem = parseYamlScalarListItem(line);
+    if (listItem) {
+      return {
+        kind: 'list-item',
+        html: [
+          `<span class="meo-export-frontmatter-list-prefix" aria-hidden="true">${escapeHtml(listItem.prefix)}</span>`,
+          renderFrontmatterValueHtml(listItem.value)
+        ].join('')
+      };
+    }
     return { kind: 'raw', html: escapeHtml(line) };
   }
 
@@ -135,11 +147,41 @@ function renderFrontmatterLineHtml(line: string): RenderedFrontmatterLine {
       beforeKey ? `<span class="meo-export-frontmatter-prefix" aria-hidden="true">${escapeHtml(beforeKey)}</span>` : '',
       `<span class="meo-export-frontmatter-key">${escapeHtml(key)}</span>`,
       '</span>',
-      '<span class="meo-export-frontmatter-value">',
-      arrayItems ? renderFrontmatterArrayHtml(arrayItems) : (value ? escapeHtml(value) : '&nbsp;'),
-      '</span>'
+      arrayItems
+        ? `<span class="meo-export-frontmatter-value is-string">${renderFrontmatterArrayHtml(arrayItems)}</span>`
+        : renderFrontmatterValueHtml(value)
     ].join('')
   };
+}
+
+function parseYamlScalarListItem(line: string): { prefix: string; value: string } | null {
+  const match = /^(\s*-\s+)(.*)$/.exec(line);
+  if (!match) {
+    return null;
+  }
+  return { prefix: match[1], value: match[2] };
+}
+
+function renderFrontmatterValueHtml(value: string): string {
+  const kind = classifyFrontmatterValue(value);
+  return `<span class="meo-export-frontmatter-value is-${kind}">${value ? escapeHtml(value) : '&nbsp;'}</span>`;
+}
+
+function classifyFrontmatterValue(value: string): FrontmatterValueKind {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('#')) {
+    return 'comment';
+  }
+  if (/^(?:true|false|null|~)$/i.test(trimmed)) {
+    return 'literal';
+  }
+  if (/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:e[+-]?\d+)?$/i.test(trimmed)) {
+    return 'number';
+  }
+  if (/^(?:https?:\/\/|mailto:)/i.test(trimmed) || /^\[\[[\s\S]+\]\]$/.test(trimmed)) {
+    return 'link';
+  }
+  return 'string';
 }
 
 function renderFrontmatterArrayHtml(items: YamlArrayItem[]): string {
