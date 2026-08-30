@@ -33,82 +33,48 @@ code --install-extension huangko555.meo-enhanced
 
 离线安装时，可从 [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) 下载 `.vsix`，然后执行 **Extensions: Install from VSIX...**。
 
-## 编辑模式与外观
+## 三种显示模式
 
-- **Live**：保持 Markdown 可直接编辑，同时在原位置渲染标题、表格、链接、图片、安全 HTML、提示块、代码块、Mermaid、LaTeX 等富内容。
-- **Source**：提供专注的 Markdown 源码编辑体验，并保留语法高亮和文档导航能力。
-- **Preview**：提供适合最终检查的只读渲染结果。
-- **独立的 Auto、Dark 与 Light 外观**：可在 More 菜单底部切换。Editor Auto 跟随 VS Code，Preview Auto 跟随解析后的 Editor 外观。选择会立即应用到当前编辑器，并成为之后新打开编辑器的默认值，不会强制改变已经打开的其他编辑器。
-- **一致的渲染与模式切换**：在 Live、Source 和 Preview 之间保持所选外观与阅读位置稳定。
+- **Live**：直接编辑 Markdown，同时在原位置显示标题、表格、图片、图表和公式等内容的渲染效果。
+- **Source**：在带有语法高亮的源码编辑器中，专注查看和编辑原始 Markdown 文本。
+- **Preview**：以完整渲染后的效果阅读和检查文档，不进入编辑状态。
 
-## 在文档中直接审阅改动
+## 边写边审阅改动
 
-MEO Enhanced 可以在文档旁直接显示新增、修改和删除状态，并通过概览标记展示它们在整个文件中的分布。
+新增、修改和删除会直接显示在文档旁，不必切换到单独的 Diff 编辑器。你可以比较当前内容、最近保存版本或 Git 版本，也可以固定一个保存版本作为对比基线，并通过概览标记快速了解改动分布。
 
-- 可与 **Current Edits**、**Recent Save** 或 **Git HEAD** 对比。
-- 可将最近保存版本固定为基线，持续观察之后的改动。
-- 无需打开独立 Diff 编辑器，即可预览删除内容并在改动位置之间移动。
-- 可选显示修改行底色。
-- 针对重复行、表格、连续删除和长文档优化改动标记稳定性。
+## 处理复杂 Markdown
 
-![新增、修改和删除状态、基线控件与文档概览标记](docs/readme/changes-overview.png)
-
-## 编辑真实场景中的表格与嵌套内容
-
-- 浏览长表格时，浮动表头会始终保留完整列信息。
-- 可拖动普通表头或浮动表头的列分隔线，自由调整列宽，且不会改动 Markdown 原文。
-- 可通过表格工具栏插入、删除、对齐和选择行列。
-- 在当前单元格中按 `Shift + Enter` 插入换行。
-- 单元格内支持有序列表、无序列表、多级缩进、图片、颜色、行内格式和键盘标签。
-- 可选择多个单元格，并使用 `Ctrl/Cmd + C` 复制为文本。
-- 表格、代码块、Mermaid 和块级公式嵌套在列表等结构中时，仍能保持内容与控件对齐。
+- 直接编辑 Markdown 表格，包括长表格和单元格内的丰富内容。
+- 在编辑器中处理 Mermaid、LaTeX、代码块、图片和安全 HTML。
+- 在同一套流程中使用文档链接、Wiki 链接、脚注、提示块和 Frontmatter Properties。
+- 编辑嵌套列表、表格和图表等复杂结构时，尽量保持内容清晰稳定。
 
 ![长表格浮动表头、单元格嵌套列表与缩进块级内容](docs/readme/tables-and-nesting.png)
 
-## 使用 Mermaid、LaTeX、代码、图片与 HTML
-
-- Mermaid 和块级公式支持 **Source**、**Split** 与 **Preview** 三种块级显示模式。
-- Split 模式支持拖动、缩放、重置和适应窗口，同时保留左侧源码和右侧渲染结果。
-- 过宽的 Mermaid 和块级公式会在 Live、Preview 与导出结果中根据可用宽度缩放。
-- 过长代码块可自动折叠；该功能默认启用，也可在 More 中关闭。
-- 代码块支持行号、语法高亮、复制，以及一致的 Live、Preview 和导出样式。
-- 图片支持剪贴板插入、稳定的本地路径处理、大图查看和通过系统应用打开。
-- Frontmatter Properties 可以显示 Obsidian 风格的属性、标签和复杂 YAML 内容。
-- Live 文本支持粗体、斜体、删除线、`==高亮==`、行内代码、键盘标签、链接、颜色和换行。
-- 安全的行内与块级 HTML 会在 Live、Preview 和 HTML/PDF 导出中一致渲染，覆盖段落、对齐、链接、锚点、图片、列表、表格、引用、`<kbd>` 和 `<details>/<summary>`。
-- HTML 渲染结果可切换为可编辑源码；危险属性和协议会被过滤，不支持或无效的内容则保留源码并显示提示。
-
 ![Mermaid 与块级公式的源码、分栏和预览模式](docs/readme/rich-content-modes.png)
 
-## 导航并保持阅读位置
+## 查找、导航与分享
 
-- 通过工具栏跳转到准确行号，或使用浮动按钮返回顶部。
-- 使用两侧可调整宽度的层级大纲折叠、拖动和跟随章节。
-- 编辑、保存、折叠、操作表格、渲染富内容或切换模式时，尽可能保持当前可见内容的位置不变。
-- 双击放弃按钮，可丢弃当前文档的全部未保存修改。
+- 在可编辑内容和已渲染内容中查找与替换。
+- 使用行号跳转或文档大纲浏览长文档。
+- 编辑、保存或切换模式时尽量保持当前位置。
+- 在 Preview 中检查最终效果，并导出为 HTML 或 PDF。
 
 ## 常用操作
 
 | 操作 | 使用方式 |
 | --- | --- |
 | 切换 Live 与 Source | `Alt/Option + Shift + M` |
+| 查找或替换 | `Ctrl/Cmd + F`；替换使用 `Ctrl + H`（Windows/Linux）或 `Cmd + Option + F`（macOS） |
 | 跳转到指定行 | 在工具栏输入行号并按 `Enter` |
 | 在表格单元格中换行 | `Shift + Enter` |
 | 选择改动基线 | 打开 **More**，选择 Current Edits、Recent Save 或 Git HEAD |
+| 导出 HTML 或 PDF | 打开 **Preview**，然后使用导出控件 |
 
 ## 配置与外观
 
-Editor 与 Preview 外观彼此独立。Live 和 Preview 使用固定的浅色/深色设计；Source 在同向外观使用 VS Code 原生配色，反向时使用内置 VS Code-like 配色。代码块明暗与 VS Code 一致时使用当前 VS Code 语法颜色，反向时使用内置匹配配色。Preview 工具栏的 **Code colors** 可将代码显示为正文纯文本色；HTML/PDF 导出会冻结并使用最终 Preview 选择与配色。
-
-常用设置包括：
-
-- `meoEnhanced.language`：自动使用 VS Code 的语言，或为新打开的编辑器面板选择英文或简体中文。
-- `meoEnhanced.appearance.editor` / `meoEnhanced.appearance.preview`：分别设置新打开面板的自动、浅色或深色默认外观。
-- `meoEnhanced.preview.fontFamily`：设置 Preview 与导出的正文字体；留空时使用编辑器或系统后备字体。
-- `meoEnhanced.preview.sourceColoring`：默认启用或关闭 Preview 与导出的代码语法颜色。
-- `meoEnhanced.outline.position`：将大纲放在左侧或右侧。
-- `meoEnhanced.changes.baseline`：选择 `current-edit`、`recent-save` 或 `git-head` 作为对比基线。
-- `meoEnhanced.gitChanges.visible`：显示或隐藏文档改动标记。
+打开 VS Code 设置并搜索 **MEO Enhanced**，即可调整界面语言、Editor 与 Preview 外观、Preview 字体和代码颜色、大纲位置、内容宽度、大文档行为、改动对比基线和粘贴图片目录。
 
 ## 兼容性与项目范围
 

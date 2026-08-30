@@ -32,82 +32,48 @@ Then right-click a `.md`, `.markdown`, `.mdx`, or `.mdc` file and choose **Open 
 
 For offline installation, download a `.vsix` package from [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) and run **Extensions: Install from VSIX...**.
 
-## Editing modes and appearance
+## Three display modes
 
-- **Live** keeps Markdown directly editable while rendering headings, tables, links, images, safe HTML, alerts, code blocks, Mermaid, LaTeX, and other rich content in place.
-- **Source** provides a focused Markdown source editor with syntax highlighting and the same document navigation tools.
-- **Preview** provides a read-only rendering for final review.
-- **Independent Auto, Dark, and Light appearances** can be switched from the bottom of the More menu. Editor Auto follows VS Code; Preview Auto follows the resolved Editor appearance. The selected preference applies to the current editor and becomes the default for editors opened later, without forcing already-open editors to change.
-- **Consistent rendering and mode switching** keep the selected appearance and reading position stable across Live, Source, and Preview.
+- **Live** — edit Markdown directly while headings, tables, images, diagrams, formulas, and other content are rendered in place.
+- **Source** — work with the original Markdown text in a focused source editor with syntax highlighting.
+- **Preview** — read and review the fully rendered document without entering editing state.
 
-## Review changes without leaving the document
+## Review changes as you write
 
-MEO Enhanced can show additions, modifications, and deletions directly beside the document, with an overview ruler for their distribution across the full file.
+Additions, modifications, and deletions stay visible beside the document, so you can review work without moving to a separate diff editor. Compare the current text with your latest save or Git version, pin a saved version as a baseline, and use the overview ruler to see where changes are located.
 
-- Compare against **Current Edits**, **Recent Save**, or **Git HEAD**.
-- Pin a recently saved revision as a fixed baseline and continue reviewing later changes against it.
-- Inspect deleted content and move between change locations without opening a separate diff editor.
-- Optionally show subtle modified-line coloring and Git author information.
-- Keep change markers stable across repeated lines, tables, consecutive deletions, and long documents.
+## Work with complex Markdown
 
-![Added, modified, and deleted lines with baseline controls and the document overview ruler](docs/readme/changes-overview.png)
-
-## Edit real-world tables and nested content
-
-- A sticky header keeps complete column context visible while scrolling long tables.
-- Drag column dividers in the regular or sticky header to freely resize table columns without changing the Markdown source.
-- Insert, remove, align, and select rows or columns from the table toolbar.
-- Press `Shift + Enter` to add a line break inside the active cell.
-- Use ordered lists, unordered lists, nested indentation, images, colors, inline formatting, and keyboard tags inside cells.
-- Select multiple cells and copy them as text with `Ctrl/Cmd + C`.
-- Keep tables, code blocks, Mermaid diagrams, and block formulas aligned when nested inside lists or other structures.
+- Edit Markdown tables visually, including long tables and rich content inside cells.
+- Work with Mermaid diagrams, LaTeX formulas, code blocks, images, and safe HTML without leaving the editor.
+- Use document links, Wiki links, footnotes, alerts, and Frontmatter Properties in the same workflow.
+- Keep nested lists, tables, diagrams, and other structured content readable while editing.
 
 ![A long table with a sticky header, nested cell lists, and indented block content](docs/readme/tables-and-nesting.png)
 
-## Work with Mermaid, LaTeX, code, images, and HTML
-
-- Mermaid diagrams and block formulas support **Source**, **Split**, and **Preview** block modes.
-- Split mode adds panning plus zoom, reset, and fit controls while keeping the source beside the rendered result.
-- Wide Mermaid diagrams and block formulas scale to the available width in Live, Preview, and export output.
-- Long fenced code blocks can collapse automatically; the behavior is enabled by default and can be disabled from More.
-- Code blocks support line numbers, syntax highlighting, copying, and consistent Live/Preview/export styling.
-- Images support clipboard insertion, stable local path handling, full-size viewing, and opening through the system application.
-- Frontmatter Properties render Obsidian-style metadata, tags, and complex YAML values.
-- Live text supports emphasis, strong text, strikethrough, `==highlight==`, inline code, keyboard tags, links, colors, and line breaks.
-- Safe inline and block HTML renders consistently in Live, Preview, and HTML/PDF export, including paragraphs, alignment, links, anchors, images, lists, tables, blockquotes, `<kbd>`, and `<details>/<summary>`.
-- Rendered HTML blocks can switch to editable source; dangerous attributes and protocols are filtered, while unsupported or invalid content remains visible as source with a warning.
-
 ![Mermaid and block formula source, split, and preview modes](docs/readme/rich-content-modes.png)
 
-## Navigate and keep your place
+## Find, navigate, and share
 
-- Jump to an exact line from the toolbar or return to the top through the floating document button.
-- Use the resizable outline on either side to collapse and follow sections.
-- Preserve the visible document position across editing, saving, folding, table interaction, rich block rendering, and mode changes whenever possible.
-- Double-click the discard button to abandon all unsaved edits in the current document.
+- Find and replace text across editable and rendered content.
+- Jump by line number or use the document outline to move through long files.
+- Keep your place while editing, saving, or switching modes.
+- Review the finished document in Preview, then export it as HTML or PDF.
 
 ## Quick reference
 
 | Action | How |
 | --- | --- |
 | Switch Live and Source | `Alt/Option + Shift + M` |
+| Find or replace | `Ctrl/Cmd + F`; replace with `Ctrl + H` (Windows/Linux) or `Cmd + Option + F` (macOS) |
 | Jump to a line | Enter a line number in the toolbar and press `Enter` |
 | Add a line break in a table cell | `Shift + Enter` |
 | Choose a change baseline | Open **More**, then select Current Edits, Recent Save, or Git HEAD |
+| Export HTML or PDF | Open **Preview**, then use the export control |
 
 ## Configuration and appearance
 
-Editor and Preview appearances are independent. Live and Preview use fixed light/dark designs; Source keeps VS Code-native colors for the matching appearance and a built-in VS Code-like palette for the reverse appearance. Fenced code uses the active VS Code syntax colors when the brightness matches and a built-in matching palette otherwise. Preview's **Code colors** toolbar control can render code as plain body-colored text; HTML/PDF export freezes and uses that final Preview choice and palette.
-
-Common settings include:
-
-- `meoEnhanced.language` — use VS Code's language automatically, or choose English or Simplified Chinese for newly opened editor panels.
-- `meoEnhanced.appearance.editor` / `meoEnhanced.appearance.preview` — choose independent Auto, Light, or Dark defaults for newly opened panels.
-- `meoEnhanced.preview.fontFamily` — choose the Preview and export prose font; leave empty to use the editor or system fallback.
-- `meoEnhanced.preview.sourceColoring` — enable or disable syntax colors in Preview and exports by default.
-- `meoEnhanced.outline.position` — place the outline on the left or right.
-- `meoEnhanced.changes.baseline` — select `current-edit`, `recent-save`, or `git-head` as the comparison baseline.
-- `meoEnhanced.gitChanges.visible` — show or hide document change indicators.
+Open VS Code Settings and search for **MEO Enhanced** to choose the interface language, Editor and Preview appearance, Preview font and code colors, outline position, content width, large-document behavior, change baseline, and pasted-image folder.
 
 ## Compatibility and project scope
 
