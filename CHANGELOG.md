@@ -3,6 +3,13 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.13
+- Improved theme, syntax-color, and interface consistency across Live, Source, and Preview modes.
+- Stabilized editing, undo and redo, cursor placement, and viewport continuity for tables, Mermaid diagrams, block formulas, long code blocks, and lists.
+- Improved long-document loading, scrolling, rendering, and reading-position recovery.
+- Refined the outline, Properties, diff and baseline controls, exports, language switching, and related toolbars.
+- Strengthened architecture checks, browser coverage, stress tests, and VSIX content validation.
+
 ## 0.3.7
 - Reworked editor state and lifecycle boundaries for more reliable mode changes, history, tables, rendered content, diagnostics, preview, and export.
 - Fixed Mermaid source mode being lost after undo and redo.
