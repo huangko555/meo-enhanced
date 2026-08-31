@@ -14,7 +14,7 @@ import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import {
   addMermaidToolbar,
   getMermaidBlockMode,
@@ -23,7 +23,7 @@ import {
 import { getLiveListBlockIndentColumns } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
-import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
+import { currentSyntaxTree, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -587,17 +587,6 @@ export function isFenceMarker(state: EditorState, from: number, to: number): boo
   return /^`{3,}$/.test(text) || /^~{3,}$/.test(text);
 }
 
-export function getFencedCodeInfo(state: EditorState, node: any): string | null {
-  let codeInfo: string | null = null;
-  for (let child = node.node.firstChild; child; child = child.nextSibling) {
-    if (child.name === 'CodeInfo') {
-      codeInfo = state.doc.sliceString(child.from, child.to).trim().toLowerCase();
-      break;
-    }
-  }
-  return codeInfo;
-}
-
 export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node: any): void {
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
@@ -623,7 +612,7 @@ export function addCodeBlockLineNumbers(builder: any[], state: EditorState, node
   }
 }
 
-class CodeBlockActionsWidget extends WidgetType {
+class CodeBlockActionsWidget extends UiLanguageSensitiveWidget {
   codeContent: string;
   contentFrom: number;
   contentTo: number;
@@ -647,6 +636,7 @@ class CodeBlockActionsWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof CodeBlockActionsWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.codeContent === this.codeContent &&
       other.contentFrom === this.contentFrom &&
       other.contentTo === this.contentTo &&

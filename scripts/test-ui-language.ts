@@ -27,6 +27,10 @@ assert.deepEqual(
 const english = getUiStrings('en');
 const chinese = getUiStrings('zh-CN');
 assert.equal(english.exportHtml, 'Export HTML');
+assert.deepEqual(
+  [english.previewFontFamily, english.previewCodeColors, english.previewAppearance],
+  ['Font', 'Code color', 'Theme']
+);
 assert.deepEqual([english.more, english.moreTools], ['Settings', 'Settings']);
 assert.deepEqual([chinese.more, chinese.moreTools], ['设置', '设置']);
 assert.equal(english.line, 'Lines');
@@ -67,6 +71,10 @@ assert.deepEqual(
   ['行内 Markdown 格式', '加粗', '行内代码', '下划线']
 );
 assert.equal(chinese.hideChanges(chinese.currentEdits), '隐藏更改（当前编辑）');
+assert.deepEqual(
+  [english.diffBaselineLabel(english.currentEdits), chinese.diffBaselineLabel(chinese.currentEdits)],
+  ['diff: Current Edits', 'diff：当前编辑']
+);
 assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
 assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);

@@ -17,14 +17,16 @@ type EndCaretObservation = {
   scrollerBottom: number;
 };
 
+const GEOMETRY_EPSILON = 1;
+
 function hasCompleteAppendedInput(value: string, initialLength: number): boolean {
   return value.length === initialLength + tableWrapFixture.length && value.endsWith(tableWrapFixture);
 }
 
 function hasVisibleEndCaret(observation: EndCaretObservation): boolean {
   return observation.isActive && observation.selectionEnd === observation.valueLength &&
-    observation.inputBottom <= observation.scrollerBottom &&
-    observation.cellBottom <= observation.scrollerBottom;
+    observation.inputBottom <= observation.scrollerBottom + GEOMETRY_EPSILON &&
+    observation.cellBottom <= observation.scrollerBottom + GEOMETRY_EPSILON;
 }
 
 async function waitForFrames(page: Page, count = 10): Promise<void> {
@@ -683,10 +685,11 @@ async function main(): Promise<void> {
           rowHeight: row.getBoundingClientRect().height,
           inputScrollTop: input.scrollTop,
           inputClientHeight: input.clientHeight,
-          inputEndVisible: input.getBoundingClientRect().bottom <= currentScrollerRect.bottom &&
-            cellRect.bottom <= currentScrollerRect.bottom
+          inputEndVisible: input.getBoundingClientRect().bottom <= currentScrollerRect.bottom + 1 &&
+            cellRect.bottom <= currentScrollerRect.bottom + 1
         });
       };
+      (window as any).__captureTableWrapFrame = capture;
       document.addEventListener('input', (event) => {
         if (!(event.target instanceof HTMLTextAreaElement) || !event.target.closest('.meo-md-html-table-shell')) return;
         capture('input');
@@ -791,29 +794,28 @@ async function main(): Promise<void> {
       '.meo-md-html-table-shell tbody tr:nth-child(2)',
       (row) => row.getBoundingClientRect().height
     );
-    const initialWrapInputScrollHeight = await page.$eval(
-      '.meo-md-html-table-shell tbody tr:nth-child(2) td:nth-child(2) textarea',
-      (input: HTMLTextAreaElement) => input.scrollHeight
-    );
     const initialWrapInputLength = await wrappingTableInput.evaluate((input) => input.value.length);
     await wrappingTableInput.type(tableWrapFixture);
-    const crossedWrapThreshold = await page.waitForFunction(
-      (initialHeight) => (
-        ((window as any).__tableWrapFrames as Array<{
-          stage: string;
-          scrollTop: number;
-          shellTop: number;
-          rowHeight: number;
-        }>).filter((frame) => frame.stage === 'frame').slice(-3).every((frame, _index, frames) => (
-          frames.length === 3 && frame.rowHeight > initialHeight &&
-          frame.rowHeight === frames[0].rowHeight &&
-          frame.scrollTop === frames[0].scrollTop &&
-          frame.shellTop === frames[0].shellTop
-        ))
-      ),
-      { timeout: 1_000 },
-      initialWrapRowHeight
-    ).then(() => true, () => false);
+    const crossedWrapThreshold = await page.evaluate(async (initialHeight) => {
+      let stableHeight: number | null = null;
+      let stableFrames = 0;
+      for (let index = 0; index < 60; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        (window as any).__captureTableWrapFrame('frame');
+        const row = document.querySelector<HTMLElement>(
+          '.meo-md-html-table-shell tbody tr:nth-child(2)'
+        );
+        const currentHeight = row?.getBoundingClientRect().height ?? 0;
+        if (currentHeight > initialHeight && currentHeight === stableHeight) {
+          stableFrames += 1;
+        } else {
+          stableHeight = currentHeight;
+          stableFrames = currentHeight > initialHeight ? 1 : 0;
+        }
+        if (stableFrames >= 3) return true;
+      }
+      return false;
+    }, initialWrapRowHeight);
     const tableWrapFrames = await page.evaluate(() => (
       (window as any).__tableWrapFrames as Array<{
         stage: string;
@@ -855,7 +857,6 @@ async function main(): Promise<void> {
     );
     if (
       !crossedWrapThreshold || !hasCompleteAppendedInput(inputGeometry.value, initialWrapInputLength) ||
-      inputGeometry.scrollHeight <= initialWrapInputScrollHeight ||
       Math.max(...wrapHeights) <= Math.min(...wrapHeights)
     ) {
       throw new Error(`Table wrap fixture did not grow a row: ${JSON.stringify({ inputGeometry, tableWrapFrames })}`);

@@ -27,6 +27,10 @@ export type EditorStyleEnvironment = {
     function?: string;
     variable?: string;
     link: string;
+    bracket1?: string;
+    bracket2?: string;
+    bracket3?: string;
+    unexpectedBracket?: string;
   }>>>;
 };
 
@@ -86,7 +90,7 @@ export function decodeEditorStyleEnvironment(value: unknown): EditorStyleEnviron
       if (!isRecord(palette)
         || ['foreground', 'comment', 'keyword', 'string', 'number', 'type', 'property', 'link']
           .some((key) => typeof palette[key] !== 'string')) return null;
-      if (['operator', 'punctuation', 'function', 'variable']
+      if (['operator', 'punctuation', 'function', 'variable', 'bracket1', 'bracket2', 'bracket3', 'unexpectedBracket']
         .some((key) => palette[key] !== undefined && typeof palette[key] !== 'string')) return null;
     }
   }

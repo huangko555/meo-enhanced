@@ -324,6 +324,59 @@ async function main(): Promise<void> {
       return output;
     });
 
+    await page.setViewport({ width: 1500, height: 720, deviceScaleFactor: 1 });
+    const maxWidthGutterClearance = await page.evaluate(async () => {
+      const harness = (window as any).ListEditingHarness;
+      const host = document.getElementById('editor-host')!;
+      host.replaceChildren();
+      host.style.width = '100%';
+      document.documentElement.classList.add('meo-content-max-width-enabled');
+      document.documentElement.style.setProperty('--meo-content-max-width', '800px');
+      const baseline = [
+        '### 2026-08-28 | heading',
+        '- unordered one',
+        '- unordered two',
+        '- unordered three',
+        '- unordered four',
+        '- unordered five'
+      ].join('\n');
+      const editor = harness.createEditor({
+        parent: host,
+        text: `${baseline}\n1. 44`,
+        initialMode: 'live',
+        uiLanguage: 'zh-CN',
+        onApplyChanges() {}
+      });
+      editor.setGitBaseline({ available: true, tracked: true, mode: 'fixed', baseText: baseline });
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const gutters = host.querySelector<HTMLElement>('.cm-gutters')!;
+      gutters.style.display = 'flex';
+      for (let index = 0; index < 2; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const marker = host.querySelector<HTMLElement>('.meo-md-list-marker-bullet')!;
+      const content = host.querySelector<HTMLElement>('.cm-content')!;
+      const diffMarker = host.querySelector<HTMLElement>('.meo-git-gutter-marker:not(.meo-git-gutter-spacer)')!;
+      const diffHitStyle = getComputedStyle(diffMarker, '::before');
+      const diffHitRight = diffMarker.getBoundingClientRect().left +
+        Number.parseFloat(diffHitStyle.left) + Number.parseFloat(diffHitStyle.width);
+      const output = {
+        clearance: marker.getBoundingClientRect().left - diffHitRight,
+        gutterRight: gutters.getBoundingClientRect().right,
+        diffHitRight,
+        markerLeft: marker.getBoundingClientRect().left,
+        contentLeft: content.getBoundingClientRect().left,
+        diffMarkers: host.querySelectorAll('.meo-git-gutter-marker:not(.meo-git-gutter-spacer)').length
+      };
+      editor.destroy();
+      document.documentElement.classList.remove('meo-content-max-width-enabled');
+      document.documentElement.style.removeProperty('--meo-content-max-width');
+      host.style.width = '';
+      return output;
+    });
+
     const localizedNavigation = await page.evaluate(async () => {
       const harness = (window as any).ListEditingHarness;
       const host = document.getElementById('editor-host')!;
@@ -344,7 +397,7 @@ async function main(): Promise<void> {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
       const read = (selector: string) => document.querySelector<HTMLElement>(selector)?.getAttribute('aria-label');
-      const output = {
+      const baseOutput = {
         openLink: read('.meo-md-link-open-btn'),
         details: read('.meo-md-details-summary'),
         detailsSource: read('.meo-md-details-source-toggle'),
@@ -359,19 +412,44 @@ async function main(): Promise<void> {
         },
         imageActions: Array.from(document.querySelectorAll<HTMLElement>(
           '.meo-md-image-controls [aria-label]'
-        )).map((element) => element.getAttribute('aria-label')),
+        )).map((element) => element.getAttribute('aria-label'))
+      };
+      const revealText = async (needle: string) => {
+        for (let lineNumber = 1; lineNumber <= editor.view.state.doc.lines; lineNumber += 1) {
+          if (!editor.view.state.doc.line(lineNumber).text.includes(needle)) continue;
+          // Keep the cursor outside the sampled rendered block. A regular line
+          // jump intentionally enters that block's source-editing state.
+          editor.restoreTopLine(lineNumber, 0, { syncCursor: false, force: true });
+          for (let index = 0; index < 6; index += 1) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          }
+          return;
+        }
+        throw new Error(`Localized control fixture text not found: ${needle}`);
+      };
+      await revealText('graph TD');
+      const mermaidControl = document.querySelector<HTMLElement>(
+        '.meo-mermaid-toolbar[role="group"]'
+      )?.getAttribute('aria-label');
+      const mermaidMode = read('.meo-mermaid-mode-btn');
+      await revealText('x^2');
+      const latexControl = document.querySelector<HTMLElement>(
+        '.meo-latex-math-toolbar[role="group"]'
+      )?.getAttribute('aria-label');
+      const latexMode = read('.meo-latex-math-mode-btn');
+      await revealText('> [!NOTE]');
+      const alertLabel = document.querySelector('.meo-md-alert-label')?.textContent;
+      await revealText('<div>HTML</div>');
+      const htmlLabel = read('.meo-md-html-source-toggle');
+      const output = {
+        ...baseOutput,
         featureChrome: {
-          alert: document.querySelector('.meo-md-alert-label')?.textContent,
-          html: read('.meo-md-html-source-toggle')
+          alert: alertLabel,
+          html: htmlLabel
         },
         renderedBlocks: {
-          controls: Array.from(document.querySelectorAll<HTMLElement>(
-            '.meo-mermaid-toolbar[role="group"], .meo-latex-math-toolbar[role="group"]'
-          )).map((element) => element.getAttribute('aria-label')),
-          modes: [
-            read('.meo-mermaid-mode-btn'),
-            read('.meo-latex-math-mode-btn')
-          ]
+          controls: [mermaidControl, latexControl],
+          modes: [mermaidMode, latexMode]
         }
       };
       editor.destroy();
@@ -432,6 +510,11 @@ async function main(): Promise<void> {
       selection: '- alpha'.length,
       focused: true
     });
+    assert.ok(maxWidthGutterClearance.diffMarkers > 0, 'wide Live fixture did not render the diff gutter marker');
+    assert.ok(
+      maxWidthGutterClearance.clearance >= 0.5,
+      `wide Live content was covered by the diff gutter hit target: ${JSON.stringify(maxWidthGutterClearance)}`
+    );
 
     console.log('list layout and interaction Chromium checks passed');
   } finally {

@@ -35,6 +35,7 @@ async function main() {
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
     await page.evaluate(() => {
+      document.querySelector<HTMLElement>('#app')!.classList.add('editor-host');
       const editor = (window as any).EditorStabilityHarness.createEditor({
         parent: document.getElementById('app')!,
         text: 'first\nlast',
@@ -50,6 +51,21 @@ async function main() {
       (window as any).__editor = editor;
     });
     await waitForFrames(page);
+
+    const narrowViewportGutterGeometry = await page.evaluate(() => {
+      const host = document.querySelector<HTMLElement>('#app')!.getBoundingClientRect();
+      const guttersElement = document.querySelector<HTMLElement>('.cm-gutters')!;
+      const gutters = guttersElement.getBoundingClientRect();
+      return {
+        offset: gutters.left - host.left,
+        computedLeft: getComputedStyle(guttersElement).left,
+        inlineLeft: guttersElement.style.left,
+        contentMaxWidth: getComputedStyle(document.documentElement).getPropertyValue('--meo-content-max-width')
+      };
+    });
+    if (Math.abs(narrowViewportGutterGeometry.offset + 5) > 0.1) {
+      throw new Error(`Narrow-view gutter offset was clamped away: ${JSON.stringify(narrowViewportGutterGeometry)}`);
+    }
 
     const marker = await page.$('.meo-git-gutter-marker.is-deleted');
     if (!marker) throw new Error('Deleted gap marker was not rendered');

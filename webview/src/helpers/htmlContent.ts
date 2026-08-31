@@ -1,5 +1,12 @@
 import { StateEffect, StateField, type EditorState } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, keymap } from '@codemirror/view';
+import {
+  Decoration,
+  EditorView,
+  GutterMarker,
+  WidgetType,
+  keymap,
+  lineNumberWidgetMarker
+} from '@codemirror/view';
 import type { SyntaxNodeRef } from '@lezer/common';
 import { createElement, AlertTriangle, Code2, Eye } from 'lucide';
 import {
@@ -18,7 +25,7 @@ import { getViewportController } from './viewportController';
 import { ImageWidget } from './images';
 import { getImagePresentationFactory } from '../editor/imagePresentation';
 import { getDetailsBlocks, toggleDetailsBlock } from './detailsBlocks';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
@@ -245,7 +252,7 @@ function createHtmlModeButton(className: string, label: string, icon: typeof Cod
   return button;
 }
 
-class HtmlBlockWidget extends WidgetType {
+class HtmlBlockWidget extends UiLanguageSensitiveWidget {
   private imageWidgets: ImageWidget[] = [];
   private heightObserver: ResizeObserver | null = null;
   private measuredHeight = -1;
@@ -265,6 +272,7 @@ class HtmlBlockWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof HtmlBlockWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.block.from === this.block.from &&
       other.block.to === this.block.to &&
       other.block.source === this.block.source &&
@@ -342,13 +350,33 @@ class HtmlBlockWidget extends WidgetType {
   }
 }
 
-class HtmlSourceControlWidget extends WidgetType {
+class HtmlBlockLineNumberMarker extends GutterMarker {
+  constructor(private readonly lineNumber: number) {
+    super();
+  }
+
+  eq(other: GutterMarker): boolean {
+    return other instanceof HtmlBlockLineNumberMarker && other.lineNumber === this.lineNumber;
+  }
+
+  toDOM(): Node {
+    return document.createTextNode(String(this.lineNumber));
+  }
+}
+
+const htmlBlockLineNumberMarker = lineNumberWidgetMarker.of((view, widget, block) => {
+  if (!(widget instanceof HtmlBlockWidget)) return null;
+  return new HtmlBlockLineNumberMarker(view.state.doc.lineAt(block.from).number);
+});
+
+class HtmlSourceControlWidget extends UiLanguageSensitiveWidget {
   constructor(readonly range: HtmlEditingRange) {
     super();
   }
 
   eq(other: WidgetType): boolean {
     return other instanceof HtmlSourceControlWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.range.from === this.range.from && other.range.to === this.range.to;
   }
 
@@ -383,13 +411,15 @@ class HtmlWarningWidget extends WidgetType {
   }
 }
 
-class InlineHtmlWidget extends WidgetType {
+class InlineHtmlWidget extends UiLanguageSensitiveWidget {
   constructor(readonly source: string) {
     super();
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof InlineHtmlWidget && other.source === this.source;
+    return other instanceof InlineHtmlWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
+      other.source === this.source;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -499,5 +529,5 @@ const htmlEscapeKeymap = keymap.of([{
 }]);
 
 export function htmlContentExtensions() {
-  return [htmlEditingRangeField, htmlEscapeKeymap];
+  return [htmlEditingRangeField, htmlEscapeKeymap, htmlBlockLineNumberMarker];
 }

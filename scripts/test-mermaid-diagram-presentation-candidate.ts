@@ -151,7 +151,10 @@ async function main(): Promise<void> {
     const slowIndex = result.stats.events.indexOf('render:graph TD\nslow-old');
     const previewIndex = result.stats.events.indexOf('preview:high');
     const newIndex = result.stats.events.indexOf('render:graph TD\nnew');
-    assert.ok(slowIndex >= 0 && previewIndex > slowIndex && newIndex > previewIndex);
+    assert.ok(
+      slowIndex >= 0 && newIndex > slowIndex && previewIndex > newIndex,
+      'Live Mermaid and Preview share high priority, so queued work must preserve enqueue order'
+    );
     assert.equal(result.activeId, 'focus');
     assert.deepEqual(result.selection, [1, 3]);
     assert.equal(result.scrollTop, 70);

@@ -13,7 +13,11 @@ export type PreviewSurface = {
   getAppearance(): ResolvedPreviewAppearance;
   setVisible(visible: boolean): void;
   preload(text: string): void;
-  requestRender(text: string, options?: { force?: boolean; preserveViewport?: boolean }): void;
+  requestRender(text: string, options?: {
+    force?: boolean;
+    preserveViewport?: boolean;
+    preserveFrame?: boolean;
+  }): void;
   acceptRenderResponse(message: PreviewRenderResponse): boolean;
   getTopVisiblePosition(): { topLine: number; topLineOffset: number } | null;
   dispose(): void;
@@ -25,7 +29,7 @@ export type PreviewWebviewAdapter = {
     active: boolean;
     text: string;
   }): void;
-  refreshVisible(text: string, options?: { preserveViewport?: boolean }): void;
+  refreshVisible(text: string, options?: { preserveViewport?: boolean; preserveFrame?: boolean }): void;
   accept(message: HostToWebviewMessage): boolean;
   getAppearance(): ResolvedPreviewAppearance;
   dispose(): void;
@@ -56,7 +60,8 @@ export function createPreviewWebviewAdapter(surface: PreviewSurface): PreviewWeb
       if (disposed || !active) return;
       surface.requestRender(text, {
         force: true,
-        preserveViewport: options.preserveViewport !== false
+        preserveViewport: options.preserveViewport !== false,
+        ...(options.preserveFrame === true ? { preserveFrame: true } : {})
       });
     },
     accept(message) {

@@ -13,6 +13,16 @@ export function syntaxTreeChanged(transaction: Transaction): boolean {
   return syntaxTree(transaction.startState) !== syntaxTree(transaction.state);
 }
 
+/** Reads the normalized language/info token owned by a fenced-code syntax node. */
+export function getFencedCodeInfo(state: EditorState, node: any): string | null {
+  for (let child = node.node.firstChild; child; child = child.nextSibling) {
+    if (child.name === 'CodeInfo') {
+      return state.doc.sliceString(child.from, child.to).trim().toLowerCase();
+    }
+  }
+  return null;
+}
+
 export function resolvedSyntaxTree(state: EditorState, timeout: number = 50): Tree {
   return ensureSyntaxTree(state, state.doc.length, timeout) ?? syntaxTree(state);
 }

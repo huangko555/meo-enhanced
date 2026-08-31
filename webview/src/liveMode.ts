@@ -7,7 +7,6 @@ import { createElement, AlertCircle, Code2, Delete } from 'lucide';
 import {
   resolveCodeLanguage,
   isFenceMarker,
-  getFencedCodeInfo,
   addFenceOpeningLineMarker,
   addCodeLanguageLabel,
   addCodeBlockLineNumbers,
@@ -19,11 +18,10 @@ import {
 import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl, type ImageGroupItem } from './helpers/images';
 import { getImagePresentationFactory } from './editor/imagePresentation';
 import { liveHighlightStyle } from './theme';
-import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
-import { headingLevelFromName, resolvedSyntaxTree } from './helpers/markdownSyntax';
+import { getFencedCodeInfo, headingLevelFromName, resolvedSyntaxTree } from './helpers/markdownSyntax';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
@@ -93,7 +91,11 @@ import {
 } from './helpers/latexMathEditing';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
 import { getUiStrings } from './application/uiLanguage';
-import { uiLanguageFacet } from './editor/uiLanguage';
+import {
+  getUiLanguageWidgetEpoch,
+  UiLanguageSensitiveWidget,
+  uiLanguageFacet
+} from './editor/uiLanguage';
 import {
   isLiveInputDerivedWorkRefresh,
   isLiveInputNestedProjection,
@@ -706,7 +708,7 @@ function findChildNode(node: SyntaxNode | SyntaxNodeRef | null, name: string): S
   return null;
 }
 
-class ClearLinkUrlWidget extends WidgetType {
+class ClearLinkUrlWidget extends UiLanguageSensitiveWidget {
   urlFrom: number;
   urlTo: number;
 
@@ -717,7 +719,10 @@ class ClearLinkUrlWidget extends WidgetType {
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof ClearLinkUrlWidget && other.urlFrom === this.urlFrom && other.urlTo === this.urlTo;
+    return other instanceof ClearLinkUrlWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
+      other.urlFrom === this.urlFrom &&
+      other.urlTo === this.urlTo;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -753,7 +758,7 @@ class ClearLinkUrlWidget extends WidgetType {
   }
 }
 
-class OpenLinkWidget extends WidgetType {
+class OpenLinkWidget extends UiLanguageSensitiveWidget {
   href: string;
 
   constructor(href: string) {
@@ -762,7 +767,9 @@ class OpenLinkWidget extends WidgetType {
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof OpenLinkWidget && other.href === this.href;
+    return other instanceof OpenLinkWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
+      other.href === this.href;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -774,9 +781,9 @@ class OpenLinkWidget extends WidgetType {
   }
 }
 
-class MissingWikiLinkWidget extends WidgetType {
+class MissingWikiLinkWidget extends UiLanguageSensitiveWidget {
   eq(other: WidgetType): boolean {
-    return other instanceof MissingWikiLinkWidget;
+    return other instanceof MissingWikiLinkWidget && this.hasSameUiLanguageEpoch(other);
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -794,9 +801,9 @@ class MissingWikiLinkWidget extends WidgetType {
   }
 }
 
-class MissingLocalLinkWidget extends WidgetType {
+class MissingLocalLinkWidget extends UiLanguageSensitiveWidget {
   eq(other: WidgetType): boolean {
-    return other instanceof MissingLocalLinkWidget;
+    return other instanceof MissingLocalLinkWidget && this.hasSameUiLanguageEpoch(other);
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -882,7 +889,7 @@ function frontmatterArrayPillsWidget(itemLabels: string[]): FrontmatterArrayPill
   return widget;
 }
 
-class DetailsSummaryWidget extends WidgetType {
+class DetailsSummaryWidget extends UiLanguageSensitiveWidget {
   anchor: number;
   lineFrom: number;
   summaryText: string;
@@ -899,6 +906,7 @@ class DetailsSummaryWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return (
       other instanceof DetailsSummaryWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.anchor === this.anchor &&
       other.lineFrom === this.lineFrom &&
       other.summaryText === this.summaryText &&
@@ -938,7 +946,7 @@ class DetailsSummaryWidget extends WidgetType {
   }
 }
 
-class FootnoteReferenceWidget extends WidgetType {
+class FootnoteReferenceWidget extends UiLanguageSensitiveWidget {
   footnoteNumber: number;
   definitionFrom: number;
 
@@ -951,6 +959,7 @@ class FootnoteReferenceWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return (
       other instanceof FootnoteReferenceWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.footnoteNumber === this.footnoteNumber &&
       other.definitionFrom === this.definitionFrom
     );
@@ -992,7 +1001,7 @@ class FootnoteReferenceWidget extends WidgetType {
   }
 }
 
-class FootnoteBacklinkWidget extends WidgetType {
+class FootnoteBacklinkWidget extends UiLanguageSensitiveWidget {
   footnoteNumber: number;
   referenceFrom: number;
 
@@ -1005,6 +1014,7 @@ class FootnoteBacklinkWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return (
       other instanceof FootnoteBacklinkWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.footnoteNumber === this.footnoteNumber &&
       other.referenceFrom === this.referenceFrom
     );
@@ -1094,13 +1104,14 @@ function addMarkdownLinkDecorations(builder: DecorationCollector, state: EditorS
   }
 }
 
-class DetailsSourceToggleWidget extends WidgetType {
+class DetailsSourceToggleWidget extends UiLanguageSensitiveWidget {
   constructor(readonly from: number, readonly to: number) {
     super();
   }
 
   eq(other: WidgetType): boolean {
     return other instanceof DetailsSourceToggleWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.from === this.from && other.to === this.to;
   }
 
@@ -2290,7 +2301,7 @@ type LatexMathWidgetElement = HTMLElement & {
   __meoLatexMathViewport?: LatexMathViewportController;
 };
 
-class LatexMathWidget extends WidgetType {
+class LatexMathWidget extends UiLanguageSensitiveWidget {
   html: string;
   mode: LatexMathMode;
   fencedDisplay: boolean;
@@ -2327,6 +2338,7 @@ class LatexMathWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     return (
       other instanceof LatexMathWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.html === this.html &&
       other.mode === this.mode &&
       other.fencedDisplay === this.fencedDisplay &&
@@ -2388,7 +2400,7 @@ function getMathWidget(
   endLine = 0,
   indentColumns = 0
 ): WidgetType {
-  const key = `${mode}:${fencedDisplay ? 1 : 0}:${startLine}:${endLine}:${indentColumns}:${html}`;
+  const key = `${getUiLanguageWidgetEpoch()}:${mode}:${fencedDisplay ? 1 : 0}:${startLine}:${endLine}:${indentColumns}:${html}`;
   let widget = mathWidgetCache.get(key);
   if (widget) {
     mathWidgetCache.delete(key);
@@ -3082,7 +3094,6 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
       extensions: [highlightMarkdownExtension, { remove: ['SetextHeading'] }]
     }),
     syntaxHighlighting(liveHighlightStyle),
-    shikiCodeHighlight,
     markdownTagField,
     livePointerSelectionActiveField,
     liveDocumentIdleField,

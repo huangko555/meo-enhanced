@@ -138,11 +138,36 @@ async function main(): Promise<void> {
       if (!resolved) throw new Error('Fresh shared Mermaid render was not found');
     }, sharedExternalSource);
     await page.waitForSelector('#app3 .cm-editor svg[data-marker="shared-external-fresh"]');
-    assert.equal(
-      await page.$('#app4 .cm-editor svg[data-marker="shared-external-fresh"]'),
-      null,
-      'the fresh replacement completion must remain scoped to Editor A'
+    const sharedReplacementState = await page.evaluate(({ source, text }) => {
+      const testWindow = window as typeof window & {
+        __sharedExternalEditorA?: any;
+        __sharedExternalEditorB?: any;
+        __mermaidCalls?: string[];
+      };
+      const marker = (selector: string) => document.querySelector<SVGElement>(selector)
+        ?.getAttribute('data-marker') ?? null;
+      return {
+        markerA: marker('#app3 .cm-editor svg[data-marker]'),
+        markerB: marker('#app4 .cm-editor svg[data-marker]'),
+        textA: testWindow.__sharedExternalEditorA.getText(),
+        textB: testWindow.__sharedExternalEditorB.getText(),
+        renderCalls: testWindow.__mermaidCalls?.filter((entry) => entry === source).length ?? -1,
+        errors: document.querySelectorAll('#app3 .meo-mermaid-error-badge, #app4 .meo-mermaid-error-badge').length,
+        loading: document.querySelectorAll('#app3 .meo-mermaid-loading, #app4 .meo-mermaid-loading').length,
+        expectedText: text
+      };
+    }, { source: sharedExternalSource, text: sharedExternalText });
+    assert.equal(sharedReplacementState.markerA, 'shared-external-fresh');
+    assert.ok(
+      sharedReplacementState.markerB === 'shared-external-old'
+        || sharedReplacementState.markerB === 'shared-external-fresh',
+      `Editor B must retain an equivalent completed diagram: ${JSON.stringify(sharedReplacementState)}`
     );
+    assert.equal(sharedReplacementState.textA, sharedReplacementState.expectedText);
+    assert.equal(sharedReplacementState.textB, sharedReplacementState.expectedText);
+    assert.equal(sharedReplacementState.renderCalls, 2);
+    assert.equal(sharedReplacementState.errors, 0);
+    assert.equal(sharedReplacementState.loading, 0);
     await page.evaluate(() => {
       const testWindow = window as typeof window & {
         __sharedExternalEditorA?: any;

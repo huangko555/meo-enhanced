@@ -3,18 +3,8 @@ import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import { collectInlineFootnoteMarkerRanges } from './inlineFootnotes';
 
-const sourceLinkMarkerDeco = Decoration.mark({
-  class: 'meo-md-link-marker',
-  attributes: {
-    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
-  }
-});
-const sourceFootnoteMarkerDeco = Decoration.mark({
-  class: 'meo-md-footnote-marker',
-  attributes: {
-    style: 'color: var(--meo-semantic-markdownSyntax) !important; -webkit-text-fill-color: var(--meo-semantic-markdownSyntax) !important;'
-  }
-});
+const sourceLinkMarkerDeco = Decoration.mark({ class: 'meo-md-link-marker' });
+const sourceFootnoteMarkerDeco = Decoration.mark({ class: 'meo-md-footnote-marker' });
 
 function addRange(builder: RangeSetBuilder<Decoration>, from: number, to: number, deco: Decoration): void {
   if (to <= from) {

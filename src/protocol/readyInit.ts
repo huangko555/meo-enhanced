@@ -10,6 +10,11 @@ import {
   type UiLanguage,
   type UiLanguagePreference
 } from '../foundation/uiLanguage';
+import {
+  DEFAULT_EDITOR_FONT_SIZE,
+  normalizeEditorFontSize,
+  type EditorFontSizeMode
+} from '../foundation/editorFontSize';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type PreviewAppearance = 'auto' | 'dark' | 'light';
@@ -40,6 +45,8 @@ export type InitMessage = {
   readonly previewFontFamily: string;
   readonly previewSourceColoring: boolean;
   readonly editorAppearance: PreviewAppearance;
+  readonly editorFontSizeMode: EditorFontSizeMode;
+  readonly editorFontSize: number;
   readonly gitChangesGutter: boolean;
   readonly gitDiffLineHighlights: boolean;
   readonly diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head';
@@ -73,6 +80,17 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
   const previewFontFamily = isRecord(value) && typeof value.previewFontFamily === 'string'
     ? normalizePreviewFontFamily(value.previewFontFamily)
     : null;
+  const editorFontSizeMode = isRecord(value) && value.editorFontSizeMode === undefined
+    ? 'auto'
+    : isRecord(value) && (value.editorFontSizeMode === 'auto' || value.editorFontSizeMode === 'custom')
+      ? value.editorFontSizeMode
+      : null;
+  const editorFontSize = isRecord(value) && value.editorFontSize === undefined
+    ? DEFAULT_EDITOR_FONT_SIZE
+    : isRecord(value) && typeof value.editorFontSize === 'number'
+      && normalizeEditorFontSize(value.editorFontSize) === value.editorFontSize
+      ? value.editorFontSize
+      : null;
   if (!isRecord(value)
     || value.type !== 'init'
     || 'theme' in value
@@ -100,6 +118,8 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     || previewFontFamily === null
     || typeof value.previewSourceColoring !== 'boolean'
     || !isPreviewAppearance(value.editorAppearance)
+    || editorFontSizeMode === null
+    || editorFontSize === null
     || !Array.isArray(value.diagnostics)
     || decodeDiagnosticsChangedEvent({ type: 'diagnosticsChanged', diagnostics: value.diagnostics }) === null
     || typeof value.gitChangesGutter !== 'boolean'
@@ -126,7 +146,9 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     ...value,
     uiLanguagePreference: value.uiLanguagePreference ?? 'auto',
     automaticUiLanguage: value.automaticUiLanguage ?? value.uiLanguage,
-    previewFontFamily
+    previewFontFamily,
+    editorFontSizeMode,
+    editorFontSize
   } as InitMessage;
 }
 

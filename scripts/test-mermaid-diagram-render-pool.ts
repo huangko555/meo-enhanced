@@ -168,7 +168,14 @@ replacement.replacePending();
 const oldThemeRenderStarted = controlledRenderer.nextStarted();
 const oldThemePending = replacement.render(request('THEME_RACE'));
 const oldThemeRender = await oldThemeRenderStarted;
+assert.equal(pool.getStale(latestRequest), null, 'current-generation results are not stale fallbacks');
 pool.refreshTheme();
+assert.equal(pool.getCached(latestRequest), null, 'theme refresh invalidates exact-theme cache entries');
+assert.deepEqual(
+  pool.getStale(latestRequest),
+  { ok: true, svg: '<svg data-generation="latest"></svg>' },
+  'theme refresh retains the last valid SVG as a bounded visual fallback'
+);
 assert.match((await oldThemePending).error, /theme generation/);
 const newThemePending = replacement.render(request('THEME_RACE'));
 const newThemeRenderStarted = controlledRenderer.nextStarted();

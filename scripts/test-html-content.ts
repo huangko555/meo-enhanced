@@ -177,6 +177,14 @@ async function main() {
           style.display !== 'none' &&
           style.color !== 'rgba(0, 0, 0, 0)';
       }).map((element) => element.textContent?.trim() ?? '');
+      const blockRect = block?.getBoundingClientRect() ?? null;
+      const htmlBlockLineNumber = blockRect
+        ? Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
+          .find((element) => {
+            const rect = element.getBoundingClientRect();
+            return rect.height > 0 && Math.abs(rect.top - blockRect.top) < 2;
+          })?.textContent?.trim() ?? null
+        : null;
       return {
         source: editor.view.state.doc.toString(),
         blockText: block?.textContent ?? '',
@@ -224,6 +232,7 @@ async function main() {
         editorInlineEndPadding: Number.parseFloat(getComputedStyle(editor.view.contentDOM).paddingRight),
         collapsedAdjacentBlankLines: document.querySelectorAll('.meo-md-html-adjacent-blank-line').length,
         visibleZeroHeightLineNumbers,
+        htmlBlockLineNumber,
         linkLineTops: blockLinks.map((link) => Math.round(link.getBoundingClientRect().top)),
         htmlRenderedBlock: (window as any).HtmlContentHarness.getLiveRenderedBlocks(editor.view.state)
           .find((candidate: any) => candidate.kind === 'html' && candidate.startLine === 23) ?? null,
@@ -268,6 +277,7 @@ async function main() {
       initial.editorInlineEndPadding < initial.htmlActionRailOffset ||
       initial.collapsedAdjacentBlankLines !== 0 ||
       initial.visibleZeroHeightLineNumbers.length !== 0 ||
+      initial.htmlBlockLineNumber !== '23' ||
       initial.linkLineTops.length !== 2 ||
       Math.max(...initial.linkLineTops) - Math.min(...initial.linkLineTops) > 1 ||
       initial.htmlRenderedBlock?.lineNumberHiddenFrom !== 24 ||
@@ -302,7 +312,12 @@ async function main() {
       };
     });
     await page.mouse.move(actionRailPoint.x, actionRailPoint.y);
-    await waitForFrames(page, 8);
+    await page.waitForFunction(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y);
+      const block = hit?.closest<HTMLElement>('.meo-md-html-block');
+      const button = block?.querySelector<HTMLElement>('.meo-md-html-source-toggle');
+      return button ? getComputedStyle(button).opacity === '1' : false;
+    }, { polling: 'raf', timeout: 1_000 }, actionRailPoint);
     const actionRailHover = await page.evaluate(({ x, y }) => {
       const hit = document.elementFromPoint(x, y);
       const block = hit?.closest<HTMLElement>('.meo-md-html-block');

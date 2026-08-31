@@ -1,8 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import type { SyntaxNodeRef } from '@lezer/common';
-import { getFencedCodeInfo } from './codeBlocks';
 import { isThematicBreakLine } from './frontmatter';
-import { resolvedSyntaxTree } from './markdownSyntax';
+import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
 import { collectLatexMathRanges, resolveFencedDisplayMathInnerLineRange } from './math';
 import { isTableDelimiterLine, parseTableInfo } from './tables';
 import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';

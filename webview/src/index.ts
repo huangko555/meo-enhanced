@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, ListTodo, ListTree, Hash, Code, Terminal, Quote, Minus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, StickyNoteOff, GitCompare, PanelLeftRightDashed, Settings, Check, MapPin, MapPinOff, Ellipsis, Sun, Moon } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, FileDiff, PanelLeftRightDashed, Settings, Check, Bookmark, BookmarkPlus, BookmarkCheck, BookmarkOff, Ellipsis, Sun, Moon } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -40,6 +40,13 @@ import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/edit
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { EditorAppearance } from '../../src/protocol/editorCommands';
 import type { InitMessage } from '../../src/protocol/readyInit';
+import {
+  EDITOR_FONT_SIZE_MAX,
+  EDITOR_FONT_SIZE_MIN,
+  normalizeEditorFontSize,
+  type EditorFontSizeMode,
+  type EditorFontSizePreference
+} from '../../src/foundation/editorFontSize';
 import type { UiLanguagePreference } from '../../src/foundation/uiLanguage';
 import { getUiStrings, type UiLanguage } from './application/uiLanguage';
 
@@ -175,7 +182,7 @@ taskBtn.type = 'button';
 taskBtn.className = 'format-button';
 taskBtn.dataset.action = 'task';
 taskBtn.title = activeUiStrings.task;
-taskBtn.appendChild(createElement(ListTodo, { width: 18, height: 18 }));
+taskBtn.appendChild(createElement(SquareCheck, { width: 18, height: 18 }));
 
 let gitChangesGutterVisible = true;
 let gitDiffLineHighlightsEnabled = true;
@@ -247,20 +254,20 @@ gitChangesGutterBtn.type = 'button';
 gitChangesGutterBtn.className = 'format-button toggle-button is-active';
 gitChangesGutterBtn.dataset.action = 'gitChangesGutter';
 gitChangesGutterBtn.title = activeUiStrings.hideChanges(activeUiStrings.currentEdits);
-gitChangesGutterBtn.appendChild(createElement(GitCompare, { width: 18, height: 18 }));
+gitChangesGutterBtn.appendChild(createElement(FileDiff, { width: 18, height: 18 }));
 
 const fixedBaselineBtn = document.createElement('button');
 fixedBaselineBtn.type = 'button';
 fixedBaselineBtn.className = 'format-button toggle-button';
 fixedBaselineBtn.dataset.action = 'fixedBaseline';
-fixedBaselineBtn.appendChild(createElement(MapPin, { width: 18, height: 18 }));
+fixedBaselineBtn.appendChild(createElement(BookmarkPlus, { width: 18, height: 18 }));
 
 const releaseFixedBaselineBtn = document.createElement('button');
 releaseFixedBaselineBtn.type = 'button';
 releaseFixedBaselineBtn.className = 'more-tools-option fixed-baseline-release-option';
 releaseFixedBaselineBtn.dataset.action = 'releaseFixedBaseline';
 releaseFixedBaselineBtn.setAttribute('role', 'menuitem');
-appendMoreToolsOptionContent(releaseFixedBaselineBtn, MapPinOff, activeUiStrings.releaseFixedBaseline);
+appendMoreToolsOptionContent(releaseFixedBaselineBtn, BookmarkOff, activeUiStrings.releaseFixedBaseline);
 
 const diffBaselineOptions = [
   { mode: 'current-edit' },
@@ -274,6 +281,10 @@ const getDiffBaselineLabel = (mode: typeof diffBaselineOptions[number]['mode']):
   'git-head': activeUiStrings.gitHead
 })[mode];
 
+const getDiffBaselineOptionLabel = (mode: typeof diffBaselineOptions[number]['mode']): string => (
+  activeUiStrings.diffBaselineLabel(getDiffBaselineLabel(mode))
+);
+
 const diffBaselineButtons: HTMLButtonElement[] = [];
 for (const option of diffBaselineOptions) {
   const button = document.createElement('button');
@@ -281,7 +292,7 @@ for (const option of diffBaselineOptions) {
   button.className = 'more-tools-option changes-baseline-option';
   button.dataset.baselineMode = option.mode;
   button.setAttribute('role', 'menuitemradio');
-  appendMoreToolsOptionContent(button, GitCompare, getDiffBaselineLabel(option.mode));
+  appendMoreToolsOptionContent(button, FileDiff, getDiffBaselineOptionLabel(option.mode));
   diffBaselineButtons.push(button);
 }
 
@@ -300,6 +311,12 @@ const updateGitChangesGutterUI = () => {
     : activeUiStrings.showChanges(modeLabel);
   fixedBaselineBtn.classList.toggle('is-active', fixedBaselineActive);
   fixedBaselineBtn.classList.toggle('is-standby', fixedBaselinePinned && !fixedBaselineActive);
+  const fixedBaselineIcon = !fixedBaselinePinned
+    ? BookmarkPlus
+    : fixedBaselineActive
+      ? Bookmark
+      : BookmarkCheck;
+  fixedBaselineBtn.replaceChildren(createElement(fixedBaselineIcon, { width: 18, height: 18 }));
   fixedBaselineBtn.setAttribute('aria-pressed', fixedBaselineActive ? 'true' : 'false');
   fixedBaselineBtn.title = !fixedBaselinePinned
     ? activeUiStrings.pinLatestSavedBaseline
@@ -418,7 +435,7 @@ codeBlockBtn.type = 'button';
 codeBlockBtn.className = 'format-button';
 codeBlockBtn.dataset.action = 'codeBlock';
 codeBlockBtn.title = activeUiStrings.codeBlock;
-codeBlockBtn.appendChild(createElement(Code, { width: 18, height: 18 }));
+codeBlockBtn.appendChild(createElement(SquareCode, { width: 18, height: 18 }));
 
 const quoteBtn = document.createElement('button');
 quoteBtn.type = 'button';
@@ -644,9 +661,9 @@ const discardBtn = document.createElement('button');
 discardBtn.type = 'button';
 discardBtn.className = 'format-button';
 discardBtn.dataset.action = 'discard';
-discardBtn.title = activeUiStrings.reloadDiskVersionDoubleClick;
+discardBtn.title = activeUiStrings.reloadDiskVersion;
 discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
-discardBtn.appendChild(createElement(StickyNoteOff, { width: 18, height: 18 }));
+discardBtn.appendChild(createElement(HardDriveUpload, { width: 18, height: 18 }));
 
 toolbar.addEventListener('pointerdown', (event) => {
   const target = event.target;
@@ -796,17 +813,46 @@ const uiLanguageControl = createSegmentedControl<UiLanguagePreference>({
   datasetKey: 'uiLanguage',
   role: 'group',
   options: [
-    { value: 'auto', label: 'Auto' },
+    { value: 'auto', label: activeUiStrings.auto },
     { value: 'zh-CN', label: '简体中文' },
     { value: 'en', label: 'English' }
   ]
 });
 uiLanguageControl.setActive('auto');
 
+const editorFontSizeModeControl = createSegmentedControl<EditorFontSizeMode>({
+  ariaLabel: activeUiStrings.editorFontSize,
+  className: 'editor-font-size-mode-control',
+  buttonClassName: 'editor-font-size-mode-button',
+  datasetKey: 'editorFontSizeMode',
+  role: 'group',
+  options: [
+    { value: 'auto', label: activeUiStrings.auto },
+    { value: 'custom', label: activeUiStrings.custom }
+  ]
+});
+editorFontSizeModeControl.setActive('auto');
+
+const editorFontSizeStepper = document.createElement('div');
+editorFontSizeStepper.className = 'editor-font-size-stepper';
+const decreaseEditorFontSizeBtn = document.createElement('button');
+decreaseEditorFontSizeBtn.type = 'button';
+decreaseEditorFontSizeBtn.className = 'editor-font-size-stepper-button';
+decreaseEditorFontSizeBtn.appendChild(createElement(Minus, { width: 13, height: 13, 'aria-hidden': 'true' }));
+const editorFontSizeValue = document.createElement('output');
+editorFontSizeValue.className = 'editor-font-size-value';
+editorFontSizeValue.textContent = '14';
+const increaseEditorFontSizeBtn = document.createElement('button');
+increaseEditorFontSizeBtn.type = 'button';
+increaseEditorFontSizeBtn.className = 'editor-font-size-stepper-button';
+increaseEditorFontSizeBtn.appendChild(createElement(Plus, { width: 13, height: 13, 'aria-hidden': 'true' }));
+editorFontSizeStepper.append(decreaseEditorFontSizeBtn, editorFontSizeValue, increaseEditorFontSizeBtn);
+
 const applyUiLanguage = (language: UiLanguage): void => {
   const strings = getUiStrings(language);
   activeUiLanguage = language;
   activeUiStrings = strings;
+  editor?.setUiLanguage?.(language);
   document.documentElement.lang = language;
   toolbar.setAttribute('aria-label', strings.editorToolbar);
   formatGroup.setAttribute('aria-label', strings.formatting);
@@ -835,7 +881,9 @@ const applyUiLanguage = (language: UiLanguage): void => {
   lineJumpInput.setAttribute('aria-label', strings.goToLine);
   saveBtn.title = strings.save;
   saveBtn.setAttribute('aria-label', strings.saveDocument);
-  discardBtn.title = strings.reloadDiskVersionDoubleClick;
+  discardBtn.title = discardBtn.classList.contains('is-discard-armed')
+    ? strings.reloadDiskVersionDoubleClick
+    : strings.reloadDiskVersion;
   discardBtn.setAttribute('aria-label', strings.reloadDiskVersion);
   contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
@@ -843,7 +891,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   releaseFixedBaselineBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.releaseFixedBaseline;
   diffBaselineButtons.forEach((button) => {
     const mode = button.dataset.baselineMode as typeof diffBaselineOptions[number]['mode'];
-    button.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = getDiffBaselineLabel(mode);
+    button.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = getDiffBaselineOptionLabel(mode);
   });
   updateGitChangesGutterUI();
   updateContentMaxWidthUI();
@@ -870,8 +918,16 @@ const applyUiLanguage = (language: UiLanguage): void => {
     dark: strings.dark
   });
   editorAppearanceLabel.textContent = strings.editorAppearance;
+  editorFontSizeLabel.textContent = strings.editorFontSize;
+  editorFontSizeModeControl.element.setAttribute('aria-label', strings.editorFontSize);
+  editorFontSizeModeControl.setLabels({ auto: strings.auto, custom: strings.custom });
+  decreaseEditorFontSizeBtn.title = strings.decreaseFontSize;
+  decreaseEditorFontSizeBtn.setAttribute('aria-label', strings.decreaseFontSize);
+  increaseEditorFontSizeBtn.title = strings.increaseFontSize;
+  increaseEditorFontSizeBtn.setAttribute('aria-label', strings.increaseFontSize);
   uiLanguageLabel.textContent = strings.interfaceLanguage;
   uiLanguageControl.element.setAttribute('aria-label', strings.interfaceLanguage);
+  uiLanguageControl.setLabels({ auto: strings.auto, 'zh-CN': '简体中文', en: 'English' });
   findPanelController.setUiLanguage(language);
   outlineController.setUiLanguage(language);
   previewController.setUiLanguage(language);
@@ -890,6 +946,15 @@ const uiLanguageLabel = document.createElement('span');
 uiLanguageLabel.className = 'more-tools-control-label';
 uiLanguageLabel.textContent = activeUiStrings.interfaceLanguage;
 uiLanguageRow.append(uiLanguageLabel, uiLanguageControl.element);
+const editorFontSizeRow = document.createElement('div');
+editorFontSizeRow.className = 'more-tools-appearance-row editor-font-size-row';
+const editorFontSizeLabel = document.createElement('span');
+editorFontSizeLabel.className = 'more-tools-control-label';
+editorFontSizeLabel.textContent = activeUiStrings.editorFontSize;
+const editorFontSizeControls = document.createElement('div');
+editorFontSizeControls.className = 'editor-font-size-controls';
+editorFontSizeControls.append(editorFontSizeModeControl.element, editorFontSizeStepper);
+editorFontSizeRow.append(editorFontSizeLabel, editorFontSizeControls);
 moreToolsPanel.append(
   toolbarOverflowSection,
   releaseFixedBaselineBtn,
@@ -901,7 +966,8 @@ moreToolsPanel.append(
   longCodeBlockFoldingBtn,
   displaySeparator,
   editorAppearanceRow,
-  uiLanguageRow
+  uiLanguageRow,
+  editorFontSizeRow
 );
 
 const moreToolsWrapper = document.createElement('div');
@@ -1141,11 +1207,15 @@ const codePaletteAdapter = createCodePaletteWebviewAdapter({ setShikiTheme });
 let resolveCodePaletteForPreview = (appearance: 'light' | 'dark') => (
   codePaletteAdapter.resolve(undefined, appearance).preview
 );
+let applyCodeThemeForPreview = (appearance: 'light' | 'dark') => {
+  setShikiTheme(codePaletteAdapter.resolve(undefined, appearance).sourceTheme, 'preview');
+};
 const previewController = createPreviewController({
   vscode,
   uiLanguage: activeUiLanguage,
   getEditorAppearance: () => resolveEditorAppearanceForPreview(),
   getCodePalette: (appearance) => resolveCodePaletteForPreview(appearance),
+  applyCodeTheme: (appearance) => applyCodeThemeForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,
   onFindRequested: () => findPanelController.open('find'),
   onRendered: () => {
@@ -1218,10 +1288,53 @@ let pendingRevealSelection: { anchor: number; head: number; focus?: boolean } | 
 let pendingRevealDocumentFragment: string | null = null;
 let pendingEditorSurfaceRecoveryRaf: number | null = null;
 let createEditorFactoryPromise: Promise<CreateEditorFactory> | null = null;
+let editorFontSizePreference: EditorFontSizePreference = { mode: 'auto', value: 14 };
 const INITIAL_EDITOR_MOUNT_FALLBACK_MS = 120;
 
 const failureNotice = createFailureNoticeManager(editorNotice);
 handleEditorNoticeDismiss = failureNotice.clearFailureNotice;
+
+const syncEditorFontSizeControls = (): void => {
+  const custom = editorFontSizePreference.mode === 'custom';
+  editorFontSizeModeControl.setActive(editorFontSizePreference.mode);
+  editorFontSizeValue.textContent = `${editorFontSizePreference.value}`;
+  editorFontSizeStepper.classList.toggle('is-disabled', !custom);
+  decreaseEditorFontSizeBtn.disabled = !custom || editorFontSizePreference.value <= EDITOR_FONT_SIZE_MIN;
+  increaseEditorFontSizeBtn.disabled = !custom || editorFontSizePreference.value >= EDITOR_FONT_SIZE_MAX;
+};
+
+const applyEditorFontSizePreference = (
+  preference: EditorFontSizePreference,
+  { post = false, refreshPreview = true }: { readonly post?: boolean; readonly refreshPreview?: boolean } = {}
+): void => {
+  editorFontSizePreference = {
+    mode: preference.mode === 'custom' ? 'custom' : 'auto',
+    value: normalizeEditorFontSize(preference.value)
+  };
+  const mutate = () => {
+    if (editorFontSizePreference.mode === 'custom') {
+      document.documentElement.style.setProperty('--meo-user-editor-font-size', `${editorFontSizePreference.value}px`);
+    } else {
+      document.documentElement.style.removeProperty('--meo-user-editor-font-size');
+    }
+  };
+  if (editor?.preserveViewport) editor.preserveViewport(mutate);
+  else mutate();
+  syncEditorFontSizeControls();
+  if (refreshPreview) {
+    previewAdapter.refreshVisible(getCurrentEditorText(), {
+      preserveViewport: true,
+      preserveFrame: true
+    });
+  }
+  if (post) {
+    vscode.postMessage({
+      type: 'setEditorFontSize',
+      mode: editorFontSizePreference.mode,
+      value: editorFontSizePreference.value
+    });
+  }
+};
 
 editorAppearanceControl.element.addEventListener('click', (event) => {
   const button = event.target instanceof Element
@@ -1232,6 +1345,27 @@ editorAppearanceControl.element.addEventListener('click', (event) => {
     themeAdapter.setAppearance(appearance, { post: true });
   }
 });
+
+editorFontSizeModeControl.element.addEventListener('click', (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest<HTMLButtonElement>('.editor-font-size-mode-button[data-editor-font-size-mode]')
+    : null;
+  const mode = button?.dataset.editorFontSizeMode;
+  if (mode === 'auto' || mode === 'custom') {
+    applyEditorFontSizePreference({ ...editorFontSizePreference, mode }, { post: true });
+  }
+});
+
+const adjustEditorFontSize = (delta: number): void => {
+  if (editorFontSizePreference.mode !== 'custom') return;
+  applyEditorFontSizePreference({
+    mode: 'custom',
+    value: normalizeEditorFontSize(editorFontSizePreference.value + delta)
+  }, { post: true });
+};
+
+decreaseEditorFontSizeBtn.addEventListener('click', () => adjustEditorFontSize(-1));
+increaseEditorFontSizeBtn.addEventListener('click', () => adjustEditorFontSize(1));
 
 uiLanguageControl.element.addEventListener('click', (event) => {
   const button = event.target instanceof Element
@@ -1486,7 +1620,7 @@ const applyDiagnosticsFromHost = (diagnostics: unknown): void => {
 
 gitClient = createGitClient();
 
-const discardConfirmationWindowMs = 500;
+const discardConfirmationWindowMs = 3000;
 let discardConfirmationTimer: number | null = null;
 let pendingReloadViewport: { handle: ViewportAnchorToken; owner: 'editor' | 'preview' } | null = null;
 
@@ -1496,6 +1630,9 @@ const clearDiscardConfirmation = () => {
     discardConfirmationTimer = null;
   }
   discardBtn.classList.remove('is-discard-armed');
+  discardBtn.title = activeUiStrings.reloadDiskVersion;
+  discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersion);
+  discardBtn.replaceChildren(createElement(HardDriveUpload, { width: 18, height: 18 }));
 };
 
 const discardUnsavedChanges = () => {
@@ -1521,6 +1658,9 @@ discardBtn.addEventListener('click', () => {
     return;
   }
   discardBtn.classList.add('is-discard-armed');
+  discardBtn.title = activeUiStrings.reloadDiskVersionDoubleClick;
+  discardBtn.setAttribute('aria-label', activeUiStrings.reloadDiskVersionDoubleClick);
+  discardBtn.replaceChildren(createElement(Check, { width: 18, height: 18, 'stroke-width': 2.5 }));
   discardConfirmationTimer = window.setTimeout(clearDiscardConfirmation, discardConfirmationWindowMs);
 });
 
@@ -1830,6 +1970,10 @@ const handleInit = (message: InitMessage) => {
   automaticUiLanguage = message.automaticUiLanguage;
   uiLanguageControl.setActive(activeUiLanguagePreference);
   applyUiLanguage(message.uiLanguage);
+  applyEditorFontSizePreference({
+    mode: message.editorFontSizeMode,
+    value: message.editorFontSize
+  }, { refreshPreview: false });
   pendingSourceLineNumbers = message.sourceLineNumbers;
   if (message.sourceLineNumbers !== 'off') {
     previousVisibleSourceLineNumbers = message.sourceLineNumbers;
@@ -1910,6 +2054,9 @@ const themeAdapter = createAppearanceWebviewAdapter({
 });
 resolveEditorAppearanceForPreview = () => themeAdapter.getAppearance();
 resolveCodePaletteForPreview = (appearance) => themeAdapter.getCodePalette(appearance).preview;
+applyCodeThemeForPreview = (appearance) => {
+  setShikiTheme(themeAdapter.getCodePalette(appearance).sourceTheme, 'preview');
+};
 
 const withMessageErrorBoundary = (context: string, action: () => void): void => {
   try {

@@ -7,7 +7,8 @@ repair loop stays narrow; broad and endurance runs are intentional events.
 | --- | --- | --- | --- |
 | Quick | A coherent implementation change is ready for a general regression check | About 30–60 seconds | `bun run test:quick` |
 | Targeted | A change affects one high-risk area, or a quick check identifies that area | About 1–5 minutes | `bun run test:targeted -- <area>` |
-| Release | A milestone or release candidate needs the complete gate | About 15–30 minutes | `bun run test:release -- --confirm-long-run` |
+| Release | A milestone or release candidate needs the complete gate | About 10–20 minutes | `bun run test:release -- --confirm-long-run` |
+| Large document | A shorter production-like document stress pass is specifically needed | About 1–3 minutes | `bun run test:large-document -- <document> --confirm-long-run` |
 | Endurance | Full-document edit, undo/redo, cursor, and viewport stress is specifically needed | About 15–30 minutes per run | `bun run test:endurance -- <document> --confirm-long-run` |
 
 ## Long-run recommendation and authorization
@@ -18,6 +19,8 @@ the work reaches one of these boundaries:
 
 - **Release:** a milestone or release candidate is becoming fixed, or broad
   cross-cutting changes need release confidence.
+- **Large document:** a shorter production benchmark, sampled strict UAT, and
+  live-scroll integrity pass are enough to assess document-scale risk.
 - **Endurance:** undo/redo, cursor, viewport, tables, or rendered-block editing
   has changed substantially, regressed repeatedly, or is ready for final UAT.
 - **Clean-environment/VM validation:** a final VSIX or installer needs an
@@ -73,16 +76,38 @@ regular substitute for the full document sweep, not a release claim.
 ## Long-running gates
 
 After explicit authorization, the release entry runs type checking,
-architecture checks, the repository's unchanged full `bun run test` suite, a
-production build, and package-content validation:
+architecture checks, every sub-suite from the repository's unchanged full
+`bun run test` pipeline, a production build, and package-content validation:
 
 ```shell
 bun run test:release -- --confirm-long-run
 ```
 
+To reduce wall-clock time without reducing coverage, independent static and
+domain suites run with bounded concurrency. The complete production
+browser matrix remains an isolated stage, followed by the production build and
+package validation. A workflow contract verifies that every sub-suite from
+`bun run test` appears exactly once in the release plan, so scheduling changes
+cannot silently remove coverage.
+
 The existing `bun run test` command remains the complete test pipeline for CI
 compatibility. Agents and local repair work use the guarded release entry when
 requesting that pipeline as part of a full gate.
+
+The simplified large-document entry is a shorter stress test, currently about
+one minute on a steady local machine and budgeted at about 1–3 minutes:
+
+```shell
+bun run test:large-document -- <document> --confirm-long-run
+```
+
+It runs the production large-document benchmark, an eight-edit strict
+full-document UAT, and the production live-scroll integrity check in that order.
+All three commands run serially so their performance measurements do not
+contaminate one another. Despite the shorter duration, this remains a stress
+test: an agent must wait for explicit user authorization in the current task
+before running it. Omitting `--confirm-long-run` is rejected; `--dry-run` may be
+used without authorization to inspect the exact plan.
 
 The full-document endurance entry preserves the original high-intensity UAT:
 

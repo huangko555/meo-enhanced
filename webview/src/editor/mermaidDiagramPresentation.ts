@@ -30,6 +30,7 @@ export type MermaidDiagramPresentationConsumer = {
   /** Warms one content-addressed SVG result without mounting diagram DOM. */
   preload(request: MermaidDiagramRenderRequest): Promise<void>;
   getCached(request: MermaidDiagramRenderRequest): MermaidDiagramRenderResult | null;
+  getStale(request: MermaidDiagramRenderRequest): Extract<MermaidDiagramRenderResult, { ok: true }> | null;
   getHeight(key: string): number | null;
   rememberHeight(key: string, height: number): void;
   subscribeThemeRefresh(listener: () => void): () => void;
@@ -120,6 +121,7 @@ export function createMermaidDiagramPresentationFactory(
             .finally(() => resources.release());
         },
         getCached: (request) => options.resources.getCached(request),
+        getStale: (request) => options.resources.getStale(request),
         getHeight: (key) => options.resources.getHeight(key),
         rememberHeight: (key, height) => options.resources.rememberHeight(key, height),
         subscribeThemeRefresh: (listener) => options.resources.subscribeThemeRefresh(listener),

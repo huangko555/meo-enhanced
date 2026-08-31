@@ -25,7 +25,7 @@ export const darkCssVariableOverrides = {
   '--meo-input-border': '#54595e',
   '--meo-toolbar-overflow-foreground': '#ffffff',
   '--meo-elevated-shadow': '0 4px 12px rgba(0, 0, 0, 0.24)',
-  '--meo-fixed-baseline-active-background': 'color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 40%, transparent)',
+  '--meo-fixed-baseline-active-background': 'color-mix(in srgb, #45bc42 44%, transparent)',
   '--meo-fixed-baseline-active-foreground': '#ffffff',
   '--meo-fixed-baseline-standby': 'var(--vscode-testing-iconPassed, #73c991)',
   '--git-added': '#4a9e82',

@@ -1,5 +1,6 @@
 import { createPreviewController } from '../webview/src/helpers/preview';
-import { resolveFinalCodePalette } from '../webview/src/application/finalCodePalette';
+import { createCodePaletteWebviewAdapter } from '../webview/src/adapters/codePaletteWebviewAdapter';
+import { setShikiTheme } from '../webview/src/helpers/shikiHighlighter';
 import { createEditor } from '../webview/src/editor';
 import {
   initializeMermaidEditorRuntime,
@@ -65,6 +66,12 @@ const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
   }
 };
 
+const codePaletteAdapter = createCodePaletteWebviewAdapter({
+  setShikiTheme(theme) {
+    setShikiTheme(theme, 'preview');
+  }
+});
+
 const previewMessages: unknown[] = [];
 type SharedMermaidEditorOptions = Omit<
   Parameters<typeof createEditor>[0],
@@ -74,7 +81,10 @@ const controller = createPreviewController({
   vscode: { postMessage(message) { previewMessages.push(message); } },
   uiLanguage: 'en',
   getEditorAppearance: () => 'dark',
-  getCodePalette: (appearance) => resolveFinalCodePalette(undefined, appearance).preview,
+  getCodePalette: (appearance) => codePaletteAdapter.resolve(undefined, appearance).preview,
+  applyCodeTheme: (appearance) => {
+    setShikiTheme(codePaletteAdapter.resolve(undefined, appearance).sourceTheme, 'preview');
+  },
   mermaidRenderResources: previewMermaidResources,
   onRendered: () => {
     (window as typeof window & { __previewRenderedAt?: number }).__previewRenderedAt = performance.now();

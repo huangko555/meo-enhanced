@@ -83,6 +83,47 @@ async function main() {
       });
     });
 
+    const localizedLongCode = [
+      '```js',
+      ...Array.from({ length: 19 }, (_, index) => `const localized${index + 1} = ${index + 1};`),
+      '```'
+    ].join('\n');
+    const localizedLongCodeLabels = await page.evaluate(async (content) => {
+      const editor = (window as any).LongCodeBlocksHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: content,
+        initialMode: 'live',
+        uiLanguage: 'zh-CN',
+        onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const read = () => {
+        const button = document.querySelector<HTMLButtonElement>(
+          '.meo-md-long-code-placeholder .meo-long-code-action'
+        );
+        return {
+          text: button?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+          label: button?.getAttribute('aria-label') ?? ''
+        };
+      };
+      const chinese = read();
+      editor.setUiLanguage('en');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const english = read();
+      editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      return { chinese, english };
+    }, localizedLongCode);
+    if (
+      localizedLongCodeLabels.chinese.text !== '显示其余 9 行' ||
+      localizedLongCodeLabels.chinese.label !== '显示其余 9 行代码' ||
+      localizedLongCodeLabels.english.text !== 'Show 9 more lines' ||
+      localizedLongCodeLabels.english.label !== 'Show 9 more lines of code'
+    ) {
+      throw new Error(`Live long-code controls did not update their language in place: ${JSON.stringify(localizedLongCodeLabels)}`);
+    }
+
     for (const bareOpeningFence of ['```', '```js']) {
       const bareFenceState = await page.evaluate((content) => {
         const editor = (window as any).LongCodeBlocksHarness.createEditor({

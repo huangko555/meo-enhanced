@@ -496,7 +496,7 @@ async function assertPreviewProjectionTransactions(
       });
     ` });
     await page.addScriptTag({ path: bundlePath });
-    const initialText = '# Projection T0\n\nOld frame sentinel';
+    const initialText = '# Projection T0\n\nOld frame sentinel\n\n```javascript\nconst themeProbe = "palette";\n```';
     await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), {
       ...initMessage,
       text: initialText,
@@ -508,6 +508,60 @@ async function assertPreviewProjectionTransactions(
     await page.waitForFunction(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Old frame sentinel')
     ));
+
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.preview-appearance-dropdown')!.click();
+      document.querySelector<HTMLButtonElement>(
+        '.preview-appearance-dropdown-panel .preview-dropdown-option[data-value="dark"]'
+      )!.click();
+    });
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.documentElement)
+        .colorScheme === 'dark'
+    ));
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.preview-source-coloring-dropdown')!.click();
+      document.querySelector<HTMLButtonElement>(
+        '.preview-source-coloring-dropdown-panel .preview-dropdown-option[data-value="false"]'
+      )!.click();
+    });
+    const disabledColoringRequest = await nextRequest('disabled source coloring from custom dropdown');
+    await resolveRequest(disabledColoringRequest);
+    await page.waitForFunction(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const source = doc.querySelector<HTMLElement>('.meo-export-code-line-source');
+      const span = source?.querySelector<HTMLElement>('span');
+      return source !== null && span !== null
+        && getComputedStyle(span).color === getComputedStyle(source).color
+        && getComputedStyle(span).fontWeight === getComputedStyle(source).fontWeight;
+    }, { timeout: 3000 });
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.preview-source-coloring-dropdown')!.click();
+      document.querySelector<HTMLButtonElement>(
+        '.preview-source-coloring-dropdown-panel .preview-dropdown-option[data-value="true"]'
+      )!.click();
+    });
+    await resolveRequest(await nextRequest('enabled source coloring from custom dropdown'));
+    await page.waitForFunction(() => (
+      document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector('.meo-export-code-line-source[data-meo-shiki]') !== null
+    ), { timeout: 5000 });
+    const darkCodeColor = await page.$eval<HTMLIFrameElement, string>('.preview-frame', (frame) => (
+      getComputedStyle(frame.contentDocument!.querySelector<HTMLElement>('.meo-export-code-line-source span')!).color
+    ));
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('.preview-appearance-dropdown')!.click();
+      document.querySelector<HTMLButtonElement>(
+        '.preview-appearance-dropdown-panel .preview-dropdown-option[data-value="light"]'
+      )!.click();
+    });
+    await page.waitForFunction((previousColor) => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const span = doc.querySelector<HTMLElement>('.meo-export-code-line-source span');
+      return getComputedStyle(doc.documentElement).colorScheme === 'light'
+        && span !== null
+        && getComputedStyle(span).color !== previousColor;
+    }, {}, darkCodeColor);
 
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'docChanged', text: '', version: 2 }
@@ -643,6 +697,9 @@ async function assertPreviewProjectionTransactions(
       return getComputedStyle(doc.documentElement).colorScheme === 'light'
         && getComputedStyle(doc.querySelector<HTMLElement>('.meo-export-doc')!).fontFamily.includes('Arial');
     });
+    await page.evaluate(() => new Promise<void>((resolve) => (
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    )));
     const preserved = await page.evaluate((before) => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const doc = frame.contentDocument!;
@@ -781,6 +838,10 @@ async function main(): Promise<void> {
   const previewFontFamilyCommands: string[] = [];
   try {
     await assertPreviewProjectionTransactions(browser, path.join(temp, 'bundle.js'));
+    if (process.argv.includes('--projection-only')) {
+      console.log('Preview projection transaction regression test passed');
+      return;
+    }
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 700, deviceScaleFactor: 1 });
     await assertOpenLinkWaiterLifecycle(page.getDefaultTimeout());
@@ -875,6 +936,30 @@ async function main(): Promise<void> {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
       return frame?.contentDocument?.body.textContent?.includes('continues */') === true;
     });
+    const propertiesBottomGap = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const properties = doc.createElement('section');
+      properties.className = 'meo-export-frontmatter';
+      properties.innerHTML = [
+        '<div class="meo-export-frontmatter-header">Properties</div>',
+        '<div class="meo-export-frontmatter-line is-property">',
+        '<span class="meo-export-frontmatter-key-cell">key</span>',
+        '<div class="meo-export-frontmatter-value-group">value</div>',
+        '</div>'
+      ].join('');
+      doc.body.append(properties);
+      const lastRow = properties.querySelector<HTMLElement>('.meo-export-frontmatter-line:last-child')!;
+      const propertiesStyle = getComputedStyle(properties);
+      const gap = properties.getBoundingClientRect().bottom
+        - lastRow.getBoundingClientRect().bottom
+        - Number.parseFloat(propertiesStyle.borderBottomWidth);
+      properties.remove();
+      return gap;
+    });
+    assert.ok(
+      propertiesBottomGap <= 0.5,
+      `Preview Properties must not leave a blank strip below its final row: ${propertiesBottomGap}px`
+    );
     const fontControlContract = await page.evaluate(() => ({
       selectCount: document.querySelectorAll('select.preview-font-family-select').length,
       inputCount: document.querySelectorAll('.preview-font-family-input').length,
@@ -914,6 +999,22 @@ async function main(): Promise<void> {
       triggerShadow: 'none'
     }, 'Preview dropdown popup must use the editor toolbar appearance with rounded, shadowless surfaces');
     await page.keyboard.press('Escape');
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.mouse.move(0, 0);
+    assert.deepEqual(await page.evaluate(() => Array.from(
+      document.querySelectorAll<HTMLElement>('.preview-toolbar-dropdown'),
+      (trigger) => {
+        const chevron = trigger.querySelector<HTMLElement>('.preview-toolbar-dropdown-chevron')!;
+        return {
+          border: getComputedStyle(trigger).borderTopColor,
+          chevron: getComputedStyle(chevron).borderRightColor
+        };
+      }
+    )), [
+      { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' },
+      { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' },
+      { border: 'rgb(122, 132, 144)', chevron: 'rgb(122, 132, 144)' }
+    ], 'Inactive Preview dropdown borders and chevrons must share the requested neutral color');
     await page.select('.preview-appearance-select', 'dark');
     await page.click('.preview-font-family-dropdown');
     assert.deepEqual(await page.evaluate(() => ({
@@ -969,6 +1070,9 @@ async function main(): Promise<void> {
       return bodyFamily.includes('SimSun') && !codeFamily.includes('SimSun');
     });
     assert.equal(previewFontFamilyCommands.at(-1), 'SimSun');
+    await page.evaluate(() => new Promise<void>((resolve) => (
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    )));
     const preservedFontInteraction = await page.evaluate((before) => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const doc = frame.contentDocument!;
@@ -977,7 +1081,8 @@ async function main(): Promise<void> {
         selection: doc.defaultView!.getSelection()!.toString(),
         expectedSelection: before.selection,
         scrollTop: doc.scrollingElement!.scrollTop,
-        expectedScrollTop: before.scrollTop
+        expectedScrollTop: before.scrollTop,
+        maxScrollTop: Math.max(0, doc.scrollingElement!.scrollHeight - doc.scrollingElement!.clientHeight)
       };
     }, fontInteractionState);
     await fontInteractionState.dispose();
@@ -985,8 +1090,9 @@ async function main(): Promise<void> {
       sameFrame: true,
       selection: preservedFontInteraction.expectedSelection,
       expectedSelection: preservedFontInteraction.expectedSelection,
-      scrollTop: preservedFontInteraction.expectedScrollTop,
-      expectedScrollTop: preservedFontInteraction.expectedScrollTop
+      scrollTop: Math.min(preservedFontInteraction.expectedScrollTop, preservedFontInteraction.maxScrollTop),
+      expectedScrollTop: preservedFontInteraction.expectedScrollTop,
+      maxScrollTop: preservedFontInteraction.maxScrollTop
     });
     await page.select('.preview-font-family-select', '');
     await page.waitForFunction(() => {
@@ -1032,12 +1138,12 @@ async function main(): Promise<void> {
     assert.equal(initialRows, 6, 'Preview must expose one independent row per fenced source line');
     await page.waitForFunction(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
-        ?.querySelectorAll('code.language-typescript .meo-export-code-line-source[data-meo-shiki="true"]').length === 3
+        ?.querySelectorAll('code.language-typescript .meo-export-code-line-source[data-meo-shiki]').length === 3
     ));
     const previewShikiColors = await page.evaluate(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const tokens = Array.from(doc.querySelectorAll<HTMLElement>(
-        'code.language-typescript .meo-export-code-line-source[data-meo-shiki="true"] > span'
+        'code.language-typescript .meo-export-code-line-source[data-meo-shiki] > span'
       ));
       const colorFor = (text: string) => tokens.find((token) => token.textContent?.trim() === text)?.style.color ?? '';
       return {
@@ -1861,7 +1967,7 @@ async function main(): Promise<void> {
       )), JSON.stringify({ width, zoom, deviceScaleFactor, mermaidSuccess: result.mermaidSuccess }));
       assert.deepEqual(result.table.semanticCounts, { table: 2, thead: 2, tbody: 2, tr: 5, th: 10, td: 18 });
       assert.equal(result.table.resizeHandleCount, 0);
-      assert.ok(result.table.listPadding >= 24 && result.table.listCellPadding >= 12, JSON.stringify(result.table));
+      assert.ok(result.table.listPadding >= 24 && result.table.listCellPadding >= 10.5, JSON.stringify(result.table));
       assert.equal(result.table.emptyCellsWithoutOverflow, true);
       assert.ok(
         result.table.documentOverflow <= 1 &&

@@ -1,7 +1,7 @@
 import { WidgetType, type EditorView } from '@codemirror/view';
 import { createElement, Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 import { getUiStrings } from '../application/uiLanguage';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 
 export type AlertType = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION';
 
@@ -55,7 +55,7 @@ function getAlertIconElement(type: AlertType): Element {
   }
 }
 
-export class AlertIconWidget extends WidgetType {
+export class AlertIconWidget extends UiLanguageSensitiveWidget {
   type: AlertType;
 
   constructor(type: AlertType) {
@@ -64,7 +64,9 @@ export class AlertIconWidget extends WidgetType {
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof AlertIconWidget && other.type === this.type;
+    return other instanceof AlertIconWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
+      other.type === this.type;
   }
 
   toDOM(view: EditorView): HTMLElement {

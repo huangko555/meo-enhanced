@@ -464,6 +464,9 @@ async function main() {
     await page.keyboard.down('Control');
     await page.keyboard.press('End');
     await page.keyboard.up('Control');
+    await page.evaluate(() => new Promise<void>((resolve) => (
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    )));
     const sourceInputStart = await page.evaluate(() => {
       const source = document.querySelector<HTMLElement>('.meo-mermaid-source-editor');
       const block = source?.closest<HTMLElement>('.meo-mermaid-editing-block');
@@ -618,6 +621,9 @@ async function main() {
     await page.keyboard.down('Control');
     await page.keyboard.press('End');
     await page.keyboard.up('Control');
+    await page.evaluate(() => new Promise<void>((resolve) => (
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    )));
     const firstMultiScrollTop = await page.evaluate(() => (
       document.querySelector<HTMLElement>('#multi-mermaid-first > .cm-editor .cm-scroller')!.scrollTop
     ));
@@ -639,6 +645,9 @@ async function main() {
     await page.keyboard.down('Control');
     await page.keyboard.press('End');
     await page.keyboard.up('Control');
+    await page.evaluate(() => new Promise<void>((resolve) => (
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    )));
     const secondMultiScrollTop = await page.evaluate(() => (
       document.querySelector<HTMLElement>('#multi-mermaid-second > .cm-editor .cm-scroller')!.scrollTop
     ));
@@ -660,6 +669,10 @@ async function main() {
         secondSuffix: second.getText().slice(-80),
         secondMode: secondHost.querySelector<HTMLElement>('.meo-mermaid-editing-block')?.dataset.meoRenderedBlockMode ?? null,
         secondIsolated: !second.getText().includes('MULTI_FIRST'),
+        firstTop,
+        firstActualTop: firstScroller.scrollTop,
+        secondTop,
+        secondActualTop: secondScroller.scrollTop,
         firstScrollStable: Math.abs(firstScroller.scrollTop - firstTop) <= 1,
         secondScrollStable: Math.abs(secondScroller.scrollTop - secondTop) <= 1,
         secondFocused: Boolean(secondSource?.contains(document.activeElement))
@@ -690,10 +703,12 @@ async function main() {
         marker: second.getText().includes('MULTI_SECOND_AFTER_FIRST_DESTROY'),
         connected: Boolean(secondHost.querySelector('.meo-mermaid-editing-block')?.isConnected),
         focused: Boolean(secondSource?.contains(document.activeElement)),
-        scrollStable: Math.abs(secondScroller.scrollTop - secondTop) <= 1
+        scrollStable: Math.abs(secondScroller.scrollTop - secondTop) <= 1,
+        expectedTop: secondTop,
+        actualTop: secondScroller.scrollTop
       };
     }, secondMultiScrollTop);
-    if (Object.values(multiAfterDestroy).some((value) => value !== true)) {
+    if (!multiAfterDestroy.marker || !multiAfterDestroy.connected || !multiAfterDestroy.focused || !multiAfterDestroy.scrollStable) {
       throw new Error(`Destroying one Mermaid editor affected the other: ${JSON.stringify(multiAfterDestroy)}`);
     }
     await page.evaluate(() => {

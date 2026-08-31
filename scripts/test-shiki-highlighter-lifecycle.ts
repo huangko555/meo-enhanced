@@ -288,6 +288,10 @@ async function languageFailureCanRetryOnTheSameInstance(): Promise<void> {
 }
 
 assert.equal(shiki.resolveShikiLang('TS'), 'typescript');
+assert.equal(shiki.resolveShikiLang('ruby'), 'ruby');
+assert.equal(shiki.resolveShikiLang('rb'), 'ruby');
+assert.equal(shiki.resolveShikiLang('php'), 'php');
+assert.equal(shiki.resolveShikiLang('plaintext'), null, 'plain-text aliases must not receive syntax colors');
 assert.equal(shiki.resolveShikiLang('unknown-language'), null, 'unknown languages must keep the plain-text fallback');
 await sourceWithoutConsumerDoesNoHeavyWork();
 await consumersShareOneInstanceUntilTheLastRelease();

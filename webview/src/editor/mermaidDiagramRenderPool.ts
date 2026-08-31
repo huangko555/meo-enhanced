@@ -46,6 +46,8 @@ type OperationJob = {
   readonly external: boolean;
   readonly resourceGeneration: number;
   readonly cacheKey?: string;
+  readonly staleKey?: string;
+  readonly themeGeneration?: number;
   readonly retainedGroups: Set<RenderGroupRecord>;
   state: 'queued' | 'running' | 'settled';
 };
@@ -60,6 +62,8 @@ const cacheKeyFor = (request: MermaidDiagramRenderRequest): string => JSON.strin
   request.rawSource
 ]);
 
+const staleKeyFor = (request: MermaidDiagramRenderRequest): string => request.rawSource;
+
 /** Owns the single Webview-wide Mermaid renderer queue and content-addressed caches. */
 export function createMermaidDiagramRenderPool(
   options: MermaidDiagramRenderPoolOptions
@@ -69,6 +73,10 @@ export function createMermaidDiagramRenderPool(
   const maxQueuedOperations = options.maxQueuedOperations ?? DEFAULT_MAX_QUEUED_OPERATIONS;
   const maxThemeListeners = options.maxThemeListeners ?? DEFAULT_MAX_THEME_LISTENERS;
   const cache = new Map<string, MermaidDiagramRenderResult>();
+  const staleCache = new Map<string, {
+    readonly themeGeneration: number;
+    readonly result: Extract<MermaidDiagramRenderResult, { ok: true }>;
+  }>();
   const renderJobs = new Map<string, OperationJob>();
   const heightCache = new Map<string, number>();
   const themeListeners = new Set<() => void>();
@@ -78,6 +86,7 @@ export function createMermaidDiagramRenderPool(
   let activeJob: OperationJob | null = null;
   let disposed = false;
   let resourceGeneration = 0;
+  let themeGeneration = 0;
   let renderSequence = 0;
   let initializedIdentity: string | null = null;
 
@@ -187,6 +196,12 @@ export function createMermaidDiagramRenderPool(
           && job.resourceGeneration === resourceGeneration
         ) {
           remember(cache, job.cacheKey, result, cacheLimit);
+          if (job.staleKey && job.themeGeneration !== undefined) {
+            remember(staleCache, job.staleKey, {
+              themeGeneration: job.themeGeneration,
+              result
+            }, cacheLimit);
+          }
         }
         for (const waiter of [...job.waiters]) settleWaiter(waiter, { value });
       },
@@ -280,6 +295,8 @@ export function createMermaidDiagramRenderPool(
       external: false,
       resourceGeneration: generation,
       cacheKey: key,
+      staleKey: staleKeyFor(request),
+      themeGeneration,
       retainedGroups: new Set(),
       state: 'queued'
     };
@@ -427,9 +444,27 @@ export function createMermaidDiagramRenderPool(
       if (cached) remember(cache, key, cached, cacheLimit);
       return cached;
     },
+    getStale(request) {
+      if (disposed) return null;
+      const key = staleKeyFor(request);
+      const cached = staleCache.get(key) ?? null;
+      if (cached) remember(staleCache, key, cached, cacheLimit);
+      return cached && cached.themeGeneration !== themeGeneration
+        ? cached.result
+        : null;
+    },
     refreshTheme() {
       if (disposed) return;
+      for (const [key, result] of cache) {
+        if (result.ok !== true) continue;
+        const parsed = JSON.parse(key) as [string, string, string];
+        remember(staleCache, parsed[2], {
+          themeGeneration,
+          result
+        }, cacheLimit);
+      }
       cache.clear();
+      themeGeneration += 1;
       resourceGeneration += 1;
       initializedIdentity = null;
       const reason = new MermaidDiagramResourceUnavailableError(
@@ -469,6 +504,7 @@ export function createMermaidDiagramRenderPool(
       highPriority.length = 0;
       normalPriority.length = 0;
       cache.clear();
+      staleCache.clear();
       renderJobs.clear();
       heightCache.clear();
       resourceGeneration += 1;

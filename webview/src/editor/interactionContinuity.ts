@@ -11,6 +11,14 @@ export type EditorInteractionContinuity = {
   dispose(): void;
 };
 
+export type NestedEditorInteractionContinuityViewport = {
+  readBounds(): { top: number; bottom: number };
+  revealCaret(
+    caret: { top: number; bottom: number },
+    isCurrent: () => boolean
+  ): void;
+};
+
 type ActiveInput = {
   generation: number;
   position: number;
@@ -149,6 +157,118 @@ export function createEditorInteractionContinuity(input: {
       cancel();
       view.scrollDOM.removeEventListener('wheel', cancelOnInteraction, true);
       view.scrollDOM.removeEventListener('touchstart', cancelOnInteraction, true);
+      view.dom.removeEventListener('pointerdown', cancelOnInteraction, true);
+      view.dom.removeEventListener('blur', cancelOnInteraction, true);
+    }
+  };
+}
+
+/**
+ * Keeps a focused editor embedded in a Live block visible through wrapping and
+ * outer-widget remeasurement. The outer viewport remains the sole scroll owner;
+ * nested editors only report their caret geometry here.
+ */
+export function createNestedEditorInteractionContinuity(input: {
+  readonly view: EditorView;
+  readonly viewport: NestedEditorInteractionContinuityViewport;
+  readonly isActive: () => boolean;
+  readonly interactionTarget?: HTMLElement;
+}): EditorInteractionContinuity {
+  const { view, viewport, isActive, interactionTarget } = input;
+  let nextGeneration = 0;
+  let active: ActiveInput | null = null;
+  let disposed = false;
+
+  const cancel = (): void => {
+    nextGeneration += 1;
+    if (active?.frame !== null && active?.frame !== undefined) {
+      cancelAnimationFrame(active.frame);
+    }
+    active = null;
+  };
+
+  const isCurrent = (candidate: ActiveInput): boolean => (
+    !disposed && active === candidate && candidate.generation === nextGeneration
+  );
+
+  const schedule = (candidate: ActiveInput): void => {
+    if (!isCurrent(candidate) || candidate.frame !== null) return;
+    candidate.frame = requestAnimationFrame(() => {
+      candidate.frame = null;
+      if (!isCurrent(candidate) || !isActive() || !view.hasFocus) {
+        cancel();
+        return;
+      }
+      view.requestMeasure({
+        read: () => {
+          if (!isCurrent(candidate)) return null;
+          const position = Math.max(0, Math.min(candidate.position, view.state.doc.length));
+          const coords = view.coordsAtPos(position);
+          if (!coords) return null;
+          const bounds = viewport.readBounds();
+          return {
+            caret: { top: coords.top, bottom: coords.bottom },
+            visible: coords.top >= bounds.top && coords.bottom <= bounds.bottom
+          };
+        },
+        write: (measurement) => {
+          if (!measurement || !isCurrent(candidate)) return;
+          candidate.remainingFrames -= 1;
+          if (!measurement.visible) {
+            candidate.stableFrames = 0;
+            viewport.revealCaret(measurement.caret, () => isCurrent(candidate));
+          } else {
+            candidate.stableFrames += 1;
+          }
+          if (candidate.remainingFrames <= 0 || candidate.stableFrames >= REQUIRED_STABLE_FRAMES) {
+            active = null;
+            return;
+          }
+          schedule(candidate);
+        }
+      });
+    });
+  };
+
+  const beginInputSettlement = (): void => {
+    cancel();
+    const candidate: ActiveInput = {
+      generation: nextGeneration,
+      position: view.state.selection.main.head,
+      awaitingDerivedPresentation: false,
+      frame: null,
+      remainingFrames: MAX_SETTLE_FRAMES,
+      stableFrames: 0
+    };
+    active = candidate;
+    schedule(candidate);
+  };
+
+  const cancelOnInteraction = () => cancel();
+  interactionTarget?.addEventListener('wheel', cancelOnInteraction, { capture: true, passive: true });
+  interactionTarget?.addEventListener('touchstart', cancelOnInteraction, { capture: true, passive: true });
+  view.dom.addEventListener('pointerdown', cancelOnInteraction, true);
+  view.dom.addEventListener('blur', cancelOnInteraction, true);
+
+  return {
+    observe(update) {
+      if (disposed) return;
+      const directInput = update.transactions.some((transaction) => (
+        transaction.docChanged && transaction.isUserEvent('input')
+      ));
+      if (directInput && isActive() && view.hasFocus && view.state.selection.main.empty) {
+        beginInputSettlement();
+      } else if (update.selectionSet && !directInput) {
+        cancel();
+      }
+    },
+    cancel,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      cancel();
+      interactionTarget?.removeEventListener('wheel', cancelOnInteraction, true);
+      interactionTarget?.removeEventListener('touchstart', cancelOnInteraction, true);
       view.dom.removeEventListener('pointerdown', cancelOnInteraction, true);
       view.dom.removeEventListener('blur', cancelOnInteraction, true);
     }

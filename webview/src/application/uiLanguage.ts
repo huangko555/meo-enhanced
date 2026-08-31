@@ -26,6 +26,10 @@ export type UiStrings = Readonly<{
   more: string;
   moreTools: string;
   editorAppearance: string;
+  editorFontSize: string;
+  custom: string;
+  decreaseFontSize: string;
+  increaseFontSize: string;
   interfaceLanguage: string;
   showLineNumbers: string;
   foldLongCodeBlocks: string;
@@ -177,6 +181,7 @@ export type UiStrings = Readonly<{
   currentEdits: string;
   recentSave: string;
   gitHead: string;
+  diffBaselineLabel: (baseline: string) => string;
   dismissNotification: string;
   liveModeFailure: string;
   editorUpdateFailure: string;
@@ -193,16 +198,17 @@ export type UiStrings = Readonly<{
 const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
   en: Object.freeze({
     auto: 'Auto', light: 'Light', dark: 'Dark', previewTitle: 'Markdown Preview',
-    previewAppearance: 'Preview appearance', previewSourceColoring: 'Preview source coloring',
-    previewCodeColors: 'Code colors', previewCodeColorsOn: 'On', previewCodeColorsOff: 'Off',
-    previewFontFamily: 'Preview font family',
+    previewAppearance: 'Theme', previewSourceColoring: 'Preview source coloring',
+    previewCodeColors: 'Code color', previewCodeColorsOn: 'On', previewCodeColorsOff: 'Off',
+    previewFontFamily: 'Font',
     previewFontPlaceholder: 'VS Code editor font',
     previewFontUnavailable: 'Local font list unavailable; type a family name',
     previewGenerating: 'Generating preview…',
     previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
     exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportAsHtml: 'Export as HTML',
     exportAsPdf: 'Export as PDF', findAndReplace: 'Find and Replace', more: 'Settings',
-    moreTools: 'Settings', editorAppearance: 'Editor appearance',
+    moreTools: 'Settings', editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
+    custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
     interfaceLanguage: 'Interface language', showLineNumbers: 'Show line numbers',
     foldLongCodeBlocks: 'Fold long code blocks',
     findAndReplacePanel: 'Find and replace', find: 'Find', replace: 'Replace',
@@ -270,7 +276,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     codeBlock: 'Code Block', quote: 'Quote', horizontalRule: 'Horizontal Rule',
     link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Lines',
     goToLine: 'Go to line', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
-    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Reload disk version (double-click)',
+    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Click again to reload disk version',
     constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
     disableConstrainedWidth: 'Disable Constrained Width',
     hideChanges: (baseline: string) => `Hide Changes (${baseline})`,
@@ -278,7 +284,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     changes: 'Changes', pinLatestSavedBaseline: 'Pin Latest Saved Version as Baseline',
     selectedMode: 'Selected Mode', showFixedBaseline: 'Show Fixed Baseline',
     releaseFixedBaseline: 'Release Fixed Baseline', currentEdits: 'Current Edits',
-    recentSave: 'Recent Save', gitHead: 'Git HEAD', dismissNotification: 'Dismiss notification',
+    recentSave: 'Recent Save', gitHead: 'Git HEAD', diffBaselineLabel: (baseline: string) => `diff: ${baseline}`,
+    dismissNotification: 'Dismiss notification',
     liveModeFailure: 'Live mode failed to render this document. Switched to Source mode.',
     editorUpdateFailure: 'Editor failed to update this document. Try reopening the file.',
     transientUpdateFailure: 'Live mode hit a transient render error while updating. Try again.',
@@ -301,7 +308,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
     findAndReplace: '查找和替换', more: '设置', moreTools: '设置',
-    editorAppearance: '编辑器外观', interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
+    editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',
+    decreaseFontSize: '减小字号', increaseFontSize: '增大字号',
+    interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
     foldLongCodeBlocks: '折叠长代码块', findAndReplacePanel: '查找和替换', find: '查找',
     replace: '替换', clearFind: '清除查找内容', clearReplace: '清除替换内容',
     wholeWord: '全字匹配', caseSensitive: '区分大小写', previousMatch: '上一个匹配项',
@@ -365,7 +374,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
     horizontalRule: '分隔线', link: '链接', wikiLink: 'Wiki 链接', image: '图片', table: '表格',
     line: '行号', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
-    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '重新加载磁盘版本（双击）',
+    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '再次点击以重新加载磁盘版本',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',
     hideChanges: (baseline: string) => `隐藏更改（${baseline}）`,
@@ -373,7 +382,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     changes: '更改', pinLatestSavedBaseline: '将最近保存版本固定为基线',
     selectedMode: '所选模式', showFixedBaseline: '显示固定基线',
     releaseFixedBaseline: '释放固定基线', currentEdits: '当前编辑', recentSave: '最近保存',
-    gitHead: 'Git HEAD', dismissNotification: '关闭通知',
+    gitHead: 'Git HEAD', diffBaselineLabel: (baseline: string) => `diff：${baseline}`,
+    dismissNotification: '关闭通知',
     liveModeFailure: '实时模式无法渲染此文档，已切换到源码模式。',
     editorUpdateFailure: '编辑器无法更新此文档，请重新打开文件。',
     transientUpdateFailure: '实时模式更新时遇到临时渲染错误，请重试。',
@@ -381,7 +391,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     transientLoadRetry: '实时模式加载时遇到临时渲染错误，正在重试…',
     transientLoadFailure: '实时模式加载时遇到临时渲染错误，请重新打开文件或切换模式。',
     pasteImageFailure: (message: string) => `无法粘贴图片：${message}`,
-    properties: '属性',
+    properties: 'Properties',
     resyncFailureNotice: '无法重新同步文档，已保留本地编辑。',
     externalConflictNotice: '存在本地编辑时文档发生了外部变更，已保留本地编辑。'
   })

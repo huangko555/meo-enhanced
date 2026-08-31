@@ -144,7 +144,7 @@ async function main() {
       button.click();
       const afterClick = messages.filter((message) => message.type === 'reloadDocumentFromDisk').length;
       const firstArmed = button.classList.contains('is-discard-armed');
-      await new Promise((resolve) => window.setTimeout(resolve, 550));
+      await new Promise((resolve) => window.setTimeout(resolve, 3050));
       const recoveredAfterTimeout = !button.classList.contains('is-discard-armed');
       button.click();
       button.click();
@@ -163,6 +163,10 @@ async function main() {
         topLine: discard?.topLine ?? null
       };
     });
+    const codeBlockIconShape = await page.$eval(
+      '[data-action="codeBlock"] svg',
+      (icon) => ({ paths: icon.querySelectorAll('path').length, rects: icon.querySelectorAll('rect').length })
+    );
 
     const failures: string[] = [];
     if (JSON.stringify(localizedFindChrome) !== JSON.stringify({
@@ -195,6 +199,9 @@ async function main() {
       discardState.topLine === null
     ) {
       failures.push(`Discard control did not provide timed two-click confirmation with viewport context: ${JSON.stringify(discardState)}`);
+    }
+    if (codeBlockIconShape.paths !== 2 || codeBlockIconShape.rects !== 1) {
+      failures.push(`Code block control did not use SquareCode: ${JSON.stringify(codeBlockIconShape)}`);
     }
     if (failures.length) throw new Error(failures.join('\n'));
     console.log('webview search and control checks passed');

@@ -377,6 +377,7 @@ async function main(): Promise<void> {
         };
       };
       const editor = (window as any).__syntaxPublicationEditor;
+      const publicationDocumentLength = editor.view.state.doc.length;
       return {
         realHeader: summarize('| Real A | Real B |'),
         validTag: summarize('paragraph with #valid-tag'),
@@ -388,7 +389,11 @@ async function main(): Promise<void> {
         fenceEnd: summarize('```'),
         text: editor.getText(),
         history: editor.getHistoryDepth(),
+        // Earlier editors remain mounted so their asynchronous parser-publication
+        // transactions can arrive during this phase. Attribute only calls made
+        // for the publication document under test.
         calls: structuredClone((window as any).__meoSyntaxParseCalls)
+          .filter((call: ParseCall) => call.docLength === publicationDocumentLength)
       };
     });
     assert.equal(publicationDecorations.text, publicationText);

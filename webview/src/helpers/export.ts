@@ -39,7 +39,8 @@ export const getExportStyleEnvironment = (code: {
     return /^var\(/i.test(value) ? fallback : value || fallback;
   };
 
-  const editorFontSizeRaw = rootStyles.getPropertyValue('--vscode-editor-font-size').trim();
+  const customEditorFontSizeRaw = rootStyles.getPropertyValue('--meo-user-editor-font-size').trim();
+  const editorFontSizeRaw = customEditorFontSizeRaw || rootStyles.getPropertyValue('--vscode-editor-font-size').trim();
   const fontSizeRaw = editorFontSizeRaw || (editorStyles?.fontSize || bodyStyles.fontSize || '').trim();
   const parsedFontSize = Number.parseFloat(fontSizeRaw);
   const editorFontFamilyRaw = rootStyles.getPropertyValue('--vscode-editor-font-family').trim();

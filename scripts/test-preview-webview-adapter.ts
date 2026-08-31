@@ -25,12 +25,17 @@ const surface = {
   preload(text: string) {
     calls.push({ type: 'preload', text });
   },
-  requestRender(text: string, options: { force?: boolean; preserveViewport?: boolean } = {}) {
+  requestRender(text: string, options: {
+    force?: boolean;
+    preserveViewport?: boolean;
+    preserveFrame?: boolean;
+  } = {}) {
     calls.push({
       type: 'render',
       text,
       force: options.force === true,
-      preserveViewport: options.preserveViewport === true
+      preserveViewport: options.preserveViewport === true,
+      preserveFrame: options.preserveFrame === true
     });
   },
   acceptRenderResponse(message: PreviewRenderResponse) {
@@ -55,7 +60,7 @@ assert.deepEqual(calls, [
 adapter.setActive({ active: true, text: 'visible' });
 assert.deepEqual(calls.slice(4), [
   { type: 'visible', visible: true },
-  { type: 'render', text: 'visible', force: false, preserveViewport: false }
+  { type: 'render', text: 'visible', force: false, preserveViewport: false, preserveFrame: false }
 ]);
 
 adapter.setActive({ active: true, text: 'updated' });
@@ -64,11 +69,15 @@ assert.deepEqual(calls.filter(call => call.type === 'appearance'), [
 ]);
 adapter.refreshVisible('theme refresh');
 assert.deepEqual(calls.at(-1), {
-  type: 'render', text: 'theme refresh', force: true, preserveViewport: true
+  type: 'render', text: 'theme refresh', force: true, preserveViewport: true, preserveFrame: false
 });
 adapter.refreshVisible('external transaction', { preserveViewport: false });
 assert.deepEqual(calls.at(-1), {
-  type: 'render', text: 'external transaction', force: true, preserveViewport: false
+  type: 'render', text: 'external transaction', force: true, preserveViewport: false, preserveFrame: false
+});
+adapter.refreshVisible('font-size refresh', { preserveFrame: true });
+assert.deepEqual(calls.at(-1), {
+  type: 'render', text: 'font-size refresh', force: true, preserveViewport: true, preserveFrame: true
 });
 
 const response: PreviewRenderResponse = {

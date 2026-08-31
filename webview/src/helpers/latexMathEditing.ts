@@ -3,7 +3,7 @@ import { EditorView, Decoration, WidgetType, keymap, lineNumbers, type Decoratio
 import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
-import { getViewportController } from './viewportController';
+import { getViewportController, visualLineContextMargin } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
@@ -16,13 +16,17 @@ import {
   type RenderedBlockMode,
   type RenderedBlockModeShellDecision
 } from '../editor/renderedBlockModeShell';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import {
   renderRenderedBlockModeButton,
   retainRenderedBlockModePointerFocus
 } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import {
+  createNestedEditorInteractionContinuity,
+  type EditorInteractionContinuity
+} from '../editor/interactionContinuity';
 
 export type LatexMathBlockMode = RenderedBlockMode;
 
@@ -224,7 +228,7 @@ function preserveAnchorWhileDispatching(
   controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects }));
 }
 
-class LatexMathToolbarWidget extends WidgetType {
+class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
   constructor(
     readonly anchor: number,
     readonly lineNumber: number,
@@ -237,6 +241,7 @@ class LatexMathToolbarWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof LatexMathToolbarWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.anchor === this.anchor &&
       other.lineNumber === this.lineNumber &&
       other.mode === this.mode &&
@@ -260,6 +265,7 @@ class LatexMathToolbarWidget extends WidgetType {
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.blockTo);
     toolbar.dataset.meoLatexMathMode = this.mode;
+    toolbar.dataset.meoUiLanguage = uiLanguage;
     toolbar[latexToolbarSourceText] = this.sourceText;
 
     const modeButton = document.createElement('button');
@@ -333,9 +339,11 @@ class LatexMathToolbarWidget extends WidgetType {
 
   updateDOM(dom: HTMLElement, view: EditorView): boolean {
     const toolbar = dom as LatexToolbarElement;
+    const uiLanguage = view.state.facet(uiLanguageFacet);
     if (
       !toolbar.classList.contains('meo-latex-math-toolbar') ||
-      toolbar.dataset.meoBlockFrom !== String(this.anchor)
+      toolbar.dataset.meoBlockFrom !== String(this.anchor) ||
+      toolbar.dataset.meoUiLanguage !== uiLanguage
     ) return false;
     const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
     if (!modeButton) return false;
@@ -346,7 +354,7 @@ class LatexMathToolbarWidget extends WidgetType {
       modeButton,
       this.mode,
       this.lineNumber,
-      view.state.facet(uiLanguageFacet)
+      uiLanguage
     );
     return true;
   }
@@ -404,6 +412,7 @@ class LatexMathEditingController {
   private previewHost: HTMLElement | null = null;
   private previewViewport: LatexMathViewportController | null = null;
   private syncingFromOuter = false;
+  private innerInteractionContinuity: EditorInteractionContinuity | null = null;
 
   constructor(
     outerView: EditorView,
@@ -451,6 +460,7 @@ class LatexMathEditingController {
             ...defaultKeymap
           ]),
           EditorView.updateListener.of((update) => {
+            this.innerInteractionContinuity?.observe(update);
             if (!update.docChanged || this.syncingFromOuter) {
               return;
             }
@@ -476,6 +486,26 @@ class LatexMathEditingController {
         ]
       }),
       parent: this.sourceHost
+    });
+
+    this.innerInteractionContinuity = createNestedEditorInteractionContinuity({
+      view: this.innerView,
+      isActive: () => this.root.isConnected,
+      interactionTarget: this.outerView.scrollDOM,
+      viewport: {
+        readBounds: () => this.outerView.scrollDOM.getBoundingClientRect(),
+        revealCaret: (caret, isCurrent) => {
+          if (!isCurrent()) return;
+          const bounds = this.outerView.scrollDOM.getBoundingClientRect();
+          const margin = visualLineContextMargin(this.outerView, 1);
+          const top = caret.top < bounds.top
+            ? caret.top - bounds.top - margin
+            : caret.bottom > bounds.bottom
+              ? caret.bottom - bounds.bottom + margin
+              : 0;
+          if (top !== 0) getViewportController(this.outerView)?.navigateBy({ top });
+        }
+      }
     });
 
     this.setMode(mode, true);
@@ -637,6 +667,8 @@ class LatexMathEditingController {
   }
 
   destroy(): void {
+    this.innerInteractionContinuity?.dispose();
+    this.innerInteractionContinuity = null;
     this.previewViewport?.destroy();
     this.previewViewport = null;
     this.innerView.destroy();
@@ -644,7 +676,7 @@ class LatexMathEditingController {
   }
 }
 
-export class LatexMathEditingWidget extends WidgetType {
+export class LatexMathEditingWidget extends UiLanguageSensitiveWidget {
   constructor(
     readonly block: LatexMathEditingBlock,
     readonly mode: Exclude<LatexMathBlockMode, 'preview'>,
@@ -664,6 +696,7 @@ export class LatexMathEditingWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof LatexMathEditingWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.block.anchor === this.block.anchor &&
       other.block.lineNumber === this.block.lineNumber &&
       other.block.sourceText === this.block.sourceText &&

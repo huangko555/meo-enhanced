@@ -1,5 +1,5 @@
-import githubLight from '@shikijs/themes/github-light';
 import darkPlus from '@shikijs/themes/dark-plus';
+import lightPlus from '@shikijs/themes/light-plus';
 import {
   resolveFinalCodePalette,
   type FinalCodePalette,
@@ -7,7 +7,10 @@ import {
 } from '../application/finalCodePalette';
 
 export type CodePaletteWebviewAdapter = {
-  resolve(currentVscodeTheme: RawCodeTheme | null | undefined, appearance: 'light' | 'dark'): FinalCodePalette;
+  resolve(
+    currentVscodeTheme: RawCodeTheme | null | undefined,
+    appearance: 'light' | 'dark'
+  ): FinalCodePalette;
   apply(palette: FinalCodePalette): void;
 };
 
@@ -16,21 +19,33 @@ export function createCodePaletteWebviewAdapter(input: {
   readonly setShikiTheme: (theme: RawCodeTheme | null | undefined) => void;
   readonly sourceStyle?: Pick<CSSStyleDeclaration, 'setProperty'>;
 }): CodePaletteWebviewAdapter {
-  const fallbackThemes = Object.freeze({
-    light: githubLight as RawCodeTheme,
+  const previewFallbackThemes = Object.freeze({
+    light: lightPlus as RawCodeTheme,
+    dark: darkPlus as RawCodeTheme
+  });
+  const sourceFallbackThemes = Object.freeze({
+    light: lightPlus as RawCodeTheme,
     dark: darkPlus as RawCodeTheme
   });
 
   return {
     resolve(currentVscodeTheme, appearance) {
-      return resolveFinalCodePalette(currentVscodeTheme, fallbackThemes[appearance], appearance);
+      return resolveFinalCodePalette(
+        currentVscodeTheme,
+        previewFallbackThemes[appearance],
+        appearance,
+        sourceFallbackThemes[appearance]
+      );
     },
     apply(palette) {
       const sourceStyle = input.sourceStyle ?? document.documentElement.style;
       for (const [id, color] of Object.entries(palette.sourceTokens)) {
         sourceStyle.setProperty(`--meo-token-${id}-color`, color);
       }
-      input.setShikiTheme(palette.theme);
+      // All fenced-code surfaces share this Shiki runtime. When the editor
+      // appearance is inverse to VS Code, code tokens and Source prose switch
+      // together to the appearance-matched native fallback palette.
+      input.setShikiTheme(palette.sourceTheme);
     }
   };
 }

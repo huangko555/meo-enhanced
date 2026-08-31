@@ -10,7 +10,7 @@ import {
   type MermaidDiagramPresentationConsumer
 } from '../editor/mermaidDiagramPresentation';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
-import { getViewportController } from './viewportController';
+import { getViewportController, visualLineContextMargin } from './viewportController';
 import { applyLiveBlockIndent } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import {
@@ -23,13 +23,18 @@ import {
   type RenderedBlockMode,
   type RenderedBlockModeShellDecision
 } from '../editor/renderedBlockModeShell';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import {
   renderRenderedBlockModeButton,
   retainRenderedBlockModePointerFocus
 } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import {
+  createNestedEditorInteractionContinuity,
+  type EditorInteractionContinuity
+} from '../editor/interactionContinuity';
+import { shikiDocumentHighlight } from './shikiDecorations';
 
 export type MermaidBlockMode = RenderedBlockMode;
 
@@ -238,7 +243,7 @@ function preserveAnchorWhileDispatching(
   controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects }));
 }
 
-class MermaidToolbarWidget extends WidgetType {
+class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
   constructor(
     readonly anchor: number,
     readonly lineNumber: number,
@@ -250,6 +255,7 @@ class MermaidToolbarWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof MermaidToolbarWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.anchor === this.anchor &&
       other.lineNumber === this.lineNumber &&
       other.mode === this.mode &&
@@ -272,6 +278,7 @@ class MermaidToolbarWidget extends WidgetType {
     toolbar.dataset.meoBlockFrom = String(this.anchor);
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
     toolbar.dataset.meoMermaidMode = this.mode;
+    toolbar.dataset.meoUiLanguage = uiLanguage;
     toolbar[mermaidToolbarCodeContent] = this.codeContent;
 
     const modeButton = document.createElement('button');
@@ -347,20 +354,23 @@ class MermaidToolbarWidget extends WidgetType {
 
   updateDOM(dom: HTMLElement, view: EditorView): boolean {
     const toolbar = dom as MermaidToolbarElement;
+    const uiLanguage = view.state.facet(uiLanguageFacet);
     if (
       !toolbar.classList.contains('meo-mermaid-toolbar') ||
-      toolbar.dataset.meoBlockFrom !== String(this.anchor)
+      toolbar.dataset.meoBlockFrom !== String(this.anchor) ||
+      toolbar.dataset.meoUiLanguage !== uiLanguage
     ) return false;
     const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
     if (!modeButton) return false;
     toolbar.dataset.meoBlockTo = String(this.anchor + this.codeContent.length);
     toolbar.dataset.meoMermaidMode = this.mode;
+    toolbar.dataset.meoUiLanguage = uiLanguage;
     toolbar[mermaidToolbarCodeContent] = this.codeContent;
     updateMermaidModeButton(
       modeButton,
       this.mode,
       this.lineNumber,
-      view.state.facet(uiLanguageFacet)
+      uiLanguage
     );
     return true;
   }
@@ -504,6 +514,7 @@ type MermaidSourceProjectionLock = {
   releaseOnInteraction: () => void;
   previousSelection: EditorSelection;
   pinnedSelection: EditorSelection | null;
+  isExplicitNavigationCurrent: () => boolean;
 };
 
 const mermaidSourceProjectionLocks = new WeakMap<
@@ -514,7 +525,8 @@ const mermaidSourceProjectionLocks = new WeakMap<
 function releaseMermaidSourceProjectionLock(
   outerView: EditorView,
   anchor: number,
-  lock: MermaidSourceProjectionLock
+  lock: MermaidSourceProjectionLock,
+  preserveScroll = false
 ): void {
   const locks = mermaidSourceProjectionLocks.get(outerView);
   if (locks?.get(anchor) !== lock) return;
@@ -536,6 +548,12 @@ function releaseMermaidSourceProjectionLock(
       selection: lock.previousSelection,
       annotations: Transaction.addToHistory.of(false)
     });
+  }
+  if (preserveScroll && outerView.dom.isConnected) {
+    getViewportController(outerView)?.lockScrollTop(
+      lock.scrollTop,
+      lock.isExplicitNavigationCurrent
+    );
   }
 }
 
@@ -561,7 +579,9 @@ function acquireMermaidSourceProjectionLock(
       releaseFrame: null,
       releaseOnInteraction,
       previousSelection: outerView.state.selection,
-      pinnedSelection: null
+      pinnedSelection: null,
+      isExplicitNavigationCurrent: getViewportController(outerView)
+        ?.captureExplicitNavigationCurrentness() ?? (() => true)
     };
     locks.set(anchor, lock);
     outerView.scrollDOM.addEventListener('pointerdown', releaseOnInteraction, { passive: true });
@@ -584,7 +604,7 @@ function releaseMermaidSourceProjectionLockAfterFrame(
     lock.releaseFrame = null;
     const locks = mermaidSourceProjectionLocks.get(outerView);
     if (locks?.get(anchor) !== lock) return;
-    releaseMermaidSourceProjectionLock(outerView, anchor, lock);
+    releaseMermaidSourceProjectionLock(outerView, anchor, lock, true);
   });
 }
 
@@ -605,6 +625,7 @@ class MermaidEditingController {
   private presentationFactory: MermaidDiagramPresentationConsumer;
   private syncingFromOuter = false;
   private searchReveal: MermaidSearchReveal;
+  private innerInteractionContinuity: EditorInteractionContinuity | null = null;
 
   constructor(
     outerView: EditorView,
@@ -646,6 +667,7 @@ class MermaidEditingController {
         doc: block.diagramText,
         extensions: [
           lineNumbers(),
+          shikiDocumentHighlight('mermaid'),
           innerMermaidSearchField,
           EditorView.lineWrapping,
           EditorView.domEventHandlers({
@@ -675,6 +697,7 @@ class MermaidEditingController {
             ...defaultKeymap
           ]),
           EditorView.updateListener.of((update) => {
+            this.innerInteractionContinuity?.observe(update);
             if (!update.docChanged || this.syncingFromOuter) {
               return;
             }
@@ -759,20 +782,40 @@ class MermaidEditingController {
                 currentController.innerView.contentDOM.focus({ preventScroll: true });
               }
             }
-            viewportController?.lockScrollTop(scrollTop);
+            viewportController?.lockScrollTop(scrollTop, projectionLock.isExplicitNavigationCurrent);
             const outerView = this.outerView;
             queueMicrotask(() => {
               const lockIsCurrent = mermaidSourceProjectionLocks
                 .get(outerView)
                 ?.get(this.block.anchor) === projectionLock;
               if (outerView.dom.isConnected && lockIsCurrent) {
-                viewportController?.lockScrollTop(scrollTop);
+                viewportController?.lockScrollTop(scrollTop, projectionLock.isExplicitNavigationCurrent);
               }
             });
           })
         ]
       }),
       parent: this.sourceHost
+    });
+
+    this.innerInteractionContinuity = createNestedEditorInteractionContinuity({
+      view: this.innerView,
+      isActive: () => this.root.isConnected,
+      interactionTarget: this.outerView.scrollDOM,
+      viewport: {
+        readBounds: () => this.outerView.scrollDOM.getBoundingClientRect(),
+        revealCaret: (caret, isCurrent) => {
+          if (!isCurrent()) return;
+          const bounds = this.outerView.scrollDOM.getBoundingClientRect();
+          const margin = visualLineContextMargin(this.outerView, 1);
+          const top = caret.top < bounds.top
+            ? caret.top - bounds.top - margin
+            : caret.bottom > bounds.bottom
+              ? caret.bottom - bounds.bottom + margin
+              : 0;
+          if (top !== 0) getViewportController(this.outerView)?.navigateBy({ top });
+        }
+      }
     });
 
     this.unsubscribeThemeRefresh = this.presentationFactory.subscribeThemeRefresh(() => {
@@ -988,6 +1031,8 @@ class MermaidEditingController {
   }
 
   destroy(): void {
+    this.innerInteractionContinuity?.dispose();
+    this.innerInteractionContinuity = null;
     this.unsubscribeThemeRefresh();
     const projectionLock = mermaidSourceProjectionLocks.get(this.outerView)?.get(this.block.anchor);
     if (projectionLock) {
@@ -1007,7 +1052,7 @@ class MermaidEditingController {
   }
 }
 
-export class MermaidEditingWidget extends WidgetType {
+export class MermaidEditingWidget extends UiLanguageSensitiveWidget {
   constructor(
     readonly block: MermaidEditingBlock,
     readonly mode: Exclude<MermaidBlockMode, 'preview'>,
@@ -1027,6 +1072,7 @@ export class MermaidEditingWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof MermaidEditingWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.block.anchor === this.block.anchor &&
       other.block.startLine === this.block.startLine &&
       other.block.diagramText === this.block.diagramText &&

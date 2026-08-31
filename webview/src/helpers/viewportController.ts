@@ -280,6 +280,7 @@ export class ViewportController {
   private lastScrollDirection: -1 | 0 | 1 = 0;
   private interactionGeneration = 0;
   private navigationGeneration = 0;
+  private explicitNavigationGeneration = 0;
   private pendingNavigationTarget: { position: number; generation: number } | null = null;
   private scrollLockGeneration = 0;
   private activeScrollTarget: ActiveScrollTarget | null = null;
@@ -1040,12 +1041,23 @@ export class ViewportController {
     this.lastTouchY = null;
   }
 
+  /** Captures whether a later explicit navigation superseded transient layout ownership. */
+  captureExplicitNavigationCurrentness(): () => boolean {
+    const generation = this.explicitNavigationGeneration;
+    return () => !this.destroyed && generation === this.explicitNavigationGeneration;
+  }
+
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
     // An explicit newer navigation supersedes an absolute scroll lock left by
-    // transient-edit settlement. Otherwise the old lock can pull the viewport
-    // back after the new target has already been shown.
+    // transient-edit settlement and any previous gesture's idle window.
+    // Otherwise the old owner can pull the viewport back, or make the new
+    // command look like it is still part of the earlier wheel gesture.
     this.scrollLockGeneration += 1;
+    this.explicitNavigationGeneration += 1;
+    this.lastWheelAt = Number.NEGATIVE_INFINITY;
+    this.lastTouchMoveAt = Number.NEGATIVE_INFINITY;
+    this.lastTouchY = null;
     const navigationGeneration = ++this.navigationGeneration;
     this.pendingNavigationTarget = null;
     return () => !this.destroyed && navigationGeneration === this.navigationGeneration;

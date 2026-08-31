@@ -86,10 +86,9 @@ async function main(): Promise<void> {
     assert.equal(initial.search.found, true);
     assert.equal(initial.focused, true);
     assert.ok(initial.lineNumbers > 1);
-    assert.equal(
-      await styledCodeTokenCount(page),
-      0,
-      'Source startup must not run the Live-only Shiki renderer or write its inline token styles'
+    assert.ok(
+      await styledCodeTokenCount(page) > 0,
+      'Source startup must use the same lazy native token renderer as Live for supported code blocks'
     );
 
     await page.evaluate(() => {
@@ -160,6 +159,8 @@ async function main(): Promise<void> {
           head: editor.view.state.selection.main.head
         },
         focused: editor.hasFocus(),
+        styledLatestValue: Array.from(document.querySelectorAll<HTMLElement>('.cm-content span[style*="color:"]'))
+          .some((node) => node.textContent?.includes('latest_value')),
         richPresentationCount: document.querySelectorAll([
           '.meo-mermaid-block',
           '.meo-md-math',
@@ -175,11 +176,7 @@ async function main(): Promise<void> {
     assert.deepEqual(afterLate.selection, beforeLate.selection);
     assert.equal(afterLate.focused, true);
     assert.equal(afterLate.richPresentationCount, 0);
-    assert.equal(
-      await styledCodeTokenCount(page),
-      0,
-      'Live-to-Source must reject late Shiki DOM presentation'
-    );
+    assert.equal(afterLate.styledLatestValue, true, 'Source must retain only the latest shared code-token presentation');
 
     await page.evaluate(() => (window as any).__sourceLightweightEditor.setMode('live'));
     await page.waitForFunction(
