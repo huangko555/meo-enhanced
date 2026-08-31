@@ -1,6 +1,7 @@
 import {
   getShikiThemeMeta,
   getShikiTokens,
+  getShikiThemeVersion,
   requestShikiTokens,
   resolveShikiLang,
   type ShikiToken
@@ -11,7 +12,9 @@ const FONT_STYLE_BOLD = 2;
 const FONT_STYLE_UNDERLINE = 4;
 
 function applyTokenStyle(element: HTMLElement, syntaxToken: ShikiToken, color?: string): void {
-  element.style.color = color ?? syntaxToken.color ?? '';
+  // Shiki has already resolved the active VS Code TextMate theme at token
+  // scope precision. Reclassifying it here loses theme-specific distinctions.
+  element.style.color = color ?? syntaxToken.color ?? 'var(--meo-code-fg)';
   const fontStyle = syntaxToken.fontStyle ?? 0;
   if (fontStyle & FONT_STYLE_ITALIC) element.style.fontStyle = 'italic';
   if (fontStyle & FONT_STYLE_BOLD) element.style.fontWeight = 'bold';
@@ -20,20 +23,22 @@ function applyTokenStyle(element: HTMLElement, syntaxToken: ShikiToken, color?: 
 
 /** Projects the exact Shiki tokens used by Live mode onto an already-rendered Preview code block. */
 export function applyPreviewCodeHighlight(frameDocument: Document): void {
+  const themeVersion = String(getShikiThemeVersion('preview'));
   for (const code of frameDocument.querySelectorAll<HTMLElement>('code.hljs')) {
     const languageClass = Array.from(code.classList).find((name) => name.startsWith('language-'));
     const language = resolveShikiLang(languageClass?.slice('language-'.length));
     if (!language) continue;
     const sources = Array.from(code.querySelectorAll<HTMLElement>('.meo-export-code-line-source'));
     if (sources.length === 0) continue;
+    if (sources.every((sourceElement) => sourceElement.dataset.meoShiki === themeVersion)) continue;
     const source = sources.map((line) => line.textContent ?? '').join('\n');
-    const lines = getShikiTokens(language, source);
+    const lines = getShikiTokens(language, source, 'preview');
     if (!lines) {
-      requestShikiTokens(language, source);
+      requestShikiTokens(language, source, 'preview');
       continue;
     }
 
-    const meta = getShikiThemeMeta();
+    const meta = getShikiThemeMeta('preview');
     let bracketDepth = 0;
     for (const [lineIndex, sourceElement] of sources.entries()) {
       const fragment = frameDocument.createDocumentFragment();
@@ -72,7 +77,7 @@ export function applyPreviewCodeHighlight(frameDocument: Document): void {
         }
       }
       sourceElement.replaceChildren(fragment);
-      sourceElement.dataset.meoShiki = 'true';
+      sourceElement.dataset.meoShiki = themeVersion;
     }
   }
 }

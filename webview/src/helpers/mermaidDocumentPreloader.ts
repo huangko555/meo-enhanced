@@ -5,6 +5,7 @@ import {
   getMermaidEditorPresentationIdentity,
   normalizeMermaidDiagramText
 } from './mermaidDiagram';
+import type { MermaidDiagramRenderRequest } from '../application/mermaidDiagramRenderResources';
 import type { MermaidDiagramPresentationConsumer } from '../editor/mermaidDiagramPresentation';
 
 export type MermaidDocumentPreloader = {
@@ -57,18 +58,39 @@ export function orderMermaidPreloads(
   return ordered;
 }
 
+export async function preloadMermaidDocumentBatch(
+  consumer: Pick<MermaidDiagramPresentationConsumer, 'preload'>,
+  requests: readonly MermaidDiagramRenderRequest[],
+  isActive: () => boolean,
+  onBatchAvailable: () => void
+): Promise<void> {
+  let completed = false;
+  for (const request of requests) {
+    if (!isActive()) return;
+    await consumer.preload(request);
+    if (!isActive()) return;
+    completed = true;
+  }
+  // Preloaded results are content-addressed and offscreen widgets consume them
+  // when mounted. One trailing refresh is sufficient for already-mounted
+  // decorations; refreshing after every diagram rebuilds the whole Live tree.
+  if (completed) onBatchAvailable();
+}
+
 /** Owns bounded, deduplicated Mermaid warming for one Live Editor. */
 export function createMermaidDocumentPreloader(
   consumer: MermaidDiagramPresentationConsumer,
-  onHeightAvailable: () => void
+  onBatchAvailable: () => void
 ): MermaidDocumentPreloader {
   let latestState: EditorState | null = null;
   let timer: number | null = null;
+  let generation = 0;
   let disposed = false;
 
   const run = (): void => {
     timer = null;
     if (disposed || !latestState) return;
+    const runGeneration = generation;
     const identity = getMermaidEditorPresentationIdentity();
     const requests = orderMermaidPreloads(collectDocumentMermaidSources(latestState)).map(({ source }) => ({
       rawSource: source,
@@ -77,18 +99,18 @@ export function createMermaidDocumentPreloader(
       configKey: identity.configKey,
       priority: 'normal' as const
     }));
-    void (async () => {
-      for (const request of requests) {
-        if (disposed) return;
-        await consumer.preload(request);
-        if (!disposed) onHeightAvailable();
-      }
-    })();
+    void preloadMermaidDocumentBatch(
+      consumer,
+      requests,
+      () => !disposed && generation === runGeneration,
+      onBatchAvailable
+    );
   };
 
   const schedule = (state: EditorState): void => {
     if (disposed) return;
     latestState = state;
+    generation += 1;
     if (timer !== null) window.clearTimeout(timer);
     timer = window.setTimeout(run, 40);
   };
@@ -102,6 +124,7 @@ export function createMermaidDocumentPreloader(
     dispose() {
       if (disposed) return;
       disposed = true;
+      generation += 1;
       if (timer !== null) window.clearTimeout(timer);
       timer = null;
       latestState = null;

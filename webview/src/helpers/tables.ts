@@ -32,7 +32,7 @@ import {
   type InlineDomCaret
 } from './inlinePresentation';
 import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import {
   getTableTransactionProvenance,
@@ -2307,7 +2307,7 @@ export function refreshMountedTablePositions(
   for (const widget of widgets) widget.refreshCurrentPosition(view, diagnostics, diffLineFlags);
 }
 
-class HtmlTableWidget extends WidgetType {
+class HtmlTableWidget extends UiLanguageSensitiveWidget {
   tableData: WidgetTableData;
   view: EditorView | null;
   layoutFrame: number;
@@ -2390,6 +2390,7 @@ class HtmlTableWidget extends WidgetType {
   eq(other: WidgetType): boolean {
     const equivalent = (
       other instanceof HtmlTableWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.tableData.indent === this.tableData.indent &&
       other.tableData.colCount === this.tableData.colCount &&
       other.tableData.headerCells.length === this.tableData.headerCells.length &&

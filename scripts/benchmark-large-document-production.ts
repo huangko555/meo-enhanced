@@ -223,9 +223,12 @@ function assertLiveResourceBound(
   sample: StableSample,
   resources: ResourceSample
 ): void {
-  const connectedRichBlocks = sample.tables + sample.mermaid + sample.images + sample.math;
+  // Live owns three editor-wide observers. Each connected table owns height,
+  // column-width, and sticky-header observers; Mermaid and math own one each.
+  // Image widgets do not own ResizeObservers.
+  const connectedResizeOwners = 3 + sample.tables * 3 + sample.mermaid + sample.math;
   assert.ok(
-    resources.resizeObservers <= 4 + connectedRichBlocks,
+    resources.resizeObservers <= connectedResizeOwners,
     `${kind} allocated ResizeObservers outside the connected rich surface: ${JSON.stringify({ sample, resources })}`
   );
   assert.ok(

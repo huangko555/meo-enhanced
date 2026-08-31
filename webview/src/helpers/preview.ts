@@ -20,6 +20,7 @@ type PreviewControllerOptions = {
   uiLanguage: UiLanguage;
   getEditorAppearance: () => 'light' | 'dark';
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
+  applyCodeTheme: (appearance: 'light' | 'dark') => void;
   onRendered?: () => void;
   onFindRequested?: () => void;
   onViewportInteraction?: () => void;
@@ -38,8 +39,16 @@ type PreviewViewportProjectionSlot = {
 };
 
 const previewScrollbarStyles = `
+html[data-meo-preview-source-coloring="false"] .meo-export-code-line-source > span {
+  color: inherit !important;
+  font-style: inherit !important;
+  font-weight: inherit !important;
+  text-decoration: inherit !important;
+}
+
 html,
 body {
+  overflow-anchor: none;
   scrollbar-gutter: stable;
   scrollbar-color: color-mix(in srgb, var(--meo-fg) 38%, transparent) transparent;
   scrollbar-width: thin;
@@ -140,6 +149,60 @@ const previewLatexMathViewportStyles = `
 }
 `;
 
+const previewPropertiesStyles = `
+.meo-export-frontmatter {
+  --meo-preview-properties-key-width: 124px;
+  padding-inline: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.meo-export-frontmatter-header {
+  padding-inline: 12px;
+}
+
+.meo-export-frontmatter-line {
+  padding: 5px 12px;
+  border-radius: 0;
+  border-top: 1px solid color-mix(in srgb, var(--meo-border) 62%, transparent);
+}
+
+.meo-export-frontmatter-line.is-property {
+  grid-template-columns: var(--meo-preview-properties-key-width) minmax(0, 1fr);
+  column-gap: 0;
+  padding: 0 12px 0 0;
+}
+
+.meo-export-frontmatter-key-cell {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 5px 10px 5px 12px;
+  border-right: 1px solid color-mix(in srgb, var(--meo-border) 82%, transparent);
+  background: color-mix(in srgb, var(--meo-border) 13%, transparent);
+}
+
+.meo-export-frontmatter-line.is-property > :is(
+  .meo-export-frontmatter-value,
+  .meo-export-frontmatter-value-group
+) {
+  padding: 5px 0 5px 16px;
+}
+
+.meo-export-frontmatter-value-line + .meo-export-frontmatter-value-line {
+  margin-top: 2px;
+}
+
+.meo-export-frontmatter-line:is(.is-list-item, .is-raw) {
+  padding-left: calc(var(--meo-preview-properties-key-width) + 16px);
+}
+
+@media (max-width: 520px) {
+  .meo-export-frontmatter {
+    --meo-preview-properties-key-width: 92px;
+  }
+}
+`;
+
 function collectPreviewKatexStyles(katexHref: string): string {
   if (!katexHref) {
     return '';
@@ -178,6 +241,7 @@ export function createPreviewController({
   uiLanguage: initialUiLanguage,
   getEditorAppearance,
   getCodePalette,
+  applyCodeTheme,
   onRendered,
   onFindRequested,
   onViewportInteraction,
@@ -272,6 +336,7 @@ export function createPreviewController({
   let frameGeneration = 0;
   let mermaidPresentationGeneration = 0;
   let activeFrameDocument: Document | null = null;
+  let pendingPresentationScroll: { document: Document; scrollTop: number } | null = null;
   let hasPendingRequest = false;
   let pendingViewportRestore: PreviewViewportRestore | null = null;
   let acceptingViewportProjection: PreviewViewportProjectionSlot | null = null;
@@ -290,12 +355,12 @@ export function createPreviewController({
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
   let disposed = false;
-  const releasePreviewCodeHighlighting = activateShikiCodeHighlighting();
+  const releasePreviewCodeHighlighting = activateShikiCodeHighlighting('preview');
   const unsubscribePreviewCodeHighlight = subscribeShikiRefresh(() => {
     if (!disposed && sourceColoring && activeFrameDocument) {
       applyPreviewCodeHighlight(activeFrameDocument);
     }
-  });
+  }, 'preview');
 
   const withViewportTransaction = (
     mutate: (slot: PreviewViewportProjectionSlot) => void
@@ -441,6 +506,23 @@ export function createPreviewController({
     appearanceSelectControl.syncFromSelect();
   };
 
+  const syncPreviewCodeHighlight = (frameDocument: Document): void => {
+    frameDocument.documentElement.dataset.meoPreviewSourceColoring = String(sourceColoring);
+    if (sourceColoring) applyPreviewCodeHighlight(frameDocument);
+  };
+
+  const capturePresentationScroll = (): void => {
+    const frameDocument = activeFrameDocument;
+    const scrollElement = frameDocument?.scrollingElement;
+    if (!frameDocument || !scrollElement) return;
+    if (!pendingPresentationScroll || pendingPresentationScroll.document !== frameDocument) {
+      pendingPresentationScroll = {
+        document: frameDocument,
+        scrollTop: scrollElement.scrollTop
+      };
+    }
+  };
+
   const setStatus = (message: string | null) => {
     status.hidden = !message;
     status.textContent = message ?? '';
@@ -458,6 +540,7 @@ export function createPreviewController({
     frameGeneration = loadGeneration;
     mermaidPresentationGeneration += 1;
     activeFrameDocument = null;
+    pendingPresentationScroll = null;
     frameRenderedText = null;
     frame.style.visibility = 'hidden';
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
@@ -489,7 +572,7 @@ export function createPreviewController({
       scrollToTopController.setScrollElement(frameDocument.scrollingElement, frameDocument);
       frameDocument.body.tabIndex = -1;
       attachPreviewMathViewports(frameDocument);
-      if (sourceColoring) applyPreviewCodeHighlight(frameDocument);
+      syncPreviewCodeHighlight(frameDocument);
       if (viewportRestore?.isCurrent()) {
         restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
       }
@@ -525,7 +608,7 @@ export function createPreviewController({
     };
     disposePreviewMathViewports();
     scrollToTopController.setScrollElement(null);
-    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
+    frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewPropertiesStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
   const applyAppearanceToFrame = () => {
@@ -536,26 +619,33 @@ export function createPreviewController({
       return;
     }
     const payload = latestPayload;
-    withViewportTransaction((slot) => {
-      const presentationGeneration = mermaidPresentationGeneration + 1;
-      mermaidPresentationGeneration = presentationGeneration;
-      const isCurrent = () => (
-        !disposed &&
-        presentationGeneration === mermaidPresentationGeneration &&
-        activeFrameDocument === frameDocument &&
-        frame.contentDocument === frameDocument
-      );
-      styleElement.textContent = payload.styles[appearance];
-      const keepPosition = () => {
-        const restore = slot.restore;
-        if (!isCurrent() || !restore?.isCurrent()) return;
-        restoreTopLine(restore.line, restore.lineOffset);
-      };
-      onRendered?.();
-      if (payload.hasMermaid) {
-        void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
-      }
-    });
+    const scrollElement = frameDocument.scrollingElement;
+    const preservedScrollTop = pendingPresentationScroll?.document === frameDocument
+      ? pendingPresentationScroll.scrollTop
+      : scrollElement?.scrollTop ?? 0;
+    const presentationGeneration = mermaidPresentationGeneration + 1;
+    mermaidPresentationGeneration = presentationGeneration;
+    const isCurrent = () => (
+      !disposed &&
+      presentationGeneration === mermaidPresentationGeneration &&
+      activeFrameDocument === frameDocument &&
+      frame.contentDocument === frameDocument
+    );
+    const keepPosition = () => {
+      if (isCurrent() && scrollElement) scrollElement.scrollTop = preservedScrollTop;
+    };
+    // This is a presentation-only update of the same frame and document. A
+    // cross-surface semantic projection would race this exact reading offset.
+    styleElement.textContent = payload.styles[appearance];
+    syncPreviewCodeHighlight(frameDocument);
+    keepPosition();
+    onRendered?.();
+    if (payload.hasMermaid) {
+      void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
+    }
+    if (!hasPendingRequest && pendingPresentationScroll?.document === frameDocument) {
+      pendingPresentationScroll = null;
+    }
   };
 
   const setAppearance = (
@@ -567,10 +657,12 @@ export function createPreviewController({
     }
     const resolvedAppearance = nextAppearance === 'auto' ? getEditorAppearance() : nextAppearance;
     const changed = appearance !== resolvedAppearance;
+    if (changed) capturePresentationScroll();
     appearancePreference = nextAppearance;
     appearance = resolvedAppearance;
+    applyCodeTheme(resolvedAppearance);
     updateThemeToggle();
-    if (changed) {
+    if (changed && activeFrameDocument) {
       applyAppearanceToFrame();
     }
     if (post) {
@@ -648,10 +740,14 @@ export function createPreviewController({
       force?: boolean;
       preserveViewport?: boolean;
       preserveFrame?: boolean;
-    } = {}
+  } = {}
   ): void => {
+    const preserveCurrentFrame = preserveFrame
+      && activeFrameDocument !== null
+      && frameRenderedText === text;
+    if (preserveCurrentFrame) capturePresentationScroll();
     const mutate = () => performRequestRender(text, { background, force, preserveFrame });
-    if (preserveViewport) withViewportTransaction(() => mutate());
+    if (preserveViewport && !preserveCurrentFrame) withViewportTransaction(() => mutate());
     else mutate();
   };
 
@@ -884,7 +980,10 @@ export function createPreviewController({
     setUiLanguage: applyUiLanguage,
     syncAutoAppearance: () => {
       if (appearancePreference === 'auto') setAppearance('auto');
-      else updateThemeToggle();
+      else {
+        applyCodeTheme(appearance);
+        updateThemeToggle();
+      }
     },
     getAppearance: () => appearance,
     getSourceColoring: () => sourceColoring,

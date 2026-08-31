@@ -1,7 +1,7 @@
 import { Decoration, WidgetType, type EditorView } from '@codemirror/view';
 import type { HexColorRange } from '../../../src/shared/hexColorSwatches';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 
 export function createColorSwatchElement(value: string, uiLanguage: UiLanguage = 'en'): HTMLSpanElement {
   const swatch = document.createElement('span');
@@ -13,7 +13,7 @@ export function createColorSwatchElement(value: string, uiLanguage: UiLanguage =
   return swatch;
 }
 
-export class ColorSwatchWidget extends WidgetType {
+export class ColorSwatchWidget extends UiLanguageSensitiveWidget {
   readonly value: string;
 
   constructor(value: string) {
@@ -22,7 +22,9 @@ export class ColorSwatchWidget extends WidgetType {
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof ColorSwatchWidget && other.value === this.value;
+    return other instanceof ColorSwatchWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
+      other.value === this.value;
   }
 
   toDOM(view: EditorView): HTMLElement {

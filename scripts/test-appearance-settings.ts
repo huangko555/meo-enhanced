@@ -5,6 +5,8 @@ import {
   APPEARANCE_SETTINGS_MIGRATION_STATE_KEY,
   createAppearanceSettingsOwner,
   EDITOR_APPEARANCE_SETTING_KEY,
+  EDITOR_FONT_SIZE_MODE_SETTING_KEY,
+  EDITOR_FONT_SIZE_SETTING_KEY,
   PREVIEW_APPEARANCE_SETTING_KEY,
   PREVIEW_FONT_FAMILY_SETTING_KEY,
   PREVIEW_SOURCE_COLORING_SETTING_KEY,
@@ -81,13 +83,17 @@ const legacyValues = {
       [EDITOR_APPEARANCE_SETTING_KEY]: properties[`meoEnhanced.${EDITOR_APPEARANCE_SETTING_KEY}`]?.default,
       [PREVIEW_APPEARANCE_SETTING_KEY]: properties[`meoEnhanced.${PREVIEW_APPEARANCE_SETTING_KEY}`]?.default,
       [PREVIEW_FONT_FAMILY_SETTING_KEY]: properties[`meoEnhanced.${PREVIEW_FONT_FAMILY_SETTING_KEY}`]?.default,
-      [PREVIEW_SOURCE_COLORING_SETTING_KEY]: properties[`meoEnhanced.${PREVIEW_SOURCE_COLORING_SETTING_KEY}`]?.default
+      [PREVIEW_SOURCE_COLORING_SETTING_KEY]: properties[`meoEnhanced.${PREVIEW_SOURCE_COLORING_SETTING_KEY}`]?.default,
+      [EDITOR_FONT_SIZE_MODE_SETTING_KEY]: properties[`meoEnhanced.${EDITOR_FONT_SIZE_MODE_SETTING_KEY}`]?.default,
+      [EDITOR_FONT_SIZE_SETTING_KEY]: properties[`meoEnhanced.${EDITOR_FONT_SIZE_SETTING_KEY}`]?.default
     },
     {
       [EDITOR_APPEARANCE_SETTING_KEY]: 'auto',
       [PREVIEW_APPEARANCE_SETTING_KEY]: 'auto',
       [PREVIEW_FONT_FAMILY_SETTING_KEY]: '',
-      [PREVIEW_SOURCE_COLORING_SETTING_KEY]: true
+      [PREVIEW_SOURCE_COLORING_SETTING_KEY]: true,
+      [EDITOR_FONT_SIZE_MODE_SETTING_KEY]: 'auto',
+      [EDITOR_FONT_SIZE_SETTING_KEY]: 14
     },
     'settings schema defaults must match the runtime owner defaults'
   );
@@ -117,14 +123,16 @@ const legacyValues = {
   await owner.setPreviewAppearance('dark');
   await owner.setPreviewFontFamily('Inter');
   await owner.setPreviewSourceColoring(true);
+  await owner.setEditorFontSizePreference({ mode: 'custom', value: 18 });
   assert.deepEqual(
     [
       owner.getEditorAppearance(),
       owner.getPreviewAppearance(),
       owner.getPreviewFontFamily(),
-      owner.getPreviewSourceColoring()
+      owner.getPreviewSourceColoring(),
+      owner.getEditorFontSizePreference()
     ],
-    ['light', 'dark', 'Inter', true]
+    ['light', 'dark', 'Inter', true, { mode: 'custom', value: 18 }]
   );
 }
 

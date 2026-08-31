@@ -126,7 +126,25 @@ export const sourceFrontmatterField = StateField.define<any>({
 const sourceFrontmatterContentLineDeco = Decoration.line({ class: 'meo-md-frontmatter-line meo-md-frontmatter-content' });
 const sourceFrontmatterDelimiterLineDeco = Decoration.line({ class: 'meo-md-frontmatter-delimiter-line' });
 const sourceFrontmatterKeyDeco = Decoration.mark({ class: 'meo-md-frontmatter-key' });
-const sourceFrontmatterValueDeco = Decoration.mark({ class: 'meo-md-frontmatter-value' });
+const sourceFrontmatterPunctuationDeco = Decoration.mark({ class: 'meo-md-frontmatter-punctuation' });
+const sourceFrontmatterValueDecos = {
+  string: Decoration.mark({ class: 'meo-md-frontmatter-value is-string' }),
+  number: Decoration.mark({ class: 'meo-md-frontmatter-value is-number' }),
+  literal: Decoration.mark({ class: 'meo-md-frontmatter-value is-literal' }),
+  link: Decoration.mark({ class: 'meo-md-frontmatter-value is-link' }),
+  comment: Decoration.mark({ class: 'meo-md-frontmatter-value is-comment' })
+} as const;
+
+function sourceFrontmatterValueDeco(value: string): Decoration {
+  const normalized = value.trim();
+  if (normalized.startsWith('#')) return sourceFrontmatterValueDecos.comment;
+  if (/^(?:true|false|null|~)$/i.test(normalized)) return sourceFrontmatterValueDecos.literal;
+  if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
+    return sourceFrontmatterValueDecos.number;
+  }
+  if (/^(?:https?:\/\/|mailto:|\[\[)/i.test(normalized)) return sourceFrontmatterValueDecos.link;
+  return sourceFrontmatterValueDecos.string;
+}
 
 export function yamlFrontmatterFieldOffsets(lineText: string): YamlFieldOffsets | null {
   let offset = 0;
@@ -366,11 +384,19 @@ function buildSourceFrontmatterDecorations(state: EditorState): any {
       return;
     }
 
-    builder.add(entry.keyFrom, entry.keyTo, sourceFrontmatterKeyDeco);
+    const punctuationFrom = Math.max(entry.keyFrom, entry.keyTo - 1);
+    if (entry.keyFrom < punctuationFrom) {
+      builder.add(entry.keyFrom, punctuationFrom, sourceFrontmatterKeyDeco);
+    }
+    builder.add(punctuationFrom, entry.keyTo, sourceFrontmatterPunctuationDeco);
 
     if (entry.valueFrom !== null) {
       if (entry.valueFrom < line.to) {
-        builder.add(entry.valueFrom, line.to, sourceFrontmatterValueDeco);
+        builder.add(
+          entry.valueFrom,
+          line.to,
+          sourceFrontmatterValueDeco(state.doc.sliceString(entry.valueFrom, line.to))
+        );
       }
     }
   });

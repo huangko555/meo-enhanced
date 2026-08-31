@@ -847,13 +847,14 @@ async function main(): Promise<void> {
     const tableSelector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table)';
     const firstHandle = `${tableSelector}:first-of-type th:first-child .meo-md-html-table-column-resize-handle`;
     const firstStickyHandle = '.meo-md-html-table-sticky-table th:first-child .meo-md-html-table-column-resize-handle';
-    await waitForTableLayout(page, tableSelector, 2, 3);
+    await waitForTableLayout(page, tableSelector, 1, 3);
     await page.evaluate(() => {
       (window as any).__columnWidthProduction.scrollToLine(26, 'top');
       const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
       scroller.scrollTop += 32;
       scroller.dispatchEvent(new Event('scroll'));
     });
+    await waitForTableLayout(page, tableSelector, 2, 3);
     await page.waitForFunction(() => {
       const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome.is-visible');
       const cells = Array.from(chrome?.querySelectorAll<HTMLElement>(

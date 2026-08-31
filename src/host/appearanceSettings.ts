@@ -1,11 +1,19 @@
 import type { EditorAppearance } from '../protocol/editorCommands';
 import { normalizePreviewFontFamily } from '../protocol/editorStyleEnvironment';
 import type { PreviewAppearance } from '../protocol/readyInit';
+import {
+  normalizeEditorFontSize,
+  normalizeEditorFontSizeMode,
+  type EditorFontSizeMode,
+  type EditorFontSizePreference
+} from '../foundation/editorFontSize';
 
 const EDITOR_APPEARANCE_STATE_KEY = 'editorAppearance';
 const PREVIEW_APPEARANCE_STATE_KEY = 'previewAppearance';
 const PREVIEW_FONT_FAMILY_STATE_KEY = 'previewFontFamily';
 const PREVIEW_SOURCE_COLORING_STATE_KEY = 'previewSourceColoring';
+const EDITOR_FONT_SIZE_MODE_STATE_KEY = 'editorFontSizeMode';
+const EDITOR_FONT_SIZE_STATE_KEY = 'editorFontSize';
 
 const normalizeEditorAppearance = (value: unknown): EditorAppearance => (
   value === 'light' || value === 'dark' ? value : 'auto'
@@ -21,6 +29,8 @@ export const EDITOR_APPEARANCE_SETTING_KEY = 'appearance.editor';
 export const PREVIEW_APPEARANCE_SETTING_KEY = 'appearance.preview';
 export const PREVIEW_FONT_FAMILY_SETTING_KEY = 'preview.fontFamily';
 export const PREVIEW_SOURCE_COLORING_SETTING_KEY = 'preview.sourceColoring';
+export const EDITOR_FONT_SIZE_MODE_SETTING_KEY = 'appearance.fontSizeMode';
+export const EDITOR_FONT_SIZE_SETTING_KEY = 'appearance.fontSize';
 export const APPEARANCE_SETTINGS_MIGRATION_STATE_KEY = 'appearanceSettingsMigration';
 
 export type AppearanceSettings = {
@@ -28,6 +38,8 @@ export type AppearanceSettings = {
   previewAppearance: PreviewAppearance;
   previewFontFamily: string;
   previewSourceColoring: boolean;
+  editorFontSizeMode: EditorFontSizeMode;
+  editorFontSize: number;
 };
 
 export type AppearanceConfigurationValue = {
@@ -52,6 +64,8 @@ export type AppearanceSettingsOwner = {
   setPreviewFontFamily: (fontFamily: string) => Promise<void>;
   getPreviewSourceColoring: () => boolean;
   setPreviewSourceColoring: (enabled: boolean) => Promise<void>;
+  getEditorFontSizePreference: () => EditorFontSizePreference;
+  setEditorFontSizePreference: (preference: EditorFontSizePreference) => Promise<void>;
 };
 
 type Descriptor = {
@@ -118,7 +132,9 @@ const resolveSettings = (store: AppearanceSettingsStore, preferLegacy: boolean):
     editorAppearance: normalizeEditorAppearance(resolve(EDITOR_APPEARANCE_SETTING_KEY, EDITOR_APPEARANCE_STATE_KEY)),
     previewAppearance: normalizePreviewAppearance(resolve(PREVIEW_APPEARANCE_SETTING_KEY, PREVIEW_APPEARANCE_STATE_KEY)),
     previewFontFamily: normalizeStoredPreviewFontFamily(resolve(PREVIEW_FONT_FAMILY_SETTING_KEY, PREVIEW_FONT_FAMILY_STATE_KEY)),
-    previewSourceColoring: normalizeSourceColoring(resolve(PREVIEW_SOURCE_COLORING_SETTING_KEY, PREVIEW_SOURCE_COLORING_STATE_KEY))
+    previewSourceColoring: normalizeSourceColoring(resolve(PREVIEW_SOURCE_COLORING_SETTING_KEY, PREVIEW_SOURCE_COLORING_STATE_KEY)),
+    editorFontSizeMode: normalizeEditorFontSizeMode(resolve(EDITOR_FONT_SIZE_MODE_SETTING_KEY, EDITOR_FONT_SIZE_MODE_STATE_KEY)),
+    editorFontSize: normalizeEditorFontSize(resolve(EDITOR_FONT_SIZE_SETTING_KEY, EDITOR_FONT_SIZE_STATE_KEY))
   };
 };
 
@@ -323,6 +339,16 @@ export async function createAppearanceSettingsOwner(
       'previewSourceColoring',
       PREVIEW_SOURCE_COLORING_SETTING_KEY,
       enabled === true
-    )
+    ),
+    getEditorFontSizePreference: () => ({
+      mode: readSettings().editorFontSizeMode,
+      value: readSettings().editorFontSize
+    }),
+    setEditorFontSizePreference: async (preference) => {
+      const mode = normalizeEditorFontSizeMode(preference.mode);
+      const value = normalizeEditorFontSize(preference.value);
+      await write('editorFontSize', EDITOR_FONT_SIZE_SETTING_KEY, value);
+      await write('editorFontSizeMode', EDITOR_FONT_SIZE_MODE_SETTING_KEY, mode);
+    }
   };
 }

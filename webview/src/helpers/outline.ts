@@ -341,7 +341,7 @@ export function createOutlineController({
       foldButton.dataset.outlineKey = node.key;
       foldButton.title = collapsed ? uiStrings.outlineExpand : uiStrings.outlineCollapse;
       foldButton.setAttribute('aria-label', foldButton.title);
-      foldButton.appendChild(createElement(collapsed ? ChevronRight : ChevronDown, { width: 12, height: 12 }));
+      foldButton.appendChild(createElement(collapsed ? ChevronRight : ChevronDown, { width: 14, height: 14 }));
     } else {
       foldButton.disabled = true;
       foldButton.tabIndex = -1;
@@ -540,6 +540,13 @@ export function createOutlineController({
       outlineLeftButton?.contains(target) ||
       additionalOutlineLeftButtons.some((button) => button.contains(target))
     ) return;
+    requestVisible(false);
+  }, true);
+
+  window.addEventListener('blur', () => {
+    if (!visible || mode !== 'floating') return;
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLIFrameElement) || !root.contains(activeElement)) return;
     requestVisible(false);
   }, true);
 

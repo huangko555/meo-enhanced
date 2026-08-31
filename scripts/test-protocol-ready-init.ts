@@ -40,6 +40,8 @@ const completeInit = {
   previewFontFamily: '' as const,
   previewSourceColoring: true,
   editorAppearance: 'dark' as const,
+  editorFontSizeMode: 'auto' as const,
+  editorFontSize: 14,
   gitChangesGutter: true,
   gitDiffLineHighlights: true,
   diffBaselineMode: 'git-head' as const,
@@ -66,6 +68,13 @@ assert.deepEqual(initializedSession.handle({
 }), []);
 assert.equal(decodeInitMessage({ ...completeInit, version: -1 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, previewSourceColoring: undefined }), null);
+assert.equal(decodeInitMessage({ ...completeInit, editorFontSizeMode: 'invalid' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 9 }), null);
+assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 14.5 }), null);
+assert.deepEqual(
+  decodeInitMessage({ ...completeInit, editorFontSizeMode: undefined, editorFontSize: undefined }),
+  completeInit
+);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: undefined }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: -1, text: '# saved' } }), null);
 assert.equal(decodeInitMessage({ ...completeInit, savedRevision: { version: 4, text: '# future' } }), null);
@@ -646,7 +655,8 @@ for (const command of [
 { type: 'setPreviewAppearance', appearance: 'auto' },
 { type: 'setPreviewFontFamily', fontFamily: 'MEO Synthetic Sans' },
 { type: 'setPreviewSourceColoring', enabled: false },
-{ type: 'setEditorAppearance', appearance: 'auto' }
+ { type: 'setEditorAppearance', appearance: 'auto' },
+ { type: 'setEditorFontSize', mode: 'custom', value: 18 }
 ]) {
   assert.notEqual(decodeEditorCommand(command), null, `Editor command was rejected: ${command.type}`);
 }
@@ -657,6 +667,9 @@ assert.equal(decodeEditorCommand({ type: 'setLongCodeBlockFolding', enabled: fal
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 3 }), null);
 assert.equal(decodeEditorCommand({ type: 'viewPositionChanged', topLine: 0 }), null);
 assert.equal(decodeEditorCommand({ type: 'setOutlineWidth', width: Number.NaN }), null);
+assert.equal(decodeEditorCommand({ type: 'setEditorFontSize', mode: 'custom', value: 9 }), null);
+assert.equal(decodeEditorCommand({ type: 'setEditorFontSize', mode: 'custom', value: 18.5 }), null);
+assert.equal(decodeEditorCommand({ type: 'setEditorFontSize', mode: 'invalid', value: 18 }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'MEO\nSynthetic' }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'MEO</style>Synthetic' }), null);
 assert.equal(decodeEditorCommand({ type: 'setPreviewFontFamily', fontFamily: 'x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1) }), null);

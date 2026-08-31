@@ -18,10 +18,15 @@ export type PreviewCodePalette = Readonly<{
   function: string;
   variable: string;
   link: string;
+  bracket1?: string;
+  bracket2?: string;
+  bracket3?: string;
+  unexpectedBracket?: string;
 }>;
 
 export type FinalCodePalette = Readonly<{
   theme: RawCodeTheme | null | undefined;
+  sourceTheme: RawCodeTheme;
   sourceTokens: Readonly<Record<string, string>>;
   preview: PreviewCodePalette;
 }>;
@@ -74,6 +79,9 @@ const SOURCE_TOKEN_SCOPES: Readonly<Record<string, readonly string[]>> = Object.
   strikethrough: ['markup.strikethrough'],
   quote: ['markup.quote'],
   contentSeparator: ['meta.separator', 'markup.separator'],
+  listMarker: ['punctuation.definition.list.begin.markdown', 'markup.list'],
+  taskMarker: ['meta.other.valid-bracket.markdown'],
+  yamlListMarker: ['punctuation.definition.sequence.item.yaml'],
   link: ['markup.underline.link', 'string.other.link'],
   url: ['markup.underline.link', 'string.other.link'],
   processingInstruction: ['meta.preprocessor']
@@ -111,20 +119,44 @@ function resolveTokenColor(
   return resolved;
 }
 
+function hasUsableTokenPalette(
+  theme: RawCodeTheme | null | undefined,
+  appearance: 'light' | 'dark'
+): theme is RawCodeTheme {
+  return theme?.type === appearance && theme.tokenColors.length > 0;
+}
+
 export function resolveFinalCodePalette(
   currentVscodeTheme: RawCodeTheme | null | undefined,
   fallbackTheme: RawCodeTheme,
-  appearance: 'light' | 'dark'
+  appearance: 'light' | 'dark',
+  sourceFallbackTheme: RawCodeTheme = fallbackTheme
 ): FinalCodePalette {
-  const theme = currentVscodeTheme?.type === appearance
+  // The host deliberately sends an empty theme when the active VS Code theme
+  // cannot be resolved. Treating that shell as a real palette flattens every
+  // code token to editor.foreground, so use the native bundled fallback instead.
+  const theme = hasUsableTokenPalette(currentVscodeTheme, appearance)
     ? currentVscodeTheme
     : fallbackTheme;
+  const sourceTheme = hasUsableTokenPalette(currentVscodeTheme, appearance)
+    ? currentVscodeTheme
+    : sourceFallbackTheme;
   const foreground = theme?.colors['editor.foreground'] ?? (appearance === 'light' ? '#24292f' : '#d4d4d4');
-  const sourceTokens = Object.fromEntries(Object.entries(SOURCE_TOKEN_SCOPES).map(([id, scopes]) => (
-    [id, resolveTokenColor(theme, scopes, foreground)]
-  )));
+  const sourceForeground = sourceTheme?.colors['editor.foreground']
+    ?? (appearance === 'light' ? '#24292f' : '#d4d4d4');
+  const sourceTokens = {
+    foreground: sourceForeground,
+    ...Object.fromEntries(Object.entries(SOURCE_TOKEN_SCOPES).map(([id, scopes]) => (
+      [id, resolveTokenColor(sourceTheme, scopes, sourceForeground)]
+    )))
+  };
+  const previewBracketFallbacks = appearance === 'light'
+    ? ['#0431fa', '#319331', '#7b3814']
+    : ['#ffd700', '#da70d6', '#179fff'];
+  const previewThemeColors = theme?.colors ?? {};
   return Object.freeze({
     theme,
+    sourceTheme,
     sourceTokens: Object.freeze(sourceTokens),
     preview: Object.freeze({
       foreground,
@@ -134,11 +166,15 @@ export function resolveFinalCodePalette(
       number: resolveTokenColor(theme, ['constant.numeric'], foreground),
       type: resolveTokenColor(theme, ['entity.name.type', 'entity.name.class', 'support.type'], foreground),
       property: resolveTokenColor(theme, ['variable.other.property', 'entity.other.attribute-name'], foreground),
-      operator: sourceTokens.operator,
-      punctuation: sourceTokens.punctuation,
-      function: sourceTokens.functionName,
-      variable: sourceTokens.variableName,
-      link: resolveTokenColor(theme, ['markup.underline.link', 'string.other.link'], foreground)
+      operator: resolveTokenColor(theme, ['keyword.operator'], foreground),
+      punctuation: resolveTokenColor(theme, ['punctuation'], foreground),
+      function: resolveTokenColor(theme, ['entity.name.function', 'support.function'], foreground),
+      variable: resolveTokenColor(theme, ['variable'], foreground),
+      link: resolveTokenColor(theme, ['markup.underline.link', 'string.other.link'], foreground),
+      bracket1: previewThemeColors['editorBracketHighlight.foreground1'] ?? previewBracketFallbacks[0],
+      bracket2: previewThemeColors['editorBracketHighlight.foreground2'] ?? previewBracketFallbacks[1],
+      bracket3: previewThemeColors['editorBracketHighlight.foreground3'] ?? previewBracketFallbacks[2],
+      unexpectedBracket: previewThemeColors['editorBracketHighlight.unexpectedBracket.foreground'] ?? '#ff1212'
     })
   });
 }

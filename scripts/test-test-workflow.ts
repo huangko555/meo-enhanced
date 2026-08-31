@@ -4,17 +4,19 @@ import { resolve } from 'node:path';
 
 import {
   createTestWorkflowPlan,
+  flattenTestWorkflowCommands,
   parseTestWorkflowRequest,
   validateTestWorkflowAuthorization
 } from './test-workflow-policy';
 
 const quick = createTestWorkflowPlan(parseTestWorkflowRequest(['quick']));
+const quickCommands = flattenTestWorkflowCommands(quick);
 assert.equal(quick.tier, 'quick');
 assert.equal(quick.longRunning, false);
-assert.ok(quick.commands.some((command) => command.args.join(' ') === 'run typecheck'));
-assert.ok(!quick.commands.some((command) => command.args.join(' ') === 'run test'));
+assert.ok(quickCommands.some((command) => command.args.join(' ') === 'run typecheck'));
+assert.ok(!quickCommands.some((command) => command.args.join(' ') === 'run test'));
 assert.doesNotThrow(() => validateTestWorkflowAuthorization(quick, false, false));
-assert.ok(quick.commands.some((command) => (
+assert.ok(quickCommands.some((command) => (
   command.args.includes('scripts/test-virtual-block-scroll-stability.ts')
 )));
 
@@ -25,19 +27,19 @@ assert.equal(history.tier, 'targeted');
 assert.equal(history.area, 'history');
 assert.equal(history.longRunning, false);
 assert.ok(
-  history.commands.some((command) =>
+  flattenTestWorkflowCommands(history).some((command) =>
     command.args.includes('scripts/test-history-matrix.ts')
   )
 );
 
 for (const area of ['table', 'rendered', 'viewport'] as const) {
   const targeted = createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', area]));
-  assert.ok(targeted.commands.some((command) => (
+  assert.ok(flattenTestWorkflowCommands(targeted).some((command) => (
     command.args.includes('scripts/test-virtual-block-scroll-stability.ts')
   )), `${area} targeted workflow must cover virtual block scroll stability`);
 }
 assert.ok(
-  history.commands.some((command) =>
+  flattenTestWorkflowCommands(history).some((command) =>
     command.args.includes('scripts/test-rendered-content-history-roundtrip.ts')
   )
 );
@@ -47,16 +49,18 @@ const uat = createTestWorkflowPlan(
 );
 assert.equal(uat.area, 'uat');
 assert.equal(uat.longRunning, false);
-assert.equal(uat.commands.length, 2);
-assert.equal(uat.commands[0]?.env?.MEO_UAT_ENDURANCE_LIMIT, '8');
-assert.equal(uat.commands[0]?.env?.MEO_UAT_STRICT_FINDING, '*');
-assert.deepEqual(uat.commands[1]?.args, [
+const uatCommands = flattenTestWorkflowCommands(uat);
+assert.equal(uatCommands.length, 2);
+assert.equal(uatCommands[0]?.env?.MEO_UAT_ENDURANCE_LIMIT, '8');
+assert.equal(uatCommands[0]?.env?.MEO_UAT_STRICT_FINDING, '*');
+assert.deepEqual(uatCommands[1]?.args, [
   'scripts/test-production-live-scroll-integrity.ts',
   '--document=fixtures/uat.md'
 ]);
 
 const release = createTestWorkflowPlan(parseTestWorkflowRequest(['release']));
 assert.equal(release.longRunning, true);
+assert.equal(release.stages[0]?.maxConcurrency, 3);
 assert.throws(
   () => validateTestWorkflowAuthorization(release, false, false),
   /--confirm-long-run/
@@ -68,11 +72,53 @@ const endurance = createTestWorkflowPlan(
   parseTestWorkflowRequest(['endurance', 'fixtures/uat.md'])
 );
 assert.equal(endurance.longRunning, true);
-assert.equal(endurance.commands[0]?.env?.MEO_UAT_STRICT_FINDING, '*');
+assert.equal(
+  flattenTestWorkflowCommands(endurance)[0]?.env?.MEO_UAT_STRICT_FINDING,
+  '*'
+);
 assert.throws(
   () => validateTestWorkflowAuthorization(endurance, false, false),
   /--confirm-long-run/
 );
+
+const largeDocument = createTestWorkflowPlan(
+  parseTestWorkflowRequest(['large-document', 'fixtures/large document.md'])
+);
+assert.equal(largeDocument.tier, 'large-document');
+assert.equal(largeDocument.title, 'Simplified large-document stress test');
+assert.equal(largeDocument.expectedDuration, 'about 1-3 minutes');
+assert.equal(largeDocument.longRunning, true);
+assert.equal(largeDocument.stages.length, 1);
+assert.equal(largeDocument.stages[0]?.maxConcurrency, 1);
+assert.deepEqual(flattenTestWorkflowCommands(largeDocument), [
+  { args: ['run', 'benchmark:large-document'] },
+  {
+    args: [
+      'scripts/test-uat-full-document-endurance.ts',
+      'fixtures/large document.md'
+    ],
+    env: {
+      MEO_UAT_ENDURANCE_LIMIT: '8',
+      MEO_UAT_STRICT_FINDING: '*'
+    }
+  },
+  {
+    args: [
+      'scripts/test-production-live-scroll-integrity.ts',
+      '--document=fixtures/large document.md'
+    ]
+  }
+]);
+assert.throws(
+  () => validateTestWorkflowAuthorization(largeDocument, false, false),
+  /--confirm-long-run/
+);
+assert.doesNotThrow(() => (
+  validateTestWorkflowAuthorization(largeDocument, true, false)
+));
+assert.doesNotThrow(() => (
+  validateTestWorkflowAuthorization(largeDocument, false, true)
+));
 
 assert.throws(
   () => parseTestWorkflowRequest(['targeted', 'unknown']),
@@ -86,6 +132,10 @@ assert.throws(
   () => parseTestWorkflowRequest(['endurance']),
   /document path/
 );
+assert.throws(
+  () => parseTestWorkflowRequest(['large-document']),
+  /document path/
+);
 
 const repoRoot = resolve(import.meta.dir, '..');
 const packageJson = JSON.parse(
@@ -96,7 +146,28 @@ assert.equal(packageScripts['test:quick'], 'bun scripts/test-workflow.ts quick')
 assert.equal(packageScripts['test:targeted'], 'bun scripts/test-workflow.ts targeted');
 assert.equal(packageScripts['test:release'], 'bun scripts/test-workflow.ts release');
 assert.equal(packageScripts['test:endurance'], 'bun scripts/test-workflow.ts endurance');
+assert.equal(
+  packageScripts['test:large-document'],
+  'bun scripts/test-workflow.ts large-document'
+);
 assert.match(packageScripts.test ?? '', /bun run test:browser/);
+
+const fullSuiteScripts = [...(packageScripts.test ?? '').matchAll(/bun run (test:[\w-]+)/g)]
+  .map((match) => match[1]!);
+const releasePackageScripts = flattenTestWorkflowCommands(release)
+  .filter((command) => command.args[0] === 'run')
+  .map((command) => command.args[1]!);
+for (const suite of fullSuiteScripts) {
+  assert.equal(
+    releasePackageScripts.filter((candidate) => candidate === suite).length,
+    1,
+    `release workflow must run full-suite command ${suite} exactly once`
+  );
+}
+assert.ok(
+  !releasePackageScripts.includes('test'),
+  'release workflow should schedule the full suite groups without nesting the serial test script'
+);
 
 const workflowGuide = readFileSync(
   resolve(repoRoot, 'docs/testing-workflow.md'),
@@ -106,14 +177,17 @@ for (const command of [
   'bun run test:quick',
   'bun run test:targeted',
   'bun run test:release',
-  'bun run test:endurance'
+  'bun run test:endurance',
+  'bun run test:large-document -- <document> --confirm-long-run'
 ]) {
   assert.ok(workflowGuide.includes(command), `Workflow guide must document ${command}`);
 }
 assert.match(workflowGuide, /explicit user authorization/i);
+assert.match(workflowGuide, /1[–-]3 minutes/);
 
 const agentGuide = readFileSync(resolve(repoRoot, 'AGENTS.md'), 'utf8');
 assert.ok(agentGuide.includes('docs/testing-workflow.md'));
+assert.ok(agentGuide.includes('bun run test:release -- --confirm-long-run'));
 assert.match(agentGuide, /当前任务中的明确授权/);
 
 console.log('Test workflow policy contract passed');

@@ -1,7 +1,7 @@
 import { EditorState, Facet, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { getFencedCodeInfo } from './codeBlocks';
+import { getFencedCodeInfo } from './markdownSyntax';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns } from './blockIndent';
 import {
   mapLiveInputDerivedDecorations,
@@ -9,7 +9,7 @@ import {
 } from '../editor/liveInputDerivedWork';
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
 import { getUiStrings } from '../application/uiLanguage';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
@@ -239,7 +239,7 @@ function makeActionButton(
   return button;
 }
 
-class LongCodePlaceholderWidget extends WidgetType {
+class LongCodePlaceholderWidget extends UiLanguageSensitiveWidget {
   constructor(
     readonly anchor: number,
     readonly language: string,
@@ -257,6 +257,7 @@ class LongCodePlaceholderWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof LongCodePlaceholderWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.language === this.language &&
       other.lineCount === this.lineCount &&
       other.hiddenLineCount === this.hiddenLineCount &&
@@ -288,7 +289,7 @@ class LongCodePlaceholderWidget extends WidgetType {
   }
 }
 
-class LongCodeFooterWidget extends WidgetType {
+class LongCodeFooterWidget extends UiLanguageSensitiveWidget {
   constructor(
     readonly anchor: number,
     readonly language: string,
@@ -304,6 +305,7 @@ class LongCodeFooterWidget extends WidgetType {
 
   eq(other: WidgetType): boolean {
     return other instanceof LongCodeFooterWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.language === this.language &&
       other.lineCount === this.lineCount &&
       other.indentColumns === this.indentColumns;
@@ -622,6 +624,11 @@ class LongCodeFloatingButtonPlugin {
   }
 
   update(update: ViewUpdate): void {
+    if (update.startState.facet(uiLanguageFacet) !== update.state.facet(uiLanguageFacet)) {
+      const strings = getUiStrings(update.state.facet(uiLanguageFacet));
+      this.button.textContent = strings.showLess;
+      this.button.setAttribute('aria-label', strings.showLessCode);
+    }
     if (update.transactions.some(isExternalDocumentPresentation)) {
       viewportGeneration.set(this.view, (viewportGeneration.get(this.view) ?? 0) + 1);
     }

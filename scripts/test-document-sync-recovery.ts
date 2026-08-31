@@ -59,6 +59,25 @@ async function main(): Promise<void> {
     ));
 
     await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'docChanged',
+        text: '1. alpha',
+        version: 1
+      }}));
+    });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const textAfterStaleEcho = await page.evaluate(() => {
+      const EditorView = (window as any).__EditorView;
+      const editorElement = document.querySelector('.cm-editor');
+      return EditorView.findFromDOM(editorElement).state.doc.toString();
+    });
+    if (textAfterStaleEcho !== '1. alpha\n2. beta') {
+      throw new Error(
+        `stale host echo discarded pending Live input: ${JSON.stringify(textAfterStaleEcho)}`
+      );
+    }
+
+    await page.evaluate(() => {
       const EditorView = (window as any).__EditorView;
       const editorElement = document.querySelector('.cm-editor');
       const view = EditorView.findFromDOM(editorElement);

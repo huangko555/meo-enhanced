@@ -1,7 +1,6 @@
-import { RangeSetBuilder, StateEffect, Prec } from '@codemirror/state';
+import { RangeSetBuilder, StateEffect, Prec, type Extension } from '@codemirror/state';
 import { Decoration, ViewPlugin, EditorView, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { getFencedCodeInfo } from './codeBlocks';
 import {
   resolveShikiLang,
   getShikiTokens,
@@ -17,6 +16,7 @@ import {
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
+import { getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
 
 const shikiRefreshEffect = StateEffect.define<null>();
 
@@ -39,32 +39,14 @@ function tokenStyle(token: ShikiToken): string {
   return style;
 }
 
-function addBlockDecorations(
-  view: EditorView,
-  node: { name: string; from: number; to: number },
+function addTokenDecorations(
   builder: RangeSetBuilder<Decoration>,
-  markCache: Map<string, Decoration>
+  markCache: Map<string, Decoration>,
+  lang: string,
+  code: string,
+  contentFrom: number,
+  contentTo: number
 ): void {
-  const { state } = view;
-  const info = node.name === 'FencedCode' ? getFencedCodeInfo(state, node) : null;
-  const lang = resolveShikiLang(info);
-  if (!lang) {
-    return;
-  }
-
-  const startLine = state.doc.lineAt(node.from);
-  const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
-  if (endLine.number - startLine.number < 2) {
-    return;
-  }
-
-  const contentFrom = state.doc.line(startLine.number + 1).from;
-  const contentTo = state.doc.line(endLine.number - 1).to;
-  if (contentFrom >= contentTo) {
-    return;
-  }
-
-  const code = state.doc.sliceString(contentFrom, contentTo);
   const tokens = getShikiTokens(lang, code);
   if (!tokens) {
     requestShikiTokens(lang, code);
@@ -140,6 +122,45 @@ function addBlockDecorations(
   }
 }
 
+function addBlockDecorations(
+  view: EditorView,
+  node: { name: string; from: number; to: number },
+  builder: RangeSetBuilder<Decoration>,
+  markCache: Map<string, Decoration>
+): void {
+  const { state } = view;
+  const info = node.name === 'FencedCode' ? getFencedCodeInfo(state, node) : null;
+  const startLine = state.doc.lineAt(node.from);
+  const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
+  if (endLine.number - startLine.number < 2) {
+    return;
+  }
+
+  const contentFrom = state.doc.line(startLine.number + 1).from;
+  const contentTo = state.doc.line(endLine.number - 1).to;
+  if (contentFrom >= contentTo) {
+    return;
+  }
+
+  const lang = resolveShikiLang(info);
+  if (!lang) {
+    const style = 'color:var(--meo-token-foreground-color,var(--vscode-editor-foreground))';
+    let deco = markCache.get(style);
+    if (!deco) {
+      deco = Decoration.mark({ attributes: { style } });
+      markCache.set(style, deco);
+    }
+    for (let lineNumber = startLine.number + 1; lineNumber < endLine.number; lineNumber += 1) {
+      const line = state.doc.line(lineNumber);
+      if (line.from < line.to) builder.add(line.from, line.to, deco);
+    }
+    return;
+  }
+
+  const code = state.doc.sliceString(contentFrom, contentTo);
+  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo);
+}
+
 function buildDecorations(view: EditorView): DecorationSet {
   if (!isShikiThemeReady()) {
     return Decoration.none;
@@ -190,6 +211,7 @@ const shikiPlugin = ViewPlugin.fromClass(
       const refreshed = update.transactions.some((transaction) =>
         transaction.effects.some((effect) => effect.is(shikiRefreshEffect))
           || isLiveInputDerivedWorkRefresh(transaction)
+          || syntaxTreeChanged(transaction)
       );
       if (update.docChanged || refreshed) {
         this.decorations = buildDecorations(update.view);
@@ -207,3 +229,58 @@ const shikiPlugin = ViewPlugin.fromClass(
 );
 
 export const shikiCodeHighlight = Prec.high(shikiPlugin);
+
+/** Projects the shared editor Shiki palette onto an editor whose whole document is one language. */
+export function shikiDocumentHighlight(language: string): Extension {
+  const lang = resolveShikiLang(language);
+  if (!lang) return [];
+
+  const plugin = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      private readonly unsubscribe: () => void;
+      private readonly releaseHighlighting: () => void;
+
+      constructor(view: EditorView) {
+        this.releaseHighlighting = activateShikiCodeHighlighting();
+        this.decorations = this.build(view);
+        this.unsubscribe = subscribeShikiRefresh(() => {
+          view.dispatch({ effects: shikiRefreshEffect.of(null) });
+        });
+      }
+
+      update(update: ViewUpdate): void {
+        const refreshed = update.transactions.some((transaction) =>
+          transaction.effects.some((effect) => effect.is(shikiRefreshEffect))
+        );
+        if (update.docChanged || refreshed) {
+          this.decorations = this.build(update.view);
+        }
+      }
+
+      destroy(): void {
+        this.unsubscribe();
+        this.releaseHighlighting();
+      }
+
+      private build(view: EditorView): DecorationSet {
+        if (!isShikiThemeReady() || view.state.doc.length === 0) {
+          return Decoration.none;
+        }
+        const builder = new RangeSetBuilder<Decoration>();
+        addTokenDecorations(
+          builder,
+          new Map<string, Decoration>(),
+          lang,
+          view.state.doc.toString(),
+          0,
+          view.state.doc.length
+        );
+        return builder.finish();
+      }
+    },
+    { decorations: (value) => value.decorations }
+  );
+
+  return Prec.high(plugin);
+}

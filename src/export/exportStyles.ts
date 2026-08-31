@@ -85,8 +85,8 @@ function buildReadingStyles(
     'normal'
   );
   const editorFontSizePx = clampFontSize(environment.editorFontSizePx);
-  const liveFontSizePx = Math.max(16, resolveThemeFontSizePx(fonts.liveFontSize, editorFontSizePx));
-  const sourceFontSizePx = Math.max(14, resolveThemeFontSizePx(fonts.sourceFontSize, editorFontSizePx));
+  const liveFontSizePx = resolveThemeFontSizePx(fonts.liveFontSize, editorFontSizePx);
+  const sourceFontSizePx = resolveThemeFontSizePx(fonts.sourceFontSize, editorFontSizePx);
   const lineHeight = Math.max(1.7, clampLineHeight(environment.liveLineHeight ?? fonts.liveLineHeight));
   const sourceLineHeight = clampLineHeight(environment.sourceLineHeight ?? fonts.sourceLineHeight);
   const headingFontSizes = fonts.headingFontSizes.map((fontSize) => `${fontSize}em`);
@@ -123,6 +123,10 @@ function buildReadingStyles(
   --meo-code-function: ${codeColor('function')};
   --meo-code-variable: ${codeColor('variable')};
   --meo-code-link: ${codeColor('link')};
+  --meo-code-bracket-1: ${codeColor('bracket1')};
+  --meo-code-bracket-2: ${codeColor('bracket2')};
+  --meo-code-bracket-3: ${codeColor('bracket3')};
+  --meo-code-bracket-unexpected: ${codeColor('unexpectedBracket')};
   --meo-muted: ${readingMutedColor};
   --meo-border: ${panelBorderColor};
   --meo-base04: ${readingForegroundColor};
@@ -130,6 +134,11 @@ function buildReadingStyles(
   --meo-base07: ${readingForegroundColor};
   --meo-base08: ${readingForegroundColor};
   --meo-base09: ${readingForegroundColor};
+  --meo-alert-note: ${colors.base05};
+  --meo-alert-tip: ${colors.base09};
+  --meo-alert-important: ${colors.base08};
+  --meo-alert-warning: ${colors.base07};
+  --meo-alert-caution: ${colors.base04};
   --meo-heading: ${readingForegroundColor};
   --meo-link: ${readingForegroundColor};
   --meo-accent-2: ${readingForegroundColor};
@@ -353,6 +362,29 @@ body[data-meo-export-target='pdf'] hr {
 .meo-export-frontmatter-value {
   min-width: 0;
   color: var(--meo-code-string);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.meo-export-frontmatter-value-group {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+}
+
+.meo-export-frontmatter-value-line {
+  min-width: 0;
+}
+
+.meo-export-frontmatter-value-line.is-list-item {
+  display: flex;
+  align-items: flex-start;
+}
+
+.meo-export-frontmatter-value-line.is-raw {
+  color: var(--meo-muted);
+  font-family: var(--meo-font-body);
+  font-size: var(--meo-font-size-code);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -869,33 +901,33 @@ th:empty::before {
 }
 
 .meo-export-alert-note {
-  --meo-alert-color: var(--meo-base05);
-  border-left-color: var(--meo-base05);
-  background-color: color-mix(in srgb, var(--meo-base05) 8%, transparent);
+  --meo-alert-color: var(--meo-alert-note);
+  border-left-color: var(--meo-alert-note);
+  background-color: color-mix(in srgb, var(--meo-alert-note) 8%, transparent);
 }
 
 .meo-export-alert-tip {
-  --meo-alert-color: var(--meo-base09);
-  border-left-color: var(--meo-base09);
-  background-color: color-mix(in srgb, var(--meo-base09) 8%, transparent);
+  --meo-alert-color: var(--meo-alert-tip);
+  border-left-color: var(--meo-alert-tip);
+  background-color: color-mix(in srgb, var(--meo-alert-tip) 8%, transparent);
 }
 
 .meo-export-alert-important {
-  --meo-alert-color: var(--meo-base08);
-  border-left-color: var(--meo-base08);
-  background-color: color-mix(in srgb, var(--meo-base08) 8%, transparent);
+  --meo-alert-color: var(--meo-alert-important);
+  border-left-color: var(--meo-alert-important);
+  background-color: color-mix(in srgb, var(--meo-alert-important) 8%, transparent);
 }
 
 .meo-export-alert-warning {
-  --meo-alert-color: var(--meo-base07);
-  border-left-color: var(--meo-base07);
-  background-color: color-mix(in srgb, var(--meo-base07) 8%, transparent);
+  --meo-alert-color: var(--meo-alert-warning);
+  border-left-color: var(--meo-alert-warning);
+  background-color: color-mix(in srgb, var(--meo-alert-warning) 8%, transparent);
 }
 
 .meo-export-alert-caution {
-  --meo-alert-color: var(--meo-base04);
-  border-left-color: var(--meo-base04);
-  background-color: color-mix(in srgb, var(--meo-base04) 8%, transparent);
+  --meo-alert-color: var(--meo-alert-caution);
+  border-left-color: var(--meo-alert-caution);
+  background-color: color-mix(in srgb, var(--meo-alert-caution) 8%, transparent);
 }
 
 .meo-export-alert,
@@ -925,23 +957,23 @@ th:empty::before {
 }
 
 .meo-export-alert-note .meo-export-alert-icon {
-  color: var(--meo-base05);
+  color: var(--meo-alert-note);
 }
 
 .meo-export-alert-tip .meo-export-alert-icon {
-  color: var(--meo-base09);
+  color: var(--meo-alert-tip);
 }
 
 .meo-export-alert-important .meo-export-alert-icon {
-  color: var(--meo-base08);
+  color: var(--meo-alert-important);
 }
 
 .meo-export-alert-warning .meo-export-alert-icon {
-  color: var(--meo-base07);
+  color: var(--meo-alert-warning);
 }
 
 .meo-export-alert-caution .meo-export-alert-icon {
-  color: var(--meo-base04);
+  color: var(--meo-alert-caution);
 }
 
 .meo-export-alert-icon svg {

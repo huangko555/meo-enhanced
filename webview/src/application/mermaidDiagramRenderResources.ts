@@ -16,6 +16,8 @@ export type MermaidDiagramRenderResult =
   | { readonly ok: false; readonly error: string; readonly unavailable?: false }
   | { readonly ok: false; readonly error: string; readonly unavailable: true };
 
+export type MermaidDiagramSuccessfulRender = Extract<MermaidDiagramRenderResult, { readonly ok: true }>;
+
 /**
  * One independently replaceable Widget presentation within an active render group.
  * After release, render resolves unavailable, getCached returns null, and replacePending throws.
@@ -47,6 +49,8 @@ export type MermaidDiagramRenderResources = {
   /** Acquires a new group or throws after Pool disposal. */
   acquireGroup(): MermaidDiagramRenderGroupLease;
   getCached(request: MermaidDiagramRenderRequest): MermaidDiagramRenderResult | null;
+  /** Latest valid SVG for the same source/config, regardless of theme generation. */
+  getStale(request: MermaidDiagramRenderRequest): MermaidDiagramSuccessfulRender | null;
   refreshTheme(): void;
   subscribeThemeRefresh(listener: () => void): () => void;
   getHeight(key: string): number | null;

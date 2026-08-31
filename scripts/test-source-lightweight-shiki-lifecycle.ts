@@ -168,8 +168,14 @@ async function main(): Promise<void> {
     await waitForFrames(page);
     assert.deepEqual(
       await readMetrics(page),
-      { initCalls: 0, loadCalls: 0, tokenizeCalls: 0, disposeCalls: 0, instances: [] },
-      'production Source bootstrap must do zero Shiki init/load/tokenize/dispose work'
+      {
+        initCalls: 1,
+        loadCalls: 1,
+        tokenizeCalls: 1,
+        disposeCalls: 0,
+        instances: [{ id: 1, loadCalls: 1, tokenizeCalls: 1, disposeCalls: 0 }]
+      },
+      'Source must lazily initialize the shared native code-token renderer when a supported block is present'
     );
 
     await page.evaluate(() => (window as any).__shikiEditors.first.setMode('live'));
@@ -205,17 +211,20 @@ async function main(): Promise<void> {
     assert.equal(metrics.loadCalls, 1);
     assert.equal(metrics.tokenizeCalls, 3, 'remaining Live consumer must keep producing current tokens');
     assert.equal(metrics.disposeCalls, 0, '2→1 consumers must not dispose');
-    assert.equal(await page.evaluate(() => document.querySelectorAll('#first span[style*="color:"]').length), 0);
+    assert.ok(
+      await page.evaluate(() => document.querySelectorAll('#first span[style*="color:"]').length) > 0,
+      'Source and Live must retain the same editor-scoped token presentation'
+    );
 
     await page.evaluate(() => {
       const state = (window as any).__shikiEditors;
       state.second.setMode('source');
       state.second.setMode('source');
     });
-    await page.waitForFunction(() => (window as any).__shikiLifecycleMetrics.disposeCalls === 1);
+    await waitForFrames(page);
     metrics = await readMetrics(page);
-    assert.equal(metrics.disposeCalls, 1, '1→0 consumers must dispose exactly once');
-    assert.equal(metrics.instances[0].disposeCalls, 1, 'repeated Source transition must be idempotent');
+    assert.equal(metrics.disposeCalls, 0, 'mode switches must not dispose the editor-scoped highlighter');
+    assert.equal(metrics.instances[0].disposeCalls, 0);
 
     const rapidText = '# Rapid latest\n\n```typescript\nconst rapid_latest = 4;\n```';
     await page.evaluate((latest) => {
@@ -227,13 +236,12 @@ async function main(): Promise<void> {
     }, rapidText);
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#first span[style*="color:"]'))
       .some((node) => node.textContent?.includes('rapid_latest')));
-    await page.waitForFunction(() => (window as any).__shikiLifecycleMetrics.instances.length === 3);
     await waitForFrames(page);
     metrics = await readMetrics(page);
-    assert.equal(metrics.instances[1].disposeCalls, 1, 'rapid abandoned generation must dispose once');
-    assert.equal(metrics.instances[1].tokenizeCalls, 0, 'rapid abandoned generation must not tokenize or publish DOM');
-    assert.equal(metrics.instances[2].loadCalls, 1);
-    assert.equal(metrics.instances[2].tokenizeCalls, 1, 'latest generation must render the latest Document');
+    assert.equal(metrics.instances.length, 1, 'mode switches must keep one shared HighlighterCore');
+    assert.equal(metrics.instances[0].disposeCalls, 0);
+    assert.equal(metrics.instances[0].loadCalls, 1);
+    assert.equal(metrics.instances[0].tokenizeCalls, 4, 'the shared instance must render only each distinct latest code source');
     assert.equal(
       await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('#first span[style*="color:"]'))
         .some((node) => node.textContent?.includes('first_value'))),
@@ -246,9 +254,9 @@ async function main(): Promise<void> {
       state.second.destroy();
       state.first.destroy();
     });
-    await page.waitForFunction(() => (window as any).__shikiLifecycleMetrics.disposeCalls === 3);
+    await page.waitForFunction(() => (window as any).__shikiLifecycleMetrics.disposeCalls === 1);
     metrics = await readMetrics(page);
-    assert.equal(metrics.disposeCalls, 3);
+    assert.equal(metrics.disposeCalls, 1);
     assert.equal(metrics.instances.every((instance) => instance.disposeCalls === 1), true);
   } finally {
     await browser.close();

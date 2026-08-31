@@ -14,14 +14,19 @@ export type SelectionMenuState = {
   align?: 'center' | 'start';
 };
 
-const createSelectionActionButton = (action: string, label: string, Icon: any): HTMLButtonElement => {
+const createSelectionActionButton = (
+  action: string,
+  label: string,
+  Icon: any,
+  iconAttributes: Record<string, string | number> = {}
+): HTMLButtonElement => {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'selection-inline-button';
   button.dataset.action = action;
   button.title = label;
   button.setAttribute('aria-label', label);
-  button.appendChild(createElement(Icon, { width: 16, height: 16 }));
+  button.appendChild(createElement(Icon, { width: 16, height: 16, ...iconAttributes }));
   return button;
 };
 
@@ -31,7 +36,7 @@ export const createSelectionMenu = (): SelectionMenuElements => {
   menu.setAttribute('role', 'toolbar');
   menu.setAttribute('aria-label', 'Inline markdown formatting');
 
-  const selectionBoldBtn = createSelectionActionButton('bold', 'Bold', Bold);
+  const selectionBoldBtn = createSelectionActionButton('bold', 'Bold', Bold, { 'stroke-width': 2.75 });
   const selectionItalicBtn = createSelectionActionButton('italic', 'Italic', Italic);
   const selectionLineoverBtn = createSelectionActionButton('lineover', 'Lineover', Strikethrough);
   const selectionHighlightBtn = createSelectionActionButton('highlight', 'Highlight', Highlighter);

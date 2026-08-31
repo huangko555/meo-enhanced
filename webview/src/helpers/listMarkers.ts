@@ -10,7 +10,7 @@ import {
 } from '@codemirror/state';
 import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemirror/view';
 import { getUiStrings } from '../application/uiLanguage';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
 
 interface ListMarkerData {
@@ -511,7 +511,7 @@ class ListMarkerWidget extends WidgetType {
   }
 }
 
-class CheckboxWidget extends WidgetType {
+class CheckboxWidget extends UiLanguageSensitiveWidget {
   status: TaskStatus;
   bracketStart: number;
 
@@ -522,7 +522,10 @@ class CheckboxWidget extends WidgetType {
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof CheckboxWidget && other.status === this.status && other.bracketStart === this.bracketStart;
+    return other instanceof CheckboxWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
+      other.status === this.status &&
+      other.bracketStart === this.bracketStart;
   }
 
   toDOM(view: EditorView): HTMLElement {

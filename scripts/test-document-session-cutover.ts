@@ -174,6 +174,8 @@ async function main(): Promise<void> {
         const render = await takeNext(source);
         render.resolve({ svg: `<svg data-marker="${marker}" width="160" height="80"></svg>` });
       };
+      (window as any).__hasPendingDocumentSessionMermaid = (source: string) =>
+        (pending.get(source)?.length ?? 0) > 0;
       (window as any).__failDocumentSessionMermaid = async (source: string, message: string) => {
         const render = await takeNext(source);
         render.reject(new Error(message));
@@ -200,6 +202,11 @@ async function main(): Promise<void> {
     const equalReadyMermaidText = `${readyMermaidBaseText} ready-edit`;
     await page.evaluate(() => (window as any).__documentSessionCandidate.setMode('live'));
     await page.waitForSelector('.meo-mermaid-loading');
+    await page.waitForFunction(
+      (source) => (window as any).__hasPendingDocumentSessionMermaid(source),
+      {},
+      'READY_VISIBLE'
+    );
     await page.evaluate(() => {
       (window as any).__completeDocumentSessionMermaid('READY_VISIBLE', 'ready-visible');
     });
@@ -236,6 +243,11 @@ async function main(): Promise<void> {
     const equalErrorMermaidText = `${errorMermaidBaseText} error-edit`;
     await page.evaluate(() => (window as any).__documentSessionCandidate.setMode('live'));
     await page.waitForSelector('.meo-mermaid-loading');
+    await page.waitForFunction(
+      (source) => (window as any).__hasPendingDocumentSessionMermaid(source),
+      {},
+      'ERROR_VISIBLE'
+    );
     await page.evaluate(() => {
       (window as any).__failDocumentSessionMermaid('ERROR_VISIBLE', 'visible parse error');
     });
@@ -279,6 +291,11 @@ async function main(): Promise<void> {
 
     await page.evaluate(() => (window as any).__documentSessionCandidate.setMode('live'));
     await page.waitForSelector('.meo-mermaid-loading');
+    await page.waitForFunction(
+      (source) => (window as any).__hasPendingDocumentSessionMermaid(source),
+      {},
+      'SLOW_OLD'
+    );
     await page.keyboard.down('Shift');
     for (let index = 0; index < 4; index += 1) await page.keyboard.press('ArrowLeft');
     await page.keyboard.up('Shift');
@@ -308,9 +325,6 @@ async function main(): Promise<void> {
       }
       const scroller = document.querySelector<HTMLElement>('.cm-scroller');
       if (!scroller) throw new Error('Missing public CodeMirror scroller');
-      const viewportSettled = new Promise<void>((resolve) => {
-        scroller.addEventListener('scrollend', () => resolve(), { once: true });
-      });
       let errorObserver!: MutationObserver;
       const unexpectedError = new Promise<never>((_resolve, reject) => {
         errorObserver = new MutationObserver(() => {
@@ -329,7 +343,22 @@ async function main(): Promise<void> {
       } finally {
         errorObserver.disconnect();
       }
-      await viewportSettled;
+      let previousTop = scroller.scrollTop;
+      let previousHeight = scroller.scrollHeight;
+      let stableFrames = 0;
+      for (let frame = 0; frame < 120 && stableFrames < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const currentTop = scroller.scrollTop;
+        const currentHeight = scroller.scrollHeight;
+        stableFrames = Math.abs(currentTop - previousTop) <= 0.5 && currentHeight === previousHeight
+          ? stableFrames + 1
+          : 0;
+        previousTop = currentTop;
+        previousHeight = currentHeight;
+      }
+      if (stableFrames < 8) {
+        throw new Error('Equal-text external replacement viewport did not settle');
+      }
     }, equalExternalText);
     await page.waitForSelector('svg[data-marker="current-external"]');
     await page.evaluate(() => (window as any).__documentSessionCandidate.whenIdle());

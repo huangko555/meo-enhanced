@@ -97,6 +97,14 @@ async function main() {
       window.__hostMessages = [];
       window.__mermaidInitializeConfigs = [];
       window.__mermaidConfig = null;
+      window.__holdTallMermaidRender = false;
+      window.__pendingTallMermaidRenders = [];
+      window.__releaseTallMermaidRender = () => {
+        const pending = window.__pendingTallMermaidRenders.splice(0);
+        if (pending.length === 0) throw new Error('No pending tall Mermaid render to release');
+        window.__holdTallMermaidRender = false;
+        for (const resolve of pending) resolve();
+      };
       document.body.dataset.meoMermaidSrc = ${JSON.stringify(previewMermaidRuntimeSrc)};
       window.acquireVsCodeApi = () => ({
         postMessage(message) { window.__hostMessages.push(message); },
@@ -109,7 +117,11 @@ async function main() {
           window.__mermaidInitializeConfigs.push(config);
         },
         async render(id, source) {
-          await new Promise(resolve => setTimeout(resolve, source.includes('Step18') ? 650 : source.includes('Check') ? 80 : 5));
+          if (source.includes('Step18') && window.__holdTallMermaidRender) {
+            await new Promise(resolve => window.__pendingTallMermaidRenders.push(resolve));
+          } else {
+            await new Promise(resolve => setTimeout(resolve, source.includes('Step18') ? 650 : source.includes('Check') ? 80 : 5));
+          }
           const height = source.includes('Step18') ? 3000 : source.includes('sequenceDiagram') ? 260 : 120;
           const variables = window.__mermaidConfig?.themeVariables ?? {};
           const fill = variables.primaryColor ?? '#ffffff';
@@ -392,6 +404,7 @@ async function main() {
       const options = Array.from(panel.querySelectorAll<HTMLElement>(':scope > .more-tools-option'));
       return {
         labels: options.map((option) => option.querySelector('.more-tools-option-label')?.textContent),
+        languageAutoLabel: panel.querySelector<HTMLElement>('[data-ui-language="auto"] .segmented-control-button-label')?.textContent,
         directChildren: options.every((option) => option.parentElement === panel),
         baselineIcons: options.slice(1, 4).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
         separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length,
@@ -403,9 +416,10 @@ async function main() {
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         '释放固定基线',
-        '当前编辑', '最近保存', 'Git HEAD',
+        'diff：当前编辑', 'diff：最近保存', 'diff：Git HEAD',
         '限制宽度', '显示行号', '折叠长代码块'
       ]) ||
+      moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 3 ||
       moreToolsLayout.width > 268 ||
@@ -609,10 +623,14 @@ async function main() {
         type: 'fixedBaselineChanged', pinned: true, active: false
       }}));
     });
-    const standbyBaseline = await page.$eval('[data-action="fixedBaseline"]', (button) => ({
-      icon: button.querySelector('svg')?.classList.contains('lucide-bookmark-check') ?? false,
-      opacity: getComputedStyle(button).opacity
-    }));
+    const standbyBaseline = await page.$eval('[data-action="fixedBaseline"]', (button) => {
+      const icon = button.querySelector('svg');
+      return {
+        icon: icon?.querySelectorAll('path').length === 2
+          && icon.querySelector('path:last-child')?.getAttribute('d') === 'm9 10 2 2 4-4',
+        opacity: getComputedStyle(button).opacity
+      };
+    });
     if (
       JSON.stringify(activeBaselineColors) !== JSON.stringify({
         color: 'rgb(255, 255, 255)',
@@ -1800,6 +1818,7 @@ async function main() {
       (window as typeof window & { __hostMessages?: Array<{ type?: string }> }).__hostMessages ?? []
     ).filter((message) => message.type === 'requestPreviewRender').length);
     await page.evaluate(() => {
+      (window as any).__holdTallMermaidRender = true;
       window.dispatchEvent(new MessageEvent('message', {
         data: {
           type: 'vscodeCodeThemeChanged',
@@ -1873,11 +1892,12 @@ async function main() {
       scroller.scrollTop = scroller.scrollHeight;
       for (let attempt = 0; attempt < 80; attempt += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const pending = document.querySelector<HTMLElement>('.meo-mermaid-loading')
-          ?.closest<HTMLElement>('.meo-mermaid-block') ?? null;
+        const pending = document.querySelector<HTMLElement>(
+          '.meo-mermaid-block[aria-busy="true"]:has(svg[height="3000"])'
+        );
         if (pending) {
           const viewportTop = scroller.getBoundingClientRect().top;
-          scroller.scrollTop += pending.getBoundingClientRect().top - viewportTop - 80;
+          scroller.scrollTop += pending.getBoundingClientRect().bottom - viewportTop - 220;
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           const pendingBottom = pending.getBoundingClientRect().bottom;
           const anchor = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
@@ -1888,38 +1908,70 @@ async function main() {
           return {
             text: anchor?.textContent ?? null,
             top: anchor?.getBoundingClientRect().top ?? null,
-            blockTop: pending.getBoundingClientRect().top
+            blockTop: pending.getBoundingClientRect().top,
+            blockHeight: pending.getBoundingClientRect().height,
+            scrollTop: scroller.scrollTop
           };
         }
         scroller.scrollTop = Math.max(0, scroller.scrollTop - 120);
       }
       return null;
     });
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    if (!tallMermaidBefore || tallMermaidBefore.top === null) {
+      throw new Error(`Tall Mermaid did not enter the controlled pending state: ${JSON.stringify(tallMermaidBefore)}`);
+    }
     const tallMermaidWheelDelta = -20;
     const tallMermaidWheelCount = 6;
-    for (let index = 0; index < tallMermaidWheelCount; index += 1) {
+    const pendingWheelCount = tallMermaidWheelCount / 2;
+    for (let index = 0; index < pendingWheelCount; index += 1) {
+      await page.mouse.wheel({ deltaY: tallMermaidWheelDelta });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await page.evaluate(() => (window as any).__releaseTallMermaidRender());
+    await page.waitForFunction(() => (
+      !document.querySelector('.meo-mermaid-block[aria-busy="true"]:has(svg[height="3000"])') &&
+      Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]'))
+    ));
+    for (let index = pendingWheelCount; index < tallMermaidWheelCount; index += 1) {
       await page.mouse.wheel({ deltaY: tallMermaidWheelDelta });
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
     await waitForFrames(page);
     const tallMermaidAfter = await page.evaluate((anchorText) => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const anchor = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find((line) => line.textContent === anchorText);
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-block:has(svg[height="3000"])');
       return {
         text: anchor?.textContent ?? null,
         top: anchor?.getBoundingClientRect().top ?? null,
-        rendered: Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]'))
+        rendered: Boolean(document.querySelector('.meo-mermaid-block svg[height="3000"]')),
+        scrollTop: scroller.scrollTop,
+        blockTop: block?.getBoundingClientRect().top ?? null,
+        blockHeight: block?.getBoundingClientRect().height ?? null,
+        visibleLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .filter((line) => {
+            const rect = line.getBoundingClientRect();
+            const viewport = scroller.getBoundingClientRect();
+            return rect.bottom > viewport.top && rect.top < viewport.bottom;
+          })
+          .slice(0, 8)
+          .map((line) => line.textContent)
       };
     }, tallMermaidBefore?.text ?? null);
     if (
-      !tallMermaidBefore || tallMermaidBefore.top === null ||
       !tallMermaidAfter.rendered || tallMermaidAfter.top === null ||
+      tallMermaidAfter.blockTop === null || tallMermaidAfter.blockHeight === null ||
+      Math.abs(tallMermaidAfter.blockHeight - tallMermaidBefore.blockHeight) > 1 ||
+      Math.abs(
+        (tallMermaidAfter.top - tallMermaidAfter.blockTop) -
+        (tallMermaidBefore.top - tallMermaidBefore.blockTop)
+      ) > 1 ||
       Math.abs(
         tallMermaidAfter.top - tallMermaidBefore.top +
         tallMermaidWheelDelta * tallMermaidWheelCount
-      ) > 1
+      ) > 12
     ) {
       throw new Error(`Tall Mermaid displaced the visible reading anchor: ${JSON.stringify({ tallMermaidBefore, tallMermaidAfter })}`);
     }

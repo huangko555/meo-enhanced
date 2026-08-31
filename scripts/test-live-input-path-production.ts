@@ -115,7 +115,11 @@ async function armFirstFrame(
         };
         (window as any).__liveInputSettledFrame = new Promise<FrameSample>((resolveSettled) => {
           requestAnimationFrame(() => {
-            setTimeout(() => resolve(snapshot()), 0);
+            // MutationObserver delivery has completed before this rendering
+            // callback. Keep the first-frame sample in the same frame: a
+            // zero-delay timer can be delayed past the next frame under load
+            // and accidentally include second-frame derived work.
+            queueMicrotask(() => resolve(snapshot()));
             let remainingFrames = 3;
             const settleAfterPaint = () => requestAnimationFrame(() => {
               remainingFrames -= 1;
@@ -866,6 +870,10 @@ async function main(): Promise<void> {
           (window as any).__dispatchProductionInput(editor, insertion, '', insertion + 'preedit'.length);
         }
         content.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }));
+        // Composition ownership is released by the production 20ms timer.
+        // rAF count is not elapsed time in a headless browser, so cross that
+        // boundary explicitly before observing the committed refresh.
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
         await frames(6);
         const after = probe.count();
         probe.destroy();

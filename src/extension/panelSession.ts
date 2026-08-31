@@ -49,6 +49,7 @@ import type { ExportStyleEnvironment } from '../export/runtime';
 import type { PreviewAppearance, PreviewRenderResult } from '../shared/preview';
 import type { EditorAppearance } from '../shared/editorAppearance';
 import type { RawVscodeTheme } from '../shared/vscodeTheme';
+import type { EditorFontSizePreference } from '../foundation/editorFontSize';
 import type { OutlinePosition } from '../shared/extensionConfig';
 import type { InitMessage, SavedRevisionDto, SourceLineNumberMode } from '../protocol/readyInit';
 import type {
@@ -127,6 +128,8 @@ type PanelSessionControllerParams = {
   setPreviewSourceColoring: (enabled: boolean) => Promise<void>;
   getEditorAppearance: () => EditorAppearance;
   setEditorAppearance: (appearance: EditorAppearance) => Promise<void>;
+  getEditorFontSizePreference: () => EditorFontSizePreference;
+  setEditorFontSizePreference: (preference: EditorFontSizePreference) => Promise<void>;
   setOutlineVisible: (visible: boolean) => Promise<void>;
   onPanelActivated: (panel: vscode.WebviewPanel) => void;
   onPanelViewStateChanged: () => void;
@@ -179,6 +182,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     setPreviewSourceColoring,
     getEditorAppearance,
     setEditorAppearance,
+    getEditorFontSizePreference,
+    setEditorFontSizePreference,
     setOutlineVisible,
     onPanelActivated,
     onPanelViewStateChanged,
@@ -324,6 +329,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const sendInit = async (): Promise<boolean> => {
     const savedRevision = await readInitialSavedRevision();
     const diffBaselineState = diffBaselineSelection.getState();
+    const editorFontSizePreference = getEditorFontSizePreference();
     const initialText = document.getText();
     const initialMode = selectInitialEditorMode({
       text: initialText,
@@ -348,6 +354,8 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       previewFontFamily: getPreviewFontFamily(),
       previewSourceColoring: getPreviewSourceColoring(),
       editorAppearance: getEditorAppearance(),
+      editorFontSizeMode: editorFontSizePreference.mode,
+      editorFontSize: editorFontSizePreference.value,
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
       diffBaselineMode: diffBaselineState.mode,
@@ -571,6 +579,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'setEditorAppearance':
         await setEditorAppearance(raw.appearance);
+        return;
+      case 'setEditorFontSize':
+        await setEditorFontSizePreference({ mode: raw.mode, value: raw.value });
         return;
       case 'setUiLanguagePreference':
         await vscode.workspace

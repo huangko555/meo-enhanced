@@ -157,7 +157,22 @@ async function assertEmbeddedMermaidSupportsPointerPanning(page: Page): Promise<
 }
 
 async function enterMermaidFullscreen(page: Page): Promise<void> {
-  await page.click('.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Fullscreen"]');
+  const clicked = await page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>(
+      '.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Fullscreen"]'
+    )).find((candidate) => {
+      if (!candidate.isConnected) return false;
+      const rect = candidate.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+    });
+    button?.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      cancelable: true,
+      button: 0
+    }));
+    return Boolean(button);
+  });
+  if (!clicked) throw new Error('No connected visible Mermaid fullscreen control was available');
   await page.waitForFunction(() => {
     const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen');
     const wrapper = fullscreen?.querySelector<HTMLElement>('.meo-mermaid-svg-wrapper');
@@ -561,12 +576,16 @@ async function assertFullscreenCleanupPreservesPrimaryCause(page: Page): Promise
   await page.evaluate(() => {
     const container = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
     const overlay = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen-scrim')!;
+    container.setPointerCapture = () => {};
+    container.hasPointerCapture = () => true;
     container.releasePointerCapture = () => { throw new Error('primary pointer capture cleanup failed'); };
     overlay.remove = () => { throw new Error('secondary overlay cleanup failed'); };
+    container.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      pointerId: 91
+    }));
   });
-  await page.mouse.move(320, 260);
-  await page.mouse.down();
-  await page.mouse.move(360, 300);
   const failure = await page.evaluate(() => {
     try {
       (window as any).__mermaidEditingEditor.destroy();
@@ -582,10 +601,11 @@ async function assertFullscreenCleanupPreservesPrimaryCause(page: Page): Promise
       };
     }
   });
-  await page.mouse.up();
   await page.evaluate(() => {
     const container = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen')!;
     const overlay = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen-scrim')!;
+    delete (container as any).setPointerCapture;
+    delete (container as any).hasPointerCapture;
     delete (container as any).releasePointerCapture;
     delete (overlay as any).remove;
     overlay.remove();
@@ -1540,6 +1560,7 @@ async function main() {
       const previous = (window as any).__mermaidEditingEditor;
       previous.destroy();
       document.getElementById('app')!.replaceChildren();
+      (window as any).MermaidEditingHarness.applyCodeTheme('light');
       const prelude = Array.from({ length: 40 }, (_, index) => `prelude ${index + 1}`);
       (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
         parent: document.getElementById('app')!,
@@ -1560,10 +1581,86 @@ async function main() {
       });
     });
     await waitForFrames(page);
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.setMode('source'));
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(43, 'center'));
+    await page.waitForFunction(() => {
+      const view = (window as any).__mermaidEditingEditor.view;
+      const position = view.state.doc.toString().indexOf('graph TD') + 1;
+      const target = view.domAtPos(position).node;
+      const element = target instanceof HTMLElement ? target : target.parentElement;
+      return element ? getComputedStyle(element).color === 'rgb(0, 0, 0)' : false;
+    });
+    const outerMermaidTokenColors = await page.evaluate(() => {
+      const view = (window as any).__mermaidEditingEditor.view;
+      const source = view.state.doc.toString();
+      const colorAt = (position: number): string | null => {
+        const target = view.domAtPos(position).node;
+        const element = target instanceof HTMLElement ? target : target.parentElement;
+        return element ? getComputedStyle(element).color : null;
+      };
+      const graph = source.indexOf('graph TD');
+      const edge = source.indexOf('A --> B');
+      return [colorAt(graph + 1), colorAt(graph + 7), colorAt(edge), colorAt(edge + 3), colorAt(edge + 6)];
+    });
+    await page.evaluate(() => (window as any).__mermaidEditingEditor.setMode('live'));
+    await waitForFrames(page, 8);
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(42, 'center'));
     await waitForFrames(page);
     await page.click('.meo-mermaid-mode-btn');
     await waitForFrames(page);
+    await page.waitForFunction((expectedColors) => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split');
+      const view = (block as any)?.__meoMermaidEditingController?.innerView;
+      if (!view) return false;
+      const source = view.state.doc.toString();
+      const colorAt = (position: number): string | null => {
+        const target = view.domAtPos(position).node;
+        const element = target instanceof HTMLElement ? target : target.parentElement;
+        return element ? getComputedStyle(element).color : null;
+      };
+      const graph = source.indexOf('graph TD');
+      const edge = source.indexOf('A --> B');
+      const actualColors = [
+        colorAt(graph + 1), colorAt(graph + 7), colorAt(edge), colorAt(edge + 3), colorAt(edge + 6)
+      ];
+      return JSON.stringify(actualColors) === JSON.stringify(expectedColors);
+    }, { timeout: 3000 }, outerMermaidTokenColors);
+    const innerMermaidTokenColors = await page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
+      const view = (block as any).__meoMermaidEditingController?.innerView;
+      const source = view.state.doc.toString();
+      const colorAt = (position: number): string | null => {
+        const target = view.domAtPos(position).node;
+        const element = target instanceof HTMLElement ? target : target.parentElement;
+        return element ? getComputedStyle(element).color : null;
+      };
+      const graph = source.indexOf('graph TD');
+      const edge = source.indexOf('A --> B');
+      return [colorAt(graph + 1), colorAt(graph + 7), colorAt(edge), colorAt(edge + 3), colorAt(edge + 6)];
+    });
+    if (JSON.stringify(innerMermaidTokenColors) !== JSON.stringify(outerMermaidTokenColors)) {
+      throw new Error(`Mermaid source token palette differs from outer Source mode: ${JSON.stringify({ outerMermaidTokenColors, innerMermaidTokenColors })}`);
+    }
+    await page.evaluate(() => (window as any).MermaidEditingHarness.applyCodeTheme('dark'));
+    await page.waitForFunction(() => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split');
+      const view = (block as any)?.__meoMermaidEditingController?.innerView;
+      if (!view) return false;
+      const position = view.state.doc.toString().indexOf('graph TD') + 1;
+      const target = view.domAtPos(position).node;
+      const element = target instanceof HTMLElement ? target : target.parentElement;
+      return element ? getComputedStyle(element).color === 'rgb(212, 212, 212)' : false;
+    }, { timeout: 3000 });
+    await page.evaluate(() => (window as any).MermaidEditingHarness.applyCodeTheme('light'));
+    await page.waitForFunction(() => {
+      const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split');
+      const view = (block as any)?.__meoMermaidEditingController?.innerView;
+      if (!view) return false;
+      const position = view.state.doc.toString().indexOf('graph TD') + 1;
+      const target = view.domAtPos(position).node;
+      const element = target instanceof HTMLElement ? target : target.parentElement;
+      return element ? getComputedStyle(element).color === 'rgb(0, 0, 0)' : false;
+    }, { timeout: 3000 });
     const shortSplitLayout = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-mermaid-editing-block.is-split')!;
       const sourcePane = block?.querySelector<HTMLElement>('.meo-mermaid-source-pane')!;

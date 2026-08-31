@@ -30,7 +30,7 @@ export type AppearanceWebviewAdapter = {
   accept(message: HostToWebviewMessage): boolean;
 };
 
-/** Owns resolved Editor appearance and final Live/Preview code palette ordering for one Webview. */
+/** Owns resolved Editor appearance and final Live/Source/Preview code palette ordering for one Webview. */
 export function createAppearanceWebviewAdapter(
   dependencies: AppearanceWebviewAdapterDependencies
 ): AppearanceWebviewAdapter {

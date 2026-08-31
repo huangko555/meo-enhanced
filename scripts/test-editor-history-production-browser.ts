@@ -346,7 +346,11 @@ async function assertRenderedHistoryViewportPolicy(page: any): Promise<void> {
     const viewport = scroller.getBoundingClientRect();
     return {
       scrollTop: scroller.scrollTop,
-      visible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom)
+      visible: Boolean(rect && rect.bottom > viewport.top && rect.top < viewport.bottom),
+      blockTop: rect?.top ?? null,
+      blockBottom: rect?.bottom ?? null,
+      viewportTop: viewport.top,
+      viewportBottom: viewport.bottom
     };
   });
   const beforeVisibleUndo = await capture();
@@ -372,7 +376,8 @@ async function assertRenderedHistoryViewportPolicy(page: any): Promise<void> {
   const moveAway = async () => {
     await page.evaluate(() => (window as any).__historyProductionEditor.scrollToLine(3, 'center'));
     await waitForFrames(page, 10);
-    assert.equal((await capture()).visible, false, 'Mermaid history target fixture did not move offscreen');
+    const moved = await capture();
+    assert.equal(moved.visible, false, `Mermaid history target fixture did not move offscreen: ${JSON.stringify(moved)}`);
   };
   await moveAway();
   assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.undo()), true);

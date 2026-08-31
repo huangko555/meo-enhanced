@@ -1,4 +1,9 @@
-export type TestWorkflowTier = 'quick' | 'targeted' | 'release' | 'endurance';
+export type TestWorkflowTier =
+  | 'quick'
+  | 'targeted'
+  | 'release'
+  | 'endurance'
+  | 'large-document';
 
 export type TargetedTestArea =
   | 'history'
@@ -11,6 +16,12 @@ export type TargetedTestArea =
 export type TestWorkflowCommand = {
   args: string[];
   env?: Record<string, string>;
+};
+
+export type TestWorkflowStage = {
+  title: string;
+  commands: TestWorkflowCommand[];
+  maxConcurrency?: number;
 };
 
 export type TestWorkflowRequest = {
@@ -27,7 +38,7 @@ export type TestWorkflowPlan = {
   title: string;
   expectedDuration: string;
   longRunning: boolean;
-  commands: TestWorkflowCommand[];
+  stages: TestWorkflowStage[];
 };
 
 const targetedAreas = new Set<TargetedTestArea>([
@@ -47,6 +58,17 @@ const script = (path: string, env?: Record<string, string>): TestWorkflowCommand
 const packageScript = (name: string): TestWorkflowCommand => ({
   args: ['run', name]
 });
+
+const serialStage = (
+  title: string,
+  commands: TestWorkflowCommand[]
+): TestWorkflowStage => ({ title, commands, maxConcurrency: 1 });
+
+export function flattenTestWorkflowCommands(
+  plan: TestWorkflowPlan
+): TestWorkflowCommand[] {
+  return plan.stages.flatMap((stage) => stage.commands);
+}
 
 function targetedCommands(
   area: TargetedTestArea,
@@ -118,8 +140,13 @@ export function parseTestWorkflowRequest(argv: string[]): TestWorkflowRequest {
   const dryRun = argv.includes('--dry-run');
   const positional = argv.filter((value) => !value.startsWith('--'));
   const tier = positional[0] as TestWorkflowTier | undefined;
-  if (!tier || !['quick', 'targeted', 'release', 'endurance'].includes(tier)) {
-    throw new Error('Expected one tier: quick, targeted, release, or endurance');
+  if (
+    !tier
+    || !['quick', 'targeted', 'release', 'endurance', 'large-document'].includes(tier)
+  ) {
+    throw new Error(
+      'Expected one tier: quick, targeted, release, endurance, or large-document'
+    );
   }
 
   if (tier === 'targeted') {
@@ -140,6 +167,9 @@ export function parseTestWorkflowRequest(argv: string[]): TestWorkflowRequest {
   if (tier === 'endurance' && !documentPath) {
     throw new Error('Endurance UAT requires a document path');
   }
+  if (tier === 'large-document' && !documentPath) {
+    throw new Error('Large-document stress test requires a document path');
+  }
   return { tier, documentPath, confirmLongRun, dryRun };
 }
 
@@ -151,7 +181,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         title: 'Quick regression gate',
         expectedDuration: 'about 30-60 seconds',
         longRunning: false,
-        commands: [
+        stages: [serialStage('Quick regression contracts', [
           packageScript('typecheck'),
           script('scripts/test-test-workflow.ts'),
           script('scripts/test-editor-history-runtime.ts'),
@@ -161,7 +191,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
           script('scripts/test-viewport-controller.ts'),
           script('scripts/test-uat-viewport-stability.ts'),
           script('scripts/test-virtual-block-scroll-stability.ts')
-        ]
+        ])]
       };
     case 'targeted': {
       const area = request.area;
@@ -172,21 +202,38 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         title: `Targeted ${area} regression`,
         expectedDuration: area === 'uat' ? 'about 2-5 minutes' : 'about 1-3 minutes',
         longRunning: false,
-        commands: targetedCommands(area, request.documentPath)
+        stages: [serialStage(
+          `Targeted ${area} contracts`,
+          targetedCommands(area, request.documentPath)
+        )]
       };
     }
     case 'release':
       return {
         tier: 'release',
         title: 'Full release gate',
-        expectedDuration: 'about 15-30 minutes',
+        expectedDuration: 'about 10-20 minutes',
         longRunning: true,
-        commands: [
-          packageScript('typecheck'),
-          packageScript('architecture:check'),
-          packageScript('test'),
-          packageScript('build'),
-          packageScript('package:check')
+        stages: [
+          {
+            title: 'Static checks and domain suites',
+            maxConcurrency: 3,
+            commands: [
+              packageScript('typecheck'),
+              packageScript('architecture:check'),
+              packageScript('test:latex-scanner'),
+              packageScript('test:table-provenance'),
+              packageScript('test:table-column-width'),
+              packageScript('test:table-sticky-header'),
+              packageScript('test:table-command'),
+              packageScript('test:image-presentation'),
+              packageScript('test:mermaid-presentation'),
+              packageScript('test:unit')
+            ]
+          },
+          serialStage('Production browser matrix', [packageScript('test:browser')]),
+          serialStage('Production build', [packageScript('build')]),
+          serialStage('VSIX content validation', [packageScript('package:check')])
         ]
       };
     case 'endurance': {
@@ -197,10 +244,38 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         title: 'Full-document endurance UAT',
         expectedDuration: 'about 15-30 minutes per run',
         longRunning: true,
-        commands: [{
+        stages: [serialStage('Full-document endurance contracts', [{
           args: ['scripts/test-uat-full-document-endurance.ts', documentPath],
           env: { MEO_UAT_STRICT_FINDING: '*' }
-        }]
+        }])]
+      };
+    }
+    case 'large-document': {
+      const documentPath = request.documentPath;
+      if (!documentPath) {
+        throw new Error('Large-document stress test requires a document path');
+      }
+      return {
+        tier: 'large-document',
+        title: 'Simplified large-document stress test',
+        expectedDuration: 'about 1-3 minutes',
+        longRunning: true,
+        stages: [serialStage('Large-document stress contracts', [
+          packageScript('benchmark:large-document'),
+          {
+            args: ['scripts/test-uat-full-document-endurance.ts', documentPath],
+            env: {
+              MEO_UAT_ENDURANCE_LIMIT: '8',
+              MEO_UAT_STRICT_FINDING: '*'
+            }
+          },
+          {
+            args: [
+              'scripts/test-production-live-scroll-integrity.ts',
+              `--document=${documentPath}`
+            ]
+          }
+        ])]
       };
     }
   }

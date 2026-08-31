@@ -286,7 +286,7 @@ if (
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-property"')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-key">title</span>')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-pill">Markdown</span>')
-  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-list-item"')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value-line is-list-item"')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value is-string">undo</span>')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value is-literal">true</span>')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value is-number">1</span>')
@@ -295,8 +295,14 @@ if (
   throw new Error('Preview frontmatter must render an Obsidian-style Properties layout');
 }
 if (
-  !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-raw"')
-  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-raw">    Keep: this nested YAML content.</div>')
+  !/class="meo-export-frontmatter-line is-property"[^>]*>[\s\S]*class="meo-export-frontmatter-key">tags<\/span>[\s\S]*class="meo-export-frontmatter-value-group"[\s\S]*>undo<[\s\S]*>redo<[\s\S]*<\/div><\/div>/.test(propertiesFrontmatter.html)
+  || propertiesFrontmatter.html.includes('class="meo-export-frontmatter-line is-list-item"')
+) {
+  throw new Error('Preview Properties must keep every multi-line value inside the single value cell paired with its key');
+}
+if (
+  !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value-line is-raw"')
+  || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-value-line is-raw">    Keep: this nested YAML content.</div>')
   || !propertiesFrontmatter.html.includes('https://example.com/docs')
   || !propertiesFrontmatter.html.includes('class="meo-export-frontmatter-key">"a:b"</span>')
   || !propertiesFrontmatter.html.includes('# Preserve comments')
@@ -397,6 +403,7 @@ const maliciousFontStyles = buildPreviewStyles({
   ...environment,
   previewFontFamily: 'MEO Synthetic Sans";color:red;}'
 }, 'dark');
+const customSizeStyles = buildPreviewStyles({ ...environment, editorFontSizePx: 12 }, 'dark');
 
 if (!darkPreviewStyles.includes('--meo-font-body: "MEO Synthetic Sans", MEO Synthetic Mono')
   || !darkPreviewStyles.includes('--meo-font-code: MEO Synthetic Mono')) {
@@ -443,6 +450,15 @@ if (
   !darkPreviewStyles.includes('strong { color: inherit; font-weight: 700; }')
 ) {
   throw new Error('Preview strong text must inherit its surrounding color and only change font weight');
+}
+if (!customSizeStyles.includes('--meo-font-size-body: 12px')
+  || !customSizeStyles.includes('--meo-font-size-code: 12px')) {
+  throw new Error('Preview must use the selected editor-wide custom font size without a hidden minimum');
+}
+if (!darkPreviewStyles.includes('--meo-alert-note: #61afef')
+  || !darkPreviewStyles.includes('--meo-alert-tip: #98c379')
+  || !darkPreviewStyles.includes('--meo-alert-warning: #e5c07b')) {
+  throw new Error('Preview alerts must retain the Live semantic colors independently from plain body text');
 }
 
 if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {

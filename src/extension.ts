@@ -540,6 +540,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       setPreviewSourceColoring: this.appearanceSettings.setPreviewSourceColoring,
       getEditorAppearance: this.appearanceSettings.getEditorAppearance,
       setEditorAppearance: this.appearanceSettings.setEditorAppearance,
+      getEditorFontSizePreference: this.appearanceSettings.getEditorFontSizePreference,
+      setEditorFontSizePreference: this.appearanceSettings.setEditorFontSizePreference,
       setOutlineVisible: (visible) => this.setOutlineVisible(visible),
       onPanelActivated: (activePanel) => {
         this.lastActivePanel = activePanel;

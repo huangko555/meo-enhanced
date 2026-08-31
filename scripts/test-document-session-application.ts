@@ -33,6 +33,36 @@ assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 4 }), [
 assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 4 }), []);
 assert.deepEqual(localEdit.handle({ type: 'hostChangeApplied', version: 3 }), []);
 
+const staleEchoAfterInsert = createCoordinator();
+staleEchoAfterInsert.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' });
+assert.deepEqual(staleEchoAfterInsert.handle({
+  type: 'hostRevisionChanged',
+  version: 3,
+  text: 'one\ntwo'
+}), []);
+assert.deepEqual(staleEchoAfterInsert.handle({ type: 'submitPendingDraft' }), [
+  {
+    type: 'applyTextChange',
+    baseVersion: 3,
+    changes: [{ from: 0, to: 7, insert: 'one\ntwo\nlocal' }]
+  }
+]);
+
+const staleEchoAfterDelete = createCoordinator();
+staleEchoAfterDelete.handle({ type: 'localDraftChanged', text: 'one' });
+assert.deepEqual(staleEchoAfterDelete.handle({
+  type: 'hostRevisionChanged',
+  version: 3,
+  text: 'one\ntwo'
+}), []);
+assert.deepEqual(staleEchoAfterDelete.handle({ type: 'submitPendingDraft' }), [
+  {
+    type: 'applyTextChange',
+    baseVersion: 3,
+    changes: [{ from: 0, to: 7, insert: 'one' }]
+  }
+]);
+
 const orderedEdits = createCoordinator();
 orderedEdits.handle({ type: 'localDraftChanged', text: 'first edit' });
 orderedEdits.handle({ type: 'submitPendingDraft' });

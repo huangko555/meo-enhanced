@@ -26,6 +26,7 @@ assets/**
 .local/**
 .claude/
 .agents/
+.codex-remote-attachments/
 AGENTS.md
 CLAUDE.md
 .env

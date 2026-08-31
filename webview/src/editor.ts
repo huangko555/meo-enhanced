@@ -4,12 +4,13 @@ import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
-import { sourceHighlightStyle } from './theme';
+import { sourceHighlightStyle, sourceMarkdownHighlightProps } from './theme';
+import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
 import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
 import type { SourceLineNumberMode } from '../../src/protocol/readyInit';
 import { assessLargeDocument } from '../../src/foundation/largeDocument';
-import { uiLanguageFacet } from './editor/uiLanguage';
+import { advanceUiLanguageWidgetEpoch, uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
@@ -1393,8 +1394,6 @@ export function createEditor({
     const nextAnchor = Math.max(0, Math.min(anchor, max));
     const nextHead = Math.max(0, Math.min(head, max));
     const selection = view.state.selection.main;
-    const isRevealCurrent = viewportController.beginNavigationReveal();
-
     if (selection.anchor !== nextAnchor || selection.head !== nextHead) {
       view.dispatch({ selection: { anchor: nextAnchor, head: nextHead } });
     }
@@ -1402,6 +1401,7 @@ export function createEditor({
       view.focus();
     }
     if (align === 'none') return;
+    const isRevealCurrent = viewportController.beginNavigationReveal();
     const revealOptions = align === 'upper'
       ? { y: 'start' as const, yMargin: Math.round(view.scrollDOM.clientHeight * 0.3) }
       : { y: align === 'top' ? 'start' as const : align === 'nearest' ? 'nearest' as const : 'center' as const };
@@ -2106,6 +2106,9 @@ export function createEditor({
       mermaidDiagramPresentationFactoryFacet.of(
         mermaidDiagramPresentationConsumer
       ),
+      // One editor-scoped renderer keeps fenced-code TextMate tokens identical
+      // across Live and Source, and avoids disposing/recreating Shiki on mode switches.
+      shikiCodeHighlight,
       modeCompartment.of(startMode === 'live' ? liveModeExtensions({ largeDocument }) : sourceMode()),
       searchQueryField,
       Prec.high(searchMatchField),
@@ -2907,6 +2910,7 @@ export function createEditor({
       });
     },
     setUiLanguage(language: UiLanguage) {
+      advanceUiLanguageWidgetEpoch();
       view.dispatch({
         effects: uiLanguageCompartment.reconfigure(uiLanguageFacet.of(language))
       });
@@ -3678,7 +3682,11 @@ function sourceMode(): Extension[] {
       base: markdownLanguage,
       addKeymap: false,
       codeLanguages: resolveCodeLanguage,
-      extensions: [highlightMarkdownExtension, { remove: ['SetextHeading'] }]
+      extensions: [
+        highlightMarkdownExtension,
+        { props: [sourceMarkdownHighlightProps] },
+        { remove: ['SetextHeading'] }
+      ]
     }),
     syntaxHighlighting(sourceHighlightStyle),
     sourceCodeBlockField,

@@ -543,6 +543,7 @@ export class MermaidDiagramWidget extends WidgetType {
   previewResizeObserver: ResizeObserver | null;
   measuredHeight: number;
   initialHeightSeed: number;
+  staleSvg: string | null;
   indentColumns: number;
   presentationFactory: MermaidDiagramPresentationConsumer;
   presentationHandle: MermaidDiagramPresentationHandle | null;
@@ -582,9 +583,15 @@ export class MermaidDiagramWidget extends WidgetType {
     const request = mermaidRenderRequest(this.diagramText, this.themeSignature);
     const cached = this.presentationFactory.getCached(request);
     const contentWidth = currentMermaidContentWidth();
-    this.measuredHeight = this.presentationFactory.getHeight(
-      mermaidEstimatedHeightKey(JSON.stringify(request), contentWidth)
-    ) ?? estimateCachedMermaidHeight(cached && 'svg' in cached ? cached.svg : undefined, contentWidth);
+    const staleCandidate = cached?.ok === true ? null : this.presentationFactory.getStale(request);
+    const staleEstimatedHeight = estimateCachedMermaidHeight(staleCandidate?.svg, contentWidth);
+    const stale = staleCandidate;
+    this.staleSvg = stale?.svg ?? null;
+    this.measuredHeight = stale
+      ? Math.max(1, staleEstimatedHeight - 24)
+      : this.presentationFactory.getHeight(
+          mermaidEstimatedHeightKey(JSON.stringify(request), contentWidth)
+        ) ?? estimateCachedMermaidHeight(cached?.ok === true ? cached.svg : undefined, contentWidth);
     this.initialHeightSeed = this.measuredHeight;
   }
 
@@ -615,7 +622,7 @@ export class MermaidDiagramWidget extends WidgetType {
     const container = document.createElement('div');
     container.className = 'meo-mermaid-block';
     const initialHeight = this.estimatedHeight;
-    if (initialHeight > 0) {
+    if (initialHeight > 0 && !this.staleSvg) {
       container.style.minHeight = `${initialHeight}px`;
     }
     container.addEventListener('pointerdown', (event: PointerEvent) => {
@@ -635,6 +642,7 @@ export class MermaidDiagramWidget extends WidgetType {
     if (this.isDisplayMath) {
       container.classList.add('meo-mermaid-math-block');
     }
+    if (this.staleSvg) this.renderSvg(container, this.staleSvg);
     if (this.cachePreviewHeight && view && typeof ResizeObserver !== 'undefined') {
       this.previewResizeObserver = new ResizeObserver(() => {
         const height = container.getBoundingClientRect().height;
@@ -662,12 +670,24 @@ export class MermaidDiagramWidget extends WidgetType {
 
     this.presentationHandle = this.presentationFactory.create({
       showPending: () => {
+        if (container.querySelector('.meo-mermaid-svg-wrapper')) {
+          // Theme/config refreshes keep the last valid diagram visible until
+          // its replacement is ready. Collapsing a tall diagram to a Loading
+          // row and expanding it again causes avoidable viewport jumps.
+          container.setAttribute('aria-busy', 'true');
+          return;
+        }
+        if (container.isConnected) {
+          const currentHeight = container.getBoundingClientRect().height;
+          if (currentHeight > 0) container.style.minHeight = `${currentHeight}px`;
+        }
         const loading = document.createElement('div');
         loading.className = 'meo-mermaid-loading';
         loading.textContent = getUiStrings(this.uiLanguage).loading;
         container.replaceChildren(loading);
       },
       showDiagram: (svg) => {
+        container.removeAttribute('aria-busy');
         const estimatedHeight = estimateCachedMermaidHeight(svg, currentMermaidContentWidth(container));
         if (estimatedHeight > 0) {
           this.measuredHeight = estimatedHeight;
@@ -684,11 +704,13 @@ export class MermaidDiagramWidget extends WidgetType {
         this.renderSvg(container, svg);
       },
       showError: (_source, error) => {
+        container.removeAttribute('aria-busy');
         container.style.removeProperty('min-height');
         container.replaceChildren();
         this.renderError(container, error);
       },
       clearPresentation: () => {
+        container.removeAttribute('aria-busy');
         this.exitFullscreen('external');
         this.embeddedInteractionCleanup();
         container.style.removeProperty('min-height');

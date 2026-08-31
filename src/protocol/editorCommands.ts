@@ -1,6 +1,10 @@
 import { normalizePreviewFontFamily } from './editorStyleEnvironment';
 import { isUiLanguagePreference, type UiLanguagePreference } from '../foundation/uiLanguage';
 import type { SourceLineNumberMode } from './readyInit';
+import {
+  normalizeEditorFontSize,
+  type EditorFontSizeMode
+} from '../foundation/editorFontSize';
 
 export type EditorMode = 'live' | 'source' | 'preview';
 export type EditorAppearance = 'auto' | 'dark' | 'light';
@@ -31,6 +35,7 @@ export type EditorCommand =
   | { readonly type: 'setPreviewFontFamily'; readonly fontFamily: string }
   | { readonly type: 'setPreviewSourceColoring'; readonly enabled: boolean }
   | { readonly type: 'setEditorAppearance'; readonly appearance: EditorAppearance }
+  | { readonly type: 'setEditorFontSize'; readonly mode: EditorFontSizeMode; readonly value: number }
   | { readonly type: 'setUiLanguagePreference'; readonly language: UiLanguagePreference }
   | { readonly type: 'setSourceLineNumbers'; readonly mode: SourceLineNumberMode };
 
@@ -97,6 +102,12 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
     case 'setEditorAppearance':
       return value.appearance === 'auto' || value.appearance === 'dark' || value.appearance === 'light'
         ? value as EditorCommand : null;
+    case 'setEditorFontSize':
+      return (value.mode === 'auto' || value.mode === 'custom')
+        && isFiniteNumber(value.value)
+        && normalizeEditorFontSize(value.value) === value.value
+        ? value as EditorCommand
+        : null;
     case 'setPreviewSourceColoring':
       return typeof value.enabled === 'boolean' ? value as EditorCommand : null;
     case 'setPreviewFontFamily': {

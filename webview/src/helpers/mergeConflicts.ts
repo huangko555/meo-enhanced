@@ -6,7 +6,7 @@ import {
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
 import { getUiStrings } from '../application/uiLanguage';
-import { uiLanguageFacet } from '../editor/uiLanguage';
+import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 
 const lineDecos = {
   currentHeader: Decoration.line({ class: 'meo-merge-line meo-merge-current-header' }),
@@ -138,7 +138,7 @@ export function parseMergeConflicts(state: EditorState): MergeConflict[] {
   return conflicts;
 }
 
-class MergeConflictActionsWidget extends WidgetType {
+class MergeConflictActionsWidget extends UiLanguageSensitiveWidget {
   conflictId: number;
   currentLabel: string;
   incomingLabel: string;
@@ -152,6 +152,7 @@ class MergeConflictActionsWidget extends WidgetType {
 
   eq(other: MergeConflictActionsWidget): boolean {
     return other instanceof MergeConflictActionsWidget &&
+      this.hasSameUiLanguageEpoch(other) &&
       other.conflictId === this.conflictId &&
       other.currentLabel === this.currentLabel &&
       other.incomingLabel === this.incomingLabel;
@@ -263,7 +264,8 @@ const mergeConflictField = StateField.define<MergeConflictState>({
         ? { ...value, decorations: mapLiveInputDerivedDecorations(value.decorations, tr) }
         : value;
     }
-    if (!tr.docChanged && !isLiveInputDerivedWorkRefresh(tr)) {
+    const uiLanguageChanged = tr.startState.facet(uiLanguageFacet) !== tr.state.facet(uiLanguageFacet);
+    if (!tr.docChanged && !isLiveInputDerivedWorkRefresh(tr) && !uiLanguageChanged) {
       return value;
     }
     return buildMergeConflictState(tr.state);
