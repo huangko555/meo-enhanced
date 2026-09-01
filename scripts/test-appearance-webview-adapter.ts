@@ -10,7 +10,8 @@ const currentDark: CodeThemeDto = {
   colors: { 'editor.foreground': '#fefefe' },
   tokenColors: [
     { scope: 'keyword', settings: { foreground: '#123456' } },
-    { scope: 'string', settings: { foreground: '#abcdef' } }
+    { scope: 'string', settings: { foreground: '#abcdef' } },
+    { scope: 'markup.heading', settings: { foreground: '#569cd6', fontStyle: 'bold' } }
   ]
 };
 const currentLight: CodeThemeDto = { name: 'Current Light', type: 'light', colors: {}, tokenColors: [] };
@@ -34,6 +35,7 @@ const currentPalette = resolveFinalCodePalette(currentDark, fallbackLight, 'dark
 assert.equal(currentPalette.theme, currentDark);
 assert.equal(currentPalette.sourceTokens.keyword, '#123456');
 assert.equal(currentPalette.sourceTokens.string, '#abcdef');
+assert.equal(currentPalette.sourceHeadingFontWeight, '700');
 assert.equal(
   currentPalette.sourceTokens.listMarker,
   '#fefefe',
@@ -80,6 +82,16 @@ assert.equal(
   'light-plus',
   'Source and fenced code must share the bundled VS Code Light+ fallback'
 );
+assert.equal(
+  productionInversePalette.sourceTokens.heading,
+  '#800000',
+  'The Source fallback must retain the official VS Code Light+ heading color'
+);
+assert.equal(
+  productionInversePalette.sourceHeadingFontWeight,
+  '700',
+  'The Source fallback must honor the official VS Code heading bold rule'
+);
 const productionDarkInversePalette = codePaletteAdapter.resolve(currentLight, 'dark');
 assert.equal(
   productionDarkInversePalette.sourceTheme.name,
@@ -104,6 +116,7 @@ assert.notEqual(
 );
 codePaletteAdapter.apply(currentPalette);
 assert.equal(sourceVariables.get('--meo-token-keyword-color'), '#123456');
+assert.equal(sourceVariables.get('--meo-heading-token-weight'), '700');
 assert.equal(appliedShikiThemes.at(-1), currentDark);
 
 const appliedAppearances: string[] = [];

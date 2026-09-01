@@ -1006,12 +1006,15 @@ async function main() {
       previewHeight: document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect().height ?? 0,
       editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
       buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label'),
+      visibleLatexFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .filter((line) => (line.textContent ?? '').includes('$$')).length,
       sharedSplitIcon: document.querySelector('.meo-mermaid-mode-btn svg')?.innerHTML
         === document.querySelector('.meo-latex-math-mode-btn svg')?.innerHTML
     }));
     if (
       !defaultMode.preview || defaultMode.editing
       || defaultMode.buttonLabel !== 'Edit Mermaid in split view'
+      || defaultMode.visibleLatexFenceLines !== 1
       || !defaultMode.sharedSplitIcon
     ) {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);

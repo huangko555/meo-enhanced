@@ -2602,12 +2602,14 @@ function addMathDecorations(
         openingLine.to,
         activeLines.has(openingLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
       );
-      addRange(
-        builder,
-        closingLine.from,
-        closingLine.to,
-        activeLines.has(closingLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
-      );
+      if (decision?.effectiveMode !== 'preview') {
+        addRange(
+          builder,
+          closingLine.from,
+          closingLine.to,
+          activeLines.has(closingLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
+        );
+      }
 
       if (editingBoundary && decision?.effectiveMode === 'preview') {
         continue;
@@ -2640,7 +2642,7 @@ function addMathDecorations(
         Decoration.replace({
           widget: getMathWidget(html, mathRange.mode, true, startLineNo, endLineNo, indentColumns),
           block: true
-        }).range(renderSpan.innerFrom, renderSpan.innerTo)
+        }).range(renderSpan.innerFrom, closingLine.to)
       );
       continue;
     }

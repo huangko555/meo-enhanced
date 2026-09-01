@@ -42,6 +42,7 @@ export function createCodePaletteWebviewAdapter(input: {
       for (const [id, color] of Object.entries(palette.sourceTokens)) {
         sourceStyle.setProperty(`--meo-token-${id}-color`, color);
       }
+      sourceStyle.setProperty('--meo-heading-token-weight', palette.sourceHeadingFontWeight);
       // All fenced-code surfaces share this Shiki runtime. When the editor
       // appearance is inverse to VS Code, code tokens and Source prose switch
       // together to the appearance-matched native fallback palette.

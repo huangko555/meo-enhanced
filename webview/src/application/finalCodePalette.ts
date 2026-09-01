@@ -28,12 +28,13 @@ export type FinalCodePalette = Readonly<{
   theme: RawCodeTheme | null | undefined;
   sourceTheme: RawCodeTheme;
   sourceTokens: Readonly<Record<string, string>>;
+  sourceHeadingFontWeight: '400' | '700';
   preview: PreviewCodePalette;
 }>;
 
 type TokenColorRule = {
   readonly scope?: string | readonly string[];
-  readonly settings?: { readonly foreground?: string };
+  readonly settings?: { readonly foreground?: string; readonly fontStyle?: string };
 };
 
 const SOURCE_TOKEN_SCOPES: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -90,7 +91,8 @@ const SOURCE_TOKEN_SCOPES: Readonly<Record<string, readonly string[]>> = Object.
 function isTokenColorRule(value: unknown): value is TokenColorRule {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as TokenColorRule;
-  return typeof candidate.settings?.foreground === 'string';
+  return typeof candidate.settings?.foreground === 'string'
+    || typeof candidate.settings?.fontStyle === 'string';
 }
 
 function ruleScopes(rule: TokenColorRule): readonly string[] {
@@ -115,6 +117,16 @@ function resolveTokenColor(
     if (ruleScopes(value).some((scope) => requestedScopes.some((requested) => matchesScope(scope, requested)))) {
       resolved = value.settings?.foreground ?? resolved;
     }
+  }
+  return resolved;
+}
+
+function resolveHeadingFontWeight(theme: RawCodeTheme | null | undefined): '400' | '700' {
+  let resolved: '400' | '700' = '400';
+  for (const value of theme?.tokenColors ?? []) {
+    if (!isTokenColorRule(value) || typeof value.settings?.fontStyle !== 'string') continue;
+    if (!ruleScopes(value).some((scope) => matchesScope(scope, 'markup.heading'))) continue;
+    resolved = value.settings.fontStyle.split(/\s+/).includes('bold') ? '700' : '400';
   }
   return resolved;
 }
@@ -158,6 +170,7 @@ export function resolveFinalCodePalette(
     theme,
     sourceTheme,
     sourceTokens: Object.freeze(sourceTokens),
+    sourceHeadingFontWeight: resolveHeadingFontWeight(sourceTheme),
     preview: Object.freeze({
       foreground,
       comment: resolveTokenColor(theme, ['comment'], foreground),

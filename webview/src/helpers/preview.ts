@@ -112,6 +112,10 @@ const previewFontFamilies = [
 ] as const;
 
 const previewLatexMathViewportStyles = `
+.meo-export-math-display.meo-export-math-fenced-display {
+  padding-block: 0.8em;
+}
+
 .meo-export-math-display.meo-latex-math-viewport {
   position: relative;
   display: flex;

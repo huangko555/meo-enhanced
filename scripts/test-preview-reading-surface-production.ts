@@ -1169,6 +1169,19 @@ async function main(): Promise<void> {
       if (!(frame instanceof HTMLIFrameElement) || !frame.isConnected) return false;
       return frame.contentDocument?.querySelectorAll('.meo-export-math-fenced-display > .meo-latex-math-canvas').length === 1;
     }, {}, currentFrame);
+    const fencedMathPadding = await page.evaluate(() => {
+      const root = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector<HTMLElement>('.meo-export-math-fenced-display')!;
+      const style = root.ownerDocument.defaultView!.getComputedStyle(root);
+      return {
+        top: Number.parseFloat(style.paddingTop),
+        bottom: Number.parseFloat(style.paddingBottom)
+      };
+    });
+    assert.ok(
+      fencedMathPadding.top >= 10 && fencedMathPadding.bottom >= 10,
+      `Preview fenced math needs readable vertical breathing room: ${JSON.stringify(fencedMathPadding)}`
+    );
 
     const initialNative = await page.evaluate(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
