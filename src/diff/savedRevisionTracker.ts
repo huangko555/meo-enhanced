@@ -111,6 +111,20 @@ export class SavedRevisionTracker {
     return true;
   }
 
+  acceptDiskReload(text: string): boolean {
+    const next = snapshot(text);
+    const changed = next.contentHash !== this.latestDisk?.contentHash
+      || this.recentSaveBaseline !== null
+      || this.lastDiskRevisionAt !== null;
+    this.latestDisk = next;
+    this.recentSaveBaseline = null;
+    this.lastDiskRevisionAt = null;
+    if (changed) {
+      this.generation += 1;
+    }
+    return changed;
+  }
+
   getPinnedBaseline(): SavedTextSnapshot | null {
     return this.pinnedBaseline;
   }

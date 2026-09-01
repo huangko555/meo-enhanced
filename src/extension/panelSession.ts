@@ -206,7 +206,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   const documentReload = createVscodeDocumentReloadAdapter(document);
   let nextDiskReloadId = 1;
   let draftRecoveryReceiptVersion = 0;
-  const pendingDiskReloadPresentations = new Map<number, number>();
+  const pendingDiskReloadPresentations = new Map<number, {
+    readonly receiptVersion: number;
+    readonly text: string;
+  }>();
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     applyQueue = applyQueue.then(task, task);
     return applyQueue;
@@ -720,13 +723,16 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         );
         return;
       case 'documentReloadPresentationCompleted': {
-        const recoveryVersion = pendingDiskReloadPresentations.get(raw.reloadId);
-        if (recoveryVersion === undefined) return;
+        const pendingReload = pendingDiskReloadPresentations.get(raw.reloadId);
+        if (!pendingReload) return;
         pendingDiskReloadPresentations.delete(raw.reloadId);
+        if (raw.presented && savedRevisionTracker.acceptDiskReload(pendingReload.text)) {
+          notifySavedRevisionChanged();
+        }
         if (raw.presented
           && raw.receiptVersion === draftRecoveryReceiptVersion
-          && recoveryVersion === raw.receiptVersion) {
-          pendingDraftRecovery.discardIfCurrent(recoveryVersion);
+          && pendingReload.receiptVersion === raw.receiptVersion) {
+          pendingDraftRecovery.discardIfCurrent(pendingReload.receiptVersion);
         }
         return;
       }
@@ -751,7 +757,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
             await refreshSavedRevisionNow();
             const reloadId = nextDiskReloadId;
             nextDiskReloadId += 1;
-            pendingDiskReloadPresentations.set(reloadId, draftRecoveryReceiptVersion);
+            pendingDiskReloadPresentations.set(reloadId, {
+              receiptVersion: draftRecoveryReceiptVersion,
+              text: revision.text
+            });
             const message: DocumentReloadedFromDiskMessage = {
               type: 'documentReloadedFromDisk',
               reloadId,

@@ -28,9 +28,9 @@
   "config.contentMaxWidth": "将编辑器内容限制在居中的 800px 栏内。",
   "config.performance.largeDocumentOptimization": "大文档初次以源码模式打开以保持编辑响应；手动选择的模式仍然优先。",
   "config.gitChanges": "在编辑器中显示更改指示器。",
-  "config.baseline.currentEdit": "与最近保存到磁盘的内容比较。",
-  "config.baseline.recentSave": "与最近一次保存批次之前的版本比较。",
-  "config.baseline.gitHead": "与 Git HEAD 中的文件比较。",
+  "config.baseline.currentEdit": "diff: 与最新磁盘版本比较",
+  "config.baseline.recentSave": "diff: 与上一保存版本比较",
+  "config.baseline.gitHead": "diff: 与 Git HEAD 版本比较",
   "config.baseline.description": "选择更改指示器使用的比较基线。",
   "config.lineHighlights": "在源码模式中以淡色标示修改过的行。",
   "config.imageFolder": "保存粘贴图片的文件夹名称（相对于工作区根目录）。"

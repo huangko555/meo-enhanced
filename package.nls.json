@@ -28,9 +28,9 @@
   "config.contentMaxWidth": "Constrain the editor content to a centered 800px column.",
   "config.performance.largeDocumentOptimization": "Open large documents in Source mode initially to keep editing responsive. A manual mode choice remains preferred.",
   "config.gitChanges": "Show change indicators in the editor.",
-  "config.baseline.currentEdit": "Compare with the latest content saved to disk.",
-  "config.baseline.recentSave": "Compare with the version before the most recent save batch.",
-  "config.baseline.gitHead": "Compare with the file at Git HEAD.",
+  "config.baseline.currentEdit": "diff: Latest Disk Version",
+  "config.baseline.recentSave": "diff: Previous Saved Version",
+  "config.baseline.gitHead": "diff: Git HEAD Version",
   "config.baseline.description": "Choose the baseline used for change indicators.",
   "config.lineHighlights": "Show subtle line coloring for modified lines in Source mode.",
   "config.imageFolder": "Folder name to save pasted images (relative to workspace root)."

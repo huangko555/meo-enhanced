@@ -31,6 +31,20 @@ const generation = tracker.getGeneration();
 tracker.initialize('D');
 assert(tracker.getGeneration() === generation, 'reinitializing identical content should not create a revision');
 
+const reloadTracker = new SavedRevisionTracker({ mergeWindowMs: 10_000 });
+reloadTracker.initialize('disk A');
+reloadTracker.noteDiskRevision('disk B', 1_000);
+assert(reloadTracker.getRecentSaveBaseline()?.text === 'disk A', 'setup should expose a natural save baseline');
+assert(reloadTracker.acceptDiskReload('disk B') === true, 'accepting a disk reload should clear natural save history');
+assert(reloadTracker.getCurrentEditBaseline()?.text === 'disk B', 'disk reload should retain the presented disk text');
+assert(reloadTracker.getRecentSaveBaseline() === null, 'disk reload should remove the natural save baseline');
+assert(reloadTracker.getDiffBaseline('recent-save')?.text === 'disk B', 'recent-save mode should become neutral after reload');
+
+reloadTracker.pinLatestSavedBaseline();
+reloadTracker.noteDiskRevision('disk C', 20_000);
+reloadTracker.acceptDiskReload('disk C');
+assert(reloadTracker.getPinnedBaseline()?.text === 'disk B', 'disk reload must preserve a manually pinned baseline');
+
 const explicitSaveTracker = new SavedRevisionTracker({ mergeWindowMs: 10_000 });
 explicitSaveTracker.initialize('A');
 let explicitPreSaveRevision = explicitSaveTracker.getCurrentEditBaseline();

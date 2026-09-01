@@ -416,7 +416,7 @@ async function main() {
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         '释放固定基线',
-        'diff：当前编辑', 'diff：最近保存', 'diff：Git HEAD',
+        'diff: 与最新磁盘版本比较', 'diff: 与上一保存版本比较', 'diff: 与 Git HEAD 版本比较',
         '限制宽度', '显示行号', '折叠长代码块'
       ]) ||
       moreToolsLayout.languageAutoLabel !== '自动' ||

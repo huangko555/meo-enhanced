@@ -70,11 +70,12 @@ assert.deepEqual(
   [chinese.inlineMarkdownFormatting, chinese.bold, chinese.inlineCode, chinese.underline],
   ['行内 Markdown 格式', '加粗', '行内代码', '下划线']
 );
-assert.equal(chinese.hideChanges(chinese.currentEdits), '隐藏更改（当前编辑）');
+assert.equal(chinese.hideChanges(chinese.currentEdits), '隐藏更改（最新磁盘版本）');
 assert.deepEqual(
   [english.diffBaselineLabel(english.currentEdits), chinese.diffBaselineLabel(chinese.currentEdits)],
-  ['diff: Current Edits', 'diff：当前编辑']
+  ['diff: Latest Disk Version', 'diff: 与最新磁盘版本比较']
 );
+assert.equal(chinese.diffBaselineLabel(chinese.gitHead), 'diff: 与 Git HEAD 版本比较');
 assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
 assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);
