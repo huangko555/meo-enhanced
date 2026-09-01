@@ -10,6 +10,7 @@ export type TargetedTestArea =
   | 'table'
   | 'rendered'
   | 'appearance'
+  | 'search'
   | 'viewport'
   | 'uat';
 
@@ -46,6 +47,7 @@ const targetedAreas = new Set<TargetedTestArea>([
   'table',
   'rendered',
   'appearance',
+  'search',
   'viewport',
   'uat'
 ]);
@@ -110,6 +112,13 @@ function targetedCommands(
         script('scripts/test-vscode-theme-transition.ts'),
         script('scripts/test-highlight.ts')
       ];
+    case 'search':
+      return [
+        script('scripts/test-search-replace-production.ts'),
+        script('scripts/test-webview-search-controls.ts'),
+        script('scripts/test-viewport-controller.ts'),
+        script('scripts/test-table-column-width-lifecycle.ts')
+      ];
     case 'viewport':
       return [
         script('scripts/test-viewport-controller.ts'),
@@ -153,7 +162,7 @@ export function parseTestWorkflowRequest(argv: string[]): TestWorkflowRequest {
     const area = positional[1] as TargetedTestArea | undefined;
     if (!area || !targetedAreas.has(area)) {
       throw new Error(
-        `Unknown targeted area "${area ?? ''}". Expected history, table, rendered, appearance, viewport, or uat`
+        `Unknown targeted area "${area ?? ''}". Expected history, table, rendered, appearance, search, viewport, or uat`
       );
     }
     const documentPath = positional[2];

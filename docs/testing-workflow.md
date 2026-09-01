@@ -55,6 +55,7 @@ bun run test:targeted -- history
 bun run test:targeted -- table
 bun run test:targeted -- rendered
 bun run test:targeted -- appearance
+bun run test:targeted -- search
 bun run test:targeted -- viewport
 ```
 

@@ -912,6 +912,21 @@ await flushFrames(wheelFrames);
 if (revealScrollDOM.scrollTop !== 100) {
   throw new Error(`An already-visible target scrolled to ${revealScrollDOM.scrollTop}`);
 }
+const visibleCenterIfOutside = revealController.beginNavigationReveal();
+revealController.revealPosition(200, { y: 'center-if-outside' }, visibleCenterIfOutside);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 100) {
+  throw new Error(`Center-if-outside moved an already-visible target to ${revealScrollDOM.scrollTop}`);
+}
+const offscreenCenterIfOutside = revealController.beginNavigationReveal();
+revealController.revealPosition(900, { y: 'center-if-outside' }, offscreenCenterIfOutside);
+await Promise.resolve();
+await flushFrames(wheelFrames);
+if (revealScrollDOM.scrollTop !== 660) {
+  throw new Error(`Center-if-outside reached ${revealScrollDOM.scrollTop} instead of 660`);
+}
+revealScrollDOM.scrollTop = 100;
 const offscreenReveal = revealController.beginNavigationReveal();
 revealController.revealPosition(900, { y: 'nearest' }, offscreenReveal);
 await Promise.resolve();

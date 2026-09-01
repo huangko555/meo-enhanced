@@ -115,7 +115,7 @@ interface NavigationRevealOptions {
 interface RevealPositionOptions {
   readonly geometry?: 'caret' | 'line-block';
   readonly marginMode?: 'outside-only' | 'comfort-band';
-  readonly y?: 'nearest' | 'center' | 'start';
+  readonly y?: 'nearest' | 'center' | 'center-if-outside' | 'start';
   readonly yMargin?: number;
   readonly schedule?: 'immediate' | 'next-frame';
 }
@@ -1104,8 +1104,15 @@ export class ViewportController {
       const current = this.readScrollPosition();
       const coords = geometry === 'caret' ? this.view.coordsAtPos(targetPosition) : null;
       const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
-      if (y === 'center') {
+      if (y === 'center' || y === 'center-if-outside') {
         if (coords) {
+          if (
+            y === 'center-if-outside'
+            && coords.top >= scrollerRect.top
+            && coords.bottom <= scrollerRect.bottom
+          ) {
+            return { kind: 'stable' };
+          }
           return {
             kind: 'target',
             target: {
@@ -1114,6 +1121,13 @@ export class ViewportController {
           };
         }
         const block = this.view.lineBlockAt(targetPosition);
+        if (
+          y === 'center-if-outside'
+          && block.top >= current.top
+          && block.bottom <= current.top + this.view.scrollDOM.clientHeight
+        ) {
+          return { kind: 'stable' };
+        }
         return {
           kind: 'target',
           target: {

@@ -32,6 +32,14 @@ assert.ok(
   )
 );
 
+const search = createTestWorkflowPlan(
+  parseTestWorkflowRequest(['targeted', 'search'])
+);
+assert.equal(search.area, 'search');
+assert.ok(flattenTestWorkflowCommands(search).some((command) => (
+  command.args.includes('scripts/test-search-replace-production.ts')
+)));
+
 for (const area of ['table', 'rendered', 'viewport'] as const) {
   const targeted = createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', area]));
   assert.ok(flattenTestWorkflowCommands(targeted).some((command) => (

@@ -1371,7 +1371,6 @@ export function createEditor({
     const htmlBlock = currentMode === 'live'
       ? collectRenderableHtmlBlocks(view.state).find((block) => from < block.to && to > block.from)
       : null;
-    const isRevealCurrent = viewportController.beginNavigationReveal();
     view.dispatch({
       selection: { anchor: from, head: to },
       annotations: Transaction.userEvent.of('select.search'),
@@ -1383,7 +1382,8 @@ export function createEditor({
       ]
     });
     scheduleLiveSearchDecorationRefresh(to);
-    viewportController.revealPosition(from, { y: 'center', schedule: 'next-frame' }, isRevealCurrent);
+    const isRevealCurrent = viewportController.beginNavigationReveal();
+    viewportController.revealPosition(from, { y: 'center-if-outside', schedule: 'next-frame' }, isRevealCurrent);
     if (focusEditor) {
       view.focus();
     }
@@ -1780,17 +1780,29 @@ export function createEditor({
       return { replaced: false, ...findMatch(query, false, options) };
     }
 
+    const replacementEnd = from + replacement.length;
     view.dispatch({
       changes: { from, to, insert: replacement },
-      selection: { anchor: from, head: from + replacement.length }
+      selection: { anchor: replacementEnd }
     });
-    const nextMatch = findMatch(query, false, options);
-    if (nextMatch.found) {
-      return { replaced: true, ...nextMatch };
+
+    const remainingMatches = getSearchMatches(query, options);
+    const afterReplacement = remainingMatches.findIndex((match) => match.start >= replacementEnd);
+    const wrappedMatch = afterReplacement >= 0
+      ? afterReplacement
+      : remainingMatches.findIndex((match) => match.end <= from);
+    if (wrappedMatch >= 0) {
+      const match = remainingMatches[wrappedMatch];
+      selectSearchMatch(match.start, match.end);
+      return {
+        replaced: true,
+        found: true,
+        current: wrappedMatch + 1,
+        total: remainingMatches.length
+      };
     }
 
-    const remaining = getSearchMatches(query, options).length;
-    return { replaced: true, found: false, current: 0, total: remaining };
+    return { replaced: true, found: false, current: 0, total: remainingMatches.length };
   };
 
   const tableTransactionProvenanceAdapter = createCodeMirrorTableTransactionProvenanceAdapter(
@@ -2600,17 +2612,18 @@ export function createEditor({
         return { replaced: 0, total: 0 };
       }
 
-      const text = view.state.doc.toString();
       const matches = getSearchMatches(query, options);
       const replaced = matches.length;
       if (!replaced) {
         return { replaced: 0, total: 0 };
       }
 
-      const nextText = replaceMatchRanges(text, matches, replacement);
       view.dispatch({
-        changes: { from: 0, to: text.length, insert: nextText },
-        selection: { anchor: 0 }
+        changes: matches.map((match) => ({
+          from: match.start,
+          to: match.end,
+          insert: replacement
+        }))
       });
       return { replaced, total: getSearchMatches(query, options).length };
     },
@@ -3385,22 +3398,6 @@ function findSelectedSearchMatchIndex(matches: SearchMatchRange[], from: number,
     }
   }
   return -1;
-}
-
-function replaceMatchRanges(text: string, matches: SearchMatchRange[], replacement: string): string {
-  if (!matches.length) {
-    return text;
-  }
-
-  let nextText = '';
-  let offset = 0;
-  for (const match of matches) {
-    nextText += text.slice(offset, match.start);
-    nextText += replacement;
-    offset = match.end;
-  }
-  nextText += text.slice(offset);
-  return nextText;
 }
 
 function normalizeLiveInlineSelectionForListContent(

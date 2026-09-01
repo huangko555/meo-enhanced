@@ -874,6 +874,87 @@ async function runFastHistoryCycle(
   }
 }
 
+async function runSearchReplaceEnduranceWave(
+  page: import('puppeteer-core').Page,
+  expectedText: string
+): Promise<void> {
+  const rounds = Number.isInteger(Number.parseInt(process.env.MEO_UAT_ENDURANCE_LIMIT ?? '', 10))
+    ? 4
+    : 12;
+  const result = await page.evaluate(async ({ searchRounds, expected }) => {
+    const editor = (window as any).__fullUatEditor;
+    const query = '__';
+    const replacement = '@@';
+    const expectedMatches = expected.split(query).length - 1;
+    if (expectedMatches < 1) throw new Error('Search endurance fixture contains no inserted marker');
+    const middleLine = Math.max(1, Math.floor(editor.view.state.doc.lines / 2));
+    const middle = editor.view.state.doc.line(middleLine).from;
+    editor.revealSelection(middle, middle, { focusEditor: false, align: 'center' });
+    for (let frame = 0; frame < 6; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const beforeTopLine = editor.getTopVisiblePosition().line;
+    for (let round = 0; round < searchRounds; round += 1) {
+      const navigation = round % 3 === 2
+        ? editor.findPrevious(query, { focusEditor: false })
+        : editor.findNext(query, { focusEditor: false });
+      if (!navigation.found) throw new Error(`Search endurance navigation failed at round ${round + 1}`);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    editor.revealSelection(middle, middle, { focusEditor: false, align: 'center' });
+    for (let frame = 0; frame < 6; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const replaceBeforeTopLine = editor.getTopVisiblePosition().line;
+    const replaced = editor.replaceAll(query, replacement);
+    for (let frame = 0; frame < 10; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const afterTopLine = editor.getTopVisiblePosition().line;
+    const selectionLine = editor.view.state.doc.lineAt(editor.view.state.selection.main.anchor).number;
+    const replacedText = editor.getText();
+    const undoApplied = await editor.undo();
+    for (let frame = 0; frame < 10; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const undoRestored = editor.getText() === expected;
+    const redoApplied = await editor.redo();
+    for (let frame = 0; frame < 10; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const redoRestored = editor.getText() === replacedText;
+    const finalUndoApplied = await editor.undo();
+    for (let frame = 0; frame < 10; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return {
+      expectedMatches,
+      replaced,
+      replaceBeforeTopLine,
+      afterTopLine,
+      selectionLine,
+      middleLine,
+      beforeTopLine,
+      undoApplied,
+      undoRestored,
+      redoApplied,
+      redoRestored,
+      finalUndoApplied,
+      finalTextRestored: editor.getText() === expected
+    };
+  }, { searchRounds: rounds, expected: expectedText });
+  if (
+    result.replaced.replaced !== result.expectedMatches ||
+    result.selectionLine !== result.middleLine ||
+    Math.abs(result.afterTopLine - result.replaceBeforeTopLine) > 1 ||
+    !result.undoApplied || !result.undoRestored ||
+    !result.redoApplied || !result.redoRestored ||
+    !result.finalUndoApplied || !result.finalTextRestored
+  ) {
+    throw new Error(`Search/replace endurance wave failed: ${JSON.stringify(result)}`);
+  }
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-mermaid-editing-entry.ts')],
@@ -951,6 +1032,7 @@ async function main(): Promise<void> {
       }
     }
     await runFastHistoryCycle(page, records, versions);
+    await runSearchReplaceEnduranceWave(page, versions.at(-1)!);
 
     const finalText = await getText(page);
     if (finalText !== versions.at(-1)) throw new Error('Final text differs after the fast history cycle');
