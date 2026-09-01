@@ -56,4 +56,16 @@ assert.deepEqual(tableStickyHeaderPolicy.layout({
   controlsHeight: 31
 });
 
+const fractionalLayout = tableStickyHeaderPolicy.layout({
+  ...common,
+  scroller: { ...common.scroller, left: 20.4, right: 419.4 },
+  table: { ...common.table, left: 20.4, right: 419.4, width: 399 }
+});
+assert.equal(fractionalLayout.visible, true);
+if (fractionalLayout.visible) {
+  assert.equal(fractionalLayout.left, 20, 'fractional left edge should round outward');
+  assert.equal(fractionalLayout.width, 400, 'fractional right edge should round outward');
+  assert.ok(Math.abs(fractionalLayout.translateX - 0.4) < 0.001);
+}
+
 console.log('table sticky header policy contracts passed');

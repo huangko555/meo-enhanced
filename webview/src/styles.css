@@ -4456,7 +4456,7 @@ body.outline-resizing .preview-frame {
   overflow-x: auto;
 }
 
-.cm-editor .meo-md-html-table th:last-child > .meo-md-html-table-column-resize-handle {
+.cm-editor .meo-md-html-table :is(th, td):last-child > .meo-md-html-table-column-resize-handle {
   right: 0;
   width: 5px;
 }

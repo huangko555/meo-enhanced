@@ -75,15 +75,17 @@ export const tableStickyHeaderPolicy: TableStickyHeaderPolicy = {
       return { visible: false, reason: 'outside-horizontal-viewport' };
     }
 
+    const coveredLeft = Math.floor(visibleLeft);
+    const coveredRight = Math.ceil(visibleRight);
     return {
       visible: true,
       top: Math.round(input.scroller.top),
-      left: Math.round(visibleLeft),
-      width: Math.round(visibleWidth),
+      left: coveredLeft,
+      width: coveredRight - coveredLeft,
       height: Math.ceil(controlsHeight + input.header.height + separatorDepth),
       headerHeight: Math.ceil(input.header.height),
       tableWidth: input.table.width,
-      translateX: input.table.left - visibleLeft,
+      translateX: input.table.left - coveredLeft,
       controlsHeight
     };
   }

@@ -4923,6 +4923,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         inputs.push(input);
         bodyCells.push(td);
         td.appendChild(content);
+        td.appendChild(this.createColumnResizeHandle(col));
 
         tr.appendChild(td);
       }
