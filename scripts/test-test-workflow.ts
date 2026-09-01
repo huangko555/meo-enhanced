@@ -46,6 +46,13 @@ for (const area of ['table', 'rendered', 'viewport'] as const) {
     command.args.includes('scripts/test-virtual-block-scroll-stability.ts')
   )), `${area} targeted workflow must cover virtual block scroll stability`);
 }
+
+assert.ok(flattenTestWorkflowCommands(
+  createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'table']))
+).some((command) => command.args.includes('scripts/test-table-body-interaction-sticky-production.ts')));
+assert.ok(flattenTestWorkflowCommands(
+  createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', 'viewport']))
+).some((command) => command.args.includes('scripts/test-document-reload-mermaid-viewport.ts')));
 assert.ok(
   flattenTestWorkflowCommands(history).some((command) =>
     command.args.includes('scripts/test-rendered-content-history-roundtrip.ts')

@@ -92,6 +92,7 @@ function targetedCommands(
         script('scripts/test-table-column-width-policy.ts'),
         script('scripts/test-table-column-width-lifecycle.ts'),
         script('scripts/test-table-diff-refresh.ts'),
+        script('scripts/test-table-body-interaction-sticky-production.ts'),
         script('scripts/test-table-input-visual-stability.ts'),
         script('scripts/test-table-visible-history-viewport.ts'),
         script('scripts/test-virtual-block-scroll-stability.ts')
@@ -122,6 +123,7 @@ function targetedCommands(
     case 'viewport':
       return [
         script('scripts/test-viewport-controller.ts'),
+        script('scripts/test-document-reload-mermaid-viewport.ts'),
         script('scripts/test-uat-viewport-stability.ts'),
         script('scripts/test-live-embedded-input-viewport.ts'),
         script('scripts/test-table-position-after-embedded-edit.ts'),

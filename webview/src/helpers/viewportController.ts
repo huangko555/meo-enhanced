@@ -4,6 +4,7 @@ export interface ViewportDocumentAnchor {
   position: number;
   lineOffset: number;
   viewportOffset?: number;
+  renderedBlock?: boolean;
 }
 
 type RestoreDocumentAnchorOptions = {
@@ -505,7 +506,8 @@ export class ViewportController {
         const rect = renderedBlock.getBoundingClientRect();
         return {
           position: this.view.state.doc.line(renderedBlockStartLine).from,
-          lineOffset: Math.max(0, scrollerRect.top - rect.top)
+          lineOffset: Math.max(0, scrollerRect.top - rect.top),
+          renderedBlock: true
         };
       }
     }
@@ -536,6 +538,22 @@ export class ViewportController {
       ? Math.max(0, anchor.viewportOffset ?? 0)
       : null;
     this.stabilize(() => {
+      if (anchor.renderedBlock && typeof this.view.contentDOM?.querySelectorAll === 'function') {
+        const lineNumber = this.view.state.doc.lineAt(position).number;
+        const renderedBlock = Array.from(
+          this.view.contentDOM.querySelectorAll<HTMLElement>('[data-meo-rendered-block-start-line]')
+        ).find((block) => Number(block.dataset.meoRenderedBlockStartLine) === lineNumber);
+        if (renderedBlock) {
+          const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
+          const blockRect = renderedBlock.getBoundingClientRect();
+          return {
+            top: Math.max(
+              0,
+              this.view.scrollDOM.scrollTop + blockRect.top - scrollerRect.top + lineOffset
+            )
+          };
+        }
+      }
       if (viewportOffset !== null) {
         const coords = this.view.coordsAtPos(position);
         if (coords) {
