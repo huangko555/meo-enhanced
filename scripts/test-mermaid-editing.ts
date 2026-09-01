@@ -1006,25 +1006,77 @@ async function main() {
       const latexCanvas = latexRoot.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
       const latexRootRect = latexRoot.getBoundingClientRect();
       const latexCanvasRect = latexCanvas.getBoundingClientRect();
+      const readPreviewChrome = (kind: 'mermaid' | 'latex') => {
+        const shell = document.querySelector<HTMLElement>(
+          `.meo-rendered-block-preview[data-meo-rendered-block-kind="${kind === 'latex' ? 'math' : kind}"]`
+        );
+        const label = shell?.querySelector<HTMLElement>(':scope > .meo-rendered-block-preview-language') ?? null;
+        const toolbar = shell?.querySelector<HTMLElement>(
+          `:scope > .meo-${kind === 'latex' ? 'latex-math' : kind}-toolbar`
+        ) ?? null;
+        const controls = Array.from(toolbar?.children ?? [])
+          .filter((element): element is HTMLElement => element instanceof HTMLElement);
+        return {
+          shell: Boolean(shell),
+          label: label?.textContent ?? null,
+          labelParent: label?.parentElement === shell,
+          toolbarParent: toolbar?.parentElement === shell,
+          controlCount: controls.length,
+          chrome: [label, ...controls].map((element) => {
+            if (!element) return null;
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            return {
+              background: style.backgroundColor,
+              borderRadius: style.borderRadius,
+              borderWidth: style.borderWidth,
+              width: rect.width,
+              height: rect.height
+            };
+          })
+        };
+      };
       return {
         preview: Boolean(document.querySelector('.meo-mermaid-block')),
         previewHeight: document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect().height ?? 0,
         editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
         buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label'),
+        visibleMermaidFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .filter((line) => (line.textContent ?? '').includes('```mermaid')).length,
         visibleLatexFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
           .filter((line) => (line.textContent ?? '').includes('$$')).length,
         latexVisualTop: latexCanvasRect.top - latexRootRect.top,
         latexVisualBottom: latexRootRect.bottom - latexCanvasRect.bottom,
+        mermaidChrome: readPreviewChrome('mermaid'),
+        latexChrome: readPreviewChrome('latex'),
         sharedSplitIcon: document.querySelector('.meo-mermaid-mode-btn svg')?.innerHTML
           === document.querySelector('.meo-latex-math-mode-btn svg')?.innerHTML
       };
     });
+    const hasExpectedPreviewChrome = (
+      chrome: typeof defaultMode.mermaidChrome,
+      language: string
+    ) => chrome.shell
+      && chrome.label === language
+      && chrome.labelParent
+      && chrome.toolbarParent
+      && chrome.controlCount === 3
+      && chrome.chrome.every((item) => item
+        && item.background === 'rgb(246, 248, 250)'
+        && item.borderRadius === '6px'
+        && item.borderWidth === '0px'
+        && item.width > 0
+        && item.height > 0);
     if (
       !defaultMode.preview || defaultMode.editing
       || defaultMode.buttonLabel !== 'Edit Mermaid in split view'
-      || defaultMode.visibleLatexFenceLines !== 1
+      || defaultMode.visibleMermaidFenceLines !== 0
+      || defaultMode.visibleLatexFenceLines !== 0
       || defaultMode.latexVisualTop < 12
       || defaultMode.latexVisualBottom < 12
+      || Math.abs(defaultMode.latexVisualTop - defaultMode.latexVisualBottom) > 1
+      || !hasExpectedPreviewChrome(defaultMode.mermaidChrome, 'mermaid')
+      || !hasExpectedPreviewChrome(defaultMode.latexChrome, 'latex')
       || !defaultMode.sharedSplitIcon
     ) {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);
@@ -1144,6 +1196,52 @@ async function main() {
       throw new Error(`Pressing Mermaid preview temporarily revealed source: ${JSON.stringify(previewPointerDown)}`);
     }
 
+    for (const labelSelector of [
+      '.meo-rendered-block-preview[data-meo-rendered-block-kind="mermaid"] > .meo-rendered-block-preview-language',
+      '.meo-rendered-block-preview[data-meo-rendered-block-kind="math"] > .meo-rendered-block-preview-language'
+    ]) {
+      const labelBefore = await page.evaluate(() => {
+        const editor = (window as any).__mermaidEditingEditor;
+        return {
+          selectionHead: editor.view.state.selection.main.head,
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          mermaidPreview: Boolean(document.querySelector('.meo-mermaid-block')),
+          latexPreview: Boolean(document.querySelector('.meo-md-math-fenced-display'))
+        };
+      });
+      const labelPoint = await page.$eval(labelSelector, (label) => {
+        const rect = label.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      });
+      await page.mouse.click(labelPoint.x, labelPoint.y);
+      await waitForFrames(page, 2);
+      const labelAfter = await page.evaluate(() => {
+        const editor = (window as any).__mermaidEditingEditor;
+        return {
+          selectionHead: editor.view.state.selection.main.head,
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          mermaidPreview: Boolean(document.querySelector('.meo-mermaid-block')),
+          latexPreview: Boolean(document.querySelector('.meo-md-math-fenced-display')),
+          mermaidEditing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
+          latexEditing: Boolean(document.querySelector('.meo-latex-math-editing-block'))
+        };
+      });
+      if (
+        labelAfter.selectionHead !== labelBefore.selectionHead
+        || Math.abs(labelAfter.scrollTop - labelBefore.scrollTop) > 1
+        || !labelAfter.mermaidPreview
+        || !labelAfter.latexPreview
+        || labelAfter.mermaidEditing
+        || labelAfter.latexEditing
+      ) {
+        throw new Error(`Clicking preview language chrome changed editor state: ${JSON.stringify({
+          labelSelector,
+          before: labelBefore,
+          after: labelAfter
+        })}`);
+      }
+    }
+
     const latexHoverPoint = await page.$eval('.meo-latex-math-viewport', (block) => {
       block.scrollIntoView({ block: 'center' });
       const rect = block.getBoundingClientRect();
@@ -1205,16 +1303,21 @@ async function main() {
     const mermaidToolbarAfterModeChange = await page.evaluate(() => ({
       hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
       opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-mermaid-toolbar')!).opacity,
+      previewOwned: document.querySelector('.meo-mermaid-toolbar')?.parentElement
+        ?.classList.contains('meo-rendered-block-preview') ?? false,
+      focused: document.activeElement === document.querySelector('.meo-mermaid-mode-btn'),
       sameToolbar: (window as any).__mermaidToolbarBeforeModeChange === document.querySelector('.meo-mermaid-toolbar'),
       sameButton: (window as any).__mermaidModeButtonBeforeModeChange === document.querySelector('.meo-mermaid-mode-btn')
     }));
     if (
       !mermaidToolbarAfterModeChange.hovered ||
       mermaidToolbarAfterModeChange.opacity !== '1' ||
-      !mermaidToolbarAfterModeChange.sameToolbar ||
-      !mermaidToolbarAfterModeChange.sameButton
+      !mermaidToolbarAfterModeChange.previewOwned ||
+      !mermaidToolbarAfterModeChange.focused ||
+      mermaidToolbarAfterModeChange.sameToolbar ||
+      mermaidToolbarAfterModeChange.sameButton
     ) {
-      throw new Error(`Mermaid toolbar disappeared after mode change: ${JSON.stringify(mermaidToolbarAfterModeChange)}`);
+      throw new Error(`Mermaid toolbar ownership handoff failed after returning to preview: ${JSON.stringify(mermaidToolbarAfterModeChange)}`);
     }
 
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(56, 'upper'));
@@ -1244,16 +1347,21 @@ async function main() {
     const latexToolbarAfterModeChange = await page.evaluate(() => ({
       hovered: document.querySelector('.meo-latex-math-toolbar')?.classList.contains('is-block-hovered'),
       opacity: getComputedStyle(document.querySelector<HTMLElement>('.meo-latex-math-toolbar')!).opacity,
+      previewOwned: document.querySelector('.meo-latex-math-toolbar')?.parentElement
+        ?.classList.contains('meo-rendered-block-preview') ?? false,
+      focused: document.activeElement === document.querySelector('.meo-latex-math-mode-btn'),
       sameToolbar: (window as any).__latexToolbarBeforeModeChange === document.querySelector('.meo-latex-math-toolbar'),
       sameButton: (window as any).__latexModeButtonBeforeModeChange === document.querySelector('.meo-latex-math-mode-btn')
     }));
     if (
       !latexToolbarAfterModeChange.hovered ||
       latexToolbarAfterModeChange.opacity !== '1' ||
-      !latexToolbarAfterModeChange.sameToolbar ||
-      !latexToolbarAfterModeChange.sameButton
+      !latexToolbarAfterModeChange.previewOwned ||
+      !latexToolbarAfterModeChange.focused ||
+      latexToolbarAfterModeChange.sameToolbar ||
+      latexToolbarAfterModeChange.sameButton
     ) {
-      throw new Error(`Formula toolbar disappeared after mode change: ${JSON.stringify(latexToolbarAfterModeChange)}`);
+      throw new Error(`Formula toolbar ownership handoff failed after returning to preview: ${JSON.stringify(latexToolbarAfterModeChange)}`);
     }
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(1, 'top'));
     await waitForFrames(page);
@@ -1262,7 +1370,7 @@ async function main() {
       const editor = (window as any).__mermaidEditingEditor;
       const samples: Array<{
         scrollTop: number;
-        blockTop: number | null;
+        toolbarTop: number | null;
         blockPresent: boolean;
       }> = [];
       (window as any).__mermaidSelectAllTrace = new Promise((resolve) => {
@@ -1273,7 +1381,8 @@ async function main() {
           );
           samples.push({
             scrollTop: editor.view.scrollDOM.scrollTop,
-            blockTop: block?.getBoundingClientRect().top ?? null,
+            toolbarTop: document.querySelector<HTMLElement>('.meo-mermaid-toolbar')
+              ?.getBoundingClientRect().top ?? null,
             blockPresent: Boolean(block)
           });
           remaining -= 1;
@@ -1286,24 +1395,50 @@ async function main() {
         sample();
       });
     });
-    await page.click('.meo-mermaid-toolbar .meo-select-all-code-btn');
+    const selectAllPoint = await page.$eval(
+      '.meo-mermaid-toolbar .meo-select-all-code-btn',
+      (button) => {
+        const rect = button.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    );
+    await page.mouse.move(selectAllPoint.x, selectAllPoint.y);
+    await page.waitForFunction(() => {
+      const toolbar = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
+      return toolbar?.classList.contains('is-block-hovered')
+        && getComputedStyle(toolbar).pointerEvents === 'auto';
+    });
+    const selectAllHitTarget = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return {
+        className: target?.getAttribute('class') ?? null,
+        label: target?.getAttribute('aria-label') ?? null
+      };
+    }, selectAllPoint);
+    if (selectAllHitTarget.label !== 'Select all code') {
+      throw new Error(`Mermaid select-all backing plate missed hit testing: ${JSON.stringify({
+        selectAllPoint,
+        selectAllHitTarget
+      })}`);
+    }
+    await page.mouse.click(selectAllPoint.x, selectAllPoint.y);
     const selectAllTrace = await page.evaluate(async () => (
       await (window as any).__mermaidSelectAllTrace
-    )) as Array<{ scrollTop: number; blockTop: number | null; blockPresent: boolean }>;
+    )) as Array<{ scrollTop: number; toolbarTop: number | null; blockPresent: boolean }>;
     const scrollValues = selectAllTrace.map((sample) => sample.scrollTop);
-    const blockTopValues = selectAllTrace
-      .map((sample) => sample.blockTop)
+    const toolbarTopValues = selectAllTrace
+      .map((sample) => sample.toolbarTop)
       .filter((value): value is number => value !== null);
     const scrollSpan = Math.max(...scrollValues) - Math.min(...scrollValues);
-    const blockTopSpan = Math.max(...blockTopValues) - Math.min(...blockTopValues);
+    const toolbarTopSpan = Math.max(...toolbarTopValues) - Math.min(...toolbarTopValues);
     if (
       selectAllTrace.some((sample) => !sample.blockPresent) ||
       scrollSpan > 1 ||
-      blockTopSpan > 1
+      toolbarTopSpan > 1
     ) {
       throw new Error(`Mermaid select all visibly shifted the editor: ${JSON.stringify({
         scrollSpan,
-        blockTopSpan,
+        toolbarTopSpan,
         samples: selectAllTrace
       })}`);
     }
@@ -1767,7 +1902,30 @@ async function main() {
     await waitForFrames(page);
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(42, 'center'));
     await waitForFrames(page);
-    await page.click('.meo-latex-math-mode-btn');
+    const latexModePoint = await page.$eval('.meo-latex-math-mode-btn', (button) => {
+      const rect = button.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(latexModePoint.x, latexModePoint.y);
+    await page.waitForFunction(() => {
+      const toolbar = document.querySelector<HTMLElement>('.meo-latex-math-toolbar');
+      return toolbar?.classList.contains('is-block-hovered')
+        && getComputedStyle(toolbar).pointerEvents === 'auto';
+    });
+    const latexModeHit = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return {
+        className: target?.getAttribute('class') ?? null,
+        label: target?.closest('[aria-label]')?.getAttribute('aria-label') ?? null
+      };
+    }, latexModePoint);
+    if (latexModeHit.label !== 'Edit formula in split view') {
+      throw new Error(`LaTeX preview mode backing plate missed hit testing: ${JSON.stringify({
+        latexModePoint,
+        latexModeHit
+      })}`);
+    }
+    await page.mouse.click(latexModePoint.x, latexModePoint.y);
     await waitForFrames(page);
     const latexSplitLayout = await page.evaluate(() => {
       const block = document.querySelector<HTMLElement>('.meo-latex-math-editing-block.is-split')!;

@@ -485,6 +485,12 @@ export function createEditor({
       setHoveredBlockActionToolbar(directToolbar);
       return;
     }
+    const previewShell = targetElement?.closest('.meo-rendered-block-preview');
+    const previewToolbar = previewShell?.querySelector<HTMLElement>(blockActionToolbarSelector);
+    if (previewToolbar) {
+      setHoveredBlockActionToolbar(previewToolbar);
+      return;
+    }
 
     const position = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
     if (position === null) {

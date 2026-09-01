@@ -2485,6 +2485,79 @@ body {
   background: var(--meo-semantic-codeCopyHoverBackground);
 }
 
+.cm-editor.meo-mode-live .cm-line.meo-rendered-block-preview-anchor-line,
+.cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-rendered-block-preview-anchor-gutter {
+  height: 0 !important;
+  min-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  line-height: 0 !important;
+  overflow: hidden;
+}
+
+.cm-editor .meo-rendered-block-preview {
+  position: relative;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--meo-code-background);
+  overflow: hidden;
+}
+
+.cm-editor .meo-rendered-block-preview-language {
+  position: absolute;
+  top: 4px;
+  left: 2ch;
+  z-index: 21;
+  color: var(--meo-semantic-codeLanguageLabelForeground);
+  background: var(--meo-code-background);
+  cursor: default;
+}
+
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar,
+.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar {
+  z-index: 20;
+}
+
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-code-block-pill,
+.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-code-block-pill,
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-mermaid-mode-btn,
+.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-latex-math-mode-btn {
+  border: 0;
+  border-radius: 6px;
+  background-color: var(--meo-code-background);
+  background-image: none;
+}
+
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-code-block-pill:hover,
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-code-block-pill:focus-visible,
+.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-code-block-pill:hover,
+.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-code-block-pill:focus-visible,
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-mermaid-mode-btn:hover,
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-mermaid-mode-btn:focus-visible,
+.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-latex-math-mode-btn:hover,
+.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-latex-math-mode-btn:focus-visible {
+  background-color: var(--meo-code-background);
+  background-image: linear-gradient(
+    var(--meo-semantic-codeCopyHoverBackground, rgba(127, 127, 127, 0.2)),
+    var(--meo-semantic-codeCopyHoverBackground, rgba(127, 127, 127, 0.2))
+  );
+}
+
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-block,
+.cm-editor .meo-rendered-block-preview > .meo-md-math-fenced-display {
+  width: 100%;
+  margin: 0;
+}
+
+.cm-editor .meo-rendered-block-preview > .meo-mermaid-block .meo-visual-controls,
+.cm-editor .meo-rendered-block-preview > .meo-md-math-fenced-display .meo-visual-controls {
+  top: 32px;
+}
+
 .cm-editor .meo-md-html-block {
   position: relative;
   box-sizing: border-box;

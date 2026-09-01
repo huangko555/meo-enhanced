@@ -622,6 +622,26 @@ export class ViewportController {
     });
   }
 
+  preserveElementPositionWhileMutation(
+    element: HTMLElement,
+    resolveCurrentElement: () => HTMLElement | null,
+    mutate: () => void,
+    schedule: StabilizeOptions['schedule'] = 'next-frame'
+  ): void {
+    const beforeTop = element.isConnected ? element.getBoundingClientRect().top : null;
+    mutate();
+    if (beforeTop === null || this.isUserScrolling()) return;
+    this.stabilize(() => {
+      const current = resolveCurrentElement();
+      if (!current?.isConnected) return null;
+      return {
+        top: this.view.scrollDOM.scrollTop + current.getBoundingClientRect().top - beforeTop
+      };
+    }, {
+      schedule
+    });
+  }
+
   /** Reveals through the owned scroller; pending geometry never displaces the current viewport owner. */
   revealElement(element: HTMLElement, isCurrent: () => boolean = () => true): void {
     this.runNavigationReveal(() => {

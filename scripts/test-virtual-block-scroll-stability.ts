@@ -189,7 +189,7 @@ async function snapshot(page: Page, collectDocumentGeometry = false): Promise<Vi
     const visibleIntegrityMismatches: VisibleSnapshot['visibleIntegrityMismatches'] = [];
     for (const lineElement of view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')) {
       const rect = lineElement.getBoundingClientRect();
-      if (rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
+      if (rect.height <= 0.5 || rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
       try {
         const position = view.posAtDOM(lineElement, 0);
         const line = view.state.doc.lineAt(position).number;
@@ -208,7 +208,7 @@ async function snapshot(page: Page, collectDocumentGeometry = false): Promise<Vi
           const closestDistance = Math.abs(closest.rect.top + closest.rect.height / 2 - center);
           return distance < closestDistance ? item : closest;
         }, null);
-        if (gutter && Math.abs(gutter.line - line) > 3) {
+        if (text && gutter && Math.abs(gutter.line - line) > 3) {
           visibleIntegrityMismatches.push({
             kind: 'gutter-document', text, expectedLine: line, actualLine: gutter.line
           });
@@ -347,7 +347,7 @@ async function main(): Promise<void> {
           const mismatches: Array<Record<string, unknown>> = [];
           for (const element of view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')) {
             const rect = element.getBoundingClientRect();
-            if (rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
+            if (rect.height <= 0.5 || rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
             let documentLine: number;
             try {
               documentLine = view.state.doc.lineAt(view.posAtDOM(element, 0)).number;
@@ -366,7 +366,7 @@ async function main(): Promise<void> {
             if (expectedTextLine && expectedTextLine !== documentLine) {
               mismatches.push({ kind: 'text-document', text, expectedTextLine, documentLine });
             }
-            if (gutter && Math.abs((gutter.rect.top + gutter.rect.height / 2) - center) <= rect.height
+            if (text && gutter && Math.abs((gutter.rect.top + gutter.rect.height / 2) - center) <= rect.height
               && gutter.number !== documentLine) {
               mismatches.push({ kind: 'gutter-document', text, gutterLine: gutter.number, documentLine });
             }

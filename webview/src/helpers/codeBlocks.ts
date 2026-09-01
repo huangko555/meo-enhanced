@@ -17,6 +17,7 @@ import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockCont
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import {
   addMermaidToolbar,
+  createMermaidToolbarWidget,
   getMermaidBlockMode,
   MermaidEditingWidget
 } from './mermaidEditing';
@@ -24,6 +25,8 @@ import { getLiveListBlockIndentColumns } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { currentSyntaxTree, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
+import { createRenderedBlockPreviewShell } from './renderedBlockPreview';
+import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -733,7 +736,9 @@ export function addTopLinePillLabel(builder: any[], lineEnd: number, labelText: 
 const quotedFenceOpeningLineRegex = /^[ \t]{0,3}(?:>[ \t]?)*[ \t]{0,3}(?:`{3,}|~{3,})/;
 const fenceLineRegex = /^[ \t]*[`~]{3,}.*$/;
 const quotedFencePrefixRegex = /^[ \t]{0,3}((?:>[ \t]?)*)[ \t]{0,3}(?:`{3,}|~{3,})/;
-
+const renderedBlockPreviewAnchorLineDeco = Decoration.line({
+  class: 'meo-rendered-block-preview-anchor-line'
+});
 export function addFenceOpeningLineMarker(builder: any[], state: EditorState, from: number, activeLines: Set<number>, addRange: Function, activeLineMarkerDeco: any, fenceMarkerDeco: any): void {
   const line = state.doc.lineAt(from);
   const text = state.doc.sliceString(line.from, line.to);
@@ -764,18 +769,105 @@ export function addCodeLanguageLabel(builder: any[], state: EditorState, node: a
   addTopLinePillLabel(builder, startLine.to, labelText);
 }
 
-export function addMermaidDiagram(builder: any[], state: EditorState, node: any): void {
+class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
+  private readonly diagramWidget: MermaidDiagramWidget;
+  private readonly toolbarWidget: WidgetType;
+
+  constructor(
+    readonly diagramText: string,
+    readonly fullBlockText: string,
+    readonly anchor: number,
+    readonly blockTo: number,
+    readonly startLine: number,
+    readonly endLine: number,
+    readonly indentColumns: number,
+    presentationFactory: ReturnType<typeof getMermaidDiagramPresentationFactory>,
+    uiLanguage: UiLanguage
+  ) {
+    super();
+    this.diagramWidget = new MermaidDiagramWidget(diagramText, startLine, endLine, {
+      presentationFactory,
+      indentColumns: 0,
+      uiLanguage
+    });
+    this.toolbarWidget = createMermaidToolbarWidget(
+      anchor,
+      startLine,
+      'preview',
+      fullBlockText,
+      blockTo
+    );
+  }
+
+  get estimatedHeight(): number {
+    return this.diagramWidget.estimatedHeight;
+  }
+
+  eq(other: WidgetType): boolean {
+    return other instanceof MermaidPreviewWidget
+      && this.hasSameUiLanguageEpoch(other)
+      && other.diagramText === this.diagramText
+      && other.fullBlockText === this.fullBlockText
+      && other.anchor === this.anchor
+      && other.blockTo === this.blockTo
+      && other.startLine === this.startLine
+      && other.endLine === this.endLine
+      && other.indentColumns === this.indentColumns
+      && this.diagramWidget.eq(other.diagramWidget)
+      && this.toolbarWidget.eq(other.toolbarWidget);
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const content = this.diagramWidget.toDOM(view) as HTMLElement;
+    delete content.dataset.meoRenderedBlockStartLine;
+    delete content.dataset.meoRenderedBlockEndLine;
+    const shell = createRenderedBlockPreviewShell({
+      kind: 'mermaid',
+      language: 'mermaid',
+      startLine: this.startLine,
+      endLine: this.endLine,
+      indentColumns: this.indentColumns,
+      toolbar: this.toolbarWidget.toDOM(view),
+      content
+    });
+    (shell as MermaidPreviewShellElement).__meoMermaidPreviewDiagramWidget = this.diagramWidget;
+    return shell;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
+
+  destroy(dom: HTMLElement): void {
+    const shell = dom as MermaidPreviewShellElement;
+    const mountedDiagram = shell.__meoMermaidPreviewDiagramWidget;
+    delete shell.__meoMermaidPreviewDiagramWidget;
+    mountedDiagram?.destroy();
+  }
+}
+
+type MermaidPreviewShellElement = HTMLElement & {
+  __meoMermaidPreviewDiagramWidget?: MermaidDiagramWidget;
+};
+
+export function addMermaidDiagram(
+  builder: any[],
+  state: EditorState,
+  node: any,
+  activeLines: ReadonlySet<number>
+): boolean {
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(Math.max(node.to - 1, node.from));
   const diagramText = getFencedCodeContent(state, node);
   const fullBlockText = state.doc.sliceString(startLine.from, endLine.to);
 
-  addMermaidDiagramBlock(builder, state, {
+  return addMermaidDiagramBlock(builder, state, {
     startLine: startLine.number,
     endLine: endLine.number,
     diagramText,
     fullBlockText,
-    indentColumns: getLiveListBlockIndentColumns(state, node.from, node.node)
+    indentColumns: getLiveListBlockIndentColumns(state, node.from, node.node),
+    activeLines
   });
 }
 
@@ -788,24 +880,25 @@ function addMermaidDiagramBlock(
     diagramText: string;
     fullBlockText: string;
     indentColumns?: number;
+    activeLines: ReadonlySet<number>;
   }
-): void {
+): boolean {
   if (!block.diagramText.trim()) {
-    return;
+    return false;
   }
 
   const startLine = state.doc.line(block.startLine);
   const endLine = state.doc.line(block.endLine);
 
   if (startLine.number >= endLine.number) {
-    return;
+    return false;
   }
 
   const contentStartLine = state.doc.line(startLine.number + 1);
   const contentEndLine = state.doc.line(endLine.number - 1);
 
   if (contentStartLine.from >= contentEndLine.to) {
-    return;
+    return false;
   }
 
   const anchor = startLine.from;
@@ -822,14 +915,33 @@ function addMermaidDiagramBlock(
     contentEndLine.to
   );
   const decision = mode.decision;
-  addMermaidToolbar(builder, startLine.to, anchor, startLine.number, decision.effectiveMode, block.fullBlockText);
+  if (decision.effectiveMode !== 'preview') {
+    if (!block.activeLines.has(startLine.number)) {
+      addTopLinePillLabel(builder, startLine.to, 'mermaid');
+    }
+    addMermaidToolbar(
+      builder,
+      startLine.to,
+      anchor,
+      startLine.number,
+      decision.effectiveMode,
+      block.fullBlockText,
+      endLine.to
+    );
+  }
 
   const widget = decision.effectiveMode === 'preview'
-    ? new MermaidDiagramWidget(block.diagramText, startLine.number, endLine.number, {
-        presentationFactory: getMermaidDiagramPresentationFactory(state),
+    ? new MermaidPreviewWidget(
+        block.diagramText,
+        block.fullBlockText,
+        anchor,
+        endLine.to,
+        startLine.number,
+        endLine.number,
         indentColumns,
-        uiLanguage: state.facet(uiLanguageFacet)
-      })
+        getMermaidDiagramPresentationFactory(state),
+        state.facet(uiLanguageFacet)
+      )
     : new MermaidEditingWidget({
       anchor,
       contentFrom: contentStartLine.from,
@@ -841,7 +953,7 @@ function addMermaidDiagramBlock(
       indentColumns
     }, decision.effectiveMode, mode.searchReveal);
   const replacementFrom = decision.effectiveMode === 'preview'
-    ? startLine.to
+    ? startLine.from
     : contentStartLine.from;
   const replacementTo = decision.effectiveMode === 'preview'
     ? endLine.to
@@ -856,6 +968,10 @@ function addMermaidDiagramBlock(
       inclusive: decision.effectiveMode !== 'preview'
     }).range(replacementFrom, replacementTo)
   );
+  if (decision.effectiveMode === 'preview') {
+    builder.push(renderedBlockPreviewAnchorLineDeco.range(startLine.from));
+  }
+  return decision.effectiveMode === 'preview';
 }
 
 export function addCopyCodeButton(builder: any[], state: EditorState, from: number, to: number): void {

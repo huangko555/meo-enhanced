@@ -103,6 +103,10 @@ function resolveLatexMathToolbarAnchor(
   toolbar: HTMLElement,
   fallbackLineNumber: number
 ): number | null {
+  const declaredAnchor = Number.parseInt(toolbar.dataset.meoBlockFrom ?? '', 10);
+  if (Number.isFinite(declaredAnchor) && isLatexMathAnchor(view.state, declaredAnchor)) {
+    return declaredAnchor;
+  }
   try {
     const position = view.posAtDOM(toolbar);
     const line = view.state.doc.lineAt(Math.max(0, Math.min(position, view.state.doc.length)));
@@ -215,8 +219,9 @@ function updateLatexMathModeButton(
   renderRenderedBlockModeButton(button, decision);
 }
 
-function preserveAnchorWhileDispatching(
+function preserveToolbarWhileDispatching(
   view: EditorView,
+  toolbar: HTMLElement,
   anchor: number,
   effects: StateEffect<unknown> | readonly StateEffect<unknown>[]
 ): void {
@@ -225,7 +230,13 @@ function preserveAnchorWhileDispatching(
     view.dispatch({ effects });
     return;
   }
-  controller.preservePositionWhileMutation(anchor, () => view.dispatch({ effects }));
+  controller.preserveElementPositionWhileMutation(
+    toolbar,
+    () => view.dom.querySelector<HTMLElement>(
+      `.meo-latex-math-toolbar[data-meo-block-from="${anchor}"]`
+    ),
+    () => view.dispatch({ effects })
+  );
 }
 
 class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
@@ -267,6 +278,11 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
     toolbar.dataset.meoLatexMathMode = this.mode;
     toolbar.dataset.meoUiLanguage = uiLanguage;
     toolbar[latexToolbarSourceText] = this.sourceText;
+    toolbar.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
 
     const modeButton = document.createElement('button');
     modeButton.type = 'button';
@@ -287,8 +303,9 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
         uiLanguage
       }).nextManualMode;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
-      preserveAnchorWhileDispatching(
+      preserveToolbarWhileDispatching(
         view,
+        toolbar,
         currentAnchor,
         [
           supersedeLiveInputDerivedWork(),
@@ -298,7 +315,10 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
         if (nextMode === 'preview') {
-          modeButton.focus({ preventScroll: true });
+          const currentModeButton = view.dom.querySelector<HTMLButtonElement>(
+            `.meo-latex-math-toolbar[data-meo-block-from="${currentAnchor}"] .meo-latex-math-mode-btn`
+          );
+          currentModeButton?.focus({ preventScroll: true });
           return;
         }
         const editingBlock = view.dom.querySelector<HTMLElement>(
@@ -312,8 +332,10 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
       const currentAnchor = resolveLatexMathToolbarAnchor(view, toolbar, this.lineNumber);
       if (currentAnchor === null) return;
       const isRevealCurrent = getViewportController(view)?.beginNavigationReveal() ?? (() => true);
-      preserveAnchorWhileDispatching(
+      const scrollTop = view.scrollDOM.scrollTop;
+      preserveToolbarWhileDispatching(
         view,
+        toolbar,
         currentAnchor,
         [
           supersedeLiveInputDerivedWork(),
@@ -326,6 +348,7 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
           `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${currentAnchor}"]`
         );
         (editingBlock as LatexMathEditingBlockElement | null)?.__meoLatexMathEditingController?.selectAll();
+        getViewportController(view)?.lockScrollTop(scrollTop, isRevealCurrent);
       });
     }, uiLanguage);
 
@@ -375,10 +398,20 @@ export function addLatexMathToolbar(
 ): void {
   builder.push(
     Decoration.widget({
-      widget: new LatexMathToolbarWidget(anchor, lineNumber, mode, sourceText, blockTo),
+      widget: createLatexMathToolbarWidget(anchor, lineNumber, mode, sourceText, blockTo),
       side: 1
     }).range(lineEnd)
   );
+}
+
+export function createLatexMathToolbarWidget(
+  anchor: number,
+  lineNumber: number,
+  mode: LatexMathBlockMode,
+  sourceText: string,
+  blockTo: number
+): WidgetType {
+  return new LatexMathToolbarWidget(anchor, lineNumber, mode, sourceText, blockTo);
 }
 
 type LatexMathEditingBlockElement = HTMLElement & {
