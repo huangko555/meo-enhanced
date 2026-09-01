@@ -2337,7 +2337,7 @@ body {
   justify-content: center;
   width: 100%;
   margin: 0;
-  padding: 0;
+  padding: 1em 0;
   background: var(--meo-code-background);
   border-radius: 0;
   line-height: 1;

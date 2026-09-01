@@ -1001,20 +1001,30 @@ async function main() {
     await assertInitialInteractiveMathMeasurementStaysVisible(page);
     await waitForFrames(page);
 
-    const defaultMode = await page.evaluate(() => ({
-      preview: Boolean(document.querySelector('.meo-mermaid-block')),
-      previewHeight: document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect().height ?? 0,
-      editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
-      buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label'),
-      visibleLatexFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .filter((line) => (line.textContent ?? '').includes('$$')).length,
-      sharedSplitIcon: document.querySelector('.meo-mermaid-mode-btn svg')?.innerHTML
-        === document.querySelector('.meo-latex-math-mode-btn svg')?.innerHTML
-    }));
+    const defaultMode = await page.evaluate(() => {
+      const latexRoot = document.querySelector<HTMLElement>('.meo-md-math-fenced-display')!;
+      const latexCanvas = latexRoot.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
+      const latexRootRect = latexRoot.getBoundingClientRect();
+      const latexCanvasRect = latexCanvas.getBoundingClientRect();
+      return {
+        preview: Boolean(document.querySelector('.meo-mermaid-block')),
+        previewHeight: document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect().height ?? 0,
+        editing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
+        buttonLabel: document.querySelector('.meo-mermaid-mode-btn')?.getAttribute('aria-label'),
+        visibleLatexFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .filter((line) => (line.textContent ?? '').includes('$$')).length,
+        latexVisualTop: latexCanvasRect.top - latexRootRect.top,
+        latexVisualBottom: latexRootRect.bottom - latexCanvasRect.bottom,
+        sharedSplitIcon: document.querySelector('.meo-mermaid-mode-btn svg')?.innerHTML
+          === document.querySelector('.meo-latex-math-mode-btn svg')?.innerHTML
+      };
+    });
     if (
       !defaultMode.preview || defaultMode.editing
       || defaultMode.buttonLabel !== 'Edit Mermaid in split view'
       || defaultMode.visibleLatexFenceLines !== 1
+      || defaultMode.latexVisualTop < 12
+      || defaultMode.latexVisualBottom < 12
       || !defaultMode.sharedSplitIcon
     ) {
       throw new Error(`Unexpected default Mermaid mode: ${JSON.stringify(defaultMode)}`);

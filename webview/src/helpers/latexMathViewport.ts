@@ -233,7 +233,18 @@ export function attachLatexMathViewport(
           restorePresentation(entryPresentation);
           return false;
         }
-        candidateHeight = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(renderedHeight))}px`;
+        const rootStyle = ownerWindow.getComputedStyle(root);
+        const verticalChrome = rootStyle.boxSizing === 'border-box'
+          ? Number.parseFloat(rootStyle.paddingTop)
+            + Number.parseFloat(rootStyle.paddingBottom)
+            + Number.parseFloat(rootStyle.borderTopWidth)
+            + Number.parseFloat(rootStyle.borderBottomWidth)
+          : 0;
+        if (!Number.isFinite(verticalChrome) || verticalChrome < 0) {
+          restorePresentation(entryPresentation);
+          return false;
+        }
+        candidateHeight = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(renderedHeight + verticalChrome))}px`;
       }
 
       if (candidateHeight !== null) {

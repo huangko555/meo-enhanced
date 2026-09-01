@@ -1169,18 +1169,23 @@ async function main(): Promise<void> {
       if (!(frame instanceof HTMLIFrameElement) || !frame.isConnected) return false;
       return frame.contentDocument?.querySelectorAll('.meo-export-math-fenced-display > .meo-latex-math-canvas').length === 1;
     }, {}, currentFrame);
-    const fencedMathPadding = await page.evaluate(() => {
+    const fencedMathSpacing = await page.evaluate(() => {
       const root = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
         .querySelector<HTMLElement>('.meo-export-math-fenced-display')!;
+      const canvas = root.querySelector<HTMLElement>(':scope > .meo-latex-math-canvas')!;
       const style = root.ownerDocument.defaultView!.getComputedStyle(root);
+      const rootRect = root.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
       return {
-        top: Number.parseFloat(style.paddingTop),
-        bottom: Number.parseFloat(style.paddingBottom)
+        paddingTop: Number.parseFloat(style.paddingTop),
+        paddingBottom: Number.parseFloat(style.paddingBottom),
+        visualTop: canvasRect.top - rootRect.top,
+        visualBottom: rootRect.bottom - canvasRect.bottom
       };
     });
     assert.ok(
-      fencedMathPadding.top >= 10 && fencedMathPadding.bottom >= 10,
-      `Preview fenced math needs readable vertical breathing room: ${JSON.stringify(fencedMathPadding)}`
+      fencedMathSpacing.visualTop >= 12 && fencedMathSpacing.visualBottom >= 12,
+      `Preview fenced math needs a visible line of vertical breathing room: ${JSON.stringify(fencedMathSpacing)}`
     );
 
     const initialNative = await page.evaluate(() => {
