@@ -1234,6 +1234,31 @@ async function main() {
         return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
       }
     );
+    await page.evaluate(() => {
+      const scroller = (window as any).__longCodeBlocksEditor.view.scrollDOM as HTMLElement;
+      let owner: object | null = scroller;
+      let descriptor: PropertyDescriptor | undefined;
+      while (owner && !descriptor) {
+        descriptor = Object.getOwnPropertyDescriptor(owner, 'scrollTop');
+        owner = Object.getPrototypeOf(owner);
+      }
+      if (!descriptor?.get || !descriptor.set) throw new Error('Browser scrollTop boundary is unavailable');
+      const redundantWrites: number[] = [];
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get: () => descriptor!.get!.call(scroller),
+        set: (value: number) => {
+          const before = descriptor!.get!.call(scroller) as number;
+          descriptor!.set!.call(scroller, value);
+          const after = descriptor!.get!.call(scroller) as number;
+          if (Math.abs(before - after) <= 0.1) redundantWrites.push(value);
+        }
+      });
+      (window as any).__fullyVisibleFoldScrollWriteProbe = {
+        redundantWrites,
+        stop() { delete (scroller as HTMLElement & { scrollTop?: number }).scrollTop; }
+      };
+    });
     await page.mouse.move(collapsePoint.x, collapsePoint.y);
     await page.mouse.down();
     const pointerDownFocus = await page.evaluate(() => {
@@ -1255,8 +1280,11 @@ async function main() {
           openingTop: opening?.getBoundingClientRect().top ?? Number.NaN
         });
       }
+      const scrollWriteProbe = (window as any).__fullyVisibleFoldScrollWriteProbe;
+      scrollWriteProbe.stop();
       return {
         samples,
+        redundantScrollWrites: scrollWriteProbe.redundantWrites.length,
         selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number,
         editorFocused: editor.view.hasFocus,
         placeholderCount: document.querySelectorAll('.meo-md-long-code-placeholder').length
@@ -1268,6 +1296,7 @@ async function main() {
       !pointerDownFocus.editorFocused || pointerDownFocus.actionFocused ||
       collapsedFullyVisibleFold.selectionLine !== 76 ||
       !collapsedFullyVisibleFold.editorFocused || collapsedFullyVisibleFold.placeholderCount !== 1 ||
+      collapsedFullyVisibleFold.redundantScrollWrites !== 0 ||
       Math.max(...collapseScrolls) - Math.min(...collapseScrolls) > 1 ||
       Math.max(...collapseTops) - Math.min(...collapseTops) > 1
     ) {
@@ -1289,6 +1318,48 @@ async function main() {
       !expandedFullyVisibleFold.editorFocused || expandedFullyVisibleFold.footerCount !== 1
     ) {
       throw new Error(`Fully-visible expansion changed focus or selection: ${JSON.stringify(expandedFullyVisibleFold)}`);
+    }
+
+    await page.evaluate(() => {
+      const samples: Array<{ contentVisible: boolean; gutterVisible: boolean }> = [];
+      let running = true;
+      const sample = () => {
+        const visibleLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .filter((line) => line.getBoundingClientRect().height > 0)
+          .map((line) => line.textContent);
+        const contentVisible = ['prelude 76', 'row 1'].every((text) => visibleLines.includes(text));
+        const visibleGutters = Array.from(
+          document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+        ).filter((marker) => marker.getBoundingClientRect().height > 0)
+          .map((marker) => marker.textContent?.trim());
+        const gutterVisible = ['76', '78'].every((lineNumber) => visibleGutters.includes(lineNumber));
+        samples.push({ contentVisible, gutterVisible });
+        if (running) requestAnimationFrame(sample);
+      };
+      (window as any).__fullyVisibleFoldFrameProbe = {
+        samples,
+        stop() { running = false; }
+      };
+      requestAnimationFrame(sample);
+    });
+    for (let cycle = 0; cycle < 20; cycle += 1) {
+      await page.click('.meo-md-long-code-footer .meo-long-code-action');
+      await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    }
+    await waitForFrames(page, 8);
+    const fullyVisibleFoldFrameProbe = await page.evaluate(() => {
+      const probe = (window as any).__fullyVisibleFoldFrameProbe;
+      probe.stop();
+      return probe.samples as Array<{ contentVisible: boolean; gutterVisible: boolean }>;
+    });
+    const missingContentFrames = fullyVisibleFoldFrameProbe.filter((sample) => !sample.contentVisible).length;
+    const missingGutterFrames = fullyVisibleFoldFrameProbe.filter((sample) => !sample.gutterVisible).length;
+    if (missingContentFrames > 0 || missingGutterFrames > 0) {
+      throw new Error(`Fully-visible fold flashed during repeated toggles: ${JSON.stringify({
+        totalFrames: fullyVisibleFoldFrameProbe.length,
+        missingContentFrames,
+        missingGutterFrames
+      })}`);
     }
 
     await page.evaluate(() => {

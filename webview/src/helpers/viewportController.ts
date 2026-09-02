@@ -460,10 +460,17 @@ export class ViewportController {
       ) {
         return;
       }
-      this.view.scrollDOM.scrollTop = Math.max(0, Math.min(
+      const nextScrollTop = Math.max(0, Math.min(
         targetTop,
         this.view.scrollDOM.scrollHeight - this.view.scrollDOM.clientHeight
       ));
+      // Reassigning an unchanged scroll offset can still invalidate Chromium's
+      // independently painted content and gutter layers. Keep the late-layout
+      // guard alive for all settle frames, but only touch the scroller when its
+      // measured position actually drifted.
+      if (Math.abs(this.view.scrollDOM.scrollTop - nextScrollTop) > 0.1) {
+        this.view.scrollDOM.scrollTop = nextScrollTop;
+      }
       remainingFrames -= 1;
       if (remainingFrames > 0 && isCurrent()) requestAnimationFrame(write);
     };
