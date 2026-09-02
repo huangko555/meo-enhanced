@@ -223,7 +223,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
       return {
         tier: 'release',
         title: 'Full release gate',
-        expectedDuration: 'about 10-20 minutes',
+        expectedDuration: 'about 12-25 minutes',
         longRunning: true,
         stages: [
           {
@@ -242,6 +242,9 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
               packageScript('test:unit')
             ]
           },
+          serialStage('High-risk browser regression preflight', [
+            packageScript('test:browser-high-risk')
+          ]),
           serialStage('Production browser matrix', [packageScript('test:browser')]),
           serialStage('Production build', [packageScript('build')]),
           serialStage('VSIX content validation', [packageScript('package:check')])
@@ -253,12 +256,26 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
       return {
         tier: 'endurance',
         title: 'Full-document endurance UAT',
-        expectedDuration: 'about 15-30 minutes per run',
+        expectedDuration: 'about 20-35 minutes per run',
         longRunning: true,
-        stages: [serialStage('Full-document endurance contracts', [{
-          args: ['scripts/test-uat-full-document-endurance.ts', documentPath],
-          env: { MEO_UAT_STRICT_FINDING: '*' }
-        }])]
+        stages: [
+          serialStage('Recent interaction regression preflight', [
+            script('scripts/test-document-reload-mermaid-viewport.ts'),
+            script('scripts/test-search-replace-production.ts'),
+            script('scripts/test-table-body-interaction-sticky-production.ts'),
+            script('scripts/test-mermaid-editing.ts')
+          ]),
+          serialStage('Full-document endurance contracts', [{
+            args: ['scripts/test-uat-full-document-endurance.ts', documentPath],
+            env: { MEO_UAT_STRICT_FINDING: '*' }
+          }]),
+          serialStage('Production full-document scroll integrity', [{
+            args: [
+              'scripts/test-production-live-scroll-integrity.ts',
+              `--document=${documentPath}`
+            ]
+          }])
+        ]
       };
     }
     case 'large-document': {

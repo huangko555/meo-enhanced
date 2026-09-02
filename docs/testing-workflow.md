@@ -7,9 +7,9 @@ repair loop stays narrow; broad and endurance runs are intentional events.
 | --- | --- | --- | --- |
 | Quick | A coherent implementation change is ready for a general regression check | About 30–60 seconds | `bun run test:quick` |
 | Targeted | A change affects one high-risk area, or a quick check identifies that area | About 1–5 minutes | `bun run test:targeted -- <area>` |
-| Release | A milestone or release candidate needs the complete gate | About 10–20 minutes | `bun run test:release -- --confirm-long-run` |
+| Release | A milestone or release candidate needs the complete gate | About 12–25 minutes | `bun run test:release -- --confirm-long-run` |
 | Large document | A shorter production-like document stress pass is specifically needed | About 1–3 minutes | `bun run test:large-document -- <document> --confirm-long-run` |
-| Endurance | Full-document edit, undo/redo, cursor, and viewport stress is specifically needed | About 15–30 minutes per run | `bun run test:endurance -- <document> --confirm-long-run` |
+| Endurance | Full-document edit, undo/redo, cursor, and viewport stress is specifically needed | About 20–35 minutes per run | `bun run test:endurance -- <document> --confirm-long-run` |
 
 ## Long-run recommendation and authorization
 
@@ -85,11 +85,14 @@ bun run test:release -- --confirm-long-run
 ```
 
 To reduce wall-clock time without reducing coverage, independent static and
-domain suites run with bounded concurrency. The complete production
-browser matrix remains an isolated stage, followed by the production build and
-package validation. A workflow contract verifies that every sub-suite from
-`bun run test` appears exactly once in the release plan, so scheduling changes
-cannot silently remove coverage.
+domain suites run with bounded concurrency. High-risk browser contracts run as
+an early serial preflight before the complete production browser matrix, so a
+recent interaction regression fails before the longest stage. The matrix is
+followed by the production build and package validation. Workflow contracts
+verify both that every sub-suite from `bun run test` appears exactly once in
+the release plan and that every non-UAT targeted contract is transitively
+included in the full suite, so scheduling changes cannot silently remove
+coverage.
 
 The existing `bun run test` command remains the complete test pipeline for CI
 compatibility. Agents and local repair work use the guarded release entry when
@@ -110,7 +113,10 @@ test: an agent must wait for explicit user authorization in the current task
 before running it. Omitting `--confirm-long-run` is rejected; `--dry-run` may be
 used without authorization to inspect the exact plan.
 
-The full-document endurance entry preserves the original high-intensity UAT:
+The full-document endurance entry first runs recent rendered-block, search,
+reload, and table interaction regressions. It then preserves the original
+high-intensity UAT and finishes with production live-scroll integrity against
+the same document:
 
 ```shell
 bun run test:endurance -- path/to/document.md --confirm-long-run

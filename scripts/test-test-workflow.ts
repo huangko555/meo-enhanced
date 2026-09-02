@@ -76,6 +76,8 @@ assert.deepEqual(uatCommands[1]?.args, [
 const release = createTestWorkflowPlan(parseTestWorkflowRequest(['release']));
 assert.equal(release.longRunning, true);
 assert.equal(release.stages[0]?.maxConcurrency, 3);
+assert.deepEqual(release.stages[1]?.commands, [{ args: ['run', 'test:browser-high-risk'] }]);
+assert.deepEqual(release.stages[2]?.commands, [{ args: ['run', 'test:browser'] }]);
 assert.throws(
   () => validateTestWorkflowAuthorization(release, false, false),
   /--confirm-long-run/
@@ -87,10 +89,25 @@ const endurance = createTestWorkflowPlan(
   parseTestWorkflowRequest(['endurance', 'fixtures/uat.md'])
 );
 assert.equal(endurance.longRunning, true);
+assert.equal(endurance.stages.length, 3);
+const enduranceCommands = flattenTestWorkflowCommands(endurance);
+assert.deepEqual(
+  enduranceCommands.slice(0, 4).map((command) => command.args[0]),
+  [
+    'scripts/test-document-reload-mermaid-viewport.ts',
+    'scripts/test-search-replace-production.ts',
+    'scripts/test-table-body-interaction-sticky-production.ts',
+    'scripts/test-mermaid-editing.ts'
+  ]
+);
 assert.equal(
-  flattenTestWorkflowCommands(endurance)[0]?.env?.MEO_UAT_STRICT_FINDING,
+  enduranceCommands[4]?.env?.MEO_UAT_STRICT_FINDING,
   '*'
 );
+assert.deepEqual(enduranceCommands[5]?.args, [
+  'scripts/test-production-live-scroll-integrity.ts',
+  '--document=fixtures/uat.md'
+]);
 assert.throws(
   () => validateTestWorkflowAuthorization(endurance, false, false),
   /--confirm-long-run/
@@ -166,6 +183,44 @@ assert.equal(
   'bun scripts/test-workflow.ts large-document'
 );
 assert.match(packageScripts.test ?? '', /bun run test:browser/);
+assert.match(packageScripts.test ?? '', /bun run test:browser-high-risk/);
+
+function collectTransitiveTestScripts(
+  root: string,
+  scripts: Record<string, string>
+): Set<string> {
+  const visited = new Set<string>();
+  const directScripts = new Set<string>();
+  const visit = (name: string): void => {
+    if (visited.has(name)) return;
+    visited.add(name);
+    const body = scripts[name];
+    assert.ok(body, `Missing package script referenced by full test workflow: ${name}`);
+    for (const match of body.matchAll(
+      /\bbun\s+(?:run\s+([\w:-]+)|(scripts\/[\w./-]+\.(?:ts|mjs)))/g
+    )) {
+      const nestedPackageScript = match[1];
+      const directScript = match[2];
+      if (nestedPackageScript) visit(nestedPackageScript);
+      if (directScript) directScripts.add(directScript);
+    }
+  };
+  visit(root);
+  return directScripts;
+}
+
+const fullDirectScripts = collectTransitiveTestScripts('test', packageScripts);
+for (const area of ['history', 'table', 'rendered', 'appearance', 'search', 'viewport'] as const) {
+  const targetedPlan = createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', area]));
+  for (const command of flattenTestWorkflowCommands(targetedPlan)) {
+    const directScript = command.args[0];
+    if (!directScript?.startsWith('scripts/')) continue;
+    assert.ok(
+      fullDirectScripts.has(directScript),
+      `full test workflow must include targeted ${area} contract ${directScript}`
+    );
+  }
+}
 
 const fullSuiteScripts = [...(packageScripts.test ?? '').matchAll(/bun run (test:[\w-]+)/g)]
   .map((match) => match[1]!);

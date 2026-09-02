@@ -10,7 +10,7 @@ const help = `MEO Enhanced test workflow
 
 Usage:
   bun scripts/test-workflow.ts quick [--dry-run]
-  bun scripts/test-workflow.ts targeted <history|table|rendered|appearance|viewport> [--dry-run]
+  bun scripts/test-workflow.ts targeted <history|table|rendered|appearance|search|viewport> [--dry-run]
   bun scripts/test-workflow.ts targeted uat <document> [--dry-run]
   bun scripts/test-workflow.ts release --confirm-long-run [--dry-run]
   bun scripts/test-workflow.ts endurance <document> --confirm-long-run [--dry-run]
