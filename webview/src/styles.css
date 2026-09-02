@@ -1254,7 +1254,7 @@ body {
 }
 
 .meo-code-block-actions.is-block-hovered,
-.meo-code-block-actions:focus-within {
+.meo-code-block-actions:has(:focus-visible) {
   opacity: 1;
 }
 
@@ -2445,8 +2445,8 @@ body {
 
 .meo-mermaid-toolbar.is-block-hovered,
 .meo-latex-math-toolbar.is-block-hovered,
-.meo-mermaid-toolbar:focus-within,
-.meo-latex-math-toolbar:focus-within {
+.meo-mermaid-toolbar:has(:focus-visible),
+.meo-latex-math-toolbar:has(:focus-visible) {
   opacity: 1;
   pointer-events: auto;
 }
