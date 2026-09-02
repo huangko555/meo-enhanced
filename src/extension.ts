@@ -37,6 +37,7 @@ import {
   getOutlineVisible,
   getContentMaxWidthEnabled,
   isMarkdownDocumentPath,
+  migrateGitDiffLineHighlightsDefaultOff,
   migrateLegacyToggleSettings
 } from './shared/extensionConfig';
 import { createPanelSessionController, type ExportFormat, type PanelSession } from './extension/panelSession';
@@ -144,6 +145,7 @@ const createVscodeAppearanceSettingsStore = (context: vscode.ExtensionContext): 
 });
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  await migrateGitDiffLineHighlightsDefaultOff(context);
   const appearanceSettings = await createAppearanceSettingsOwner(createVscodeAppearanceSettingsStore(context));
   void vscode.commands.executeCommand('setContext', ACTIVE_EDITOR_CONTEXT_KEY, false);
   const useAsDefault = vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>('useAsDefault', true);
