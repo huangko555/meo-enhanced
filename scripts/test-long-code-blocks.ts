@@ -1168,6 +1168,152 @@ async function main() {
       throw new Error(`Nested Mermaid or math editing block lost its indentation: ${JSON.stringify(editingBlockLayout)}`);
     }
 
+    await page.setViewport({ width: 720, height: 600, deviceScaleFactor: 1 });
+    const fullyVisibleFoldText = [
+      ...Array.from({ length: 76 }, (_, index) => `prelude ${index + 1}`),
+      '```text',
+      ...Array.from({ length: 20 }, (_, index) => `row ${index + 1}`),
+      '```',
+      ...Array.from({ length: 20 }, (_, index) => `tail ${index + 1}`)
+    ].join('\n');
+    await page.evaluate((content) => {
+      (window as any).__longCodeBlocksEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__longCodeBlocksEditor = (window as any).LongCodeBlocksHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: content,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      (window as any).__longCodeBlocksEditor.scrollToLine(77, 'center');
+    }, fullyVisibleFoldText);
+    await waitForFrames(page, 10);
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      editor.view.scrollDOM.scrollTop = Math.max(0, editor.view.lineBlockAt(
+        editor.view.state.doc.line(77).from
+      ).top - 24);
+    });
+    await waitForFrames(page, 10);
+    const preparedFullyVisibleFold = await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const opening = document.querySelector<HTMLElement>('.cm-line.meo-md-code-block-start');
+      const footer = document.querySelector<HTMLElement>('.meo-md-long-code-footer');
+      if (!opening || !footer) throw new Error('Missing expanded fully-visible fold fixture');
+      const scroller = editor.view.scrollDOM;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const openingRect = opening.getBoundingClientRect();
+      scroller.scrollTop += openingRect.top - scrollerRect.top - 24;
+      const selection = editor.view.state.doc.line(76).from;
+      editor.view.dispatch({ selection: { anchor: selection } });
+      editor.view.focus();
+      const nextOpeningRect = opening.getBoundingClientRect();
+      const footerRect = footer.getBoundingClientRect();
+      const nextScrollerRect = scroller.getBoundingClientRect();
+      return {
+        blockTop: nextOpeningRect.top,
+        blockBottom: footerRect.bottom,
+        viewportTop: nextScrollerRect.top,
+        viewportBottom: nextScrollerRect.bottom,
+        selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
+      };
+    });
+    if (
+      preparedFullyVisibleFold.blockTop < preparedFullyVisibleFold.viewportTop - 1 ||
+      preparedFullyVisibleFold.blockBottom > preparedFullyVisibleFold.viewportBottom + 1 ||
+      preparedFullyVisibleFold.selectionLine !== 76
+    ) {
+      throw new Error(`Could not place the complete code block in the viewport: ${JSON.stringify(preparedFullyVisibleFold)}`);
+    }
+
+    const collapsePoint = await page.$eval(
+      '.meo-md-long-code-footer .meo-long-code-action',
+      (element) => {
+        const rect = element.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    );
+    await page.mouse.move(collapsePoint.x, collapsePoint.y);
+    await page.mouse.down();
+    const pointerDownFocus = await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      return {
+        editorFocused: editor.view.hasFocus,
+        actionFocused: document.activeElement?.classList.contains('meo-long-code-action') ?? false
+      };
+    });
+    await page.mouse.up();
+    const collapsedFullyVisibleFold = await page.evaluate(async () => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const opening = document.querySelector<HTMLElement>('.cm-line.meo-md-code-block-start');
+      const samples: Array<{ scrollTop: number; openingTop: number }> = [];
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        samples.push({
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          openingTop: opening?.getBoundingClientRect().top ?? Number.NaN
+        });
+      }
+      return {
+        samples,
+        selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number,
+        editorFocused: editor.view.hasFocus,
+        placeholderCount: document.querySelectorAll('.meo-md-long-code-placeholder').length
+      };
+    });
+    const collapseScrolls = collapsedFullyVisibleFold.samples.map((sample) => sample.scrollTop);
+    const collapseTops = collapsedFullyVisibleFold.samples.map((sample) => sample.openingTop);
+    if (
+      !pointerDownFocus.editorFocused || pointerDownFocus.actionFocused ||
+      collapsedFullyVisibleFold.selectionLine !== 76 ||
+      !collapsedFullyVisibleFold.editorFocused || collapsedFullyVisibleFold.placeholderCount !== 1 ||
+      Math.max(...collapseScrolls) - Math.min(...collapseScrolls) > 1 ||
+      Math.max(...collapseTops) - Math.min(...collapseTops) > 1
+    ) {
+      throw new Error(`Fully-visible collapse changed focus, selection, or viewport: ${JSON.stringify({ pointerDownFocus, collapsedFullyVisibleFold })}`);
+    }
+
+    await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
+    await waitForFrames(page, 8);
+    const expandedFullyVisibleFold = await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      return {
+        selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number,
+        editorFocused: editor.view.hasFocus,
+        footerCount: document.querySelectorAll('.meo-md-long-code-footer').length
+      };
+    });
+    if (
+      expandedFullyVisibleFold.selectionLine !== 76 ||
+      !expandedFullyVisibleFold.editorFocused || expandedFullyVisibleFold.footerCount !== 1
+    ) {
+      throw new Error(`Fully-visible expansion changed focus or selection: ${JSON.stringify(expandedFullyVisibleFold)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const hiddenSelection = editor.view.state.doc.toString().indexOf('row 15');
+      editor.view.dispatch({ selection: { anchor: hiddenSelection } });
+      editor.view.focus();
+    });
+    await page.click('.meo-md-long-code-footer .meo-long-code-action');
+    await waitForFrames(page, 8);
+    const hiddenSelectionCollapse = await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      return {
+        selectionLine: editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number,
+        selectionEmpty: editor.view.state.selection.main.empty,
+        placeholderCount: document.querySelectorAll('.meo-md-long-code-placeholder').length
+      };
+    });
+    if (
+      hiddenSelectionCollapse.selectionLine !== 87 ||
+      !hiddenSelectionCollapse.selectionEmpty || hiddenSelectionCollapse.placeholderCount !== 1
+    ) {
+      throw new Error(`Collapsing a hidden selection did not move it to the last visible code line: ${JSON.stringify(hiddenSelectionCollapse)}`);
+    }
+
     console.log('long code block checks passed');
   } finally {
     await browser.close();

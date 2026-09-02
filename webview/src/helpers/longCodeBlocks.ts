@@ -11,6 +11,7 @@ import { isExternalDocumentPresentation } from '../editor/externalDocumentPresen
 import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
+import { getViewportController } from './viewportController';
 
 const LONG_CODE_LINE_THRESHOLD = 18;
 const LONG_CODE_VISIBLE_LINES = 10;
@@ -128,66 +129,50 @@ function findBlockIntersectingHiddenRange(
     : rangeFrom < block.contentTo && rangeTo > block.collapsedFrom) ?? null;
 }
 
-function getCollapseSelectionPosition(view: EditorView, anchor: number): number {
-  return collectLongCodeBlockDescriptors(view.state)
-    .find((block) => block.anchor === anchor)?.collapsedFrom ?? anchor;
+function getCollapseSelectionPosition(
+  view: EditorView,
+  descriptor: LongCodeBlockDescriptor
+): number | null {
+  const selectionTouchesHiddenRange = view.state.selection.ranges.some((range) => (
+    range.empty
+      ? range.from >= descriptor.collapsedFrom && range.from <= descriptor.end
+      : range.from < descriptor.end && range.to > descriptor.collapsedFrom
+  ));
+  if (!selectionTouchesHiddenRange) return null;
+  const firstHiddenLine = view.state.doc.lineAt(descriptor.collapsedFrom);
+  return firstHiddenLine.number > 1
+    ? view.state.doc.line(firstHiddenLine.number - 1).to
+    : descriptor.start;
 }
 
-function ensureCollapsedBlockVisible(view: EditorView, anchor: number, generation: number): void {
-  view.requestMeasure({
-    read: (measuredView) => {
-      if (viewportGeneration.get(measuredView) !== generation) return null;
-      const descriptor = collectLongCodeBlockDescriptors(measuredView.state)
-        .find((block) => block.anchor === anchor);
-      const scroller = measuredView.scrollDOM.getBoundingClientRect();
-      if (!descriptor || scroller.height <= 0) {
-        return null;
-      }
-
-      const start = measuredView.coordsAtPos(descriptor.start);
-      const placeholderElement = Array.from(
-        measuredView.dom.querySelectorAll<HTMLElement>('.meo-md-long-code-placeholder')
-      ).find((element) => {
-        try {
-          const position = measuredView.posAtDOM(element);
-          return position >= descriptor.start && position <= descriptor.end;
-        } catch {
-          return false;
-        }
-      });
-      const placeholder = placeholderElement?.getBoundingClientRect() ?? null;
-      const startVisible = Boolean(start && start.bottom >= scroller.top && start.top <= scroller.bottom);
-      const placeholderVisible = Boolean(
-        placeholder && placeholder.bottom >= scroller.top && placeholder.top <= scroller.bottom
-      );
-      if (startVisible || placeholderVisible) {
-        return null;
-      }
-      if (placeholder) {
-        return measuredView.scrollDOM.scrollTop + placeholder.top - scroller.top - 8;
-      }
-      return null;
-    },
-    write: (scrollTop) => {
-      if (scrollTop !== null && viewportGeneration.get(view) === generation) {
-        view.scrollDOM.scrollTop = scrollTop;
-        // CodeMirror may apply its own selection anchoring after the measure write.
-        requestAnimationFrame(() => {
-          if (viewportGeneration.get(view) === generation && view.scrollDOM.scrollTop !== scrollTop) {
-            view.scrollDOM.scrollTop = scrollTop;
-          }
-        });
-      }
-    }
-  });
+function revealCollapsedBlockIfNeeded(
+  view: EditorView,
+  collapsedFrom: number,
+  generation: number
+): void {
+  getViewportController(view)?.revealPositionUntilStable(
+    collapsedFrom,
+    { geometry: 'line-block', y: 'nearest', yMargin: 8 },
+    () => viewportGeneration.get(view) === generation
+  );
 }
 
 function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: boolean): void {
   const generation = (viewportGeneration.get(view) ?? 0) + 1;
   viewportGeneration.set(view, generation);
-  const previousScrollTop = view.scrollDOM.scrollTop;
+  const descriptor = collectLongCodeBlockDescriptors(view.state)
+    .find((block) => block.anchor === anchor);
+  const previousScrollTop = collapsed ? view.scrollDOM.scrollTop : null;
+  const scroller = collapsed ? view.scrollDOM.getBoundingClientRect() : null;
+  const start = collapsed && descriptor ? view.coordsAtPos(descriptor.start) : null;
+  const startWasVisible = Boolean(start && scroller && (
+    start.bottom >= scroller.top && start.top <= scroller.bottom
+  ));
+  const selectionPosition = collapsed && descriptor
+    ? getCollapseSelectionPosition(view, descriptor)
+    : null;
   view.dispatch({
-    selection: { anchor: collapsed ? getCollapseSelectionPosition(view, anchor) : anchor },
+    ...(selectionPosition === null ? {} : { selection: { anchor: selectionPosition } }),
     effects: toggleLongCodeBlockEffect.of({ anchor, collapsed })
   });
   view.focus();
@@ -195,8 +180,15 @@ function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: 
     return;
   }
 
-  view.scrollDOM.scrollTop = previousScrollTop;
-  ensureCollapsedBlockVisible(view, anchor, generation);
+  const viewportController = getViewportController(view);
+  if (startWasVisible && previousScrollTop !== null) {
+    viewportController?.lockScrollTop(
+      previousScrollTop,
+      () => viewportGeneration.get(view) === generation
+    );
+    return;
+  }
+  if (descriptor) revealCollapsedBlockIfNeeded(view, descriptor.collapsedFrom, generation);
 }
 
 function resolveCurrentBlockAnchor(view: EditorView, dom: HTMLElement, fallbackAnchor: number): number {
@@ -231,6 +223,9 @@ function makeActionButton(
   button.textContent = action === 'expand'
     ? strings.showMoreLines(hiddenLineCount)
     : strings.showLess;
+  button.addEventListener('pointerdown', (event) => {
+    if (event.button === 0) event.preventDefault();
+  });
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
