@@ -2,6 +2,18 @@ import { applyLiveBlockIndent } from './blockIndent';
 
 export type RenderedBlockPreviewKind = 'mermaid' | 'math';
 
+export const renderedBlockPreviewStartLine = Symbol('meoRenderedBlockPreviewStartLine');
+
+export function getRenderedBlockPreviewStartLine(widget: unknown): number | null {
+  if (typeof widget !== 'object' || widget === null) return null;
+  const startLine = (widget as { [renderedBlockPreviewStartLine]?: unknown })[
+    renderedBlockPreviewStartLine
+  ];
+  return Number.isInteger(startLine) && (startLine as number) > 0
+    ? startLine as number
+    : null;
+}
+
 export function createRenderedBlockPreviewShell(options: {
   kind: RenderedBlockPreviewKind;
   language: 'mermaid' | 'latex';

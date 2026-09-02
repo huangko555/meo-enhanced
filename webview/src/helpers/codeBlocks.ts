@@ -25,7 +25,10 @@ import { getLiveListBlockIndentColumns } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { currentSyntaxTree, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
-import { createRenderedBlockPreviewShell } from './renderedBlockPreview';
+import {
+  createRenderedBlockPreviewShell,
+  renderedBlockPreviewStartLine
+} from './renderedBlockPreview';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 
 const shellLanguage = StreamLanguage.define({
@@ -801,6 +804,10 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
 
   get estimatedHeight(): number {
     return this.diagramWidget.estimatedHeight;
+  }
+
+  get [renderedBlockPreviewStartLine](): number {
+    return this.startLine;
   }
 
   eq(other: WidgetType): boolean {

@@ -1,7 +1,15 @@
 import { RangeSetBuilder, StateEffect, StateField, EditorState, type Range, type RangeSet, type Extension, type EditorSelection, type Transaction } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
-import { Decoration, EditorView, GutterMarker, WidgetType, gutterLineClass, type DecorationSet } from '@codemirror/view';
+import {
+  Decoration,
+  EditorView,
+  GutterMarker,
+  WidgetType,
+  gutterLineClass,
+  lineNumberWidgetMarker,
+  type DecorationSet
+} from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
 import { createElement, AlertCircle, Code2, Delete } from 'lucide';
 import {
@@ -91,7 +99,11 @@ import {
   latexMathEditingStateField
 } from './helpers/latexMathEditing';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
-import { createRenderedBlockPreviewShell } from './helpers/renderedBlockPreview';
+import {
+  createRenderedBlockPreviewShell,
+  getRenderedBlockPreviewStartLine,
+  renderedBlockPreviewStartLine
+} from './helpers/renderedBlockPreview';
 import { getUiStrings } from './application/uiLanguage';
 import {
   getUiLanguageWidgetEpoch,
@@ -194,6 +206,25 @@ const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
 const renderedBlockPreviewAnchorGutterMarker = new (class extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-anchor-gutter';
 })();
+class RenderedBlockPreviewLineNumberMarker extends GutterMarker {
+  constructor(readonly lineNumber: number) {
+    super();
+  }
+
+  eq(other: GutterMarker): boolean {
+    return other instanceof RenderedBlockPreviewLineNumberMarker
+      && other.lineNumber === this.lineNumber;
+  }
+
+  toDOM(): Node {
+    return document.createTextNode(String(this.lineNumber));
+  }
+}
+const renderedBlockPreviewLineNumberMarker = lineNumberWidgetMarker.of((_view, widget, block) => {
+  const startLine = getRenderedBlockPreviewStartLine(widget);
+  if (startLine === null || block.height < 1) return null;
+  return new RenderedBlockPreviewLineNumberMarker(startLine);
+});
 const isTableContentLine = (lineText: string): boolean => lineText.includes('|');
 
 type DecorationCollector = Array<Range<Decoration>>;
@@ -2370,6 +2401,12 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
     );
   }
 
+  get [renderedBlockPreviewStartLine](): number | undefined {
+    return this.fencedDisplay && this.mode === 'display'
+      ? this.startLine
+      : undefined;
+  }
+
   toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement(this.mode === 'display' ? 'div' : 'span') as LatexMathWidgetElement;
     wrapper.className = `meo-md-math meo-md-math-${this.mode}`;
@@ -3180,6 +3217,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     latexMathEditingStateField,
     ...htmlContentExtensions(),
     liveDecorationField,
+    renderedBlockPreviewLineNumberMarker,
     ...longCodeBlockSessionUiExtension(),
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

@@ -62,6 +62,10 @@ async function main() {
         'A-->B',
         '```',
         '',
+        '$$',
+        'x^2 + y^2 = z^2',
+        '$$',
+        '',
         '    indented one',
         '    indented two',
         '',
@@ -130,6 +134,36 @@ async function main() {
     }
     if (result.mermaidNumbered) {
       throw new Error('Rendered Mermaid source received code line numbers');
+    }
+
+    const renderedBlockGutters = await page.evaluate(() => {
+      const gutterElements = Array.from(
+        document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+      );
+      return Array.from(document.querySelectorAll<HTMLElement>(
+        '.meo-rendered-block-preview[data-meo-rendered-block-kind]'
+      )).map((block) => {
+        const startLine = block.dataset.meoRenderedBlockStartLine ?? '';
+        const blockRect = block.getBoundingClientRect();
+        const marker = gutterElements.find((candidate) => {
+          if (candidate.textContent?.trim() !== startLine) return false;
+          const rect = candidate.getBoundingClientRect();
+          return rect.height > 0 && rect.bottom > blockRect.top && rect.top < blockRect.bottom;
+        });
+        return {
+          kind: block.dataset.meoRenderedBlockKind ?? '',
+          startLine,
+          hasAlignedStartLineNumber: Boolean(marker)
+        };
+      });
+    });
+    if (
+      renderedBlockGutters.length !== 2 ||
+      renderedBlockGutters.some((block) => !block.hasAlignedStartLineNumber)
+    ) {
+      throw new Error(
+        `Rendered Mermaid or math preview did not show its starting line number: ${JSON.stringify(renderedBlockGutters)}`
+      );
     }
 
     const hiddenActionOpacities = await page.$$eval('.meo-code-block-actions', (toolbars) => (
