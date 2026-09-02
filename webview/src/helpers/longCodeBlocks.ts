@@ -173,7 +173,12 @@ function setLongCodeBlockCollapsed(view: EditorView, anchor: number, collapsed: 
     : null;
   view.dispatch({
     ...(selectionPosition === null ? {} : { selection: { anchor: selectionPosition } }),
-    effects: toggleLongCodeBlockEffect.of({ anchor, collapsed })
+    effects: [
+      toggleLongCodeBlockEffect.of({ anchor, collapsed }),
+      ...(collapsed && !startWasVisible && descriptor
+        ? [EditorView.scrollIntoView(descriptor.collapsedFrom, { y: 'nearest', yMargin: 8 })]
+        : [])
+    ]
   });
   view.focus();
   if (!collapsed) {

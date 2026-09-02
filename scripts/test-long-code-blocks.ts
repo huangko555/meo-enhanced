@@ -938,8 +938,75 @@ async function main() {
     if (floatingHorizontalOffset > 1) {
       throw new Error(`Floating collapse button was not centered over the code content: ${floatingHorizontalOffset}`);
     }
+    await page.evaluate(() => {
+      const editor = (window as any).__longCodeBlocksEditor;
+      const samples: Array<{
+        scrollTop: number;
+        missingGutter: boolean;
+        mismatchedGutters: number;
+      }> = [];
+      let running = true;
+      const sample = () => {
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
+        const gutters = Array.from(
+          outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+        ).map((element) => ({
+          line: Number(element.textContent?.trim()),
+          rect: element.getBoundingClientRect()
+        })).filter((item) => Number.isInteger(item.line) && item.rect.height > 0);
+        let visibleLines = 0;
+        let mismatchedGutters = 0;
+        for (const line of Array.from(editor.view.contentDOM.querySelectorAll<HTMLElement>(':scope > .cm-line'))) {
+          const rect = line.getBoundingClientRect();
+          if (rect.height <= 0 || rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
+          visibleLines += 1;
+          let documentLine: number;
+          try {
+            documentLine = editor.view.state.doc.lineAt(editor.view.posAtDOM(line)).number;
+          } catch {
+            continue;
+          }
+          const center = rect.top + rect.height / 2;
+          const gutter = gutters.reduce<typeof gutters[number] | null>((closest, item) => {
+            if (!closest) return item;
+            const closestCenter = closest.rect.top + closest.rect.height / 2;
+            const itemCenter = item.rect.top + item.rect.height / 2;
+            return Math.abs(itemCenter - center) < Math.abs(closestCenter - center) ? item : closest;
+          }, null);
+          if (!gutter || Math.abs(gutter.rect.top + gutter.rect.height / 2 - center) > rect.height || gutter.line !== documentLine) {
+            mismatchedGutters += 1;
+          }
+        }
+        samples.push({
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          missingGutter: visibleLines > 0 && gutters.length === 0,
+          mismatchedGutters
+        });
+        if (running) requestAnimationFrame(sample);
+      };
+      (window as any).__floatingCollapseFrameProbe = { samples, stop() { running = false; } };
+      requestAnimationFrame(sample);
+    });
     await page.click('.meo-long-code-floating-action');
-    await waitForFrames(page);
+    await waitForFrames(page, 12);
+    const floatingCollapseFrameProbe = await page.evaluate(() => {
+      const probe = (window as any).__floatingCollapseFrameProbe;
+      probe.stop();
+      return probe.samples as Array<{ scrollTop: number; missingGutter: boolean; mismatchedGutters: number }>;
+    });
+    const floatingCollapseScrollPositions = [...new Set(
+      floatingCollapseFrameProbe.map((sample) => Math.round(sample.scrollTop * 10) / 10)
+    )];
+    if (
+      floatingCollapseFrameProbe.some((sample) => sample.missingGutter || sample.mismatchedGutters > 0) ||
+      floatingCollapseScrollPositions.length > 2
+    ) {
+      throw new Error(`Floating collapse flashed or settled in multiple visible steps: ${JSON.stringify({
+        scrollPositions: floatingCollapseScrollPositions,
+        samples: floatingCollapseFrameProbe
+      })}`);
+    }
     const collapsedBlockVisible = await page.evaluate(() => {
       const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
       const candidates = [
