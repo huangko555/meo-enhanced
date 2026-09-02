@@ -98,7 +98,7 @@ async function main() {
         '```',
         '',
         '$$',
-        'x^2 + y^2 = z^2',
+        '\\int_{-\\infty}^{\\infty} e^{-x^2} \\, dx = \\sqrt{\\pi} + a deliberately long formula tail that must wrap in the split source pane',
         '$$',
         '',
         '    indented one',
@@ -108,8 +108,10 @@ async function main() {
         'tail one',
         'tail two'
       ].join('\n');
+      const editorHost = document.getElementById('app')!;
+      editorHost.className = 'editor-host';
       (window as any).__codeBlockLineNumbersEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
-        parent: document.getElementById('app')!,
+        parent: editorHost,
         text,
         initialMode: 'live',
         onApplyChanges() {}
@@ -145,7 +147,13 @@ async function main() {
         availableNumberWidth,
         requiredNumberWidth,
         mermaidNumbered: Array.from(document.querySelectorAll<HTMLElement>('.meo-md-code-line-numbered'))
-          .some((line) => line.textContent?.includes('graph TD') || line.textContent?.includes('A-->B'))
+          .some((line) => line.textContent?.includes('graph TD') || line.textContent?.includes('A-->B')),
+        outerGutterTransform: getComputedStyle(document.querySelector<HTMLElement>(
+          '.editor-host > .cm-editor > .cm-scroller > .cm-gutters'
+        )!).transform,
+        outerLineNumberPaddingRight: getComputedStyle(document.querySelector<HTMLElement>(
+          '.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .cm-gutterElement'
+        )!).paddingRight
       };
     });
 
@@ -169,6 +177,9 @@ async function main() {
     }
     if (result.mermaidNumbered) {
       throw new Error('Rendered Mermaid source received code line numbers');
+    }
+    if (result.outerGutterTransform !== 'none' || result.outerLineNumberPaddingRight !== '10px') {
+      throw new Error(`Outer gutter still uses a composited transform offset: ${JSON.stringify(result)}`);
     }
 
     const renderedBlockGutters = await page.evaluate(() => {
@@ -236,23 +247,68 @@ async function main() {
           .filter(Boolean);
         const content = Array.from(root?.querySelectorAll<HTMLElement>('.cm-content .cm-line') ?? [])
           .map((element) => element.textContent ?? '');
-        return { gutters, content, startLine };
+        const firstGutter = Array.from(root?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? [])
+          .find((element) => element.textContent?.trim() === '1');
+        const firstLine = root?.querySelector<HTMLElement>('.cm-content .cm-line') ?? null;
+        const textTop = (node: Node | null): number | null => {
+          if (!node) return null;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return range.getBoundingClientRect().top;
+        };
+        return {
+          gutters,
+          content,
+          startLine,
+          firstLineTextOffset: firstGutter && firstLine
+            ? (textTop(firstGutter) ?? 0) - (textTop(firstLine) ?? 0)
+            : null
+        };
       };
       const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
       const outerNumbers = Array.from(
         outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
       ).map((element) => element.textContent?.trim() ?? '').filter(Boolean);
+      const readOuterStartLine = (startLine: number) => {
+        const candidates = Array.from(
+          outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+        ).filter((element) => element.textContent?.trim() === String(startLine));
+        const marker = candidates[0] ?? null;
+        const coords = editor.view.coordsAtPos(editor.view.state.doc.line(startLine).from);
+        if (!marker || !coords) return null;
+        const markerRect = marker.getBoundingClientRect();
+        return {
+          candidateCount: candidates.length,
+          height: markerRect.height,
+          markerClass: marker.className,
+          topOffset: markerRect.top - coords.top
+        };
+      };
       return {
         outerNumbers,
         mermaid: readInner('.meo-mermaid-source-editor', 20),
-        math: readInner('.meo-latex-math-source-editor', 25)
+        math: readInner('.meo-latex-math-source-editor', 25),
+        outerMermaidStart: readOuterStartLine(20),
+        outerMathStart: readOuterStartLine(25)
       };
     });
     if (
       !splitLineNumbers.outerNumbers.includes('20') ||
       !splitLineNumbers.outerNumbers.includes('25') ||
       JSON.stringify(splitLineNumbers.mermaid.gutters) !== JSON.stringify(['1', '2']) ||
-      JSON.stringify(splitLineNumbers.math.gutters) !== JSON.stringify(['1'])
+      JSON.stringify(splitLineNumbers.math.gutters) !== JSON.stringify(['1']) ||
+      splitLineNumbers.math.firstLineTextOffset === null ||
+      Math.abs(splitLineNumbers.math.firstLineTextOffset) > 1 ||
+      splitLineNumbers.outerMermaidStart === null ||
+      splitLineNumbers.outerMathStart === null ||
+      splitLineNumbers.outerMermaidStart.candidateCount !== 1 ||
+      splitLineNumbers.outerMathStart.candidateCount !== 1 ||
+      splitLineNumbers.outerMermaidStart.height < 1 ||
+      splitLineNumbers.outerMathStart.height < 1 ||
+      splitLineNumbers.outerMermaidStart.markerClass.includes('meo-rendered-block-preview-anchor-gutter') ||
+      splitLineNumbers.outerMathStart.markerClass.includes('meo-rendered-block-preview-anchor-gutter') ||
+      Math.abs(splitLineNumbers.outerMermaidStart.topOffset) > 4 ||
+      Math.abs(splitLineNumbers.outerMathStart.topOffset) > 4
     ) {
       throw new Error(`Split rendered-block line numbers violated inner/outer numbering: ${JSON.stringify(splitLineNumbers)}`);
     }

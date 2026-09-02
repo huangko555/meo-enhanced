@@ -1489,8 +1489,8 @@ body {
   overflow: visible;
 }
 
-.editor-host > .cm-editor > .cm-scroller > .cm-gutters {
-  transform: translateX(-5px);
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .cm-gutterElement {
+  padding-right: 10px;
 }
 
 .meo-content-max-width-enabled .cm-editor .cm-gutters {
@@ -1513,7 +1513,7 @@ body {
 
 .cm-editor .cm-lineNumbers .cm-gutterElement {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
   text-align: right;
   box-sizing: border-box;

@@ -78,7 +78,12 @@ import {
 import { diagnosticDataField, type EditorDiagnostic } from './helpers/diagnostics';
 import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
-import { getMermaidBlockMode, mermaidEditingStateField } from './helpers/mermaidEditing';
+import {
+  getMermaidBlockMode,
+  mermaidEditingStateField,
+  setMermaidBlockModeEffect,
+  setMermaidSearchRevealEffect
+} from './helpers/mermaidEditing';
 import { collectPunctuationClosingInlineStyles, type ParsedInlineStyleRange } from './helpers/inlineStyleFallback';
 import { collectHexColorRangesFromText } from '../../src/shared/hexColorSwatches';
 import { addColorSwatchDecoration } from './helpers/colorSwatches';
@@ -96,7 +101,9 @@ import {
   createLatexMathToolbarWidget,
   getLatexMathBlockMode,
   LatexMathEditingWidget,
-  latexMathEditingStateField
+  latexMathEditingStateField,
+  setLatexMathBlockModeEffect,
+  setLatexMathSearchRevealEffect
 } from './helpers/latexMathEditing';
 import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
 import {
@@ -3192,8 +3199,15 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
     if (shouldDeferLiveInputDerivedWork(transaction)) {
       return transaction.docChanged ? markers.map(transaction.changes) : markers;
     }
+    const renderedBlockPresentationChanged = transaction.effects.some((effect) => (
+      effect.is(setMermaidBlockModeEffect)
+      || effect.is(setMermaidSearchRevealEffect)
+      || effect.is(setLatexMathBlockModeEffect)
+      || effect.is(setLatexMathSearchRevealEffect)
+    ));
     if (!transaction.docChanged
       && !isLiveInputDerivedWorkRefresh(transaction)
+      && !renderedBlockPresentationChanged
       && transaction.startState.selection.eq(transaction.state.selection)) {
       return markers;
     }
