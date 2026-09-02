@@ -365,7 +365,7 @@ class HtmlBlockLineNumberMarker extends GutterMarker {
 }
 
 const htmlBlockLineNumberMarker = lineNumberWidgetMarker.of((view, widget, block) => {
-  if (!(widget instanceof HtmlBlockWidget)) return null;
+  if (!(widget instanceof HtmlBlockWidget) || block.height < 1) return null;
   return new HtmlBlockLineNumberMarker(view.state.doc.lineAt(block.from).number);
 });
 

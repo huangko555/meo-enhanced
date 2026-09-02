@@ -558,6 +558,57 @@ async function main() {
       throw new Error(`HTML link button did not use the existing link path: ${JSON.stringify(openedLinks)}`);
     }
 
+    await page.evaluate(() => {
+      (window as any).__htmlContentEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__htmlContentEditor = (window as any).HtmlContentHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: ['previous', '<div id="empty"></div>', 'next'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page, 10);
+    const emptyHtmlGutter = await page.evaluate(() => {
+      const editor = (window as any).__htmlContentEditor;
+      const gutterElements = Array.from(
+        document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+      );
+      const readLineNumber = (lineNumber: string) => gutterElements
+        .filter((element) => element.textContent?.trim() === lineNumber)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return { height: rect.height, top: rect.top };
+        });
+      const emptyBlock = document.querySelector<HTMLElement>('.meo-md-html-block');
+      return {
+        first: readLineNumber('1'),
+        empty: readLineNumber('2'),
+        last: readLineNumber('3'),
+        blockHeight: emptyBlock?.getBoundingClientRect().height ?? null,
+        source: editor.view.state.doc.toString()
+      };
+    });
+    if (
+      emptyHtmlGutter.first.every((entry) => entry.height < 1) ||
+      emptyHtmlGutter.empty.length !== 0 ||
+      emptyHtmlGutter.last.every((entry) => entry.height < 1) ||
+      emptyHtmlGutter.blockHeight === null || emptyHtmlGutter.blockHeight >= 1 ||
+      emptyHtmlGutter.source !== ['previous', '<div id="empty"></div>', 'next'].join('\n')
+    ) {
+      throw new Error(`Zero-height HTML retained an overlapping line number: ${JSON.stringify(emptyHtmlGutter)}`);
+    }
+
+    await page.evaluate(() => (window as any).__htmlContentEditor.setMode('source'));
+    await waitForFrames(page, 8);
+    const emptyHtmlSourceGutter = await page.evaluate(() => Array.from(
+      document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+    ).filter((element) => element.textContent?.trim() === '2')
+      .map((element) => element.getBoundingClientRect().height));
+    if (emptyHtmlSourceGutter.every((height) => height < 1)) {
+      throw new Error(`Source mode did not restore the empty HTML source line number: ${JSON.stringify(emptyHtmlSourceGutter)}`);
+    }
+
     console.log('HTML content browser tests passed');
   } finally {
     await browser.close();
