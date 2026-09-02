@@ -220,6 +220,7 @@ async function editRenderedBlock(
       }
       const center = (viewport.top + viewport.bottom) / 2;
       if (controls.top <= center && controls.bottom >= center) return { status: 'settled' as const };
+      const fullyVisible = controls.top >= viewport.top && controls.bottom <= viewport.bottom;
       if (!('onscrollend' in scroller)) return { status: 'unsupported' as const };
       const registry = window as any;
       const transaction = {
@@ -229,8 +230,17 @@ async function editRenderedBlock(
       const onScrollEnd = () => { transaction.settled = true; transaction.dispose(); };
       registry[registryKey] = transaction;
       scroller.addEventListener('scrollend', onScrollEnd);
+      const beforeScrollTop = scroller.scrollTop;
       try { (window as any).__historyMatrixEditor.scrollToLine(lineNumber, 'center'); }
       catch (error) { transaction.dispose(); delete registry[registryKey]; throw error; }
+      if (
+        !transaction.settled
+        && fullyVisible
+        && Math.abs(scroller.scrollTop - beforeScrollTop) <= 0.5
+      ) {
+        transaction.settled = true;
+        transaction.dispose();
+      }
       return { status: transaction.settled ? 'settled' as const : 'pending' as const };
     }, {
       lineNumber: targetLineNumber,
@@ -246,7 +256,24 @@ async function editRenderedBlock(
       if (scrollSettlement.status === 'pending') {
         await page.waitForFunction((registryKey) => (
           (window as any)[registryKey]?.settled === true
-        ), {}, scrollSettlementKey);
+        ), {}, scrollSettlementKey).catch(async (error: unknown) => {
+          const evidence = await page.evaluate(({ blockKind, lineNumber }) => {
+            const scroller = document.querySelector<HTMLElement>('.cm-editor > .cm-scroller');
+            const label = blockKind === 'mermaid'
+              ? `Mermaid block controls at line ${lineNumber}`
+              : `Formula block controls at line ${lineNumber}`;
+            const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${label}"]`);
+            const viewport = scroller?.getBoundingClientRect();
+            const controls = group?.getBoundingClientRect();
+            return {
+              scrollTop: scroller?.scrollTop ?? null,
+              viewport: viewport?.toJSON() ?? null,
+              controls: controls?.toJSON() ?? null,
+              fullyVisible: Boolean(viewport && controls && controls.top >= viewport.top && controls.bottom <= viewport.bottom)
+            };
+          }, { blockKind: kind, lineNumber: targetLineNumber });
+          throw new Error(`Rendered block scroll did not settle for ${lineNeedle}: ${JSON.stringify(evidence)}`, { cause: error });
+        });
       }
     } finally {
       await page.evaluate((key) => {
@@ -263,7 +290,9 @@ async function editRenderedBlock(
       const group = document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
         ?.getBoundingClientRect();
       return Boolean(viewport && group && group.top >= viewport.top && group.bottom <= viewport.bottom);
-    }, {}, { blockKind: kind, lineNumber: targetLineNumber });
+    }, {}, { blockKind: kind, lineNumber: targetLineNumber }).catch((error: unknown) => {
+      throw new Error(`Rendered block controls did not become visible for ${lineNeedle} at line ${targetLineNumber}`, { cause: error });
+    });
   };
   const clickTargetModeButton = async () => {
     modeClickSequence += 1;
@@ -560,14 +589,36 @@ async function editRenderedBlock(
         await page.mouse.move(point.x, point.y);
         await page.mouse.up();
       },
-      settleTarget: () => injectPreDownReplacement ? Promise.resolve() : page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
-        document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
-          ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
-      ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition).catch(
-        (error: unknown) => {
-          throw new Error(`Mode button label did not settle: ${transition.controlsLabel}`, { cause: error });
+      settleTarget: async () => {
+        if (injectPreDownReplacement) return;
+        try {
+          await page.waitForFunction(({ controlsLabel, expectedLabel }) => Array.from(
+            document.querySelector<HTMLElement>(`[role="group"][aria-label="${controlsLabel}"]`)
+              ?.querySelectorAll<HTMLButtonElement>('button[aria-label]') ?? []
+          ).some((candidate) => candidate.getAttribute('aria-label') === expectedLabel), {}, transition);
+        } catch (error) {
+          const evidence = await page.evaluate((contract) => ({
+            transition: contract,
+            active: document.activeElement instanceof HTMLElement ? {
+              tag: document.activeElement.tagName,
+              label: document.activeElement.getAttribute('aria-label'),
+              className: document.activeElement.className
+            } : null,
+            hit: document.elementFromPoint(contract.hitPoint.x, contract.hitPoint.y)?.closest<HTMLElement>('[aria-label]')?.getAttribute('aria-label') ?? null,
+            groups: Array.from(document.querySelectorAll<HTMLElement>(
+              '.meo-mermaid-toolbar, .meo-latex-math-toolbar'
+            )).map((group) => ({
+              label: group.getAttribute('aria-label'),
+              mode: group.dataset.meoMermaidMode ?? group.dataset.meoLatexMathMode,
+              from: group.dataset.meoBlockFrom,
+              line: group.closest('.cm-line')?.textContent ?? null,
+              shell: Boolean(group.closest('.meo-rendered-block-preview')),
+              buttons: Array.from(group.querySelectorAll<HTMLButtonElement>('button[aria-label]')).map((button) => button.getAttribute('aria-label'))
+            }))
+          }), transition);
+          throw new Error(`Mode button label did not settle: ${JSON.stringify(evidence)}`, { cause: error });
         }
-      ),
+      },
       async moveToSafeReleaseTarget() {
         const safePoint = await page.evaluate((ariaLabel) => {
           const existing = document.querySelector(`[aria-label="${ariaLabel}"]`);
@@ -1171,7 +1222,6 @@ async function main() {
       console.log('focused first Mermaid mode click checks passed');
       return;
     }
-
     const externalSyncDepth = await page.evaluate(() => {
       const editor = (window as any).__historyMatrixEditor;
       const text = editor.getText();

@@ -179,9 +179,10 @@ async function startMonitor(
   lineNumber: number,
   excludedFrom: number,
   excludedTo: number,
-  trackFocusedControl = false
+  trackFocusedControl = false,
+  renderedBlock: { kind: 'mermaid' | 'math'; openingLine: number } | null = null
 ): Promise<void> {
-  await page.evaluate(({ targetLine, excludeFrom, excludeTo, focusedControl }) => {
+  await page.evaluate(({ targetLine, excludeFrom, excludeTo, focusedControl, rendered }) => {
     const editor = (window as any).__fullUatEditor;
     const scroller = editor.view.scrollDOM as HTMLElement;
     const readVisibleLines = () => {
@@ -205,14 +206,34 @@ async function startMonitor(
       }
       return result;
     };
-    let lastFocusedControlTop: number | null = null;
+    let lastTargetTop: number | null = null;
     const targetTop = () => {
       if (focusedControl) {
         const active = document.activeElement;
         if (active instanceof HTMLTextAreaElement) {
-          lastFocusedControlTop = active.getBoundingClientRect().top;
+          lastTargetTop = active.getBoundingClientRect().top;
         }
-        return lastFocusedControlTop;
+        return lastTargetTop;
+      }
+      if (rendered) {
+        const preview = document.querySelector<HTMLElement>(
+          `.meo-rendered-block-preview[data-meo-rendered-block-kind="${rendered.kind}"]`
+          + `[data-meo-rendered-block-start-line="${rendered.openingLine}"]`
+        );
+        if (preview) {
+          lastTargetTop = preview.getBoundingClientRect().top;
+        } else {
+          const openingLine = editor.view.state.doc.line(
+            Math.min(Math.max(rendered.openingLine, 1), editor.view.state.doc.lines)
+          );
+          const anchorDom = editor.view.domAtPos(openingLine.from).node;
+          const anchorElement = anchorDom instanceof Element ? anchorDom : anchorDom.parentElement;
+          const openingLineElement = anchorElement?.closest<HTMLElement>('.cm-line');
+          lastTargetTop = openingLineElement?.getBoundingClientRect().top
+            ?? editor.view.coordsAtPos(openingLine.from)?.top
+            ?? lastTargetTop;
+        }
+        return lastTargetTop;
       }
       const line = editor.view.state.doc.line(Math.min(Math.max(targetLine, 1), editor.view.state.doc.lines));
       return editor.view.coordsAtPos(line.from)?.top ?? null;
@@ -248,7 +269,13 @@ async function startMonitor(
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
-  }, { targetLine: lineNumber, excludeFrom: excludedFrom, excludeTo: excludedTo, focusedControl: trackFocusedControl });
+  }, {
+    targetLine: lineNumber,
+    excludeFrom: excludedFrom,
+    excludeTo: excludedTo,
+    focusedControl: trackFocusedControl,
+    rendered: renderedBlock
+  });
 }
 
 async function stopMonitor(page: import('puppeteer-core').Page): Promise<MonitorMetrics> {
@@ -604,7 +631,20 @@ async function applyOperation(page: import('puppeteer-core').Page, operation: Op
     : operation.kind === 'html'
       ? location.lineNumber + 10
     : location.lineNumber;
-  await startMonitor(page, location.lineNumber, excludeFrom, excludeTo, operation.kind === 'table');
+  const monitoredLine = operation.kind === 'mermaid' || operation.kind === 'math'
+    ? location.openingLine
+    : location.lineNumber;
+  const renderedBlock = operation.kind === 'mermaid' || operation.kind === 'math'
+    ? { kind: operation.kind, openingLine: location.openingLine }
+    : null;
+  await startMonitor(
+    page,
+    monitoredLine,
+    excludeFrom,
+    excludeTo,
+    operation.kind === 'table',
+    renderedBlock
+  );
   if (operation.kind === 'outer') await editOuter(page, operation, location.lineNumber);
   else if (operation.kind === 'html') await editHtml(page, operation, location.lineNumber);
   else if (operation.kind === 'table') await editTable(page, operation, location.lineNumber);
@@ -716,7 +756,22 @@ async function prepareHistoryViewport(
   // has stopped correcting the test's own navigation.
   await targetState(page, operation);
   await waitForScrollStability(page);
-  return targetState(page, operation);
+  let previous = await targetState(page, operation);
+  let stableFrames = 0;
+  for (let frame = 0; frame < 60 && stableFrames < 6; frame += 1) {
+    await waitForFrames(page, 1);
+    const current = await targetState(page, operation);
+    const stableValue = (left: number | null, right: number | null) => (
+      left === null || right === null ? left === right : Math.abs(left - right) <= 0.5
+    );
+    stableFrames = (
+      Math.abs(current.scrollTop - previous.scrollTop) <= 0.5 &&
+      stableValue(current.targetTop, previous.targetTop) &&
+      stableValue(current.targetBottom, previous.targetBottom)
+    ) ? stableFrames + 1 : 0;
+    previous = current;
+  }
+  return previous;
 }
 
 async function replayHistory(

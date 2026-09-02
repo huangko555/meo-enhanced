@@ -41,6 +41,7 @@ export type EditorHistoryEffectCapabilities = {
 export function createEditorHistoryEffectAdapter(
   capabilities: EditorHistoryEffectCapabilities
 ): EditorHistoryEffectExecutor {
+  const maxRestoreAttempts = 32;
   let restoreGeneration = 0;
   let cancelFocusRetry: (() => void) | null = null;
   let settleRestore: ((completion: EditorHistoryInput | null) => void) | null = null;
@@ -60,6 +61,7 @@ export function createEditorHistoryEffectAdapter(
 
     return new Promise<EditorHistoryInput | null>((resolve) => {
       settleRestore = resolve;
+      let attempts = 0;
 
       const finish = (completion: EditorHistoryInput | null): void => {
         if (generation !== restoreGeneration || settleRestore !== resolve) return;
@@ -71,6 +73,7 @@ export function createEditorHistoryEffectAdapter(
 
       const attempt = (): void => {
         if (generation !== restoreGeneration || settleRestore !== resolve) return;
+        attempts += 1;
         try {
           const result = capabilities.attemptBoundaryRestore(request, isCurrent);
           if (result === 'restored') {
@@ -78,6 +81,11 @@ export function createEditorHistoryEffectAdapter(
             return;
           }
           if (result === 'not-rendered') {
+            capabilities.restoreEditorInteraction(request, isCurrent);
+            finish({ type: 'interactionRestored', replayId: request.replayId });
+            return;
+          }
+          if (attempts >= maxRestoreAttempts) {
             capabilities.restoreEditorInteraction(request, isCurrent);
             finish({ type: 'interactionRestored', replayId: request.replayId });
             return;

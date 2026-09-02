@@ -345,26 +345,45 @@ export function focusTableHistoryChange(
 
   const changedLine = view.state.doc.lineAt(Math.min(changed.from, view.state.doc.length)).number;
   const findInput = () => {
-    let closest: { input: HTMLTextAreaElement; distance: number } | null = null;
+    let closest: { input: HTMLTextAreaElement; distance: number; viewportDistance: number } | null = null;
+    const viewport = view.scrollDOM.getBoundingClientRect();
     for (const input of view.dom.querySelectorAll<HTMLTextAreaElement>(
       '.meo-md-html-table-wrap textarea[data-table-cell-from][data-table-cell-to]'
     )) {
       const sourceLine = Number.parseInt(input.closest('tr')?.dataset.sourceLineNumber ?? '', 10);
       if (sourceLine !== changedLine) continue;
-      const from = Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
-      const to = Number.parseInt(input.dataset.tableCellTo ?? '', 10);
+      const column = Number.parseInt(input.dataset.tableCol ?? '', 10);
+      const currentLine = view.state.doc.line(sourceLine);
+      const currentSegment = Number.isInteger(column)
+        ? parseTableRowCells(currentLine.text, currentLine.from).segments[column]
+        : null;
+      const from = currentSegment?.from ?? Number.parseInt(input.dataset.tableCellFrom ?? '', 10);
+      const to = currentSegment?.to ?? Number.parseInt(input.dataset.tableCellTo ?? '', 10);
       if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
       // A history transaction updates the document before Live's derived table
       // presentation is replaced. Never focus that stale textarea: it would be
       // detached on the next frame and the restored focus would immediately vanish.
       const currentSource = view.state.doc.sliceString(from, to).trim();
       if (tableCellEditorValueToSource(input.value).trim() !== currentSource) continue;
+      input.dataset.tableCellFrom = String(from);
+      input.dataset.tableCellTo = String(to);
       const distance = changed.to < from
         ? from - changed.to
         : changed.from > to
           ? changed.from - to
           : 0;
-      if (!closest || distance < closest.distance) closest = { input, distance };
+      const rect = input.getBoundingClientRect();
+      const viewportDistance = rect.bottom < viewport.top
+        ? viewport.top - rect.bottom
+        : rect.top > viewport.bottom
+          ? rect.top - viewport.bottom
+          : 0;
+      if (
+        !closest || distance < closest.distance ||
+        (distance === closest.distance && viewportDistance < closest.viewportDistance)
+      ) {
+        closest = { input, distance, viewportDistance };
+      }
     }
     return closest?.input ?? null;
   };
@@ -409,22 +428,7 @@ export function focusTableHistoryChange(
       const isNavigationCurrent = viewportController?.beginNavigationReveal();
       if (viewportController && isNavigationCurrent) {
         const canReveal = () => isCurrent() && isNavigationCurrent();
-        view.requestMeasure({
-          read: () => {
-            if (!canReveal() || !input.isConnected) return null;
-            const currentCaret = tableCellCaretViewportBounds(input);
-            const currentViewport = view.scrollDOM.getBoundingClientRect();
-            const delta = currentCaret.top < currentViewport.top
-              ? currentCaret.top - currentViewport.top - historyContextMargin
-              : currentCaret.bottom > currentViewport.bottom
-                ? currentCaret.bottom - currentViewport.bottom + historyContextMargin
-                : 0;
-            return Math.abs(delta) >= 1 ? delta : null;
-          },
-          write: (delta) => {
-            if (delta !== null && canReveal()) viewportController.navigateBy({ top: delta });
-          }
-        });
+        viewportController.revealElement(cell, canReveal, { yMargin: historyContextMargin });
       } else {
         input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       }
@@ -967,8 +971,10 @@ export function tableCellVisualLineBoundary(input: HTMLTextAreaElement): {
 function tableCellCaretViewportBounds(input: HTMLTextAreaElement): { top: number; bottom: number } {
   return withTableCellVisualLineProbe(input, ({ caret, lineHeight, lineTopAt }) => {
     const inputRect = input.getBoundingClientRect();
-    const top = inputRect.top + lineTopAt(caret) - input.scrollTop;
-    return { top, bottom: top + lineHeight };
+    const measuredTop = inputRect.top + lineTopAt(caret) - input.scrollTop;
+    const latestVisibleTop = Math.max(inputRect.top, inputRect.bottom - lineHeight);
+    const top = Math.min(Math.max(measuredTop, inputRect.top), latestVisibleTop);
+    return { top, bottom: Math.min(inputRect.bottom, top + lineHeight) };
   });
 }
 

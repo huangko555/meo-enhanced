@@ -27,6 +27,7 @@ import {
   createNestedEditorInteractionContinuity,
   type EditorInteractionContinuity
 } from '../editor/interactionContinuity';
+import { getLiveRenderedBlocks } from './liveRenderedBlocks';
 
 export type LatexMathBlockMode = RenderedBlockMode;
 
@@ -80,14 +81,15 @@ const innerLatexMathSearchField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field)
 });
 
-const latexMathOpeningLineRegex = /^[ \t]*\$\$\s*$/;
-
 function isLatexMathAnchor(state: EditorState, anchor: number): boolean {
   if (anchor < 0 || anchor > state.doc.length) {
     return false;
   }
   const line = state.doc.lineAt(anchor);
-  return line.from === anchor && latexMathOpeningLineRegex.test(line.text);
+  if (line.from !== anchor) return false;
+  return getLiveRenderedBlocks(state, { includeSelectedMath: true }).some((block) => (
+    block.kind === 'math' && block.startLine === line.number
+  ));
 }
 
 function resolveLatexMathAnchorAtLine(state: EditorState, lineNumber: number): number | null {

@@ -1086,27 +1086,36 @@ async function main() {
     const mermaidShellLayout = await page.evaluate(() => {
       const diagram = document.querySelector<HTMLElement>('.meo-mermaid-block');
       if (!diagram) return null;
+      const shell = diagram.closest<HTMLElement>(
+        '.meo-rendered-block-preview[data-meo-rendered-block-kind="mermaid"]'
+      );
+      const language = shell?.querySelector<HTMLElement>('.meo-rendered-block-preview-language');
+      const toolbar = shell?.querySelector<HTMLElement>(':scope > .meo-mermaid-toolbar');
       const diagramRect = diagram.getBoundingClientRect();
-      const start = diagram.previousElementSibling as HTMLElement | null;
-      let next = diagram.nextElementSibling as HTMLElement | null;
+      const shellRect = shell?.getBoundingClientRect();
+      let next = shell?.nextElementSibling as HTMLElement | null;
       let detachedClosingFence = false;
       while (next && !next.classList.contains('meo-md-code-block-start')) {
         if (next.classList.contains('meo-md-code-block-end')) detachedClosingFence = true;
         next = next.nextElementSibling as HTMLElement | null;
       }
-      const startRect = start?.getBoundingClientRect();
       return {
-        startIsOpeningFence: Boolean(start?.classList.contains('meo-md-code-block-start')),
-        startGap: startRect ? diagramRect.top - startRect.bottom : null,
+        atomicShell: Boolean(shell && language && toolbar && shell.contains(diagram)),
+        topGap: shellRect ? diagramRect.top - shellRect.top : null,
+        bottomGap: shellRect ? shellRect.bottom - diagramRect.bottom : null,
+        shellRadius: shell ? getComputedStyle(shell).borderRadius : null,
         diagramRadius: getComputedStyle(diagram).borderRadius,
         detachedClosingFence
       };
     });
     if (
-      !mermaidShellLayout?.startIsOpeningFence ||
-      mermaidShellLayout.startGap === null ||
-      Math.abs(mermaidShellLayout.startGap) > 1 ||
-      mermaidShellLayout.diagramRadius !== '0px 0px 6px 6px' ||
+      !mermaidShellLayout?.atomicShell ||
+      mermaidShellLayout.topGap === null ||
+      mermaidShellLayout.bottomGap === null ||
+      Math.abs(mermaidShellLayout.topGap) > 1 ||
+      Math.abs(mermaidShellLayout.bottomGap) > 1 ||
+      mermaidShellLayout.shellRadius !== '6px' ||
+      mermaidShellLayout.diagramRadius !== '6px' ||
       mermaidShellLayout.detachedClosingFence
     ) {
       throw new Error(`Mermaid preview shell is visually disconnected: ${JSON.stringify(mermaidShellLayout)}`);

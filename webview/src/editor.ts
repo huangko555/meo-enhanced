@@ -2377,7 +2377,7 @@ export function createEditor({
     scheduleFocusRetry(run) {
       let cancelled = false;
       let frame: number | null = null;
-      const observer = new MutationObserver(() => trigger());
+      const observer = new MutationObserver(() => scheduleTrigger());
       const cleanup = () => {
         if (cancelled) return;
         cancelled = true;
@@ -2390,9 +2390,16 @@ export function createEditor({
         cleanup();
         run();
       };
+      const scheduleTrigger = () => {
+        if (cancelled || frame !== null) return;
+        frame = requestAnimationFrame(() => {
+          frame = null;
+          trigger();
+        });
+      };
       observer.observe(view.dom, { childList: true, subtree: true });
-      view.requestMeasure({ read: () => null, write: trigger });
-      frame = requestAnimationFrame(trigger);
+      view.requestMeasure({ read: () => null, write: scheduleTrigger });
+      scheduleTrigger();
       return cleanup;
     },
     reportError(operation, error) {
@@ -3257,7 +3264,10 @@ function isTableHistoryRange(
       node = node.parent;
     }
   }
-  return false;
+  const changedLines = [...positions].map((position) => state.doc.lineAt(position).number);
+  return getLiveRenderedBlocks(state).some((block) => (
+    block.kind === 'table' && changedLines.some((line) => line >= block.startLine && line <= block.endLine)
+  ));
 }
 
 function findSyncChange(previousText: string, nextText: string): SyncChange | null {

@@ -643,11 +643,21 @@ export class ViewportController {
   }
 
   /** Reveals through the owned scroller; pending geometry never displaces the current viewport owner. */
-  revealElement(element: HTMLElement, isCurrent: () => boolean = () => true): void {
+  revealElement(
+    element: HTMLElement,
+    isCurrent: () => boolean = () => true,
+    { yMargin = 0 }: { yMargin?: number } = {}
+  ): void {
     this.runNavigationReveal(() => {
       if (!element.isConnected) return { kind: 'unavailable' };
       const scrollerRect = this.view.scrollDOM.getBoundingClientRect();
       const elementRect = element.getBoundingClientRect();
+      const margin = Math.min(
+        Math.max(0, yMargin),
+        Math.max(0, (
+          (scrollerRect.bottom - scrollerRect.top) - (elementRect.bottom - elementRect.top)
+        ) / 2)
+      );
       const nearestEdge = (startDelta: number, endDelta: number): 'start' | 'end' | null => {
         if (startDelta >= 0 && endDelta <= 0) return null;
         if (startDelta < 0 && endDelta > 0) {
@@ -656,8 +666,8 @@ export class ViewportController {
         return startDelta < 0 ? 'start' : 'end';
       };
       const verticalEdge = nearestEdge(
-        elementRect.top - scrollerRect.top,
-        elementRect.bottom - scrollerRect.bottom
+        elementRect.top - scrollerRect.top - margin,
+        elementRect.bottom - scrollerRect.bottom + margin
       );
       const horizontalEdge = nearestEdge(
         elementRect.left - scrollerRect.left,
@@ -670,8 +680,8 @@ export class ViewportController {
           ...(verticalEdge ? {
             top: this.view.scrollDOM.scrollTop + (
               verticalEdge === 'start'
-                ? elementRect.top - scrollerRect.top
-                : elementRect.bottom - scrollerRect.bottom
+                ? elementRect.top - scrollerRect.top - margin
+                : elementRect.bottom - scrollerRect.bottom + margin
             )
           } : {}),
           ...(horizontalEdge ? {

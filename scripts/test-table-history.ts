@@ -280,6 +280,64 @@ async function main() {
       throw new Error(`Typing immediately after table history was stolen by a stale focus callback: ${JSON.stringify({ immediateInputSetup, immediateInputEnd })}`);
     }
 
+    const nestedTableText = [
+      '- before',
+      '',
+      '  | Nested A | Nested B |',
+      '  | --- | --- |',
+      '  | NA1 | NB1 |',
+      '  | NA2 | NB2 |',
+      '',
+      '- after'
+    ].join('\n');
+    const nestedShiftedText = `prefix ${nestedTableText}`;
+    await page.evaluate((text) => {
+      (window as any).__tableHistoryEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__tableHistoryEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    }, nestedTableText);
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      const view = (window as any).__tableHistoryEditor.view;
+      view.dispatch({ changes: { from: 0, insert: 'prefix ' }, selection: { anchor: 7 } });
+    });
+    await waitForFrames(page);
+    await page.evaluate(() => {
+      const input = Array.from(document.querySelectorAll<HTMLTextAreaElement>('tbody textarea'))
+        .find((candidate) => candidate.value === 'NB2')!;
+      input.focus();
+      input.value = 'NB2 edited';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ' edited' }));
+    });
+    const nestedUndoApplied = await page.evaluate(() => (window as any).__tableHistoryEditor.undo());
+    await waitForFrames(page);
+    const nestedAfterUndo = await page.evaluate(() => ({
+      text: (window as any).__tableHistoryEditor.view.state.doc.toString(),
+      activeValue: (document.activeElement as HTMLTextAreaElement | null)?.value ?? null
+    }));
+    const nestedShiftUndoApplied = await page.evaluate(() => (window as any).__tableHistoryEditor.undo());
+    await waitForFrames(page);
+    const nestedShiftRedoApplied = await page.evaluate(() => (window as any).__tableHistoryEditor.redo());
+    await waitForFrames(page);
+    const nestedRedoApplied = await page.evaluate(() => (window as any).__tableHistoryEditor.redo());
+    await waitForFrames(page);
+    const nestedAfterRedo = await page.evaluate(() => ({
+      text: (window as any).__tableHistoryEditor.view.state.doc.toString(),
+      activeValue: (document.activeElement as HTMLTextAreaElement | null)?.value ?? null
+    }));
+    if (
+      !nestedUndoApplied || nestedAfterUndo.text !== nestedShiftedText || nestedAfterUndo.activeValue !== 'NB2' ||
+      !nestedShiftUndoApplied || !nestedShiftRedoApplied ||
+      !nestedRedoApplied || !nestedAfterRedo.text.includes('| NA2 | NB2 edited |') || nestedAfterRedo.activeValue !== 'NB2 edited'
+    ) {
+      throw new Error(`Nested table history did not restore its target cell after an upstream shift: ${JSON.stringify({ nestedUndoApplied, nestedAfterUndo, nestedShiftUndoApplied, nestedShiftRedoApplied, nestedRedoApplied, nestedAfterRedo })}`);
+    }
+
     const plainText = 'alpha beta gamma';
     await page.evaluate((text) => {
       (window as any).__tableHistoryEditor.destroy();

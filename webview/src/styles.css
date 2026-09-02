@@ -2549,6 +2549,7 @@ body {
 
 .cm-editor .meo-rendered-block-preview > .meo-mermaid-block,
 .cm-editor .meo-rendered-block-preview > .meo-md-math-fenced-display {
+  box-sizing: border-box;
   width: 100%;
   margin: 0;
 }

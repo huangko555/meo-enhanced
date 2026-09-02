@@ -483,6 +483,9 @@ async function assertFullscreenExitRestoresReadingContext(page: Page): Promise<v
 
 async function assertLateFullscreenExitCannotCloseReplacementSession(page: Page): Promise<void> {
   await page.evaluate(() => {
+    if (document.querySelector('#app > .cm-editor')) {
+      (window as any).__mermaidEditingEditor.destroy();
+    }
     document.getElementById('app')!.replaceChildren();
     (window as any).__mermaidEditingEditor = (window as any).MermaidEditingHarness.createEditor({
       parent: document.getElementById('app')!,
@@ -492,6 +495,7 @@ async function assertLateFullscreenExitCannotCloseReplacementSession(page: Page)
     });
   });
   await page.waitForFunction(() => Boolean(document.querySelector('.meo-mermaid-block svg')));
+  await waitForFrames(page);
   await enterMermaidFullscreen(page);
   await page.evaluate(() => {
     const staleExit = document.querySelector<HTMLButtonElement>(
