@@ -2495,6 +2495,10 @@ body {
   overflow: hidden;
 }
 
+.cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-rendered-block-preview-line-number {
+  align-items: flex-start;
+}
+
 .cm-editor .meo-rendered-block-preview {
   position: relative;
   box-sizing: border-box;

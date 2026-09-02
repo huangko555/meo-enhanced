@@ -207,6 +207,8 @@ const renderedBlockPreviewAnchorGutterMarker = new (class extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-anchor-gutter';
 })();
 class RenderedBlockPreviewLineNumberMarker extends GutterMarker {
+  elementClass = 'meo-rendered-block-preview-line-number';
+
   constructor(readonly lineNumber: number) {
     super();
   }

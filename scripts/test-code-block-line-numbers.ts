@@ -15,6 +15,41 @@ async function waitForFrames(page: Page, count = 6): Promise<void> {
   }, count);
 }
 
+async function readOuterLineNumberAlignment(
+  page: Page,
+  lineNumbers: readonly number[]
+): Promise<Array<{ lineNumber: number; markerText: string | null; offset: number | null }>> {
+  const results: Array<{ lineNumber: number; markerText: string | null; offset: number | null }> = [];
+  for (const lineNumber of lineNumbers) {
+    await page.evaluate((targetLine) => {
+      (window as any).__codeBlockLineNumbersEditor.scrollToLine(targetLine, 'center');
+    }, lineNumber);
+    await waitForFrames(page, 4);
+    results.push(await page.evaluate((targetLine) => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      const line = editor.view.state.doc.line(targetLine);
+      const coords = editor.view.coordsAtPos(line.from);
+      const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
+      const marker = Array.from(
+        outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+      ).find((element) => (
+        getComputedStyle(element).visibility !== 'hidden' &&
+        element.textContent?.trim() === String(targetLine)
+      ));
+      if (!coords || !marker) {
+        return { lineNumber: targetLine, markerText: marker?.textContent?.trim() ?? null, offset: null };
+      }
+      const markerRect = marker.getBoundingClientRect();
+      return {
+        lineNumber: targetLine,
+        markerText: marker.textContent?.trim() ?? null,
+        offset: markerRect.top + markerRect.height / 2 - (coords.top + coords.bottom) / 2
+      };
+    }, lineNumber));
+  }
+  return results;
+}
+
 async function main() {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-code-block-line-numbers-entry.ts')],
@@ -137,6 +172,7 @@ async function main() {
     }
 
     const renderedBlockGutters = await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
       const gutterElements = Array.from(
         document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
       );
@@ -150,20 +186,103 @@ async function main() {
           const rect = candidate.getBoundingClientRect();
           return rect.height > 0 && rect.bottom > blockRect.top && rect.top < blockRect.bottom;
         });
+        const markerText = marker?.firstChild ?? null;
+        const markerTextRange = markerText ? document.createRange() : null;
+        if (markerText && markerTextRange) markerTextRange.selectNodeContents(markerText);
+        const markerTextRect = markerTextRange?.getBoundingClientRect() ?? null;
+        const previousLine = Math.max(1, Number(startLine) - 1);
+        const referenceMarker = gutterElements.find((candidate) => (
+          getComputedStyle(candidate).visibility !== 'hidden' &&
+          candidate.textContent?.trim() === String(previousLine)
+        ));
+        const referenceText = referenceMarker?.firstChild ?? null;
+        const referenceRange = referenceText ? document.createRange() : null;
+        if (referenceText && referenceRange) referenceRange.selectNodeContents(referenceText);
+        const referenceTextRect = referenceRange?.getBoundingClientRect() ?? null;
+        const referenceCoords = editor.view.coordsAtPos(editor.view.state.doc.line(previousLine).from);
         return {
           kind: block.dataset.meoRenderedBlockKind ?? '',
           startLine,
-          hasAlignedStartLineNumber: Boolean(marker)
+          hasAlignedStartLineNumber: Boolean(marker),
+          textTopOffset: markerTextRect && referenceTextRect && referenceCoords
+            ? (markerTextRect.top - blockRect.top) - (referenceTextRect.top - referenceCoords.top)
+            : null
         };
       });
     });
     if (
       renderedBlockGutters.length !== 2 ||
-      renderedBlockGutters.some((block) => !block.hasAlignedStartLineNumber)
+      renderedBlockGutters.some((block) => (
+        !block.hasAlignedStartLineNumber ||
+        block.textTopOffset === null ||
+        Math.abs(block.textTopOffset) > 4
+      ))
     ) {
       throw new Error(
         `Rendered Mermaid or math preview did not show its starting line number: ${JSON.stringify(renderedBlockGutters)}`
       );
+    }
+
+    await page.click('.meo-mermaid-mode-btn');
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page, 8);
+    const splitLineNumbers = await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      const readInner = (selector: string, startLine: number) => {
+        const root = document.querySelector<HTMLElement>(selector);
+        const gutters = Array.from(root?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? [])
+          .filter((element) => getComputedStyle(element).visibility !== 'hidden')
+          .map((element) => element.textContent?.trim() ?? '')
+          .filter(Boolean);
+        const content = Array.from(root?.querySelectorAll<HTMLElement>('.cm-content .cm-line') ?? [])
+          .map((element) => element.textContent ?? '');
+        return { gutters, content, startLine };
+      };
+      const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
+      const outerNumbers = Array.from(
+        outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+      ).map((element) => element.textContent?.trim() ?? '').filter(Boolean);
+      return {
+        outerNumbers,
+        mermaid: readInner('.meo-mermaid-source-editor', 20),
+        math: readInner('.meo-latex-math-source-editor', 25)
+      };
+    });
+    if (
+      !splitLineNumbers.outerNumbers.includes('20') ||
+      !splitLineNumbers.outerNumbers.includes('25') ||
+      JSON.stringify(splitLineNumbers.mermaid.gutters) !== JSON.stringify(['1', '2']) ||
+      JSON.stringify(splitLineNumbers.math.gutters) !== JSON.stringify(['1'])
+    ) {
+      throw new Error(`Split rendered-block line numbers violated inner/outer numbering: ${JSON.stringify(splitLineNumbers)}`);
+    }
+    const splitOuterAlignment = await readOuterLineNumberAlignment(page, [20, 23, 24, 25, 27, 28]);
+    if (splitOuterAlignment.some((item) => item.offset === null || Math.abs(item.offset) > 1)) {
+      throw new Error(`Split rendered-block outer line numbers were misaligned: ${JSON.stringify(splitOuterAlignment)}`);
+    }
+
+    await page.click('.meo-mermaid-mode-btn');
+    await page.click('.meo-latex-math-mode-btn');
+    await waitForFrames(page, 8);
+    const sourceBlockLineNumbers = await page.evaluate(() => ({
+      mermaid: Array.from(document.querySelectorAll<HTMLElement>(
+        '.meo-mermaid-source-editor .cm-lineNumbers > .cm-gutterElement'
+      )).filter((element) => getComputedStyle(element).visibility !== 'hidden')
+        .map((element) => element.textContent?.trim() ?? '').filter(Boolean),
+      math: Array.from(document.querySelectorAll<HTMLElement>(
+        '.meo-latex-math-source-editor .cm-lineNumbers > .cm-gutterElement'
+      )).filter((element) => getComputedStyle(element).visibility !== 'hidden')
+        .map((element) => element.textContent?.trim() ?? '').filter(Boolean)
+    }));
+    if (
+      JSON.stringify(sourceBlockLineNumbers.mermaid) !== JSON.stringify(['1', '2']) ||
+      JSON.stringify(sourceBlockLineNumbers.math) !== JSON.stringify(['1'])
+    ) {
+      throw new Error(`Source rendered-block inner line numbers changed from block-relative numbering: ${JSON.stringify(sourceBlockLineNumbers)}`);
+    }
+    const sourceOuterAlignment = await readOuterLineNumberAlignment(page, [20, 23, 24, 25, 27, 28]);
+    if (sourceOuterAlignment.some((item) => item.offset === null || Math.abs(item.offset) > 1)) {
+      throw new Error(`Source rendered-block outer line numbers were misaligned: ${JSON.stringify(sourceOuterAlignment)}`);
     }
 
     const hiddenActionOpacities = await page.$$eval('.meo-code-block-actions', (toolbars) => (
@@ -345,6 +464,7 @@ async function main() {
         `Four-digit code line number was clipped: ${fourDigitResult.availableNumberWidth}px available, ${fourDigitResult.requiredNumberWidth}px required`
       );
     }
+
     console.log('code block line number checks passed');
   } finally {
     await browser.close();
