@@ -57,6 +57,7 @@ bun run test:targeted -- rendered
 bun run test:targeted -- appearance
 bun run test:targeted -- search
 bun run test:targeted -- viewport
+bun run test:targeted -- changes
 ```
 
 Choose only areas affected by the change. Several areas may be run one after
@@ -114,9 +115,9 @@ before running it. Omitting `--confirm-long-run` is rejected; `--dry-run` may be
 used without authorization to inspect the exact plan.
 
 The full-document endurance entry first runs recent rendered-block, search,
-reload, and table interaction regressions. It then preserves the original
-high-intensity UAT and finishes with production live-scroll integrity against
-the same document:
+reload, table interaction, change-review, diff-gutter, and code-block line-number
+regressions. It then preserves the original high-intensity UAT and finishes with
+production live-scroll integrity against the same document:
 
 ```shell
 bun run test:endurance -- path/to/document.md --confirm-long-run

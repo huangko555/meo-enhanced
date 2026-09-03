@@ -12,6 +12,7 @@ export type TargetedTestArea =
   | 'appearance'
   | 'search'
   | 'viewport'
+  | 'changes'
   | 'uat';
 
 export type TestWorkflowCommand = {
@@ -49,6 +50,7 @@ const targetedAreas = new Set<TargetedTestArea>([
   'appearance',
   'search',
   'viewport',
+  'changes',
   'uat'
 ]);
 
@@ -129,6 +131,17 @@ function targetedCommands(
         script('scripts/test-table-position-after-embedded-edit.ts'),
         script('scripts/test-virtual-block-scroll-stability.ts')
       ];
+    case 'changes':
+      return [
+        script('scripts/test-changes-review.ts'),
+        script('scripts/test-git-diff-line-highlights-setting.ts'),
+        script('scripts/test-saved-revision-tracker.ts'),
+        script('scripts/test-diff-baseline-selection.ts'),
+        script('scripts/test-document-diff-gutter.ts'),
+        script('scripts/test-git-diff-overview-ruler.ts'),
+        script('scripts/test-webview-viewport.ts'),
+        script('scripts/test-table-diff-refresh.ts')
+      ];
     case 'uat':
       if (!documentPath) throw new Error('Targeted UAT requires a document path');
       return [
@@ -164,7 +177,7 @@ export function parseTestWorkflowRequest(argv: string[]): TestWorkflowRequest {
     const area = positional[1] as TargetedTestArea | undefined;
     if (!area || !targetedAreas.has(area)) {
       throw new Error(
-        `Unknown targeted area "${area ?? ''}". Expected history, table, rendered, appearance, search, viewport, or uat`
+        `Unknown targeted area "${area ?? ''}". Expected history, table, rendered, appearance, search, viewport, changes, or uat`
       );
     }
     const documentPath = positional[2];
@@ -239,6 +252,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
               packageScript('test:table-command'),
               packageScript('test:image-presentation'),
               packageScript('test:mermaid-presentation'),
+              packageScript('test:changes-review'),
               packageScript('test:unit')
             ]
           },
@@ -263,7 +277,11 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
             script('scripts/test-document-reload-mermaid-viewport.ts'),
             script('scripts/test-search-replace-production.ts'),
             script('scripts/test-table-body-interaction-sticky-production.ts'),
-            script('scripts/test-mermaid-editing.ts')
+            script('scripts/test-mermaid-editing.ts'),
+            script('scripts/test-changes-review.ts'),
+            script('scripts/test-document-diff-gutter.ts'),
+            script('scripts/test-code-block-line-numbers.ts'),
+            script('scripts/test-long-code-blocks.ts')
           ]),
           serialStage('Full-document endurance contracts', [{
             args: ['scripts/test-uat-full-document-endurance.ts', documentPath],

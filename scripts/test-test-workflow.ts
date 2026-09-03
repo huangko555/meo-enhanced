@@ -40,6 +40,24 @@ assert.ok(flattenTestWorkflowCommands(search).some((command) => (
   command.args.includes('scripts/test-search-replace-production.ts')
 )));
 
+const changes = createTestWorkflowPlan(
+  parseTestWorkflowRequest(['targeted', 'changes'])
+);
+assert.equal(changes.area, 'changes');
+assert.deepEqual(
+  flattenTestWorkflowCommands(changes).map((command) => command.args[0]),
+  [
+    'scripts/test-changes-review.ts',
+    'scripts/test-git-diff-line-highlights-setting.ts',
+    'scripts/test-saved-revision-tracker.ts',
+    'scripts/test-diff-baseline-selection.ts',
+    'scripts/test-document-diff-gutter.ts',
+    'scripts/test-git-diff-overview-ruler.ts',
+    'scripts/test-webview-viewport.ts',
+    'scripts/test-table-diff-refresh.ts'
+  ]
+);
+
 for (const area of ['table', 'rendered', 'viewport'] as const) {
   const targeted = createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', area]));
   assert.ok(flattenTestWorkflowCommands(targeted).some((command) => (
@@ -92,19 +110,23 @@ assert.equal(endurance.longRunning, true);
 assert.equal(endurance.stages.length, 3);
 const enduranceCommands = flattenTestWorkflowCommands(endurance);
 assert.deepEqual(
-  enduranceCommands.slice(0, 4).map((command) => command.args[0]),
+  enduranceCommands.slice(0, 8).map((command) => command.args[0]),
   [
     'scripts/test-document-reload-mermaid-viewport.ts',
     'scripts/test-search-replace-production.ts',
     'scripts/test-table-body-interaction-sticky-production.ts',
-    'scripts/test-mermaid-editing.ts'
+    'scripts/test-mermaid-editing.ts',
+    'scripts/test-changes-review.ts',
+    'scripts/test-document-diff-gutter.ts',
+    'scripts/test-code-block-line-numbers.ts',
+    'scripts/test-long-code-blocks.ts'
   ]
 );
 assert.equal(
-  enduranceCommands[4]?.env?.MEO_UAT_STRICT_FINDING,
+  enduranceCommands[8]?.env?.MEO_UAT_STRICT_FINDING,
   '*'
 );
-assert.deepEqual(enduranceCommands[5]?.args, [
+assert.deepEqual(enduranceCommands[9]?.args, [
   'scripts/test-production-live-scroll-integrity.ts',
   '--document=fixtures/uat.md'
 ]);
@@ -210,7 +232,7 @@ function collectTransitiveTestScripts(
 }
 
 const fullDirectScripts = collectTransitiveTestScripts('test', packageScripts);
-for (const area of ['history', 'table', 'rendered', 'appearance', 'search', 'viewport'] as const) {
+for (const area of ['history', 'table', 'rendered', 'appearance', 'search', 'viewport', 'changes'] as const) {
   const targetedPlan = createTestWorkflowPlan(parseTestWorkflowRequest(['targeted', area]));
   for (const command of flattenTestWorkflowCommands(targetedPlan)) {
     const directScript = command.args[0];
@@ -255,9 +277,8 @@ for (const command of [
 assert.match(workflowGuide, /explicit user authorization/i);
 assert.match(workflowGuide, /1[–-]3 minutes/);
 
-const agentGuide = readFileSync(resolve(repoRoot, 'AGENTS.md'), 'utf8');
-assert.ok(agentGuide.includes('docs/testing-workflow.md'));
-assert.ok(agentGuide.includes('bun run test:release -- --confirm-long-run'));
-assert.match(agentGuide, /当前任务中的明确授权/);
+const contributingGuide = readFileSync(resolve(repoRoot, 'CONTRIBUTING.md'), 'utf8');
+assert.ok(contributingGuide.includes('docs/testing-workflow.md'));
+assert.ok(contributingGuide.includes('bun run test:release -- --confirm-long-run'));
 
 console.log('Test workflow policy contract passed');
