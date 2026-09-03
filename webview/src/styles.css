@@ -4686,6 +4686,10 @@ body.outline-resizing .preview-frame {
   white-space: nowrap;
 }
 
+.editor-host > .cm-editor .meo-md-html-table-line-number {
+  right: 10px;
+}
+
 .cm-editor .meo-md-html-table-diff-markers {
   position: absolute;
   top: 0;
