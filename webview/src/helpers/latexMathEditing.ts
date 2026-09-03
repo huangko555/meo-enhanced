@@ -205,6 +205,18 @@ type LatexToolbarElement = HTMLSpanElement & {
   [latexToolbarSourceText]: string;
 };
 
+const latexToolbarDomCache = new WeakMap<EditorView, Map<string, LatexToolbarElement>>();
+const LATEX_TOOLBAR_DOM_CACHE_LIMIT = 300;
+
+function getLatexToolbarDomCache(view: EditorView): Map<string, LatexToolbarElement> {
+  let cache = latexToolbarDomCache.get(view);
+  if (!cache) {
+    cache = new Map();
+    latexToolbarDomCache.set(view, cache);
+  }
+  return cache;
+}
+
 function updateLatexMathModeButton(
   button: HTMLButtonElement,
   mode: LatexMathBlockMode,
@@ -237,7 +249,8 @@ function preserveToolbarWhileDispatching(
     () => view.dom.querySelector<HTMLElement>(
       `.meo-latex-math-toolbar[data-meo-block-from="${anchor}"]`
     ),
-    () => view.dispatch({ effects })
+    () => view.dispatch({ effects }),
+    'immediate'
   );
 }
 
@@ -264,6 +277,14 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
 
   toDOM(view: EditorView): HTMLElement {
     const uiLanguage = view.state.facet(uiLanguageFacet);
+    const cache = getLatexToolbarDomCache(view);
+    const cacheKey = `${this.anchor}:${this.lineNumber}:${uiLanguage}`;
+    const cachedToolbar = cache.get(cacheKey);
+    if (cachedToolbar && this.updateDOM(cachedToolbar, view)) {
+      cache.delete(cacheKey);
+      cache.set(cacheKey, cachedToolbar);
+      return cachedToolbar;
+    }
     const decision = decideRenderedBlockModeShell({
       kind: 'latex',
       lineNumber: this.lineNumber,
@@ -359,6 +380,11 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
       selectAllButton,
       createCopyCodeButton(() => toolbar[latexToolbarSourceText] ?? '', uiLanguage)
     );
+    cache.set(cacheKey, toolbar);
+    if (cache.size > LATEX_TOOLBAR_DOM_CACHE_LIMIT) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey !== undefined) cache.delete(oldestKey);
+    }
     return toolbar;
   }
 
@@ -391,18 +417,19 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
 
 export function addLatexMathToolbar(
   builder: any[],
-  lineEnd: number,
+  position: number,
   anchor: number,
   lineNumber: number,
   mode: LatexMathBlockMode,
   sourceText: string,
-  blockTo: number
+  blockTo: number,
+  side = 1
 ): void {
   builder.push(
     Decoration.widget({
       widget: createLatexMathToolbarWidget(anchor, lineNumber, mode, sourceText, blockTo),
-      side: 1
-    }).range(lineEnd)
+      side
+    }).range(position)
   );
 }
 

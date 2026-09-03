@@ -55,16 +55,22 @@ async function main() {
     const narrowViewportGutterGeometry = await page.evaluate(() => {
       const host = document.querySelector<HTMLElement>('#app')!.getBoundingClientRect();
       const guttersElement = document.querySelector<HTMLElement>('.cm-gutters')!;
+      const lineNumber = guttersElement.querySelector<HTMLElement>(
+        '.cm-lineNumbers > .cm-gutterElement'
+      )!;
       const gutters = guttersElement.getBoundingClientRect();
       return {
         offset: gutters.left - host.left,
-        computedLeft: getComputedStyle(guttersElement).left,
-        inlineLeft: guttersElement.style.left,
-        contentMaxWidth: getComputedStyle(document.documentElement).getPropertyValue('--meo-content-max-width')
+        transform: getComputedStyle(guttersElement).transform,
+        lineNumberPaddingRight: getComputedStyle(lineNumber).paddingRight
       };
     });
-    if (Math.abs(narrowViewportGutterGeometry.offset + 5) > 0.1) {
-      throw new Error(`Narrow-view gutter offset was clamped away: ${JSON.stringify(narrowViewportGutterGeometry)}`);
+    if (
+      Math.abs(narrowViewportGutterGeometry.offset) > 0.1 ||
+      narrowViewportGutterGeometry.transform !== 'none' ||
+      narrowViewportGutterGeometry.lineNumberPaddingRight !== '10px'
+    ) {
+      throw new Error(`Narrow-view gutter reintroduced a composited offset: ${JSON.stringify(narrowViewportGutterGeometry)}`);
     }
 
     const marker = await page.$('.meo-git-gutter-marker.is-deleted');

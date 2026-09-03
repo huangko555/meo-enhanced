@@ -80,6 +80,7 @@ import { gitDiffLineFlagsField } from './helpers/gitDiffGutter';
 import { markdownTagField } from './helpers/tags';
 import {
   getMermaidBlockMode,
+  MermaidEditingWidget,
   mermaidEditingStateField,
   setMermaidBlockModeEffect,
   setMermaidSearchRevealEffect
@@ -213,6 +214,8 @@ const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
 const renderedBlockPreviewAnchorGutterMarker = new (class extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-anchor-gutter';
 })();
+type RenderedBlockDocumentLineNumberKind = 'mermaid' | 'math';
+
 class RenderedBlockPreviewLineNumberMarker extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-line-number';
 
@@ -229,10 +232,128 @@ class RenderedBlockPreviewLineNumberMarker extends GutterMarker {
     return document.createTextNode(String(this.lineNumber));
   }
 }
-const renderedBlockPreviewLineNumberMarker = lineNumberWidgetMarker.of((_view, widget, block) => {
-  const startLine = getRenderedBlockPreviewStartLine(widget);
-  if (startLine === null || block.height < 1) return null;
-  return new RenderedBlockPreviewLineNumberMarker(startLine);
+
+type RenderedBlockDocumentLineNumberColumn = HTMLDivElement & {
+  __meoRenderedBlockLineNumberCleanup?: () => void;
+};
+
+class RenderedBlockDocumentLineNumbersMarker extends GutterMarker {
+  elementClass = 'meo-rendered-block-document-line-numbers';
+
+  constructor(
+    readonly kind: RenderedBlockDocumentLineNumberKind,
+    readonly anchor: number,
+    readonly startLine: number,
+    readonly lineCount: number
+  ) {
+    super();
+  }
+
+  eq(other: GutterMarker): boolean {
+    return other instanceof RenderedBlockDocumentLineNumbersMarker
+      && other.kind === this.kind
+      && other.anchor === this.anchor
+      && other.startLine === this.startLine
+      && other.lineCount === this.lineCount;
+  }
+
+  toDOM(view: EditorView): Node {
+    const column = document.createElement('div') as RenderedBlockDocumentLineNumberColumn;
+    column.className = 'meo-rendered-block-document-line-number-column';
+    for (let index = 0; index < this.lineCount; index += 1) {
+      const marker = document.createElement('span');
+      marker.className = 'meo-rendered-block-document-line-number';
+      marker.textContent = String(this.startLine + index);
+      column.appendChild(marker);
+    }
+
+    const rootSelector = this.kind === 'mermaid'
+      ? `.meo-mermaid-editing-block[data-meo-mermaid-anchor="${this.anchor}"]`
+      : `.meo-latex-math-editing-block[data-meo-latex-math-anchor="${this.anchor}"]`;
+    const sourceSelector = this.kind === 'mermaid'
+      ? '.meo-mermaid-source-editor'
+      : '.meo-latex-math-source-editor';
+    let timer = 0;
+    let observer: ResizeObserver | null = null;
+    let observedElements: Element[] = [];
+
+    const sync = (): boolean => {
+      const outerMarker = column.closest<HTMLElement>('.cm-gutterElement');
+      const source = view.dom.querySelector<HTMLElement>(`${rootSelector} ${sourceSelector}`);
+      const innerMarkers = Array.from(
+        source?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+      ).filter((element) => (
+        getComputedStyle(element).visibility !== 'hidden'
+        && element.getBoundingClientRect().height > 0
+        && Boolean(element.textContent?.trim())
+      ));
+      if (!outerMarker || innerMarkers.length < this.lineCount) return false;
+
+      column.style.top = '';
+      const columnRect = column.getBoundingClientRect();
+      const firstInnerRect = innerMarkers[0].getBoundingClientRect();
+      column.style.top = `${firstInnerRect.top - columnRect.top}px`;
+      const lineMarkers = Array.from(column.children) as HTMLElement[];
+      for (let index = 0; index < lineMarkers.length; index += 1) {
+        lineMarkers[index].style.height = `${innerMarkers[index].getBoundingClientRect().height}px`;
+      }
+
+      if (typeof ResizeObserver !== 'undefined') {
+        const nextObserved = [source!, ...innerMarkers];
+        if (
+          !observer
+          || nextObserved.length !== observedElements.length
+          || nextObserved.some((element, index) => element !== observedElements[index])
+        ) {
+          observer?.disconnect();
+          observer = new ResizeObserver(() => sync());
+          observedElements = nextObserved;
+          for (const element of observedElements) observer.observe(element);
+        }
+      }
+      return true;
+    };
+    const settle = (attemptsLeft: number): void => {
+      if (sync() || attemptsLeft <= 1) return;
+      timer = window.setTimeout(() => settle(attemptsLeft - 1));
+    };
+    queueMicrotask(() => settle(4));
+    column.__meoRenderedBlockLineNumberCleanup = () => {
+      window.clearTimeout(timer);
+      observer?.disconnect();
+      observer = null;
+      observedElements = [];
+    };
+    return column;
+  }
+
+  destroy(dom: Node): void {
+    (dom as RenderedBlockDocumentLineNumberColumn).__meoRenderedBlockLineNumberCleanup?.();
+  }
+}
+const renderedBlockLineNumberMarker = lineNumberWidgetMarker.of((_view, widget, block) => {
+  if (block.height < 1) return null;
+  const previewStartLine = getRenderedBlockPreviewStartLine(widget);
+  if (previewStartLine !== null) {
+    return new RenderedBlockPreviewLineNumberMarker(previewStartLine);
+  }
+  if (widget instanceof MermaidEditingWidget) {
+    return new RenderedBlockDocumentLineNumbersMarker(
+      'mermaid',
+      widget.block.anchor,
+      widget.block.startLine + 1,
+      widget.block.diagramText.split('\n').length
+    );
+  }
+  if (widget instanceof LatexMathEditingWidget) {
+    return new RenderedBlockDocumentLineNumbersMarker(
+      'math',
+      widget.block.anchor,
+      widget.block.lineNumber + 1,
+      widget.block.sourceText.split('\n').length
+    );
+  }
+  return null;
 });
 const isTableContentLine = (lineText: string): boolean => lineText.includes('|');
 
@@ -1830,8 +1951,7 @@ function buildDecorations(state: EditorState): DecorationSet {
           const codeInfo = getFencedCodeInfo(state, node);
           if (codeInfo === 'mermaid') {
             const sourceDecorationEnd = ranges.length;
-            const previewConsumesFence = addMermaidDiagram(ranges, state, node, activeLines);
-            if (previewConsumesFence) {
+            if (addMermaidDiagram(ranges, state, node, activeLines)) {
               ranges.splice(sourceDecorationStart, sourceDecorationEnd - sourceDecorationStart);
             }
             return;
@@ -2646,7 +2766,6 @@ function addMathDecorations(
     );
 
     if (fencedDisplay) {
-      const sourceDecorationStart = builder.length;
       const openingLine = state.doc.lineAt(mathRange.from);
       const closingLine = state.doc.lineAt(Math.max(mathRange.to - 1, mathRange.from));
       const startLineNo = openingLine.number;
@@ -2659,11 +2778,6 @@ function addMathDecorations(
           overlapsSelection(state, renderSpan.innerFrom, renderSpan.innerTo);
       }
 
-      addLineClass(builder, state, openingLine.from, closingLine.to, lineStyleDecos.codeBlock);
-      addBlockIndentLines(builder, state, openingLine.from, closingLine.to, indentColumns);
-      builder.push(lineStyleDecos.codeBlockStart.range(openingLine.from));
-      builder.push(lineStyleDecos.codeBlockEnd.range(closingLine.from));
-
       const copyContent = renderSpan
         ? state.doc.sliceString(renderSpan.innerFrom, renderSpan.innerTo)
         : '';
@@ -2672,24 +2786,28 @@ function addMathDecorations(
         ? getLatexMathBlockMode(state, anchor, renderSpan.innerFrom, renderSpan.innerTo)
         : null;
       const decision = mode?.decision ?? null;
-      if (
-        copyContent
-        && decision
-        && decision.effectiveMode !== 'preview'
-      ) {
-        if (!activeLines.has(openingLine.number)) {
-          addTopLinePillLabel(builder, openingLine.to, 'latex');
+      if (copyContent && decision) {
+        if (decision.effectiveMode !== 'preview' && !activeLines.has(openingLine.number)) {
+          addTopLinePillLabel(builder, openingLine.from, 'latex', -1);
         }
-        addLatexMathToolbar(
-          builder,
-          openingLine.to,
-          anchor,
-          openingLine.number,
-          decision.effectiveMode,
-          copyContent,
-          mathRange.to
-        );
+        if (decision.effectiveMode !== 'preview') {
+          addLatexMathToolbar(
+            builder,
+            openingLine.to,
+            anchor,
+            openingLine.number,
+            decision.effectiveMode,
+            copyContent,
+            mathRange.to
+          );
+        }
       }
+
+      const sourceDecorationStart = builder.length;
+      addLineClass(builder, state, openingLine.from, closingLine.to, lineStyleDecos.codeBlock);
+      addBlockIndentLines(builder, state, openingLine.from, closingLine.to, indentColumns);
+      builder.push(lineStyleDecos.codeBlockStart.range(openingLine.from));
+      builder.push(lineStyleDecos.codeBlockEnd.range(closingLine.from));
 
       addRange(
         builder,
@@ -2697,7 +2815,7 @@ function addMathDecorations(
         openingLine.to,
         activeLines.has(openingLine.number) ? activeCodeMarkerDeco : fenceMarkerDeco
       );
-      if (decision?.effectiveMode !== 'preview') {
+      if (decision) {
         addRange(
           builder,
           closingLine.from,
@@ -3024,6 +3142,9 @@ function isRenderedBlockPreview(state: EditorState, block: LiveRenderedBlock): b
     const anchor = state.doc.line(block.startLine).from;
     const contentFrom = state.doc.line(block.startLine + 1).from;
     const contentTo = state.doc.line(block.endLine - 1).to;
+    if (contentFrom >= contentTo || !state.doc.sliceString(contentFrom, contentTo).trim()) {
+      return false;
+    }
     return getMermaidBlockMode(state, anchor, contentFrom, contentTo).decision.effectiveMode === 'preview';
   }
   if (block.kind === 'math') {
@@ -3233,7 +3354,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     latexMathEditingStateField,
     ...htmlContentExtensions(),
     liveDecorationField,
-    renderedBlockPreviewLineNumberMarker,
+    renderedBlockLineNumberMarker,
     ...longCodeBlockSessionUiExtension(),
     liveLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),

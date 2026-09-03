@@ -25,7 +25,24 @@ async function assertVisibleIntegrity(page: Page, step: string, failOnMismatch =
     const viewport = scroller.getBoundingClientRect();
     const sourceLines = String((window as any).__integritySource).split(/\r?\n/);
     const uniqueLines = new Map<string, number | null>();
+    const fencedLines = new Set<number>();
+    let openFence: { marker: '`' | '~'; length: number } | null = null;
     sourceLines.forEach((line, index) => {
+      const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (openFence) {
+        fencedLines.add(index + 1);
+        if (
+          fence
+          && fence[1]![0] === openFence.marker
+          && fence[1]!.length >= openFence.length
+          && fence[2]!.trim() === ''
+        ) {
+          openFence = null;
+        }
+      } else if (fence) {
+        openFence = { marker: fence[1]![0] as '`' | '~', length: fence[1]!.length };
+        fencedLines.add(index + 1);
+      }
       const text = line.trim();
       if (!text) return;
       uniqueLines.set(text, uniqueLines.has(text) ? null : index + 1);
@@ -47,6 +64,7 @@ async function assertVisibleIntegrity(page: Page, step: string, failOnMismatch =
       const expectedLine = uniqueLines.get(text);
       if (!expectedLine) continue;
       const sourceText = sourceLines[expectedLine - 1]?.trim() ?? '';
+      if (fencedLines.has(expectedLine)) continue;
       const heading = /^(#{1,6})\s/.exec(sourceText);
       if (heading && !line.classList.contains(`meo-md-h${heading[1].length}`)) {
         invalidStyles.push({ text, expectedLine, missing: `meo-md-h${heading[1].length}` });

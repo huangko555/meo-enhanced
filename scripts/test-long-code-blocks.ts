@@ -124,6 +124,35 @@ async function main() {
       throw new Error(`Live long-code controls did not update their language in place: ${JSON.stringify(localizedLongCodeLabels)}`);
     }
 
+    const compactFontControlHeight = await page.evaluate(async (content) => {
+      document.documentElement.style.setProperty('--meo-font-live-size', '14px');
+      const harness = (window as any).LongCodeBlocksHarness;
+      const editor = harness.createEditor({
+        parent: document.getElementById('app')!,
+        text: content,
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const placeholder = document.querySelector<HTMLElement>('.meo-md-long-code-placeholder');
+      const result = {
+        estimate: harness.estimateBlockWidgetHeight({ kind: 'long-code-control' }),
+        measured: placeholder?.getBoundingClientRect().height ?? 0,
+        fontSize: Number.parseFloat(getComputedStyle(editor.view.contentDOM).fontSize)
+      };
+      editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      document.documentElement.style.removeProperty('--meo-font-live-size');
+      return result;
+    }, localizedLongCode);
+    if (
+      compactFontControlHeight.fontSize !== 14 ||
+      compactFontControlHeight.measured <= 0 ||
+      Math.abs(compactFontControlHeight.estimate - compactFontControlHeight.measured) > 1
+    ) {
+      throw new Error(`Long-code control height estimate can cause a one-frame gutter correction: ${JSON.stringify(compactFontControlHeight)}`);
+    }
+
     for (const bareOpeningFence of ['```', '```js']) {
       const bareFenceState = await page.evaluate((content) => {
         const editor = (window as any).LongCodeBlocksHarness.createEditor({
@@ -166,8 +195,32 @@ async function main() {
       });
     }, replacementBlock('manualOld'));
     await waitForFrames(page);
+    const liveScrollerOverflowAnchor = await page.evaluate(() => getComputedStyle(
+      (window as any).__longCodeBlocksEditor.view.scrollDOM
+    ).overflowAnchor);
+    if (liveScrollerOverflowAnchor !== 'none') {
+      throw new Error(`Live scroller allowed native scroll anchoring: ${liveScrollerOverflowAnchor}`);
+    }
+    await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        '.meo-md-long-code-placeholder .meo-long-code-action'
+      );
+      button?.addEventListener('click', () => {
+        const gutter = (window as any).__longCodeBlocksEditor.view.scrollDOM
+          .querySelector<HTMLElement>(':scope > .cm-gutters');
+        (window as any).__expandGutterVisibility = gutter
+          ? getComputedStyle(gutter).visibility
+          : null;
+      }, { once: true });
+    });
     await page.click('.meo-md-long-code-placeholder .meo-long-code-action');
     await waitForFrames(page);
+    const expandGutterVisibility = await page.evaluate(() => (
+      (window as any).__expandGutterVisibility as string | null
+    ));
+    if (expandGutterVisibility !== 'visible') {
+      throw new Error(`Expanding a long code block hid the gutter: ${JSON.stringify(expandGutterVisibility)}`);
+    }
     await page.evaluate((content) => {
       (window as any).__longCodeBlocksEditor.setText(content, true);
     }, replacementBlock('manualNew'));
@@ -453,8 +506,26 @@ async function main() {
       (window as any).__longCodeBlocksEditor.selectAll();
     });
     await waitForFrames(page);
+    await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        '.meo-md-long-code-footer .meo-long-code-action'
+      );
+      button?.addEventListener('click', () => {
+        const gutter = (window as any).__longCodeBlocksEditor.view.scrollDOM
+          .querySelector<HTMLElement>(':scope > .cm-gutters');
+        (window as any).__collapseGutterVisibility = gutter
+          ? getComputedStyle(gutter).visibility
+          : null;
+      }, { once: true });
+    });
     await page.click('.meo-md-long-code-footer .meo-long-code-action');
     await waitForFrames(page);
+    const collapseGutterVisibility = await page.evaluate(() => (
+      (window as any).__collapseGutterVisibility as string | null
+    ));
+    if (collapseGutterVisibility !== 'visible') {
+      throw new Error(`Collapsing a long code block hid the gutter: ${JSON.stringify(collapseGutterVisibility)}`);
+    }
     const collapsedAgain = await page.evaluate(() => ({
       placeholders: document.querySelectorAll('.meo-md-long-code-placeholder').length,
       footerCount: document.querySelectorAll('.meo-md-long-code-footer').length,
@@ -986,6 +1057,14 @@ async function main() {
         if (running) requestAnimationFrame(sample);
       };
       (window as any).__floatingCollapseFrameProbe = { samples, stop() { running = false; } };
+      (window as any).__floatingCollapseGutterVisibility = null;
+      const floating = document.querySelector<HTMLButtonElement>('.meo-long-code-floating-action');
+      floating?.addEventListener('click', () => {
+        const gutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
+        (window as any).__floatingCollapseGutterVisibility = gutter
+          ? getComputedStyle(gutter).visibility
+          : null;
+      }, { once: true });
       requestAnimationFrame(sample);
     });
     await page.click('.meo-long-code-floating-action');
@@ -993,18 +1072,27 @@ async function main() {
     const floatingCollapseFrameProbe = await page.evaluate(() => {
       const probe = (window as any).__floatingCollapseFrameProbe;
       probe.stop();
-      return probe.samples as Array<{ scrollTop: number; missingGutter: boolean; mismatchedGutters: number }>;
+      return {
+        gutterVisibilityOnClick: (window as any).__floatingCollapseGutterVisibility,
+        samples: probe.samples as Array<{
+          scrollTop: number;
+          missingGutter: boolean;
+          mismatchedGutters: number;
+        }>
+      };
     });
     const floatingCollapseScrollPositions = [...new Set(
-      floatingCollapseFrameProbe.map((sample) => Math.round(sample.scrollTop * 10) / 10)
+      floatingCollapseFrameProbe.samples.map((sample) => Math.round(sample.scrollTop * 10) / 10)
     )];
     if (
-      floatingCollapseFrameProbe.some((sample) => sample.missingGutter || sample.mismatchedGutters > 0) ||
+      floatingCollapseFrameProbe.gutterVisibilityOnClick !== 'visible' ||
+      floatingCollapseFrameProbe.samples.some((sample) => sample.missingGutter || sample.mismatchedGutters > 0) ||
       floatingCollapseScrollPositions.length > 2
     ) {
       throw new Error(`Floating collapse flashed or settled in multiple visible steps: ${JSON.stringify({
+        gutterVisibilityOnClick: floatingCollapseFrameProbe.gutterVisibilityOnClick,
         scrollPositions: floatingCollapseScrollPositions,
-        samples: floatingCollapseFrameProbe
+        samples: floatingCollapseFrameProbe.samples
       })}`);
     }
     const collapsedBlockVisible = await page.evaluate(() => {
@@ -1156,7 +1244,9 @@ async function main() {
       const shell = diagram.closest<HTMLElement>(
         '.meo-rendered-block-preview[data-meo-rendered-block-kind="mermaid"]'
       );
-      const language = shell?.querySelector<HTMLElement>('.meo-rendered-block-preview-language');
+      const language = shell?.querySelector<HTMLElement>(
+        ':scope > .meo-rendered-block-preview-language'
+      );
       const toolbar = shell?.querySelector<HTMLElement>(':scope > .meo-mermaid-toolbar');
       const diagramRect = diagram.getBoundingClientRect();
       const shellRect = shell?.getBoundingClientRect();
@@ -1167,12 +1257,16 @@ async function main() {
         next = next.nextElementSibling as HTMLElement | null;
       }
       return {
-        atomicShell: Boolean(shell && language && toolbar && shell.contains(diagram)),
+        atomicShell: Boolean(
+          shell && shell.contains(diagram)
+          && language?.textContent === 'mermaid'
+          && toolbar?.parentElement === shell
+        ),
         topGap: shellRect ? diagramRect.top - shellRect.top : null,
         bottomGap: shellRect ? shellRect.bottom - diagramRect.bottom : null,
         shellRadius: shell ? getComputedStyle(shell).borderRadius : null,
         diagramRadius: getComputedStyle(diagram).borderRadius,
-        detachedClosingFence
+        retainedClosingFence: detachedClosingFence
       };
     });
     if (
@@ -1183,18 +1277,21 @@ async function main() {
       Math.abs(mermaidShellLayout.bottomGap) > 1 ||
       mermaidShellLayout.shellRadius !== '6px' ||
       mermaidShellLayout.diagramRadius !== '6px' ||
-      mermaidShellLayout.detachedClosingFence
+      mermaidShellLayout.retainedClosingFence
     ) {
       throw new Error(`Mermaid preview shell is visually disconnected: ${JSON.stringify(mermaidShellLayout)}`);
     }
 
     const renderedBlockLayout = await page.evaluate(() => {
-      const top = document.querySelector<HTMLElement>('.cm-line.meo-md-code-block-start')?.getBoundingClientRect();
+      const content = document.querySelector<HTMLElement>(
+        '.cm-editor.meo-mode-live > .cm-scroller > .cm-content > .cm-line'
+      )
+        ?.getBoundingClientRect();
       const mermaid = document.querySelector<HTMLElement>('.meo-mermaid-block')?.getBoundingClientRect();
       const math = document.querySelector<HTMLElement>('.meo-md-math-fenced-display')?.getBoundingClientRect();
       return {
-        topLeft: top?.left ?? 0,
-        topRight: top?.right ?? 0,
+        topLeft: content?.left ?? 0,
+        topRight: content?.right ?? 0,
         mermaidLeft: mermaid?.left ?? 0,
         mermaidRight: mermaid?.right ?? 0,
         mathLeft: math?.left ?? 0,
@@ -1388,19 +1485,56 @@ async function main() {
     }
 
     await page.evaluate(() => {
-      const samples: Array<{ contentVisible: boolean; gutterVisible: boolean }> = [];
+      const editor = (window as any).__longCodeBlocksEditor;
+      const samples: Array<{
+        contentVisible: boolean;
+        gutterVisible: boolean;
+        maxGutterOffset: number;
+      }> = [];
       let running = true;
       const sample = () => {
-        const visibleLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .filter((line) => line.getBoundingClientRect().height > 0)
-          .map((line) => line.textContent);
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        const visibleLineElements = Array.from(
+          editor.view.contentDOM.querySelectorAll<HTMLElement>(':scope > .cm-line')
+        ).filter((line) => {
+          const rect = line.getBoundingClientRect();
+          return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
+        });
+        const visibleLines = visibleLineElements.map((line) => line.textContent);
         const contentVisible = ['prelude 76', 'row 1'].every((text) => visibleLines.includes(text));
         const visibleGutters = Array.from(
-          document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+          editor.view.scrollDOM.querySelectorAll<HTMLElement>(
+            ':scope > .cm-gutters > .cm-lineNumbers > .cm-gutterElement'
+          )
         ).filter((marker) => marker.getBoundingClientRect().height > 0)
-          .map((marker) => marker.textContent?.trim());
-        const gutterVisible = ['76', '78'].every((lineNumber) => visibleGutters.includes(lineNumber));
-        samples.push({ contentVisible, gutterVisible });
+          .map((marker) => ({
+            marker,
+            lineNumber: Number(marker.textContent?.trim())
+          }))
+          .filter((entry) => Number.isInteger(entry.lineNumber));
+        const gutterVisible = [76, 78].every((lineNumber) => (
+          visibleGutters.some((entry) => entry.lineNumber === lineNumber)
+        ));
+        let maxGutterOffset = 0;
+        for (const line of visibleLineElements) {
+          try {
+            const documentLine = editor.view.state.doc.lineAt(editor.view.posAtDOM(line)).number;
+            const gutter = visibleGutters.find((entry) => entry.lineNumber === documentLine)?.marker;
+            if (!gutter) continue;
+            const lineRect = line.getBoundingClientRect();
+            const gutterRect = gutter.getBoundingClientRect();
+            maxGutterOffset = Math.max(
+              maxGutterOffset,
+              Math.abs(
+                gutterRect.top + gutterRect.height / 2
+                - (lineRect.top + lineRect.height / 2)
+              )
+            );
+          } catch {
+            // Ignore a line that CodeMirror detached between enumeration and measurement.
+          }
+        }
+        samples.push({ contentVisible, gutterVisible, maxGutterOffset });
         if (running) requestAnimationFrame(sample);
       };
       (window as any).__fullyVisibleFoldFrameProbe = {
@@ -1417,15 +1551,21 @@ async function main() {
     const fullyVisibleFoldFrameProbe = await page.evaluate(() => {
       const probe = (window as any).__fullyVisibleFoldFrameProbe;
       probe.stop();
-      return probe.samples as Array<{ contentVisible: boolean; gutterVisible: boolean }>;
+      return probe.samples as Array<{
+        contentVisible: boolean;
+        gutterVisible: boolean;
+        maxGutterOffset: number;
+      }>;
     });
     const missingContentFrames = fullyVisibleFoldFrameProbe.filter((sample) => !sample.contentVisible).length;
     const missingGutterFrames = fullyVisibleFoldFrameProbe.filter((sample) => !sample.gutterVisible).length;
-    if (missingContentFrames > 0 || missingGutterFrames > 0) {
+    const maxGutterOffset = Math.max(...fullyVisibleFoldFrameProbe.map((sample) => sample.maxGutterOffset));
+    if (missingContentFrames > 0 || missingGutterFrames > 0 || maxGutterOffset > 1) {
       throw new Error(`Fully-visible fold flashed during repeated toggles: ${JSON.stringify({
         totalFrames: fullyVisibleFoldFrameProbe.length,
         missingContentFrames,
-        missingGutterFrames
+        missingGutterFrames,
+        maxGutterOffset
       })}`);
     }
 

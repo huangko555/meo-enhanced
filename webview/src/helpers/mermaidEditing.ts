@@ -218,6 +218,18 @@ type MermaidToolbarElement = HTMLSpanElement & {
   [mermaidToolbarCodeContent]: string;
 };
 
+const mermaidToolbarDomCache = new WeakMap<EditorView, Map<string, MermaidToolbarElement>>();
+const MERMAID_TOOLBAR_DOM_CACHE_LIMIT = 300;
+
+function getMermaidToolbarDomCache(view: EditorView): Map<string, MermaidToolbarElement> {
+  let cache = mermaidToolbarDomCache.get(view);
+  if (!cache) {
+    cache = new Map();
+    mermaidToolbarDomCache.set(view, cache);
+  }
+  return cache;
+}
+
 function updateMermaidModeButton(
   button: HTMLButtonElement,
   mode: MermaidBlockMode,
@@ -250,7 +262,8 @@ function preserveToolbarWhileDispatching(
     () => view.dom.querySelector<HTMLElement>(
       `.meo-mermaid-toolbar[data-meo-block-from="${anchor}"]`
     ),
-    () => view.dispatch({ effects })
+    () => view.dispatch({ effects }),
+    'immediate'
   );
 }
 
@@ -277,6 +290,14 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
 
   toDOM(view: EditorView): HTMLElement {
     const uiLanguage = view.state.facet(uiLanguageFacet);
+    const cache = getMermaidToolbarDomCache(view);
+    const cacheKey = `${this.anchor}:${this.lineNumber}:${uiLanguage}`;
+    const cachedToolbar = cache.get(cacheKey);
+    if (cachedToolbar && this.updateDOM(cachedToolbar, view)) {
+      cache.delete(cacheKey);
+      cache.set(cacheKey, cachedToolbar);
+      return cachedToolbar;
+    }
     const decision = decideRenderedBlockModeShell({
       kind: 'mermaid',
       lineNumber: this.lineNumber,
@@ -331,10 +352,8 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
       requestAnimationFrame(() => {
         if (!isRevealCurrent()) return;
         if (nextMode === 'preview') {
-          // Preview owns its toolbar inside the replacement widget, while
-          // Source/Split keep the toolbar on the opening line. Focus the
-          // current control after that ownership handoff without asking the
-          // unrelated outer selection to reveal itself.
+          // The opening line owns the toolbar in every mode. Restore focus
+          // without asking the unrelated outer selection to reveal itself.
           const currentModeButton = view.dom.querySelector<HTMLButtonElement>(
             `.meo-mermaid-toolbar[data-meo-block-from="${currentAnchor}"] .meo-mermaid-mode-btn`
           );
@@ -375,6 +394,11 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     const copyButton = createCopyCodeButton(() => toolbar[mermaidToolbarCodeContent] ?? '', uiLanguage);
 
     toolbar.append(modeButton, selectAllButton, copyButton);
+    cache.set(cacheKey, toolbar);
+    if (cache.size > MERMAID_TOOLBAR_DOM_CACHE_LIMIT) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey !== undefined) cache.delete(oldestKey);
+    }
     return toolbar;
   }
 
@@ -408,18 +432,19 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
 
 export function addMermaidToolbar(
   builder: any[],
-  lineEnd: number,
+  position: number,
   anchor: number,
   lineNumber: number,
   mode: MermaidBlockMode,
   codeContent: string,
-  blockTo: number
+  blockTo: number,
+  side = 1
 ): void {
   builder.push(
     Decoration.widget({
       widget: createMermaidToolbarWidget(anchor, lineNumber, mode, codeContent, blockTo),
-      side: 1
-    }).range(lineEnd)
+      side
+    }).range(position)
   );
 }
 

@@ -1489,6 +1489,12 @@ body {
   overflow: visible;
 }
 
+/* Live mode owns viewport anchoring. Chromium's native anchor correction can
+   otherwise paint once before the controller applies its measured position. */
+.cm-editor.meo-mode-live > .cm-scroller {
+  overflow-anchor: none;
+}
+
 .editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .cm-gutterElement {
   padding-right: 10px;
 }
@@ -2485,6 +2491,16 @@ body {
   background: var(--meo-semantic-codeCopyHoverBackground);
 }
 
+.cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-rendered-block-document-line-numbers {
+  position: relative;
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-rendered-block-preview-line-number {
+  align-items: flex-start;
+}
+
 .cm-editor.meo-mode-live .cm-line.meo-rendered-block-preview-anchor-line,
 .cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-rendered-block-preview-anchor-gutter {
   height: 0 !important;
@@ -2495,8 +2511,21 @@ body {
   overflow: hidden;
 }
 
-.cm-editor.meo-mode-live .cm-lineNumbers .cm-gutterElement.meo-rendered-block-preview-line-number {
-  align-items: flex-start;
+.cm-editor .meo-rendered-block-document-line-number-column {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.cm-editor .meo-rendered-block-document-line-number {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  min-height: calc(var(--meo-active-editor-line-height) * 1em);
+  font: inherit;
+  line-height: var(--meo-active-editor-line-height);
 }
 
 .cm-editor .meo-rendered-block-preview {
@@ -2534,21 +2563,6 @@ body {
   border-radius: 6px;
   background-color: var(--meo-code-background);
   background-image: none;
-}
-
-.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-code-block-pill:hover,
-.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-code-block-pill:focus-visible,
-.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-code-block-pill:hover,
-.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-code-block-pill:focus-visible,
-.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-mermaid-mode-btn:hover,
-.cm-editor .meo-rendered-block-preview > .meo-mermaid-toolbar > .meo-mermaid-mode-btn:focus-visible,
-.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-latex-math-mode-btn:hover,
-.cm-editor .meo-rendered-block-preview > .meo-latex-math-toolbar > .meo-latex-math-mode-btn:focus-visible {
-  background-color: var(--meo-code-background);
-  background-image: linear-gradient(
-    var(--meo-semantic-codeCopyHoverBackground, rgba(127, 127, 127, 0.2)),
-    var(--meo-semantic-codeCopyHoverBackground, rgba(127, 127, 127, 0.2))
-  );
 }
 
 .cm-editor .meo-rendered-block-preview > .meo-mermaid-block,

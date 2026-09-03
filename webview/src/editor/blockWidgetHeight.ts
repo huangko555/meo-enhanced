@@ -46,6 +46,8 @@ const FALLBACK_FONT_SIZE = 16;
 const FALLBACK_CONTENT_WIDTH = 900;
 const MIN_ESTIMATE = 16;
 const MAX_ESTIMATE = 12_000;
+const LONG_CODE_CONTROL_MIN_HEIGHT_EM = 2.4;
+const LONG_CODE_CONTROL_CHROME_HEIGHT = 24 + 12 + 1;
 
 function finitePositive(value: number | undefined): value is number {
   return Number.isFinite(value) && (value ?? 0) > 0;
@@ -228,7 +230,14 @@ export function estimateBlockWidgetHeight(request: BlockWidgetHeightRequest): nu
   const metrics = readLayoutMetrics('contentWidth' in request ? request.contentWidth : undefined);
   switch (request.kind) {
     case 'long-code-control':
-      return boundedHeight(metrics.fontSize * 2.4);
+      // Match the widget's 2.4em minimum and its fixed 24px action,
+      // 12px vertical padding, and 1px border. Underestimating the latter at
+      // compact font sizes makes CodeMirror correct content one frame after
+      // the gutter, which is visible as a line-number flash.
+      return boundedHeight(Math.max(
+        metrics.fontSize * LONG_CODE_CONTROL_MIN_HEIGHT_EM,
+        LONG_CODE_CONTROL_CHROME_HEIGHT
+      ));
     case 'mermaid-preview':
       return boundedHeight(request.displayMath
         ? Math.max(metrics.fontSize * 1.2, metrics.lineHeight * 0.8)

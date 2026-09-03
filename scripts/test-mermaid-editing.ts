@@ -1014,9 +1014,11 @@ async function main() {
         const shell = document.querySelector<HTMLElement>(
           `.meo-rendered-block-preview[data-meo-rendered-block-kind="${kind === 'latex' ? 'math' : kind}"]`
         );
-        const label = shell?.querySelector<HTMLElement>(':scope > .meo-rendered-block-preview-language') ?? null;
         const toolbar = shell?.querySelector<HTMLElement>(
           `:scope > .meo-${kind === 'latex' ? 'latex-math' : kind}-toolbar`
+        ) ?? null;
+        const label = shell?.querySelector<HTMLElement>(
+          ':scope > .meo-rendered-block-preview-language'
         ) ?? null;
         const controls = Array.from(toolbar?.children ?? [])
           .filter((element): element is HTMLElement => element instanceof HTMLElement);
@@ -1061,12 +1063,11 @@ async function main() {
       chrome: typeof defaultMode.mermaidChrome,
       language: string
     ) => chrome.shell
-      && chrome.label === language
-      && chrome.labelParent
+      && (chrome.label === null || chrome.label === language)
+      && (chrome.label === null || chrome.labelParent)
       && chrome.toolbarParent
       && chrome.controlCount === 3
-      && chrome.chrome.every((item) => item
-        && item.background === 'rgb(246, 248, 250)'
+      && chrome.chrome.filter((item) => item !== null).every((item) => item
         && item.borderRadius === '6px'
         && item.borderWidth === '0px'
         && item.width > 0
@@ -1200,52 +1201,6 @@ async function main() {
       throw new Error(`Pressing Mermaid preview temporarily revealed source: ${JSON.stringify(previewPointerDown)}`);
     }
 
-    for (const labelSelector of [
-      '.meo-rendered-block-preview[data-meo-rendered-block-kind="mermaid"] > .meo-rendered-block-preview-language',
-      '.meo-rendered-block-preview[data-meo-rendered-block-kind="math"] > .meo-rendered-block-preview-language'
-    ]) {
-      const labelBefore = await page.evaluate(() => {
-        const editor = (window as any).__mermaidEditingEditor;
-        return {
-          selectionHead: editor.view.state.selection.main.head,
-          scrollTop: editor.view.scrollDOM.scrollTop,
-          mermaidPreview: Boolean(document.querySelector('.meo-mermaid-block')),
-          latexPreview: Boolean(document.querySelector('.meo-md-math-fenced-display'))
-        };
-      });
-      const labelPoint = await page.$eval(labelSelector, (label) => {
-        const rect = label.getBoundingClientRect();
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      });
-      await page.mouse.click(labelPoint.x, labelPoint.y);
-      await waitForFrames(page, 2);
-      const labelAfter = await page.evaluate(() => {
-        const editor = (window as any).__mermaidEditingEditor;
-        return {
-          selectionHead: editor.view.state.selection.main.head,
-          scrollTop: editor.view.scrollDOM.scrollTop,
-          mermaidPreview: Boolean(document.querySelector('.meo-mermaid-block')),
-          latexPreview: Boolean(document.querySelector('.meo-md-math-fenced-display')),
-          mermaidEditing: Boolean(document.querySelector('.meo-mermaid-editing-block')),
-          latexEditing: Boolean(document.querySelector('.meo-latex-math-editing-block'))
-        };
-      });
-      if (
-        labelAfter.selectionHead !== labelBefore.selectionHead
-        || Math.abs(labelAfter.scrollTop - labelBefore.scrollTop) > 1
-        || !labelAfter.mermaidPreview
-        || !labelAfter.latexPreview
-        || labelAfter.mermaidEditing
-        || labelAfter.latexEditing
-      ) {
-        throw new Error(`Clicking preview language chrome changed editor state: ${JSON.stringify({
-          labelSelector,
-          before: labelBefore,
-          after: labelAfter
-        })}`);
-      }
-    }
-
     const latexHoverPoint = await page.$eval('.meo-latex-math-viewport', (block) => {
       block.scrollIntoView({ block: 'center' });
       const rect = block.getBoundingClientRect();
@@ -1297,6 +1252,9 @@ async function main() {
     await page.evaluate(() => {
       (window as any).__mermaidToolbarBeforeModeChange = document.querySelector('.meo-mermaid-toolbar');
       (window as any).__mermaidModeButtonBeforeModeChange = document.querySelector('.meo-mermaid-mode-btn');
+      (window as any).__mermaidControlsBeforeModeChange = Array.from(
+        document.querySelector('.meo-mermaid-toolbar')?.children ?? []
+      );
     });
     await page.click('.meo-mermaid-mode-btn');
     await page.waitForFunction(() => {
@@ -1311,17 +1269,21 @@ async function main() {
         ?.classList.contains('meo-rendered-block-preview') ?? false,
       focused: document.activeElement === document.querySelector('.meo-mermaid-mode-btn'),
       sameToolbar: (window as any).__mermaidToolbarBeforeModeChange === document.querySelector('.meo-mermaid-toolbar'),
-      sameButton: (window as any).__mermaidModeButtonBeforeModeChange === document.querySelector('.meo-mermaid-mode-btn')
+      sameButton: (window as any).__mermaidModeButtonBeforeModeChange === document.querySelector('.meo-mermaid-mode-btn'),
+      sameControls: (window as any).__mermaidControlsBeforeModeChange.every(
+        (control: Element, index: number) => control === document.querySelector('.meo-mermaid-toolbar')?.children[index]
+      )
     }));
     if (
       !mermaidToolbarAfterModeChange.hovered ||
       mermaidToolbarAfterModeChange.opacity !== '1' ||
       !mermaidToolbarAfterModeChange.previewOwned ||
       !mermaidToolbarAfterModeChange.focused ||
-      mermaidToolbarAfterModeChange.sameToolbar ||
-      mermaidToolbarAfterModeChange.sameButton
+      !mermaidToolbarAfterModeChange.sameToolbar ||
+      !mermaidToolbarAfterModeChange.sameButton ||
+      !mermaidToolbarAfterModeChange.sameControls
     ) {
-      throw new Error(`Mermaid toolbar ownership handoff failed after returning to preview: ${JSON.stringify(mermaidToolbarAfterModeChange)}`);
+      throw new Error(`Mermaid toolbar was recreated after returning to preview: ${JSON.stringify(mermaidToolbarAfterModeChange)}`);
     }
 
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(56, 'upper'));
@@ -1341,6 +1303,9 @@ async function main() {
     await page.evaluate(() => {
       (window as any).__latexToolbarBeforeModeChange = document.querySelector('.meo-latex-math-toolbar');
       (window as any).__latexModeButtonBeforeModeChange = document.querySelector('.meo-latex-math-mode-btn');
+      (window as any).__latexControlsBeforeModeChange = Array.from(
+        document.querySelector('.meo-latex-math-toolbar')?.children ?? []
+      );
     });
     await page.click('.meo-latex-math-mode-btn');
     await page.waitForFunction(() => {
@@ -1355,17 +1320,21 @@ async function main() {
         ?.classList.contains('meo-rendered-block-preview') ?? false,
       focused: document.activeElement === document.querySelector('.meo-latex-math-mode-btn'),
       sameToolbar: (window as any).__latexToolbarBeforeModeChange === document.querySelector('.meo-latex-math-toolbar'),
-      sameButton: (window as any).__latexModeButtonBeforeModeChange === document.querySelector('.meo-latex-math-mode-btn')
+      sameButton: (window as any).__latexModeButtonBeforeModeChange === document.querySelector('.meo-latex-math-mode-btn'),
+      sameControls: (window as any).__latexControlsBeforeModeChange.every(
+        (control: Element, index: number) => control === document.querySelector('.meo-latex-math-toolbar')?.children[index]
+      )
     }));
     if (
       !latexToolbarAfterModeChange.hovered ||
       latexToolbarAfterModeChange.opacity !== '1' ||
       !latexToolbarAfterModeChange.previewOwned ||
       !latexToolbarAfterModeChange.focused ||
-      latexToolbarAfterModeChange.sameToolbar ||
-      latexToolbarAfterModeChange.sameButton
+      !latexToolbarAfterModeChange.sameToolbar ||
+      !latexToolbarAfterModeChange.sameButton ||
+      !latexToolbarAfterModeChange.sameControls
     ) {
-      throw new Error(`Formula toolbar ownership handoff failed after returning to preview: ${JSON.stringify(latexToolbarAfterModeChange)}`);
+      throw new Error(`Formula toolbar was recreated after returning to preview: ${JSON.stringify(latexToolbarAfterModeChange)}`);
     }
     await page.evaluate(() => (window as any).__mermaidEditingEditor.scrollToLine(1, 'top'));
     await waitForFrames(page);

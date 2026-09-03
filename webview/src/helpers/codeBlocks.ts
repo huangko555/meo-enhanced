@@ -701,12 +701,12 @@ class CodeLanguageLabelWidget extends WidgetType {
   }
 }
 
-function addTopLineWidget(builder: any[], lineEnd: number, widget: WidgetType): void {
+function addTopLineWidget(builder: any[], position: number, widget: WidgetType, side = 1): void {
   builder.push(
     Decoration.widget({
       widget,
-      side: 1
-    }).range(lineEnd)
+      side
+    }).range(position)
   );
 }
 
@@ -729,11 +729,16 @@ export function addTopLineCopyButton(
   );
 }
 
-export function addTopLinePillLabel(builder: any[], lineEnd: number, labelText: string | null): void {
+export function addTopLinePillLabel(
+  builder: any[],
+  position: number,
+  labelText: string | null,
+  side = 1
+): void {
   if (!labelText) {
     return;
   }
-  addTopLineWidget(builder, lineEnd, new CodeLanguageLabelWidget(labelText));
+  addTopLineWidget(builder, position, new CodeLanguageLabelWidget(labelText), side);
 }
 
 const quotedFenceOpeningLineRegex = /^[ \t]{0,3}(?:>[ \t]?)*[ \t]{0,3}(?:`{3,}|~{3,})/;
@@ -922,10 +927,10 @@ function addMermaidDiagramBlock(
     contentEndLine.to
   );
   const decision = mode.decision;
+  if (decision.effectiveMode !== 'preview' && !block.activeLines.has(startLine.number)) {
+    addTopLinePillLabel(builder, startLine.from, 'mermaid', -1);
+  }
   if (decision.effectiveMode !== 'preview') {
-    if (!block.activeLines.has(startLine.number)) {
-      addTopLinePillLabel(builder, startLine.to, 'mermaid');
-    }
     addMermaidToolbar(
       builder,
       startLine.to,
@@ -959,12 +964,6 @@ function addMermaidDiagramBlock(
       endLine: endLine.number,
       indentColumns
     }, decision.effectiveMode, mode.searchReveal);
-  const replacementFrom = decision.effectiveMode === 'preview'
-    ? startLine.from
-    : contentStartLine.from;
-  const replacementTo = decision.effectiveMode === 'preview'
-    ? endLine.to
-    : contentEndLine.to;
   builder.push(
     Decoration.replace({
       widget,
@@ -973,7 +972,10 @@ function addMermaidDiagramBlock(
       // boundary insertions (especially appending at the last source line)
       // owned by the current widget until its updateDOM receives new text.
       inclusive: decision.effectiveMode !== 'preview'
-    }).range(replacementFrom, replacementTo)
+    }).range(
+      decision.effectiveMode === 'preview' ? startLine.from : contentStartLine.from,
+      decision.effectiveMode === 'preview' ? endLine.to : contentEndLine.to
+    )
   );
   if (decision.effectiveMode === 'preview') {
     builder.push(renderedBlockPreviewAnchorLineDeco.range(startLine.from));
