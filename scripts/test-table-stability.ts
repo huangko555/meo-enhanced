@@ -1730,6 +1730,13 @@ async function main() {
       const rect = hoverMarker?.getBoundingClientRect();
       const gutterRect = document.querySelector<HTMLElement>('.cm-gutter.meo-git-gutter')?.getBoundingClientRect();
       const deletionAtEnd = hoverMarker?.classList.contains('is-deleted-at-end') ?? false;
+      const deletionTriangle = hoverMarker ? getComputedStyle(hoverMarker, '::after') : null;
+      const deletionTriangleLeft = rect && deletionTriangle
+        ? rect.left + (Number.parseFloat(deletionTriangle.left) || 0)
+        : null;
+      const deletionTriangleWidth = deletionTriangle
+        ? Number.parseFloat(deletionTriangle.borderLeftWidth) || 0
+        : 0;
       return {
         source: editor.view.state.doc.toString(),
         markerGutterLeftDelta: rect && gutterRect ? rect.left - gutterRect.left : null,
@@ -1741,8 +1748,8 @@ async function main() {
           liveTo: marker.dataset.meoLiveBlockEndLine
         })),
         aggregateMarkerClasses: aggregateMarkers.map((marker) => marker.className),
-        hoverPoint: rect ? {
-          x: rect.left + Math.min(2, rect.width / 2),
+        hoverPoint: rect && deletionTriangleLeft !== null ? {
+          x: deletionTriangleLeft + deletionTriangleWidth / 2,
           y: deletionAtEnd ? rect.bottom - 1 : rect.top + 1
         } : null
       };
@@ -1869,8 +1876,13 @@ async function main() {
       const pointFor = (marker: HTMLElement | undefined, kind: 'deleted' | 'modified') => {
         if (!marker) return null;
         const rect = marker.getBoundingClientRect();
+        const triangle = getComputedStyle(marker, '::after');
+        const triangleLeft = rect.left + (Number.parseFloat(triangle.left) || 0);
+        const triangleWidth = Number.parseFloat(triangle.borderLeftWidth) || 0;
         return {
-          x: rect.left + Math.min(2, rect.width / 2),
+          x: kind === 'deleted'
+            ? triangleLeft + triangleWidth / 2
+            : rect.left + Math.min(2, rect.width / 2),
           y: kind === 'deleted' ? rect.top + 1 : rect.top + rect.height / 2
         };
       };
