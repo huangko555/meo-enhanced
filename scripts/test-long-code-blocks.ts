@@ -960,6 +960,19 @@ async function main() {
     if (!floatingInsideBlock) {
       throw new Error('Floating collapse button was not shown while viewport bottom was inside an expanded block');
     }
+    const floatingPointerDownBehavior = await page.$eval('.meo-long-code-floating-action', (button) => {
+      const primary = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+      const secondary = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 2 });
+      button.dispatchEvent(primary);
+      button.dispatchEvent(secondary);
+      return {
+        primaryPrevented: primary.defaultPrevented,
+        secondaryPrevented: secondary.defaultPrevented
+      };
+    });
+    if (!floatingPointerDownBehavior.primaryPrevented || floatingPointerDownBehavior.secondaryPrevented) {
+      throw new Error(`Floating collapse pointer focus guard was incorrect: ${JSON.stringify(floatingPointerDownBehavior)}`);
+    }
     const floatingHorizontalCenters = await page.evaluate(async () => {
       const editor = (window as any).__longCodeBlocksEditor;
       const readCenter = () => {

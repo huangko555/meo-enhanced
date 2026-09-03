@@ -608,6 +608,9 @@ class LongCodeFloatingButtonPlugin {
     this.button.textContent = strings.showLess;
     this.button.setAttribute('aria-label', strings.showLessCode);
     this.button.hidden = true;
+    this.button.addEventListener('pointerdown', (event) => {
+      if (event.button === 0) event.preventDefault();
+    });
     this.button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
