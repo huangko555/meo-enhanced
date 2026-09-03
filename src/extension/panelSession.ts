@@ -271,13 +271,20 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let requestDiffBaselineRefresh = (_options: GitBaselineRefreshOptions): void => undefined;
   const diffBaselineSelection = createDiffBaselineSelection<GitBaselinePayload>({
     initialMode: getDiffBaselineMode(),
-    readEnabled: () => getGitChangesGutterEnabled(context),
+    readEnabled: () => true,
     canPublish: () => initDelivered,
     saved: {
       getPinned: () => savedRevisionTracker.getPinnedBaseline(),
+      getPinnedUpdatedAt: () => savedRevisionTracker.getPinnedBaselineUpdatedAt(),
       pinLatest: async () => {
         const existing = savedRevisionTracker.getPinnedBaseline();
         if (existing) return existing;
+        await refreshSavedRevisionNow();
+        return savedRevisionLifecycle.getUnavailableReason()
+          ? null
+          : savedRevisionTracker.pinLatestSavedBaseline();
+      },
+      replacePinned: async () => {
         await refreshSavedRevisionNow();
         return savedRevisionLifecycle.getUnavailableReason()
           ? null
@@ -364,6 +371,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       diffBaselineMode: diffBaselineState.mode,
       fixedBaselinePinned: diffBaselineState.fixedPinned,
       fixedBaselineActive: diffBaselineState.fixedActive,
+      fixedBaselineUpdatedAt: diffBaselineState.fixedUpdatedAt,
       contentMaxWidthEnabled: getContentMaxWidthEnabled(context),
       findOptions: getFindOptions(),
       outlinePosition: getOutlinePosition(),
@@ -534,6 +542,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       case 'setFixedBaseline':
         await enqueue(async () => {
           await diffBaselineSelection.setFixed(raw.enabled);
+        });
+        return;
+      case 'updateFixedBaseline':
+        await enqueue(async () => {
+          await diffBaselineSelection.updateFixed();
         });
         return;
       case 'releaseFixedBaseline':

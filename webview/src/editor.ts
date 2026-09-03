@@ -27,9 +27,12 @@ import {
   gitDiffGutterLiveRenderExtensions,
   gitDiffGutterRenderExtensions,
   gitDiffLineFlagsField,
+  getGitDiffSummary,
   setGitBaselineEffect
 } from './helpers/gitDiffGutter';
+import type { ChangesReviewDiffSummary } from './application/changesReview';
 import { gitDiffLineHighlightsField } from './helpers/gitDiffLineHighlights';
+import { gitDiffDetailsExtensions } from './helpers/gitDiffDetails';
 import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
 import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
 import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
@@ -178,6 +181,7 @@ type CreateEditorOptions = {
   onApplyChanges: (text: string) => void;
   onOpenLink?: (href: string) => void;
   onSelectionChange?: (state: SelectionMenuState & { from?: number; to?: number }) => void;
+  onGitDiffSummaryChange?: (summary: ChangesReviewDiffSummary) => void;
   initialMode?: EditableEditorMode;
   initialGitGutter?: boolean;
   initialDiagnostics?: readonly EditorDiagnostic[];
@@ -320,6 +324,7 @@ export function createEditor({
   onApplyChanges,
   onOpenLink,
   onSelectionChange,
+  onGitDiffSummaryChange,
   initialMode = 'source',
   initialGitGutter = true,
   initialDiagnostics = [],
@@ -361,6 +366,7 @@ export function createEditor({
   let mermaidDocumentPreloader: MermaidDocumentPreloader | null = null;
   let currentMode: EditableEditorMode = startMode;
   let lastSearchStateSignature = '';
+  let lastGitDiffSummarySignature = '';
   let tableInteractionActive = false;
   let tableInteractionOwner: HTMLElement | null = null;
   let tableInteractionClassFrame = 0;
@@ -411,6 +417,14 @@ export function createEditor({
       return;
     }
     onApplyChanges(view.state.doc.toString());
+  };
+  const emitGitDiffSummary = (state: EditorState) => {
+    if (typeof onGitDiffSummaryChange !== 'function') return;
+    const summary = getGitDiffSummary(state);
+    const signature = `${summary.status}:${summary.status === 'unavailable' ? summary.reason : ''}:${summary.added}:${summary.deleted}`;
+    if (signature === lastGitDiffSummarySignature) return;
+    lastGitDiffSummarySignature = signature;
+    onGitDiffSummaryChange(summary);
   };
   const scheduleImeCompositionFlush = () => {
     if (imeCompositionFlushTimer !== null) {
@@ -2152,6 +2166,9 @@ export function createEditor({
         const presentationMayHaveChanged = update.docChanged
           || update.viewportChanged
           || renderedPresentationChanged;
+        if (update.docChanged || gitBaselineChanged || liveDerivedRefresh) {
+          emitGitDiffSummary(update.state);
+        }
         if (!liveDerivedRefresh && presentationMayHaveChanged) {
           requestLiveInputDerivedWork(update.view, toolbarDerivedConsumer, () => {
             scheduleBlockActionToolbarReconcile();
@@ -2221,6 +2238,7 @@ export function createEditor({
     state,
     parent
   });
+  emitGitDiffSummary(view.state);
   if (startMode === 'live') tableColumnWidthAdapter.adapter.acquire();
   // CodeMirror deliberately suppresses editor handlers for some block widgets.
   // Native listeners keep hover behavior consistent across code, Mermaid, and math blocks.
@@ -3714,6 +3732,7 @@ function sourceMode(): Extension[] {
     sourceTableHeaderLineField,
     sourceFrontmatterField,
     gitDiffLineHighlightsField,
+    ...gitDiffDetailsExtensions(),
     ...mergeConflictSourceExtensions()
   ];
 }

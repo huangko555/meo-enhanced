@@ -67,15 +67,43 @@ assert.deepEqual(
   ['Markdown 模式', '实时', '源码', '预览']
 );
 assert.deepEqual(
+  [chinese.recentSave, chinese.beforeLastSaveVersionOption],
+  ['Agent 编辑前版本', 'Agent 编辑前版本']
+);
+assert.deepEqual(
+  [english.recentSave, english.beforeLastSaveVersionOption],
+  ['Before Agent Edits', 'Before Agent Edits']
+);
+assert.deepEqual(
+  [english.currentDiskVersionOption, english.showBeforeChangeContent],
+  ['Saved File', 'Show Original · Source Only']
+);
+assert.deepEqual(
+  [english.currentEdits, english.gitHeadStatus('not-repo'), english.gitHeadStatus('no-commits'), english.gitHeadStatus('error'), english.updateSnapshot],
+  ['Saved File', 'Not a Git Repo', 'No Commits', 'Temporary Error', 'Update']
+);
+assert.deepEqual(
+  [chinese.clickToCreateSnapshot, english.clickToCreateSnapshot],
+  ['点击创建', 'Click to Create']
+);
+assert.deepEqual(
+  [chinese.gitHeadStatus('not-repo'), chinese.gitHeadStatus('ignored'), chinese.gitHeadStatus('untracked'), chinese.gitHeadStatus('error'), chinese.updateSnapshot],
+  ['非 Git 仓库', 'Git 已忽略', '未跟踪文件', '暂不可用', '更新']
+);
+assert.equal(chinese.gitHeadStatus('not-repo'), '非 Git 仓库');
+assert.equal(english.gitHeadStatus('git-unavailable'), 'Git Unavailable');
+assert.deepEqual(
+  [chinese.comparisonUnavailable, english.comparisonUnavailable],
+  ['无法比较', 'Unable to Compare']
+);
+assert.deepEqual(
+  [chinese.comparedWith('Git HEAD'), english.comparedWith('Git HEAD')],
+  ['与Git HEAD对比', 'vs. Git HEAD']
+);
+assert.deepEqual(
   [chinese.inlineMarkdownFormatting, chinese.bold, chinese.inlineCode, chinese.underline],
   ['行内 Markdown 格式', '加粗', '行内代码', '下划线']
 );
-assert.equal(chinese.hideChanges(chinese.currentEdits), '隐藏更改（最新磁盘版本）');
-assert.deepEqual(
-  [english.diffBaselineLabel(english.currentEdits), chinese.diffBaselineLabel(chinese.currentEdits)],
-  ['diff: Latest Disk Version', 'diff: 与最新磁盘版本比较']
-);
-assert.equal(chinese.diffBaselineLabel(chinese.gitHead), 'diff: 与 Git HEAD 版本比较');
 assert.equal(chinese.pasteImageFailure('格式错误'), '无法粘贴图片：格式错误');
 assert.equal(Object.isFrozen(english), true);
 assert.equal(Object.isFrozen(chinese), true);

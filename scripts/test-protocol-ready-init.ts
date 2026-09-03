@@ -47,6 +47,7 @@ const completeInit = {
   diffBaselineMode: 'git-head' as const,
   fixedBaselinePinned: false,
   fixedBaselineActive: false,
+  fixedBaselineUpdatedAt: null,
   contentMaxWidthEnabled: true,
   findOptions: { wholeWord: false, caseSensitive: false },
   outlinePosition: 'right' as const,
@@ -642,6 +643,7 @@ for (const command of [
   { type: 'setGitChangesGutter', enabled: false },
   { type: 'setDiffBaselineMode', mode: 'git-head' },
   { type: 'setFixedBaseline', enabled: true },
+  { type: 'updateFixedBaseline' },
   { type: 'releaseFixedBaseline' },
   { type: 'setOutlineVisible', visible: false },
   { type: 'setOutlinePosition', position: 'right' },
@@ -683,7 +685,7 @@ for (const event of [
   { type: 'gitChangesGutterChanged', enabled: false },
   { type: 'gitDiffLineHighlightsChanged', enabled: true },
   { type: 'diffBaselineModeChanged', mode: 'recent-save' },
-  { type: 'fixedBaselineChanged', pinned: true, active: false },
+  { type: 'fixedBaselineChanged', pinned: true, active: false, updatedAt: 2_000 },
   { type: 'contentMaxWidthChanged', enabled: true },
   { type: 'findOptionsChanged', findOptions: { wholeWord: false, caseSensitive: true } }
 ]) {
@@ -693,6 +695,9 @@ assert.equal(decodeHostEditorEvent({ type: 'revealSelection', anchor: -1, head: 
 assert.equal(decodeHostEditorEvent({ type: 'lineNumbersChanged', enabled: true }), null);
 assert.equal(decodeHostEditorEvent({ type: 'longCodeBlockFoldingChanged', enabled: true }), null);
 assert.equal(decodeHostEditorEvent({ type: 'fixedBaselineChanged', pinned: true, active: 'yes' }), null);
+assert.equal(decodeHostEditorEvent({
+  type: 'fixedBaselineChanged', pinned: true, active: false, updatedAt: 'recently'
+}), null);
 assert.equal(decodeHostEditorEvent({ type: 'previewAppearanceChanged', appearance: 'light' }), null);
 assert.equal(decodeHostEditorEvent({ type: 'previewSourceColoringChanged', enabled: false }), null);
 assert.equal(decodeHostToWebviewMessage({ type: 'previewAppearanceChanged', appearance: 'light' }), null);

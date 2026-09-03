@@ -23,6 +23,7 @@ export class SavedRevisionTracker {
   private latestDisk: SavedTextSnapshot | null = null;
   private recentSaveBaseline: SavedTextSnapshot | null = null;
   private pinnedBaseline: SavedTextSnapshot | null = null;
+  private pinnedBaselineUpdatedAt: number | null = null;
   private lastDiskRevisionAt: number | null = null;
   private generation = 0;
 
@@ -95,11 +96,12 @@ export class SavedRevisionTracker {
     return this.recentSaveBaseline;
   }
 
-  pinLatestSavedBaseline(): SavedTextSnapshot | null {
+  pinLatestSavedBaseline(updatedAt = Date.now()): SavedTextSnapshot | null {
     if (!this.latestDisk) {
       return null;
     }
     this.pinnedBaseline = this.latestDisk;
+    this.pinnedBaselineUpdatedAt = updatedAt;
     return this.pinnedBaseline;
   }
 
@@ -108,6 +110,7 @@ export class SavedRevisionTracker {
       return false;
     }
     this.pinnedBaseline = null;
+    this.pinnedBaselineUpdatedAt = null;
     return true;
   }
 
@@ -127,6 +130,10 @@ export class SavedRevisionTracker {
 
   getPinnedBaseline(): SavedTextSnapshot | null {
     return this.pinnedBaseline;
+  }
+
+  getPinnedBaselineUpdatedAt(): number | null {
+    return this.pinnedBaselineUpdatedAt;
   }
 
   getDiffBaseline(mode: SavedRevisionDiffMode): SavedTextSnapshot | null {

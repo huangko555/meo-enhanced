@@ -847,6 +847,255 @@ body {
   gap: 2px;
 }
 
+.changes-review-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.changes-review-trigger:hover,
+.changes-review-trigger:focus-visible,
+.changes-review-trigger.is-open {
+  background: var(--vscode-toolbar-hoverBackground);
+  outline: none;
+}
+
+.changes-review-trigger-icon,
+.changes-review-chevron,
+.changes-review-option-icon,
+.changes-review-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.changes-review-trigger-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.changes-review-trigger-icon svg,
+.changes-review-chevron svg {
+  display: block;
+}
+
+.changes-review-chevron {
+  width: 12px;
+  height: 12px;
+  opacity: 0.72;
+}
+
+.changes-review-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 16px;
+  line-height: 16px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-review-count.is-added {
+  color: var(--git-added);
+}
+
+.changes-review-count.is-deleted {
+  color: var(--git-deleted);
+}
+
+.changes-review-empty {
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+}
+
+.changes-review-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 310;
+  box-sizing: border-box;
+  width: min(268px, calc(100vw - 24px));
+  padding: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-sideBar-background);
+  box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
+}
+
+.changes-review-panel[hidden] {
+  display: none;
+}
+
+.changes-review-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--meo-divider-color, var(--vscode-panel-border));
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.changes-review-header-separator {
+  flex: 0 0 auto;
+  opacity: 0.65;
+}
+
+.changes-review-header-baseline {
+  min-width: 0;
+  overflow: visible;
+}
+
+.changes-review-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.changes-review-section + .changes-review-section {
+  border-top: 1px solid var(--meo-divider-color, var(--vscode-panel-border));
+}
+
+.changes-review-section-label {
+  padding: 3px 8px 2px;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.changes-review-option,
+.changes-review-snapshot-select {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-review-option:hover:not(:disabled),
+.changes-review-option:focus-visible,
+.changes-review-snapshot-select:hover:not(:disabled),
+.changes-review-snapshot-select:focus-visible,
+.changes-review-option.is-selected,
+.changes-review-snapshot-select.is-selected {
+  background: var(--vscode-toolbar-hoverBackground);
+  outline: none;
+}
+
+.changes-review-option-label {
+  min-width: 0;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.changes-review-option:disabled {
+  color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+  cursor: default;
+}
+
+.changes-review-option:disabled .changes-review-option-icon,
+.changes-review-option:disabled .changes-review-check {
+  color: currentColor;
+}
+
+.changes-review-toggle {
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+}
+
+.changes-review-option-icon {
+  color: var(--vscode-icon-foreground, var(--vscode-editor-foreground));
+}
+
+.changes-review-check {
+  color: var(--vscode-editor-foreground);
+}
+
+.changes-review-check.is-warning {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.changes-review-snapshot-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+}
+
+.changes-review-snapshot-row.is-empty {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.changes-review-snapshot-select {
+  min-width: 0;
+  gap: 2px;
+  padding-right: 6px;
+}
+
+.changes-review-snapshot-select.is-empty {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+
+.changes-review-snapshot-select:disabled {
+  cursor: default;
+}
+
+.changes-review-snapshot-create-hint {
+  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.changes-review-snapshot-action {
+  height: 28px;
+  min-height: 28px;
+  margin-right: 0;
+  min-width: 40px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.changes-review-snapshot-action:hover,
+.changes-review-snapshot-action:focus-visible,
+.changes-review-snapshot-action.is-selected {
+  background: var(--vscode-toolbar-hoverBackground);
+  outline: none;
+}
+
 .more-tools-panel {
   position: absolute;
   top: calc(100% + 8px);
@@ -1183,30 +1432,6 @@ body {
 .format-button.toggle-button:not(.is-active) {
   color: var(--vscode-descriptionForeground, var(--vscode-icon-foreground));
   opacity: 0.5;
-}
-
-.format-button[data-action='fixedBaseline'].is-active {
-  color: var(--meo-fixed-baseline-active-foreground, #fff);
-  background-color: var(
-    --meo-fixed-baseline-active-background,
-    color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 40%, transparent)
-  );
-}
-
-.format-button[data-action='fixedBaseline'] svg {
-  width: 19px;
-  height: 19px;
-}
-
-.format-button[data-action='fixedBaseline'].is-standby {
-  position: relative;
-  color: var(--vscode-editor-foreground, #fff);
-  background-color: transparent;
-  opacity: 1;
-}
-
-.fixed-baseline-release-option .more-tools-option-icon {
-  color: var(--vscode-testing-iconFailed, #f14c4c);
 }
 
 .heading-dropdown-option {
@@ -3932,6 +4157,191 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .cm-activeLine.meo-diff-changed-line {
   background-color: color-mix(in srgb, var(--git-changed) 20%, transparent) !important;
+}
+
+.cm-editor.meo-git-diff-details-visible .meo-diff-added-line,
+.cm-editor.meo-git-diff-details-visible .meo-diff-changed-line,
+.cm-editor.meo-git-diff-details-visible .meo-git-diff-current-line {
+  background-color: color-mix(in srgb, var(--git-added) 12%, transparent) !important;
+  box-shadow: -5px 0 color-mix(in srgb, var(--git-added) 12%, transparent);
+}
+
+.cm-editor .cm-gutter.meo-git-diff-sign-gutter {
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.cm-editor.meo-git-diff-details-visible .cm-gutter.meo-git-diff-sign-gutter {
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  overflow: visible;
+}
+
+.cm-editor.meo-git-diff-details-visible .meo-git-gutter-marker {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.cm-editor.meo-git-diff-details-visible.meo-git-gutter-hidden .cm-gutter.meo-git-gutter {
+  visibility: visible;
+  pointer-events: none;
+}
+
+.cm-editor .cm-gutter.meo-git-diff-sign-gutter .cm-gutterElement,
+.cm-editor .meo-git-diff-sign-gutter-spacer {
+  box-sizing: border-box;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.cm-editor.meo-git-diff-details-visible .cm-gutterElement.meo-git-diff-current-gutter-row {
+  background-color: color-mix(in srgb, var(--git-added) 12%, transparent) !important;
+}
+
+.cm-editor.meo-git-diff-details-visible .cm-gutterElement.meo-git-diff-original-gutter-row {
+  background-color: color-mix(in srgb, var(--git-deleted) 12%, transparent) !important;
+}
+
+.cm-editor.meo-git-diff-details-visible .cm-lineNumbers .meo-git-diff-current-gutter-row {
+  background: linear-gradient(
+    to right,
+    transparent 0 7px,
+    var(--git-added) 7px 10px,
+    color-mix(in srgb, var(--git-added) 12%, transparent) 10px 100%
+  ) !important;
+}
+
+.cm-editor.meo-git-diff-details-visible .cm-lineNumbers .meo-git-diff-original-gutter-row {
+  background: linear-gradient(
+    to right,
+    transparent 0 7px,
+    var(--git-deleted) 7px 10px,
+    color-mix(in srgb, var(--git-deleted) 12%, transparent) 10px 100%
+  ) !important;
+}
+
+.cm-editor .meo-git-diff-sign-gutter-cell {
+  position: relative;
+}
+
+.cm-editor .meo-git-diff-sign {
+  position: absolute;
+  top: 0;
+  right: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 13px;
+  min-width: 13px;
+  max-width: 13px;
+  height: 100%;
+  color: var(--git-added);
+  pointer-events: none;
+  user-select: none;
+}
+
+.cm-editor .meo-git-diff-sign.is-original {
+  color: var(--git-deleted);
+}
+
+.cm-editor .meo-git-diff-sign svg {
+  display: block;
+  flex: none;
+  stroke: currentColor;
+}
+
+.cm-editor:not(:has(.cm-lineNumbers)) .cm-gutter.meo-git-diff-sign-gutter,
+.cm-editor:not(:has(.cm-lineNumbers)) .cm-gutter.meo-git-diff-sign-gutter .cm-gutterElement,
+.cm-editor:not(:has(.cm-lineNumbers)) .meo-git-diff-sign-gutter-spacer {
+  box-sizing: border-box;
+  width: 18px;
+  min-width: 18px;
+  max-width: 18px;
+  overflow: visible;
+}
+
+.cm-editor:not(:has(.cm-lineNumbers)) .meo-git-diff-sign-gutter-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.cm-editor:not(:has(.cm-lineNumbers)) .meo-git-diff-sign {
+  position: static;
+  right: auto;
+  flex: none;
+}
+
+.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+  .meo-git-diff-sign-gutter-cell.is-current {
+  background: linear-gradient(
+    to right,
+    transparent 0 1px,
+    var(--git-added) 1px 4px,
+    color-mix(in srgb, var(--git-added) 12%, transparent) 4px 100%
+  ) !important;
+  box-shadow: 2px 0 color-mix(in srgb, var(--git-added) 12%, transparent);
+}
+
+.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+  .meo-git-diff-sign-gutter-cell.is-original {
+  background: linear-gradient(
+    to right,
+    transparent 0 1px,
+    var(--git-deleted) 1px 4px,
+    color-mix(in srgb, var(--git-deleted) 12%, transparent) 4px 100%
+  ) !important;
+  box-shadow: 2px 0 color-mix(in srgb, var(--git-deleted) 12%, transparent);
+}
+
+.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+  .meo-git-diff-current-line {
+  box-shadow: -7px 0 color-mix(in srgb, var(--git-added) 12%, transparent);
+}
+
+.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+  .meo-git-diff-original-block {
+  box-shadow: -7px 0 color-mix(in srgb, var(--git-deleted) 12%, transparent);
+}
+
+.cm-editor .meo-git-diff-original-block {
+  box-sizing: border-box;
+  width: 100%;
+  background: color-mix(in srgb, var(--git-deleted) 12%, transparent);
+  box-shadow: -5px 0 color-mix(in srgb, var(--git-deleted) 12%, transparent);
+  color: var(--vscode-editor-foreground);
+  font: inherit;
+}
+
+.cm-editor .meo-git-diff-original-line {
+  position: relative;
+  display: block;
+  min-height: var(--meo-source-line-height, 1.5em);
+}
+
+.cm-editor .cm-lineNumbers .meo-git-diff-original-line-number {
+  display: block;
+  width: 100%;
+  color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground));
+  text-align: right;
+  user-select: none;
+}
+
+.cm-editor .meo-git-diff-original-content {
+  min-width: 0;
+  padding-right: 8px;
+  color: var(--vscode-editor-foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .cm-editor.meo-git-hover-band .cm-gutters {

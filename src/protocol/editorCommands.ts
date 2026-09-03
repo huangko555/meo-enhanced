@@ -16,6 +16,7 @@ export type EditorCommand =
   | { readonly type: 'setGitChangesGutter'; readonly visible?: boolean; readonly enabled?: boolean }
   | { readonly type: 'setDiffBaselineMode'; readonly mode: DiffBaselineMode }
   | { readonly type: 'setFixedBaseline'; readonly enabled: boolean }
+  | { readonly type: 'updateFixedBaseline' }
   | { readonly type: 'releaseFixedBaseline' }
   | { readonly type: 'setOutlineVisible'; readonly visible: boolean }
   | { readonly type: 'setOutlinePosition'; readonly position: OutlinePosition }
@@ -70,6 +71,7 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
     case 'setDiffBaselineMode':
       return value.mode === 'current-edit' || value.mode === 'recent-save' || value.mode === 'git-head'
         ? value as EditorCommand : null;
+    case 'updateFixedBaseline':
     case 'releaseFixedBaseline':
       return { type: value.type } as EditorCommand;
     case 'setOutlineVisible':

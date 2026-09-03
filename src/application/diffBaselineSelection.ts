@@ -36,6 +36,7 @@ export type DiffBaselineSelectionState = {
   readonly mode: DiffBaselineMode;
   readonly fixedPinned: boolean;
   readonly fixedActive: boolean;
+  readonly fixedUpdatedAt: number | null;
 };
 
 export type DiffBaselineSelectionModule<TGitProjection> = {
@@ -44,6 +45,7 @@ export type DiffBaselineSelectionModule<TGitProjection> = {
   savedRevisionChanged(): void;
   setMode(mode: DiffBaselineMode): Promise<void>;
   setFixed(enabled: boolean): Promise<void>;
+  updateFixed(): Promise<void>;
   releaseFixed(): Promise<void>;
   publish(options?: DiffBaselinePublishOptions): Promise<boolean>;
   dispose(): void;
@@ -52,7 +54,7 @@ export type DiffBaselineSelectionModule<TGitProjection> = {
 export type DiffBaselineOutput<TGitProjection> = {
   hash(selection: DiffBaselineSelection<TGitProjection>): string;
   publish(selection: DiffBaselineSelection<TGitProjection>, generation: number): Promise<boolean>;
-  publishFixedState(state: { readonly pinned: boolean; readonly active: boolean }): Promise<void>;
+  publishFixedState(state: { readonly pinned: boolean; readonly active: boolean; readonly updatedAt: number | null }): Promise<void>;
 };
 
 export type DiffBaselineSelectionDependencies<TGitProjection> = {
@@ -61,7 +63,9 @@ export type DiffBaselineSelectionDependencies<TGitProjection> = {
   readonly canPublish: () => boolean;
   readonly saved: {
     getPinned(): { readonly text: string } | null;
+    getPinnedUpdatedAt(): number | null;
     pinLatest(): Promise<{ readonly text: string } | null>;
+    replacePinned(): Promise<{ readonly text: string } | null>;
     releasePinned(): void;
     resolve(mode: 'current-edit' | 'recent-save'): Promise<
       | { readonly ok: true; readonly text: string }
@@ -92,7 +96,17 @@ export function createDiffBaselineSelection<TGitProjection>(
 
   const getState = (): DiffBaselineSelectionState => {
     const fixedPinned = dependencies.saved.getPinned() !== null;
-    return { mode, fixedPinned, fixedActive: fixedSelected && fixedPinned };
+    return {
+      mode,
+      fixedPinned,
+      fixedActive: fixedSelected && fixedPinned,
+      fixedUpdatedAt: fixedPinned ? dependencies.saved.getPinnedUpdatedAt() : null
+    };
+  };
+
+  const fixedState = () => {
+    const state = getState();
+    return { pinned: state.fixedPinned, active: state.fixedActive, updatedAt: state.fixedUpdatedAt };
   };
 
   const requestRefresh = (options: DiffBaselineRefreshRequest = {}): void => {
@@ -116,10 +130,7 @@ export function createDiffBaselineSelection<TGitProjection>(
       mode = nextMode;
       fixedSelected = false;
       invalidateSelection();
-      await dependencies.output.publishFixedState({
-        pinned: dependencies.saved.getPinned() !== null,
-        active: false
-      });
+      await dependencies.output.publishFixedState(fixedState());
       if (disposed || transition !== transitionGeneration) return;
       await dependencies.persistMode(nextMode);
       if (disposed || transition !== transitionGeneration) return;
@@ -135,25 +146,37 @@ export function createDiffBaselineSelection<TGitProjection>(
         if (!pinned) {
           fixedSelected = false;
           invalidateSelection();
-          await dependencies.output.publishFixedState({ pinned: false, active: false });
+          await dependencies.output.publishFixedState(fixedState());
           if (!disposed && transition === transitionGeneration) dependencies.warnNoSavedRevision();
           return;
         }
         fixedSelected = true;
         invalidateSelection();
-        await dependencies.output.publishFixedState({ pinned: true, active: true });
+        await dependencies.output.publishFixedState(fixedState());
         if (!disposed && transition === transitionGeneration) requestRefresh({ forcePost: true });
         return;
       }
 
       fixedSelected = false;
       invalidateSelection();
-      await dependencies.output.publishFixedState({
-        pinned: dependencies.saved.getPinned() !== null,
-        active: false
-      });
+      await dependencies.output.publishFixedState(fixedState());
       if (!disposed && transition === transitionGeneration) {
         requestRefresh({ forcePost: true, forceReload: mode === 'git-head' });
+      }
+    },
+    async updateFixed() {
+      if (disposed) return;
+      const transition = ++transitionGeneration;
+      const pinned = await dependencies.saved.replacePinned();
+      if (disposed || transition !== transitionGeneration) return;
+      if (!pinned) {
+        dependencies.warnNoSavedRevision();
+        return;
+      }
+      invalidateSelection();
+      await dependencies.output.publishFixedState(fixedState());
+      if (!disposed && transition === transitionGeneration && fixedSelected) {
+        requestRefresh({ forcePost: true });
       }
     },
     async releaseFixed() {
@@ -162,7 +185,7 @@ export function createDiffBaselineSelection<TGitProjection>(
       dependencies.saved.releasePinned();
       fixedSelected = false;
       invalidateSelection();
-      await dependencies.output.publishFixedState({ pinned: false, active: false });
+      await dependencies.output.publishFixedState(fixedState());
       if (!disposed && transition === transitionGeneration) {
         requestRefresh({ forcePost: true, forceReload: mode === 'git-head' });
       }

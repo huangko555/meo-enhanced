@@ -52,6 +52,7 @@ export type InitMessage = {
   readonly diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head';
   readonly fixedBaselinePinned: boolean;
   readonly fixedBaselineActive: boolean;
+  readonly fixedBaselineUpdatedAt?: number | null;
   readonly contentMaxWidthEnabled: boolean;
   readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean };
   readonly outlinePosition: 'left' | 'right';
@@ -129,6 +130,9 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
       && value.diffBaselineMode !== 'git-head')
     || typeof value.fixedBaselinePinned !== 'boolean'
     || typeof value.fixedBaselineActive !== 'boolean'
+    || (value.fixedBaselineUpdatedAt !== undefined
+      && value.fixedBaselineUpdatedAt !== null
+      && (typeof value.fixedBaselineUpdatedAt !== 'number' || !Number.isFinite(value.fixedBaselineUpdatedAt)))
     || typeof value.contentMaxWidthEnabled !== 'boolean'
     || !isRecord(value.findOptions)
     || typeof value.findOptions.wholeWord !== 'boolean'

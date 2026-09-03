@@ -370,7 +370,7 @@ async function main() {
     if (
       JSON.stringify(toolbarLayout.left.slice(0, 5)) !== JSON.stringify(['outline-left', 'line-jump', 'save', 'discard', 'separator']) ||
       JSON.stringify(toolbarLayout.right) !== JSON.stringify(['changes', 'separator', 'find', 'outline-right', 'more']) ||
-      JSON.stringify(toolbarLayout.changes) !== JSON.stringify(['fixedBaseline', 'gitChangesGutter'])
+      JSON.stringify(toolbarLayout.changes) !== JSON.stringify(['changes-review-trigger', 'changes-review-panel'])
     ) {
       throw new Error(`Unexpected toolbar layout: ${JSON.stringify(toolbarLayout)}`);
     }
@@ -378,22 +378,306 @@ async function main() {
       data: { type: 'gitChangesGutterChanged', enabled: false }
     })));
     await waitForFrames(page, 2);
-    const inactiveToggleStyle = await page.$eval('[data-action="gitChangesGutter"]', (button) => {
-      const style = getComputedStyle(button);
-      return { color: style.color, opacity: style.opacity, background: style.backgroundColor };
+    await page.click('.changes-review-trigger');
+    const inactiveMarkerSetting = await page.evaluate(() => {
+      const button = document.querySelector<HTMLElement>('[data-toggle="markers"]')!;
+      const sourceOnlyButton = document.querySelector<HTMLButtonElement>('[data-toggle="before-content"]')!;
+      const panel = document.querySelector<HTMLElement>('.changes-review-panel')!;
+      const trigger = document.querySelector<HTMLElement>('.changes-review-trigger')!;
+      const triggerRect = trigger.getBoundingClientRect();
+      const triggerCenter = triggerRect.top + triggerRect.height / 2;
+      const centerOffset = (selector: string) => {
+        const rect = trigger.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+        return Math.round((rect.top + rect.height / 2 - triggerCenter) * 100) / 100;
+      };
+      return {
+        checked: button.getAttribute('aria-checked'),
+        label: button.querySelector('.changes-review-option-label')?.textContent,
+        headerText: panel.querySelector('.changes-review-header')?.textContent,
+        baselineLabels: Array.from(panel.querySelectorAll<HTMLElement>('[data-baseline] .changes-review-option-label'))
+          .map((label) => label.textContent),
+        baselineLabelsClipped: Array.from(panel.querySelectorAll<HTMLElement>('[data-baseline] .changes-review-option-label'))
+          .some((label) => label.scrollWidth > label.clientWidth),
+        baselineIconCount: panel.querySelectorAll('[data-baseline] .changes-review-option-icon svg').length,
+        selectedBaselineCheckCount: panel.querySelectorAll('[data-baseline] .changes-review-check svg').length,
+        snapshotIconCount: panel.querySelectorAll('.changes-review-snapshot-select .changes-review-option-icon svg').length,
+        snapshotCreateHint: panel.querySelector('.changes-review-snapshot-create-hint')?.textContent,
+        snapshotActionCount: panel.querySelectorAll('.changes-review-snapshot-action').length,
+        snapshotSelectAction: panel.querySelector<HTMLElement>('.changes-review-snapshot-select')?.dataset.action,
+        snapshotSelectDisabled: panel.querySelector<HTMLButtonElement>('.changes-review-snapshot-select')?.disabled,
+        panelWidth: panel.getBoundingClientRect().width,
+        panelClientWidth: panel.clientWidth,
+        panelScrollWidth: panel.scrollWidth,
+        triggerHeight: trigger.getBoundingClientRect().height,
+        triggerIconSize: trigger.querySelector<SVGElement>('.changes-review-trigger-icon svg')?.getAttribute('width'),
+        triggerCenterOffsets: [
+          centerOffset('.changes-review-trigger-icon'),
+          centerOffset('.changes-review-counts'),
+          centerOffset('.changes-review-chevron')
+        ],
+        chevronCount: trigger.querySelectorAll('.changes-review-chevron').length,
+        chevronSize: trigger.querySelector<SVGElement>('.changes-review-chevron svg')?.getAttribute('width'),
+        baselineGaps: Array.from(panel.querySelectorAll<HTMLElement>('.changes-review-baseline-option'))
+          .map((option, index, options) => index === 0
+            ? null
+            : option.getBoundingClientRect().top - options[index - 1]!.getBoundingClientRect().bottom)
+          .slice(1),
+        sourceOnlyDisabled: sourceOnlyButton.disabled,
+        sourceOnlyOpacity: getComputedStyle(sourceOnlyButton).opacity,
+        sourceOnlyMatchesMarkerColor: getComputedStyle(sourceOnlyButton).color === getComputedStyle(button).color
+      };
     });
-    await page.hover('[data-action="gitChangesGutter"]');
-    const inactiveToggleHoverStyle = await page.$eval('[data-action="gitChangesGutter"]', (button) => {
-      const style = getComputedStyle(button);
-      return { color: style.color, opacity: style.opacity, background: style.backgroundColor };
-    });
-    if (
-      inactiveToggleHoverStyle.color !== inactiveToggleStyle.color ||
-      inactiveToggleHoverStyle.opacity !== inactiveToggleStyle.opacity ||
-      inactiveToggleHoverStyle.background === inactiveToggleStyle.background
-    ) {
-      throw new Error(`Inactive toolbar hover changed its icon instead of only its background: ${JSON.stringify({ inactiveToggleStyle, inactiveToggleHoverStyle })}`);
+    if (JSON.stringify(inactiveMarkerSetting) !== JSON.stringify({
+      checked: 'false',
+      label: '标记更改位置',
+      headerText: '无更改·与当前磁盘版本对比',
+      baselineLabels: ['当前磁盘版本', 'Agent 编辑前版本', 'Git HEAD · 最新提交'],
+      baselineLabelsClipped: false,
+      baselineIconCount: 3,
+      selectedBaselineCheckCount: 1,
+      snapshotIconCount: 1,
+      snapshotCreateHint: '点击创建',
+      snapshotActionCount: 0,
+      snapshotSelectAction: 'create-snapshot',
+      snapshotSelectDisabled: false,
+      panelWidth: 268,
+      panelClientWidth: 266,
+      panelScrollWidth: 266,
+      triggerHeight: 24,
+      triggerIconSize: '16',
+      triggerCenterOffsets: [0, 0, 0],
+      chevronCount: 1,
+      chevronSize: '12',
+      baselineGaps: [2, 2],
+      sourceOnlyDisabled: false,
+      sourceOnlyOpacity: '1',
+      sourceOnlyMatchesMarkerColor: true
+    })) {
+      throw new Error(`Change marker setting did not reflect host state: ${JSON.stringify(inactiveMarkerSetting)}`);
     }
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'gitBaselineChanged', version: 1,
+      payload: {
+        available: false, tracked: false, mode: 'current-edit', generation: 0, reason: 'too-large'
+      }
+    }})));
+    await waitForFrames(page, 2);
+    const unavailableSavedBaseline = await page.evaluate(() => ({
+      trigger: document.querySelector('.changes-review-trigger')?.textContent,
+      header: document.querySelector('.changes-review-header')?.textContent
+    }));
+    if (JSON.stringify(unavailableSavedBaseline) !== JSON.stringify({
+      trigger: '无法比较',
+      header: '无法比较·文件过大'
+    })) {
+      throw new Error(`Unavailable Saved File baseline looked like no changes: ${JSON.stringify(unavailableSavedBaseline)}`);
+    }
+    await page.evaluate((baseText) => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'gitBaselineChanged', version: 1,
+      payload: {
+        available: true, tracked: true, mode: 'current-edit', generation: 0, baseText
+      }
+    }})), initialText);
+    await waitForFrames(page, 2);
+    const createSnapshotMessageCount = await page.evaluate(() => {
+      const messages = (window as typeof window & { __hostMessages?: Array<{ type?: string; enabled?: boolean }> })
+        .__hostMessages ?? [];
+      const before = messages.filter((message) => message.type === 'setFixedBaseline' && message.enabled === true).length;
+      document.querySelector<HTMLButtonElement>('.changes-review-snapshot-select')!.click();
+      const after = messages.filter((message) => message.type === 'setFixedBaseline' && message.enabled === true).length;
+      return { before, after };
+    });
+    if (createSnapshotMessageCount.after !== createSnapshotMessageCount.before + 1) {
+      throw new Error(`Clicking the empty snapshot row did not request creation: ${JSON.stringify(createSnapshotMessageCount)}`);
+    }
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-ui-language="en"]')!.click());
+    await waitForFrames(page, 2);
+    const englishReviewMenu = await page.evaluate(() => {
+      const labels = Array.from(document.querySelectorAll<HTMLElement>('.changes-review-option-label'));
+      const header = document.querySelector<HTMLElement>('.changes-review-header')!;
+      const headerBaseline = header.querySelector<HTMLElement>('.changes-review-header-baseline')!;
+      return {
+        labels: labels.map((label) => label.textContent),
+        headerText: header.textContent,
+        clipped: labels.some((label) => label.scrollWidth > label.clientWidth)
+          || header.scrollWidth > header.clientWidth
+          || headerBaseline.scrollWidth > headerBaseline.clientWidth
+      };
+    });
+    if (JSON.stringify(englishReviewMenu) !== JSON.stringify({
+      labels: [
+        'Saved File',
+        'Before Agent Edits',
+        'Git HEAD · Latest Commit',
+        'Manual Snapshot',
+        'Mark Change Locations',
+        'Show Original · Source Only'
+      ],
+      headerText: 'No Changes·vs. Saved File',
+      clipped: false
+    })) {
+      throw new Error(`English change review labels did not fit the shared menu width: ${JSON.stringify(englishReviewMenu)}`);
+    }
+    const recentSaveHeaders = await page.evaluate(() => {
+      const read = () => {
+        const header = document.querySelector<HTMLElement>('.changes-review-header')!;
+        const baseline = header.querySelector<HTMLElement>('.changes-review-header-baseline')!;
+        return {
+          text: header.textContent,
+          clipped: header.scrollWidth > header.clientWidth || baseline.scrollWidth > baseline.clientWidth
+        };
+      };
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'diffBaselineModeChanged', mode: 'recent-save'
+      }}));
+      const english = read();
+      document.querySelector<HTMLButtonElement>('[data-ui-language="zh-CN"]')!.click();
+      const chinese = read();
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'diffBaselineModeChanged', mode: 'current-edit'
+      }}));
+      return { english, chinese };
+    });
+    if (JSON.stringify(recentSaveHeaders) !== JSON.stringify({
+      english: { text: 'No Changes·vs. Before Agent Edits', clipped: false },
+      chinese: { text: '无更改·与Agent 编辑前版本对比', clipped: false }
+    })) {
+      throw new Error(`Recent-save headers did not fit both languages: ${JSON.stringify(recentSaveHeaders)}`);
+    }
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-ui-language="zh-CN"]')!.click());
+    await waitForFrames(page, 2);
+    await page.click('[data-baseline="git-head"]');
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'gitBaselineChanged',
+      version: 1,
+      payload: {
+        available: false,
+        tracked: false,
+        mode: 'git-head',
+        generation: 0,
+        reason: 'not-repo'
+      }
+    }})));
+    const unavailableGitBaseline = await page.evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>('[data-baseline="git-head"]')!;
+      return {
+        label: button.querySelector('.changes-review-option-label')?.textContent,
+        checked: button.getAttribute('aria-checked'),
+        ariaDisabled: button.getAttribute('aria-disabled'),
+        disabled: button.disabled,
+        cursor: getComputedStyle(button).cursor,
+        checkIconCount: button.querySelectorAll('.changes-review-check:not(.is-warning) svg').length,
+        warningIconCount: button.querySelectorAll('.changes-review-check.is-warning svg').length,
+        circleWarningIconCount: button.querySelectorAll('.changes-review-check.is-warning svg circle').length,
+        warningColor: getComputedStyle(button.querySelector<HTMLElement>('.changes-review-check')!).color,
+        headerText: document.querySelector('.changes-review-header')?.textContent,
+        triggerText: document.querySelector('.changes-review-trigger')?.textContent
+      };
+    });
+    if (JSON.stringify(unavailableGitBaseline) !== JSON.stringify({
+      label: 'Git HEAD · 非 Git 仓库',
+      checked: 'true',
+      ariaDisabled: null,
+      disabled: false,
+      cursor: 'pointer',
+      checkIconCount: 0,
+      warningIconCount: 1,
+      circleWarningIconCount: 1,
+      warningColor: 'rgb(241, 76, 76)',
+      headerText: '无法比较·非 Git 仓库',
+      triggerText: '无法比较'
+    })) {
+      throw new Error(`Unavailable Git baseline was not explained inline: ${JSON.stringify(unavailableGitBaseline)}`);
+    }
+    const gitStateLayout = await page.evaluate(() => {
+      const cases = [
+        { available: false, tracked: false, reason: 'git-unavailable' },
+        { available: false, tracked: false, reason: 'not-repo' },
+        { available: false, tracked: false, reason: 'ignored' },
+        { available: true, tracked: false, headOid: 'abc123' },
+        { available: true, tracked: true, headOid: null },
+        { available: false, tracked: false, reason: 'not-file' },
+        { available: true, tracked: true, headOid: 'abc123', reason: 'too-large' },
+        { available: true, tracked: true, headOid: 'abc123', reason: 'binary' },
+        { available: true, tracked: true, headOid: 'abc123', reason: 'error' },
+        { available: true, tracked: true, headOid: 'abc123' }
+      ];
+      const run = (language: 'zh-CN' | 'en') => {
+        document.querySelector<HTMLButtonElement>(`[data-ui-language="${language}"]`)!.click();
+        return cases.map((payload) => {
+          window.dispatchEvent(new MessageEvent('message', { data: {
+            type: 'gitBaselineChanged', version: 1,
+            payload: { ...payload, mode: 'git-head', generation: 0 }
+          }}));
+          const panel = document.querySelector<HTMLElement>('.changes-review-panel')!;
+          const optionLabel = panel.querySelector<HTMLElement>('[data-baseline="git-head"] .changes-review-option-label')!;
+          const header = panel.querySelector<HTMLElement>('.changes-review-header')!;
+          const headerBaseline = panel.querySelector<HTMLElement>('.changes-review-header-baseline')!;
+          return {
+            label: optionLabel.textContent,
+            header: header.textContent,
+            disabled: panel.querySelector<HTMLButtonElement>('[data-baseline="git-head"]')!.disabled,
+            warning: optionLabel.parentElement?.querySelectorAll('.changes-review-check.is-warning svg').length === 1,
+            check: optionLabel.parentElement?.querySelectorAll('.changes-review-check:not(.is-warning) svg').length === 1,
+            clipped: optionLabel.scrollWidth > optionLabel.clientWidth
+              || headerBaseline.scrollWidth > headerBaseline.clientWidth
+              || header.scrollWidth > header.clientWidth
+              || panel.scrollWidth > panel.clientWidth
+          };
+        });
+      };
+      const result = { chinese: run('zh-CN'), english: run('en') };
+      document.querySelector<HTMLButtonElement>('[data-ui-language="zh-CN"]')!.click();
+      return result;
+    });
+    const expectedGitLabels = {
+      chinese: [
+        'Git HEAD · Git 不可用', 'Git HEAD · 非 Git 仓库', 'Git HEAD · Git 已忽略',
+        'Git HEAD · 未跟踪文件', 'Git HEAD · 暂无提交', 'Git HEAD · 非本地文件',
+        'Git HEAD · 文件过大', 'Git HEAD · 二进制文件', 'Git HEAD · 暂不可用', 'Git HEAD · 最新提交'
+      ],
+      english: [
+        'Git HEAD · Git Unavailable', 'Git HEAD · Not a Git Repo', 'Git HEAD · Ignored by Git',
+        'Git HEAD · Untracked File', 'Git HEAD · No Commits', 'Git HEAD · Not a Local File',
+        'Git HEAD · File Too Large', 'Git HEAD · Binary File', 'Git HEAD · Temporary Error', 'Git HEAD · Latest Commit'
+      ]
+    };
+    for (const language of ['chinese', 'english'] as const) {
+      const states = gitStateLayout[language];
+      if (
+        JSON.stringify(states.map((entry) => entry.label)) !== JSON.stringify(expectedGitLabels[language])
+        || states.some((entry) => entry.clipped)
+        || states.some((entry) => entry.disabled)
+        || states.map((entry) => entry.warning).join(',') !== 'true,true,true,false,false,true,true,true,true,false'
+        || states.map((entry) => entry.check).join(',') !== 'false,false,false,true,true,false,false,false,false,true'
+      ) {
+        throw new Error(`Git review states did not fit the shared menu in ${language}: ${JSON.stringify(states)}`);
+      }
+    }
+    await page.click('[data-baseline="current-edit"]');
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'diffBaselineModeChanged', mode: 'current-edit'
+    }})));
+    const unselectedGitWarning = await page.$eval('[data-baseline="git-head"]', (button) => ({
+      checked: button.getAttribute('aria-checked'),
+      warningIconCount: button.querySelectorAll('.changes-review-check.is-warning svg').length,
+      checkIconCount: button.querySelectorAll('.changes-review-check:not(.is-warning) svg').length
+    }));
+    if (JSON.stringify(unselectedGitWarning) !== JSON.stringify({
+      checked: 'false', warningIconCount: 0, checkIconCount: 0
+    })) {
+      throw new Error(`Unselected Git baseline should not show a warning: ${JSON.stringify(unselectedGitWarning)}`);
+    }
+    await page.click('[data-toggle="before-content"]');
+    const liveBeforeContentSetting = await page.evaluate(() => ({
+      checked: document.querySelector<HTMLElement>('[data-toggle="before-content"]')?.getAttribute('aria-checked'),
+      rendered: document.querySelector<HTMLElement>('.editor-host > .cm-editor')
+        ?.classList.contains('meo-git-diff-details-visible')
+    }));
+    if (JSON.stringify(liveBeforeContentSetting) !== JSON.stringify({ checked: 'true', rendered: false })) {
+      throw new Error(`Live mode did not retain the source-only preference independently: ${JSON.stringify(liveBeforeContentSetting)}`);
+    }
+    await page.click('[data-toggle="before-content"]');
     await page.mouse.move(0, 0);
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'gitChangesGutterChanged', enabled: true }
@@ -406,7 +690,6 @@ async function main() {
         labels: options.map((option) => option.querySelector('.more-tools-option-label')?.textContent),
         languageAutoLabel: panel.querySelector<HTMLElement>('[data-ui-language="auto"] .segmented-control-button-label')?.textContent,
         directChildren: options.every((option) => option.parentElement === panel),
-        baselineIcons: options.slice(1, 4).map((option) => option.querySelector('.more-tools-option-icon svg')?.outerHTML),
         separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length,
         width: panel.getBoundingClientRect().width,
         clientWidth: panel.clientWidth,
@@ -415,17 +698,13 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '释放固定基线',
-        'diff: 与最新磁盘版本比较', 'diff: 与上一保存版本比较', 'diff: 与 Git HEAD 版本比较',
         '限制宽度', '显示行号', '折叠长代码块'
       ]) ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
-      moreToolsLayout.separatorCount !== 3 ||
+      moreToolsLayout.separatorCount !== 1 ||
       moreToolsLayout.width > 268 ||
-      moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth ||
-      moreToolsLayout.baselineIcons.some((icon) => !icon) ||
-      new Set(moreToolsLayout.baselineIcons).size !== 1
+      moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth
     ) {
       throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
     }
@@ -609,36 +888,191 @@ async function main() {
     })) {
       throw new Error(`VS Code host theme changed the manual light appearance: ${JSON.stringify(lightAfterHostThemeChange)}`);
     }
-    await page.evaluate(() => {
-      window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'fixedBaselineChanged', pinned: true, active: true
-      }}));
+    await page.click('.changes-review-trigger');
+    const todaySnapshotTimestamp = await page.evaluate(() => {
+      const date = new Date();
+      date.setHours(7, 5, 0, 0);
+      return date.getTime();
     });
-    const activeBaselineColors = await page.$eval('[data-action="fixedBaseline"]', (button) => ({
-      color: getComputedStyle(button).color,
-      background: getComputedStyle(button).backgroundColor
-    }));
-    await page.evaluate(() => {
+    await page.evaluate((updatedAt) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'fixedBaselineChanged', pinned: true, active: false
+        type: 'fixedBaselineChanged', pinned: true, active: true, updatedAt
       }}));
-    });
-    const standbyBaseline = await page.$eval('[data-action="fixedBaseline"]', (button) => {
-      const icon = button.querySelector('svg');
+    }, todaySnapshotTimestamp);
+    const activeSnapshot = await page.$eval('.changes-review-snapshot-row', (row) => {
+      const select = row.querySelector<HTMLElement>('.changes-review-snapshot-select')!;
+      const action = row.querySelector<HTMLElement>('.changes-review-snapshot-action')!;
+      const previous = row.previousElementSibling as HTMLElement | null;
+      const selectRect = select.getBoundingClientRect();
+      const actionRect = action.getBoundingClientRect();
+      const checkRect = select.querySelector<HTMLElement>('.changes-review-check')!.getBoundingClientRect();
       return {
-        icon: icon?.querySelectorAll('path').length === 2
-          && icon.querySelector('path:last-child')?.getAttribute('d') === 'm9 10 2 2 4-4',
-        opacity: getComputedStyle(button).opacity
+      selected: select.classList.contains('is-selected'),
+      actionSelected: action.classList.contains('is-selected'),
+      rowSelected: row.classList.contains('is-selected'),
+      label: row.querySelector('.changes-review-option-label')?.textContent,
+      action: action.textContent,
+      actionIconCount: action.querySelectorAll('svg').length,
+      actionAriaLabel: action.getAttribute('aria-label'),
+      actionTitle: action.title,
+      selectHeight: selectRect.height,
+      actionHeight: actionRect.height,
+      actionGap: actionRect.left - selectRect.right,
+      checkRightInset: selectRect.right - checkRect.right,
+      matchingSelectedBackground: getComputedStyle(select).backgroundColor === getComputedStyle(action).backgroundColor,
+      previousGap: previous ? selectRect.top - previous.getBoundingClientRect().bottom : null,
+      selectAction: select.dataset.action,
+      clipped: Array.from(row.querySelectorAll<HTMLElement>('.changes-review-option-label, .changes-review-snapshot-action'))
+        .some((element) => element.scrollWidth > element.clientWidth)
+    };
+    });
+    await page.evaluate(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'fixedBaselineChanged', pinned: true, active: false, updatedAt: 2_000
+      }}));
+    });
+    const standbySnapshot = await page.$eval('.changes-review-snapshot-row', (row) => ({
+      selected: row.querySelector('.changes-review-snapshot-select')?.classList.contains('is-selected'),
+      actionSelected: row.querySelector('.changes-review-snapshot-action')?.classList.contains('is-selected'),
+      rowSelected: row.classList.contains('is-selected'),
+      action: row.querySelector('.changes-review-snapshot-action')?.textContent,
+      actionBackground: getComputedStyle(row.querySelector<HTMLElement>('.changes-review-snapshot-action')!).backgroundColor
+    }));
+    if (
+      !activeSnapshot.selected ||
+      !activeSnapshot.actionSelected ||
+      activeSnapshot.rowSelected ||
+      activeSnapshot.label !== '手动快照（07:05）' ||
+      activeSnapshot.action !== '更新' ||
+      activeSnapshot.actionIconCount !== 0 ||
+      activeSnapshot.actionAriaLabel !== '更新手动快照' ||
+      activeSnapshot.actionTitle !== '更新手动快照' ||
+      activeSnapshot.selectHeight !== 28 ||
+      activeSnapshot.actionHeight !== 28 ||
+      activeSnapshot.actionGap !== 2 ||
+      activeSnapshot.checkRightInset !== 6 ||
+      !activeSnapshot.matchingSelectedBackground ||
+      activeSnapshot.previousGap !== 2 ||
+      activeSnapshot.selectAction !== 'select-snapshot' ||
+      activeSnapshot.clipped ||
+      standbySnapshot.selected ||
+      standbySnapshot.actionSelected ||
+      standbySnapshot.rowSelected ||
+      standbySnapshot.action !== '更新' ||
+      standbySnapshot.actionBackground !== 'rgba(0, 0, 0, 0)'
+    ) {
+      throw new Error(`Manual snapshot states were not readable: ${JSON.stringify({ activeSnapshot, standbySnapshot })}`);
+    }
+    const snapshotStates = await page.evaluate(() => {
+      const read = () => {
+        const panel = document.querySelector<HTMLElement>('.changes-review-panel')!;
+        const row = panel.querySelector<HTMLElement>('.changes-review-snapshot-row')!;
+        const label = row.querySelector<HTMLElement>('.changes-review-option-label')!;
+        const action = row.querySelector<HTMLButtonElement>('.changes-review-snapshot-action');
+        const header = panel.querySelector<HTMLElement>('.changes-review-header')!;
+        const headerBaseline = panel.querySelector<HTMLElement>('.changes-review-header-baseline')!;
+        const overflow = {
+          label: label.scrollWidth > label.clientWidth,
+          action: action ? action.scrollWidth > action.clientWidth : false,
+          row: row.scrollWidth > row.clientWidth,
+          header: header.scrollWidth > header.clientWidth,
+          headerBaseline: headerBaseline.scrollWidth > headerBaseline.clientWidth,
+          panel: panel.scrollWidth > panel.clientWidth
+        };
+        return {
+          label: label.textContent ?? '',
+          hint: row.querySelector('.changes-review-snapshot-create-hint')?.textContent ?? null,
+          action: action?.textContent ?? null,
+          actionIconCount: action?.querySelectorAll('svg').length ?? 0,
+          actionAriaLabel: action?.getAttribute('aria-label') ?? null,
+          selectAction: row.querySelector<HTMLElement>('.changes-review-snapshot-select')!.dataset.action,
+          selectAriaLabel: row.querySelector<HTMLElement>('.changes-review-snapshot-select')!.getAttribute('aria-label'),
+          selectDisabled: row.querySelector<HTMLButtonElement>('.changes-review-snapshot-select')!.disabled,
+          labelWidth: { client: label.clientWidth, scroll: label.scrollWidth },
+          actionWidth: action ? { client: action.clientWidth, scroll: action.scrollWidth } : null,
+          overflow,
+          clipped: Object.values(overflow).some(Boolean)
+        };
+      };
+      const updateSnapshot = (date: Date) => {
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'fixedBaselineChanged', pinned: true, active: true, updatedAt: date.getTime()
+        }}));
+        return read();
+      };
+      const run = (language: 'zh-CN' | 'en') => {
+        document.querySelector<HTMLButtonElement>(`[data-ui-language="${language}"]`)!.click();
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'fixedBaselineChanged', pinned: false, active: false
+        }}));
+        window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'fixedBaselineChanged', pinned: true, active: true
+        }}));
+        const noTimestamp = read();
+        const today = new Date();
+        today.setHours(7, 5, 0, 0);
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        yesterday.setHours(23, 4, 0, 0);
+        const older = new Date();
+        older.setDate(older.getDate() - 2);
+        older.setHours(18, 37, 0, 0);
+        const previousYear = new Date();
+        previousYear.setFullYear(previousYear.getFullYear() - 1, 6, 9);
+        previousYear.setHours(12, 34, 0, 0);
+        return {
+          noTimestamp,
+          today: updateSnapshot(today),
+          yesterday: updateSnapshot(yesterday),
+          older: updateSnapshot(older),
+          previousYear: updateSnapshot(previousYear)
+        };
+      };
+      const chinese = run('zh-CN');
+      const english = run('en');
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'fixedBaselineChanged', pinned: false, active: false
+      }}));
+      const englishNone = read();
+      document.querySelector<HTMLButtonElement>('[data-ui-language="zh-CN"]')!.click();
+      const chineseNone = read();
+      return {
+        chinese: { ...chinese, none: chineseNone },
+        english: { ...english, none: englishNone }
       };
     });
     if (
-      JSON.stringify(activeBaselineColors) !== JSON.stringify({
-        color: 'rgb(255, 255, 255)',
-        background: 'rgb(45, 164, 78)'
-      }) ||
-      !standbyBaseline.icon || standbyBaseline.opacity !== '1'
+      snapshotStates.chinese.today.label !== '手动快照（07:05）' ||
+      snapshotStates.chinese.noTimestamp.label !== '手动快照' ||
+      snapshotStates.chinese.yesterday.label !== '手动快照（昨天）' ||
+      snapshotStates.english.today.label !== 'Manual Snapshot (07:05)' ||
+      snapshotStates.english.noTimestamp.label !== 'Manual Snapshot' ||
+      snapshotStates.english.yesterday.label !== 'Manual Snapshot (Yesterday)' ||
+      snapshotStates.chinese.older.label !== '手动快照（较早）' ||
+      snapshotStates.english.older.label !== 'Manual Snapshot (Earlier)' ||
+      snapshotStates.chinese.previousYear.label !== '手动快照（较早）' ||
+      snapshotStates.english.previousYear.label !== 'Manual Snapshot (Earlier)' ||
+      snapshotStates.chinese.none.label !== '手动快照' ||
+      snapshotStates.chinese.none.hint !== '点击创建' ||
+      snapshotStates.chinese.none.action !== null ||
+      snapshotStates.chinese.none.actionIconCount !== 0 ||
+      snapshotStates.chinese.none.actionAriaLabel !== null ||
+      snapshotStates.chinese.none.selectAction !== 'create-snapshot' ||
+      snapshotStates.chinese.none.selectAriaLabel !== '创建手动快照' ||
+      snapshotStates.chinese.none.selectDisabled ||
+      snapshotStates.english.none.label !== 'Manual Snapshot' ||
+      snapshotStates.english.none.hint !== 'Click to Create' ||
+      snapshotStates.english.none.action !== null ||
+      snapshotStates.english.none.actionIconCount !== 0 ||
+      snapshotStates.english.none.actionAriaLabel !== null ||
+      snapshotStates.english.none.selectAction !== 'create-snapshot' ||
+      snapshotStates.english.none.selectAriaLabel !== 'Create Manual Snapshot' ||
+      snapshotStates.english.none.selectDisabled ||
+      Object.values(snapshotStates).some((languageStates) =>
+        Object.values(languageStates).some((entry) => entry.clipped)
+      )
     ) {
-      throw new Error(`Editor light baseline states were not readable: ${JSON.stringify({ activeBaselineColors, standbyBaseline })}`);
+      throw new Error(`Manual snapshot states were not compact: ${JSON.stringify(snapshotStates)}`);
     }
     await page.evaluate(() => {
       window.dispatchEvent(new MessageEvent('message', { data: {
@@ -663,6 +1097,7 @@ async function main() {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector<HTMLButtonElement>('[data-action="find"]')!.click();
     });
+    await page.click('.more-tools-wrapper > button');
     await page.click('.editor-appearance-button[data-editor-appearance="dark"]');
     await waitForFrames(page, 2);
     const restoredDarkAppearanceState = await page.evaluate(() => ({
@@ -724,11 +1159,55 @@ async function main() {
       }}));
     }, toolbarBaselineText);
     await waitForFrames(page, 8);
+    await page.click('[data-mode="source"]');
+    await page.evaluate((selection) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'revealSelection', anchor: selection, head: selection, focus: false
+      }}));
+    }, initialText.indexOf('stable line 40'));
+    await waitForFrames(page, 4);
+    const changesMenuExpanded = await page.$eval(
+      '.changes-review-trigger',
+      (button) => button.getAttribute('aria-expanded') === 'true'
+    );
+    if (!changesMenuExpanded) await page.click('.changes-review-trigger');
+    await page.click('[data-toggle="before-content"]');
+    await waitForFrames(page, 4);
+    const sourceDiffDetails = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll<HTMLElement>('.meo-git-diff-original-line'));
+      const numbers = Array.from(document.querySelectorAll<HTMLElement>(
+        '.cm-lineNumbers .meo-git-diff-original-line-number'
+      ));
+      const firstContent = rows[0]?.querySelector<HTMLElement>('.meo-git-diff-original-content');
+      const currentContent = document.querySelector<HTMLElement>('.editor-host .cm-content');
+      return {
+        rowCount: rows.length,
+        numberCount: numbers.length,
+        firstNumber: numbers[0]?.textContent,
+        firstContent: firstContent?.textContent,
+        oldContentEditable: rows[0]?.getAttribute('contenteditable'),
+        oldContentUserSelect: firstContent ? getComputedStyle(firstContent).userSelect : null,
+        currentContentEditable: currentContent?.getAttribute('contenteditable')
+      };
+    });
+    if (
+      sourceDiffDetails.rowCount === 0 ||
+      sourceDiffDetails.numberCount !== sourceDiffDetails.rowCount ||
+      sourceDiffDetails.firstNumber !== '40' ||
+      sourceDiffDetails.firstContent !== 'removed baseline line 1' ||
+      sourceDiffDetails.oldContentEditable !== 'false' ||
+      sourceDiffDetails.oldContentUserSelect !== 'text' ||
+      sourceDiffDetails.currentContentEditable !== 'true'
+    ) {
+      throw new Error(`Source diff detail rendering regressed: ${JSON.stringify(sourceDiffDetails)}`);
+    }
+    await page.click('[data-toggle="before-content"]');
+    await page.click('[data-mode="live"]');
+    await waitForFrames(page, 4);
     const toolbarDocumentActions = [
       { name: 'save', selector: '[data-action="save"]' },
       { name: 'reload', selector: '[data-action="discard"]' },
-      { name: 'fixed-baseline', selector: '[data-action="fixedBaseline"]' },
-      { name: 'changes', selector: '[data-action="gitChangesGutter"]' },
+      { name: 'changes', selector: '.changes-review-trigger' },
       { name: 'settings', selector: '[data-action="settings"]' }
     ];
     const toolbarDocumentActionTraces: Array<{

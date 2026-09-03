@@ -17,6 +17,10 @@ import {
   isLiveInputDerivedWorkRefresh,
   shouldDeferLiveInputDerivedWork
 } from '../editor/liveInputDerivedWork';
+import type {
+  ChangesReviewDiffSummary,
+  ChangesReviewUnavailableReason
+} from '../application/changesReview';
 
 const MAX_DIFF_TEXT_CHARS = 1024 * 1024;
 const MAX_DIFF_COMPUTATION_TIME_MS = 50;
@@ -31,7 +35,7 @@ interface BaselineSnapshot {
   baseLines: string[] | null;
   mode?: 'current-edit' | 'recent-save' | 'git-head' | 'fixed';
   headOid?: string | null;
-  reason?: 'not-file' | 'git-unavailable' | 'not-repo' | 'ignored' | 'too-large' | 'binary' | 'error';
+  reason?: Exclude<ChangesReviewUnavailableReason, 'timeout'>;
 }
 
 export interface MarkerFlags {
@@ -151,6 +155,23 @@ function emptyMarkerFlags(): MarkerFlags {
     added: false,
     modified: false
   };
+}
+
+const comparisonStatus = Symbol('comparisonStatus');
+type GitDiffLineFlags = (MarkerFlags | undefined)[] & {
+  [comparisonStatus]?: Pick<ChangesReviewDiffSummary, 'status'> & {
+    readonly reason?: ChangesReviewUnavailableReason;
+  };
+};
+
+function lineFlagsWithStatus(
+  lineCount: number,
+  status: 'pending' | 'ready' | 'unavailable',
+  reason?: ChangesReviewUnavailableReason
+): GitDiffLineFlags {
+  const flags = new Array<MarkerFlags | undefined>(lineCount) as GitDiffLineFlags;
+  flags[comparisonStatus] = reason ? { status, reason } : { status };
+  return flags;
 }
 
 function mergeLineRanges(
@@ -351,14 +372,18 @@ function getTrailingEofProxyFlags(
   };
 }
 
-function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): (MarkerFlags | undefined)[] | null {
+function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): GitDiffLineFlags {
+  if (!baseline || (!baseline.available && !baseline.reason)) {
+    return lineFlagsWithStatus(0, 'pending');
+  }
+  const baselineUnavailableReason = baseline.reason;
   if (!canRenderGitDiffBaseline(baseline)) {
-    return null;
+    return lineFlagsWithStatus(0, 'unavailable', baselineUnavailableReason ?? 'error');
   }
 
   if (typeof baseline.baseText !== 'string') {
     if (!baseline.tracked || baseline.headOid === null) {
-      const lineFlags: (MarkerFlags | undefined)[] = new Array(state.doc.lines);
+      const lineFlags = lineFlagsWithStatus(state.doc.lines, 'ready');
       const textLength = state.doc.length;
       if (!textLength && state.doc.lines === 1 && state.doc.sliceString(0, state.doc.length) === '') {
         return lineFlags;
@@ -368,20 +393,20 @@ function buildDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | nul
       }
       return lineFlags;
     }
-    return null;
+    return lineFlagsWithStatus(0, 'unavailable', baseline.reason ?? 'error');
   }
 
   if (state.doc.length > MAX_DIFF_TEXT_CHARS || baseline.baseText.length > MAX_DIFF_TEXT_CHARS) {
-    return null;
+    return lineFlagsWithStatus(0, 'unavailable', 'too-large');
   }
 
   const result = compareDocuments(baseline.baseText, state.doc.sliceString(0, state.doc.length), {
     maxComputationTimeMs: MAX_DIFF_COMPUTATION_TIME_MS
   });
   if (result.hitTimeout || result.failed) {
-    return null;
+    return lineFlagsWithStatus(0, 'unavailable', result.hitTimeout ? 'timeout' : 'error');
   }
-  const lineFlags: (MarkerFlags | undefined)[] = new Array(state.doc.lines);
+  const lineFlags = lineFlagsWithStatus(state.doc.lines, 'ready');
   for (const change of result.lineChanges) {
     if (change.line < 1 || change.line > state.doc.lines) {
       continue;
@@ -733,6 +758,102 @@ interface DiffSegment {
   added: boolean;
   modified: boolean;
   deleted: boolean;
+}
+
+export type GitDiffLineCounts = {
+  readonly added: number;
+  readonly deleted: number;
+};
+
+export function getGitDiffSummary(state: EditorState): ChangesReviewDiffSummary {
+  const lineFlags = state.field(gitDiffLineFlagsField, false) as GitDiffLineFlags | undefined;
+  const computation = lineFlags?.[comparisonStatus];
+  if (!computation || computation.status === 'pending') {
+    return { status: 'pending', added: 0, deleted: 0 };
+  }
+  if (computation.status === 'unavailable') {
+    return {
+      status: 'unavailable',
+      reason: computation.reason ?? 'error',
+      added: 0,
+      deleted: 0
+    };
+  }
+  return { status: 'ready', ...countGitDiffLines(lineFlags) };
+}
+
+export type GitDiffOriginalBlock = {
+  readonly at: number;
+  readonly side: -1 | 1;
+  readonly lines: ReadonlyArray<{ readonly number: number; readonly text: string }>;
+};
+
+function collectOriginalRanges(lineFlags: ReadonlyArray<MarkerFlags | undefined>): Array<[number, number]> {
+  return mergeLineRanges(lineFlags.flatMap((flags) => [
+    ...(flags?.modifiedRanges ?? []),
+    ...(flags?.deletionRanges ?? [])
+  ]));
+}
+
+function countGitDiffLines(
+  lineFlags: ReadonlyArray<MarkerFlags | undefined> | null | undefined
+): GitDiffLineCounts {
+  if (!Array.isArray(lineFlags)) return { added: 0, deleted: 0 };
+
+  const added = lineFlags.reduce((count, flags) => (
+    count + (flags && !flags.trailingEofProxyOnly && (flags.added || flags.modified) ? 1 : 0)
+  ), 0);
+  const deleted = collectOriginalRanges(lineFlags).reduce(
+    (count, [fromLine, toLine]) => count + Math.max(0, toLine - fromLine + 1),
+    0
+  );
+  return { added, deleted };
+}
+
+export function getGitDiffLineCounts(state: EditorState): GitDiffLineCounts {
+  return countGitDiffLines(state.field(gitDiffLineFlagsField, false));
+}
+
+export function getGitDiffOriginalBlocks(state: EditorState): GitDiffOriginalBlock[] {
+  const lineFlags = state.field(gitDiffLineFlagsField, false);
+  const baseline = state.field(gitBaselineField, false);
+  if (!Array.isArray(lineFlags) || !baseline?.baseLines) return [];
+
+  const seenRanges = new Set<string>();
+  const grouped = new Map<string, { at: number; side: -1 | 1; ranges: Array<[number, number]> }>();
+  for (let index = 0; index < lineFlags.length; index += 1) {
+    const flags = lineFlags[index];
+    if (!flags) continue;
+    const candidates = [
+      ...(flags.modifiedRanges ?? []).map((range) => ({ range, atEnd: false })),
+      ...(flags.deletionRanges ?? []).map((range) => ({ range, atEnd: flags.deletionAtEnd === true }))
+    ];
+    for (const { range, atEnd } of candidates) {
+      const rangeKey = `${range[0]}:${range[1]}`;
+      if (seenRanges.has(rangeKey)) continue;
+      seenRanges.add(rangeKey);
+      const at = atEnd ? state.doc.length : state.doc.line(Math.min(index + 1, state.doc.lines)).from;
+      const side: -1 | 1 = atEnd ? 1 : -1;
+      const groupKey = `${at}:${side}`;
+      const group = grouped.get(groupKey) ?? { at, side, ranges: [] };
+      group.ranges.push(range);
+      grouped.set(groupKey, group);
+    }
+  }
+
+  return Array.from(grouped.values())
+    .map((group) => ({
+      at: group.at,
+      side: group.side,
+      lines: mergeLineRanges(group.ranges).flatMap(([fromLine, toLine]) => {
+        const lines = [];
+        for (let line = fromLine; line <= toLine; line += 1) {
+          lines.push({ number: line, text: baseline.baseLines?.[line - 1] ?? '' });
+        }
+        return lines;
+      })
+    }))
+    .sort((left, right) => left.at - right.at || left.side - right.side);
 }
 
 export function getGitDiffOverviewSegments(state: EditorState): DiffSegment[] {

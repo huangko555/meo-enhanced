@@ -12,13 +12,14 @@ type GitProjection = { readonly oid?: string; readonly available: boolean; reado
 let currentText: string | null = 'current-A';
 let recentText: string | null = 'recent-A';
 let pinnedText: string | null = null;
+let pinnedUpdatedAt: number | null = null;
 let enabled = true;
 let ready = true;
 let savedUnavailableReason: 'binary' | 'error' | 'no-baseline' | null = null;
 const gitForces: boolean[] = [];
 let resolveGit: (forceReload: boolean) => Promise<GitProjection> = async () => ({ oid: 'head-A', available: true });
 const published: Array<{ selection: DiffBaselineSelection<GitProjection>; generation: number }> = [];
-const fixedStates: Array<{ pinned: boolean; active: boolean }> = [];
+const fixedStates: Array<{ pinned: boolean; active: boolean; updatedAt: number | null }> = [];
 const refreshes: Array<{ forcePost?: boolean; forceReload?: boolean; delayMs?: number }> = [];
 const persistedModes: DiffBaselineMode[] = [];
 let warnings = 0;
@@ -29,12 +30,20 @@ const selection = createDiffBaselineSelection<GitProjection>({
   canPublish: () => ready,
   saved: {
     getPinned: () => pinnedText === null ? null : { text: pinnedText },
+    getPinnedUpdatedAt: () => pinnedUpdatedAt,
     pinLatest: async () => {
       if (currentText === null) return null;
       pinnedText = currentText;
+      pinnedUpdatedAt = 1_000;
       return { text: pinnedText };
     },
-    releasePinned: () => { pinnedText = null; },
+    replacePinned: async () => {
+      if (currentText === null) return null;
+      pinnedText = currentText;
+      pinnedUpdatedAt = 2_000;
+      return { text: pinnedText };
+    },
+    releasePinned: () => { pinnedText = null; pinnedUpdatedAt = null; },
     resolve: async (mode) => {
       if (savedUnavailableReason) return { ok: false, reason: savedUnavailableReason };
       const text = mode === 'current-edit' ? currentText : (recentText ?? currentText);
@@ -58,7 +67,8 @@ const selection = createDiffBaselineSelection<GitProjection>({
 assert.deepEqual(selection.getState(), {
   mode: 'current-edit',
   fixedPinned: false,
-  fixedActive: false
+  fixedActive: false,
+  fixedUpdatedAt: null
 });
 assert.equal(await selection.publish(), true);
 assert.deepEqual(published.at(-1), {
@@ -74,7 +84,7 @@ assert.equal(published.at(-1)?.generation, 2);
 
 await selection.setMode('recent-save');
 assert.deepEqual(persistedModes, ['recent-save']);
-assert.deepEqual(fixedStates.at(-1), { pinned: false, active: false });
+assert.deepEqual(fixedStates.at(-1), { pinned: false, active: false, updatedAt: null });
 assert.deepEqual(refreshes.at(-1), { forcePost: true, forceReload: false });
 assert.equal(await selection.publish(), true);
 assert.deepEqual(published.at(-1)?.selection, { kind: 'saved', mode: 'recent-save', text: 'recent-A' });
@@ -93,23 +103,34 @@ await selection.setFixed(true);
 assert.deepEqual(selection.getState(), {
   mode: 'current-edit',
   fixedPinned: true,
-  fixedActive: true
+  fixedActive: true,
+  fixedUpdatedAt: 1_000
 });
 assert.equal(await selection.publish(), true);
 assert.deepEqual(published.at(-1)?.selection, { kind: 'fixed', text: 'current-A' });
 currentText = 'current-B';
 assert.equal(await selection.publish({ forcePost: true }), true);
 assert.deepEqual(published.at(-1)?.selection, { kind: 'fixed', text: 'current-A' }, 'later saves must not advance fixed');
+await selection.updateFixed();
+assert.deepEqual(selection.getState(), {
+  mode: 'current-edit',
+  fixedPinned: true,
+  fixedActive: true,
+  fixedUpdatedAt: 2_000
+});
+assert.equal(await selection.publish(), true);
+assert.deepEqual(published.at(-1)?.selection, { kind: 'fixed', text: 'current-B' }, 'updating must replace the manual snapshot');
 
 await selection.setFixed(false);
 assert.deepEqual(selection.getState(), {
   mode: 'current-edit',
   fixedPinned: true,
-  fixedActive: false
+  fixedActive: false,
+  fixedUpdatedAt: 2_000
 });
 await selection.setFixed(true);
 assert.equal(await selection.publish(), true);
-assert.deepEqual(published.at(-1)?.selection, { kind: 'fixed', text: 'current-A' }, 're-entry must reuse the pinned snapshot');
+assert.deepEqual(published.at(-1)?.selection, { kind: 'fixed', text: 'current-B' }, 're-entry must reuse the updated snapshot');
 assert.equal(warnings, 0);
 
 await selection.releaseFixed();
@@ -128,7 +149,8 @@ await selection.setFixed(true);
 assert.deepEqual(selection.getState(), {
   mode: 'current-edit',
   fixedPinned: false,
-  fixedActive: false
+  fixedActive: false,
+  fixedUpdatedAt: null
 });
 assert.equal(warnings, 1, 'pinning without a Saved Revision must keep fixed inactive and warn');
 
@@ -173,7 +195,9 @@ const transitionSelection = createDiffBaselineSelection<GitProjection>({
   canPublish: () => true,
   saved: {
     getPinned: () => null,
+    getPinnedUpdatedAt: () => null,
     pinLatest: async () => null,
+    replacePinned: async () => null,
     releasePinned: () => undefined,
     resolve: async () => ({ ok: true, text: 'transition' })
   },
@@ -208,7 +232,9 @@ const retrySelection = createDiffBaselineSelection<GitProjection>({
   canPublish: () => true,
   saved: {
     getPinned: () => null,
+    getPinnedUpdatedAt: () => null,
     pinLatest: async () => null,
+    replacePinned: async () => null,
     releasePinned: () => undefined,
     resolve: async () => ({ ok: true, text: 'retry' })
   },
@@ -292,8 +318,10 @@ assert.deepEqual(protocolMessages.at(-1), {
     generation: 6
   }
 });
-await protocolOutput.publishFixedState({ pinned: true, active: false });
-assert.deepEqual(protocolMessages.at(-1), { type: 'fixedBaselineChanged', pinned: true, active: false });
+await protocolOutput.publishFixedState({ pinned: true, active: false, updatedAt: 2_000 });
+assert.deepEqual(protocolMessages.at(-1), {
+  type: 'fixedBaselineChanged', pinned: true, active: false, updatedAt: 2_000
+});
 assert.equal(
   protocolOutput.hash({ kind: 'fixed', text: 'same' }),
   protocolOutput.hash({ kind: 'fixed', text: 'same' }),

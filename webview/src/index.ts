@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, FileDiff, PanelLeftRightDashed, Settings, Check, Bookmark, BookmarkPlus, BookmarkCheck, BookmarkOff, Ellipsis, Sun, Moon } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, Settings, Check, Ellipsis, Sun, Moon } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -39,6 +39,7 @@ import { createEditorModeEffectAdapter } from './adapters/editorModeEffectAdapte
 import { createEditorModeRuntime, type EditorModeRuntime } from './adapters/editorModeRuntime';
 import { decodeHostToWebviewMessage } from '../../src/protocol/messages';
 import type { EditorAppearance } from '../../src/protocol/editorCommands';
+import type { GitBaselinePayload } from '../../src/protocol/git';
 import type { InitMessage } from '../../src/protocol/readyInit';
 import {
   EDITOR_FONT_SIZE_MAX,
@@ -49,6 +50,9 @@ import {
 } from '../../src/foundation/editorFontSize';
 import type { UiLanguagePreference } from '../../src/foundation/uiLanguage';
 import { getUiStrings, type UiLanguage } from './application/uiLanguage';
+import { createChangesReviewControl } from './adapters/changesReviewControl';
+import type { ChangesReviewDiffSummary } from './application/changesReview';
+import { setGitDiffDetailsVisible } from './helpers/gitDiffDetails';
 
 type CreateEditorFactory = (typeof import('./editor'))['createEditor'];
 
@@ -184,11 +188,16 @@ taskBtn.dataset.action = 'task';
 taskBtn.title = activeUiStrings.task;
 taskBtn.appendChild(createElement(SquareCheck, { width: 18, height: 18 }));
 
-let gitChangesGutterVisible = true;
-let gitDiffLineHighlightsEnabled = true;
+let gitChangesGutterVisible = false;
+let gitDiffLineHighlightsEnabled = false;
 let diffBaselineMode: 'current-edit' | 'recent-save' | 'git-head' = 'current-edit';
 let fixedBaselinePinned = false;
 let fixedBaselineActive = false;
+let fixedBaselineUpdatedAt: number | null = null;
+let gitDiffDetailsVisible = false;
+let gitDiffSummary: ChangesReviewDiffSummary = { status: 'pending', added: 0, deleted: 0 };
+let gitBaselineState: GitBaselinePayload | null = null;
+let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
 let contentMaxWidthEnabled = false;
 let outlineUiState: { mode: 'floating' | 'fixed'; width: number } = { mode: 'fixed', width: 260 };
 
@@ -249,87 +258,40 @@ longCodeBlockFoldingBtn.dataset.action = 'longCodeBlockFolding';
 longCodeBlockFoldingBtn.setAttribute('role', 'menuitemcheckbox');
 appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, activeUiStrings.foldLongCodeBlocks);
 
-const gitChangesGutterBtn = document.createElement('button');
-gitChangesGutterBtn.type = 'button';
-gitChangesGutterBtn.className = 'format-button toggle-button is-active';
-gitChangesGutterBtn.dataset.action = 'gitChangesGutter';
-gitChangesGutterBtn.title = activeUiStrings.hideChanges(activeUiStrings.currentEdits);
-gitChangesGutterBtn.appendChild(createElement(FileDiff, { width: 18, height: 18 }));
+const changesReviewControl = createChangesReviewControl({
+  uiLanguage: activeUiLanguage,
+  onIntent(intent) {
+    if (intent.type === 'selectBaseline') setDiffBaselineMode(intent.baseline);
+    if (intent.type === 'selectManualSnapshot' && fixedBaselinePinned && !fixedBaselineActive) {
+      vscode.postMessage({ type: 'setFixedBaseline', enabled: true });
+    }
+    if (intent.type === 'createManualSnapshot') {
+      vscode.postMessage({ type: 'setFixedBaseline', enabled: true });
+    }
+    if (intent.type === 'updateManualSnapshot') {
+      vscode.postMessage({ type: 'updateFixedBaseline' });
+    }
+    if (intent.type === 'setMarkersVisible') setGitChangesGutterVisible(intent.visible);
+    if (intent.type === 'setBeforeContentVisible') setGitDiffDetailsVisibleState(intent.visible);
+  }
+});
+const changesControls = changesReviewControl.element;
+changesControls.classList.add('changes-controls', 'preview-hidden-toolbar-control');
 
-const fixedBaselineBtn = document.createElement('button');
-fixedBaselineBtn.type = 'button';
-fixedBaselineBtn.className = 'format-button toggle-button';
-fixedBaselineBtn.dataset.action = 'fixedBaseline';
-fixedBaselineBtn.appendChild(createElement(BookmarkPlus, { width: 18, height: 18 }));
-
-const releaseFixedBaselineBtn = document.createElement('button');
-releaseFixedBaselineBtn.type = 'button';
-releaseFixedBaselineBtn.className = 'more-tools-option fixed-baseline-release-option';
-releaseFixedBaselineBtn.dataset.action = 'releaseFixedBaseline';
-releaseFixedBaselineBtn.setAttribute('role', 'menuitem');
-appendMoreToolsOptionContent(releaseFixedBaselineBtn, BookmarkOff, activeUiStrings.releaseFixedBaseline);
-
-const diffBaselineOptions = [
-  { mode: 'current-edit' },
-  { mode: 'recent-save' },
-  { mode: 'git-head' }
-] as const;
-
-const getDiffBaselineLabel = (mode: typeof diffBaselineOptions[number]['mode']): string => ({
-  'current-edit': activeUiStrings.currentEdits,
-  'recent-save': activeUiStrings.recentSave,
-  'git-head': activeUiStrings.gitHead
-})[mode];
-
-const getDiffBaselineOptionLabel = (mode: typeof diffBaselineOptions[number]['mode']): string => (
-  activeUiStrings.diffBaselineLabel(getDiffBaselineLabel(mode))
-);
-
-const diffBaselineButtons: HTMLButtonElement[] = [];
-for (const option of diffBaselineOptions) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'more-tools-option changes-baseline-option';
-  button.dataset.baselineMode = option.mode;
-  button.setAttribute('role', 'menuitemradio');
-  appendMoreToolsOptionContent(button, FileDiff, getDiffBaselineOptionLabel(option.mode));
-  diffBaselineButtons.push(button);
-}
-
-const changesControls = document.createElement('div');
-changesControls.className = 'changes-controls preview-hidden-toolbar-control';
-changesControls.append(fixedBaselineBtn, gitChangesGutterBtn);
+const presentChangesReview = () => {
+  changesReviewControl.present({
+    mode: changesReviewMode,
+    baseline: fixedBaselineActive ? 'manual' : diffBaselineMode,
+    summary: gitDiffSummary,
+    markersVisible: gitChangesGutterVisible,
+    beforeContentVisible: gitDiffDetailsVisible,
+    gitBaseline: gitBaselineState,
+    manualSnapshot: { exists: fixedBaselinePinned, updatedAt: fixedBaselineUpdatedAt }
+  });
+};
 
 const updateGitChangesGutterUI = () => {
-  gitChangesGutterBtn.classList.toggle('is-active', gitChangesGutterVisible);
-  gitChangesGutterBtn.setAttribute('aria-pressed', gitChangesGutterVisible ? 'true' : 'false');
-  const modeLabel = fixedBaselineActive
-    ? activeUiStrings.fixedBaseline
-    : getDiffBaselineLabel(diffBaselineMode) ?? activeUiStrings.changes;
-  gitChangesGutterBtn.title = gitChangesGutterVisible
-    ? activeUiStrings.hideChanges(modeLabel)
-    : activeUiStrings.showChanges(modeLabel);
-  fixedBaselineBtn.classList.toggle('is-active', fixedBaselineActive);
-  fixedBaselineBtn.classList.toggle('is-standby', fixedBaselinePinned && !fixedBaselineActive);
-  const fixedBaselineIcon = !fixedBaselinePinned
-    ? BookmarkPlus
-    : fixedBaselineActive
-      ? Bookmark
-      : BookmarkCheck;
-  fixedBaselineBtn.replaceChildren(createElement(fixedBaselineIcon, { width: 18, height: 18 }));
-  fixedBaselineBtn.setAttribute('aria-pressed', fixedBaselineActive ? 'true' : 'false');
-  fixedBaselineBtn.title = !fixedBaselinePinned
-    ? activeUiStrings.pinLatestSavedBaseline
-    : fixedBaselineActive
-      ? activeUiStrings.showChanges(getDiffBaselineLabel(diffBaselineMode) ?? activeUiStrings.selectedMode)
-      : activeUiStrings.showFixedBaseline;
-  fixedBaselineBtn.setAttribute('aria-label', fixedBaselineBtn.title);
-  releaseFixedBaselineBtn.disabled = !fixedBaselinePinned;
-  for (const option of diffBaselineButtons) {
-    const active = option.dataset.baselineMode === diffBaselineMode;
-    option.classList.toggle('is-active', active);
-    option.setAttribute('aria-checked', active ? 'true' : 'false');
-  }
+  presentChangesReview();
 };
 
 const setDiffBaselineMode = (
@@ -341,6 +303,9 @@ const setDiffBaselineMode = (
   }
   const changed = mode !== diffBaselineMode;
   const leavesFixedBaseline = fixedBaselineActive;
+  if (changed || leavesFixedBaseline) {
+    gitDiffSummary = { status: 'pending', added: 0, deleted: 0 };
+  }
   diffBaselineMode = mode;
   updateGitChangesGutterUI();
   if (post && (changed || leavesFixedBaseline)) {
@@ -348,9 +313,15 @@ const setDiffBaselineMode = (
   }
 };
 
-const setFixedBaselineState = (pinned: boolean, active: boolean) => {
+const setFixedBaselineState = (pinned: boolean, active: boolean, updatedAt?: number | null) => {
+  const nextActive = pinned && active;
+  const nextUpdatedAt = pinned ? updatedAt ?? fixedBaselineUpdatedAt : null;
+  if (nextActive !== fixedBaselineActive || (nextActive && nextUpdatedAt !== fixedBaselineUpdatedAt)) {
+    gitDiffSummary = { status: 'pending', added: 0, deleted: 0 };
+  }
   fixedBaselinePinned = pinned;
-  fixedBaselineActive = pinned && active;
+  fixedBaselineActive = nextActive;
+  fixedBaselineUpdatedAt = nextUpdatedAt;
   updateGitChangesGutterUI();
 };
 
@@ -368,8 +339,25 @@ const syncGitDiffLineHighlights = () => {
   }
   setGitDiffLineHighlightsEnabled(
     editor,
-    getActiveEditorMode() === 'source' && gitChangesGutterVisible && gitDiffLineHighlightsEnabled
+    getActiveEditorMode() === 'source'
+      && (gitDiffDetailsVisible || (gitChangesGutterVisible && gitDiffLineHighlightsEnabled))
   );
+};
+
+const syncGitDiffDetails = () => {
+  if (!editor) return;
+  setGitDiffDetailsVisible(editor, getActiveEditorMode() === 'source' && gitDiffDetailsVisible);
+};
+
+const setGitDiffDetailsVisibleState = (
+  visible: boolean,
+  { persist = true }: { persist?: boolean } = {}
+) => {
+  gitDiffDetailsVisible = visible === true;
+  syncGitDiffDetails();
+  syncGitDiffLineHighlights();
+  presentChangesReview();
+  if (persist) persistUiState();
 };
 
 type PostUpdateOptions = { post?: boolean };
@@ -420,10 +408,6 @@ const setOutlineVisible = (visible: boolean, { post = true }: PostUpdateOptions 
   if (post && changed) {
     vscode.postMessage({ type: 'setOutlineVisible', visible: nextVisible });
   }
-};
-
-const toggleGitChangesGutter = () => {
-  setGitChangesGutterVisible(!gitChangesGutterVisible);
 };
 
 const separator = document.createElement('div');
@@ -772,12 +756,6 @@ moreToolsPanel.hidden = true;
 const toolbarOverflowSection = document.createElement('div');
 toolbarOverflowSection.className = 'more-tools-overflow-items';
 toolbarOverflowSection.hidden = true;
-const releaseFixedBaselineSeparator = document.createElement('div');
-releaseFixedBaselineSeparator.className = 'more-tools-separator';
-releaseFixedBaselineSeparator.setAttribute('role', 'separator');
-const changesSeparator = document.createElement('div');
-changesSeparator.className = 'more-tools-separator';
-changesSeparator.setAttribute('role', 'separator');
 const displaySeparator = document.createElement('div');
 displaySeparator.className = 'more-tools-separator';
 displaySeparator.setAttribute('role', 'separator');
@@ -888,11 +866,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   contentMaxWidthBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.constrainWidth;
   sourceLineNumbersBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.showLineNumbers;
   longCodeBlockFoldingBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.foldLongCodeBlocks;
-  releaseFixedBaselineBtn.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = strings.releaseFixedBaseline;
-  diffBaselineButtons.forEach((button) => {
-    const mode = button.dataset.baselineMode as typeof diffBaselineOptions[number]['mode'];
-    button.querySelector<HTMLElement>('.more-tools-option-label')!.textContent = getDiffBaselineOptionLabel(mode);
-  });
+  changesReviewControl.setUiLanguage(language);
   updateGitChangesGutterUI();
   updateContentMaxWidthUI();
   editorNotice.setUiLanguage(language);
@@ -957,10 +931,6 @@ editorFontSizeControls.append(editorFontSizeModeControl.element, editorFontSizeS
 editorFontSizeRow.append(editorFontSizeLabel, editorFontSizeControls);
 moreToolsPanel.append(
   toolbarOverflowSection,
-  releaseFixedBaselineBtn,
-  releaseFixedBaselineSeparator,
-  ...diffBaselineButtons,
-  changesSeparator,
   contentMaxWidthBtn,
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
@@ -1455,6 +1425,7 @@ type WebviewUiState = {
   mode?: 'live' | 'source' | 'preview';
   lastEditableMode?: 'live' | 'source';
   contentMaxWidthEnabled?: boolean;
+  gitDiffDetailsVisible?: boolean;
   outlineMode?: 'floating' | 'fixed';
   outlineWidth?: number;
 };
@@ -1467,6 +1438,7 @@ const persistUiState = (
     mode,
     lastEditableMode,
     contentMaxWidthEnabled,
+    gitDiffDetailsVisible,
     outlineMode: outlineUiState.mode,
     outlineWidth: outlineUiState.width
   };
@@ -1834,6 +1806,10 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     mermaidDiagramPresentationFactory,
     uiLanguage: activeUiLanguage,
     sourceLineNumbers: pendingSourceLineNumbers,
+    onGitDiffSummaryChange: (summary) => {
+      gitDiffSummary = summary;
+      presentChangesReview();
+    },
     previewViewportSurface: {
       captureTopVisiblePosition() {
         const position = previewController.getTopVisiblePosition();
@@ -1847,6 +1823,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
   editor.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
   gitClient?.applyBaselineToEditor(editor);
+  syncGitDiffDetails();
   syncGitDiffLineHighlights();
   editor.focus();
   pendingInitialText = null;
@@ -1888,6 +1865,8 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
     editor.setMode(mode, viewport);
+    changesReviewMode = mode;
+    syncGitDiffDetails();
     syncGitDiffLineHighlights();
     if (outlineController.isVisible()) outlineController.refresh();
     if (mode === 'live') failureNotice.clearFailureNotice();
@@ -1902,6 +1881,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
       document.activeElement.blur();
     }
     syncGitDiffLineHighlights();
+    if (active) syncGitDiffDetails();
   },
   setEditorVisible(visible) {
     editorHost.hidden = !visible;
@@ -1909,6 +1889,8 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   presentModeControl(mode) {
     root.dataset.mode = mode;
     modeControl.setActive(mode);
+    changesReviewMode = mode;
+    presentChangesReview();
   },
   closeFind: () => findPanelController.close(),
   setSearchOwner: () => findPanelController.updateFindStatusSummary(),
@@ -2000,7 +1982,11 @@ const handleInit = (message: InitMessage) => {
     setDiffBaselineMode(message.diffBaselineMode, { post: false });
   }
   if (typeof message.fixedBaselinePinned === 'boolean' && typeof message.fixedBaselineActive === 'boolean') {
-    setFixedBaselineState(message.fixedBaselinePinned, message.fixedBaselineActive);
+    setFixedBaselineState(
+      message.fixedBaselinePinned,
+      message.fixedBaselineActive,
+      message.fixedBaselineUpdatedAt
+    );
   }
   if (typeof message.gitDiffLineHighlights === 'boolean') {
     gitDiffLineHighlightsEnabled = message.gitDiffLineHighlights;
@@ -2157,7 +2143,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'fixedBaselineChanged') {
-    setFixedBaselineState(message.pinned === true, message.active === true);
+    setFixedBaselineState(message.pinned === true, message.active === true, message.updatedAt);
     return;
   }
 
@@ -2180,7 +2166,11 @@ window.addEventListener('message', (event) => {
   }
 
   if (message.type === 'gitBaselineChanged') {
+    if (message.payload.mode === 'git-head') {
+      gitBaselineState = message.payload;
+    }
     gitClient?.handleMessage(message, { editor });
+    presentChangesReview();
     return;
   }
 
@@ -2271,6 +2261,7 @@ window.addEventListener('beforeunload', () => {
   documentSaveFlushAdapter.dispose();
   previewAdapter.dispose();
   exportAdapter.dispose();
+  changesReviewControl.destroy();
   if (pendingEditorSurfaceRecoveryRaf !== null) {
     window.cancelAnimationFrame(pendingEditorSurfaceRecoveryRaf);
     pendingEditorSurfaceRecoveryRaf = null;
@@ -2301,6 +2292,9 @@ if (state && (state.mode === 'live' || state.mode === 'source' || state.mode ===
 }
 if (typeof state?.contentMaxWidthEnabled === 'boolean') {
   setContentMaxWidthEnabled(state.contentMaxWidthEnabled, { post: false, persist: false });
+}
+if (typeof state?.gitDiffDetailsVisible === 'boolean') {
+  setGitDiffDetailsVisibleState(state.gitDiffDetailsVisible, { persist: false });
 }
 if (state?.outlineMode === 'floating' || state?.outlineMode === 'fixed') {
   outlineUiState.mode = state.outlineMode;
@@ -2488,17 +2482,6 @@ longCodeBlockFoldingBtn.addEventListener('click', () => {
   longCodeBlockFoldingBtn.classList.toggle('is-active', longCodeBlockFoldingEnabled);
   longCodeBlockFoldingBtn.setAttribute('aria-checked', longCodeBlockFoldingEnabled ? 'true' : 'false');
   editor?.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
-});
-gitChangesGutterBtn.addEventListener('click', toggleGitChangesGutter);
-fixedBaselineBtn.addEventListener('click', () => {
-  vscode.postMessage({ type: 'setFixedBaseline', enabled: !fixedBaselineActive });
-});
-releaseFixedBaselineBtn.addEventListener('click', () => {
-  if (!fixedBaselinePinned) {
-    return;
-  }
-  vscode.postMessage({ type: 'releaseFixedBaseline' });
-  setMoreToolsVisible(false);
 });
 scheduleReadyHandshake();
 scheduleEditorBundleWarmupAfterReady();

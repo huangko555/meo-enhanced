@@ -1,6 +1,18 @@
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
+import type { ChangesReviewUnavailableReason } from './changesReview';
 
 export type { UiLanguage } from '../../../src/foundation/uiLanguage';
+
+export type GitHeadDisplayStatus =
+  | 'git-unavailable'
+  | 'not-repo'
+  | 'ignored'
+  | 'untracked'
+  | 'no-commits'
+  | 'not-file'
+  | 'too-large'
+  | 'binary'
+  | 'error';
 
 export type UiStrings = Readonly<{
   auto: string;
@@ -170,18 +182,31 @@ export type UiStrings = Readonly<{
   constrainContentWidth: string;
   constrainWidth: string;
   disableConstrainedWidth: string;
-  hideChanges: (baseline: string) => string;
-  showChanges: (baseline: string) => string;
-  fixedBaseline: string;
-  changes: string;
-  pinLatestSavedBaseline: string;
-  selectedMode: string;
-  showFixedBaseline: string;
-  releaseFixedBaseline: string;
   currentEdits: string;
   recentSave: string;
   gitHead: string;
-  diffBaselineLabel: (baseline: string) => string;
+  compareWithVersion: string;
+  displaySettings: string;
+  currentDiskVersionOption: string;
+  beforeLastSaveVersionOption: string;
+  gitHeadOption: string;
+  gitHeadStatus: (status: GitHeadDisplayStatus) => string;
+  gitHeadWithStatus: (status: string) => string;
+  gitHeadOptionWithStatus: (status: string) => string;
+  manualSnapshot: string;
+  createSnapshot: string;
+  clickToCreateSnapshot: string;
+  updateSnapshot: string;
+  showChangeLocations: string;
+  showBeforeChangeContent: string;
+  sourceModeOnly: string;
+  noChanges: string;
+  comparisonUnavailable: string;
+  comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => string;
+  addedCount: (count: number) => string;
+  deletedCount: (count: number) => string;
+  comparedWith: (baseline: string) => string;
+  changesComparedWith: (summary: string, baseline: string) => string;
   dismissNotification: string;
   liveModeFailure: string;
   editorUpdateFailure: string;
@@ -279,12 +304,45 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Click again to reload disk version',
     constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
     disableConstrainedWidth: 'Disable Constrained Width',
-    hideChanges: (baseline: string) => `Hide Changes (${baseline})`,
-    showChanges: (baseline: string) => `Show Changes (${baseline})`, fixedBaseline: 'Fixed Baseline',
-    changes: 'Changes', pinLatestSavedBaseline: 'Pin Latest Saved Version as Baseline',
-    selectedMode: 'Selected Mode', showFixedBaseline: 'Show Fixed Baseline',
-    releaseFixedBaseline: 'Release Fixed Baseline', currentEdits: 'Latest Disk Version',
-    recentSave: 'Previous Saved Version', gitHead: 'Git HEAD Version', diffBaselineLabel: (baseline: string) => `diff: ${baseline}`,
+    currentEdits: 'Saved File', recentSave: 'Before Agent Edits',
+    gitHead: 'Git HEAD (Latest Commit)',
+    compareWithVersion: 'Compare Against', displaySettings: 'Display Settings',
+    currentDiskVersionOption: 'Saved File',
+    beforeLastSaveVersionOption: 'Before Agent Edits',
+    gitHeadOption: 'Git HEAD · Latest Commit', manualSnapshot: 'Manual Snapshot',
+    gitHeadStatus: (status: GitHeadDisplayStatus) => ({
+      'git-unavailable': 'Git Unavailable',
+      'not-repo': 'Not a Git Repo',
+      ignored: 'Ignored by Git',
+      untracked: 'Untracked File',
+      'no-commits': 'No Commits',
+      'not-file': 'Not a Local File',
+      'too-large': 'File Too Large',
+      binary: 'Binary File',
+      error: 'Temporary Error'
+    })[status],
+    gitHeadWithStatus: (status: string) => `Git HEAD (${status})`,
+    gitHeadOptionWithStatus: (status: string) => `Git HEAD · ${status}`,
+    createSnapshot: 'Create',
+    clickToCreateSnapshot: 'Click to Create', updateSnapshot: 'Update',
+    showChangeLocations: 'Mark Change Locations',
+    showBeforeChangeContent: 'Show Original · Source Only',
+    sourceModeOnly: 'Available in Source mode only', noChanges: 'No Changes',
+    comparisonUnavailable: 'Unable to Compare',
+    comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
+      'git-unavailable': 'Git Unavailable',
+      'not-repo': 'Not a Git Repo',
+      ignored: 'Ignored by Git',
+      'not-file': 'Not a Local File',
+      'too-large': 'File Too Large',
+      binary: 'Binary File',
+      error: 'Temporary Error',
+      'no-baseline': 'No Comparison Version',
+      timeout: 'Comparison Timed Out'
+    })[reason],
+    addedCount: (count: number) => `${count} added`, deletedCount: (count: number) => `${count} deleted`,
+    comparedWith: (baseline: string) => `vs. ${baseline}`,
+    changesComparedWith: (summary: string, baseline: string) => `${summary} · Compared with ${baseline}`,
     dismissNotification: 'Dismiss notification',
     liveModeFailure: 'Live mode failed to render this document. Switched to Source mode.',
     editorUpdateFailure: 'Editor failed to update this document. Try reopening the file.',
@@ -377,12 +435,43 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '再次点击以重新加载磁盘版本',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',
-    hideChanges: (baseline: string) => `隐藏更改（${baseline}）`,
-    showChanges: (baseline: string) => `显示更改（${baseline}）`, fixedBaseline: '固定基线',
-    changes: '更改', pinLatestSavedBaseline: '将最近保存版本固定为基线',
-    selectedMode: '所选模式', showFixedBaseline: '显示固定基线',
-    releaseFixedBaseline: '释放固定基线', currentEdits: '最新磁盘版本', recentSave: '上一保存版本',
-    gitHead: 'Git HEAD 版本', diffBaselineLabel: (baseline: string) => `diff: 与${/^[A-Za-z]/.test(baseline) ? ' ' : ''}${baseline}比较`,
+    currentEdits: '当前磁盘版本', recentSave: 'Agent 编辑前版本',
+    gitHead: 'Git HEAD（最新提交）',
+    compareWithVersion: '比较版本', displaySettings: '显示设置',
+    currentDiskVersionOption: '当前磁盘版本',
+    beforeLastSaveVersionOption: 'Agent 编辑前版本',
+    gitHeadOption: 'Git HEAD · 最新提交', manualSnapshot: '手动快照',
+    gitHeadStatus: (status: GitHeadDisplayStatus) => ({
+      'git-unavailable': 'Git 不可用',
+      'not-repo': '非 Git 仓库',
+      ignored: 'Git 已忽略',
+      untracked: '未跟踪文件',
+      'no-commits': '暂无提交',
+      'not-file': '非本地文件',
+      'too-large': '文件过大',
+      binary: '二进制文件',
+      error: '暂不可用'
+    })[status],
+    gitHeadWithStatus: (status: string) => `Git HEAD（${status}）`,
+    gitHeadOptionWithStatus: (status: string) => `Git HEAD · ${status}`,
+    createSnapshot: '创建', clickToCreateSnapshot: '点击创建', updateSnapshot: '更新',
+    showChangeLocations: '标记更改位置',
+    showBeforeChangeContent: '显示修改前内容（仅源码模式）', sourceModeOnly: '仅在源码模式下可用', noChanges: '无更改',
+    comparisonUnavailable: '无法比较',
+    comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
+      'git-unavailable': 'Git 不可用',
+      'not-repo': '非 Git 仓库',
+      ignored: 'Git 已忽略',
+      'not-file': '非本地文件',
+      'too-large': '文件过大',
+      binary: '二进制文件',
+      error: '暂不可用',
+      'no-baseline': '暂无比较版本',
+      timeout: '比较超时'
+    })[reason],
+    addedCount: (count: number) => `新增 ${count} 行`, deletedCount: (count: number) => `删除 ${count} 行`,
+    comparedWith: (baseline: string) => `与${baseline}对比`,
+    changesComparedWith: (summary: string, baseline: string) => `${summary} · 与${baseline}对比`,
     dismissNotification: '关闭通知',
     liveModeFailure: '实时模式无法渲染此文档，已切换到源码模式。',
     editorUpdateFailure: '编辑器无法更新此文档，请重新打开文件。',

@@ -6,7 +6,6 @@ export { normalizeOutlineWidth } from './outlineWidth';
 export const EXTENSION_CONFIG_SECTION = 'meoEnhanced';
 export const GIT_CHANGES_GUTTER_SETTING_KEY = 'gitChanges.visible';
 export const GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY = 'gitChanges.lineHighlights';
-export const GIT_DIFF_LINE_HIGHLIGHTS_DEFAULT_OFF_MIGRATION_KEY = 'gitDiffLineHighlightsDefaultOffMigrationV1';
 export const DIFF_BASELINE_MODE_SETTING_KEY = 'changes.baseline';
 export const CONTENT_MAX_WIDTH_SETTING_KEY = 'contentMaxWidth.visible';
 export const LARGE_DOCUMENT_OPTIMIZATION_SETTING_KEY = 'performance.largeDocumentOptimization';
@@ -27,26 +26,11 @@ export function getGitChangesGutterEnabled(context: vscode.ExtensionContext): bo
     GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY,
     GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
     GIT_CHANGES_GUTTER_LEGACY_SETTING_KEY
-  ]);
+  ], false);
 }
 
 export function getGitDiffLineHighlightsEnabled(): boolean {
   return vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get<boolean>(GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY, false);
-}
-
-export async function migrateGitDiffLineHighlightsDefaultOff(context: vscode.ExtensionContext): Promise<void> {
-  if (context.globalState.get<boolean>(GIT_DIFF_LINE_HIGHLIGHTS_DEFAULT_OFF_MIGRATION_KEY, false)) {
-    return;
-  }
-
-  try {
-    await vscode.workspace
-      .getConfiguration(EXTENSION_CONFIG_SECTION)
-      .update(GIT_DIFF_LINE_HIGHLIGHTS_SETTING_KEY, false, vscode.ConfigurationTarget.Global);
-    await context.globalState.update(GIT_DIFF_LINE_HIGHLIGHTS_DEFAULT_OFF_MIGRATION_KEY, true);
-  } catch {
-    // Leave the migration incomplete so a later activation can retry without blocking startup.
-  }
 }
 
 export function getCurrentVscodeCodeTheme(kind?: vscode.ColorThemeKind): RawVscodeTheme | null {

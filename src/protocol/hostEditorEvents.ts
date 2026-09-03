@@ -9,7 +9,7 @@ export type HostEditorEvent =
   | { readonly type: 'gitChangesGutterChanged'; readonly enabled: boolean }
   | { readonly type: 'gitDiffLineHighlightsChanged'; readonly enabled: boolean }
   | { readonly type: 'diffBaselineModeChanged'; readonly mode: DiffBaselineMode }
-  | { readonly type: 'fixedBaselineChanged'; readonly pinned: boolean; readonly active: boolean }
+  | { readonly type: 'fixedBaselineChanged'; readonly pinned: boolean; readonly active: boolean; readonly updatedAt?: number | null }
   | { readonly type: 'contentMaxWidthChanged'; readonly enabled: boolean }
   | { readonly type: 'findOptionsChanged'; readonly findOptions: { readonly wholeWord: boolean; readonly caseSensitive: boolean } };
 
@@ -45,7 +45,10 @@ export function decodeHostEditorEvent(value: unknown): HostEditorEvent | null {
       return value.mode === 'current-edit' || value.mode === 'recent-save' || value.mode === 'git-head'
         ? value as HostEditorEvent : null;
     case 'fixedBaselineChanged':
-      return typeof value.pinned === 'boolean' && typeof value.active === 'boolean' ? value as HostEditorEvent : null;
+      return typeof value.pinned === 'boolean'
+        && typeof value.active === 'boolean'
+        && (value.updatedAt === undefined || value.updatedAt === null || (typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt)))
+        ? value as HostEditorEvent : null;
     case 'findOptionsChanged':
       return isRecord(value.findOptions)
         && typeof value.findOptions.wholeWord === 'boolean'

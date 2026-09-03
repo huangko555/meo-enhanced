@@ -67,13 +67,16 @@ assert(interleavedSaveTracker.getRecentSaveBaseline()?.text === 'A', 'an automat
 const fixedBaselineTracker = new SavedRevisionTracker({ mergeWindowMs: 10_000 });
 assert(fixedBaselineTracker.pinLatestSavedBaseline() === null, 'pinning should fail before a saved disk revision exists');
 fixedBaselineTracker.initialize('A');
-assert(fixedBaselineTracker.pinLatestSavedBaseline()?.text === 'A', 'pinning should capture the latest saved disk revision');
+assert(fixedBaselineTracker.pinLatestSavedBaseline(1_000)?.text === 'A', 'pinning should capture the latest saved disk revision');
+assert(fixedBaselineTracker.getPinnedBaselineUpdatedAt() === 1_000, 'pinning should record when the snapshot was created');
 fixedBaselineTracker.noteDiskRevision('B', 1_000);
 fixedBaselineTracker.noteDiskRevision('C', 20_000);
 assert(fixedBaselineTracker.getPinnedBaseline()?.text === 'A', 'later saves must not advance a pinned baseline');
 assert(fixedBaselineTracker.releasePinnedBaseline() === true, 'releasing an active pinned baseline should report a change');
 assert(fixedBaselineTracker.getPinnedBaseline() === null, 'releasing should restore normal baseline resolution');
+assert(fixedBaselineTracker.getPinnedBaselineUpdatedAt() === null, 'releasing should clear the snapshot timestamp');
 assert(fixedBaselineTracker.releasePinnedBaseline() === false, 'releasing an inactive pinned baseline should be stable');
-assert(fixedBaselineTracker.pinLatestSavedBaseline()?.text === 'C', 'pinning again should capture the newest saved revision');
+assert(fixedBaselineTracker.pinLatestSavedBaseline(2_000)?.text === 'C', 'pinning again should capture the newest saved revision');
+assert(fixedBaselineTracker.getPinnedBaselineUpdatedAt() === 2_000, 'replacing the snapshot should refresh its timestamp');
 
 console.log('saved revision tracker checks passed');

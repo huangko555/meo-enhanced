@@ -267,7 +267,7 @@
         },
         "meoEnhanced.gitChanges.visible": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "order": 5,
           "description": "%config.gitChanges%"
         },
@@ -304,7 +304,7 @@
   },
   "scripts": {
     "install:all": "bun install && (cd webview && bun install)",
-    "test": "bun run test:latex-scanner && bun run test:table-provenance && bun run test:table-column-width && bun run test:table-sticky-header && bun run test:table-command && bun run test:image-presentation && bun run test:mermaid-presentation && bun run test:unit && bun run test:browser-high-risk && bun run test:browser",
+    "test": "bun run test:latex-scanner && bun run test:table-provenance && bun run test:table-column-width && bun run test:table-sticky-header && bun run test:table-command && bun run test:image-presentation && bun run test:mermaid-presentation && bun run test:changes-review && bun run test:unit && bun run test:browser-high-risk && bun run test:browser",
     "test:quick": "bun scripts/test-workflow.ts quick",
     "test:targeted": "bun scripts/test-workflow.ts targeted",
     "test:release": "bun scripts/test-workflow.ts release",
@@ -342,6 +342,7 @@
     "test:html-break-rendering": "bun scripts/test-html-break-rendering.ts",
     "test:editor-stability": "bun scripts/test-editor-stability.ts",
     "test:highlight": "bun scripts/test-highlight.ts",
+    "test:changes-review": "bun scripts/test-changes-review.ts",
     "test:basic-capability-production": "bun scripts/test-basic-capability-production-matrix.ts",
     "typecheck": "bun run typecheck:extension && bun run typecheck:webview",
     "typecheck:extension": "tsc -p tsconfig.json --noEmit",
