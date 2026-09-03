@@ -322,6 +322,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     requestRefresh: (options) => requestDiffBaselineRefresh(options)
   });
   notifySavedRevisionChanged = () => diffBaselineSelection.savedRevisionChanged();
+  const retryDiffComparison = (): void => {
+    diffBaselineSelection.requestRefresh({
+      forcePost: true,
+      forceReload: diffBaselineSelection.getState().mode === 'git-head'
+    });
+  };
 
   const readInitialSavedRevision = async (): Promise<SavedRevisionDto | null> => {
     if (!savedRevisionTracker.getCurrentEditBaseline()) {
@@ -441,10 +447,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     if (!readBack.ok) {
       return { ok: false, error: { code: 'operation-failed', message: 'Saved text differs from the requested Revision' } };
     }
-    const changed = savedRevisionTracker.getCurrentEditBaseline()
+    savedRevisionTracker.getCurrentEditBaseline()
       ? savedRevisionTracker.noteExplicitSave(readBack.text, previousDisk)
       : savedRevisionTracker.initialize(readBack.text);
-    if (changed) diffBaselineSelection.savedRevisionChanged();
+    retryDiffComparison();
     return { ok: true, value: { revision: expected } };
   };
 
@@ -747,8 +753,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         const pendingReload = pendingDiskReloadPresentations.get(raw.reloadId);
         if (!pendingReload) return;
         pendingDiskReloadPresentations.delete(raw.reloadId);
-        if (raw.presented && savedRevisionTracker.acceptDiskReload(pendingReload.text)) {
-          notifySavedRevisionChanged();
+        if (raw.presented) {
+          savedRevisionTracker.acceptDiskReload(pendingReload.text);
+          retryDiffComparison();
         }
         if (raw.presented
           && raw.receiptVersion === draftRecoveryReceiptVersion

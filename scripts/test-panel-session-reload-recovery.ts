@@ -77,13 +77,29 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
       return true;
     }
   });
+  let baselinePublishCount = 0;
   const controller = createPanelSessionController(createPanelSessionControllerParams({
     panel,
     document,
     pendingDraftRecovery,
-    readDiskText: () => diskText
+    readDiskText: () => diskText,
+    overrides: {
+      diffBaselineOutput: {
+        hash: () => 'baseline',
+        publish: async () => {
+          baselinePublishCount += 1;
+          return true;
+        },
+        publishFixedState: async () => undefined
+      }
+    }
   }) as never);
-  return { controller, postedToWebview, getReceiveMessage: () => receiveMessage };
+  return {
+    controller,
+    postedToWebview,
+    getReceiveMessage: () => receiveMessage,
+    getBaselinePublishCount: () => baselinePublishCount
+  };
 };
 
 const reloadIdFrom = (messages: readonly Record<string, unknown>[]): number => {
@@ -224,6 +240,50 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
     receiptVersion: 1
   });
   assert.equal(await closeAndReadRecoveredText(fixture.controller), 'disk version', 'success clears recovery');
+}
+
+{
+  const fixture = createHostFixture('disk version', 'disk version');
+  await fixture.controller.handleMessage({ type: 'ready' });
+  await flushMicrotasks();
+  const baselinePostsBeforeReload = fixture.getBaselinePublishCount();
+  await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
+  await fixture.controller.handleMessage({
+    type: 'documentReloadPresentationCompleted',
+    reloadId: reloadIdFrom(fixture.postedToWebview),
+    presented: true,
+    receiptVersion: 0
+  });
+  await flushMicrotasks();
+  assert.ok(
+    fixture.getBaselinePublishCount() > baselinePostsBeforeReload,
+    'a successful disk reload must republish an unchanged baseline so a timed-out comparison retries'
+  );
+  fixture.controller.dispose();
+}
+
+{
+  const fixture = createHostFixture('disk version', 'disk version');
+  await fixture.controller.handleMessage({ type: 'ready' });
+  await flushMicrotasks();
+  await fixture.controller.handleMessage({
+    type: 'saveDocumentRevision',
+    requestId: 'prime-save-checkpoint',
+    revision: { version: document.version, text: document.text }
+  });
+  await flushMicrotasks();
+  const baselinePostsAfterPrimeSave = fixture.getBaselinePublishCount();
+  await fixture.controller.handleMessage({
+    type: 'saveDocumentRevision',
+    requestId: 'retry-comparison-save',
+    revision: { version: document.version, text: document.text }
+  });
+  await flushMicrotasks();
+  assert.ok(
+    fixture.getBaselinePublishCount() > baselinePostsAfterPrimeSave,
+    'a successful unchanged save must republish the baseline so a timed-out comparison retries'
+  );
+  fixture.controller.dispose();
 }
 
 {
