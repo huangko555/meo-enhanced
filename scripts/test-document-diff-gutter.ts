@@ -15,6 +15,37 @@ async function waitForFrames(page: Page, count = 4): Promise<void> {
   }, count);
 }
 
+async function assertCompactMarkerPlacement(page: Page, mode: 'source' | 'live'): Promise<void> {
+  const geometry = await page.evaluate(() => {
+    const stripe = document.querySelector<HTMLElement>(
+      '.meo-git-gutter-marker:is(.is-added, .is-modified) .meo-git-gutter-stripe'
+    );
+    const lineNumber = Array.from(
+      document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+    ).find((element) => element.textContent?.trim());
+    const content = document.querySelector<HTMLElement>('.cm-content');
+    if (!stripe || !lineNumber || !content) return null;
+
+    const lineNumberRange = document.createRange();
+    lineNumberRange.selectNodeContents(lineNumber);
+    const stripeRect = stripe.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    return {
+      lineNumberTextRight: lineNumberRange.getBoundingClientRect().right,
+      stripeLeft: stripeRect.left,
+      stripeRight: stripeRect.right,
+      contentLeft: contentRect.left
+    };
+  });
+  if (
+    !geometry ||
+    geometry.stripeLeft - geometry.lineNumberTextRight < 4 ||
+    geometry.contentLeft - geometry.stripeRight < 4
+  ) {
+    throw new Error(`${mode} compact change marker was not separated from both line numbers and content: ${JSON.stringify(geometry)}`);
+  }
+}
+
 async function assertDetailBackgroundContinuity(page: Page, label: string): Promise<void> {
   const layout = await page.evaluate(() => {
     const hasLineNumbers = document.querySelector('.cm-lineNumbers') !== null;
@@ -143,6 +174,12 @@ async function main() {
       const selection = 'first\n'.length;
       editor.revealSelection(selection, selection, { focus: false });
     });
+    await waitForFrames(page, 4);
+    await assertCompactMarkerPlacement(page, 'source');
+    await page.evaluate(() => (window as any).__editor.setMode('live'));
+    await waitForFrames(page, 4);
+    await assertCompactMarkerPlacement(page, 'live');
+    await page.evaluate(() => (window as any).__editor.setMode('source'));
     await waitForFrames(page, 4);
     const compactLayoutBaseline = await page.evaluate(() => ({
       contentLeft: document.querySelector<HTMLElement>('.meo-diff-changed-line')!.getBoundingClientRect().left,
@@ -766,7 +803,36 @@ async function main() {
 
     const rect = await marker.boundingBox();
     if (!rect) throw new Error('Deleted gap marker had no layout box');
-    await page.mouse.move(rect.x + 1, rect.y + 1);
+    const deletionGeometry = await marker.evaluate((element) => {
+      const markerRect = element.getBoundingClientRect();
+      const triangleStyle = getComputedStyle(element, '::after');
+      const triangleLeft = markerRect.left + (Number.parseFloat(triangleStyle.left) || 0);
+      const triangleRight = triangleLeft + (Number.parseFloat(triangleStyle.borderLeftWidth) || 0);
+      const lineNumber = Array.from(
+        document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
+      ).find((candidate) => candidate.textContent?.trim());
+      const lineNumberRange = document.createRange();
+      if (lineNumber) lineNumberRange.selectNodeContents(lineNumber);
+      return {
+        triangleLeft,
+        triangleRight,
+        triangleY: markerRect.top,
+        lineNumberTextRight: lineNumber ? lineNumberRange.getBoundingClientRect().right : null,
+        contentLeft: document.querySelector<HTMLElement>('.cm-content')?.getBoundingClientRect().left ?? null
+      };
+    });
+    if (
+      deletionGeometry.lineNumberTextRight === null ||
+      deletionGeometry.contentLeft === null ||
+      deletionGeometry.triangleLeft - deletionGeometry.lineNumberTextRight < 4 ||
+      deletionGeometry.contentLeft - deletionGeometry.triangleRight < 4
+    ) {
+      throw new Error(`Source deletion marker was not centered between line numbers and content: ${JSON.stringify(deletionGeometry)}`);
+    }
+    await page.mouse.move(
+      (deletionGeometry.triangleLeft + deletionGeometry.triangleRight) / 2,
+      deletionGeometry.triangleY
+    );
     await waitForFrames(page, 2);
     const tooltip = await page.evaluate(() => {
       const root = document.querySelector<HTMLElement>('.meo-deletion-tooltip');
@@ -1139,13 +1205,19 @@ async function main() {
       document.querySelectorAll<HTMLElement>('.meo-git-gutter-marker.is-deleted')
     ).map((marker) => {
       const rect = marker.getBoundingClientRect();
-      return { left: rect.left, top: rect.top };
+      const style = getComputedStyle(marker, '::after');
+      const triangleLeft = rect.left + (Number.parseFloat(style.left) || 0);
+      const triangleWidth = Number.parseFloat(style.borderLeftWidth) || 0;
+      return { triangleLeft, triangleWidth, top: rect.top };
     }).sort((left, right) => left.top - right.top));
     if (adjacentMarkers.length !== 2) {
       throw new Error(`Adjacent deletions rendered ${adjacentMarkers.length} markers instead of two`);
     }
     const lowerMarker = adjacentMarkers[1];
-    await page.mouse.move(lowerMarker.left + 1, lowerMarker.top - 4);
+    await page.mouse.move(
+      lowerMarker.triangleLeft + lowerMarker.triangleWidth / 2,
+      lowerMarker.top - 4
+    );
     await waitForFrames(page, 2);
     const adjacentTooltipText = await page.$eval('.meo-deletion-tooltip', (element) => element.textContent ?? '');
     if (!adjacentTooltipText.includes('removed lower') || adjacentTooltipText.includes('removed upper')) {

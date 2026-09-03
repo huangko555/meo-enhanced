@@ -4107,7 +4107,7 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-git-gutter-marker::before {
   content: '';
   position: absolute;
-  left: -3px;
+  left: -8px;
   top: 0;
   width: 13px;
   height: 100%;
@@ -4116,7 +4116,7 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-git-gutter-stripe {
   position: absolute;
-  left: 0;
+  left: -5px;
   top: 0;
   width: 3px;
   height: 100%;
@@ -4136,7 +4136,7 @@ body.outline-resizing .preview-frame {
   content: '';
   position: absolute;
   z-index: 2;
-  left: 0;
+  left: -6px;
   top: -3px;
   width: 0;
   height: 0;
@@ -4151,17 +4151,17 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-git-gutter-marker.is-deleted.is-hit-hover::after {
-  left: -2px;
+  left: -8px;
   border-left-width: 7px;
 }
 
 .cm-editor .meo-git-gutter-marker:hover .meo-git-gutter-stripe {
-  left: -2px;
+  left: -7px;
   width: 5px;
 }
 
 .cm-editor .meo-git-gutter-marker.is-hit-hover .meo-git-gutter-stripe {
-  left: -2px;
+  left: -7px;
   width: 5px;
 }
 
