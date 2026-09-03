@@ -909,16 +909,16 @@ body {
 }
 
 .changes-review-count {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .changes-review-count.is-added {
-  color: var(--git-added);
+  color: color-mix(in srgb, var(--git-added) 70%, var(--meo-foreground) 30%);
 }
 
 .changes-review-count.is-deleted {
-  color: var(--git-deleted);
+  color: color-mix(in srgb, var(--git-deleted) 70%, var(--meo-foreground) 30%);
 }
 
 .changes-review-empty {
@@ -1202,6 +1202,7 @@ body {
 }
 
 .editor-font-size-stepper {
+  box-sizing: border-box;
   display: inline-grid;
   grid-template-columns: 24px 28px 24px;
   align-items: stretch;

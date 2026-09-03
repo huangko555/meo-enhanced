@@ -693,7 +693,11 @@ async function main() {
         separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length,
         width: panel.getBoundingClientRect().width,
         clientWidth: panel.clientWidth,
-        scrollWidth: panel.scrollWidth
+        scrollWidth: panel.scrollWidth,
+        fontSizeModeHeight: panel.querySelector<HTMLElement>('.editor-font-size-mode-control')
+          ?.getBoundingClientRect().height,
+        fontSizeStepperHeight: panel.querySelector<HTMLElement>('.editor-font-size-stepper')
+          ?.getBoundingClientRect().height
       };
     });
     if (
@@ -704,7 +708,9 @@ async function main() {
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 1 ||
       moreToolsLayout.width > 268 ||
-      moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth
+      moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth ||
+      moreToolsLayout.fontSizeModeHeight !== 26 ||
+      moreToolsLayout.fontSizeStepperHeight !== 26
     ) {
       throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
     }
@@ -1227,7 +1233,7 @@ async function main() {
       sourceDiffDetails.currentContentEditable !== 'true' ||
       sourceDiffDetails.reviewCountStyles.length < 2 ||
       sourceDiffDetails.reviewCountStyles.some(({ fontSize, fontWeight }) =>
-        fontSize !== '12px' || fontWeight !== '600'
+        fontSize !== '13px' || fontWeight !== '700'
       )
     ) {
       throw new Error(`Source diff detail rendering regressed: ${JSON.stringify(sourceDiffDetails)}`);
