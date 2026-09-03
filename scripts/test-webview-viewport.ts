@@ -915,6 +915,7 @@ async function main() {
       actionIconCount: action.querySelectorAll('svg').length,
       actionAriaLabel: action.getAttribute('aria-label'),
       actionTitle: action.title,
+      actionBackground: getComputedStyle(action).backgroundColor,
       selectHeight: selectRect.height,
       actionHeight: actionRect.height,
       actionGap: actionRect.left - selectRect.right,
@@ -938,9 +939,21 @@ async function main() {
       action: row.querySelector('.changes-review-snapshot-action')?.textContent,
       actionBackground: getComputedStyle(row.querySelector<HTMLElement>('.changes-review-snapshot-action')!).backgroundColor
     }));
+    await page.hover('.changes-review-snapshot-action');
+    const hoveredSnapshotActionBackground = await page.$eval(
+      '.changes-review-snapshot-action',
+      (action) => getComputedStyle(action).backgroundColor
+    );
+    await page.mouse.down();
+    const pressedSnapshotActionBackground = await page.$eval(
+      '.changes-review-snapshot-action',
+      (action) => getComputedStyle(action).backgroundColor
+    );
+    await page.mouse.move(0, 0);
+    await page.mouse.up();
     if (
       !activeSnapshot.selected ||
-      !activeSnapshot.actionSelected ||
+      activeSnapshot.actionSelected ||
       activeSnapshot.rowSelected ||
       activeSnapshot.label !== '手动快照（07:05）' ||
       activeSnapshot.action !== '更新' ||
@@ -951,7 +964,10 @@ async function main() {
       activeSnapshot.actionHeight !== 28 ||
       activeSnapshot.actionGap !== 2 ||
       activeSnapshot.checkRightInset !== 6 ||
-      !activeSnapshot.matchingSelectedBackground ||
+      activeSnapshot.actionBackground !== 'rgba(0, 0, 0, 0)' ||
+      activeSnapshot.matchingSelectedBackground ||
+      hoveredSnapshotActionBackground === 'rgba(0, 0, 0, 0)' ||
+      pressedSnapshotActionBackground === 'rgba(0, 0, 0, 0)' ||
       activeSnapshot.previousGap !== 2 ||
       activeSnapshot.selectAction !== 'select-snapshot' ||
       activeSnapshot.clipped ||
@@ -969,6 +985,8 @@ async function main() {
         const row = panel.querySelector<HTMLElement>('.changes-review-snapshot-row')!;
         const label = row.querySelector<HTMLElement>('.changes-review-option-label')!;
         const action = row.querySelector<HTMLButtonElement>('.changes-review-snapshot-action');
+        const hint = row.querySelector<HTMLElement>('.changes-review-snapshot-create-hint');
+        const select = row.querySelector<HTMLElement>('.changes-review-snapshot-select')!;
         const header = panel.querySelector<HTMLElement>('.changes-review-header')!;
         const headerBaseline = panel.querySelector<HTMLElement>('.changes-review-header-baseline')!;
         const overflow = {
@@ -981,7 +999,9 @@ async function main() {
         };
         return {
           label: label.textContent ?? '',
-          hint: row.querySelector('.changes-review-snapshot-create-hint')?.textContent ?? null,
+          hint: hint?.textContent ?? null,
+          hintColor: hint ? getComputedStyle(hint).color : null,
+          selectColor: getComputedStyle(select).color,
           action: action?.textContent ?? null,
           actionIconCount: action?.querySelectorAll('svg').length ?? 0,
           actionAriaLabel: action?.getAttribute('aria-label') ?? null,
@@ -1054,6 +1074,7 @@ async function main() {
       snapshotStates.english.previousYear.label !== 'Manual Snapshot (Earlier)' ||
       snapshotStates.chinese.none.label !== '手动快照' ||
       snapshotStates.chinese.none.hint !== '点击创建' ||
+      snapshotStates.chinese.none.hintColor !== snapshotStates.chinese.none.selectColor ||
       snapshotStates.chinese.none.action !== null ||
       snapshotStates.chinese.none.actionIconCount !== 0 ||
       snapshotStates.chinese.none.actionAriaLabel !== null ||
@@ -1062,6 +1083,7 @@ async function main() {
       snapshotStates.chinese.none.selectDisabled ||
       snapshotStates.english.none.label !== 'Manual Snapshot' ||
       snapshotStates.english.none.hint !== 'Click to Create' ||
+      snapshotStates.english.none.hintColor !== snapshotStates.english.none.selectColor ||
       snapshotStates.english.none.action !== null ||
       snapshotStates.english.none.actionIconCount !== 0 ||
       snapshotStates.english.none.actionAriaLabel !== null ||
@@ -1180,6 +1202,7 @@ async function main() {
       ));
       const firstContent = rows[0]?.querySelector<HTMLElement>('.meo-git-diff-original-content');
       const currentContent = document.querySelector<HTMLElement>('.editor-host .cm-content');
+      const reviewCounts = Array.from(document.querySelectorAll<HTMLElement>('.changes-review-count'));
       return {
         rowCount: rows.length,
         numberCount: numbers.length,
@@ -1187,7 +1210,11 @@ async function main() {
         firstContent: firstContent?.textContent,
         oldContentEditable: rows[0]?.getAttribute('contenteditable'),
         oldContentUserSelect: firstContent ? getComputedStyle(firstContent).userSelect : null,
-        currentContentEditable: currentContent?.getAttribute('contenteditable')
+        currentContentEditable: currentContent?.getAttribute('contenteditable'),
+        reviewCountStyles: reviewCounts.map((count) => ({
+          fontSize: getComputedStyle(count).fontSize,
+          fontWeight: getComputedStyle(count).fontWeight
+        }))
       };
     });
     if (
@@ -1197,7 +1224,11 @@ async function main() {
       sourceDiffDetails.firstContent !== 'removed baseline line 1' ||
       sourceDiffDetails.oldContentEditable !== 'false' ||
       sourceDiffDetails.oldContentUserSelect !== 'text' ||
-      sourceDiffDetails.currentContentEditable !== 'true'
+      sourceDiffDetails.currentContentEditable !== 'true' ||
+      sourceDiffDetails.reviewCountStyles.length < 2 ||
+      sourceDiffDetails.reviewCountStyles.some(({ fontSize, fontWeight }) =>
+        fontSize !== '12px' || fontWeight !== '600'
+      )
     ) {
       throw new Error(`Source diff detail rendering regressed: ${JSON.stringify(sourceDiffDetails)}`);
     }

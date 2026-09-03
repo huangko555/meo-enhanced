@@ -908,6 +908,11 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.changes-review-count {
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .changes-review-count.is-added {
   color: var(--git-added);
 }
@@ -1068,7 +1073,7 @@ body {
 }
 
 .changes-review-snapshot-create-hint {
-  color: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  color: inherit;
   font-size: 11px;
   white-space: nowrap;
 }
@@ -1090,10 +1095,13 @@ body {
 }
 
 .changes-review-snapshot-action:hover,
-.changes-review-snapshot-action:focus-visible,
-.changes-review-snapshot-action.is-selected {
+.changes-review-snapshot-action:focus-visible {
   background: var(--vscode-toolbar-hoverBackground);
   outline: none;
+}
+
+.changes-review-snapshot-action:active {
+  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
 }
 
 .more-tools-panel {

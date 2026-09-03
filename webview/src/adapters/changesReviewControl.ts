@@ -345,7 +345,6 @@ export function createChangesReviewControl(options: {
     const snapshotAction = document.createElement('button');
     snapshotAction.type = 'button';
     snapshotAction.className = 'changes-review-snapshot-action';
-    snapshotAction.classList.toggle('is-selected', state.baseline === 'manual');
     snapshotAction.dataset.action = state.manualSnapshot.exists ? 'update-snapshot' : 'create-snapshot';
     const snapshotActionText = state.manualSnapshot.exists ? value.updateSnapshot : value.createSnapshot;
     const snapshotActionDescription = language === 'zh-CN'
