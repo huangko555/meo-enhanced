@@ -161,14 +161,20 @@ export function createChangesReviewControl(options: {
     if (counts.added > 0) {
       const added = document.createElement('span');
       added.className = 'changes-review-count is-added';
-      added.textContent = `+${counts.added}`;
+      const sign = document.createElement('span');
+      sign.className = 'changes-review-count-sign';
+      sign.textContent = '+';
+      added.append(sign, document.createTextNode(`${counts.added}`));
       target.appendChild(added);
       accessible.push(value.addedCount(counts.added));
     }
     if (counts.deleted > 0) {
       const deleted = document.createElement('span');
       deleted.className = 'changes-review-count is-deleted';
-      deleted.textContent = `−${counts.deleted}`;
+      const sign = document.createElement('span');
+      sign.className = 'changes-review-count-sign';
+      sign.textContent = '−';
+      deleted.append(sign, document.createTextNode(`${counts.deleted}`));
       target.appendChild(deleted);
       accessible.push(value.deletedCount(counts.deleted));
     }

@@ -909,8 +909,17 @@ body {
 }
 
 .changes-review-count {
+  display: inline-flex;
+  align-items: center;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.changes-review-count-sign {
+  display: inline-block;
+  line-height: 1;
+  transform: translateY(-0.06em);
 }
 
 .changes-review-count.is-added {

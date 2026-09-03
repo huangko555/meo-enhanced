@@ -1209,6 +1209,7 @@ async function main() {
       const firstContent = rows[0]?.querySelector<HTMLElement>('.meo-git-diff-original-content');
       const currentContent = document.querySelector<HTMLElement>('.editor-host .cm-content');
       const reviewCounts = Array.from(document.querySelectorAll<HTMLElement>('.changes-review-count'));
+      const reviewCountSigns = Array.from(document.querySelectorAll<HTMLElement>('.changes-review-count-sign'));
       return {
         rowCount: rows.length,
         numberCount: numbers.length,
@@ -1220,7 +1221,8 @@ async function main() {
         reviewCountStyles: reviewCounts.map((count) => ({
           fontSize: getComputedStyle(count).fontSize,
           fontWeight: getComputedStyle(count).fontWeight
-        }))
+        })),
+        reviewCountSignTransforms: reviewCountSigns.map((sign) => getComputedStyle(sign).transform)
       };
     });
     if (
@@ -1233,8 +1235,10 @@ async function main() {
       sourceDiffDetails.currentContentEditable !== 'true' ||
       sourceDiffDetails.reviewCountStyles.length < 2 ||
       sourceDiffDetails.reviewCountStyles.some(({ fontSize, fontWeight }) =>
-        fontSize !== '13px' || fontWeight !== '700'
-      )
+        fontSize !== '13px' || fontWeight !== '600'
+      ) ||
+      sourceDiffDetails.reviewCountSignTransforms.length < 2 ||
+      sourceDiffDetails.reviewCountSignTransforms.some((transform) => transform === 'none')
     ) {
       throw new Error(`Source diff detail rendering regressed: ${JSON.stringify(sourceDiffDetails)}`);
     }
