@@ -48,6 +48,7 @@ assert.deepEqual(
   flattenTestWorkflowCommands(changes).map((command) => command.args[0]),
   [
     'scripts/test-changes-review.ts',
+    'scripts/test-changes-review-consistency.ts',
     'scripts/test-git-diff-line-highlights-setting.ts',
     'scripts/test-saved-revision-tracker.ts',
     'scripts/test-diff-baseline-selection.ts',

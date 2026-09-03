@@ -195,6 +195,8 @@ let fixedBaselinePinned = false;
 let fixedBaselineActive = false;
 let fixedBaselineUpdatedAt: number | null = null;
 let gitDiffDetailsVisible = false;
+// Baseline selection events arrive before the matching editor transaction. Keep
+// this projection until the editor updates markers and counts from the same state.
 let gitDiffSummary: ChangesReviewDiffSummary = { status: 'pending', added: 0, deleted: 0 };
 let gitBaselineState: GitBaselinePayload | null = null;
 let changesReviewMode: 'live' | 'source' | 'preview' = 'live';
@@ -303,9 +305,6 @@ const setDiffBaselineMode = (
   }
   const changed = mode !== diffBaselineMode;
   const leavesFixedBaseline = fixedBaselineActive;
-  if (changed || leavesFixedBaseline) {
-    gitDiffSummary = { status: 'pending', added: 0, deleted: 0 };
-  }
   diffBaselineMode = mode;
   updateGitChangesGutterUI();
   if (post && (changed || leavesFixedBaseline)) {
@@ -316,9 +315,6 @@ const setDiffBaselineMode = (
 const setFixedBaselineState = (pinned: boolean, active: boolean, updatedAt?: number | null) => {
   const nextActive = pinned && active;
   const nextUpdatedAt = pinned ? updatedAt ?? fixedBaselineUpdatedAt : null;
-  if (nextActive !== fixedBaselineActive || (nextActive && nextUpdatedAt !== fixedBaselineUpdatedAt)) {
-    gitDiffSummary = { status: 'pending', added: 0, deleted: 0 };
-  }
   fixedBaselinePinned = pinned;
   fixedBaselineActive = nextActive;
   fixedBaselineUpdatedAt = nextUpdatedAt;

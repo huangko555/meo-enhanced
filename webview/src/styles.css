@@ -954,12 +954,12 @@ body {
 }
 
 .changes-review-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
   min-height: 28px;
   padding: 0 6px;
-  border-bottom: 1px solid var(--meo-divider-color, var(--vscode-panel-border));
   overflow: hidden;
   color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
   font-size: 11px;
@@ -977,6 +977,7 @@ body {
 }
 
 .changes-review-section {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -984,7 +985,18 @@ body {
 }
 
 .changes-review-section + .changes-review-section {
-  border-top: 1px solid var(--meo-divider-color, var(--vscode-panel-border));
+  padding-top: 5px;
+}
+
+.changes-review-section + .changes-review-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 6px;
+  left: 6px;
+  height: 1px;
+  background: var(--meo-divider-color, var(--vscode-panel-border));
+  pointer-events: none;
 }
 
 .changes-review-section-label {
@@ -1085,6 +1097,21 @@ body {
   color: inherit;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.changes-review-header::after {
+  content: '';
+  position: absolute;
+  right: 6px;
+  bottom: 0;
+  left: 6px;
+  height: 1px;
+  background: var(--meo-divider-color, var(--vscode-panel-border));
+  pointer-events: none;
+}
+
+.changes-review-header > * {
+  transform: translateY(-1px);
 }
 
 .changes-review-snapshot-action {

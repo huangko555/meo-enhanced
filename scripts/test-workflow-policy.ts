@@ -134,6 +134,7 @@ function targetedCommands(
     case 'changes':
       return [
         script('scripts/test-changes-review.ts'),
+        script('scripts/test-changes-review-consistency.ts'),
         script('scripts/test-git-diff-line-highlights-setting.ts'),
         script('scripts/test-saved-revision-tracker.ts'),
         script('scripts/test-diff-baseline-selection.ts'),
