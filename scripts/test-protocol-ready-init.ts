@@ -44,6 +44,7 @@ const completeInit = {
   editorFontSize: 14,
   gitChangesGutter: true,
   gitDiffLineHighlights: true,
+  gitDiffDetailsVisible: false,
   diffBaselineMode: 'git-head' as const,
   fixedBaselinePinned: false,
   fixedBaselineActive: false,
@@ -72,6 +73,7 @@ assert.equal(decodeInitMessage({ ...completeInit, previewSourceColoring: undefin
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSizeMode: 'invalid' }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 9 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 14.5 }), null);
+assert.equal(decodeInitMessage({ ...completeInit, gitDiffDetailsVisible: 'yes' }), null);
 assert.deepEqual(
   decodeInitMessage({ ...completeInit, editorFontSizeMode: undefined, editorFontSize: undefined }),
   completeInit
@@ -100,7 +102,7 @@ assert.equal(normalizePreviewFontFamily('MEO\nSynthetic'), null);
 assert.equal(normalizePreviewFontFamily('x'.repeat(MAX_PREVIEW_FONT_FAMILY_LENGTH + 1)), null);
 for (const requiredKey of [
   'documentId', 'savedRevision', 'diagnostics', 'uiLanguage', 'sourceLineNumbers', 'previewAppearance', 'previewFontFamily', 'editorAppearance', 'gitChangesGutter',
-  'gitDiffLineHighlights', 'diffBaselineMode', 'fixedBaselinePinned',
+  'gitDiffLineHighlights', 'gitDiffDetailsVisible', 'diffBaselineMode', 'fixedBaselinePinned',
   'fixedBaselineActive', 'contentMaxWidthEnabled',
   'findOptions', 'outlinePosition', 'outlineVisible',
   'outlineWidth', 'vscodeTheme'
@@ -641,6 +643,7 @@ assert.equal(decodeGitBaselineChangedEvent({
 for (const command of [
   { type: 'setMode', mode: 'preview' },
   { type: 'setGitChangesGutter', enabled: false },
+  { type: 'setGitDiffDetailsVisible', visible: true },
   { type: 'setDiffBaselineMode', mode: 'git-head' },
   { type: 'setFixedBaseline', enabled: true },
   { type: 'updateFixedBaseline' },
@@ -663,6 +666,7 @@ for (const command of [
   assert.notEqual(decodeEditorCommand(command), null, `Editor command was rejected: ${command.type}`);
 }
 assert.equal(decodeEditorCommand({ type: 'setMode', mode: 'unknown' }), null);
+assert.equal(decodeEditorCommand({ type: 'setGitDiffDetailsVisible', visible: 'yes' }), null);
 assert.equal(decodeEditorCommand({ type: 'saveDocument' }), null);
 assert.equal(decodeEditorCommand({ type: 'setLineNumbers', visible: true }), null);
 assert.equal(decodeEditorCommand({ type: 'setLongCodeBlockFolding', enabled: false }), null);

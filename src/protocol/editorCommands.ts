@@ -14,6 +14,7 @@ export type OutlinePosition = 'left' | 'right';
 export type EditorCommand =
   | { readonly type: 'setMode'; readonly mode: EditorMode }
   | { readonly type: 'setGitChangesGutter'; readonly visible?: boolean; readonly enabled?: boolean }
+  | { readonly type: 'setGitDiffDetailsVisible'; readonly visible: boolean }
   | { readonly type: 'setDiffBaselineMode'; readonly mode: DiffBaselineMode }
   | { readonly type: 'setFixedBaseline'; readonly enabled: boolean }
   | { readonly type: 'updateFixedBaseline' }
@@ -65,6 +66,8 @@ export function decodeEditorCommand(value: unknown): EditorCommand | null {
       return (value.visible === undefined || isBoolean(value.visible))
         && (value.enabled === undefined || isBoolean(value.enabled))
         && (isBoolean(value.visible) || isBoolean(value.enabled)) ? value as EditorCommand : null;
+    case 'setGitDiffDetailsVisible':
+      return isBoolean(value.visible) ? value as EditorCommand : null;
     case 'setFixedBaseline':
     case 'setContentMaxWidth':
       return isBoolean(value.enabled) ? value as EditorCommand : null;

@@ -49,7 +49,23 @@ const document = createPanelSessionTestDocument(
   createPanelSessionTestUri('C:/session-setting-isolation.md'),
   '# Settings isolation'
 );
-mock.module('vscode', () => createPanelSessionVscodeMock(document));
+const persistedConfiguration = new Map<string, unknown>();
+const vscodeMock = createPanelSessionVscodeMock(document) as {
+  workspace: { getConfiguration(): unknown };
+};
+vscodeMock.workspace.getConfiguration = () => ({
+  get: <T>(key: string, fallback?: T): T | undefined => (
+    persistedConfiguration.has(key) ? persistedConfiguration.get(key) as T : fallback
+  ),
+  inspect: (key: string) => persistedConfiguration.has(key)
+    ? { globalValue: persistedConfiguration.get(key) }
+    : undefined,
+  update: async (key: string, value: unknown) => {
+    if (value === undefined) persistedConfiguration.delete(key);
+    else persistedConfiguration.set(key, value);
+  }
+});
+mock.module('vscode', () => vscodeMock);
 const { createPanelSessionController } = await import('../src/extension/panelSession');
 
 const defaults = {
@@ -114,6 +130,7 @@ await firstPanel.controller.handleMessage({ type: 'setPreviewAppearance', appear
 await firstPanel.controller.handleMessage({ type: 'setPreviewFontFamily', fontFamily: 'Inter' });
 await firstPanel.controller.handleMessage({ type: 'setPreviewSourceColoring', enabled: false });
 await firstPanel.controller.handleMessage({ type: 'setEditorAppearance', appearance: 'dark' });
+await firstPanel.controller.handleMessage({ type: 'setGitDiffDetailsVisible', visible: true });
 assert.equal(
   firstPanel.messages.length,
   firstMessageCount,
@@ -124,13 +141,15 @@ assert.deepEqual(
     previewAppearance: firstInit.previewAppearance,
     previewFontFamily: firstInit.previewFontFamily,
     previewSourceColoring: firstInit.previewSourceColoring,
-    editorAppearance: firstInit.editorAppearance
+    editorAppearance: firstInit.editorAppearance,
+    gitDiffDetailsVisible: firstInit.gitDiffDetailsVisible
   },
   {
     previewAppearance: 'light',
     previewFontFamily: '',
     previewSourceColoring: true,
-    editorAppearance: 'light'
+    editorAppearance: 'light',
+    gitDiffDetailsVisible: false
   },
   'the current panel must retain its original Init snapshot'
 );
@@ -144,13 +163,15 @@ assert.deepEqual(
     previewAppearance: secondInit.previewAppearance,
     previewFontFamily: secondInit.previewFontFamily,
     previewSourceColoring: secondInit.previewSourceColoring,
-    editorAppearance: secondInit.editorAppearance
+    editorAppearance: secondInit.editorAppearance,
+    gitDiffDetailsVisible: secondInit.gitDiffDetailsVisible
   },
   {
     previewAppearance: 'dark',
     previewFontFamily: 'Inter',
     previewSourceColoring: false,
-    editorAppearance: 'dark'
+    editorAppearance: 'dark',
+    gitDiffDetailsVisible: true
   },
   'persisted appearance changes must become defaults only for later panels'
 );

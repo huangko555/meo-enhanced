@@ -32,6 +32,7 @@
   "config.baseline.recentSave": "diff: 与上一保存版本比较",
   "config.baseline.gitHead": "diff: 与 Git HEAD 版本比较",
   "config.baseline.description": "选择更改指示器使用的比较基线。",
+  "config.showBeforeContent": "新打开的编辑器面板默认在变更行上方显示修改前内容。",
   "config.lineHighlights": "在源码模式中以淡色标示修改过的行。",
   "config.imageFolder": "保存粘贴图片的文件夹名称（相对于工作区根目录）。"
 }

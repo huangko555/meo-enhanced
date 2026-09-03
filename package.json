@@ -287,10 +287,16 @@
           "order": 6,
           "description": "%config.baseline.description%"
         },
+        "meoEnhanced.changes.showBeforeContent": {
+          "type": "boolean",
+          "default": false,
+          "order": 7,
+          "description": "%config.showBeforeContent%"
+        },
         "meoEnhanced.gitChanges.lineHighlights": {
           "type": "boolean",
           "default": false,
-          "order": 6,
+          "order": 8,
           "description": "%config.lineHighlights%"
         },
         "meoEnhanced.imageFolder": {

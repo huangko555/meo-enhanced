@@ -351,13 +351,13 @@ const syncGitDiffDetails = () => {
 
 const setGitDiffDetailsVisibleState = (
   visible: boolean,
-  { persist = true }: { persist?: boolean } = {}
+  { post = true }: PostUpdateOptions = {}
 ) => {
   gitDiffDetailsVisible = visible === true;
   syncGitDiffDetails();
   syncGitDiffLineHighlights();
   presentChangesReview();
-  if (persist) persistUiState();
+  if (post) vscode.postMessage({ type: 'setGitDiffDetailsVisible', visible: gitDiffDetailsVisible });
 };
 
 type PostUpdateOptions = { post?: boolean };
@@ -1425,7 +1425,6 @@ type WebviewUiState = {
   mode?: 'live' | 'source' | 'preview';
   lastEditableMode?: 'live' | 'source';
   contentMaxWidthEnabled?: boolean;
-  gitDiffDetailsVisible?: boolean;
   outlineMode?: 'floating' | 'fixed';
   outlineWidth?: number;
 };
@@ -1438,7 +1437,6 @@ const persistUiState = (
     mode,
     lastEditableMode,
     contentMaxWidthEnabled,
-    gitDiffDetailsVisible,
     outlineMode: outlineUiState.mode,
     outlineWidth: outlineUiState.width
   };
@@ -1992,6 +1990,9 @@ const handleInit = (message: InitMessage) => {
     gitDiffLineHighlightsEnabled = message.gitDiffLineHighlights;
     syncGitDiffLineHighlights();
   }
+  if (typeof message.gitDiffDetailsVisible === 'boolean') {
+    setGitDiffDetailsVisibleState(message.gitDiffDetailsVisible, { post: false });
+  }
   if (message.findOptions && typeof message.findOptions === 'object') {
     findPanelController.setSearchOptions(message.findOptions);
   }
@@ -2292,9 +2293,6 @@ if (state && (state.mode === 'live' || state.mode === 'source' || state.mode ===
 }
 if (typeof state?.contentMaxWidthEnabled === 'boolean') {
   setContentMaxWidthEnabled(state.contentMaxWidthEnabled, { post: false, persist: false });
-}
-if (typeof state?.gitDiffDetailsVisible === 'boolean') {
-  setGitDiffDetailsVisibleState(state.gitDiffDetailsVisible, { persist: false });
 }
 if (state?.outlineMode === 'floating' || state?.outlineMode === 'fixed') {
   outlineUiState.mode = state.outlineMode;

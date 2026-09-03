@@ -173,7 +173,7 @@ async function main(): Promise<void> {
         type: 'init', documentId: 'file:///viewport-anchor.md', text, version: 1,
         savedRevision: { version: 1, text }, diagnostics: [], mode: 'source',
         uiLanguage: 'en', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light',
-        gitChangesGutter: false, gitDiffLineHighlights: false,
+        gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false,
         diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false,
         findOptions: { wholeWord: false, caseSensitive: false },

@@ -9,16 +9,23 @@ const setting = packageJson.contributes.configuration.properties['meoEnhanced.gi
 assert.equal(setting.default, false, 'Source diff line backgrounds must default to disabled');
 const gutterSetting = packageJson.contributes.configuration.properties['meoEnhanced.gitChanges.visible'];
 assert.equal(gutterSetting.default, false, 'Change location markers must default to hidden');
+const detailsSetting = packageJson.contributes.configuration.properties['meoEnhanced.changes.showBeforeContent'];
+assert.equal(detailsSetting.default, false, 'Original changed content must default to hidden');
 
 let configuredValue: boolean | undefined;
 let configuredGutterValue: boolean | undefined;
+let configuredDetailsValue: boolean | undefined;
 let gutterExplicit = false;
 
 mock.module('vscode', () => ({
   workspace: {
     getConfiguration: () => ({
       get: <T>(key: string, fallback: T): T => (
-        key === 'gitChanges.visible' ? configuredGutterValue ?? fallback : configuredValue ?? fallback
+        key === 'gitChanges.visible'
+          ? configuredGutterValue ?? fallback
+          : key === 'changes.showBeforeContent'
+            ? configuredDetailsValue ?? fallback
+            : configuredValue ?? fallback
       ) as T,
       inspect: (key: string) => key === 'gitChanges.visible' && gutterExplicit
         ? { globalValue: configuredGutterValue }
@@ -30,6 +37,7 @@ mock.module('vscode', () => ({
 const {
   GIT_CHANGES_GUTTER_KEY,
   getGitChangesGutterEnabled,
+  getGitDiffDetailsVisible,
   getGitDiffLineHighlightsEnabled
 } = await import('../src/shared/extensionConfig');
 
@@ -77,5 +85,11 @@ assert.equal(getGitDiffLineHighlightsEnabled(), false, 'runtime fallback must ma
 
 configuredValue = true;
 assert.equal(getGitDiffLineHighlightsEnabled(), true, 'an existing explicit line-background preference must remain enabled');
+
+configuredDetailsValue = undefined;
+assert.equal(getGitDiffDetailsVisible(), false, 'runtime fallback for original changed content must match the package default');
+
+configuredDetailsValue = true;
+assert.equal(getGitDiffDetailsVisible(), true, 'an explicit original-content preference must remain enabled');
 
 console.log('Git diff display defaults and preference preservation checks passed');

@@ -53,7 +53,7 @@ async function main(): Promise<void> {
         type: 'init', documentId: 'file:///ordered.md', text: '', version: 1,
         savedRevision: { version: 1, text: '' }, diagnostics: [], mode: 'live',
         uiLanguage: 'en', sourceLineNumbers: 'on', previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark', gitChangesGutter: false,
-        gitDiffLineHighlights: false, diffBaselineMode: 'current-edit',
+        gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false,
         contentMaxWidthEnabled: false,
         findOptions: { wholeWord: false, caseSensitive: false },

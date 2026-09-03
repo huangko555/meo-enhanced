@@ -136,6 +136,7 @@ const initMessage = {
   editorAppearance: 'light',
   gitChangesGutter: false,
   gitDiffLineHighlights: false,
+  gitDiffDetailsVisible: false,
   diffBaselineMode: 'current-edit',
   fixedBaselinePinned: false,
   fixedBaselineActive: false,

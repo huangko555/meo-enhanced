@@ -32,6 +32,7 @@
   "config.baseline.recentSave": "diff: Previous Saved Version",
   "config.baseline.gitHead": "diff: Git HEAD Version",
   "config.baseline.description": "Choose the baseline used for change indicators.",
+  "config.showBeforeContent": "Show the original content above changed lines by default in newly opened editor panels.",
   "config.lineHighlights": "Show subtle line coloring for modified lines in Source mode.",
   "config.imageFolder": "Folder name to save pasted images (relative to workspace root)."
 }

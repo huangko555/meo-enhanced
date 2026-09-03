@@ -20,11 +20,13 @@ import type { HostViewNavigationPort } from '../application/hostViewNavigationLi
 import {
   EXTENSION_CONFIG_SECTION,
   GIT_CHANGES_GUTTER_SETTING_KEY,
+  GIT_DIFF_DETAILS_VISIBLE_SETTING_KEY,
   DIFF_BASELINE_MODE_SETTING_KEY,
   CONTENT_MAX_WIDTH_SETTING_KEY,
   OUTLINE_WIDTH_KEY,
   getContentMaxWidthEnabled,
   getGitChangesGutterEnabled,
+  getGitDiffDetailsVisible,
   getGitDiffLineHighlightsEnabled,
   getDiffBaselineMode,
   getLargeDocumentOptimizationEnabled,
@@ -368,6 +370,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       editorFontSize: editorFontSizePreference.value,
       gitChangesGutter: getGitChangesGutterEnabled(context),
       gitDiffLineHighlights: getGitDiffLineHighlightsEnabled(),
+      gitDiffDetailsVisible: getGitDiffDetailsVisible(),
       diffBaselineMode: diffBaselineState.mode,
       fixedBaselinePinned: diffBaselineState.fixedPinned,
       fixedBaselineActive: diffBaselineState.fixedActive,
@@ -536,6 +539,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .update(GIT_CHANGES_GUTTER_SETTING_KEY, visible, vscode.ConfigurationTarget.Global);
         return;
       }
+      case 'setGitDiffDetailsVisible':
+        await vscode.workspace
+          .getConfiguration(EXTENSION_CONFIG_SECTION)
+          .update(GIT_DIFF_DETAILS_VISIBLE_SETTING_KEY, raw.visible, vscode.ConfigurationTarget.Global);
+        return;
       case 'setDiffBaselineMode':
         await diffBaselineSelection.setMode(raw.mode);
         return;
