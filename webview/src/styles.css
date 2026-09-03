@@ -4798,6 +4798,7 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-mermaid-source-editor > .cm-editor,
 .cm-editor .meo-latex-math-source-editor > .cm-editor {
   height: auto;
+  outline: none;
   color: var(--meo-foreground);
   background: var(--meo-code-background);
   font-family: var(--meo-font-source);

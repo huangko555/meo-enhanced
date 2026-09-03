@@ -401,6 +401,30 @@ async function main() {
       throw new Error(`Split rendered-block outer line numbers were misaligned: ${JSON.stringify(splitOuterAlignment)}`);
     }
 
+    const focusedInnerOutlines: Array<{
+      selector: string;
+      focused: boolean;
+      outlineStyle: string;
+      outlineWidth: string;
+    }> = [];
+    for (const selector of ['.meo-mermaid-source-editor', '.meo-latex-math-source-editor']) {
+      await page.click(`${selector} .cm-content`);
+      focusedInnerOutlines.push(await page.$eval(`${selector} > .cm-editor`, (editor, sourceSelector) => {
+        const style = getComputedStyle(editor);
+        return {
+          selector: sourceSelector,
+          focused: editor.classList.contains('cm-focused'),
+          outlineStyle: style.outlineStyle,
+          outlineWidth: style.outlineWidth
+        };
+      }, selector));
+    }
+    if (focusedInnerOutlines.some((item) => (
+      !item.focused || (item.outlineStyle !== 'none' && item.outlineWidth !== '0px')
+    ))) {
+      throw new Error(`Focused rendered-block source showed an outline: ${JSON.stringify(focusedInnerOutlines)}`);
+    }
+
     await page.evaluate(() => {
       document.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn')?.click();
     });
