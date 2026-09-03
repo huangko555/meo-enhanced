@@ -542,7 +542,9 @@ export class MermaidDiagramWidget extends WidgetType {
   cachePreviewHeight: boolean;
   previewResizeObserver: ResizeObserver | null;
   measuredHeight: number;
+  measuredContentWidth: number;
   initialHeightSeed: number;
+  intrinsicSvg: string | null;
   staleSvg: string | null;
   indentColumns: number;
   presentationFactory: MermaidDiagramPresentationConsumer;
@@ -586,22 +588,28 @@ export class MermaidDiagramWidget extends WidgetType {
     const staleCandidate = cached?.ok === true ? null : this.presentationFactory.getStale(request);
     const staleEstimatedHeight = estimateCachedMermaidHeight(staleCandidate?.svg, contentWidth);
     const stale = staleCandidate;
+    this.intrinsicSvg = cached?.ok === true ? cached.svg : stale?.svg ?? null;
     this.staleSvg = stale?.svg ?? null;
     this.measuredHeight = stale
-      ? Math.max(1, staleEstimatedHeight - 24)
+      ? staleEstimatedHeight
       : this.presentationFactory.getHeight(
           mermaidEstimatedHeightKey(JSON.stringify(request), contentWidth)
         ) ?? estimateCachedMermaidHeight(cached?.ok === true ? cached.svg : undefined, contentWidth);
+    this.measuredContentWidth = contentWidth;
     this.initialHeightSeed = this.measuredHeight;
   }
 
   get estimatedHeight(): number {
+    const contentWidth = currentMermaidContentWidth();
+    const measuredHeight = Math.abs(contentWidth - this.measuredContentWidth) <= 1
+      ? this.measuredHeight
+      : estimateCachedMermaidHeight(this.intrinsicSvg ?? undefined, contentWidth);
     return estimateBlockWidgetHeight({
       kind: 'mermaid-preview',
       source: this.diagramText,
       displayMath: this.isDisplayMath,
-      measuredHeight: this.measuredHeight,
-      contentWidth: currentMermaidContentWidth()
+      measuredHeight,
+      contentWidth
     });
   }
 
@@ -647,6 +655,7 @@ export class MermaidDiagramWidget extends WidgetType {
       this.previewResizeObserver = new ResizeObserver(() => {
         const height = container.getBoundingClientRect().height;
         if (height > 0 && container.querySelector('.meo-mermaid-svg-wrapper')) {
+          const contentWidth = currentMermaidContentWidth(container);
           const content = container.closest<HTMLElement>('.cm-content') ?? view.contentDOM;
           const cacheKey = mermaidPreviewHeightKey(
             this.diagramText,
@@ -655,10 +664,11 @@ export class MermaidDiagramWidget extends WidgetType {
             mermaidLayoutSignature(content)
           );
           this.measuredHeight = height;
+          this.measuredContentWidth = contentWidth;
           this.presentationFactory.rememberHeight(
             mermaidEstimatedHeightKey(
               JSON.stringify(mermaidRenderRequest(this.diagramText, this.themeSignature)),
-              currentMermaidContentWidth(container)
+              contentWidth
             ),
             height
           );
@@ -688,13 +698,16 @@ export class MermaidDiagramWidget extends WidgetType {
       },
       showDiagram: (svg) => {
         container.removeAttribute('aria-busy');
-        const estimatedHeight = estimateCachedMermaidHeight(svg, currentMermaidContentWidth(container));
+        const contentWidth = currentMermaidContentWidth(container);
+        const estimatedHeight = estimateCachedMermaidHeight(svg, contentWidth);
+        this.intrinsicSvg = svg;
         if (estimatedHeight > 0) {
           this.measuredHeight = estimatedHeight;
+          this.measuredContentWidth = contentWidth;
           this.presentationFactory.rememberHeight(
             mermaidEstimatedHeightKey(
               JSON.stringify(mermaidRenderRequest(this.diagramText, this.themeSignature)),
-              currentMermaidContentWidth(container)
+              contentWidth
             ),
             estimatedHeight
           );
