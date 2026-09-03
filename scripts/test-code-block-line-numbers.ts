@@ -494,6 +494,73 @@ async function main() {
       throw new Error(`Source rendered-block outer line numbers were misaligned: ${JSON.stringify(sourceOuterAlignment)}`);
     }
 
+    const formulaSourcePalette = await page.evaluate(async () => {
+      const sourceLine = document.querySelector<HTMLElement>(
+        '.meo-latex-math-source-editor .cm-content .cm-line'
+      );
+      const formula = sourceLine?.textContent ?? '';
+      const comparisonHost = document.createElement('div');
+      comparisonHost.className = 'editor-host';
+      document.body.appendChild(comparisonHost);
+      const comparisonEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
+        parent: comparisonHost,
+        text: ['```latex', formula, '```'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      for (let frame = 0; frame < 8; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const currentSourceLine = document.querySelector<HTMLElement>(
+        '.meo-latex-math-source-editor .cm-content .cm-line'
+      );
+      const codeLine = Array.from(comparisonHost.querySelectorAll<HTMLElement>(
+        '.cm-line.meo-md-code-block'
+      )).find((line) => line.textContent === formula) ?? null;
+      const readStyledCharacters = (root: HTMLElement | null) => {
+        if (!root) return null;
+        const result: Array<{ character: string; color: string; fontStyle: string; fontWeight: string }> = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node) {
+          const style = getComputedStyle(node.parentElement ?? root);
+          for (const character of node.textContent ?? '') {
+            if (/\s/.test(character)) continue;
+            result.push({
+              character,
+              color: style.color,
+              fontStyle: style.fontStyle,
+              fontWeight: style.fontWeight
+            });
+          }
+          node = walker.nextNode();
+        }
+        return result;
+      };
+      const result = {
+        source: readStyledCharacters(currentSourceLine),
+        code: readStyledCharacters(codeLine)
+      };
+      comparisonEditor.destroy();
+      comparisonHost.remove();
+      return result;
+    });
+    if (
+      formulaSourcePalette.source === null ||
+      formulaSourcePalette.code === null ||
+      JSON.stringify(formulaSourcePalette.source) !== JSON.stringify(formulaSourcePalette.code)
+    ) {
+      const summarize = (items: typeof formulaSourcePalette.source) => items === null
+        ? null
+        : Array.from(new Set(items.map((item) => (
+            `${item.color}/${item.fontStyle}/${item.fontWeight}`
+          ))));
+      throw new Error(`Formula source did not use the code-block palette: ${JSON.stringify({
+        source: summarize(formulaSourcePalette.source),
+        code: summarize(formulaSourcePalette.code)
+      })}`);
+    }
+
     if (renderedBlockFailures.length > 0) {
       throw new Error(`Rendered-block line-number failures:\n${renderedBlockFailures.join('\n')}`);
     }

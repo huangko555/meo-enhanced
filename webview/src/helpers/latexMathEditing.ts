@@ -28,6 +28,7 @@ import {
   type EditorInteractionContinuity
 } from '../editor/interactionContinuity';
 import { getLiveRenderedBlocks } from './liveRenderedBlocks';
+import { shikiDocumentHighlight } from './shikiDecorations';
 
 export type LatexMathBlockMode = RenderedBlockMode;
 
@@ -512,6 +513,7 @@ class LatexMathEditingController {
         doc: block.sourceText,
         extensions: [
           lineNumbers(),
+          shikiDocumentHighlight('latex'),
           innerLatexMathSearchField,
           EditorView.lineWrapping,
           keymap.of([
