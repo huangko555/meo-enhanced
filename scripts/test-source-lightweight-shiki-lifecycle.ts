@@ -146,7 +146,7 @@ async function main(): Promise<void> {
     });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addStyleTag({
-      content: ':root{--meo-background:#fff;--meo-foreground:#111;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--meo-line-height-live:1.6;--meo-line-height-source:1.5}'
+      content: ':root{--meo-background:#fff;--meo-foreground:#24292f;--meo-code-background:#f4f4f4;--meo-surface-background:#fff;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--meo-line-height-live:1.6;--meo-line-height-source:1.5;--meo-token-foreground-color:#24292f;--meo-token-monospace-color:#0550ae}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
@@ -197,15 +197,34 @@ async function main(): Promise<void> {
     assert.equal(metrics.tokenizeCalls, 2);
     assert.equal(metrics.disposeCalls, 0);
 
-    const latestSecondText = '# Latest second\n\n```typescript\nconst latest_second = 3;\n```';
-    await page.evaluate((latest) => {
+    const latestSecondCode = Array.from(
+      { length: 24 },
+      (_, index) => `const latest_second_${index} = ${index};`
+    ).join('\n');
+    const latestSecondText = secondText.replace('const second_value = 2;', latestSecondCode);
+    const pendingSecondPresentation = await page.evaluate((latestCode) => {
       const state = (window as any).__shikiEditors;
+      const harness = (window as any).SourceLightweightShikiHarness;
       state.first.setMode('source');
       state.first.setMode('source');
-      state.second.setText(latest);
-    }, latestSecondText);
+      const previousCode = 'const second_value = 2;';
+      const from = state.second.view.state.doc.toString().indexOf(previousCode);
+      harness.pasteText(state.second, from, from + previousCode.length, latestCode);
+      const line = Array.from(document.querySelectorAll<HTMLElement>('#second .cm-line'))
+        .find((candidate) => candidate.textContent?.includes('latest_second_23'));
+      const matchingSpans = Array.from(line?.querySelectorAll<HTMLElement>('span') ?? [])
+        .filter((candidate) => candidate.textContent?.includes('latest_second_23'));
+      const presentationNode = matchingSpans.at(-1) ?? line;
+      return presentationNode ? getComputedStyle(presentationNode).color : null;
+    }, latestSecondCode);
+    assert.deepEqual(
+      pendingSecondPresentation,
+      'rgb(36, 41, 47)',
+      'A newly pasted supported code block must stay neutral until its Shiki tokens are ready'
+    );
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#second span[style*="color:"]'))
-      .some((node) => node.textContent?.includes('latest_second')));
+      .some((node) => node.textContent?.includes('latest_second_23')
+        && getComputedStyle(node).color === 'rgb(170, 34, 85)'));
     metrics = await readMetrics(page);
     assert.equal(metrics.initCalls, 1);
     assert.equal(metrics.loadCalls, 1);

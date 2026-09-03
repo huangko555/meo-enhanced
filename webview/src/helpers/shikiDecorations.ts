@@ -1,6 +1,14 @@
-import { RangeSetBuilder, StateEffect, Prec, type Extension } from '@codemirror/state';
+import {
+  RangeSetBuilder,
+  StateEffect,
+  Prec,
+  type EditorState,
+  type Extension,
+  type Transaction
+} from '@codemirror/state';
 import { Decoration, ViewPlugin, EditorView, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import type { SyntaxNode } from '@lezer/common';
 import {
   resolveShikiLang,
   getShikiTokens,
@@ -23,6 +31,51 @@ const shikiRefreshEffect = StateEffect.define<null>();
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
 const FONT_STYLE_UNDERLINE = 4;
+const pendingTokenDecoration = Decoration.mark({
+  attributes: {
+    style: 'color:var(--meo-token-foreground-color,var(--vscode-editor-foreground))'
+  }
+});
+
+function isSupportedFencedCodeAt(state: EditorState, position: number): boolean {
+  const boundedPosition = Math.max(0, Math.min(position, state.doc.length));
+  const probes = boundedPosition > 0 ? [boundedPosition, boundedPosition - 1] : [boundedPosition];
+  for (const probe of probes) {
+    let node: SyntaxNode | null = syntaxTree(state).resolveInner(probe, -1);
+    while (node) {
+      if (node.name === 'FencedCode') {
+        return resolveShikiLang(getFencedCodeInfo(state, node)) !== null;
+      }
+      node = node.parent;
+    }
+  }
+  return false;
+}
+
+function addPendingTokenDecorations(
+  decorations: DecorationSet,
+  transaction: Transaction
+): DecorationSet {
+  const added: Array<ReturnType<typeof pendingTokenDecoration.range>> = [];
+  transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (fromB >= toB) return;
+    const wasSupportedCode = isSupportedFencedCodeAt(transaction.startState, fromA)
+      || isSupportedFencedCodeAt(transaction.startState, toA);
+    const isSupportedCode = isSupportedFencedCodeAt(transaction.state, fromB)
+      || isSupportedFencedCodeAt(transaction.state, toB);
+    if (!wasSupportedCode && !isSupportedCode) return;
+
+    const startLine = transaction.newDoc.lineAt(fromB).number;
+    const endLine = transaction.newDoc.lineAt(Math.max(fromB, toB - 1)).number;
+    for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
+      const line = transaction.newDoc.line(lineNumber);
+      const from = Math.max(fromB, line.from);
+      const to = Math.min(toB, line.to);
+      if (from < to) added.push(pendingTokenDecoration.range(from, to));
+    }
+  });
+  return added.length > 0 ? decorations.update({ add: added, sort: true }) : decorations;
+}
 
 function tokenStyle(token: ShikiToken): string {
   let style = token.color ? `color:${token.color}` : '';
@@ -202,7 +255,10 @@ const shikiPlugin = ViewPlugin.fromClass(
         if (update.docChanged) {
           for (const transaction of update.transactions) {
             if (transaction.docChanged) {
-              this.decorations = mapLiveInputDerivedDecorations(this.decorations, transaction);
+              this.decorations = addPendingTokenDecorations(
+                mapLiveInputDerivedDecorations(this.decorations, transaction),
+                transaction
+              );
             }
           }
         }
