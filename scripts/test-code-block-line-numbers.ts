@@ -724,6 +724,63 @@ async function main() {
       );
     }
 
+    await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__codeBlockLineNumbersEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: ['# Heading 1', '## Heading 2', '### Heading 3', '#### Heading 4', '##### Heading 5', '###### Heading 6', 'Body'].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+    });
+    await waitForFrames(page, 8);
+    const headingLineNumberOffsets = await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
+      return Array.from({ length: 6 }, (_, index) => {
+        const lineNumber = index + 1;
+        const line = Array.from(editor.view.contentDOM.querySelectorAll<HTMLElement>(':scope > .cm-line'))
+          .find((candidate) => candidate.classList.contains(`meo-md-h${lineNumber}`));
+        const marker = Array.from(
+          outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+        ).find((candidate) => candidate.textContent?.trim() === String(lineNumber));
+        const markerText = marker?.firstChild ?? null;
+        if (!line || !marker || !markerText) return { lineNumber, offset: null };
+        const lineRect = line.getBoundingClientRect();
+        const markerRect = marker.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(markerText);
+        const markerTextRect = range.getBoundingClientRect();
+        return {
+          lineNumber,
+          offset: markerTextRect.top + markerTextRect.height / 2 - (lineRect.top + lineRect.height / 2),
+          lineHeight: lineRect.height,
+          markerHeight: markerRect.height,
+          markerTextHeight: markerTextRect.height,
+          alignItems: getComputedStyle(marker).alignItems
+        };
+      });
+    });
+    if (headingLineNumberOffsets.some((item) => item.offset === null || Math.abs(item.offset) > 1)) {
+      throw new Error(`Heading line numbers were not vertically centered: ${JSON.stringify(headingLineNumberOffsets)}`);
+    }
+    const bodyLineAlignment = await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      const outerGutter = editor.view.scrollDOM.querySelector<HTMLElement>(':scope > .cm-gutters');
+      const marker = Array.from(
+        outerGutter?.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement') ?? []
+      ).find((candidate) => candidate.textContent?.trim() === '7');
+      return marker ? {
+        alignItems: getComputedStyle(marker).alignItems,
+        headingClass: marker.classList.contains('meo-md-heading-line-number')
+      } : null;
+    });
+    if (!bodyLineAlignment || bodyLineAlignment.alignItems !== 'flex-start' || bodyLineAlignment.headingClass) {
+      throw new Error(`Body line number inherited heading alignment: ${JSON.stringify(bodyLineAlignment)}`);
+    }
+
     console.log('code block line number checks passed');
   } finally {
     await browser.close();

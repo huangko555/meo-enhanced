@@ -211,6 +211,9 @@ const hiddenDetailsSourceDeco = Decoration.replace({
 const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
   elementClass = 'meo-md-hide-line-number';
 })();
+const headingGutterLineClassMarker = new (class extends GutterMarker {
+  elementClass = 'meo-md-heading-line-number';
+})();
 const renderedBlockPreviewAnchorGutterMarker = new (class extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-anchor-gutter';
 })();
@@ -3337,6 +3340,27 @@ const liveLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   provide: (field) => gutterLineClass.from(field)
 });
 
+function buildHeadingLineNumberMarkers(state: EditorState): RangeSet<GutterMarker> {
+  const builder = new RangeSetBuilder<GutterMarker>();
+  resolvedSyntaxTree(state).iterate({
+    enter(node) {
+      if (headingLevelFromName(node.name) === null) return;
+      const line = state.doc.lineAt(node.from);
+      builder.add(line.from, line.from, headingGutterLineClassMarker);
+    }
+  });
+  return builder.finish();
+}
+
+const headingLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
+  create: buildHeadingLineNumberMarkers,
+  update(markers, transaction) {
+    if (!transaction.docChanged && !isLiveInputDerivedWorkRefresh(transaction)) return markers;
+    return buildHeadingLineNumberMarkers(transaction.state);
+  },
+  provide: (field) => gutterLineClass.from(field)
+});
+
 export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [
     ...liveInputDerivedWorkExtensions(options),
@@ -3357,6 +3381,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
     renderedBlockLineNumberMarker,
     ...longCodeBlockSessionUiExtension(),
     liveLineNumberMarkerField,
+    headingLineNumberMarkerField,
     ...mergeConflictSourceExtensions(),
     ...detailsBlockLiveExtensions()
   ];

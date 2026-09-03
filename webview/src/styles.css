@@ -1732,6 +1732,10 @@ body {
   padding-right: 10px;
 }
 
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number {
+  align-items: center;
+}
+
 .meo-content-max-width-enabled .cm-editor .cm-gutters {
   left: max(0px, calc((100% - var(--meo-content-max-width) - var(--meo-gutters-width)) / 2 - 4px));
 }
