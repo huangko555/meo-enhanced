@@ -34,7 +34,9 @@ The feature contracts in `package.json` remain available when one narrower
 contract is sufficient during the implementation loop.
 
 Before submitting a change, run the relevant feature contract and the baseline
-checks that match its risk. The pull-request and push workflow always runs:
+checks that match its risk. The **CI checks** workflow runs on Ubuntu and Windows
+for pull requests and branch pushes. Tag pushes do not duplicate these checks.
+Each platform runs:
 
 ```shell
 bun run typecheck

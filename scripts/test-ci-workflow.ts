@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 type WorkflowStep = { run?: unknown; uses?: unknown };
-type Workflow = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+type Workflow = {
+  name?: string;
+  on?: { pull_request?: unknown; push?: { branches?: string[]; tags?: string[] } };
+  jobs?: Record<string, {
+    'runs-on'?: string;
+    strategy?: { 'fail-fast'?: boolean; matrix?: { os?: string[] } };
+    steps?: WorkflowStep[];
+  }>;
+};
 
 const repoRoot = resolve(import.meta.dir, '..');
 const workflow = Bun.YAML.parse(
@@ -11,6 +19,21 @@ const workflow = Bun.YAML.parse(
 const packageJson = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8')) as {
   scripts?: Record<string, string>;
 };
+
+if (workflow.name !== 'CI checks') {
+  throw new Error('CI workflow name must describe all checks, not only architecture');
+}
+if (!workflow.on || !('pull_request' in workflow.on)
+  || JSON.stringify(workflow.on.push?.branches) !== JSON.stringify(['**'])
+  || workflow.on.push?.tags !== undefined) {
+  throw new Error('CI must check pull requests and all branch pushes without duplicate tag runs');
+}
+const verify = workflow.jobs?.verify;
+if (verify?.['runs-on'] !== '${{ matrix.os }}'
+  || JSON.stringify(verify.strategy?.matrix?.os) !== JSON.stringify(['ubuntu-latest', 'windows-latest'])
+  || verify.strategy?.['fail-fast'] !== false) {
+  throw new Error('CI must independently check both Ubuntu and Windows');
+}
 
 const steps = workflow.jobs?.verify?.steps;
 if (!Array.isArray(steps)) {
@@ -61,4 +84,4 @@ if (!testBrowser.includes('bun scripts/test-history-matrix.ts')) {
   throw new Error('test:browser must include the production mixed history matrix');
 }
 
-console.log('CI architecture gate contract passed');
+console.log('Cross-platform CI gate contract passed');

@@ -22,7 +22,7 @@ const architectureBaseline = JSON.parse(
 };
 
 for (const readme of ['README.md', 'README.zh-CN.md']) {
-  if (!/href=["'](?:\.\/)?CONTRIBUTING\.md["']/.test(readRepoFile(readme))) {
+  if (!/href=["'](?:(?:\.\/)?|https:\/\/github\.com\/huangko555\/meo-enhanced\/blob\/main\/)CONTRIBUTING\.md["']/.test(readRepoFile(readme))) {
     throw new Error(`${readme} must link to CONTRIBUTING.md`);
   }
 }
