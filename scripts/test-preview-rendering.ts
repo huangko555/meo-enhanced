@@ -309,12 +309,12 @@ if (
 ) {
   throw new Error('Preview Properties must preserve complex and unstructured YAML lines');
 }
-if (!localizedReading.html.includes('>属性<')
+if (!localizedReading.html.includes('>Properties<')
   || !localizedReading.html.includes('>警告<')
   || !localizedReading.html.includes('aria-label="颜色 #ff0000"')
   || !localizedReading.html.includes('aria-label="返回脚注引用 1"')
   || !localizedReading.html.includes('aria-label="返回脚注引用"')
-  || localizedReading.html.includes('>Properties<')
+  || localizedReading.html.includes('>属性<')
   || localizedReading.html.includes('>WARNING<')
   || localizedReading.html.includes('aria-label="Color #ff0000"')
   || localizedReading.html.includes('aria-label="Back to reference')) {

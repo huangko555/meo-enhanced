@@ -157,12 +157,24 @@ const previewPropertiesStyles = `
 .meo-export-frontmatter {
   --meo-preview-properties-key-width: 124px;
   padding-inline: 0;
+  padding-top: 0;
   padding-bottom: 0;
   overflow: hidden;
 }
 
 .meo-export-frontmatter-header {
-  padding-inline: 12px;
+  margin-bottom: 0;
+  padding: 5px 12px;
+  font-size: inherit;
+  line-height: inherit;
+  /* Match one property line plus its vertical padding and separator. Keep
+     the smaller title font independent of the row's height. */
+  min-height: max(1.7em, calc(1lh + 11px));
+}
+
+.meo-export-frontmatter-header > span:last-child {
+  font-size: 0.82em;
+  line-height: 1.2;
 }
 
 .meo-export-frontmatter-line {

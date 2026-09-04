@@ -17,7 +17,7 @@ const CATALOG: Readonly<Record<UiLanguage, ReadingUiStrings>> = Object.freeze({
     backToNumberedReference: (number: number) => `Back to reference ${number}`
   }),
   'zh-CN': Object.freeze({
-    properties: '属性',
+    properties: 'Properties',
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
     colorLabel: (value: string) => `颜色 ${value}`,
     backToReference: '返回脚注引用',

@@ -5501,7 +5501,8 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-toolbar-delet
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-frontmatter-boundary .meo-code-language-label {
-  top: 2px;
+  top: 50%;
+  transform: translateY(-50%);
   left: 14px;
   display: inline-flex;
   align-items: center;
@@ -5510,6 +5511,7 @@ html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-toolbar-delet
   color: var(--meo-semantic-mutedForeground);
   background: transparent;
   font-size: 0.82em;
+  line-height: 1.2;
   font-weight: 600;
   letter-spacing: 0.01em;
 }

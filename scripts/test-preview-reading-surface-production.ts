@@ -937,12 +937,12 @@ async function main(): Promise<void> {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame');
       return frame?.contentDocument?.body.textContent?.includes('continues */') === true;
     });
-    const propertiesBottomGap = await page.evaluate(() => {
+    const propertiesGeometry = await page.evaluate(() => {
       const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
       const properties = doc.createElement('section');
       properties.className = 'meo-export-frontmatter';
       properties.innerHTML = [
-        '<div class="meo-export-frontmatter-header">Properties</div>',
+        '<div class="meo-export-frontmatter-header"><span class="meo-export-frontmatter-header-icon"></span><span>Properties</span></div>',
         '<div class="meo-export-frontmatter-line is-property">',
         '<span class="meo-export-frontmatter-key-cell">key</span>',
         '<div class="meo-export-frontmatter-value-group">value</div>',
@@ -954,13 +954,21 @@ async function main(): Promise<void> {
       const gap = properties.getBoundingClientRect().bottom
         - lastRow.getBoundingClientRect().bottom
         - Number.parseFloat(propertiesStyle.borderBottomWidth);
+      const header = properties.querySelector<HTMLElement>('.meo-export-frontmatter-header')!.getBoundingClientRect();
+      const label = properties.querySelector<HTMLElement>('.meo-export-frontmatter-header > span:last-child')!.getBoundingClientRect();
+      const rowHeight = lastRow.getBoundingClientRect().height;
       properties.remove();
-      return gap;
+      return { gap, rowHeight, headerHeight: header.height,
+        centerOffset: (label.top + label.bottom - header.top - header.bottom) / 2 };
     });
     assert.ok(
-      propertiesBottomGap <= 0.5,
-      `Preview Properties must not leave a blank strip below its final row: ${propertiesBottomGap}px`
+      propertiesGeometry.gap <= 0.5,
+      `Preview Properties must not leave a blank strip below its final row: ${propertiesGeometry.gap}px`
     );
+    assert.ok(Math.abs(propertiesGeometry.headerHeight - propertiesGeometry.rowHeight) <= 1,
+      `Preview Properties header must match a single property row: ${JSON.stringify(propertiesGeometry)}`);
+    assert.ok(Math.abs(propertiesGeometry.centerOffset) <= 0.5,
+      `Preview Properties title must remain centered: ${JSON.stringify(propertiesGeometry)}`);
     const fontControlContract = await page.evaluate(() => ({
       selectCount: document.querySelectorAll('select.preview-font-family-select').length,
       inputCount: document.querySelectorAll('.preview-font-family-input').length,

@@ -21,11 +21,14 @@ assert.equal(resolveUiLanguage('auto', 'zh-TW'), 'en');
 assert.equal(resolveUiLanguage('invalid', 'en'), 'en');
 assert.deepEqual(
   [getReadingUiStrings('zh-CN').properties, getReadingUiStrings('zh-CN').alertLabel('WARNING')],
-  ['属性', '警告']
+  ['Properties', '警告']
 );
 
 const english = getUiStrings('en');
 const chinese = getUiStrings('zh-CN');
+assert.equal(english.properties, 'Properties');
+assert.equal(chinese.properties, 'Properties');
+assert.equal(getReadingUiStrings('en').properties, 'Properties');
 assert.equal(english.exportHtml, 'Export HTML');
 assert.deepEqual(
   [english.previewFontFamily, english.previewCodeColors, english.previewAppearance],
