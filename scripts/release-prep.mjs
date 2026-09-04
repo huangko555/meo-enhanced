@@ -319,9 +319,7 @@ function finalizeRelease() {
 
   console.log(`Release finalized locally for ${pkg.version}`);
   console.log("Next steps:");
-  console.log("  bun run vscode:publish");
-  console.log("  git push origin main");
-  console.log(`  git push origin ${releaseTag(pkg.version)}`);
+  console.log("  Follow .agents/ship.md from its resume preflight.");
 }
 
 function main() {
