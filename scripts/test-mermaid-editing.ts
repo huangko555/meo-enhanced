@@ -1260,7 +1260,8 @@ async function main() {
     await page.waitForFunction(() => {
       const toolbar = document.querySelector<HTMLElement>('.meo-mermaid-toolbar');
       return toolbar?.classList.contains('is-block-hovered')
-        && getComputedStyle(toolbar).opacity === '1';
+        && getComputedStyle(toolbar).opacity === '1'
+        && document.activeElement === toolbar.querySelector('.meo-mermaid-mode-btn');
     });
     const mermaidToolbarAfterModeChange = await page.evaluate(() => ({
       hovered: document.querySelector('.meo-mermaid-toolbar')?.classList.contains('is-block-hovered'),
@@ -1311,7 +1312,8 @@ async function main() {
     await page.waitForFunction(() => {
       const toolbar = document.querySelector<HTMLElement>('.meo-latex-math-toolbar');
       return toolbar?.classList.contains('is-block-hovered')
-        && getComputedStyle(toolbar).opacity === '1';
+        && getComputedStyle(toolbar).opacity === '1'
+        && document.activeElement === toolbar.querySelector('.meo-latex-math-mode-btn');
     });
     const latexToolbarAfterModeChange = await page.evaluate(() => ({
       hovered: document.querySelector('.meo-latex-math-toolbar')?.classList.contains('is-block-hovered'),

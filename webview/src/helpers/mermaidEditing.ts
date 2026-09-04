@@ -218,6 +218,18 @@ type MermaidToolbarElement = HTMLSpanElement & {
   [mermaidToolbarCodeContent]: string;
 };
 
+const mermaidToolbarDomCache = new WeakMap<EditorView, Map<string, MermaidToolbarElement>>();
+const MERMAID_TOOLBAR_DOM_CACHE_LIMIT = 300;
+
+function getMermaidToolbarDomCache(view: EditorView): Map<string, MermaidToolbarElement> {
+  let cache = mermaidToolbarDomCache.get(view);
+  if (!cache) {
+    cache = new Map();
+    mermaidToolbarDomCache.set(view, cache);
+  }
+  return cache;
+}
+
 function updateMermaidModeButton(
   button: HTMLButtonElement,
   mode: MermaidBlockMode,
@@ -278,6 +290,14 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
 
   toDOM(view: EditorView): HTMLElement {
     const uiLanguage = view.state.facet(uiLanguageFacet);
+    const cache = getMermaidToolbarDomCache(view);
+    const cacheKey = `${this.anchor}:${this.lineNumber}:${uiLanguage}`;
+    const cachedToolbar = cache.get(cacheKey);
+    if (cachedToolbar && this.updateDOM(cachedToolbar, view)) {
+      cache.delete(cacheKey);
+      cache.set(cacheKey, cachedToolbar);
+      return cachedToolbar;
+    }
     const decision = decideRenderedBlockModeShell({
       kind: 'mermaid',
       lineNumber: this.lineNumber,
@@ -374,6 +394,11 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     const copyButton = createCopyCodeButton(() => toolbar[mermaidToolbarCodeContent] ?? '', uiLanguage);
 
     toolbar.append(modeButton, selectAllButton, copyButton);
+    cache.set(cacheKey, toolbar);
+    if (cache.size > MERMAID_TOOLBAR_DOM_CACHE_LIMIT) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey !== undefined) cache.delete(oldestKey);
+    }
     return toolbar;
   }
 
