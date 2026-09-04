@@ -222,8 +222,10 @@ async function main(): Promise<void> {
       'rgb(36, 41, 47)',
       'A newly pasted supported code block must stay neutral until its Shiki tokens are ready'
     );
+    // Mapped old token spans may still wrap the neutral pending text. Only
+    // the innermost text span proves that current tokens have been presented.
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#second span[style*="color:"]'))
-      .some((node) => node.textContent?.includes('latest_second_23')
+      .some((node) => node.children.length === 0 && node.textContent?.includes('latest_second_23')
         && getComputedStyle(node).color === 'rgb(170, 34, 85)'));
     metrics = await readMetrics(page);
     assert.equal(metrics.initCalls, 1);
