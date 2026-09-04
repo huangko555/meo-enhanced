@@ -3,6 +3,14 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.15
+- Added an explicit comparison-off option and enabled comparison with the last saved version by default for new users, while preserving existing preferences.
+- Refined settings switches, comparison labels and icons, toolbar overflow menus, and the find-and-replace panel; clarified that reloading discards unsaved changes.
+- Kept line numbers, change markers, and original-content backgrounds aligned when toggling line numbers and constrained width, with scrollbars and overview rulers remaining at the window edge.
+- Unified the Properties heading across interface languages and corrected its vertical alignment and Preview row height.
+- Refreshed Mermaid and formula toolbar line identities after edits and undo, and prevented change-marker hit areas from overlapping list content.
+- Expanded browser regression coverage and corrected asynchronous syntax-highlighting test synchronization.
+
 ## 0.3.14
 - Added change-review baseline controls for disk, Agent edits, Git HEAD, and manual snapshots, with persistent display preferences.
 - Kept change counts and editor markers synchronized, and restored comparison retries after saving or reloading a document.
