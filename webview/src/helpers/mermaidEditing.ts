@@ -412,6 +412,11 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
     ) return false;
     const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-mermaid-mode-btn');
     if (!modeButton) return false;
+    // Equal-length edits can change line identity without changing the anchor.
+    toolbar.setAttribute('aria-label', decideRenderedBlockModeShell({
+      kind: 'mermaid', lineNumber: this.lineNumber, manualMode: this.mode,
+      temporaryReveal: false, uiLanguage
+    }).controlsLabel);
     toolbar.dataset.meoBlockTo = String(this.blockTo);
     toolbar.dataset.meoMermaidMode = this.mode;
     toolbar.dataset.meoUiLanguage = uiLanguage;

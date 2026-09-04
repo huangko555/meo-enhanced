@@ -399,6 +399,11 @@ class LatexMathToolbarWidget extends UiLanguageSensitiveWidget {
     ) return false;
     const modeButton = toolbar.querySelector<HTMLButtonElement>('.meo-latex-math-mode-btn');
     if (!modeButton) return false;
+    // Equal-length edits can change line identity without changing the anchor.
+    toolbar.setAttribute('aria-label', decideRenderedBlockModeShell({
+      kind: 'latex', lineNumber: this.lineNumber, manualMode: this.mode,
+      temporaryReveal: false, uiLanguage
+    }).controlsLabel);
     toolbar.dataset.meoLatexMathMode = this.mode;
     toolbar.dataset.meoBlockTo = String(this.blockTo);
     toolbar[latexToolbarSourceText] = this.sourceText;
