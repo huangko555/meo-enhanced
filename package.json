@@ -267,7 +267,7 @@
         },
         "meoEnhanced.gitChanges.visible": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "order": 5,
           "description": "%config.gitChanges%"
         },

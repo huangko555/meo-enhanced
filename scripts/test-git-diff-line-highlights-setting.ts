@@ -8,24 +8,29 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json
 const setting = packageJson.contributes.configuration.properties['meoEnhanced.gitChanges.lineHighlights'];
 assert.equal(setting.default, false, 'Source diff line backgrounds must default to disabled');
 const gutterSetting = packageJson.contributes.configuration.properties['meoEnhanced.gitChanges.visible'];
-assert.equal(gutterSetting.default, false, 'Change location markers must default to hidden');
+assert.equal(gutterSetting.default, true, 'Comparison must default to enabled');
+const baselineSetting = packageJson.contributes.configuration.properties['meoEnhanced.changes.baseline'];
+assert.equal(baselineSetting.default, 'current-edit', 'New users must compare with the last saved version');
 const detailsSetting = packageJson.contributes.configuration.properties['meoEnhanced.changes.showBeforeContent'];
 assert.equal(detailsSetting.default, false, 'Original changed content must default to hidden');
 
 let configuredValue: boolean | undefined;
 let configuredGutterValue: boolean | undefined;
 let configuredDetailsValue: boolean | undefined;
+let configuredBaseline: string | undefined;
 let gutterExplicit = false;
 
 mock.module('vscode', () => ({
   workspace: {
     getConfiguration: () => ({
       get: <T>(key: string, fallback: T): T => (
-        key === 'gitChanges.visible'
-          ? configuredGutterValue ?? fallback
-          : key === 'changes.showBeforeContent'
-            ? configuredDetailsValue ?? fallback
-            : configuredValue ?? fallback
+        key === 'changes.baseline'
+          ? configuredBaseline ?? fallback
+          : key === 'gitChanges.visible'
+            ? configuredGutterValue ?? fallback
+            : key === 'changes.showBeforeContent'
+              ? configuredDetailsValue ?? fallback
+              : configuredValue ?? fallback
       ) as T,
       inspect: (key: string) => key === 'gitChanges.visible' && gutterExplicit
         ? { globalValue: configuredGutterValue }
@@ -37,6 +42,7 @@ mock.module('vscode', () => ({
 const {
   GIT_CHANGES_GUTTER_KEY,
   getGitChangesGutterEnabled,
+  getDiffBaselineMode,
   getGitDiffDetailsVisible,
   getGitDiffLineHighlightsEnabled
 } = await import('../src/shared/extensionConfig');
@@ -60,19 +66,31 @@ gutterExplicit = false;
 configuredGutterValue = undefined;
 assert.equal(
   getGitChangesGutterEnabled(createContext().context as never),
-  false,
-  'a new user must start with change location markers hidden'
+  true,
+  'a new user must start with comparison enabled'
 );
+assert.equal(getDiffBaselineMode(), 'current-edit', 'runtime baseline must select the second menu option for new users');
+for (const mode of ['recent-save', 'git-head'] as const) {
+  configuredBaseline = mode;
+  assert.equal(getDiffBaselineMode(), mode, 'an existing comparison baseline must remain effective');
+}
+configuredBaseline = undefined;
 gutterExplicit = true;
-configuredGutterValue = true;
+configuredGutterValue = false;
 assert.equal(
   getGitChangesGutterEnabled(createContext().context as never),
-  true,
-  'an explicit user setting must override the new default'
+  false,
+  'an explicit disabled setting must override the new enabled default'
 );
 gutterExplicit = false;
 configuredGutterValue = undefined;
 const legacyGutter = createContext();
+await legacyGutter.context.globalState.update(GIT_CHANGES_GUTTER_KEY, false);
+assert.equal(
+  getGitChangesGutterEnabled(legacyGutter.context as never),
+  false,
+  'an existing disabled legacy preference must remain disabled'
+);
 await legacyGutter.context.globalState.update(GIT_CHANGES_GUTTER_KEY, true);
 assert.equal(
   getGitChangesGutterEnabled(legacyGutter.context as never),

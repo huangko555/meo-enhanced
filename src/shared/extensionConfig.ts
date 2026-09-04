@@ -27,7 +27,7 @@ export function getGitChangesGutterEnabled(context: vscode.ExtensionContext): bo
     GIT_CHANGES_GUTTER_LEGACY_VISIBLE_SETTING_KEY,
     GIT_CHANGES_GUTTER_LEGACY_VISIBILITY_SETTING_KEY,
     GIT_CHANGES_GUTTER_LEGACY_SETTING_KEY
-  ], false);
+  ], true);
 }
 
 export function getGitDiffLineHighlightsEnabled(): boolean {
