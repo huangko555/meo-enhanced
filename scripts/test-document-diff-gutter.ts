@@ -24,23 +24,30 @@ async function assertCompactMarkerPlacement(page: Page, mode: 'source' | 'live')
       document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')
     ).find((element) => element.textContent?.trim());
     const content = document.querySelector<HTMLElement>('.cm-content');
-    if (!stripe || !lineNumber || !content) return null;
+    if (!stripe || !content) return null;
 
     const lineNumberRange = document.createRange();
-    lineNumberRange.selectNodeContents(lineNumber);
+    if (lineNumber) lineNumberRange.selectNodeContents(lineNumber);
     const stripeRect = stripe.getBoundingClientRect();
     const contentRect = content.getBoundingClientRect();
+    const marker = stripe.parentElement!;
+    const hitStyle = getComputedStyle(marker, '::before');
+    const hitRight = marker.getBoundingClientRect().left
+      + Number.parseFloat(hitStyle.left) + Number.parseFloat(hitStyle.width);
     return {
-      lineNumberTextRight: lineNumberRange.getBoundingClientRect().right,
+      lineNumberTextRight: lineNumber ? lineNumberRange.getBoundingClientRect().right : null,
       stripeLeft: stripeRect.left,
       stripeRight: stripeRect.right,
-      contentLeft: contentRect.left
+      contentLeft: contentRect.left,
+      hitRight
     };
   });
   if (
     !geometry ||
-    geometry.stripeLeft - geometry.lineNumberTextRight < 4 ||
-    geometry.contentLeft - geometry.stripeRight < 4
+    geometry.stripeLeft < 0 ||
+    geometry.contentLeft - geometry.hitRight < 0.5 ||
+    (geometry.lineNumberTextRight !== null && geometry.stripeLeft - geometry.lineNumberTextRight < 4) ||
+    Math.abs(geometry.contentLeft - geometry.stripeRight - 5) > 1
   ) {
     throw new Error(`${mode} compact change marker was not separated from both line numbers and content: ${JSON.stringify(geometry)}`);
   }
@@ -108,9 +115,10 @@ async function assertDetailBackgroundContinuity(page: Page, label: string): Prom
       const y = Math.min(row.bottom - 2, row.top + row.lineHeight * (visualIndex + 0.5));
       const expected = row.expected;
       const wrong = Array.from(
-        { length: Math.max(0, Math.ceil(row.left) - Math.floor(row.connectionStart)) },
+        { length: Math.max(0, Math.floor(row.left) - Math.ceil(row.connectionStart)) },
         (_, offset) => {
-          const x = Math.floor(row.connectionStart) + offset;
+          // Sample full pixels, excluding antialiasing at fractional edges.
+          const x = Math.ceil(row.connectionStart) + offset;
           const actual = pixel(x, y);
           return JSON.stringify(actual) === JSON.stringify(expected) ? null : { x, actual };
         }
@@ -121,6 +129,89 @@ async function assertDetailBackgroundContinuity(page: Page, label: string): Prom
   if (mismatches.length > 0) {
     throw new Error(`${label} detail backgrounds were discontinuous: ${JSON.stringify(mismatches)}`);
   }
+}
+
+async function assertDetailRowAlignment(page: Page, label: string): Promise<void> {
+  const mismatches = await page.evaluate(() => (['original', 'current'] as const).flatMap((kind) => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(`.meo-git-diff-${kind}-line`));
+    const selectors = [`.meo-git-diff-sign-gutter-cell.is-${kind}`];
+    if (document.querySelector('.cm-lineNumbers')) selectors.push(`.cm-lineNumbers .meo-git-diff-${kind}-gutter-row`);
+    return selectors.flatMap((selector) => {
+      const gutters = Array.from(document.querySelectorAll<HTMLElement>(selector));
+      return rows.flatMap((row, index) => {
+        const content = row.getBoundingClientRect();
+        const gutter = gutters[index]?.getBoundingClientRect();
+        return !gutter || Math.abs(content.top - gutter.top) > 1 || Math.abs(content.height - gutter.height) > 1
+          ? [{ kind, selector, index, content: { top: content.top, height: content.height }, gutter: gutter && { top: gutter.top, height: gutter.height } }]
+          : [];
+      });
+    });
+  }));
+  if (mismatches.length) throw new Error(`${label} detail gutters were misaligned: ${JSON.stringify(mismatches)}`);
+}
+
+async function assertConstrainedContentMatchesWindow(page: Page): Promise<void> {
+  for (const mode of ['live', 'source'] as const) {
+    for (const numbers of ['on', 'off'] as const) {
+      for (const details of mode === 'source' ? [false, true] : [false]) {
+        await page.evaluate(({ mode, numbers, details }) => {
+          const editor = (window as any).__editor;
+          editor.setMode(mode);
+          editor.setSourceLineNumbers(numbers);
+          editor.setSearchQuery('current');
+          (window as any).EditorStabilityHarness.setGitDiffDetailsVisible(editor, details);
+        }, { mode, numbers, details });
+        const layouts: Array<Record<string, number[]>> = [];
+        for (const constrained of [false, true]) {
+          await page.setViewport({ width: constrained ? 1400 : 800, height: 500, deviceScaleFactor: 1 });
+          await page.evaluate((enabled) => {
+            document.documentElement.classList.toggle('meo-content-max-width-enabled', enabled);
+            if (enabled) document.documentElement.style.setProperty('--meo-content-max-width', '800px');
+            else document.documentElement.style.removeProperty('--meo-content-max-width');
+            (window as any).__editor.refreshLayout();
+          }, constrained);
+          await waitForFrames(page, 8);
+          if (!details) await assertCompactMarkerPlacement(page, mode);
+          layouts.push(await page.evaluate(() => {
+            const root = document.querySelector('.cm-editor')!.getBoundingClientRect();
+            const gutter = document.querySelector('.cm-gutters')!.getBoundingClientRect();
+            const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
+            if (Math.abs(scroller.right - window.innerWidth) > 1) {
+              throw new Error(`Scrollbar moved away from the window edge: ${scroller.right} vs ${window.innerWidth}`);
+            }
+            for (const [selector, inset] of [['.meo-git-overview-ruler', 10], ['.meo-search-overview-ruler', 3]] as const) {
+              const ruler = document.querySelector(selector)!;
+              if (!ruler.children.length || Math.abs(window.innerWidth - ruler.getBoundingClientRect().right - inset) > 1) {
+                throw new Error(`${selector} did not keep its markers at the window edge`);
+              }
+            }
+            const selectors = ['.cm-gutters', '.cm-content', '.cm-line',
+              '.cm-lineNumbers .cm-gutterElement', '.meo-git-gutter-stripe',
+              '.meo-git-diff-original-line', '.meo-git-diff-sign'];
+            return Object.fromEntries(selectors.map((selector) => [selector,
+              Array.from(document.querySelectorAll(selector)).flatMap((element) => {
+                const rect = element.getBoundingClientRect();
+                return [rect.left - gutter.left, rect.top - root.top, rect.width, rect.height];
+              })]));
+          }));
+        }
+        for (const selector of Object.keys(layouts[0])) {
+          const normal = layouts[0][selector];
+          const constrained = layouts[1][selector];
+          if (normal.length !== constrained.length
+            || normal.some((value, index) => Math.abs(value - constrained[index]) > 0.75)) {
+            throw new Error(`${mode}, numbers ${numbers}, details ${details}: limited viewport differs from a real 800px window for ${selector}: ${JSON.stringify({ normal, constrained })}`);
+          }
+        }
+      }
+    }
+  }
+  await page.evaluate(() => {
+    (window as any).__editor.setSourceLineNumbers('on');
+    (window as any).__editor.setSearchQuery('');
+    document.documentElement.classList.remove('meo-content-max-width-enabled');
+    document.documentElement.style.removeProperty('--meo-content-max-width');
+  });
 }
 
 async function main() {
@@ -423,6 +514,70 @@ async function main() {
       (window as any).__editor.setGitGutterVisible(true);
     });
     await waitForFrames(page, 3);
+
+    await assertConstrainedContentMatchesWindow(page);
+    await page.setViewport({ width: 1400, height: 500, deviceScaleFactor: 1 });
+    await waitForFrames(page, 12);
+    const widthFixture = await page.evaluate(() => {
+      const current = (window as any).__editor.getText() as string;
+      const original = current.split('\n');
+      original[1] = document.querySelector('.meo-git-diff-original-content')!.textContent!;
+      const currentLines = current.split('\n');
+      currentLines[1] += '\n\n\n  current continuation';
+      const preceding = '<a href="./markdown-render-test.md#html-jump-target" title="打开当前文件并跳转">相对文件锚点</a>';
+      currentLines.splice(1, 0, preceding);
+      original.splice(1, 0, preceding);
+      return { current: currentLines.join('\n'), original: original.join('\n') };
+    });
+    for (const scrollable of [false, true]) {
+      await page.evaluate(({ fixture, overflow }) => {
+        const editor = (window as any).__editor;
+        const suffix = overflow ? '\nunchanged'.repeat(60) : '';
+        document.documentElement.style.setProperty('--meo-user-editor-font-size', overflow ? '18px' : '14px');
+        editor.setText(fixture.current + suffix);
+        editor.setGitBaseline({ available: true, tracked: true, mode: 'current-edit', baseText: fixture.original + suffix });
+        editor.refreshLayout();
+      }, { fixture: widthFixture, overflow: scrollable });
+      await waitForFrames(page, 8);
+      for (const lineNumbers of ['on', 'off'] as const) {
+        await page.evaluate((value) => (window as any).__editor.setSourceLineNumbers(value), lineNumbers);
+        await waitForFrames(page, 4);
+        await assertDetailRowAlignment(page, `scrollable ${scrollable}, number-only toggle ${lineNumbers}`);
+        for (const enabled of [true, false, true]) {
+          await page.evaluate((constrained) => {
+            document.documentElement.classList.toggle('meo-content-max-width-enabled', constrained);
+            if (constrained) document.documentElement.style.setProperty('--meo-content-max-width', '800px');
+            else document.documentElement.style.removeProperty('--meo-content-max-width');
+            (window as any).__editor.refreshLayout();
+          }, enabled);
+          await waitForFrames(page, 8);
+          const label = `scrollable ${scrollable}, line numbers ${lineNumbers}, constrained width ${enabled}`;
+          await assertDetailRowAlignment(page, label);
+          const gap = await page.evaluate(() => (
+            document.querySelector('.cm-content')!.getBoundingClientRect().left
+            - document.querySelector('.cm-gutters')!.getBoundingClientRect().right
+          ));
+          if (Math.abs(gap) > 1) throw new Error(`${label} separated gutters from content by ${gap}px`);
+          await assertDetailBackgroundContinuity(page, label);
+          if (scrollable) {
+            await page.evaluate(() => { document.querySelector('.cm-scroller')!.scrollTop = 8; });
+            await waitForFrames(page, 4);
+            await assertDetailRowAlignment(page, `${label}, after scrolling`);
+            await assertDetailBackgroundContinuity(page, `${label}, after scrolling`);
+            await page.evaluate(() => { document.querySelector('.cm-scroller')!.scrollTop = 0; });
+            await waitForFrames(page, 4);
+          }
+        }
+      }
+    }
+    await page.evaluate(() => {
+      (window as any).__editor.setSourceLineNumbers('on');
+      document.documentElement.classList.remove('meo-content-max-width-enabled');
+      document.documentElement.style.removeProperty('--meo-content-max-width');
+      document.documentElement.style.removeProperty('--meo-user-editor-font-size');
+    });
+    await page.setViewport({ width: 900, height: 500, deviceScaleFactor: 1 });
+    await waitForFrames(page, 4);
 
     await page.evaluate(() => {
       const harness = (window as any).EditorStabilityHarness;
@@ -1184,6 +1339,47 @@ async function main() {
         after: expandedTriangle
       })}`);
     }
+
+    for (const mode of ['source', 'live'] as const) {
+      for (const numbers of ['off', 'on'] as const) {
+        for (const limited of [false, true]) {
+          await page.mouse.move(700, 450);
+          await page.evaluate(({ mode, numbers, limited }) => {
+            const editor = (window as any).__editor;
+            editor.setMode(mode);
+            editor.setSourceLineNumbers(numbers);
+            document.documentElement.classList.toggle('meo-content-max-width-enabled', limited);
+            document.documentElement.style.setProperty('--meo-content-max-width', limited ? '800px' : '100%');
+            editor.refreshLayout();
+          }, { mode, numbers, limited });
+          await waitForFrames(page, 4);
+          const triangle = await page.$eval('.meo-git-gutter-marker.is-deleted', (marker) => {
+            const rect = marker.getBoundingClientRect();
+            const style = getComputedStyle(marker, '::after');
+            const left = rect.left + Number.parseFloat(style.left);
+            const right = left + Number.parseFloat(style.borderLeftWidth);
+            return { left, right, y: rect.top,
+              gap: document.querySelector('.cm-content')!.getBoundingClientRect().left - right };
+          });
+          if (triangle.left < 0 || Math.abs(triangle.gap - 4) > 1) {
+            throw new Error(`${mode}, numbers ${numbers}, limited ${limited}: deletion marker misplaced: ${JSON.stringify(triangle)}`);
+          }
+          await page.mouse.move((triangle.left + triangle.right) / 2, triangle.y);
+          await waitForFrames(page, 2);
+          if (await page.$eval('.meo-deletion-tooltip', element => (element as HTMLElement).hidden)) {
+            throw new Error(`${mode}, numbers ${numbers}, limited ${limited}: moved deletion marker lost its hit area`);
+          }
+        }
+      }
+    }
+    await page.mouse.move(700, 450);
+    await page.evaluate(() => {
+      (window as any).__editor.setMode('source');
+      document.documentElement.classList.remove('meo-content-max-width-enabled');
+      document.documentElement.style.removeProperty('--meo-content-max-width');
+      (window as any).__editor.refreshLayout();
+    });
+    await waitForFrames(page, 4);
 
     await page.evaluate(() => {
       const editor = (window as any).__editor;

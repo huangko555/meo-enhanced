@@ -2947,6 +2947,9 @@ export function createEditor({
       view.dispatch({
         effects: lineNumberCompartment.reconfigure(lineNumberExtensions(currentMode, currentSourceLineNumbers))
       });
+      // Gutter-only reconfiguration can rewrap content without changing the
+      // scroller or redrawing the document. Remeasure block/gutter heights too.
+      view.requestMeasure();
     },
     setLongCodeBlockFolding(enabled: boolean) {
       view.dispatch({

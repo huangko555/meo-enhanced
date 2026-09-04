@@ -388,6 +388,9 @@ const setContentMaxWidthEnabled = (
   } else {
     document.documentElement.style.removeProperty('--meo-content-max-width');
   }
+  // Reading-area padding can rewrap lines/widgets without resizing the outer
+  // scroller. Refresh their height map together before gutter paint.
+  if (changed) refreshEditorSurface();
   updateContentMaxWidthUI();
   if (persist) {
     persistUiState();

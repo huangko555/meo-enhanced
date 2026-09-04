@@ -330,6 +330,7 @@ async function main(): Promise<void> {
       const host = document.getElementById('editor-host')!;
       host.replaceChildren();
       host.style.width = '100%';
+      host.classList.add('editor-host');
       document.documentElement.classList.add('meo-content-max-width-enabled');
       document.documentElement.style.setProperty('--meo-content-max-width', '800px');
       const baseline = [
@@ -374,6 +375,7 @@ async function main(): Promise<void> {
       document.documentElement.classList.remove('meo-content-max-width-enabled');
       document.documentElement.style.removeProperty('--meo-content-max-width');
       host.style.width = '';
+      host.classList.remove('editor-host');
       return output;
     });
 

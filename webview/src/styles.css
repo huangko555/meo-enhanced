@@ -1667,7 +1667,6 @@ body {
   background: var(--meo-background);
   min-width: 0;
   position: relative;
-  --meo-gutters-width: 89px;
 }
 
 .cm-editor.meo-mode-live {
@@ -1708,6 +1707,13 @@ body {
   scrollbar-width: thin;
   padding-right: 10px;
   box-sizing: border-box;
+}
+
+.meo-content-max-width-enabled .editor-host > .cm-editor > .cm-scroller {
+  /* Keep the native scrollbar and overview rulers at the full-width edge.
+     Shared padding narrows the space for gutters and content together. */
+  padding-left: max(0px, calc((100% - var(--meo-content-max-width)) / 2));
+  padding-right: calc(10px + max(0px, (100% - var(--meo-content-max-width)) / 2));
 }
 
 .cm-editor .cm-scroller::-webkit-scrollbar {
@@ -1771,10 +1777,6 @@ body {
 
 .editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number {
   align-items: center;
-}
-
-.meo-content-max-width-enabled .cm-editor .cm-gutters {
-  left: max(0px, calc((100% - var(--meo-content-max-width) - var(--meo-gutters-width)) / 2 - 4px));
 }
 
 .cm-editor .cm-gutter.cm-lineNumbers {
@@ -1881,9 +1883,7 @@ body {
   caret-color: var(--meo-caret-color);
   cursor: text;
   width: 100%;
-  max-width: var(--meo-content-max-width);
-  margin-left: auto;
-  margin-right: auto;
+  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -4110,6 +4110,13 @@ body.outline-resizing .preview-frame {
   cursor: pointer;
 }
 
+/* Without numbers, the sign column and minimum gutter width still reserve
+   space. Keep compact markers at the content edge, not before that space. */
+.cm-editor:not(.meo-git-diff-details-visible):not(:has(.cm-lineNumbers)) .cm-gutter.meo-git-gutter {
+  order: 1;
+  margin-left: auto;
+}
+
 .cm-editor .cm-gutter.meo-git-gutter .cm-gutterElement {
   width: 3px;
   min-width: 3px;
@@ -4138,7 +4145,8 @@ body.outline-resizing .preview-frame {
   position: absolute;
   left: -8px;
   top: 0;
-  width: 13px;
+  /* Stop before the content edge so list markers remain clickable. */
+  width: 10px;
   height: 100%;
   background: transparent;
 }
