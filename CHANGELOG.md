@@ -3,6 +3,13 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.14
+- Added change-review baseline controls for disk, Agent edits, Git HEAD, and manual snapshots, with persistent display preferences.
+- Kept change counts and editor markers synchronized, and restored comparison retries after saving or reloading a document.
+- Stabilized line-number alignment, floating code-block collapse, rendered-block mode changes, and Mermaid viewport geometry.
+- Improved code and formula syntax colors, removed nested source-editor focus outlines, and refined settings and change-menu spacing.
+- Improved table resizing, search replacement context, and editing history, with expanded release regression coverage.
+
 ## 0.3.13
 - Improved theme, syntax-color, and interface consistency across Live, Source, and Preview modes.
 - Stabilized editing, undo and redo, cursor placement, and viewport continuity for tables, Mermaid diagrams, block formulas, long code blocks, and lists.

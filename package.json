@@ -2,7 +2,7 @@
   "name": "meo-enhanced",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "publisher": "huangko555",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
