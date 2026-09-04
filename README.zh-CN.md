@@ -1,95 +1,117 @@
-
 # MEO Enhanced
 
-Edit complex Markdown and see every addition, modification, and deletion as you work—all inside VS Code.
+面向 VS Code 的增强型 Markdown 编辑器。
 
-在 VS Code 中编辑复杂 Markdown，并在工作过程中清楚看到每一处新增、修改与删除。
+提供实时编辑、源码编辑、只读预览和文档改动审阅，重点支持表格、图片、HTML、Mermaid、LaTeX 和代码块等复杂内容。
 
 <p align="center">
-  <a href="https://github.com/huangko555/meo-enhanced/blob/main/README.md">English</a> · <strong>简体中文</strong> · <a href="CONTRIBUTING.md">贡献指南</a>
+  <a href="https://github.com/huangko555/meo-enhanced/blob/main/README.md">English</a> · <strong>简体中文</strong> · <a href="https://github.com/huangko555/meo-enhanced/blob/main/CONTRIBUTING.md">贡献指南</a>
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced">从 VS Code Marketplace 安装</a> ·
+  <a href="https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced"><strong>从 VS Code Marketplace 安装</strong></a> ·
   <a href="https://github.com/huangko555/meo-enhanced/releases">下载 VSIX</a> ·
-  <a href="https://github.com/huangko555/meo-enhanced/blob/main/CHANGELOG.md">查看变更记录</a>
+  <a href="https://github.com/huangko555/meo-enhanced/blob/main/CHANGELOG.md">变更记录</a>
 </p>
 
-![MEO Enhanced 在同一份 Live 文档中显示独立的深色和浅色外观](docs/readme/editor-appearance-dark-light.png)
+![MEO Enhanced 在深色和浅色外观下显示同一份 Live 文档](docs/readme/zh-cn/product-overview.png)
 
-MEO Enhanced 是一款围绕稳定 Live 编辑工作流构建的 VS Code Markdown 编辑器。它把源码编辑、实时渲染、改动审阅、高级表格、Mermaid、LaTeX、图片和文档导航放进同一个编辑器，避免在互相割裂的视图之间来回切换。
+MEO Enhanced 适用于需要在 VS Code 中编写和审阅复杂 Markdown 文档的用户。编辑器将 Markdown 源码、渲染结果和版本差异集中在同一界面中，减少不同编辑器和预览窗口之间的切换。
 
-项目基于 [Markdown Editor Optimized（MEO）](https://github.com/vadimmelnicuk/meo) 开发，重点增强大型文档和复杂结构文档的交互、审阅与布局稳定性。
+## 界面与显示设置
+
+工具栏及其设置面板提供以下选项：
+
+- **界面语言**：简体中文、English 或自动跟随 VS Code 显示语言。
+- **编辑器外观**：浅色、深色或自动跟随当前 VS Code 主题。
+- **内容字号**：跟随 VS Code 编辑器字号，或使用 `10` 至 `32` 的自定义字号。
+- **Preview 设置**：独立选择预览外观、正文字体和代码着色方式。
+
+![MEO Enhanced 设置面板，包含界面语言、编辑器外观和字号选项](docs/readme/zh-cn/settings-panel.png)
+
+## 三种显示模式
+
+- **Live**：在文档原位置显示标题、列表、表格、图片、图表和公式等渲染结果，同时保留直接编辑能力。
+- **Source**：显示完整 Markdown 源码和语法颜色，适用于精确修改标记、批量编辑和原始内容检查。
+- **Preview**：以只读形式显示完整渲染结果，并提供预览字体、代码着色、亮暗外观和导出功能。
+
+三种模式使用同一份文档内容。模式切换时会保留当前阅读位置，无需创建或维护单独的预览文档。
+
+![同一份 Markdown 文档在 Live、Source 和 Preview 模式中的显示效果](docs/readme/zh-cn/display-modes.png)
+
+## 文档改动审阅
+
+改动审阅功能在编辑器侧边显示新增、修改和删除标记，并在工具栏中汇总变更数量。右侧概览标记用于显示改动在全文中的分布。
+
+支持以下比较基线：
+
+- **最近保存版本**：比较当前编辑内容与磁盘中的最近保存版本。
+- **Agent 编辑前版本**：检查当前 Agent 编辑过程产生的文档改动。
+- **Git HEAD**：比较当前文档与最新 Git 提交中的版本。
+- **手动快照**：固定当前文档状态，并将后续改动与该状态比较。
+
+Source 模式可以在修改行上方显示修改前内容。代码块、表格、Mermaid 和公式等连续内容会合并显示对应的改动标记，便于结合完整结构进行审阅。
+
+![改动审阅菜单，以及 Source 模式中的新增、删除和修改前内容](docs/readme/zh-cn/change-review.png)
+
+## Markdown 内容支持
+
+### 表格
+
+Markdown 表格以可交互形式显示，并支持以下操作：
+
+- 直接编辑单元格内容。
+- 增加或删除行列，设置列对齐方式。
+- 拖动调整列宽，并在当前会话中保留宽度。
+- 跨单元格选择和复制。
+- 在单元格中使用链接、图片、列表、代码和多行内容。
+- 在长表格中显示浮动表头和编辑工具栏。
+
+### 图片与 HTML
+
+图片支持本地路径、工作区相对路径、Windows 绝对路径和远程地址。从剪贴板粘贴图片时，文件可以自动保存到指定目录并插入当前文档。
+
+受支持的安全行内 HTML 和块级 HTML 可以在 Live 与 Preview 中显示，也可以切换为源码进行修改。渲染结果会用于 Preview、HTML 导出和 PDF 导出。
+
+![可交互 Markdown 表格，以及图片和 HTML 的 Live 显示效果](docs/readme/zh-cn/tables-images-html.png)
+
+### Mermaid、LaTeX 与代码块
+
+Mermaid 图表和块级 LaTeX 公式提供 **Source、Split、Preview** 三种块内显示方式。内容可以在源码、分栏和渲染结果之间切换，并提供缩放控制。较大的图表和公式会根据 Preview 与导出区域调整显示尺寸。
+
+代码块支持语法高亮、全选、复制和长代码折叠。Preview 与导出可以保留代码语法颜色。
+
+![Live 模式中渲染后的 Mermaid 图表、LaTeX 公式和代码块](docs/readme/zh-cn/diagrams-formulas-code.png)
+
+### 其他 Markdown 内容
+
+- Frontmatter Properties，以及复杂 YAML 内容的源码编辑。
+- GitHub Alerts、脚注、任务列表和引用块。
+- 普通链接、文档内锚点和 Wiki 链接。
+- `==高亮==`、键盘按键、颜色值预览和行内样式。
+- 合并冲突块的可视化操作。
 
 ## 安装
 
-从 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced) 安装 **MEO Enhanced - Markdown Editor**，也可以执行：
+从 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=huangko555.meo-enhanced) 安装 **MEO Enhanced - Markdown 编辑器**，或在终端中执行：
 
 ```shell
 code --install-extension huangko555.meo-enhanced
 ```
 
-随后右键 `.md`、`.markdown`、`.mdx` 或 `.mdc` 文件，选择 **Open With MEO Enhanced**。如需设为默认 Markdown 编辑器，可在命令面板中执行 **MEO Enhanced: Set as Default**。
+安装完成后，可直接打开 `.md`、`.markdown`、`.mdx` 或 `.mdc` 文件。也可以右键文件并选择 **使用 MEO Enhanced 打开**，或在命令面板中执行 **MEO Enhanced：设为默认编辑器**。
 
-离线安装时，可从 [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) 下载 `.vsix`，然后执行 **Extensions: Install from VSIX...**。
+离线安装时，从 [GitHub Releases](https://github.com/huangko555/meo-enhanced/releases) 下载 `.vsix`，然后在 VS Code 中执行 **Extensions: Install from VSIX...**。
 
-## 三种显示模式
-
-- **Live**：直接编辑 Markdown，同时在原位置显示标题、表格、图片、图表和公式等内容的渲染效果。
-- **Source**：在带有语法高亮的源码编辑器中，专注查看和编辑原始 Markdown 文本。
-- **Preview**：以完整渲染后的效果阅读和检查文档，不进入编辑状态。
-
-## 边写边审阅改动
-
-新增、修改和删除会直接显示在文档旁，不必切换到单独的 Diff 编辑器。你可以比较当前内容、最近保存版本或 Git 版本，也可以固定一个保存版本作为对比基线，并通过概览标记快速了解改动分布。
-
-## 处理复杂 Markdown
-
-- 直接编辑 Markdown 表格，包括长表格和单元格内的丰富内容。
-- 在编辑器中处理 Mermaid、LaTeX、代码块、图片和安全 HTML。
-- 在同一套流程中使用文档链接、Wiki 链接、脚注、提示块和 Frontmatter Properties。
-- 编辑嵌套列表、表格和图表等复杂结构时，尽量保持内容清晰稳定。
-
-![长表格浮动表头、单元格嵌套列表与缩进块级内容](docs/readme/tables-and-nesting.png)
-
-![Mermaid 与块级公式的源码、分栏和预览模式](docs/readme/rich-content-modes.png)
-
-## 查找、导航与分享
-
-- 在可编辑内容和已渲染内容中查找与替换。
-- 使用行号跳转或文档大纲浏览长文档。
-- 编辑、保存或切换模式时尽量保持当前位置。
-- 在 Preview 中检查最终效果，并导出为 HTML 或 PDF。
-
-## 常用操作
-
-| 操作 | 使用方式 |
-| --- | --- |
-| 切换 Live 与 Source | `Alt/Option + Shift + M` |
-| 查找或替换 | `Ctrl/Cmd + F`；替换使用 `Ctrl + H`（Windows/Linux）或 `Cmd + Option + F`（macOS） |
-| 跳转到指定行 | 在工具栏输入行号并按 `Enter` |
-| 在表格单元格中换行 | `Shift + Enter` |
-| 选择改动基线 | 打开 **More**，选择 Current Edits、Recent Save 或 Git HEAD |
-| 导出 HTML 或 PDF | 打开 **Preview**，然后使用导出控件 |
-
-## 配置与外观
-
-打开 VS Code 设置并搜索 **MEO Enhanced**，即可调整界面语言、Editor 与 Preview 外观、Preview 字体和代码颜色、大纲位置、内容宽度、大文档行为、改动对比基线和粘贴图片目录。
-
-## 兼容性与项目范围
+## 兼容性
 
 - 需要 VS Code `1.97.0` 或更高版本。
-- 通过自定义编辑器处理 `.md`、`.markdown`、`.mdx` 和 `.mdc` 文件。
-- 与原版 MEO 使用不同的命令、设置和编辑器标识，因此可以同时安装。
-- 本文以项目分叉时的上游 MEO `v0.1.26` 作为功能对比基准。
-- 逐版本新增、修改、修复和移除内容请查看[变更记录](CHANGELOG.md)。
+- 支持 `.md`、`.markdown`、`.mdx` 和 `.mdc` 文件。
+- 可以与原版 MEO 同时安装，两者使用独立的编辑器、命令和设置。
 
-## 致谢
+## 项目来源
 
-- [Markdown Editor Optimized](https://github.com/vadimmelnicuk/meo) — 原始项目
-- [VS Code](https://code.visualstudio.com/) — 扩展平台
-- [CodeMirror](https://codemirror.net/) — 编辑器核心
-- [Obsidian](https://obsidian.md/) — 交互设计参考
+MEO Enhanced 基于 [Markdown Editor Optimized（MEO）](https://github.com/vadimmelnicuk/meo) 开发。编辑功能使用 [CodeMirror](https://codemirror.net/) 实现，交互设计参考了 [Obsidian](https://obsidian.md/)。
 
 ## 许可证
 
