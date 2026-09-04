@@ -232,10 +232,10 @@ const appendMoreToolsOptionContent = (
   const label = document.createElement('span');
   label.className = 'more-tools-option-label';
   label.textContent = labelText;
-  const check = document.createElement('span');
-  check.className = 'more-tools-option-check';
-  check.appendChild(createElement(Check, { width: 14, height: 14 }));
-  button.append(iconElement, label, check);
+  const toggle = document.createElement('span');
+  toggle.className = 'menu-switch';
+  toggle.setAttribute('aria-hidden', 'true');
+  button.append(iconElement, label, toggle);
 };
 
 const contentMaxWidthBtn = document.createElement('button');
@@ -263,17 +263,25 @@ appendMoreToolsOptionContent(longCodeBlockFoldingBtn, Code, activeUiStrings.fold
 const changesReviewControl = createChangesReviewControl({
   uiLanguage: activeUiLanguage,
   onIntent(intent) {
-    if (intent.type === 'selectBaseline') setDiffBaselineMode(intent.baseline);
-    if (intent.type === 'selectManualSnapshot' && fixedBaselinePinned && !fixedBaselineActive) {
+    if (intent.type === 'selectBaseline') {
+      if (intent.baseline === 'none') {
+        setGitChangesGutterVisible(false);
+      } else {
+        setDiffBaselineMode(intent.baseline);
+        setGitChangesGutterVisible(true);
+      }
+    }
+    if (intent.type === 'selectManualSnapshot' && fixedBaselinePinned && (!fixedBaselineActive || !gitChangesGutterVisible)) {
       vscode.postMessage({ type: 'setFixedBaseline', enabled: true });
+      setGitChangesGutterVisible(true);
     }
     if (intent.type === 'createManualSnapshot') {
       vscode.postMessage({ type: 'setFixedBaseline', enabled: true });
+      setGitChangesGutterVisible(true);
     }
     if (intent.type === 'updateManualSnapshot') {
       vscode.postMessage({ type: 'updateFixedBaseline' });
     }
-    if (intent.type === 'setMarkersVisible') setGitChangesGutterVisible(intent.visible);
     if (intent.type === 'setBeforeContentVisible') setGitDiffDetailsVisibleState(intent.visible);
   }
 });
@@ -307,7 +315,7 @@ const setDiffBaselineMode = (
   const leavesFixedBaseline = fixedBaselineActive;
   diffBaselineMode = mode;
   updateGitChangesGutterUI();
-  if (post && (changed || leavesFixedBaseline)) {
+  if (post && (changed || leavesFixedBaseline || !gitChangesGutterVisible)) {
     vscode.postMessage({ type: 'setDiffBaselineMode', mode });
   }
 };
@@ -336,13 +344,13 @@ const syncGitDiffLineHighlights = () => {
   setGitDiffLineHighlightsEnabled(
     editor,
     getActiveEditorMode() === 'source'
-      && (gitDiffDetailsVisible || (gitChangesGutterVisible && gitDiffLineHighlightsEnabled))
+      && gitChangesGutterVisible && (gitDiffDetailsVisible || gitDiffLineHighlightsEnabled)
   );
 };
 
 const syncGitDiffDetails = () => {
   if (!editor) return;
-  setGitDiffDetailsVisible(editor, getActiveEditorMode() === 'source' && gitDiffDetailsVisible);
+  setGitDiffDetailsVisible(editor, getActiveEditorMode() === 'source' && gitChangesGutterVisible && gitDiffDetailsVisible);
 };
 
 const setGitDiffDetailsVisibleState = (
@@ -365,6 +373,10 @@ const setGitChangesGutterVisible = (visible: boolean, { post = true }: PostUpdat
   if (changed) {
     gitChangesGutterVisible = nextVisible;
     editor?.setGitGutterVisible(gitChangesGutterVisible);
+    if (!nextVisible) {
+      editor?.setGitBaseline({ available: false, tracked: false, baseText: null });
+    }
+    syncGitDiffDetails();
     syncGitDiffLineHighlights();
   }
   updateGitChangesGutterUI();
@@ -753,7 +765,10 @@ moreToolsPanel.setAttribute('role', 'menu');
 moreToolsPanel.setAttribute('aria-label', activeUiStrings.moreTools);
 moreToolsPanel.hidden = true;
 const toolbarOverflowSection = document.createElement('div');
-toolbarOverflowSection.className = 'more-tools-overflow-items';
+toolbarOverflowSection.className = 'toolbar-overflow-panel';
+toolbarOverflowSection.id = 'toolbar-overflow-panel';
+toolbarOverflowSection.setAttribute('role', 'group');
+toolbarOverflowSection.setAttribute('aria-label', activeUiStrings.toolbarOverflow);
 toolbarOverflowSection.hidden = true;
 const displaySeparator = document.createElement('div');
 displaySeparator.className = 'more-tools-separator';
@@ -884,6 +899,9 @@ const applyUiLanguage = (language: UiLanguage): void => {
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
   moreToolsPanel.setAttribute('aria-label', strings.moreTools);
+  toolbarOverflowIndicator.title = strings.toolbarOverflow;
+  toolbarOverflowIndicator.setAttribute('aria-label', strings.toolbarOverflow);
+  toolbarOverflowSection.setAttribute('aria-label', strings.toolbarOverflow);
   editorAppearanceControl.element.setAttribute('aria-label', strings.editorAppearance);
   editorAppearanceControl.setLabels({
     auto: strings.auto,
@@ -929,10 +947,9 @@ editorFontSizeControls.className = 'editor-font-size-controls';
 editorFontSizeControls.append(editorFontSizeModeControl.element, editorFontSizeStepper);
 editorFontSizeRow.append(editorFontSizeLabel, editorFontSizeControls);
 moreToolsPanel.append(
-  toolbarOverflowSection,
-  contentMaxWidthBtn,
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
+  contentMaxWidthBtn,
   displaySeparator,
   editorAppearanceRow,
   uiLanguageRow,
@@ -1007,10 +1024,42 @@ const liveButton = modeControl.getButton('live');
 const sourceButton = modeControl.getButton('source');
 const previewButton = modeControl.getButton('preview');
 
-const toolbarOverflowIndicator = document.createElement('span');
-toolbarOverflowIndicator.className = 'toolbar-overflow-indicator';
-toolbarOverflowIndicator.setAttribute('aria-hidden', 'true');
+const toolbarOverflowIndicator = document.createElement('button');
+toolbarOverflowIndicator.type = 'button';
+toolbarOverflowIndicator.className = 'format-button toolbar-overflow-indicator';
+toolbarOverflowIndicator.title = activeUiStrings.toolbarOverflow;
+toolbarOverflowIndicator.setAttribute('aria-label', activeUiStrings.toolbarOverflow);
+toolbarOverflowIndicator.setAttribute('aria-expanded', 'false');
+toolbarOverflowIndicator.setAttribute('aria-controls', toolbarOverflowSection.id);
+toolbarOverflowIndicator.hidden = true;
 toolbarOverflowIndicator.appendChild(createElement(Ellipsis, { width: 18, height: 18 }));
+
+const setToolbarOverflowVisible = (visible: boolean): void => {
+  toolbarOverflowSection.hidden = !visible;
+  toolbarOverflowIndicator.setAttribute('aria-expanded', String(visible));
+  toolbarOverflowIndicator.classList.toggle('is-active', visible);
+  if (visible) {
+    const toolbarLeft = toolbar.getBoundingClientRect().left;
+    const buttonLeft = toolbarOverflowIndicator.getBoundingClientRect().left;
+    const panelWidth = toolbarOverflowSection.getBoundingClientRect().width;
+    toolbarOverflowSection.style.left = `${Math.max(8, Math.min(buttonLeft, window.innerWidth - panelWidth - 8)) - toolbarLeft}px`;
+  }
+};
+toolbarOverflowIndicator.addEventListener('click', () => {
+  setToolbarOverflowVisible(toolbarOverflowSection.hidden);
+});
+document.addEventListener('pointerdown', (event) => {
+  const target = event.target as Node;
+  if (!toolbarOverflowIndicator.contains(target) && !toolbarOverflowSection.contains(target)) {
+    setToolbarOverflowVisible(false);
+  }
+}, true);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !toolbarOverflowSection.hidden) {
+    setToolbarOverflowVisible(false);
+    toolbarOverflowIndicator.focus();
+  }
+});
 
 const toolbarRight = document.createElement('div');
 toolbarRight.className = 'toolbar-right';
@@ -1051,7 +1100,7 @@ const editorNotice = createEditorNoticeController(
   () => handleEditorNoticeDismiss()
 );
 
-toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarRight, findPanelElements.panel, editorNoticeBanner);
+toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarOverflowSection, toolbarRight, findPanelElements.panel, editorNoticeBanner);
 
 const toolbarOverflowHomes = new Map<HTMLElement, Comment>();
 let toolbarOverflowLayoutKey = '';
@@ -1062,11 +1111,10 @@ const restoreToolbarOverflowItems = (): void => {
     item.classList.remove('is-toolbar-overflow-item');
   }
   toolbarOverflowHomes.clear();
-  toolbarOverflowSection.hidden = true;
-  moreToolsWrapper.classList.remove('has-toolbar-overflow-items');
+  setToolbarOverflowVisible(false);
 };
 
-const moveToolbarItemToMore = (item: HTMLElement): void => {
+const moveToolbarItemToOverflow = (item: HTMLElement): void => {
   const home = document.createComment('toolbar overflow home');
   item.before(home);
   toolbarOverflowHomes.set(item, home);
@@ -1096,11 +1144,7 @@ const syncToolbarOverflow = () => {
     return;
   }
 
-  // Reserve the existing More button before selecting the suffix to migrate.
   // The moved controls remain the authoritative nodes and retain their state/listeners.
-  moreToolsWrapper.classList.add('has-toolbar-overflow-items');
-  toolbarOverflowSection.hidden = false;
-  rightBoundary = toolbarRight.getBoundingClientRect().left;
 
   const indicatorWidth = 24;
   const indicatorGap = 4;
@@ -1114,7 +1158,7 @@ const syncToolbarOverflow = () => {
     visibleCount -= 1;
   }
 
-  leftItems.slice(visibleCount).forEach(moveToolbarItemToMore);
+  leftItems.slice(visibleCount).forEach(moveToolbarItemToOverflow);
 
   const leftGroupBounds = visibleLeftGroup.getBoundingClientRect();
   const indicatorLeft = visibleCount > 0
@@ -1819,7 +1863,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
   });
   editor.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
-  gitClient?.applyBaselineToEditor(editor);
+  if (gitChangesGutterVisible) gitClient?.applyBaselineToEditor(editor);
   syncGitDiffDetails();
   syncGitDiffLineHighlights();
   editor.focus();
@@ -2169,7 +2213,7 @@ window.addEventListener('message', (event) => {
     if (message.payload.mode === 'git-head') {
       gitBaselineState = message.payload;
     }
-    gitClient?.handleMessage(message, { editor });
+    gitClient?.handleMessage(message, { editor: gitChangesGutterVisible ? editor : undefined });
     presentChangesReview();
     return;
   }

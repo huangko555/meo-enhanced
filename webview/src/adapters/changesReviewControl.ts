@@ -4,10 +4,12 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  EyeOff,
   Diff,
-  FileClock,
+  Minus,
+  Plus,
+  SquareSplitVertical,
   GitCommitHorizontal,
-  MapPin,
   Save,
   createElement
 } from 'lucide';
@@ -22,6 +24,19 @@ import {
   type UiLanguage
 } from '../application/uiLanguage';
 
+const beforeContentIcon: typeof SquareSplitVertical = [
+  // Balance the visible gaps: the plus extends above its center, unlike the minus.
+  ...SquareSplitVertical.filter(([tag]) => tag === 'line').map(([tag, attrs]): (typeof SquareSplitVertical)[number] => [tag, {
+    ...attrs, y1: 11.125, y2: 11.125
+  }]),
+  ...Minus.map(([tag, attrs]): (typeof SquareSplitVertical)[number] => [tag, {
+    ...attrs, transform: 'translate(6 -1) scale(0.5)', 'stroke-width': 4
+  }]),
+  ...Plus.map(([tag, attrs]): (typeof SquareSplitVertical)[number] => [tag, {
+    ...attrs, transform: 'translate(6 13) scale(0.5)', 'stroke-width': 4
+  }])
+];
+
 export type ChangesReviewBaseline = 'current-edit' | 'recent-save' | 'git-head' | 'manual';
 
 export type ChangesReviewState = {
@@ -35,11 +50,10 @@ export type ChangesReviewState = {
 };
 
 export type ChangesReviewIntent =
-  | { readonly type: 'selectBaseline'; readonly baseline: Exclude<ChangesReviewBaseline, 'manual'> }
+  | { readonly type: 'selectBaseline'; readonly baseline: Exclude<ChangesReviewBaseline, 'manual'> | 'none' }
   | { readonly type: 'selectManualSnapshot' }
   | { readonly type: 'createManualSnapshot' }
   | { readonly type: 'updateManualSnapshot' }
-  | { readonly type: 'setMarkersVisible'; readonly visible: boolean }
   | { readonly type: 'setBeforeContentVisible'; readonly visible: boolean };
 
 export type ChangesReviewControl = {
@@ -146,12 +160,11 @@ export function createChangesReviewControl(options: {
 
   const formatManualSnapshotLabel = (): string => {
     const value = strings();
-    if (!state.manualSnapshot.exists) return value.manualSnapshot;
+    if (!state.manualSnapshot.exists) return value.manualSnapshotOption;
+    if (language !== 'zh-CN') return value.manualSnapshotOption;
     const time = state.manualSnapshot.updatedAt === null ? '' : formatSnapshotTime(state.manualSnapshot.updatedAt);
-    if (!time) return value.manualSnapshot;
-    return language === 'zh-CN'
-      ? `${value.manualSnapshot}（${time}）`
-      : `${value.manualSnapshot} (${time})`;
+    if (!time) return value.manualSnapshotOption;
+    return `${value.manualSnapshotOption}（${time}）`;
   };
 
   const appendCounts = (target: HTMLElement, counts: Pick<ChangesReviewDiffSummary, 'added' | 'deleted'>): string => {
@@ -189,7 +202,7 @@ export function createChangesReviewControl(options: {
   };
 
   const createRadioOption = (
-    baseline: Exclude<ChangesReviewBaseline, 'manual'>,
+    baseline: Exclude<ChangesReviewBaseline, 'manual'> | 'none',
     label: string,
     iconData: Parameters<typeof createElement>[0],
     warning = false
@@ -198,8 +211,9 @@ export function createChangesReviewControl(options: {
     button.type = 'button';
     button.className = 'changes-review-option changes-review-baseline-option';
     button.dataset.baseline = baseline;
+    if (baseline === 'current-edit') button.title = strings().currentDiskVersionDescription;
     button.setAttribute('role', 'menuitemradio');
-    const selected = state.baseline === baseline;
+    const selected = state.markersVisible ? state.baseline === baseline : baseline === 'none';
     button.classList.toggle('is-selected', selected);
     button.setAttribute('aria-checked', selected ? 'true' : 'false');
     const icon = document.createElement('span');
@@ -221,7 +235,7 @@ export function createChangesReviewControl(options: {
   };
 
   const createToggleOption = (
-    kind: 'markers' | 'before-content',
+    kind: 'before-content',
     label: string,
     checked: boolean
   ): HTMLButtonElement => {
@@ -233,14 +247,14 @@ export function createChangesReviewControl(options: {
     button.setAttribute('aria-checked', checked ? 'true' : 'false');
     const icon = document.createElement('span');
     icon.className = 'changes-review-option-icon';
-    appendIcon(icon, kind === 'markers' ? MapPin : FileClock);
+    appendIcon(icon, beforeContentIcon);
     const text = document.createElement('span');
     text.className = 'changes-review-option-label';
     text.textContent = label;
-    const check = document.createElement('span');
-    check.className = 'changes-review-check';
-    if (checked) appendIcon(check, Check, 14);
-    button.append(icon, text, check);
+    const toggle = document.createElement('span');
+    toggle.className = 'menu-switch';
+    toggle.setAttribute('aria-hidden', 'true');
+    button.append(icon, text, toggle);
     return button;
   };
 
@@ -254,7 +268,14 @@ export function createChangesReviewControl(options: {
         : null;
     const comparisonUnavailable = unavailableReason !== null;
     let accessibleSummary: string;
-    if (comparisonUnavailable) {
+    if (!state.markersVisible) {
+      triggerSummary.replaceChildren();
+      const empty = document.createElement('span');
+      empty.className = 'changes-review-empty';
+      empty.textContent = value.noComparison;
+      triggerSummary.appendChild(empty);
+      accessibleSummary = value.noComparison;
+    } else if (comparisonUnavailable) {
       triggerSummary.replaceChildren();
       const unavailable = document.createElement('span');
       unavailable.className = 'changes-review-empty';
@@ -277,7 +298,10 @@ export function createChangesReviewControl(options: {
     const headerCounts = document.createElement('span');
     headerCounts.className = 'changes-review-counts';
     let headerSummary: string;
-    if (comparisonUnavailable) {
+    if (!state.markersVisible) {
+      headerCounts.textContent = value.noComparison;
+      headerSummary = value.noComparison;
+    } else if (comparisonUnavailable) {
       headerCounts.textContent = value.comparisonUnavailable;
       headerSummary = value.comparisonUnavailable;
     } else {
@@ -298,6 +322,10 @@ export function createChangesReviewControl(options: {
         : value.changesComparedWith(headerSummary, shortBaselineLabel(state.baseline))
     );
     header.append(headerCounts, separator, comparison);
+    if (!state.markersVisible) {
+      header.replaceChildren(headerCounts);
+      header.setAttribute('aria-label', value.noComparison);
+    }
 
     const baselineSection = document.createElement('div');
     baselineSection.className = 'changes-review-section';
@@ -308,10 +336,11 @@ export function createChangesReviewControl(options: {
       'git-head',
       gitHeadLabel(true),
       GitCommitHorizontal,
-      state.baseline === 'git-head' && gitHeadUnavailable()
+      state.markersVisible && state.baseline === 'git-head' && gitHeadUnavailable()
     );
     baselineSection.append(
       baselineHeading,
+      createRadioOption('none', value.disableComparison, EyeOff),
       createRadioOption('current-edit', value.currentDiskVersionOption, Save),
       createRadioOption('recent-save', value.beforeLastSaveVersionOption, Bot),
       gitHeadOption
@@ -324,16 +353,20 @@ export function createChangesReviewControl(options: {
     snapshotSelect.type = 'button';
     snapshotSelect.className = 'changes-review-snapshot-select';
     snapshotSelect.classList.toggle('is-empty', !state.manualSnapshot.exists);
-    snapshotSelect.classList.toggle('is-selected', state.baseline === 'manual');
+    snapshotSelect.classList.toggle('is-selected', state.markersVisible && state.baseline === 'manual');
     snapshotSelect.dataset.action = state.manualSnapshot.exists ? 'select-snapshot' : 'create-snapshot';
     snapshotSelect.setAttribute('role', 'menuitemradio');
-    snapshotSelect.setAttribute('aria-checked', state.baseline === 'manual' ? 'true' : 'false');
+    snapshotSelect.setAttribute('aria-checked', state.markersVisible && state.baseline === 'manual' ? 'true' : 'false');
     const snapshotIcon = document.createElement('span');
     snapshotIcon.className = 'changes-review-option-icon';
     appendIcon(snapshotIcon, Camera);
     const snapshotLabel = document.createElement('span');
     snapshotLabel.className = 'changes-review-option-label';
     snapshotLabel.textContent = formatManualSnapshotLabel();
+    if (language !== 'zh-CN' && state.manualSnapshot.exists && state.manualSnapshot.updatedAt !== null) {
+      const time = formatSnapshotTime(state.manualSnapshot.updatedAt);
+      if (time) snapshotSelect.title = `${value.manualSnapshot} (${time})`;
+    }
     const snapshotCheck = document.createElement('span');
     snapshotCheck.className = 'changes-review-check';
     if (!state.manualSnapshot.exists) {
@@ -344,7 +377,7 @@ export function createChangesReviewControl(options: {
         : `${value.createSnapshot} ${value.manualSnapshot}`;
       snapshotSelect.title = createDescription;
       snapshotSelect.setAttribute('aria-label', createDescription);
-    } else if (state.baseline === 'manual') {
+    } else if (state.markersVisible && state.baseline === 'manual') {
       appendIcon(snapshotCheck, Check, 14);
     }
     snapshotSelect.append(snapshotIcon, snapshotLabel, snapshotCheck);
@@ -368,13 +401,14 @@ export function createChangesReviewControl(options: {
     const displayHeading = document.createElement('div');
     displayHeading.className = 'changes-review-section-label';
     displayHeading.textContent = value.displaySettings;
-    const markers = createToggleOption('markers', value.showChangeLocations, state.markersVisible);
     const sourceOnly = state.mode !== 'source';
     const beforeContent = createToggleOption(
       'before-content', value.showBeforeChangeContent, state.beforeContentVisible
     );
-    if (sourceOnly) beforeContent.title = value.sourceModeOnly;
-    displaySection.append(displayHeading, markers, beforeContent);
+    beforeContent.disabled = !state.markersVisible;
+    if (!state.markersVisible) beforeContent.title = value.selectComparisonToEnable;
+    else if (sourceOnly) beforeContent.title = value.sourceModeOnly;
+    displaySection.append(displayHeading, beforeContent);
     panel.append(header, baselineSection, displaySection);
   };
 
@@ -385,13 +419,13 @@ export function createChangesReviewControl(options: {
 
   const onClick = (event: MouseEvent): void => {
     const target = event.target instanceof Element ? event.target : null;
-    if (!target) return;
+    if (!target || target.closest('button')?.disabled) return;
     if (target.closest('.changes-review-trigger')) {
       setOpen(!open);
       return;
     }
     const baseline = target.closest<HTMLElement>('[data-baseline]')?.dataset.baseline;
-    if (baseline === 'current-edit' || baseline === 'recent-save' || baseline === 'git-head') {
+    if (baseline === 'none' || baseline === 'current-edit' || baseline === 'recent-save' || baseline === 'git-head') {
       options.onIntent({ type: 'selectBaseline', baseline });
       return;
     }
@@ -400,7 +434,6 @@ export function createChangesReviewControl(options: {
     if (action === 'create-snapshot') options.onIntent({ type: 'createManualSnapshot' });
     if (action === 'update-snapshot') options.onIntent({ type: 'updateManualSnapshot' });
     const toggle = target.closest<HTMLElement>('[data-toggle]')?.dataset.toggle;
-    if (toggle === 'markers') options.onIntent({ type: 'setMarkersVisible', visible: !state.markersVisible });
     if (toggle === 'before-content') {
       options.onIntent({ type: 'setBeforeContentVisible', visible: !state.beforeContentVisible });
     }

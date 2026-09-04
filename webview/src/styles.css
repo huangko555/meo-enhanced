@@ -295,15 +295,20 @@ body {
 .find-panel {
   display: none;
   position: absolute;
-  top: 100%;
-  right: -14px;
+  top: calc(100% + 8px);
+  right: 14px;
   flex-direction: column;
   gap: 4px;
   --find-input-width: 200px;
   max-width: calc(100vw - 24px);
+  box-sizing: border-box;
   padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 50%, transparent);
+  border-radius: 8px;
   background-color: var(--vscode-sideBar-background);
-  z-index: 250;
+  box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
+  /* Keep below the toolbar-right stacking context and its dropdown menus. */
+  z-index: 1;
 }
 
 .find-panel.is-visible {
@@ -821,11 +826,10 @@ body {
   height: 24px;
   color: var(--meo-toolbar-overflow-foreground, #fff);
   background-color: var(--vscode-sideBar-background);
-  pointer-events: none;
 }
 
-.toolbar-overflow-indicator svg {
-  transform: translateY(5px);
+.toolbar-overflow-indicator.is-active {
+  background-color: var(--vscode-toolbar-hoverBackground);
 }
 
 .toolbar-overflow-indicator[hidden] {
@@ -955,14 +959,17 @@ body {
 
 .changes-review-header {
   position: relative;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 28px;
-  padding: 0 6px;
+  margin-top: -4px;
+  min-height: 32px;
+  padding: 0 6px 1px;
   overflow: hidden;
   color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 16px;
   white-space: nowrap;
 }
 
@@ -1051,8 +1058,13 @@ body {
   color: currentColor;
 }
 
+.changes-review-option:disabled .menu-switch {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
 .changes-review-toggle {
-  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
 }
 
 .changes-review-option-icon {
@@ -1081,7 +1093,6 @@ body {
 
 .changes-review-snapshot-select {
   min-width: 0;
-  gap: 2px;
   padding-right: 6px;
 }
 
@@ -1110,8 +1121,8 @@ body {
   pointer-events: none;
 }
 
-.changes-review-header > * {
-  transform: translateY(-1px);
+.changes-review-header .changes-review-count {
+  font-size: inherit;
 }
 
 .changes-review-snapshot-action {
@@ -1164,20 +1175,29 @@ body {
   display: none;
 }
 
-.more-tools-overflow-items {
+.toolbar-overflow-panel {
+  position: absolute;
+  top: 38px;
+  z-index: 300;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 4px;
-  border-bottom: 1px solid var(--vscode-panel-border);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(268px, calc(100vw - 16px));
+  padding: 6px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-sideBar-background);
+  box-shadow: var(--meo-elevated-shadow, 0 4px 12px rgba(0, 0, 0, 0.24));
 }
 
-.more-tools-overflow-items[hidden] {
+.toolbar-overflow-panel[hidden] {
   display: none;
 }
 
-.more-tools-overflow-items .is-toolbar-overflow-item {
+.toolbar-overflow-panel .is-toolbar-overflow-item {
   flex: 0 0 auto;
 }
 
@@ -1302,8 +1322,7 @@ body {
   opacity: 0.55;
 }
 
-.more-tools-option-icon,
-.more-tools-option-check {
+.more-tools-option-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1315,12 +1334,50 @@ body {
   white-space: nowrap;
 }
 
-.more-tools-option-check {
-  visibility: hidden;
+.more-tools-toggle-option {
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
 }
 
-.more-tools-option.is-active .more-tools-option-check {
-  visibility: visible;
+.menu-switch {
+  position: relative;
+  box-sizing: border-box;
+  width: 28px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 38%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+  pointer-events: none;
+}
+
+.menu-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+}
+
+[aria-checked='true'] > .menu-switch {
+  border-color: color-mix(in srgb, var(--meo-semantic-linkForeground) 35%, var(--vscode-descriptionForeground));
+  background: color-mix(in srgb, var(--meo-semantic-linkForeground) 35%, var(--vscode-descriptionForeground));
+}
+
+html[data-editor-appearance='dark'] [aria-checked='true'] > .menu-switch {
+  border-color: color-mix(in srgb, var(--meo-semantic-linkForeground) 75%, var(--vscode-editor-background));
+  background: color-mix(in srgb, var(--meo-semantic-linkForeground) 75%, var(--vscode-editor-background));
+}
+
+[aria-checked='true'] > .menu-switch::after {
+  transform: translateX(12px);
+  background: var(--vscode-editor-background);
+}
+
+button:focus-visible > .menu-switch {
+  outline: 1px solid var(--meo-semantic-linkForeground);
+  outline-offset: 2px;
 }
 
 .more-tools-separator {
@@ -1481,12 +1538,6 @@ body {
 
 .heading-dropdown-option {
   transition: background-color 0.12s ease;
-}
-
-@media (max-width: 920px) {
-  .find-panel {
-    right: -10px;
-  }
 }
 
 .meo-code-block-pill {
@@ -5086,10 +5137,6 @@ body.outline-resizing .preview-frame {
 
 .editor-root[data-mode='preview'] .preview-hidden-toolbar-control {
   display: none;
-}
-
-.editor-root[data-mode='preview'] .preview-hidden-toolbar-control.has-toolbar-overflow-items {
-  display: block;
 }
 
 .editor-root[data-mode='preview'] .find-replace-row {

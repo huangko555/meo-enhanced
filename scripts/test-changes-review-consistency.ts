@@ -59,8 +59,9 @@ async function main(): Promise<void> {
     ` });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
-    const currentText = 'first\nnew value\nlast';
-    const baselineText = 'first\nold value\nlast';
+    const precedingText = `<a href="./markdown-render-test.md#html-jump-target" title="打开当前文件并跳转">相对文件锚点</a>`;
+    const currentText = `first\n${precedingText}\nnew value ${'long-source-path/'.repeat(20)}\nlast`;
+    const baselineText = `first\n${precedingText}\nold value ${'old-source-path/'.repeat(20)}\nlast`;
     await page.evaluate((text) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
         type: 'init', documentId: 'file:///changes.md', text, version: 1,
@@ -150,7 +151,11 @@ async function main(): Promise<void> {
         headerDividerRight: headerRect.right - (Number.parseFloat(headerDivider.right) || 0),
         sectionDividerLeft: sectionRect.left + (Number.parseFloat(sectionDivider.left) || 0),
         sectionDividerRight: sectionRect.right - (Number.parseFloat(sectionDivider.right) || 0),
-        headerContentCenterOffset: (contentTop + contentBottom) / 2 - (headerRect.top + headerRect.height / 2)
+        headerContentCenterOffset: (contentTop + contentBottom) / 2
+          - (panelRect.top + Number.parseFloat(getComputedStyle(panel).borderTopWidth)
+            + headerRect.bottom - Number.parseFloat(headerDivider.height)) / 2,
+        headerFont: getComputedStyle(header).fontSize,
+        optionFont: getComputedStyle(panel.querySelector('.changes-review-option')!).fontSize
       };
     });
     await page.click('.changes-review-trigger');
@@ -172,12 +177,73 @@ async function main(): Promise<void> {
       Math.abs(changesMenuGeometry.headerDividerRight - expectedRight) > 0.5 ||
       Math.abs(changesMenuGeometry.sectionDividerLeft - expectedLeft) > 0.5 ||
       Math.abs(changesMenuGeometry.sectionDividerRight - expectedRight) > 0.5 ||
-      Math.abs(changesMenuGeometry.headerContentCenterOffset + 1) > 0.25
+      Math.abs(changesMenuGeometry.headerContentCenterOffset) > 0.25 ||
+      changesMenuGeometry.headerFont !== changesMenuGeometry.optionFont
     ) {
       throw new Error(`Changes menu alignment did not match Settings: ${JSON.stringify({
         changesMenuGeometry,
         settingsMenuGeometry
       })}`);
+    }
+
+    await page.click('.more-tools-wrapper > button');
+    await page.click('.changes-review-trigger');
+    await page.click('[data-toggle="before-content"]');
+    await waitForFrames(page, 4);
+    await page.click('[data-baseline="none"]');
+    await waitForFrames(page, 4);
+    const assertComparisonOff = async () => {
+      const projection = await page.evaluate(() => ({
+        counts: document.querySelector('.changes-review-trigger .changes-review-counts')?.textContent,
+        rows: document.querySelectorAll('.meo-git-diff-original-line, .meo-diff-changed-line, .meo-diff-added-line').length,
+        toggleChecked: document.querySelector('[data-toggle="before-content"]')?.getAttribute('aria-checked'),
+        toggleDisabled: document.querySelector<HTMLButtonElement>('[data-toggle="before-content"]')?.disabled,
+        selected: document.querySelector('[data-baseline="none"]')?.getAttribute('aria-checked')
+      }));
+      if (projection.counts !== '不比较' || projection.rows || projection.toggleChecked !== 'true'
+        || !projection.toggleDisabled || projection.selected !== 'true') {
+        throw new Error(`Comparison off did not clear the projection while retaining preferences: ${JSON.stringify(projection)}`);
+      }
+    };
+    await assertComparisonOff();
+    await page.evaluate((baseText) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'gitBaselineChanged', version: 1,
+        payload: { available: true, tracked: true, mode: 'fixed', generation: 5, baseText }
+      }}));
+    }, baselineText);
+    await waitForFrames(page, 4);
+    await assertComparisonOff();
+    await page.click('[data-action="select-snapshot"]');
+    await page.evaluate((baseText) => {
+      window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'gitBaselineChanged', version: 1,
+        payload: { available: true, tracked: true, mode: 'fixed', generation: 6, baseText }
+      }}));
+    }, baselineText);
+    await waitForFrames(page, 4);
+    await assertCountsMatchMarkers(page, 'Reenabled snapshot baseline');
+    if (await page.$eval('[data-toggle="before-content"]', (button) => (button as HTMLButtonElement).disabled)) {
+      throw new Error('Original-content preference did not reactivate with comparison');
+    }
+    await page.click('.changes-review-trigger');
+    await page.setViewport({ width: 1400, height: 520, deviceScaleFactor: 1 });
+    await waitForFrames(page, 12);
+    await page.click('.more-tools-wrapper > button');
+    // Assert each transition, including number-only changes that rewrap the
+    // preceding line without resizing the full-width scroll container.
+    for (const action of ['contentMaxWidth', 'sourceLineNumbers', 'sourceLineNumbers', 'contentMaxWidth',
+      'sourceLineNumbers', 'contentMaxWidth', 'sourceLineNumbers', 'contentMaxWidth', 'contentMaxWidth']) {
+      await page.click(`[data-action="${action}"]`);
+      await waitForFrames(page, 8);
+      const layout = await page.evaluate(() => (['original', 'current'] as const).map((kind) => {
+        const row = document.querySelector<HTMLElement>(`.meo-git-diff-${kind}-line`)!.getBoundingClientRect();
+        const gutter = document.querySelector<HTMLElement>(`.meo-git-diff-sign-gutter-cell.is-${kind}`)!.getBoundingClientRect();
+        return { kind, top: row.top - gutter.top, height: row.height - gutter.height };
+      }));
+      if (layout.some((row) => Math.abs(row.top) > 1 || Math.abs(row.height) > 1)) {
+        throw new Error(`Settings ${action} toggle left stale diff gutter heights: ${JSON.stringify(layout)}`);
+      }
     }
 
     console.log('changes review consistency checks passed');

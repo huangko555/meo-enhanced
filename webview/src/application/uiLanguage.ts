@@ -37,6 +37,7 @@ export type UiStrings = Readonly<{
   findAndReplace: string;
   more: string;
   moreTools: string;
+  toolbarOverflow: string;
   editorAppearance: string;
   editorFontSize: string;
   custom: string;
@@ -188,12 +189,15 @@ export type UiStrings = Readonly<{
   compareWithVersion: string;
   displaySettings: string;
   currentDiskVersionOption: string;
+  currentDiskVersionDescription: string;
   beforeLastSaveVersionOption: string;
   gitHeadOption: string;
   gitHeadStatus: (status: GitHeadDisplayStatus) => string;
   gitHeadWithStatus: (status: string) => string;
   gitHeadOptionWithStatus: (status: string) => string;
   manualSnapshot: string;
+  manualSnapshotOption: string;
+  disableComparison: string;
   createSnapshot: string;
   clickToCreateSnapshot: string;
   updateSnapshot: string;
@@ -201,6 +205,8 @@ export type UiStrings = Readonly<{
   showBeforeChangeContent: string;
   sourceModeOnly: string;
   noChanges: string;
+  noComparison: string;
+  selectComparisonToEnable: string;
   comparisonUnavailable: string;
   comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => string;
   addedCount: (count: number) => string;
@@ -232,7 +238,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
     exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportAsHtml: 'Export as HTML',
     exportAsPdf: 'Export as PDF', findAndReplace: 'Find and Replace', more: 'Settings',
-    moreTools: 'Settings', editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
+    moreTools: 'Settings', toolbarOverflow: 'More tools', editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
     interfaceLanguage: 'Interface language', showLineNumbers: 'Show line numbers',
     foldLongCodeBlocks: 'Fold long code blocks',
@@ -301,15 +307,17 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     codeBlock: 'Code Block', quote: 'Quote', horizontalRule: 'Horizontal Rule',
     link: 'Link', wikiLink: 'Wiki Link', image: 'Image', table: 'Table', line: 'Lines',
     goToLine: 'Go to line', save: 'Save (Ctrl+S)', saveDocument: 'Save document',
-    reloadDiskVersion: 'Reload disk version', reloadDiskVersionDoubleClick: 'Click again to reload disk version',
+    reloadDiskVersion: 'Reload from disk and discard unsaved changes', reloadDiskVersionDoubleClick: 'Click again to discard unsaved changes and reload from disk',
     constrainContentWidth: 'Constrain Content Width', constrainWidth: 'Constrain Width',
     disableConstrainedWidth: 'Disable Constrained Width',
-    currentEdits: 'Saved File', recentSave: 'Before Agent Edits',
+    currentEdits: 'Last Saved Version', recentSave: 'Before Agent Edits',
     gitHead: 'Git HEAD (Latest Commit)',
     compareWithVersion: 'Compare Against', displaySettings: 'Display Settings',
-    currentDiskVersionOption: 'Saved File',
+    currentDiskVersionOption: 'Last Saved Version',
+    currentDiskVersionDescription: 'Compare with the latest file contents saved on disk, including external changes',
     beforeLastSaveVersionOption: 'Before Agent Edits',
-    gitHeadOption: 'Git HEAD · Latest Commit', manualSnapshot: 'Manual Snapshot',
+    gitHeadOption: 'Git HEAD', manualSnapshot: 'Manual Snapshot',
+    manualSnapshotOption: 'Manual Snapshot', disableComparison: 'Turn Off Comparison',
     gitHeadStatus: (status: GitHeadDisplayStatus) => ({
       'git-unavailable': 'Git Unavailable',
       'not-repo': 'Not a Git Repo',
@@ -327,8 +335,9 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     clickToCreateSnapshot: 'Click to Create', updateSnapshot: 'Update',
     showChangeLocations: 'Mark Change Locations',
     showBeforeChangeContent: 'Show Original · Source Only',
-    sourceModeOnly: 'Available in Source mode only', noChanges: 'No Changes',
+    sourceModeOnly: 'Available in Source mode only', noChanges: 'No Changes', noComparison: 'No comparison',
     comparisonUnavailable: 'Unable to Compare',
+    selectComparisonToEnable: 'Select a comparison version to enable',
     comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
       'git-unavailable': 'Git Unavailable',
       'not-repo': 'Not a Git Repo',
@@ -365,7 +374,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewGenerating: '正在生成预览…',
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
-    findAndReplace: '查找和替换', more: '设置', moreTools: '设置',
+    findAndReplace: '查找和替换', more: '设置', moreTools: '设置', toolbarOverflow: '更多工具',
     editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',
     decreaseFontSize: '减小字号', increaseFontSize: '增大字号',
     interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
@@ -432,15 +441,17 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     showOutlineRight: '在右侧显示目录', codeBlock: '代码块', quote: '引用',
     horizontalRule: '分隔线', link: '链接', wikiLink: 'Wiki 链接', image: '图片', table: '表格',
     line: '行号', goToLine: '跳转到行', save: '保存 (Ctrl+S)', saveDocument: '保存文档',
-    reloadDiskVersion: '重新加载磁盘版本', reloadDiskVersionDoubleClick: '再次点击以重新加载磁盘版本',
+    reloadDiskVersion: '从磁盘重新加载，放弃未保存的更改', reloadDiskVersionDoubleClick: '再次点击将放弃未保存的更改，并从磁盘重新加载',
     constrainContentWidth: '限制内容宽度', constrainWidth: '限制宽度',
     disableConstrainedWidth: '取消内容宽度限制',
-    currentEdits: '当前磁盘版本', recentSave: 'Agent 编辑前版本',
+    currentEdits: '最近保存版本', recentSave: 'Agent 编辑前版本',
     gitHead: 'Git HEAD（最新提交）',
-    compareWithVersion: '比较版本', displaySettings: '显示设置',
-    currentDiskVersionOption: '当前磁盘版本',
-    beforeLastSaveVersionOption: 'Agent 编辑前版本',
-    gitHeadOption: 'Git HEAD · 最新提交', manualSnapshot: '手动快照',
+    compareWithVersion: '比较方式', displaySettings: '显示设置',
+    currentDiskVersionOption: '与最近保存版本比较',
+    currentDiskVersionDescription: '与磁盘上最新保存的文件内容比较，包含外部修改',
+    beforeLastSaveVersionOption: '与 Agent 编辑前版本比较',
+    gitHeadOption: '与 Git HEAD 比较', manualSnapshot: '手动快照',
+    manualSnapshotOption: '与手动快照比较', disableComparison: '关闭比较',
     gitHeadStatus: (status: GitHeadDisplayStatus) => ({
       'git-unavailable': 'Git 不可用',
       'not-repo': '非 Git 仓库',
@@ -453,11 +464,12 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
       error: '暂不可用'
     })[status],
     gitHeadWithStatus: (status: string) => `Git HEAD（${status}）`,
-    gitHeadOptionWithStatus: (status: string) => `Git HEAD · ${status}`,
+    gitHeadOptionWithStatus: (status: string) => `与 Git HEAD 比较 · ${status}`,
     createSnapshot: '创建', clickToCreateSnapshot: '点击创建', updateSnapshot: '更新',
     showChangeLocations: '标记更改位置',
-    showBeforeChangeContent: '显示修改前内容（仅源码模式）', sourceModeOnly: '仅在源码模式下可用', noChanges: '无更改',
+    showBeforeChangeContent: '显示修改前内容 · 仅源码模式', sourceModeOnly: '仅在源码模式下可用', noChanges: '无更改', noComparison: '不比较',
     comparisonUnavailable: '无法比较',
+    selectComparisonToEnable: '选择比较版本后生效',
     comparisonUnavailableReason: (reason: ChangesReviewUnavailableReason) => ({
       'git-unavailable': 'Git 不可用',
       'not-repo': '非 Git 仓库',

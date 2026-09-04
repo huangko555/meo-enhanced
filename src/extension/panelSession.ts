@@ -273,7 +273,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let requestDiffBaselineRefresh = (_options: GitBaselineRefreshOptions): void => undefined;
   const diffBaselineSelection = createDiffBaselineSelection<GitBaselinePayload>({
     initialMode: getDiffBaselineMode(),
-    readEnabled: () => true,
+    readEnabled: () => getGitChangesGutterEnabled(context),
     canPublish: () => initDelivered,
     saved: {
       getPinned: () => savedRevisionTracker.getPinnedBaseline(),
@@ -540,9 +540,12 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         if (typeof visible !== 'boolean') {
           return;
         }
-        await vscode.workspace
-          .getConfiguration(EXTENSION_CONFIG_SECTION)
-          .update(GIT_CHANGES_GUTTER_SETTING_KEY, visible, vscode.ConfigurationTarget.Global);
+        await enqueue(async () => {
+          await vscode.workspace
+            .getConfiguration(EXTENSION_CONFIG_SECTION)
+            .update(GIT_CHANGES_GUTTER_SETTING_KEY, visible, vscode.ConfigurationTarget.Global);
+          requestDiffBaselineRefresh({ forcePost: true, delayMs: 0 });
+        });
         return;
       }
       case 'setGitDiffDetailsVisible':
@@ -551,7 +554,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           .update(GIT_DIFF_DETAILS_VISIBLE_SETTING_KEY, raw.visible, vscode.ConfigurationTarget.Global);
         return;
       case 'setDiffBaselineMode':
-        await diffBaselineSelection.setMode(raw.mode);
+        await enqueue(() => diffBaselineSelection.setMode(raw.mode));
         return;
       case 'setFixedBaseline':
         await enqueue(async () => {

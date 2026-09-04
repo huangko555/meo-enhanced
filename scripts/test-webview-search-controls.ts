@@ -69,6 +69,56 @@ async function main() {
       wholeWord: document.querySelector('.find-option-button')?.getAttribute('aria-label')
     }));
 
+    for (const appearance of ['light', 'dark']) {
+      await page.evaluate((value) => {
+        document.querySelector<HTMLButtonElement>(`[data-editor-appearance="${value}"]`)!.click();
+        document.querySelector<HTMLButtonElement>('[data-action="find"]')!.click();
+      }, appearance);
+      await page.click('.more-tools-wrapper > button');
+      const popupLayout = await page.evaluate(() => {
+        const find = document.querySelector<HTMLElement>('.find-panel')!;
+        const menu = document.querySelector<HTMLElement>('.more-tools-panel')!;
+        const findRect = find.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        const left = Math.max(findRect.left, menuRect.left);
+        const right = Math.min(findRect.right, menuRect.right);
+        const top = Math.max(findRect.top, menuRect.top);
+        const bottom = Math.min(findRect.bottom, menuRect.bottom);
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+        return {
+          radius: getComputedStyle(find).borderRadius,
+          border: getComputedStyle(find).borderTopWidth,
+          onRight: findRect.left > window.innerWidth / 2,
+          fits: findRect.right <= window.innerWidth,
+          overlap: right > left && bottom > top,
+          menuOnTop: Boolean(hit && menu.contains(hit))
+        };
+      });
+      if (popupLayout.radius !== '8px' || popupLayout.border !== '1px'
+        || !popupLayout.onRight || !popupLayout.fits || !popupLayout.overlap || !popupLayout.menuOnTop) {
+        throw new Error(`${appearance} search popup layout/stacking regressed: ${JSON.stringify(popupLayout)}`);
+      }
+      await page.click('.more-tools-wrapper > button');
+      await page.click('.find-close-button');
+    }
+
+    for (const language of ['en', 'zh-CN']) {
+      const titles = await page.evaluate((value) => {
+        document.querySelector<HTMLButtonElement>(`[data-ui-language="${value}"]`)!.click();
+        const button = document.querySelector<HTMLButtonElement>('[data-action="discard"]')!;
+        const normal = button.title;
+        button.click();
+        const armed = button.title;
+        // Clicking elsewhere cancels confirmation without discarding any content.
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        return { normal, armed };
+      }, language);
+      const warning = language === 'en' ? /unsaved changes/i : /未保存的更改/;
+      if (!warning.test(titles.normal) || !warning.test(titles.armed)) {
+        throw new Error(`${language} reload tooltip omitted the unsaved-change warning: ${JSON.stringify(titles)}`);
+      }
+    }
+
     const tableSelectionText = await page.evaluate(async () => {
       const input = document.querySelector<HTMLTextAreaElement>('tbody textarea')!;
       input.focus();

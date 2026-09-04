@@ -175,7 +175,7 @@ async function main() {
       });
       return {
         crossedBoundary,
-        migratedCount: document.querySelectorAll('.more-tools-overflow-items > .is-toolbar-overflow-item').length
+        migratedCount: document.querySelectorAll('.toolbar-overflow-panel > .is-toolbar-overflow-item').length
       };
     });
     if (resolvedLanguageLayout.crossedBoundary || resolvedLanguageLayout.migratedCount === 0) {
@@ -380,7 +380,7 @@ async function main() {
     await waitForFrames(page, 2);
     await page.click('.changes-review-trigger');
     const inactiveMarkerSetting = await page.evaluate(() => {
-      const button = document.querySelector<HTMLElement>('[data-toggle="markers"]')!;
+      const button = document.querySelector<HTMLElement>('[data-baseline="none"]')!;
       const sourceOnlyButton = document.querySelector<HTMLButtonElement>('[data-toggle="before-content"]')!;
       const panel = document.querySelector<HTMLElement>('.changes-review-panel')!;
       const trigger = document.querySelector<HTMLElement>('.changes-review-trigger')!;
@@ -428,12 +428,12 @@ async function main() {
       };
     });
     if (JSON.stringify(inactiveMarkerSetting) !== JSON.stringify({
-      checked: 'false',
-      label: '标记更改位置',
-      headerText: '无更改·与当前磁盘版本对比',
-      baselineLabels: ['当前磁盘版本', 'Agent 编辑前版本', 'Git HEAD · 最新提交'],
+      checked: 'true',
+      label: '关闭比较',
+      headerText: '不比较',
+      baselineLabels: ['关闭比较', '与最近保存版本比较', '与 Agent 编辑前版本比较', '与 Git HEAD 比较'],
       baselineLabelsClipped: false,
-      baselineIconCount: 3,
+      baselineIconCount: 4,
       selectedBaselineCheckCount: 1,
       snapshotIconCount: 1,
       snapshotCreateHint: '点击创建',
@@ -448,13 +448,14 @@ async function main() {
       triggerCenterOffsets: [0, 0, 0],
       chevronCount: 1,
       chevronSize: '12',
-      baselineGaps: [2, 2],
-      sourceOnlyDisabled: false,
+      baselineGaps: [2, 2, 2],
+      sourceOnlyDisabled: true,
       sourceOnlyOpacity: '1',
-      sourceOnlyMatchesMarkerColor: true
+      sourceOnlyMatchesMarkerColor: false
     })) {
       throw new Error(`Change marker setting did not reflect host state: ${JSON.stringify(inactiveMarkerSetting)}`);
     }
+    await page.click('[data-baseline="current-edit"]');
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: {
       type: 'gitBaselineChanged', version: 1,
       payload: {
@@ -506,14 +507,14 @@ async function main() {
     });
     if (JSON.stringify(englishReviewMenu) !== JSON.stringify({
       labels: [
-        'Saved File',
+        'Turn Off Comparison',
+        'Last Saved Version',
         'Before Agent Edits',
-        'Git HEAD · Latest Commit',
+        'Git HEAD',
         'Manual Snapshot',
-        'Mark Change Locations',
         'Show Original · Source Only'
       ],
-      headerText: 'No Changes·vs. Saved File',
+      headerText: 'No Changes·vs. Last Saved Version',
       clipped: false
     })) {
       throw new Error(`English change review labels did not fit the shared menu width: ${JSON.stringify(englishReviewMenu)}`);
@@ -575,7 +576,7 @@ async function main() {
       };
     });
     if (JSON.stringify(unavailableGitBaseline) !== JSON.stringify({
-      label: 'Git HEAD · 非 Git 仓库',
+      label: '与 Git HEAD 比较 · 非 Git 仓库',
       checked: 'true',
       ariaDisabled: null,
       disabled: false,
@@ -632,14 +633,14 @@ async function main() {
     });
     const expectedGitLabels = {
       chinese: [
-        'Git HEAD · Git 不可用', 'Git HEAD · 非 Git 仓库', 'Git HEAD · Git 已忽略',
-        'Git HEAD · 未跟踪文件', 'Git HEAD · 暂无提交', 'Git HEAD · 非本地文件',
-        'Git HEAD · 文件过大', 'Git HEAD · 二进制文件', 'Git HEAD · 暂不可用', 'Git HEAD · 最新提交'
+        '与 Git HEAD 比较 · Git 不可用', '与 Git HEAD 比较 · 非 Git 仓库', '与 Git HEAD 比较 · Git 已忽略',
+        '与 Git HEAD 比较 · 未跟踪文件', '与 Git HEAD 比较 · 暂无提交', '与 Git HEAD 比较 · 非本地文件',
+        '与 Git HEAD 比较 · 文件过大', '与 Git HEAD 比较 · 二进制文件', '与 Git HEAD 比较 · 暂不可用', '与 Git HEAD 比较'
       ],
       english: [
         'Git HEAD · Git Unavailable', 'Git HEAD · Not a Git Repo', 'Git HEAD · Ignored by Git',
         'Git HEAD · Untracked File', 'Git HEAD · No Commits', 'Git HEAD · Not a Local File',
-        'Git HEAD · File Too Large', 'Git HEAD · Binary File', 'Git HEAD · Temporary Error', 'Git HEAD · Latest Commit'
+        'Git HEAD · File Too Large', 'Git HEAD · Binary File', 'Git HEAD · Temporary Error', 'Git HEAD'
       ]
     };
     for (const language of ['chinese', 'english'] as const) {
@@ -702,7 +703,7 @@ async function main() {
     });
     if (
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
-        '限制宽度', '显示行号', '折叠长代码块'
+        '显示行号', '折叠长代码块', '限制宽度'
       ]) ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
@@ -765,7 +766,10 @@ async function main() {
       return {
         active: button.classList.contains('is-active'),
         checked: button.getAttribute('aria-checked'),
-        widthOverride: document.documentElement.style.getPropertyValue('--meo-content-max-width')
+        widthOverride: document.documentElement.style.getPropertyValue('--meo-content-max-width'),
+        hostWidth: document.querySelector('.editor-host')!.getBoundingClientRect().width,
+        viewportWidth: document.querySelector('.editor-host > .cm-editor')!.getBoundingClientRect().width,
+        toolbarWidth: document.querySelector('.mode-toolbar')!.getBoundingClientRect().width
       };
     });
     if (
@@ -785,7 +789,10 @@ async function main() {
       Math.abs(toggledToolbarStart.firstButtonOffset - 10) > 0.5 ||
       !constrainedWidthState.active ||
       constrainedWidthState.checked !== 'true' ||
-      constrainedWidthState.widthOverride !== '800px'
+      constrainedWidthState.widthOverride !== '800px' ||
+      constrainedWidthState.hostWidth !== 900 ||
+      constrainedWidthState.viewportWidth !== 900 ||
+      constrainedWidthState.toolbarWidth !== 900
     ) {
       throw new Error(`Toolbar settings did not update as expected: ${JSON.stringify({ initialToolbarStart, toggledToolbarStart, constrainedWidthState })}`);
     }
@@ -961,7 +968,7 @@ async function main() {
       !activeSnapshot.selected ||
       activeSnapshot.actionSelected ||
       activeSnapshot.rowSelected ||
-      activeSnapshot.label !== '手动快照（07:05）' ||
+      activeSnapshot.label !== '与手动快照比较（07:05）' ||
       activeSnapshot.action !== '更新' ||
       activeSnapshot.actionIconCount !== 0 ||
       activeSnapshot.actionAriaLabel !== '更新手动快照' ||
@@ -1068,17 +1075,17 @@ async function main() {
       };
     });
     if (
-      snapshotStates.chinese.today.label !== '手动快照（07:05）' ||
-      snapshotStates.chinese.noTimestamp.label !== '手动快照' ||
-      snapshotStates.chinese.yesterday.label !== '手动快照（昨天）' ||
-      snapshotStates.english.today.label !== 'Manual Snapshot (07:05)' ||
+      snapshotStates.chinese.today.label !== '与手动快照比较（07:05）' ||
+      snapshotStates.chinese.noTimestamp.label !== '与手动快照比较' ||
+      snapshotStates.chinese.yesterday.label !== '与手动快照比较（昨天）' ||
+      snapshotStates.english.today.label !== 'Manual Snapshot' ||
       snapshotStates.english.noTimestamp.label !== 'Manual Snapshot' ||
-      snapshotStates.english.yesterday.label !== 'Manual Snapshot (Yesterday)' ||
-      snapshotStates.chinese.older.label !== '手动快照（较早）' ||
-      snapshotStates.english.older.label !== 'Manual Snapshot (Earlier)' ||
-      snapshotStates.chinese.previousYear.label !== '手动快照（较早）' ||
-      snapshotStates.english.previousYear.label !== 'Manual Snapshot (Earlier)' ||
-      snapshotStates.chinese.none.label !== '手动快照' ||
+      snapshotStates.english.yesterday.label !== 'Manual Snapshot' ||
+      snapshotStates.chinese.older.label !== '与手动快照比较（较早）' ||
+      snapshotStates.english.older.label !== 'Manual Snapshot' ||
+      snapshotStates.chinese.previousYear.label !== '与手动快照比较（较早）' ||
+      snapshotStates.english.previousYear.label !== 'Manual Snapshot' ||
+      snapshotStates.chinese.none.label !== '与手动快照比较' ||
       snapshotStates.chinese.none.hint !== '点击创建' ||
       snapshotStates.chinese.none.hintColor !== snapshotStates.chinese.none.selectColor ||
       snapshotStates.chinese.none.action !== null ||
@@ -1220,7 +1227,8 @@ async function main() {
         currentContentEditable: currentContent?.getAttribute('contenteditable'),
         reviewCountStyles: reviewCounts.map((count) => ({
           fontSize: getComputedStyle(count).fontSize,
-          fontWeight: getComputedStyle(count).fontWeight
+          fontWeight: getComputedStyle(count).fontWeight,
+          inHeader: Boolean(count.closest('.changes-review-header'))
         })),
         reviewCountSignTransforms: reviewCountSigns.map((sign) => getComputedStyle(sign).transform)
       };
@@ -1234,8 +1242,8 @@ async function main() {
       sourceDiffDetails.oldContentUserSelect !== 'text' ||
       sourceDiffDetails.currentContentEditable !== 'true' ||
       sourceDiffDetails.reviewCountStyles.length < 2 ||
-      sourceDiffDetails.reviewCountStyles.some(({ fontSize, fontWeight }) =>
-        fontSize !== '13px' || fontWeight !== '600'
+      sourceDiffDetails.reviewCountStyles.some(({ fontSize, fontWeight, inHeader }) =>
+        fontSize !== (inHeader ? '12px' : '13px') || fontWeight !== '600'
       ) ||
       sourceDiffDetails.reviewCountSignTransforms.length < 2 ||
       sourceDiffDetails.reviewCountSignTransforms.some((transform) => transform === 'none')
@@ -1626,8 +1634,8 @@ async function main() {
       const moreHit = document.elementFromPoint(moreCenter.x, moreCenter.y);
       return {
         overflowIndicatorVisible: !document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
-        migratedCount: document.querySelectorAll('.more-tools-overflow-items > .is-toolbar-overflow-item').length,
-        pdfMigrated: pdfNode.parentElement?.classList.contains('more-tools-overflow-items') === true,
+        migratedCount: document.querySelectorAll('.toolbar-overflow-panel > .is-toolbar-overflow-item').length,
+        pdfMigrated: pdfNode.parentElement?.classList.contains('toolbar-overflow-panel') === true,
         moreVisible: getComputedStyle(moreButton).display !== 'none',
         moreHit: Boolean(moreHit && moreButton.contains(moreHit)),
         moreCenter,
@@ -1646,13 +1654,13 @@ async function main() {
     ) {
       throw new Error(`Narrow Preview toolbar overflow regressed: ${JSON.stringify(narrowPreviewToolbar)}`);
     }
-    await page.mouse.click(narrowPreviewToolbar.moreCenter.x, narrowPreviewToolbar.moreCenter.y);
+    await page.click('.toolbar-overflow-indicator');
     const migratedPdfTarget = await page.evaluate((pdfNode) => {
       const bounds = pdfNode.getBoundingClientRect();
       const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
       const hit = document.elementFromPoint(center.x, center.y);
       return {
-        panelOpen: !document.querySelector<HTMLElement>('.more-tools-panel')!.hidden,
+        panelOpen: !document.querySelector<HTMLElement>('.toolbar-overflow-panel')!.hidden,
         hit: Boolean(hit && pdfNode.contains(hit)),
         center
       };
@@ -1714,7 +1722,7 @@ async function main() {
       return {
         overflowIndicatorHidden: document.querySelector<HTMLElement>('.toolbar-overflow-indicator')!.hidden,
         pdfRestored: pdfNode.parentElement?.classList.contains('preview-format-group') === true,
-        overflowSectionEmpty: document.querySelector('.more-tools-overflow-items')?.childElementCount === 0,
+        overflowSectionEmpty: document.querySelector('.toolbar-overflow-panel')?.childElementCount === 0,
         html: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="html"]')!),
         pdf: describe(document.querySelector<HTMLButtonElement>('.preview-toolbar-action[data-format="pdf"]')!),
         labelsVisible: Array.from(document.querySelectorAll<HTMLElement>('.preview-toolbar-action-label'))

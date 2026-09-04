@@ -71,7 +71,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [chinese.recentSave, chinese.beforeLastSaveVersionOption],
-  ['Agent 编辑前版本', 'Agent 编辑前版本']
+  ['Agent 编辑前版本', '与 Agent 编辑前版本比较']
 );
 assert.deepEqual(
   [english.recentSave, english.beforeLastSaveVersionOption],
@@ -79,11 +79,11 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [english.currentDiskVersionOption, english.showBeforeChangeContent],
-  ['Saved File', 'Show Original · Source Only']
+  ['Last Saved Version', 'Show Original · Source Only']
 );
 assert.deepEqual(
   [english.currentEdits, english.gitHeadStatus('not-repo'), english.gitHeadStatus('no-commits'), english.gitHeadStatus('error'), english.updateSnapshot],
-  ['Saved File', 'Not a Git Repo', 'No Commits', 'Temporary Error', 'Update']
+  ['Last Saved Version', 'Not a Git Repo', 'No Commits', 'Temporary Error', 'Update']
 );
 assert.deepEqual(
   [chinese.clickToCreateSnapshot, english.clickToCreateSnapshot],
