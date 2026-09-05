@@ -67,7 +67,7 @@ const fakeCore = `
           tokens: [[{
             offset: 0,
             content: code,
-            color: instance.id % 2 === 0 ? '#2255aa' : '#aa2255',
+            color: code.includes('latest_second_') ? '#338855' : instance.id % 2 === 0 ? '#2255aa' : '#aa2255',
             fontStyle: 0
           }]]
         };
@@ -219,14 +219,14 @@ async function main(): Promise<void> {
     }, latestSecondCode);
     assert.deepEqual(
       pendingSecondPresentation,
-      'rgb(36, 41, 47)',
-      'A newly pasted supported code block must stay neutral until its Shiki tokens are ready'
+      'rgb(170, 34, 85)',
+      'Pasting into an existing code block must retain its presentation until new tokens are ready'
     );
-    // Mapped old token spans may still wrap the neutral pending text. Only
-    // the innermost text span proves that current tokens have been presented.
+    // Current tokens have a different color so retained old spans cannot satisfy
+    // the readiness check before the remaining consumer has really tokenized.
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>('#second span[style*="color:"]'))
       .some((node) => node.children.length === 0 && node.textContent?.includes('latest_second_23')
-        && getComputedStyle(node).color === 'rgb(170, 34, 85)'));
+        && getComputedStyle(node).color === 'rgb(51, 136, 85)'));
     metrics = await readMetrics(page);
     assert.equal(metrics.initCalls, 1);
     assert.equal(metrics.loadCalls, 1);
