@@ -265,13 +265,19 @@ export function collectHexColorRangesFromText(
   const scanFrom = Math.max(0, Math.min(text.length, Math.trunc(scanRange.from)));
   const scanTo = Math.max(scanFrom, Math.min(text.length, Math.trunc(scanRange.to)));
   const ranges: HexColorRange[] = [];
+  // Most Markdown blocks contain no color. Restrict candidate search to this
+  // block before building delimiter exclusions; otherwise each plain block
+  // scans the remaining document and still pays for the exclusion parser.
+  const source = text.slice(scanFrom, scanTo);
+  HEX_COLOR_REGEX.lastIndex = 0;
+  let match = HEX_COLOR_REGEX.exec(source);
+  if (!match) return ranges;
   const excludedRanges = collectExcludedRanges(text, scanFrom, scanTo);
   let excludedIndex = 0;
 
-  HEX_COLOR_REGEX.lastIndex = scanFrom;
-  for (let match = HEX_COLOR_REGEX.exec(text); match !== null; match = HEX_COLOR_REGEX.exec(text)) {
+  for (; match !== null; match = HEX_COLOR_REGEX.exec(source)) {
     const value = match[0];
-    const from = match.index;
+    const from = scanFrom + match.index;
     if (from >= scanTo) break;
     while (excludedRanges[excludedIndex]?.to <= from) excludedIndex += 1;
     const isExcluded = excludedRanges[excludedIndex]?.from <= from;

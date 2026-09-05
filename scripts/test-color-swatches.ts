@@ -90,6 +90,12 @@ assert.deepEqual(
 const collectBounded = (text: string, from: number, to: number) => (
   collectHexColorRangesFromText(text, 0, { from, to })
 );
+assert.deepEqual(collectBounded('#aabbcc then #def', 0, 4), [],
+  'A range boundary must not turn a prefix of a longer color into a short color');
+assert.deepEqual(collectBounded('#aabbcc then #def', 8, 12), [],
+  'A plain bounded range must not collect a later color');
+assert.deepEqual(collectHexColorRangesFromText('plain #abc end', 20, {from: 6, to: 10}),
+  [{from: 26, to: 30, value: '#abc'}], 'Bounded scanning must preserve document and caller offsets');
 const firstBoundary = blockBoundaryCases[0];
 const firstBreak = firstBoundary.indexOf('\n');
 assert.deepEqual(
