@@ -111,8 +111,13 @@ assert.equal(endurance.longRunning, true);
 assert.equal(endurance.stages.length, 3);
 const enduranceCommands = flattenTestWorkflowCommands(endurance);
 assert.deepEqual(
-  enduranceCommands.slice(0, 8).map((command) => command.args[0]),
+  enduranceCommands.slice(0, 13).map((command) => command.args[0]),
   [
+    'scripts/test-document-auto-save-concurrency.ts',
+    'scripts/test-document-save-flush-webview-adapter.ts',
+    'scripts/test-vscode-document-save-lifecycle-adapter.ts',
+    'scripts/test-panel-session-native-save-flush.ts',
+    'scripts/test-native-save-table-flush.ts',
     'scripts/test-document-reload-mermaid-viewport.ts',
     'scripts/test-search-replace-production.ts',
     'scripts/test-table-body-interaction-sticky-production.ts',
@@ -124,10 +129,10 @@ assert.deepEqual(
   ]
 );
 assert.equal(
-  enduranceCommands[8]?.env?.MEO_UAT_STRICT_FINDING,
+  enduranceCommands[13]?.env?.MEO_UAT_STRICT_FINDING,
   '*'
 );
-assert.deepEqual(enduranceCommands[9]?.args, [
+assert.deepEqual(enduranceCommands[14]?.args, [
   'scripts/test-production-live-scroll-integrity.ts',
   '--document=fixtures/uat.md'
 ]);

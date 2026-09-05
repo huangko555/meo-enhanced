@@ -143,7 +143,8 @@ test: an agent must wait for explicit user authorization in the current task
 before running it. Omitting `--confirm-long-run` is rejected; `--dry-run` may be
 used without authorization to inspect the exact plan.
 
-The full-document endurance entry first runs recent rendered-block, search,
+The full-document endurance entry first runs save concurrency, transient-input
+flush (including IME), and recent rendered-block, search,
 reload, table interaction, change-review, diff-gutter, and code-block line-number
 regressions. It then preserves the original high-intensity UAT and finishes with
 production live-scroll integrity against the same document:
@@ -153,6 +154,46 @@ bun run test:endurance -- path/to/document.md --confirm-long-run
 ```
 
 Use the recommendation and authorization policy above before either long run.
+
+## Release candidate evidence
+
+Before a release, compare the last published tag with the candidate commit.
+Map every user-visible change to a relevant contract or native acceptance result,
+and write release notes from that inventory. Do not describe an unconfirmed report
+as fixed. Record the candidate commit, clean working-tree state, runtime versions,
+commands, exit codes, log locations, and final VSIX size and SHA-256.
+
+Run the complete release gate before endurance. Keep browser performance and
+native endurance runs serial to avoid resource contention. Diagnose failures with
+the smallest reproducer, inspect any skipped remainder, then run the required
+formal gate on the corrected candidate. Do not retry failures until one passes
+or lower endurance limits to obtain release evidence. A short runner preflight
+is useful during setup, but must be reported separately from the full run.
+
+The full-document endurance runner exercises editor history and viewport
+stability; it does **not** exercise VS Code's auto-save scheduler or real disk
+persistence. When save behavior changes, supplement it with native acceptance.
+The reusable `scripts/test-vscode-auto-save-endurance.cjs` runner is loaded through
+VS Code's `--extensionTestsPath`, alongside `--extensionDevelopmentPath=<repo>`.
+Launch it in a dedicated disposable workspace with separate `--user-data-dir`
+and `--extensions-dir`, and `--remote-debugging-port=9337`. It requires:
+
+- `MEO_CONFIRM_LONG_RUN=1`, only after explicit authorization.
+- `MEO_NATIVE_ENDURANCE_WORKSPACE`: the absolute path of that disposable workspace.
+- `MEO_NATIVE_ENDURANCE_ROUNDS`: defaults to 60 (1–120); use three rounds only
+  for setup verification, then the default for candidate acceptance.
+- `MEO_NATIVE_BROWSER_URL`: defaults to `http://127.0.0.1:9337`.
+
+The native runner creates its own Markdown fixture, uses `afterDelay` at 1000 ms,
+and keeps one document session alive across Source input, Live table editing,
+undo/redo, and Preview transitions. It waits for actual platform save events and
+compares exact expected text with TextDocument and disk, checks cell focus, then
+reopens the file. It never calls `document.save()` to simulate auto-save. Results
+are written to `auto-save-endurance-result.json` in the disposable workspace.
+Budget approximately 3–6 minutes in addition to full-document endurance. This
+complements, rather than replaces, the native focus-change/window-change and IME
+acceptance described above. Do not use an actual user workspace or edit a user's
+original document for this runner.
 
 ## Manual F5 acceptance
 
