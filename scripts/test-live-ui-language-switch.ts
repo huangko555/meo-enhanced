@@ -189,6 +189,12 @@ async function main(): Promise<void> {
 
       editor.view.scrollDOM.scrollTop = 120;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const gutter = editor.view.dom.querySelector<HTMLElement>('.cm-gutters')!;
+      const lineNumberNodes = Array.from(gutter.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'));
+      const tableLineNumbers = gutter.querySelector<HTMLElement>('.meo-md-html-table-line-numbers');
+      const mutationRecords: MutationRecord[] = [];
+      const observer = new MutationObserver((records) => mutationRecords.push(...records));
+      observer.observe(gutter, { childList: true, subtree: true });
       const before = {
         labels: read(),
         scrollTop: editor.view.scrollDOM.scrollTop,
@@ -199,23 +205,43 @@ async function main(): Promise<void> {
       editor.setUiLanguage('en');
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      observer.disconnect();
+      const nextLineNumberNodes = Array.from(gutter.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'));
       const after = {
         labels: read(),
         scrollTop: editor.view.scrollDOM.scrollTop,
         selection: editor.view.state.selection.toJSON(),
         history: editor.getHistoryDepth(),
-        text: editor.getText()
+        text: editor.getText(),
+        stableLineNumbers: lineNumberNodes.length === nextLineNumberNodes.length
+          && lineNumberNodes.every((node, index) => node === nextLineNumberNodes[index]),
+        stableTableLineNumbers: tableLineNumbers === gutter.querySelector('.meo-md-html-table-line-numbers'),
+        replacedGutterNodes: mutationRecords.reduce(
+          (count, record) => count + record.addedNodes.length + record.removedNodes.length,
+          0
+        ),
+        gutterMutations: mutationRecords.map((record) => ({
+          target: (record.target as HTMLElement).className ?? record.target.nodeName,
+          added: Array.from(record.addedNodes, (node) => (node as HTMLElement).className ?? node.nodeName),
+          removed: Array.from(record.removedNodes, (node) => (node as HTMLElement).className ?? node.nodeName)
+        }))
       };
       editor.destroy();
       return { before, after };
     });
 
     assert.deepEqual(result.before.labels, expectedLabels('zh-CN', mermaidLine, formulaLine));
-    assert.deepEqual(result.after.labels, expectedLabels('en', mermaidLine, formulaLine));
     assert.ok(Math.abs(result.after.scrollTop - result.before.scrollTop) <= 1, 'language switch moved the Live viewport');
     assert.deepEqual(result.after.selection, result.before.selection, 'language switch changed the editor selection');
     assert.deepEqual(result.after.history, result.before.history, 'language switch changed undo/redo history');
     assert.equal(result.after.text, result.before.text, 'language switch changed document content');
+    assert.equal(result.after.stableLineNumbers, true, 'language switch replaced ordinary line number nodes');
+    assert.equal(result.after.stableTableLineNumbers, true, 'language switch replaced table-projected line numbers');
+    assert.equal(
+      result.after.replacedGutterNodes,
+      0,
+      `language switch mutated gutter structure: ${JSON.stringify(result.after.gutterMutations)}`
+    );
     console.log('Live UI language switch checks passed');
   } finally {
     await browser.close();

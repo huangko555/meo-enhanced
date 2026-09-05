@@ -10,7 +10,7 @@ import type { UiLanguage } from '../../src/foundation/uiLanguage';
 import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
 import type { SourceLineNumberMode } from '../../src/protocol/readyInit';
 import { assessLargeDocument } from '../../src/foundation/largeDocument';
-import { advanceUiLanguageWidgetEpoch, uiLanguageFacet } from './editor/uiLanguage';
+import { uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
@@ -2996,7 +2996,6 @@ export function createEditor({
       });
     },
     setUiLanguage(language: UiLanguage) {
-      advanceUiLanguageWidgetEpoch();
       view.dispatch({
         effects: uiLanguageCompartment.reconfigure(uiLanguageFacet.of(language))
       });

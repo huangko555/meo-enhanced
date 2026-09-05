@@ -4486,7 +4486,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         lineNumberLayer.appendChild(item);
       }
       item.classList.toggle('is-active', rowIndex === activeRow);
-      item.textContent = lineNumber;
+      if (item.textContent !== lineNumber) {
+        item.textContent = lineNumber;
+      }
       item.style.top = `${row.getBoundingClientRect().top - gutterRect.top}px`;
       itemIndex += 1;
     }
