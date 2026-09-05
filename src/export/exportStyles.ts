@@ -23,7 +23,12 @@ export function buildPreviewStyles(
   environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'dark'
 ): string {
-  return buildReadingStyles(environment, appearance);
+  const linkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
+  return `${buildReadingStyles(environment, appearance)}
+:root { --meo-link: ${linkColor}; }
+.footnote-backref { color: var(--meo-link); }
+a code { color: inherit; }
+`;
 }
 
 function buildReadingStyles(
