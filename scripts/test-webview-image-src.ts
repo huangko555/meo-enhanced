@@ -190,4 +190,8 @@ for (const source of [externalImage.fsPath, encodeURI(externalImage.fsPath)]) {
   }
 }
 
+assert(await resolveWebviewImageSrc('//images.example.test/image.png', documentUri as never,
+  externalWebview.webview as never, { delivery: 'embedded' }) === 'https://images.example.test/image.png',
+  'Protocol-relative Preview images must use the existing HTTPS normalization');
+
 console.log('webview image source checks passed');

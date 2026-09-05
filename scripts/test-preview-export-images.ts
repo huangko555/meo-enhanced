@@ -72,6 +72,26 @@ try {
     throw new Error('PDF export changed or dropped a valid remote AVIF image URL');
   }
 
+  for (const source of ['http://images.example.test/image.png', '//images.example.test/image.png']) {
+    const text = `![remote](${source})\n\n<img src="${source}" alt="HTML remote">`;
+    const previewVariant = exportRuntime.renderPreviewDocument({ ...baseOptions, markdownText: text, uiLanguage: 'en' });
+    if (previewVariant.html.split(`data-meo-deferred-image-src="${source}"`).length - 1 !== 2) {
+      throw new Error(`Preview did not defer both network image syntaxes: ${source}`);
+    }
+    for (const target of ['html', 'pdf'] as const) {
+      const exportedVariant = exportRuntime.renderExportHtmlDocument({
+        ...baseOptions, target, outputFilePath: path.join(tempDir, `variant.${target}`),
+        readingSnapshot: { snapshotId: `network-${target}`, text, appearance: 'dark', uiLanguage: 'en', environment: {} }
+      }).htmlDocument;
+      if (exportedVariant.includes('data-meo-deferred-image-src=')) {
+        throw new Error(`${target} export depends on Preview's resource lifecycle: ${source}`);
+      }
+      if (source.startsWith('http:') && !exportedVariant.includes(`src="${source}"`)) {
+        throw new Error(`${target} export changed an HTTP image source`);
+      }
+    }
+  }
+
   console.log('Preview and export image checks passed');
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });
