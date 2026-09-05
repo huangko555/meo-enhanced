@@ -165,4 +165,29 @@ assert(newExternalResult === 'data:image/jpeg;base64,AQID', `unexpected new imag
 assert(externalWebview.optionsAssignments === 0, 'new external image changed webview options and can reload the editor');
 assert(readFileCount === 2, `new external image read count was ${readFileCount}`);
 
+// Exercise the actual Preview-to-Host seam: Markdown normalizes Windows
+// backslashes to %5C before the deferred resource request reaches the resolver.
+const { default: exportRuntime } = await import('../src/export/runtime');
+for (const source of [externalImage.fsPath, encodeURI(externalImage.fsPath)]) {
+  const preview = exportRuntime.renderPreviewDocument({
+    markdownText: `![external](${source})\n\n<img src="${source}" alt="HTML external">`,
+    sourceDocumentPath: documentUri.fsPath,
+    uiLanguage: 'en'
+  });
+  const deferredSources = Array.from(preview.html.matchAll(/data-meo-deferred-image-src="([^"]+)"/g), match => match[1]!);
+  assert(deferredSources.length === 2, 'Preview must preserve both local image syntaxes');
+  for (const deferredSource of deferredSources) {
+    const resolved = await resolveWebviewImageSrc(
+      deferredSource, documentUri as never, externalWebview.webview as never,
+      { delivery: 'embedded' }
+    );
+    assert(resolved === 'data:image/jpeg;base64,AQID',
+      `Rendered Preview image did not resolve to image bytes: ${deferredSource}`);
+    const direct = await resolveWebviewImageSrc(
+      deferredSource, documentUri as never, externalWebview.webview as never
+    );
+    assert(direct === externalResult, 'Rendered local image must retain its authorized resource identity');
+  }
+}
+
 console.log('webview image source checks passed');

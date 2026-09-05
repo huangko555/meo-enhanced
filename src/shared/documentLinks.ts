@@ -10,6 +10,10 @@ const ALLOWED_IMAGE_SRC_RE = /^(?:https?:|data:|blob:|vscode-webview:|vscode-web
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const HOSTNAME_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 const WINDOWS_ABSOLUTE_PATH_RE = /^[a-z]:[\\/]/i;
+// Preview's Markdown renderer URI-encodes backslashes before requesting an
+// image. Classify that drive path before interpreting the colon as a scheme;
+// resolveLocalImageUri still decodes the filesystem path exactly once.
+const WINDOWS_IMAGE_PATH_RE = /^[a-z]:(?:[\\/]|%5c|%2f)/i;
 
 export async function openExternalLink(rawHref: string): Promise<void> {
   try {
@@ -291,7 +295,7 @@ export async function resolveWebviewImageSrc(
     return trimmed;
   }
 
-  if (SCHEME_RE.test(trimmed) && !/^file:/i.test(trimmed) && !WINDOWS_ABSOLUTE_PATH_RE.test(trimmed)) {
+  if (SCHEME_RE.test(trimmed) && !/^file:/i.test(trimmed) && !WINDOWS_IMAGE_PATH_RE.test(trimmed)) {
     return trimmed;
   }
 
@@ -342,7 +346,7 @@ function resolveLocalImageUri(rawUrl: string, documentUri: vscode.Uri): vscode.U
   if (!trimmed || /^\/\//.test(trimmed) || ALLOWED_IMAGE_SRC_RE.test(trimmed)) {
     return null;
   }
-  if (SCHEME_RE.test(trimmed) && !/^file:/i.test(trimmed) && !WINDOWS_ABSOLUTE_PATH_RE.test(trimmed)) {
+  if (SCHEME_RE.test(trimmed) && !/^file:/i.test(trimmed) && !WINDOWS_IMAGE_PATH_RE.test(trimmed)) {
     return null;
   }
 
