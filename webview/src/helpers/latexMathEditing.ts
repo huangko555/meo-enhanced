@@ -607,21 +607,27 @@ class LatexMathEditingController {
     if (!isCurrent()) return false;
     this.innerView.focus();
     if (!isCurrent()) return false;
-    this.innerView.requestMeasure({
-      read: (innerView) => {
-        if (!isCurrent()) return null;
-        const coords = innerView.coordsAtPos(position);
-        const viewport = this.outerView.scrollDOM.getBoundingClientRect();
-        if (!coords || (coords.top >= viewport.top && coords.bottom <= viewport.bottom)) {
-          return null;
+    // Measure after the outer replacement settles so a temporary caret offset
+    // cannot start a competing history navigation.
+    const isNavigationCurrent = getViewportController(this.outerView)?.captureNavigationCurrentness() ?? (() => true);
+    requestAnimationFrame(() => {
+      if (!isCurrent() || !isNavigationCurrent() || !this.root.isConnected) return;
+      this.innerView.requestMeasure({
+        read: (innerView) => {
+          if (!isCurrent() || !isNavigationCurrent()) return null;
+          const coords = innerView.coordsAtPos(position);
+          const viewport = this.outerView.scrollDOM.getBoundingClientRect();
+          if (!coords || (coords.top >= viewport.top && coords.bottom <= viewport.bottom)) {
+            return null;
+          }
+          return coords.top - viewport.top - viewport.height * 0.3;
+        },
+        write: (delta) => {
+          if (isCurrent() && isNavigationCurrent() && delta !== null) {
+            getViewportController(this.outerView)?.navigateBy({ top: delta });
+          }
         }
-        return coords.top - viewport.top - viewport.height * 0.3;
-      },
-      write: (delta) => {
-        if (isCurrent() && delta !== null) {
-          getViewportController(this.outerView)?.navigateBy({ top: delta });
-        }
-      }
+      });
     });
     return true;
   }

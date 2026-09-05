@@ -705,20 +705,24 @@ const dispatchWheel = (deltaY: number) => wheelScrollDOM.dispatch('wheel', {
 });
 
 const firstNavigationReveal = wheelController.beginNavigationReveal();
-if (!firstNavigationReveal()) {
+const measuredNavigation = wheelController.captureNavigationCurrentness();
+const secondMeasurement = wheelController.captureNavigationCurrentness();
+if (!firstNavigationReveal() || !measuredNavigation() || !secondMeasurement()) {
   throw new Error('A fresh navigation reveal was not current');
 }
 const secondNavigationReveal = wheelController.beginNavigationReveal();
-if (firstNavigationReveal() || !secondNavigationReveal()) {
+if (firstNavigationReveal() || measuredNavigation() || secondMeasurement() || !secondNavigationReveal()) {
   throw new Error('A newer navigation reveal did not replace the older intent');
 }
+const inputMeasurement = wheelController.captureNavigationCurrentness();
 wheelDom.dispatch('beforeinput', { inputType: 'insertText' });
-if (secondNavigationReveal()) {
+if (secondNavigationReveal() || inputMeasurement()) {
   throw new Error('Beforeinput did not invalidate a delayed navigation reveal');
 }
 const keyNavigationReveal = wheelController.beginNavigationReveal();
+const keyMeasurement = wheelController.captureNavigationCurrentness();
 wheelDom.dispatch('keydown', { key: 'ArrowDown', ctrlKey: false, metaKey: false, isComposing: false });
-if (keyNavigationReveal()) {
+if (keyNavigationReveal() || keyMeasurement()) {
   throw new Error('A newer key interaction did not invalidate a delayed navigation reveal');
 }
 const pointerNavigationReveal = wheelController.beginNavigationReveal();
@@ -728,8 +732,9 @@ if (pointerNavigationReveal()) {
 }
 wheelDocument.dispatch('pointerup', {});
 const wheelNavigationReveal = wheelController.beginNavigationReveal();
+const wheelMeasurement = wheelController.captureNavigationCurrentness();
 dispatchWheel(-80);
-if (wheelNavigationReveal()) {
+if (wheelNavigationReveal() || wheelMeasurement()) {
   throw new Error('A newer wheel interaction did not invalidate a delayed navigation reveal');
 }
 
@@ -1283,7 +1288,12 @@ if (wheelScrollDOM.scrollTop !== 800 || wheelScrollDOM.scrollLeft !== 50) {
   throw new Error(`Explicit navigation reached ${wheelScrollDOM.scrollTop}, ${wheelScrollDOM.scrollLeft}`);
 }
 
+const interactionMeasurement = wheelController.captureNavigationCurrentness();
+wheelController.markInteraction();
+if (interactionMeasurement()) throw new Error('Interaction must cancel deferred caret measurement');
+const destroyedMeasurement = wheelController.captureNavigationCurrentness();
 wheelController.destroy();
+if (destroyedMeasurement()) throw new Error('Destroy must cancel deferred caret measurement');
 globalThis.requestAnimationFrame = originalWheelRequestAnimationFrame;
 (globalThis as typeof globalThis & { WheelEvent: typeof WheelEvent }).WheelEvent = originalWheelEvent;
 

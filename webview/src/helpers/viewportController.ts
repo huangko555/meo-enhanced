@@ -1111,6 +1111,12 @@ export class ViewportController {
     return () => !this.destroyed && generation === this.explicitNavigationGeneration;
   }
 
+  /** Allows deferred caret measurement to yield to newer commands, input, or scrolling. */
+  captureNavigationCurrentness(): () => boolean {
+    const generation = this.navigationGeneration;
+    return () => !this.destroyed && generation === this.navigationGeneration;
+  }
+
   /** Reserves currentness for one navigation intent without disturbing the active viewport owner. */
   beginNavigationReveal(): () => boolean {
     // An explicit newer navigation supersedes an absolute scroll lock left by

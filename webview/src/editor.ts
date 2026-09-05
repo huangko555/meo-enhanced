@@ -1500,7 +1500,7 @@ export function createEditor({
     if (targetWasVisibleBeforeReplay) {
       viewportController.lockScrollTop(previousViewport.scrollTop, isCurrent);
     } else {
-      viewportController.revealPositionUntilStable(openingLine.from, { y: 'center' }, isCurrent);
+      viewportController.revealPositionUntilStable(openingLine.from, { y: 'center', geometry: 'line-block' }, isCurrent);
     }
     // Undo/Redo follows the user's chosen presentation. Preview has no source
     // editor to focus, so restoring the visible block and outer editor is the
@@ -1526,11 +1526,19 @@ export function createEditor({
         return visibleHeight >= requiredVisibleHeight;
       });
     };
+    // Retrying focus must not restart the settling navigation every frame.
+    // That starves distant nested blocks until the history adapter falls back.
+    let boundaryRevealRequested = !targetWasVisibleBeforeReplay;
+    const requestBoundaryReveal = () => {
+      if (boundaryRevealRequested) return;
+      boundaryRevealRequested = true;
+      viewportController.revealPositionUntilStable(openingLine.from, { y: 'center', geometry: 'line-block' }, isCurrent);
+    };
     if (manualMode === 'preview') {
       return () => {
         if (!isCurrent()) return false;
         if (!renderedBlockIsReady()) {
-          viewportController.revealPositionUntilStable(openingLine.from, { y: 'center' }, isCurrent);
+          requestBoundaryReveal();
           return false;
         }
         view.contentDOM.focus({ preventScroll: true });
@@ -1541,8 +1549,7 @@ export function createEditor({
     return () => {
       if (!renderedBlockIsReady()) {
         stableFocusedElement = null;
-        view.dispatch({ effects: EditorView.scrollIntoView(openingLine.from, { y: 'center' }) });
-        viewportController.revealPositionUntilStable(openingLine.from, { y: 'center' }, isCurrent);
+        requestBoundaryReveal();
         return false;
       }
       const focused = block.kind === 'mermaid'

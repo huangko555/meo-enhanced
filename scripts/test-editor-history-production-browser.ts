@@ -15,6 +15,160 @@ async function waitForFrames(page: any, count = 8): Promise<void> {
   }, count);
 }
 
+async function assertTallRenderedHistoryViewport(page: any): Promise<void> {
+  for (const kind of ['mermaid', 'math'] as const) {
+    const prefix = Array.from({ length: 100 }, () => 'History viewport spacer.\n').join('\n');
+    const body = kind === 'mermaid'
+      ? ['flowchart TB', ...Array.from({ length: 75 }, (_, i) => `N${i} --> N${i + 1}`)]
+      : ['x = 1', ...Array.from({ length: 75 }, (_, i) => `% formula spacer ${i}`)];
+    const fence = kind === 'mermaid' ? '```mermaid' : '$$';
+    const text = `${prefix}\n${fence}\n${body.join('\n')}\n${kind === 'mermaid' ? '```' : '$$'}`;
+    const opening = prefix.split('\n').length + 1;
+    const source = kind === 'mermaid' ? '.meo-mermaid-source-editor' : '.meo-latex-math-source-editor';
+    const button = kind === 'mermaid' ? '.meo-mermaid-mode-btn' : '.meo-latex-math-mode-btn';
+    await page.evaluate(({ text, opening }) => {
+      (window as any).__historyProductionEditor?.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const editor = (window as any).MermaidEditingHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+      (window as any).__historyProductionEditor = editor;
+      editor.scrollToLine(opening, 'center');
+    }, { text, opening });
+    await waitForFrames(page, 12);
+    await page.evaluate((selector) => (document.querySelector(selector) as HTMLButtonElement).click(), button);
+    await page.waitForSelector(`${source} .cm-content`);
+    await waitForFrames(page, 12);
+    await page.evaluate((selector) => {
+      const content = document.querySelector(`${selector} .cm-content`)! as HTMLElement;
+      const range = document.createRange();
+      range.selectNodeContents(content);
+      range.collapse(true);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      content.focus({ preventScroll: true });
+    }, source);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.type(`${kind === 'mermaid' ? '%%' : '%'} HISTORY_MARKER`);
+    await waitForFrames(page, 12);
+    const edited = await page.evaluate(() => (window as any).__historyProductionEditor.getText());
+    assert.ok(edited.includes('HISTORY_MARKER'));
+    await page.evaluate(() => (window as any).__historyProductionEditor.undo());
+    for (const visible of [true, false]) {
+      await page.evaluate(({ opening, visible }) => (window as any).__historyProductionEditor.scrollToLine(visible ? opening : 1, 'center'), { opening, visible });
+      await waitForFrames(page, 20);
+      const result = await page.evaluate(async ({ source, expected }) => {
+        const editor = (window as any).__historyProductionEditor;
+        const samples = [editor.view.scrollDOM.scrollTop];
+        let sampling = true;
+        const sample = () => { if (sampling) { samples.push(editor.view.scrollDOM.scrollTop); requestAnimationFrame(sample); } };
+        requestAnimationFrame(sample);
+        await editor.redo();
+        for (let i = 0; i < 20; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        sampling = false;
+        const content = document.querySelector(`${source} .cm-content`);
+        const line = content?.querySelector('.cm-line')?.getBoundingClientRect();
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        return {
+          span: Math.max(...samples) - Math.min(...samples),
+          textMatches: editor.getText() === expected,
+          focused: content === document.activeElement,
+          lineVisible: Boolean(line && line.top >= viewport.top && line.bottom <= viewport.bottom)
+        };
+      }, { source, expected: edited });
+      assert.ok(result.textMatches && result.focused && result.lineVisible, `${kind} history target: ${JSON.stringify(result)}`);
+      if (visible) assert.ok(result.span <= 2, `${kind} visible redo moved: ${JSON.stringify(result)}`);
+      else assert.ok(result.span > 20, `${kind} offscreen redo must reveal`);
+      await page.evaluate(() => (window as any).__historyProductionEditor.undo());
+    }
+    // A tall replacement can intersect the viewport while its inner caret is
+    // far below it. The outer visible line range alone cannot decide reveal.
+    await page.evaluate((selector) => (document.querySelector(`${selector} .cm-content`) as HTMLElement).focus({ preventScroll: true }), source);
+    await page.keyboard.down('Control');
+    await page.keyboard.press('End');
+    await page.keyboard.up('Control');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type(`${kind === 'mermaid' ? '%%' : '%'} DEEP_MARKER`);
+    await waitForFrames(page, 12);
+    const deepEdited = await page.evaluate(() => (window as any).__historyProductionEditor.getText());
+    assert.ok(deepEdited.includes('DEEP_MARKER'));
+    await page.evaluate(() => (window as any).__historyProductionEditor.undo());
+    await page.evaluate((opening) => (window as any).__historyProductionEditor.scrollToLine(opening, 'center'), opening);
+    await waitForFrames(page, 20);
+    const beforeDeep = await page.evaluate((source) => {
+      const root = document.querySelector(source)!.closest('[role="region"]')!.getBoundingClientRect();
+      const editor = (window as any).__historyProductionEditor;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return { top: editor.view.scrollDOM.scrollTop, rootVisible: root.top < viewport.bottom && root.bottom > viewport.top, bottomOffscreen: root.bottom > viewport.bottom + 500 };
+    }, source);
+    assert.ok(beforeDeep.rootVisible && beforeDeep.bottomOffscreen, `${kind} deep target fixture must span beyond viewport`);
+    await page.evaluate(() => (window as any).__historyProductionEditor.redo());
+    await waitForFrames(page, 20);
+    const deepState = await page.evaluate(() => {
+      const editor = (window as any).__historyProductionEditor;
+      const range = window.getSelection()?.getRangeAt(0);
+      const caret = range?.getBoundingClientRect();
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      return { top: editor.view.scrollDOM.scrollTop, caretVisible: Boolean(caret && caret.height > 0 && caret.top >= viewport.top && caret.bottom <= viewport.bottom), text: editor.getText() };
+    });
+    assert.equal(deepState.text, deepEdited);
+    assert.ok(deepState.caretVisible && Math.abs(deepState.top - beforeDeep.top) > 20, `${kind} deep caret was not revealed`);
+    await page.keyboard.type('Z');
+    await waitForFrames(page, 8);
+    assert.equal(await page.evaluate(() => (window as any).__historyProductionEditor.getText()), deepEdited.replace('DEEP_MARKER', 'DEEP_MARKERZ'), `${kind} DOM caret must match restored history selection`);
+  }
+}
+
+async function assertDistantNestedFormulaHistory(page: any): Promise<void> {
+  const text = [
+    ...Array.from({ length: 180 }, () => 'Leading history spacer.\n'),
+    '- Outer list', '', '  - Inner list', '',
+    '    $$', '    E = mc^2', '', '    $$', '',
+    ...Array.from({ length: 1200 }, () => 'Trailing history spacer.\n')
+  ].join('\n');
+  const opening = text.split('\n').findIndex(line => line.trim() === '$$') + 1;
+  await page.evaluate(({ text, opening }) => {
+    (window as any).__historyProductionEditor?.destroy();
+    document.getElementById('app')!.replaceChildren();
+    const editor = (window as any).MermaidEditingHarness.createEditor({ parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {} });
+    (window as any).__historyProductionEditor = editor;
+    editor.scrollToLine(opening, 'center');
+  }, { text, opening });
+  await waitForFrames(page, 20);
+  await page.evaluate(() => (document.querySelector('.meo-latex-math-mode-btn') as HTMLButtonElement).click());
+  await page.waitForSelector('.meo-latex-math-source-editor .cm-content');
+  await waitForFrames(page, 12);
+  await page.evaluate(() => {
+    const content = document.querySelector('.meo-latex-math-source-editor .cm-content')! as HTMLElement;
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    content.focus({ preventScroll: true });
+  });
+  await page.keyboard.press('End');
+  await page.keyboard.type(' % NESTED_HISTORY');
+  await waitForFrames(page, 12);
+  await page.evaluate(() => {
+    const editor = (window as any).__historyProductionEditor;
+    editor.scrollToLine(editor.view.state.doc.lines, 'center');
+  });
+  await waitForFrames(page, 20);
+  const result = await page.evaluate(async () => {
+    const editor = (window as any).__historyProductionEditor;
+    const before = editor.view.scrollDOM.scrollTop;
+    await editor.undo();
+    for (let i = 0; i < 12; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    const content = document.querySelector('.meo-latex-math-source-editor .cm-content');
+    return { before, after: editor.view.scrollDOM.scrollTop, focused: content === document.activeElement, text: editor.getText() };
+  });
+  assert.ok(result.before - result.after > 20000, 'Nested fixture must exercise distant history navigation');
+  assert.equal(result.text, text);
+  assert.ok(result.focused, 'Distant nested formula history must restore inner focus without falling back');
+}
+
 async function assertFormulaToolbarHistoryHitability(page: any): Promise<void> {
   const formulaText = [
     ...Array.from({ length: 72 }, (_, index) => `formula history line ${index + 1}`),
@@ -637,6 +791,8 @@ async function main(): Promise<void> {
       sourceRedo: { source: true, head: 24, focused: true }
     });
 
+    await assertTallRenderedHistoryViewport(page);
+    await assertDistantNestedFormulaHistory(page);
     await assertFormulaToolbarHistoryHitability(page);
     await page.evaluate(() => (window as any).__historyProductionEditor.destroy());
   } finally {
