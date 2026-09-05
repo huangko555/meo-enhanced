@@ -8,6 +8,8 @@ import {
 
 type PendingFlush = {
   readonly requestId: string;
+  readonly documentVersion: number;
+  readonly refreshed: boolean;
   readonly resolve: (result: FlushDocumentEditsResolution) => void;
   readonly timeout: unknown;
 };
@@ -38,7 +40,8 @@ const failure = (code: 'timeout' | 'operation-failed', message: string): FlushDo
 });
 
 /**
- * Adapts VS Code's bounded will-save participant to one correlated Webview flush.
+ * Adapts VS Code's bounded will-save participant to a correlated Webview flush.
+ * One refresh may follow a concurrent document change, within the same budget.
  * A failed participant is observable but cannot cancel VS Code's native save.
  */
 export function createVscodeDocumentSaveLifecycleAdapter(
@@ -66,18 +69,7 @@ export function createVscodeDocumentSaveLifecycleAdapter(
     return true;
   };
 
-  const startPreparation = (): Promise<void> => {
-    if (activePreparation) return activePreparation;
-    const requestId = `document-save-flush-${nextRequestId++}`;
-    const result = new Promise<FlushDocumentEditsResolution>((resolve) => {
-      const timeout = scheduleTimeout(() => {
-        settle(requestId, failure(
-          'timeout',
-          'Timed out while collecting pending editor changes before save.'
-        ));
-      }, timeoutMs);
-      pending = { requestId, resolve, timeout };
-    });
+  const postFlush = (requestId: string): void => {
     void dependencies.postMessage({ type: 'flushDocumentEdits', requestId }).then((posted) => {
       if (!posted) {
         settle(requestId, failure(
@@ -91,6 +83,26 @@ export function createVscodeDocumentSaveLifecycleAdapter(
         error instanceof Error ? error.message : 'Failed to request pending editor changes.'
       ));
     });
+  };
+
+  const startPreparation = (): Promise<void> => {
+    if (activePreparation) return activePreparation;
+    const requestId = `document-save-flush-${nextRequestId++}`;
+    const result = new Promise<FlushDocumentEditsResolution>((resolve) => {
+      const timeout = scheduleTimeout(() => {
+        if (pending?.resolve !== resolve) return;
+        settle(pending.requestId, failure(
+          'timeout',
+          'Timed out while collecting pending editor changes before save.'
+        ));
+      }, timeoutMs);
+      pending = {
+        requestId, resolve, timeout,
+        documentVersion: dependencies.document.version,
+        refreshed: false
+      };
+    });
+    postFlush(requestId);
 
     const preparation = result.then((resolution) => {
       if (resolution.ok === false) {
@@ -121,6 +133,18 @@ export function createVscodeDocumentSaveLifecycleAdapter(
       if (disposed || pending?.requestId !== response.requestId) return false;
       if (response.result.ok === false) return settle(response.requestId, response.result);
       if (normalize(dependencies.document.getText()) !== normalize(response.result.value.text)) {
+        // A response can trail a newer edit. Ask for fresh content rather than
+        // treating a higher version as proof that the requested text was applied.
+        // The new request ID avoids the Webview's completed-response cache.
+        if (!pending.refreshed && dependencies.document.version > pending.documentVersion) {
+          const requestId = `document-save-flush-${nextRequestId++}`;
+          pending = {
+            ...pending, requestId, refreshed: true,
+            documentVersion: dependencies.document.version
+          };
+          postFlush(requestId);
+          return true;
+        }
         return settle(response.requestId, failure(
           'operation-failed',
           'The TextDocument did not reach the editor Revision requested for save.'

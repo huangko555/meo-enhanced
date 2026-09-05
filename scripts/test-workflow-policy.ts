@@ -209,6 +209,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         stages: [serialStage('Quick regression contracts', [
           packageScript('typecheck'),
           script('scripts/test-test-workflow.ts'),
+          script('scripts/test-document-auto-save-concurrency.ts'),
           script('scripts/test-editor-history-runtime.ts'),
           script('scripts/test-table-cell-editing.ts'),
           script('scripts/test-rendered-block-mode-shell.ts'),

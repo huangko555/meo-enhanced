@@ -48,6 +48,26 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+## Auto-save verification
+
+Auto-save concurrency is part of `bun run test:quick`. The focused save checks are:
+
+```shell
+bun scripts/test-document-auto-save-concurrency.ts
+bun scripts/test-document-save-flush-webview-adapter.ts
+bun scripts/test-vscode-document-save-lifecycle-adapter.ts
+bun scripts/test-panel-session-native-save-flush.ts
+bun scripts/test-native-save-table-flush.ts
+```
+
+For native VS Code acceptance, use an isolated development profile and disposable
+Markdown files. Check `files.autoSave` with `afterDelay` (1000 ms),
+`onFocusChange` (switch to another editor), and `onWindowChange` (leave the VS Code
+window). Verify Live and Source input, a table cell without leaving the cell,
+continued input during save, and reopening the saved file. Compare disk contents
+with the editor and verify focus/history are preserved; a simulated save event
+alone does not validate the platform's focus or auto-save scheduling.
+
 ## Targeted packs
 
 ```shell

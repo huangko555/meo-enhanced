@@ -65,11 +65,9 @@ export function createDocumentSaveFlushWebviewAdapter(
 
   const run = (request: FlushDocumentEditsRequest): void => {
     pending.add(request.requestId);
-    let text: string;
     let idle: Promise<void>;
     try {
       dependencies.commitTransientEdits();
-      text = dependencies.getCurrentText();
       idle = dependencies.whenDocumentIdle();
     } catch (error) {
       respond(request.requestId, failedResult(error));
@@ -78,7 +76,14 @@ export function createDocumentSaveFlushWebviewAdapter(
     void idle.then(
       () => {
         if (disposed) return;
-        respond(request.requestId, { ok: true, value: { text } });
+        try {
+          // Input can advance while the queue drains. Host still verifies this
+          // snapshot against TextDocument after its pending applies complete.
+          const text = dependencies.getCurrentText();
+          respond(request.requestId, { ok: true, value: { text } });
+        } catch (error) {
+          respond(request.requestId, failedResult(error));
+        }
       },
       (error) => respond(request.requestId, failedResult(error))
     );

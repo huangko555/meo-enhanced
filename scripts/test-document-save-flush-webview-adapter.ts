@@ -104,4 +104,44 @@ assert.equal(posted.length, 1, 'late idle completion after dispose must not emit
   failed.dispose();
 }
 
+{
+  const responses: WebviewToHostMessage[] = [];
+  let current = 'first input';
+  const barrier = deferred();
+  const concurrent = createDocumentSaveFlushWebviewAdapter({
+    postMessage: message => { responses.push(message); },
+    commitTransientEdits: () => undefined,
+    getCurrentText: () => current,
+    whenDocumentIdle: () => barrier.promise
+  });
+  concurrent.accept({ type: 'flushDocumentEdits', requestId: 'concurrent' });
+  current = 'second input';
+  barrier.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(responses, [{
+    type: 'flushDocumentEditsResult', requestId: 'concurrent',
+    result: { ok: true, value: { text: current } }
+  }], 'save must collect the text after queued input, not replay its earlier snapshot');
+  concurrent.dispose();
+}
+
+{
+  const responses: WebviewToHostMessage[] = [];
+  const broken = createDocumentSaveFlushWebviewAdapter({
+    postMessage: message => { responses.push(message); },
+    commitTransientEdits: () => undefined,
+    getCurrentText: () => { throw new Error('read failed'); },
+    whenDocumentIdle: async () => undefined
+  });
+  broken.accept({ type: 'flushDocumentEdits', requestId: 'failed-read' });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(responses, [{
+    type: 'flushDocumentEditsResult', requestId: 'failed-read',
+    result: { ok: false, error: { code: 'operation-failed', message: 'read failed' } }
+  }]);
+  broken.dispose();
+}
+
 console.log('Document save flush Webview Adapter checks passed');

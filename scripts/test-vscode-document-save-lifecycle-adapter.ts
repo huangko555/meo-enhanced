@@ -4,6 +4,7 @@ import { mock } from 'bun:test';
 type FakeDocument = {
   readonly uri: { toString(): string };
   text: string;
+  version: number;
   getText(): string;
 };
 
@@ -37,11 +38,13 @@ const createFixture = () => {
   const target: FakeDocument = {
     uri: { toString: () => 'file:///target.md' },
     text: 'accepted',
+    version: 1,
     getText() { return this.text; }
   };
   const other: FakeDocument = {
     uri: { toString: () => 'file:///other.md' },
     text: 'other',
+    version: 1,
     getText() { return this.text; }
   };
   const posted: Array<{ type: 'flushDocumentEdits'; requestId: string }> = [];
@@ -272,6 +275,63 @@ const createFixture = () => {
     requestId: request.requestId,
     result: { ok: true, value: { text: fixture.target.text } }
   }), false, 'disposed lifecycle must reject a late response');
+}
+
+for (const outcome of ['success', 'mismatch', 'timeout', 'unavailable', 'dispose'] as const) {
+  const fixture = createFixture();
+  const waiters = fixture.fire(fixture.target, 2);
+  const original = fixture.posted[0];
+  fixture.target.text = 'newer accepted input';
+  fixture.target.version += 1;
+  if (outcome === 'unavailable') fixture.setPostResult(false);
+  fixture.adapter.accept({
+    type: 'flushDocumentEditsResult', requestId: original.requestId,
+    result: { ok: true, value: { text: 'accepted' } }
+  });
+  assert.equal(fixture.posted.length, 2, 'a changed document must request a fresh snapshot before reporting mismatch');
+  const retry = fixture.posted[1];
+  assert.notEqual(retry.requestId, original.requestId, 'refresh must not replay the cached old snapshot');
+  assert.equal(fixture.scheduled.length, 1, 'refresh must share the original save budget');
+  assert.equal(fixture.adapter.accept({
+    type: 'flushDocumentEditsResult', requestId: original.requestId,
+    result: { ok: true, value: { text: fixture.target.text } }
+  }), false, 'a late first response must not complete the refreshed request');
+  if (outcome === 'timeout') fixture.scheduled[0].callback();
+  else if (outcome === 'dispose') fixture.adapter.dispose();
+  else if (outcome !== 'unavailable') {
+    if (outcome === 'mismatch') fixture.target.version += 1;
+    fixture.adapter.accept({
+      type: 'flushDocumentEditsResult', requestId: retry.requestId,
+      result: { ok: true, value: { text: outcome === 'success' ? fixture.target.text : 'unconfirmed draft' } }
+    });
+  }
+  await Promise.all(waiters);
+  assert.equal(fixture.posted.length, 2, 'continued changes must not create an unbounded refresh loop');
+  if (outcome === 'success') assert.deepEqual(fixture.failures, []);
+  else {
+    assert.equal(fixture.failures.length, 1);
+    assert.match(fixture.failures[0], /unconfirmed/);
+  }
+  fixture.adapter.dispose();
+}
+
+{
+  const fixture = createFixture();
+  const firstWaiters = fixture.fire(fixture.target, 2);
+  fixture.adapter.accept({
+    type: 'flushDocumentEditsResult', requestId: fixture.posted[0].requestId,
+    result: { ok: true, value: { text: fixture.target.text } }
+  });
+  await Promise.all(firstWaiters);
+  const secondWaiters = fixture.fire(fixture.target, 3);
+  fixture.scheduled[0].callback();
+  assert.equal(fixture.adapter.accept({
+    type: 'flushDocumentEditsResult', requestId: fixture.posted[1].requestId,
+    result: { ok: true, value: { text: fixture.target.text } }
+  }), true, 'a canceled timer from an older save must not settle a later preparation');
+  await Promise.all(secondWaiters);
+  assert.deepEqual(fixture.failures, []);
+  fixture.adapter.dispose();
 }
 
 console.log('VS Code document save lifecycle Adapter checks passed');
