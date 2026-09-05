@@ -930,6 +930,7 @@ async function main() {
           return null;
         };
         return {
+          marker: document.querySelector<HTMLElement>('.meo-md-footnote-backref')?.getBoundingClientRect().left ?? null,
           first: textLeft('First paragraph.'),
           continuation: textLeft('Second paragraph.'),
           list: textLeft('nested item'),
@@ -945,12 +946,14 @@ async function main() {
       || !footnoteCodeState.nestedListRendered
       || footnoteCodeState.language !== 'ts'
       || footnoteCodeState.geometry.first === null
+      || footnoteCodeState.geometry.marker === null
       || footnoteCodeState.geometry.continuation === null
       || footnoteCodeState.geometry.list === null
       || footnoteCodeState.geometry.codeBox === null
       || Math.abs(footnoteCodeState.geometry.continuation - footnoteCodeState.geometry.first) > 1
       || footnoteCodeState.geometry.list <= footnoteCodeState.geometry.first
       || Math.abs(footnoteCodeState.geometry.codeBox - footnoteCodeState.geometry.first) > 1
+      || footnoteCodeState.geometry.codeBox - footnoteCodeState.geometry.marker < 4
     ) {
       throw new Error(`Live footnote nested Markdown was not rendered structurally: ${JSON.stringify(footnoteCodeState)}`);
     }
