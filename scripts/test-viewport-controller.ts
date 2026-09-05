@@ -1896,4 +1896,56 @@ if (anchorScrollDOM.scrollTop !== 309) {
 }
 globalThis.requestAnimationFrame = originalAnchorRequestAnimationFrame;
 
+// CodeMirror can redraw a newly opened block after the read phase, before the
+// queued scroll write. No intermediate compensation may reach a painted frame.
+for (const settledShift of [0, 40]) {
+  const frames: FrameRequestCallback[] = [];
+  const previousRaf = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+  let layoutTop = 1350;
+  let scrollTop = 1000;
+  let firstMeasure = true;
+  const writes: number[] = [];
+  const scroller = {
+    get scrollTop() { return scrollTop; },
+    set scrollTop(value: number) { scrollTop = value; writes.push(value); },
+    scrollLeft: 0,
+    scrollHeight: 5000,
+    scrollWidth: 900,
+    clientHeight: 700,
+    clientWidth: 900
+  };
+  const toolbar = {
+    isConnected: true,
+    getBoundingClientRect: () => ({ top: layoutTop - scrollTop })
+  };
+  const controller = new ViewportController({
+    dom: {},
+    scrollDOM: scroller,
+    requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => {
+      const measurement = read();
+      write(measurement);
+      if (firstMeasure) {
+        firstMeasure = false;
+        layoutTop = 1350 + settledShift;
+      }
+    }
+  } as any, { attachInteractions: false });
+  try {
+    controller.preserveElementPositionWhileMutation(
+      toolbar as any,
+      () => toolbar as any,
+      () => { layoutTop += 22.5; },
+      'immediate'
+    );
+    await flushFrames(frames);
+    if (scrollTop !== 1000 + settledShift || writes.some((value) => value !== 1000 + settledShift)) {
+      throw new Error(`Toolbar preservation painted stale geometry: ${JSON.stringify({ settledShift, writes })}`);
+    }
+  } finally {
+    controller.destroy();
+    globalThis.requestAnimationFrame = previousRaf;
+  }
+}
+
 console.log('viewport controller checks passed');

@@ -777,7 +777,16 @@ export class ViewportController {
               finish();
               return;
             }
-            const changed = this.writeScrollPosition(target);
+            // CodeMirror may redraw and correct its height map after the read
+            // phase. Reconcile against that finished layout, not a target that
+            // would move an already stable toolbar for one painted frame.
+            const requested = readTarget();
+            if (requested === null) {
+              finish();
+              return;
+            }
+            const currentTarget = this.resolveScrollTarget(requested, this.readScrollPosition());
+            const changed = this.writeScrollPosition(currentTarget);
             stableFrames = changed ? 0 : stableFrames + 1;
             if (stableFrames >= REQUIRED_STABLE_FRAMES || attempts >= MAX_SETTLE_FRAMES) {
               finish();
