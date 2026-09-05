@@ -1,4 +1,5 @@
 import { EditorState } from '@codemirror/state';
+import type { MarkdownConfig } from '@lezer/markdown';
 import { parseFrontmatter, isInsideFrontmatter } from './frontmatter';
 import { resolvedSyntaxTree } from './markdownSyntax';
 import { collectInlineFootnoteMarkerRanges } from './inlineFootnotes';
@@ -53,6 +54,33 @@ interface ProtectedRange {
 
 const footnoteCache = new WeakMap<object, ParsedFootnotes>();
 const definitionMarkerPattern = /^[ \t]{0,3}\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
+const footnoteCompositeMarkerPattern = /^\[\^([^\]\r\n]+)\]:(?:[ \t]|$)/;
+const footnoteContinuationIndent = 4;
+
+export const footnoteMarkdownExtension: MarkdownConfig = {
+  defineNodes: [{
+    name: 'FootnoteDefinition',
+    block: true,
+    composite(_context, line, indent) {
+      if (line.pos === line.text.length) return true;
+      if (line.indent < line.baseIndent + indent) return false;
+      line.moveBaseColumn(line.baseIndent + indent);
+      return true;
+    }
+  }],
+  parseBlock: [{
+    name: 'FootnoteDefinition',
+    before: 'IndentedCode',
+    parse(context, line) {
+      const marker = footnoteCompositeMarkerPattern.exec(line.text.slice(line.pos));
+      if (!marker) return false;
+      const contentFrom = line.pos + marker[0].length;
+      context.startComposite('FootnoteDefinition', line.pos, footnoteContinuationIndent);
+      line.moveBase(contentFrom);
+      return null;
+    }
+  }]
+};
 
 export function normalizeFootnoteLabel(rawLabel: string): string {
   return String(rawLabel ?? '')
@@ -196,7 +224,7 @@ function collectDefinitions(
 
     while (endLineNo < state.doc.lines) {
       const nextLine = state.doc.line(endLineNo + 1);
-      if (isInsideFrontmatter(frontmatter, nextLine.from) || isInsideProtectedRange(nextLine.from, protectedRanges)) {
+      if (isInsideFrontmatter(frontmatter, nextLine.from)) {
         break;
       }
       if (definitionMarkerPattern.test(nextLine.text)) {

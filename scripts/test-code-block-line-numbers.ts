@@ -821,10 +821,11 @@ async function main() {
       document.getElementById('app')!.replaceChildren();
       (window as any).__codeBlockLineNumbersEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
         parent: document.getElementById('app')!,
-        text: ['# Heading 1', '## Heading 2', '### Heading 3', '#### Heading 4', '##### Heading 5', '###### Heading 6', 'Body'].join('\n'),
+        text: Array.from({ length: 6 }, (_, index) => `${'#'.repeat(index + 1)} Heading ${index + 1} that wraps across several visual lines for gutter alignment`).concat('Body').join('\n'),
         initialMode: 'live',
         onApplyChanges() {}
       });
+      (window as any).__codeBlockLineNumbersEditor.view.contentDOM.style.width = '230px';
     });
     await waitForFrames(page, 8);
     const headingLineNumberOffsets = await page.evaluate(() => {
@@ -839,23 +840,29 @@ async function main() {
         ).find((candidate) => candidate.textContent?.trim() === String(lineNumber));
         const markerText = marker?.firstChild ?? null;
         if (!line || !marker || !markerText) return { lineNumber, offset: null };
-        const lineRect = line.getBoundingClientRect();
         const markerRect = marker.getBoundingClientRect();
-        const range = document.createRange();
-        range.selectNodeContents(markerText);
-        const markerTextRect = range.getBoundingClientRect();
+        const markerRange = document.createRange();
+        markerRange.selectNodeContents(markerText);
+        const markerTextRect = markerRange.getBoundingClientRect();
+        const headingContent = line.querySelector<HTMLElement>('.meo-md-heading-content');
+        const headingRange = document.createRange();
+        if (headingContent) headingRange.selectNodeContents(headingContent);
+        const firstHeadingRect = headingContent ? Array.from(headingRange.getClientRects())[0] : null;
         return {
           lineNumber,
-          offset: markerTextRect.top + markerTextRect.height / 2 - (lineRect.top + lineRect.height / 2),
-          lineHeight: lineRect.height,
+          offset: firstHeadingRect
+            ? markerTextRect.top + markerTextRect.height / 2 - (firstHeadingRect.top + firstHeadingRect.height / 2)
+            : null,
+          lineHeight: line.getBoundingClientRect().height,
           markerHeight: markerRect.height,
           markerTextHeight: markerTextRect.height,
+          markerFontSize: getComputedStyle(marker).fontSize,
           alignItems: getComputedStyle(marker).alignItems
         };
       });
     });
     if (headingLineNumberOffsets.some((item) => item.offset === null || Math.abs(item.offset) > 1)) {
-      throw new Error(`Heading line numbers were not vertically centered: ${JSON.stringify(headingLineNumberOffsets)}`);
+      throw new Error(`Heading line numbers were not centered on the first visual line: ${JSON.stringify(headingLineNumberOffsets)}`);
     }
     const bodyLineAlignment = await page.evaluate(() => {
       const editor = (window as any).__codeBlockLineNumbersEditor;
@@ -865,11 +872,55 @@ async function main() {
       ).find((candidate) => candidate.textContent?.trim() === '7');
       return marker ? {
         alignItems: getComputedStyle(marker).alignItems,
+        fontSize: getComputedStyle(marker).fontSize,
         headingClass: marker.classList.contains('meo-md-heading-line-number')
       } : null;
     });
     if (!bodyLineAlignment || bodyLineAlignment.alignItems !== 'flex-start' || bodyLineAlignment.headingClass) {
       throw new Error(`Body line number inherited heading alignment: ${JSON.stringify(bodyLineAlignment)}`);
+    }
+    if (headingLineNumberOffsets.some((item) => item.markerFontSize !== bodyLineAlignment.fontSize)) {
+      throw new Error(`Heading line number font size changed: ${JSON.stringify({ headingLineNumberOffsets, bodyLineAlignment })}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__codeBlockLineNumbersEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          'Reference[^long]', '',
+          '[^long]: First paragraph.',
+          '    Second paragraph.', '',
+          '    - nested item', '',
+          '    ```ts',
+          '    const insideFootnote = true;',
+          '    ```', '', 'Tail'
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      const lastLine = (window as any).__codeBlockLineNumbersEditor.view.state.doc.lines;
+      (window as any).__codeBlockLineNumbersEditor.view.dispatch({ selection: { anchor: (window as any).__codeBlockLineNumbersEditor.view.state.doc.line(lastLine).to } });
+    });
+    await waitForFrames(page, 8);
+    const footnoteCodeState = await page.evaluate(() => ({
+      codeLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+        .map((line) => line.textContent?.trim() ?? ''),
+      codeNumbers: Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-line-numbered'))
+        .map((line) => line.dataset.meoCodeLineNumber ?? ''),
+      nestedListRendered: Boolean(document.querySelector('.cm-line .meo-md-list-marker')),
+      language: document.querySelector('.meo-code-language-label')?.textContent ?? ''
+    }));
+    if (
+      footnoteCodeState.codeLines.some((line) => line.includes('Second paragraph') || line.includes('nested item'))
+      || !footnoteCodeState.codeLines.some((line) => line.includes('insideFootnote'))
+      || JSON.stringify(footnoteCodeState.codeNumbers) !== JSON.stringify(['1'])
+      || !footnoteCodeState.nestedListRendered
+      || footnoteCodeState.language !== 'ts'
+    ) {
+      throw new Error(`Live footnote nested Markdown was not rendered structurally: ${JSON.stringify(footnoteCodeState)}`);
     }
 
     console.log('code block line number checks passed');

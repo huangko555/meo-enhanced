@@ -243,6 +243,29 @@ try {
   await page.evaluate(() => {
     (window as typeof window & { __previewController?: any }).__previewController?.setVisible(true);
   });
+  const previewDragState = await page.evaluate(() => {
+    const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+    const diagram = frameDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-rendered:not(.is-math)');
+    const wrapper = diagram?.querySelector<HTMLElement>('.meo-export-mermaid-svg');
+    if (!diagram || !wrapper) return null;
+    diagram.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0, pointerId: 71, clientX: 40, clientY: 40, bubbles: true, cancelable: true
+    }));
+    diagram.dispatchEvent(new PointerEvent('pointermove', {
+      button: 0, pointerId: 71, clientX: 72, clientY: 64, bubbles: true, cancelable: true
+    }));
+    diagram.dispatchEvent(new PointerEvent('pointerup', {
+      button: 0, pointerId: 71, clientX: 72, clientY: 64, bubbles: true, cancelable: true
+    }));
+    return {
+      cursor: diagram.style.cursor,
+      panFlag: diagram.dataset.mermaidPan ?? null,
+      transform: wrapper.style.transform
+    };
+  });
+  if (!previewDragState || previewDragState.cursor || previewDragState.panFlag || previewDragState.transform) {
+    throw new Error(`Preview Mermaid must remain static on pointer drag: ${JSON.stringify(previewDragState)}`);
+  }
   const previewMathFont = await page.evaluate(() => {
     const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
     const katex = frameDocument?.querySelector<HTMLElement>('.meo-export-mermaid.is-math .katex');

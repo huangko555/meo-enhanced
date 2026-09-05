@@ -1366,6 +1366,44 @@ body {
   grid-template-columns: 16px minmax(0, 1fr) 28px;
 }
 
+.more-tools-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  padding: 3px 8px;
+}
+
+.more-tools-feedback-prompt {
+  min-width: 0;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.more-tools-feedback-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--meo-semantic-linkForeground, var(--vscode-textLink-foreground));
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.more-tools-feedback-link:hover,
+.more-tools-feedback-link:focus-visible {
+  color: var(--vscode-textLink-activeForeground, var(--meo-semantic-linkForeground));
+  background: var(--vscode-toolbar-hoverBackground);
+  outline: none;
+}
+
 .menu-switch {
   position: relative;
   box-sizing: border-box;
@@ -1855,7 +1893,31 @@ button:focus-visible > .menu-switch {
 }
 
 .editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number {
-  align-items: center;
+  align-items: flex-start;
+}
+
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number-h1 {
+  padding-top: 0.525em;
+}
+
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number-h2 {
+  padding-top: 0.45em;
+}
+
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number-h3 {
+  padding-top: 0.3em;
+}
+
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number-h4 {
+  padding-top: 0.225em;
+}
+
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number-h5 {
+  padding-top: 0.15em;
+}
+
+.editor-host > .cm-editor > .cm-scroller > .cm-gutters > .cm-lineNumbers > .meo-md-heading-line-number-h6 {
+  padding-top: 0.075em;
 }
 
 .cm-editor .cm-gutter.cm-lineNumbers {
@@ -4772,6 +4834,7 @@ body.outline-resizing .preview-frame {
   color: var(--meo-line-number-foreground, var(--vscode-editorLineNumber-foreground));
   font: inherit;
   line-height: var(--meo-active-editor-line-height);
+  transform: translateY(0.25em);
   white-space: nowrap;
 }
 

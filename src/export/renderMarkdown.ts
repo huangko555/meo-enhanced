@@ -117,14 +117,6 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     return defaultImageRule(tokens, idx, opts, env, self);
   };
 
-  const preparedMarkdown = prepareMarkdownWithFootnotes(extractedFrontmatter.body, {
-    target: options.target,
-    outputFilePath: options.outputFilePath,
-    renderMarkdown: (markdownText) => md.render(markdownText),
-    normalizeMarkdown: normalizeMarkdownForExport,
-    backToReference: uiStrings.backToReference,
-    backToNumberedReference: uiStrings.backToNumberedReference
-  });
   md.renderer.rules.fence = (tokens, idx) => {
     const fenceBlock = tokens[idx];
     const language = normalizeFenceLanguage(fenceBlock.info);
@@ -172,6 +164,14 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
       '</div>'
     ].join('');
   };
+  const preparedMarkdown = prepareMarkdownWithFootnotes(extractedFrontmatter.body, {
+    target: options.target,
+    outputFilePath: options.outputFilePath,
+    renderMarkdown: (markdownText) => md.render(markdownText),
+    normalizeMarkdown: normalizeMarkdownForExport,
+    backToReference: uiStrings.backToReference,
+    backToNumberedReference: uiStrings.backToNumberedReference
+  });
   bodySourceLines = preparedMarkdown.body.sourceLines;
   const bodyHtml = md.render(preparedMarkdown.body.markdown);
   const rawHtml = [

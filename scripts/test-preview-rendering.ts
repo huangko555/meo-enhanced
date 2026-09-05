@@ -93,6 +93,22 @@ const transformedSources = renderMarkdownToHtml({
   markdownFilePath: 'C:/tmp/preview-source-map.md',
   target: 'html'
 });
+const footnoteWithFencedCode = renderMarkdownToHtml({
+  markdownText: [
+    'Reference[^long]',
+    '',
+    '[^long]: First paragraph.',
+    '    Second paragraph.',
+    '',
+    '    - nested item',
+    '',
+    '    ```ts',
+    '    const insideFootnote = true;',
+    '    ```'
+  ].join('\n'),
+  markdownFilePath: 'C:/tmp/preview-footnote-code.md',
+  target: 'html'
+});
 const rawHtmlUnderline = renderMarkdownToHtml({
   markdownText: 'Before <u>underlined</u> after',
   markdownFilePath: 'C:/tmp/preview-html-underline.md',
@@ -331,6 +347,14 @@ if (
 }
 if (!transformedSources.html.includes('class="footnotes" data-source-line="6" data-source-end-line="7"')) {
   throw new Error('Preview footnotes must participate in viewport position mapping');
+}
+if (
+  !/<li[^>]*class="footnote-item"[\s\S]*<ul>[\s\S]*nested item[\s\S]*<div class="meo-export-code-block-wrap"/.test(footnoteWithFencedCode.html)
+  || !footnoteWithFencedCode.html.includes('class="meo-export-code-language-label">ts</div>')
+  || !footnoteWithFencedCode.html.includes('data-line-number="1"')
+  || footnoteWithFencedCode.html.includes('<pre><code class="language-ts">')
+) {
+  throw new Error(`Preview footnote fences must use the standard code block renderer: ${footnoteWithFencedCode.html}`);
 }
 if (!tableLikeCode.html.includes('| --- |') || tableLikeCode.html.includes('| --- | --- |')) {
   throw new Error('Preview table compatibility must not rewrite fenced code');

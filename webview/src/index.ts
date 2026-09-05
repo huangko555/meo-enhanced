@@ -1,4 +1,4 @@
-import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, Settings, Check, Ellipsis, Sun, Moon } from 'lucide';
+import { createElement, Heading, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, List, ListOrdered, SquareCheck, ListTree, Hash, Code, SquareCode, Terminal, Quote, Minus, Plus, Table2, Link, Brackets, Image, Bold, Italic, Strikethrough, Search, FileCode2, FileText, Save, HardDriveUpload, PanelLeftRightDashed, Settings, Check, Ellipsis, Sun, Moon, ExternalLink } from 'lucide';
 import { setImageSrcResolver, initializeImageHandling, resolveImageSrc, settleImageSrcRequest, handleSavedImagePath, handleImagePaste } from './helpers/images';
 import { createGitClient } from './helpers/gitClient';
 import { createOutlineController } from './helpers/outline';
@@ -899,6 +899,10 @@ const applyUiLanguage = (language: UiLanguage): void => {
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
   moreToolsPanel.setAttribute('aria-label', strings.moreTools);
+  feedbackPrompt.textContent = strings.feedbackPrompt;
+  reportIssueButton.title = strings.reportIssue;
+  reportIssueButton.setAttribute('aria-label', strings.reportIssue);
+  reportIssueLabel.textContent = strings.reportIssue;
   toolbarOverflowIndicator.title = strings.toolbarOverflow;
   toolbarOverflowIndicator.setAttribute('aria-label', strings.toolbarOverflow);
   toolbarOverflowSection.setAttribute('aria-label', strings.toolbarOverflow);
@@ -946,6 +950,23 @@ const editorFontSizeControls = document.createElement('div');
 editorFontSizeControls.className = 'editor-font-size-controls';
 editorFontSizeControls.append(editorFontSizeModeControl.element, editorFontSizeStepper);
 editorFontSizeRow.append(editorFontSizeLabel, editorFontSizeControls);
+const feedbackSeparator = document.createElement('div');
+feedbackSeparator.className = 'more-tools-separator';
+feedbackSeparator.setAttribute('role', 'separator');
+const feedbackRow = document.createElement('div');
+feedbackRow.className = 'more-tools-feedback';
+const feedbackPrompt = document.createElement('span');
+feedbackPrompt.className = 'more-tools-feedback-prompt';
+feedbackPrompt.textContent = activeUiStrings.feedbackPrompt;
+const reportIssueButton = document.createElement('button');
+reportIssueButton.type = 'button';
+reportIssueButton.className = 'more-tools-feedback-link';
+reportIssueButton.title = activeUiStrings.reportIssue;
+reportIssueButton.setAttribute('aria-label', activeUiStrings.reportIssue);
+const reportIssueLabel = document.createElement('span');
+reportIssueLabel.textContent = activeUiStrings.reportIssue;
+reportIssueButton.append(reportIssueLabel, createElement(ExternalLink, { width: 13, height: 13 }));
+feedbackRow.append(feedbackPrompt, reportIssueButton);
 moreToolsPanel.append(
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
@@ -953,7 +974,9 @@ moreToolsPanel.append(
   displaySeparator,
   editorAppearanceRow,
   uiLanguageRow,
-  editorFontSizeRow
+  editorFontSizeRow,
+  feedbackSeparator,
+  feedbackRow
 );
 
 const moreToolsWrapper = document.createElement('div');
@@ -983,6 +1006,14 @@ const setMoreToolsVisible = (visible: boolean) => {
 
 moreToolsButton.addEventListener('click', () => {
   setMoreToolsVisible(moreToolsPanel.hidden);
+});
+
+reportIssueButton.addEventListener('click', () => {
+  vscode.postMessage({
+    type: 'openLink',
+    href: 'https://github.com/huangko555/meo-enhanced/issues/new'
+  });
+  setMoreToolsVisible(false);
 });
 
 document.addEventListener('pointerdown', (event) => {

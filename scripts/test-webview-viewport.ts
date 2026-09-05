@@ -692,6 +692,8 @@ async function main() {
         languageAutoLabel: panel.querySelector<HTMLElement>('[data-ui-language="auto"] .segmented-control-button-label')?.textContent,
         directChildren: options.every((option) => option.parentElement === panel),
         separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length,
+        feedbackPrompt: panel.querySelector<HTMLElement>('.more-tools-feedback-prompt')?.textContent,
+        feedbackLabel: panel.querySelector<HTMLElement>('.more-tools-feedback-link')?.textContent?.trim(),
         width: panel.getBoundingClientRect().width,
         clientWidth: panel.clientWidth,
         scrollWidth: panel.scrollWidth,
@@ -707,7 +709,9 @@ async function main() {
       ]) ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
-      moreToolsLayout.separatorCount !== 1 ||
+      moreToolsLayout.separatorCount !== 2 ||
+      moreToolsLayout.feedbackPrompt !== '使用中遇到问题？' ||
+      moreToolsLayout.feedbackLabel !== '反馈问题' ||
       moreToolsLayout.width > 268 ||
       moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth ||
       moreToolsLayout.fontSizeModeHeight !== 26 ||
@@ -715,7 +719,17 @@ async function main() {
     ) {
       throw new Error(`Unexpected flat More tools layout: ${JSON.stringify(moreToolsLayout)}`);
     }
-    await page.click('.more-tools-wrapper > button');
+    await page.click('.more-tools-feedback-link');
+    const feedbackAction = await page.evaluate(() => ({
+      panelClosed: document.querySelector<HTMLElement>('.more-tools-panel')!.hidden,
+      message: window.__hostMessages.at(-1)
+    }));
+    if (!feedbackAction.panelClosed || JSON.stringify(feedbackAction.message) !== JSON.stringify({
+      type: 'openLink',
+      href: 'https://github.com/huangko555/meo-enhanced/issues/new'
+    })) {
+      throw new Error(`Unexpected feedback action: ${JSON.stringify(feedbackAction)}`);
+    }
     const measureToolbarStart = () => page.evaluate(() => {
       const toolbar = document.querySelector<HTMLElement>('.mode-toolbar')!;
       const firstButton = document.querySelector<HTMLElement>('.format-group > .format-button')!;

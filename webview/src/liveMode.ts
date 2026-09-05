@@ -60,7 +60,13 @@ import {
   AlertIconWidget,
   detectAlertInBlockquote
 } from './helpers/alerts';
-import { parseFootnotes, footnoteReferenceKey, type FootnoteReference, type ParsedFootnotes } from './helpers/footnotes';
+import {
+  footnoteMarkdownExtension,
+  parseFootnotes,
+  footnoteReferenceKey,
+  type FootnoteReference,
+  type ParsedFootnotes
+} from './helpers/footnotes';
 import { getLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRenderedBlocks';
 import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls';
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
@@ -211,9 +217,9 @@ const hiddenDetailsSourceDeco = Decoration.replace({
 const tableDelimiterGutterLineClassMarker = new (class extends GutterMarker {
   elementClass = 'meo-md-hide-line-number';
 })();
-const headingGutterLineClassMarker = new (class extends GutterMarker {
-  elementClass = 'meo-md-heading-line-number';
-})();
+const headingGutterLineClassMarkers = Array.from({ length: 6 }, (_, index) => new (class extends GutterMarker {
+  elementClass = `meo-md-heading-line-number meo-md-heading-line-number-h${index + 1}`;
+})());
 const renderedBlockPreviewAnchorGutterMarker = new (class extends GutterMarker {
   elementClass = 'meo-rendered-block-preview-anchor-gutter';
 })();
@@ -3344,9 +3350,10 @@ function buildHeadingLineNumberMarkers(state: EditorState): RangeSet<GutterMarke
   const builder = new RangeSetBuilder<GutterMarker>();
   resolvedSyntaxTree(state).iterate({
     enter(node) {
-      if (headingLevelFromName(node.name) === null) return;
+      const level = headingLevelFromName(node.name);
+      if (level === null) return;
       const line = state.doc.lineAt(node.from);
-      builder.add(line.from, line.from, headingGutterLineClassMarker);
+      builder.add(line.from, line.from, headingGutterLineClassMarkers[level - 1]);
     }
   });
   return builder.finish();
@@ -3368,7 +3375,7 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean }
       base: markdownLanguage,
       addKeymap: false,
       codeLanguages: resolveCodeLanguage,
-      extensions: [highlightMarkdownExtension, { remove: ['SetextHeading'] }]
+      extensions: [footnoteMarkdownExtension, highlightMarkdownExtension, { remove: ['SetextHeading'] }]
     }),
     syntaxHighlighting(liveHighlightStyle),
     markdownTagField,

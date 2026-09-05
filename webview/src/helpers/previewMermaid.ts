@@ -169,52 +169,11 @@ async function renderMermaidBlocks(
       block.classList.add('is-rendered');
       block.classList.remove('is-error');
       block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
-      attachPreviewMermaidPanning(block);
       onDiagramRendered?.();
     } catch {
       if (isCurrent()) block.classList.add('is-error');
     }
   }
-}
-
-function attachPreviewMermaidPanning(block: HTMLElement): void {
-  const wrapper = block.querySelector<HTMLElement>('.meo-export-mermaid-svg');
-  if (!wrapper) return;
-  let pointerId: number | null = null;
-  let lastX = 0;
-  let lastY = 0;
-  let panX = 0;
-  let panY = 0;
-  block.dataset.mermaidPan = 'true';
-  block.style.cursor = 'grab';
-  block.style.overflow = 'hidden';
-  wrapper.style.transformOrigin = 'center center';
-
-  block.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    pointerId = event.pointerId;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    block.style.cursor = 'grabbing';
-    block.setPointerCapture(event.pointerId);
-  });
-  block.addEventListener('pointermove', (event) => {
-    if (pointerId !== event.pointerId) return;
-    panX += event.clientX - lastX;
-    panY += event.clientY - lastY;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    wrapper.style.transform = `translate(${panX}px, ${panY}px)`;
-  });
-  const finish = (event: PointerEvent) => {
-    if (pointerId !== event.pointerId) return;
-    if (block.hasPointerCapture(event.pointerId)) block.releasePointerCapture(event.pointerId);
-    pointerId = null;
-    block.style.cursor = 'grab';
-  };
-  block.addEventListener('pointerup', finish);
-  block.addEventListener('pointercancel', finish);
 }
 
 function readPreviewMermaidPalette(

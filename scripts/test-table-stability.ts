@@ -207,6 +207,16 @@ async function main() {
       const lineNumberRightDelta = regularLineNumber && tableLineNumber
         ? textRight(tableLineNumber) - textRight(regularLineNumber)
         : null;
+      const firstCellText = document.querySelector<HTMLElement>('.meo-md-html-table-cell-preview');
+      const lineNumberTextRange = tableLineNumber ? document.createRange() : null;
+      const firstCellTextRange = firstCellText ? document.createRange() : null;
+      if (tableLineNumber && lineNumberTextRange) lineNumberTextRange.selectNodeContents(tableLineNumber);
+      if (firstCellText && firstCellTextRange) firstCellTextRange.selectNodeContents(firstCellText);
+      const lineNumberTextRect = lineNumberTextRange?.getBoundingClientRect();
+      const firstCellLineRect = firstCellTextRange ? Array.from(firstCellTextRange.getClientRects())[0] : null;
+      const lineNumberVerticalDelta = lineNumberTextRect && firstCellLineRect
+        ? lineNumberTextRect.top + lineNumberTextRect.height / 2 - (firstCellLineRect.top + firstCellLineRect.height / 2)
+        : null;
       const lineNumberNodeBeforeScroll = document.querySelector('.meo-md-html-table-line-number');
       positionEditor.view.scrollDOM.dispatchEvent(new Event('scroll'));
       await waitFrames();
@@ -1080,6 +1090,7 @@ async function main() {
         lineBefore,
         lineAfter,
         lineNumberRightDelta,
+        lineNumberVerticalDelta,
         lineNumberNodeReused,
         interactionActive,
         borderlessActiveMatch,
@@ -1210,6 +1221,9 @@ async function main() {
     if (result.lineBefore !== '1' || result.lineAfter !== '2') failures.push(`table line number stayed ${result.lineBefore} -> ${result.lineAfter}`);
     if (result.lineNumberRightDelta === null || Math.abs(result.lineNumberRightDelta) > 0.5) {
       failures.push(`table line number right edge was offset by ${result.lineNumberRightDelta}px`);
+    }
+    if (result.lineNumberVerticalDelta === null || Math.abs(result.lineNumberVerticalDelta) > 1) {
+      failures.push(`table line number was vertically offset from its row text by ${result.lineNumberVerticalDelta}px`);
     }
     if (!result.lineNumberNodeReused) failures.push('table line number DOM was recreated during scroll');
     if (result.interactionActive) failures.push('table interaction remained active after keyboard focus exit');

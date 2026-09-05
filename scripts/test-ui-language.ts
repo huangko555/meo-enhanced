@@ -36,6 +36,8 @@ assert.deepEqual(
 );
 assert.deepEqual([english.more, english.moreTools], ['Settings', 'Settings']);
 assert.deepEqual([chinese.more, chinese.moreTools], ['设置', '设置']);
+assert.deepEqual([english.feedbackPrompt, english.reportIssue], ['Having trouble?', 'Report an issue']);
+assert.deepEqual([chinese.feedbackPrompt, chinese.reportIssue], ['使用中遇到问题？', '反馈问题']);
 assert.equal(english.line, 'Lines');
 assert.equal(chinese.line, '行号');
 assert.equal(chinese.exportHtml, '导出 HTML');

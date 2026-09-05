@@ -38,6 +38,8 @@ export type UiStrings = Readonly<{
   more: string;
   moreTools: string;
   toolbarOverflow: string;
+  feedbackPrompt: string;
+  reportIssue: string;
   editorAppearance: string;
   editorFontSize: string;
   custom: string;
@@ -238,7 +240,8 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewFailed: 'Preview generation failed', previewTools: 'Preview tools',
     exportHtml: 'Export HTML', exportPdf: 'Export PDF', exportAsHtml: 'Export as HTML',
     exportAsPdf: 'Export as PDF', findAndReplace: 'Find and Replace', more: 'Settings',
-    moreTools: 'Settings', toolbarOverflow: 'More tools', editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
+    moreTools: 'Settings', toolbarOverflow: 'More tools', feedbackPrompt: 'Having trouble?', reportIssue: 'Report an issue',
+    editorAppearance: 'Editor appearance', editorFontSize: 'Font size',
     custom: 'Custom', decreaseFontSize: 'Decrease font size', increaseFontSize: 'Increase font size',
     interfaceLanguage: 'Interface language', showLineNumbers: 'Show line numbers',
     foldLongCodeBlocks: 'Fold long code blocks',
@@ -375,6 +378,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
     findAndReplace: '查找和替换', more: '设置', moreTools: '设置', toolbarOverflow: '更多工具',
+    feedbackPrompt: '使用中遇到问题？', reportIssue: '反馈问题',
     editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',
     decreaseFontSize: '减小字号', increaseFontSize: '增大字号',
     interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
