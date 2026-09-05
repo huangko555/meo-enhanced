@@ -598,6 +598,18 @@ export function createPreviewController({
       for (const type of ['wheel', 'pointerdown', 'keydown', 'beforeinput', 'selectionchange', 'focusin']) {
         frameDocument.addEventListener(type, notifyViewportInteraction, true);
       }
+      // Pointer events do not bubble out of an iframe. Notify the outer document
+      // at the frame boundary so existing outside-click handlers dismiss popups.
+      // Keep the original event intact for selection and link activation inside.
+      frameDocument.addEventListener('pointerdown', (event) => {
+        frame.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          pointerId: event.pointerId,
+          pointerType: event.pointerType,
+          button: event.button,
+          buttons: event.buttons
+        }));
+      }, true);
       bindPreviewLinks(frameDocument, vscode);
       bindPreviewWheelFallback(frameDocument);
       bindPreviewFindShortcut(frameDocument, onFindRequested);
