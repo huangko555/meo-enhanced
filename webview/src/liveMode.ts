@@ -433,6 +433,22 @@ const lineStyleDecos = {
   hr: Decoration.line({ class: 'meo-md-hr' })
 };
 
+const footnoteContinuationLineDecoCache = new Map<number, Decoration>();
+
+function footnoteContinuationLineDeco(footnoteNumber: number): Decoration {
+  const digitCount = String(footnoteNumber).length;
+  let deco = footnoteContinuationLineDecoCache.get(digitCount);
+  if (deco) return deco;
+
+  deco = Decoration.line({
+    attributes: {
+      style: `--meo-footnote-body-indent:calc(${digitCount + 1}ch + 0.45em);`
+    }
+  });
+  footnoteContinuationLineDecoCache.set(digitCount, deco);
+  return deco;
+}
+
 const alertLineDecos: Record<AlertType, ReturnType<typeof Decoration.line>> = {
   NOTE: Decoration.line({ class: 'meo-md-alert meo-md-alert-note' }),
   TIP: Decoration.line({ class: 'meo-md-alert meo-md-alert-tip' }),
@@ -1668,6 +1684,7 @@ function addFootnoteDefinitionDecorations(builder: DecorationCollector, state: E
 
     for (const continuationLine of definition.continuationLines) {
       builder.push(lineStyleDecos.footnoteContinuation.range(continuationLine.from));
+      builder.push(footnoteContinuationLineDeco(definition.number).range(continuationLine.from));
       if (continuationLine.hideIndentFrom !== null && continuationLine.hideIndentTo !== null) {
         builder.push(
           Decoration.replace({

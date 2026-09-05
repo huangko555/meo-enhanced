@@ -2461,6 +2461,16 @@ button:focus-visible > .menu-switch {
   pointer-events: none;
 }
 
+.cm-editor.meo-mode-live .cm-line.meo-md-footnote-continuation.meo-md-code-block {
+  box-sizing: border-box;
+  width: calc(100% - var(--meo-footnote-body-indent) - var(--meo-live-block-indent, 0px));
+  margin-left: calc(var(--meo-footnote-body-indent) + var(--meo-live-block-indent, 0px));
+}
+
+.cm-editor.meo-mode-live .cm-line.meo-md-footnote-continuation.meo-md-code-block .meo-md-footnote-backref-spacer {
+  display: none;
+}
+
 .cm-editor .meo-md-wiki-marker,
 .cm-editor .meo-md-wiki-marker * {
   color: var(--meo-muted-foreground) !important;

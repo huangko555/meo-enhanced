@@ -16,6 +16,7 @@ import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
 import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
 import { highlightMarkdownExtension, sourceHighlightField } from './helpers/highlightSyntax';
+import { footnoteMarkdownExtension } from './helpers/footnotes';
 import { sourceWikiMarkerField } from './helpers/wikiLinks';
 import { sourceFileLinkField } from './helpers/sourceRawLinks';
 import { sourceUrlBoundaryField } from './helpers/sourceUrlBoundaries';
@@ -3755,6 +3756,7 @@ function sourceMode(): Extension[] {
       addKeymap: false,
       codeLanguages: resolveCodeLanguage,
       extensions: [
+        footnoteMarkdownExtension,
         highlightMarkdownExtension,
         { props: [sourceMarkdownHighlightProps] },
         { remove: ['SetextHeading'] }

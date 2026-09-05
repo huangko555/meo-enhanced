@@ -371,7 +371,10 @@ function measureContinuationIndent(lineText: string): { chars: number; extraInde
 
   return {
     chars,
-    extraIndentColumns: Math.max(0, visibleIndent - 2)
+    // Four columns are the Markdown continuation baseline. Keep accepting two
+    // columns for compatibility, but don't render valid four-space source as
+    // an extra visual indent in Live mode.
+    extraIndentColumns: Math.max(0, visibleIndent - footnoteContinuationIndent)
   };
 }
 

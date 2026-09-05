@@ -911,7 +911,32 @@ async function main() {
       codeNumbers: Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-line-numbered'))
         .map((line) => line.dataset.meoCodeLineNumber ?? ''),
       nestedListRendered: Boolean(document.querySelector('.cm-line .meo-md-list-marker')),
-      language: document.querySelector('.meo-code-language-label')?.textContent ?? ''
+      language: document.querySelector('.meo-code-language-label')?.textContent ?? '',
+      geometry: (() => {
+        const textLeft = (needle: string): number | null => {
+          const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+            .find((candidate) => candidate.textContent?.includes(needle));
+          if (!line) return null;
+          const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) {
+            const node = walker.currentNode as Text;
+            const index = node.data.indexOf(needle);
+            if (index < 0) continue;
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + 1);
+            return range.getBoundingClientRect().left;
+          }
+          return null;
+        };
+        return {
+          first: textLeft('First paragraph.'),
+          continuation: textLeft('Second paragraph.'),
+          list: textLeft('nested item'),
+          codeBox: Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+            .find((line) => line.textContent?.includes('insideFootnote'))?.getBoundingClientRect().left ?? null
+        };
+      })()
     }));
     if (
       footnoteCodeState.codeLines.some((line) => line.includes('Second paragraph') || line.includes('nested item'))
@@ -919,8 +944,38 @@ async function main() {
       || JSON.stringify(footnoteCodeState.codeNumbers) !== JSON.stringify(['1'])
       || !footnoteCodeState.nestedListRendered
       || footnoteCodeState.language !== 'ts'
+      || footnoteCodeState.geometry.first === null
+      || footnoteCodeState.geometry.continuation === null
+      || footnoteCodeState.geometry.list === null
+      || footnoteCodeState.geometry.codeBox === null
+      || Math.abs(footnoteCodeState.geometry.continuation - footnoteCodeState.geometry.first) > 1
+      || footnoteCodeState.geometry.list <= footnoteCodeState.geometry.first
+      || Math.abs(footnoteCodeState.geometry.codeBox - footnoteCodeState.geometry.first) > 1
     ) {
       throw new Error(`Live footnote nested Markdown was not rendered structurally: ${JSON.stringify(footnoteCodeState)}`);
+    }
+
+    await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      editor.setMode('source');
+    });
+    await waitForFrames(page, 4);
+    const sourceFootnoteState = await page.evaluate(() => {
+      const codeLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-src-code-block'));
+      const fenceLines = codeLines.filter((line) => line.textContent?.trim().startsWith('```'));
+      return {
+        codeLines: codeLines.map((line) => line.textContent?.trim() ?? ''),
+        fenceColors: fenceLines.map((line) => getComputedStyle(line.querySelector('span') ?? line).color)
+      };
+    });
+    if (
+      JSON.stringify(sourceFootnoteState.codeLines) !== JSON.stringify([
+        '```ts', 'const insideFootnote = true;', '```'
+      ])
+      || sourceFootnoteState.fenceColors.length !== 2
+      || sourceFootnoteState.fenceColors[0] !== sourceFootnoteState.fenceColors[1]
+    ) {
+      throw new Error(`Source footnote Markdown was not parsed structurally: ${JSON.stringify(sourceFootnoteState)}`);
     }
 
     console.log('code block line number checks passed');
