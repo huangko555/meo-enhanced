@@ -41,6 +41,12 @@ import {
 } from '../adapters/tableTransactionProvenance';
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import {
+  getLiveBlockIndent,
+  liveBlockIndentCssValue,
+  liveBlockIndentKey,
+  type LiveBlockIndentValue
+} from './blockIndent';
+import {
   tableStickyHeaderAdapterFactoryFacet,
   type TableStickyHeaderAdapter,
   type TableStickyHeaderAdapterFactory,
@@ -158,6 +164,7 @@ interface WidgetTableData extends TableData {
   startLine: number;
   endLine: number;
   indent: string;
+  visualIndent: LiveBlockIndentValue;
   signature: string;
   headerCells: string[];
 }
@@ -2265,6 +2272,7 @@ function tableWidthIdentity(tableData: WidgetTableData): string {
 }
 
 function buildWidgetTableData(
+  state: EditorState,
   data: BuiltTableData,
   diagnostics: EditorDiagnostic[] = [],
   diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
@@ -2272,6 +2280,10 @@ function buildWidgetTableData(
   const { from, to, headerLine, dataLines, alignments, colCount, startLine, endLine } = data;
   if (colCount === 0 || !headerLine) return null;
   const indent = /^(\s*)/.exec(headerLine.text)?.[1] ?? '';
+  const blockIndent = getLiveBlockIndent(state, headerLine.from);
+  const visualIndent = blockIndent.footnoteNumber === null
+    ? tableCellIndentColumns(indent)
+    : blockIndent;
   const normalizedAlignments = normalizeRow(alignments, colCount, '').map((value) => value ?? null);
   const headerCells = normalizeRow(headerLine.cells, colCount, '');
   const rows = dataLines.map((line) => normalizeRow(line.cells, colCount, ''));
@@ -2281,6 +2293,7 @@ function buildWidgetTableData(
     from,
     to,
     indent,
+    visualIndent,
     colCount,
     alignments: normalizedAlignments,
     headerCells,
@@ -2399,6 +2412,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       other instanceof HtmlTableWidget &&
       this.hasSameUiLanguageEpoch(other) &&
       other.tableData.indent === this.tableData.indent &&
+      liveBlockIndentKey(other.tableData.visualIndent) === liveBlockIndentKey(this.tableData.visualIndent) &&
       other.tableData.colCount === this.tableData.colCount &&
       other.tableData.headerCells.length === this.tableData.headerCells.length &&
       other.tableData.rows.length === this.tableData.rows.length &&
@@ -2469,6 +2483,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       return;
     }
     const current = buildWidgetTableData(
+      view.state,
       buildTableData(view.state, node),
       diagnostics,
       diffLineFlags
@@ -4853,7 +4868,10 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const shell = document.createElement('div');
     shell.className = 'meo-md-html-table-shell';
     shell.style.setProperty('--meo-html-table-toolbar-height', `${tableToolbarHeight}px`);
-    shell.style.setProperty('--meo-html-table-indent', `${tableCellIndentColumns(this.tableData.indent ?? '')}ch`);
+    shell.style.setProperty(
+      '--meo-html-table-indent',
+      liveBlockIndentCssValue(this.tableData.visualIndent) ?? '0ch'
+    );
     const wrap = document.createElement('div');
     wrap.className = 'meo-md-html-table-wrap';
     if (Number.isFinite(this.tableData.startLine)) {
@@ -5142,6 +5160,7 @@ export function addTableDecorations(
   const data = buildTableData(state, tableNode);
   addTableWidgetDecoration(
     builder,
+    state,
     data,
     state.facet(tableStickyHeaderAdapterFactoryFacet),
     state.facet(tableCommandEnvironmentFacet),
@@ -5161,6 +5180,7 @@ export function addTableDecorationsForLineRange(
   const data = buildTableDataForLineRange(state, startLineNo, endLineNo);
   addTableWidgetDecoration(
     builder,
+    state,
     data,
     state.facet(tableStickyHeaderAdapterFactoryFacet),
     state.facet(tableCommandEnvironmentFacet),
@@ -5272,13 +5292,14 @@ function collectTableDiffFlags(
 
 function addTableWidgetDecoration(
   builder: Range<Decoration>[],
+  state: EditorState,
   data: BuiltTableData,
   stickyHeaderAdapterFactory: TableStickyHeaderAdapterFactory | null,
   tableCommandEnvironment: TableCommandEnvironment | null,
   diagnostics: EditorDiagnostic[] = [],
   diffLineFlags: readonly (TableDiffFlags | undefined)[] | null | undefined = null
 ) {
-  const tableData = buildWidgetTableData(data, diagnostics, diffLineFlags);
+  const tableData = buildWidgetTableData(state, data, diagnostics, diffLineFlags);
   if (!tableData) return;
   if (!stickyHeaderAdapterFactory) {
     throw new Error('Table Sticky Header Adapter factory is not configured');

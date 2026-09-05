@@ -4,7 +4,7 @@ import { defaultKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { renderLatexMathToHtml } from './math';
 import { getViewportController, visualLineContextMargin } from './viewportController';
-import { applyLiveBlockIndent } from './blockIndent';
+import { applyLiveBlockIndent, liveBlockIndentKey, type LiveBlockIndentValue } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import { attachLatexMathViewport, type LatexMathViewportController } from './latexMathViewport';
 import {
@@ -53,7 +53,7 @@ type LatexMathEditingBlock = {
   contentFrom: number;
   contentTo: number;
   sourceText: string;
-  indentColumns: number;
+  indentColumns: LiveBlockIndentValue;
 };
 
 export const setLatexMathBlockModeEffect = StateEffect.define<LatexMathModeChange>();
@@ -775,7 +775,7 @@ export class LatexMathEditingWidget extends UiLanguageSensitiveWidget {
       other.block.anchor === this.block.anchor &&
       other.block.lineNumber === this.block.lineNumber &&
       other.block.sourceText === this.block.sourceText &&
-      other.block.indentColumns === this.block.indentColumns &&
+      liveBlockIndentKey(other.block.indentColumns) === liveBlockIndentKey(this.block.indentColumns) &&
       other.mode === this.mode &&
       other.searchReveal?.from === this.searchReveal?.from &&
       other.searchReveal?.to === this.searchReveal?.to;

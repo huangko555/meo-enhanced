@@ -1,4 +1,4 @@
-import { applyLiveBlockIndent } from './blockIndent';
+import { applyLiveBlockIndent, type LiveBlockIndentValue } from './blockIndent';
 
 export type RenderedBlockPreviewKind = 'mermaid' | 'math';
 
@@ -19,7 +19,7 @@ export function createRenderedBlockPreviewShell(options: {
   language: 'mermaid' | 'latex';
   startLine: number;
   endLine: number;
-  indentColumns: number;
+  indentColumns: LiveBlockIndentValue;
   toolbar: HTMLElement;
   content: HTMLElement;
 }): HTMLElement {

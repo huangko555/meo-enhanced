@@ -21,7 +21,7 @@ import {
   getMermaidBlockMode,
   MermaidEditingWidget
 } from './mermaidEditing';
-import { getLiveListBlockIndentColumns } from './blockIndent';
+import { getLiveBlockIndent, liveBlockIndentKey, type LiveBlockIndentValue } from './blockIndent';
 import { getViewportController } from './viewportController';
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { currentSyntaxTree, getFencedCodeInfo, syntaxTreeChanged } from './markdownSyntax';
@@ -788,7 +788,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
     readonly blockTo: number,
     readonly startLine: number,
     readonly endLine: number,
-    readonly indentColumns: number,
+    readonly indentColumns: LiveBlockIndentValue,
     presentationFactory: ReturnType<typeof getMermaidDiagramPresentationFactory>,
     uiLanguage: UiLanguage
   ) {
@@ -824,7 +824,7 @@ class MermaidPreviewWidget extends UiLanguageSensitiveWidget {
       && other.blockTo === this.blockTo
       && other.startLine === this.startLine
       && other.endLine === this.endLine
-      && other.indentColumns === this.indentColumns
+      && liveBlockIndentKey(other.indentColumns) === liveBlockIndentKey(this.indentColumns)
       && this.diagramWidget.eq(other.diagramWidget)
       && this.toolbarWidget.eq(other.toolbarWidget);
   }
@@ -878,7 +878,7 @@ export function addMermaidDiagram(
     endLine: endLine.number,
     diagramText,
     fullBlockText,
-    indentColumns: getLiveListBlockIndentColumns(state, node.from, node.node),
+    indentColumns: getLiveBlockIndent(state, node.from, node.node),
     activeLines
   });
 }
@@ -891,7 +891,7 @@ function addMermaidDiagramBlock(
     endLine: number;
     diagramText: string;
     fullBlockText: string;
-    indentColumns?: number;
+    indentColumns?: LiveBlockIndentValue;
     activeLines: ReadonlySet<number>;
   }
 ): boolean {

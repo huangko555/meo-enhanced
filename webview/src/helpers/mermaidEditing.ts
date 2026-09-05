@@ -11,7 +11,7 @@ import {
 } from '../editor/mermaidDiagramPresentation';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { getViewportController, visualLineContextMargin } from './viewportController';
-import { applyLiveBlockIndent } from './blockIndent';
+import { applyLiveBlockIndent, liveBlockIndentKey, type LiveBlockIndentValue } from './blockIndent';
 import { consumeEditorHistoryCommand } from './historyCommands';
 import {
   markLiveInputNestedProjection,
@@ -61,7 +61,7 @@ type MermaidEditingBlock = {
   sourceLinePrefix: string;
   startLine: number;
   endLine: number;
-  indentColumns: number;
+  indentColumns: LiveBlockIndentValue;
 };
 
 export const setMermaidBlockModeEffect = StateEffect.define<MermaidModeChange>();
@@ -1150,7 +1150,7 @@ export class MermaidEditingWidget extends UiLanguageSensitiveWidget {
       other.block.startLine === this.block.startLine &&
       other.block.diagramText === this.block.diagramText &&
       other.block.sourceLinePrefix === this.block.sourceLinePrefix &&
-      other.block.indentColumns === this.block.indentColumns &&
+      liveBlockIndentKey(other.block.indentColumns) === liveBlockIndentKey(this.block.indentColumns) &&
       other.mode === this.mode &&
       other.searchReveal?.from === this.searchReveal?.from &&
       other.searchReveal?.to === this.searchReveal?.to;

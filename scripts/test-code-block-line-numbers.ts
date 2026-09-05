@@ -1004,6 +1004,102 @@ async function main() {
       throw new Error(`Source footnote Markdown was not parsed structurally: ${JSON.stringify(sourceFootnoteState)}`);
     }
 
+    await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      editor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      (window as any).__codeBlockLineNumbersEditor = (window as any).CodeBlockLineNumbersHarness.createEditor({
+        parent: document.getElementById('app')!,
+        text: [
+          'Reference[^blocks]', '',
+          '[^blocks]: Block body.',
+          '    ```ts',
+          '    const nestedCode = true;',
+          '    ```', '',
+          '    ```js',
+          ...Array.from({ length: 20 }, (_, index) => `    const long_${index + 1} = ${index + 1};`),
+          '    ```', '',
+          '    ```mermaid',
+          '    graph TD',
+          '    A-->B',
+          '    ```', '',
+          '    $$',
+          '    x = 1',
+          '    $$', '',
+          '    | A | B |',
+          '    | - | - |',
+          '    | one | two |', '',
+          'Tail'
+        ].join('\n'),
+        initialMode: 'live',
+        onApplyChanges() {}
+      });
+      const lastLine = (window as any).__codeBlockLineNumbersEditor.view.state.doc.lines;
+      (window as any).__codeBlockLineNumbersEditor.view.dispatch({
+        selection: { anchor: (window as any).__codeBlockLineNumbersEditor.view.state.doc.line(lastLine).to }
+      });
+    });
+    await waitForFrames(page, 12);
+    const readNestedBlockGeometry = () => page.evaluate(() => {
+      const textLeft = (needle: string): number | null => {
+        const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((candidate) => candidate.textContent?.includes(needle));
+        if (!line) return null;
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode as Text;
+          const index = node.data.indexOf(needle);
+          if (index < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          return range.getBoundingClientRect().left;
+        }
+        return null;
+      };
+      return {
+        body: textLeft('Block body.'),
+        code: Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+          .find((line) => line.textContent?.includes('nestedCode'))?.getBoundingClientRect().left ?? null,
+        longCode: document.querySelector<HTMLElement>('.meo-md-long-code-placeholder')
+          ?.getBoundingClientRect().left ?? null,
+        mermaid: document.querySelector<HTMLElement>(
+          '.meo-rendered-block-preview[data-meo-rendered-block-kind="mermaid"]'
+        )?.getBoundingClientRect().left ?? null,
+        math: document.querySelector<HTMLElement>(
+          '.meo-rendered-block-preview[data-meo-rendered-block-kind="math"]'
+        )?.getBoundingClientRect().left ?? null,
+        table: document.querySelector<HTMLElement>('.meo-md-html-table-shell')?.getBoundingClientRect().left ?? null
+      };
+    });
+    const inactiveNestedBlocks = await readNestedBlockGeometry();
+    await page.evaluate(() => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      editor.view.dispatch({ selection: { anchor: editor.view.state.doc.line(7).from } });
+    });
+    await waitForFrames(page, 4);
+    const activeNestedBlocks = await readNestedBlockGeometry();
+    if (inactiveNestedBlocks.body === null) {
+      throw new Error(`Missing inactive footnote body geometry: ${JSON.stringify(inactiveNestedBlocks)}`);
+    }
+    for (const kind of ['code', 'longCode', 'mermaid', 'math', 'table'] as const) {
+      if (
+        inactiveNestedBlocks[kind] === null
+        || Math.abs(inactiveNestedBlocks[kind] - inactiveNestedBlocks.body) > 1
+      ) {
+        throw new Error(`Footnote ${kind} block was not body-aligned: ${JSON.stringify(inactiveNestedBlocks)}`);
+      }
+      if (
+        activeNestedBlocks[kind] === null
+        || Math.abs(activeNestedBlocks[kind] - inactiveNestedBlocks[kind]) > 1
+      ) {
+        throw new Error(`Footnote ${kind} block moved while editing: ${JSON.stringify({
+          inactive: inactiveNestedBlocks,
+          active: activeNestedBlocks
+        })}`);
+      }
+    }
+
     console.log('code block line number checks passed');
   } finally {
     await browser.close();

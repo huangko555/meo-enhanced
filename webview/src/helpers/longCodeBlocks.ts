@@ -2,7 +2,12 @@ import { EditorState, Facet, StateEffect, StateField, Transaction } from '@codem
 import { Decoration, EditorView, WidgetType, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { getFencedCodeInfo } from './markdownSyntax';
-import { applyLiveBlockIndent, getLiveListBlockIndentColumns } from './blockIndent';
+import {
+  applyLiveBlockIndent,
+  getLiveBlockIndent,
+  liveBlockIndentKey,
+  type LiveBlockIndentValue
+} from './blockIndent';
 import {
   mapLiveInputDerivedDecorations,
   shouldDeferLiveInputDerivedWork
@@ -21,7 +26,7 @@ type LongCodeBlockDescriptor = {
   start: number;
   end: number;
   endLineFrom: number;
-  indentColumns: number;
+  indentColumns: LiveBlockIndentValue;
   language: string;
   contentFrom: number;
   contentTo: number;
@@ -94,7 +99,7 @@ function collectLongCodeBlockDescriptors(state: EditorState): LongCodeBlockDescr
         start: startLine.from,
         end: endLine.to,
         endLineFrom: endLine.from,
-        indentColumns: getLiveListBlockIndentColumns(state, node.from, node.node),
+        indentColumns: getLiveBlockIndent(state, node.from, node.node),
         language: info || 'Plain text',
         contentFrom: contentStartLine.from,
         contentTo: contentEndLine.to,
@@ -246,7 +251,7 @@ class LongCodePlaceholderWidget extends UiLanguageSensitiveWidget {
     readonly lineCount: number,
     readonly hiddenLineCount: number,
     readonly contentTo: number,
-    readonly indentColumns: number
+    readonly indentColumns: LiveBlockIndentValue
   ) {
     super();
   }
@@ -261,7 +266,7 @@ class LongCodePlaceholderWidget extends UiLanguageSensitiveWidget {
       other.language === this.language &&
       other.lineCount === this.lineCount &&
       other.hiddenLineCount === this.hiddenLineCount &&
-      other.indentColumns === this.indentColumns;
+      liveBlockIndentKey(other.indentColumns) === liveBlockIndentKey(this.indentColumns);
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -294,7 +299,7 @@ class LongCodeFooterWidget extends UiLanguageSensitiveWidget {
     readonly anchor: number,
     readonly language: string,
     readonly lineCount: number,
-    readonly indentColumns: number
+    readonly indentColumns: LiveBlockIndentValue
   ) {
     super();
   }
@@ -308,7 +313,7 @@ class LongCodeFooterWidget extends UiLanguageSensitiveWidget {
       this.hasSameUiLanguageEpoch(other) &&
       other.language === this.language &&
       other.lineCount === this.lineCount &&
-      other.indentColumns === this.indentColumns;
+      liveBlockIndentKey(other.indentColumns) === liveBlockIndentKey(this.indentColumns);
   }
 
   toDOM(view: EditorView): HTMLElement {

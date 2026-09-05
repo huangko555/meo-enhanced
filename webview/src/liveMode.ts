@@ -112,7 +112,14 @@ import {
   setLatexMathBlockModeEffect,
   setLatexMathSearchRevealEffect
 } from './helpers/latexMathEditing';
-import { applyLiveBlockIndent, getLiveListBlockIndentColumns, liveBlockIndentProperty } from './helpers/blockIndent';
+import {
+  applyLiveBlockIndent,
+  getLiveBlockIndent,
+  liveBlockIndentCssValue,
+  liveBlockIndentKey,
+  liveBlockIndentProperty,
+  type LiveBlockIndentValue
+} from './helpers/blockIndent';
 import {
   createRenderedBlockPreviewShell,
   getRenderedBlockPreviewStartLine,
@@ -433,22 +440,6 @@ const lineStyleDecos = {
   hr: Decoration.line({ class: 'meo-md-hr' })
 };
 
-const footnoteContinuationLineDecoCache = new Map<number, Decoration>();
-
-function footnoteContinuationLineDeco(footnoteNumber: number): Decoration {
-  const digitCount = String(footnoteNumber).length;
-  let deco = footnoteContinuationLineDecoCache.get(digitCount);
-  if (deco) return deco;
-
-  deco = Decoration.line({
-    attributes: {
-      style: `--meo-footnote-body-indent:calc(${digitCount + 1}ch + 0.45em);`
-    }
-  });
-  footnoteContinuationLineDecoCache.set(digitCount, deco);
-  return deco;
-}
-
 const alertLineDecos: Record<AlertType, ReturnType<typeof Decoration.line>> = {
   NOTE: Decoration.line({ class: 'meo-md-alert meo-md-alert-note' }),
   TIP: Decoration.line({ class: 'meo-md-alert meo-md-alert-tip' }),
@@ -488,7 +479,7 @@ function addFrontmatterValueUrlDecorations(builder: DecorationCollector, valueFr
 
 const listLineDecoCache = new Map<string, Decoration>();
 const listIndentWidgetCache = new Map<number, ListIndentWidget>();
-const blockIndentLineDecoCache = new Map<number, ReturnType<typeof Decoration.line>>();
+const blockIndentLineDecoCache = new Map<string, ReturnType<typeof Decoration.line>>();
 const frontmatterArrayPillWidgetCache = new Map<string, FrontmatterArrayPillsWidget>();
 const htmlBreakTagRegex = /^<br\s*\/?>$/i;
 
@@ -1050,24 +1041,25 @@ class FrontmatterArrayPillsWidget extends WidgetType {
   }
 }
 
-function blockIndentLineDeco(indentColumns: number) {
-  const normalized = Math.max(0, Math.round(indentColumns));
-  let decoration = blockIndentLineDecoCache.get(normalized);
+function blockIndentLineDeco(indent: LiveBlockIndentValue) {
+  const key = liveBlockIndentKey(indent);
+  const cssValue = liveBlockIndentCssValue(indent);
+  let decoration = blockIndentLineDecoCache.get(key);
   if (!decoration) {
     decoration = Decoration.line({
       class: 'meo-live-indented-block-line',
-      attributes: { style: `${liveBlockIndentProperty}:${normalized}ch` }
+      attributes: { style: `${liveBlockIndentProperty}:${cssValue}` }
     });
-    blockIndentLineDecoCache.set(normalized, decoration);
+    blockIndentLineDecoCache.set(key, decoration);
   }
   return decoration;
 }
 
-function addBlockIndentLines(builder: DecorationCollector, state: EditorState, from: number, to: number, indentColumns: number): void {
-  if (indentColumns <= 0) {
+function addBlockIndentLines(builder: DecorationCollector, state: EditorState, from: number, to: number, indent: LiveBlockIndentValue): void {
+  if (liveBlockIndentCssValue(indent) === null) {
     return;
   }
-  addLineClass(builder, state, from, to, blockIndentLineDeco(indentColumns));
+  addLineClass(builder, state, from, to, blockIndentLineDeco(indent));
 }
 
 function frontmatterArrayPillsWidget(itemLabels: string[]): FrontmatterArrayPillsWidget {
@@ -1691,7 +1683,6 @@ function addFootnoteDefinitionDecorations(builder: DecorationCollector, state: E
 
     for (const continuationLine of definition.continuationLines) {
       builder.push(lineStyleDecos.footnoteContinuation.range(continuationLine.from));
-      builder.push(footnoteContinuationLineDeco(definition.number).range(continuationLine.from));
       if (continuationLine.hideIndentFrom !== null && continuationLine.hideIndentTo !== null) {
         builder.push(
           Decoration.replace({
@@ -1965,7 +1956,7 @@ function buildDecorations(state: EditorState): DecorationSet {
         addTableDecorations(ranges, state, node, diagnostics, state.field(gitDiffLineFlagsField, false));
       } else if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
         const sourceDecorationStart = ranges.length;
-        const indentColumns = getLiveListBlockIndentColumns(state, node.from, node.node);
+        const indentColumns = getLiveBlockIndent(state, node.from, node.node);
         addLineClass(ranges, state, node.from, node.to, lineStyleDecos.codeBlock);
         addBlockIndentLines(ranges, state, node.from, node.to, indentColumns);
         ranges.push(lineStyleDecos.codeBlockStart.range(state.doc.lineAt(node.from).from));
@@ -2510,7 +2501,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
   fencedDisplay: boolean;
   startLine: number;
   endLine: number;
-  indentColumns: number;
+  indentColumns: LiveBlockIndentValue;
   anchor: number;
   sourceText: string;
   blockTo: number;
@@ -2521,7 +2512,7 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
     fencedDisplay = false,
     startLine = 0,
     endLine = 0,
-    indentColumns = 0,
+    indentColumns: LiveBlockIndentValue = 0,
     anchor = 0,
     sourceText = '',
     blockTo = 0
@@ -2628,12 +2619,12 @@ function getMathWidget(
   fencedDisplay = false,
   startLine = 0,
   endLine = 0,
-  indentColumns = 0,
+  indentColumns: LiveBlockIndentValue = 0,
   anchor = 0,
   sourceText = '',
   blockTo = 0
 ): WidgetType {
-  const key = `${getUiLanguageWidgetEpoch()}:${mode}:${fencedDisplay ? 1 : 0}:${startLine}:${endLine}:${indentColumns}:${anchor}:${blockTo}:${sourceText}:${html}`;
+  const key = `${getUiLanguageWidgetEpoch()}:${mode}:${fencedDisplay ? 1 : 0}:${startLine}:${endLine}:${liveBlockIndentKey(indentColumns)}:${anchor}:${blockTo}:${sourceText}:${html}`;
   let widget = mathWidgetCache.get(key);
   if (widget) {
     mathWidgetCache.delete(key);
@@ -2803,7 +2794,7 @@ function addMathDecorations(
       const closingLine = state.doc.lineAt(Math.max(mathRange.to - 1, mathRange.from));
       const startLineNo = openingLine.number;
       const endLineNo = closingLine.number;
-      const indentColumns = getLiveListBlockIndentColumns(state, openingLine.from);
+      const indentColumns = getLiveBlockIndent(state, openingLine.from);
       const renderSpan = resolveFencedMathRenderSpan(state, startLineNo, endLineNo);
       if (renderSpan) {
         editingBoundary =

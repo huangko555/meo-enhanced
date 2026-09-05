@@ -2461,13 +2461,7 @@ button:focus-visible > .menu-switch {
   pointer-events: none;
 }
 
-.cm-editor.meo-mode-live .cm-line.meo-md-footnote-continuation.meo-md-code-block {
-  box-sizing: border-box;
-  width: calc(100% - var(--meo-footnote-body-indent) - var(--meo-live-block-indent, 0px));
-  margin-left: calc(var(--meo-footnote-body-indent) + var(--meo-live-block-indent, 0px));
-}
-
-.cm-editor.meo-mode-live .cm-line.meo-md-footnote-continuation.meo-md-code-block .meo-md-footnote-backref-spacer {
+.cm-editor.meo-mode-live .cm-line.meo-md-footnote-continuation.meo-live-indented-block-line .meo-md-footnote-backref-spacer {
   display: none;
 }
 
