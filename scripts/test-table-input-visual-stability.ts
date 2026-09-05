@@ -25,6 +25,54 @@ async function focusCell(page: import('puppeteer-core').Page, value: string): Pr
   await waitForFrames(page, 8);
 }
 
+async function assertColumnReflowKeepsActiveCell(page: import('puppeteer-core').Page): Promise<void> {
+  await page.setViewport({ width: 1280, height: 760, deviceScaleFactor: 1 });
+  let unwrappedCases = 0;
+  for (const repeats of [2, 3, 4, 5]) {
+    await page.evaluate((repeats) => {
+      (window as any).__tableVisualEditor.destroy();
+      document.getElementById('app')!.replaceChildren();
+      const description = `1. 准备 - 检查材料 - 确认环境2. 执行 1. 第一阶段 2. 第二阶段 [参考链接](https://example.com/)${'L'.repeat(repeats * 16)}`;
+      const text = [
+        ...Array.from({ length: 80 }, () => 'Table reflow spacer.'), '',
+        '| 类型 | 单元格内容 |', '| --- | --- |',
+        '| 嵌套无序列表 | - 一级 A- 二级 A.1 - 二级 1. A.2- 一级 B |',
+        `| 混合嵌套列表 | ${description} |`, '',
+        ...Array.from({ length: 80 }, () => 'Table reflow tail.')
+      ].join('\n');
+      const editor = (window as any).EmbeddedInputViewportHarness.createEditor({ parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {} });
+      (window as any).__tableVisualEditor = editor;
+      editor.scrollToLine(85, 'center');
+    }, repeats);
+    await waitForFrames(page, 16);
+    await focusCell(page, '混合嵌套列表');
+    await page.evaluate(() => {
+      const input = document.activeElement as HTMLTextAreaElement;
+      const row = input.closest('tr')!;
+      const previous = row.previousElementSibling!;
+      (window as any).__columnReflowProbe = { input, previous, beforeHeight: previous.getBoundingClientRect().height, tops: [input.getBoundingClientRect().top], sampling: true };
+      const sample = () => {
+        const probe = (window as any).__columnReflowProbe;
+        if (!probe.sampling) return;
+        probe.tops.push(input.getBoundingClientRect().top);
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await page.keyboard.type('X');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await waitForFrames(page, 12);
+    const result = await page.evaluate(() => {
+      const probe = (window as any).__columnReflowProbe;
+      probe.sampling = false;
+      return { heightDelta: probe.previous.getBoundingClientRect().height - probe.beforeHeight, topSpan: Math.max(...probe.tops) - Math.min(...probe.tops), focused: probe.input.isConnected && probe.input === document.activeElement, value: probe.input.value };
+    });
+    if (result.heightDelta < -10) unwrappedCases++;
+    if (!result.focused || result.value !== '混合嵌套列表X' || result.topSpan > 2) throw new Error(`Column reflow moved active cell: ${JSON.stringify({ repeats, ...result })}`);
+  }
+  if (!unwrappedCases) throw new Error('Column reflow fixture did not unwrap an earlier row');
+}
+
 async function main(): Promise<void> {
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'test-live-embedded-input-viewport-entry.ts')],
@@ -138,6 +186,7 @@ async function main(): Promise<void> {
       throw new Error(`Table input moved while the caret remained visible: ${JSON.stringify(result)}`);
     }
 
+    await assertColumnReflowKeepsActiveCell(page);
     console.log('table input visual stability regression passed');
   } catch (error) {
     primaryError = error;

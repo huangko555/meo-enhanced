@@ -4438,8 +4438,23 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   resizeAllRows() {
     if (!this.domRefs) return;
-    for (const entry of this.domRefs.rowEntries) {
-      this.resizeRow(entry.row, entry.inputs);
+    const { table, rowEntries } = this.domRefs;
+    const resize = () => {
+      for (const entry of rowEntries) this.resizeRow(entry.row, entry.inputs);
+    };
+    const active = table.ownerDocument.activeElement;
+    const controller = this.view ? getViewportController(this.view) : null;
+    if (active instanceof HTMLTextAreaElement && table.contains(active) && controller) {
+      // Column redistribution can unwrap an earlier row. Preserve the active
+      // input at the row measurement boundary, after content projection settles.
+      controller.preserveElementPositionWhileMutation(
+        active,
+        () => table.ownerDocument.activeElement === active ? active : null,
+        resize,
+        'immediate'
+      );
+    } else {
+      resize();
     }
   }
 
