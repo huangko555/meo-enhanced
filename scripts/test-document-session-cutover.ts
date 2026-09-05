@@ -144,6 +144,7 @@ async function main(): Promise<void> {
         reject(error: Error): void;
       };
       const pending = new Map<string, PendingRender[]>();
+      const parseErrors = new Map<string, string>();
       const waiting = new Map<string, Array<(render: PendingRender) => void>>();
       const takeNext = (source: string): Promise<PendingRender> => {
         const queued = pending.get(source)?.shift();
@@ -157,6 +158,10 @@ async function main(): Promise<void> {
       (window as any).mermaid = {
         initialize() {},
         render(_renderId: string, source: string) {
+          // Background warming can retry an invalid source. Keep its parse
+          // result consistent instead of leaving a second request unresolved.
+          const parseError = parseErrors.get(source);
+          if (parseError) return Promise.reject(new Error(parseError));
           return new Promise<{ svg: string }>((resolve, reject) => {
             const sourceWaiters = waiting.get(source);
             const waiter = sourceWaiters?.shift();
@@ -178,6 +183,7 @@ async function main(): Promise<void> {
       (window as any).__hasPendingDocumentSessionMermaid = (source: string) =>
         (pending.get(source)?.length ?? 0) > 0;
       (window as any).__failDocumentSessionMermaid = async (source: string, message: string) => {
+        parseErrors.set(source, message);
         const render = await takeNext(source);
         render.reject(new Error(message));
       };
@@ -300,6 +306,24 @@ async function main(): Promise<void> {
     await page.keyboard.down('Shift');
     for (let index = 0; index < 4; index += 1) await page.keyboard.press('ArrowLeft');
     await page.keyboard.up('Shift');
+    // The pending renderer is deliberately held. Establish the reading baseline
+    // after the preceding Source -> Live layout and selection reveal settle, so
+    // this assertion measures the equal-text refresh rather than both actions.
+    await page.evaluate(async () => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+      let previousTop = scroller.scrollTop;
+      let previousHeight = scroller.scrollHeight;
+      let stableFrames = 0;
+      for (let frame = 0; frame < 120 && stableFrames < 8; frame += 1) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        const top = scroller.scrollTop;
+        const height = scroller.scrollHeight;
+        stableFrames = Math.abs(top - previousTop) <= 0.5 && height === previousHeight ? stableFrames + 1 : 0;
+        previousTop = top;
+        previousHeight = height;
+      }
+      if (stableFrames < 8) throw new Error('Source to Live viewport did not settle before external refresh');
+    });
     const beforeEqualExternal = await page.evaluate(() => {
       (window as any).__equalTextEditorDom = document.querySelector('.cm-editor');
       return {
