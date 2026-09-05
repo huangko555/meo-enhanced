@@ -86,6 +86,24 @@ built baseline checkout. A single pair is indicative, not a stable improvement
 percentage; repeated performance/endurance campaigns still require long-run
 authorization. Do not run other tests alongside timing samples.
 
+For a short read-only mode-transition and image-decoding probe:
+
+```powershell
+pwsh -File scripts/benchmark-vscode-startup.ps1 -Scenario reading -Document <absolute-markdown-path> -CodePath <absolute-Code.exe-path> -ImageLine <one-based-source-line>
+```
+
+This visits Preview, Source, Live, Source, Preview, and Live once, and records the
+document and build hashes in `.local/probes/reading-*`. `readyMs` ends when the
+destination surface is ready and the transition cover is gone; it includes
+automation overhead and does not wait for every image or diagram. `-ImageLine`
+optionally selects the first image whose mapped source line matches, aligns its
+source block with the top after a trusted interaction, and checks real decoding
+separately from the placeholder. The image report records its bounds and visibility after decoding;
+decoding success alone does not prove that late layout kept it in the viewport.
+`-Profile` samples the first Preview transition and marks the run as profiled.
+These single samples are diagnostic, not percentiles or endurance acceptance.
+The same hidden-window, foreground-permission, and no-concurrent-test rules apply.
+
 For a short native input/save baseline on a disposable copy of a rich document:
 
 ```powershell
