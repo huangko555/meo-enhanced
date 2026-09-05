@@ -1665,7 +1665,7 @@ function addFootnoteDefinitionDecorations(builder: DecorationCollector, state: E
     const showRawSyntax =
       rangeTouchesActiveLine(state, definition.lineFrom, definition.lineTo, activeLines) ||
       overlapsSelection(state, definition.lineFrom, definition.lineTo);
-    if (showRawSyntax || definition.number === null || definition.firstReferenceFrom === null) {
+    if (definition.number === null || definition.firstReferenceFrom === null) {
       addRange(builder, definition.markerFrom, definition.markerFrom + 2, footnoteMarkerDeco);
       addRange(builder, definition.markerFrom + 2, definition.colonFrom - 1, footnoteLiteralDeco);
       addRange(builder, definition.colonFrom - 1, definition.colonFrom, footnoteMarkerDeco);
@@ -1674,13 +1674,20 @@ function addFootnoteDefinitionDecorations(builder: DecorationCollector, state: E
     }
 
     const firstLine = state.doc.lineAt(definition.lineFrom);
-    builder.push(
-      Decoration.replace({
-        widget: new FootnoteBacklinkWidget(definition.number, definition.firstReferenceFrom),
-        inclusive: false
-      }).range(definition.markerFrom, definition.markerTo)
-    );
-    builder.push(lineStyleDecos.footnote.range(firstLine.from));
+    if (showRawSyntax) {
+      addRange(builder, definition.markerFrom, definition.markerFrom + 2, footnoteMarkerDeco);
+      addRange(builder, definition.markerFrom + 2, definition.colonFrom - 1, footnoteLiteralDeco);
+      addRange(builder, definition.colonFrom - 1, definition.colonFrom, footnoteMarkerDeco);
+      addRange(builder, definition.colonFrom, definition.colonTo, activeLinkMarkerDeco);
+    } else {
+      builder.push(
+        Decoration.replace({
+          widget: new FootnoteBacklinkWidget(definition.number, definition.firstReferenceFrom),
+          inclusive: false
+        }).range(definition.markerFrom, definition.markerTo)
+      );
+      builder.push(lineStyleDecos.footnote.range(firstLine.from));
+    }
 
     for (const continuationLine of definition.continuationLines) {
       builder.push(lineStyleDecos.footnoteContinuation.range(continuationLine.from));

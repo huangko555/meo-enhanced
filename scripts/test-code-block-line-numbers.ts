@@ -958,6 +958,29 @@ async function main() {
       throw new Error(`Live footnote nested Markdown was not rendered structurally: ${JSON.stringify(footnoteCodeState)}`);
     }
 
+    const activeFootnoteCodeState = await page.evaluate(async () => {
+      const editor = (window as any).__codeBlockLineNumbersEditor;
+      const blankFootnoteLine = editor.view.state.doc.line(5);
+      editor.view.dispatch({ selection: { anchor: blankFootnoteLine.from } });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return {
+        codeBox: Array.from(document.querySelectorAll<HTMLElement>('.cm-line.meo-md-code-block'))
+          .find((line) => line.textContent?.includes('insideFootnote'))?.getBoundingClientRect().left ?? null,
+        rawMarkerVisible: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .some((line) => line.textContent?.includes('[^long]:'))
+      };
+    });
+    if (
+      activeFootnoteCodeState.codeBox === null
+      || Math.abs(activeFootnoteCodeState.codeBox - footnoteCodeState.geometry.codeBox) > 1
+    ) {
+      throw new Error(`Active footnote changed code block alignment: ${JSON.stringify({
+        inactive: footnoteCodeState.geometry,
+        active: activeFootnoteCodeState
+      })}`);
+    }
+
     await page.evaluate(() => {
       const editor = (window as any).__codeBlockLineNumbersEditor;
       editor.setMode('source');
