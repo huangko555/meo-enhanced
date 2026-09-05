@@ -711,7 +711,7 @@ async function main() {
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||
       moreToolsLayout.feedbackPrompt !== '使用中遇到问题？' ||
-      moreToolsLayout.feedbackLabel !== '反馈问题' ||
+      moreToolsLayout.feedbackLabel !== '欢迎反馈' ||
       moreToolsLayout.width > 268 ||
       moreToolsLayout.scrollWidth > moreToolsLayout.clientWidth ||
       moreToolsLayout.fontSizeModeHeight !== 26 ||

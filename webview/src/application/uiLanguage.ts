@@ -378,7 +378,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     previewFailed: '预览生成失败', previewTools: '预览工具', exportHtml: '导出 HTML',
     exportPdf: '导出 PDF', exportAsHtml: '导出为 HTML', exportAsPdf: '导出为 PDF',
     findAndReplace: '查找和替换', more: '设置', moreTools: '设置', toolbarOverflow: '更多工具',
-    feedbackPrompt: '使用中遇到问题？', reportIssue: '反馈问题',
+    feedbackPrompt: '使用中遇到问题？', reportIssue: '欢迎反馈',
     editorAppearance: '编辑器外观', editorFontSize: '字号大小', custom: '自定义',
     decreaseFontSize: '减小字号', increaseFontSize: '增大字号',
     interfaceLanguage: '界面语言', showLineNumbers: '显示行号',
