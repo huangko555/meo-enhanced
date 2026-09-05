@@ -35,7 +35,7 @@ const failedResult = (error: unknown): FlushDocumentEditsResolution => ({
 
 const MAX_COMPLETED_REQUESTS = 16;
 
-/** Commits transient editor state, then crosses the Document Session idle seam once. */
+/** Collects editor state and drains any work produced while reading the save snapshot. */
 export function createDocumentSaveFlushWebviewAdapter(
   dependencies: DocumentSaveFlushWebviewAdapterDependencies
 ): DocumentSaveFlushWebviewAdapter {
@@ -74,12 +74,16 @@ export function createDocumentSaveFlushWebviewAdapter(
       return;
     }
     void idle.then(
-      () => {
+      async () => {
         if (disposed) return;
         try {
           // Input can advance while the queue drains. Host still verifies this
           // snapshot against TextDocument after its pending applies complete.
           const text = dependencies.getCurrentText();
+          // Reading can itself commit pending table input. Its apply messages
+          // must precede this response, just like the initial transient edits.
+          await dependencies.whenDocumentIdle();
+          if (disposed) return;
           respond(request.requestId, { ok: true, value: { text } });
         } catch (error) {
           respond(request.requestId, failedResult(error));

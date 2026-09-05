@@ -92,8 +92,120 @@ async function main(): Promise<void> {
     assert.equal(redone.mode, before.mode);
     assert.deepEqual(redone.top, before.top);
 
+    const concurrentText = expectedText.replace('pending cell', 'input during save');
+    const concurrentSave = await page.evaluate((selector) => {
+      const save = (window as any).__nativeSaveTableFlush.nativeSave();
+      const input = document.querySelector<HTMLTextAreaElement>(selector);
+      if (!input) throw new Error('Missing table input during save');
+      input.focus();
+      input.value = 'input during save';
+      input.dispatchEvent(new InputEvent('input', {
+        bubbles: true, inputType: 'insertText', data: 'input during save'
+      }));
+      return save;
+    }, inputSelector);
+    assert.equal(concurrentSave.result.ok, true);
+    const concurrent = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+    assert.equal(concurrent.diskText, concurrentText,
+      'a table edit collected while reading the save snapshot must reach Host before the flush response');
+    assert.equal(concurrent.hostRevision.text, concurrentText);
+    assert.equal(concurrent.activeTableInput, true);
+
+    const tableCdp = await page.createCDPSession();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' prior');
+    await tableCdp.send('Input.imeSetComposition', { text: 'pinyin', selectionStart: 6, selectionEnd: 6 });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const tablePreedit = await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+    const tableBeforeComposition = concurrentText.replace('input during save', 'input during save prior');
+    assert.deepEqual(tablePreedit.result, { ok: true, value: { text: tableBeforeComposition } },
+      'table preedit must remain outside the save snapshot');
+    const composingTable = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+    assert.equal(composingTable.diskText, tableBeforeComposition);
+    assert.equal(composingTable.tableValue, 'input during save priorpinyin');
+    await tableCdp.send('Input.insertText', { text: '中文' });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+    const committedTable = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+    assert.equal(committedTable.diskText, tableBeforeComposition.replace('prior', 'prior中文'));
+    await tableCdp.detach();
+
     await page.evaluate(() => (window as any).__nativeSaveTableFlush.destroy());
-    console.log('Native save pending table flush browser trace passed');
+    for (const mode of ['live', 'source']) {
+      await page.goto('about:blank');
+      await page.setContent('<!doctype html><body><div id="editor"></div></body>');
+      await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+      await page.addScriptTag({ path: path.join(tempDir, 'trace.js') });
+      await page.evaluate(mode => (window as any).__nativeSaveTableFlush.initialize('text', mode), mode);
+      await page.click('.cm-content');
+      await page.keyboard.press('End');
+      await page.keyboard.type(' committed');
+      const cdp = await page.createCDPSession();
+      await cdp.send('Input.imeSetComposition', { text: 'pinyin', selectionStart: 6, selectionEnd: 6 });
+      await new Promise(resolve => setTimeout(resolve, 180));
+      const preeditSave = await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+      const composing = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+      assert.equal(composing.hostRevision.text, 'text committed');
+      assert.deepEqual(preeditSave.result, { ok: true, value: { text: 'text committed' } },
+        `${mode}: saving during IME must preserve preedit and flush only committed text`);
+      assert.equal(composing.diskText, 'text committed');
+      assert.ok(await page.$eval('.cm-content', node => node.textContent?.includes('pinyin')));
+      await cdp.send('Input.insertText', { text: '中文' });
+      await new Promise(resolve => setTimeout(resolve, 180));
+      await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+      const committed = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+      assert.equal(committed.diskText, 'text committed中文');
+      assert.equal(committed.hostRevision.text, committed.diskText);
+      await cdp.send('Input.imeSetComposition', { text: 'cancel', selectionStart: 6, selectionEnd: 6 });
+      await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 });
+      await new Promise(resolve => setTimeout(resolve, 180));
+      await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+      const cancelled = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+      assert.equal(cancelled.diskText, committed.diskText, `${mode}: cancelled IME must not reach disk`);
+      await cdp.detach();
+      await page.evaluate(() => (window as any).__nativeSaveTableFlush.destroy());
+    }
+    for (const block of [
+      { text: '```mermaid\ngraph TD\nA --> B\n```', kind: 'mermaid', marker: 'C' },
+      { text: '$$\nx = 1\n$$', kind: 'latex-math', marker: '+2' }
+    ]) {
+      await page.goto('about:blank');
+      await page.setContent('<!doctype html><body><div id="editor"></div></body>');
+      await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+      await page.addScriptTag({ path: path.join(tempDir, 'trace.js') });
+      await page.evaluate(text => (window as any).__nativeSaveTableFlush.initialize(text), block.text);
+      await page.click(`.meo-${block.kind}-mode-btn`);
+      const selector = `.meo-${block.kind}-source-editor .cm-content`;
+      await page.waitForSelector(selector);
+      await page.click(selector);
+      await page.keyboard.down('Control');
+      await page.keyboard.press('End');
+      await page.keyboard.up('Control');
+      await page.keyboard.type(block.marker);
+      const saved = await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+      const snapshot = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+      const expected = block.text.replace(/\n([^\n]+)$/, `${block.marker}\n$1`);
+      assert.deepEqual(saved.result, { ok: true, value: { text: expected } });
+      assert.equal(snapshot.diskText, expected, `${block.kind}: embedded input must reach disk`);
+      assert.equal(await page.$eval(selector, node => node === document.activeElement), true,
+        'saving must preserve embedded editor focus');
+      const cdp = await page.createCDPSession();
+      await cdp.send('Input.imeSetComposition', { text: 'pinyin', selectionStart: 6, selectionEnd: 6 });
+      await new Promise(resolve => setTimeout(resolve, 180));
+      const preeditSave = await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+      assert.deepEqual(preeditSave.result, { ok: true, value: { text: expected } },
+        `${block.kind}: embedded preedit must not enter the save snapshot`);
+      const preedit = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+      assert.equal(preedit.hostRevision.text, expected);
+      await cdp.send('Input.insertText', { text: '中文' });
+      await new Promise(resolve => setTimeout(resolve, 180));
+      await page.evaluate(() => (window as any).__nativeSaveTableFlush.nativeSave());
+      const committed = await page.evaluate(() => (window as any).__nativeSaveTableFlush.snapshot());
+      assert.equal(committed.diskText, expected.replace(/\n([^\n]+)$/, '中文\n$1'));
+      await cdp.detach();
+      await page.evaluate(() => (window as any).__nativeSaveTableFlush.destroy());
+    }
+    console.log('Native save transient input browser checks passed (table, IME, Mermaid, math)');
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

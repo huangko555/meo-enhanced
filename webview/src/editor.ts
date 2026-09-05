@@ -355,6 +355,7 @@ export function createEditor({
   let applyingExternal = false;
   let imeCompositionActive = false;
   let imeCompositionChanged = false;
+  let imeCompositionBaseText: string | null = null;
   let imeCompositionFlushTimer: number | null = null;
   let capturedPointerId: number | null = null;
   let liveSelectionPointerId: number | null = null;
@@ -412,10 +413,20 @@ export function createEditor({
   const tablePositionDerivedConsumer = {};
   const bootstrapDerivedConsumer = {};
   let editorDestroyed = false;
+  const startImeComposition = () => {
+    imeCompositionBaseText ??= view.state.doc.toString();
+    imeCompositionActive = true;
+    beginLiveInputComposition(view);
+    if (imeCompositionFlushTimer !== null) {
+      window.clearTimeout(imeCompositionFlushTimer);
+      imeCompositionFlushTimer = null;
+    }
+  };
   const publishComposedDocumentChange = () => {
     if (!view || applyingExternal) {
       return;
     }
+    imeCompositionBaseText = null;
     onApplyChanges(view.state.doc.toString());
   };
   const emitGitDiffSummary = (state: EditorState) => {
@@ -436,6 +447,7 @@ export function createEditor({
         return;
       }
       if (!imeCompositionChanged) {
+        imeCompositionBaseText = null;
         completeLiveInputComposition(view);
         return;
       }
@@ -1937,12 +1949,7 @@ export function createEditor({
           return false;
         },
         compositionstart() {
-          imeCompositionActive = true;
-          beginLiveInputComposition(view);
-          if (imeCompositionFlushTimer !== null) {
-            window.clearTimeout(imeCompositionFlushTimer);
-            imeCompositionFlushTimer = null;
-          }
+          startImeComposition();
           return false;
         },
         compositionend() {
@@ -2215,6 +2222,7 @@ export function createEditor({
           } else {
             imeCompositionChanged = false;
             if (isHistoryReplayUpdate(update)) {
+              imeCompositionBaseText = null;
               onApplyChanges(update.state.doc.toString());
             } else {
               publishComposedDocumentChange();
@@ -2246,6 +2254,22 @@ export function createEditor({
   onBlockActionPointerLeave = () => setHoveredBlockActionToolbar(null);
   view.dom.addEventListener('pointermove', onBlockActionPointerMove);
   view.dom.addEventListener('pointerleave', onBlockActionPointerLeave);
+  // CodeMirror filters events owned by embedded editors. Their projected
+  // changes still belong to this document and must share its IME save boundary.
+  const onNestedComposition = (event: Event) => {
+    const content = event.target instanceof Element ? event.target.closest('.cm-content') : null;
+    if (!content || content === view.contentDOM) return;
+    if (event.type === 'compositionstart') startImeComposition();
+    else if (event.type !== 'beforeinput' || (
+      event instanceof InputEvent && event.inputType === 'insertText' && !event.isComposing
+    )) {
+      if (!imeCompositionActive) return;
+      imeCompositionActive = false;
+      scheduleImeCompositionFlush();
+    }
+  };
+  const nestedCompositionEvents = ['compositionstart', 'compositionend', 'beforeinput', 'blur'] as const;
+  for (const event of nestedCompositionEvents) view.dom.addEventListener(event, onNestedComposition, true);
   viewportController = new ViewportController(view, {
     getMode: () => currentMode === 'live' ? 'live' : 'source',
     previewSurface: previewViewportSurface
@@ -2604,6 +2628,11 @@ export function createEditor({
       commitActiveTableInput();
       return view.state.doc.toString();
     },
+    /** Save confirmed input without committing or cancelling an active IME candidate. */
+    getTextForSave() {
+      commitActiveTableInput();
+      return imeCompositionBaseText ?? view.state.doc.toString();
+    },
     revealDocumentFragment(href: string) {
       const fragmentHref = href.startsWith('#') ? href : `#${href}`;
       return openHref(fragmentHref, view);
@@ -2719,6 +2748,7 @@ export function createEditor({
     },
     destroy() {
       editorDestroyed = true;
+      for (const event of nestedCompositionEvents) view.dom.removeEventListener(event, onNestedComposition, true);
       view.dom.classList.remove('meo-live-pointer-selecting');
       gitDiffContentHover?.destroy();
       gitDiffContentHover = null;
@@ -2803,6 +2833,7 @@ export function createEditor({
       imagePresentationResourcePool.dispose();
     },
     setText(textValue: string, resetHistory = false) {
+      if (imeCompositionBaseText !== null) imeCompositionBaseText = textValue;
       document.dispatchEvent(new CustomEvent('meo-table-selection-external-presentation', {
         detail: { owner: view.dom }
       }));

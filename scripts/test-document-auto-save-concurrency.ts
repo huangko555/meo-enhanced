@@ -16,8 +16,8 @@ mock.module('vscode', () => ({
 const { createVscodeDocumentSaveLifecycleAdapter } = await import('../src/host/vscodeDocumentSaveLifecycleAdapter');
 
 // Exercise the production session and both flush endpoints. Only VS Code I/O
-// and transport scheduling are substituted to make the two race windows exact.
-for (const timing of ['idle', 'transport'] as const) {
+// and transport scheduling are substituted to make the race windows exact.
+for (const timing of ['idle', 'snapshot', 'transport'] as const) {
   for (const reason of [1, 2, 3]) {
     let editorText = 'first edit';
     let diskText = 'initial';
@@ -53,7 +53,10 @@ for (const timing of ['idle', 'transport'] as const) {
     };
     const flush = createDocumentSaveFlushWebviewAdapter({
       commitTransientEdits() {},
-      getCurrentText: () => editorText,
+      getCurrentText: () => {
+        if (timing === 'snapshot' && !edited) typeNextEdit();
+        return editorText;
+      },
       whenDocumentIdle: () => session.whenIdle(),
       postMessage(message) {
         if (message.type !== 'flushDocumentEditsResult') return;
@@ -85,7 +88,7 @@ for (const timing of ['idle', 'transport'] as const) {
     assert.equal(diskText, editorText, `${timing}/${reason}: final accepted input must reach disk`);
     assert.deepEqual(failures, [], `${timing}/${reason}: accepted concurrent input must not cause a save warning`);
     assert.deepEqual(errors, []);
-    assert.equal(requests, timing === 'idle' ? 1 : 2);
+    assert.equal(requests, timing === 'transport' ? 2 : 1);
     lifecycle.dispose();
     flush.dispose();
     session.dispose();

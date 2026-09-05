@@ -68,6 +68,15 @@ continued input during save, and reopening the saved file. Compare disk contents
 with the editor and verify focus/history are preserved; a simulated save event
 alone does not validate the platform's focus or auto-save scheduling.
 
+The transient-input browser check also covers input arriving during snapshot
+collection, Live/Source IME confirmation and cancellation, table-cell IME after
+pending ordinary input, and Mermaid/math embedded input. During composition,
+saving must preserve the candidate and save only confirmed text; after confirmation,
+the final characters must reach disk. Include a short delay (100 ms), switching
+auto-save off and back on, manual save, and a clean external file update in native
+acceptance. Keep failure checks for rejected applies, mismatched text, timeout,
+and closing the editor: a warning must not be suppressed when input is unconfirmed.
+
 ## Targeted packs
 
 ```shell

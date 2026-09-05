@@ -144,4 +144,31 @@ assert.equal(posted.length, 1, 'late idle completion after dispose must not emit
   broken.dispose();
 }
 
+for (const outcome of ['complete', 'reject', 'dispose'] as const) {
+  const responses: WebviewToHostMessage[] = [];
+  const collected = deferred();
+  let read = false;
+  const collecting = createDocumentSaveFlushWebviewAdapter({
+    postMessage: message => { responses.push(message); },
+    commitTransientEdits() {},
+    getCurrentText() { read = true; return 'collected cell'; },
+    whenDocumentIdle: () => read ? collected.promise : Promise.resolve()
+  });
+  collecting.accept({ type: 'flushDocumentEdits', requestId: outcome });
+  await Promise.resolve();
+  assert.equal(read, true);
+  assert.deepEqual(responses, [], 'snapshot collection must drain the work it produces');
+  if (outcome === 'dispose') collecting.dispose();
+  if (outcome === 'reject') collected.reject(new Error('collected apply failed'));
+  else collected.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(responses.length, 1);
+  const response = responses[0];
+  assert.equal(response.type, 'flushDocumentEditsResult');
+  if (response.type !== 'flushDocumentEditsResult') throw new Error('Wrong response');
+  assert.equal(response.result.ok, outcome === 'complete');
+  collecting.dispose();
+}
+
 console.log('Document save flush Webview Adapter checks passed');

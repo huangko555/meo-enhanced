@@ -31,7 +31,7 @@ const documentSession = createDocumentSessionWebviewAdapter({
 const saveFlush = createDocumentSaveFlushWebviewAdapter({
   postMessage: handleWebviewMessage,
   commitTransientEdits: () => { editor?.commitTransientEdits(); },
-  getCurrentText: () => editor?.getText() ?? '',
+  getCurrentText: () => editor?.getTextForSave() ?? '',
   whenDocumentIdle: () => documentSession.whenIdle()
 });
 
@@ -73,7 +73,7 @@ function handleWebviewMessage(raw: unknown): void {
 }
 
 const harness = {
-  initialize(text: string) {
+  initialize(text: string, mode: 'live' | 'source' = 'live') {
     hostRevision = { version: 1, text };
     diskText = text;
     documentSession.start({
@@ -88,7 +88,7 @@ const harness = {
     editor = createEditor({
       parent,
       text,
-      initialMode: 'live',
+      initialMode: mode,
       initialGitGutter: false,
       onApplyChanges: (nextText) => documentSession.localDraftChanged(nextText),
       onOpenLink: () => undefined,

@@ -2323,6 +2323,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   cellSelection: TableCellSelection;
   cellInteraction: TableCellInteraction;
   pendingCellAutoCommitTimer: number | null;
+  composingInput: HTMLTextAreaElement | null = null;
   pendingCellSwitchCommit: boolean;
   activeTarget: TableActionTarget;
   searchState: TableSearchState | null;
@@ -2441,7 +2442,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         for (let col = 0; col < allRowInputs[row].length; col += 1) {
           const input = allRowInputs[row][col];
           const value = tableCellSourceToEditorValue(values[row]?.[col] ?? '');
-          if (input.value !== value) input.value = value;
+          // A confirmed edit can reach the document while the same textarea
+          // already holds the next IME candidate. Preserve that native input.
+          if (input !== this.composingInput && input.value !== value) input.value = value;
           this.refreshCellPreviewFromInput(input);
         }
       }
@@ -2483,6 +2486,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   discardPendingCellEdits() {
+    this.composingInput = null;
     this.cellInteraction.accept({ type: 'invalidate', reason: 'replacement' });
     this.cancelPendingCellAutoCommit();
   }
@@ -4196,7 +4200,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   wireInput(input: HTMLTextAreaElement, rowEl: HTMLTableRowElement, rowInputs: HTMLTextAreaElement[], container: HTMLElement, rowIndex: number, colIndex: number, preview: HTMLElement) {
-    let compositionActive = false;
     let compositionEndedAt = Number.NEGATIVE_INFINITY;
     const refreshPreview = () => {
       this.renderCellPreview(
@@ -4211,8 +4214,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
     input.addEventListener('input', () => {
       normalizeTableCellEditorInput(input);
-      const autoCommitGeneration = this.recordPendingCellEdit(rowIndex, colIndex, input.value);
-      if (!compositionActive) this.schedulePendingCellAutoCommit(input, rowIndex, colIndex, autoCommitGeneration);
+      // Preedit belongs to the native textarea until the IME confirms it.
+      // Save-triggered commits must not consume an unfinished candidate.
+      if (this.composingInput !== input) {
+        const autoCommitGeneration = this.recordPendingCellEdit(rowIndex, colIndex, input.value);
+        this.schedulePendingCellAutoCommit(input, rowIndex, colIndex, autoCommitGeneration);
+      }
       const hadSearchMatch = input.parentElement?.classList.contains('has-search-match') ?? false;
       const sourceValue = tableCellEditorValueToSource(input.value);
       if (this.searchState && (hadSearchMatch || shouldExpandTableCellForSearch(sourceValue, this.searchState))) {
@@ -4237,11 +4244,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     input.addEventListener('keyup', notifySelectionChange);
     input.addEventListener('pointerup', notifySelectionChange);
     input.addEventListener('compositionstart', () => {
-      compositionActive = true;
+      this.composingInput = input;
       this.cancelPendingCellAutoCommit();
     });
     input.addEventListener('compositionend', () => {
-      compositionActive = false;
+      this.composingInput = null;
       compositionEndedAt = performance.now();
       this.schedulePendingCellAutoCommit(
         input,
@@ -4252,7 +4259,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     });
     input.addEventListener('keydown', (event) => {
       const followsCompositionEnd = performance.now() - compositionEndedAt < 100;
-      if (compositionActive || event.isComposing || event.keyCode === 229 || (
+      if (this.composingInput === input || event.isComposing || event.keyCode === 229 || (
         followsCompositionEnd && (event.key === 'Enter' || event.key === ' ')
       )) return;
       const keyboard = this.cellInteraction.accept({

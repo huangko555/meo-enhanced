@@ -1800,7 +1800,7 @@ const documentSessionAdapter = createDocumentSessionWebviewAdapter({
 const documentSaveFlushAdapter = createDocumentSaveFlushWebviewAdapter({
   postMessage: (message) => vscode.postMessage(message),
   commitTransientEdits: commitEditorTransientEdits,
-  getCurrentText: getCurrentEditorText,
+  getCurrentText: () => editor?.getTextForSave() ?? getCurrentEditorText(),
   whenDocumentIdle: () => documentSessionAdapter.whenIdle()
 });
 
