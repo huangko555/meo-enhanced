@@ -3,6 +3,12 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.16
+- Fixed auto-save snapshot races when editing continues during a save, and preserved pending table, Mermaid, formula, and IME input.
+- Made Preview links, document jumps, and footnote returns blue in both light and dark appearances.
+- Dismissed toolbar menus and floating panels when clicking Preview content while preserving link activation.
+- Expanded save regression coverage and added reusable native auto-save endurance acceptance.
+
 ## 0.3.15
 - Added an explicit comparison-off option and enabled comparison with the last saved version by default for new users, while preserving existing preferences.
 - Refined settings switches, comparison labels and icons, toolbar overflow menus, and the find-and-replace panel; clarified that reloading discards unsaved changes.

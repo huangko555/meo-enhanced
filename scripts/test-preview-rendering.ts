@@ -440,8 +440,22 @@ if (!/u\s*\{[^}]*text-decoration:\s*underline;/s.test(darkPreviewStyles)) {
 if (!/h1, h2\s*\{[^}]*padding-bottom:\s*0\.3em;[^}]*border-bottom:\s*1px solid var\(--meo-hr\);/s.test(exportStyles)) {
   throw new Error('Export headings must match the Preview divider line');
 }
-if (exportStyles !== lightPreviewStyles || darkExportStyles !== darkPreviewStyles) {
-  throw new Error('Export and Preview must share one reading stylesheet for the same appearance');
+for (const [preview, exported, color] of [
+  [lightPreviewStyles, exportStyles, '#0969da'],
+  [darkPreviewStyles, darkExportStyles, '#58a6ff']
+]) {
+  if (!preview.startsWith(exported)) {
+    throw new Error('Preview must retain the shared export reading styles');
+  }
+  const previewOverrides = preview.slice(exported.length);
+  if (!previewOverrides.includes(`--meo-link: ${color}`)
+    || !previewOverrides.includes('.footnote-backref { color: var(--meo-link); }')
+    || !previewOverrides.includes('a code { color: inherit; }')) {
+    throw new Error('Preview links, footnote returns, and linked code must use appearance-specific blue');
+  }
+  if (exported.includes(`--meo-link: ${color}`)) {
+    throw new Error('Preview-only blue links must not change export styling');
+  }
 }
 
 if (
