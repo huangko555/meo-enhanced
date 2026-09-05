@@ -118,6 +118,34 @@ body {
   background: var(--meo-background);
 }
 
+/* Both surfaces retain the same reading width, including during background
+   preview preparation. The previous surface covers iframe compositor startup. */
+.editor-surface {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-surface > .editor-host,
+.editor-surface > .preview-host {
+  grid-area: 1 / 1;
+}
+
+.editor-surface > .preview-host[hidden] {
+  display: block;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.editor-host[data-preview-cover] {
+  display: block;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .document-scroll-top {
   position: absolute;
   right: 18px;

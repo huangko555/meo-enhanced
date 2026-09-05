@@ -4,6 +4,7 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.3.16
+- Reduced Preview activation layout work and prevented blank frames during mode switches, including the first render.
 - Fixed auto-save snapshot races when editing continues during a save, and preserved pending table, Mermaid, formula, and IME input.
 - Made Preview links, document jumps, and footnote returns blue in both light and dark appearances.
 - Dismissed toolbar menus and floating panels when clicking Preview content while preserving link activation.

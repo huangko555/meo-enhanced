@@ -22,6 +22,7 @@ type PreviewControllerOptions = {
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   applyCodeTheme: (appearance: 'light' | 'dark') => void;
   onRendered?: () => void;
+  onPaintReady?: () => void;
   onFindRequested?: () => void;
   onViewportInteraction?: () => void;
   runViewportTransaction?: (mutate: () => void) => void;
@@ -259,6 +260,7 @@ export function createPreviewController({
   getCodePalette,
   applyCodeTheme,
   onRendered,
+  onPaintReady,
   onFindRequested,
   onViewportInteraction,
   runViewportTransaction,
@@ -269,6 +271,7 @@ export function createPreviewController({
   const host = document.createElement('div');
   host.className = 'preview-host';
   host.hidden = true;
+  host.inert = true;
 
   const frame = document.createElement('iframe');
   frame.className = 'preview-frame';
@@ -371,6 +374,23 @@ export function createPreviewController({
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
   let disposed = false;
+  let paintFrame: number | null = null;
+  const cancelPaintReady = () => {
+    if (paintFrame !== null) window.cancelAnimationFrame(paintFrame);
+    paintFrame = null;
+  };
+  const schedulePaintReady = () => {
+    cancelPaintReady();
+    if (disposed || host.hidden) return;
+    // A visible iframe can still have no compositor surface in this frame.
+    // Keep the previous reading surface until the browser has painted it.
+    paintFrame = window.requestAnimationFrame(() => {
+      paintFrame = window.requestAnimationFrame(() => {
+        paintFrame = null;
+        if (!disposed && !host.hidden) onPaintReady?.();
+      });
+    });
+  };
   const releasePreviewCodeHighlighting = activateShikiCodeHighlighting('preview');
   const unsubscribePreviewCodeHighlight = subscribeShikiRefresh(() => {
     if (!disposed && sourceColoring && activeFrameDocument) {
@@ -628,6 +648,7 @@ export function createPreviewController({
         frame.style.removeProperty('visibility');
         scrollToTopController.sync();
         onRendered?.();
+        schedulePaintReady();
       };
       finishRender();
       if (payload.hasMermaid) {
@@ -723,6 +744,7 @@ export function createPreviewController({
       && frame.contentDocument?.querySelector('.meo-export-doc')) {
       setStatus(null);
       onRendered?.();
+      schedulePaintReady();
       return;
     }
     if (!force && hasPendingRequest && text === pendingText) {
@@ -730,6 +752,7 @@ export function createPreviewController({
       return;
     }
     const generation = requestGeneration + 1;
+    cancelPaintReady();
     const requestText = text;
     requestGeneration = generation;
     hasPendingRequest = true;
@@ -746,6 +769,7 @@ export function createPreviewController({
       if (result.ok === false) {
         pendingViewportRestore = null;
         setStatus(uiStrings.previewFailed);
+        schedulePaintReady();
         return;
       }
       latestPayload = result.value;
@@ -1018,6 +1042,9 @@ export function createPreviewController({
     getStyleEnvironment,
     setVisible: (visible: boolean) => {
       host.hidden = !visible;
+      host.inert = !visible;
+      if (!visible) cancelPaintReady();
+      else if (activeFrameDocument && !hasPendingRequest) schedulePaintReady();
     },
     focus: () => {
       frame.focus();
@@ -1042,6 +1069,7 @@ export function createPreviewController({
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      cancelPaintReady();
       requestGeneration += 1;
       frameGeneration += 1;
       mermaidPresentationGeneration += 1;

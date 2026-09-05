@@ -1223,6 +1223,7 @@ let resolveCodePaletteForPreview = (appearance: 'light' | 'dark') => (
 let applyCodeThemeForPreview = (appearance: 'light' | 'dark') => {
   setShikiTheme(codePaletteAdapter.resolve(undefined, appearance).sourceTheme, 'preview');
 };
+let previewPaintReady = false;
 const previewController = createPreviewController({
   vscode,
   uiLanguage: activeUiLanguage,
@@ -1231,6 +1232,10 @@ const previewController = createPreviewController({
   applyCodeTheme: (appearance) => applyCodeThemeForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,
   onFindRequested: () => findPanelController.open('find'),
+  onPaintReady: () => {
+    previewPaintReady = true;
+    editorHost.removeAttribute('data-preview-cover');
+  },
   onRendered: () => {
     if (outlineController?.isVisible()) {
       outlineController.refresh();
@@ -1280,7 +1285,10 @@ outlineController = createOutlineController({
   }
 });
 
-editorWrapper.replaceChildren(editorHost, previewController.host, outlineController.sidebar, selectionMenuElements.menu);
+const editorSurface = document.createElement('div');
+editorSurface.className = 'editor-surface';
+editorSurface.append(editorHost, previewController.host);
+editorWrapper.replaceChildren(editorSurface, outlineController.sidebar, selectionMenuElements.menu);
 root.replaceChildren(toolbar, editorWrapper);
 
 const editorModeApplication = createEditorModeApplication();
@@ -1914,6 +1922,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     failureNotice.updateEditorNotice();
   },
   setPreviewActive(active) {
+    if (active !== !previewController.host.hidden) previewPaintReady = false;
     previewAdapter.setActive({
       active,
       text: getCurrentEditorText()
@@ -1925,6 +1934,8 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     if (active) syncGitDiffDetails();
   },
   setEditorVisible(visible) {
+    editorHost.toggleAttribute('data-preview-cover', !visible && !previewPaintReady);
+    editorHost.inert = !visible;
     editorHost.hidden = !visible;
   },
   presentModeControl(mode) {
