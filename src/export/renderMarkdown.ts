@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import sanitizeHtml from 'sanitize-html';
-import { rewriteExportImageSrc } from './assetPaths';
+import { isLocalImageSrc, rewriteExportImageSrc } from './assetPaths';
 import { extractExportFrontmatter } from './frontmatter';
 import { prepareMarkdownWithFootnotes } from './footnotes';
 import type { SourceMappedMarkdown } from './sourceMappedMarkdown';
@@ -33,6 +33,8 @@ const FENCE_LANGUAGE_ALIASES: Record<string, string> = {
 const MATH_FENCE_LANGUAGES = new Set(['latex', 'tex', 'math', 'katex']);
 const OPENING_KBD_TAG_RE = /^<kbd\b[^>]*>$/i;
 const CLOSING_KBD_TAG_RE = /^<\/kbd\s*>$/i;
+const DEFERRED_IMAGE_ATTRIBUTE = 'data-meo-deferred-image-src';
+const DEFERRED_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 
 registerExportLanguages();
 
@@ -45,6 +47,7 @@ export type RenderMarkdownOptions = {
   target: RenderMarkdownTarget;
   renderHexColorSwatches?: boolean;
   uiLanguage?: UiLanguage;
+  deferLocalImages?: boolean;
 };
 
 export type RenderMarkdownResult = {
@@ -59,6 +62,17 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   let hasMath = false;
   let bodySourceLines: number[] | null = null;
   const embeddedImageDataUrlCache = new Map<string, string | null>();
+  const rewriteImageSrc = (rawSrc: string): string => rewriteExportImageSrc(rawSrc, {
+    markdownFilePath: options.markdownFilePath,
+    outputFilePath: options.outputFilePath,
+    target: options.target,
+    embeddedImageDataUrlCache
+  });
+  const deferImageSrc = (rawSrc: string): { src: string; deferredSrc?: string } => (
+    options.deferLocalImages && isLocalImageSrc(rawSrc)
+      ? { src: DEFERRED_IMAGE_PLACEHOLDER, deferredSrc: rawSrc }
+      : { src: rewriteImageSrc(rawSrc) }
+  );
   const originalSourceLines = String(options.markdownText ?? '').split(/\r?\n/);
   const normalized = normalizeMarkdownForExportWithSourceMap(options.markdownText);
   const extractedFrontmatter = extractExportFrontmatter(normalized, uiStrings.properties);
@@ -87,8 +101,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   }
   installSafeHtmlTransform(
     md,
-    options,
-    embeddedImageDataUrlCache,
+    deferImageSrc,
     (startIndex, endIndex) => ({
       start: bodySourceLines?.[startIndex] ?? 0,
       end: bodySourceLines?.[Math.max(startIndex, endIndex - 1)] ?? 0
@@ -106,13 +119,9 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   md.renderer.rules.image = (tokens, idx, opts, env, self) => {
     const token = tokens[idx];
     const src = token.attrGet('src') ?? '';
-    const rewritten = rewriteExportImageSrc(src, {
-      markdownFilePath: options.markdownFilePath,
-      outputFilePath: options.outputFilePath,
-      target: options.target,
-      embeddedImageDataUrlCache
-    });
-    token.attrSet('src', rewritten);
+    const rewritten = deferImageSrc(src);
+    token.attrSet('src', rewritten.src);
+    if (rewritten.deferredSrc) token.attrSet(DEFERRED_IMAGE_ATTRIBUTE, rewritten.deferredSrc);
     token.attrSet('loading', 'eager');
     return defaultImageRule(tokens, idx, opts, env, self);
   };
@@ -215,7 +224,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     allowedAttributes: {
       a: ['href', 'name', 'target', 'rel', 'title', 'aria-label'],
       details: ['open'],
-      img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
+      img: ['src', 'alt', 'title', 'width', 'height', 'loading', DEFERRED_IMAGE_ATTRIBUTE],
       ol: ['start', 'reversed'],
       li: ['value'],
       '*': ['class', 'style', 'id', 'data-source-b64', 'data-source-line', 'data-source-end-line', 'aria-hidden'],
@@ -405,13 +414,13 @@ function installHexColorSwatchTransform(md: MarkdownIt, colorLabel: (value: stri
 
 function installSafeHtmlTransform(
   md: MarkdownIt,
-  options: RenderMarkdownOptions,
-  embeddedImageDataUrlCache: Map<string, string | null>,
+  rewriteImageSrc: (rawSrc: string) => { src: string; deferredSrc?: string },
   resolveSourceRange: (startIndex: number, endIndex: number) => { start: number; end: number }
 ): void {
   const allowedAttributes = Object.fromEntries(
     [...supportedHtmlTags].map((tagName) => [tagName, getSupportedHtmlAttributes(tagName)])
   );
+  allowedAttributes.img = [...allowedAttributes.img, DEFERRED_IMAGE_ATTRIBUTE];
   const safeHtmlSanitizerOptions: NonNullable<Parameters<typeof sanitizeHtml>[1]> = {
     allowedTags: [...supportedHtmlTags],
     allowedAttributes,
@@ -421,20 +430,17 @@ function installSafeHtmlTransform(
     },
     allowProtocolRelative: false,
     transformTags: {
-      img: (tagName, attribs) => ({
-        tagName,
-        attribs: {
-          ...attribs,
-          ...(attribs.src ? {
-            src: rewriteExportImageSrc(attribs.src, {
-              markdownFilePath: options.markdownFilePath,
-              outputFilePath: options.outputFilePath,
-              target: options.target,
-              embeddedImageDataUrlCache
-            })
-          } : {})
-        }
-      })
+      img: (tagName, attribs) => {
+        const rewritten = attribs.src ? rewriteImageSrc(attribs.src) : null;
+        return {
+          tagName,
+          attribs: {
+            ...attribs,
+            ...(rewritten ? { src: rewritten.src } : {}),
+            ...(rewritten?.deferredSrc ? { [DEFERRED_IMAGE_ATTRIBUTE]: rewritten.deferredSrc } : {})
+          }
+        };
+      }
     }
   };
   const sanitizeRawSource = (source: string, tokenType: string): string => {

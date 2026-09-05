@@ -28,6 +28,17 @@ export type RewriteExportImageSrcOptions = {
   embeddedImageDataUrlCache?: Map<string, string | null>;
 };
 
+export function isLocalImageSrc(rawSrc: string): boolean {
+  const input = (rawSrc ?? '').trim();
+  if (!input || REMOTE_OR_INLINE_RE.test(input) || /^\/\//.test(input)) {
+    return false;
+  }
+  const { pathPart } = splitPathAndSuffix(input);
+  return Boolean(pathPart) && (
+    !SCHEME_RE.test(pathPart) || /^file:/i.test(pathPart) || hasWindowsDrivePrefix(pathPart)
+  );
+}
+
 export function rewriteExportImageSrc(rawSrc: string, options: RewriteExportImageSrcOptions): string {
   const input = (rawSrc ?? '').trim();
   if (!input) {

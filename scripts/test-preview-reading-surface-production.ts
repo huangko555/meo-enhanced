@@ -873,6 +873,18 @@ async function main(): Promise<void> {
         }
         return null;
       }
+      if (message.type === 'resolveImageSrc') {
+        assert.equal(message.delivery, 'embedded');
+        const imagePath = path.join(temp, message.url);
+        const resolvedUrl = fs.existsSync(imagePath)
+          ? `data:image/svg+xml;base64,${fs.readFileSync(imagePath).toString('base64')}`
+          : '';
+        return decodeHostToWebviewMessage({
+          type: 'resolvedImageSrc',
+          requestId: message.requestId,
+          result: { ok: true, value: { resolvedUrl } }
+        });
+      }
       if (message.type === 'setPreviewFontFamily') {
         previewFontFamilyCommands.push(message.fontFamily);
         return null;

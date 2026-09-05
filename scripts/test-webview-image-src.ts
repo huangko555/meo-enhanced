@@ -75,7 +75,10 @@ mock.module('vscode', () => ({
   }
 }));
 
-const { collectWebviewImageResourceRoots, resolveWebviewImageSrc } = await import('../src/shared/documentLinks');
+const {
+  collectWebviewImageResourceRoots,
+  resolveWebviewImageSrc
+} = await import('../src/shared/documentLinks');
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -144,6 +147,14 @@ const externalResult = await resolveWebviewImageSrc(externalImage.fsPath, docume
 assert(externalResult.startsWith('vscode-webview-resource:'), 'initial external image did not use its exact authorized URI');
 assert(externalWebview.optionsAssignments === 0, 'external image changed webview options and can reload the editor');
 assert(readFileCount === 0, `initial external image was unnecessarily copied ${readFileCount} times`);
+const embeddedPreviewResult = await resolveWebviewImageSrc(
+  externalImage.fsPath,
+  documentUri as never,
+  externalWebview.webview as never,
+  { delivery: 'embedded' }
+);
+assert(embeddedPreviewResult === 'data:image/jpeg;base64,AQID', 'Preview did not request iframe-compatible image data');
+assert(readFileCount === 1, 'embedded Preview image was not read exactly once');
 
 const newExternalResult = await resolveWebviewImageSrc(
   newExternalImage.fsPath,
@@ -152,6 +163,6 @@ const newExternalResult = await resolveWebviewImageSrc(
 );
 assert(newExternalResult === 'data:image/jpeg;base64,AQID', `unexpected new image result: ${newExternalResult.slice(0, 40)}`);
 assert(externalWebview.optionsAssignments === 0, 'new external image changed webview options and can reload the editor');
-assert(readFileCount === 1, `new external image read count was ${readFileCount}`);
+assert(readFileCount === 2, `new external image read count was ${readFileCount}`);
 
 console.log('webview image source checks passed');

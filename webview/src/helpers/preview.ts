@@ -14,6 +14,7 @@ import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
 import { applyPreviewCodeHighlight } from './previewCodeHighlight';
 import { activateShikiCodeHighlighting, subscribeShikiRefresh } from './shikiHighlighter';
 import { createToolbarDropdown } from './toolbarDropdown';
+import { resolveEmbeddedImageSrc } from './images';
 
 type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
@@ -374,6 +375,7 @@ export function createPreviewController({
   let searchMatches: HTMLElement[] = [];
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
+  let disposeDeferredImages = () => {};
   let disposed = false;
   let paintFrame: number | null = null;
   let highlightFrame: number | null = null;
@@ -432,6 +434,48 @@ export function createPreviewController({
       viewport.destroy();
     }
     previewMathViewports = [];
+  };
+
+  const attachDeferredImages = (frameDocument: Document) => {
+    disposeDeferredImages();
+    const abortController = new AbortController();
+    const images = Array.from(frameDocument.querySelectorAll<HTMLImageElement>(
+      'img[data-meo-deferred-image-src]'
+    ));
+    const loadImage = async (image: HTMLImageElement) => {
+      const rawSrc = image.getAttribute('data-meo-deferred-image-src') ?? '';
+      image.removeAttribute('data-meo-deferred-image-src');
+      const resolvedSrc = await resolveEmbeddedImageSrc(rawSrc, abortController.signal);
+      if (
+        abortController.signal.aborted ||
+        disposed ||
+        activeFrameDocument !== frameDocument
+      ) return;
+      if (resolvedSrc) image.src = resolvedSrc;
+      else image.removeAttribute('src');
+    };
+    const FrameIntersectionObserver = frame.contentWindow
+      ? (frame.contentWindow as unknown as Pick<typeof globalThis, 'IntersectionObserver'>).IntersectionObserver
+      : null;
+    const observer = FrameIntersectionObserver
+      ? new FrameIntersectionObserver((entries: IntersectionObserverEntry[]) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            observer?.unobserve(entry.target);
+            void loadImage(entry.target as HTMLImageElement);
+          }
+        }, { rootMargin: '800px 0px' })
+      : null;
+    if (observer) {
+      for (const image of images) observer.observe(image);
+    } else {
+      for (const image of images) void loadImage(image);
+    }
+    disposeDeferredImages = () => {
+      observer?.disconnect();
+      abortController.abort();
+      disposeDeferredImages = () => {};
+    };
   };
 
   const attachPreviewMathViewports = (frameDocument: Document) => {
@@ -594,6 +638,7 @@ export function createPreviewController({
     activeFrameDocument = null;
     pendingPresentationScroll = null;
     frameRenderedText = null;
+    disposeDeferredImages();
     frame.style.visibility = 'hidden';
     const katexHref = document.body.dataset.meoKatexSrc ?? '';
     const katexInlineStyles = collectPreviewKatexStyles(katexHref).replace(/<\/style/gi, '<\\/style');
@@ -673,6 +718,7 @@ export function createPreviewController({
         schedulePaintReady();
       };
       finishRender();
+      attachDeferredImages(frameDocument);
       if (payload.hasMermaid) {
         void previewMermaidRenderer.render(frameDocument, appearance, keepPosition, isCurrent).finally(keepPosition);
       }
@@ -1120,6 +1166,7 @@ export function createPreviewController({
       fontFamilySelectControl.dispose();
       frame.onload = null;
       disposePreviewMathViewports();
+      disposeDeferredImages();
       scrollToTopController.setScrollElement(null);
       clearSearchMatches();
     }

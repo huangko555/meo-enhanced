@@ -6,14 +6,17 @@ import exportRuntime from '../src/export/runtime';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-image-'));
 const localImagePath = path.join(tempDir, 'absolute-image.png');
-const pngBytes = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-  'base64'
-);
+const pngBytes = Buffer.concat([
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64'
+  ),
+  Buffer.alloc(2 * 1024 * 1024)
+]);
 fs.writeFileSync(localImagePath, pngBytes);
 
 const remoteImageUrl = 'https://i2.hdslb.com/bfs/banner/example.jpg@976w_550h_!web-home-carousel-cover.avif';
-const markdownText = `![local](${localImagePath} "title")\n\n![remote](${remoteImageUrl})\n\n![missing fallback](missing-image.png)`;
+const markdownText = `![local](${localImagePath} "title")\n\n<img src="${localImagePath}" alt="raw local">\n\n![remote](${remoteImageUrl})\n\n![missing fallback](missing-image.png)`;
 const baseOptions = {
   sourceDocumentPath: path.join(tempDir, 'document.md'),
   mermaidRuntimeSrc: 'mermaid.min.js',
@@ -36,22 +39,23 @@ try {
     target: 'pdf' as const
   });
 
-  for (const [surface, html] of [
-    ['Preview', preview.html],
-    ['Export', exported.htmlDocument]
-  ] as const) {
-    if (!html.includes('src="data:image/png;base64,')) {
-      throw new Error(`${surface} did not embed a Windows absolute-path image`);
-    }
-    if (!html.includes(remoteImageUrl)) {
-      throw new Error(`${surface} changed or dropped a valid remote AVIF image URL`);
-    }
-    if (!html.includes('alt="missing fallback"')) {
-      throw new Error(`${surface} dropped fallback alt text for an unreadable local image`);
-    }
-    if (html.includes('meo-md-image-controls')) {
-      throw new Error(`${surface} exposed Live image controls in the reading surface`);
-    }
+  if (preview.html.includes('src="data:image/png;base64,')) {
+    throw new Error('Preview copied local image bytes into its first HTML payload');
+  }
+  if (preview.html.length > 20_000) {
+    throw new Error(`Large local images inflated the first Preview payload to ${preview.html.length} characters`);
+  }
+  const deferredImages = preview.html.match(/data-meo-deferred-image-src=/g) ?? [];
+  if (deferredImages.length !== 3 || !preview.html.includes('alt="raw local"')) {
+    throw new Error(`Preview did not defer every Markdown and raw HTML local image (${deferredImages.length})`);
+  }
+  for (const [surface, html] of [['Preview', preview.html], ['Export', exported.htmlDocument]] as const) {
+    if (!html.includes(remoteImageUrl)) throw new Error(`${surface} changed or dropped a valid remote AVIF image URL`);
+    if (!html.includes('alt="missing fallback"')) throw new Error(`${surface} dropped fallback alt text`);
+    if (html.includes('meo-md-image-controls')) throw new Error(`${surface} exposed Live image controls`);
+  }
+  if (!exported.htmlDocument.includes('src="data:image/png;base64,')) {
+    throw new Error('HTML export did not embed a Windows absolute-path image');
   }
   if (!pdf.htmlDocument.includes(pathToFileURL(localImagePath).toString())) {
     throw new Error('PDF export did not convert a Windows absolute-path image to a file URL');

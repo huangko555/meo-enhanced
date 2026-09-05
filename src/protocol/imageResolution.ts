@@ -6,6 +6,7 @@ export type ResolveImageSrcRequest = {
   readonly type: 'resolveImageSrc';
   readonly requestId: string;
   readonly url: string;
+  readonly delivery?: 'embedded';
 };
 
 export type ResolvedImageSrc = {
@@ -35,7 +36,13 @@ export function decodeResolveImageSrcRequest(value: unknown): ResolveImageSrcReq
     || !isNonEmptyString(value.url)) {
     return null;
   }
-  return { type: 'resolveImageSrc', requestId: value.requestId, url: value.url };
+  if (value.delivery !== undefined && value.delivery !== 'embedded') return null;
+  return {
+    type: 'resolveImageSrc',
+    requestId: value.requestId,
+    url: value.url,
+    ...(value.delivery === 'embedded' ? { delivery: 'embedded' as const } : {})
+  };
 }
 
 export function decodeResolvedImageSrcResponse(value: unknown): ResolvedImageSrcResponse | null {

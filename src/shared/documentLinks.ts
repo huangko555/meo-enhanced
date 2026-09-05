@@ -276,7 +276,8 @@ export async function uriExists(uri: vscode.Uri): Promise<boolean> {
 export async function resolveWebviewImageSrc(
   rawUrl: string,
   documentUri: vscode.Uri,
-  webview: vscode.Webview
+  webview: vscode.Webview,
+  options: { delivery?: 'embedded' } = {}
 ): Promise<string> {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
@@ -298,6 +299,10 @@ export async function resolveWebviewImageSrc(
 
   if (!imageUri || !(await uriExists(imageUri))) {
     return '';
+  }
+
+  if (options.delivery === 'embedded') {
+    return readImageAsDataUri(imageUri);
   }
 
   const roots = webview.options.localResourceRoots ?? [];

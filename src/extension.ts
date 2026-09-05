@@ -516,9 +516,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       onExportDocument: (session, format) => this.exportSessionDocument(session, format),
       renderPreview: async (options) => {
         const exportRuntime = await loadExportRuntimeModule(this.context.extensionUri);
-        return exportRuntime.renderPreviewDocument({
-          ...options
-        });
+        return exportRuntime.renderPreviewDocument(options);
       },
       getFindOptions: () => this.getFindOptions(),
       getUiLanguage: () => resolveUiLanguage(

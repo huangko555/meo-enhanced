@@ -19,7 +19,7 @@ export type ImageResolutionTransportOptions = {
 };
 
 export type ImageResolutionTransport = {
-  resolve(url: string, signal?: AbortSignal): Promise<ImageResolutionResult>;
+  resolve(url: string, signal?: AbortSignal, delivery?: 'embedded'): Promise<ImageResolutionResult>;
   accept(response: ResolvedImageSrcResponse): boolean;
 };
 
@@ -46,7 +46,7 @@ export function createImageResolutionTransport(
   };
 
   return {
-    resolve(url, signal) {
+    resolve(url, signal, delivery) {
       const requestId = `img-${requestCounter++}`;
       const result = new Promise<ImageResolutionResult>((resolve) => {
         const timeout = scheduleTimeout(() => {
@@ -67,7 +67,7 @@ export function createImageResolutionTransport(
       });
       if (signal?.aborted) return result;
       try {
-        postMessage({ type: 'resolveImageSrc', requestId, url });
+        postMessage({ type: 'resolveImageSrc', requestId, url, ...(delivery ? { delivery } : {}) });
       } catch (error) {
         settle(requestId, {
           ok: false,

@@ -18,6 +18,19 @@ try {
   const initialRender = new Promise<void>(resolve => { releaseInitialRender = resolve; });
   let holdInitialRender = true;
   await page.exposeFunction('__renderPreview', async (message: any) => {
+    if (message.type === 'resolveImageSrc') {
+      assert.equal(message.delivery, 'embedded', 'Preview iframe images must request embedded delivery');
+      return {
+        type: 'resolvedImageSrc',
+        requestId: message.requestId,
+        result: {
+          ok: true,
+          value: {
+            resolvedUrl: 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+          }
+        }
+      };
+    }
     if (message.type !== 'requestPreviewRender') return null;
     if (holdInitialRender) await initialRender;
     if (failRender) return { type: 'previewRenderResult', requestId: message.requestId,
@@ -32,7 +45,11 @@ try {
   });
   await page.addScriptTag({ content: `window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){window.__renderPreview(message).then(response=>{if(response)window.dispatchEvent(new MessageEvent('message',{data:response}));});}});` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
-  const text = Array.from({ length: 40 }, (_, i) => `Paragraph ${i}: visible text throughout the preview transition.`).join('\n\n');
+  const text = [
+    '![Markdown local](images/markdown-local.png)',
+    '<img src="images/html-local.png" alt="HTML local">',
+    ...Array.from({ length: 40 }, (_, i) => `Paragraph ${i}: visible text throughout the preview transition.`)
+  ].join('\n\n');
   await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
     type: 'init', documentId: 'file:///preview-transition.md', text, version: 1,
     savedRevision: { version: 1, text }, diagnostics: [], mode: 'live', uiLanguage: 'en',
@@ -70,6 +87,14 @@ try {
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Paragraph 39')
       && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover')
     );
+    await page.waitForFunction(() => {
+      const images = Array.from(
+        document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.images ?? []
+      );
+      return images.length === 2
+        && images.every(image => image.complete && image.naturalWidth === 1)
+        && images.every(image => !image.hasAttribute('data-meo-deferred-image-src'));
+    });
     await new Promise(resolve => setTimeout(resolve, 500));
     await cdp.send('Page.stopScreencast');
     await cdp.detach();

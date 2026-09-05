@@ -116,6 +116,13 @@ const requestImageSrcResolution = async (url: string, signal?: AbortSignal): Pro
   return resolvedUrl || url;
 };
 
+export const resolveEmbeddedImageSrc = async (rawUrl: string, signal?: AbortSignal): Promise<string> => {
+  const url = rawUrl.trim();
+  if (!url) return '';
+  const result = await imageResolutionTransport.resolve(url, signal, 'embedded');
+  return result.ok === true ? result.value.resolvedUrl : '';
+};
+
 export const settleImageSrcRequest = (message: ResolvedImageSrcResponse): void => {
   imageResolutionTransport.accept(message);
 };

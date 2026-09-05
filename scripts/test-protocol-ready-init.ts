@@ -171,6 +171,14 @@ assert.equal(decodeDocumentSyncCommand({ type: 'applyChanges', baseVersion: 2, c
 assert.deepEqual(decodeResolveImageSrcRequest({ type: 'resolveImageSrc', requestId: 'img-1', url: 'images/a.png' }), {
   type: 'resolveImageSrc', requestId: 'img-1', url: 'images/a.png'
 });
+assert.deepEqual(decodeResolveImageSrcRequest({
+  type: 'resolveImageSrc', requestId: 'img-embedded', url: 'images/a.png', delivery: 'embedded'
+}), {
+  type: 'resolveImageSrc', requestId: 'img-embedded', url: 'images/a.png', delivery: 'embedded'
+});
+assert.equal(decodeResolveImageSrcRequest({
+  type: 'resolveImageSrc', requestId: 'img-invalid', url: 'images/a.png', delivery: 'direct'
+}), null);
 assert.equal(decodeResolveImageSrcRequest({ type: 'resolveImageSrc', requestId: '', url: 'images/a.png' }), null);
 assert.deepEqual(decodeResolvedImageSrcResponse({ type: 'resolvedImageSrc', requestId: 'img-1', result: {
   ok: true, value: { resolvedUrl: 'vscode-webview://a' }

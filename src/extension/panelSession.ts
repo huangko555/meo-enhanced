@@ -644,7 +644,11 @@ export function createPanelSessionController(params: PanelSessionControllerParam
             requestId: raw.requestId,
             result: {
               ok: true,
-              value: { resolvedUrl: await resolveWebviewImageSrc(raw.url, documentUri, panel.webview) }
+              value: {
+                resolvedUrl: await resolveWebviewImageSrc(raw.url, documentUri, panel.webview, {
+                  delivery: raw.delivery
+                })
+              }
             }
           };
         } catch (error) {
