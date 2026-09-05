@@ -54,7 +54,6 @@ import {
 import { createTableCommandTargetRegistry } from './editor/tableCommandTargetRegistry';
 import { createGitDiffOverviewRulerController } from './helpers/gitDiffOverviewRuler';
 import { createSearchOverviewRulerController } from './helpers/searchOverviewRuler';
-import { createGitDiffContentHoverController } from './helpers/gitDeletionHover';
 import { mergeConflictSourceExtensions } from './helpers/mergeConflicts';
 import { resolvedSyntaxTree, extractHeadings } from './helpers/markdownSyntax';
 import {
@@ -397,7 +396,6 @@ export function createEditor({
   let onHistoryWheel: (() => void) | null = null;
   let onHistoryBlur: ((event: FocusEvent) => void) | null = null;
   let blockActionToolbarReconcileFrame: number | null = null;
-  let gitDiffContentHover: ReturnType<typeof createGitDiffContentHoverController> | null = null;
   let gitDiffOverviewRuler: ReturnType<typeof createGitDiffOverviewRulerController> | null = null;
   let searchOverviewRuler: ReturnType<typeof createSearchOverviewRulerController> | null = null;
   let editableLinkHoverPointerActive = false;
@@ -843,31 +841,35 @@ export function createEditor({
     }
   };
 
-  const clearLivePointerSelection = () => {
+  const clearPointerSelection = () => {
+    if (view) {
+      view.dom.classList.remove('meo-pointer-selecting');
+    }
     if (liveSelectionPointerId === null) {
       return;
     }
     liveSelectionPointerId = null;
     if (view && currentMode === 'live') {
-      view.dom.classList.remove('meo-live-pointer-selecting');
-      view.dom.style.cursor = '';
       view.dispatch({
         effects: setLivePointerSelectionActiveEffect.of({ active: false, preservedLine: null })
       });
     }
   };
 
-  const finishLivePointerSelection = (pointerId: number, defer = false) => {
+  const finishPointerSelection = (pointerId: number, defer = false) => {
+    if (view) {
+      view.dom.classList.remove('meo-pointer-selecting');
+    }
     if (liveSelectionPointerId === pointerId) {
       if (defer) {
         const generation = liveSelectionGeneration;
         requestAnimationFrame(() => {
           if (liveSelectionPointerId === pointerId && liveSelectionGeneration === generation) {
-            clearLivePointerSelection();
+            clearPointerSelection();
           }
         });
       } else {
-        clearLivePointerSelection();
+        clearPointerSelection();
       }
     }
   };
@@ -2013,6 +2015,8 @@ export function createEditor({
             )
           };
 
+          view.dom.classList.add('meo-pointer-selecting');
+
           if (currentMode === 'live') {
             const pointerPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
             const pointerLine = pointerPos === null ? null : view.state.doc.lineAt(pointerPos).number;
@@ -2021,8 +2025,6 @@ export function createEditor({
             ) ? pointerLine : null;
             liveSelectionGeneration += 1;
             liveSelectionPointerId = event.pointerId;
-            view.dom.classList.add('meo-live-pointer-selecting');
-            view.dom.style.cursor = 'text';
             view.dispatch({
               effects: setLivePointerSelectionActiveEffect.of({ active: true, preservedLine })
             });
@@ -2035,7 +2037,7 @@ export function createEditor({
           return false;
         },
         pointerup(event, view) {
-          finishLivePointerSelection(event.pointerId, true);
+          finishPointerSelection(event.pointerId, true);
 
           if (checkboxClick?.pointerId === event.pointerId) {
             frontmatterBoundaryClick = null;
@@ -2105,7 +2107,7 @@ export function createEditor({
           return false;
         },
         pointercancel(event, _view) {
-          finishLivePointerSelection(event.pointerId);
+          finishPointerSelection(event.pointerId);
 
           if (capturedPointerId !== event.pointerId) {
             if (frontmatterBoundaryClick?.pointerId === event.pointerId) {
@@ -2584,12 +2586,12 @@ export function createEditor({
   };
   document.addEventListener('selectionchange', onDocumentSelectionChange);
   onWindowPointerUp = (event) => {
-    clearLivePointerSelection();
+    clearPointerSelection();
   };
   onWindowPointerCancel = (event) => {
-    clearLivePointerSelection();
+    clearPointerSelection();
   };
-  onWindowBlur = () => clearLivePointerSelection();
+  onWindowBlur = () => clearPointerSelection();
   window.addEventListener('pointerup', onWindowPointerUp, true);
   window.addEventListener('pointercancel', onWindowPointerCancel, true);
   window.addEventListener('blur', onWindowBlur);
@@ -2598,7 +2600,6 @@ export function createEditor({
     gitDiffOverviewRuler?.refresh();
   };
   view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
-  gitDiffContentHover = createGitDiffContentHoverController(view);
   gitDiffOverviewRuler = createGitDiffOverviewRulerController({
     view,
     getMode: () => currentMode,
@@ -2757,9 +2758,7 @@ export function createEditor({
     destroy() {
       editorDestroyed = true;
       for (const event of nestedCompositionEvents) view.dom.removeEventListener(event, onNestedComposition, true);
-      view.dom.classList.remove('meo-live-pointer-selecting');
-      gitDiffContentHover?.destroy();
-      gitDiffContentHover = null;
+      view.dom.classList.remove('meo-pointer-selecting');
       gitDiffOverviewRuler?.destroy();
       gitDiffOverviewRuler = null;
       searchOverviewRuler?.destroy();
@@ -2872,7 +2871,7 @@ export function createEditor({
         const newLength = textValue.length;
         const mappedAnchor = Math.min(mapPositionThroughTextChange(anchor, currentText, textValue, syncChange), newLength);
         const mappedHead = Math.min(mapPositionThroughTextChange(head, currentText, textValue, syncChange), newLength);
-        clearLivePointerSelection();
+        clearPointerSelection();
         setTableInteractionActive(false);
         applyingExternal = true;
         try {
@@ -3189,7 +3188,6 @@ export function createEditor({
             tableTransactionProvenanceAdapter.effect({ type: 'baselineRefreshed' })
           ]
         });
-        gitDiffContentHover?.hide();
         gitDiffOverviewRuler?.refresh();
       });
     }

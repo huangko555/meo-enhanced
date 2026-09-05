@@ -1743,17 +1743,10 @@ async function main() {
       const hoverMarker = tableDeletedMarkers[0] ?? aggregateMarkers[0] ?? null;
       const rect = hoverMarker?.getBoundingClientRect();
       const gutterRect = document.querySelector<HTMLElement>('.cm-gutter.meo-git-gutter')?.getBoundingClientRect();
-      const deletionAtEnd = hoverMarker?.classList.contains('is-deleted-at-end') ?? false;
-      const deletionTriangle = hoverMarker ? getComputedStyle(hoverMarker, '::after') : null;
-      const deletionTriangleLeft = rect && deletionTriangle
-        ? rect.left + (Number.parseFloat(deletionTriangle.left) || 0)
-        : null;
-      const deletionTriangleWidth = deletionTriangle
-        ? Number.parseFloat(deletionTriangle.borderLeftWidth) || 0
-        : 0;
       return {
         source: editor.view.state.doc.toString(),
         markerGutterLeftDelta: rect && gutterRect ? rect.left - gutterRect.left : null,
+        markerPointerEvents: hoverMarker ? getComputedStyle(hoverMarker).pointerEvents : null,
         tableMarkerClasses,
         tableDeletedMarkers: tableDeletedMarkers.map((marker) => ({
           baselineFrom: marker.dataset.meoBaselineFromLine,
@@ -1761,28 +1754,11 @@ async function main() {
           liveFrom: marker.dataset.meoLiveBlockStartLine,
           liveTo: marker.dataset.meoLiveBlockEndLine
         })),
-        aggregateMarkerClasses: aggregateMarkers.map((marker) => marker.className),
-        hoverPoint: rect && deletionTriangleLeft !== null ? {
-          x: deletionTriangleLeft + deletionTriangleWidth / 2,
-          y: deletionAtEnd ? rect.bottom - 1 : rect.top + 1
-        } : null
+        aggregateMarkerClasses: aggregateMarkers.map((marker) => marker.className)
       };
     });
-    if (deletedTableDiffState.hoverPoint) {
-      await page.mouse.move(deletedTableDiffState.hoverPoint.x, deletedTableDiffState.hoverPoint.y);
-      await waitForPageFrames(2);
-    }
-    const deletedTableDiffTooltip = await page.evaluate(() => {
-      const deletion = document.querySelector<HTMLElement>('.meo-deletion-tooltip');
-      const modified = document.querySelector<HTMLElement>('.meo-modified-tooltip');
-      const result = {
-        deletionVisible: Boolean(deletion && !deletion.hidden),
-        deletionText: deletion?.textContent ?? '',
-        modifiedVisible: Boolean(modified && !modified.hidden),
-        modifiedText: modified?.textContent ?? ''
-      };
+    await page.evaluate(() => {
       (window as any).__deletedTableDiffEditor.destroy();
-      return result;
     });
     if (
       deletedTableDiffState.source !== '| A             |\n| ------------- |\n| keep          |\n| last          |' ||
@@ -1792,13 +1768,9 @@ async function main() {
       deletedTableDiffState.tableDeletedMarkers[0]?.baselineFrom !== '4' ||
       deletedTableDiffState.tableDeletedMarkers[0]?.baselineTo !== '5' ||
       deletedTableDiffState.aggregateMarkerClasses.length !== 0 ||
-      !deletedTableDiffTooltip.deletionVisible ||
-      !deletedTableDiffTooltip.deletionText.includes('removed one') ||
-      !deletedTableDiffTooltip.deletionText.includes('removed two') ||
-      deletedTableDiffTooltip.deletionText.includes('| A |') ||
-      deletedTableDiffTooltip.modifiedVisible
+      deletedTableDiffState.markerPointerEvents !== 'none'
     ) {
-      failures.push(`deleted table rows did not render a row-scoped deletion change: ${JSON.stringify({ markers: deletedTableDiffState, tooltip: deletedTableDiffTooltip })}`);
+      failures.push(`deleted table rows did not render a passive row-scoped deletion change: ${JSON.stringify(deletedTableDiffState)}`);
     }
 
     const adjacentTableDiffState = await page.evaluate(async () => {
@@ -1887,51 +1859,15 @@ async function main() {
       }
       const redoSource = editor.view.state.doc.toString();
       const redoMarkers = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-diff-marker'));
-      const pointFor = (marker: HTMLElement | undefined, kind: 'deleted' | 'modified') => {
-        if (!marker) return null;
-        const rect = marker.getBoundingClientRect();
-        const triangle = getComputedStyle(marker, '::after');
-        const triangleLeft = rect.left + (Number.parseFloat(triangle.left) || 0);
-        const triangleWidth = Number.parseFloat(triangle.borderLeftWidth) || 0;
-        return {
-          x: kind === 'deleted'
-            ? triangleLeft + triangleWidth / 2
-            : rect.left + Math.min(2, rect.width / 2),
-          y: kind === 'deleted' ? rect.top + 1 : rect.top + rect.height / 2
-        };
-      };
       return {
         source: editor.view.state.doc.toString(),
         markers: markerState,
         undoSource,
         undoDeletedMarkerCount,
         redoSource,
-        deletedPoint: pointFor(redoMarkers.find((marker) => marker.classList.contains('is-deleted')), 'deleted'),
-        modifiedPoint: pointFor(redoMarkers.find((marker) => marker.classList.contains('is-modified')), 'modified')
+        passiveMarkers: redoMarkers.every((marker) => getComputedStyle(marker).pointerEvents === 'none')
       };
     });
-    const readVisibleDiffTooltip = () => page.evaluate(() => {
-      const deletion = document.querySelector<HTMLElement>('.meo-deletion-tooltip');
-      const modified = document.querySelector<HTMLElement>('.meo-modified-tooltip');
-      return {
-        deletionVisible: Boolean(deletion && !deletion.hidden),
-        deletionText: deletion?.textContent ?? '',
-        modifiedVisible: Boolean(modified && !modified.hidden),
-        modifiedText: modified?.textContent ?? ''
-      };
-    });
-    let adjacentDeletedTooltip = null;
-    if (adjacentTableDiffState.deletedPoint) {
-      await page.mouse.move(adjacentTableDiffState.deletedPoint.x, adjacentTableDiffState.deletedPoint.y);
-      await waitForPageFrames(2);
-      adjacentDeletedTooltip = await readVisibleDiffTooltip();
-    }
-    let adjacentModifiedTooltip = null;
-    if (adjacentTableDiffState.modifiedPoint) {
-      await page.mouse.move(adjacentTableDiffState.modifiedPoint.x, adjacentTableDiffState.modifiedPoint.y);
-      await waitForPageFrames(2);
-      adjacentModifiedTooltip = await readVisibleDiffTooltip();
-    }
     await page.evaluate(() => (window as any).__adjacentTableDiffEditor.destroy());
     const adjacentDeletedMarkers = adjacentTableDiffState.markers.filter((marker) => marker.classes.includes('is-deleted'));
     const adjacentModifiedMarkers = adjacentTableDiffState.markers.filter((marker) => marker.classes.includes('is-modified'));
@@ -1945,13 +1881,9 @@ async function main() {
       adjacentDeletedMarkers[0]?.baselineTo !== '5' ||
       adjacentModifiedMarkers.length !== 1 ||
       adjacentModifiedMarkers[0]?.modifiedRanges !== '[[6,6]]' ||
-      !adjacentDeletedTooltip?.deletionVisible ||
-      adjacentDeletedTooltip.deletionText.includes('old value') ||
-      !adjacentModifiedTooltip?.modifiedVisible ||
-      adjacentModifiedTooltip.modifiedText.includes('removed one') ||
-      adjacentModifiedTooltip.modifiedText.includes('removed two')
+      !adjacentTableDiffState.passiveMarkers
     ) {
-      failures.push(`adjacent table deletion was swallowed by a modified marker: ${JSON.stringify({ state: adjacentTableDiffState, deletedTooltip: adjacentDeletedTooltip, modifiedTooltip: adjacentModifiedTooltip })}`);
+      failures.push(`adjacent table deletion was swallowed by a modified marker: ${JSON.stringify(adjacentTableDiffState)}`);
     }
 
     const emptyTableRowDeletionState = await page.evaluate(async () => {

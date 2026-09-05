@@ -358,17 +358,12 @@ async function main(): Promise<void> {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
       const marker = host.querySelector<HTMLElement>('.meo-md-list-marker-bullet')!;
-      const content = host.querySelector<HTMLElement>('.cm-content')!;
       const diffMarker = host.querySelector<HTMLElement>('.meo-git-gutter-marker:not(.meo-git-gutter-spacer)')!;
-      const diffHitStyle = getComputedStyle(diffMarker, '::before');
-      const diffHitRight = diffMarker.getBoundingClientRect().left +
-        Number.parseFloat(diffHitStyle.left) + Number.parseFloat(diffHitStyle.width);
       const output = {
-        clearance: marker.getBoundingClientRect().left - diffHitRight,
         gutterRight: gutters.getBoundingClientRect().right,
-        diffHitRight,
+        gutterPointerEvents: getComputedStyle(gutters).pointerEvents,
+        diffMarkerPointerEvents: getComputedStyle(diffMarker).pointerEvents,
         markerLeft: marker.getBoundingClientRect().left,
-        contentLeft: content.getBoundingClientRect().left,
         diffMarkers: host.querySelectorAll('.meo-git-gutter-marker:not(.meo-git-gutter-spacer)').length
       };
       editor.destroy();
@@ -514,8 +509,9 @@ async function main(): Promise<void> {
     });
     assert.ok(maxWidthGutterClearance.diffMarkers > 0, 'wide Live fixture did not render the diff gutter marker');
     assert.ok(
-      maxWidthGutterClearance.clearance >= 0.5,
-      `wide Live content was covered by the diff gutter hit target: ${JSON.stringify(maxWidthGutterClearance)}`
+      maxWidthGutterClearance.gutterPointerEvents === 'none' &&
+      maxWidthGutterClearance.diffMarkerPointerEvents === 'none',
+      `wide Live diff markers retained a pointer hit target: ${JSON.stringify(maxWidthGutterClearance)}`
     );
 
     console.log('list layout and interaction Chromium checks passed');

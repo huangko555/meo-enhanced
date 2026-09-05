@@ -139,10 +139,6 @@ export type UiStrings = Readonly<{
   openWithSystemApp: string;
   fullscreenImage: string;
   colorLabel: (value: string) => string;
-  beforeChange: string;
-  deletedLines: (count: number) => string;
-  moreDeletedContentHidden: string;
-  moreOriginalContentHidden: string;
   showHtmlPreview: string;
   unsupportedHtmlSource: string;
   acceptCurrent: string;
@@ -289,10 +285,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
     mermaidError: (message: string) => `Mermaid error: ${message}`,
     openWithSystemApp: 'Open with system app', fullscreenImage: 'Fullscreen image',
-    colorLabel: (value: string) => `Color ${value}`, beforeChange: 'Before change',
-    deletedLines: (count: number) => `Deleted ${count} ${count === 1 ? 'line' : 'lines'}`,
-    moreDeletedContentHidden: 'More deleted content is not shown.',
-    moreOriginalContentHidden: 'More original content is not shown.',
+    colorLabel: (value: string) => `Color ${value}`,
     showHtmlPreview: 'Show HTML preview',
     unsupportedHtmlSource: 'This HTML stays as source because it contains unsupported or invalid markup.',
     acceptCurrent: 'Accept Current', acceptIncoming: 'Accept Incoming', acceptBoth: 'Accept Both',
@@ -425,10 +418,7 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     fullscreen: '全屏', exitFullscreen: '退出全屏',
     mermaidError: (message: string) => `Mermaid 错误：${message}`,
     openWithSystemApp: '使用系统应用打开', fullscreenImage: '全屏查看图片',
-    colorLabel: (value: string) => `颜色 ${value}`, beforeChange: '更改前',
-    deletedLines: (count: number) => `已删除 ${count} 行`,
-    moreDeletedContentHidden: '还有更多已删除内容未显示。',
-    moreOriginalContentHidden: '还有更多原始内容未显示。',
+    colorLabel: (value: string) => `颜色 ${value}`,
     showHtmlPreview: '显示 HTML 预览',
     unsupportedHtmlSource: '此 HTML 包含不支持或无效的标记，因此保留为源码。',
     acceptCurrent: '接受当前更改', acceptIncoming: '接受传入更改', acceptBoth: '接受两者',

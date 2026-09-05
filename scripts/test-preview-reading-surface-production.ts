@@ -1046,6 +1046,12 @@ async function main(): Promise<void> {
         .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
       return (window as typeof window & { __meoSyntheticFontQueryCount?: number }).__meoSyntheticFontQueryCount;
     }), 0, 'Init and synthetic activation must not enumerate local fonts');
+    const previewFrameCenter = await page.$eval('.preview-frame', (frame) => {
+      const rect = frame.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(previewFrameCenter.x, previewFrameCenter.y);
+    await page.mouse.wheel({ deltaY: 1 });
     const fontInteractionState = await page.evaluateHandle(() => {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const doc = frame.contentDocument!;
@@ -1976,7 +1982,7 @@ async function main(): Promise<void> {
         fullscreenButtons: 0,
         liveControls: 0,
         fullscreenSurfaces: 0,
-        panSurfaces: 2
+        panSurfaces: 0
       });
       assert.equal(result.mermaidSuccess.selectionText, 'Wide start label Wide end label Wide foreign label');
       assert.equal(result.mermaidSuccess.copied, true);
@@ -1994,7 +2000,7 @@ async function main(): Promise<void> {
         && diagram.graphicsWithinViewport && diagram.graphicsWithinPage
         && diagram.preserveAspectRatio !== 0
         && diagram.draggable === null
-        && diagram.cursor === 'grab'
+        && diagram.cursor === 'auto'
       )), JSON.stringify({ width, zoom, deviceScaleFactor, mermaidSuccess: result.mermaidSuccess }));
       assert.deepEqual(result.table.semanticCounts, { table: 2, thead: 2, tbody: 2, tr: 5, th: 10, td: 18 });
       assert.equal(result.table.resizeHandleCount, 0);

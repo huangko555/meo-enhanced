@@ -1878,6 +1878,8 @@ button:focus-visible > .menu-switch {
   min-width: 23px;
   max-width: 89px;
   background: var(--meo-background);
+  /* Line numbers and change markers are visual context, not pointer targets. */
+  pointer-events: none;
   border-right: 0;
   overflow: visible;
 }
@@ -2018,9 +2020,12 @@ button:focus-visible > .menu-switch {
 }
 
 .cm-editor .cm-content {
+  /* Keep text fixed while extending the native click/drag surface 10px left. */
+  margin-left: -10px;
   padding-top: 0;
   padding-right: var(--meo-editor-inline-end-padding);
   padding-bottom: 50px;
+  padding-left: 10px !important;
   caret-color: var(--meo-caret-color);
   cursor: text;
   width: 100%;
@@ -2052,8 +2057,8 @@ button:focus-visible > .menu-switch {
   border-radius: 2px;
 }
 
-.cm-editor.meo-live-pointer-selecting,
-.cm-editor.meo-live-pointer-selecting * {
+.cm-editor.meo-pointer-selecting,
+.cm-editor.meo-pointer-selecting * {
   cursor: text !important;
 }
 
@@ -4252,7 +4257,7 @@ body.outline-resizing .preview-frame {
   width: 3px;
   min-width: 3px;
   overflow: visible;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 /* Without numbers, the sign column and minimum gutter width still reserve
@@ -4267,7 +4272,7 @@ body.outline-resizing .preview-frame {
   min-width: 3px;
   padding: 0;
   overflow: visible;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .cm-editor .meo-git-gutter-spacer {
@@ -4282,18 +4287,7 @@ body.outline-resizing .preview-frame {
   min-height: 1.2em;
   height: 100%;
   overflow: visible;
-  cursor: pointer;
-}
-
-.cm-editor .meo-git-gutter-marker::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 0;
-  /* Stop before the content edge so list markers remain clickable. */
-  width: 10px;
-  height: 100%;
-  background: transparent;
+  pointer-events: none;
 }
 
 .cm-editor .meo-git-gutter-stripe {
@@ -4330,21 +4324,6 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-git-gutter-marker.is-deleted-at-end::after {
   top: auto;
   bottom: -3px;
-}
-
-.cm-editor .meo-git-gutter-marker.is-deleted.is-hit-hover::after {
-  left: -8px;
-  border-left-width: 7px;
-}
-
-.cm-editor .meo-git-gutter-marker:hover .meo-git-gutter-stripe {
-  left: -7px;
-  width: 5px;
-}
-
-.cm-editor .meo-git-gutter-marker.is-hit-hover .meo-git-gutter-stripe {
-  left: -7px;
-  width: 5px;
 }
 
 .cm-editor .meo-diff-added-line {
@@ -4548,10 +4527,6 @@ body.outline-resizing .preview-frame {
   user-select: text;
 }
 
-.cm-editor.meo-git-hover-band .cm-gutters {
-  cursor: pointer;
-}
-
 .cm-editor .meo-git-overview-ruler {
   position: absolute;
   top: 0;
@@ -4622,80 +4597,6 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-search-overview-ruler-marker.is-active {
   background: var(--meo-semantic-searchMatchActiveBackground);
-}
-
-.meo-git-hover-overlay {
-  position: fixed;
-  z-index: 29;
-  pointer-events: none;
-  background: transparent;
-}
-
-.meo-git-hover-overlay[hidden] {
-  display: none;
-}
-
-.meo-git-hover-overlay.is-empty {
-  background: var(--meo-color-base03);
-}
-
-.meo-git-hover-overlay.is-added {
-  background: var(--git-added);
-}
-
-.meo-git-hover-overlay.is-modified {
-  background: var(--git-changed);
-}
-
-.meo-deletion-tooltip,
-.meo-modified-tooltip {
-  position: fixed;
-  z-index: 31;
-  min-width: 220px;
-  max-width: min(520px, calc(100vw - 16px));
-  max-height: min(420px, calc(100vh - 16px));
-  padding: 8px 10px;
-  overflow: hidden;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 6px;
-  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #1f1f1f));
-  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-}
-
-.meo-deletion-tooltip-title,
-.meo-modified-tooltip-title {
-  margin-bottom: 6px;
-  color: var(--git-deleted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.meo-modified-tooltip-title {
-  color: var(--git-changed);
-}
-
-.meo-deletion-tooltip-content,
-.meo-modified-tooltip-content {
-  max-height: 320px;
-  margin: 0;
-  overflow: hidden;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font: 11px/1.45 var(--vscode-editor-font-family, monospace);
-}
-
-.meo-deletion-tooltip-more,
-.meo-modified-tooltip-more {
-  margin-top: 6px;
-  color: var(--vscode-descriptionForeground, var(--vscode-editorLineNumber-foreground));
-  font-size: 11px;
-}
-
-.meo-deletion-tooltip-more:empty,
-.meo-modified-tooltip-more:empty {
-  display: none;
 }
 
 .cm-editor .meo-merge-line {
@@ -4856,7 +4757,7 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-md-html-table-diff-marker {
   position: absolute;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .cm-editor .meo-rendered-block-mode-shell {
