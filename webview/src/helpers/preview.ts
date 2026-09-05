@@ -451,8 +451,47 @@ export function createPreviewController({
         disposed ||
         activeFrameDocument !== frameDocument
       ) return;
-      if (resolvedSrc) image.src = resolvedSrc;
-      else image.removeAttribute('src');
+      if (!resolvedSrc) {
+        if (host.hidden) image.removeAttribute('src');
+        else withViewportTransaction(() => image.removeAttribute('src'));
+        return;
+      }
+      // Load outside the reading layout so intrinsic dimensions do not change
+      // before the shared viewport owner can capture the current reading anchor.
+      const prepared = image.cloneNode(false) as HTMLImageElement;
+      prepared.removeAttribute('src');
+      prepared.loading = 'eager';
+      await new Promise<void>((resolve) => {
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          prepared.onload = null;
+          prepared.onerror = null;
+          abortController.signal.removeEventListener('abort', abort);
+          resolve();
+        };
+        const abort = () => {
+          finish();
+          prepared.removeAttribute('src');
+        };
+        prepared.onload = () => { void prepared.decode().catch(() => undefined).then(finish); };
+        prepared.onerror = finish;
+        abortController.signal.addEventListener('abort', abort, { once: true });
+        prepared.src = resolvedSrc;
+      });
+      if (abortController.signal.aborted || disposed || activeFrameDocument !== frameDocument) return;
+      // Keep attributes that may have changed while loading, including authored
+      // dimensions. Link handlers live on ancestors and survive this replacement.
+      for (const attribute of Array.from(prepared.attributes)) {
+        if (attribute.name !== 'src') prepared.removeAttribute(attribute.name);
+      }
+      for (const attribute of Array.from(image.attributes)) {
+        if (attribute.name !== 'src') prepared.setAttribute(attribute.name, attribute.value);
+      }
+      const commit = () => image.replaceWith(prepared);
+      if (host.hidden) commit();
+      else withViewportTransaction(commit);
     };
     const FrameIntersectionObserver = frame.contentWindow
       ? (frame.contentWindow as unknown as Pick<typeof globalThis, 'IntersectionObserver'>).IntersectionObserver
@@ -1004,7 +1043,8 @@ export function createPreviewController({
     const viewportAnchor = 0;
     let candidate = elements[0];
     for (const element of elements) {
-      if (element.getBoundingClientRect().top > viewportAnchor) {
+      // Scroll positions can round a block just below zero at fractional scale.
+      if (element.getBoundingClientRect().top > viewportAnchor + 0.5) {
         break;
       }
       candidate = element;
@@ -1018,12 +1058,12 @@ export function createPreviewController({
     const topLine = Math.round(range.start + (range.end - range.start) * ratio);
     const lineSpan = Math.max(1, range.end - range.start + 1);
     const lineTop = rect.top + rect.height * ((topLine - range.start) / lineSpan);
-    const semanticLineHeight = rect.height / lineSpan;
     return {
       topLine,
-      topLineOffset: rect.bottom > viewportAnchor
-        ? Math.max(0, Math.min(semanticLineHeight, viewportAnchor - lineTop))
-        : 0
+      // The viewport may start in the margin after this source block. Keep
+      // that distance too; resetting it to zero moves the preceding block to
+      // the top whenever a deferred resource changes layout above the reader.
+      topLineOffset: Math.max(0, viewportAnchor - lineTop)
     };
   };
   const restoreTopVisiblePosition = (
