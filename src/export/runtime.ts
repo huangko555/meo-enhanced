@@ -58,7 +58,7 @@ function renderPreviewDocument(options: {
     target: 'html',
     uiLanguage: options.uiLanguage,
     renderHexColorSwatches: true,
-    deferLocalImages: true
+    deferImages: true
   });
   return {
     html: rendered.html,

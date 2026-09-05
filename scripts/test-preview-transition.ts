@@ -11,6 +11,19 @@ const browser = await launchTestBrowser();
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 800, height: 600 });
+  const pendingRemoteImages: Array<() => Promise<void>> = [];
+  let holdRemoteImages = true;
+  await page.setRequestInterception(true);
+  page.on('request', request => {
+    if (!request.url().startsWith('https://preview-image.test/')) {
+      void request.continue();
+      return;
+    }
+    const respond = () => request.respond({ status: 200, contentType: 'image/gif',
+      body: Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64') });
+    if (holdRemoteImages) pendingRemoteImages.push(respond);
+    else void respond();
+  });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   let failRender = false;
@@ -26,7 +39,8 @@ try {
         result: {
           ok: true,
           value: {
-            resolvedUrl: 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+            resolvedUrl: message.url.startsWith('https://preview-image.test/')
+              ? message.url : 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
           }
         }
       };
@@ -48,6 +62,8 @@ try {
   const text = [
     '![Markdown local](images/markdown-local.png)',
     '<img src="images/html-local.png" alt="HTML local">',
+    '![Markdown remote](https://preview-image.test/markdown.gif)',
+    '<img src="https://preview-image.test/html.gif" alt="HTML remote">',
     ...Array.from({ length: 40 }, (_, i) => `Paragraph ${i}: visible text throughout the preview transition.`)
   ].join('\n\n');
   await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
@@ -86,12 +102,16 @@ try {
     await page.waitForFunction(() =>
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.body.textContent?.includes('Paragraph 39')
       && !document.querySelector('.editor-host')?.hasAttribute('data-preview-cover')
-    );
+    , { timeout: 5000 });
+    // Text must become readable while the network image requests are unresolved.
+    // Release them only after the previous-surface cover is gone.
+    holdRemoteImages = false;
+    await Promise.all(pendingRemoteImages.splice(0).map(respond => respond()));
     await page.waitForFunction(() => {
       const images = Array.from(
         document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.images ?? []
       );
-      return images.length === 2
+      return images.length === 4
         && images.every(image => image.complete && image.naturalWidth === 1)
         && images.every(image => !image.hasAttribute('data-meo-deferred-image-src'));
     });

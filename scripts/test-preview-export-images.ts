@@ -46,8 +46,16 @@ try {
     throw new Error(`Large local images inflated the first Preview payload to ${preview.html.length} characters`);
   }
   const deferredImages = preview.html.match(/data-meo-deferred-image-src=/g) ?? [];
-  if (deferredImages.length !== 3 || !preview.html.includes('alt="raw local"')) {
-    throw new Error(`Preview did not defer every Markdown and raw HTML local image (${deferredImages.length})`);
+  if (deferredImages.length !== 4 || !preview.html.includes('alt="raw local"')) {
+    throw new Error(`Preview did not defer local and network images (${deferredImages.length})`);
+  }
+  if (!preview.html.includes(`data-meo-deferred-image-src="${remoteImageUrl}"`)) {
+    throw new Error('A network image can still block Preview frame readiness');
+  }
+  for (const html of [exported.htmlDocument, pdf.htmlDocument]) {
+    if (html.includes('data-meo-deferred-image-src=') || !html.includes(`src="${remoteImageUrl}"`)) {
+      throw new Error('Export images must load without the Preview resource lifecycle');
+    }
   }
   for (const [surface, html] of [['Preview', preview.html], ['Export', exported.htmlDocument]] as const) {
     if (!html.includes(remoteImageUrl)) throw new Error(`${surface} changed or dropped a valid remote AVIF image URL`);

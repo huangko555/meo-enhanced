@@ -47,7 +47,8 @@ export type RenderMarkdownOptions = {
   target: RenderMarkdownTarget;
   renderHexColorSwatches?: boolean;
   uiLanguage?: UiLanguage;
-  deferLocalImages?: boolean;
+  /** Preview resolves local and network images after the reading frame is ready. */
+  deferImages?: boolean;
 };
 
 export type RenderMarkdownResult = {
@@ -69,7 +70,7 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
     embeddedImageDataUrlCache
   });
   const deferImageSrc = (rawSrc: string): { src: string; deferredSrc?: string } => (
-    options.deferLocalImages && isLocalImageSrc(rawSrc)
+    options.deferImages && (isLocalImageSrc(rawSrc) || /^(?:https?:)?\/\//i.test(rawSrc.trim()))
       ? { src: DEFERRED_IMAGE_PLACEHOLDER, deferredSrc: rawSrc }
       : { src: rewriteImageSrc(rawSrc) }
   );
