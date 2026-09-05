@@ -4,6 +4,7 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.3.16
+- Stopped delayed Preview appearance renders from restoring an old reading position after user interaction.
 - Prevented stale viewport measurements from briefly shifting the document when first opening a Mermaid split view.
 - Kept existing code syntax colors visible while updated highlighting is pending during typing.
 - Reduced startup work by limiting code highlighting to the reading viewport, batching highlight refreshes, and yielding between diagram preloads.

@@ -356,6 +356,7 @@ export function createPreviewController({
   let mermaidPresentationGeneration = 0;
   let activeFrameDocument: Document | null = null;
   let pendingPresentationScroll: { document: Document; scrollTop: number } | null = null;
+  let viewportInteractionGeneration = 0;
   let hasPendingRequest = false;
   let pendingViewportRestore: PreviewViewportRestore | null = null;
   let acceptingViewportProjection: PreviewViewportProjectionSlot | null = null;
@@ -631,7 +632,10 @@ export function createPreviewController({
         restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
       }
       const notifyViewportInteraction = (event: Event) => {
-        if (event.isTrusted) onViewportInteraction?.();
+        if (!event.isTrusted) return;
+        viewportInteractionGeneration += 1;
+        pendingPresentationScroll = null;
+        onViewportInteraction?.();
       };
       for (const type of ['wheel', 'pointerdown', 'keydown', 'beforeinput', 'selectionchange', 'focusin']) {
         frameDocument.addEventListener(type, notifyViewportInteraction, true);
@@ -690,6 +694,7 @@ export function createPreviewController({
     const preservedScrollTop = pendingPresentationScroll?.document === frameDocument
       ? pendingPresentationScroll.scrollTop
       : scrollElement?.scrollTop ?? 0;
+    const interactionGeneration = viewportInteractionGeneration;
     const presentationGeneration = mermaidPresentationGeneration + 1;
     mermaidPresentationGeneration = presentationGeneration;
     const isCurrent = () => (
@@ -699,7 +704,13 @@ export function createPreviewController({
       frame.contentDocument === frameDocument
     );
     const keepPosition = () => {
-      if (isCurrent() && scrollElement) scrollElement.scrollTop = preservedScrollTop;
+      // Let the appearance render finish, but retire its old reading offset as
+      // soon as the user interacts with the frame during asynchronous work.
+      if (isCurrent() && interactionGeneration === viewportInteractionGeneration && scrollElement) {
+        if (Math.abs(scrollElement.scrollTop - preservedScrollTop) > 0.1) {
+          scrollElement.scrollTop = preservedScrollTop;
+        }
+      }
     };
     // This is a presentation-only update of the same frame and document. A
     // cross-surface semantic projection would race this exact reading offset.
