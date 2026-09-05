@@ -17,6 +17,7 @@ import {
   isShikiThemeReady,
   subscribeShikiRefresh,
   getShikiThemeMeta,
+  getShikiThemeVersion,
   type ShikiToken
 } from './shikiHighlighter';
 import {
@@ -71,7 +72,16 @@ function addPendingTokenDecorations(
       const line = transaction.newDoc.line(lineNumber);
       const from = Math.max(fromB, line.from);
       const to = Math.min(toB, line.to);
-      if (from < to) added.push(pendingTokenDecoration.range(from, to));
+      if (from < to) {
+        let inherited: Decoration | null = null;
+        let covered = false;
+        decorations.between(Math.max(0, from - 1), to, (start, end, decoration) => {
+          if (!decoration.spec.shikiLanguage || decoration.spec.shikiThemeVersion !== getShikiThemeVersion()) return;
+          if (start <= from && end >= to) covered = true;
+          if (start <= from && end >= from) inherited = decoration;
+        });
+        if (!covered) added.push((inherited ?? pendingTokenDecoration).range(from, to));
+      }
     }
   });
   return added.length > 0 ? decorations.update({ add: added, sort: true }) : decorations;
@@ -98,11 +108,20 @@ function addTokenDecorations(
   lang: string,
   code: string,
   contentFrom: number,
-  contentTo: number
+  contentTo: number,
+  previous: DecorationSet = Decoration.none
 ): void {
   const tokens = getShikiTokens(lang, code);
   if (!tokens) {
     requestShikiTokens(lang, code);
+    // Keep the mapped presentation until this revision's tokens are ready.
+    // Only matching language/theme identities may enter the rebuilt result.
+    previous.between(contentFrom, contentTo, (from, to, decoration) => {
+      if (decoration.spec.shikiLanguage !== lang || decoration.spec.shikiThemeVersion !== getShikiThemeVersion()) return;
+      const start = Math.max(contentFrom, from);
+      const end = Math.min(contentTo, to);
+      if (start < end) builder.add(start, end, decoration);
+    });
     return;
   }
 
@@ -114,10 +133,11 @@ function addTokenDecorations(
     if (from >= to || !style) {
       return;
     }
-    let deco = markCache.get(style);
+    const key = `${lang}:${style}`;
+    let deco = markCache.get(key);
     if (!deco) {
-      deco = Decoration.mark({ attributes: { style } });
-      markCache.set(style, deco);
+      deco = Decoration.mark({ attributes: { style }, shikiLanguage: lang, shikiThemeVersion: getShikiThemeVersion() });
+      markCache.set(key, deco);
     }
     builder.add(from, to, deco);
   };
@@ -179,7 +199,8 @@ function addBlockDecorations(
   view: EditorView,
   node: { name: string; from: number; to: number },
   builder: RangeSetBuilder<Decoration>,
-  markCache: Map<string, Decoration>
+  markCache: Map<string, Decoration>,
+  previous: DecorationSet
 ): void {
   const { state } = view;
   const info = node.name === 'FencedCode' ? getFencedCodeInfo(state, node) : null;
@@ -211,10 +232,10 @@ function addBlockDecorations(
   }
 
   const code = state.doc.sliceString(contentFrom, contentTo);
-  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo);
+  addTokenDecorations(builder, markCache, lang, code, contentFrom, contentTo, previous);
 }
 
-function buildDecorations(view: EditorView): DecorationSet {
+function buildDecorations(view: EditorView, previous: DecorationSet = Decoration.none): DecorationSet {
   if (!isShikiThemeReady()) {
     return Decoration.none;
   }
@@ -226,7 +247,7 @@ function buildDecorations(view: EditorView): DecorationSet {
       to: view.viewport.to,
       enter(node) {
         if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
-          addBlockDecorations(view, node, builder, markCache);
+          addBlockDecorations(view, node, builder, markCache, previous);
           return false;
         }
         return undefined;
@@ -253,17 +274,14 @@ const shikiPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate): void {
-      if (update.transactions.some(shouldDeferLiveInputDerivedWork)) {
-        if (update.docChanged) {
-          for (const transaction of update.transactions) {
-            if (transaction.docChanged) {
-              this.decorations = addPendingTokenDecorations(
-                mapLiveInputDerivedDecorations(this.decorations, transaction),
-                transaction
-              );
-            }
-          }
+      for (const transaction of update.transactions) {
+        if (transaction.docChanged) {
+          this.decorations = addPendingTokenDecorations(
+            mapLiveInputDerivedDecorations(this.decorations, transaction), transaction
+          );
         }
+      }
+      if (update.transactions.some(shouldDeferLiveInputDerivedWork)) {
         return;
       }
       const refreshed = update.transactions.some((transaction) =>
@@ -272,7 +290,7 @@ const shikiPlugin = ViewPlugin.fromClass(
           || syntaxTreeChanged(transaction)
       );
       if (update.docChanged || update.viewportChanged || refreshed) {
-        this.decorations = buildDecorations(update.view);
+        this.decorations = buildDecorations(update.view, this.decorations);
       }
     }
 
@@ -308,6 +326,7 @@ export function shikiDocumentHighlight(language: string): Extension {
       }
 
       update(update: ViewUpdate): void {
+        if (update.docChanged) this.decorations = this.decorations.map(update.changes);
         const refreshed = update.transactions.some((transaction) =>
           transaction.effects.some((effect) => effect.is(shikiRefreshEffect))
         );
@@ -332,7 +351,8 @@ export function shikiDocumentHighlight(language: string): Extension {
           lang,
           view.state.doc.toString(),
           0,
-          view.state.doc.length
+          view.state.doc.length,
+          this.decorations
         );
         return builder.finish();
       }

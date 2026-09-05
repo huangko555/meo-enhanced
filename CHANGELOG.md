@@ -4,6 +4,7 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.3.16
+- Kept existing code syntax colors visible while updated highlighting is pending during typing.
 - Reduced startup work by limiting code highlighting to the reading viewport, batching highlight refreshes, and yielding between diagram preloads.
 - Reduced Preview activation layout work and prevented blank frames during mode switches, including the first render.
 - Fixed auto-save snapshot races when editing continues during a save, and preserved pending table, Mermaid, formula, and IME input.

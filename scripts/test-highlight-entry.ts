@@ -4,6 +4,13 @@ import { createCodePaletteWebviewAdapter } from '../webview/src/adapters/codePal
 import { applyBuiltInVisualBaseline } from '../webview/src/helpers/theme';
 import { applyPreviewCodeHighlight } from '../webview/src/helpers/previewCodeHighlight';
 import { activateShikiCodeHighlighting, setShikiTheme } from '../webview/src/helpers/shikiHighlighter';
+import { EditorView } from '@codemirror/view';
+import { shikiDocumentHighlight } from '../webview/src/helpers/shikiDecorations';
+
+function createStandaloneHighlightEditor(parent: HTMLElement, text: string) {
+  const view = new EditorView({ parent, doc: text, extensions: [shikiDocumentHighlight('typescript')] });
+  return { view, getText: () => view.state.doc.toString(), focus: () => view.focus(), destroy: () => view.destroy() };
+}
 
 (globalThis as typeof globalThis & {
   HighlightHarness?: {
@@ -14,6 +21,7 @@ import { activateShikiCodeHighlighting, setShikiTheme } from '../webview/src/hel
     applyPreviewCodeHighlight: typeof applyPreviewCodeHighlight;
     activateShikiCodeHighlighting: typeof activateShikiCodeHighlighting;
     setShikiTheme: typeof setShikiTheme;
+    createStandaloneHighlightEditor: typeof createStandaloneHighlightEditor;
   };
 }).HighlightHarness = {
   createEditor,
@@ -22,5 +30,6 @@ import { activateShikiCodeHighlighting, setShikiTheme } from '../webview/src/hel
   applyBuiltInVisualBaseline,
   applyPreviewCodeHighlight,
   activateShikiCodeHighlighting,
-  setShikiTheme
+  setShikiTheme,
+  createStandaloneHighlightEditor
 };
