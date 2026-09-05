@@ -276,6 +276,7 @@ export function createTestWorkflowPlan(request: TestWorkflowRequest): TestWorkfl
         longRunning: true,
         stages: [
           serialStage('Recent interaction regression preflight', [
+            script('scripts/test-uat-document-operations.ts'),
             script('scripts/test-document-auto-save-concurrency.ts'),
             script('scripts/test-document-save-flush-webview-adapter.ts'),
             script('scripts/test-vscode-document-save-lifecycle-adapter.ts'),

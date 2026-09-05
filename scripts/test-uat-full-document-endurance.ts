@@ -2,16 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
+import { discoverDocumentOperations, type DocumentOperation } from './uat-document-operations';
 
-type OperationKind = 'outer' | 'html' | 'table' | 'mermaid' | 'math';
-
-interface Operation {
-  id: string;
-  kind: OperationKind;
-  needle: string;
-  marker: string;
-  tableCell?: string;
-}
+type OperationKind = DocumentOperation['kind'];
+type Operation = DocumentOperation;
 
 interface OperationRecord extends Operation {
   lineNumber: number;
@@ -480,19 +474,31 @@ async function prepareTableInput(page: import('puppeteer-core').Page, operation:
       .find((candidate) => candidate.value === value);
     if (!input) throw new Error(`Missing table input at line ${sourceLine}: ${value}`);
     input.dataset.uatTableTarget = target;
-    input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true, pointerId: 777 }));
-    input.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true, pointerId: 777 }));
-    const scroller = editor.view.scrollDOM as HTMLElement;
-    const viewport = scroller.getBoundingClientRect();
-    const rect = input.getBoundingClientRect();
-    scroller.scrollTop += rect.top + rect.height / 2 - (viewport.top + viewport.height / 2);
     return { datasetLine: Number(row?.dataset.sourceLineNumber), sourceLine };
   }, { sourceLine: lineNumber, value: before, target: targetAttribute });
+  // Use real scrolling so pending navigation yields to the test's new intent.
+  // A raw scrollTop write can be undone by a still-settling rendered block.
+  await page.mouse.move(640, 380);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const delta = await page.evaluate((target) => {
+      const input = document.querySelector(`[data-uat-table-target="${target}"]`);
+      if (!input) throw new Error(`Missing prepared table input: ${target}`);
+      const viewport = (window as any).__fullUatEditor.view.scrollDOM.getBoundingClientRect();
+      const rect = input.getBoundingClientRect();
+      return rect.top + rect.height / 2 - (viewport.top + viewport.height / 2);
+    }, targetAttribute);
+    if (Math.abs(delta) < 2) break;
+    await page.mouse.wheel({ deltaY: delta });
+    await waitForFrames(page, 4);
+    await waitForScrollStability(page);
+  }
   await waitForScrollStability(page);
   const clickPoint = await page.evaluate((target) => {
     const input = document.querySelector<HTMLTextAreaElement>(`[data-uat-table-target="${target}"]`);
     if (!input) throw new Error(`Missing prepared table input: ${target}`);
     const rect = input.getBoundingClientRect();
+    const viewport = (window as any).__fullUatEditor.view.scrollDOM.getBoundingClientRect();
+    if (rect.top < viewport.top || rect.bottom > viewport.bottom) throw new Error(`Table target remained offscreen: ${target}`);
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   }, targetAttribute);
   await page.mouse.click(clickPoint.x, clickPoint.y);
@@ -585,14 +591,22 @@ async function editRendered(
     if (!content) throw new Error(`Missing embedded source content: ${label}`);
     const range = document.createRange();
     range.selectNodeContents(content);
-    range.collapse(false);
+    range.collapse(true);
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
     content.focus({ preventScroll: true });
   }, regionLabel);
-  await page.keyboard.press('Enter');
-  await page.keyboard.type(`${kind === 'mermaid' ? '%% ' : '% '}${operation.marker}`);
+  if (kind === 'math') {
+    // Formula source retains Markdown indentation; inserting an unindented
+    // comment line would change the surrounding nested list's structure.
+    await page.keyboard.press('End');
+    await page.keyboard.type(` % ${operation.marker}`);
+  } else {
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.type(`%% ${operation.marker}`);
+  }
   await page.waitForFunction((marker) => (window as any).__fullUatEditor.getText().includes(marker), {}, operation.marker);
   await waitForFrames(page, 10);
   const focus = await page.evaluate(({ label, controls }) => {
@@ -770,6 +784,19 @@ async function prepareHistoryViewport(
       stableValue(current.targetBottom, previous.targetBottom)
     ) ? stableFrames + 1 : 0;
     previous = current;
+  }
+  // Distant navigation can finish measuring outside the initially requested
+  // position. Establish the stated visible-history precondition before replay.
+  for (let attempt = 0; shouldBeVisible && !previous.visible && attempt < 3; attempt++) {
+    if (previous.targetTop === null) break;
+    await page.mouse.move(640, 380);
+    await page.mouse.wheel({ deltaY: previous.targetTop + 24 - (previous.viewportTop + previous.viewportBottom) / 2 });
+    await waitForFrames(page, 4);
+    await waitForScrollStability(page);
+    previous = await targetState(page, operation);
+  }
+  if (previous.visible !== shouldBeVisible) {
+    throw new Error(`History viewport preparation failed: ${JSON.stringify({ operation: operation.id, shouldBeVisible, state: previous })}`);
   }
   return previous;
 }
@@ -1041,7 +1068,14 @@ async function main(): Promise<void> {
     }, baselineText);
     await page.waitForFunction(() => Boolean((window as any).__fullUatEditor?.getText()));
 
-    const allOperations = [...topDownOperations, ...deterministicShuffle(shuffledWave)];
+    const curatedOperations = [...topDownOperations, ...deterministicShuffle(shuffledWave)];
+    const adaptive = curatedOperations.every(operation => baselineText.includes(operation.needle))
+      ? null
+      : discoverDocumentOperations(baselineText);
+    const allOperations = adaptive
+      ? [...adaptive.operations.filter((_, index) => index % 2 === 0), ...deterministicShuffle(adaptive.operations.filter((_, index) => index % 2 === 1))]
+      : curatedOperations;
+    console.log(`Endurance operation coverage: ${JSON.stringify(adaptive ? { mode: 'adaptive', ...adaptive.coverage, unavailable: adaptive.unavailable } : { mode: 'curated', operations: allOperations.length })}`);
     const phase = process.env.MEO_UAT_ENDURANCE_PHASE?.trim() || 'full';
     const historyTableVisibleIds = [
       'frontmatter',

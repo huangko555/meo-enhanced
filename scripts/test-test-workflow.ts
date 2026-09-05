@@ -111,8 +111,9 @@ assert.equal(endurance.longRunning, true);
 assert.equal(endurance.stages.length, 3);
 const enduranceCommands = flattenTestWorkflowCommands(endurance);
 assert.deepEqual(
-  enduranceCommands.slice(0, 13).map((command) => command.args[0]),
+  enduranceCommands.slice(0, 14).map((command) => command.args[0]),
   [
+    'scripts/test-uat-document-operations.ts',
     'scripts/test-document-auto-save-concurrency.ts',
     'scripts/test-document-save-flush-webview-adapter.ts',
     'scripts/test-vscode-document-save-lifecycle-adapter.ts',
@@ -129,10 +130,10 @@ assert.deepEqual(
   ]
 );
 assert.equal(
-  enduranceCommands[13]?.env?.MEO_UAT_STRICT_FINDING,
+  enduranceCommands[14]?.env?.MEO_UAT_STRICT_FINDING,
   '*'
 );
-assert.deepEqual(enduranceCommands[14]?.args, [
+assert.deepEqual(enduranceCommands[15]?.args, [
   'scripts/test-production-live-scroll-integrity.ts',
   '--document=fixtures/uat.md'
 ]);

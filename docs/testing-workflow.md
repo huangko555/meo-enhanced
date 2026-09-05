@@ -48,6 +48,15 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+The full-document endurance runner keeps the curated operation set for its
+original acceptance fixture. For other Markdown documents it discovers unique
+edit targets by structure, samples up to eight per category across the document,
+and mixes forward and shuffled traversal. Its report lists available/selected
+targets and locations that could not be addressed safely. This is sampled editing
+coverage; the subsequent production scroll-integrity pass traverses the document.
+Duplicate text and unsupported shells are reported rather than counted as tested.
+Custom fixture-specific phases still require their matching curated document.
+
 ## Performance investigation
 
 Start with a fixed revision and document, then measure cold startup separately
