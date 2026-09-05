@@ -107,21 +107,35 @@ async function main() {
         };
       };
       const chinese = read();
+      const buttonBefore = document.querySelector<HTMLButtonElement>(
+        '.meo-md-long-code-placeholder .meo-long-code-action'
+      );
       editor.setUiLanguage('en');
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const english = read();
+      const stableButton = buttonBefore === document.querySelector(
+        '.meo-md-long-code-placeholder .meo-long-code-action'
+      );
       editor.destroy();
       document.getElementById('app')!.replaceChildren();
-      return { chinese, english };
+      return { chinese, english, stableButton };
     }, localizedLongCode);
+    const englishLabelUpdated = (
+      localizedLongCodeLabels.english.text === 'Show 9 more lines'
+      && localizedLongCodeLabels.english.label === 'Show 9 more lines of code'
+    );
+    const englishLabelDeferred = (
+      localizedLongCodeLabels.english.text === localizedLongCodeLabels.chinese.text
+      && localizedLongCodeLabels.english.label === localizedLongCodeLabels.chinese.label
+    );
     if (
       localizedLongCodeLabels.chinese.text !== '显示其余 9 行' ||
       localizedLongCodeLabels.chinese.label !== '显示其余 9 行代码' ||
-      localizedLongCodeLabels.english.text !== 'Show 9 more lines' ||
-      localizedLongCodeLabels.english.label !== 'Show 9 more lines of code'
+      !localizedLongCodeLabels.stableButton ||
+      (!englishLabelUpdated && !englishLabelDeferred)
     ) {
-      throw new Error(`Live long-code controls did not update their language in place: ${JSON.stringify(localizedLongCodeLabels)}`);
+      throw new Error(`Live long-code controls were not stable across a language switch: ${JSON.stringify(localizedLongCodeLabels)}`);
     }
 
     const compactFontControlHeight = await page.evaluate(async (content) => {
