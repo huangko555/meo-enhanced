@@ -386,6 +386,9 @@ export async function initializeMermaidEditorRuntime(
 export async function renderMermaidRuntime(renderId: string, source: string): Promise<string> {
   await document.fonts?.ready;
   const runtime = await loadMermaidRuntime();
+  // Cached results bypass this path. Give pending input a turn before an
+  // uncached diagram adds synchronous layout work to editor initialization.
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
   return renderMermaidSvgInDocument(runtime, renderId, source, document);
 }
 

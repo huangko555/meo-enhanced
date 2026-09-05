@@ -34,12 +34,16 @@ async function main(): Promise<void> {
       let maxActive = 0;
       let themeInitializations = 0;
       let activeIdentity = '';
+      let yielded = false;
+      let firstRenderYielded = false;
+      setTimeout(() => { yielded = true; }, 0);
       (window as any).mermaid = {
         initialize(config: unknown) {
           themeInitializations += 1;
           activeIdentity = JSON.stringify(config);
         },
         async render(_id: string, source: string) {
+          if (calls.length === 0) firstRenderYielded = yielded;
           calls.push({ source, identity: activeIdentity });
           active += 1;
           maxActive = Math.max(maxActive, active);
@@ -191,6 +195,7 @@ async function main(): Promise<void> {
       editor.destroy();
       await settle(30);
       return {
+        firstRenderYielded,
         shared,
         rawIsolation,
         invalid,
@@ -207,6 +212,7 @@ async function main(): Promise<void> {
       };
     });
 
+    assert.equal(result.firstRenderYielded, true, 'Initial diagram computation must yield beyond editor initialization');
     assert.deepEqual(result.shared, {
       renderCalls: 1,
       calls: [{ source: 'graph TD\nA-->B', identity: result.shared.calls[0]?.identity }],

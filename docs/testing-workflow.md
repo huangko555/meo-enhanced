@@ -77,6 +77,37 @@ built baseline checkout. A single pair is indicative, not a stable improvement
 percentage; repeated performance/endurance campaigns still require long-run
 authorization. Do not run other tests alongside timing samples.
 
+For a short native input/save baseline on a disposable copy of a rich document:
+
+```powershell
+pwsh -File scripts/benchmark-vscode-startup.ps1 -Scenario interaction -Document <absolute-markdown-path> -CodePath <absolute-Code.exe-path>
+```
+
+This adds known edit targets to a copy inside the isolated workspace and measures
+one prose, table, and Mermaid input/save action, followed by one delayed auto-save.
+It checks the expected contents against both Host and disk and verifies the original
+file is unchanged. The report remains under `.local/probes/interaction-*`. Input
+latency ends after two animation frames following the native input event; this is
+a scheduling proxy, not a physical display measurement. Save latency includes
+the native save command and disk verification; auto-save includes the configured
+one-second delay. Hidden windows remain diagnostic even if DOM focus is true.
+`-Visible` requires foreground authorization, and `-Profile` is unavailable for
+this scenario. A single sample per action establishes a baseline, not percentiles.
+
+To isolate one diagram using the real runtime and production editor:
+
+```shell
+bun scripts/benchmark-mermaid-render.ts
+bun scripts/benchmark-mermaid-render.ts <markdown-path> <opening-fence-line>
+```
+
+The default fixture has 40 edges. The optional document is read-only; only the
+selected fenced Mermaid source is rendered. Reports record its hash, viewport,
+cold render duration, long tasks, and whether Split reuses the cached SVG.
+Initial editor work and individual diagram computation should be distinguished:
+yielding can separate tasks without reducing total render time. Neither probe is
+part of the quick gate or a substitute for authorized repeated/endurance checks.
+
 For a narrow ordinary-document input, scroll, resource, and Live/Source baseline:
 
 ```shell

@@ -1,0 +1,131 @@
+// Short native input/save baseline on a disposable copy, never the input file.
+const vscode = require('vscode');
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
+const puppeteer = require('puppeteer-core');
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+exports.run = async () => {
+  const originalPath = process.env.MEO_PERF_DOCUMENT;
+  const output = process.env.MEO_PERF_OUTPUT;
+  assert.ok(originalPath && path.isAbsolute(originalPath) && output && path.isAbsolute(output));
+  const workspace = path.join(output, 'workspace');
+  assert.equal(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath.toLowerCase(), workspace.toLowerCase());
+  const original = fs.readFileSync(originalPath);
+  const file = path.join(workspace, 'interaction-copy.md');
+  assert.notEqual(path.resolve(file).toLowerCase(), path.resolve(originalPath).toLowerCase());
+  let expected = [
+    '# Native interaction baseline', '', 'BENCH_PARAGRAPH', '',
+    '| Name | Value |', '| --- | --- |', '| probe | BENCH_CELL |', '',
+    '```mermaid', 'flowchart LR', '  A --> B', '```', '',
+    original.toString('utf8').replaceAll('\r\n', '\n')
+  ].join('\n');
+  fs.writeFileSync(file, expected);
+  const uri = vscode.Uri.file(file);
+  const report = { vscode: vscode.version, sha256: createHash('sha256').update(original).digest('hex'), bytes: original.length, visible: process.env.MEO_PERF_VISIBLE === '1', autoSaveDelayMs: 1000, runs: [] };
+  let browser;
+  const waitFor = async (predicate, label) => {
+    const deadline = performance.now() + 15000;
+    while (!await predicate()) {
+      if (performance.now() > deadline) throw Error(`Timed out: ${label}`);
+      await wait(20);
+    }
+  };
+  try {
+    await vscode.workspace.getConfiguration('files').update('autoSave', 'off', vscode.ConfigurationTarget.Workspace);
+    await vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor');
+    await vscode.commands.executeCommand('workbench.action.closeSidebar');
+    await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+    browser = await puppeteer.connect({ browserURL: process.env.MEO_PERF_BROWSER_URL, defaultViewport: null });
+    let frame;
+    await waitFor(async () => {
+      for (const page of await browser.pages()) for (const candidate of page.frames()) {
+        if (await candidate.$('.cm-content').catch(() => null)) { frame = candidate; return true; }
+      }
+      return false;
+    }, 'editor');
+    if (report.visible) await frame.page().bringToFront();
+    report.environment = await frame.evaluate(() => ({ width: innerWidth, height: innerHeight, scale: devicePixelRatio, font: getComputedStyle(document.querySelector('.cm-content')).font, userAgent: navigator.userAgent }));
+    const extension = vscode.extensions.getExtension('huangko555.meo-enhanced');
+    report.extensionVersion = extension?.packageJSON.version;
+    report.webviewEntrySha256 = createHash('sha256').update(fs.readFileSync(path.join(extension.extensionPath, 'webview/dist/index.js'))).digest('hex');
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const jump = async line => {
+      await frame.$eval('.line-jump-input', (input, line) => { input.value = String(line); }, line);
+      await frame.focus('.line-jump-input');
+      await frame.page().keyboard.press('Enter');
+      await wait(150);
+    };
+    await wait(1500);
+    for (const phase of ['prose', 'table', 'mermaid']) {
+      if (phase === 'prose') {
+        await jump(3);
+        await frame.evaluate(() => {
+          const line = [...document.querySelectorAll('.editor-host .cm-line')].find(e => e.textContent === 'BENCH_PARAGRAPH');
+          if (!line) throw Error('Missing probe paragraph');
+          const range = document.createRange(); range.selectNodeContents(line); range.collapse(false);
+          const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+          line.closest('.cm-content').focus({ preventScroll: true });
+        });
+        expected = expected.replace('BENCH_PARAGRAPH', 'BENCH_PARAGRAPHx');
+      } else if (phase === 'table') {
+        await jump(5);
+        const selector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody textarea[data-table-col="1"]';
+        await frame.waitForSelector(selector);
+        await frame.click(selector);
+        await frame.$eval(selector, input => input.select());
+        expected = expected.replace('BENCH_CELL', 'x');
+      } else {
+        await jump(8);
+        const button = '.meo-mermaid-mode-btn';
+        await frame.waitForSelector(button);
+        await frame.click(button);
+        await frame.waitForSelector('.meo-mermaid-editing-block .cm-content');
+        await frame.click('.meo-mermaid-editing-block .cm-content');
+        await frame.page().keyboard.down('Control');
+        await frame.page().keyboard.press('End');
+        await frame.page().keyboard.up('Control');
+        expected = expected.replace('  A --> B', '  A --> Bx');
+      }
+      await frame.evaluate(() => {
+        window.__inputPaint = null;
+        document.addEventListener('input', () => {
+          const start = performance.now();
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            window.__inputPaint = { inputToPaintMs: performance.now() - start, foreground: document.hasFocus() && document.visibilityState === 'visible' };
+          }));
+        }, { once: true, capture: true });
+      });
+      await frame.page().keyboard.type('x');
+      await frame.waitForFunction(() => window.__inputPaint !== null);
+      const input = await frame.evaluate(() => window.__inputPaint);
+      const saveStart = performance.now();
+      await vscode.commands.executeCommand('workbench.action.files.save');
+      await waitFor(() => !doc.isDirty && fs.readFileSync(file, 'utf8') === expected, 'manual save including embedded input');
+      assert.equal(doc.getText(), expected);
+      report.runs.push({ phase, ...input, manualSaveMs: performance.now() - saveStart });
+    }
+    await vscode.workspace.getConfiguration('files').update('autoSaveDelay', report.autoSaveDelayMs, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace.getConfiguration('files').update('autoSave', 'afterDelay', vscode.ConfigurationTarget.Workspace);
+    await frame.click('button[data-mode="source"]');
+    await frame.click('.editor-host .cm-content');
+    await frame.page().keyboard.down('Control');
+    await frame.page().keyboard.press('End');
+    await frame.page().keyboard.up('Control');
+    const autoStart = performance.now();
+    await frame.page().keyboard.type('x');
+    expected += 'x';
+    await waitFor(() => !doc.isDirty && fs.readFileSync(file, 'utf8') === expected, 'delayed auto-save');
+    assert.equal(doc.getText(), expected);
+    report.runs.push({ phase: 'auto-save', inputToDiskMs: performance.now() - autoStart });
+    report.passed = true;
+  } catch (error) { report.error = String(error.stack || error); throw error; }
+  finally {
+    browser?.disconnect();
+    report.originalUnchanged = original.equals(fs.readFileSync(originalPath));
+    fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(report, null, 2));
+    assert.ok(report.originalUnchanged, 'Original document changed');
+  }
+};
