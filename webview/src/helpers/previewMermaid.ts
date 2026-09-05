@@ -131,6 +131,9 @@ async function renderMermaidBlocks(
 
   let renderIndex = 0;
   for (const { block, documentIndex } of blocks) {
+    // Mermaid's promises can resolve in one task. Let input and paint run
+    // between diagrams while retaining the exclusive theme lease.
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
     if (!isCurrent()) return;
     const source = decodeBase64Utf8(block.dataset.sourceB64 ?? '');
     if (!source) continue;

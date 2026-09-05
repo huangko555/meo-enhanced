@@ -22,9 +22,15 @@ function applyTokenStyle(element: HTMLElement, syntaxToken: ShikiToken, color?: 
 }
 
 /** Projects the exact Shiki tokens used by Live mode onto an already-rendered Preview code block. */
-export function applyPreviewCodeHighlight(frameDocument: Document): void {
+export function applyPreviewCodeHighlight(frameDocument: Document, nearViewportOnly = false): void {
   const themeVersion = String(getShikiThemeVersion('preview'));
   for (const code of frameDocument.querySelectorAll<HTMLElement>('code.hljs')) {
+    if (nearViewportOnly) {
+      const height = frameDocument.documentElement.clientHeight;
+      const bounds = code.getBoundingClientRect();
+      // Inspect geometry before extracting source or allocating token DOM.
+      if (bounds.bottom < -height || bounds.top > height * 2) continue;
+    }
     const languageClass = Array.from(code.classList).find((name) => name.startsWith('language-'));
     const language = resolveShikiLang(languageClass?.slice('language-'.length));
     if (!language) continue;

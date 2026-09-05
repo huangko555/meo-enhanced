@@ -66,6 +66,9 @@ export async function preloadMermaidDocumentBatch(
 ): Promise<void> {
   let completed = false;
   for (const request of requests) {
+    // A cached or synchronously completed render must not turn the whole
+    // document warm-up into one uninterrupted task.
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
     if (!isActive()) return;
     await consumer.preload(request);
     if (!isActive()) return;

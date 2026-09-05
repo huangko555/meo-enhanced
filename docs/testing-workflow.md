@@ -48,6 +48,48 @@ still checking type safety, workflow policy, history, tables, rendered blocks,
 input-derived work, viewport behavior, and one production browser scenario in
 the quick gate.
 
+## Performance investigation
+
+Start with a fixed revision and document, then measure cold startup separately
+from settled interaction. Change one suspected source of work at a time. Keep
+the document hash, viewport, font, runtime version, and profiling mode with the
+results; CPU sampling changes timings and must not be mixed with unprofiled runs.
+
+For a short, read-only native Windows startup/scroll probe after building:
+
+```powershell
+pwsh -File scripts/benchmark-vscode-startup.ps1 -Document <absolute-markdown-path> -CodePath <absolute-Code.exe-path>
+```
+
+This opens an isolated hidden development window, measures immediate and settled
+wheel scrolling, and stores JSON in `.local/probes/startup-*`. `openToEditorMs`
+starts at the open command, after VS Code itself has started. Add `-Profile`
+only to investigate CPU stacks. It never edits the input document. The timings
+are comparative evidence, not hardware-independent pass/fail limits. This probe
+uses a hidden window whose scheduling may differ from foreground use. It
+does not measure native input latency or prove pixel-level scroll integrity;
+use the existing input/viewport contracts for those checks.
+
+For user-visible acceptance, obtain permission to occupy the foreground and add
+`-Visible`. Compare only samples whose `foreground` values are true and whose
+recorded viewport/font settings match. `-ExtensionPath` selects an independently
+built baseline checkout. A single pair is indicative, not a stable improvement
+percentage; repeated performance/endurance campaigns still require long-run
+authorization. Do not run other tests alongside timing samples.
+
+For a narrow ordinary-document input, scroll, resource, and Live/Source baseline:
+
+```shell
+bun scripts/benchmark-large-document-production.ts --fixture ordinary
+```
+
+Keep the default full fixture matrix and endurance behind the existing long-run
+authorization. Select additional scenarios from the actual changes: startup,
+input, rendering, mode transitions, or native save scheduling. Optimize measured
+bottlenecks and recheck adjacent behavior so work is not merely moved to the
+next interaction. Preserve deterministic regression tests for excess work or
+incorrect scheduling; do not turn noisy millisecond samples into CI assertions.
+
 ## Auto-save verification
 
 Auto-save concurrency is part of `bun run test:quick`. The focused save checks are:

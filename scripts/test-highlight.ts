@@ -586,6 +586,73 @@ try {
     );
   }
 
+  const liveViewportHighlight = await page.evaluate(async () => {
+    const harness = (window as any).HighlightHarness;
+    const parent = document.getElementById('app')!;
+    parent.replaceChildren();
+    const text = ['```typescript', 'const firstValue = 73193;', '```',
+      ...Array.from({ length: 300 }, () => 'A paragraph between supported code blocks.\n'),
+      '```typescript', 'const lastValue = 83193;', '```'].join('\n');
+    const editor = harness.createEditor({ parent, text, initialMode: 'live', onApplyChanges() {} });
+    const readColor = (number: string) => {
+      const walker = document.createTreeWalker(editor.view.dom, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent === number) return getComputedStyle(node.parentElement!).color;
+      }
+      return null;
+    };
+    const observations: string[] = [];
+    try {
+      for (const color of ['#55aa55', '#cc4444']) {
+        harness.setShikiTheme({ name: 'viewport', type: 'dark', colors: { 'editor.foreground': '#eeeeee' },
+          tokenColors: [{ scope: 'constant.numeric', settings: { foreground: color } }] });
+        for (const number of ['73193', '83193', '73193']) {
+          editor.scrollToLine(editor.view.state.doc.lineAt(text.indexOf(number)).number, 'center');
+          const expected = color === '#55aa55' ? 'rgb(85, 170, 85)' : 'rgb(204, 68, 68)';
+          for (let attempt = 0; attempt < 200 && readColor(number) !== expected; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          observations.push(readColor(number) ?? 'missing');
+        }
+      }
+    } finally { editor.destroy(); }
+    return observations;
+  });
+  if (JSON.stringify(liveViewportHighlight) !== JSON.stringify([
+    ...Array(3).fill('rgb(85, 170, 85)'), ...Array(3).fill('rgb(204, 68, 68)')
+  ])) throw new Error(`Live viewport/theme highlight failed: ${JSON.stringify(liveViewportHighlight)}`);
+
+  const viewportHighlight = await page.evaluate(async () => {
+    const harness = (window as any).HighlightHarness;
+    const release = harness.activateShikiCodeHighlighting('preview');
+    const block = document.createElement('pre');
+    block.style.cssText = 'position:fixed;top:100000px;left:0';
+    block.innerHTML = '<code class="hljs language-typescript"><span class="meo-export-code-line-source">const viewportOnlyProbe = 927461;</span></code>';
+    document.body.append(block);
+    const line = block.querySelector<HTMLElement>('.meo-export-code-line-source')!;
+    try {
+      for (let i = 0; i < 20; i += 1) {
+        harness.applyPreviewCodeHighlight(document, true);
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      const offscreenDeferred = !line.dataset.meoShiki;
+      block.style.top = '0';
+      for (let i = 0; i < 200 && !line.dataset.meoShiki; i += 1) {
+        harness.applyPreviewCodeHighlight(document, true);
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      return { offscreenDeferred, visibleColored: !!line.dataset.meoShiki,
+        text: line.textContent };
+    } finally {
+      block.remove();
+      release();
+    }
+  });
+  if (!viewportHighlight.offscreenDeferred || !viewportHighlight.visibleColored
+    || viewportHighlight.text !== 'const viewportOnlyProbe = 927461;') {
+    throw new Error(`Preview viewport highlighting failed: ${JSON.stringify(viewportHighlight)}`);
+  }
+
   console.log('Highlight syntax test passed');
 } finally {
   await browser.close();

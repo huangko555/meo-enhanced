@@ -89,6 +89,7 @@ type ShikiRuntimeState = {
   refreshListeners: Set<() => void>;
   activeHighlightConsumers: number;
   workGeneration: number;
+  refreshTimer: ReturnType<typeof setTimeout> | null;
 };
 
 function createRuntimeState(): ShikiRuntimeState {
@@ -104,7 +105,8 @@ function createRuntimeState(): ShikiRuntimeState {
     pending: new Map(),
     refreshListeners: new Set(),
     activeHighlightConsumers: 0,
-    workGeneration: 0
+    workGeneration: 0,
+    refreshTimer: null
   };
 }
 
@@ -146,6 +148,7 @@ export function activateShikiCodeHighlighting(surface: ShikiSurface = 'editor'):
     active = false;
     state.activeHighlightConsumers = Math.max(0, state.activeHighlightConsumers - 1);
     if (state.activeHighlightConsumers === 0) {
+      cancelRefresh(state);
       state.workGeneration += 1;
       state.pending.clear();
       state.tokenCache.clear();
@@ -154,10 +157,23 @@ export function activateShikiCodeHighlighting(surface: ShikiSurface = 'editor'):
   };
 }
 
+function cancelRefresh(state: ShikiRuntimeState): void {
+  if (state.refreshTimer !== null) clearTimeout(state.refreshTimer);
+  state.refreshTimer = null;
+}
+
 function notifyRefresh(state: ShikiRuntimeState): void {
+  cancelRefresh(state);
   for (const listener of state.refreshListeners) {
     listener();
   }
+}
+
+function scheduleTokenRefresh(state: ShikiRuntimeState): void {
+  if (state.refreshTimer !== null) return;
+  // Each consumer rebuilds its decorations on refresh. Publish a completed
+  // batch together instead of rebuilding the document once per code block.
+  state.refreshTimer = setTimeout(() => notifyRefresh(state), 0);
 }
 
 export function subscribeShikiRefresh(
@@ -331,7 +347,7 @@ async function tokenizeAndCache(
       state.tokenCache.set(key, mapped);
     }
     finish();
-    notifyRefresh(state);
+    scheduleTokenRefresh(state);
   } catch (error) {
     finish();
     if (isCurrent()) console.error('[MEO webview] Shiki tokenization failed', error);

@@ -408,6 +408,11 @@ async function measureScroll(page: Page, line: number): Promise<{
 }
 
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const selected = args.length === 2 && args[0] === '--fixture' ? args[1] : undefined;
+  if (args.length && !selected) throw new Error('Usage: benchmark-large-document-production.ts [--fixture <kind>]');
+  const fixtures = createLargeDocumentFixtures().filter(fixture => !selected || fixture.kind === selected);
+  if (!fixtures.length) throw new Error(`Unknown fixture: ${selected}`);
   const build = await Bun.build({
     entrypoints: [path.join(repoRoot, 'scripts', 'benchmark-large-document-entry.ts')],
     outdir: tempDir,
@@ -421,7 +426,7 @@ async function main(): Promise<void> {
   try {
     const browserVersion = await browser.version();
     const results = [];
-    for (const fixture of createLargeDocumentFixtures()) {
+    for (const fixture of fixtures) {
       const page = await browser.newPage();
       const pageErrors: string[] = [];
       page.on('pageerror', (error) => pageErrors.push(error.message));

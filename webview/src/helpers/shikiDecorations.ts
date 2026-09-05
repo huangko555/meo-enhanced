@@ -222,6 +222,8 @@ function buildDecorations(view: EditorView): DecorationSet {
   const markCache = new Map<string, Decoration>();
   try {
     syntaxTree(view.state).iterate({
+      from: view.viewport.from,
+      to: view.viewport.to,
       enter(node) {
         if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
           addBlockDecorations(view, node, builder, markCache);
@@ -269,7 +271,7 @@ const shikiPlugin = ViewPlugin.fromClass(
           || isLiveInputDerivedWorkRefresh(transaction)
           || syntaxTreeChanged(transaction)
       );
-      if (update.docChanged || refreshed) {
+      if (update.docChanged || update.viewportChanged || refreshed) {
         this.decorations = buildDecorations(update.view);
       }
     }

@@ -375,6 +375,20 @@ export function createPreviewController({
   let previewMathViewports: LatexMathViewportController[] = [];
   let disposed = false;
   let paintFrame: number | null = null;
+  let highlightFrame: number | null = null;
+  const cancelHighlightFrame = () => {
+    if (highlightFrame !== null) window.cancelAnimationFrame(highlightFrame);
+    highlightFrame = null;
+  };
+  const scheduleViewportHighlight = (frameDocument: Document) => {
+    if (highlightFrame !== null) return;
+    highlightFrame = window.requestAnimationFrame(() => {
+      highlightFrame = null;
+      if (!disposed && sourceColoring && activeFrameDocument === frameDocument) {
+        applyPreviewCodeHighlight(frameDocument, true);
+      }
+    });
+  };
   const cancelPaintReady = () => {
     if (paintFrame !== null) window.cancelAnimationFrame(paintFrame);
     paintFrame = null;
@@ -394,7 +408,7 @@ export function createPreviewController({
   const releasePreviewCodeHighlighting = activateShikiCodeHighlighting('preview');
   const unsubscribePreviewCodeHighlight = subscribeShikiRefresh(() => {
     if (!disposed && sourceColoring && activeFrameDocument) {
-      applyPreviewCodeHighlight(activeFrameDocument);
+      applyPreviewCodeHighlight(activeFrameDocument, true);
     }
   }, 'preview');
 
@@ -544,7 +558,7 @@ export function createPreviewController({
 
   const syncPreviewCodeHighlight = (frameDocument: Document): void => {
     frameDocument.documentElement.dataset.meoPreviewSourceColoring = String(sourceColoring);
-    if (sourceColoring) applyPreviewCodeHighlight(frameDocument);
+    if (sourceColoring) applyPreviewCodeHighlight(frameDocument, true);
   };
 
   const capturePresentationScroll = (): void => {
@@ -572,6 +586,7 @@ export function createPreviewController({
       return;
     }
     const payload = latestPayload;
+    cancelHighlightFrame();
     const loadGeneration = frameGeneration + 1;
     frameGeneration = loadGeneration;
     mermaidPresentationGeneration += 1;
@@ -609,6 +624,9 @@ export function createPreviewController({
       frameDocument.body.tabIndex = -1;
       attachPreviewMathViewports(frameDocument);
       syncPreviewCodeHighlight(frameDocument);
+      frameDocument.addEventListener('scroll', () => {
+        if (!disposed && activeFrameDocument === frameDocument && sourceColoring) scheduleViewportHighlight(frameDocument);
+      }, { passive: true });
       if (viewportRestore?.isCurrent()) {
         restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
       }
@@ -1070,6 +1088,7 @@ export function createPreviewController({
       if (disposed) return;
       disposed = true;
       cancelPaintReady();
+      cancelHighlightFrame();
       requestGeneration += 1;
       frameGeneration += 1;
       mermaidPresentationGeneration += 1;

@@ -248,6 +248,7 @@ async function oldLanguageCompletionCannotPolluteReplacementTheme(): Promise<voi
     'the latest theme must publish the final token color'
   );
   assert.equal(replacement.tokenizeCalls, 1);
+  await waitFor(() => refreshes.length > replacementRefreshBaseline, 'current batch refresh');
   assert.equal(refreshes.length, replacementRefreshBaseline + 1, 'only the current completion may refresh consumers');
 
   release();
@@ -293,6 +294,21 @@ assert.equal(shiki.resolveShikiLang('rb'), 'ruby');
 assert.equal(shiki.resolveShikiLang('php'), 'php');
 assert.equal(shiki.resolveShikiLang('plaintext'), null, 'plain-text aliases must not receive syntax colors');
 assert.equal(shiki.resolveShikiLang('unknown-language'), null, 'unknown languages must keep the plain-text fallback');
+async function completedBatchRefreshesOnce(): Promise<void> {
+  shiki.setShikiTheme(theme('batch', 'dark'));
+  const release = shiki.activateShikiCodeHighlighting();
+  let refreshes = 0;
+  const unsubscribe = shiki.subscribeShikiRefresh(() => { refreshes += 1; });
+  for (let i = 0; i < 30; i += 1) shiki.requestShikiTokens('typescript', `const batch = ${i};`);
+  await waitFor(() => shiki.getShikiTokens('typescript', 'const batch = 29;') !== null, 'batch tokens');
+  await drain();
+  assert.equal(refreshes, 1, 'A completed token batch must not rebuild every consumer once per code block');
+  unsubscribe();
+  release();
+  shiki.setShikiTheme(null);
+}
+
+await completedBatchRefreshesOnce();
 await sourceWithoutConsumerDoesNoHeavyWork();
 await consumersShareOneInstanceUntilTheLastRelease();
 await pendingInitializationDisposesWithoutPublishing();

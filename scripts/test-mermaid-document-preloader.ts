@@ -54,4 +54,14 @@ await preloadMermaidDocumentBatch(
 assert.equal(stoppedPreloadCount, 1);
 assert.equal(refreshCount, 1, 'a disposed warm-up batch must not request a stale refresh');
 
+let yielded = false;
+let countBeforeInput = 0;
+await preloadMermaidDocumentBatch({
+  async preload() {
+    countBeforeInput += 1;
+    if (countBeforeInput === 1) setTimeout(() => { yielded = true; }, 0);
+    else assert.ok(yielded, 'Input tasks must run between completed diagram preloads');
+  }
+}, requests.slice(0, 2), () => true, () => {});
+
 console.log('Mermaid document preloader batch refresh contract passed');

@@ -1145,6 +1145,10 @@ async function main(): Promise<void> {
         ?.contentDocument?.querySelectorAll('.meo-export-code-line').length ?? 0
     ));
     assert.equal(initialRows, 6, 'Preview must expose one independent row per fenced source line');
+    await page.evaluate(() => {
+      document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
+        ?.querySelector('code.language-typescript')?.scrollIntoView({ block: 'center' });
+    });
     await page.waitForFunction(() => (
       document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument
         ?.querySelectorAll('code.language-typescript .meo-export-code-line-source[data-meo-shiki]').length === 3
