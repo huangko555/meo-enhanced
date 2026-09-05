@@ -1,8 +1,8 @@
 # MEO Enhanced
 
-面向 VS Code 的增强型 Markdown 编辑器。
+在 VS Code 中流畅编写、预览和审阅复杂 Markdown，随时切换实时、源码与预览模式，并轻松处理表格、Mermaid、LaTeX、HTML 等内容。
 
-提供实时编辑、源码编辑、只读预览和文档改动审阅，重点支持表格、图片、HTML、Mermaid、LaTeX 和代码块等复杂内容。
+Write, preview, and review complex Markdown seamlessly in VS Code, switch freely between Live, Source, and Preview modes, and handle tables, Mermaid, LaTeX, HTML, and more with ease.
 
 <p align="center">
   <a href="https://github.com/huangko555/meo-enhanced/blob/main/README.md">English</a> · <strong>简体中文</strong> · <a href="https://github.com/huangko555/meo-enhanced/blob/main/CONTRIBUTING.md">贡献指南</a>
@@ -41,14 +41,24 @@ MEO Enhanced 适用于需要在 VS Code 中编写和审阅复杂 Markdown 文档
 
 ## 文档改动审阅
 
-改动审阅功能在编辑器侧边显示新增、修改和删除标记，并在工具栏中汇总变更数量。右侧概览标记用于显示改动在全文中的分布。
+文档改动审阅会随编辑实时更新，在编辑器侧边显示新增、修改和删除标记，并在工具栏中汇总变更数量。右侧概览标记显示改动在全文中的分布，方便在长文档中快速定位。
+
+![Live 模式中的长文档改动标记与右侧概览定位](docs/readme/zh-cn/change-review-overview.png)
 
 支持以下比较基线：
 
-- **最近保存版本**：比较当前编辑内容与磁盘中的最近保存版本。
-- **Agent 编辑前版本**：检查当前 Agent 编辑过程产生的文档改动。
+- **最近保存版本**：手动编辑时推荐，比较当前内容与最近一次磁盘保存内容。
+- **Agent 编辑前版本**：Agent 编辑时推荐，显示连续磁盘写入产生的改动。
 - **Git HEAD**：比较当前文档与最新 Git 提交中的版本。
 - **手动快照**：固定当前文档状态，并将后续改动与该状态比较。
+
+> **“Agent 编辑前版本”如何工作？**
+>
+> Agent 的修改会直接写入磁盘，不会形成“未保存内容”。因此，该选项比较当前内容与更前一次的磁盘保存版本，显示两次磁盘保存之间的差异。
+>
+> 10 秒内连续发生的磁盘写入会视为同一轮修改，并继续使用这一轮首次写入前的版本作为比较基线。
+>
+> 如果没有更前一次的保存记录，则使用最近保存版本作为基线。
 
 Source 模式可以在修改行上方显示修改前内容。代码块、表格、Mermaid 和公式等连续内容会合并显示对应的改动标记，便于结合完整结构进行审阅。
 

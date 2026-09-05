@@ -1,8 +1,8 @@
 # MEO Enhanced
 
-An enhanced Markdown editor for VS Code.
+Write, preview, and review complex Markdown seamlessly in VS Code, switch freely between Live, Source, and Preview modes, and handle tables, Mermaid, LaTeX, HTML, and more with ease.
 
-It provides live editing, source editing, read-only preview, and document change review, with focused support for complex content such as tables, images, HTML, Mermaid, LaTeX, and code blocks.
+在 VS Code 中流畅编写、预览和审阅复杂 Markdown，随时切换实时、源码与预览模式，并轻松处理表格、Mermaid、LaTeX、HTML 等内容。
 
 <p align="center">
   <strong>English</strong> · <a href="https://github.com/huangko555/meo-enhanced/blob/main/README.zh-CN.md">简体中文</a> · <a href="https://github.com/huangko555/meo-enhanced/blob/main/CONTRIBUTING.md">Contributing</a>
@@ -41,14 +41,24 @@ All three modes use the same document content. The current reading position is p
 
 ## Document change review
 
-Change review displays addition, modification, and deletion markers beside the editor and summarizes the change count in the toolbar. The overview ruler on the right shows how changes are distributed throughout the document.
+Change review updates in real time as you edit, displaying additions, modifications, and deletions beside the editor and summarizing their counts in the toolbar. The overview ruler on the right shows how changes are distributed throughout the document, making them easy to locate in long files.
+
+![Change markers and overview navigation for a long document in Live mode](docs/readme/en/change-review-overview.png)
 
 The following comparison baselines are available:
 
-- **Last Saved Version**: Compares the current content with the most recently saved version on disk.
-- **Before Agent Edits**: Reviews document changes made during the current agent editing session.
+- **Last Saved Version**: Recommended for manual editing. Compares the current content with the most recent content saved to disk.
+- **Before Agent Edits**: Recommended for agent editing. Shows changes produced by consecutive writes to disk.
 - **Git HEAD**: Compares the current document with its version in the latest Git commit.
 - **Manual Snapshot**: Captures the current document state and compares subsequent changes against it.
+
+> **How does “Before Agent Edits” work?**
+>
+> Agent changes are written directly to disk, so they do not appear as unsaved content. This option therefore compares the current content with the preceding version saved to disk, showing the difference between two disk saves.
+>
+> Consecutive disk writes within 10 seconds are treated as one editing round and continue to use the version from before the first write in that round as the comparison baseline.
+>
+> If no preceding saved version is available, the most recently saved version is used as the baseline.
 
 Source mode can display the previous content above modified lines. Consecutive content such as code blocks, tables, Mermaid diagrams, and formulas is grouped under the corresponding change marker so that each change can be reviewed in context.
 
