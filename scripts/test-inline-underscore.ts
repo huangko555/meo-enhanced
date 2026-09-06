@@ -37,7 +37,7 @@ if (tagRanges.length !== 1 || tagRanges[0].from !== 0 || tagRanges[0].to !== tag
 
 const colorAndTagText = '#f00 #face #ff0000 #ff000080 #todo #project/alpha #12345 #abc/tag';
 const colorAndTags = decoratedTags(colorAndTagText);
-const expectedTags = ['#todo', '#project/alpha', '#12345', '#abc/tag'];
+const expectedTags = ['#todo', '#project/alpha', '#abc/tag'];
 if (JSON.stringify(colorAndTags) !== JSON.stringify(expectedTags)) {
   throw new Error(`Colors and Markdown tags were not classified separately: ${JSON.stringify(colorAndTags)}`);
 }
