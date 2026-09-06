@@ -5,12 +5,12 @@ param(
   [switch]$Profile,
   [switch]$Trace,
   [switch]$Visible,
-  [ValidateSet('startup','interaction','reading')][string]$Scenario='startup',
+  [ValidateSet('startup','interaction','reading','lifecycle')][string]$Scenario='startup',
   [ValidateRange(0,2147483647)][int]$ImageLine=0,
   [string]$ExtensionPath
 )
 $ErrorActionPreference='Stop'
-if ($Profile -and $Scenario -eq 'interaction') { throw 'Interaction samples must run without the startup CPU profiler.' }
+if ($Profile -and $Scenario -in @('interaction','lifecycle')) { throw 'Interaction and lifecycle samples must run without the startup CPU profiler.' }
 if ($Trace -and ($Scenario -ne 'reading' -or $Profile)) { throw 'Trace requires the reading scenario without Profile; collect timings separately.' }
 if ($ImageLine -and $Scenario -ne 'reading') { throw 'ImageLine is only used by the reading scenario.' }
 if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
@@ -40,4 +40,7 @@ Write-Output ('Report: '+(Join-Path $output 'result.json'))
 if($child.ExitCode -ne 0){exit $child.ExitCode}
 $report=Get-Content (Join-Path $output 'result.json') -Raw | ConvertFrom-Json
 if ($Scenario -eq 'startup') { $report.runs | Select-Object phase,max,p95,over50,longMs | ConvertTo-Json }
+elseif ($Scenario -eq 'lifecycle') {
+  $report | Select-Object passed,originalUnchanged,richOpenToEditorMs,controlOpenToEditorMs,returnCommandMs,richFrameDetached | ConvertTo-Json
+}
 else { $report.runs | ConvertTo-Json -Depth 4 }

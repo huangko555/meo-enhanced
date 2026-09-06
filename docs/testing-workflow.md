@@ -128,6 +128,30 @@ one-second delay. Hidden windows remain diagnostic even if DOM focus is true.
 `-Visible` requires foreground authorization, and `-Profile` is unavailable for
 this scenario. A single sample per action establishes a baseline, not percentiles.
 
+For one bounded native hide/return/close resource sample:
+
+```powershell
+pwsh -File scripts/benchmark-vscode-startup.ps1 -Scenario lifecycle -Document <absolute-markdown-path> -CodePath <absolute-Code.exe-path>
+```
+
+This opens the read-only rich document and one disposable plain control editor
+in the same tab group, returns to the rich document, then closes its tab. It
+records Host tab activity separately from Webview visibility, diagnostic timer
+progress, buffered long tasks, runtime availability, and CDP heap/DOM counters.
+Different Webview targets may share an isolate: heap samples are deduplicated
+by isolate ID and must not be added once per target. These are not native/GPU
+memory totals or leak evidence. No forced GC is performed; closing a tab checks
+frame detachment, not immediate return of memory to the OS. The probe does not
+exercise multiple rich documents or repeated open/close cycles.
+
+`richOpenToEditorMs` and `controlOpenToEditorMs` end at automated editor detection;
+`returnCommandMs` ends at the Host command completing, not at first paint.
+The counters and timers themselves add overhead. Reports include document/build
+hashes and environment information under `.local/probes/lifecycle-*`. The same
+hidden-window and foreground-permission rules apply; Profile/Trace are rejected.
+Use the reading trace separately for startup attribution, and collect timing
+samples without concurrent tests. Repeated resource campaigns remain long runs.
+
 To isolate one diagram using the real runtime and production editor:
 
 ```shell
