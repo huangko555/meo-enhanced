@@ -35,6 +35,7 @@ try {
       '<h2 id="target">Target</h2>',
       '</div>'
     ].join('');
+    (window as any).__previewLinkHtml = html;
     for (let round = 0; round < 3; round += 1) {
       controller.preload(`README links ${round}`);
       const requestId = messages.findLast((message) => message.type === 'requestPreviewRender')?.requestId;
@@ -48,7 +49,26 @@ try {
   });
   await page.waitForFunction(() => Boolean(
     document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.getElementById('license')
+    && document.querySelector<HTMLIFrameElement>('.preview-frame')?.style.visibility !== 'hidden'
   ));
+  await page.evaluate(() => {
+    (window as any).__loadedPreviewDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument;
+  });
+  // Exercise completed-document refreshes, not only superseded pending requests.
+  for (let round = 0; round < 2; round += 1) {
+    await page.evaluate(round => {
+      const controller = (window as any).__previewController;
+      controller.requestRender(`refreshed links ${round}`);
+      const requestId = (window as any).__previewMessages.findLast((message: any) => message.type === 'requestPreviewRender').requestId;
+      controller.acceptRenderResponse({ type: 'previewRenderResult', requestId,
+        result: { ok: true, value: { hasMermaid: false, styles: { dark: '', light: '' },
+          html: (window as any).__previewLinkHtml + `<span id="refresh-${round}"></span>` } } });
+    }, round);
+    await page.waitForFunction(round => Boolean(document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument?.getElementById(`refresh-${round}`)), {}, round);
+    if (!await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument === (window as any).__loadedPreviewDocument)) {
+      throw new Error('Preview refresh must reuse the loaded document');
+    }
+  }
   await page.click('.preview-appearance-dropdown');
   await page.click('.preview-appearance-dropdown-panel [data-value="dark"]');
   if (!await page.evaluate(() =>
@@ -197,6 +217,22 @@ try {
     result.linkCount !== 6
   ) {
     throw new Error(`Preview link click routing was inconsistent: ${JSON.stringify(result)}`);
+  }
+  const wheel = await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    doc.body.style.minHeight = '2000px';
+    const scroller = doc.scrollingElement!;
+    scroller.scrollTop = 0;
+    doc.body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 }));
+    const afterRefresh = scroller.scrollTop;
+    (window as any).__previewController.dispose();
+    ((window as any).__previewMessages as unknown[]).length = 0;
+    doc.getElementById('external')!.click();
+    doc.body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 }));
+    return { afterRefresh, afterDispose: scroller.scrollTop, messages: (window as any).__previewMessages.length };
+  });
+  if (wheel.afterRefresh !== 40 || wheel.afterDispose !== 40 || wheel.messages !== 0) {
+    throw new Error(`Refreshed or disposed Preview retained duplicate listeners: ${JSON.stringify(wheel)}`);
   }
 } finally {
   await browser.close();

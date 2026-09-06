@@ -376,6 +376,7 @@ export function createPreviewController({
   let activeSearchIndex = -1;
   let previewMathViewports: LatexMathViewportController[] = [];
   let disposeDeferredImages = () => {};
+  let frameEvents: AbortController | null = null;
   let disposed = false;
   let paintFrame: number | null = null;
   let highlightFrame: number | null = null;
@@ -671,6 +672,11 @@ export function createPreviewController({
     }
     const payload = latestPayload;
     cancelHighlightFrame();
+    const reusableDocument = activeFrameDocument === frame.contentDocument ? activeFrameDocument : null;
+    const reusableMain = reusableDocument?.querySelector<HTMLElement>('main.meo-export-doc');
+    frameEvents?.abort();
+    frameEvents = null;
+    clearSearchMatches();
     const loadGeneration = frameGeneration + 1;
     frameGeneration = loadGeneration;
     mermaidPresentationGeneration += 1;
@@ -687,13 +693,15 @@ export function createPreviewController({
         ? `<link rel="stylesheet" href="${escapeHtmlAttribute(katexHref)}">`
         : '';
     const styles = payload.styles[appearance].replace(/<\/style/gi, '<\\/style');
-    frame.onload = () => {
+    const initializeFrame = () => {
       if (disposed || loadGeneration !== frameGeneration) return;
       const frameDocument = frame.contentDocument;
       if (!frameDocument) {
         return;
       }
       activeFrameDocument = frameDocument;
+      frameEvents = new AbortController();
+      const signal = frameEvents.signal;
       frameRenderedText = renderedText;
       const styleElement = frameDocument.querySelector<HTMLStyleElement>('style[data-meo-preview-styles]');
       if (styleElement) styleElement.textContent = payload.styles[appearance];
@@ -711,7 +719,7 @@ export function createPreviewController({
       syncPreviewCodeHighlight(frameDocument);
       frameDocument.addEventListener('scroll', () => {
         if (!disposed && activeFrameDocument === frameDocument && sourceColoring) scheduleViewportHighlight(frameDocument);
-      }, { passive: true });
+      }, { passive: true, signal });
       if (viewportRestore?.isCurrent()) {
         restoreTopLine(viewportRestore.line, viewportRestore.lineOffset);
       }
@@ -722,7 +730,7 @@ export function createPreviewController({
         onViewportInteraction?.();
       };
       for (const type of ['wheel', 'pointerdown', 'keydown', 'beforeinput', 'selectionchange', 'focusin']) {
-        frameDocument.addEventListener(type, notifyViewportInteraction, true);
+        frameDocument.addEventListener(type, notifyViewportInteraction, { capture: true, signal });
       }
       // Pointer events do not bubble out of an iframe. Notify the outer document
       // at the frame boundary so existing outside-click handlers dismiss popups.
@@ -735,10 +743,10 @@ export function createPreviewController({
           button: event.button,
           buttons: event.buttons
         }));
-      }, true);
-      bindPreviewLinks(frameDocument, vscode);
-      bindPreviewWheelFallback(frameDocument);
-      bindPreviewFindShortcut(frameDocument, onFindRequested);
+      }, { capture: true, signal });
+      bindPreviewLinks(frameDocument, vscode, signal);
+      bindPreviewWheelFallback(frameDocument, signal);
+      bindPreviewFindShortcut(frameDocument, onFindRequested, signal);
       refreshSearchMatches();
       const keepPosition = () => {
         if (
@@ -764,6 +772,18 @@ export function createPreviewController({
     };
     disposePreviewMathViewports();
     scrollToTopController.setScrollElement(null);
+    if (reusableDocument && reusableMain) {
+      // Keep the document's font/layout caches while retiring each presentation's
+      // listeners, measurements and asynchronous image/diagram generations.
+      frame.onload = null;
+      reusableDocument.getSelection()?.removeAllRanges();
+      reusableDocument.documentElement.lang = uiLanguage;
+      reusableMain.innerHTML = payload.html;
+      if (reusableDocument.scrollingElement) reusableDocument.scrollingElement.scrollTop = 0;
+      initializeFrame();
+      return;
+    }
+    frame.onload = initializeFrame;
     frame.srcdoc = `<!DOCTYPE html><html lang="${uiLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewLatexMathViewportStyles}${previewPropertiesStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}.meo-preview-search-match{background:#e0a800;color:inherit}.meo-preview-search-match.is-active{background:#ff8c00;outline:1px solid currentColor}</style></head><body><div class="meo-export-page"><main class="meo-export-doc">${payload.html}</main></div></body></html>`;
   };
 
@@ -1205,6 +1225,8 @@ export function createPreviewController({
       fontFamilySelectControl.dispose();
       frame.onload = null;
       disposePreviewMathViewports();
+      frameEvents?.abort();
+      frameEvents = null;
       disposeDeferredImages();
       scrollToTopController.setScrollElement(null);
       clearSearchMatches();
@@ -1212,7 +1234,7 @@ export function createPreviewController({
   };
 }
 
-function bindPreviewFindShortcut(frameDocument: Document, onFindRequested?: () => void): void {
+function bindPreviewFindShortcut(frameDocument: Document, onFindRequested: (() => void) | undefined, signal: AbortSignal): void {
   frameDocument.addEventListener('keydown', (event) => {
     const hasPrimaryModifier = event.metaKey !== event.ctrlKey && (event.metaKey || event.ctrlKey);
     if (
@@ -1226,12 +1248,13 @@ function bindPreviewFindShortcut(frameDocument: Document, onFindRequested?: () =
     event.preventDefault();
     event.stopPropagation();
     onFindRequested?.();
-  }, { capture: true });
+  }, { capture: true, signal });
 }
 
 function bindPreviewLinks(
   frameDocument: Document,
-  vscode: { postMessage: (message: WebviewMessage) => void }
+  vscode: { postMessage: (message: WebviewMessage) => void },
+  signal: AbortSignal
 ): void {
   for (const link of frameDocument.querySelectorAll<HTMLAnchorElement>('a[href]')) {
     const href = link.getAttribute('href')?.trim() ?? '';
@@ -1272,16 +1295,16 @@ function bindPreviewLinks(
     vscode.postMessage({ type: 'openLink', href, source: 'preview' });
   };
 
-  frameDocument.addEventListener('click', activateLink, { capture: true });
-  frameDocument.addEventListener('auxclick', activateLink, { capture: true });
+  frameDocument.addEventListener('click', activateLink, { capture: true, signal });
+  frameDocument.addEventListener('auxclick', activateLink, { capture: true, signal });
   frameDocument.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       activateLink(event);
     }
-  }, { capture: true });
+  }, { capture: true, signal });
 }
 
-function bindPreviewWheelFallback(frameDocument: Document): void {
+function bindPreviewWheelFallback(frameDocument: Document, signal: AbortSignal): void {
   frameDocument.addEventListener('wheel', (event) => {
     if (event.ctrlKey) {
       return;
@@ -1297,7 +1320,7 @@ function bindPreviewWheelFallback(frameDocument: Document): void {
         : 1;
     event.preventDefault();
     scrollElement.scrollTop += event.deltaY * deltaScale;
-  }, { passive: false });
+  }, { passive: false, signal });
 }
 
 function escapeHtmlAttribute(value: string): string {
