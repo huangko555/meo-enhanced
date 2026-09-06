@@ -67,7 +67,7 @@ const createPreviewHtml = (lines: readonly string[]): string => [
       return '<table data-source-line="20" data-source-end-line="36" style="display:block;height:520px;margin:0"><tbody><tr><td>rendered table block</td></tr></tbody></table>';
     }
     if (line > 20 && line <= 36) return '';
-    return `<p data-source-line="${line}" style="height:28px;margin:0">${text}</p>`;
+    return `<p data-source-line="${line}" style="height:28px;margin:0 0 ${line === 76 || line === 100 ? 40 : 0}px">${text}</p>`;
   }),
   '<div class="meo-export-mermaid" data-source-line="150" data-source-b64="Zmxvd2NoYXJ0IFREO0EtLT5C"></div>'
 ].join('');
@@ -665,9 +665,9 @@ async function main(): Promise<void> {
       const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const frameDocument = frame.contentDocument!;
       const visible = Array.from(frameDocument.querySelectorAll<HTMLElement>('[data-source-line]'))
-        .find((element) => {
+        .findLast((element) => {
           const rect = element.getBoundingClientRect();
-          return rect.top <= 0 && rect.bottom > 0;
+          return rect.top <= 0.5;
         });
       const editorScroller = document.querySelector<HTMLElement>('.editor-host .cm-scroller')!;
       const editorTop = editorScroller.getBoundingClientRect().top;
@@ -720,7 +720,7 @@ async function main(): Promise<void> {
 
     await page.click('[data-mode="preview"]');
     await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')?.dataset.mode === 'preview');
-    await moveHiddenEditorAndPreview(fixture, 3, 76, 18);
+    await moveHiddenEditorAndPreview(fixture, 3, 76, 36);
     const externalBefore = await readPreviewTrace();
     assert.ok(
       externalBefore.hiddenSelectionText === 'semantic line 3' && externalBefore.line === 76,
@@ -742,11 +742,11 @@ async function main(): Promise<void> {
     );
     const externalAfter = await readPreviewTrace();
     assert.equal(externalAfter.line, 76, JSON.stringify({ externalBefore, externalAfter }));
-    assert.ok(Math.abs((externalAfter.offset ?? 99) - 18) <= 2, JSON.stringify(externalAfter));
+    assert.ok(Math.abs((externalAfter.offset ?? 99) - 36) <= 2, JSON.stringify(externalAfter));
     assert.ok(externalAfter.text.includes(externalLines[0]), 'clean external revision did not update the production Editor');
     assert.equal(externalAfter.focusInEditor, false, 'clean external revision stole focus into the hidden Editor');
 
-    await moveHiddenEditorAndPreview(externalText, 4, 100, 12);
+    await moveHiddenEditorAndPreview(externalText, 4, 100, 36);
     const reloadBefore = await readPreviewTrace();
     assert.ok(
       reloadBefore.hiddenSelectionText === 'semantic line 4' && reloadBefore.line === 100,
@@ -774,7 +774,7 @@ async function main(): Promise<void> {
     await fulfillNextPreviewRender(externalRequestId, createPreviewHtml(reloadLines), reloadLines[0]);
     const reloadAfter = await readPreviewTrace();
     assert.equal(reloadAfter.line, 100, JSON.stringify({ reloadBefore, reloadAfter }));
-    assert.ok(Math.abs((reloadAfter.offset ?? 99) - 12) <= 2, JSON.stringify(reloadAfter));
+    assert.ok(Math.abs((reloadAfter.offset ?? 99) - 36) <= 2, JSON.stringify(reloadAfter));
     assert.ok(reloadAfter.text.includes(reloadLines[0]), 'disk reload did not update the production Editor');
     assert.equal(reloadAfter.focusInEditor, false, 'disk reload stole focus into the hidden Editor');
     const reloadReceipt = await page.waitForFunction(() => (
@@ -783,6 +783,24 @@ async function main(): Promise<void> {
       )) ?? null
     )).then((handle) => handle.jsonValue() as Promise<{ presented: boolean }>);
     assert.equal(reloadReceipt.presented, true, 'disk reload presentation was not accepted');
+    for (const fail of [false, true]) {
+      await page.evaluate(async (shouldFail) => {
+        const editor = (window as any).__viewportAnchorTransaction.editor;
+        const viewportHandle = editor.captureViewportAnchorToken('preview');
+        try {
+          await editor.runViewportAnchorTransaction(viewportHandle, 'preview', async () => {
+            if (shouldFail) throw new Error('controlled presentation failure');
+          });
+        } catch (error) {
+          if (!shouldFail) throw error;
+        }
+      }, fail);
+      await waitForFrames(page, 6);
+      const gapAfter = await readPreviewTrace();
+      assert.equal(gapAfter.line, 100, JSON.stringify(gapAfter));
+      assert.ok(Math.abs((gapAfter.offset ?? 99) - 36) <= 2,
+        `Same Preview ${fail ? 'failed' : 'equal-text'} presentation lost its gap: ${JSON.stringify(gapAfter)}`);
+    }
     await page.evaluate(() => (window as any).__viewportAnchorTransaction.destroyForeign());
     console.log(`Viewport Anchor production Chromium trace passed: ${JSON.stringify(traceResult.samples)}`);
   } finally {

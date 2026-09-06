@@ -1893,7 +1893,11 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     previewViewportSurface: {
       captureTopVisiblePosition() {
         const position = previewController.getTopVisiblePosition();
-        return position ? { line: position.topLine, lineOffset: position.topLineOffset } : null;
+        return position ? {
+          line: position.topLine,
+          lineOffset: position.topLineOffset,
+          editorLineOffset: position.editorLineOffset
+        } : null;
       },
       restoreTopVisiblePosition(position, isCurrent) {
         previewController.restoreTopVisiblePosition(position, isCurrent);

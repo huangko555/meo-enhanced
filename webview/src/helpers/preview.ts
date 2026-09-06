@@ -1035,7 +1035,7 @@ export function createPreviewController({
     const mappedOffset = line >= source.start && line <= source.end ? Math.max(0, lineOffset) : 0;
     scrollElement.scrollTop += rect.top + rect.height * ratio + mappedOffset;
   };
-  const getTopVisiblePosition = (): { topLine: number; topLineOffset: number } | null => {
+  const getTopVisiblePosition = (): { topLine: number; topLineOffset: number; editorLineOffset: number } | null => {
     const elements = getSourceElements();
     if (elements.length === 0) {
       return null;
@@ -1060,11 +1060,9 @@ export function createPreviewController({
     const lineTop = rect.top + rect.height * ((topLine - range.start) / lineSpan);
     return {
       topLine,
-      // Keep gaps for a layout transaction within this Preview. A mode switch
-      // cannot project an unmapped Preview spacer into the editor's line box.
-      topLineOffset: rect.bottom <= viewportAnchor && !acceptingViewportProjection
-        ? 0
-        : Math.max(0, viewportAnchor - lineTop)
+      topLineOffset: Math.max(0, viewportAnchor - lineTop),
+      // An unmapped Preview gap has no corresponding editor line box.
+      editorLineOffset: rect.bottom <= viewportAnchor ? 0 : Math.max(0, viewportAnchor - lineTop)
     };
   };
   const restoreTopVisiblePosition = (

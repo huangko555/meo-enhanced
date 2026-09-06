@@ -3,6 +3,8 @@ import type { EditorView } from '@codemirror/view';
 export interface ViewportDocumentAnchor {
   position: number;
   lineOffset: number;
+  /** Preview captures may need a different offset when projected into Editor. */
+  editorLineOffset?: number;
   viewportOffset?: number;
   renderedBlock?: boolean;
 }
@@ -38,7 +40,7 @@ export function visualLineContextMargin(
 }
 
 export interface PreviewViewportSurface {
-  captureTopVisiblePosition(): { line: number; lineOffset: number } | null;
+  captureTopVisiblePosition(): { line: number; lineOffset: number; editorLineOffset?: number } | null;
   restoreTopVisiblePosition(
     position: { line: number; lineOffset: number },
     isCurrent: () => boolean
@@ -1453,7 +1455,10 @@ export class ViewportController {
   ): void {
     if (record.projectedOwners.has(owner)) return;
     if (owner === 'editor') {
-      this.restoreDocumentAnchor(anchor, undefined, { force: true });
+      this.restoreDocumentAnchor({
+        ...anchor,
+        lineOffset: anchor.editorLineOffset ?? anchor.lineOffset
+      }, undefined, { force: true });
       record.projectedOwners.add(owner);
       return;
     }
@@ -1536,7 +1541,10 @@ export class ViewportController {
     );
     return {
       position: this.view.state.doc.line(lineNumber).from,
-      lineOffset: Number.isFinite(position.lineOffset) ? Math.max(0, position.lineOffset) : 0
+      lineOffset: Number.isFinite(position.lineOffset) ? Math.max(0, position.lineOffset) : 0,
+      editorLineOffset: position.editorLineOffset !== undefined && Number.isFinite(position.editorLineOffset)
+        ? Math.max(0, position.editorLineOffset)
+        : undefined
     };
   }
 

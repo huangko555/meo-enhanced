@@ -19,7 +19,7 @@ export type PreviewSurface = {
     preserveFrame?: boolean;
   }): void;
   acceptRenderResponse(message: PreviewRenderResponse): boolean;
-  getTopVisiblePosition(): { topLine: number; topLineOffset: number } | null;
+  getTopVisiblePosition(): { topLine: number; topLineOffset: number; editorLineOffset?: number } | null;
   dispose(): void;
 };
 
