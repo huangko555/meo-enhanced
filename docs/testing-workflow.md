@@ -102,11 +102,13 @@ separately from the placeholder. The image report records its bounds and visibil
 decoding success alone does not prove that late layout kept it in the viewport.
 `-Profile` samples each transition separately and marks the run as profiled.
 `-Trace` instead captures `reading.trace.json` from before `openWith` through all
-six transitions, including newly created webview renderers. User Timing marks
+six transitions, including CPU samples from newly created webview renderers. User Timing marks
 identify editor detection and each transition's automation start/ready bounds.
 The trace excludes VS Code process startup and Extension Host CPU stacks;
 editor detection can lag actual mounting. Use it to attribute renderer work,
-not as an exact first-paint measurement. Trace and CPU sampling cannot be combined;
+not as an exact first-paint measurement. Group trace CPU profiles by process and
+profile ID before aggregating samples; a renderer can also have worker profiles.
+The trace cannot be combined with the separate per-transition `-Profile` mode;
 collect uninstrumented timings separately.
 These single samples are diagnostic, not percentiles or endurance acceptance.
 The same hidden-window, foreground-permission, and no-concurrent-test rules apply.

@@ -29,7 +29,7 @@ exports.run = async () => {
       // A browser session includes the webview renderer that does not exist yet.
       traceSession = await browser.target().createCDPSession();
       await traceSession.send('Tracing.start', {
-        categories: 'devtools.timeline,v8.execute,blink.user_timing,loading,disabled-by-default-devtools.timeline',
+        categories: 'devtools.timeline,v8.execute,blink.user_timing,loading,disabled-by-default-devtools.timeline,disabled-by-default-v8.cpu_profiler',
         transferMode: 'ReturnAsStream'
       });
       await traceSession.send('Tracing.recordClockSyncMarker', {syncId: 'meo-open-with'});

@@ -1879,6 +1879,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     text: initialText,
     initialMode: mode,
     initialGitGutter: gitChangesGutterVisible,
+    initialLongCodeBlockFolding: longCodeBlockFoldingEnabled,
     initialDiagnostics: pendingDiagnostics,
     onApplyChanges: handleLocalEditorChange,
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
@@ -1904,7 +1905,6 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
       }
     }
   });
-  editor.setLongCodeBlockFolding(longCodeBlockFoldingEnabled);
   editorScrollToTopController.setScrollElement(editor.view.scrollDOM);
   if (gitChangesGutterVisible) gitClient?.applyBaselineToEditor(editor);
   syncGitDiffDetails();

@@ -315,6 +315,32 @@ async function main(): Promise<void> {
       content: ':root{--meo-background:#24292e;--meo-foreground:#e6edf3;--meo-code-background:#1b1f23;--meo-inset-background:#20252a;--meo-semantic-mutedForeground:#8b949e;--meo-semantic-tableBorder:#3e444d;--meo-font-live:Arial;--meo-font-live-weight:400;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-weight:400;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    const tableMeasurement = await page.evaluate(() => {
+      const prototype = CanvasRenderingContext2D.prototype;
+      const original = prototype.measureText;
+      const calls: string[] = [];
+      let scale = 10;
+      prototype.measureText = function (text: string) {
+        calls.push(text);
+        return { width: text.length * scale } as TextMetrics;
+      };
+      try {
+        const estimate = (window as any).BlockWidgetHeightHarness.estimate;
+        const request = { kind: 'table', contentWidth: 352, headerCells: ['same', 'same'],
+          rows: [['same', '**same**'], ['same<br>same', 'same']] };
+        const firstHeight = estimate(request);
+        const firstCalls = calls.length;
+        scale = 100;
+        const changedHeight = estimate(request);
+        return { firstHeight, changedHeight, firstCalls, secondCalls: calls.length - firstCalls };
+      } finally {
+        prototype.measureText = original;
+      }
+    });
+    if (tableMeasurement.firstCalls !== 3 || tableMeasurement.secondCalls !== 3
+      || tableMeasurement.firstHeight !== 123 || tableMeasurement.changedHeight !== 411) {
+      throw new Error(`Table height must measure each distinct line once per estimate and remeasure later: ${JSON.stringify(tableMeasurement)}`);
+    }
     await page.evaluate((text) => {
       (window as any).__virtualBlockEditor = (window as any).EmbeddedInputViewportHarness.createEditor({
         parent: document.getElementById('app')!,

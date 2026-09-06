@@ -88,6 +88,47 @@ async function main() {
       ...Array.from({ length: 19 }, (_, index) => `const localized${index + 1} = ${index + 1};`),
       '```'
     ].join('\n');
+    const initialPreferences = await page.evaluate(async (content) => {
+      const results = [];
+      for (const enabled of [false, true]) {
+        let changes = 0;
+        const editor = (window as any).LongCodeBlocksHarness.createEditor({
+          parent: document.getElementById('app')!,
+          text: content,
+          initialMode: 'live',
+          initialLongCodeBlockFolding: enabled,
+          onApplyChanges() { changes += 1; }
+        });
+        const paintedCollapsed = async () => {
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+          return Boolean(document.querySelector('.meo-md-long-code-placeholder'));
+        };
+        try {
+          const initiallyCollapsed = await paintedCollapsed();
+          const initialState = editor.view.state;
+          editor.setLongCodeBlockFolding(enabled);
+          const unchangedState = editor.view.state === initialState;
+          editor.setLongCodeBlockFolding(!enabled);
+          const toggledCollapsed = await paintedCollapsed();
+          editor.setLongCodeBlockFolding(enabled);
+          const restoredCollapsed = await paintedCollapsed();
+          results.push({ enabled, initiallyCollapsed, unchangedState, toggledCollapsed, restoredCollapsed,
+            unchangedText: editor.view.state.doc.toString() === content, changes });
+        } finally {
+          editor.destroy();
+          document.getElementById('app')!.replaceChildren();
+        }
+      }
+      return results;
+    }, localizedLongCode);
+    for (const result of initialPreferences) {
+      if (result.initiallyCollapsed !== result.enabled || !result.unchangedState
+        || result.toggledCollapsed === result.enabled || result.restoredCollapsed !== result.enabled
+        || !result.unchangedText || result.changes !== 0) {
+        throw new Error(`Initial folding preference must avoid redundant reconfiguration and remain switchable: ${JSON.stringify(result)}`);
+      }
+    }
     const localizedLongCodeLabels = await page.evaluate(async (content) => {
       const editor = (window as any).LongCodeBlocksHarness.createEditor({
         parent: document.getElementById('app')!,

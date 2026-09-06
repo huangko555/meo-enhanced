@@ -123,8 +123,8 @@ function visualText(source: string): string {
     .trim();
 }
 
-function visualLineWidths(source: string, metrics: BlockWidgetLayoutMetrics): readonly number[] {
-  return visualText(source).split(/\r?\n/).map((line) => textWidth(line, metrics));
+function visualLineWidths(source: string, measure: (text: string) => number): readonly number[] {
+  return visualText(source).split(/\r?\n/).map(measure);
 }
 
 let textMeasurementContext: CanvasRenderingContext2D | null | undefined;
@@ -152,11 +152,21 @@ function estimateTableHeight(
   request: Extract<BlockWidgetHeightRequest, { kind: 'table' }>,
   metrics: BlockWidgetLayoutMetrics
 ): number {
+  // Column sizing and row wrapping reuse the same lines and font metrics.
+  // Keep measurements local so later font loads and layout changes remeasure.
+  const widths = new Map<string, number>();
+  const measure = (text: string): number => {
+    const cached = widths.get(text);
+    if (cached !== undefined) return cached;
+    const width = textWidth(text, metrics);
+    widths.set(text, width);
+    return width;
+  };
   const matrix = [request.headerCells, ...request.rows];
   const columnCount = Math.max(1, request.headerCells.length, ...request.rows.map((row) => row.length));
   const desiredColumnWidths = Array.from({ length: columnCount }, (_, column) => {
     const desired = Math.max(...matrix.map((row) => (
-      Math.max(...visualLineWidths(row[column] ?? '', metrics)) + metrics.fontSize
+      Math.max(...visualLineWidths(row[column] ?? '', measure)) + metrics.fontSize
     )));
     return Math.max(64, Math.min(metrics.contentWidth, desired));
   });
@@ -171,11 +181,11 @@ function estimateTableHeight(
       // The source editor is hidden outside an active cell. Reserving height for
       // Markdown punctuation or image URLs makes virtual rows taller than their
       // rendered table and causes a correction when the table first mounts.
-      const renderedLines = visualLineWidths(cell, metrics).reduce((sum, width) => (
+      const renderedLines = visualLineWidths(cell, measure).reduce((sum, width) => (
         sum + Math.max(1, Math.ceil(width / (contentWidths[column] ?? 32)))
       ), 0);
       const sourceLines = cell.split(/\r?\n/).reduce((sum, line) => (
-        sum + Math.max(1, Math.ceil(textWidth(line, metrics) / (contentWidths[column] ?? 32)))
+        sum + Math.max(1, Math.ceil(measure(line) / (contentWidths[column] ?? 32)))
       ), 0);
       // A table row reserves enough room for both its rendered preview and the
       // hidden Markdown textarea, so focusing a cell never changes row height.

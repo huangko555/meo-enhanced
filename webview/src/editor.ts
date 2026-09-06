@@ -184,6 +184,7 @@ type CreateEditorOptions = {
   onGitDiffSummaryChange?: (summary: ChangesReviewDiffSummary) => void;
   initialMode?: EditableEditorMode;
   initialGitGutter?: boolean;
+  initialLongCodeBlockFolding?: boolean;
   initialDiagnostics?: readonly EditorDiagnostic[];
   mermaidDiagramPresentationFactory: MermaidDiagramPresentationFactory;
   previewViewportSurface?: PreviewViewportSurface;
@@ -327,6 +328,7 @@ export function createEditor({
   onGitDiffSummaryChange,
   initialMode = 'source',
   initialGitGutter = true,
+  initialLongCodeBlockFolding = true,
   initialDiagnostics = [],
   mermaidDiagramPresentationFactory,
   previewViewportSurface,
@@ -1937,7 +1939,7 @@ export function createEditor({
       ]),
       historyCompartment.of(history()),
       lineNumberCompartment.of(lineNumberExtensions(startMode, currentSourceLineNumbers)),
-      longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(true)),
+      longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(initialLongCodeBlockFolding)),
       tableTransactionProvenanceAdapter.extension,
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
@@ -2990,6 +2992,8 @@ export function createEditor({
       view.requestMeasure();
     },
     setLongCodeBlockFolding(enabled: boolean) {
+      // Reconfiguring an unchanged facet still runs the editor's state fields.
+      if (view.state.facet(longCodeBlockEnabledFacet) === enabled) return;
       view.dispatch({
         effects: longCodeBlockPreferenceCompartment.reconfigure(longCodeBlockEnabledFacet.of(enabled))
       });
