@@ -82,10 +82,14 @@ exports.run = async () => {
           const start = performance.now();
           if (traced) performance.mark('meo-cold-input');
           requestAnimationFrame(() => {
+            const firstFrameAt = performance.now();
             if (traced) performance.mark('meo-cold-frame1');
             requestAnimationFrame(() => {
+              const secondFrameAt = performance.now();
               if (traced) performance.mark('meo-cold-frame2');
-              window.__coldPaint = { inputToPaintMs: performance.now() - start,
+              window.__coldPaint = { inputToPaintMs: secondFrameAt - start,
+                inputToFirstFrameMs: firstFrameAt - start,
+                betweenFramesMs: secondFrameAt - firstFrameAt,
                 setupToInputEventMs: start - setupAt, trusted: event.isTrusted,
                 textVisible: [...document.querySelectorAll('.editor-host .cm-line')].some(e => e.textContent === '# Native interaction baselinex') };
             });

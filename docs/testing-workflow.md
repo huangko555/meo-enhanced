@@ -138,7 +138,10 @@ must not be used for this cold probe. It then scrolls once, switches Source →
 Preview → Live, and performs the usual input/save checks, including that first
 edit in the expected contents. Reports separate detection-to-command,
 setup-to-input-event, input-to-two-frames, and command-to-result times.
-The first two include automation/setup overhead and editor detection itself can
+Cold input also reports `inputToFirstFrameMs` and `betweenFramesMs`, whose sum
+is `inputToPaintMs`. The split distinguishes waiting for the first frame callback
+from subsequent work; neither callback proves that pixels reached the display.
+Detection-to-command and setup-to-input-event include automation/setup overhead; editor detection can
 lag mounting; this is not a measurement from the physical key press. Collecting
 the result can wait behind later renderer tasks even when the two frames have
 already occurred, so command-to-result must not be treated as input latency. The scroll
