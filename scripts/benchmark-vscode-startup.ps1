@@ -7,9 +7,16 @@ param(
   [switch]$Visible,
   [ValidateSet('startup','interaction','reading','lifecycle')][string]$Scenario='startup',
   [ValidateRange(0,2147483647)][int]$ImageLine=0,
+  [switch]$ResourceCampaign,
+  [switch]$ConfirmLongRun,
+  [string]$ImagePath,
   [string]$ExtensionPath
 )
 $ErrorActionPreference='Stop'
+if ($ResourceCampaign -and ($Scenario -ne 'lifecycle' -or -not $ConfirmLongRun -or -not $ImagePath)) {
+  throw 'ResourceCampaign requires lifecycle, ImagePath and explicit ConfirmLongRun authorization.'
+}
+if (($ConfirmLongRun -or $ImagePath) -and -not $ResourceCampaign) { throw 'ConfirmLongRun and ImagePath require ResourceCampaign.' }
 if ($Profile -and $Scenario -in @('interaction','lifecycle')) { throw 'Interaction and lifecycle samples must run without the startup CPU profiler.' }
 if ($Trace -and ($Scenario -ne 'reading' -or $Profile)) { throw 'Trace requires the reading scenario without Profile; collect timings separately.' }
 if ($ImageLine -and $Scenario -ne 'reading') { throw 'ImageLine is only used by the reading scenario.' }
@@ -32,6 +39,9 @@ $env:MEO_PERF_PROFILE=if($Profile){'1'}else{'0'}
 $env:MEO_PERF_TRACE=if($Trace){'1'}else{'0'}
 $env:MEO_PERF_VISIBLE=if($Visible){'1'}else{'0'}
 $env:MEO_PERF_IMAGE_LINE=[string]$ImageLine
+$env:MEO_PERF_RESOURCE_CAMPAIGN=if($ResourceCampaign){'1'}else{'0'}
+$env:MEO_PERF_CONFIRM_LONG_RUN=if($ConfirmLongRun){'1'}else{'0'}
+$env:MEO_PERF_IMAGE=if($ImagePath){(Resolve-Path -LiteralPath $ImagePath).Path}else{''}
 $entry=Join-Path $PSScriptRoot ('benchmark-vscode-'+$Scenario+'.cjs')
 $launchArgs=@('--new-window','--skip-welcome','--skip-release-notes','--disable-updates','--disable-workspace-trust',('--remote-debugging-port='+$Port),('--user-data-dir="'+$profileDirectory+'"'),('--extensions-dir="'+$extensions+'"'),('--extensionDevelopmentPath="'+$ExtensionPath+'"'),('--extensionTestsPath="'+$entry+'"'),('"'+$workspace+'"'))
 $windowStyle=if ($Visible) {'Normal'} else {'Hidden'}
@@ -41,6 +51,10 @@ if($child.ExitCode -ne 0){exit $child.ExitCode}
 $report=Get-Content (Join-Path $output 'result.json') -Raw | ConvertFrom-Json
 if ($Scenario -eq 'startup') { $report.runs | Select-Object phase,max,p95,over50,longMs | ConvertTo-Json }
 elseif ($Scenario -eq 'lifecycle') {
-  $report | Select-Object passed,originalUnchanged,richOpenToEditorMs,controlOpenToEditorMs,returnCommandMs,richFrameDetached | ConvertTo-Json
+  if ($ResourceCampaign) {
+    $report | Select-Object passed,originalUnchanged,imageUnchanged,@{Name='completedRounds';Expression={$_.rounds.Count}} | ConvertTo-Json
+  } else {
+    $report | Select-Object passed,originalUnchanged,richOpenToEditorMs,controlOpenToEditorMs,returnCommandMs,richFrameDetached | ConvertTo-Json
+  }
 }
 else { $report.runs | ConvertTo-Json -Depth 4 }

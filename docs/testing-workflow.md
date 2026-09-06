@@ -152,6 +152,30 @@ hidden-window and foreground-permission rules apply; Profile/Trace are rejected.
 Use the reading trace separately for startup attribution, and collect timing
 samples without concurrent tests. Repeated resource campaigns remain long runs.
 
+After explicit authorization for a repeated resource investigation, use:
+
+```powershell
+pwsh -File scripts/benchmark-vscode-startup.ps1 -Scenario lifecycle -ResourceCampaign -ConfirmLongRun -Document <absolute-markdown-path> -ImagePath <absolute-local-image-path> -CodePath <absolute-Code.exe-path>
+```
+
+This bounded campaign runs eight rounds with three generated rich documents
+(small SVG images, twelve flowcharts, and the supplied large image) plus a
+retained plain control, at most four editors at once. All assets are local
+copies in the isolated workspace. The supplied Markdown is hashed for provenance
+and checked unchanged; the campaign renders generated fixtures, not that entire
+document. It waits for real Preview SVG/image completion, records return command
+latency, observes five seconds hidden and five seconds after closing each round,
+and writes incremental `progress.json` alongside the final report. Input/save,
+foreground paint latency, and full-document scroll integrity are not covered.
+
+Windows process private bytes and working sets are sampled only for process IDs
+reported by the isolated browser. Shared working sets must not be summed as unique
+memory; heap samples remain deduplicated by isolate. A final forced-GC diagnostic
+is labeled separately, after every normal round and timing measurement has ended.
+It helps distinguish retained objects from delayed collection, but cannot prove
+the absence of native/GPU leaks. Reserve about 10–15 minutes and do not run other
+tests concurrently. This authorization does not imply a release or VM run.
+
 To isolate one diagram using the real runtime and production editor:
 
 ```shell
