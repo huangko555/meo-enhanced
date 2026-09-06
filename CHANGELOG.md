@@ -3,6 +3,15 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.3.17
+- Stabilized reading-position continuity across Live, Source, and Preview transitions, including image loading and long-document viewport restoration.
+- Improved mode-switch performance by reusing Markdown parses, decorations, rendered-block discovery, and loaded Preview documents while discarding obsolete background results.
+- Kept Preview, HTML, and PDF links consistently blue; limited Live HEX color previews to six- and eight-digit values and removed color swatches from reading and exported output.
+- Fixed local and network Preview image handling, including encoded Windows paths, deferred loading, and non-embedded image delivery.
+- Refined multiline footnotes, editor leading-edge selection, language-switch line numbers and long-code widgets, settings and change-review menus, and feedback access.
+- Improved table resource disposal, list normalization, plain-text scanning, Mermaid startup work, and inactive diagnostics and diff processing.
+- Expanded browser, viewport, image, mode-transition, resource-lifecycle, native performance, and endurance regression coverage.
+
 ## 0.3.16
 - Stopped delayed Preview appearance renders from restoring an old reading position after user interaction.
 - Yielded before uncached Live diagram rendering and added focused diagram and native input/save performance probes.
