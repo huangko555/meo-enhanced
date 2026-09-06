@@ -34,6 +34,7 @@ type BrowserMemory = {
 } | null;
 
 type ResourceSample = {
+  readonly detachedResizeTargets: number;
   readonly resizeObservers: number;
   readonly mutationObservers: number;
   readonly intersectionObservers: number;
@@ -199,6 +200,8 @@ async function preparePage(page: Page): Promise<void> {
     }) as typeof window.clearTimeout;
     (window as any).__largeDocumentResourceProbe = {
       snapshot: (): ResourceSample => ({
+        detachedResizeTargets: [...active.resize].reduce((count, observer) => count
+          + [...(observer as TrackedResizeObserver).targets].filter(target => !target.isConnected).length, 0),
         resizeObservers: active.resize.size,
         mutationObservers: active.mutation.size,
         intersectionObservers: active.intersection.size,
@@ -223,6 +226,7 @@ function assertLiveResourceBound(
   sample: StableSample,
   resources: ResourceSample
 ): void {
+  assert.equal(resources.detachedResizeTargets, 0, `${kind} retained detached ResizeObserver targets`);
   // Live owns three editor-wide observers. Each connected table owns height,
   // column-width, and sticky-header observers; Mermaid and math own one each.
   // Image widgets do not own ResizeObservers.
@@ -440,6 +444,7 @@ async function main(): Promise<void> {
         const liveDestroy = await destroyEditor(page);
         assert.equal(liveDestroy.connectedEditors, 0);
         assert.deepEqual(liveDestroy.resources, {
+          detachedResizeTargets: 0,
           resizeObservers: 0,
           mutationObservers: 0,
           intersectionObservers: 0,
@@ -509,6 +514,7 @@ async function main(): Promise<void> {
         const finalDestroy = await destroyEditor(page);
         assert.equal(finalDestroy.connectedEditors, 0);
         assert.deepEqual(finalDestroy.resources, {
+          detachedResizeTargets: 0,
           resizeObservers: 0,
           mutationObservers: 0,
           intersectionObservers: 0,

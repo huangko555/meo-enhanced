@@ -2315,6 +2315,7 @@ function buildWidgetTableData(
 }
 
 const mountedTableWidgets = new WeakMap<EditorView, Set<HtmlTableWidget>>();
+const tableDomOwners = new WeakMap<HTMLElement, HtmlTableWidget>();
 
 export function refreshMountedTablePositions(
   view: EditorView,
@@ -4867,6 +4868,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     }
     const shell = document.createElement('div');
     shell.className = 'meo-md-html-table-shell';
+    tableDomOwners.set(shell, this);
     shell.style.setProperty('--meo-html-table-toolbar-height', `${tableToolbarHeight}px`);
     shell.style.setProperty(
       '--meo-html-table-indent',
@@ -5085,6 +5087,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   destroy(dom: HTMLElement) {
+    // CodeMirror may retain the DOM while replacing an equivalent widget.
+    // Dispose the instance that actually allocated this DOM's resources.
+    const owner = tableDomOwners.get(dom);
+    if (owner && owner !== this) {
+      owner.destroy(dom);
+      return;
+    }
+    tableDomOwners.delete(dom);
     const selectionDisposal = this.cellSelection.accept({ type: 'dispose' });
     this.applyCellSelectionTransition(selectionDisposal);
     disposeImagePresentations(dom);
