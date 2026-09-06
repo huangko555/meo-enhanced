@@ -80,4 +80,17 @@ if (fallbackSources(fullyParsed, fullyParsedRanges).length !== 0) {
   throw new Error('Already parsed styles were processed again');
 }
 
+// Sparse long lines must retain absolute offsets and escaped-marker semantics.
+const longPrefix = 'plain text 中文 '.repeat(8_000);
+const sparse = `${longPrefix}\\**escaped** x 12**\`tail\`**`;
+const sparseRanges = collectPunctuationClosingInlineStyles(sparse, 37);
+const tailFrom = sparse.lastIndexOf('**`tail`**');
+if (sparseRanges.length !== 1 || sparseRanges[0]!.from !== 37 + tailFrom
+  || sparseRanges[0]!.to !== 37 + sparse.length) {
+  throw new Error('Sparse long-line fallback lost its marker boundary or document offset');
+}
+if (collectPunctuationClosingInlineStyles(longPrefix).length !== 0) {
+  throw new Error('Plain long lines must not create fallback styling');
+}
+
 console.log('inline style fallback boundary checks passed');

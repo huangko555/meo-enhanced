@@ -39,9 +39,16 @@ export function collectPunctuationClosingInlineStyles(
   parsedStyleRanges: readonly ParsedInlineStyleRange[] = []
 ): FallbackInlineStyleRange[] {
   const ranges: FallbackInlineStyleRange[] = [];
+  const candidates = /\*|~~|==/g;
   let cursor = 0;
 
   while (cursor < text.length) {
+    // Skip ordinary text in the native scanner instead of checking every
+    // character against every style on each Live decoration rebuild.
+    candidates.lastIndex = cursor;
+    const candidate = candidates.exec(text);
+    if (!candidate) break;
+    cursor = candidate.index;
     const style = fallbackStyles.find(({ marker }) => text.startsWith(marker, cursor));
     if (!style || isEscaped(text, cursor)) {
       cursor += 1;
