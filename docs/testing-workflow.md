@@ -131,8 +131,10 @@ one-second delay. Hidden windows remain diagnostic even if DOM focus is true.
 this scenario. A single sample per action establishes a baseline, not percentiles.
 
 Add `-ColdInput` to observe the editor while `openWith` is still pending and
-issue one trusted prose input immediately after detection and caret setup,
-without the normal settling sleep. It then scrolls once, switches Source →
+issue one trusted input at its default first-line-end caret immediately after
+detection and focus, without the normal settling sleep or changing selection.
+Direct DOM selection changes can race the editor's initial selection sync and
+must not be used for this cold probe. It then scrolls once, switches Source →
 Preview → Live, and performs the usual input/save checks, including that first
 edit in the expected contents. Reports separate detection-to-command,
 setup-to-input-event, input-to-two-frames, and command-to-result times.

@@ -270,6 +270,45 @@ async function main() {
       content: ':root { --meo-background:#24292e; --meo-foreground:#e6edf3; --meo-semantic-markdownSyntax:#8b949e; --meo-semantic-mutedForeground:#8b949e; --meo-semantic-tableBorder:#3e444d; --meo-semantic-tagForeground:#61afef; --meo-semantic-tagBackground:rgba(97,175,239,.14); --meo-semantic-tagBorder:rgba(97,175,239,.45); --meo-font-live:Arial; --meo-font-live-weight:400; --meo-font-live-size:16px; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; } .cm-editor .meo-md-strike::selection { color: var(--meo-foreground); -webkit-text-fill-color: var(--meo-foreground); }'
     });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    const initialDiagnostics = await page.evaluate(() => {
+      const harness = (window as any).EditorStabilityHarness;
+      const results = [];
+      for (const mode of ['live', 'source']) for (const populated of [false, true]) {
+        const diagnostic = { from: 0, to: 5, severity: 1, message: 'Initial warning' };
+        const prototype = harness.EditorView.prototype;
+        const dispatch = prototype.dispatch;
+        let diagnosticTransactions = 0;
+        prototype.dispatch = function (...specs: any[]) {
+          for (const spec of specs) {
+            const effects = Array.isArray(spec.effects) ? spec.effects : [spec.effects];
+            if (effects.some(effect => effect?.is(harness.setDiagnosticsEffect))) diagnosticTransactions++;
+          }
+          return dispatch.apply(this, specs);
+        };
+        let editor: any;
+        try {
+          editor = harness.createEditor({ parent: document.getElementById('app')!, text: 'hello world',
+            initialMode: mode, initialDiagnostics: populated ? [diagnostic] : [], onApplyChanges() {} });
+        } finally { prototype.dispatch = dispatch; }
+        try {
+          const initialTransactionCount = diagnosticTransactions;
+          const initiallyMarked = !!editor.view.dom.querySelector('.meo-diagnostic-warning');
+          editor.setDiagnostics([{ ...diagnostic, message: 'Updated warning' }]);
+          const updated = !!editor.view.dom.querySelector('.meo-diagnostic-warning[title="Updated warning"]');
+          editor.setDiagnostics([]);
+          results.push({ mode, populated, diagnosticTransactions: initialTransactionCount, initiallyMarked, updated,
+            cleared: !editor.view.dom.querySelector('.meo-diagnostic'),
+            unchangedText: editor.view.state.doc.toString() === 'hello world' });
+        } finally { editor.destroy(); document.getElementById('app')!.replaceChildren(); }
+      }
+      return results;
+    });
+    for (const result of initialDiagnostics) {
+      if ((!result.populated && result.diagnosticTransactions !== 0)
+        || result.initiallyMarked !== result.populated || !result.updated || !result.cleared || !result.unchangedText) {
+        throw Error(`Initial empty diagnostics must avoid transactions while warnings remain functional: ${JSON.stringify(result)}`);
+      }
+    }
 
     const markerLines = [
       '**还有什么：**大客户给的',

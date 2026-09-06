@@ -59,14 +59,12 @@ exports.run = async () => {
     const detectedAt = performance.now();
     report.openToEditorMs = detectedAt - openedAt;
     if (coldInput) {
-      // No settling sleep or source-line navigation before this first input.
+      // Type at the editor's default first-line-end caret without replacing its
+      // selection or waiting for layout/selection synchronization to settle.
       await frame.evaluate(() => {
-        const line = [...document.querySelectorAll('.editor-host .cm-line')].find(e => e.textContent === 'BENCH_PARAGRAPH');
-        if (!line) throw Error('Missing cold-input paragraph');
-        const content = line.closest('.cm-content');
+        const content = document.querySelector('.editor-host .cm-content');
+        if (!content) throw Error('Missing cold-input editor');
         content.focus({ preventScroll: true });
-        const range = document.createRange(); range.selectNodeContents(line); range.collapse(false);
-        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
         window.__coldPaint = null;
         const setupAt = performance.now();
         content.addEventListener('input', event => {
@@ -74,7 +72,7 @@ exports.run = async () => {
           requestAnimationFrame(() => requestAnimationFrame(() => {
             window.__coldPaint = { inputToPaintMs: performance.now() - start,
               setupToInputEventMs: start - setupAt, trusted: event.isTrusted,
-              textVisible: [...document.querySelectorAll('.editor-host .cm-line')].some(e => e.textContent === 'BENCH_PARAGRAPHx') };
+              textVisible: [...document.querySelectorAll('.editor-host .cm-line')].some(e => e.textContent === '# Native interaction baselinex') };
           }));
         }, { once: true, capture: true });
       });
@@ -84,7 +82,7 @@ exports.run = async () => {
       const paint = await frame.evaluate(() => window.__coldPaint);
       assert.ok(paint.textVisible, 'Cold input must be visible');
       assert.ok(paint.trusted, 'Cold input must use a browser input event');
-      expected = expected.replace('BENCH_PARAGRAPH', 'BENCH_PARAGRAPHx');
+      expected = expected.replace('# Native interaction baseline', '# Native interaction baselinex');
       report.runs.push({ phase: 'cold-input', detectedToInputCommandMs: issuedAt - detectedAt,
         commandToResultMs: performance.now() - issuedAt, ...paint });
       const scroller = await frame.$('.editor-host .cm-scroller');
@@ -127,7 +125,7 @@ exports.run = async () => {
       if (phase === 'prose') {
         await jump(3);
         await frame.evaluate(() => {
-          const line = [...document.querySelectorAll('.editor-host .cm-line')].find(e => /^BENCH_PARAGRAPHx?$/.test(e.textContent));
+          const line = [...document.querySelectorAll('.editor-host .cm-line')].find(e => e.textContent === 'BENCH_PARAGRAPH');
           if (!line) throw Error('Missing probe paragraph');
           const range = document.createRange(); range.selectNodeContents(line); range.collapse(false);
           const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);

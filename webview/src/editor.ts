@@ -2629,7 +2629,10 @@ export function createEditor({
   syncModeClasses();
   syncGitGutterVisibility();
   syncSelectionClass();
-  view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
+  // Both diagnostic fields start empty. An empty effect only rebuilds Live decorations.
+  if (currentDiagnostics.length > 0) {
+    view.dispatch({ effects: setDiagnosticsEffect.of(currentDiagnostics) });
+  }
   emitSelectionChange();
 
   return {
