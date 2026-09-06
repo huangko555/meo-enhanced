@@ -2,9 +2,10 @@ import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, R
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
-import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
+import { markdownKeymap } from '@codemirror/lang-markdown';
+import { editorMarkdownLanguage } from './liveMode';
 import { indentUnit, syntaxHighlighting, syntaxTree, forceParsing } from '@codemirror/language';
-import { sourceHighlightStyle, sourceMarkdownHighlightProps } from './theme';
+import { sourceHighlightStyle } from './theme';
 import { shikiCodeHighlight } from './helpers/shikiDecorations';
 import type { UiLanguage } from '../../src/foundation/uiLanguage';
 import { longCodeBlockEnabledFacet } from './helpers/longCodeBlocks';
@@ -13,10 +14,9 @@ import { assessLargeDocument } from '../../src/foundation/largeDocument';
 import { uiLanguageFacet } from './editor/uiLanguage';
 import { liveModeExtensions, preserveLiveDecorationsForSearchEffect, refreshLiveDecorationsAfterSearchEffect, setLiveDocumentIdleEffect, setLivePointerSelectionActiveEffect } from './liveMode';
 import { detailsBlockStateExtensions } from './helpers/detailsBlocks';
-import { resolveCodeLanguage, insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
+import { insertCodeBlock, sourceCodeBlockField } from './helpers/codeBlocks';
 import { sourceStrikeMarkerField } from './helpers/strikeMarkers';
-import { highlightMarkdownExtension, sourceHighlightField } from './helpers/highlightSyntax';
-import { footnoteMarkdownExtension } from './helpers/footnotes';
+import { sourceHighlightField } from './helpers/highlightSyntax';
 import { sourceWikiMarkerField } from './helpers/wikiLinks';
 import { sourceFileLinkField } from './helpers/sourceRawLinks';
 import { sourceUrlBoundaryField } from './helpers/sourceUrlBoundaries';
@@ -3748,17 +3748,7 @@ function insertWikiLink(view: EditorView, selection: InlineSelectionRange | Sele
 
 function sourceMode(): Extension[] {
   return [
-    markdown({
-      base: markdownLanguage,
-      addKeymap: false,
-      codeLanguages: resolveCodeLanguage,
-      extensions: [
-        footnoteMarkdownExtension,
-        highlightMarkdownExtension,
-        { props: [sourceMarkdownHighlightProps] },
-        { remove: ['SetextHeading'] }
-      ]
-    }),
+    editorMarkdownLanguage,
     syntaxHighlighting(sourceHighlightStyle),
     sourceCodeBlockField,
     sourceListMarkerField,

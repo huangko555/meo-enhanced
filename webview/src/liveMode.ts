@@ -25,9 +25,9 @@ import {
 } from './helpers/codeBlocks';
 import { ImageGroupWidget, ImageWidget, getImageData, isImageUrl, type ImageGroupItem } from './helpers/images';
 import { getImagePresentationFactory } from './editor/imagePresentation';
-import { liveHighlightStyle } from './theme';
-import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
+import { liveHighlightStyle, sourceMarkdownHighlightProps } from './theme';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
+import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
 import { getFencedCodeInfo, headingLevelFromName, resolvedSyntaxTree } from './helpers/markdownSyntax';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
@@ -3383,15 +3383,20 @@ const headingLineNumberMarkerField = StateField.define<RangeSet<GutterMarker>>({
   provide: (field) => gutterLineClass.from(field)
 });
 
+// Both modes edit the same grammar. Stable language identity lets CodeMirror
+// retain its incremental parse when only presentation extensions change.
+export const editorMarkdownLanguage = markdown({
+  base: markdownLanguage,
+  addKeymap: false,
+  codeLanguages: resolveCodeLanguage,
+  extensions: [footnoteMarkdownExtension, highlightMarkdownExtension,
+    { props: [sourceMarkdownHighlightProps] }, { remove: ['SetextHeading'] }]
+});
+
 export function liveModeExtensions(options: { readonly largeDocument?: boolean } = {}): Extension[] {
   return [
     ...liveInputDerivedWorkExtensions(options),
-    markdown({
-      base: markdownLanguage,
-      addKeymap: false,
-      codeLanguages: resolveCodeLanguage,
-      extensions: [footnoteMarkdownExtension, highlightMarkdownExtension, { remove: ['SetextHeading'] }]
-    }),
+    editorMarkdownLanguage,
     syntaxHighlighting(liveHighlightStyle),
     markdownTagField,
     livePointerSelectionActiveField,
