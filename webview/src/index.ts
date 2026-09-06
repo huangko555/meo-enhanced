@@ -1259,6 +1259,7 @@ const previewController = createPreviewController({
   vscode,
   uiLanguage: activeUiLanguage,
   getEditorAppearance: () => resolveEditorAppearanceForPreview(),
+  isCurrentText: (text) => getCurrentEditorText() === text,
   getCodePalette: (appearance) => resolveCodePaletteForPreview(appearance),
   applyCodeTheme: (appearance) => applyCodeThemeForPreview(appearance),
   mermaidRenderResources: mermaidDiagramRenderPool,

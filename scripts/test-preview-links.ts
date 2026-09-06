@@ -19,6 +19,28 @@ try {
   const page = await browser.newPage();
   await page.setContent('<!doctype html><style>.preview-dropdown-panel { position: fixed; }</style><body></body>');
   await page.addScriptTag({ path: path.join(tempDir, 'test-preview-mermaid-runtime-entry.js') });
+  const stalePreload = await page.evaluate(async () => {
+    const controller = (window as any).__previewController;
+    (window as any).__previewCurrentText = 'edited text';
+    controller.preload('original text');
+    const requestId = (window as any).__previewMessages.findLast((message: any) => message.type === 'requestPreviewRender').requestId;
+    controller.acceptRenderResponse({ type: 'previewRenderResult', requestId,
+      result: { ok: true, value: { hasMermaid: false, styles: { dark: '', light: '' }, html: '<p>Obsolete preload</p>' } } });
+    await Promise.resolve();
+    const srcdoc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.srcdoc;
+    controller.preload('promoted text');
+    controller.setVisible(true);
+    const promotedId = (window as any).__previewMessages.findLast((message: any) => message.type === 'requestPreviewRender').requestId;
+    controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: promotedId,
+      result: { ok: true, value: { hasMermaid: false, styles: { dark: '', light: '' }, html: '<p>Promoted preload</p>' } } });
+    await Promise.resolve();
+    const promoted = document.querySelector<HTMLIFrameElement>('.preview-frame')!.srcdoc.includes('Promoted preload');
+    controller.setVisible(false);
+    delete (window as any).__previewCurrentText;
+    return { srcdoc, promoted };
+  });
+  if (stalePreload.srcdoc) throw new Error('Obsolete background preload must not start iframe layout');
+  if (!stalePreload.promoted) throw new Error('Promoted preload must complete after Preview becomes visible');
   await page.evaluate(() => {
     const controller = (window as any).__previewController;
     document.body.prepend(controller.appearanceControl);

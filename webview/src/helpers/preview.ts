@@ -20,6 +20,7 @@ type PreviewControllerOptions = {
   vscode: { postMessage: (message: WebviewMessage) => void };
   uiLanguage: UiLanguage;
   getEditorAppearance: () => 'light' | 'dark';
+  isCurrentText?: (text: string) => boolean;
   getCodePalette: (appearance: 'light' | 'dark') => PreviewCodePalette;
   applyCodeTheme: (appearance: 'light' | 'dark') => void;
   onRendered?: () => void;
@@ -258,6 +259,7 @@ export function createPreviewController({
   vscode,
   uiLanguage: initialUiLanguage,
   getEditorAppearance,
+  isCurrentText,
   getCodePalette,
   applyCodeTheme,
   onRendered,
@@ -900,6 +902,12 @@ export function createPreviewController({
     }).then((result) => {
       if (generation !== requestGeneration) return;
       hasPendingRequest = false;
+      // A hidden preload can finish after typing has already made it obsolete.
+      // Keep explicit visible requests authoritative, including a promoted preload.
+      if (background && host.hidden && isCurrentText?.(requestText) === false) {
+        pendingViewportRestore = null;
+        return;
+      }
       if (result.ok === false) {
         pendingViewportRestore = null;
         setStatus(uiStrings.previewFailed);

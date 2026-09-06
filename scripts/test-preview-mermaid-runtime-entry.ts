@@ -83,6 +83,10 @@ const controller = createPreviewController({
   vscode: { postMessage(message) { previewMessages.push(message); } },
   uiLanguage: 'en',
   getEditorAppearance: () => 'dark',
+  isCurrentText: (text: string) => {
+    const current = (window as typeof window & { __previewCurrentText?: string }).__previewCurrentText;
+    return current === undefined || current === text;
+  },
   getCodePalette: (appearance) => codePaletteAdapter.resolve(undefined, appearance).preview,
   applyCodeTheme: (appearance) => {
     setShikiTheme(codePaletteAdapter.resolve(undefined, appearance).sourceTheme, 'preview');
