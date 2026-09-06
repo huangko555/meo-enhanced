@@ -18,11 +18,22 @@ exports.run = async () => {
     vscode: vscode.version,
     sha256: createHash('sha256').update(original).digest('hex'), bytes: original.length,
     visible: process.env.MEO_PERF_VISIBLE === '1',
-    profiled: process.env.MEO_PERF_PROFILE === '1', imageLine, runs: []
+    profiled: process.env.MEO_PERF_PROFILE === '1',
+    traced: process.env.MEO_PERF_TRACE === '1', imageLine, runs: []
   };
   let browser;
+  let traceSession;
   try {
     browser = await puppeteer.connect({ browserURL: process.env.MEO_PERF_BROWSER_URL, defaultViewport: null });
+    if (result.traced) {
+      // A browser session includes the webview renderer that does not exist yet.
+      traceSession = await browser.target().createCDPSession();
+      await traceSession.send('Tracing.start', {
+        categories: 'devtools.timeline,v8.execute,blink.user_timing,loading,disabled-by-default-devtools.timeline',
+        transferMode: 'ReturnAsStream'
+      });
+      await traceSession.send('Tracing.recordClockSyncMarker', {syncId: 'meo-open-with'});
+    }
     const openedAt = performance.now();
     let openError;
     const opening = vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), 'meoEnhanced.editor').catch(error => { openError = error; });
@@ -36,6 +47,7 @@ exports.run = async () => {
     }
     if (!frame) throw Error('No editor');
     result.openToEditorMs = performance.now() - openedAt;
+    if (traceSession) await frame.evaluate(() => performance.mark('meo-editor-detected'));
     const extension = vscode.extensions.getExtension('huangko555.meo-enhanced');
     result.extensionVersion = extension?.packageJSON.version;
     if (extension) {
@@ -52,7 +64,9 @@ exports.run = async () => {
     }));
     let firstPreview = true;
     for (const mode of ['preview','source','live','source','preview','live']) {
-      const profile = result.profiled && mode === 'preview' && firstPreview;
+      const traceLabel = `meo-switch-${result.runs.length}-${mode}`;
+      if (traceSession) await frame.evaluate(label => performance.mark(`${label}-start`), traceLabel);
+      const profile = result.profiled;
       if (profile) { await frame.client.send('Profiler.enable'); await frame.client.send('Profiler.start'); }
       const start = performance.now();
       await frame.click(`button[data-mode="${mode}"]`);
@@ -63,9 +77,14 @@ exports.run = async () => {
       }, {timeout:30000}, mode);
       result.runs.push({ mode, readyMs: performance.now() - start,
         foreground: await frame.evaluate(() => document.hasFocus()) });
+      if (traceSession) await frame.evaluate(label => {
+        performance.mark(`${label}-ready`);
+        performance.measure(label, `${label}-start`, `${label}-ready`);
+      }, traceLabel);
       if (profile) {
         const {profile: cpu} = await frame.client.send('Profiler.stop');
-        fs.writeFileSync(path.join(output,'first-preview.cpuprofile'),JSON.stringify(cpu));
+        const name = firstPreview && mode === 'preview' ? 'first-preview' : `switch-${result.runs.length - 1}-${mode}`;
+        fs.writeFileSync(path.join(output, `${name}.cpuprofile`), JSON.stringify(cpu));
       }
       if (mode === 'preview' && firstPreview) {
         firstPreview = false;
@@ -117,8 +136,28 @@ exports.run = async () => {
     if (imageLine && !result.imageLoaded) throw Error('Selected Preview image did not decode');
   } catch(error) { result.error=String(error.stack||error); throw error; }
   finally {
+    if (traceSession) {
+      let timer;
+      try {
+        const complete = new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(Error('Trace completion timed out')), 15000);
+          traceSession.once('Tracing.tracingComplete', event => { clearTimeout(timer); resolve(event); });
+        });
+        const [{stream}] = await Promise.all([complete, traceSession.send('Tracing.end')]);
+        const descriptor = fs.openSync(path.join(output, 'reading.trace.json'), 'w');
+        try {
+          while (true) {
+            const chunk = await traceSession.send('IO.read', {handle: stream});
+            fs.writeSync(descriptor, Buffer.from(chunk.data, chunk.base64Encoded ? 'base64' : 'utf8'));
+            if (chunk.eof) break;
+          }
+        } finally { fs.closeSync(descriptor); await traceSession.send('IO.close', {handle: stream}); }
+      } catch (error) { result.traceError = String(error.stack || error); }
+      finally { clearTimeout(timer); }
+    }
     browser?.disconnect(); result.originalUnchanged=original.equals(fs.readFileSync(file));
     fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2));
     if (!result.originalUnchanged) throw Error('The input document changed during the read-only probe');
+    if (result.traceError && !result.error) throw Error(result.traceError);
   }
 };

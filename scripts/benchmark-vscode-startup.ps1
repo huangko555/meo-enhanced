@@ -3,6 +3,7 @@ param(
   [Parameter(Mandatory=$true)][string]$CodePath,
   [ValidateRange(1024,65535)][int]$Port=9341,
   [switch]$Profile,
+  [switch]$Trace,
   [switch]$Visible,
   [ValidateSet('startup','interaction','reading')][string]$Scenario='startup',
   [ValidateRange(0,2147483647)][int]$ImageLine=0,
@@ -10,6 +11,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 if ($Profile -and $Scenario -eq 'interaction') { throw 'Interaction samples must run without the startup CPU profiler.' }
+if ($Trace -and ($Scenario -ne 'reading' -or $Profile)) { throw 'Trace requires the reading scenario without Profile; collect timings separately.' }
 if ($ImageLine -and $Scenario -ne 'reading') { throw 'ImageLine is only used by the reading scenario.' }
 if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
   throw 'The debugging port is already in use; choose another -Port.'
@@ -27,6 +29,7 @@ $env:MEO_PERF_DOCUMENT=$documentPath
 $env:MEO_PERF_OUTPUT=$output
 $env:MEO_PERF_BROWSER_URL='http://127.0.0.1:'+ $Port
 $env:MEO_PERF_PROFILE=if($Profile){'1'}else{'0'}
+$env:MEO_PERF_TRACE=if($Trace){'1'}else{'0'}
 $env:MEO_PERF_VISIBLE=if($Visible){'1'}else{'0'}
 $env:MEO_PERF_IMAGE_LINE=[string]$ImageLine
 $entry=Join-Path $PSScriptRoot ('benchmark-vscode-'+$Scenario+'.cjs')

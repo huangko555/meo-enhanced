@@ -100,7 +100,14 @@ optionally selects the first image whose mapped source line matches, aligns its
 source block with the top after a trusted interaction, and checks real decoding
 separately from the placeholder. The image report records its bounds and visibility after decoding;
 decoding success alone does not prove that late layout kept it in the viewport.
-`-Profile` samples the first Preview transition and marks the run as profiled.
+`-Profile` samples each transition separately and marks the run as profiled.
+`-Trace` instead captures `reading.trace.json` from before `openWith` through all
+six transitions, including newly created webview renderers. User Timing marks
+identify editor detection and each transition's automation start/ready bounds.
+The trace excludes VS Code process startup and Extension Host CPU stacks;
+editor detection can lag actual mounting. Use it to attribute renderer work,
+not as an exact first-paint measurement. Trace and CPU sampling cannot be combined;
+collect uninstrumented timings separately.
 These single samples are diagnostic, not percentiles or endurance acceptance.
 The same hidden-window, foreground-permission, and no-concurrent-test rules apply.
 
