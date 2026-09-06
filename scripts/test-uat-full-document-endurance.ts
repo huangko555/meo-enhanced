@@ -166,6 +166,26 @@ async function locateOperation(page: import('puppeteer-core').Page, operation: O
 async function centerLine(page: import('puppeteer-core').Page, lineNumber: number): Promise<void> {
   await page.evaluate((line) => (window as any).__fullUatEditor.scrollToLine(line, 'center'), lineNumber);
   await waitForScrollStability(page);
+  const viewport = await page.evaluate((lineNumber) => {
+    const editor = (window as any).__fullUatEditor;
+    const line = editor.view.state.doc.line(lineNumber);
+    const block = editor.view.lineBlockAt(line.from);
+    const viewportRect = editor.view.scrollDOM.getBoundingClientRect();
+    const top = viewportRect.top + block.top - editor.view.scrollDOM.scrollTop;
+    const bottom = viewportRect.top + block.bottom - editor.view.scrollDOM.scrollTop;
+    return {
+      line: lineNumber,
+      from: editor.view.state.doc.lineAt(editor.view.viewport.from).number,
+      to: editor.view.state.doc.lineAt(editor.view.viewport.to).number,
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      targetTop: top,
+      targetBottom: bottom,
+      visible: bottom > viewportRect.top && top < viewportRect.bottom
+    };
+  }, lineNumber);
+  if (!viewport.visible) {
+    throw new Error(`Centered line remained outside the viewport: ${JSON.stringify(viewport)}`);
+  }
 }
 
 async function startMonitor(
@@ -713,9 +733,18 @@ async function targetState(page: import('puppeteer-core').Page, operation: Opera
       tableInput = Array.from(row?.querySelectorAll<HTMLTextAreaElement>('textarea') ?? [])
         .find((input) => input.value.includes(marker) || input.value === tableCell) ?? null;
     }
-    const coords = editor.view.coordsAtPos(editor.view.state.doc.line(lineNumber).from);
+    const sourceLine = editor.view.state.doc.line(lineNumber);
+    // Live decorations can replace syntax at the start of a line (for example
+    // heading markers), making coordsAtPos(line.from) legitimately unavailable
+    // even while the editable line content is painted and focused.
+    const coords = editor.view.coordsAtPos(sourceLine.from) ?? editor.view.coordsAtPos(sourceLine.to);
+    const lineBlock = editor.view.lineBlockAt(sourceLine.from);
+    const sourceRect = coords ?? {
+      top: viewport.top + lineBlock.top - editor.view.scrollDOM.scrollTop,
+      bottom: viewport.top + lineBlock.bottom - editor.view.scrollDOM.scrollTop
+    };
     const target = region ?? tableInput;
-    const rect = target?.getBoundingClientRect() ?? coords;
+    const rect = target?.getBoundingClientRect() ?? sourceRect;
     const active = document.activeElement;
     const activeLineRect = region?.querySelector<HTMLElement>('.cm-activeLine')?.getBoundingClientRect() ?? null;
     const cursorRect = region?.querySelector<HTMLElement>('.cm-cursor-primary')?.getBoundingClientRect() ?? null;

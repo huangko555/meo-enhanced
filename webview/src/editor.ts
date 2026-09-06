@@ -3146,6 +3146,48 @@ export function createEditor({
         });
         return;
       }
+      if (align === 'center') {
+        // A distant Live target can be hidden by a replacement decoration whose
+        // geometry is still settling. Move the selection and request the first
+        // scroll in one CodeMirror transaction so a stale virtual viewport
+        // cannot leave the new target unmounted; the controller owns only the
+        // following height-map settlement.
+        const isRevealCurrent = viewportController.beginNavigationReveal();
+        view.dispatch({
+          selection: { anchor: line.from, head: line.from },
+          effects: EditorView.scrollIntoView(line.from, { y: 'center' })
+        });
+        view.focus();
+        viewportController.revealPositionUntilStable(
+          line.from,
+          { y: 'center' },
+          isRevealCurrent
+        );
+        // A late Live decoration measurement can supersede that first request.
+        // Retry only while the entire target remains offscreen so settled,
+        // clickable controls never move under an in-progress pointer gesture.
+        let remainingRevealFrames = 8;
+        const ensureTargetVisible = () => {
+          if (!isRevealCurrent() || remainingRevealFrames <= 0) return;
+          const targetLine = view.state.doc.line(Math.min(line.number, view.state.doc.lines));
+          const targetBlock = view.lineBlockAt(targetLine.from);
+          const viewportTop = view.scrollDOM.scrollTop;
+          if (
+            targetBlock.bottom > viewportTop &&
+            targetBlock.top < viewportTop + view.scrollDOM.clientHeight
+          ) return;
+          remainingRevealFrames -= 1;
+          view.dispatch({ effects: EditorView.scrollIntoView(targetLine.from, { y: 'center' }) });
+          viewportController.revealPositionUntilStable(
+            targetLine.from,
+            { y: 'center' },
+            isRevealCurrent
+          );
+          requestAnimationFrame(ensureTargetVisible);
+        };
+        requestAnimationFrame(ensureTargetVisible);
+        return;
+      }
       const targetIsVisible = align === 'upper' && isPositionVisible(line.from);
       const effectiveAlign = targetIsVisible ? 'nearest' : align;
       applyRevealSelection(line.from, line.from, { focusEditor: true, align: effectiveAlign }, true);
