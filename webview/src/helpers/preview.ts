@@ -1060,10 +1060,11 @@ export function createPreviewController({
     const lineTop = rect.top + rect.height * ((topLine - range.start) / lineSpan);
     return {
       topLine,
-      // The viewport may start in the margin after this source block. Keep
-      // that distance too; resetting it to zero moves the preceding block to
-      // the top whenever a deferred resource changes layout above the reader.
-      topLineOffset: Math.max(0, viewportAnchor - lineTop)
+      // Keep gaps for a layout transaction within this Preview. A mode switch
+      // cannot project an unmapped Preview spacer into the editor's line box.
+      topLineOffset: rect.bottom <= viewportAnchor && !acceptingViewportProjection
+        ? 0
+        : Math.max(0, viewportAnchor - lineTop)
     };
   };
   const restoreTopVisiblePosition = (
