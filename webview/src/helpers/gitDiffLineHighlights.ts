@@ -102,7 +102,8 @@ export function setGitDiffLineHighlightsEnabled(target: unknown, enabled: boolea
   // are not active (e.g. toggled while in Live mode).
   gitDiffHighlightsEnabled = enabled;
   const view = resolveEditorView(target);
-  if (!view) {
+  // The stored preference is enough until Source installs the highlight field.
+  if (!view || !view.state.field(gitDiffLineHighlightsField, false)) {
     return;
   }
   view.dispatch({

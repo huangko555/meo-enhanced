@@ -5,6 +5,7 @@ param(
   [switch]$Profile,
   [switch]$Trace,
   [switch]$Visible,
+  [switch]$ColdInput,
   [ValidateSet('startup','interaction','reading','lifecycle')][string]$Scenario='startup',
   [ValidateRange(0,2147483647)][int]$ImageLine=0,
   [switch]$ResourceCampaign,
@@ -13,6 +14,7 @@ param(
   [string]$ExtensionPath
 )
 $ErrorActionPreference='Stop'
+if ($ColdInput -and $Scenario -ne 'interaction') { throw 'ColdInput requires the interaction scenario.' }
 if ($ResourceCampaign -and ($Scenario -ne 'lifecycle' -or -not $ConfirmLongRun -or -not $ImagePath)) {
   throw 'ResourceCampaign requires lifecycle, ImagePath and explicit ConfirmLongRun authorization.'
 }
@@ -38,6 +40,7 @@ $env:MEO_PERF_BROWSER_URL='http://127.0.0.1:'+ $Port
 $env:MEO_PERF_PROFILE=if($Profile){'1'}else{'0'}
 $env:MEO_PERF_TRACE=if($Trace){'1'}else{'0'}
 $env:MEO_PERF_VISIBLE=if($Visible){'1'}else{'0'}
+$env:MEO_PERF_COLD_INPUT=if($ColdInput){'1'}else{'0'}
 $env:MEO_PERF_IMAGE_LINE=[string]$ImageLine
 $env:MEO_PERF_RESOURCE_CAMPAIGN=if($ResourceCampaign){'1'}else{'0'}
 $env:MEO_PERF_CONFIRM_LONG_RUN=if($ConfirmLongRun){'1'}else{'0'}

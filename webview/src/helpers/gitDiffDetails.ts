@@ -233,7 +233,9 @@ function resolveEditorView(target: unknown): EditorView | null {
 export function setGitDiffDetailsVisible(target: unknown, visible: boolean): void {
   gitDiffDetailsVisible = visible;
   const view = resolveEditorView(target);
-  if (!view) return;
+  // Live has no details field; the preference is read when Source mounts it.
+  // Dispatching there would only rebuild unrelated Live decorations.
+  if (!view || !view.state.field(gitDiffDetailsField, false)) return;
   view.dispatch({ effects: setGitDiffDetailsVisibleEffect.of(visible) });
 }
 

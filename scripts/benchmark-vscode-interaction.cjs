@@ -26,6 +26,8 @@ exports.run = async () => {
   const uri = vscode.Uri.file(file);
   const report = { vscode: vscode.version, sha256: createHash('sha256').update(original).digest('hex'), bytes: original.length, visible: process.env.MEO_PERF_VISIBLE === '1', autoSaveDelayMs: 1000, runs: [] };
   let browser;
+  const coldInput = process.env.MEO_PERF_COLD_INPUT === '1';
+  report.coldInput = coldInput;
   const waitFor = async (predicate, label) => {
     const deadline = performance.now() + 15000;
     while (!await predicate()) {
@@ -35,17 +37,79 @@ exports.run = async () => {
   };
   try {
     await vscode.workspace.getConfiguration('files').update('autoSave', 'off', vscode.ConfigurationTarget.Workspace);
-    await vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor');
     await vscode.commands.executeCommand('workbench.action.closeSidebar');
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
     browser = await puppeteer.connect({ browserURL: process.env.MEO_PERF_BROWSER_URL, defaultViewport: null });
+    const openedAt = performance.now();
+    let openError;
+    const opening = vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor').catch(error => { openError = error; });
+    if (!coldInput) await opening;
     let frame;
     await waitFor(async () => {
+      if (openError) throw openError;
       for (const page of await browser.pages()) for (const candidate of page.frames()) {
-        if (await candidate.$('.cm-content').catch(() => null)) { frame = candidate; return true; }
+        try {
+          if (await candidate.evaluate(() => !!document.querySelector('.editor-host .cm-content'))) { frame = candidate; return true; }
+        } catch (error) {
+          if (!/detached|Execution context was destroyed|Cannot find context/i.test(String(error))) throw error;
+        }
       }
       return false;
     }, 'editor');
+    const detectedAt = performance.now();
+    report.openToEditorMs = detectedAt - openedAt;
+    if (coldInput) {
+      // No settling sleep or source-line navigation before this first input.
+      await frame.evaluate(() => {
+        const line = [...document.querySelectorAll('.editor-host .cm-line')].find(e => e.textContent === 'BENCH_PARAGRAPH');
+        if (!line) throw Error('Missing cold-input paragraph');
+        const content = line.closest('.cm-content');
+        content.focus({ preventScroll: true });
+        const range = document.createRange(); range.selectNodeContents(line); range.collapse(false);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        window.__coldPaint = null;
+        const setupAt = performance.now();
+        content.addEventListener('input', event => {
+          const start = performance.now();
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            window.__coldPaint = { inputToPaintMs: performance.now() - start,
+              setupToInputEventMs: start - setupAt, trusted: event.isTrusted,
+              textVisible: [...document.querySelectorAll('.editor-host .cm-line')].some(e => e.textContent === 'BENCH_PARAGRAPHx') };
+          }));
+        }, { once: true, capture: true });
+      });
+      const issuedAt = performance.now();
+      await frame.page().keyboard.type('x');
+      await frame.waitForFunction(() => window.__coldPaint !== null);
+      const paint = await frame.evaluate(() => window.__coldPaint);
+      assert.ok(paint.textVisible, 'Cold input must be visible');
+      assert.ok(paint.trusted, 'Cold input must use a browser input event');
+      expected = expected.replace('BENCH_PARAGRAPH', 'BENCH_PARAGRAPHx');
+      report.runs.push({ phase: 'cold-input', detectedToInputCommandMs: issuedAt - detectedAt,
+        commandToResultMs: performance.now() - issuedAt, ...paint });
+      const scroller = await frame.$('.editor-host .cm-scroller');
+      const box = await scroller.boundingBox();
+      assert.ok(box);
+      await frame.page().mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      const scrollStart = performance.now();
+      const before = await frame.$eval('.editor-host .cm-scroller', e => e.scrollTop);
+      await frame.page().mouse.wheel({ deltaY: 180 });
+      await frame.waitForFunction(before => document.querySelector('.editor-host .cm-scroller').scrollTop !== before, {}, before);
+      report.runs.push({ phase: 'cold-scroll', commandToObservedScrollMs: performance.now() - scrollStart });
+      for (const mode of ['source', 'preview', 'live']) {
+        const start = performance.now();
+        await frame.click(`button[data-mode="${mode}"]`);
+        await frame.waitForFunction(mode => {
+          if (document.getElementById('app').dataset.mode !== mode) return false;
+          return mode === 'preview'
+            ? !document.querySelector('.editor-host').hasAttribute('data-preview-cover') && !!document.querySelector('.preview-frame')?.contentDocument?.querySelector('.meo-export-doc')
+            : !document.querySelector('.editor-host').hidden && !!document.querySelector('.editor-host .cm-content');
+        }, { timeout: 30000 }, mode);
+        report.runs.push({ phase: `cold-switch-${mode}`, readyMs: performance.now() - start });
+      }
+    }
+    await opening;
+    if (openError) throw openError;
     if (report.visible) await frame.page().bringToFront();
     report.environment = await frame.evaluate(() => ({ width: innerWidth, height: innerHeight, scale: devicePixelRatio, font: getComputedStyle(document.querySelector('.cm-content')).font, userAgent: navigator.userAgent }));
     const extension = vscode.extensions.getExtension('huangko555.meo-enhanced');
@@ -63,7 +127,7 @@ exports.run = async () => {
       if (phase === 'prose') {
         await jump(3);
         await frame.evaluate(() => {
-          const line = [...document.querySelectorAll('.editor-host .cm-line')].find(e => e.textContent === 'BENCH_PARAGRAPH');
+          const line = [...document.querySelectorAll('.editor-host .cm-line')].find(e => /^BENCH_PARAGRAPHx?$/.test(e.textContent));
           if (!line) throw Error('Missing probe paragraph');
           const range = document.createRange(); range.selectNodeContents(line); range.collapse(false);
           const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);

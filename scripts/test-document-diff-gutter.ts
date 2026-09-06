@@ -230,6 +230,36 @@ async function main() {
     await page.addStyleTag({ content: ':root { --meo-background:#24292e; --meo-foreground:#e6edf3; --meo-font-source:monospace; --meo-font-source-weight:400; --meo-font-source-size:14px; --git-deleted:#e05252; }' });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
 
+    const inactiveDiffSettings = await page.evaluate(() => {
+      const harness = (window as any).EditorStabilityHarness;
+      const editor = harness.createEditor({ parent: document.getElementById('app')!,
+        text: 'first\nchanged\nlast', initialMode: 'live', onApplyChanges() {} });
+      try {
+        editor.setGitBaseline({ available: true, tracked: true, mode: 'current-edit',
+          baseText: 'first\noriginal\nlast' });
+        const liveState = editor.view.state;
+        harness.setGitDiffDetailsVisible(editor, true);
+        harness.setGitDiffLineHighlightsEnabled(editor, true);
+        const unchangedLiveState = editor.view.state === liveState;
+        editor.setMode('source');
+        const sourceDetails = editor.view.dom.classList.contains('meo-git-diff-details-visible');
+        const sourceHighlights = !!editor.view.dom.querySelector('.meo-diff-changed-line');
+        editor.setMode('live');
+        const nextLiveState = editor.view.state;
+        harness.setGitDiffDetailsVisible(editor, false);
+        harness.setGitDiffLineHighlightsEnabled(editor, false);
+        const unchangedNextLiveState = editor.view.state === nextLiveState;
+        editor.setMode('source');
+        return { unchangedLiveState, unchangedNextLiveState, sourceDetails, sourceHighlights,
+          hiddenDetails: !editor.view.dom.classList.contains('meo-git-diff-details-visible'),
+          hiddenHighlights: !editor.view.dom.querySelector('.meo-diff-changed-line'),
+          unchangedText: editor.view.state.doc.toString() === 'first\nchanged\nlast' };
+      } finally { editor.destroy(); document.getElementById('app')!.replaceChildren(); }
+    });
+    if (Object.values(inactiveDiffSettings).some(value => !value)) {
+      throw Error(`Inactive diff settings must avoid Live transactions and apply on Source entry: ${JSON.stringify(inactiveDiffSettings)}`);
+    }
+
     await page.evaluate(() => {
       document.querySelector<HTMLElement>('#app')!.classList.add('editor-host');
       const editor = (window as any).EditorStabilityHarness.createEditor({

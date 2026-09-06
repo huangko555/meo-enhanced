@@ -130,6 +130,20 @@ one-second delay. Hidden windows remain diagnostic even if DOM focus is true.
 `-Visible` requires foreground authorization, and `-Profile` is unavailable for
 this scenario. A single sample per action establishes a baseline, not percentiles.
 
+Add `-ColdInput` to observe the editor while `openWith` is still pending and
+issue one trusted prose input immediately after detection and caret setup,
+without the normal settling sleep. It then scrolls once, switches Source →
+Preview → Live, and performs the usual input/save checks, including that first
+edit in the expected contents. Reports separate detection-to-command,
+setup-to-input-event, input-to-two-frames, and command-to-result times.
+The first two include automation/setup overhead and editor detection itself can
+lag mounting; this is not a measurement from the physical key press. Collecting
+the result can wait behind later renderer tasks even when the two frames have
+already occurred, so command-to-result must not be treated as input latency. The scroll
+and switches follow that first input, so they do not represent independently
+cold launches. This option is limited to `interaction` and remains a short
+diagnostic, not an endurance run or a pixel-level scroll assertion.
+
 For one bounded native hide/return/close resource sample:
 
 ```powershell
