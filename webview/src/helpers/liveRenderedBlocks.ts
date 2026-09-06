@@ -1,5 +1,5 @@
 import { EditorState } from '@codemirror/state';
-import type { SyntaxNodeRef } from '@lezer/common';
+import type { SyntaxNodeRef, Tree } from '@lezer/common';
 import { isThematicBreakLine } from './frontmatter';
 import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
 import { collectLatexMathRanges, resolveFencedDisplayMathInnerLineRange } from './math';
@@ -35,6 +35,10 @@ export interface LiveCollapsedGitBlock {
 }
 
 const renderedBlockCache = new WeakMap<EditorState, { tree: any; blocks: LiveRenderedBlock[] }>();
+type DiscoveredBlock = { block: LiveRenderedBlock; htmlFrom?: number };
+// Discovery depends on text and the resolved parse. Selection and HTML editing
+// only filter that discovery; they must not invalidate its whole-document scans.
+const discoveredBlockCache = new WeakMap<EditorState['doc'], { tree: Tree; blocks: DiscoveredBlock[] }>();
 const collapsedBlockCache = new WeakMap<EditorState, {
   lineFlags: readonly LineFlagLike[];
   blocks: LiveCollapsedGitBlock[];
@@ -193,10 +197,27 @@ export function getLiveRenderedBlocks(
     return cached.blocks;
   }
 
+  let discovered = discoveredBlockCache.get(state.doc);
+  if (!discovered || discovered.tree !== tree) {
+    discovered = { tree, blocks: discoverRenderedBlocks(state, tree) };
+    discoveredBlockCache.set(state.doc, discovered);
+  }
+  const htmlEditingRange = getHtmlEditingRange(state);
+  const blocks = discovered.blocks.filter(({ block, htmlFrom }) => {
+    if (block.kind === 'html' && htmlEditingRange?.from === htmlFrom) return false;
+    return block.kind !== 'math' || options.includeSelectedMath
+      || block.lineNumberHiddenTo < block.lineNumberHiddenFrom
+      || !selectionTouchesLineRange(state, block.lineNumberHiddenFrom, block.lineNumberHiddenTo);
+  }).map(({ block }) => ({ ...block }));
+  if (!options.includeSelectedMath) renderedBlockCache.set(state, { tree, blocks });
+  return blocks;
+}
+
+function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {
   const blocks: LiveRenderedBlock[] = [];
+  const htmlFromByBlock = new Map<LiveRenderedBlock, number>();
   const parsedTableRanges: Array<{ from: number; to: number }> = [];
   const codeLikeRanges = collectCodeLikeRanges(tree);
-  const htmlEditingRange = getHtmlEditingRange(state);
 
   tree.iterate({
     enter(node: SyntaxNodeRef) {
@@ -245,13 +266,6 @@ export function getLiveRenderedBlocks(
       continue;
     }
     const hiddenRange = resolveMathHiddenLineRange(startLine, endLine);
-    if (
-      !options.includeSelectedMath &&
-      hiddenRange &&
-      selectionTouchesLineRange(state, hiddenRange.from, hiddenRange.to)
-    ) {
-      continue;
-    }
     const block = createRenderedBlock('math', startLine, endLine, null);
     if (block) {
       if (hiddenRange) {
@@ -266,11 +280,11 @@ export function getLiveRenderedBlocks(
   }
 
   for (const htmlBlock of collectRenderableHtmlBlocks(state)) {
-    if (htmlEditingRange?.from === htmlBlock.from) continue;
     const block = createRenderedBlock('html', htmlBlock.startLine, htmlBlock.endLine, null);
     if (!block) continue;
     block.lineNumberHiddenFrom = htmlBlock.startLine + 1;
     block.lineNumberHiddenTo = htmlBlock.endLine;
+    htmlFromByBlock.set(block, htmlBlock.from);
     blocks.push(block);
   }
 
@@ -279,10 +293,7 @@ export function getLiveRenderedBlocks(
     left.startLine - right.startLine ||
     left.endLine - right.endLine
   ));
-  if (!options.includeSelectedMath) {
-    renderedBlockCache.set(state, { tree, blocks });
-  }
-  return blocks;
+  return blocks.map(block => ({ block, htmlFrom: htmlFromByBlock.get(block) }));
 }
 
 function createCollapsedBlock(

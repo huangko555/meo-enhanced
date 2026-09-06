@@ -332,7 +332,7 @@
     "test:table-cell-editing": "bun scripts/test-table-cell-editing.ts && bun scripts/test-table-cell-editing-production.ts",
     "test:table-cell-selection": "bun scripts/test-table-cell-selection.ts && bun scripts/test-table-cell-selection-production.ts",
     "test:history-rendered-block-interaction": "bun scripts/test-history-rendered-block-interaction.ts && bun scripts/test-history-rendered-block-chromium.ts && bun scripts/test-history-matrix.ts",
-    "test:editor-syntax-parsing": "bun scripts/test-mode-parser-reuse.ts && bun scripts/test-editor-syntax-parsing-matrix.ts && bun scripts/test-source-force-parsing-production.ts",
+    "test:editor-syntax-parsing": "bun scripts/test-mode-parser-reuse.ts && bun scripts/test-rendered-block-discovery.ts && bun scripts/test-editor-syntax-parsing-matrix.ts && bun scripts/test-source-force-parsing-production.ts",
     "test:browser-launch": "bun scripts/test-browser-launch.ts",
     "test:emoji-shortcodes": "bun scripts/test-emoji-shortcode-removal.ts",
     "test:mermaid-colon-removal": "bun scripts/test-mermaid-colon-removal.ts",
