@@ -157,21 +157,40 @@ async function assertEmbeddedMermaidSupportsPointerPanning(page: Page): Promise<
 }
 
 async function enterMermaidFullscreen(page: Page): Promise<void> {
-  const clicked = await page.evaluate(() => {
-    const button = Array.from(document.querySelectorAll<HTMLButtonElement>(
-      '.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Fullscreen"]'
-    )).find((candidate) => {
-      if (!candidate.isConnected) return false;
-      const rect = candidate.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
-    });
-    button?.dispatchEvent(new PointerEvent('pointerdown', {
-      bubbles: true,
-      cancelable: true,
-      button: 0
-    }));
-    return Boolean(button);
-  });
+  const clicked = await page.evaluate(() => new Promise<boolean>((resolve) => {
+    let stableButton: HTMLButtonElement | null = null;
+    let stableFrames = 0;
+    let remainingFrames = 120;
+    const probe = () => {
+      const button = Array.from(document.querySelectorAll<HTMLButtonElement>(
+        '.meo-mermaid-block .meo-mermaid-zoom-btn[aria-label="Fullscreen"]'
+      )).find((candidate) => {
+        if (!candidate.isConnected || candidate.closest('.meo-mermaid-block')?.getAttribute('aria-busy') === 'true') {
+          return false;
+        }
+        const rect = candidate.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+      }) ?? null;
+      stableFrames = button !== null && button === stableButton ? stableFrames + 1 : 0;
+      stableButton = button;
+      if (button && stableFrames >= 4) {
+        button.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          button: 0
+        }));
+        resolve(true);
+        return;
+      }
+      remainingFrames -= 1;
+      if (remainingFrames <= 0) {
+        resolve(false);
+        return;
+      }
+      requestAnimationFrame(probe);
+    };
+    probe();
+  }));
   if (!clicked) throw new Error('No connected visible Mermaid fullscreen control was available');
   await page.waitForFunction(() => {
     const fullscreen = document.querySelector<HTMLElement>('.meo-mermaid-fullscreen');
