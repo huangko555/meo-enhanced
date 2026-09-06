@@ -26,8 +26,10 @@ exports.run = async () => {
   const uri = vscode.Uri.file(file);
   const report = { vscode: vscode.version, sha256: createHash('sha256').update(original).digest('hex'), bytes: original.length, visible: process.env.MEO_PERF_VISIBLE === '1', autoSaveDelayMs: 1000, runs: [] };
   let browser;
+  let traceSession;
   const coldInput = process.env.MEO_PERF_COLD_INPUT === '1';
   report.coldInput = coldInput;
+  report.traced = process.env.MEO_PERF_TRACE === '1';
   const waitFor = async (predicate, label) => {
     const deadline = performance.now() + 15000;
     while (!await predicate()) {
@@ -40,6 +42,14 @@ exports.run = async () => {
     await vscode.commands.executeCommand('workbench.action.closeSidebar');
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
     browser = await puppeteer.connect({ browserURL: process.env.MEO_PERF_BROWSER_URL, defaultViewport: null });
+    if (report.traced) {
+      assert.ok(coldInput, 'Interaction tracing requires ColdInput');
+      traceSession = await browser.target().createCDPSession();
+      await traceSession.send('Tracing.start', {
+        categories: 'devtools.timeline,v8.execute,blink.user_timing,loading,disabled-by-default-devtools.timeline,disabled-by-default-v8.cpu_profiler',
+        transferMode: 'ReturnAsStream'
+      });
+    }
     const openedAt = performance.now();
     let openError;
     const opening = vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor').catch(error => { openError = error; });
@@ -61,21 +71,27 @@ exports.run = async () => {
     if (coldInput) {
       // Type at the editor's default first-line-end caret without replacing its
       // selection or waiting for layout/selection synchronization to settle.
-      await frame.evaluate(() => {
+      await frame.evaluate(traced => {
         const content = document.querySelector('.editor-host .cm-content');
         if (!content) throw Error('Missing cold-input editor');
         content.focus({ preventScroll: true });
         window.__coldPaint = null;
         const setupAt = performance.now();
+        if (traced) performance.mark('meo-cold-setup');
         content.addEventListener('input', event => {
           const start = performance.now();
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            window.__coldPaint = { inputToPaintMs: performance.now() - start,
-              setupToInputEventMs: start - setupAt, trusted: event.isTrusted,
-              textVisible: [...document.querySelectorAll('.editor-host .cm-line')].some(e => e.textContent === '# Native interaction baselinex') };
-          }));
+          if (traced) performance.mark('meo-cold-input');
+          requestAnimationFrame(() => {
+            if (traced) performance.mark('meo-cold-frame1');
+            requestAnimationFrame(() => {
+              if (traced) performance.mark('meo-cold-frame2');
+              window.__coldPaint = { inputToPaintMs: performance.now() - start,
+                setupToInputEventMs: start - setupAt, trusted: event.isTrusted,
+                textVisible: [...document.querySelectorAll('.editor-host .cm-line')].some(e => e.textContent === '# Native interaction baselinex') };
+            });
+          });
         }, { once: true, capture: true });
-      });
+      }, report.traced);
       const issuedAt = performance.now();
       await frame.page().keyboard.type('x');
       await frame.waitForFunction(() => window.__coldPaint !== null);
@@ -185,9 +201,38 @@ exports.run = async () => {
     report.passed = true;
   } catch (error) { report.error = String(error.stack || error); throw error; }
   finally {
+    if (traceSession) {
+      let timer;
+      let descriptor;
+      let stream;
+      try {
+        const complete = new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(Error('Trace completion timed out')), 15000);
+          traceSession.once('Tracing.tracingComplete', event => { clearTimeout(timer); resolve(event); });
+        });
+        const [event] = await Promise.all([complete, traceSession.send('Tracing.end')]);
+        stream = event.stream;
+        descriptor = fs.openSync(path.join(output, 'interaction.trace.json'), 'w');
+        while (true) {
+          const chunk = await traceSession.send('IO.read', { handle: stream });
+          fs.writeSync(descriptor, Buffer.from(chunk.data, chunk.base64Encoded ? 'base64' : 'utf8'));
+          if (chunk.eof) break;
+        }
+      } catch (error) { report.traceError = String(error.stack || error); }
+      finally {
+        clearTimeout(timer);
+        if (descriptor !== undefined) {
+          try { fs.closeSync(descriptor); } catch (error) { report.traceError ??= String(error); }
+        }
+        if (stream) {
+          try { await traceSession.send('IO.close', { handle: stream }); } catch (error) { report.traceError ??= String(error); }
+        }
+      }
+    }
     browser?.disconnect();
     report.originalUnchanged = original.equals(fs.readFileSync(originalPath));
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(report, null, 2));
     assert.ok(report.originalUnchanged, 'Original document changed');
+    if (report.traceError && !report.error) throw Error(report.traceError);
   }
 };

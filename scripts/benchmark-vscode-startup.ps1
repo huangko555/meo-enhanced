@@ -20,7 +20,7 @@ if ($ResourceCampaign -and ($Scenario -ne 'lifecycle' -or -not $ConfirmLongRun -
 }
 if (($ConfirmLongRun -or $ImagePath) -and -not $ResourceCampaign) { throw 'ConfirmLongRun and ImagePath require ResourceCampaign.' }
 if ($Profile -and $Scenario -in @('interaction','lifecycle')) { throw 'Interaction and lifecycle samples must run without the startup CPU profiler.' }
-if ($Trace -and ($Scenario -ne 'reading' -or $Profile)) { throw 'Trace requires the reading scenario without Profile; collect timings separately.' }
+if ($Trace -and ($Profile -or ($Scenario -ne 'reading' -and -not ($Scenario -eq 'interaction' -and $ColdInput)))) { throw 'Trace requires reading or interaction with ColdInput, without Profile; collect timings separately.' }
 if ($ImageLine -and $Scenario -ne 'reading') { throw 'ImageLine is only used by the reading scenario.' }
 if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
   throw 'The debugging port is already in use; choose another -Port.'

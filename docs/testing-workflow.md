@@ -146,6 +146,12 @@ and switches follow that first input, so they do not represent independently
 cold launches. This option is limited to `interaction` and remains a short
 diagnostic, not an endurance run or a pixel-level scroll assertion.
 
+Combine `-ColdInput -Trace` to write `interaction.trace.json` with CPU samples
+and `meo-cold-setup`, `meo-cold-input`, `meo-cold-frame1`, and `meo-cold-frame2`
+marks. Use this to attribute work between input and frames; tracing affects
+timings, so collect untraced samples separately. This combination cannot use
+`-Profile`.
+
 For one bounded native hide/return/close resource sample:
 
 ```powershell

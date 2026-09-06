@@ -31,7 +31,7 @@ function rawChange(state: EditorState, changes: ChangeSpec | readonly ChangeSpec
 
 function countedTransaction(transaction: Transaction): { transaction: Transaction; counts: AccessCounts } {
   const counts: AccessCounts = { lineReads: 0, slices: 0 };
-  const document = transaction.state.doc;
+  const document = transaction.newDoc;
   const countedDocument = new Proxy(document, {
     get(target, property) {
       const value = Reflect.get(target, property, target);
@@ -58,6 +58,7 @@ function countedTransaction(transaction: Transaction): { transaction: Transactio
   return {
     transaction: new Proxy(transaction, {
       get(target, property) {
+        if (property === 'newDoc') return countedDocument;
         return property === 'state' ? countedState : Reflect.get(target, property, target);
       }
     }) as Transaction,

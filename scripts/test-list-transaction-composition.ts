@@ -3,6 +3,7 @@ import {
   Annotation,
   EditorState,
   StateEffect,
+  StateField,
   Transaction,
   type Transaction as CodeMirrorTransaction,
   type TransactionSpec
@@ -41,6 +42,36 @@ function state(text: string, shouldNormalize: () => boolean = () => true): Edito
     doc: text,
     extensions: orderedListRenumberTransactionFilter(shouldNormalize)
   });
+}
+
+// Filters must not construct provisional fields before transaction extenders run.
+for (const [doc, from, expected] of [
+  ['# Heading', 9, '# Headingx'],
+  ['1. a\n2. b', 4, '1. ax\n2. b'],
+  ['1. a\n99. b', 4, '1. ax\n2. b']
+] as const) {
+  let updates = 0;
+  const extended = StateEffect.define<boolean>();
+  const observer = StateField.define<boolean>({
+    create: () => false,
+    update(_value, transaction) {
+      updates += 1;
+      return transaction.effects.some((effect) => effect.is(extended));
+    }
+  });
+  const initial = EditorState.create({
+    doc,
+    extensions: [
+      orderedListRenumberTransactionFilter(() => true),
+      observer,
+      EditorState.transactionExtender.of(() => ({ effects: extended.of(true) }))
+    ]
+  });
+  const transaction = initial.update({ changes: { from, insert: 'x' } });
+  assert.equal(updates, 0, `list filter must leave fields lazy: ${doc}`);
+  assert.equal(transaction.newDoc.toString(), expected);
+  assert.equal(transaction.state.field(observer), true);
+  assert.equal(updates, 1, 'fields should update only for the final extended transaction');
 }
 
 const zero = state('1. a\n2. b').update({

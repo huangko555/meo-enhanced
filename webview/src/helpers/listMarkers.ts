@@ -6,6 +6,7 @@ import {
   Annotation,
   type Extension,
   type Line,
+  type Text,
   type Range
 } from '@codemirror/state';
 import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemirror/view';
@@ -891,30 +892,30 @@ interface ListLineRecord {
   readonly text: string;
 }
 
-function readListLine(state: EditorState, lineNumber: number): ListLineRecord {
-  const line = state.doc.line(lineNumber);
-  return { line, text: state.doc.sliceString(line.from, line.to) };
+function readListLine(doc: Text, lineNumber: number): ListLineRecord {
+  const line = doc.line(lineNumber);
+  return { line, text: doc.sliceString(line.from, line.to) };
 }
 
 function collectContiguousListLines(
-  state: EditorState,
+  doc: Text,
   lineNumber: number
 ): ListLineRecord[] | null {
-  const current = readListLine(state, lineNumber);
+  const current = readListLine(doc, lineNumber);
   if (!isListLine(current.text)) {
     return null;
   }
 
   const lines: ListLineRecord[] = [];
   for (let previousLine = lineNumber - 1; previousLine >= 1; previousLine -= 1) {
-    const previous = readListLine(state, previousLine);
+    const previous = readListLine(doc, previousLine);
     if (!isListLine(previous.text)) break;
     lines.push(previous);
   }
   lines.reverse();
   lines.push(current);
-  for (let nextLine = lineNumber + 1; nextLine <= state.doc.lines; nextLine += 1) {
-    const next = readListLine(state, nextLine);
+  for (let nextLine = lineNumber + 1; nextLine <= doc.lines; nextLine += 1) {
+    const next = readListLine(doc, nextLine);
     if (!isListLine(next.text)) break;
     lines.push(next);
   }
@@ -963,14 +964,15 @@ function collectOrderedListRenumberChangesForTransaction(
   transaction: Transaction,
   resetNestedStartsAtLines: ReadonlySet<number> = new Set()
 ): ListTextChange[] {
-  const state = transaction.state;
+  // Reading transaction.state here computes all fields before input extenders run.
+  const doc = transaction.newDoc;
   const candidateLines = new Set<number>();
   transaction.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
-    const from = Math.min(state.doc.length, fromB);
-    const to = Math.min(state.doc.length, toB);
-    const first = state.doc.lineAt(from).number;
-    const last = state.doc.lineAt(to).number;
-    for (let lineNumber = Math.max(1, first - 1); lineNumber <= Math.min(state.doc.lines, last + 1); lineNumber += 1) {
+    const from = Math.min(doc.length, fromB);
+    const to = Math.min(doc.length, toB);
+    const first = doc.lineAt(from).number;
+    const last = doc.lineAt(to).number;
+    for (let lineNumber = Math.max(1, first - 1); lineNumber <= Math.min(doc.lines, last + 1); lineNumber += 1) {
       candidateLines.add(lineNumber);
     }
   });
@@ -979,7 +981,7 @@ function collectOrderedListRenumberChangesForTransaction(
   const changes: ListTextChange[] = [];
   for (const lineNumber of [...candidateLines].sort((left, right) => left - right)) {
     if (handledLines.has(lineNumber)) continue;
-    const lines = collectContiguousListLines(state, lineNumber);
+    const lines = collectContiguousListLines(doc, lineNumber);
     if (!lines) continue;
     for (const { line } of lines) handledLines.add(line.number);
     changes.push(...collectOrderedListRenumberChangesInLines(lines, resetNestedStartsAtLines));
@@ -1013,11 +1015,10 @@ export function orderedListRenumberTransactionFilter(
     );
     if (!changes.length) return transaction;
 
-    const normalization = transaction.state.changes(changes);
     // CodeMirror owns composition of the original transaction's opaque
     // annotations, effects, selection, scroll intent and history semantics.
     // Keeping the originating Transaction intact avoids a list-owned registry.
-    return [transaction, { changes: normalization, sequential: true }];
+    return [transaction, { changes, sequential: true }];
   });
 }
 
