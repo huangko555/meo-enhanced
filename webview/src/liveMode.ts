@@ -29,7 +29,7 @@ import { liveHighlightStyle, sourceMarkdownHighlightProps } from './theme';
 import { highlightMarkdownExtension } from './helpers/highlightSyntax';
 import { collectSingleTildeStrikePairs, collectStrikethroughRanges } from './helpers/strikeMarkers';
 import { collectKbdTagRangesFromText, hasKbdTagMarker } from './helpers/kbd';
-import { getFencedCodeInfo, headingLevelFromName, resolvedSyntaxTree } from './helpers/markdownSyntax';
+import { getFencedCodeInfo, headingLevelFromName, resolvedSyntaxTree, syntaxTreeChanged } from './helpers/markdownSyntax';
 import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from './helpers/detailsBlocks';
 import {
   addListMarkerDecoration,
@@ -3144,8 +3144,13 @@ const liveDecorationField = StateField.define<DecorationSet>({
           : mapLiveInputDerivedDecorations(inputDecorations, transaction)
         : inputDecorations;
     }
-    // Recompute on every transaction so live mode stays in sync with parser updates
-    // that may arrive without direct doc/selection changes.
+    // Explicit effects also refresh resources and presentation state. Only reuse
+    // decorations when none of those inputs, including a published parse, changed.
+    // An explicit selection can end an editing/search reveal even at the same position.
+    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured && transaction.effects.length === 0
+      && !syntaxTreeChanged(transaction)) {
+      return decorations;
+    }
     const next = safeBuildDecorations(transaction.state, decorations, 'update', {
       docChanged: transaction.docChanged,
       selection: transaction.selection
