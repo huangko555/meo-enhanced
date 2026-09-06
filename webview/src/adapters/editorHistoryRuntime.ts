@@ -82,9 +82,12 @@ export function createEditorHistoryRuntime(
   const enqueue = (input: EditorHistoryRuntimeInput): Promise<boolean | null> => {
     if (disposed) return Promise.resolve(null);
     const currentGeneration = generation;
-    const result = operation.then(() => (
-      processApplicationInput(adapter.prepareInput(input), currentGeneration)
-    ));
+    // Preparation captures the user's viewport and invalidates any delayed
+    // focus/scroll restore at the moment the input arrives. Deferring it behind
+    // the operation queue lets an older replay keep moving the UI after a newer
+    // key, pointer, or edit interaction has already happened.
+    const preparedInput = adapter.prepareInput(input);
+    const result = operation.then(() => processApplicationInput(preparedInput, currentGeneration));
     operation = result.then(() => undefined).catch(reportUnexpectedError);
     return result;
   };

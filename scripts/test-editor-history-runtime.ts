@@ -104,7 +104,13 @@ restoreResult = 'retry';
 await runtime.dispatch({ type: 'requestReplay', direction: 'undo' });
 const staleRetry = scheduledRetry;
 assert.ok(staleRetry);
-await runtime.dispatch({ type: 'externalDocumentPresented' });
+const externalPresentation = runtime.dispatch({ type: 'externalDocumentPresented' });
+assert.equal(
+  latestRestoreIsCurrent?.(),
+  false,
+  'new public input must invalidate delayed restore work before its queued Application turn'
+);
+await externalPresentation;
 assert.equal(runtime.getState().pendingReplay, null);
 restoreResult = 'restored';
 staleRetry();
