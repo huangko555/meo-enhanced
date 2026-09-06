@@ -77,7 +77,25 @@ try {
     let sourceTop = 0;
     if (scenario === 'hidden' || scenario === 'replaced') {
       await page.click('button[data-mode="source"]');
-      sourceTop = await page.$eval('.cm-scroller', element => element.scrollTop);
+      // The click starts an asynchronous mode/anchor transition. Establish the
+      // hidden-consumer baseline only after Source has finished moving, while
+      // the image response is still held; otherwise its own restore is blamed
+      // on the later image completion.
+      await page.waitForFunction(() => document.querySelector<HTMLElement>('#app')!.dataset.mode === 'source'
+        && document.querySelector<HTMLElement>('.preview-host')!.hidden);
+      sourceTop = await page.evaluate(async () => {
+        const scroller = document.querySelector('.cm-scroller')!;
+        let previous = scroller.scrollTop;
+        let stable = 0;
+        for (let frame = 0; frame < 60; frame += 1) {
+          await new Promise(requestAnimationFrame);
+          const current = scroller.scrollTop;
+          stable = Math.abs(current - previous) < 0.1 ? stable + 1 : 0;
+          previous = current;
+          if (stable === 4) return current;
+        }
+        throw Error('Source did not settle before releasing the pending image');
+      });
     }
     if (scenario === 'replaced') {
       await page.click('.cm-content');
@@ -108,8 +126,9 @@ try {
       .contentDocument!.querySelector('[data-reading-anchor]')!.getBoundingClientRect().top);
     if (scenario === 'hidden') {
       assert.equal(await page.$eval('#app', element => (element as HTMLElement).dataset.mode), 'source');
-      assert.ok(Math.abs(await page.$eval('.cm-scroller', element => element.scrollTop) - sourceTop) < 2,
-        'A hidden Preview image must not project an anchor into Source');
+      const sourceAfter = await page.$eval('.cm-scroller', element => element.scrollTop);
+      assert.ok(Math.abs(sourceAfter - sourceTop) < 2,
+        `A hidden Preview image must not project an anchor into Source: ${sourceTop} -> ${sourceAfter}`);
     } else {
       assert.ok(Math.abs(after - before) < 2,
         `${scenario}: A late image moved the user's current reading anchor: ${before} -> ${after}`);
