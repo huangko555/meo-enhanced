@@ -144,14 +144,23 @@ exports.run = async () => {
           traceSession.once('Tracing.tracingComplete', event => { clearTimeout(timer); resolve(event); });
         });
         const [{stream}] = await Promise.all([complete, traceSession.send('Tracing.end')]);
-        const descriptor = fs.openSync(path.join(output, 'reading.trace.json'), 'w');
+        const traceErrors = [];
+        let descriptor;
         try {
+          descriptor = fs.openSync(path.join(output, 'reading.trace.json'), 'w');
           while (true) {
             const chunk = await traceSession.send('IO.read', {handle: stream});
             fs.writeSync(descriptor, Buffer.from(chunk.data, chunk.base64Encoded ? 'base64' : 'utf8'));
             if (chunk.eof) break;
           }
-        } finally { fs.closeSync(descriptor); await traceSession.send('IO.close', {handle: stream}); }
+        } catch (error) { traceErrors.push(error); }
+        finally {
+          if (descriptor !== undefined) {
+            try { fs.closeSync(descriptor); } catch (error) { traceErrors.push(error); }
+          }
+          try { await traceSession.send('IO.close', {handle: stream}); } catch (error) { traceErrors.push(error); }
+        }
+        if (traceErrors.length) throw new AggregateError(traceErrors, traceErrors.map(String).join('\n'));
       } catch (error) { result.traceError = String(error.stack || error); }
       finally { clearTimeout(timer); }
     }

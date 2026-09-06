@@ -32,29 +32,20 @@ try {
       h.forceParsing(editor.view, editor.getText().length, 5000);
       const changedTree = h.currentSyntaxTree(editor.view.state);
       editor.setMode('live');
-      // Observe the decoration source consumed by CodeMirror, without exporting
-      // the production StateField or adding a production instrumentation hook.
-      const liveDecorations = () => editor.view.state.facet(h.EditorView.decorations).find((source: any) => {
-        if (typeof source === 'function') return false;
-        let heading = false;
-        source.between(0, 10, (_from: number, _to: number, value: any) => {
-          if (value.spec.class === 'meo-md-h1') heading = true;
-        });
-        return heading;
-      });
-      const initialDecorations = liveDecorations();
-      if (!initialDecorations) throw Error('Live heading decoration source is missing');
       const stableBefore = { text: editor.getText(), history: editor.getHistoryDepth(), selection: editor.view.state.selection.toJSON() };
+      const emptyWork = h.captureLiveProjectionWork(editor);
       editor.view.dispatch({});
-      const emptyRetained = liveDecorations() === initialDecorations;
+      const emptyRetained = !emptyWork();
+      const identicalSelectionWork = h.captureLiveProjectionWork(editor);
       editor.view.dispatch({ selection: editor.view.state.selection });
-      const identicalSelectionRebuilt = liveDecorations() !== initialDecorations;
+      const identicalSelectionRebuilt = identicalSelectionWork();
       const stableAfter = { text: editor.getText(), history: editor.getHistoryDepth(), selection: editor.view.state.selection.toJSON() };
+      const changedSelectionWork = h.captureLiveProjectionWork(editor);
       editor.view.dispatch({ selection: { anchor: 3 } });
-      const changedSelectionRebuilt = liveDecorations() !== initialDecorations;
-      const selectedDecorations = liveDecorations();
+      const changedSelectionRebuilt = changedSelectionWork();
+      const refreshWork = h.captureLiveProjectionWork(editor);
       editor.refreshDecorations();
-      const explicitRefreshRebuilt = liveDecorations() !== selectedDecorations;
+      const explicitRefreshRebuilt = refreshWork();
       return { before, after, retained, sourceMarkerColor, changedRetained: h.currentSyntaxTree(editor.view.state) === changedTree,
         emptyRetained, identicalSelectionRebuilt, changedSelectionRebuilt, explicitRefreshRebuilt, stableBefore, stableAfter,
         changedText: editor.getText(), expectedChangedText: text + '\n\nChanged tail' };
