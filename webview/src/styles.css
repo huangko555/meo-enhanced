@@ -991,6 +991,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-top: -4px;
   min-height: 36px;
   padding: 2px 8px 3px;
   overflow: hidden;
@@ -1140,9 +1141,9 @@ body {
 .changes-review-header::after {
   content: '';
   position: absolute;
-  right: 8px;
+  right: 6px;
   bottom: 0;
-  left: 8px;
+  left: 6px;
   height: 1px;
   background: var(--meo-divider-color, var(--vscode-panel-border));
   pointer-events: none;
