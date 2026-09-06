@@ -67,11 +67,10 @@ const browser = await launchTestBrowser();
 
 try {
   const extensionSource = fs.readFileSync(path.join(repoRoot, 'src', 'extension.ts'), 'utf8');
-  const runtimeScript = '<script nonce="${nonce}" src="${mermaidRuntimeUri}"></script>';
-  const runtimeScriptIndex = extensionSource.indexOf(runtimeScript);
-  const webviewEntryIndex = extensionSource.indexOf('<script type="module" nonce="${nonce}" src="${scriptUri}"></script>');
-  if (runtimeScriptIndex < 0 || webviewEntryIndex < 0 || runtimeScriptIndex > webviewEntryIndex) {
-    throw new Error('The Webview must preload Mermaid before its module entry');
+  if (!extensionSource.includes('data-meo-mermaid-src="${mermaidRuntimeUri}"')
+    || !extensionSource.includes('data-meo-script-nonce="${nonce}"')
+    || !extensionSource.includes('${preloadMermaid ? `<script nonce="${nonce}" src="${mermaidRuntimeUri}"></script>` : \'\'}')) {
+    throw new Error('Mermaid must support on-demand loading and preserve preloading for existing diagrams');
   }
 
   const build = await Bun.build({
@@ -86,17 +85,40 @@ try {
   const runtime = fs.readFileSync(path.join(repoRoot, 'webview', 'dist', 'mermaid.min.js'), 'utf8');
   const entry = fs.readFileSync(path.join(tempDir, 'test-preview-mermaid-runtime-entry.js'), 'utf8');
   const page = await browser.newPage();
+  let runtimeRequests = 0;
+  await page.setRequestInterception(true);
+  page.on('request', request => {
+    if (request.url() !== 'https://meo-runtime.invalid/mermaid.min.js') return void request.continue();
+    runtimeRequests += 1;
+    void request.respond(runtimeRequests === 1
+      ? {status: 503, body: 'Temporarily unavailable'}
+      : {status: 200, contentType: 'text/javascript', body: runtime});
+  });
   await page.setContent(`<!doctype html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; font-src data:; script-src 'nonce-preview-runtime-test'"></head><body></body>`);
   await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
   await page.addStyleTag({ content: ':root { --meo-font-live: "Sarasa Term SC", "Cascadia Mono", Consolas, monospace; --meo-font-live-size: 15px; --meo-code-background: #20252b; --meo-foreground: #d8dee9; --meo-surface-background: #20252b; } .cm-line { white-space: pre; }' });
-  await page.evaluate(({ runtime, entry }) => {
-    for (const source of [runtime, entry]) {
-      const script = document.createElement('script');
-      script.nonce = 'preview-runtime-test';
-      script.textContent = source;
-      document.head.appendChild(script);
-    }
-  }, { runtime, entry });
+  await page.evaluate(entry => {
+    document.body.dataset.meoMermaidSrc = 'https://meo-runtime.invalid/mermaid.min.js';
+    document.body.dataset.meoScriptNonce = 'preview-runtime-test';
+    const script = document.createElement('script');
+    script.nonce = 'preview-runtime-test';
+    script.textContent = entry;
+    document.head.appendChild(script);
+  }, entry);
+  if (runtimeRequests !== 0) throw new Error('Creating the editor must not load an unused Mermaid runtime');
+  const failedLoads = await page.evaluate(async () => {
+    const load = (window as any).__loadMermaidRuntime;
+    return (await Promise.allSettled([load(), load()])).map(result => result.status);
+  });
+  if (runtimeRequests !== 1 || failedLoads.some(status => status !== 'rejected')) {
+    throw new Error('Concurrent failed loads must share one request and reject both callers');
+  }
+  const sharedRuntime = await page.evaluate(async () => {
+    const load = (window as any).__loadMermaidRuntime;
+    const [first, second] = await Promise.all([load(), load()]);
+    return first === second && typeof first.render === 'function';
+  });
+  if (!sharedRuntime || runtimeRequests !== 2) throw new Error('Retry must load one CSP-authorized runtime shared by concurrent callers');
   const invalidMermaidLeaked = await page.evaluate(() => (
     (window as typeof window & { __probeInvalidMermaidCleanup?: () => Promise<boolean> })
       .__probeInvalidMermaidCleanup?.()

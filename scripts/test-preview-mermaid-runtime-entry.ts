@@ -15,6 +15,8 @@ import { createMermaidDiagramPresentationRuntime } from '../webview/src/adapters
 import { createMermaidDiagramPresentationEffectAdapter } from '../webview/src/editor/mermaidDiagramPresentationAdapter';
 import { createMermaidDiagramPresentationFactory } from '../webview/src/editor/mermaidDiagramPresentation';
 
+(window as typeof window & { __loadMermaidRuntime: typeof loadMermaidRuntime }).__loadMermaidRuntime = loadMermaidRuntime;
+
 const mermaidResources = createMermaidDiagramRenderPool({
   initialize: initializeMermaidEditorRuntime,
   render: renderMermaidRuntime

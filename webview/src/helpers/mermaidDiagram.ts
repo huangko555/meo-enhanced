@@ -354,13 +354,44 @@ function getMermaidRuntime() {
   return runtime;
 }
 
-export function loadMermaidRuntime() {
+type MermaidRuntimeScript = HTMLScriptElement & { runtimePromise?: Promise<MermaidRuntime> };
+
+export function loadMermaidRuntime(): Promise<MermaidRuntime> {
   const existing = getMermaidRuntime();
   if (existing) {
     return Promise.resolve(existing);
   }
 
-  return Promise.reject(new Error('Preloaded Mermaid runtime unavailable'));
+  const pending = document.querySelector<MermaidRuntimeScript>('script[data-meo-mermaid-runtime-loader]');
+  if (pending?.runtimePromise) return pending.runtimePromise;
+  const src = document.body.dataset.meoMermaidSrc;
+  if (!src) return Promise.reject(new Error('Mermaid runtime URL unavailable'));
+
+  // Keep the bundled classic runtime and CSP nonce used by Live and Preview.
+  // Only its first request is deferred; concurrent consumers share the load.
+  const script: MermaidRuntimeScript = document.createElement('script');
+  script.dataset.meoMermaidRuntimeLoader = '';
+  script.runtimePromise = new Promise<MermaidRuntime>((resolve, reject) => {
+    script.nonce = document.body.dataset.meoScriptNonce ?? '';
+    script.src = src;
+    const cleanup = () => {
+      script.onload = null;
+      script.onerror = null;
+      script.remove();
+    };
+    script.onload = () => {
+      cleanup();
+      const runtime = getMermaidRuntime();
+      if (runtime) resolve(runtime);
+      else reject(new Error('Loaded Mermaid runtime unavailable'));
+    };
+    script.onerror = () => {
+      cleanup();
+      reject(new Error('Mermaid runtime failed to load'));
+    };
+    document.head.appendChild(script);
+  });
+  return script.runtimePromise;
 }
 
 export function getMermaidEditorPresentationIdentity(): {
@@ -416,7 +447,9 @@ export async function renderMermaidSvgInDocument(
 }
 
 export async function restoreMermaidEditorTheme(): Promise<void> {
-  const runtime = await loadMermaidRuntime();
+  // An empty Preview never initialized Mermaid and has no theme to restore.
+  const runtime = getMermaidRuntime();
+  if (!runtime) return;
   const { config } = getMermaidThemeConfig();
   runtime.initialize(config);
 }

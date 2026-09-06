@@ -557,7 +557,9 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       }
     });
 
-    panel.webview.html = this.getWebviewHtml(panel.webview);
+    // A conservative hint preserves immediate diagram transitions without a
+    // second Markdown parser. New diagrams can still load the runtime later.
+    panel.webview.html = this.getWebviewHtml(panel.webview, /mermaid/i.test(document.getText()));
     this.panelSessions.set(panel, controller.session);
     if (panel.active) {
       this.lastActivePanel = panel;
@@ -801,7 +803,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     panel.dispose();
   }
 
-  private getWebviewHtml(webview: vscode.Webview): string {
+  private getWebviewHtml(webview: vscode.Webview, preloadMermaid: boolean): string {
     const scriptUri = webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'dist', 'index.js'))
       .toString();
@@ -837,11 +839,11 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
         <link href="${katexStyleUri}" rel="stylesheet" />
         <link href="${styleUri}" rel="stylesheet" />
       </head>
-      <body data-meo-katex-src="${katexStyleUri}">
+      <body data-meo-katex-src="${katexStyleUri}" data-meo-mermaid-src="${mermaidRuntimeUri}" data-meo-script-nonce="${nonce}">
         <div id="app" class="editor-root">
           ${getWebviewPreloadShellMarkup()}
         </div>
-        <script nonce="${nonce}" src="${mermaidRuntimeUri}"></script>
+        ${preloadMermaid ? `<script nonce="${nonce}" src="${mermaidRuntimeUri}"></script>` : ''}
         <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
       </body>
     </html>`;
