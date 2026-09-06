@@ -8,19 +8,19 @@ function sources(text: string): string[] {
 }
 
 const supported = 'Hex #abc #abcd #aabbcc #aabbccdd';
-const expected = ['#abc', '#abcd', '#aabbcc', '#aabbccdd'];
+const expected = ['#aabbcc', '#aabbccdd'];
 if (JSON.stringify(sources(supported)) !== JSON.stringify(expected)) {
   throw new Error(`Supported colors were not collected: ${JSON.stringify(sources(supported))}`);
 }
 
 assert.deepEqual(
-  sources('linear-gradient(red, blue) value (#abc) url(x) value (#abcd)'),
-  ['#abc', '#abcd'],
+  sources('linear-gradient(red, blue) value (#aabbcc) url(x) value (#aabbccdd)'),
+  ['#aabbcc', '#aabbccdd'],
   'HEX after closed CSS functions must remain independently collectible'
 );
 assert.deepEqual(
-  sources('linear-gradient("close ) #abc", nested(fn(#def)), blue) #123456 url("x(#456)") #abcd'),
-  ['#123456', '#abcd'],
+  sources('linear-gradient("close ) #aabbcc", nested(fn(#ddeeff)), blue) #123456 url("x(#445566)") #aabbccdd'),
+  ['#123456', '#aabbccdd'],
   'quoted close-parens and nested calls must not leak or swallow HEX ranges'
 );
 assert.deepEqual(
@@ -29,8 +29,8 @@ assert.deepEqual(
   'escaped quotes inside excluded functions must not close their string early'
 );
 assert.deepEqual(
-  sources('url(one) linear-gradient(red, blue) radial-gradient(circle, white) --x:#fff'),
-  ['#fff'],
+  sources('url(one) linear-gradient(red, blue) radial-gradient(circle, white) --x:#aabbcc'),
+  ['#aabbcc'],
   'multiple closed functions must not hide later custom-property HEX values'
 );
 assert.deepEqual(
@@ -39,47 +39,47 @@ assert.deepEqual(
   'an unclosed excluded function conservatively owns the remaining text'
 );
 
-const unmatchedInlineCode = 'Unmatched ` inline marker\n\n#abc';
+const unmatchedInlineCode = 'Unmatched ` inline marker\n\n#aabbcc';
 assert.deepEqual(
   sources(unmatchedInlineCode),
-  ['#abc'],
+  ['#aabbcc'],
   'an unmatched inline backtick must remain ordinary Markdown text'
 );
 const backslashBacktickBoundaries = [
-  ['odd escaped unmatched', 'odd \\` literal\n\n#abc', ['#abc']],
-  ['even unescaped unmatched', 'even \\\\` literal\n\n#abc', ['#abc']],
-  ['odd escaped then unmatched', 'odd \\`#abc` #def', ['#abc', '#def']],
-  ['even unescaped and closed', 'even \\\\`#abc` #def', ['#def']]
+  ['odd escaped unmatched', 'odd \\` literal\n\n#aabbcc', ['#aabbcc']],
+  ['even unescaped unmatched', 'even \\\\` literal\n\n#aabbcc', ['#aabbcc']],
+  ['odd escaped then unmatched', 'odd \\`#aabbcc` #ddeeff', ['#aabbcc', '#ddeeff']],
+  ['even unescaped and closed', 'even \\\\`#aabbcc` #ddeeff', ['#ddeeff']]
 ] as const;
 for (const [label, text, expectedSources] of backslashBacktickBoundaries) {
   assert.deepEqual(sources(text), expectedSources, `${label} must follow Markdown backtick escaping`);
 }
 const backslash = String.fromCharCode(92);
 const backtick = String.fromCharCode(96);
-const escapedMultiBacktick = `${backslash}${backtick.repeat(2)}#abc${backtick} #def`;
+const escapedMultiBacktick = `${backslash}${backtick.repeat(2)}#aabbcc${backtick} #ddeeff`;
 const escapedMultiTokens = new MarkdownIt().parseInline(escapedMultiBacktick, {})[0]?.children ?? [];
 assert.deepEqual(
   escapedMultiTokens.map((token) => [token.type, token.content]),
-  [['text', backtick], ['code_inline', '#abc'], ['text', ' #def']],
+  [['text', backtick], ['code_inline', '#aabbcc'], ['text', ' #ddeeff']],
   'project markdown-it must define the escaped multi-backtick fixture semantics'
 );
 assert.deepEqual(
   sources(escapedMultiBacktick),
-  ['#def'],
+  ['#ddeeff'],
   'an odd slash escapes only the first backtick of a multi-backtick run'
 );
 const escapedRunMatrix = [
-  ['odd single matched becomes text', `${backslash}${backtick}#abc${backtick} #def`, ['#abc', '#def']],
-  ['odd triple leaves paired double', `${backslash}${backtick.repeat(3)}#abc${backtick.repeat(2)} #def`, ['#def']],
-  ['odd triple without double close stays text', `${backslash}${backtick.repeat(3)}#abc${backtick} #def`, ['#abc', '#def']],
-  ['even double stays paired double', `${backslash.repeat(2)}${backtick.repeat(2)}#abc${backtick.repeat(2)} #def`, ['#def']]
+  ['odd single matched becomes text', `${backslash}${backtick}#aabbcc${backtick} #ddeeff`, ['#aabbcc', '#ddeeff']],
+  ['odd triple leaves paired double', `${backslash}${backtick.repeat(3)}#aabbcc${backtick.repeat(2)} #ddeeff`, ['#ddeeff']],
+  ['odd triple without double close stays text', `${backslash}${backtick.repeat(3)}#aabbcc${backtick} #ddeeff`, ['#aabbcc', '#ddeeff']],
+  ['even double stays paired double', `${backslash.repeat(2)}${backtick.repeat(2)}#aabbcc${backtick.repeat(2)} #ddeeff`, ['#ddeeff']]
 ] as const;
 for (const [label, text, expectedSources] of escapedRunMatrix) {
   assert.deepEqual(sources(text), expectedSources, label);
 }
 const blockBoundaryCases = [
-  `${'# Heading '}${backtick}\nParagraph #abc ${backtick}`,
-  `open ${backtick}\n# Heading #abc\nclose ${backtick}`
+  `${'# Heading '}${backtick}\nParagraph #aabbcc ${backtick}`,
+  `open ${backtick}\n# Heading #aabbcc\nclose ${backtick}`
 ] as const;
 const markdown = new MarkdownIt();
 assert.deepEqual(
@@ -94,14 +94,14 @@ assert.deepEqual(collectBounded('#aabbcc then #def', 0, 4), [],
   'A range boundary must not turn a prefix of a longer color into a short color');
 assert.deepEqual(collectBounded('#aabbcc then #def', 8, 12), [],
   'A plain bounded range must not collect a later color');
-assert.deepEqual(collectHexColorRangesFromText('plain #abc end', 20, {from: 6, to: 10}),
-  [{from: 26, to: 30, value: '#abc'}], 'Bounded scanning must preserve document and caller offsets');
+assert.deepEqual(collectHexColorRangesFromText('plain #aabbcc end', 20, {from: 6, to: 13}),
+  [{from: 26, to: 33, value: '#aabbcc'}], 'Bounded scanning must preserve document and caller offsets');
 const firstBoundary = blockBoundaryCases[0];
 const firstBreak = firstBoundary.indexOf('\n');
 assert.deepEqual(
   [...collectBounded(firstBoundary, 0, firstBreak), ...collectBounded(firstBoundary, firstBreak + 1, firstBoundary.length)]
     .map((range) => range.value),
-  ['#abc'],
+  ['#aabbcc'],
   'caller-owned Markdown inline ranges must prevent cross-block delimiter pairing'
 );
 const secondBoundary = blockBoundaryCases[1];
@@ -113,7 +113,7 @@ assert.deepEqual(
     ...collectBounded(secondBoundary, secondFirstBreak + 1, secondSecondBreak),
     ...collectBounded(secondBoundary, secondSecondBreak + 1, secondBoundary.length)
   ].map((range) => range.value),
-  ['#abc'],
+  ['#aabbcc'],
   'bounded collector calls must keep unmatched markers ordinary in each Markdown block'
 );
 
@@ -155,7 +155,7 @@ if (sources(plainCssText).length !== 0) {
 
 const largeFixture = Array.from(
   { length: 2_000 },
-  (_, index) => `url("asset-${index}(#000)") linear-gradient("close ) #111", fn(#222)) --tone-${index}:#abc;`
+  (_, index) => `url("asset-${index}(#000000)") linear-gradient("close ) #111111", fn(#222222)) --tone-${index}:#aabbcc;`
 ).join('\n');
 assert.equal(
   collectHexColorRangesFromText(largeFixture).length,
@@ -170,30 +170,30 @@ assert.doesNotMatch(
   /(?:slice|substring)\(\s*0\s*,\s*(?:index|from|match)/,
   'collector must not rescan a growing prefix for each HEX match'
 );
-const unmatchedDestinations = `${Array.from({ length: 2_500 }, (_, index) => `[label-${index}](`).join(' ')}\n#abc`;
+const unmatchedDestinations = `${Array.from({ length: 2_500 }, (_, index) => `[label-${index}](`).join(' ')}\n#aabbcc`;
 assert.deepEqual(
   sources(unmatchedDestinations),
-  ['#abc'],
+  ['#aabbcc'],
   'many unmatched link destinations must remain ordinary text without hiding a trailing HEX value'
 );
 const unmatchedBacktickRuns = `${Array.from(
   { length: 180 },
   (_, index) => `${'`'.repeat(index + 1)}run-${index}`
-).join(' ')}\n#abcd`;
+).join(' ')}\n#aabbccdd`;
 assert.deepEqual(
   sources(unmatchedBacktickRuns),
-  ['#abcd'],
+  ['#aabbccdd'],
   'many different-length unmatched backtick runs must not hide a trailing HEX value'
 );
 const mixedBacktickRuns = [
-  'odd \\` literal #abc',
-  'even \\\\`#def` outside #123456',
+  'odd \\` literal #aabbcc',
+  'even \\\\`#ddeeff` outside #123456',
   'unmatched `` marker',
-  'matched ```#456``` outside #aabbccdd'
+  'matched ```#445566``` outside #aabbccdd'
 ].join('\n');
 assert.deepEqual(
   sources(mixedBacktickRuns),
-  ['#abc', '#123456', '#aabbccdd'],
+  ['#aabbcc', '#123456', '#aabbccdd'],
   'escaped, matched and unmatched backtick runs must retain their existing Markdown semantics'
 );
 assert.doesNotMatch(

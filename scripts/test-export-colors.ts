@@ -4,7 +4,7 @@ import { launchTestBrowser } from './browser-test-helpers';
 const rendered = exportRuntime.renderExportHtmlDocument({
   readingSnapshot: {
     snapshotId: 'export-colors',
-    text: '# Heading\n\n**Bold**\n\n*Italic*\n\n~~Deleted~~\n\n`Code`',
+    text: '# Heading\n\n**Bold**\n\n*Italic*\n\n~~Deleted~~\n\n`Code`\n\n[Link](https://example.com)\n\n[Linked `code`](https://example.com/code)',
     appearance: 'dark',
     uiLanguage: 'en',
     environment: {
@@ -38,7 +38,9 @@ try {
       strong: read('strong'),
       emphasis: read('em'),
       deleted: read('s, del'),
-      code: read('code')
+      code: read('p > code'),
+      link: read('a'),
+      linkedCode: read('a code')
     };
   });
   const htmlColors = await readColors();
@@ -50,7 +52,8 @@ try {
   const expected = 'rgb(216, 222, 233)';
   for (const [target, colors] of Object.entries({ html: htmlColors, pdf: pdfColors })) {
     for (const [kind, color] of Object.entries(colors)) {
-      if (color !== expected) {
+      const expectedColor = kind === 'link' || kind === 'linkedCode' ? 'rgb(88, 166, 255)' : expected;
+      if (color !== expectedColor) {
         throw new Error(`Dark ${target} export ${kind} color leaked from the editor theme: ${color}`);
       }
     }

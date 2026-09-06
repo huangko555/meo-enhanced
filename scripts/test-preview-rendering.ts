@@ -169,8 +169,7 @@ const localizedReading = renderMarkdownToHtml({
   markdownText: '---\ntitle: 中文\n---\n\n> [!WARNING]\n> 内容\n\n颜色 #ff0000 与脚注[^note]。\n\n[^note]: 脚注内容',
   markdownFilePath: 'C:/tmp/preview-localized.md',
   target: 'html',
-  uiLanguage: 'zh-CN',
-  renderHexColorSwatches: true
+  uiLanguage: 'zh-CN'
 });
 const tableLikeCode = renderMarkdownToHtml({
   markdownText: '```text\n| A | B |\n| --- |\n```',
@@ -278,17 +277,15 @@ if (!transformedSources.html.includes('<h2 data-source-line="8"')) {
 if (!transformedSources.html.includes('class="meo-export-frontmatter" data-source-line="1" data-source-end-line="3"')) {
   throw new Error('Preview frontmatter must participate in viewport position mapping');
 }
-const previewSwatches = Array.from(previewColors.html.matchAll(/<span class="meo-md-color-swatch"[^>]*title="([^"]+)"[^>]*><\/span>/g), (match) => match[1]);
 for (const [index, preview] of blockBoundaryPreviews.entries()) {
-  const colors = Array.from(preview.html.matchAll(/class="meo-md-color-swatch"[^>]*title="([^"]+)"/g), (match) => match[1]);
-  if (JSON.stringify(colors) !== JSON.stringify(['#abc'])) {
-    throw new Error(`Preview Markdown block boundary ${index} did not preserve #abc: ${JSON.stringify(colors)}`);
+  if (preview.html.includes('meo-md-color-swatch') || !preview.html.includes('#abc')) {
+    throw new Error(`Preview Markdown block boundary ${index} did not preserve plain HEX text`);
   }
 }
-if (JSON.stringify(previewSwatches) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203', '#0b0'])
-  || /<(?:input|button|select|textarea)\b[^>]*meo-md-color-swatch/i.test(previewColors.html)
+if (previewColors.html.includes('meo-md-color-swatch')
+  || !previewColors.html.includes('HEX #abc #abcd #aabbcc #aabbccdd')
   || !previewColors.html.includes('rgb(1 2 3) rgba(1 2 3 / 40%) hsl(120 50% 40%) hsla(120 50% 40% / .5) red linear-gradient(#fff, #000)')) {
-  throw new Error(`Preview HEX swatches must be read-only and exclusive: ${JSON.stringify(previewSwatches)}`);
+  throw new Error('Preview must keep color literals as plain text without swatches');
 }
 if (exportedColors.html.includes('meo-md-color-swatch') || !exportedColors.html.includes('#abc')) {
   throw new Error('HTML export must keep HEX text without enabling Preview-only swatches');
@@ -327,7 +324,8 @@ if (
 }
 if (!localizedReading.html.includes('>Properties<')
   || !localizedReading.html.includes('>警告<')
-  || !localizedReading.html.includes('aria-label="颜色 #ff0000"')
+  || localizedReading.html.includes('meo-md-color-swatch')
+  || !localizedReading.html.includes('颜色 #ff0000')
   || !localizedReading.html.includes('aria-label="返回脚注引用 1"')
   || !localizedReading.html.includes('aria-label="返回脚注引用"')
   || localizedReading.html.includes('>属性<')
@@ -468,17 +466,10 @@ for (const [preview, exported, color] of [
   [lightPreviewStyles, exportStyles, '#0969da'],
   [darkPreviewStyles, darkExportStyles, '#58a6ff']
 ]) {
-  if (!preview.startsWith(exported)) {
-    throw new Error('Preview must retain the shared export reading styles');
-  }
-  const previewOverrides = preview.slice(exported.length);
-  if (!previewOverrides.includes(`--meo-link: ${color}`)
-    || !previewOverrides.includes('.footnote-backref { color: var(--meo-link); }')
-    || !previewOverrides.includes('a code { color: inherit; }')) {
-    throw new Error('Preview links, footnote returns, and linked code must use appearance-specific blue');
-  }
-  if (exported.includes(`--meo-link: ${color}`)) {
-    throw new Error('Preview-only blue links must not change export styling');
+  if (preview !== exported
+    || !exported.includes(`--meo-link: ${color}`)
+    || !exported.includes('a code {')) {
+    throw new Error('Preview and export links must share the same appearance-specific blue');
   }
 }
 
@@ -505,7 +496,7 @@ if (!darkPreviewStyles.includes('--meo-bg: #20252b')) {
 for (const expected of [
   '--meo-fg: #d8dee9',
   '--meo-heading: #d8dee9',
-  '--meo-link: #d8dee9'
+  '--meo-link: #58a6ff'
 ]) {
   if (!darkPreviewStyles.includes(expected)) {
     throw new Error(`Dark Preview must use its neutral reading palette: ${expected}`);
@@ -517,14 +508,14 @@ if (darkPreviewStyles.includes('#171b20')) {
 if (!lightPreviewStyles.includes('--meo-bg: #ffffff')) {
   throw new Error('Light Preview must use a white reading background');
 }
-if (!lightPreviewStyles.includes('--meo-link: #1f2328')) {
-  throw new Error('Light Preview links must use the neutral reading foreground');
+if (!lightPreviewStyles.includes('--meo-link: #0969da')) {
+  throw new Error('Light Preview links must use the shared blue reading color');
 }
 if (!darkPreviewStyles.includes('padding-inline-start: 1.5em')) {
   throw new Error('Preview lists must retain readable indentation in documents and table cells');
 }
-if (!darkPreviewStyles.includes('.meo-md-color-swatch') || !darkPreviewStyles.includes('pointer-events: none')) {
-  throw new Error('Preview HEX swatches must have a visible, non-interactive reading style');
+if (darkPreviewStyles.includes('.meo-md-color-swatch')) {
+  throw new Error('Preview/export styles must not retain unused HEX swatch chrome');
 }
 if (
   !/\.meo-table-scroll\s*\{[^}]*\bwidth:\s*100%;/s.test(darkPreviewStyles) ||

@@ -57,7 +57,6 @@ function renderPreviewDocument(options: {
     markdownFilePath: options.sourceDocumentPath,
     target: 'html',
     uiLanguage: options.uiLanguage,
-    renderHexColorSwatches: true,
     deferImages: true
   });
   return {

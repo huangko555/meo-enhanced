@@ -18,7 +18,7 @@ import { continuedListMarker, listMarkerData, nextOrderedSequenceNumber } from '
 import { getViewportController, visualLineContextMargin } from './viewportController';
 import { changedDocumentRange, runEditorHistoryCommand } from './historyCommands';
 import { createOpenLinkButton } from './linkOpenButton';
-import { collectHexColorRangesFromText } from '../../../src/shared/hexColorSwatches';
+import { collectHexColorRangesFromText, isHexColorLikeLiteral } from '../../../src/shared/hexColorSwatches';
 import { createColorSwatchElement } from './colorSwatches';
 import {
   createMissingLocalLinkIndicator,
@@ -1871,8 +1871,7 @@ function appendTableInlinePreviewNodes(parent: HTMLElement, text: string, option
       continue;
     }
 
-    if (tag && collectHexColorRangesFromText(tag[0])
-      .some((range) => range.from === 0 && range.to === tag[0].length)) {
+    if (tag && isHexColorLikeLiteral(tag[0])) {
       appendToBuffer(tag[0], i);
       i += tag[0].length;
       continue;

@@ -1,7 +1,7 @@
 import { RangeSetBuilder, StateField } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
-import { collectHexColorRangesFromText } from '../../../src/shared/hexColorSwatches';
+import { collectHexColorRangesFromText, isHexColorLikeLiteral } from '../../../src/shared/hexColorSwatches';
 import { currentSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import {
   isLiveInputDerivedWorkRefresh,
@@ -71,8 +71,7 @@ function buildMarkdownTagDecorations(state: any): DecorationSet {
       const linePosition = from - line.from;
       const isColor = colorRanges.some((range) => range.from === from && range.to === to);
       const rawTag = text.slice(linePosition, to - line.from);
-      const isHexColorText = collectHexColorRangesFromText(rawTag)
-        .some((range) => range.from === 0 && range.to === rawTag.length);
+      const isHexColorText = isHexColorLikeLiteral(rawTag);
       if (
         to <= from + 1 ||
         isColor ||

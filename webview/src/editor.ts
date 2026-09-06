@@ -2965,6 +2965,9 @@ export function createEditor({
           mermaidDocumentPreloader?.schedule(view.state);
         }
         syncModeClasses();
+        // Reconfiguration invalidates CodeMirror's height map. Finish its queued
+        // measurement before the browser can paint the unanchored intermediate frame.
+        (view as EditorView & { measure(flush?: boolean): void }).measure(false);
         syncGitGutterVisibility();
 
         if (topPosition) {

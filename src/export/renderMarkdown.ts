@@ -14,7 +14,6 @@ import {
   isSupportedHtmlSource,
   supportedHtmlTags
 } from '../shared/htmlPolicy';
-import { collectHexColorRangesFromText } from '../shared/hexColorSwatches';
 import type { UiLanguage } from '../foundation/uiLanguage';
 import { getReadingUiStrings } from './readingUiLanguage';
 
@@ -45,7 +44,6 @@ export type RenderMarkdownOptions = {
   markdownFilePath: string;
   outputFilePath?: string;
   target: RenderMarkdownTarget;
-  renderHexColorSwatches?: boolean;
   uiLanguage?: UiLanguage;
   /** Preview resolves local and network images after the reading frame is ready. */
   deferImages?: boolean;
@@ -97,9 +95,6 @@ export function renderMarkdownToHtml(options: RenderMarkdownOptions): RenderMark
   installTaskListTransform(md);
   installKbdFallbackTransform(md);
   installAlertTransform(md, uiStrings.alertLabel);
-  if (options.renderHexColorSwatches) {
-    installHexColorSwatchTransform(md, uiStrings.colorLabel);
-  }
   installSafeHtmlTransform(
     md,
     deferImageSrc,
@@ -367,50 +362,6 @@ function renderHighlightedCodeLines(highlighted: string, source: string): string
     `<span class="meo-export-code-line-source">${row}</span>`,
     '</span>'
   ].join('')).join('') + (source.endsWith('\n') ? '\n' : '');
-}
-
-function installHexColorSwatchTransform(md: MarkdownIt, colorLabel: (value: string) => string): void {
-  md.renderer.rules.meo_hex_color_swatch = (tokens, index) => {
-    const value = escapeHtmlAttr(tokens[index].content);
-    return `<span class="meo-md-color-swatch" style="background-color:${value}" title="${value}" role="img" aria-label="${escapeHtmlAttr(colorLabel(tokens[index].content))}"></span>`;
-  };
-  md.core.ruler.after('inline', 'meo-hex-color-swatches', (state) => {
-    for (const inlineToken of state.tokens) {
-      if (inlineToken.type !== 'inline' || !inlineToken.children) continue;
-      const nextChildren = [];
-      let linkDepth = 0;
-      for (const child of inlineToken.children) {
-        if (child.type === 'link_open') linkDepth += 1;
-        if (child.type !== 'text' || linkDepth > 0) {
-          nextChildren.push(child);
-        } else {
-          const ranges = collectHexColorRangesFromText(child.content);
-          let cursor = 0;
-          for (const range of ranges) {
-            if (range.from > cursor) {
-              const textNode = new state.Token('text', '', 0);
-              textNode.content = child.content.slice(cursor, range.from);
-              nextChildren.push(textNode);
-            }
-            const swatchNode = new state.Token('meo_hex_color_swatch', '', 0);
-            swatchNode.content = range.value;
-            nextChildren.push(swatchNode);
-            const valueNode = new state.Token('text', '', 0);
-            valueNode.content = range.value;
-            nextChildren.push(valueNode);
-            cursor = range.to;
-          }
-          if (cursor < child.content.length) {
-            const textNode = new state.Token('text', '', 0);
-            textNode.content = child.content.slice(cursor);
-            nextChildren.push(textNode);
-          }
-        }
-        if (child.type === 'link_close') linkDepth = Math.max(0, linkDepth - 1);
-      }
-      inlineToken.children = nextChildren;
-    }
-  });
 }
 
 function installSafeHtmlTransform(

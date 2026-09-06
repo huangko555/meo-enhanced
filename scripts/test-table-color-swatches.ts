@@ -34,7 +34,7 @@ async function main() {
         text: [
           '| Colors | Tag | Protected |',
           '| --- | --- | --- |',
-          `| #f00 #0f08 #336699 #33669988 rgba(51, 153, 255, 0.55) hsl(210 100% 60%) red linear-gradient(#fff, #000) | #todo #abc/tag | \`#0f0\` HTTPS://example.com/?color=#abc //example.com/?color=#abc [section]( #abc) ${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0 |`
+          `| #f00 #0f08 #336699 #33669988 rgba(51, 153, 255, 0.55) hsl(210 100% 60%) red linear-gradient(#ffffff, #000000) | #todo #abc/tag | \`#00ff00\` HTTPS://example.com/?color=#aabbcc //example.com/?color=#aabbcc [section]( #aabbcc) ${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#00aa00${String.fromCharCode(96)} #00bb00 |`
         ].join('\n'),
         onApplyChanges() {}
       });
@@ -77,11 +77,11 @@ async function main() {
     });
 
     const expectedInitial = {
-      colors: ['#f00', '#0f08', '#336699', '#33669988'],
+      colors: ['#336699', '#33669988'],
       colorTags: [],
       tags: ['#todo', '#abc/tag'],
       protectedColors: 1,
-      protectedColorTitles: ['#0b0']
+      protectedColorTitles: ['#00bb00']
     };
     if (JSON.stringify(result.initial) !== JSON.stringify(expectedInitial)) {
       throw new Error(`Table colors were not rendered separately from tags: ${JSON.stringify(result.initial)}`);
@@ -103,7 +103,7 @@ async function main() {
         'Unmatched ` inline marker',
         '',
         'After unmatched #010203',
-        `${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#0a0${String.fromCharCode(96)} #0b0`
+        `${String.fromCharCode(92)}${String.fromCharCode(96).repeat(2)}#00aa00${String.fromCharCode(96)} #00bb00`
       ].join('\n');
       let applyCount = 0;
       const editor = harness.createEditor({
@@ -131,7 +131,7 @@ async function main() {
       editor.destroy();
       return result;
     });
-    if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#abc', '#abcd', '#aabbcc', '#aabbccdd', '#010203', '#0b0'])
+    if (JSON.stringify(liveResult.colors) !== JSON.stringify(['#aabbcc', '#aabbccdd', '#010203', '#00bb00'])
       || liveResult.roles.some((role) => role !== 'img')
       || liveResult.interactiveDescendants !== 0
       || !liveResult.textUnchanged
@@ -144,8 +144,8 @@ async function main() {
       const app = document.getElementById('app')!;
       const backtick = String.fromCharCode(96);
       const cases = [
-        `# Heading ${backtick}\nParagraph #abc ${backtick}`,
-        `open ${backtick}\n# Heading #abc\nclose ${backtick}`
+        `# Heading ${backtick}\nParagraph #aabbcc ${backtick}`,
+        `open ${backtick}\n# Heading #aabbcc\nclose ${backtick}`
       ];
       const results: string[][] = [];
       for (const text of cases) {
@@ -159,7 +159,7 @@ async function main() {
       }
       return results;
     });
-    if (JSON.stringify(blockBoundaryResult) !== JSON.stringify([['#abc'], ['#abc']])) {
+    if (JSON.stringify(blockBoundaryResult) !== JSON.stringify([['#aabbcc'], ['#aabbcc']])) {
       throw new Error(`Live Markdown block boundaries diverged from Preview: ${JSON.stringify(blockBoundaryResult)}`);
     }
 
@@ -167,7 +167,7 @@ async function main() {
       const harness = (window as any).TableStabilityHarness;
       const app = document.getElementById('app')!;
       const count = 2_500;
-      const text = Array.from({ length: count }, (_, index) => `[label #abc](target-${index}) #def`).join('\n\n');
+      const text = Array.from({ length: count }, (_, index) => `[label #aabbcc](target-${index}) #ddeeff`).join('\n\n');
       app.replaceChildren();
       const editor = harness.createEditor({ parent: app, initialMode: 'live', text, onApplyChanges() {} });
       for (let index = 0; index < 3; index += 1) {
@@ -176,7 +176,7 @@ async function main() {
       const swatches = Array.from(app.querySelectorAll<HTMLElement>('.meo-md-color-swatch'), (swatch) => swatch.title);
       const result = {
         count: swatches.length,
-        onlyExternalHex: swatches.every((value) => value === '#def')
+        onlyExternalHex: swatches.every((value) => value === '#ddeeff')
       };
       editor.destroy();
       return result;

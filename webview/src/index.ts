@@ -773,6 +773,9 @@ toolbarOverflowSection.hidden = true;
 const displaySeparator = document.createElement('div');
 displaySeparator.className = 'more-tools-separator';
 displaySeparator.setAttribute('role', 'separator');
+const displaySettingsHeading = document.createElement('div');
+displaySettingsHeading.className = 'more-tools-section-label';
+displaySettingsHeading.textContent = activeUiStrings.displaySettings;
 const editorAppearanceControl = createSegmentedControl<EditorAppearance>({
   ariaLabel: activeUiStrings.editorAppearance,
   className: 'editor-appearance-control',
@@ -899,6 +902,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   moreToolsButton.title = strings.more;
   moreToolsButton.setAttribute('aria-label', strings.moreTools);
   moreToolsPanel.setAttribute('aria-label', strings.moreTools);
+  displaySettingsHeading.textContent = strings.displaySettings;
   feedbackPrompt.textContent = strings.feedbackPrompt;
   reportIssueButton.title = strings.reportIssue;
   reportIssueButton.setAttribute('aria-label', strings.reportIssue);
@@ -968,6 +972,7 @@ reportIssueLabel.textContent = activeUiStrings.reportIssue;
 reportIssueButton.append(reportIssueLabel, createElement(ExternalLink, { width: 13, height: 13 }));
 feedbackRow.append(feedbackPrompt, reportIssueButton);
 moreToolsPanel.append(
+  displaySettingsHeading,
   sourceLineNumbersBtn,
   longCodeBlockFoldingBtn,
   contentMaxWidthBtn,

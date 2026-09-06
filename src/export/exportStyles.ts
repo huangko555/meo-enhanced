@@ -23,12 +23,7 @@ export function buildPreviewStyles(
   environment: ExportStyleEnvironment = { previewFontFamily: '' },
   appearance: PreviewAppearance = 'dark'
 ): string {
-  const linkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
-  return `${buildReadingStyles(environment, appearance)}
-:root { --meo-link: ${linkColor}; }
-.footnote-backref { color: var(--meo-link); }
-a code { color: inherit; }
-`;
+  return buildReadingStyles(environment, appearance);
 }
 
 function buildReadingStyles(
@@ -72,6 +67,7 @@ function buildReadingStyles(
     : `color-mix(in srgb, ${previewForegroundColor} 22%, transparent)`;
   const readingMutedColor = previewMutedColor;
   const readingForegroundColor = previewForegroundColor;
+  const readingLinkColor = appearance === 'light' ? '#0969da' : '#58a6ff';
   const selectedFontFamily = normalizePreviewFontFamily(environment.previewFontFamily);
   const liveFont = selectedFontFamily
     ? `${quoteCssFontFamily(selectedFontFamily)}, ${editorFontFamily || 'var(--meo-font-system-sans)'}`
@@ -145,7 +141,7 @@ function buildReadingStyles(
   --meo-alert-warning: ${colors.base07};
   --meo-alert-caution: ${colors.base04};
   --meo-heading: ${readingForegroundColor};
-  --meo-link: ${readingForegroundColor};
+  --meo-link: ${readingLinkColor};
   --meo-accent-2: ${readingForegroundColor};
   --meo-number: ${readingForegroundColor};
   --meo-quote: ${readingMutedColor};
@@ -443,17 +439,6 @@ h1, h2 {
   border-bottom: 1px solid var(--meo-hr);
 }
 
-.meo-md-color-swatch {
-  display: inline-block;
-  width: 0.9em;
-  height: 0.9em;
-  margin-right: 0.3em;
-  border: 1px solid var(--meo-border);
-  border-radius: 3px;
-  vertical-align: -0.08em;
-  pointer-events: none;
-}
-
 p, ul, ol, blockquote, pre, table, hr {
   margin: 0 0 1em;
 }
@@ -640,6 +625,10 @@ th code {
   border-radius: 0.35em;
   background: var(--meo-code-bg);
   color: var(--meo-fg);
+}
+
+a code {
+  color: inherit;
 }
 
 kbd {

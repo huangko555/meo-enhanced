@@ -394,6 +394,11 @@ async function main() {
         checked: button.getAttribute('aria-checked'),
         label: button.querySelector('.changes-review-option-label')?.textContent,
         headerText: panel.querySelector('.changes-review-header')?.textContent,
+        headerHeight: panel.querySelector<HTMLElement>('.changes-review-header')?.getBoundingClientRect().height,
+        headerPadding: [
+          getComputedStyle(panel.querySelector<HTMLElement>('.changes-review-header')!).paddingTop,
+          getComputedStyle(panel.querySelector<HTMLElement>('.changes-review-header')!).paddingBottom
+        ],
         baselineLabels: Array.from(panel.querySelectorAll<HTMLElement>('[data-baseline] .changes-review-option-label'))
           .map((label) => label.textContent),
         baselineLabelsClipped: Array.from(panel.querySelectorAll<HTMLElement>('[data-baseline] .changes-review-option-label'))
@@ -431,6 +436,8 @@ async function main() {
       checked: 'true',
       label: '关闭比较',
       headerText: '不比较',
+      headerHeight: 36,
+      headerPadding: ['2px', '3px'],
       baselineLabels: ['关闭比较', '与最近保存版本比较', '与 Agent 编辑前版本比较', '与 Git HEAD 比较'],
       baselineLabelsClipped: false,
       baselineIconCount: 4,
@@ -500,6 +507,7 @@ async function main() {
       return {
         labels: labels.map((label) => label.textContent),
         headerText: header.textContent,
+        settingsHeading: document.querySelector<HTMLElement>('.more-tools-section-label')?.textContent,
         clipped: labels.some((label) => label.scrollWidth > label.clientWidth)
           || header.scrollWidth > header.clientWidth
           || headerBaseline.scrollWidth > headerBaseline.clientWidth
@@ -515,6 +523,7 @@ async function main() {
         'Show Original · Source Only'
       ],
       headerText: 'No Changes·vs. Last Saved Version',
+      settingsHeading: 'Display Settings',
       clipped: false
     })) {
       throw new Error(`English change review labels did not fit the shared menu width: ${JSON.stringify(englishReviewMenu)}`);
@@ -689,6 +698,7 @@ async function main() {
       const options = Array.from(panel.querySelectorAll<HTMLElement>(':scope > .more-tools-option'));
       return {
         labels: options.map((option) => option.querySelector('.more-tools-option-label')?.textContent),
+        topHeading: panel.querySelector<HTMLElement>(':scope > .more-tools-section-label')?.textContent,
         languageAutoLabel: panel.querySelector<HTMLElement>('[data-ui-language="auto"] .segmented-control-button-label')?.textContent,
         directChildren: options.every((option) => option.parentElement === panel),
         separatorCount: panel.querySelectorAll(':scope > .more-tools-separator').length,
@@ -707,6 +717,7 @@ async function main() {
       JSON.stringify(moreToolsLayout.labels) !== JSON.stringify([
         '显示行号', '折叠长代码块', '限制宽度'
       ]) ||
+      moreToolsLayout.topHeading !== '显示设置' ||
       moreToolsLayout.languageAutoLabel !== '自动' ||
       !moreToolsLayout.directChildren ||
       moreToolsLayout.separatorCount !== 2 ||
@@ -2221,8 +2232,38 @@ async function main() {
     if (!previewSourceVisibleLine) {
       throw new Error('Preview to Source lost the visible document position');
     }
-    await page.click('[data-mode="live"]');
-    await waitForFrames(page, 2);
+    const sourceLiveFrames = await page.evaluate(async () => {
+      const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
+      const sample = () => {
+        const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .find((line) => line.textContent === '## Short Mermaid');
+        const viewport = scroller.getBoundingClientRect();
+        return {
+          mode: document.querySelector<HTMLElement>('.editor-root')?.dataset.mode,
+          targetTop: heading ? heading.getBoundingClientRect().top - viewport.top : null,
+          viewportHeight: viewport.height
+        };
+      };
+      document.querySelector<HTMLButtonElement>('[data-mode="live"]')!.click();
+      const frames = [];
+      for (let index = 0; index < 8; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        frames.push(sample());
+      }
+      return frames;
+    });
+    const liveFrames = sourceLiveFrames.filter((frame) => frame.mode === 'live');
+    const liveTargetTops = liveFrames
+      .map((frame) => frame.targetTop)
+      .filter((top): top is number => top !== null);
+    if (
+      liveFrames.length === 0
+      || liveTargetTops.length !== liveFrames.length
+      || liveFrames.some((frame) => frame.targetTop! < -4 || frame.targetTop! > frame.viewportHeight + 4)
+      || Math.max(...liveTargetTops) - Math.min(...liveTargetTops) > 4
+    ) {
+      throw new Error(`Source to Live painted an unstable viewport frame: ${JSON.stringify(sourceLiveFrames)}`);
+    }
     const sourceLiveVisibleLine = await page.evaluate(() => {
       const scroller = document.querySelector<HTMLElement>('.editor-host > .cm-editor .cm-scroller')!;
       const viewport = scroller.getBoundingClientRect();

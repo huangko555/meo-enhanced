@@ -9,7 +9,8 @@ export type HexColorScanRange = {
   to: number;
 };
 
-const HEX_COLOR_REGEX = /#[0-9a-f]{3,8}/gi;
+const HEX_COLOR_REGEX = /#[0-9a-f]{6}(?:[0-9a-f]{2})?/gi;
+const HEX_COLOR_LIKE_LITERAL_REGEX = /^#[0-9a-f]{3,8}$/i;
 const excludedFunctionNames = new Set([
   'linear-gradient',
   'radial-gradient',
@@ -23,6 +24,11 @@ const excludedFunctionNames = new Set([
 interface ExcludedRange {
   from: number;
   to: number;
+}
+
+/** Keeps unsupported HEX-like literals from being reclassified as Markdown tags. */
+export function isHexColorLikeLiteral(value: string): boolean {
+  return HEX_COLOR_LIKE_LITERAL_REGEX.test(value);
 }
 
 function scanQuoted(text: string, start: number, quote: string, scanTo: number): number {
@@ -282,7 +288,7 @@ export function collectHexColorRangesFromText(
     while (excludedRanges[excludedIndex]?.to <= from) excludedIndex += 1;
     const isExcluded = excludedRanges[excludedIndex]?.from <= from;
     if (from + value.length > scanTo
-      || ![4, 5, 7, 9].includes(value.length)
+      || ![7, 9].includes(value.length)
       || !isColorBoundary(text, from, value)
       || isExcluded) {
       continue;
