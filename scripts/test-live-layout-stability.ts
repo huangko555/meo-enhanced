@@ -890,32 +890,31 @@ async function main(): Promise<void> {
       })}`);
     }
 
-    const hiddenToolbarHitTest = await page.evaluate(async () => {
+    const hiddenContextTriggerHitTest = await page.evaluate(async () => {
       const editor = (window as any).__editor;
       editor.view.contentDOM.focus();
       for (let index = 0; index < 3; index += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
-      const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
-      const button = toolbar.querySelector<HTMLButtonElement>('.meo-md-html-table-toolbar-btn')!;
-      const rect = button.getBoundingClientRect();
+      const trigger = document.querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger')!;
+      const rect = trigger.getBoundingClientRect();
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       return {
-        toolbarOpacity: getComputedStyle(toolbar).opacity,
-        toolbarPointerEvents: getComputedStyle(toolbar).pointerEvents,
-        toolbarVisibility: getComputedStyle(toolbar).visibility,
+        triggerOpacity: getComputedStyle(trigger).opacity,
+        triggerPointerEvents: getComputedStyle(trigger).pointerEvents,
+        triggerVisibility: getComputedStyle(trigger).visibility,
         hitClassName: hit instanceof HTMLElement ? hit.className : '',
-        hitToolbarButton: Boolean(hit?.closest('.meo-md-html-table-toolbar-btn')),
+        hitContextTrigger: Boolean(hit?.closest('.meo-md-html-table-context-trigger')),
         cursor: hit instanceof Element ? getComputedStyle(hit).cursor : ''
       };
     });
     if (
-      hiddenToolbarHitTest.toolbarVisibility !== 'hidden' ||
-      hiddenToolbarHitTest.toolbarPointerEvents !== 'none' ||
-      hiddenToolbarHitTest.hitToolbarButton ||
-      hiddenToolbarHitTest.cursor === 'pointer'
+      hiddenContextTriggerHitTest.triggerVisibility !== 'hidden' ||
+      hiddenContextTriggerHitTest.triggerPointerEvents !== 'none' ||
+      hiddenContextTriggerHitTest.hitContextTrigger ||
+      hiddenContextTriggerHitTest.cursor === 'pointer'
     ) {
-      throw new Error(`Hidden table toolbar remained pointer-interactive: ${JSON.stringify(hiddenToolbarHitTest)}`);
+      throw new Error(`Hidden table context trigger remained pointer-interactive: ${JSON.stringify(hiddenContextTriggerHitTest)}`);
     }
 
     console.log('live layout stability browser tests passed');

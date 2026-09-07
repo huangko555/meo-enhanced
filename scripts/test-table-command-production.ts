@@ -105,6 +105,25 @@ async function main() {
       firstInput.focus();
       firstInput.select();
       document.execCommand('insertText', false, 'edited');
+      const contextLayout = (() => {
+        const shell = firstInput.closest<HTMLElement>('.meo-md-html-table-shell')!;
+        const trigger = shell.querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger')!;
+        const menu = shell.querySelector<HTMLElement>('.meo-md-html-table-context-menu')!;
+        const heightBefore = shell.getBoundingClientRect().height;
+        pointer(trigger);
+        const button = menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-btn')!;
+        const result = {
+          triggerVisible: getComputedStyle(trigger).visibility,
+          menuVisible: getComputedStyle(menu).display,
+          heightBefore,
+          heightAfter: shell.getBoundingClientRect().height,
+          menuPosition: getComputedStyle(menu).position,
+          buttonSize: [button.getBoundingClientRect().width, button.getBoundingClientRect().height],
+          groups: Array.from(menu.querySelectorAll('.meo-md-html-table-context-group-label'), (label) => label.textContent)
+        };
+        pointer(trigger);
+        return result;
+      })();
       const insert = document.querySelector<HTMLButtonElement>(
         '.meo-md-html-table-shell:first-of-type button[title="Insert row below"]'
       )!;
@@ -119,11 +138,11 @@ async function main() {
       const afterAtomicRedo = editor.view.state.doc.toString();
 
       const shells = Array.from(document.querySelectorAll<HTMLElement>('.meo-md-html-table-shell'));
-      const toolbarButtons = Array.from(
-        shells[0].querySelectorAll<HTMLButtonElement>('.meo-md-html-table-toolbar-btn')
+      const contextButtons = Array.from(
+        shells[0].querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn')
       );
-      const toolbarActions = toolbarButtons.map((button) => button.getAttribute('aria-label'));
-      const sortingCapabilityCount = toolbarButtons.filter((button) => (
+      const contextActions = contextButtons.map((button) => button.getAttribute('aria-label'));
+      const sortingCapabilityCount = contextButtons.filter((button) => (
         /\b(?:sort|order|reorder)(?:ing|ed)?\b/i.test([
           button.getAttribute('aria-label'),
           button.title,
@@ -138,7 +157,9 @@ async function main() {
       pointer(shells[1].querySelector<HTMLButtonElement>('button[title="Align selected column right"]')!);
       await waitUntil(() => /\| C\s+\| D\s+\|\n\| ---:\s+\| ---\s+\|/.test(editor.view.state.doc.toString()), 'multi-table queue');
       const afterRapidMultiTable = editor.view.state.doc.toString();
-      const toolbarCount = document.querySelectorAll('.meo-md-html-table-toolbar').length;
+      const contextTriggerCount = document.querySelectorAll('.meo-md-html-table-context-trigger').length;
+      const contextMenuCount = document.querySelectorAll('.meo-md-html-table-context-menu').length;
+      const stickyToolbarBandCount = document.querySelectorAll('.meo-md-html-table-sticky-toolbar-band').length;
       const resizeHandleCount = document.querySelectorAll('.meo-md-html-table-column-resize-handle').length;
       const stickyCount = document.querySelectorAll('.meo-md-html-table-sticky-chrome').length;
       const detachedButton = shells[0].querySelector<HTMLButtonElement>('button[title="Insert row below"]')!;
@@ -347,16 +368,19 @@ async function main() {
       saveAfterDispatchFailureEditor.destroy();
       return {
         original,
+        contextLayout,
         consumed,
         afterAtomicInsert,
         undoApplied,
         afterAtomicUndo,
         redoApplied,
         afterAtomicRedo,
-        toolbarActions,
+        contextActions,
         sortingCapabilityCount,
         afterRapidMultiTable,
-        toolbarCount,
+        contextTriggerCount,
+        contextMenuCount,
+        stickyToolbarBandCount,
         resizeHandleCount,
         stickyCount,
         detachedConsumed,
@@ -385,30 +409,42 @@ async function main() {
       };
     });
 
-    assert.equal(result.consumed, true, 'Toolbar pointer command must be consumed synchronously');
+    assert.equal(result.consumed, true, 'Context-menu pointer command must be consumed synchronously');
+    assert.equal(result.contextLayout.triggerVisible, 'visible');
+    assert.notEqual(result.contextLayout.menuVisible, 'none');
+    assert.equal(result.contextLayout.heightAfter, result.contextLayout.heightBefore, 'floating menu must not change table layout height');
+    assert.equal(result.contextLayout.menuPosition, 'absolute');
+    assert.deepEqual(result.contextLayout.buttonSize, [28, 28]);
+    assert.deepEqual(result.contextLayout.groups, ['Insert', 'Move', 'Align', 'Delete']);
     assert.match(result.afterAtomicInsert, /edited/);
     assert.notEqual(result.afterAtomicInsert, result.original);
     assert.equal(result.undoApplied, true);
     assert.equal(result.afterAtomicUndo, result.original, 'pending edit and row insertion must undo together');
     assert.equal(result.redoApplied, true);
     assert.equal(result.afterAtomicRedo, result.afterAtomicInsert);
-    assert.deepEqual(result.toolbarActions, [
+    assert.deepEqual(result.contextActions, [
       'Insert row above',
       'Insert row below',
-      'Delete row',
       'Insert column left',
       'Insert column right',
-      'Delete column',
+      'Move row up',
+      'Move row down',
+      'Move column left',
+      'Move column right',
       'Align selected column left',
       'Align selected column center',
-      'Align selected column right'
-    ], 'the real Table Toolbar must expose every retained structure/alignment command exactly once');
-    assert.equal(result.sortingCapabilityCount, 0, 'Table sorting must not have any Toolbar capability');
+      'Align selected column right',
+      'Delete row',
+      'Delete column'
+    ], 'the contextual menu must expose every structure, movement and alignment command exactly once');
+    assert.equal(result.sortingCapabilityCount, 0, 'Table sorting must not have any contextual capability');
     assert.match(result.afterRapidMultiTable, /\| C\s+\| D\s+\|\n\| ---:\s+\| ---\s+\|/);
-    assert.equal(result.toolbarCount, 2);
+    assert.equal(result.contextTriggerCount, 2);
+    assert.equal(result.contextMenuCount, 2);
+    assert.equal(result.stickyToolbarBandCount, 0, 'contextual controls must not reserve a sticky toolbar band');
     assert.ok(result.resizeHandleCount >= 4, 'Column Width controls must remain available');
     assert.equal(result.stickyCount, 2, 'Sticky Header lifecycle must remain mounted per table');
-    assert.equal(result.detachedConsumed, true, 'detached Toolbar keeps browser-default suppression without reviving Runtime');
+    assert.equal(result.detachedConsumed, true, 'detached contextual control keeps browser-default suppression without reviving Runtime');
     assert.match(result.afterQueuedCoordinateChange, /\| one\s+\| 1\s+\|/);
     assert.doesNotMatch(
       result.afterQueuedCoordinateChange,
@@ -464,6 +500,16 @@ async function main() {
         focus: { row: 2, col: 0 }
       },
       {
+        name: 'move row up', title: 'Move row up', edit: { row: 1, col: 0 }, target: { row: 2, col: 0 },
+        expected: ['| A | B |', '| --- | --- |', '| three | four |', '| one! | two |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      },
+      {
+        name: 'move row down', title: 'Move row down', edit: { row: 2, col: 0 }, target: { row: 1, col: 0 },
+        expected: ['| A | B |', '| --- | --- |', '| three! | four |', '| one | two |'].join('\n'),
+        focus: { row: 2, col: 0 }
+      },
+      {
         name: 'delete row', title: 'Delete row', edit: { row: 1, col: 0 }, target: { row: 2, col: 0 },
         expected: ['| A | B |', '| --- | --- |', '| one! | two |'].join('\n'),
         focus: { row: 1, col: 0 }
@@ -476,6 +522,16 @@ async function main() {
       {
         name: 'insert column right', title: 'Insert column right', edit: { row: 1, col: 0 }, target: { row: 1, col: 0 },
         expected: ['| A |  | B |', '| --- | --- | --- |', '| one! |  | two |', '| three |  | four |'].join('\n'),
+        focus: { row: 1, col: 1 }
+      },
+      {
+        name: 'move column left', title: 'Move column left', edit: { row: 1, col: 0 }, target: { row: 1, col: 1 },
+        expected: ['| B | A |', '| --- | --- |', '| two | one! |', '| four | three |'].join('\n'),
+        focus: { row: 1, col: 0 }
+      },
+      {
+        name: 'move column right', title: 'Move column right', edit: { row: 1, col: 1 }, target: { row: 1, col: 0 },
+        expected: ['| B | A |', '| --- | --- |', '| two! | one |', '| four | three |'].join('\n'),
         focus: { row: 1, col: 1 }
       },
       {
@@ -538,7 +594,11 @@ async function main() {
         }));
         return before;
       }, matrixCase.target);
-      await page.click(`button[title="${matrixCase.title}"]`);
+      await page.evaluate((title) => {
+        const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn'))
+          .find((candidate) => candidate.title === title)!;
+        button.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+      }, matrixCase.title);
       await page.waitForFunction((expected) => (
         (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected
       ), {}, matrixCase.expected);
@@ -588,6 +648,71 @@ async function main() {
       assert.deepEqual(afterRedo.history, { undo: 1, redo: 0 }, `${matrixCase.name}: redo history depth`);
       assert.equal(afterRedo.scrollTop, beforeCommand.scrollTop, `${matrixCase.name}: redo scroll continuity`);
     }
+
+    const rangeOriginal = [
+      '| A | B | C |',
+      '| --- | --- | --- |',
+      '| a1 | b1 | c1 |',
+      '| a2 | b2 | c2 |',
+      '| a3 | b3 | c3 |'
+    ].join('\n');
+    const resetRangeEditor = async () => {
+      await page.evaluate((text) => {
+        const candidate = window as typeof window & { __tableCommandMatrixEditor?: any };
+        candidate.__tableCommandMatrixEditor?.destroy();
+        document.getElementById('app')!.replaceChildren();
+        candidate.__tableCommandMatrixEditor = (window as any).TableStabilityHarness.createEditor({
+          parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+        });
+      }, rangeOriginal);
+      await page.waitForSelector('.meo-md-html-table-shell tbody textarea');
+    };
+    const dragRange = async (from: string, to: string) => {
+      const points = await page.evaluate(([firstSelector, lastSelector]) => (
+        [firstSelector, lastSelector].map((selector) => {
+          const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        })
+      ), [from, to]);
+      await page.mouse.move(points[0].x, points[0].y);
+      await page.mouse.down();
+      await page.mouse.move(points[1].x, points[1].y, { steps: 4 });
+      await page.mouse.up();
+    };
+    const invokeRangeCommand = async (title: string) => {
+      await page.evaluate((label) => {
+        const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.meo-md-html-table-context-btn'))
+          .find((candidate) => candidate.title === label)!;
+        button.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+      }, title);
+    };
+
+    await resetRangeEditor();
+    await dragRange(
+      'tbody tr:nth-child(1) td:nth-child(1) .meo-md-html-table-cell-preview',
+      'tbody tr:nth-child(2) td:nth-child(3) .meo-md-html-table-cell-preview'
+    );
+    await invokeRangeCommand('Move row down');
+    const movedRows = ['| A | B | C |', '| --- | --- | --- |', '| a3 | b3 | c3 |', '| a1 | b1 | c1 |', '| a2 | b2 | c2 |'].join('\n');
+    await page.waitForFunction((expected) => (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected, {}, movedRows);
+
+    await resetRangeEditor();
+    await dragRange(
+      'tbody tr:nth-child(1) td:nth-child(1) .meo-md-html-table-cell-preview',
+      'tbody tr:nth-child(2) td:nth-child(2) .meo-md-html-table-cell-preview'
+    );
+    await invokeRangeCommand('Move column right');
+    const movedColumns = ['| C | A | B |', '| --- | --- | --- |', '| c1 | a1 | b1 |', '| c2 | a2 | b2 |', '| c3 | a3 | b3 |'].join('\n');
+    await page.waitForFunction((expected) => (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected, {}, movedColumns);
+
+    await resetRangeEditor();
+    await dragRange(
+      'tbody tr:nth-child(1) td:nth-child(1) .meo-md-html-table-cell-preview',
+      'tbody tr:nth-child(1) td:nth-child(2) .meo-md-html-table-cell-preview'
+    );
+    await invokeRangeCommand('Align selected column right');
+    const alignedColumns = ['| A | B | C |', '| ---: | ---: | --- |', '| a1 | b1 | c1 |', '| a2 | b2 | c2 |', '| a3 | b3 | c3 |'].join('\n');
+    await page.waitForFunction((expected) => (window as any).__tableCommandMatrixEditor.view.state.doc.toString() === expected, {}, alignedColumns);
   } finally {
     await browser.close();
   }

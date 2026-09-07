@@ -9,9 +9,13 @@ import {
 assert.deepEqual(tableCommands, [
   'insert-row-above',
   'insert-row-below',
+  'move-row-up',
+  'move-row-down',
   'delete-row',
   'insert-column-left',
   'insert-column-right',
+  'move-column-left',
+  'move-column-right',
   'delete-column',
   'align-left',
   'align-center',

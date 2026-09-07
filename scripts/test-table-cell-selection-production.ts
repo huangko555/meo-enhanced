@@ -314,7 +314,10 @@ async function main() {
     if (ownerCommit.tag !== 'TEXTAREA' || ownerCommit.selected < 1) {
       throw new Error(`second pointer prevented the owner pointerup: ${JSON.stringify(ownerCommit)}`);
     }
-    await page.click('button[title="Delete column"]');
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>('button[title="Delete column"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+    });
     await page.waitForFunction(() => (window as any).__selectionEditor.getText().startsWith('| <tag> |'));
     await page.evaluate((text) => (window as any).__selectionEditor.setText(text), source);
     await page.waitForFunction(() => document.querySelectorAll('.meo-md-html-table-shell').length === 2);

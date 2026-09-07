@@ -77,10 +77,6 @@ import {
   type TableCellRange as TableSelectionRange
 } from '../editor/tableCellSelection';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
-import {
-  projectFixedChromeGeometry
-} from '../editor/fixedChromeGeometry';
-import { measureFixedContainingBlockMapping } from '../editor/fixedChromeDomGeometry';
 
 interface TableData {
   rows: string[][];
@@ -134,12 +130,18 @@ interface DomRefs {
   stickyHeaderViewport: HTMLDivElement;
   stickyTable: HTMLTableElement;
   stickyHeaderRow: HTMLTableRowElement;
-  toolbarButtons: {
+  contextTrigger: HTMLButtonElement;
+  contextMenu: HTMLDivElement;
+  contextButtons: {
     insertRowAbove: HTMLButtonElement;
     insertRowBelow: HTMLButtonElement;
+    moveRowUp: HTMLButtonElement;
+    moveRowDown: HTMLButtonElement;
     deleteRow: HTMLButtonElement;
     insertColumnLeft: HTMLButtonElement;
     insertColumnRight: HTMLButtonElement;
+    moveColumnLeft: HTMLButtonElement;
+    moveColumnRight: HTMLButtonElement;
     deleteColumn: HTMLButtonElement;
     alignColumnLeft: HTMLButtonElement;
     alignColumnCenter: HTMLButtonElement;
@@ -246,13 +248,13 @@ const sourceTableHeaderLineDeco = Decoration.line({ class: 'meo-md-source-table-
 const sourceTableHeaderCellDeco = Decoration.mark({ class: 'meo-md-source-table-header-cell' });
 const tableDelimiterRegex = /^\s*\|?\s*[:]?\-+[:]?\s*(\|\s*[:]?\-+[:]?\s*)*\|?$/;
 const tableCellSelector = 'th[data-table-row][data-table-col], td[data-table-row][data-table-col]';
-const tableControlSelector = '.meo-md-html-table-toolbar, .meo-md-html-table-toolbar-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
-const tableToolbarHeight = 24;
+const tableControlSelector = '.meo-md-html-table-context-trigger, .meo-md-html-table-context-menu, .meo-md-html-table-context-btn, .meo-md-link-open-btn, .meo-md-html-table-column-resize-handle';
 const tableCellAutoCommitDelayMs = 250;
 // Chromium reports fractional caret bounds while scrollTop is effectively
 // quantized. Treat sub-pixel differences as visible so reveal retries settle.
 const tableCellCaretRevealEpsilon = 1;
 let nextTableCellEditSequence = 0;
+let nextTableContextMenuSequence = 0;
 
 export function commitPendingTableEdits(view: EditorView): boolean {
   const detail: PendingTableCommitDetail = {
@@ -546,15 +548,6 @@ export function focusHistoryChange(
 
 }
 
-function tableHasReachedStickyThreshold(
-  tableRect: DOMRect,
-  scrollerRect: DOMRect,
-  toolbarViewportHeight: number
-) {
-  const stickyBottom = scrollerRect.top + toolbarViewportHeight;
-  return tableRect.top <= stickyBottom && tableRect.bottom > stickyBottom;
-}
-
 class TableHeaderAlignmentOverrideValue extends RangeValue {
   constructor(readonly columns: ReadonlySet<number>) {
     super();
@@ -632,6 +625,22 @@ const tableToolbarIcons: Record<string, TableToolbarIcon> = {
       'M15 12l4 0',
       'M17 10l0 4'
     ]
+  },
+  arrowUp: {
+    className: 'icon-tabler-arrow-up',
+    paths: ['M12 5l0 14', 'M18 11l-6 -6', 'M6 11l6 -6']
+  },
+  arrowDown: {
+    className: 'icon-tabler-arrow-down',
+    paths: ['M12 5l0 14', 'M18 13l-6 6', 'M6 13l6 6']
+  },
+  arrowLeft: {
+    className: 'icon-tabler-arrow-left',
+    paths: ['M5 12l14 0', 'M5 12l6 6', 'M5 12l6 -6']
+  },
+  arrowRight: {
+    className: 'icon-tabler-arrow-right',
+    paths: ['M5 12l14 0', 'M13 18l6 -6', 'M13 6l6 6']
   },
   rowRemove: {
     className: 'icon-tabler-row-remove',
@@ -2394,7 +2403,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.stickyHeaderAdapter = stickyHeaderAdapterFactory.create({
       scheduler: this.layoutScheduler,
       resolveElements: () => this.resolveStickyHeaderElements(),
-      controlsHeight: () => this.stickyControlsHeight()
+      controlsHeight: () => 0
     });
   }
 
@@ -2527,15 +2536,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
   }
 
-  stickyControlsHeight(): number {
-    const shell = this.domRefs?.shell;
-    if (!shell || !shell.classList.contains('is-controls-sticky')) return 0;
-    const visible = shell.matches(':focus-within') || shell.classList.contains('is-interacting');
-    if (!visible) return 0;
-    const toolbar = shell.querySelector<HTMLElement>('.meo-md-html-table-toolbar');
-    return toolbar?.getBoundingClientRect().height ?? 0;
-  }
-
   getEditorView(dom?: HTMLElement): EditorView | null {
     if (this.view) return this.view;
     if (!dom) return null;
@@ -2657,27 +2657,74 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return Math.min(Math.max(column, 0), colCount - 1);
   }
 
-  updateToolbarState() {
-    if (!this.domRefs) return;
-    const { toolbarButtons } = this.domRefs;
-    const activeBodyRow = this.activeBodyRowIndex();
-    const activeColumn = this.activeColumnIndex();
-    const hasRowTarget = activeBodyRow !== null;
-    const hasColumnTarget = activeColumn !== null;
+  selectedBodyRows(target: TableCommandTarget = this.currentCommandTarget()): number[] {
+    const selection = target.selection;
+    const rows: number[] = [];
+    if (selection && (selection.fromRow !== selection.toRow || selection.fromColumn !== selection.toColumn)) {
+      for (let row = Math.max(1, selection.fromRow); row <= selection.toRow; row += 1) {
+        const bodyIndex = row - 1;
+        if (bodyIndex >= 0 && bodyIndex < this.tableData.rows.length) rows.push(bodyIndex);
+      }
+      return rows;
+    }
+    const bodyRow = this.bodyRowIndexFor(target.row);
+    return bodyRow === null ? [] : [bodyRow];
+  }
 
-    toolbarButtons.insertRowAbove.disabled = this.tableData.colCount === 0;
-    toolbarButtons.insertRowBelow.disabled = this.tableData.colCount === 0;
-    toolbarButtons.deleteRow.disabled = !hasRowTarget || this.tableData.rows.length <= 1;
-    toolbarButtons.insertColumnLeft.disabled = !hasColumnTarget;
-    toolbarButtons.insertColumnRight.disabled = !hasColumnTarget;
-    toolbarButtons.deleteColumn.disabled = !hasColumnTarget || this.tableData.colCount <= 1;
-    toolbarButtons.alignColumnLeft.disabled = !hasColumnTarget;
-    toolbarButtons.alignColumnCenter.disabled = !hasColumnTarget;
-    toolbarButtons.alignColumnRight.disabled = !hasColumnTarget;
+  selectedColumns(target: TableCommandTarget = this.currentCommandTarget()): number[] {
+    const selection = target.selection;
+    const columns: number[] = [];
+    if (selection && (selection.fromRow !== selection.toRow || selection.fromColumn !== selection.toColumn)) {
+      for (let column = selection.fromColumn; column <= selection.toColumn; column += 1) {
+        if (column >= 0 && column < this.tableData.colCount) columns.push(column);
+      }
+      return columns;
+    }
+    const column = this.columnIndexFor(target.column);
+    return column === null ? [] : [column];
+  }
+
+  currentCommandTarget(): TableCommandTarget {
+    const selectionRange = this.cellSelection.snapshot().range;
+    return {
+      tableId: this.tableCommandTargetId,
+      row: this.activeTarget.row,
+      column: this.activeTarget.col,
+      selection: selectionRange ? {
+        fromRow: selectionRange.fromRow,
+        toRow: selectionRange.toRow,
+        fromColumn: selectionRange.fromCol,
+        toColumn: selectionRange.toCol
+      } : null
+    };
+  }
+
+  updateContextMenuState() {
+    if (!this.domRefs) return;
+    const { contextButtons } = this.domRefs;
+    const rows = this.selectedBodyRows();
+    const columns = this.selectedColumns();
+    const hasRows = rows.length > 0;
+    const hasColumns = columns.length > 0;
+
+    contextButtons.insertRowAbove.disabled = this.tableData.colCount === 0;
+    contextButtons.insertRowBelow.disabled = this.tableData.colCount === 0;
+    contextButtons.moveRowUp.disabled = !hasRows || Math.min(...rows) <= 0;
+    contextButtons.moveRowDown.disabled = !hasRows || Math.max(...rows) >= this.tableData.rows.length - 1;
+    contextButtons.deleteRow.disabled = !hasRows || rows.length >= this.tableData.rows.length;
+    contextButtons.insertColumnLeft.disabled = !hasColumns;
+    contextButtons.insertColumnRight.disabled = !hasColumns;
+    contextButtons.moveColumnLeft.disabled = !hasColumns || Math.min(...columns) <= 0;
+    contextButtons.moveColumnRight.disabled = !hasColumns || Math.max(...columns) >= this.tableData.colCount - 1;
+    contextButtons.deleteColumn.disabled = !hasColumns || columns.length >= this.tableData.colCount;
+    contextButtons.alignColumnLeft.disabled = !hasColumns;
+    contextButtons.alignColumnCenter.disabled = !hasColumns;
+    contextButtons.alignColumnRight.disabled = !hasColumns;
   }
 
   updateActionTargetStyles() {
-    this.updateToolbarState();
+    this.updateContextMenuState();
+    this.updateContextControlsPosition();
   }
 
   setActionTarget(target: TableActionTarget) {
@@ -2689,21 +2736,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   }
 
   requestTableCommand(command: TableCommand, enabled = true) {
-    const selectionRange = this.cellSelection.snapshot().range;
+    const target = this.currentCommandTarget();
+    this.setContextMenuOpen(false);
     void this.tableCommandEnvironment.dispatch({
       type: 'request',
       command,
-      target: {
-        tableId: this.tableCommandTargetId,
-        row: this.activeTarget.row,
-        column: this.activeTarget.col,
-        selection: selectionRange ? {
-          fromRow: selectionRange.fromRow,
-          toRow: selectionRange.toRow,
-          fromColumn: selectionRange.fromCol,
-          toColumn: selectionRange.toCol
-        } : null
-      },
+      target,
       enabled
     });
   }
@@ -2716,6 +2754,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   requestInsertRowBelow(container: HTMLElement) {
     void container;
     this.requestTableCommand('insert-row-below', this.tableData.colCount > 0);
+  }
+
+  requestMoveRow(container: HTMLElement, direction: 'up' | 'down') {
+    void container;
+    const rows = this.selectedBodyRows();
+    const enabled = rows.length > 0 && (
+      direction === 'up' ? Math.min(...rows) > 0 : Math.max(...rows) < this.tableData.rows.length - 1
+    );
+    this.requestTableCommand(direction === 'up' ? 'move-row-up' : 'move-row-down', enabled);
   }
 
   requestDeleteRow(container: HTMLElement) {
@@ -2731,6 +2778,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   requestInsertColumnRight(container: HTMLElement) {
     void container;
     this.requestTableCommand('insert-column-right', this.activeColumnIndex() !== null);
+  }
+
+  requestMoveColumn(container: HTMLElement, direction: 'left' | 'right') {
+    void container;
+    const columns = this.selectedColumns();
+    const enabled = columns.length > 0 && (
+      direction === 'left' ? Math.min(...columns) > 0 : Math.max(...columns) < this.tableData.colCount - 1
+    );
+    this.requestTableCommand(direction === 'left' ? 'move-column-left' : 'move-column-right', enabled);
   }
 
   requestDeleteColumn(container: HTMLElement) {
@@ -2990,9 +3046,11 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         if (wrap && effect.reason === 'cross-table') {
           runPrimary(() => {
             const shell = wrap.closest('.meo-md-html-table-shell');
-            if (shell instanceof HTMLElement) shell.classList.remove('is-interacting');
+            if (shell instanceof HTMLElement) {
+              shell.classList.remove('is-interacting');
+              this.setContextMenuOpen(false);
+            }
           });
-          runPrimary(() => this.updateStickyControls());
           runPrimary(() => this.stickyHeaderAdapter.invalidate());
         } else if (wrap && effect.reason !== 'pointercancel' && effect.reason !== 'lostcapture') {
           runPrimary(() => this.setTableInteractionActive(wrap, false));
@@ -3072,7 +3130,8 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (shell instanceof HTMLElement) {
       shell.classList.toggle('is-interacting', active);
     }
-    this.updateStickyControls();
+    if (!active) this.setContextMenuOpen(false);
+    else this.updateContextControlsPosition();
     this.stickyHeaderAdapter.invalidate();
     const view = this.getEditorView(container);
     if (!view) return;
@@ -3196,6 +3255,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (isTableControlTarget(event.target)) return;
       const cell = this.findCellElement(event.target);
       if (!cell) return;
+      this.setContextMenuOpen(false);
       const current = this.coordsFromCell(cell);
       if (!current) return;
       if (event.target instanceof HTMLTextAreaElement) {
@@ -3295,10 +3355,21 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (this.handleHistoryShortcut(event, table)) {
         return;
       }
+      if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setContextMenuOpen(true, true);
+      }
     };
 
     const onDocumentKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (this.domRefs && !this.domRefs.contextMenu.hidden) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setContextMenuOpen(false);
+        return;
+      }
       const transition = this.cellSelection.accept({ type: 'clear', reason: 'escape' });
       this.applyCellSelectionTransition(transition, { event });
     };
@@ -3344,6 +3415,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       if (!isOutsideTable && isTableControlTarget(event.target)) {
         return;
       }
+      this.setContextMenuOpen(false);
       const active = document.activeElement;
       if (isOutsideTable) {
         pendingOutsidePointerId = event.pointerId;
@@ -3515,16 +3587,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   ): TableCommandTransactionPlan {
     const dom = this.domRefs?.wrap;
     const view = this.view;
-    const column = this.columnIndexFor(target.column);
-    if (!dom || !view || column === null) return { transaction: null, outcome: 'no-op' };
+    const columns = this.selectedColumns(target);
+    if (!dom || !view || !columns.length) return { transaction: null, outcome: 'no-op' };
     if (!this.resolveCurrentTableRange(view, dom)) return { transaction: null, outcome: 'no-op' };
     const matrix = this.readCellMatrix();
     if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
     const alignments = normalizeRow(this.tableData.alignments, matrix.headerCells.length, '').map((value) => value ?? null);
-    alignments[column] = alignment;
+    for (const column of columns) alignments[column] = alignment;
     matrix.alignments = alignments;
-    return this.buildMatrixTransaction(matrix, dom, { row: target.row ?? 0, col: column }, {
-      alignmentOverrideColumn: column
+    return this.buildMatrixTransaction(matrix, dom, { row: target.row ?? 0, col: columns[0] }, {
+      alignmentOverrideColumns: columns
     });
   }
 
@@ -3559,53 +3631,45 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (!dom) return { transaction: null, outcome: 'no-op' };
     const bodyRow = this.bodyRowIndexFor(target.row);
     const column = this.columnIndexFor(target.column);
-    const selection = target.selection;
-    const selectionCount = selection
-      ? (selection.toRow - selection.fromRow + 1) * (selection.toColumn - selection.fromColumn + 1)
-      : 0;
+    const selectedRows = this.selectedBodyRows(target);
+    const selectedColumns = this.selectedColumns(target);
 
     switch (command) {
       case 'insert-row-above': {
-        return bodyRow === null
+        const firstRow = selectedRows.length ? Math.min(...selectedRows) : bodyRow;
+        return firstRow === null
           ? this.buildAddRowAfter(dom, -1, column ?? 0)
-          : this.buildAddRowBefore(dom, bodyRow, column ?? 0);
+          : this.buildAddRowBefore(dom, firstRow, column ?? 0);
       }
-      case 'insert-row-below':
-        return this.buildAddRowAfter(dom, bodyRow ?? -1, column ?? 0);
+      case 'insert-row-below': {
+        const lastRow = selectedRows.length ? Math.max(...selectedRows) : bodyRow;
+        return this.buildAddRowAfter(dom, lastRow ?? -1, column ?? 0);
+      }
+      case 'move-row-up':
+        return this.buildMoveRows(dom, selectedRows, 'up', column ?? 0, target.row ?? 1);
+      case 'move-row-down':
+        return this.buildMoveRows(dom, selectedRows, 'down', column ?? 0, target.row ?? 1);
       case 'delete-row': {
-        if (!selection || selectionCount <= 1) {
-          return bodyRow === null
-            ? { transaction: null, outcome: 'no-op' }
-            : this.buildRemoveRowsAt(dom, [bodyRow], column ?? 0);
-        }
-        const bodyRowIndexes: number[] = [];
-        for (let row = Math.max(1, selection.fromRow); row <= selection.toRow; row += 1) {
-          const bodyIndex = row - 1;
-          if (bodyIndex >= 0 && bodyIndex < this.tableData.rows.length) bodyRowIndexes.push(bodyIndex);
-        }
-        return this.buildRemoveRowsAt(dom, bodyRowIndexes, column ?? 0);
+        return this.buildRemoveRowsAt(dom, selectedRows, column ?? 0);
       }
       case 'insert-column-left': {
-        return column === null
+        const firstColumn = selectedColumns.length ? Math.min(...selectedColumns) : column;
+        return firstColumn === null
           ? { transaction: null, outcome: 'no-op' }
-          : this.buildAddColumnBefore(dom, column, target.row ?? 0);
+          : this.buildAddColumnBefore(dom, firstColumn, target.row ?? 0);
       }
       case 'insert-column-right': {
-        return column === null
+        const lastColumn = selectedColumns.length ? Math.max(...selectedColumns) : column;
+        return lastColumn === null
           ? { transaction: null, outcome: 'no-op' }
-          : this.buildAddColumnAfter(dom, column, target.row ?? 0);
+          : this.buildAddColumnAfter(dom, lastColumn, target.row ?? 0);
       }
+      case 'move-column-left':
+        return this.buildMoveColumns(dom, selectedColumns, 'left', target.row ?? 0, column ?? 0);
+      case 'move-column-right':
+        return this.buildMoveColumns(dom, selectedColumns, 'right', target.row ?? 0, column ?? 0);
       case 'delete-column': {
-        if (!selection || selectionCount <= 1) {
-          return column === null
-            ? { transaction: null, outcome: 'no-op' }
-            : this.buildRemoveColumnsAt(dom, [column], target.row ?? 0);
-        }
-        const columns: number[] = [];
-        for (let selectedColumn = selection.fromColumn; selectedColumn <= selection.toColumn; selectedColumn += 1) {
-          if (selectedColumn >= 0 && selectedColumn < this.tableData.colCount) columns.push(selectedColumn);
-        }
-        return this.buildRemoveColumnsAt(dom, columns, target.row ?? 0);
+        return this.buildRemoveColumnsAt(dom, selectedColumns, target.row ?? 0);
       }
       case 'align-left':
         return this.buildAlignmentTransaction('left', target);
@@ -3884,12 +3948,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       preserveScrollPosition = false,
       sourceRowOrder = null,
       extraEffects = [],
-      alignmentOverrideColumn = null
+      alignmentOverrideColumns = []
     }: {
       preserveScrollPosition?: boolean;
       sourceRowOrder?: number[] | null;
       extraEffects?: readonly StateEffect<unknown>[];
-      alignmentOverrideColumn?: number | null;
+      alignmentOverrideColumns?: readonly number[];
     } = {}
   ): TableCommandTransactionPlan {
     const view = this.getEditorView(dom);
@@ -3902,15 +3966,15 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const tableStartLine = view.state.doc.lineAt(range.from).number;
     const markdown = serializeTableMarkdown(this.tableData.indent, headerCells, alignments, rows);
     const current = view.state.doc.sliceString(range.from, range.to);
-    const commandEffects = alignmentOverrideColumn === null
+    const commandEffects = alignmentOverrideColumns.length === 0
       ? [...extraEffects]
       : [
           ...extraEffects,
-          setTableHeaderAlignmentOverrideEffect.of({
-            from: range.from,
-            to: range.from + markdown.length,
-            column: alignmentOverrideColumn
-          })
+          ...alignmentOverrideColumns.map((column) => setTableHeaderAlignmentOverrideEffect.of({
+              from: range.from,
+              to: range.from + markdown.length,
+              column
+            }))
         ];
     if (current === markdown) {
       if (commandEffects.length) {
@@ -4004,6 +4068,42 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       dom,
       { row: insertAt + 1, col: focusColumn },
       { sourceRowOrder }
+    );
+  }
+
+  buildMoveRows(
+    dom: HTMLElement,
+    rowIndexes: number[],
+    direction: 'up' | 'down',
+    focusColumn: number,
+    focusTableRow: number
+  ): TableCommandTransactionPlan {
+    const indexes = [...new Set(rowIndexes)].sort((left, right) => left - right);
+    if (!indexes.length) return { transaction: null, outcome: 'no-op' };
+    const first = indexes[0];
+    const last = indexes[indexes.length - 1];
+    if (indexes.some((index, offset) => index !== first + offset)) {
+      return { transaction: null, outcome: 'no-op' };
+    }
+    if (direction === 'up' ? first <= 0 : last >= this.tableData.rows.length - 1) {
+      return { transaction: null, outcome: 'no-op' };
+    }
+    const matrix = this.readCellMatrix();
+    const sourceRowOrder = matrix.rows.map((_row, index) => index);
+    if (direction === 'up') {
+      sourceRowOrder.splice(first - 1, indexes.length + 1, ...indexes, first - 1);
+    } else {
+      sourceRowOrder.splice(first, indexes.length + 1, last + 1, ...indexes);
+    }
+    matrix.rows = sourceRowOrder.map((index) => matrix.rows[index]);
+    return this.buildMatrixTransaction(
+      matrix,
+      dom,
+      {
+        row: Math.min(Math.max(focusTableRow + (direction === 'up' ? -1 : 1), 1), matrix.rows.length),
+        col: focusColumn
+      },
+      { sourceRowOrder, preserveScrollPosition: true }
     );
   }
 
@@ -4186,6 +4286,49 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     alignments.splice(insertAt, 0, null);
     matrix.alignments = alignments;
     return this.buildMatrixTransaction(matrix, dom, { row: focusRow, col: insertAt });
+  }
+
+  buildMoveColumns(
+    dom: HTMLElement,
+    columnIndexes: number[],
+    direction: 'left' | 'right',
+    focusRow: number,
+    focusColumn: number
+  ): TableCommandTransactionPlan {
+    const indexes = [...new Set(columnIndexes)].sort((left, right) => left - right);
+    if (!indexes.length) return { transaction: null, outcome: 'no-op' };
+    const first = indexes[0];
+    const last = indexes[indexes.length - 1];
+    if (indexes.some((index, offset) => index !== first + offset)) {
+      return { transaction: null, outcome: 'no-op' };
+    }
+    if (direction === 'left' ? first <= 0 : last >= this.tableData.colCount - 1) {
+      return { transaction: null, outcome: 'no-op' };
+    }
+    const matrix = this.readCellMatrix();
+    const sourceTable = this.domRefs?.table ?? null;
+    const commandRoot = this.view?.dom ?? null;
+    const columnPermutation = matrix.headerCells.map((_cell, index) => index);
+    if (direction === 'left') {
+      columnPermutation.splice(first - 1, indexes.length + 1, ...indexes, first - 1);
+    } else {
+      columnPermutation.splice(first, indexes.length + 1, last + 1, ...indexes);
+    }
+    matrix.headerCells = columnPermutation.map((index) => matrix.headerCells[index]);
+    matrix.rows = matrix.rows.map((row) => columnPermutation.map((index) => row[index] ?? ''));
+    const alignments = normalizeRow(this.tableData.alignments, columnPermutation.length, '').map((value) => value ?? null);
+    matrix.alignments = columnPermutation.map((index) => alignments[index] ?? null);
+    const plan = this.buildMatrixTransaction(matrix, dom, {
+      row: focusRow,
+      col: Math.min(Math.max(focusColumn + (direction === 'left' ? -1 : 1), 0), matrix.headerCells.length - 1)
+    });
+    if (!plan.transaction || !sourceTable || !commandRoot) return plan;
+    return {
+      ...plan,
+      afterDispatch: () => commandRoot.dispatchEvent(new CustomEvent('meo-table-column-permutation', {
+        detail: { table: sourceTable, permutation: columnPermutation }
+      }))
+    };
   }
 
   buildRemoveColumnsAt(dom: HTMLElement, columnIndexes: number[], focusRow: number): TableCommandTransactionPlan {
@@ -4512,57 +4655,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     }
   }
 
-  updateStickyControls() {
-    if (!this.domRefs || !this.view) return;
-    const { shell, table } = this.domRefs;
-    const scroller = this.view.scrollDOM;
-    const controlsVisible = shell.classList.contains('is-interacting');
-    if (!controlsVisible) {
-      shell.classList.remove('is-controls-sticky');
-      shell.style.removeProperty('--meo-html-table-sticky-top');
-      shell.style.removeProperty('--meo-html-table-sticky-left');
-      return;
-    }
-
-    const scrollerRect = scroller.getBoundingClientRect();
-    const tableRect = table.getBoundingClientRect();
-    const shellRect = shell.getBoundingClientRect();
-    const toolbar = shell.querySelector<HTMLElement>('.meo-md-html-table-toolbar');
-    const toolbarViewportHeight = toolbar?.getBoundingClientRect().height ?? 0;
-    const shouldStick = tableHasReachedStickyThreshold(
-      tableRect,
-      scrollerRect,
-      toolbarViewportHeight
-    );
-    if (shouldStick) {
-      const mapping = toolbar ? measureFixedContainingBlockMapping(toolbar) : null;
-      const projection = mapping ? projectFixedChromeGeometry(mapping, {
-        rect: { left: shellRect.left, top: scrollerRect.top, width: 0, height: 0 },
-        vectors: []
-      }) : null;
-      if (projection?.ok) {
-        shell.style.setProperty('--meo-html-table-sticky-top', `${projection.geometry.rect.top}px`);
-        shell.style.setProperty('--meo-html-table-sticky-left', `${projection.geometry.rect.left}px`);
-        shell.classList.add('is-controls-sticky');
-        return;
-      }
-      shell.classList.remove('is-controls-sticky');
-      shell.style.removeProperty('--meo-html-table-sticky-top');
-      shell.style.removeProperty('--meo-html-table-sticky-left');
-    } else {
-      shell.classList.remove('is-controls-sticky');
-      shell.style.removeProperty('--meo-html-table-sticky-top');
-      shell.style.removeProperty('--meo-html-table-sticky-left');
-    }
-  }
-
   recalcLayout() {
     if (this.pendingResizeRows) {
       this.resizeAllRows();
     }
     this.syncTableLineNumbers();
     this.syncTableDiffMarkers();
-    this.updateStickyControls();
+    this.updateContextControlsPosition();
     for (const task of Array.from(this.layoutTasks)) task();
   }
 
@@ -4741,7 +4840,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return { content, input };
   }
 
-  createToolbarIcon(icon: TableToolbarIcon) {
+  createContextIcon(icon: TableToolbarIcon) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', '18');
     svg.setAttribute('height', '18');
@@ -4752,7 +4851,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     svg.setAttribute('stroke-linecap', 'round');
     svg.setAttribute('stroke-linejoin', 'round');
     svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('class', `meo-md-html-table-toolbar-icon ${icon.className}`);
+    svg.setAttribute('class', `meo-md-html-table-context-icon ${icon.className}`);
 
     for (const d of icon.paths) {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -4763,14 +4862,16 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return svg;
   }
 
-  createToolbarButton(label: string, icon: TableToolbarIcon, onClick: () => void) {
+  createContextButton(label: string, command: TableCommand, icon: TableToolbarIcon, onClick: () => void) {
     const button = document.createElement('button');
     button.type = 'button';
     button.tabIndex = -1;
-    button.className = 'meo-visual-control-btn meo-md-html-table-toolbar-btn';
+    button.className = 'meo-md-html-table-context-btn';
     button.title = label;
     button.setAttribute('aria-label', label);
-    button.appendChild(this.createToolbarIcon(icon));
+    button.setAttribute('role', 'menuitem');
+    button.dataset.command = command;
+    button.appendChild(this.createContextIcon(icon));
     button.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -4781,76 +4882,173 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       event.preventDefault();
       event.stopPropagation();
     });
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
     return button;
   }
 
-  createToolbarSeparator() {
-    const separator = document.createElement('span');
-    separator.className = 'meo-md-html-table-toolbar-separator';
-    separator.setAttribute('aria-hidden', 'true');
-    return separator;
+  createContextGroup(label: string, buttons: readonly HTMLButtonElement[]) {
+    const group = document.createElement('section');
+    group.className = 'meo-md-html-table-context-group';
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', label);
+    const heading = document.createElement('div');
+    heading.className = 'meo-md-html-table-context-group-label';
+    heading.textContent = label;
+    const actions = document.createElement('div');
+    actions.className = 'meo-md-html-table-context-group-actions';
+    actions.append(...buttons);
+    group.append(heading, actions);
+    return group;
   }
 
-  createTableToolbar(container: HTMLElement) {
-    const strings = getUiStrings(this.view!.state.facet(uiLanguageFacet));
-    const toolbar = document.createElement('div');
-    toolbar.className = 'meo-visual-surface meo-md-html-table-toolbar';
-    toolbar.setAttribute('aria-label', strings.tableActions);
+  setContextMenuOpen(open: boolean, focusFirst = false) {
+    if (!this.domRefs) return;
+    const { shell, contextTrigger, contextMenu } = this.domRefs;
+    contextMenu.hidden = !open;
+    contextTrigger.setAttribute('aria-expanded', String(open));
+    shell.classList.toggle('is-context-menu-open', open);
+    if (!open) return;
+    this.updateContextMenuState();
+    this.updateContextControlsPosition();
+    if (focusFirst) {
+      contextMenu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
+    }
+  }
 
-    const insertRowAbove = this.createToolbarButton(strings.insertRowAbove, tableToolbarIcons.rowInsertTop, () => {
+  updateContextControlsPosition() {
+    if (!this.domRefs) return;
+    const { shell, rowEntries, contextTrigger, contextMenu } = this.domRefs;
+    const rowIndex = this.cellSelection.snapshot().anchor?.row ?? this.activeTarget.row;
+    const row = rowEntries[Math.min(Math.max(rowIndex, 0), rowEntries.length - 1)]?.row;
+    if (!row) return;
+    const shellRect = shell.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const rowCenter = rowRect.top - shellRect.top + rowRect.height / 2;
+    contextTrigger.style.top = `${rowCenter}px`;
+    if (contextMenu.hidden) return;
+    const gap = 5;
+    const menuHeight = contextMenu.offsetHeight;
+    const below = rowRect.bottom - shellRect.top + gap;
+    const above = rowRect.top - shellRect.top - menuHeight - gap;
+    contextMenu.style.top = `${rowRect.bottom + menuHeight + gap <= window.innerHeight ? below : Math.max(0, above)}px`;
+  }
+
+  createTableContextControls(container: HTMLElement) {
+    const strings = getUiStrings(this.view!.state.facet(uiLanguageFacet));
+    const menuId = `meo-table-context-menu-${++nextTableContextMenuSequence}`;
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.tabIndex = -1;
+    trigger.className = 'meo-md-html-table-context-trigger';
+    trigger.title = strings.tableActions;
+    trigger.setAttribute('aria-label', strings.tableActions);
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', menuId);
+    trigger.textContent = '⋯';
+
+    const menu = document.createElement('div');
+    menu.id = menuId;
+    menu.className = 'meo-visual-surface meo-md-html-table-context-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', strings.tableActions);
+    menu.hidden = true;
+
+    const insertRowAbove = this.createContextButton(strings.insertRowAbove, 'insert-row-above', tableToolbarIcons.rowInsertTop, () => {
       this.requestInsertRowAbove(container);
     });
-    const insertRowBelow = this.createToolbarButton(strings.insertRowBelow, tableToolbarIcons.rowInsertBottom, () => {
+    const insertRowBelow = this.createContextButton(strings.insertRowBelow, 'insert-row-below', tableToolbarIcons.rowInsertBottom, () => {
       this.requestInsertRowBelow(container);
     });
-    const deleteRow = this.createToolbarButton(strings.deleteRow, tableToolbarIcons.rowRemove, () => {
+    const moveRowUp = this.createContextButton(strings.moveRowUp, 'move-row-up', tableToolbarIcons.arrowUp, () => {
+      this.requestMoveRow(container, 'up');
+    });
+    const moveRowDown = this.createContextButton(strings.moveRowDown, 'move-row-down', tableToolbarIcons.arrowDown, () => {
+      this.requestMoveRow(container, 'down');
+    });
+    const deleteRow = this.createContextButton(strings.deleteRow, 'delete-row', tableToolbarIcons.rowRemove, () => {
       this.requestDeleteRow(container);
     });
-    const insertColumnLeft = this.createToolbarButton(strings.insertColumnLeft, tableToolbarIcons.columnInsertLeft, () => {
+    const insertColumnLeft = this.createContextButton(strings.insertColumnLeft, 'insert-column-left', tableToolbarIcons.columnInsertLeft, () => {
       this.requestInsertColumnLeft(container);
     });
-    const insertColumnRight = this.createToolbarButton(strings.insertColumnRight, tableToolbarIcons.columnInsertRight, () => {
+    const insertColumnRight = this.createContextButton(strings.insertColumnRight, 'insert-column-right', tableToolbarIcons.columnInsertRight, () => {
       this.requestInsertColumnRight(container);
     });
-    const deleteColumn = this.createToolbarButton(strings.deleteColumn, tableToolbarIcons.columnRemove, () => {
+    const moveColumnLeft = this.createContextButton(strings.moveColumnLeft, 'move-column-left', tableToolbarIcons.arrowLeft, () => {
+      this.requestMoveColumn(container, 'left');
+    });
+    const moveColumnRight = this.createContextButton(strings.moveColumnRight, 'move-column-right', tableToolbarIcons.arrowRight, () => {
+      this.requestMoveColumn(container, 'right');
+    });
+    const deleteColumn = this.createContextButton(strings.deleteColumn, 'delete-column', tableToolbarIcons.columnRemove, () => {
       this.requestDeleteColumn(container);
     });
-    const alignColumnLeft = this.createToolbarButton(strings.alignColumnLeft, tableToolbarIcons.alignLeft, () => {
+    const alignColumnLeft = this.createContextButton(strings.alignColumnLeft, 'align-left', tableToolbarIcons.alignLeft, () => {
       this.requestColumnAlignment(container, 'left');
     });
-    const alignColumnCenter = this.createToolbarButton(strings.alignColumnCenter, tableToolbarIcons.alignCenter, () => {
+    const alignColumnCenter = this.createContextButton(strings.alignColumnCenter, 'align-center', tableToolbarIcons.alignCenter, () => {
       this.requestColumnAlignment(container, 'center');
     });
-    const alignColumnRight = this.createToolbarButton(strings.alignColumnRight, tableToolbarIcons.alignRight, () => {
+    const alignColumnRight = this.createContextButton(strings.alignColumnRight, 'align-right', tableToolbarIcons.alignRight, () => {
       this.requestColumnAlignment(container, 'right');
     });
-    const rowSeparator = this.createToolbarSeparator();
-    const columnSeparator = this.createToolbarSeparator();
-    deleteRow.classList.add('meo-md-html-table-toolbar-delete-btn');
-    deleteColumn.classList.add('meo-md-html-table-toolbar-delete-btn');
+    deleteRow.classList.add('meo-md-html-table-context-delete-btn');
+    deleteColumn.classList.add('meo-md-html-table-context-delete-btn');
 
-    toolbar.append(
-      insertRowAbove,
-      insertRowBelow,
-      deleteRow,
-      rowSeparator,
-      insertColumnLeft,
-      insertColumnRight,
-      deleteColumn,
-      columnSeparator,
-      alignColumnLeft,
-      alignColumnCenter,
-      alignColumnRight
+    menu.append(
+      this.createContextGroup(strings.tableInsert, [insertRowAbove, insertRowBelow, insertColumnLeft, insertColumnRight]),
+      this.createContextGroup(strings.tableMove, [moveRowUp, moveRowDown, moveColumnLeft, moveColumnRight]),
+      this.createContextGroup(strings.tableAlign, [alignColumnLeft, alignColumnCenter, alignColumnRight]),
+      this.createContextGroup(strings.tableDelete, [deleteRow, deleteColumn])
     );
 
+    trigger.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.setContextMenuOpen(menu.hidden);
+    });
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'ArrowDown') return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.setContextMenuOpen(true, true);
+    });
+    menu.addEventListener('keydown', (event) => {
+      const buttons = Array.from(menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+      const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setContextMenuOpen(false);
+        trigger.focus({ preventScroll: true });
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      buttons[(index + delta + buttons.length) % buttons.length]?.focus({ preventScroll: true });
+    });
+
     return {
-      toolbar,
+      trigger,
+      menu,
       buttons: {
         insertRowAbove,
         insertRowBelow,
+        moveRowUp,
+        moveRowDown,
         deleteRow,
         insertColumnLeft,
         insertColumnRight,
+        moveColumnLeft,
+        moveColumnRight,
         deleteColumn,
         alignColumnLeft,
         alignColumnCenter,
@@ -4868,7 +5066,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const shell = document.createElement('div');
     shell.className = 'meo-md-html-table-shell';
     tableDomOwners.set(shell, this);
-    shell.style.setProperty('--meo-html-table-toolbar-height', `${tableToolbarHeight}px`);
     shell.style.setProperty(
       '--meo-html-table-indent',
       liveBlockIndentCssValue(this.tableData.visualIndent) ?? '0ch'
@@ -4890,7 +5087,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       heightObserver.observe(shell);
       this.cleanupFns.push(() => heightObserver.disconnect());
     }
-    const { toolbar, buttons: toolbarButtons } = this.createTableToolbar(wrap);
+    const { trigger: contextTrigger, menu: contextMenu, buttons: contextButtons } = this.createTableContextControls(wrap);
 
     const table = document.createElement('table');
     table.className = 'meo-md-html-table';
@@ -4986,8 +5183,6 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const stickyChrome = document.createElement('div');
     stickyChrome.className = 'meo-md-html-table-sticky-chrome';
     stickyChrome.setAttribute('aria-hidden', 'true');
-    const stickyToolbarBand = document.createElement('div');
-    stickyToolbarBand.className = 'meo-md-html-table-sticky-toolbar-band';
     const stickyHeaderViewport = document.createElement('div');
     stickyHeaderViewport.className = 'meo-md-html-table-sticky-header';
     const stickyTable = document.createElement('table');
@@ -5000,7 +5195,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     stickyThead.appendChild(stickyHeaderRow);
     stickyTable.append(stickyColgroupElement, stickyThead);
     stickyHeaderViewport.appendChild(stickyTable);
-    stickyChrome.append(stickyToolbarBand, stickyHeaderViewport);
+    stickyChrome.append(stickyHeaderViewport);
 
     const lineNumberLayer = document.createElement('div');
     lineNumberLayer.className = 'meo-md-html-table-line-numbers';
@@ -5015,7 +5210,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     if (diffGutter instanceof HTMLElement) diffGutter.appendChild(diffMarkerLayer);
     this.cleanupFns.push(() => diffMarkerLayer.remove());
     wrap.append(table);
-    shell.append(toolbar, wrap, stickyChrome);
+    shell.append(contextTrigger, contextMenu, wrap, stickyChrome);
     this.domRefs = {
       shell,
       wrap,
@@ -5034,7 +5229,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       stickyHeaderViewport,
       stickyTable,
       stickyHeaderRow,
-      toolbarButtons
+      contextTrigger,
+      contextMenu,
+      contextButtons
     };
     let mounted = mountedTableWidgets.get(view);
     if (!mounted) {

@@ -45,7 +45,6 @@ async function main(): Promise<void> {
       let editor: any;
       const geometry = () => {
         const scroller = editor?.view.scrollDOM as HTMLElement | undefined;
-        const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar');
         const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome');
         const stickyHeader = chrome?.querySelector<HTMLElement>('.meo-md-html-table-sticky-header');
         const mainCell = document.querySelector<HTMLElement>(
@@ -55,10 +54,10 @@ async function main(): Promise<void> {
         const shell = document.querySelector<HTMLElement>('.meo-md-html-table-shell');
         return {
           scrollerTop: scroller?.getBoundingClientRect().top ?? null,
-          toolbarTop: toolbar?.getBoundingClientRect().top ?? null,
-          toolbarHeight: toolbar?.getBoundingClientRect().height ?? null,
-          toolbarLeft: toolbar?.getBoundingClientRect().left ?? null,
-          shellLeft: shell?.getBoundingClientRect().left ?? null,
+          contextTriggerFixed: getComputedStyle(
+            document.querySelector<HTMLElement>('.meo-md-html-table-context-trigger')!
+          ).position === 'fixed',
+          stickyToolbarBands: document.querySelectorAll('.meo-md-html-table-sticky-toolbar-band').length,
           chromeTop: chrome?.getBoundingClientRect().top ?? null,
           stickyHeaderTop: stickyHeader?.getBoundingClientRect().top ?? null,
           firstColumnDelta: mainCell && stickyCell
@@ -108,21 +107,19 @@ async function main(): Promise<void> {
       ));
       let threshold: null | {
         beforeGap: number;
-        beforeSticky: boolean;
+        beforeVisible: boolean;
         afterGap: number;
-        afterSticky: boolean;
+        afterVisible: boolean;
         takeoverDelta: number;
       } = null;
       if (!scenarioInput.expectFailure) {
         const table = document.querySelector<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)')!;
-        const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
-        const beforeGap = table.getBoundingClientRect().top - scroller.getBoundingClientRect().top -
-          toolbar.getBoundingClientRect().height;
-        const beforeSticky = geometry().controlsSticky;
-        if (!(beforeGap > 0) || beforeSticky) {
+        const beforeGap = table.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+        const beforeVisible = geometry().visible;
+        if (!(beforeGap > 0) || beforeVisible) {
           throw new Error(`threshold fixture did not start before takeover: ${JSON.stringify({
             beforeGap,
-            beforeSticky
+            beforeVisible
           })}`);
         }
         await settle(() => {
@@ -130,21 +127,20 @@ async function main(): Promise<void> {
           scroller.dispatchEvent(new Event('scroll'));
         }, () => true);
         const afterGeometry = geometry();
-        const afterGap = table.getBoundingClientRect().top - scroller.getBoundingClientRect().top -
-          toolbar.getBoundingClientRect().height;
-        if (!(afterGap <= 0) || !afterGeometry.controlsSticky) {
+        const afterGap = table.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+        if (!(afterGap <= 0) || !afterGeometry.visible) {
           throw new Error(`single threshold scroll did not cross takeover: ${JSON.stringify({
             afterGap,
-            afterSticky: afterGeometry.controlsSticky,
+            afterVisible: afterGeometry.visible,
             scrollTop: scroller.scrollTop
           })}`);
         }
         threshold = {
           beforeGap,
-          beforeSticky,
+          beforeVisible,
           afterGap,
-          afterSticky: afterGeometry.controlsSticky,
-          takeoverDelta: Math.abs(afterGeometry.toolbarTop! - afterGeometry.scrollerTop!)
+          afterVisible: afterGeometry.visible,
+          takeoverDelta: Math.abs(afterGeometry.chromeTop! - afterGeometry.scrollerTop!)
         };
       }
       await settle(() => {
@@ -183,22 +179,21 @@ async function main(): Promise<void> {
     };
     const assertAlignedGeometry = (geometry: Awaited<ReturnType<typeof runGeometryScenario>>['before']) => {
       assert.equal(geometry.visible, true, JSON.stringify(geometry));
-      assert.ok(Math.abs(geometry.toolbarTop! - geometry.scrollerTop!) <= 1, JSON.stringify(geometry));
       assert.ok(Math.abs(geometry.chromeTop! - geometry.scrollerTop!) <= 1, JSON.stringify(geometry));
-      assert.ok(Math.abs(geometry.toolbarLeft! - geometry.shellLeft!) <= 1, JSON.stringify(geometry));
-      assert.ok(Math.abs(
-        geometry.stickyHeaderTop! - geometry.chromeTop! - geometry.toolbarHeight!
-      ) <= 1, JSON.stringify(geometry));
+      assert.ok(Math.abs(geometry.stickyHeaderTop! - geometry.chromeTop!) <= 1, JSON.stringify(geometry));
       assert.ok(geometry.firstColumnDelta! <= 1, JSON.stringify(geometry));
+      assert.equal(geometry.contextTriggerFixed, false, JSON.stringify(geometry));
+      assert.equal(geometry.stickyToolbarBands, 0, JSON.stringify(geometry));
+      assert.equal(geometry.controlsSticky, false, JSON.stringify(geometry));
     };
     for (const dpr of [1, 1.5, 2]) {
       for (const zoom of [0.8, 1, 1.25]) {
         const geometryResult = await runGeometryScenario({ dpr, zoom });
         assert.ok(geometryResult.threshold);
         assert.ok(geometryResult.threshold!.beforeGap > 0, JSON.stringify(geometryResult.threshold));
-        assert.equal(geometryResult.threshold!.beforeSticky, false);
+        assert.equal(geometryResult.threshold!.beforeVisible, false);
         assert.ok(geometryResult.threshold!.afterGap <= 0, JSON.stringify(geometryResult.threshold));
-        assert.equal(geometryResult.threshold!.afterSticky, true);
+        assert.equal(geometryResult.threshold!.afterVisible, true);
         assert.ok(geometryResult.threshold!.takeoverDelta <= 1, JSON.stringify(geometryResult.threshold));
         assertAlignedGeometry(geometryResult.before);
         if (dpr === 1.5 && zoom === 1.25) {
@@ -327,13 +322,11 @@ async function main(): Promise<void> {
 
       const input = document.querySelector<HTMLTextAreaElement>('.meo-md-html-table tbody textarea')!;
       transactions.push(await settle(() => input.focus({ preventScroll: true }), () => (
-        document.querySelector('.meo-md-html-table-sticky-chrome')?.classList.contains('has-sticky-controls') ?? false
+        document.querySelector('.meo-md-html-table-shell')?.classList.contains('is-interacting') ?? false
       )));
       const chrome = document.querySelector<HTMLElement>('.meo-md-html-table-sticky-chrome')!;
-      const toolbar = document.querySelector<HTMLElement>('.meo-md-html-table-toolbar')!;
       const stickyHeader = chrome.querySelector<HTMLElement>('.meo-md-html-table-sticky-header')!;
-      const controls = [toolbar.getBoundingClientRect().top, chrome.getBoundingClientRect().top,
-        stickyHeader.getBoundingClientRect().top, toolbar.getBoundingClientRect().height];
+      const controls = [chrome.getBoundingClientRect().top, stickyHeader.getBoundingClientRect().top];
       input.blur();
 
       transactions.push(await settle(() => {
@@ -527,7 +520,6 @@ async function main(): Promise<void> {
     assert.equal(result.appeared.visible, true);
     assert.ok(Math.abs(result.appeared.chromeTop - result.appeared.scrollerTop) <= 1);
     assert.ok(Math.abs(result.controls[0] - result.controls[1]) <= 1);
-    assert.ok(Math.abs(result.controls[2] - result.controls[1] - result.controls[3]) <= 1);
     assert.ok(Math.abs(result.outerAligned.chromeTop - result.outerAligned.scrollerTop) <= 1);
     assert.deepEqual(result.domContract.stickyCols, result.domContract.normalCols);
     assert.deepEqual([result.domContract.normalHandles, result.domContract.stickyHandles], [2, 2]);

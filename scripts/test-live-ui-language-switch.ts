@@ -35,13 +35,17 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
       strings.tableActions,
       strings.insertRowAbove,
       strings.insertRowBelow,
-      strings.deleteRow,
       strings.insertColumnLeft,
       strings.insertColumnRight,
-      strings.deleteColumn,
+      strings.moveRowUp,
+      strings.moveRowDown,
+      strings.moveColumnLeft,
+      strings.moveColumnRight,
       strings.alignColumnLeft,
       strings.alignColumnCenter,
-      strings.alignColumnRight
+      strings.alignColumnRight,
+      strings.deleteRow,
+      strings.deleteColumn
     ],
     mermaidControls: strings.mermaidBlockControls(mermaidLine),
     mermaidMode: strings.editMermaidSplit,
@@ -153,7 +157,7 @@ async function main(): Promise<void> {
       && Boolean(document.querySelector('.meo-mermaid-mode-btn'))
       && Boolean(document.querySelector('.meo-latex-math-mode-btn'))
       && Boolean(document.querySelector('.meo-md-html-source-toggle'))
-      && Boolean(document.querySelector('.meo-md-html-table-toolbar'))
+      && Boolean(document.querySelector('.meo-md-html-table-context-menu'))
     ));
     await waitForFrames(page);
 
@@ -177,8 +181,8 @@ async function main(): Promise<void> {
         html: readLabel('.meo-md-html-source-toggle:not(.meo-md-details-source-toggle)'),
         merge: Array.from(document.querySelectorAll<HTMLElement>('.meo-merge-action-btn'), (button) => button.textContent),
         tableControls: [
-          readLabel('.meo-md-html-table-toolbar'),
-          ...readLabels('.meo-md-html-table-toolbar button[aria-label]')
+          readLabel('.meo-md-html-table-context-trigger'),
+          ...readLabels('.meo-md-html-table-context-menu button[aria-label]')
         ],
         mermaidControls: readLabel('.meo-mermaid-toolbar'),
         mermaidMode: readLabel('.meo-mermaid-mode-btn'),

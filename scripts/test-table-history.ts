@@ -790,7 +790,7 @@ async function main() {
     await waitForFrames(page);
     await page.evaluate(() => {
       const tables = document.querySelectorAll<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
-      (window as any).__firstTableToolbar = tables[0].closest('.meo-md-html-table-shell')?.querySelector('.meo-md-html-table-toolbar');
+      (window as any).__firstTableContextTrigger = tables[0].closest('.meo-md-html-table-shell')?.querySelector('.meo-md-html-table-context-trigger');
       const input = tables[0].querySelector<HTMLTextAreaElement>('tbody textarea')!;
       input.focus();
       input.value = 'One edited';
@@ -817,7 +817,7 @@ async function main() {
       const secondInput = tables[1].querySelector<HTMLTextAreaElement>('tbody textarea')!;
       return {
         activeSecondInput: document.activeElement === secondInput,
-        toolbarPreserved: (window as any).__firstTableToolbar === tables[0].closest('.meo-md-html-table-shell')?.querySelector('.meo-md-html-table-toolbar'),
+        contextTriggerPreserved: (window as any).__firstTableContextTrigger === tables[0].closest('.meo-md-html-table-shell')?.querySelector('.meo-md-html-table-context-trigger'),
         interactionDropped: (window as any).__tableInteractionDropped,
         text: (window as any).__tableHistoryEditor.view.state.doc.toString(),
         activeClass: document.activeElement?.className ?? ''
@@ -828,8 +828,8 @@ async function main() {
       const tables = document.querySelectorAll<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table)');
       return tables[1].querySelector<HTMLTextAreaElement>('tbody textarea')!.value;
     });
-    if (!crossTableFocus.activeSecondInput || !crossTableFocus.toolbarPreserved || crossTableFocus.interactionDropped || !secondTableValue.includes('inserted')) {
-      throw new Error(`Switching tables rebuilt the toolbar or lost the target caret: ${JSON.stringify({ crossTableFocus, secondTableValue })}`);
+    if (!crossTableFocus.activeSecondInput || !crossTableFocus.contextTriggerPreserved || crossTableFocus.interactionDropped || !secondTableValue.includes('inserted')) {
+      throw new Error(`Switching tables rebuilt the context trigger or lost the target caret: ${JSON.stringify({ crossTableFocus, secondTableValue })}`);
     }
     const committedTwoTables = await page.evaluate(() => (window as any).__tableHistoryEditor.getText());
     await waitForFrames(page);

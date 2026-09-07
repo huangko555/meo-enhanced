@@ -75,6 +75,7 @@ type LifecycleEpoch = {
 const tableSelector = 'table[data-table-column-width]';
 const handleSelector = '[data-table-resize-column]';
 const projectionEventName = 'meo-table-column-width-projected';
+const columnPermutationEventName = 'meo-table-column-permutation';
 const resizingClassName = 'meo-table-column-resizing';
 
 function numberFromDataset(element: HTMLElement, key: 'tableFrom' | 'tableTo'): number | null {
@@ -102,6 +103,7 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
   let currentEpoch: LifecycleEpoch | null = null;
   let currentView: EditorView | null = null;
   let disposed = false;
+  let listensForColumnPermutation = false;
   let reconcile: (epoch: LifecycleEpoch, notifyPendingDrag?: boolean) => void;
 
   const isCurrentEpoch = (epoch: LifecycleEpoch): boolean => (
@@ -407,6 +409,28 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     };
     if (existing >= 0) intents[existing] = value;
     else intents.push(value);
+  };
+
+  const applyColumnPermutation = (event: Event) => {
+    const table = event instanceof CustomEvent ? event.detail?.table : null;
+    const permutation = event instanceof CustomEvent ? event.detail?.permutation : null;
+    if (!(table instanceof HTMLTableElement)) return;
+    const columnCount = table.querySelectorAll('thead th').length;
+    if (!Array.isArray(permutation) || permutation.length !== columnCount ||
+      permutation.some((index) => !Number.isInteger(index) || index < 0 || index >= columnCount) ||
+      new Set(permutation).size !== columnCount) return;
+    const permute = <T>(values: readonly T[]) => permutation.map((index) => values[index]);
+    const intent = findIntent(table, true);
+    if (intent) {
+      intent.snapshot = {
+        ...intent.snapshot,
+        widths: permute(intent.snapshot.widths),
+        intentWidths: permute(intent.snapshot.intentWidths),
+        minimumWidths: permute(intent.snapshot.minimumWidths)
+      };
+    }
+    const baseline = findStartupBaseline(table);
+    if (baseline) baseline.widths = permute(baseline.widths);
   };
 
   const bind = (table: HTMLTableElement, epoch: LifecycleEpoch): TableBinding => {
@@ -720,11 +744,17 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
     mutationObserver = null;
     for (const binding of bindings.values()) binding.cleanup();
     bindings.clear();
+    if (listensForColumnPermutation) {
+      options.root.removeEventListener(columnPermutationEventName, applyColumnPermutation);
+      listensForColumnPermutation = false;
+    }
   };
 
   const adapter: TableColumnWidthAdapter = {
     acquire() {
       if (disposed || currentEpoch) return;
+      options.root.addEventListener(columnPermutationEventName, applyColumnPermutation);
+      listensForColumnPermutation = true;
       const epoch = { alive: true, projectionConsumer: {} };
       currentEpoch = epoch;
       mutationObserver = new MutationObserver(() => {

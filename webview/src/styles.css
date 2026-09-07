@@ -5176,17 +5176,6 @@ body.outline-resizing .preview-frame {
   cursor: col-resize !important;
 }
 
-.cm-editor .meo-md-html-table-sticky-toolbar-band {
-  display: none;
-  width: 100%;
-  height: var(--meo-html-table-toolbar-height);
-  background: var(--meo-background);
-}
-
-.cm-editor .meo-md-html-table-sticky-chrome.has-sticky-controls .meo-md-html-table-sticky-toolbar-band {
-  display: block;
-}
-
 .cm-editor .meo-md-html-table-sticky-header {
   width: 100%;
   overflow: hidden;
@@ -5358,76 +5347,133 @@ body.outline-resizing .preview-frame {
   background: var(--meo-active-line-bg);
 }
 
-.cm-editor .meo-md-html-table-toolbar {
+.cm-editor .meo-md-html-table-context-trigger {
   position: absolute;
-  top: calc(-1 * var(--meo-html-table-toolbar-height));
-  left: 0;
+  left: -27px;
   z-index: 225;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0;
+  justify-content: center;
   box-sizing: border-box;
-  height: var(--meo-html-table-toolbar-height);
-  padding: 0;
-  border: 0;
-  background-color: rgb(20 24 28);
-  outline: 1px solid rgb(255 255 255 / 10%);
-  outline-offset: -1px;
-  box-shadow: none;
-  backdrop-filter: none;
+  width: 24px;
+  height: 24px;
+  padding: 0 0 4px;
+  border: 1px solid color-mix(in srgb, var(--meo-foreground) 16%, transparent);
+  border-radius: 5px;
+  color: var(--meo-color-base02);
+  font: 600 16px/1 var(--meo-active-editor-font);
+  background: var(--meo-background);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
+  cursor: pointer;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease;
+  transform: translateY(-50%);
+  transition: opacity 0.1s ease, background-color 0.1s ease;
 }
 
-.cm-editor .meo-md-html-table-shell.is-controls-sticky .meo-md-html-table-toolbar {
-  position: fixed;
-  top: var(--meo-html-table-sticky-top);
-  left: var(--meo-html-table-sticky-left);
-}
-
-.cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-toolbar,
-.cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-toolbar {
+.cm-editor .meo-md-html-table-shell:focus-within .meo-md-html-table-context-trigger,
+.cm-editor .meo-md-html-table-shell.is-interacting .meo-md-html-table-context-trigger,
+.cm-editor .meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-trigger {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
 }
 
-.cm-editor .meo-md-html-table-toolbar-btn {
-  flex: 0 0 auto;
+.cm-editor .meo-md-html-table-context-trigger:hover,
+.cm-editor .meo-md-html-table-context-trigger[aria-expanded='true'] {
+  color: var(--meo-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgb(127 127 127 / 18%));
 }
 
-.cm-editor .meo-md-html-table-toolbar-btn:disabled {
+.cm-editor .meo-md-html-table-context-trigger:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.cm-editor .meo-md-html-table-context-menu {
+  position: absolute;
+  left: 0;
+  z-index: 230;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 212px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
+  border-radius: 7px;
+  color: var(--meo-foreground);
+  background: var(--meo-background);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+}
+
+.cm-editor .meo-md-html-table-context-menu[hidden] {
+  display: none;
+}
+
+.cm-editor .meo-md-html-table-context-group {
+  min-width: 0;
+  padding: 4px;
+}
+
+.cm-editor .meo-md-html-table-context-group-label {
+  margin: 0 0 4px 2px;
+  color: var(--meo-color-base02);
+  font-size: 11px;
+  line-height: 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cm-editor .meo-md-html-table-context-group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.cm-editor .meo-md-html-table-context-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cm-editor .meo-md-html-table-context-btn:hover:not(:disabled),
+.cm-editor .meo-md-html-table-context-btn:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgb(127 127 127 / 18%));
+  outline: none;
+}
+
+.cm-editor .meo-md-html-table-context-btn:disabled {
   color: var(--vscode-disabledForeground, var(--meo-color-base03));
   cursor: default;
-  opacity: 0.45;
+  opacity: 0.38;
 }
 
-.cm-editor .meo-md-html-table-toolbar-delete-btn {
+.cm-editor .meo-md-html-table-context-delete-btn {
   color: #f48771;
 }
 
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-toolbar {
-  background-color: #fff;
-  outline-color: rgb(31 35 40 / 12%);
-  box-shadow: none;
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-trigger,
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu {
+  box-shadow: 0 6px 20px rgb(31 35 40 / 16%);
 }
 
-html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-toolbar-delete-btn {
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delete-btn {
   color: #c62828;
 }
 
-.cm-editor .meo-md-html-table-toolbar-btn svg {
+.cm-editor .meo-md-html-table-context-btn svg {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
-}
-
-.cm-editor .meo-md-html-table-toolbar-separator {
-  width: 1px;
-  height: 13px;
-  background: color-mix(in srgb, var(--meo-foreground) 50%, transparent);
 }
 
 .cm-editor .meo-md-table-header-line {

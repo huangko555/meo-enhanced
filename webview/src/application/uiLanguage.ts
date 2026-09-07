@@ -148,11 +148,19 @@ export type UiStrings = Readonly<{
   incomingVersion: (label: string) => string;
   alertLabel: (type: string) => string;
   tableActions: string;
+  tableInsert: string;
+  tableMove: string;
+  tableAlign: string;
+  tableDelete: string;
   insertRowAbove: string;
   insertRowBelow: string;
+  moveRowUp: string;
+  moveRowDown: string;
   deleteRow: string;
   insertColumnLeft: string;
   insertColumnRight: string;
+  moveColumnLeft: string;
+  moveColumnRight: string;
   deleteColumn: string;
   alignColumnLeft: string;
   alignColumnCenter: string;
@@ -292,8 +300,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     currentVersion: (label: string) => `Current: ${label},`,
     incomingVersion: (label: string) => `Incoming: ${label}`,
     alertLabel: (type: string) => type,
-    tableActions: 'Table actions', insertRowAbove: 'Insert row above', insertRowBelow: 'Insert row below',
+    tableActions: 'Table actions', tableInsert: 'Insert', tableMove: 'Move', tableAlign: 'Align', tableDelete: 'Delete',
+    insertRowAbove: 'Insert row above', insertRowBelow: 'Insert row below', moveRowUp: 'Move row up', moveRowDown: 'Move row down',
     deleteRow: 'Delete row', insertColumnLeft: 'Insert column left', insertColumnRight: 'Insert column right',
+    moveColumnLeft: 'Move column left', moveColumnRight: 'Move column right',
     deleteColumn: 'Delete column', alignColumnLeft: 'Align selected column left',
     alignColumnCenter: 'Align selected column center', alignColumnRight: 'Align selected column right',
     heading: 'Heading',
@@ -425,8 +435,10 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     currentVersion: (label: string) => `当前：${label}，`,
     incomingVersion: (label: string) => `传入：${label}`,
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
-    tableActions: '表格操作', insertRowAbove: '在上方插入行', insertRowBelow: '在下方插入行',
+    tableActions: '表格操作', tableInsert: '插入', tableMove: '移动', tableAlign: '对齐', tableDelete: '删除',
+    insertRowAbove: '在上方插入行', insertRowBelow: '在下方插入行', moveRowUp: '上移行', moveRowDown: '下移行',
     deleteRow: '删除行', insertColumnLeft: '在左侧插入列', insertColumnRight: '在右侧插入列',
+    moveColumnLeft: '左移列', moveColumnRight: '右移列',
     deleteColumn: '删除列', alignColumnLeft: '所选列左对齐',
     alignColumnCenter: '所选列居中对齐', alignColumnRight: '所选列右对齐',
     heading: '标题', headingLevels: '标题级别',
