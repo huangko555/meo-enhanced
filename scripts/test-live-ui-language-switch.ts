@@ -33,19 +33,27 @@ function expectedLabels(language: UiLanguage, mermaidLine: number, formulaLine: 
     merge: [strings.acceptCurrent, strings.acceptIncoming, strings.acceptBoth],
     tableControls: [
       strings.tableActions,
+      strings.tableInsert,
+      strings.tableMove,
+      strings.tableAlign,
+      strings.tableDelete,
+      strings.tableBack,
       strings.insertRowAbove,
       strings.insertRowBelow,
-      strings.moveRowUp,
-      strings.moveRowDown,
-      strings.deleteRow,
       strings.insertColumnLeft,
       strings.insertColumnRight,
+      strings.tableBack,
+      strings.moveRowUp,
+      strings.moveRowDown,
       strings.moveColumnLeft,
       strings.moveColumnRight,
-      strings.deleteColumn,
+      strings.tableBack,
       strings.alignColumnLeft,
       strings.alignColumnCenter,
-      strings.alignColumnRight
+      strings.alignColumnRight,
+      strings.tableBack,
+      strings.deleteRow,
+      strings.deleteColumn
     ],
     mermaidControls: strings.mermaidBlockControls(mermaidLine),
     mermaidMode: strings.editMermaidSplit,
@@ -163,6 +171,11 @@ async function main(): Promise<void> {
 
     const result = await page.evaluate(async () => {
       const editor = (window as any).__liveUiLanguageEditor;
+      const pointer = (button: HTMLButtonElement) => button.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        bubbles: true,
+        cancelable: true
+      }));
       const readLabel = (selector: string) => document.querySelector<HTMLElement>(selector)?.getAttribute('aria-label') ?? null;
       const readLabels = (selector: string) => Array.from(
         document.querySelectorAll<HTMLElement>(selector),
@@ -193,6 +206,9 @@ async function main(): Promise<void> {
 
       editor.view.scrollDOM.scrollTop = 120;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const tableTrigger = document.querySelector<HTMLButtonElement>('.meo-md-html-table-context-trigger')!;
+      pointer(tableTrigger);
+      pointer(document.querySelector<HTMLButtonElement>('[data-context-panel-target="insert"]')!);
       const gutter = editor.view.dom.querySelector<HTMLElement>('.cm-gutters')!;
       const lineNumberNodes = Array.from(gutter.querySelectorAll<HTMLElement>('.cm-lineNumbers > .cm-gutterElement'));
       const tableLineNumbers = gutter.querySelector<HTMLElement>('.meo-md-html-table-line-numbers');
@@ -204,7 +220,9 @@ async function main(): Promise<void> {
         scrollTop: editor.view.scrollDOM.scrollTop,
         selection: editor.view.state.selection.toJSON(),
         history: editor.getHistoryDepth(),
-        text: editor.getText()
+        text: editor.getText(),
+        tableMenuOpen: tableTrigger.getAttribute('aria-expanded'),
+        tablePanel: document.querySelector<HTMLElement>('.meo-md-html-table-context-menu')?.dataset.activePanel
       };
       editor.setUiLanguage('en');
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -217,6 +235,8 @@ async function main(): Promise<void> {
         selection: editor.view.state.selection.toJSON(),
         history: editor.getHistoryDepth(),
         text: editor.getText(),
+        tableMenuOpen: document.querySelector('.meo-md-html-table-context-trigger')?.getAttribute('aria-expanded'),
+        tablePanel: document.querySelector<HTMLElement>('.meo-md-html-table-context-menu')?.dataset.activePanel,
         stableLineNumbers: lineNumberNodes.length === nextLineNumberNodes.length
           && lineNumberNodes.every((node, index) => node === nextLineNumberNodes[index]),
         stableTableLineNumbers: tableLineNumbers === gutter.querySelector('.meo-md-html-table-line-numbers'),
@@ -235,6 +255,15 @@ async function main(): Promise<void> {
     });
 
     assert.deepEqual(result.before.labels, expectedLabels('zh-CN', mermaidLine, formulaLine));
+    assert.deepEqual(
+      result.after.labels.tableControls,
+      expectedLabels('en', mermaidLine, formulaLine).tableControls,
+      'table menu labels did not update in place'
+    );
+    assert.equal(result.before.tableMenuOpen, 'true');
+    assert.equal(result.after.tableMenuOpen, 'true', 'language switch closed the open table menu');
+    assert.equal(result.before.tablePanel, 'insert');
+    assert.equal(result.after.tablePanel, 'insert', 'language switch reset the active table submenu');
     assert.ok(Math.abs(result.after.scrollTop - result.before.scrollTop) <= 1, 'language switch moved the Live viewport');
     assert.deepEqual(result.after.selection, result.before.selection, 'language switch changed the editor selection');
     assert.deepEqual(result.after.history, result.before.history, 'language switch changed undo/redo history');

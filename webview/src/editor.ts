@@ -79,7 +79,8 @@ import {
   commitPendingTableEdits,
   focusHistoryChange,
   focusTableHistoryChange,
-  refreshMountedTablePositions
+  refreshMountedTablePositions,
+  refreshMountedTableUiLanguage
 } from './helpers/tables';
 import { parseFrontmatter, sourceFrontmatterField } from './helpers/frontmatter';
 import { collectLatexMathRanges } from './helpers/math';
@@ -3009,6 +3010,7 @@ export function createEditor({
       view.dispatch({
         effects: uiLanguageCompartment.reconfigure(uiLanguageFacet.of(language))
       });
+      refreshMountedTableUiLanguage(view, language);
     },
     insertFormat(action: EditorFormatAction, level?: EditorFormatLevel) {
       const activeTableInput = getActiveTableInput();

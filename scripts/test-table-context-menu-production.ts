@@ -48,7 +48,11 @@ async function main(): Promise<void> {
       const app = document.getElementById('app')!;
       const editor = (window as any).TableStabilityHarness.createEditor({
         parent: app,
-        text: ['| A | B | C |', '| --- | --- | --- |', '| one | two | three |', '| four | five | six |'].join('\n'),
+        text: [
+          '| A | B | C |',
+          '| --- | --- | --- |',
+          ...Array.from({ length: 18 }, (_, index) => `| row ${index + 1} | two | three |`)
+        ].join('\n'),
         initialMode: 'live',
         onApplyChanges() {}
       });
@@ -85,25 +89,29 @@ async function main(): Promise<void> {
       await frames(2);
       const menu = shell.querySelector<HTMLElement>('.meo-md-html-table-context-menu')!;
       const triggerRect = trigger.getBoundingClientRect();
-      const shellRect = shell.getBoundingClientRect();
+      const wrapRect = wrap.getBoundingClientRect();
       const menuRect = menu.getBoundingClientRect();
       const triggerVisible = getComputedStyle(trigger).visibility;
-      const triggerInsideShell = triggerRect.left >= shellRect.left - 0.5 && triggerRect.right <= shellRect.right + 0.5;
+      const triggerInsideViewport = triggerRect.left >= -0.5 && triggerRect.right <= window.innerWidth + 0.5;
+      const triggerOutsideTable = triggerRect.right <= wrapRect.left + 0.5;
       const menuInsideViewport = menuRect.left >= -0.5 && menuRect.right <= window.innerWidth + 0.5;
       const floating = getComputedStyle(menu).position;
+      const menuStyle = getComputedStyle(menu);
       const shellHeightStable = Math.abs(shell.getBoundingClientRect().height - shellHeightBefore) < 0.5;
-      const groupLabels = Array.from(
-        menu.querySelectorAll('.meo-md-html-table-context-group-label'),
-        (label) => label.textContent
-      );
-      const visibleActionLabels = Array.from(
-        menu.querySelectorAll('.meo-md-html-table-context-btn-label'),
+      const rootActionLabels = Array.from(
+        menu.querySelectorAll('[data-context-panel="root"] .meo-md-html-table-context-btn-label'),
         (label) => label.textContent
       );
 
+      pointer(menu.querySelector<HTMLButtonElement>('[data-context-panel-target="insert"]')!);
+      await frames(1);
+      const insertActionLabels = Array.from(
+        menu.querySelectorAll('[data-context-panel="insert"] .meo-md-html-table-context-btn-label'),
+        (label) => label.textContent
+      );
       pointer(menu.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
       await waitUntil(() => (
-        document.querySelectorAll('.meo-md-html-table-shell tbody tr').length === 3
+        document.querySelectorAll('.meo-md-html-table-shell tbody tr').length === 19
         && Boolean(document.querySelector('.meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-menu:not([hidden])'))
       ), 'first persistent row insertion');
       const firstRestoredMenu = document.querySelector<HTMLElement>(
@@ -111,9 +119,33 @@ async function main(): Promise<void> {
       )!;
       pointer(firstRestoredMenu.querySelector<HTMLButtonElement>('button[title="Insert row below"]')!);
       await waitUntil(() => (
-        document.querySelectorAll('.meo-md-html-table-shell tbody tr').length === 4
+        document.querySelectorAll('.meo-md-html-table-shell tbody tr').length === 20
         && Boolean(document.querySelector('.meo-md-html-table-shell.is-context-menu-open .meo-md-html-table-context-menu:not([hidden])'))
       ), 'second persistent row insertion');
+
+      const moveInput = document.querySelector<HTMLTextAreaElement>('textarea[data-table-row="12"][data-table-col="0"]')!;
+      moveInput.focus({ preventScroll: true });
+      moveInput.closest('td')!.scrollIntoView({ block: 'center' });
+      await frames(4);
+      const moveMenu = document.querySelector<HTMLElement>('.meo-md-html-table-context-menu:not([hidden])')!;
+      pointer(moveMenu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-back')!);
+      pointer(moveMenu.querySelector<HTMLButtonElement>('[data-context-panel-target="move"]')!);
+      const textBeforeMove = editor.getText();
+      const scrollBeforeMove = editor.view.scrollDOM.scrollTop;
+      pointer(moveMenu.querySelector<HTMLButtonElement>('button[title="Move row down"]')!);
+      await waitUntil(() => (
+        editor.getText() !== textBeforeMove
+        && document.querySelector<HTMLElement>('.meo-md-html-table-context-menu:not([hidden])')?.dataset.activePanel === 'move'
+      ), 'persistent row move');
+      const moveScrollSamples: number[] = [];
+      for (let index = 0; index < 12; index += 1) {
+        await frames(1);
+        moveScrollSamples.push(editor.view.scrollDOM.scrollTop);
+      }
+      const maximumMoveScrollDelta = Math.max(
+        Math.abs(editor.view.scrollDOM.scrollTop - scrollBeforeMove),
+        ...moveScrollSamples.map((value) => Math.abs(value - scrollBeforeMove))
+      );
 
       app.style.width = '440px';
       await frames(12);
@@ -128,15 +160,21 @@ async function main(): Promise<void> {
       );
       const output = {
         triggerVisible,
-        triggerInsideShell,
+        triggerInsideViewport,
+        triggerOutsideTable,
         menuInsideViewport,
         floating,
+        menuBackground: menuStyle.backgroundColor,
+        menuBackdropFilter: menuStyle.backdropFilter,
         shellHeightStable,
-        groupLabels,
-        visibleActionLabels,
+        rootActionLabels,
+        insertActionLabels,
         initialWidths,
+        preferredColumnWidth: table.dataset.tablePreferredColumnWidth,
         rowCountAfterRepeatedInsert: constrainedTable.tBodies[0].rows.length,
         menuOpenAfterRepeatedInsert: constrainedShell.classList.contains('is-context-menu-open'),
+        activePanelAfterMove: constrainedShell.querySelector<HTMLElement>('.meo-md-html-table-context-menu')?.dataset.activePanel,
+        maximumMoveScrollDelta,
         constrainedWidths,
         constrainedFits: constrainedTable.getBoundingClientRect().width <= constrainedWrap.clientWidth + 1,
         constrainedOverflow: constrainedWrap.classList.contains('is-table-overflowing')
@@ -152,19 +190,21 @@ async function main(): Promise<void> {
     }
 
     assert.equal(result.triggerVisible, 'visible');
-    assert.equal(result.triggerInsideShell, true, 'the row action trigger must remain inside the table shell');
+    assert.equal(result.triggerInsideViewport, true, 'the row action trigger must remain visible in the viewport');
+    assert.equal(result.triggerOutsideTable, true, 'the row action trigger must use the rail to the left of the table');
     assert.equal(result.menuInsideViewport, true, 'the menu must remain inside the viewport');
     assert.equal(result.floating, 'absolute');
+    assert.doesNotMatch(result.menuBackground, /rgba\([^)]*,\s*0(?:\.0+)?\)/, 'the menu surface must be opaque');
+    assert.ok(result.menuBackdropFilter === 'none' || result.menuBackdropFilter === '');
     assert.equal(result.shellHeightStable, true, 'the floating menu must not reserve document height');
-    assert.deepEqual(result.groupLabels, ['Rows', 'Columns', 'Align']);
-    assert.deepEqual(result.visibleActionLabels, [
-      'Insert row above', 'Insert row below', 'Move row up', 'Move row down', 'Delete row',
-      'Insert column left', 'Insert column right', 'Move column left', 'Move column right', 'Delete column'
-    ]);
-    assert.ok(result.initialWidths.every((width) => width >= 179.5), JSON.stringify(result.initialWidths));
-    assert.equal(result.rowCountAfterRepeatedInsert, 4);
+    assert.deepEqual(result.rootActionLabels, ['Insert', 'Move', 'Align', 'Delete']);
+    assert.deepEqual(result.insertActionLabels, ['Row above', 'Row below', 'Column left', 'Column right']);
+    assert.equal(result.preferredColumnWidth, '90');
+    assert.ok(result.initialWidths.every((width) => width >= 89.5), JSON.stringify(result.initialWidths));
+    assert.equal(result.rowCountAfterRepeatedInsert, 20);
     assert.equal(result.menuOpenAfterRepeatedInsert, true);
-    assert.ok(result.constrainedWidths.some((width) => width < 179.5), JSON.stringify(result.constrainedWidths));
+    assert.equal(result.activePanelAfterMove, 'move', 'repeated commands must stay in the current submenu');
+    assert.ok(result.maximumMoveScrollDelta <= 0.5, `row movement shifted the viewport by ${result.maximumMoveScrollDelta}px`);
     assert.equal(result.constrainedFits, true, 'preferred cell width must yield when the table reaches its available width');
     assert.equal(result.constrainedOverflow, false, 'a feasible constrained table must not gain horizontal overflow');
     console.log('table context menu production checks passed');

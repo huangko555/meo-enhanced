@@ -148,8 +148,10 @@ export type UiStrings = Readonly<{
   incomingVersion: (label: string) => string;
   alertLabel: (type: string) => string;
   tableActions: string;
-  tableRows: string;
-  tableColumns: string;
+  tableInsert: string;
+  tableMove: string;
+  tableDelete: string;
+  tableBack: string;
   tableAlign: string;
   insertRowAbove: string;
   insertRowBelow: string;
@@ -164,6 +166,19 @@ export type UiStrings = Readonly<{
   alignColumnLeft: string;
   alignColumnCenter: string;
   alignColumnRight: string;
+  insertRowAboveShort: string;
+  insertRowBelowShort: string;
+  insertColumnLeftShort: string;
+  insertColumnRightShort: string;
+  moveRowUpShort: string;
+  moveRowDownShort: string;
+  moveColumnLeftShort: string;
+  moveColumnRightShort: string;
+  deleteRowShort: string;
+  deleteColumnShort: string;
+  alignColumnLeftShort: string;
+  alignColumnCenterShort: string;
+  alignColumnRightShort: string;
   heading: string;
   headingLevels: string;
   headingLevel: (level: number) => string;
@@ -299,13 +314,19 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     currentVersion: (label: string) => `Current: ${label},`,
     incomingVersion: (label: string) => `Incoming: ${label}`,
     alertLabel: (type: string) => type,
-    tableActions: 'Table actions', tableRows: 'Rows', tableColumns: 'Columns',
+    tableActions: 'Table actions', tableInsert: 'Insert', tableMove: 'Move', tableDelete: 'Delete', tableBack: 'Back',
     tableAlign: 'Align',
     insertRowAbove: 'Insert row above', insertRowBelow: 'Insert row below', moveRowUp: 'Move row up', moveRowDown: 'Move row down',
     deleteRow: 'Delete row', insertColumnLeft: 'Insert column left', insertColumnRight: 'Insert column right',
     moveColumnLeft: 'Move column left', moveColumnRight: 'Move column right',
     deleteColumn: 'Delete column', alignColumnLeft: 'Align selected column left',
     alignColumnCenter: 'Align selected column center', alignColumnRight: 'Align selected column right',
+    insertRowAboveShort: 'Row above', insertRowBelowShort: 'Row below',
+    insertColumnLeftShort: 'Column left', insertColumnRightShort: 'Column right',
+    moveRowUpShort: 'Row up', moveRowDownShort: 'Row down',
+    moveColumnLeftShort: 'Column left', moveColumnRightShort: 'Column right',
+    deleteRowShort: 'Row', deleteColumnShort: 'Column',
+    alignColumnLeftShort: 'Left', alignColumnCenterShort: 'Center', alignColumnRightShort: 'Right',
     heading: 'Heading',
     headingLevels: 'Heading levels', headingLevel: (level: number) => `Heading ${level}`,
     bulletList: 'Bullet List', numberedList: 'Numbered List', task: 'Task',
@@ -435,13 +456,19 @@ const CATALOG: Readonly<Record<UiLanguage, UiStrings>> = Object.freeze({
     currentVersion: (label: string) => `当前：${label}，`,
     incomingVersion: (label: string) => `传入：${label}`,
     alertLabel: (type: string) => ({ NOTE: '备注', TIP: '提示', IMPORTANT: '重要', WARNING: '警告', CAUTION: '注意' }[type] ?? type),
-    tableActions: '表格操作', tableRows: '行', tableColumns: '列',
+    tableActions: '表格操作', tableInsert: '插入', tableMove: '移动', tableDelete: '删除', tableBack: '返回',
     tableAlign: '对齐',
     insertRowAbove: '在上方插入行', insertRowBelow: '在下方插入行', moveRowUp: '上移行', moveRowDown: '下移行',
     deleteRow: '删除行', insertColumnLeft: '在左侧插入列', insertColumnRight: '在右侧插入列',
     moveColumnLeft: '左移列', moveColumnRight: '右移列',
     deleteColumn: '删除列', alignColumnLeft: '所选列左对齐',
     alignColumnCenter: '所选列居中对齐', alignColumnRight: '所选列右对齐',
+    insertRowAboveShort: '上方加行', insertRowBelowShort: '下方加行',
+    insertColumnLeftShort: '左侧加列', insertColumnRightShort: '右侧加列',
+    moveRowUpShort: '行上移', moveRowDownShort: '行下移',
+    moveColumnLeftShort: '列左移', moveColumnRightShort: '列右移',
+    deleteRowShort: '行', deleteColumnShort: '列',
+    alignColumnLeftShort: '左对齐', alignColumnCenterShort: '居中', alignColumnRightShort: '右对齐',
     heading: '标题', headingLevels: '标题级别',
     headingLevel: (level: number) => `${level} 级标题`, bulletList: '无序列表',
     numberedList: '有序列表', task: '任务列表', showOutlineLeft: '在左侧显示目录',

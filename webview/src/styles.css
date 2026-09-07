@@ -4719,14 +4719,14 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-shell {
-  --meo-html-table-controls-width: 352px;
+  --meo-html-table-context-rail-width: 28px;
   --meo-html-table-indent: 0ch;
   position: relative;
   z-index: 1;
   padding: 0;
   width: calc(100% - 24px - var(--meo-html-table-indent));
   max-width: 100%;
-  min-width: var(--meo-html-table-controls-width);
+  min-width: 0;
   margin: 0 0 0 var(--meo-html-table-indent);
 }
 
@@ -4938,9 +4938,10 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-wrap {
-  width: 100%;
-  max-width: 100%;
+  width: calc(100% - var(--meo-html-table-context-rail-width));
+  max-width: calc(100% - var(--meo-html-table-context-rail-width));
   min-width: 0;
+  margin-left: var(--meo-html-table-context-rail-width);
   overflow-x: clip;
   overflow-y: visible;
   scrollbar-color: var(--meo-scrollbar-thumb) transparent;
@@ -4991,7 +4992,7 @@ body.outline-resizing .preview-frame {
   border-collapse: collapse;
   width: fit-content;
   max-width: 100%;
-  min-width: var(--meo-html-table-controls-width);
+  min-width: 0;
   table-layout: auto;
 }
 
@@ -5349,7 +5350,7 @@ body.outline-resizing .preview-frame {
 
 .cm-editor .meo-md-html-table-context-trigger {
   position: absolute;
-  left: 4px;
+  left: -26px;
   z-index: 225;
   display: flex;
   align-items: center;
@@ -5397,12 +5398,14 @@ body.outline-resizing .preview-frame {
   z-index: 230;
   display: block;
   box-sizing: border-box;
-  width: min(304px, calc(100% - 8px));
-  padding: 8px;
+  width: min(196px, calc(100% - 8px));
+  padding: 6px;
   border: 1px solid color-mix(in srgb, var(--meo-foreground) 14%, transparent);
   border-radius: 8px;
   color: var(--meo-foreground);
-  background: var(--meo-background);
+  background-color: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background, #1f2328)));
+  opacity: 1;
+  backdrop-filter: none;
   box-shadow: 0 10px 28px rgb(0 0 0 / 28%);
 }
 
@@ -5410,31 +5413,56 @@ body.outline-resizing .preview-frame {
   display: none;
 }
 
-.cm-editor .meo-md-html-table-context-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.cm-editor .meo-md-html-table-context-group {
-  min-width: 0;
-  padding: 0;
-}
-
-.cm-editor .meo-md-html-table-context-group-label {
-  margin: 0 0 5px 6px;
-  color: var(--meo-color-base02);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.cm-editor .meo-md-html-table-context-group-actions {
+.cm-editor .meo-md-html-table-context-panel,
+.cm-editor .meo-md-html-table-context-actions {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.cm-editor .meo-md-html-table-context-panel[hidden] {
+  display: none;
+}
+
+.cm-editor .meo-md-html-table-context-panel-header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  min-height: 30px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--meo-foreground) 12%, transparent);
+}
+
+.cm-editor .meo-md-html-table-context-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cm-editor .meo-md-html-table-context-back:hover,
+.cm-editor .meo-md-html-table-context-back:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgb(127 127 127 / 18%));
+  outline: none;
+}
+
+.cm-editor .meo-md-html-table-context-panel-title {
+  padding-left: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .cm-editor .meo-md-html-table-context-btn {
@@ -5464,6 +5492,15 @@ body.outline-resizing .preview-frame {
   text-overflow: ellipsis;
 }
 
+.cm-editor .meo-md-html-table-context-btn.is-navigation .meo-md-html-table-context-btn-label {
+  flex: 1 1 auto;
+}
+
+.cm-editor .meo-md-html-table-context-chevron {
+  margin-left: auto;
+  opacity: 0.58;
+}
+
 .cm-editor .meo-md-html-table-context-btn:hover:not(:disabled),
 .cm-editor .meo-md-html-table-context-btn:focus-visible,
 .cm-editor .meo-md-html-table-context-btn.is-active {
@@ -5482,33 +5519,13 @@ body.outline-resizing .preview-frame {
   color: #f48771;
 }
 
-.cm-editor .meo-md-html-table-context-group.is-alignment {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  align-items: center;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--meo-foreground) 12%, transparent);
-}
-
-.cm-editor .meo-md-html-table-context-group.is-alignment .meo-md-html-table-context-group-label {
-  margin: 0 0 0 6px;
-}
-
-.cm-editor .meo-md-html-table-context-group.is-alignment .meo-md-html-table-context-group-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 2px;
-}
-
-.cm-editor .meo-md-html-table-context-btn.is-icon-only {
-  justify-content: center;
-  padding: 0;
-}
-
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-trigger,
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu {
   box-shadow: 0 6px 20px rgb(31 35 40 / 16%);
+}
+
+html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-menu {
+  background-color: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background, #fff)));
 }
 
 html[data-editor-appearance='light'] .cm-editor .meo-md-html-table-context-delete-btn {

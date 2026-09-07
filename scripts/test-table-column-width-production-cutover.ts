@@ -1006,7 +1006,7 @@ async function main(): Promise<void> {
     assert.equal(resized.focused, initial.focused);
     assert.ok(Math.abs(resized.scrollTop - initial.scrollTop) < 2);
 
-    await page.setViewport({ width: 680, height: 440 });
+    await page.setViewport({ width: 400, height: 440 });
     try {
       await page.waitForFunction((selector) => {
         const table = document.querySelector<HTMLTableElement>(selector);
@@ -1059,7 +1059,7 @@ async function main(): Promise<void> {
     const restoredViewport = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
     assert.deepEqual(restoredViewport.stickyWidths.map(Math.round), restoredViewport.primaryWidths.map(Math.round));
 
-    await page.setViewport({ width: 680, height: 440 });
+    await page.setViewport({ width: 400, height: 440 });
     await page.waitForFunction((selector) => {
       const table = document.querySelector<HTMLTableElement>(selector);
       const wrap = table?.closest<HTMLElement>('.meo-md-html-table-wrap');
@@ -2155,9 +2155,17 @@ async function main(): Promise<void> {
         trace.preview.primaryWidths.map(Math.round),
         `${direction} pointerup must preserve the last complete preview before causal resize projection`
       );
-      assert.deepEqual(trace.atPointerUp.stickyWidths.map(Math.round), trace.atPointerUp.primaryWidths.map(Math.round));
+      assert.ok(
+        trace.atPointerUp.stickyWidths.every((width, index) => (
+          Math.abs(width - trace.atPointerUp.primaryWidths[index]) < 1
+        )),
+        `${direction} Sticky projection diverged at pointerup: ${JSON.stringify(trace.atPointerUp)}`
+      );
       for (const sample of trace.eventSamples) {
-        assert.deepEqual(sample.stickyWidths.map(Math.round), sample.primaryWidths.map(Math.round));
+        assert.ok(
+          sample.stickyWidths.every((width, index) => Math.abs(width - sample.primaryWidths[index]) < 1),
+          `${direction} Sticky projection diverged during a projection event: ${JSON.stringify(sample)}`
+        );
       }
       const previewTotal = Math.round(trace.preview.primaryTableWidth);
       const eventTotals = trace.eventSamples.map((sample) => Math.round(sample.primaryTableWidth));
