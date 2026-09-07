@@ -4719,7 +4719,6 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-shell {
-  --meo-html-table-context-rail-width: 28px;
   --meo-html-table-indent: 0ch;
   position: relative;
   z-index: 1;
@@ -4938,10 +4937,10 @@ body.outline-resizing .preview-frame {
 }
 
 .cm-editor .meo-md-html-table-wrap {
-  width: calc(100% - var(--meo-html-table-context-rail-width));
-  max-width: calc(100% - var(--meo-html-table-context-rail-width));
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
-  margin-left: var(--meo-html-table-context-rail-width);
+  margin-left: 0;
   overflow-x: clip;
   overflow-y: visible;
   scrollbar-color: var(--meo-scrollbar-thumb) transparent;
@@ -5363,7 +5362,7 @@ body.outline-resizing .preview-frame {
   border-radius: 6px;
   color: var(--meo-color-base02);
   font: 600 17px/1 var(--meo-active-editor-font);
-  background: var(--meo-background);
+  background: var(--vscode-menu-background, var(--meo-background));
   box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
   cursor: pointer;
   visibility: hidden;
@@ -5384,7 +5383,7 @@ body.outline-resizing .preview-frame {
 .cm-editor .meo-md-html-table-context-trigger:hover,
 .cm-editor .meo-md-html-table-context-trigger[aria-expanded='true'] {
   color: var(--meo-foreground);
-  background: var(--vscode-toolbar-hoverBackground, rgb(127 127 127 / 18%));
+  background: color-mix(in srgb, var(--vscode-menu-background, var(--meo-background)) 88%, var(--meo-foreground));
 }
 
 .cm-editor .meo-md-html-table-context-trigger:focus-visible {

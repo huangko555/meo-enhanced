@@ -113,12 +113,14 @@ async function main() {
         pointer(trigger);
         const button = menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-btn')!;
         const triggerRect = trigger.getBoundingClientRect();
+        const shellRect = shell.getBoundingClientRect();
         const wrapRect = shell.querySelector<HTMLElement>('.meo-md-html-table-wrap')!.getBoundingClientRect();
         const result = {
           triggerVisible: getComputedStyle(trigger).visibility,
           triggerInsideViewport: triggerRect.left >= -0.5
             && triggerRect.right <= window.innerWidth + 0.5,
           triggerOutsideTable: triggerRect.right <= wrapRect.left + 0.5,
+          tableUsesNormalContentLeft: Math.abs(wrapRect.left - shellRect.left) < 0.5,
           menuVisible: getComputedStyle(menu).display,
           heightBefore,
           heightAfter: shell.getBoundingClientRect().height,
@@ -436,7 +438,8 @@ async function main() {
     assert.equal(result.consumed, true, 'Context-menu pointer command must be consumed synchronously');
     assert.equal(result.contextLayout.triggerVisible, 'visible');
     assert.equal(result.contextLayout.triggerInsideViewport, true, 'Context trigger must stay visible in the viewport');
-    assert.equal(result.contextLayout.triggerOutsideTable, true, 'Context trigger must stay in the rail to the left of the table');
+    assert.equal(result.contextLayout.triggerOutsideTable, true, 'Context trigger must float over the gutter to the left of the table');
+    assert.equal(result.contextLayout.tableUsesNormalContentLeft, true, 'Context trigger must not reserve table width');
     assert.notEqual(result.contextLayout.menuVisible, 'none');
     assert.equal(result.contextLayout.heightAfter, result.contextLayout.heightBefore, 'floating menu must not change table layout height');
     assert.equal(result.contextLayout.menuPosition, 'absolute');

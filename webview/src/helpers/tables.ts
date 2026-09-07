@@ -4007,10 +4007,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     view: EditorView,
     tableStartLine: number,
     focusTarget: PendingCellFocus,
-    replacedInput: HTMLTextAreaElement | null = null
+    replacedInput: HTMLTextAreaElement | null = null,
+    replacedShell: HTMLElement | null = null
   ) {
     const viewport = getViewportController(view);
-    const isRevealCurrent = viewport?.beginNavigationReveal() ?? (() => true);
+    const restoreContextMenu = this.pendingContextMenuRestore;
+    const isRevealCurrent = restoreContextMenu
+      ? viewport?.captureNavigationCurrentness() ?? (() => true)
+      : viewport?.beginNavigationReveal() ?? (() => true);
     let observer: MutationObserver | null = null;
     let timeout: number | null = null;
     const dispose = () => {
@@ -4028,22 +4032,26 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
         `.meo-md-html-table-shell[data-meo-rendered-block-start-line="${tableStartLine}"] textarea[data-table-row="${focusTarget.row}"][data-table-col="${focusTarget.col}"]`
       );
       if (!(input instanceof HTMLTextAreaElement)) return false;
+      const shell = input.closest<HTMLElement>('.meo-md-html-table-shell');
+      if (replacedShell && shell === replacedShell) return false;
       // Value-only commits reuse the mounted table DOM, so the original input
       // is already the durable target. Structural commits still replace it and
       // reach this method again through the observer below.
       if (input === replacedInput && !input.isConnected) return false;
-      input.focus({ preventScroll: true });
       const caret = Math.min(Math.max(focusTarget.caret ?? 0, 0), input.value.length);
+      input.focus({ preventScroll: true });
       input.setSelectionRange(caret, caret);
-      if (this.pendingContextMenuRestore) {
-        const shell = input.closest<HTMLElement>('.meo-md-html-table-shell');
+      if (restoreContextMenu) {
         const owner = shell ? tableDomOwners.get(shell) : null;
         owner?.setContextPanel(this.contextPanel);
         owner?.setContextMenuOpen(true);
         this.pendingContextMenuRestore = false;
       }
       dispose();
-      this.revealTableCellCaretIfNeeded(input, isRevealCurrent);
+      // A contextual command is an in-place table operation. Revealing the
+      // restored caret would make the document chase rows changed by the
+      // command even though focus was restored with preventScroll.
+      if (!restoreContextMenu) this.revealTableCellCaretIfNeeded(input, isRevealCurrent);
       return true;
     };
 
@@ -4118,6 +4126,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     const range = this.resolveCurrentTableRange(view, dom);
     if (!range) return { transaction: null, outcome: 'no-op' };
     const tableStartLine = view.state.doc.lineAt(range.from).number;
+    const replacedShell = this.domRefs?.shell ?? null;
+    const expectsReplacement = (
+      headerCells.length !== this.tableData.headerCells.length ||
+      rows.length !== this.tableData.rows.length ||
+      alignments.some((alignment, index) => alignment !== this.tableData.alignments[index])
+    );
     const markdown = serializeTableMarkdown(this.tableData.indent, headerCells, alignments, rows);
     const current = view.state.doc.sliceString(range.from, range.to);
     const commandEffects = alignmentOverrideColumns.length === 0
@@ -4136,7 +4150,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
           transaction: { effects: commandEffects },
           outcome: 'changed',
           restoreInteraction: focusTarget
-            ? () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+            ? () => this.scheduleFocusCellAfterCommit(
+                view,
+                tableStartLine,
+                focusTarget,
+                null,
+                expectsReplacement ? replacedShell : null
+              )
             : undefined
         };
       }
@@ -4184,7 +4204,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       outcome: 'changed',
       preserveViewport: preserveScrollPosition,
       restoreInteraction: focusTarget
-        ? () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+        ? () => this.scheduleFocusCellAfterCommit(
+            view,
+            tableStartLine,
+            focusTarget,
+            null,
+            expectsReplacement ? replacedShell : null
+          )
         : undefined
     };
   }
@@ -4298,7 +4324,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return {
       transaction: { changes, effects: insertedRowEffect },
       outcome: 'changed',
-      restoreInteraction: () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+      restoreInteraction: () => this.scheduleFocusCellAfterCommit(
+        view,
+        tableStartLine,
+        focusTarget,
+        null,
+        this.domRefs?.shell ?? null
+      )
     };
   }
 
@@ -4406,7 +4438,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return {
       transaction: { changes, effects: deletionEffects },
       outcome: 'changed',
-      restoreInteraction: () => this.scheduleFocusCellAfterCommit(view, tableStartLine, focusTarget)
+      restoreInteraction: () => this.scheduleFocusCellAfterCommit(
+        view,
+        tableStartLine,
+        focusTarget,
+        null,
+        this.domRefs?.shell ?? null
+      )
     };
   }
 
@@ -5241,6 +5279,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       bottom: window.innerHeight
     };
     const rowRect = row.getBoundingClientRect();
+    if (
+      !contextMenu.hidden &&
+      (rowRect.bottom <= viewportRect.top || rowRect.top >= viewportRect.bottom)
+    ) {
+      this.setContextMenuOpen(false);
+      return;
+    }
     const visibleTop = Math.max(viewportRect.top, wrapRect.top);
     const visibleBottom = Math.min(viewportRect.bottom, wrapRect.bottom);
     const rowCenterInViewport = Math.min(
