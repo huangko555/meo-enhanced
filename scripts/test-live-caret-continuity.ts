@@ -50,6 +50,63 @@ async function main(): Promise<void> {
       });
     }, text);
     await page.waitForSelector('.cm-editor');
+
+    await page.evaluate(async () => {
+      const editor = (window as any).__editor;
+      const view = editor.view;
+      editor.scrollToLine(116, 'top');
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const target = view.state.doc.line(120);
+      view.dispatch({ selection: { anchor: target.to } });
+      view.focus();
+      view.scrollDOM.scrollTop = Math.max(
+        0,
+        view.lineBlockAt(target.from).top - view.scrollDOM.clientHeight * 0.18
+      );
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const enterBefore = await page.evaluate(() => {
+      const view = (window as any).__editor.view;
+      const target = view.state.doc.line(120);
+      return {
+        scrollTop: view.scrollDOM.scrollTop,
+        targetTop: view.coordsAtPos(target.from)?.top ?? null
+      };
+    });
+    await page.keyboard.press('Enter');
+    await page.evaluate(async () => {
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+    const enterAfter = await page.evaluate(() => {
+      const view = (window as any).__editor.view;
+      const target = view.state.doc.line(120);
+      const caret = view.coordsAtPos(view.state.selection.main.head);
+      const viewport = view.scrollDOM.getBoundingClientRect();
+      return {
+        scrollTop: view.scrollDOM.scrollTop,
+        targetTop: view.coordsAtPos(target.from)?.top ?? null,
+        caretLine: view.state.doc.lineAt(view.state.selection.main.head).number,
+        caretVisible: Boolean(caret && caret.top >= viewport.top && caret.bottom <= viewport.bottom)
+      };
+    });
+    if (
+      enterBefore.targetTop === null || enterAfter.targetTop === null ||
+      Math.abs(enterAfter.scrollTop - enterBefore.scrollTop) > 0.5 ||
+      Math.abs(enterAfter.targetTop - enterBefore.targetTop) > 0.5 ||
+      enterAfter.caretLine !== 121 || !enterAfter.caretVisible
+    ) {
+      throw new Error(`Enter moved the viewport while the new caret remained visible: ${JSON.stringify({
+        enterBefore,
+        enterAfter
+      })}`);
+    }
+
     await page.click('.cm-content');
     await page.keyboard.down('Control');
     await page.keyboard.press('End');

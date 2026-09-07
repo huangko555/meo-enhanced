@@ -2298,10 +2298,11 @@ export function createEditor({
   interactionContinuity = createEditorInteractionContinuity({
     view,
     viewport: {
-      revealCaret(position, isCurrent) {
+      revealCaret(position, isCurrent, withComfortBand) {
         viewportController.revealPosition(position, {
           y: 'nearest',
-          yMargin: visualLineContextMargin(view, 1)
+          yMargin: visualLineContextMargin(view, 1),
+          marginMode: withComfortBand ? 'comfort-band' : 'outside-only'
         }, isCurrent);
       }
     },

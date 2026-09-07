@@ -1005,6 +1005,11 @@ export class ViewportController {
     }
     this.markInteraction();
     if (!this.canChangeLiveLayout(event)) return;
+    const insideRenderedBlock = event.target instanceof Element && Boolean(event.target.closest(
+      '[data-meo-rendered-block-start-line][data-meo-rendered-block-end-line]'
+    ));
+    const canRemoveBlockSyntax = event.key === 'Backspace' || event.key === 'Delete';
+    if (!insideRenderedBlock && !canRemoveBlockSyntax) return;
     this.startInteractionLayoutStabilization(
       this.getInteractionLayoutRange(event.target, this.view.state.selection.main.head)
     );
