@@ -77,6 +77,10 @@ const handleSelector = '[data-table-resize-column]';
 const projectionEventName = 'meo-table-column-width-projected';
 const columnPermutationEventName = 'meo-table-column-permutation';
 const resizingClassName = 'meo-table-column-resizing';
+const preferredDefaultColumnWidth = (table: HTMLTableElement): number => {
+  const value = Number.parseFloat(table.dataset.tablePreferredColumnWidth ?? '');
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
 
 function numberFromDataset(element: HTMLElement, key: 'tableFrom' | 'tableTo'): number | null {
   const value = Number(element.dataset[key]);
@@ -319,33 +323,40 @@ export function createCodeMirrorDomTableColumnWidthAdapter(
       const startupBaseline = refreshUncommittedStartupBaseline(table);
       const currentFacts = layoutFacts(table);
       const currentTotalWidth = currentFacts.widths.reduce((sum, width) => sum + width, 0);
+      const preferredColumnWidth = preferredDefaultColumnWidth(table);
+      const preferredWidths = currentFacts.widths.map((width) => Math.max(width, preferredColumnWidth));
+      const preferredTotalWidth = preferredWidths.reduce((sum, width) => sum + width, 0);
       const minimumTotalWidth = currentFacts.minimumWidths.reduce((sum, width) => sum + width, 0);
       const canFitReadableColumns = minimumTotalWidth <= currentFacts.availableWidth + 0.5;
       if (startupBaseline && currentFacts.availableWidth > 0
-        && currentTotalWidth > currentFacts.availableWidth + 0.5
+        && (currentTotalWidth > currentFacts.availableWidth + 0.5
+          || preferredTotalWidth > currentTotalWidth + 0.5)
         && canFitReadableColumns) {
+        const tracksAvailableWidth = preferredTotalWidth > currentFacts.availableWidth + 0.5;
+        const startupPolicyState: TableColumnWidthPolicyState = tracksAvailableWidth
+          ? { elastic: true, tracksAvailableWidth: true }
+          : { elastic: false, tracksAvailableWidth: false };
         const result = policy.project({
-          widths: currentFacts.widths,
+          widths: preferredWidths,
           minimumWidths: currentFacts.minimumWidths,
-          initialTotalWidth: startupBaseline.totalWidth,
-          maximumTrackedWidth: startupBaseline.totalWidth,
-          defaultWidthWasCapped: true,
+          initialTotalWidth: preferredTotalWidth,
+          maximumTrackedWidth: preferredTotalWidth,
+          defaultWidthWasCapped: tracksAvailableWidth,
           availableWidth: currentFacts.availableWidth,
           preserveWidthIntent: false,
-          elastic: true,
-          tracksAvailableWidth: true
+          ...startupPolicyState
         });
         render(table, result.widths, result.totalWidth);
         storeIntent(table, {
           snapshot: {
             widths: [...result.widths],
-            intentWidths: [...startupBaseline.widths],
+            intentWidths: [...preferredWidths],
             minimumWidths: [...currentFacts.minimumWidths],
             availableWidth: currentFacts.availableWidth,
             policyState: result.elastic
               ? { elastic: true, tracksAvailableWidth: result.tracksAvailableWidth }
               : { elastic: false, tracksAvailableWidth: false },
-            preferredTotalWidth: startupBaseline.totalWidth
+            preferredTotalWidth
           }
         });
         return;

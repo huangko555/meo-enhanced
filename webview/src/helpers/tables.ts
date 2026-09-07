@@ -601,6 +601,14 @@ export const tableHeaderAlignmentOverrideField = StateField.define<RangeSet<Tabl
 // Icons are inline SVG path data from Tabler Icons (MIT), vendored to avoid a
 // broad icon dependency for this table-only toolbar.
 const tableToolbarIcons: Record<string, TableToolbarIcon> = {
+  dotsVertical: {
+    className: 'icon-tabler-dots-vertical',
+    paths: [
+      'M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
+      'M12 19m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
+      'M12 5m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'
+    ]
+  },
   rowInsertTop: {
     className: 'icon-tabler-row-insert-top',
     paths: [
@@ -2373,6 +2381,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
   tableCommandTargetRegistration: TableCommandTargetRegistration | null;
   selectionDomAnchor: { node: Node; offset: number } | null;
   measuredHeight: number;
+  pendingContextMenuRestore: boolean;
 
   constructor(
     tableData: WidgetTableData,
@@ -2397,6 +2406,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     this.tableCommandTargetRegistration = null;
     this.selectionDomAnchor = null;
     this.measuredHeight = -1;
+    this.pendingContextMenuRestore = false;
     this.stickyHeaderAdapterFactory = stickyHeaderAdapterFactory;
     this.layoutTasks = new Set();
     this.layoutScheduler = {
@@ -2735,6 +2745,20 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     contextButtons.alignColumnLeft.disabled = !hasColumns;
     contextButtons.alignColumnCenter.disabled = !hasColumns;
     contextButtons.alignColumnRight.disabled = !hasColumns;
+    const selectedAlignments = columns.map((column) => this.tableData.alignments[column] ?? 'left');
+    const selectedAlignment = selectedAlignments.length > 0
+      && selectedAlignments.every((alignment) => alignment === selectedAlignments[0])
+      ? selectedAlignments[0]
+      : null;
+    for (const [button, alignment] of [
+      [contextButtons.alignColumnLeft, 'left'],
+      [contextButtons.alignColumnCenter, 'center'],
+      [contextButtons.alignColumnRight, 'right']
+    ] as const) {
+      const active = selectedAlignment === alignment;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-checked', String(active));
+    }
   }
 
   updateActionTargetStyles() {
@@ -2752,7 +2776,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   requestTableCommand(command: TableCommand, enabled = true) {
     const target = this.currentCommandTarget();
-    this.setContextMenuOpen(false);
+    this.pendingContextMenuRestore = Boolean(this.domRefs && !this.domRefs.contextMenu.hidden);
     void this.tableCommandEnvironment.dispatch({
       type: 'request',
       command,
@@ -3985,6 +4009,12 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       input.focus({ preventScroll: true });
       const caret = Math.min(Math.max(focusTarget.caret ?? 0, 0), input.value.length);
       input.setSelectionRange(caret, caret);
+      if (this.pendingContextMenuRestore) {
+        const shell = input.closest<HTMLElement>('.meo-md-html-table-shell');
+        const owner = shell ? tableDomOwners.get(shell) : null;
+        owner?.setContextMenuOpen(true);
+        this.pendingContextMenuRestore = false;
+      }
       dispose();
       this.revealTableCellCaretIfNeeded(input, isRevealCurrent);
       return true;
@@ -4959,7 +4989,13 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return svg;
   }
 
-  createContextButton(label: string, command: TableCommand, icon: TableToolbarIcon, onClick: () => void) {
+  createContextButton(
+    label: string,
+    command: TableCommand,
+    icon: TableToolbarIcon,
+    onClick: () => void,
+    showLabel = true
+  ) {
     const button = document.createElement('button');
     button.type = 'button';
     button.tabIndex = -1;
@@ -4969,6 +5005,14 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     button.setAttribute('role', 'menuitem');
     button.dataset.command = command;
     button.appendChild(this.createContextIcon(icon));
+    if (showLabel) {
+      const text = document.createElement('span');
+      text.className = 'meo-md-html-table-context-btn-label';
+      text.textContent = label;
+      button.appendChild(text);
+    } else {
+      button.classList.add('is-icon-only');
+    }
     button.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -4988,9 +5032,9 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     return button;
   }
 
-  createContextGroup(label: string, buttons: readonly HTMLButtonElement[]) {
+  createContextGroup(label: string, buttons: readonly HTMLButtonElement[], className = '') {
     const group = document.createElement('section');
-    group.className = 'meo-md-html-table-context-group';
+    group.className = `meo-md-html-table-context-group ${className}`.trim();
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', label);
     const heading = document.createElement('div');
@@ -5019,20 +5063,50 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
 
   updateContextControlsPosition() {
     if (!this.domRefs) return;
-    const { shell, rowEntries, contextTrigger, contextMenu } = this.domRefs;
+    const { shell, wrap, rowEntries, contextTrigger, contextMenu } = this.domRefs;
     const rowIndex = this.cellSelection.snapshot().anchor?.row ?? this.activeTarget.row;
     const row = rowEntries[Math.min(Math.max(rowIndex, 0), rowEntries.length - 1)]?.row;
     if (!row) return;
     const shellRect = shell.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    const viewportRect = this.view?.scrollDOM.getBoundingClientRect() ?? {
+      left: 0,
+      right: window.innerWidth,
+      top: 0,
+      bottom: window.innerHeight
+    };
     const rowRect = row.getBoundingClientRect();
-    const rowCenter = rowRect.top - shellRect.top + rowRect.height / 2;
+    const visibleTop = Math.max(viewportRect.top, wrapRect.top);
+    const visibleBottom = Math.min(viewportRect.bottom, wrapRect.bottom);
+    const rowCenterInViewport = Math.min(
+      Math.max(rowRect.top + rowRect.height / 2, visibleTop + 14),
+      visibleBottom - 14
+    );
+    const rowCenter = rowCenterInViewport - shellRect.top;
+    const triggerLeft = Math.max(
+      4,
+      Math.min(shellRect.width - contextTrigger.offsetWidth - 4, viewportRect.left - shellRect.left + 4)
+    );
+    contextTrigger.style.left = `${triggerLeft}px`;
     contextTrigger.style.top = `${rowCenter}px`;
     if (contextMenu.hidden) return;
-    const gap = 5;
+    const gap = 6;
+    const menuWidth = contextMenu.offsetWidth;
     const menuHeight = contextMenu.offsetHeight;
-    const below = rowRect.bottom - shellRect.top + gap;
-    const above = rowRect.top - shellRect.top - menuHeight - gap;
-    contextMenu.style.top = `${rowRect.bottom + menuHeight + gap <= window.innerHeight ? below : Math.max(0, above)}px`;
+    const visibleLeft = Math.max(shellRect.left, viewportRect.left);
+    const visibleRight = Math.min(shellRect.right, viewportRect.right);
+    const preferredLeft = shellRect.left + triggerLeft + contextTrigger.offsetWidth + gap;
+    const menuLeft = Math.min(
+      Math.max(preferredLeft, visibleLeft + 4),
+      Math.max(visibleLeft + 4, visibleRight - menuWidth - 4)
+    );
+    const below = rowRect.bottom + gap;
+    const above = rowRect.top - menuHeight - gap;
+    const menuTop = below + menuHeight <= viewportRect.bottom - 4
+      ? below
+      : Math.max(viewportRect.top + 4, above);
+    contextMenu.style.left = `${menuLeft - shellRect.left}px`;
+    contextMenu.style.top = `${menuTop - shellRect.top}px`;
   }
 
   createTableContextControls(container: HTMLElement) {
@@ -5047,7 +5121,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     trigger.setAttribute('aria-haspopup', 'menu');
     trigger.setAttribute('aria-expanded', 'false');
     trigger.setAttribute('aria-controls', menuId);
-    trigger.textContent = '⋯';
+    trigger.appendChild(this.createContextIcon(tableToolbarIcons.dotsVertical));
 
     const menu = document.createElement('div');
     menu.id = menuId;
@@ -5088,21 +5162,28 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     });
     const alignColumnLeft = this.createContextButton(strings.alignColumnLeft, 'align-left', tableToolbarIcons.alignLeft, () => {
       this.requestColumnAlignment(container, 'left');
-    });
+    }, false);
     const alignColumnCenter = this.createContextButton(strings.alignColumnCenter, 'align-center', tableToolbarIcons.alignCenter, () => {
       this.requestColumnAlignment(container, 'center');
-    });
+    }, false);
     const alignColumnRight = this.createContextButton(strings.alignColumnRight, 'align-right', tableToolbarIcons.alignRight, () => {
       this.requestColumnAlignment(container, 'right');
-    });
+    }, false);
+    alignColumnLeft.setAttribute('role', 'menuitemradio');
+    alignColumnCenter.setAttribute('role', 'menuitemradio');
+    alignColumnRight.setAttribute('role', 'menuitemradio');
     deleteRow.classList.add('meo-md-html-table-context-delete-btn');
     deleteColumn.classList.add('meo-md-html-table-context-delete-btn');
 
+    const commandColumns = document.createElement('div');
+    commandColumns.className = 'meo-md-html-table-context-columns';
+    commandColumns.append(
+      this.createContextGroup(strings.tableRows, [insertRowAbove, insertRowBelow, moveRowUp, moveRowDown, deleteRow]),
+      this.createContextGroup(strings.tableColumns, [insertColumnLeft, insertColumnRight, moveColumnLeft, moveColumnRight, deleteColumn])
+    );
     menu.append(
-      this.createContextGroup(strings.tableInsert, [insertRowAbove, insertRowBelow, insertColumnLeft, insertColumnRight]),
-      this.createContextGroup(strings.tableMove, [moveRowUp, moveRowDown, moveColumnLeft, moveColumnRight]),
-      this.createContextGroup(strings.tableAlign, [alignColumnLeft, alignColumnCenter, alignColumnRight]),
-      this.createContextGroup(strings.tableDelete, [deleteRow, deleteColumn])
+      commandColumns,
+      this.createContextGroup(strings.tableAlign, [alignColumnLeft, alignColumnCenter, alignColumnRight], 'is-alignment')
     );
 
     trigger.addEventListener('pointerdown', (event) => {
@@ -5190,6 +5271,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     table.className = 'meo-md-html-table';
     table.tabIndex = -1;
     table.dataset.tableColumnWidth = 'true';
+    table.dataset.tablePreferredColumnWidth = '180';
     table.dataset.tableSignature = tableWidthIdentity(this.tableData);
     if (Number.isFinite(this.tableData.from) && Number.isFinite(this.tableData.to)) {
       table.dataset.tableFrom = String(this.tableData.from);

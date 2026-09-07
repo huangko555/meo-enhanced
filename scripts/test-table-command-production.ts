@@ -112,23 +112,37 @@ async function main() {
         const heightBefore = shell.getBoundingClientRect().height;
         pointer(trigger);
         const button = menu.querySelector<HTMLButtonElement>('.meo-md-html-table-context-btn')!;
+        const triggerRect = trigger.getBoundingClientRect();
+        const shellRect = shell.getBoundingClientRect();
         const result = {
           triggerVisible: getComputedStyle(trigger).visibility,
+          triggerInsideShell: triggerRect.left >= shellRect.left - 0.5
+            && triggerRect.right <= shellRect.right + 0.5,
           menuVisible: getComputedStyle(menu).display,
           heightBefore,
           heightAfter: shell.getBoundingClientRect().height,
           menuPosition: getComputedStyle(menu).position,
           buttonSize: [button.getBoundingClientRect().width, button.getBoundingClientRect().height],
-          groups: Array.from(menu.querySelectorAll('.meo-md-html-table-context-group-label'), (label) => label.textContent)
+          preferredColumnWidths: Array.from(
+            shell.querySelectorAll<HTMLElement>('.meo-md-html-table:not(.meo-md-html-table-sticky-table) thead th'),
+            (cell) => cell.getBoundingClientRect().width
+          ),
+          groups: Array.from(menu.querySelectorAll('.meo-md-html-table-context-group-label'), (label) => label.textContent),
+          visibleLabels: Array.from(menu.querySelectorAll('.meo-md-html-table-context-btn-label'), (label) => label.textContent)
         };
         pointer(trigger);
         return result;
       })();
+      pointer(document.querySelector<HTMLButtonElement>('.meo-md-html-table-shell:first-of-type .meo-md-html-table-context-trigger')!);
       const insert = document.querySelector<HTMLButtonElement>(
         '.meo-md-html-table-shell:first-of-type button[title="Insert row below"]'
       )!;
       const consumed = !pointer(insert);
       await waitUntil(() => editor.view.state.doc.toString().includes('edited'), 'atomic insert');
+      await waitUntil(() => Boolean(document.querySelector(
+        '.meo-md-html-table-shell:first-of-type.is-context-menu-open .meo-md-html-table-context-menu:not([hidden])'
+      )), 'context menu restore after command');
+      const menuOpenAfterAtomicInsert = true;
       const afterAtomicInsert = editor.view.state.doc.toString();
       const undoApplied = await editor.undo();
       await waitUntil(() => editor.view.state.doc.toString() === original, 'atomic undo');
@@ -369,6 +383,7 @@ async function main() {
       return {
         original,
         contextLayout,
+        menuOpenAfterAtomicInsert,
         consumed,
         afterAtomicInsert,
         undoApplied,
@@ -411,11 +426,30 @@ async function main() {
 
     assert.equal(result.consumed, true, 'Context-menu pointer command must be consumed synchronously');
     assert.equal(result.contextLayout.triggerVisible, 'visible');
+    assert.equal(result.contextLayout.triggerInsideShell, true, 'Context trigger must stay inside the visible table shell');
     assert.notEqual(result.contextLayout.menuVisible, 'none');
     assert.equal(result.contextLayout.heightAfter, result.contextLayout.heightBefore, 'floating menu must not change table layout height');
     assert.equal(result.contextLayout.menuPosition, 'absolute');
-    assert.deepEqual(result.contextLayout.buttonSize, [28, 28]);
-    assert.deepEqual(result.contextLayout.groups, ['Insert', 'Move', 'Align', 'Delete']);
+    assert.ok(result.contextLayout.buttonSize[0] >= 120);
+    assert.equal(result.contextLayout.buttonSize[1], 32);
+    assert.ok(
+      result.contextLayout.preferredColumnWidths.every((width) => width >= 179.5),
+      `Columns with available space must keep the 180px preferred minimum: ${JSON.stringify(result.contextLayout.preferredColumnWidths)}`
+    );
+    assert.deepEqual(result.contextLayout.groups, ['Rows', 'Columns', 'Align']);
+    assert.deepEqual(result.contextLayout.visibleLabels, [
+      'Insert row above',
+      'Insert row below',
+      'Move row up',
+      'Move row down',
+      'Delete row',
+      'Insert column left',
+      'Insert column right',
+      'Move column left',
+      'Move column right',
+      'Delete column'
+    ]);
+    assert.equal(result.menuOpenAfterAtomicInsert, true, 'Context menu must remain open after a table command restores focus');
     assert.match(result.afterAtomicInsert, /edited/);
     assert.notEqual(result.afterAtomicInsert, result.original);
     assert.equal(result.undoApplied, true);
@@ -425,17 +459,17 @@ async function main() {
     assert.deepEqual(result.contextActions, [
       'Insert row above',
       'Insert row below',
-      'Insert column left',
-      'Insert column right',
       'Move row up',
       'Move row down',
+      'Delete row',
+      'Insert column left',
+      'Insert column right',
       'Move column left',
       'Move column right',
+      'Delete column',
       'Align selected column left',
       'Align selected column center',
-      'Align selected column right',
-      'Delete row',
-      'Delete column'
+      'Align selected column right'
     ], 'the contextual menu must expose every structure, movement and alignment command exactly once');
     assert.equal(result.sortingCapabilityCount, 0, 'Table sorting must not have any contextual capability');
     assert.match(result.afterRapidMultiTable, /\| C\s+\| D\s+\|\n\| ---:\s+\| ---\s+\|/);

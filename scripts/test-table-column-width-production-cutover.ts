@@ -1007,41 +1007,69 @@ async function main(): Promise<void> {
     assert.ok(Math.abs(resized.scrollTop - initial.scrollTop) < 2);
 
     await page.setViewport({ width: 680, height: 440 });
-    await page.waitForFunction((selector) => {
-      const table = document.querySelector<HTMLTableElement>(selector);
-      if (!table) return false;
-      const primary = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
-        .map((cell) => cell.getBoundingClientRect().width);
-      const sticky = Array.from(
-        table.closest('.meo-md-html-table-shell')!
-          .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table thead th')
-      ).map((cell) => cell.getBoundingClientRect().width);
-      return primary.length === 3
-        && sticky.length === 3
-        && primary.every((width, index) => width > 0 && Math.abs(width - sticky[index]) < 1)
-        && table.getBoundingClientRect().width <= document.querySelector<HTMLElement>('.cm-scroller')!.clientWidth + 1;
-    }, { polling: 'raf', timeout: 5000 }, `${tableSelector}:first-of-type`);
+    try {
+      await page.waitForFunction((selector) => {
+        const table = document.querySelector<HTMLTableElement>(selector);
+        if (!table) return false;
+        const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap');
+        const primary = Array.from(table.querySelectorAll<HTMLElement>('thead th'))
+          .map((cell) => cell.getBoundingClientRect().width);
+        const sticky = Array.from(
+          table.closest('.meo-md-html-table-shell')!
+            .querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table thead th')
+        ).map((cell) => cell.getBoundingClientRect().width);
+        return primary.length === 3
+          && sticky.length === 3
+          && primary.every((width, index) => width > 0 && Math.abs(width - sticky[index]) < 1)
+          && Boolean(wrap && table.getBoundingClientRect().width <= wrap.clientWidth + 1);
+      }, { polling: 'raf', timeout: 5000 }, `${tableSelector}:first-of-type`);
+    } catch (error) {
+      const diagnostics = await page.evaluate((selector) => {
+        const table = document.querySelector<HTMLTableElement>(selector);
+        const wrap = table?.closest<HTMLElement>('.meo-md-html-table-wrap');
+        const sticky = table?.closest('.meo-md-html-table-shell')
+          ?.querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table');
+        return {
+          tableWidth: table?.getBoundingClientRect().width,
+          wrapWidth: wrap?.clientWidth,
+          primary: Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? [], (cell) => cell.getBoundingClientRect().width),
+          sticky: Array.from(sticky?.querySelectorAll<HTMLElement>('thead th') ?? [], (cell) => cell.getBoundingClientRect().width)
+        };
+      }, `${tableSelector}:first-of-type`);
+      throw new Error(`Narrow table projection did not settle: ${JSON.stringify(diagnostics)}`, { cause: error });
+    }
     const narrowViewport = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
     assert.deepEqual(narrowViewport.stickyWidths.map(Math.round), narrowViewport.primaryWidths.map(Math.round));
+    const resizedTotal = resized.primaryWidths.reduce((sum, width) => sum + width, 0);
+    const startupTotal = initial.widths[0].reduce((sum, width) => sum + width, 0);
+    const restoredFirstWidth = resized.primaryWidths[0] * startupTotal / resizedTotal;
     await page.setViewport({ width: 900, height: 440 });
-    await page.waitForFunction((selector, expected) => {
-      const cell = document.querySelector<HTMLElement>(`${selector} thead th:first-child`);
-      return Boolean(cell && Math.abs(cell.getBoundingClientRect().width - expected) < 2);
-    }, { polling: 'raf', timeout: 5000 }, `${tableSelector}:first-of-type`, resized.primaryWidths[0]);
+    try {
+      await page.waitForFunction((selector, expected) => {
+        const cell = document.querySelector<HTMLElement>(`${selector} thead th:first-child`);
+        return Boolean(cell && Math.abs(cell.getBoundingClientRect().width - expected) < 2);
+      }, { polling: 'raf', timeout: 5000 }, `${tableSelector}:first-of-type`, restoredFirstWidth);
+    } catch (error) {
+      const diagnostics = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
+      throw new Error(`Wide table projection did not restore: ${JSON.stringify({
+        expectedFirstWidth: restoredFirstWidth,
+        actual: diagnostics
+      })}`, { cause: error });
+    }
     const restoredViewport = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
     assert.deepEqual(restoredViewport.stickyWidths.map(Math.round), restoredViewport.primaryWidths.map(Math.round));
 
     await page.setViewport({ width: 680, height: 440 });
     await page.waitForFunction((selector) => {
       const table = document.querySelector<HTMLTableElement>(selector);
-      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      const wrap = table?.closest<HTMLElement>('.meo-md-html-table-wrap');
       const primary = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? [])
         .map((cell) => cell.getBoundingClientRect().width);
       const sticky = Array.from(table?.closest('.meo-md-html-table-shell')
         ?.querySelectorAll<HTMLElement>('.meo-md-html-table-sticky-table thead th') ?? [])
         .map((cell) => cell.getBoundingClientRect().width);
-      return Boolean(table && scroller && primary.length === 3 && sticky.length === 3
-        && table.getBoundingClientRect().width <= scroller.clientWidth + 1
+      return Boolean(table && wrap && primary.length === 3 && sticky.length === 3
+        && table.getBoundingClientRect().width <= wrap.clientWidth + 1
         && primary.every((width, index) => Math.abs(width - sticky[index]) < 1));
     }, { timeout: 5000 }, `${tableSelector}:first-of-type`);
     const narrowedAgain = await tablePresentationWidths(page, `${tableSelector}:first-of-type`);
@@ -1054,7 +1082,7 @@ async function main(): Promise<void> {
     await page.waitForFunction((selector, expected) => {
       const cell = document.querySelector<HTMLElement>(`${selector} thead th:first-child`);
       return Boolean(cell && Math.abs(cell.getBoundingClientRect().width - expected) < 2);
-    }, { timeout: 5000 }, `${tableSelector}:first-of-type`, resized.primaryWidths[0]);
+    }, { timeout: 5000 }, `${tableSelector}:first-of-type`, restoredFirstWidth);
 
     const cssPixelWidths = await page.$$eval(
       `${tableSelector}:first-of-type colgroup > col`,
@@ -1353,13 +1381,13 @@ async function main(): Promise<void> {
     );
     let expandedAfterShrink = await page.$eval(
       `${tableSelector}:first-of-type`,
-      async (table: HTMLTableElement) => {
+      async (table: HTMLTableElement, expectedTotal: number) => {
         const wrap = table.closest<HTMLElement>('.meo-md-html-table-wrap')!;
         const projected = new Promise<void>((resolve) => {
           table.addEventListener('meo-table-column-width-projected', () => resolve(), { once: true });
         });
         wrap.style.maxWidth = 'none';
-        wrap.style.width = '500px';
+        wrap.style.width = `${Math.max(500, Math.ceil(expectedTotal + 20))}px`;
         await projected;
         const sticky = table.closest('.meo-md-html-table-shell')!
           .querySelector<HTMLTableElement>('.meo-md-html-table-sticky-table')!;
@@ -1369,7 +1397,8 @@ async function main(): Promise<void> {
           sticky: Array.from(sticky.querySelectorAll<HTMLElement>('thead th'))
             .map((cell) => cell.getBoundingClientRect().width)
         };
-      }
+      },
+      elasticRestoreTotal
     );
     await page.waitForFunction((selector, expectedTotal) => {
       const table = document.querySelector<HTMLTableElement>(selector);
@@ -1928,7 +1957,7 @@ async function main(): Promise<void> {
     await waitForTableLayout(page, tableSelector, 1, 2);
     const afterTwoToThreeToTwo = await widths(page, tableSelector);
     assert.equal(afterTwoToThree.length, 3);
-    assert.ok(afterTwoToThree[0] < resizedTwo[0] - 20);
+    assert.deepEqual(afterTwoToThree, resizedThree);
     assert.deepEqual(afterTwoToThreeToTwo, resizedTwo);
 
     await page.evaluate((text) => (window as any).__columnWidthProduction.setText(text), threeColumns);
@@ -1966,9 +1995,13 @@ async function main(): Promise<void> {
     await page.evaluate(async () => { await (window as any).__columnWidthProduction.redo(); });
     await waitForTableLayout(page, tableSelector, 1, 3);
     const afterRedo = await widths(page, tableSelector);
-    assert.notDeepEqual(afterEdit, beforeEdit);
+    assert.deepEqual(
+      afterEdit,
+      beforeEdit,
+      'content shorter than the preferred column width must not resize the table'
+    );
     assert.deepEqual(afterUndo, beforeEdit);
-    assert.deepEqual(afterRedo, afterEdit);
+    assert.deepEqual(afterRedo, beforeEdit);
 
     await page.evaluate(() => {
       (window as any).__widthTerminalEvents = [];
