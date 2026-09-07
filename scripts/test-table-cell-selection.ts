@@ -5,6 +5,7 @@ import {
   type TableCellSelectionEffect,
   type TableCellSelectionEvent
 } from '../webview/src/editor/tableCellSelection';
+import { serializeMeoTableClipboard } from '../webview/src/editor/tableClipboard';
 
 const cell = (row: number, col: number) => ({ row, col });
 const range = (fromRow: number, toRow: number, fromCol: number, toCol: number) => ({
@@ -308,7 +309,11 @@ for (const head of [cell(0, 0), cell(1, 1)] as const) {
     [value('"quoted"'), value("apostrophe's")]
   ]), {
     plain: '**bold** <img src=x onerror=alert(1)> &\t<tag>\n"quoted"\tapostrophe\'s',
-    html: '<table><tr><td><strong>bold</strong> &lt;img src=x onerror=alert(1)&gt; &amp;</td><td>&lt;tag&gt;</td></tr><tr><td>&quot;quoted&quot;</td><td>apostrophe&#39;s</td></tr></table>'
+    html: '<table><tr><td><strong>bold</strong> &lt;img src=x onerror=alert(1)&gt; &amp;</td><td>&lt;tag&gt;</td></tr><tr><td>&quot;quoted&quot;</td><td>apostrophe&#39;s</td></tr></table>',
+    meo: serializeMeoTableClipboard([
+      ['**bold** <img src=x onerror=alert(1)> &', '<tag>'],
+      ['"quoted"', "apostrophe's"]
+    ])
   });
 }
 

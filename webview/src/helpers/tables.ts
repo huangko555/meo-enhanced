@@ -76,6 +76,13 @@ import {
   type TableCellSelectionTransition,
   type TableCellRange as TableSelectionRange
 } from '../editor/tableCellSelection';
+import {
+  meoTableClipboardMime,
+  parseHtmlTableClipboard,
+  parseMeoTableClipboard,
+  parseTsvTableClipboard,
+  type TableClipboardMatrix
+} from '../editor/tableClipboard';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
 
 interface TableData {
@@ -686,6 +693,14 @@ const tableToolbarIcons: Record<string, TableToolbarIcon> = {
 
 function isTableControlTarget(target: EventTarget | null): boolean {
   return Boolean(target instanceof Element && target.closest(tableControlSelector));
+}
+
+function externalClipboardCellToSource(value: string): string {
+  return value
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\r', '\n')
+    .replaceAll('|', '\\|')
+    .replaceAll('\n', '<br>');
 }
 
 function isSelectionMenuTarget(target: EventTarget | null): boolean {
@@ -3179,6 +3194,73 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     };
   }
 
+  clipboardPayload(event: ClipboardEvent): TableClipboardMatrix | null {
+    const clipboard = event.clipboardData;
+    if (!clipboard) return null;
+    return parseMeoTableClipboard(clipboard.getData(meoTableClipboardMime))
+      ?? parseHtmlTableClipboard(clipboard.getData('text/html'))
+      ?? parseTsvTableClipboard(clipboard.getData('text/plain'));
+  }
+
+  buildPasteCellsTransaction(
+    payload: TableClipboardMatrix,
+    target: CellCoords
+  ): TableCommandTransactionPlan {
+    const dom = this.domRefs?.wrap;
+    if (!dom || !payload.cells.length) return { transaction: null, outcome: 'no-op' };
+    const matrix = this.readCellMatrix();
+    if (!matrix.headerCells.length) return { transaction: null, outcome: 'no-op' };
+    const sourceWidth = Math.max(...payload.cells.map((row) => row.length));
+    const requiredColumns = target.col + sourceWidth;
+    const finalColumns = Math.max(matrix.headerCells.length, requiredColumns);
+    while (matrix.headerCells.length < finalColumns) matrix.headerCells.push('');
+    matrix.rows = matrix.rows.map((row) => normalizeRow(row, finalColumns, ''));
+    const alignments = normalizeRow(this.tableData.alignments, finalColumns, '').map((value) => value ?? null);
+    matrix.alignments = alignments;
+    const requiredTableRows = target.row + payload.cells.length;
+    while (matrix.rows.length + 1 < requiredTableRows) {
+      matrix.rows.push(new Array(finalColumns).fill(''));
+    }
+    const sourceValue = (value: string) => payload.source === 'meo'
+      ? value
+      : externalClipboardCellToSource(value);
+    for (let rowOffset = 0; rowOffset < payload.cells.length; rowOffset += 1) {
+      const destinationRow = target.row + rowOffset;
+      const destination = destinationRow === 0
+        ? matrix.headerCells
+        : matrix.rows[destinationRow - 1];
+      if (!destination) continue;
+      for (let columnOffset = 0; columnOffset < payload.cells[rowOffset].length; columnOffset += 1) {
+        destination[target.col + columnOffset] = sourceValue(payload.cells[rowOffset][columnOffset]);
+      }
+    }
+    return this.buildMatrixTransaction(matrix, dom, target, { preserveScrollPosition: true });
+  }
+
+  applyTablePaste(payload: TableClipboardMatrix, target: CellCoords) {
+    const view = this.view;
+    if (!view) return;
+    const commit = this.cellInteraction.accept({ type: 'commit', reason: 'command' }).commit;
+    const confirmation = commit
+      ? createTableCellCommitConfirmation(this.cellInteraction, commit.generation)
+      : null;
+    if (confirmation) this.cancelPendingCellAutoCommit();
+    let plan: TableCommandTransactionPlan;
+    try {
+      plan = this.buildPasteCellsTransaction(payload, target);
+    } catch (error) {
+      confirmation?.settle('failed');
+      throw error;
+    }
+    const confirmations = confirmation ? [confirmation] : [];
+    executeTableCellCommitBoundary(confirmations, () => {
+      if (!plan.transaction) return;
+      for (const pending of confirmations) pending.applied = true;
+      this.preserveTableCommandViewport(() => view.dispatch(plan.transaction!));
+      plan.restoreInteraction?.();
+    });
+  }
+
   handleHistoryShortcut(event: KeyboardEvent, table: HTMLTableElement) {
     if (!isPrimaryModifier(event) || (!isUndoShortcut(event) && !isRedoShortcut(event))) {
       return false;
@@ -3343,6 +3425,19 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       event.stopPropagation();
       event.clipboardData?.setData('text/plain', serialized.plain);
       event.clipboardData?.setData('text/html', serialized.html);
+      event.clipboardData?.setData(meoTableClipboardMime, serialized.meo);
+    };
+
+    const onPaste = (event: ClipboardEvent) => {
+      if (!(event.target instanceof Node) || !table.contains(event.target)) return;
+      const payload = this.clipboardPayload(event);
+      if (!payload) return;
+      const targetCell = this.findCellElement(event.target);
+      const target = targetCell ? this.coordsFromCell(targetCell) : this.cellSelection.snapshot().anchor;
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.applyTablePaste(payload, target);
     };
 
     const onDragStart = (event: DragEvent) => {
@@ -3470,6 +3565,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
     table.addEventListener('pointercancel', endPointerSelection);
     table.addEventListener('lostpointercapture', endPointerSelection);
     document.addEventListener('copy', onCopy, true);
+    document.addEventListener('paste', onPaste, true);
     table.addEventListener('dragstart', onDragStart);
     table.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('keydown', onDocumentKeyDown, true);
@@ -3503,6 +3599,7 @@ class HtmlTableWidget extends UiLanguageSensitiveWidget {
       table.removeEventListener('pointercancel', endPointerSelection);
       table.removeEventListener('lostpointercapture', endPointerSelection);
       document.removeEventListener('copy', onCopy, true);
+      document.removeEventListener('paste', onPaste, true);
       table.removeEventListener('dragstart', onDragStart);
       table.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('keydown', onDocumentKeyDown, true);

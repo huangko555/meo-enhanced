@@ -1,3 +1,5 @@
+import { serializeMeoTableClipboard } from './tableClipboard';
+
 export interface TableCellCoordinates {
   readonly row: number;
   readonly col: number;
@@ -98,6 +100,7 @@ export interface TableCellSelectionTransition {
 export interface SerializedTableCellSelection {
   readonly plain: string;
   readonly html: string;
+  readonly meo: string;
 }
 
 export type TableCellCopyInline = string | {
@@ -382,7 +385,8 @@ export class TableCellSelection {
       plain: rows.map((row) => row.map((value) => value.plain).join('\t')).join('\n'),
       html: `<table>${rows.map((row) => `<tr>${row.map((value) => `<td>${
         renderCopyInline(value.inline)
-      }</td>`).join('')}</tr>`).join('')}</table>`
+      }</td>`).join('')}</tr>`).join('')}</table>`,
+      meo: serializeMeoTableClipboard(rows.map((row) => row.map((value) => value.plain)))
     };
   }
 
