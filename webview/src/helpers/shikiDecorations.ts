@@ -38,6 +38,48 @@ const pendingTokenDecoration = Decoration.mark({
   }
 });
 
+function pendingDocumentTokenDecoration(language: string): Decoration {
+  return Decoration.mark({
+    attributes: {
+      style: 'color:var(--meo-token-foreground-color,var(--vscode-editor-foreground))'
+    },
+    shikiLanguage: language,
+    shikiThemeVersion: getShikiThemeVersion()
+  });
+}
+
+function addPendingDocumentTokenDecorations(
+  decorations: DecorationSet,
+  transaction: Transaction,
+  language: string
+): DecorationSet {
+  const added: Array<ReturnType<typeof pendingTokenDecoration.range>> = [];
+  const fallback = pendingDocumentTokenDecoration(language);
+  transaction.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+    if (fromB >= toB) return;
+    const startLine = transaction.newDoc.lineAt(fromB).number;
+    const endLine = transaction.newDoc.lineAt(Math.max(fromB, toB - 1)).number;
+    for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
+      const line = transaction.newDoc.line(lineNumber);
+      const from = Math.max(fromB, line.from);
+      const to = Math.min(toB, line.to);
+      if (from >= to) continue;
+      let inherited: Decoration | null = null;
+      let covered = false;
+      decorations.between(Math.max(0, from - 1), to, (start, end, decoration) => {
+        if (
+          decoration.spec.shikiLanguage !== language
+          || decoration.spec.shikiThemeVersion !== getShikiThemeVersion()
+        ) return;
+        if (start <= from && end >= to) covered = true;
+        if (start <= from && end >= from) inherited = decoration;
+      });
+      if (!covered) added.push((inherited ?? fallback).range(from, to));
+    }
+  });
+  return added.length > 0 ? decorations.update({ add: added, sort: true }) : decorations;
+}
+
 function isFencedCodeAt(state: EditorState, position: number): boolean {
   const boundedPosition = Math.max(0, Math.min(position, state.doc.length));
   const probes = boundedPosition > 0 ? [boundedPosition, boundedPosition - 1] : [boundedPosition];
@@ -326,12 +368,20 @@ export function shikiDocumentHighlight(language: string): Extension {
       }
 
       update(update: ViewUpdate): void {
-        if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+        for (const transaction of update.transactions) {
+          if (transaction.docChanged) {
+            this.decorations = addPendingDocumentTokenDecorations(
+              this.decorations.map(transaction.changes),
+              transaction,
+              lang
+            );
+          }
+        }
         const refreshed = update.transactions.some((transaction) =>
           transaction.effects.some((effect) => effect.is(shikiRefreshEffect))
         );
         if (update.docChanged || refreshed) {
-          this.decorations = this.build(update.view);
+          this.decorations = this.build(update.view, this.decorations);
         }
       }
 
@@ -340,7 +390,7 @@ export function shikiDocumentHighlight(language: string): Extension {
         this.releaseHighlighting();
       }
 
-      private build(view: EditorView): DecorationSet {
+      private build(view: EditorView, previous: DecorationSet = Decoration.none): DecorationSet {
         if (!isShikiThemeReady() || view.state.doc.length === 0) {
           return Decoration.none;
         }
@@ -352,7 +402,7 @@ export function shikiDocumentHighlight(language: string): Extension {
           view.state.doc.toString(),
           0,
           view.state.doc.length,
-          this.decorations
+          previous
         );
         return builder.finish();
       }

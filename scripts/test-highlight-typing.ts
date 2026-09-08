@@ -88,6 +88,57 @@ try {
     await page.evaluate(() => (window as any).typingEditor.destroy());
   }
   for (const scenario of [
+    { language: 'mermaid', text: 'graph TD\nnodeAlpha --> nodeBeta', marker: 'nodeAlpha' },
+    { language: 'latex', text: '\\frac{alpha}{beta}', marker: 'alpha' }
+  ]) {
+    await page.evaluate(({ language, text, marker }) => {
+      const harness = (window as any).HighlightHarness;
+      harness.setShikiTheme({
+        name: 'nested-typing',
+        type: 'dark',
+        colors: { 'editor.foreground': '#eeeeee' },
+        tokenColors: [
+          { scope: ['keyword', 'storage'], settings: { foreground: '#ff0000' } },
+          { scope: 'string', settings: { foreground: '#0000ff' } }
+        ]
+      });
+      const parent = document.getElementById('app')!;
+      parent.replaceChildren();
+      const editor = harness.createStandaloneHighlightEditor(parent, text, language);
+      const anchor = text.indexOf(marker) + marker.length;
+      editor.view.dispatch({ selection: { anchor } });
+      editor.focus();
+      (window as any).typingEditor = editor;
+      (window as any).inputColor = () => {
+        const { node } = editor.view.domAtPos(editor.view.state.selection.main.head - 1);
+        return getComputedStyle(node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement!).color;
+      };
+    }, scenario);
+    await page.waitForFunction(() => Boolean((window as any).inputColor()));
+    const baselineColor = await page.evaluate(() => (window as any).inputColor() as string);
+    await page.evaluate(() => {
+      const state = (window as any).typingSamples = { inputColors: [], done: false };
+      const sample = () => {
+        state.inputColors.push((window as any).inputColor());
+        if (!state.done) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await page.keyboard.type('abcdef', { delay: 70 });
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const inputColors = await page.evaluate(() => {
+      (window as any).typingSamples.done = true;
+      return ((window as any).typingSamples.inputColors as string[]).filter(Boolean);
+    });
+    assert.ok(inputColors.length >= 2, 'Capture more than a single painted nested-editor frame');
+    assert.deepEqual(
+      [...new Set(inputColors)],
+      [baselineColor],
+      `Nested ${scenario.language} input must inherit the preceding character color on every frame`
+    );
+    await page.evaluate(() => (window as any).typingEditor.destroy());
+  }
+  for (const scenario of [
     { mode: 'live', fence: '' },
     { mode: 'source', fence: '' },
     { mode: 'live', fence: 'text' },

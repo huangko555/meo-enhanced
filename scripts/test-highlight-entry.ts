@@ -7,8 +7,8 @@ import { activateShikiCodeHighlighting, setShikiTheme } from '../webview/src/hel
 import { EditorView } from '@codemirror/view';
 import { shikiDocumentHighlight } from '../webview/src/helpers/shikiDecorations';
 
-function createStandaloneHighlightEditor(parent: HTMLElement, text: string) {
-  const view = new EditorView({ parent, doc: text, extensions: [shikiDocumentHighlight('typescript')] });
+function createStandaloneHighlightEditor(parent: HTMLElement, text: string, language = 'typescript') {
+  const view = new EditorView({ parent, doc: text, extensions: [shikiDocumentHighlight(language)] });
   return { view, getText: () => view.state.doc.toString(), focus: () => view.focus(), destroy: () => view.destroy() };
 }
 
